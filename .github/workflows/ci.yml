@@ -6,12 +6,12 @@ on:
 
 jobs:
   checks:
-    name: black / ruff / pydocstyle / pytest
+    name: black / ruff / pydocstyle / pytest / coverage
     runs-on: ubuntu-latest
     services:
       # Native GitHub Actions service container — no Docker Compose needed
       # here (that's for local dev; see docker-compose.yml/Makefile). This
-      # gives the Postgres-backed tests in test_runlog_postgres.py a real
+      # gives the Postgres-backed tests in tests/test_integration.py a real
       # Engine DB to run against instead of skipping themselves.
       postgres:
         image: postgres:16
@@ -54,5 +54,5 @@ jobs:
       - name: pydocstyle
         run: uv run pydocstyle .
 
-      - name: pytest
-        run: uv run pytest -q
+      - name: pytest with coverage (fails under 100%)
+        run: uv run pytest -q --cov=etl_craft --cov-report=term-missing

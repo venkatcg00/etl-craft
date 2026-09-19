@@ -7,14 +7,27 @@ per module, since combining them loses nothing (no fixture/helper name
 collisions) and keeps file count down.
 """
 
+import contextlib
+import runpy
+
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 
-from etl_craft.config import ConfigError, ConnectionProfile, load_config, resolve_secret
-from etl_craft.db import AUTH_REGISTRY, ConnectionError_, parse_jdbc_postgres
+import etl_craft
+from etl_craft.config import (
+    ConfigError,
+    ConnectionProfile,
+    _load_dotenv_file,
+    load_config,
+    resolve_secret,
+)
+from etl_craft.db import AUTH_REGISTRY, ConnectionError_, build_engine, parse_jdbc_postgres
+from etl_craft.handlers import HandlerError, dispatch
 from etl_craft.resolver import (
     CycleError,
+    DependencyGraph,
     ResolverError,
     SelfDependencyError,
     TaskEdge,
@@ -25,6 +38,7 @@ from etl_craft.resolver import (
 )
 from etl_craft.runlog import (
     RunLogError,
+    fetch_run_state,
     find_or_create_active_run,
     find_or_create_task_run,
     resolve_run_for_task,
@@ -163,6 +177,27 @@ def test_skipped_upstream_never_satisfies_success_edge():
     assert graph.ready({1: TaskRunState(status="SKIPPED")}) == []
 
 
+def test_build_graph_rejects_duplicate_task_ids():
+    with pytest.raises(ResolverError):
+        build_graph(nodes(1, 1), [])
+
+
+def test_build_graph_rejects_edge_with_unknown_task_id():
+    # Distinct from test_unknown_task_id_in_edge_rejected: that one has an
+    # unknown depends_on_task_id with a valid task_id; this is the other
+    # side — task_id itself doesn't exist in the supplied task set.
+    with pytest.raises(UnknownTaskError):
+        build_graph(nodes(1, 2), [edge(99, 1)])
+
+
+def test_edge_satisfied_rejects_unknown_dependency_type():
+    # build_graph already validates dependency_type before a DependencyGraph
+    # is ever constructed, so this path is unreachable through the public
+    # API — exercised directly against the underlying building blocks instead.
+    with pytest.raises(ResolverError):
+        DependencyGraph._edge_satisfied(edge(2, 1, dependency_type="BOGUS"), TaskRunState())
+
+
 # ==============================================================================
 # config.py — craft-connector.yml loading, no DB at all
 # ==============================================================================
@@ -216,6 +251,17 @@ def test_missing_file_raises(tmp_path):
         load_config(tmp_path / "does-not-exist.yml")
 
 
+def test_malformed_yaml_rejected(tmp_path):
+    with pytest.raises(ConfigError):
+        load_config(write_config(tmp_path, "Execution: [unterminated"))
+
+
+def test_missing_section_rejected(tmp_path):
+    no_postgres = VALID_YAML.replace("Postgres:", "NotPostgres:")
+    with pytest.raises(ConfigError):
+        load_config(write_config(tmp_path, no_postgres))
+
+
 def test_invalid_mode_rejected(tmp_path):
     bad = VALID_YAML.replace("Mode: local", "Mode: bogus")
     with pytest.raises(ConfigError):
@@ -236,6 +282,27 @@ def test_invalid_auth_mode_rejected(tmp_path):
 
 def test_file_source_requires_path(tmp_path):
     bad = VALID_YAML.replace("Type: environment", "Type: file")
+    with pytest.raises(ConfigError):
+        load_config(write_config(tmp_path, bad))
+
+
+def test_invalid_source_type_rejected(tmp_path):
+    bad = VALID_YAML.replace("Type: environment", "Type: bogus")
+    with pytest.raises(ConfigError):
+        load_config(write_config(tmp_path, bad))
+
+
+def test_connection_section_requires_active_profile_and_profiles(tmp_path):
+    # Distinct from test_active_profile_must_exist_in_profiles: that one has
+    # a well-formed section whose Active_profile just doesn't match any
+    # entry; this is the section itself missing Active_profile outright.
+    bad = VALID_YAML.replace("  Active_profile: dev\n", "")
+    with pytest.raises(ConfigError):
+        load_config(write_config(tmp_path, bad))
+
+
+def test_invalid_cloning_scope_rejected(tmp_path):
+    bad = VALID_YAML.replace("Scope: cfg", "Scope: bogus")
     with pytest.raises(ConfigError):
         load_config(write_config(tmp_path, bad))
 
@@ -278,6 +345,15 @@ def test_resolve_secret_from_file_source(tmp_path):
     )
     config = load_config(write_config(tmp_path, file_source_yaml))
     assert resolve_secret(config, config.postgres.active) == "filesecret"
+
+
+def test_load_dotenv_file_requires_a_path():
+    # Reached in practice only via resolve_secret(Source.Type='file'), but
+    # _parse_source already refuses to load a config with Type=file and no
+    # Path at all — so this defensive check is unreachable through the
+    # public API. Exercised directly instead.
+    with pytest.raises(ConfigError):
+        _load_dotenv_file(None)
 
 
 # ==============================================================================
@@ -367,6 +443,29 @@ def test_token_and_sso_creators_are_not_implemented():
         AUTH_REGISTRY["token"](profile("token"), "unused")
     with pytest.raises(NotImplementedError):
         AUTH_REGISTRY["sso"](profile("sso"), "unused")
+
+
+def test_build_engine_rejects_unknown_auth_mode():
+    # config.py's own validation already rejects an auth_mode outside
+    # VALID_AUTH_MODES at load time, so this is unreachable via a normally-
+    # loaded config — exercised by constructing a ConnectionProfile directly
+    # instead. build_engine checks auth_mode before ever touching `config`
+    # when `profile` is passed explicitly, so `config=None` is fine here.
+    with pytest.raises(ConnectionError_):
+        build_engine(None, profile("bogus"))
+
+
+# ==============================================================================
+# handlers.py — no DB, no execution — every body is still a stub
+# ==============================================================================
+
+
+def test_dispatch_unknown_handler_rejected():
+    # CFG_TASKS.HANDLER has a DB-level CHECK constraint restricting it to the
+    # four known values, so this is unreachable via a real task row — still
+    # worth guarding directly since dispatch() takes a bare string.
+    with pytest.raises(HandlerError):
+        dispatch("BOGUS")
 
 
 # ==============================================================================
@@ -546,3 +645,85 @@ def test_find_or_create_task_run_is_independent_per_task(runlog_engine):
         a = find_or_create_task_run(conn, task_id=10, pipeline_run_id=run_id)
         b = find_or_create_task_run(conn, task_id=11, pipeline_run_id=run_id)
     assert a.task_run_id != b.task_run_id
+
+
+def test_fetch_run_state_with_no_task_ids_returns_empty_without_touching_the_connection():
+    # Guards the early return: with an empty task_ids list there's nothing
+    # to query, so this never even touches `conn` — passing None proves it.
+    assert fetch_run_state(None, pipeline_run_id=1, task_ids=[]) == {}
+
+
+class _FakeResult:
+    """A minimal stand-in for a SQLAlchemy CursorResult, just enough for runlog.py's own calls."""
+
+    def __init__(self, value):
+        self._value = value
+
+    def scalar_one_or_none(self):
+        return self._value
+
+    def scalar_one(self):
+        return self._value
+
+    def one_or_none(self):
+        return self._value
+
+
+class _RaceThenVanishConnection:
+    """Simulates: insert hits a unique violation, then the immediate re-SELECT finds nothing.
+
+    Against a real Postgres this can't happen — a unique_violation on
+    ux_pipeline_run_one_active/ux_task_run_one_per_pipeline_run means a
+    conflicting row exists by definition, so the re-SELECT right after
+    losing the race is guaranteed to find the winner. runlog.py's own
+    defensive RunLogError for that "impossible" case can only be exercised
+    by simulating it directly like this — see
+    tests/test_integration.py's deterministic race tests for the real,
+    non-simulated version of this same race.
+    """
+
+    def __init__(self):
+        self._call_count = 0
+
+    def begin_nested(self):
+        return contextlib.nullcontext()
+
+    def execute(self, *args, **kwargs):
+        self._call_count += 1
+        if self._call_count == 2:
+            raise IntegrityError("INSERT", {}, Exception("unique_violation"))
+        return _FakeResult(None)
+
+
+def test_find_or_create_active_run_raises_if_winner_vanishes_after_losing_race():
+    with pytest.raises(RunLogError):
+        find_or_create_active_run(_RaceThenVanishConnection(), pipeline_id=1)
+
+
+def test_find_or_create_task_run_raises_if_winner_vanishes_after_losing_race():
+    with pytest.raises(RunLogError):
+        find_or_create_task_run(_RaceThenVanishConnection(), task_id=1, pipeline_run_id=1)
+
+
+# ==============================================================================
+# __init__.py / __main__.py — the two console-script entry points
+# ==============================================================================
+#
+# Both are pure delegation to cli.main(); the fastest way to exercise them
+# for real (not just by inspection) without needing a working
+# craft-connector.yml is to trigger argparse's own "no command given"
+# SystemExit(2), which fires before any config loading happens.
+
+
+def test_init_main_delegates_to_cli_main(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["etl-craft"])
+    with pytest.raises(SystemExit) as exc_info:
+        etl_craft.main()
+    assert exc_info.value.code == 2
+
+
+def test_dunder_main_runs_cli_when_invoked_as_a_module(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["etl-craft"])
+    with pytest.raises(SystemExit) as exc_info:
+        runpy.run_module("etl_craft", run_name="__main__")
+    assert exc_info.value.code == 2

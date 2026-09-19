@@ -80,7 +80,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _list_command(engine)
     if args.command == "graph":
         return _graph_command(args, engine)
-    return 2  # argparse's `required=True` on the subparsers already rejects anything else
+    # argparse's `required=True` on the subparsers guarantees args.command is
+    # one of the branches above; this exists only to document that invariant
+    # and satisfy the type checker, not as a path any test can reach.
+    return 2  # pragma: no cover
 
 
 def _run_command(args: argparse.Namespace, engine: Engine, config: ConnectorConfig) -> int:

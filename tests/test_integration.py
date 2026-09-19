@@ -7,6 +7,7 @@ loses nothing (no fixture/helper name collisions) and keeps file count down.
 """
 
 import threading
+import time
 
 import pytest
 from sqlalchemy import text
@@ -30,6 +31,7 @@ from etl_craft.config import (
     ConnectorConfig,
     SourceConfig,
 )
+from etl_craft.handlers import HandlerResult
 from etl_craft.orchestrator import run_pipeline
 from etl_craft.runlog import (
     find_or_create_active_run,
@@ -112,6 +114,111 @@ def test_concurrent_find_or_create_active_run_converges_on_one_run(
     assert not errors, errors
     assert len(results) == racer_count
     assert len(set(results)) == 1, "every racer must converge on the exact same run id"
+
+
+def test_find_or_create_active_run_second_transaction_hits_integrity_error_path(
+    postgres_engine, committed_pipeline
+):
+    """Deterministically forces find_or_create_active_run's except-IntegrityError branch.
+
+    The 8-racer test above proves the DB guarantee holds under real load, but
+    its timing is best-effort — depending on connection-pool/network
+    scheduling, a "losing" thread's own SELECT can end up running *after*
+    the winner has already committed, so it never actually attempts the
+    conflicting INSERT that triggers the except branch. This test instead
+    controls the interleaving explicitly so that branch is exercised for
+    real, every time.
+    """
+    holder_inserted = threading.Event()
+    results: dict[str, int] = {}
+    errors: list[Exception] = []
+
+    def holder() -> None:
+        try:
+            with postgres_engine.connect() as conn, conn.begin():
+                run_id = conn.execute(
+                    text(
+                        "INSERT INTO AUD_PIPELINES_RUN_LOG (PIPELINE_ID, STATUS) "
+                        "VALUES (:id, 'IN-PROGRESS') RETURNING PIPELINE_RUN_ID"
+                    ),
+                    {"id": committed_pipeline},
+                ).scalar_one()
+                results["holder"] = run_id
+                holder_inserted.set()
+                # Stay uncommitted long enough for the racer to see nothing
+                # on its own SELECT, then block on our still-open insert.
+                time.sleep(0.3)
+        except Exception as exc:  # surfaced via `errors`, not swallowed
+            errors.append(exc)
+
+    def racer() -> None:
+        try:
+            assert holder_inserted.wait(timeout=5)
+            time.sleep(0.05)
+            with postgres_engine.connect() as conn, conn.begin():
+                results["racer"] = find_or_create_active_run(conn, committed_pipeline)
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=holder), threading.Thread(target=racer)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert not errors, errors
+    assert results["holder"] == results["racer"]
+
+
+def test_find_or_create_task_run_second_transaction_hits_integrity_error_path(
+    postgres_engine, committed_pipeline
+):
+    """Deterministically forces find_or_create_task_run's except-IntegrityError branch.
+
+    Same rationale as the pipeline-run version above, at task-run grain.
+    """
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+    pipeline_run_id = seed_active_run(postgres_engine, committed_pipeline)
+
+    holder_inserted = threading.Event()
+    results: dict[str, int] = {}
+    errors: list[Exception] = []
+
+    def holder() -> None:
+        try:
+            with postgres_engine.connect() as conn, conn.begin():
+                task_run_id = conn.execute(
+                    text(
+                        "INSERT INTO AUD_TASK_RUN_LOG (TASK_ID, PIPELINE_RUN_ID, STATUS) "
+                        "VALUES (:task_id, :pipeline_run_id, 'IN-PROGRESS') "
+                        "RETURNING TASK_RUN_ID"
+                    ),
+                    {"task_id": task_id, "pipeline_run_id": pipeline_run_id},
+                ).scalar_one()
+                results["holder"] = task_run_id
+                holder_inserted.set()
+                time.sleep(0.3)
+        except Exception as exc:
+            errors.append(exc)
+
+    def racer() -> None:
+        try:
+            assert holder_inserted.wait(timeout=5)
+            time.sleep(0.05)
+            with postgres_engine.connect() as conn, conn.begin():
+                binding = find_or_create_task_run(conn, task_id, pipeline_run_id)
+                results["racer"] = binding.task_run_id
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=holder), threading.Thread(target=racer)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert not errors, errors
+    assert results["holder"] == results["racer"]
 
 
 # ==============================================================================
@@ -428,6 +535,38 @@ def test_run_task_force_refused_under_orchestrator_mode(postgres_engine, committ
         )
 
 
+def test_run_task_marks_success_and_stamps_counts_when_handler_succeeds(
+    monkeypatch, postgres_engine, committed_pipeline
+):
+    # Every real HANDLER is still a stub (handlers.py), so dispatch() always
+    # raises — run_task's own SUCCESS-finalizing code has nothing to
+    # exercise it through the real dispatch path yet. Patching dispatch
+    # directly proves that code works without needing a real handler built.
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+    seed_active_run(postgres_engine, committed_pipeline)
+    monkeypatch.setattr(
+        "etl_craft.runner.dispatch",
+        lambda handler: HandlerResult(source_count=10, target_count=9, insert_count=9),
+    )
+
+    outcome = run_task(postgres_engine, make_config(), "TEST_CONCURRENT_PL", "task_a")
+
+    assert outcome.status == "SUCCESS"
+    with postgres_engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT STATUS AS status, SOURCE_COUNT AS source_count, "
+                "TARGET_COUNT AS target_count, INSERT_COUNT AS insert_count "
+                "FROM AUD_TASK_RUN_LOG WHERE TASK_ID = :id"
+            ),
+            {"id": task_id},
+        ).one()
+    assert row.status == "SUCCESS"
+    assert row.source_count == 10
+    assert row.target_count == 9
+    assert row.insert_count == 9
+
+
 # ==============================================================================
 # orchestrator.py — against real Postgres, spawning real subprocesses
 # ==============================================================================
@@ -540,6 +679,17 @@ def test_cli_run_requires_pipeline_code(craft_connector_on_disk):
     assert exc_info.value.code == 2
 
 
+def test_cli_main_reports_config_error_when_craft_connector_missing(tmp_path, monkeypatch, capsys):
+    # No craft_connector_on_disk here — the point is that nothing was
+    # written, so load_config() raises before any command dispatch happens.
+    monkeypatch.chdir(tmp_path)
+
+    exit_code = cli_main(["list"])
+
+    assert exit_code == 2
+    assert "error:" in capsys.readouterr().err
+
+
 def test_cli_run_end_to_end_hits_stub_handler(
     craft_connector_on_disk, postgres_engine, committed_pipeline, capsys
 ):
@@ -584,6 +734,19 @@ def test_cli_list_prints_active_pipelines(
     assert "INCREMENTAL" in out
 
 
+def test_cli_list_with_no_pipelines(craft_connector_on_disk, monkeypatch, capsys):
+    # Monkeypatching the query result (rather than deactivating every real
+    # pipeline in the shared Docker Postgres) keeps this test from touching
+    # any other test's data — there's no safe way to make "zero active
+    # pipelines" true for real without a blast radius across the whole DB.
+    monkeypatch.setattr("etl_craft.cli.fetch_all_pipelines", lambda conn: [])
+
+    exit_code = cli_main(["list"])
+
+    assert exit_code == 0
+    assert capsys.readouterr().out.strip() == "(no active pipelines)"
+
+
 def test_cli_graph_requires_name(craft_connector_on_disk):
     with pytest.raises(SystemExit) as exc_info:
         cli_main(["graph"])
@@ -596,6 +759,16 @@ def test_cli_graph_unknown_pipeline(craft_connector_on_disk, capsys):
     assert "error:" in capsys.readouterr().err
 
 
+def test_cli_graph_with_no_active_tasks(craft_connector_on_disk, committed_pipeline, capsys):
+    exit_code = cli_main(["graph", "--name", "TEST_CONCURRENT_PL"])
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "(no active tasks)" in out
+    assert "Pipeline dependencies:\n  (none)" in out
+    assert "Cross-pipeline task dependencies:\n  (none)" in out
+
+
 def test_cli_graph_prints_waves_and_dependencies(
     craft_connector_on_disk, postgres_engine, committed_pipeline, capsys
 ):
@@ -603,11 +776,67 @@ def test_cli_graph_prints_waves_and_dependencies(
     task_b = insert_committed_task(postgres_engine, committed_pipeline, "task_b")
     insert_committed_dependency(postgres_engine, committed_pipeline, task_b, task_a)
 
-    exit_code = cli_main(["graph", "--name", "TEST_CONCURRENT_PL"])
+    with postgres_engine.begin() as conn:
+        other_pipeline_id = conn.execute(
+            text(
+                "INSERT INTO CFG_PIPELINES (PIPELINE_CODE, PIPELINE_NAME, REFRESH_TYPE) "
+                "VALUES ('TEST_GRAPH_UPSTREAM2', 'Graph Upstream 2', 'FULL') RETURNING PIPELINE_ID"
+            )
+        ).scalar_one()
+        other_task_id = conn.execute(
+            text(
+                "INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) "
+                "VALUES ('upstream_task', 'ETL', :pid, 'SQL') RETURNING TASK_ID"
+            ),
+            {"pid": other_pipeline_id},
+        ).scalar_one()
+        conn.execute(
+            text(
+                "INSERT INTO CFG_PIPELINE_DEPENDENCY "
+                "(PIPELINE_ID, DEPENDS_ON_PIPELINE_ID, DEPENDENCY_TYPE) "
+                "VALUES (:pid, :other_pid, 'HAS_DATA')"
+            ),
+            {"pid": committed_pipeline, "other_pid": other_pipeline_id},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO CFG_TASK_DEPENDENCY (PIPELINE_ID, TASK_ID, DEPENDS_ON_PIPELINE_ID, "
+                "DEPENDS_ON_TASK_ID, DEPENDENCY_TYPE) "
+                "VALUES (:pid, :task_a, :other_pid, :other_task, 'SUCCESS')"
+            ),
+            {
+                "pid": committed_pipeline,
+                "task_a": task_a,
+                "other_pid": other_pipeline_id,
+                "other_task": other_task_id,
+            },
+        )
 
-    assert exit_code == 0
-    out = capsys.readouterr().out
-    assert "Wave 1: task_a" in out
-    assert "Wave 2: task_b" in out
+    try:
+        exit_code = cli_main(["graph", "--name", "TEST_CONCURRENT_PL"])
+
+        assert exit_code == 0
+        out = capsys.readouterr().out
+        assert "Wave 1: task_a" in out
+        assert "Wave 2: task_b" in out
+        assert "TEST_GRAPH_UPSTREAM2 (HAS_DATA)" in out
+        assert "task_a -> TEST_GRAPH_UPSTREAM2.upstream_task (SUCCESS)" in out
+    finally:
+        with postgres_engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM CFG_TASK_DEPENDENCY WHERE PIPELINE_ID = :pid"),
+                {"pid": committed_pipeline},
+            )
+            conn.execute(
+                text("DELETE FROM CFG_PIPELINE_DEPENDENCY WHERE PIPELINE_ID = :pid"),
+                {"pid": committed_pipeline},
+            )
+            conn.execute(
+                text("DELETE FROM CFG_TASKS WHERE PIPELINE_ID = :pid"), {"pid": other_pipeline_id}
+            )
+            conn.execute(
+                text("DELETE FROM CFG_PIPELINES WHERE PIPELINE_ID = :pid"),
+                {"pid": other_pipeline_id},
+            )
     assert "Pipeline dependencies:" in out
     assert "Cross-pipeline task dependencies:" in out

@@ -1,4 +1,4 @@
-.PHONY: db-up db-down db-reset db-schema-test test check
+.PHONY: db-up db-down db-reset db-schema-test test coverage check
 
 # Bring up a local Postgres 16 with sql/schema.sql already applied
 # (docker-entrypoint-initdb.d only runs on a fresh volume, so this is a
@@ -23,14 +23,21 @@ db-schema-test: db-up
 	docker compose exec -T postgres psql -U etl_craft -d etl_craft -f /sql/schema_test.sql
 
 # Full test suite, including the Postgres-backed integration tests in
-# tests/test_runlog_postgres.py — those skip themselves with a clear message
+# tests/test_integration.py — those skip themselves with a clear message
 # if db-up hasn't been run (see tests/conftest.py).
 test: db-up
 	uv run pytest -q
+
+# Coverage is only meaningful against the full suite (unit + integration) —
+# most of the source is exercised through the Postgres-backed tests, so
+# without db-up this reports large, misleading gaps rather than the real
+# ones. fail_under=100 lives in pyproject.toml's [tool.coverage.report].
+coverage: db-up
+	uv run pytest -q --cov=etl_craft --cov-report=term-missing
 
 # Same checks CI runs on a PR into main.
 check: db-up
 	uv run black --check .
 	uv run ruff check .
 	uv run pydocstyle .
-	uv run pytest -q
+	uv run pytest -q --cov=etl_craft --cov-report=term-missing
