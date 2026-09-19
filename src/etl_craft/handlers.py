@@ -1,49 +1,82 @@
-"""Per-HANDLER task execution — the closed vocabulary from CLAUDE.md's Handlers section.
+"""Per-HANDLER task execution — dispatches to sql_actions.py / business_rules.py / scripts.py.
 
-Not implemented yet. This module exists so runner.py has a stable seam to
-call through (`dispatch`) while the four handler bodies — PYTHON ingestion
-scripts, SQL action-wrapping, BUSINESS_RULES, EMAIL_ALERT — get built
-separately; each is its own substantial piece (the closed SQL action
-vocabulary, `$$pipeline_id` substitution, the Data DB connection, script
-invocation, business-rule sequencing) that CLAUDE.md leaves largely
-unspecified at the implementation level.
+The closed vocabulary from CLAUDE.md's Handlers section: PYTHON (ingestion
+scripts, scripts.py), SQL (the closed action vocabulary, sql_actions.py),
+BUSINESS_RULES (CFG_BUSINESS_RULES sequencing, business_rules.py),
+EMAIL_ALERT (still unbuilt — the send transport and $$-substitution-in-alert-
+bodies question are both still open per CLAUDE.md's own Handlers section).
+
+`HandlerError`/`HandlerResult`/`TaskExecutionContext` live in execution.py,
+not here — see that module's own docstring for why (this module dispatches
+to sql_actions/business_rules/scripts, each of which needs those same three
+names, so defining them here would make this module import the very modules
+it dispatches to). Re-exported from here anyway, since runner.py (and
+anything else written before this split) reasonably expects to find them on
+`etl_craft.handlers`.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
+
+from etl_craft import business_rules, scripts, sql_actions
+from etl_craft.config import ConfigError
+from etl_craft.execution import HandlerError, HandlerResult, TaskExecutionContext
+from etl_craft.warehouse import build_data_engine
+
+__all__ = ["HandlerError", "HandlerResult", "TaskExecutionContext", "dispatch"]
+
+HANDLERS = frozenset({"PYTHON", "SQL", "BUSINESS_RULES", "EMAIL_ALERT"})
 
 
-class HandlerError(Exception):
-    """Raised when a task's HANDLER has no implementation, or execution fails."""
+def dispatch(engine: Engine, ctx: TaskExecutionContext) -> HandlerResult:
+    """Run `ctx.handler`'s body. `engine` is the Engine DB — CFG_/AUD_ tables.
 
-
-@dataclass(frozen=True)
-class HandlerResult:
-    """Counts a handler reports back, to stamp onto AUD_TASK_RUN_LOG via update_task_run."""
-
-    source_count: int | None = None
-    target_count: int | None = None
-    insert_count: int | None = None
-    update_count: int | None = None
-    delete_count: int | None = None
-
-
-def _not_implemented(handler: str) -> HandlerResult:
-    raise HandlerError(f"HANDLER={handler!r} has no execution implementation yet")
-
-
-HANDLER_REGISTRY = {
-    "PYTHON": lambda: _not_implemented("PYTHON"),
-    "SQL": lambda: _not_implemented("SQL"),
-    "BUSINESS_RULES": lambda: _not_implemented("BUSINESS_RULES"),
-    "EMAIL_ALERT": lambda: _not_implemented("EMAIL_ALERT"),
-}
-
-
-def dispatch(handler: str) -> HandlerResult:
-    """Run the handler body for `handler` and return its result counts."""
-    handler_fn = HANDLER_REGISTRY.get(handler)
-    if handler_fn is None:
-        raise HandlerError(f"unknown HANDLER: {handler!r}")
-    return handler_fn()
+    Runs inside runner.py's crash-detection fork — anything raised here that
+    *isn't* a HandlerError would otherwise crash the child process outright,
+    losing its real message in favor of the parent's generic "died
+    unexpectedly" fallback. So every predictable failure mode (a bad/missing
+    [Warehouse] profile, a real SQLAlchemy error from the Data DB — a
+    malformed author SELECT, a connection refused, ...) is caught here and
+    re-raised as a HandlerError with its original message preserved, same as
+    every explicit HandlerError sql_actions.py/business_rules.py/scripts.py
+    themselves raise for a known-bad condition.
+    """
+    if ctx.handler not in HANDLERS:
+        raise HandlerError(f"unknown HANDLER: {ctx.handler!r}")
+    if ctx.handler == "EMAIL_ALERT":
+        raise HandlerError(
+            "HANDLER='EMAIL_ALERT' has no execution implementation yet — the send transport "
+            "(SMTP vs. an API like SES/SendGrid) and whether $$-substitution applies inside "
+            "alert bodies are both still open per CLAUDE.md's Handlers section"
+        )
+    try:
+        if ctx.handler == "PYTHON":
+            with engine.begin() as cfg_conn:
+                return scripts.execute(cfg_conn, ctx)
+        # SQL and BUSINESS_RULES both need the Data DB — one engine, disposed
+        # after this single task's use, same lifecycle as validate.py's own
+        # build_data_engine(...)/dispose() pairing.
+        data_engine = build_data_engine(ctx.config)
+        try:
+            if ctx.handler == "SQL":
+                # sql_actions.py's own writes must be atomic (per explicit
+                # instruction) — one Data DB transaction for the whole
+                # action. cfg_conn is read-only here (fetch_sibling_target_
+                # sql_action), so sharing engine's transaction costs nothing.
+                with engine.begin() as cfg_conn, data_engine.begin() as data_conn:
+                    return sql_actions.execute(data_conn, cfg_conn, ctx)
+            # business_rules.py manages its own per-rule Engine DB
+            # transactions (see its own module docstring's "[Bug caught and
+            # fixed]" note) — it takes the Engine directly, not a shared
+            # Connection, so one rule's failure never rolls back another
+            # rule's already-committed result or its own FAILED marker.
+            with data_engine.connect() as data_conn:
+                return business_rules.execute(data_conn, engine, ctx)
+        finally:
+            data_engine.dispose()
+    except HandlerError:
+        raise
+    except (ConfigError, SQLAlchemyError) as exc:
+        raise HandlerError(str(exc)) from exc

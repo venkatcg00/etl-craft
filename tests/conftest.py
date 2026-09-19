@@ -59,6 +59,11 @@ def postgres_engine() -> Engine:
     # resolution entirely by injecting postgres_engine directly. setdefault
     # so a real developer override (if any) is never clobbered.
     os.environ.setdefault("ETL_CRAFT_POSTGRES_DEV_SECRET", "etl_craft")
+    # Same reasoning, for handlers.py's own fresh-Data-DB-engine-per-dispatch
+    # (sql_actions.py/business_rules.py tests configure [Warehouse] pointing
+    # at this same Postgres, standing in as the Data DB — see
+    # test_integration.py's make_config(warehouse=True)).
+    os.environ.setdefault("ETL_CRAFT_WAREHOUSE_DEV_SECRET", "etl_craft")
     engine = create_engine(url)
     yield engine
     engine.dispose()
@@ -114,6 +119,24 @@ def cfg_task(pg_conn, cfg_pipeline: int) -> int:
 
 
 @pytest.fixture
+def data_db_tables(postgres_engine: Engine):
+    """Yield a list; any table name a test appends is dropped after the test.
+
+    For sql_actions.py/business_rules.py tests, which point [Warehouse] at
+    this same Postgres (make_config(warehouse=True)) and create/drop real
+    tables there as a side effect of running a SQL_ACTION — this is separate
+    cleanup from committed_pipeline's own (which only ever touches CFG_/AUD_
+    rows, never anything in the Data DB "warehouse" side of the same
+    physical database).
+    """
+    tables: list[str] = []
+    yield tables
+    with postgres_engine.begin() as conn:
+        for table in tables:
+            conn.execute(text(f"DROP TABLE IF EXISTS {table}"))
+
+
+@pytest.fixture
 def committed_pipeline(postgres_engine: Engine):
     """Yield a genuinely committed CFG_PIPELINES row's id."""
     # Needed whenever code-under-test opens its own connections — cross-
@@ -130,6 +153,31 @@ def committed_pipeline(postgres_engine: Engine):
         ).scalar_one()
     yield pipeline_id
     with postgres_engine.begin() as conn:
+        # AUD_BUSINESS_RULES_RESULTS/_RUN_LOG (business_rules.py) and
+        # AUD_TASK_OFFSET_TRACKER (scripts.py) all FK onto CFG_TASKS/
+        # CFG_BUSINESS_RULES/AUD_TASK_RUN_LOG — deleted before those, same
+        # FK-order discipline as the rest of this teardown.
+        conn.execute(
+            text(
+                "DELETE FROM AUD_BUSINESS_RULES_RESULTS WHERE BUSINESS_RULE_ID IN "
+                "(SELECT BUSINESS_RULE_ID FROM CFG_BUSINESS_RULES WHERE PIPELINE_ID = :id)"
+            ),
+            {"id": pipeline_id},
+        )
+        conn.execute(
+            text(
+                "DELETE FROM AUD_BUSINESS_RULES_RUN_LOG WHERE BUSINESS_RULE_ID IN "
+                "(SELECT BUSINESS_RULE_ID FROM CFG_BUSINESS_RULES WHERE PIPELINE_ID = :id)"
+            ),
+            {"id": pipeline_id},
+        )
+        conn.execute(
+            text(
+                "DELETE FROM AUD_TASK_OFFSET_TRACKER WHERE TASK_ID IN "
+                "(SELECT TASK_ID FROM CFG_TASKS WHERE PIPELINE_ID = :id)"
+            ),
+            {"id": pipeline_id},
+        )
         conn.execute(
             text(
                 "DELETE FROM AUD_TASK_RUN_LOG WHERE TASK_ID IN "
@@ -139,6 +187,13 @@ def committed_pipeline(postgres_engine: Engine):
         )
         conn.execute(
             text("DELETE FROM CFG_BUSINESS_RULES WHERE PIPELINE_ID = :id"), {"id": pipeline_id}
+        )
+        conn.execute(
+            text(
+                "DELETE FROM CFG_TASK_PARAMETERS WHERE TASK_ID IN "
+                "(SELECT TASK_ID FROM CFG_TASKS WHERE PIPELINE_ID = :id)"
+            ),
+            {"id": pipeline_id},
         )
         conn.execute(
             text("DELETE FROM CFG_TASK_DEPENDENCY WHERE PIPELINE_ID = :id"), {"id": pipeline_id}
@@ -151,17 +206,45 @@ def committed_pipeline(postgres_engine: Engine):
 
 
 def insert_committed_task(
-    engine: Engine, pipeline_id: int, task_code: str, handler: str = "SQL"
+    engine: Engine,
+    pipeline_id: int,
+    task_code: str,
+    handler: str = "SQL",
+    *,
+    schema_evolution: bool = False,
+    script_name: str | None = None,
 ) -> int:
     """Insert and commit one CFG_TASKS row — for code-under-test that opens its own connections."""
     with engine.begin() as conn:
         return conn.execute(
             text(
-                "INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) "
-                "VALUES (:task_code, 'ETL', :pipeline_id, :handler) RETURNING TASK_ID"
+                "INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER, "
+                "SCHEMA_EVOLUTION, SCRIPT_NAME) "
+                "VALUES (:task_code, 'ETL', :pipeline_id, :handler, :schema_evolution, "
+                ":script_name) "
+                "RETURNING TASK_ID"
             ),
-            {"task_code": task_code, "pipeline_id": pipeline_id, "handler": handler},
+            {
+                "task_code": task_code,
+                "pipeline_id": pipeline_id,
+                "handler": handler,
+                "schema_evolution": schema_evolution,
+                "script_name": script_name,
+            },
         ).scalar_one()
+
+
+def insert_committed_task_parameters(engine: Engine, task_id: int, params: dict[str, str]) -> None:
+    """Insert and commit CFG_TASK_PARAMETERS rows for `task_id` — for sql_actions.py tests."""
+    with engine.begin() as conn:
+        for name, value in params.items():
+            conn.execute(
+                text(
+                    "INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE) "
+                    "VALUES (:task_id, :name, :value)"
+                ),
+                {"task_id": task_id, "name": name, "value": value},
+            )
 
 
 def insert_committed_business_rule(
@@ -171,15 +254,20 @@ def insert_committed_business_rule(
     business_rule_name: str,
     target_table: str,
     key_column: str,
+    *,
+    business_rule_sql: str = "SELECT 1",
+    business_rule_type: str = "REJECT",
+    sequence_number: int = 1,
 ) -> int:
-    """Insert and commit one CFG_BUSINESS_RULES row — for validate.py's PK-check tests."""
+    """Insert and commit one CFG_BUSINESS_RULES row — for validate.py's/business_rules.py tests."""
     with engine.begin() as conn:
         return conn.execute(
             text(
                 "INSERT INTO CFG_BUSINESS_RULES (BUSINESS_RULE_NAME, PIPELINE_ID, TASK_ID, "
                 "BUSINESS_RULE_SQL, BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE, "
-                "SEQUENCE_NUMBER) VALUES (:name, :pipeline_id, :task_id, 'SELECT 1', 'REJECT', "
-                ":key_column, :target_table, 1) RETURNING BUSINESS_RULE_ID"
+                "SEQUENCE_NUMBER) VALUES (:name, :pipeline_id, :task_id, :business_rule_sql, "
+                ":business_rule_type, :key_column, :target_table, :sequence_number) "
+                "RETURNING BUSINESS_RULE_ID"
             ),
             {
                 "name": business_rule_name,
@@ -187,6 +275,9 @@ def insert_committed_business_rule(
                 "task_id": task_id,
                 "key_column": key_column,
                 "target_table": target_table,
+                "business_rule_sql": business_rule_sql,
+                "business_rule_type": business_rule_type,
+                "sequence_number": sequence_number,
             },
         ).scalar_one()
 

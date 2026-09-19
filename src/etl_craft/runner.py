@@ -59,7 +59,8 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.cfg import (
     fetch_pipeline_graph,
-    fetch_task_handler,
+    fetch_task_execution_detail,
+    fetch_task_parameters,
     resolve_pipeline_id,
     resolve_task_id,
 )
@@ -72,6 +73,7 @@ from etl_craft.crosspipe import (
     consume_task_dependency_edges,
 )
 from etl_craft.db import build_engine
+from etl_craft.execution import TaskExecutionContext
 from etl_craft.handlers import HandlerError, dispatch
 from etl_craft.resolver import build_graph
 from etl_craft.runlog import (
@@ -178,9 +180,25 @@ def run_task(
 
     with engine.begin() as conn:
         binding = find_or_create_task_run(conn, task_id, pipeline_run_id)
-        handler = fetch_task_handler(conn, task_id)
+        detail = fetch_task_execution_detail(conn, task_id)
+        task_params = fetch_task_parameters(conn, task_id)
 
-    _dispatch_with_crash_detection(engine, config, binding.task_run_id, handler)
+    ctx = TaskExecutionContext(
+        config=config,
+        pipeline_id=pipeline_id,
+        pipeline_code=pipeline_code,
+        task_id=task_id,
+        task_code=task_code,
+        task_run_id=binding.task_run_id,
+        pipeline_run_id=pipeline_run_id,
+        handler=detail.handler,
+        refresh_type=detail.refresh_type,
+        schema_evolution=detail.schema_evolution,
+        script_name=detail.script_name,
+        task_params=task_params,
+        force=force,
+    )
+    _dispatch_with_crash_detection(engine, ctx)
 
     # Per CLAUDE.md: "The tracker only updates after the gated task/
     # pipeline completes" — completion, not success specifically, since
@@ -206,22 +224,20 @@ def _bind_as_skipped(
     return TaskOutcome(status="SKIPPED", message=f"{task_code}: SKIPPED — {reason}")
 
 
-def _dispatch_with_crash_detection(
-    engine: Engine, config: ConnectorConfig, task_run_id: int, handler: str
-) -> None:
+def _dispatch_with_crash_detection(engine: Engine, ctx: TaskExecutionContext) -> None:
     """Fork the handler dispatch into a child process; write FAILED if it dies unannounced."""
-    ctx = multiprocessing.get_context("fork")
-    process = ctx.Process(target=_dispatch_and_record, args=(config, task_run_id, handler))
+    mp_ctx = multiprocessing.get_context("fork")
+    process = mp_ctx.Process(target=_dispatch_and_record, args=(ctx,))
     process.start()
     process.join()
 
     if process.exitcode != 0:
         with engine.begin() as conn:
-            current = fetch_task_run_result(conn, task_run_id)
+            current = fetch_task_run_result(conn, ctx.task_run_id)
             if current.status == "IN-PROGRESS":
                 update_task_run(
                     conn,
-                    task_run_id,
+                    ctx.task_run_id,
                     status="FAILED",
                     error_message=(
                         f"task process died unexpectedly (exit code {process.exitcode}) "
@@ -230,25 +246,26 @@ def _dispatch_with_crash_detection(
                 )
 
 
-def _dispatch_and_record(config: ConnectorConfig, task_run_id: int, handler: str) -> None:
+def _dispatch_and_record(ctx: TaskExecutionContext) -> None:
     """Run in the forked child: dispatch the handler and write its own terminal status."""
     # A fresh Engine, never the parent's — see this module's own [CHOICE]
     # comment on why fork is safe here specifically because of this.
-    engine = build_engine(config)
+    engine = build_engine(ctx.config)
     try:
-        result = dispatch(handler)
+        result = dispatch(engine, ctx)
     except HandlerError as exc:
         with engine.begin() as conn:
-            update_task_run(conn, task_run_id, status="FAILED", error_message=str(exc))
+            update_task_run(conn, ctx.task_run_id, status="FAILED", error_message=str(exc))
         return
     with engine.begin() as conn:
         update_task_run(
             conn,
-            task_run_id,
+            ctx.task_run_id,
             status="SUCCESS",
             source_count=result.source_count,
             target_count=result.target_count,
             insert_count=result.insert_count,
             update_count=result.update_count,
             delete_count=result.delete_count,
+            task_log=result.task_log,
         )

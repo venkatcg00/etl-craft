@@ -1,0 +1,210 @@
+"""HANDLER=BUSINESS_RULES execution — drives CFG_BUSINESS_RULES rows for one task.
+
+Per explicit instruction, the check itself is an EXISTS-shaped query against
+the rule's own TARGET_TABLE (in the Data DB), scoped to the current run:
+
+    SELECT DISTINCT t.<key_column>
+    FROM <target_table> t
+    WHERE t.PIPELINE_RUN_ID = :pipeline_run_id   -- or 1=1, see below
+    AND EXISTS (<business_rule_sql>)
+
+Every key this returns gets flagged (a new AUD_BUSINESS_RULES_RESULTS row,
+if not already actively flagged for this rule). The same shape run with
+NOT EXISTS instead — "then again not exists on the same query to check if
+we can deactivate any history of the results that are passing now" — finds
+keys that no longer violate the rule, deactivating whatever active flagged
+row they still have.
+
+[ADDITION] BUSINESS_RULE_SQL is a correlated condition, not a standalone
+query — the outer target row is aliased `t`, and a rule author's SQL text
+must reference it that way (e.g. `SELECT 1 FROM other_table o WHERE
+o.some_key = t.some_key AND o.flag = 'BAD'`) for EXISTS/NOT EXISTS to
+actually correlate. CLAUDE.md doesn't name this convention anywhere — it's
+this module's own, and there's no way to check a rule follows it without a
+real SQL parser (ruled out per Non-goals), so a rule that doesn't correlate
+just silently matches every row or no rows, same failure mode as a
+hand-written EXISTS clause anyone gets wrong.
+
+[CHOICE] "a manual br task execution will run for all data" is read as: a
+task run via `--force` (this codebase's existing "bypass normal gating,
+just run this standalone" signal, see execution.TaskExecutionContext.force)
+scans the whole TARGET_TABLE (WHERE 1=1) instead of scoping to the current
+PIPELINE_RUN_ID. A pipeline-triggered run always scopes to PIPELINE_RUN_ID —
+which, for a FULL-refresh target, still covers every row anyway, since a
+full refresh re-stamps PIPELINE_RUN_ID onto every row it (re)writes.
+
+[ADDITION] BUSINESS_RULE_TYPE (INCOMPLETE/REJECT/REPORT, post-signoff)
+classifies what's found, copied verbatim onto AUD_BUSINESS_RULES_RESULTS.STATUS
+— execution is identical for all three; this module never branches on it.
+
+Cross-database mechanics: the target data lives in the Data DB, but
+AUD_BUSINESS_RULES_RUN_LOG/AUD_BUSINESS_RULES_RESULTS live in the Engine DB
+— two separate connections/engines, so there is no single SQL statement that
+can join them. Flagged/passing keys are therefore always pulled into Python
+first (the EXISTS/NOT EXISTS query, run once against the Data DB), then
+written to the Engine DB as a second, deliberate step — the same shape
+crosspipe.py already uses for its own cross-connection comparisons.
+
+[Bug caught and fixed before shipping, not after] Each rule gets its own
+independently-committed Engine DB transaction (`engine.begin()`, opened
+fresh per rule — this module takes an Engine, not a shared Connection),
+rather than sharing handlers.py's one outer transaction across every rule
+and both databases. A first version passed a single `cfg_conn` through:
+when a later rule's Data DB query raised, the whole enclosing
+`engine.begin()` block in handlers.py rolled back on the way out —
+including the "FAILED" status this module had just written for the *broken*
+rule, and any earlier rules' genuinely-succeeded results in the same task.
+Found by asserting AUD_BUSINESS_RULES_RUN_LOG.STATUS == 'FAILED' after a
+deliberately malformed rule and watching the row not exist at all.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+from sqlalchemy import bindparam, text
+from sqlalchemy.engine import Connection, Engine
+
+from etl_craft.cfg import fetch_business_rules_for_task
+from etl_craft.execution import HandlerError, HandlerResult, TaskExecutionContext
+from etl_craft.sql_actions import active_database, qualify
+
+
+def _find_or_create_run_log(conn: Connection, business_rule_id: int, task_run_id: int) -> int:
+    """Resume-not-restart bookkeeping for one CFG_BUSINESS_RULES row under `task_run_id`."""
+    existing = conn.execute(
+        text(
+            "SELECT BUSINESS_RULE_RUN_ID FROM AUD_BUSINESS_RULES_RUN_LOG "
+            "WHERE BUSINESS_RULE_ID = :business_rule_id AND TASK_RUN_ID = :task_run_id"
+        ),
+        {"business_rule_id": business_rule_id, "task_run_id": task_run_id},
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+    return conn.execute(
+        text(
+            "INSERT INTO AUD_BUSINESS_RULES_RUN_LOG (BUSINESS_RULE_ID, TASK_RUN_ID, STATUS) "
+            "VALUES (:business_rule_id, :task_run_id, 'IN-PROGRESS') RETURNING BUSINESS_RULE_RUN_ID"
+        ),
+        {"business_rule_id": business_rule_id, "task_run_id": task_run_id},
+    ).scalar_one()
+
+
+def _mark_run_log(conn: Connection, business_rule_run_id: int, status: str) -> None:
+    conn.execute(
+        text(
+            "UPDATE AUD_BUSINESS_RULES_RUN_LOG SET STATUS = :status, END_DATE = :now "
+            "WHERE BUSINESS_RULE_RUN_ID = :id"
+        ),
+        {"id": business_rule_run_id, "status": status, "now": datetime.now(UTC)},
+    )
+
+
+def _fetch_keys(data_conn: Connection, sql: str) -> list[str]:
+    return [str(row[0]) for row in data_conn.execute(text(sql)).all()]
+
+
+def _fetch_already_active_keys(
+    cfg_conn: Connection, business_rule_id: int, keys: list[str]
+) -> set[str]:
+    if not keys:
+        return set()
+    stmt = text(
+        "SELECT BUSINESS_RULE_KEY AS business_rule_key FROM AUD_BUSINESS_RULES_RESULTS "
+        "WHERE BUSINESS_RULE_ID = :business_rule_id AND ACTIVE_FLAG = 'Y' "
+        "AND BUSINESS_RULE_KEY IN :keys"
+    ).bindparams(bindparam("keys", expanding=True))
+    return set(
+        cfg_conn.execute(stmt, {"business_rule_id": business_rule_id, "keys": keys}).scalars().all()
+    )
+
+
+def execute(data_conn: Connection, engine: Engine, ctx: TaskExecutionContext) -> HandlerResult:
+    """Run every active CFG_BUSINESS_RULES row for this task; return aggregate counts.
+
+    `engine` is the Engine DB — deliberately an Engine, not a shared
+    Connection, so each rule's own bookkeeping commits independently (see
+    this module's own "[Bug caught and fixed]" note above).
+    """
+    with engine.connect() as conn:
+        rules = fetch_business_rules_for_task(conn, ctx.task_id)
+    database = active_database(ctx.config)
+    scope = "1=1" if ctx.force else f"t.PIPELINE_RUN_ID = {ctx.pipeline_run_id}"
+
+    total_flagged = 0
+    total_deactivated = 0
+    for rule in rules:
+        with engine.begin() as conn:
+            business_rule_run_id = _find_or_create_run_log(
+                conn, rule.business_rule_id, ctx.task_run_id
+            )
+        qualified_target = qualify(rule.target_table, database)
+        try:
+            failing_keys = _fetch_keys(
+                data_conn,
+                f"SELECT DISTINCT t.{rule.business_rule_key_column} FROM {qualified_target} AS t "
+                f"WHERE {scope} AND EXISTS ({rule.business_rule_sql})",
+            )
+            passing_keys = _fetch_keys(
+                data_conn,
+                f"SELECT DISTINCT t.{rule.business_rule_key_column} FROM {qualified_target} AS t "
+                f"WHERE {scope} AND NOT EXISTS ({rule.business_rule_sql})",
+            )
+        except Exception as exc:
+            with engine.begin() as conn:
+                _mark_run_log(conn, business_rule_run_id, "FAILED")
+            raise HandlerError(
+                f"business rule {rule.business_rule_name!r} failed to execute: {exc}"
+            ) from exc
+
+        with engine.begin() as conn:
+            already_active = _fetch_already_active_keys(conn, rule.business_rule_id, failing_keys)
+            new_keys = [key for key in failing_keys if key not in already_active]
+            now = datetime.now(UTC)
+            if new_keys:
+                conn.execute(
+                    text(
+                        "INSERT INTO AUD_BUSINESS_RULES_RESULTS "
+                        "(BUSINESS_RULE_RUN_ID, BUSINESS_RULE_ID, BUSINESS_RULE_KEY, TARGET_TABLE, "
+                        "STATUS, ACTIVE_FLAG, START_DATE) "
+                        "VALUES (:run_id, :business_rule_id, :key, :target_table, :status, "
+                        "'Y', :now)"
+                    ),
+                    [
+                        {
+                            "run_id": business_rule_run_id,
+                            "business_rule_id": rule.business_rule_id,
+                            "key": key,
+                            "target_table": rule.target_table,
+                            "status": rule.business_rule_type,
+                            "now": now,
+                        }
+                        for key in new_keys
+                    ],
+                )
+                total_flagged += len(new_keys)
+
+            # Same "never trust the driver's own rowcount" discipline as
+            # sql_actions.py: figure out exactly which passing keys are
+            # currently active *before* deactivating them, rather than
+            # reading back how many the UPDATE claims to have touched.
+            to_deactivate = _fetch_already_active_keys(conn, rule.business_rule_id, passing_keys)
+            if to_deactivate:
+                stmt = text(
+                    "UPDATE AUD_BUSINESS_RULES_RESULTS SET ACTIVE_FLAG = 'N', END_DATE = :now "
+                    "WHERE BUSINESS_RULE_ID = :business_rule_id AND ACTIVE_FLAG = 'Y' "
+                    "AND BUSINESS_RULE_KEY IN :keys"
+                ).bindparams(bindparam("keys", expanding=True))
+                conn.execute(
+                    stmt,
+                    {
+                        "business_rule_id": rule.business_rule_id,
+                        "keys": list(to_deactivate),
+                        "now": now,
+                    },
+                )
+                total_deactivated += len(to_deactivate)
+
+            _mark_run_log(conn, business_rule_run_id, "SUCCESS")
+
+    return HandlerResult(insert_count=total_flagged, update_count=total_deactivated)

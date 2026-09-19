@@ -192,6 +192,16 @@ CREATE TABLE CFG_TASKS (
     SCRIPT_NAME    VARCHAR,
     RETURN_VALUES  VARCHAR,
     ACTIVE_FLAG    VARCHAR NOT NULL DEFAULT 'Y',
+    -- [ADDITION, post-signoff 2026-09-19] Per-task opt-in to the SQL
+    -- execution engine's schema-evolution path: when a HANDLER=SQL task's
+    -- staged SELECT shape gains a column the target table doesn't have yet,
+    -- FALSE (the default) fails the task with a clear reason instead of
+    -- silently writing a mismatched shape; TRUE rebuilds the target with the
+    -- new column added at the position the SELECT puts it. See
+    -- sql_actions.py for the full mechanism (information_schema-driven
+    -- comparison, portable rebuild-and-swap in place of vendor-specific
+    -- CREATE OR REPLACE TABLE, which Postgres itself doesn't support).
+    SCHEMA_EVOLUTION BOOLEAN NOT NULL DEFAULT FALSE,
     CREATED_BY     VARCHAR,
     CREATE_DATE    TIMESTAMPTZ,
     UPDATED_BY     VARCHAR,
@@ -256,33 +266,42 @@ CREATE INDEX ix_taskdep_depends_on ON CFG_TASK_DEPENDENCY (DEPENDS_ON_TASK_ID); 
 COMMENT ON TABLE CFG_TASK_DEPENDENCY IS 'Same-pipeline edges compile into native Airflow task chaining when generating YAML; cross-pipeline edges (DEPENDS_ON_PIPELINE_ID <> PIPELINE_ID) resolve via AUD_TASK_DEPENDENCY_TRACKER at runtime instead.';
 
 -- ----------------------------------------------------------------------------
--- CFG_TASK_PARAMS
+-- CFG_TASK_PARAMETERS
 -- ----------------------------------------------------------------------------
-CREATE TABLE CFG_TASK_PARAMS (
-    TASK_PARAM_ID   BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    TASK_ID         BIGINT NOT NULL REFERENCES CFG_TASKS(TASK_ID),
-    VARIABLE_NAME   VARCHAR NOT NULL,
-    VARIABLE_VALUE  VARCHAR,
-    ACTIVE_FLAG     VARCHAR NOT NULL DEFAULT 'Y',
-    CREATED_BY      VARCHAR,
-    CREATE_DATE     TIMESTAMPTZ,
-    UPDATED_BY      VARCHAR,
-    UPDATED_DATE    TIMESTAMPTZ,
-    CONSTRAINT ck_taskparams_active_flag CHECK (ACTIVE_FLAG IN ('Y','N'))
+-- [DEVIATION, post-signoff 2026-09-19] Renamed from CFG_TASK_PARAMS, with
+-- VARIABLE_NAME/VARIABLE_VALUE -> PARAMETER_NAME/PARAMETER_VALUE (and
+-- TASK_PARAM_ID -> TASK_PARAMETER_ID to match) — "variable" read wrong for
+-- what these rows actually are: fixed, per-task configuration values the
+-- SQL execution engine reads by a closed key vocabulary, not variables in
+-- any programming sense. Corrected per explicit instruction before any
+-- external tooling could come to depend on the old names.
+CREATE TABLE CFG_TASK_PARAMETERS (
+    TASK_PARAMETER_ID  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    TASK_ID            BIGINT NOT NULL REFERENCES CFG_TASKS(TASK_ID),
+    PARAMETER_NAME     VARCHAR NOT NULL,
+    PARAMETER_VALUE    VARCHAR,
+    ACTIVE_FLAG        VARCHAR NOT NULL DEFAULT 'Y',
+    CREATED_BY         VARCHAR,
+    CREATE_DATE        TIMESTAMPTZ,
+    UPDATED_BY         VARCHAR,
+    UPDATED_DATE       TIMESTAMPTZ,
+    CONSTRAINT ck_taskparameters_active_flag CHECK (ACTIVE_FLAG IN ('Y','N'))
 );
 
-CREATE UNIQUE INDEX ux_taskparams_name_active
-    ON CFG_TASK_PARAMS (TASK_ID, VARIABLE_NAME) WHERE ACTIVE_FLAG = 'Y';  -- [ADDITION] "one step per task enforced"
+CREATE UNIQUE INDEX ux_taskparameters_name_active
+    ON CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME) WHERE ACTIVE_FLAG = 'Y';  -- [ADDITION] "one step per task enforced"
 
-CREATE TRIGGER trg_audit_cfg_task_params
-    BEFORE INSERT OR UPDATE ON CFG_TASK_PARAMS
+CREATE TRIGGER trg_audit_cfg_task_parameters
+    BEFORE INSERT OR UPDATE ON CFG_TASK_PARAMETERS
     FOR EACH ROW EXECUTE FUNCTION trg_set_audit_columns();
 
-COMMENT ON TABLE CFG_TASK_PARAMS IS
-    'Flexible key-value store. VARIABLE_NAME conventions relied on by the engine at read time, not enforced at the schema level: '
-    'SQL_ACTION (one of the closed action vocabulary — e.g. CREATE_TABLE, INSERT_OVERWRITE, SCD1_MERGE, SCD2_MERGE, DROP_TABLE, DELETE_ROWS; exact literal tokens not yet pinned down), '
-    'source_object / target_object (every SQL task needs at least one of each), '
-    'full_refresh_* / incremental_refresh_* (namespaced by the owning pipeline''s REFRESH_TYPE).';
+COMMENT ON TABLE CFG_TASK_PARAMETERS IS
+    'Flexible key-value store. PARAMETER_NAME conventions relied on by the engine at read time, not enforced at the schema level (see sql_actions.py''s own module docstring for the authoritative, current list): '
+    'SQL_ACTION (one of CREATE_TABLE | SETUP_TABLE | OVERWRITE_TABLE | SCD1_MERGE | SCD2_MERGE | DROP_TABLE | DELETE_ROWS), '
+    'TARGET_OBJECT ("schema.table", database name always supplied at runtime from the active [Warehouse] profile — never stored here), '
+    'SOURCE_SQL (the bare read-only SELECT; required for every SQL_ACTION except DROP_TABLE), '
+    'MERGE_KEY / MERGE_COMPARE_COLUMNS (pipe-separated column lists; required for SCD1_MERGE/SCD2_MERGE, MERGE_KEY alone also required for DELETE_ROWS), '
+    'HARD_DELETE (DELETE_ROWS only; "true" deletes for real, anything else soft-deletes via DELETE_FLAG).';
 
 -- ----------------------------------------------------------------------------
 -- CFG_BUSINESS_RULES
@@ -302,11 +321,24 @@ CREATE TABLE CFG_BUSINESS_RULES (
     CREATE_DATE               TIMESTAMPTZ,
     UPDATED_BY                VARCHAR,
     UPDATED_DATE              TIMESTAMPTZ,
-    CONSTRAINT ck_br_type        CHECK (BUSINESS_RULE_TYPE IN ('INCOMPLETE','REJECT')),  -- [CHOICE] — note: neither pasted
-                                                                                           -- draft annotated this one as
-                                                                                           -- trigger-enforced at all, unlike
-                                                                                           -- every other enum column; CHECK
-                                                                                           -- used anyway for consistency
+    CONSTRAINT ck_br_type        CHECK (BUSINESS_RULE_TYPE IN ('INCOMPLETE','REJECT','REPORT')),  -- [CHOICE] — note: neither
+                                                                                           -- pasted draft annotated this one
+                                                                                           -- as trigger-enforced at all,
+                                                                                           -- unlike every other enum column;
+                                                                                           -- CHECK used anyway for
+                                                                                           -- consistency. REPORT added
+                                                                                           -- post-signoff 2026-09-19 — a
+                                                                                           -- third classification bucket
+                                                                                           -- for teams that want pure
+                                                                                           -- reportability (flagged +
+                                                                                           -- tracked in
+                                                                                           -- AUD_BUSINESS_RULES_RESULTS)
+                                                                                           -- without INCOMPLETE/REJECT's
+                                                                                           -- connotations. Execution is
+                                                                                           -- identical for all three types
+                                                                                           -- — this only widens the
+                                                                                           -- vocabulary, see
+                                                                                           -- business_rules.py
     CONSTRAINT ck_br_active_flag CHECK (ACTIVE_FLAG IN ('Y','N'))
 );
 
@@ -423,7 +455,11 @@ CREATE TABLE AUD_BUSINESS_RULES_RESULTS (
     ACTIVE_FLAG              VARCHAR NOT NULL DEFAULT 'Y',
     START_DATE               TIMESTAMPTZ NOT NULL DEFAULT now(),
     END_DATE                 TIMESTAMPTZ,
-    CONSTRAINT ck_brresults_status      CHECK (STATUS IN ('INCOMPLETE','REJECT')),  -- [CHOICE]
+    CONSTRAINT ck_brresults_status      CHECK (STATUS IN ('INCOMPLETE','REJECT','REPORT')),  -- [CHOICE] mirrors
+                                                                                                -- CFG_BUSINESS_RULES.BUSINESS_RULE_TYPE
+                                                                                                -- above — STATUS here is that
+                                                                                                -- rule's type, copied down onto
+                                                                                                -- each flagged row
     CONSTRAINT ck_brresults_active_flag CHECK (ACTIVE_FLAG IN ('Y','N'))
 );
 
@@ -528,8 +564,8 @@ COMMIT;
 -- NOT enforceable at this level, by construction — flagged as `validate`
 -- CLI responsibilities instead of schema constraints:
 --   - CFG_BUSINESS_RULES.TARGET_TABLE having a single-column primary key.
---   - Any check that a CFG_TASK_PARAMS row actually exists for required
---     conventions (SQL_ACTION, source_object/target_object, etc.) — this
+--   - Any check that a CFG_TASK_PARAMETERS row actually exists for required
+--     conventions (SQL_ACTION, TARGET_OBJECT, etc.) — this
 --     schema has no way to make a key-value table enforce "this key must be
 --     present for this other row," short of a trigger that hardcodes every
 --     convention by name. Left as an application-level validation instead.
@@ -551,4 +587,26 @@ COMMIT;
 -- does nothing without a recipient list to send to. Two CHECK constraints
 -- (RETRIES/RETRY_DELAY_MINUTES >= 0 when set) are the only new validation;
 -- everything else is a plain nullable column, no enum-style CHECK needed.
+--
+-- [ADDITION, 2026-09-19, explicitly requested] CFG_TASKS gains
+-- SCHEMA_EVOLUTION BOOLEAN NOT NULL DEFAULT FALSE — per-task opt-in to the
+-- SQL execution engine's schema-evolution path (sql_actions.py). Defaults
+-- false per explicit instruction: an unexpected new column in a task's
+-- staged SELECT fails the task with a clear reason unless a team
+-- deliberately opts a task into automatic evolution.
+--
+-- [ADDITION, 2026-09-19, explicitly requested] CFG_BUSINESS_RULES gains a
+-- third BUSINESS_RULE_TYPE value, REPORT, alongside INCOMPLETE/REJECT — for
+-- teams that want a rule that flags/reports without either of those two
+-- connotations. AUD_BUSINESS_RULES_RESULTS.STATUS gets the same third value
+-- (it mirrors the flagged row's rule type). No behavioral difference in how
+-- the engine executes a REPORT-typed rule versus the other two — see
+-- business_rules.py.
+--
+-- No schema registry / expected-shape tables were added for the SQL
+-- execution engine's schema-check-before-write step: per explicit
+-- direction, that comparison is done live via each dialect's own
+-- information_schema.columns (both the target table and a materialized
+-- temp-table staging of the task's own SELECT), not a separate persisted
+-- "what shape should this table be" table.
 -- ============================================================================

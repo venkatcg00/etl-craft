@@ -56,6 +56,134 @@ def fetch_task_handler(conn: Connection, task_id: int) -> str:
     ).scalar_one()
 
 
+@dataclass(frozen=True)
+class TaskExecutionDetail:
+    """Everything handlers.dispatch() needs about a task beyond its HANDLER value."""
+
+    handler: str
+    task_code: str
+    pipeline_code: str
+    refresh_type: str
+    schema_evolution: bool
+    script_name: str | None
+
+
+def fetch_task_execution_detail(conn: Connection, task_id: int) -> TaskExecutionDetail:
+    """Fetch `task_id`'s full execution context (assumed to already be a valid, active task)."""
+    row = conn.execute(
+        text(
+            "SELECT t.HANDLER AS handler, t.TASK_CODE AS task_code, "
+            "p.PIPELINE_CODE AS pipeline_code, p.REFRESH_TYPE AS refresh_type, "
+            "t.SCHEMA_EVOLUTION AS schema_evolution, t.SCRIPT_NAME AS script_name "
+            "FROM CFG_TASKS t JOIN CFG_PIPELINES p ON p.PIPELINE_ID = t.PIPELINE_ID "
+            "WHERE t.TASK_ID = :task_id"
+        ),
+        {"task_id": task_id},
+    ).one()
+    return TaskExecutionDetail(
+        handler=row.handler,
+        task_code=row.task_code,
+        pipeline_code=row.pipeline_code,
+        refresh_type=row.refresh_type,
+        schema_evolution=row.schema_evolution,
+        script_name=row.script_name,
+    )
+
+
+def fetch_task_parameters(conn: Connection, task_id: int) -> dict[str, str]:
+    """Fetch `task_id`'s active CFG_TASK_PARAMETERS as a PARAMETER_NAME -> PARAMETER_VALUE dict.
+
+    Per sql_actions.py's own module docstring, PARAMETER_NAME is a closed,
+    engine-interpreted vocabulary for HANDLER=SQL tasks (SQL_ACTION,
+    TARGET_OBJECT, SOURCE_SQL, MERGE_KEY, MERGE_COMPARE_COLUMNS,
+    HARD_DELETE) — this function itself stays generic, same spirit as every
+    other read here.
+    """
+    rows = conn.execute(
+        text(
+            "SELECT PARAMETER_NAME AS parameter_name, PARAMETER_VALUE AS parameter_value "
+            "FROM CFG_TASK_PARAMETERS WHERE TASK_ID = :task_id AND ACTIVE_FLAG = 'Y'"
+        ),
+        {"task_id": task_id},
+    ).all()
+    return {row.parameter_name: row.parameter_value for row in rows}
+
+
+def fetch_sibling_target_sql_action(
+    conn: Connection, pipeline_id: int, task_id: int, target_object: str
+) -> str | None:
+    """Find another active SQL task in `pipeline_id` that writes the same TARGET_OBJECT.
+
+    [ADDITION] Backs SETUP_TABLE's "infer audit columns from the rest of the
+    pipeline where a task writes to it" behavior (sql_actions.py) — a
+    SETUP_TABLE task establishes a target's *shape* ahead of the real writer,
+    so its audit-column set must mirror whatever that real writer's own
+    SQL_ACTION would add, not guess independently. Excludes `task_id` itself
+    and any other SETUP_TABLE task (SETUP_TABLE never adds audit columns of
+    its own — there is nothing useful to infer from another SETUP_TABLE).
+    [CHOICE] If more than one sibling writes the same TARGET_OBJECT (a real
+    but unusual config), the lowest TASK_ID wins — deterministic, not a
+    conflict check; flagged rather than silently ambiguous.
+    """
+    return conn.execute(
+        text(
+            "SELECT a.PARAMETER_VALUE AS sql_action "
+            "FROM CFG_TASK_PARAMETERS target_param "
+            "JOIN CFG_TASKS t ON t.TASK_ID = target_param.TASK_ID "
+            "JOIN CFG_TASK_PARAMETERS a "
+            "ON a.TASK_ID = t.TASK_ID AND a.PARAMETER_NAME = 'SQL_ACTION' "
+            "WHERE t.PIPELINE_ID = :pipeline_id AND t.TASK_ID <> :task_id "
+            "AND t.ACTIVE_FLAG = 'Y' AND t.HANDLER = 'SQL' "
+            "AND target_param.ACTIVE_FLAG = 'Y' AND target_param.PARAMETER_NAME = 'TARGET_OBJECT' "
+            "AND target_param.PARAMETER_VALUE = :target_object "
+            "AND a.ACTIVE_FLAG = 'Y' AND a.PARAMETER_VALUE <> 'SETUP_TABLE' "
+            "ORDER BY t.TASK_ID LIMIT 1"
+        ),
+        {"pipeline_id": pipeline_id, "task_id": task_id, "target_object": target_object},
+    ).scalar_one_or_none()
+
+
+@dataclass(frozen=True)
+class BusinessRuleDetail:
+    """One active CFG_BUSINESS_RULES row, as business_rules.py needs it."""
+
+    business_rule_id: int
+    business_rule_name: str
+    business_rule_sql: str
+    business_rule_type: str
+    business_rule_key_column: str
+    target_table: str
+    sequence_number: int
+
+
+def fetch_business_rules_for_task(conn: Connection, task_id: int) -> list[BusinessRuleDetail]:
+    """Fetch `task_id`'s active CFG_BUSINESS_RULES rows, ordered by SEQUENCE_NUMBER."""
+    rows = conn.execute(
+        text(
+            "SELECT BUSINESS_RULE_ID AS business_rule_id, "
+            "BUSINESS_RULE_NAME AS business_rule_name, "
+            "BUSINESS_RULE_SQL AS business_rule_sql, BUSINESS_RULE_TYPE AS business_rule_type, "
+            "BUSINESS_RULE_KEY_COLUMN AS business_rule_key_column, TARGET_TABLE AS target_table, "
+            "SEQUENCE_NUMBER AS sequence_number "
+            "FROM CFG_BUSINESS_RULES WHERE TASK_ID = :task_id AND ACTIVE_FLAG = 'Y' "
+            "ORDER BY SEQUENCE_NUMBER, BUSINESS_RULE_ID"
+        ),
+        {"task_id": task_id},
+    ).all()
+    return [
+        BusinessRuleDetail(
+            business_rule_id=row.business_rule_id,
+            business_rule_name=row.business_rule_name,
+            business_rule_sql=row.business_rule_sql,
+            business_rule_type=row.business_rule_type,
+            business_rule_key_column=row.business_rule_key_column,
+            target_table=row.target_table,
+            sequence_number=row.sequence_number,
+        )
+        for row in rows
+    ]
+
+
 def fetch_task_codes(conn: Connection, pipeline_id: int) -> dict[int, str]:
     """Map TASK_ID -> TASK_CODE for every active task in `pipeline_id`."""
     rows = conn.execute(

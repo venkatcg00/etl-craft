@@ -34,7 +34,7 @@ from etl_craft.config import (
 from etl_craft.configure import configure_from_env, set_execution_mode
 from etl_craft.crosspipe import MIN_POLL_INTERVAL_SECONDS, _default_now, _next_poll_delay
 from etl_craft.db import AUTH_REGISTRY, ConnectionError_, build_engine, parse_jdbc_postgres
-from etl_craft.handlers import HandlerError, dispatch
+from etl_craft.handlers import HandlerError, TaskExecutionContext, dispatch
 from etl_craft.resolver import (
     CycleError,
     DependencyGraph,
@@ -54,6 +54,9 @@ from etl_craft.runlog import (
     resolve_run_for_task,
     update_task_run,
 )
+from etl_craft.scripts import _parse_trailing_json
+from etl_craft.scripts import execute as execute_python_script
+from etl_craft.sql_actions import active_database, qualify, substitute_pipeline_id
 from etl_craft.warehouse import (
     WAREHOUSE_AUTH_REGISTRY,
     build_data_engine,
@@ -694,16 +697,155 @@ def test_build_data_engine_rejects_unknown_auth_mode():
 
 
 # ==============================================================================
-# handlers.py — no DB, no execution — every body is still a stub
+# handlers.py — the dispatch() seam itself; sql_actions.py/business_rules.py/
+# scripts.py each get their own dedicated real-Postgres test sections in
+# test_integration.py, since none of them can do anything meaningful without
+# a live DB connection.
 # ==============================================================================
+
+
+def _dummy_ctx(handler: str) -> TaskExecutionContext:
+    return TaskExecutionContext(
+        config=None,
+        pipeline_id=1,
+        pipeline_code="P",
+        task_id=1,
+        task_code="T",
+        task_run_id=1,
+        pipeline_run_id=1,
+        handler=handler,
+        refresh_type="FULL",
+        schema_evolution=False,
+        script_name=None,
+        task_params={},
+        force=False,
+    )
 
 
 def test_dispatch_unknown_handler_rejected():
     # CFG_TASKS.HANDLER has a DB-level CHECK constraint restricting it to the
     # four known values, so this is unreachable via a real task row — still
-    # worth guarding directly since dispatch() takes a bare string.
+    # worth guarding directly since dispatch() takes a bare ctx.handler
+    # string. The unknown-handler check happens before any DB access, so a
+    # dummy ctx/engine (never touched) is enough.
     with pytest.raises(HandlerError):
-        dispatch("BOGUS")
+        dispatch(None, _dummy_ctx("BOGUS"))
+
+
+def test_dispatch_email_alert_not_implemented_yet():
+    # EMAIL_ALERT is the one HANDLER value this build doesn't implement —
+    # the send transport and $$-substitution-in-alert-bodies question are
+    # both still open per CLAUDE.md's own Handlers section.
+    with pytest.raises(HandlerError, match="EMAIL_ALERT"):
+        dispatch(None, _dummy_ctx("EMAIL_ALERT"))
+
+
+# ------------------------------------------------------------------------------
+# sql_actions.py — the pure pieces (no DB); real-Postgres behavior is covered
+# in test_integration.py's own sql_actions.py section.
+# ------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("refresh_type", "force_all", "expected"),
+    [
+        ("INCREMENTAL", False, "pipeline_run_id = 42"),
+        ("FULL", False, "1=1"),
+        # A manual/force invocation scans everything regardless of
+        # refresh_type — the same override business_rules.py's own
+        # scope predicate uses for --force.
+        ("INCREMENTAL", True, "1=1"),
+    ],
+)
+def test_substitute_pipeline_id(refresh_type, force_all, expected):
+    # $$pipeline_id substitutes to the bare condition alone — the author's
+    # own SQL text supplies the surrounding "WHERE", same as real usage.
+    result = substitute_pipeline_id(
+        "SELECT 1 WHERE $$pipeline_id",
+        refresh_type=refresh_type,
+        pipeline_run_id=42,
+        force_all=force_all,
+    )
+    assert result == f"SELECT 1 WHERE {expected}"
+
+
+def test_qualify_prepends_the_active_profiles_database():
+    assert qualify("public.some_table", "etl_craft") == "etl_craft.public.some_table"
+
+
+def test_active_database_requires_a_warehouse_section():
+    config = ConnectorConfig(
+        mode="local",
+        source=SourceConfig(type="environment"),
+        postgres=ConnectionSection(
+            active_profile="dev",
+            profiles={
+                "dev": ConnectionProfile(
+                    section="POSTGRES",
+                    name="dev",
+                    jdbc_url="jdbc:postgresql://localhost:55432/etl_craft",
+                    user="etl_craft",
+                    auth_mode="password",
+                )
+            },
+        ),
+        cloning=CloningConfig(),
+    )
+    with pytest.raises(HandlerError, match=r"\[Warehouse\]"):
+        active_database(config)
+
+
+def test_active_database_resolves_from_jdbc_url():
+    warehouse_profile = ConnectionProfile(
+        section="WAREHOUSE",
+        name="dev",
+        jdbc_url="jdbc:postgresql://localhost:55432/some_warehouse_db",
+        user="etl_craft",
+        auth_mode="password",
+    )
+    config = ConnectorConfig(
+        mode="local",
+        source=SourceConfig(type="environment"),
+        postgres=ConnectionSection(
+            active_profile="dev",
+            profiles={
+                "dev": ConnectionProfile(
+                    section="POSTGRES",
+                    name="dev",
+                    jdbc_url="jdbc:postgresql://localhost:55432/etl_craft",
+                    user="etl_craft",
+                    auth_mode="password",
+                )
+            },
+        ),
+        cloning=CloningConfig(),
+        warehouse=ConnectionSection(active_profile="dev", profiles={"dev": warehouse_profile}),
+    )
+    assert active_database(config) == "some_warehouse_db"
+
+
+# ------------------------------------------------------------------------------
+# scripts.py — HANDLER=PYTHON's SCRIPT_NAME precondition
+# ------------------------------------------------------------------------------
+
+
+def test_parse_trailing_json_blank_stdout_returns_empty_dict():
+    # A script that prints nothing at all (no counts to report) — distinct
+    # from printing plain log lines with no trailing JSON, already covered
+    # in test_integration.py's test_python_handler_no_trailing_json_is_fine.
+    assert _parse_trailing_json("") == {}
+    assert _parse_trailing_json("   \n\n  ") == {}
+
+
+def test_python_handler_missing_script_name_rejected_before_any_db_access():
+    # CFG_TASKS.ck_tasks_script_required already blocks inserting a real
+    # HANDLER=PYTHON row with no SCRIPT_NAME — this guard is unreachable via
+    # a real task, same class as db.build_engine's bad-auth_mode check.
+    # Worth keeping anyway: it's the one thing standing between a
+    # hand-constructed ctx (or a future caller that skips the CFG_ layer)
+    # and a crash. cfg_conn is never touched before this check fires.
+    with pytest.raises(HandlerError, match="SCRIPT_NAME"):
+        execute_python_script(None, _dummy_ctx("PYTHON"))
 
 
 # ==============================================================================
