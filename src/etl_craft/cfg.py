@@ -119,3 +119,98 @@ def fetch_pipeline_graph(conn: Connection, pipeline_id: int) -> PipelineGraphDat
         same_pipeline_edges=same_pipeline_edges,
         cross_pipeline_task_ids=cross_pipeline_task_ids,
     )
+
+
+@dataclass(frozen=True)
+class PipelineSummary:
+    """One row of `list`'s output."""
+
+    pipeline_code: str
+    pipeline_name: str
+    refresh_type: str
+
+
+def fetch_all_pipelines(conn: Connection) -> list[PipelineSummary]:
+    """List every active pipeline, ordered by PIPELINE_CODE."""
+    rows = conn.execute(
+        text(
+            "SELECT PIPELINE_CODE AS pipeline_code, PIPELINE_NAME AS pipeline_name, "
+            "REFRESH_TYPE AS refresh_type FROM CFG_PIPELINES "
+            "WHERE ACTIVE_FLAG = 'Y' ORDER BY PIPELINE_CODE"
+        )
+    ).all()
+    return [
+        PipelineSummary(
+            pipeline_code=row.pipeline_code,
+            pipeline_name=row.pipeline_name,
+            refresh_type=row.refresh_type,
+        )
+        for row in rows
+    ]
+
+
+@dataclass(frozen=True)
+class PipelineDependencyEdge:
+    """One CFG_PIPELINE_DEPENDENCY row, resolved to codes for display."""
+
+    depends_on_pipeline_code: str
+    dependency_type: str
+
+
+def fetch_pipeline_dependencies(conn: Connection, pipeline_id: int) -> list[PipelineDependencyEdge]:
+    """Fetch `pipeline_id`'s own active cross-pipeline dependency edges."""
+    rows = conn.execute(
+        text(
+            "SELECT p.PIPELINE_CODE AS depends_on_pipeline_code, "
+            "d.DEPENDENCY_TYPE AS dependency_type "
+            "FROM CFG_PIPELINE_DEPENDENCY d "
+            "JOIN CFG_PIPELINES p ON p.PIPELINE_ID = d.DEPENDS_ON_PIPELINE_ID "
+            "WHERE d.PIPELINE_ID = :pipeline_id AND d.ACTIVE_FLAG = 'Y'"
+        ),
+        {"pipeline_id": pipeline_id},
+    ).all()
+    return [
+        PipelineDependencyEdge(
+            depends_on_pipeline_code=row.depends_on_pipeline_code,
+            dependency_type=row.dependency_type,
+        )
+        for row in rows
+    ]
+
+
+@dataclass(frozen=True)
+class CrossPipelineTaskEdge:
+    """One task-level CFG_TASK_DEPENDENCY row that crosses pipelines, resolved to codes."""
+
+    task_code: str
+    depends_on_pipeline_code: str
+    depends_on_task_code: str
+    dependency_type: str
+
+
+def fetch_cross_pipeline_task_edges(
+    conn: Connection, pipeline_id: int
+) -> list[CrossPipelineTaskEdge]:
+    """Fetch `pipeline_id`'s active task-level edges that depend on another pipeline's task."""
+    rows = conn.execute(
+        text(
+            "SELECT t.TASK_CODE AS task_code, p.PIPELINE_CODE AS depends_on_pipeline_code, "
+            "dt.TASK_CODE AS depends_on_task_code, d.DEPENDENCY_TYPE AS dependency_type "
+            "FROM CFG_TASK_DEPENDENCY d "
+            "JOIN CFG_TASKS t ON t.TASK_ID = d.TASK_ID "
+            "JOIN CFG_PIPELINES p ON p.PIPELINE_ID = d.DEPENDS_ON_PIPELINE_ID "
+            "JOIN CFG_TASKS dt ON dt.TASK_ID = d.DEPENDS_ON_TASK_ID "
+            "WHERE d.PIPELINE_ID = :pipeline_id AND d.ACTIVE_FLAG = 'Y' "
+            "AND d.DEPENDS_ON_PIPELINE_ID <> :pipeline_id"
+        ),
+        {"pipeline_id": pipeline_id},
+    ).all()
+    return [
+        CrossPipelineTaskEdge(
+            task_code=row.task_code,
+            depends_on_pipeline_code=row.depends_on_pipeline_code,
+            depends_on_task_code=row.depends_on_task_code,
+            dependency_type=row.dependency_type,
+        )
+        for row in rows
+    ]

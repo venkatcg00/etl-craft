@@ -14,6 +14,9 @@ from sqlalchemy import text
 from conftest import insert_committed_dependency, insert_committed_task, seed_active_run
 from etl_craft.cfg import (
     CfgError,
+    fetch_all_pipelines,
+    fetch_cross_pipeline_task_edges,
+    fetch_pipeline_dependencies,
     fetch_pipeline_graph,
     fetch_task_handler,
     resolve_pipeline_id,
@@ -215,6 +218,81 @@ def test_fetch_pipeline_graph_cross_pipeline_edge_excluded(pg_conn, cfg_pipeline
     data = fetch_pipeline_graph(pg_conn, cfg_pipeline)
     assert data.same_pipeline_edges == []
     assert data.cross_pipeline_task_ids == frozenset({cfg_task})
+
+
+def test_fetch_all_pipelines_includes_active_excludes_inactive(pg_conn, cfg_pipeline):
+    pg_conn.execute(
+        text(
+            "INSERT INTO CFG_PIPELINES (PIPELINE_CODE, PIPELINE_NAME, REFRESH_TYPE, ACTIVE_FLAG) "
+            "VALUES ('TEST_INACTIVE_PL', 'Inactive Pipeline', 'FULL', 'N')"
+        )
+    )
+
+    pipelines = fetch_all_pipelines(pg_conn)
+
+    codes = {p.pipeline_code for p in pipelines}
+    assert "TEST_PL" in codes
+    assert "TEST_INACTIVE_PL" not in codes
+
+
+def test_fetch_pipeline_dependencies(pg_conn, cfg_pipeline):
+    other_pipeline = pg_conn.execute(
+        text(
+            "INSERT INTO CFG_PIPELINES (PIPELINE_CODE, PIPELINE_NAME, REFRESH_TYPE) "
+            "VALUES ('TEST_UPSTREAM_PL', 'Upstream Pipeline', 'FULL') RETURNING PIPELINE_ID"
+        )
+    ).scalar_one()
+    pg_conn.execute(
+        text(
+            "INSERT INTO CFG_PIPELINE_DEPENDENCY "
+            "(PIPELINE_ID, DEPENDS_ON_PIPELINE_ID, DEPENDENCY_TYPE) "
+            "VALUES (:pipeline_id, :other_pipeline, 'HAS_DATA')"
+        ),
+        {"pipeline_id": cfg_pipeline, "other_pipeline": other_pipeline},
+    )
+
+    deps = fetch_pipeline_dependencies(pg_conn, cfg_pipeline)
+
+    assert len(deps) == 1
+    assert deps[0].depends_on_pipeline_code == "TEST_UPSTREAM_PL"
+    assert deps[0].dependency_type == "HAS_DATA"
+
+
+def test_fetch_cross_pipeline_task_edges(pg_conn, cfg_pipeline, cfg_task):
+    other_pipeline = pg_conn.execute(
+        text(
+            "INSERT INTO CFG_PIPELINES (PIPELINE_CODE, PIPELINE_NAME, REFRESH_TYPE) "
+            "VALUES ('TEST_UPSTREAM_PL2', 'Upstream Pipeline 2', 'FULL') RETURNING PIPELINE_ID"
+        )
+    ).scalar_one()
+    other_task = pg_conn.execute(
+        text(
+            "INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) "
+            "VALUES ('upstream_task', 'ETL', :pipeline_id, 'SQL') RETURNING TASK_ID"
+        ),
+        {"pipeline_id": other_pipeline},
+    ).scalar_one()
+    pg_conn.execute(
+        text(
+            "INSERT INTO CFG_TASK_DEPENDENCY "
+            "(PIPELINE_ID, TASK_ID, DEPENDS_ON_PIPELINE_ID, DEPENDS_ON_TASK_ID, DEPENDENCY_TYPE) "
+            "VALUES (:pipeline_id, :task_id, :other_pipeline, :other_task, 'SUCCESS')"
+        ),
+        {
+            "pipeline_id": cfg_pipeline,
+            "task_id": cfg_task,
+            "other_pipeline": other_pipeline,
+            "other_task": other_task,
+        },
+    )
+
+    edges = fetch_cross_pipeline_task_edges(pg_conn, cfg_pipeline)
+
+    assert len(edges) == 1
+    assert edges[0].task_code == "test_task"
+    assert edges[0].depends_on_pipeline_code == "TEST_UPSTREAM_PL2"
+    assert edges[0].depends_on_task_code == "upstream_task"
+    assert edges[0].dependency_type == "SUCCESS"
 
 
 # ==============================================================================
@@ -490,3 +568,46 @@ def test_cli_run_without_task_code_dispatches_to_pipeline_orchestration(
     # "not implemented" stub. task_a fails on the stub handler, so the
     # whole pipeline finalizes FAILED — proving this path is live now.
     assert exit_code == 1
+
+
+def test_cli_list_prints_active_pipelines(
+    craft_connector_on_disk, postgres_engine, committed_pipeline, capsys
+):
+    # cli_main opens its own connection, so this needs genuinely committed
+    # data (committed_pipeline), not the rolled-back pg_conn/cfg_pipeline.
+    exit_code = cli_main(["list"])
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "TEST_CONCURRENT_PL" in out
+    assert "Concurrent Test Pipeline" in out
+    assert "INCREMENTAL" in out
+
+
+def test_cli_graph_requires_name(craft_connector_on_disk):
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main(["graph"])
+    assert exc_info.value.code == 2
+
+
+def test_cli_graph_unknown_pipeline(craft_connector_on_disk, capsys):
+    exit_code = cli_main(["graph", "--name", "NO_SUCH_PIPELINE"])
+    assert exit_code == 1
+    assert "error:" in capsys.readouterr().err
+
+
+def test_cli_graph_prints_waves_and_dependencies(
+    craft_connector_on_disk, postgres_engine, committed_pipeline, capsys
+):
+    task_a = insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+    task_b = insert_committed_task(postgres_engine, committed_pipeline, "task_b")
+    insert_committed_dependency(postgres_engine, committed_pipeline, task_b, task_a)
+
+    exit_code = cli_main(["graph", "--name", "TEST_CONCURRENT_PL"])
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "Wave 1: task_a" in out
+    assert "Wave 2: task_b" in out
+    assert "Pipeline dependencies:" in out
+    assert "Cross-pipeline task dependencies:" in out
