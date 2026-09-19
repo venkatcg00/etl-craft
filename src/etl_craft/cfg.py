@@ -250,3 +250,31 @@ def fetch_pipeline_detail(conn: Connection, pipeline_id: int) -> PipelineDetail:
         sla_in_hours=float(row.sla_in_hours) if row.sla_in_hours is not None else None,
         refresh_type=row.refresh_type,
     )
+
+
+@dataclass(frozen=True)
+class BusinessRuleTarget:
+    """One active CFG_BUSINESS_RULES row's Data DB target — what `validate`'s PK check needs."""
+
+    business_rule_name: str
+    target_table: str
+    key_column: str
+
+
+def fetch_business_rule_targets(conn: Connection) -> list[BusinessRuleTarget]:
+    """Fetch every active business rule's TARGET_TABLE/BUSINESS_RULE_KEY_COLUMN, all pipelines."""
+    rows = conn.execute(
+        text(
+            "SELECT BUSINESS_RULE_NAME AS business_rule_name, TARGET_TABLE AS target_table, "
+            "BUSINESS_RULE_KEY_COLUMN AS key_column FROM CFG_BUSINESS_RULES "
+            "WHERE ACTIVE_FLAG = 'Y' ORDER BY BUSINESS_RULE_NAME"
+        )
+    ).all()
+    return [
+        BusinessRuleTarget(
+            business_rule_name=row.business_rule_name,
+            target_table=row.target_table,
+            key_column=row.key_column,
+        )
+        for row in rows
+    ]

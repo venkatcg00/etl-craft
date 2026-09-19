@@ -16,6 +16,7 @@ from sqlalchemy import text
 
 from conftest import (
     CRAFT_CONNECTOR_YAML,
+    insert_committed_business_rule,
     insert_committed_dependency,
     insert_committed_task,
     seed_active_run,
@@ -23,6 +24,7 @@ from conftest import (
 from etl_craft.cfg import (
     CfgError,
     fetch_all_pipelines,
+    fetch_business_rule_targets,
     fetch_cross_pipeline_task_edges,
     fetch_pipeline_dependencies,
     fetch_pipeline_detail,
@@ -50,6 +52,7 @@ from etl_craft.runlog import (
     update_task_run,
 )
 from etl_craft.runner import DependenciesNotMetError, ForceNotAllowedError, run_task
+from etl_craft.validate import validate_business_rule_keys, validate_graphs
 from etl_craft.warehouse import build_data_engine
 
 # ==============================================================================
@@ -491,6 +494,216 @@ def test_fetch_pipeline_detail_nullable_fields_default_none(pg_conn, cfg_pipelin
     assert detail.description is None
     assert detail.run_schedule is None
     assert detail.sla_in_hours is None
+
+
+def test_fetch_business_rule_targets(pg_conn, cfg_pipeline, cfg_task):
+    pg_conn.execute(
+        text(
+            "INSERT INTO CFG_BUSINESS_RULES (BUSINESS_RULE_NAME, PIPELINE_ID, TASK_ID, "
+            "BUSINESS_RULE_SQL, BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE, "
+            "SEQUENCE_NUMBER) VALUES ('br1', :pipeline_id, :task_id, 'SELECT 1', 'REJECT', "
+            "'id', 'public.my_table', 1)"
+        ),
+        {"pipeline_id": cfg_pipeline, "task_id": cfg_task},
+    )
+
+    targets = fetch_business_rule_targets(pg_conn)
+
+    assert len(targets) == 1
+    assert targets[0].business_rule_name == "br1"
+    assert targets[0].target_table == "public.my_table"
+    assert targets[0].key_column == "id"
+
+
+def test_fetch_business_rule_targets_excludes_inactive(pg_conn, cfg_pipeline, cfg_task):
+    pg_conn.execute(
+        text(
+            "INSERT INTO CFG_BUSINESS_RULES (BUSINESS_RULE_NAME, PIPELINE_ID, TASK_ID, "
+            "BUSINESS_RULE_SQL, BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE, "
+            "SEQUENCE_NUMBER, ACTIVE_FLAG) VALUES ('br1', :pipeline_id, :task_id, 'SELECT 1', "
+            "'REJECT', 'id', 'public.my_table', 1, 'N')"
+        ),
+        {"pipeline_id": cfg_pipeline, "task_id": cfg_task},
+    )
+
+    assert fetch_business_rule_targets(pg_conn) == []
+
+
+# ==============================================================================
+# validate.py — against real Postgres
+# ==============================================================================
+
+
+def test_validate_graphs_empty_when_no_pipelines(pg_conn):
+    assert validate_graphs(pg_conn) == []
+
+
+def test_validate_graphs_ok_for_well_formed_pipeline(pg_conn, cfg_pipeline, cfg_task):
+    assert validate_graphs(pg_conn) == []
+
+
+def test_validate_graphs_reports_cycle(pg_conn, cfg_pipeline):
+    task_a = pg_conn.execute(
+        text(
+            "INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) "
+            "VALUES ('task_a', 'ETL', :pipeline_id, 'SQL') RETURNING TASK_ID"
+        ),
+        {"pipeline_id": cfg_pipeline},
+    ).scalar_one()
+    task_b = pg_conn.execute(
+        text(
+            "INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) "
+            "VALUES ('task_b', 'ETL', :pipeline_id, 'SQL') RETURNING TASK_ID"
+        ),
+        {"pipeline_id": cfg_pipeline},
+    ).scalar_one()
+    for a, b in [(task_a, task_b), (task_b, task_a)]:
+        pg_conn.execute(
+            text(
+                "INSERT INTO CFG_TASK_DEPENDENCY (PIPELINE_ID, TASK_ID, DEPENDS_ON_PIPELINE_ID, "
+                "DEPENDS_ON_TASK_ID, DEPENDENCY_TYPE) "
+                "VALUES (:pid, :a, :pid, :b, 'SUCCESS')"
+            ),
+            {"pid": cfg_pipeline, "a": a, "b": b},
+        )
+
+    issues = validate_graphs(pg_conn)
+
+    assert len(issues) == 1
+    assert issues[0].category == "graph"
+    assert "TEST_PL" in issues[0].message
+
+
+def test_validate_business_rule_keys_empty_when_no_active_rules(pg_conn):
+    assert validate_business_rule_keys(pg_conn, None) == []
+
+
+def test_validate_business_rule_keys_reports_missing_warehouse(pg_conn, cfg_pipeline, cfg_task):
+    pg_conn.execute(
+        text(
+            "INSERT INTO CFG_BUSINESS_RULES (BUSINESS_RULE_NAME, PIPELINE_ID, TASK_ID, "
+            "BUSINESS_RULE_SQL, BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE, "
+            "SEQUENCE_NUMBER) VALUES ('br1', :pipeline_id, :task_id, 'SELECT 1', 'REJECT', "
+            "'id', 'public.my_table', 1)"
+        ),
+        {"pipeline_id": cfg_pipeline, "task_id": cfg_task},
+    )
+
+    issues = validate_business_rule_keys(pg_conn, None)
+
+    assert len(issues) == 1
+    assert "Warehouse" in issues[0].message
+
+
+def _insert_business_rule(pg_conn, pipeline_id, task_id, name, target_table, key_column):
+    pg_conn.execute(
+        text(
+            "INSERT INTO CFG_BUSINESS_RULES (BUSINESS_RULE_NAME, PIPELINE_ID, TASK_ID, "
+            "BUSINESS_RULE_SQL, BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE, "
+            "SEQUENCE_NUMBER) VALUES (:name, :pipeline_id, :task_id, 'SELECT 1', 'REJECT', "
+            ":key_column, :target_table, 1)"
+        ),
+        {
+            "name": name,
+            "pipeline_id": pipeline_id,
+            "task_id": task_id,
+            "key_column": key_column,
+            "target_table": target_table,
+        },
+    )
+
+
+def test_validate_business_rule_keys_table_does_not_exist(
+    pg_conn, cfg_pipeline, cfg_task, postgres_engine
+):
+    _insert_business_rule(pg_conn, cfg_pipeline, cfg_task, "br1", "does_not_exist_xyz", "id")
+
+    issues = validate_business_rule_keys(pg_conn, postgres_engine)
+
+    assert len(issues) == 1
+    assert "does not exist" in issues[0].message
+
+
+def test_validate_business_rule_keys_matching_single_column_pk_is_ok(
+    pg_conn, cfg_pipeline, cfg_task, postgres_engine
+):
+    with postgres_engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS validate_pk_test_good"))
+        conn.execute(text("CREATE TABLE validate_pk_test_good (id INT PRIMARY KEY, val INT)"))
+    try:
+        # Uppercase key_column ("ID") against Postgres's real (lowercase,
+        # unquoted-identifier-folded) "id" — proves the comparison is
+        # case-insensitive, not just a lucky exact-string match.
+        _insert_business_rule(
+            pg_conn, cfg_pipeline, cfg_task, "br1", "public.validate_pk_test_good", "ID"
+        )
+
+        issues = validate_business_rule_keys(pg_conn, postgres_engine)
+
+        assert issues == []
+    finally:
+        with postgres_engine.begin() as conn:
+            conn.execute(text("DROP TABLE validate_pk_test_good"))
+
+
+def test_validate_business_rule_keys_no_pk_reported(
+    pg_conn, cfg_pipeline, cfg_task, postgres_engine
+):
+    with postgres_engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS validate_pk_test_nopk"))
+        conn.execute(text("CREATE TABLE validate_pk_test_nopk (id INT, val INT)"))
+    try:
+        _insert_business_rule(pg_conn, cfg_pipeline, cfg_task, "br1", "validate_pk_test_nopk", "id")
+
+        issues = validate_business_rule_keys(pg_conn, postgres_engine)
+
+        assert len(issues) == 1
+        assert "exactly one primary key column" in issues[0].message
+    finally:
+        with postgres_engine.begin() as conn:
+            conn.execute(text("DROP TABLE validate_pk_test_nopk"))
+
+
+def test_validate_business_rule_keys_composite_pk_reported(
+    pg_conn, cfg_pipeline, cfg_task, postgres_engine
+):
+    with postgres_engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS validate_pk_test_composite"))
+        conn.execute(
+            text("CREATE TABLE validate_pk_test_composite (a INT, b INT, PRIMARY KEY (a, b))")
+        )
+    try:
+        _insert_business_rule(
+            pg_conn, cfg_pipeline, cfg_task, "br1", "validate_pk_test_composite", "a"
+        )
+
+        issues = validate_business_rule_keys(pg_conn, postgres_engine)
+
+        assert len(issues) == 1
+        assert "exactly one primary key column" in issues[0].message
+    finally:
+        with postgres_engine.begin() as conn:
+            conn.execute(text("DROP TABLE validate_pk_test_composite"))
+
+
+def test_validate_business_rule_keys_mismatched_column_reported(
+    pg_conn, cfg_pipeline, cfg_task, postgres_engine
+):
+    with postgres_engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS validate_pk_test_mismatch"))
+        conn.execute(text("CREATE TABLE validate_pk_test_mismatch (id INT PRIMARY KEY, val INT)"))
+    try:
+        _insert_business_rule(
+            pg_conn, cfg_pipeline, cfg_task, "br1", "validate_pk_test_mismatch", "val"
+        )
+
+        issues = validate_business_rule_keys(pg_conn, postgres_engine)
+
+        assert len(issues) == 1
+        assert "does not match" in issues[0].message
+    finally:
+        with postgres_engine.begin() as conn:
+            conn.execute(text("DROP TABLE validate_pk_test_mismatch"))
 
 
 # ==============================================================================
@@ -1218,3 +1431,127 @@ def test_cli_generate_yml_rejects_cycle(
     exit_code = cli_main(["generate-yml", "--pipeline_code", "TEST_CONCURRENT_PL"])
 
     assert exit_code == 1
+
+
+def test_cli_validate_ok_when_no_issues(
+    craft_connector_on_disk, postgres_engine, committed_pipeline, capsys
+):
+    insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+
+    exit_code = cli_main(["validate"])
+
+    assert exit_code == 0
+    assert "OK" in capsys.readouterr().out
+
+
+def test_cli_validate_reports_cycle(
+    craft_connector_on_disk, postgres_engine, committed_pipeline, capsys
+):
+    task_a = insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+    task_b = insert_committed_task(postgres_engine, committed_pipeline, "task_b")
+    insert_committed_dependency(postgres_engine, committed_pipeline, task_b, task_a)
+    insert_committed_dependency(postgres_engine, committed_pipeline, task_a, task_b)
+
+    exit_code = cli_main(["validate"])
+
+    assert exit_code == 1
+    assert "[graph]" in capsys.readouterr().out
+
+
+def test_cli_validate_reports_missing_warehouse_for_active_business_rule(
+    craft_connector_on_disk, postgres_engine, committed_pipeline, capsys
+):
+    # craft_connector_on_disk's CRAFT_CONNECTOR_YAML has no [Warehouse]
+    # section, so an active business rule with nothing to check its
+    # TARGET_TABLE against is itself a reportable integrity issue.
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+    insert_committed_business_rule(
+        postgres_engine, committed_pipeline, task_id, "br1", "public.some_table", "id"
+    )
+
+    exit_code = cli_main(["validate"])
+
+    assert exit_code == 1
+    out = capsys.readouterr().out
+    assert "[business_rule_pk]" in out
+    assert "Warehouse" in out
+
+
+WAREHOUSE_YAML_SUFFIX = """
+Warehouse:
+  Active_profile: dev
+  Profiles:
+    dev:
+      jdbc_url: jdbc:postgresql://localhost:55432/etl_craft
+      user: etl_craft
+      auth_mode: password
+"""
+
+UNREACHABLE_WAREHOUSE_YAML_SUFFIX = """
+Warehouse:
+  Active_profile: dev
+  Profiles:
+    dev:
+      jdbc_url: jdbc:postgresql://localhost:1/etl_craft
+      user: etl_craft
+      auth_mode: password
+"""
+
+
+def test_cli_validate_ok_with_warehouse_configured_and_matching_pk(
+    tmp_path, monkeypatch, postgres_engine, committed_pipeline, capsys
+):
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+    with postgres_engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS validate_cli_test_good"))
+        conn.execute(text("CREATE TABLE validate_cli_test_good (id INT PRIMARY KEY)"))
+    insert_committed_business_rule(
+        postgres_engine, committed_pipeline, task_id, "br1", "validate_cli_test_good", "id"
+    )
+    (tmp_path / "craft-connector.yml").write_text(CRAFT_CONNECTOR_YAML + WAREHOUSE_YAML_SUFFIX)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ETL_CRAFT_POSTGRES_DEV_SECRET", "etl_craft")
+    monkeypatch.setenv("ETL_CRAFT_WAREHOUSE_DEV_SECRET", "etl_craft")
+
+    try:
+        exit_code = cli_main(["validate"])
+    finally:
+        with postgres_engine.begin() as conn:
+            conn.execute(text("DROP TABLE validate_cli_test_good"))
+
+    assert exit_code == 0
+    assert "OK" in capsys.readouterr().out
+
+
+def test_cli_validate_reports_config_error_building_data_engine(
+    tmp_path, monkeypatch, postgres_engine, committed_pipeline, capsys
+):
+    (tmp_path / "craft-connector.yml").write_text(CRAFT_CONNECTOR_YAML + WAREHOUSE_YAML_SUFFIX)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ETL_CRAFT_POSTGRES_DEV_SECRET", "etl_craft")
+    monkeypatch.delenv("ETL_CRAFT_WAREHOUSE_DEV_SECRET", raising=False)
+
+    exit_code = cli_main(["validate"])
+
+    assert exit_code == 2
+    assert "error:" in capsys.readouterr().err
+
+
+def test_cli_validate_reports_connection_error_checking_business_rules(
+    tmp_path, monkeypatch, postgres_engine, committed_pipeline, capsys
+):
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+    insert_committed_business_rule(
+        postgres_engine, committed_pipeline, task_id, "br1", "public.some_table", "id"
+    )
+    (tmp_path / "craft-connector.yml").write_text(
+        CRAFT_CONNECTOR_YAML + UNREACHABLE_WAREHOUSE_YAML_SUFFIX
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ETL_CRAFT_POSTGRES_DEV_SECRET", "etl_craft")
+    monkeypatch.setenv("ETL_CRAFT_WAREHOUSE_DEV_SECRET", "etl_craft")
+
+    exit_code = cli_main(["validate"])
+
+    assert exit_code == 2
+    assert "error:" in capsys.readouterr().err

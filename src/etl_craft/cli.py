@@ -1,8 +1,8 @@
 """The `etl-craft` command-line entry point."""
 
 # Per CLAUDE.md's CLI surface: `run`, `list`, `graph`, `set-execution-mode`,
-# `configure --env`, and `generate-yml` are wired up here so far (interactive
-# `configure` with no --env, and `validate`, are still unbuilt). Within
+# `configure --env`, `generate-yml`, and `validate` are wired up here so far
+# (interactive `configure` with no --env is still unbuilt). Within
 # `run`, `--task_code` dispatches to runner.run_task (a single task);
 # `--init-only` dispatches to orchestrator.init_pipeline_run (mint/reuse the
 # active run, no task execution — what a generated Airflow DAG's synthetic
@@ -25,6 +25,7 @@ from pathlib import Path
 
 import yaml
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.cfg import (
     CfgError,
@@ -43,6 +44,8 @@ from etl_craft.orchestrator import OrchestratorModeRefusedError, init_pipeline_r
 from etl_craft.resolver import ResolverError, build_graph
 from etl_craft.runlog import RunLogError
 from etl_craft.runner import DependenciesNotMetError, ForceNotAllowedError, run_task
+from etl_craft.validate import validate_business_rule_keys, validate_graphs
+from etl_craft.warehouse import build_data_engine
 
 # Every exception run_task/run_pipeline/init_pipeline_run can raise for
 # reasons short of a bug: bad --pipeline_code/--task_code, --force under
@@ -107,6 +110,8 @@ def build_parser() -> argparse.ArgumentParser:
     generate_yml_parser.add_argument("--pipeline_code", required=True)
     generate_yml_parser.add_argument("--output", help="Write to this path instead of stdout")
 
+    subparsers.add_parser("validate", help="Config integrity check")
+
     return parser
 
 
@@ -134,6 +139,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _graph_command(args, engine)
     if args.command == "generate-yml":
         return _generate_yml_command(args, engine)
+    if args.command == "validate":
+        return _validate_command(engine, config)
     # argparse's `required=True` on the subparsers guarantees args.command is
     # one of the branches above; this exists only to document that invariant
     # and satisfy the type checker, not as a path any test can reach.
@@ -252,3 +259,33 @@ def _generate_yml_command(args: argparse.Namespace, engine: Engine) -> int:
     else:
         print(yaml_text, end="")
     return 0
+
+
+def _validate_command(engine: Engine, config: ConnectorConfig) -> int:
+    with engine.connect() as conn:
+        issues = validate_graphs(conn)
+
+        data_engine = None
+        if config.warehouse is not None:
+            try:
+                data_engine = build_data_engine(config)
+            except ConfigError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 2
+        try:
+            issues += validate_business_rule_keys(conn, data_engine)
+        except SQLAlchemyError as exc:
+            print(
+                f"error: could not check business rules against the Data DB: {exc}", file=sys.stderr
+            )
+            return 2
+        finally:
+            if data_engine is not None:
+                data_engine.dispose()
+
+    if not issues:
+        print("validate: OK — no issues found")
+        return 0
+    for issue in issues:
+        print(f"[{issue.category}] {issue.message}")
+    return 1

@@ -115,6 +115,9 @@ def committed_pipeline(postgres_engine: Engine):
             {"id": pipeline_id},
         )
         conn.execute(
+            text("DELETE FROM CFG_BUSINESS_RULES WHERE PIPELINE_ID = :id"), {"id": pipeline_id}
+        )
+        conn.execute(
             text("DELETE FROM CFG_TASK_DEPENDENCY WHERE PIPELINE_ID = :id"), {"id": pipeline_id}
         )
         conn.execute(text("DELETE FROM CFG_TASKS WHERE PIPELINE_ID = :id"), {"id": pipeline_id})
@@ -135,6 +138,33 @@ def insert_committed_task(
                 "VALUES (:task_code, 'ETL', :pipeline_id, :handler) RETURNING TASK_ID"
             ),
             {"task_code": task_code, "pipeline_id": pipeline_id, "handler": handler},
+        ).scalar_one()
+
+
+def insert_committed_business_rule(
+    engine: Engine,
+    pipeline_id: int,
+    task_id: int,
+    business_rule_name: str,
+    target_table: str,
+    key_column: str,
+) -> int:
+    """Insert and commit one CFG_BUSINESS_RULES row — for validate.py's PK-check tests."""
+    with engine.begin() as conn:
+        return conn.execute(
+            text(
+                "INSERT INTO CFG_BUSINESS_RULES (BUSINESS_RULE_NAME, PIPELINE_ID, TASK_ID, "
+                "BUSINESS_RULE_SQL, BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE, "
+                "SEQUENCE_NUMBER) VALUES (:name, :pipeline_id, :task_id, 'SELECT 1', 'REJECT', "
+                ":key_column, :target_table, 1) RETURNING BUSINESS_RULE_ID"
+            ),
+            {
+                "name": business_rule_name,
+                "pipeline_id": pipeline_id,
+                "task_id": task_id,
+                "key_column": key_column,
+                "target_table": target_table,
+            },
         ).scalar_one()
 
 
