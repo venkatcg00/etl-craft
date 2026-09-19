@@ -7,7 +7,11 @@ authors = [
     { name = "venkatcg00", email = "venkatcg0@gmail.com" }
 ]
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "psycopg[binary]>=3.3.6",
+    "pyyaml>=6.0.3",
+    "sqlalchemy>=2.0.54",
+]
 
 [project.scripts]
 etl-craft = "etl_craft:main"
