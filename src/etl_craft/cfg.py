@@ -56,6 +56,18 @@ def fetch_task_handler(conn: Connection, task_id: int) -> str:
     ).scalar_one()
 
 
+def fetch_task_codes(conn: Connection, pipeline_id: int) -> dict[int, str]:
+    """Map TASK_ID -> TASK_CODE for every active task in `pipeline_id`."""
+    rows = conn.execute(
+        text(
+            "SELECT TASK_ID AS task_id, TASK_CODE AS task_code FROM CFG_TASKS "
+            "WHERE PIPELINE_ID = :pipeline_id AND ACTIVE_FLAG = 'Y'"
+        ),
+        {"pipeline_id": pipeline_id},
+    ).all()
+    return {row.task_id: row.task_code for row in rows}
+
+
 @dataclass(frozen=True)
 class PipelineGraphData:
     """The CFG_TASKS/CFG_TASK_DEPENDENCY rows resolver.build_graph needs for one pipeline."""

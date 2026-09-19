@@ -1,12 +1,13 @@
 """Shared fixtures for the optional real-Postgres integration suite.
 
 The default `pytest -q` run needs nothing but the in-memory SQLite
-stand-ins used by test_runlog.py/test_db.py/test_config.py — CI runs that
-on every push with no setup. The fixtures here back a separate, opt-in
-suite (test_runlog_postgres.py) that runs against a real Postgres, which
-is the only way to actually exercise the partial unique index's
-concurrency guarantee; no amount of single-connection mocking can prove
-that. See docker-compose.yml / Makefile (`make test`) to bring one up.
+stand-in in test_unit.py — CI runs that on every push with no setup. The
+fixtures here back the separate, opt-in test_integration.py suite that
+runs against a real Postgres, which is the only way to actually exercise
+the partial unique index's concurrency guarantee (no amount of
+single-connection mocking can prove that) or a real subprocess-spawning
+orchestration run. See docker-compose.yml / Makefile (`make test`) to
+bring one up.
 """
 
 import os
@@ -164,3 +165,35 @@ def insert_committed_dependency(
                 "dependency_type": dependency_type,
             },
         )
+
+
+CRAFT_CONNECTOR_YAML = """
+Execution:
+  Mode: local
+
+Source:
+  Type: environment
+
+Postgres:
+  Active_profile: dev
+  Profiles:
+    dev:
+      jdbc_url: jdbc:postgresql://localhost:55432/etl_craft
+      user: etl_craft
+      auth_mode: password
+
+Cloning:
+  Enabled: false
+"""
+
+
+@pytest.fixture
+def craft_connector_on_disk(tmp_path, monkeypatch):
+    """Write a real craft-connector.yml pointing at the test Postgres, and chdir into it."""
+    # Needed by anything that spawns a real `python -m etl_craft` subprocess
+    # (orchestrator.run_pipeline, and cli.main indirectly through it) — the
+    # child process resolves its own config from cwd, same as a real
+    # deployment, so it can't reuse the parent test's in-memory config/engine.
+    (tmp_path / "craft-connector.yml").write_text(CRAFT_CONNECTOR_YAML)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ETL_CRAFT_POSTGRES_DEV_SECRET", "etl_craft")

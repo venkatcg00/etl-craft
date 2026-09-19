@@ -27,6 +27,7 @@ from etl_craft.config import (
     ConnectorConfig,
     SourceConfig,
 )
+from etl_craft.orchestrator import run_pipeline
 from etl_craft.runlog import (
     find_or_create_active_run,
     find_or_create_task_run,
@@ -350,44 +351,120 @@ def test_run_task_force_refused_under_orchestrator_mode(postgres_engine, committ
 
 
 # ==============================================================================
+# orchestrator.py — against real Postgres, spawning real subprocesses
+# ==============================================================================
+#
+# Every task here fails on the stub handler (HANDLER=SQL has no real
+# implementation yet), so a fully-SUCCESS pipeline run can't be
+# demonstrated until real handlers exist. These instead prove the
+# orchestration mechanics: wave computation, subprocess spawning,
+# retry-skip on an already-settled task, stuck-detection, and --force.
+
+
+def test_run_pipeline_runs_independent_tasks_and_finalizes_failed(
+    craft_connector_on_disk, postgres_engine, committed_pipeline
+):
+    insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+    insert_committed_task(postgres_engine, committed_pipeline, "task_b")
+
+    outcome = run_pipeline(postgres_engine, make_config(), "TEST_CONCURRENT_PL")
+
+    assert outcome.status == "FAILED"
+    with postgres_engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT STATUS AS status FROM AUD_TASK_RUN_LOG t "
+                "JOIN CFG_TASKS c ON c.TASK_ID = t.TASK_ID WHERE c.PIPELINE_ID = :pid"
+            ),
+            {"pid": committed_pipeline},
+        ).all()
+    assert {row.status for row in rows} == {"FAILED"}
+    assert len(rows) == 2  # both tasks actually got spawned and logged
+
+
+def test_run_pipeline_never_spawns_downstream_of_a_failed_dependency(
+    craft_connector_on_disk, postgres_engine, committed_pipeline
+):
+    task_a = insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+    task_b = insert_committed_task(postgres_engine, committed_pipeline, "task_b")
+    insert_committed_dependency(postgres_engine, committed_pipeline, task_b, task_a)
+
+    outcome = run_pipeline(postgres_engine, make_config(), "TEST_CONCURRENT_PL")
+
+    assert outcome.status == "FAILED"
+    assert "stuck" in outcome.message
+    with postgres_engine.connect() as conn:
+        task_b_rows = conn.execute(
+            text("SELECT COUNT(*) FROM AUD_TASK_RUN_LOG WHERE TASK_ID = :id"), {"id": task_b}
+        ).scalar_one()
+    assert task_b_rows == 0  # never became ready, so never even got bound
+
+
+def test_run_pipeline_skips_already_succeeded_task(postgres_engine, committed_pipeline):
+    task_a = insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+    seed_active_run(postgres_engine, committed_pipeline)
+    with postgres_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO AUD_TASK_RUN_LOG (TASK_ID, PIPELINE_RUN_ID, STATUS) "
+                "SELECT :task_id, PIPELINE_RUN_ID, 'SUCCESS' FROM AUD_PIPELINES_RUN_LOG "
+                "WHERE PIPELINE_ID = :pipeline_id AND STATUS = 'IN-PROGRESS'"
+            ),
+            {"task_id": task_a, "pipeline_id": committed_pipeline},
+        )
+
+    outcome = run_pipeline(postgres_engine, make_config(), "TEST_CONCURRENT_PL")
+
+    # Never spawned (already SUCCESS), so the whole pipeline finalizes
+    # SUCCESS without ever touching the stub handler.
+    assert outcome.status == "SUCCESS"
+
+
+def test_run_pipeline_force_bypasses_dependency_check(
+    craft_connector_on_disk, postgres_engine, committed_pipeline
+):
+    task_a = insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+    task_b = insert_committed_task(postgres_engine, committed_pipeline, "task_b")
+    insert_committed_dependency(postgres_engine, committed_pipeline, task_b, task_a)
+
+    outcome = run_pipeline(postgres_engine, make_config(), "TEST_CONCURRENT_PL", force=True)
+
+    assert outcome.status == "FAILED"  # both hit the stub handler
+    with postgres_engine.connect() as conn:
+        task_b_rows = conn.execute(
+            text("SELECT COUNT(*) FROM AUD_TASK_RUN_LOG WHERE TASK_ID = :id"), {"id": task_b}
+        ).scalar_one()
+    assert task_b_rows == 1  # force spawned it despite task_a never succeeding
+
+
+def test_run_pipeline_force_refused_under_orchestrator_mode(postgres_engine, committed_pipeline):
+    insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+
+    with pytest.raises(ForceNotAllowedError):
+        run_pipeline(
+            postgres_engine, make_config(mode="orchestrator"), "TEST_CONCURRENT_PL", force=True
+        )
+
+
+def test_run_pipeline_with_no_active_tasks_finalizes_success(postgres_engine, committed_pipeline):
+    outcome = run_pipeline(postgres_engine, make_config(), "TEST_CONCURRENT_PL")
+    assert outcome.status == "SUCCESS"
+
+
+# ==============================================================================
 # cli.py — against real Postgres, via a real craft-connector.yml on disk
 # ==============================================================================
 
-CLI_CRAFT_CONNECTOR_YAML = """
-Execution:
-  Mode: local
 
-Source:
-  Type: environment
-
-Postgres:
-  Active_profile: dev
-  Profiles:
-    dev:
-      jdbc_url: jdbc:postgresql://localhost:55432/etl_craft
-      user: etl_craft
-      auth_mode: password
-
-Cloning:
-  Enabled: false
-"""
-
-
-@pytest.fixture
-def cli_env(tmp_path, monkeypatch):
-    """Write a real craft-connector.yml pointing at the test Postgres, and chdir into it."""
-    (tmp_path / "craft-connector.yml").write_text(CLI_CRAFT_CONNECTOR_YAML)
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("ETL_CRAFT_POSTGRES_DEV_SECRET", "etl_craft")
-
-
-def test_cli_run_requires_pipeline_code(cli_env):
+def test_cli_run_requires_pipeline_code(craft_connector_on_disk):
     with pytest.raises(SystemExit) as exc_info:
         cli_main(["run", "--task_code", "t1"])
     assert exc_info.value.code == 2
 
 
-def test_cli_run_end_to_end_hits_stub_handler(cli_env, postgres_engine, committed_pipeline, capsys):
+def test_cli_run_end_to_end_hits_stub_handler(
+    craft_connector_on_disk, postgres_engine, committed_pipeline, capsys
+):
     insert_committed_task(postgres_engine, committed_pipeline, "task_a")
     seed_active_run(postgres_engine, committed_pipeline)
 
@@ -397,11 +474,19 @@ def test_cli_run_end_to_end_hits_stub_handler(cli_env, postgres_engine, committe
     assert "HANDLER='SQL'" in capsys.readouterr().out
 
 
-def test_cli_run_unknown_pipeline_code(cli_env):
+def test_cli_run_unknown_pipeline_code(craft_connector_on_disk):
     exit_code = cli_main(["run", "--pipeline_code", "NO_SUCH_PIPELINE", "--task_code", "t1"])
     assert exit_code == 1
 
 
-def test_cli_run_without_task_code_not_implemented_yet(cli_env):
+def test_cli_run_without_task_code_dispatches_to_pipeline_orchestration(
+    craft_connector_on_disk, postgres_engine, committed_pipeline
+):
+    insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+
     exit_code = cli_main(["run", "--pipeline_code", "TEST_CONCURRENT_PL"])
-    assert exit_code == 2
+
+    # No --task_code: goes through orchestrator.run_pipeline, not the old
+    # "not implemented" stub. task_a fails on the stub handler, so the
+    # whole pipeline finalizes FAILED — proving this path is live now.
+    assert exit_code == 1

@@ -235,3 +235,14 @@ def fetch_run_state(
     return {
         row.task_id: TaskRunState(status=row.status, target_count=row.target_count) for row in rows
     }
+
+
+def finalize_pipeline_run(conn: Connection, pipeline_run_id: int, status: str) -> None:
+    """Mark `pipeline_run_id` terminal (SUCCESS/FAILED), stamping END_DATE."""
+    conn.execute(
+        text(
+            "UPDATE AUD_PIPELINES_RUN_LOG SET STATUS = :status, END_DATE = :now "
+            "WHERE PIPELINE_RUN_ID = :pipeline_run_id"
+        ),
+        {"pipeline_run_id": pipeline_run_id, "status": status, "now": datetime.now(UTC)},
+    )
