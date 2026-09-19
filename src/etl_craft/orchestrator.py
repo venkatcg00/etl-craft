@@ -10,10 +10,26 @@
 # and each task independently resolves its own pipeline_run_id per "Run-id
 # resolution" rather than having one passed down to it.
 #
+# [CHOICE] run_pipeline() — the full wave-spawning scheduler — is refused
+# outright under Mode=orchestrator, regardless of --force. CLAUDE.md's own
+# framing ("local runs are built to mimic exactly what an orchestrator-driven
+# run does") implies this wave-spawning loop is a *local stand-in* for what
+# Airflow's own scheduler already does natively via the DAG generate-yml
+# produces — under real Airflow there is never a reason to also run our
+# Python-level subprocess loop, and doing so would be redundant with (and
+# race against) Airflow's own per-task scheduling. CLAUDE.md doesn't say
+# this explicitly, and does say "run is the only execution primitive, in
+# both modes" — the generated DAG's synthetic first step (mint the run,
+# eventually poll cross-pipeline deps, per "an additional pipeline id
+# creation step that starts in step 1 before all named steps") still goes
+# through `run`, just via the new `--init-only` flag (`init_pipeline_run`
+# below) rather than the bare no-`--task_code` form.
+#
 # Deliberately NOT included yet:
 #   * Cross-pipeline dependency polling ("the self-check/poll step inserted
-#     before step 1, alongside run-id minting") — this pipeline's own
-#     CFG_PIPELINE_DEPENDENCY edges are not checked before minting a run.
+#     before step 1, alongside run-id minting") — init_pipeline_run mints
+#     the run but doesn't yet check this pipeline's own
+#     CFG_PIPELINE_DEPENDENCY edges before doing so.
 #   * Orchestrator-level crash detection for a subprocess that dies without
 #     writing its own terminal status. CLAUDE.md's crash detection is
 #     specifically about run_task's *own* internal fork/monitor (still
@@ -34,12 +50,15 @@ from etl_craft.cfg import fetch_pipeline_graph, fetch_task_codes, resolve_pipeli
 from etl_craft.config import ConnectorConfig
 from etl_craft.resolver import DependencyGraph, TaskRunState, build_graph
 from etl_craft.runlog import fetch_run_state, finalize_pipeline_run, find_or_create_active_run
-from etl_craft.runner import ForceNotAllowedError
 
 # Tasks in this state need no further action. FAILED is deliberately not
 # included here — per "retry resumes", a FAILED task is still retry-eligible
 # and graph.ready() will offer it again once its own upstream deps allow.
 SETTLED_STATUSES = frozenset({"SUCCESS", "SKIPPED"})
+
+
+class OrchestratorModeRefusedError(Exception):
+    """Raised when the local wave-spawning scheduler is invoked under Mode=orchestrator."""
 
 
 @dataclass(frozen=True)
@@ -50,12 +69,37 @@ class PipelineOutcome:
     message: str
 
 
+@dataclass(frozen=True)
+class InitOutcome:
+    """The result of one init_pipeline_run() call."""
+
+    pipeline_run_id: int
+    message: str
+
+
+def init_pipeline_run(engine: Engine, config: ConnectorConfig, pipeline_code: str) -> InitOutcome:
+    """Mint/reuse `pipeline_code`'s active run — the generated DAG's synthetic first step."""
+    del config  # unused for now; will gate cross-pipeline polling once that's built
+    with engine.connect() as conn:
+        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+    with engine.begin() as conn:
+        pipeline_run_id = find_or_create_active_run(conn, pipeline_id)
+    return InitOutcome(
+        pipeline_run_id=pipeline_run_id,
+        message=f"{pipeline_code}: pipeline_run_id={pipeline_run_id}",
+    )
+
+
 def run_pipeline(
     engine: Engine, config: ConnectorConfig, pipeline_code: str, *, force: bool = False
 ) -> PipelineOutcome:
     """Run every active task in `pipeline_code`'s dependency graph, wave by wave."""
-    if force and config.mode == "orchestrator":
-        raise ForceNotAllowedError("--force is only legal under Mode=local, not Mode=orchestrator")
+    if config.mode == "orchestrator":
+        raise OrchestratorModeRefusedError(
+            "run --pipeline_code X (no --task_code) is refused under Mode=orchestrator — "
+            "Airflow's own DAG structure handles per-task scheduling; the generated DAG's "
+            "synthetic first step uses --init-only instead"
+        )
 
     with engine.connect() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)

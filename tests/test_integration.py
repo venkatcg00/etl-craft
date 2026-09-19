@@ -12,7 +12,12 @@ import time
 import pytest
 from sqlalchemy import text
 
-from conftest import insert_committed_dependency, insert_committed_task, seed_active_run
+from conftest import (
+    CRAFT_CONNECTOR_YAML,
+    insert_committed_dependency,
+    insert_committed_task,
+    seed_active_run,
+)
 from etl_craft.cfg import (
     CfgError,
     fetch_all_pipelines,
@@ -32,7 +37,7 @@ from etl_craft.config import (
     SourceConfig,
 )
 from etl_craft.handlers import HandlerResult
-from etl_craft.orchestrator import run_pipeline
+from etl_craft.orchestrator import OrchestratorModeRefusedError, init_pipeline_run, run_pipeline
 from etl_craft.runlog import (
     find_or_create_active_run,
     find_or_create_task_run,
@@ -654,13 +659,53 @@ def test_run_pipeline_force_bypasses_dependency_check(
     assert task_b_rows == 1  # force spawned it despite task_a never succeeding
 
 
-def test_run_pipeline_force_refused_under_orchestrator_mode(postgres_engine, committed_pipeline):
+def test_run_pipeline_refused_under_orchestrator_mode_with_force(
+    postgres_engine, committed_pipeline
+):
     insert_committed_task(postgres_engine, committed_pipeline, "task_a")
 
-    with pytest.raises(ForceNotAllowedError):
+    with pytest.raises(OrchestratorModeRefusedError):
         run_pipeline(
             postgres_engine, make_config(mode="orchestrator"), "TEST_CONCURRENT_PL", force=True
         )
+
+
+def test_run_pipeline_refused_under_orchestrator_mode_without_force(
+    postgres_engine, committed_pipeline
+):
+    # The whole point of the change: this is refused even without --force,
+    # since under real Airflow nothing should invoke the local wave-spawning
+    # scheduler at all — see orchestrator.py's own [CHOICE] comment.
+    insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+
+    with pytest.raises(OrchestratorModeRefusedError):
+        run_pipeline(postgres_engine, make_config(mode="orchestrator"), "TEST_CONCURRENT_PL")
+
+
+def test_init_pipeline_run_mints_active_run(postgres_engine, committed_pipeline):
+    outcome = init_pipeline_run(postgres_engine, make_config(), "TEST_CONCURRENT_PL")
+
+    with postgres_engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT STATUS AS status FROM AUD_PIPELINES_RUN_LOG WHERE PIPELINE_RUN_ID = :id"),
+            {"id": outcome.pipeline_run_id},
+        ).one()
+    assert row.status == "IN-PROGRESS"
+
+
+def test_init_pipeline_run_reuses_existing_active_run(postgres_engine, committed_pipeline):
+    first = init_pipeline_run(postgres_engine, make_config(), "TEST_CONCURRENT_PL")
+    second = init_pipeline_run(postgres_engine, make_config(), "TEST_CONCURRENT_PL")
+    assert first.pipeline_run_id == second.pipeline_run_id
+
+
+def test_init_pipeline_run_works_under_orchestrator_mode(postgres_engine, committed_pipeline):
+    # Unlike run_pipeline, init_pipeline_run is legal under both modes — it's
+    # exactly what Mode=orchestrator's synthetic first step is meant to call.
+    outcome = init_pipeline_run(
+        postgres_engine, make_config(mode="orchestrator"), "TEST_CONCURRENT_PL"
+    )
+    assert outcome.pipeline_run_id is not None
 
 
 def test_run_pipeline_with_no_active_tasks_finalizes_success(postgres_engine, committed_pipeline):
@@ -717,6 +762,34 @@ def test_cli_run_without_task_code_dispatches_to_pipeline_orchestration(
     # No --task_code: goes through orchestrator.run_pipeline, not the old
     # "not implemented" stub. task_a fails on the stub handler, so the
     # whole pipeline finalizes FAILED — proving this path is live now.
+    assert exit_code == 1
+
+
+def test_cli_run_init_only(craft_connector_on_disk, committed_pipeline, capsys):
+    exit_code = cli_main(["run", "--pipeline_code", "TEST_CONCURRENT_PL", "--init-only"])
+
+    assert exit_code == 0
+    assert "pipeline_run_id=" in capsys.readouterr().out
+
+
+def test_cli_run_init_only_and_task_code_are_mutually_exclusive(craft_connector_on_disk):
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main(
+            ["run", "--pipeline_code", "TEST_CONCURRENT_PL", "--init-only", "--task_code", "t1"]
+        )
+    assert exc_info.value.code == 2
+
+
+def test_cli_run_bare_form_refused_under_orchestrator_mode(
+    tmp_path, monkeypatch, committed_pipeline
+):
+    orchestrator_yaml = CRAFT_CONNECTOR_YAML.replace("Mode: local", "Mode: orchestrator")
+    (tmp_path / "craft-connector.yml").write_text(orchestrator_yaml)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ETL_CRAFT_POSTGRES_DEV_SECRET", "etl_craft")
+
+    exit_code = cli_main(["run", "--pipeline_code", "TEST_CONCURRENT_PL"])
+
     assert exit_code == 1
 
 

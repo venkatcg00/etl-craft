@@ -3,9 +3,12 @@
 # Per CLAUDE.md's CLI surface: `run`, `list`, `graph`, `set-execution-mode`,
 # and `configure --env` are wired up here so far (interactive `configure`
 # with no --env, `validate`, `generate-yml` are still unbuilt). Within
-# `run`, `--task_code` given dispatches to runner.run_task (a single task);
-# omitted dispatches to orchestrator.run_pipeline (the whole dependency
-# graph, wave by wave).
+# `run`, `--task_code` dispatches to runner.run_task (a single task);
+# `--init-only` dispatches to orchestrator.init_pipeline_run (mint/reuse the
+# active run, no task execution — what a generated Airflow DAG's synthetic
+# first step invokes); the bare form (neither given) dispatches to
+# orchestrator.run_pipeline (the local wave-spawning scheduler, refused
+# outright under Mode=orchestrator — see orchestrator.py's own comment).
 #
 # `set-execution-mode` and `configure` are handled *before* this module's
 # usual load_config()/build_engine() setup, since both operate on a
@@ -33,17 +36,23 @@ from etl_craft.cfg import (
 from etl_craft.config import VALID_MODES, ConfigError, ConnectorConfig, load_config
 from etl_craft.configure import configure_from_env, set_execution_mode
 from etl_craft.db import build_engine
-from etl_craft.orchestrator import run_pipeline
+from etl_craft.orchestrator import OrchestratorModeRefusedError, init_pipeline_run, run_pipeline
 from etl_craft.resolver import build_graph
 from etl_craft.runlog import RunLogError
 from etl_craft.runner import DependenciesNotMetError, ForceNotAllowedError, run_task
 
-# Every exception run_task/run_pipeline can raise for reasons short of a
-# bug: bad --pipeline_code/--task_code, --force under Mode=orchestrator,
-# unmet dependencies, or a pipeline with no logged run at all to bind to.
-# Caught uniformly here as a clean one-line error rather than a raw
-# traceback.
-RUN_ERRORS = (CfgError, RunLogError, ForceNotAllowedError, DependenciesNotMetError)
+# Every exception run_task/run_pipeline/init_pipeline_run can raise for
+# reasons short of a bug: bad --pipeline_code/--task_code, --force under
+# Mode=orchestrator, run_pipeline itself under Mode=orchestrator, unmet
+# dependencies, or a pipeline with no logged run at all to bind to. Caught
+# uniformly here as a clean one-line error rather than a raw traceback.
+RUN_ERRORS = (
+    CfgError,
+    RunLogError,
+    ForceNotAllowedError,
+    DependenciesNotMetError,
+    OrchestratorModeRefusedError,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -53,7 +62,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     run_parser = subparsers.add_parser("run", help="Run a pipeline or a single task")
     run_parser.add_argument("--pipeline_code", required=True)
-    run_parser.add_argument("--task_code")
+    task_group = run_parser.add_mutually_exclusive_group()
+    task_group.add_argument("--task_code")
+    task_group.add_argument(
+        "--init-only",
+        action="store_true",
+        help=(
+            "Only mint/reuse the active run, no task execution — what a generated Airflow "
+            "DAG's synthetic first step invokes. Legal under both Mode=local and "
+            "Mode=orchestrator, unlike the bare (no --task_code) form."
+        ),
+    )
     run_parser.add_argument("--force", action="store_true")
 
     subparsers.add_parser("list", help="List pipelines")
@@ -139,6 +158,10 @@ def _configure_command(args: argparse.Namespace) -> int:
 
 def _run_command(args: argparse.Namespace, engine: Engine, config: ConnectorConfig) -> int:
     try:
+        if args.init_only:
+            init_outcome = init_pipeline_run(engine, config, args.pipeline_code)
+            print(init_outcome.message)
+            return 0
         if args.task_code is None:
             outcome = run_pipeline(engine, config, args.pipeline_code, force=args.force)
         else:
