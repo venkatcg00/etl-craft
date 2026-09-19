@@ -9,6 +9,7 @@ collisions) and keeps file count down.
 
 import contextlib
 import runpy
+from datetime import UTC, datetime
 
 import pytest
 import yaml
@@ -31,6 +32,7 @@ from etl_craft.config import (
     resolve_secret,
 )
 from etl_craft.configure import configure_from_env, set_execution_mode
+from etl_craft.crosspipe import MIN_POLL_INTERVAL_SECONDS, _default_now, _next_poll_delay
 from etl_craft.db import AUTH_REGISTRY, ConnectionError_, build_engine, parse_jdbc_postgres
 from etl_craft.handlers import HandlerError, dispatch
 from etl_craft.resolver import (
@@ -209,6 +211,56 @@ def test_edge_satisfied_rejects_unknown_dependency_type():
     # API — exercised directly against the underlying building blocks instead.
     with pytest.raises(ResolverError):
         DependencyGraph._edge_satisfied(edge(2, 1, dependency_type="BOGUS"), TaskRunState())
+
+
+# ==============================================================================
+# crosspipe.py — pure poll-interval math, no DB at all
+# ==============================================================================
+
+
+def test_next_poll_delay_targets_the_fraction_of_average_duration():
+    # avg=300s, fraction=0.70 (first poll) -> target 210s; nothing elapsed
+    # yet, so the full 210s is owed (well under the huge remaining deadline).
+    delay = _next_poll_delay(300.0, 0.0, 0.70, remaining_deadline=3600.0)
+    assert delay == 210.0
+
+
+def test_next_poll_delay_accounts_for_already_elapsed_time():
+    # Same target (210s) but 150s has already passed -> only 60s left to wait.
+    delay = _next_poll_delay(300.0, 150.0, 0.70, remaining_deadline=3600.0)
+    assert delay == 60.0
+
+
+def test_next_poll_delay_floors_at_minimum_when_already_overdue():
+    # Already past the target fraction entirely -> don't return 0 or
+    # negative (which would hot-loop with no real delay between checks).
+    delay = _next_poll_delay(300.0, 1000.0, 0.70, remaining_deadline=3600.0)
+    assert delay == MIN_POLL_INTERVAL_SECONDS
+
+
+def test_next_poll_delay_never_exceeds_remaining_deadline():
+    # Target says wait 210s, but only 5s is left before the 1-hour cap.
+    delay = _next_poll_delay(300.0, 0.0, 0.70, remaining_deadline=5.0)
+    assert delay == 5.0
+
+
+def test_next_poll_delay_never_negative_when_deadline_already_passed():
+    delay = _next_poll_delay(300.0, 0.0, 0.70, remaining_deadline=-10.0)
+    assert delay == 0.0
+
+
+def test_default_now_returns_a_timezone_aware_datetime():
+    # The real default for check_*_dependencies' `now` kwarg — everything
+    # else in this test suite injects a fake one, so this is its only
+    # direct exercise. datetime.now(UTC) is trivial but was worth pinning
+    # down as tz-aware specifically, since the poll loop subtracts it from
+    # a Postgres TIMESTAMPTZ (also tz-aware) and mixing aware/naive would
+    # raise at runtime, not silently misbehave.
+    before = datetime.now(UTC)
+    result = _default_now()
+    after = datetime.now(UTC)
+    assert result.tzinfo is not None
+    assert before <= result <= after
 
 
 # ==============================================================================

@@ -2,7 +2,30 @@
 
 Per CLAUDE.md's Execution section, this is the literal form Airflow's
 generated BashOperator tasks shell out to, and it's also what the local
-orchestrator spawns one subprocess of per ready task.
+orchestrator spawns one subprocess of per ready task. A `run --task_code`
+invocation only ever runs that one task — it never cascades into running
+the rest of the pipeline, confirmed explicitly: whoever (Airflow or a
+human) triggers a single task gets exactly that task attempted, and a
+clean SUCCESS/SKIPPED/FAILED for it alone.
+
+Per direct instruction, working through what should happen every time this
+runs, regardless of who invokes it: resolve which pipeline this is and
+build its dependency graph; resolve which task this is within that graph;
+check same-pipeline *and* cross-pipeline dependencies — if a checked
+dependency is itself still running, wait using the poll cadence
+(crosspipe.py); if a dependency will never be satisfied, don't error —
+record this task SKIPPED and still report success (exit 0) upstream, since
+"gated off by design" isn't a failure Airflow's own retry/alerting should
+react to. Only once dependencies genuinely clear does the actual handler
+dispatch (fork + monitor, below) happen.
+
+[DEVIATION] This replaces the previous behavior, where an unmet
+same-pipeline dependency raised `DependenciesNotMetError` (exit code 1, no
+row written) instead of writing SKIPPED (exit code 0). Same-pipeline and
+cross-pipeline unmet dependencies are now handled identically for this
+reason: an Airflow task whose upstream FAILURE-edge condition wasn't met
+is expected, routine behavior, not an execution error — a real error
+(secret unresolvable, DB unreachable) still surfaces as a genuine failure.
 """
 
 # Per CLAUDE.md's "Crash detection": `run` forks the actual task logic (the
@@ -26,14 +49,10 @@ orchestrator spawns one subprocess of per ready task.
 # react correctly — spawn would re-import everything fresh in the child and
 # silently ignore any monkeypatch applied in the test process.
 #
-# Deliberately NOT included yet:
-#   * Cross-pipeline dependency polling — `cfg.fetch_pipeline_graph` already
-#     surfaces which tasks have a cross-pipeline edge
-#     (`cross_pipeline_task_ids`) but this module doesn't act on it yet.
-
 from __future__ import annotations
 
 import multiprocessing
+import time
 from dataclasses import dataclass
 
 from sqlalchemy.engine import Engine
@@ -45,10 +64,18 @@ from etl_craft.cfg import (
     resolve_task_id,
 )
 from etl_craft.config import ConnectorConfig
+from etl_craft.crosspipe import (
+    NowFn,
+    SleepFn,
+    _default_now,
+    check_task_cross_pipeline_dependencies,
+    consume_task_dependency_edges,
+)
 from etl_craft.db import build_engine
 from etl_craft.handlers import HandlerError, dispatch
 from etl_craft.resolver import build_graph
 from etl_craft.runlog import (
+    fetch_pipeline_run_status,
     fetch_run_state,
     fetch_task_run_result,
     fetch_task_run_status,
@@ -62,15 +89,11 @@ class ForceNotAllowedError(Exception):
     """Raised when --force is used under Mode=orchestrator (CLAUDE.md: refused outright)."""
 
 
-class DependenciesNotMetError(Exception):
-    """Raised when a task is invoked directly but its same-pipeline deps aren't satisfied."""
-
-
 @dataclass(frozen=True)
 class TaskOutcome:
     """The result of one run_task() call — enough to set the process exit code and log a message."""
 
-    status: str  # "SUCCESS", "FAILED", or "SKIPPED" (already done, short-circuited)
+    status: str  # "SUCCESS", "FAILED", or "SKIPPED" (already done, or gated off)
     message: str
 
 
@@ -81,6 +104,8 @@ def run_task(
     task_code: str,
     *,
     force: bool = False,
+    sleep: SleepFn = time.sleep,
+    now: NowFn = _default_now,
 ) -> TaskOutcome:
     """Run exactly one task, resolving its own pipeline_run_id per CLAUDE.md's Run-id resolution."""
     if force and config.mode == "orchestrator":
@@ -109,23 +134,47 @@ def run_task(
             )
 
         with engine.connect() as conn:
+            pipeline_run_status = fetch_pipeline_run_status(conn, pipeline_run_id)
+        if pipeline_run_status == "SKIPPED":
+            # The run itself was already declared moot — its own
+            # cross-pipeline dependency (checked by whatever minted it,
+            # orchestrator.py) was never satisfied. Every task under it is
+            # SKIPPED too, uniformly, rather than each independently
+            # re-deriving the same conclusion.
+            return _bind_as_skipped(
+                engine,
+                task_id,
+                pipeline_run_id,
+                task_code,
+                f"pipeline_run_id={pipeline_run_id} is itself SKIPPED",
+            )
+
+        with engine.connect() as conn:
             graph_data = fetch_pipeline_graph(conn, pipeline_id)
             graph = build_graph(graph_data.tasks, graph_data.same_pipeline_edges)
             run_state = fetch_run_state(
                 conn, pipeline_run_id, [task.task_id for task in graph_data.tasks]
             )
+
+        # Per direct instruction: same-pipeline and cross-pipeline
+        # dependencies are checked uniformly, and an unmet one is never an
+        # error — it's recorded SKIPPED (still exit 0) so Airflow doesn't
+        # treat "correctly gated off" as a task failure. [DEVIATION] this
+        # replaces the previous same-pipeline-only DependenciesNotMetError
+        # (raise, exit 1, nothing written) — see this module's own
+        # docstring for the full reasoning.
+        skip_reason: str | None = None
         if task_id not in set(graph.ready(run_state)):
-            # Deliberately raise rather than write anything to
-            # AUD_TASK_RUN_LOG: the task never started, so there's nothing
-            # to mark FAILED, and creating a dangling IN-PROGRESS row here
-            # would be worse than leaving no row at all. Per CLAUDE.md:
-            # "any path that bypasses the DAG's own ordering ... has no
-            # structural ordering to lean on, so the engine still has to
-            # verify same-pipeline dependencies itself."
-            raise DependenciesNotMetError(
-                f"{task_code}: same-pipeline dependencies not met for "
-                f"pipeline_run_id={pipeline_run_id}"
+            skip_reason = (
+                f"same-pipeline dependencies not met for pipeline_run_id={pipeline_run_id}"
             )
+        elif task_id in graph_data.cross_pipeline_task_ids:
+            skip_reason = check_task_cross_pipeline_dependencies(
+                engine, task_id, sleep=sleep, now=now
+            )
+
+        if skip_reason is not None:
+            return _bind_as_skipped(engine, task_id, pipeline_run_id, task_code, skip_reason)
 
     with engine.begin() as conn:
         binding = find_or_create_task_run(conn, task_id, pipeline_run_id)
@@ -133,11 +182,28 @@ def run_task(
 
     _dispatch_with_crash_detection(engine, config, binding.task_run_id, handler)
 
+    # Per CLAUDE.md: "The tracker only updates after the gated task/
+    # pipeline completes" — completion, not success specifically, since
+    # what an edge is waiting for (SUCCESS/FAILURE/ALWAYS/HAS_DATA) is
+    # about *this* task's own outcome, independent of whether it succeeded.
+    # A no-op when task_id has no cross-pipeline edges of its own.
+    consume_task_dependency_edges(engine, task_id)
+
     with engine.connect() as conn:
         result = fetch_task_run_result(conn, binding.task_run_id)
     if result.status == "SUCCESS":
         return TaskOutcome(status="SUCCESS", message=f"{task_code}: SUCCESS")
     return TaskOutcome(status="FAILED", message=f"{task_code}: {result.error_message}")
+
+
+def _bind_as_skipped(
+    engine: Engine, task_id: int, pipeline_run_id: int, task_code: str, reason: str
+) -> TaskOutcome:
+    """Bind (if needed) and finalize `task_id` as SKIPPED, with `reason` logged as usual."""
+    with engine.begin() as conn:
+        binding = find_or_create_task_run(conn, task_id, pipeline_run_id)
+        update_task_run(conn, binding.task_run_id, status="SKIPPED", error_message=reason)
+    return TaskOutcome(status="SKIPPED", message=f"{task_code}: SKIPPED — {reason}")
 
 
 def _dispatch_with_crash_detection(

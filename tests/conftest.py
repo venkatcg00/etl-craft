@@ -228,6 +228,166 @@ def insert_committed_dependency(
         )
 
 
+@pytest.fixture
+def two_committed_pipelines(postgres_engine: Engine):
+    """Yield (downstream_pipeline_id, upstream_pipeline_id), both genuinely committed."""
+    # crosspipe.py's functions each open their own connections (see its own
+    # module docstring on why — never holding one open across a poll's real
+    # sleep), so — unlike pg_conn-based cfg.py/validate.py tests — every row
+    # a crosspipe test sets up must be genuinely committed, not just held in
+    # an uncommitted pg_conn transaction. Two pipelines, since almost every
+    # cross-pipeline test needs a downstream subject and an upstream target.
+    with postgres_engine.begin() as conn:
+        downstream_id = conn.execute(
+            text(
+                "INSERT INTO CFG_PIPELINES (PIPELINE_CODE, PIPELINE_NAME, REFRESH_TYPE) "
+                "VALUES ('TEST_XPIPE_DOWN', 'Downstream', 'INCREMENTAL') RETURNING PIPELINE_ID"
+            )
+        ).scalar_one()
+        upstream_id = conn.execute(
+            text(
+                "INSERT INTO CFG_PIPELINES (PIPELINE_CODE, PIPELINE_NAME, REFRESH_TYPE) "
+                "VALUES ('TEST_XPIPE_UP', 'Upstream', 'INCREMENTAL') RETURNING PIPELINE_ID"
+            )
+        ).scalar_one()
+    yield downstream_id, upstream_id
+    with postgres_engine.begin() as conn:
+        ids = {"down": downstream_id, "up": upstream_id}
+        # Tracker rows reference both sides (PIPELINE_ID and
+        # DEPENDS_ON_PIPELINE_ID/DEPENDS_ON_TASK_ID), so either pipeline
+        # appearing on either side must be checked before either CFG_
+        # pipeline/task row can be deleted.
+        conn.execute(
+            text(
+                "DELETE FROM AUD_TASK_DEPENDENCY_TRACKER WHERE PIPELINE_ID IN (:down, :up) "
+                "OR DEPENDS_ON_PIPELINE_ID IN (:down, :up)"
+            ),
+            ids,
+        )
+        conn.execute(
+            text(
+                "DELETE FROM AUD_PIPELINE_DEPENDENCY_TRACKER WHERE PIPELINE_ID IN (:down, :up) "
+                "OR DEPENDS_ON_PIPELINE_ID IN (:down, :up)"
+            ),
+            ids,
+        )
+        conn.execute(
+            text(
+                "DELETE FROM AUD_TASK_RUN_LOG WHERE PIPELINE_RUN_ID IN "
+                "(SELECT PIPELINE_RUN_ID FROM AUD_PIPELINES_RUN_LOG "
+                "WHERE PIPELINE_ID IN (:down, :up))"
+            ),
+            ids,
+        )
+        conn.execute(text("DELETE FROM CFG_TASK_DEPENDENCY WHERE PIPELINE_ID IN (:down, :up)"), ids)
+        conn.execute(
+            text("DELETE FROM CFG_PIPELINE_DEPENDENCY WHERE PIPELINE_ID IN (:down, :up)"), ids
+        )
+        conn.execute(
+            text("DELETE FROM AUD_PIPELINES_RUN_LOG WHERE PIPELINE_ID IN (:down, :up)"), ids
+        )
+        conn.execute(text("DELETE FROM CFG_TASKS WHERE PIPELINE_ID IN (:down, :up)"), ids)
+        conn.execute(text("DELETE FROM CFG_PIPELINES WHERE PIPELINE_ID IN (:down, :up)"), ids)
+
+
+def insert_committed_pipeline_run(
+    engine: Engine,
+    pipeline_id: int,
+    status: str,
+    *,
+    start_date: object = None,
+    end_date: object = None,
+) -> int:
+    """Insert and commit one AUD_PIPELINES_RUN_LOG row — for crosspipe.py's tests."""
+    with engine.begin() as conn:
+        return conn.execute(
+            text(
+                "INSERT INTO AUD_PIPELINES_RUN_LOG (PIPELINE_ID, STATUS, START_DATE, END_DATE) "
+                "VALUES (:pipeline_id, :status, COALESCE(:start_date, now()), :end_date) "
+                "RETURNING PIPELINE_RUN_ID"
+            ),
+            {
+                "pipeline_id": pipeline_id,
+                "status": status,
+                "start_date": start_date,
+                "end_date": end_date,
+            },
+        ).scalar_one()
+
+
+def insert_committed_task_run(
+    engine: Engine,
+    task_id: int,
+    pipeline_run_id: int,
+    status: str,
+    *,
+    start_date: object = None,
+    target_count: int | None = None,
+) -> int:
+    """Insert and commit one AUD_TASK_RUN_LOG row — for crosspipe.py's tests."""
+    with engine.begin() as conn:
+        return conn.execute(
+            text(
+                "INSERT INTO AUD_TASK_RUN_LOG (TASK_ID, PIPELINE_RUN_ID, STATUS, START_DATE, "
+                "TARGET_COUNT) VALUES (:task_id, :pipeline_run_id, :status, "
+                "COALESCE(:start_date, now()), :target_count) RETURNING TASK_RUN_ID"
+            ),
+            {
+                "task_id": task_id,
+                "pipeline_run_id": pipeline_run_id,
+                "status": status,
+                "start_date": start_date,
+                "target_count": target_count,
+            },
+        ).scalar_one()
+
+
+def insert_committed_pipeline_dependency(
+    engine: Engine, pipeline_id: int, depends_on_pipeline_id: int, dependency_type: str = "SUCCESS"
+) -> int:
+    """Insert and commit one CFG_PIPELINE_DEPENDENCY row — for crosspipe.py's tests."""
+    with engine.begin() as conn:
+        return conn.execute(
+            text(
+                "INSERT INTO CFG_PIPELINE_DEPENDENCY (PIPELINE_ID, DEPENDS_ON_PIPELINE_ID, "
+                "DEPENDENCY_TYPE) VALUES (:pipeline_id, :depends_on_pipeline_id, :dependency_type) "
+                "RETURNING PIPELINE_DEPENDENCY_ID"
+            ),
+            {
+                "pipeline_id": pipeline_id,
+                "depends_on_pipeline_id": depends_on_pipeline_id,
+                "dependency_type": dependency_type,
+            },
+        ).scalar_one()
+
+
+def insert_committed_cross_pipeline_task_dependency(
+    engine: Engine,
+    pipeline_id: int,
+    task_id: int,
+    depends_on_pipeline_id: int,
+    depends_on_task_id: int,
+    dependency_type: str = "SUCCESS",
+) -> int:
+    """Insert and commit one cross-pipeline CFG_TASK_DEPENDENCY row — for crosspipe.py's tests."""
+    with engine.begin() as conn:
+        return conn.execute(
+            text(
+                "INSERT INTO CFG_TASK_DEPENDENCY (PIPELINE_ID, TASK_ID, DEPENDS_ON_PIPELINE_ID, "
+                "DEPENDS_ON_TASK_ID, DEPENDENCY_TYPE) VALUES (:pipeline_id, :task_id, "
+                ":depends_on_pipeline_id, :depends_on_task_id, :dependency_type) "
+                "RETURNING TASK_DEPENDENCY_ID"
+            ),
+            {
+                "pipeline_id": pipeline_id,
+                "task_id": task_id,
+                "depends_on_pipeline_id": depends_on_pipeline_id,
+                "depends_on_task_id": depends_on_task_id,
+                "dependency_type": dependency_type,
+            },
+        ).scalar_one()
+
+
 CRAFT_CONNECTOR_YAML = """
 Execution:
   Mode: local

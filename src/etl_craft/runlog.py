@@ -50,15 +50,20 @@ class TaskRunBinding:
     status: str
 
 
-def find_or_create_active_run(conn: Connection, pipeline_id: int) -> int:
-    """Reuse this pipeline's IN-PROGRESS run, or atomically mint a new one."""
-    existing = conn.execute(
+def fetch_active_pipeline_run_id(conn: Connection, pipeline_id: int) -> int | None:
+    """Return `pipeline_id`'s current IN-PROGRESS run id, or None if it has none."""
+    return conn.execute(
         text(
             "SELECT PIPELINE_RUN_ID FROM AUD_PIPELINES_RUN_LOG "
             "WHERE PIPELINE_ID = :pipeline_id AND STATUS = 'IN-PROGRESS'"
         ),
         {"pipeline_id": pipeline_id},
     ).scalar_one_or_none()
+
+
+def find_or_create_active_run(conn: Connection, pipeline_id: int) -> int:
+    """Reuse this pipeline's IN-PROGRESS run, or atomically mint a new one."""
+    existing = fetch_active_pipeline_run_id(conn, pipeline_id)
     if existing is not None:
         return existing
 
@@ -74,13 +79,7 @@ def find_or_create_active_run(conn: Connection, pipeline_id: int) -> int:
     except IntegrityError:
         # Lost the race against ux_pipeline_run_one_active — the winner's
         # row is now visible to us.
-        winner = conn.execute(
-            text(
-                "SELECT PIPELINE_RUN_ID FROM AUD_PIPELINES_RUN_LOG "
-                "WHERE PIPELINE_ID = :pipeline_id AND STATUS = 'IN-PROGRESS'"
-            ),
-            {"pipeline_id": pipeline_id},
-        ).scalar_one_or_none()
+        winner = fetch_active_pipeline_run_id(conn, pipeline_id)
         if winner is None:
             raise RunLogError(
                 f"pipeline_id={pipeline_id}: insert failed on a unique violation, "
@@ -219,6 +218,14 @@ def fetch_task_run_status(conn: Connection, task_id: int, pipeline_run_id: int) 
         ),
         {"task_id": task_id, "pipeline_run_id": pipeline_run_id},
     ).scalar_one_or_none()
+
+
+def fetch_pipeline_run_status(conn: Connection, pipeline_run_id: int) -> str:
+    """Return `pipeline_run_id`'s own current STATUS (assumed to already exist)."""
+    return conn.execute(
+        text("SELECT STATUS FROM AUD_PIPELINES_RUN_LOG WHERE PIPELINE_RUN_ID = :id"),
+        {"id": pipeline_run_id},
+    ).scalar_one()
 
 
 @dataclass(frozen=True)

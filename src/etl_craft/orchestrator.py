@@ -25,11 +25,27 @@
 # through `run`, just via the new `--init-only` flag (`init_pipeline_run`
 # below) rather than the bare no-`--task_code` form.
 #
+# Cross-pipeline dependency polling ("the self-check/poll step inserted
+# before step 1, alongside run-id minting") is wired into both
+# init_pipeline_run and run_pipeline below, but only on the mint-a-*new*-run
+# path — never re-checked against an already-IN-PROGRESS run, since that
+# run's own gate already passed when it was minted. If the gate finds an
+# unmet dependency, the run is still minted (so any task invocation that
+# was waiting on it has a real pipeline_run_id to bind to) but immediately
+# finalized SKIPPED rather than left IN-PROGRESS — runner.py's run_task
+# checks for exactly this and marks every task under it SKIPPED too.
+#
+# [Known gap, not fixed here] Once a run genuinely starts (its own gate
+# passed), nothing marks AUD_PIPELINES_RUN_LOG SUCCESS/FAILED under
+# Mode=orchestrator — finalize_pipeline_run is only ever called from
+# run_pipeline() below, which is refused under that mode. A real Airflow
+# DAG's tasks each finalize their own AUD_TASK_RUN_LOG row correctly, but
+# nothing finalizes the *pipeline* row once every task is done. This is a
+# pre-existing gap (not introduced by cross-pipeline polling) that a
+# synthetic "last task" mechanism, mirroring --init-only's synthetic first
+# one, would close — flagged for follow-up, out of scope here.
+#
 # Deliberately NOT included yet:
-#   * Cross-pipeline dependency polling ("the self-check/poll step inserted
-#     before step 1, alongside run-id minting") — init_pipeline_run mints
-#     the run but doesn't yet check this pipeline's own
-#     CFG_PIPELINE_DEPENDENCY edges before doing so.
 #   * Orchestrator-level crash detection for a subprocess that dies without
 #     writing its own terminal status. CLAUDE.md's crash detection is
 #     specifically about run_task's *own* internal fork/monitor (still
@@ -42,14 +58,27 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 
 from sqlalchemy.engine import Engine
 
 from etl_craft.cfg import fetch_pipeline_graph, fetch_task_codes, resolve_pipeline_id
 from etl_craft.config import ConnectorConfig
+from etl_craft.crosspipe import (
+    NowFn,
+    SleepFn,
+    _default_now,
+    check_pipeline_dependencies,
+    consume_pipeline_dependency_edges,
+)
 from etl_craft.resolver import DependencyGraph, TaskRunState, build_graph
-from etl_craft.runlog import fetch_run_state, finalize_pipeline_run, find_or_create_active_run
+from etl_craft.runlog import (
+    fetch_active_pipeline_run_id,
+    fetch_run_state,
+    finalize_pipeline_run,
+    find_or_create_active_run,
+)
 
 # Tasks in this state need no further action. FAILED is deliberately not
 # included here — per "retry resumes", a FAILED task is still retry-eligible
@@ -65,7 +94,7 @@ class OrchestratorModeRefusedError(Exception):
 class PipelineOutcome:
     """The result of one run_pipeline() call."""
 
-    status: str  # "SUCCESS" or "FAILED"
+    status: str  # "SUCCESS", "FAILED", or "SKIPPED" (a cross-pipeline dependency was never met)
     message: str
 
 
@@ -77,13 +106,44 @@ class InitOutcome:
     message: str
 
 
-def init_pipeline_run(engine: Engine, config: ConnectorConfig, pipeline_code: str) -> InitOutcome:
+def init_pipeline_run(
+    engine: Engine,
+    config: ConnectorConfig,
+    pipeline_code: str,
+    *,
+    sleep: SleepFn = time.sleep,
+    now: NowFn = _default_now,
+) -> InitOutcome:
     """Mint/reuse `pipeline_code`'s active run — the generated DAG's synthetic first step."""
-    del config  # unused for now; will gate cross-pipeline polling once that's built
+    del config  # not needed for the cross-pipeline gate itself
     with engine.connect() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+
+    with engine.connect() as conn:
+        existing = fetch_active_pipeline_run_id(conn, pipeline_id)
+    if existing is not None:
+        return InitOutcome(
+            pipeline_run_id=existing, message=f"{pipeline_code}: pipeline_run_id={existing}"
+        )
+
+    # Only reached when about to mint a genuinely new run — an already
+    # IN-PROGRESS run's own gate already passed when it was minted, so it's
+    # never re-checked here. (A concurrent caller could in principle mint
+    # its own run between this gate check and find_or_create_active_run
+    # below winning that race; find_or_create_active_run's own unique-index
+    # fallback still returns the right row either way, but in that rare
+    # window this caller's gate conclusion — not the winner's — is what
+    # gets recorded. Accepted as rare enough not to engineer around.)
+    skip_reason = check_pipeline_dependencies(engine, pipeline_id, sleep=sleep, now=now)
     with engine.begin() as conn:
         pipeline_run_id = find_or_create_active_run(conn, pipeline_id)
+        if skip_reason is not None:
+            finalize_pipeline_run(conn, pipeline_run_id, "SKIPPED")
+    if skip_reason is not None:
+        return InitOutcome(
+            pipeline_run_id=pipeline_run_id,
+            message=f"{pipeline_code}: pipeline_run_id={pipeline_run_id} SKIPPED — {skip_reason}",
+        )
     return InitOutcome(
         pipeline_run_id=pipeline_run_id,
         message=f"{pipeline_code}: pipeline_run_id={pipeline_run_id}",
@@ -91,7 +151,13 @@ def init_pipeline_run(engine: Engine, config: ConnectorConfig, pipeline_code: st
 
 
 def run_pipeline(
-    engine: Engine, config: ConnectorConfig, pipeline_code: str, *, force: bool = False
+    engine: Engine,
+    config: ConnectorConfig,
+    pipeline_code: str,
+    *,
+    force: bool = False,
+    sleep: SleepFn = time.sleep,
+    now: NowFn = _default_now,
 ) -> PipelineOutcome:
     """Run every active task in `pipeline_code`'s dependency graph, wave by wave."""
     if config.mode == "orchestrator":
@@ -103,6 +169,27 @@ def run_pipeline(
 
     with engine.connect() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+
+    if not force:
+        # Same "only gate when actually minting a new run" rule as
+        # init_pipeline_run — --force bypasses this gate entirely too, per
+        # CLAUDE.md ("--force bypasses all dependency/state checks").
+        with engine.connect() as conn:
+            existing = fetch_active_pipeline_run_id(conn, pipeline_id)
+        if existing is None:
+            skip_reason = check_pipeline_dependencies(engine, pipeline_id, sleep=sleep, now=now)
+            if skip_reason is not None:
+                with engine.begin() as conn:
+                    pipeline_run_id = find_or_create_active_run(conn, pipeline_id)
+                    finalize_pipeline_run(conn, pipeline_run_id, "SKIPPED")
+                consume_pipeline_dependency_edges(engine, pipeline_id)
+                return PipelineOutcome(
+                    status="SKIPPED",
+                    message=(
+                        f"{pipeline_code}: pipeline_run_id={pipeline_run_id} SKIPPED — "
+                        f"{skip_reason}"
+                    ),
+                )
 
     with engine.begin() as conn:
         pipeline_run_id = find_or_create_active_run(conn, pipeline_id)
@@ -116,6 +203,7 @@ def run_pipeline(
     if not all_task_ids:
         with engine.begin() as conn:
             finalize_pipeline_run(conn, pipeline_run_id, "SUCCESS")
+        consume_pipeline_dependency_edges(engine, pipeline_id)
         return PipelineOutcome(status="SUCCESS", message=f"{pipeline_code}: no active tasks")
 
     if force:
@@ -141,6 +229,10 @@ def run_pipeline(
     final_status = "FAILED" if unsettled else "SUCCESS"
     with engine.begin() as conn:
         finalize_pipeline_run(conn, pipeline_run_id, final_status)
+    # Per CLAUDE.md: tracker updates only after the gated pipeline
+    # completes — this pipeline's own outgoing cross-pipeline edges (if
+    # any) are advanced now, regardless of whether it succeeded or failed.
+    consume_pipeline_dependency_edges(engine, pipeline_id)
 
     if never_ready:
         failed_count = len(unsettled) - len(never_ready)

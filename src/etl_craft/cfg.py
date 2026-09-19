@@ -281,3 +281,73 @@ def fetch_business_rule_targets(conn: Connection) -> list[BusinessRuleTarget]:
         )
         for row in rows
     ]
+
+
+@dataclass(frozen=True)
+class PipelineDependencyEdgeId:
+    """One active CFG_PIPELINE_DEPENDENCY row, by id — what crosspipe.py's polling needs."""
+
+    pipeline_dependency_id: int
+    depends_on_pipeline_id: int
+    dependency_type: str
+
+
+def fetch_pipeline_dependency_edge_ids(
+    conn: Connection, pipeline_id: int
+) -> list[PipelineDependencyEdgeId]:
+    """Fetch `pipeline_id`'s own active CFG_PIPELINE_DEPENDENCY edges, by id."""
+    rows = conn.execute(
+        text(
+            "SELECT PIPELINE_DEPENDENCY_ID AS pipeline_dependency_id, "
+            "DEPENDS_ON_PIPELINE_ID AS depends_on_pipeline_id, "
+            "DEPENDENCY_TYPE AS dependency_type "
+            "FROM CFG_PIPELINE_DEPENDENCY WHERE PIPELINE_ID = :pipeline_id AND ACTIVE_FLAG = 'Y'"
+        ),
+        {"pipeline_id": pipeline_id},
+    ).all()
+    return [
+        PipelineDependencyEdgeId(
+            pipeline_dependency_id=row.pipeline_dependency_id,
+            depends_on_pipeline_id=row.depends_on_pipeline_id,
+            dependency_type=row.dependency_type,
+        )
+        for row in rows
+    ]
+
+
+@dataclass(frozen=True)
+class TaskCrossPipelineDependencyId:
+    """One active, genuinely cross-pipeline CFG_TASK_DEPENDENCY row, by id."""
+
+    task_dependency_id: int
+    pipeline_id: int
+    depends_on_pipeline_id: int
+    depends_on_task_id: int
+    dependency_type: str
+
+
+def fetch_task_cross_pipeline_dependency_ids(
+    conn: Connection, task_id: int
+) -> list[TaskCrossPipelineDependencyId]:
+    """Fetch `task_id`'s own active cross-pipeline CFG_TASK_DEPENDENCY edges, by id."""
+    rows = conn.execute(
+        text(
+            "SELECT TASK_DEPENDENCY_ID AS task_dependency_id, PIPELINE_ID AS pipeline_id, "
+            "DEPENDS_ON_PIPELINE_ID AS depends_on_pipeline_id, "
+            "DEPENDS_ON_TASK_ID AS depends_on_task_id, DEPENDENCY_TYPE AS dependency_type "
+            "FROM CFG_TASK_DEPENDENCY t "
+            "WHERE TASK_ID = :task_id AND ACTIVE_FLAG = 'Y' "
+            "AND DEPENDS_ON_PIPELINE_ID <> PIPELINE_ID"
+        ),
+        {"task_id": task_id},
+    ).all()
+    return [
+        TaskCrossPipelineDependencyId(
+            task_dependency_id=row.task_dependency_id,
+            pipeline_id=row.pipeline_id,
+            depends_on_pipeline_id=row.depends_on_pipeline_id,
+            depends_on_task_id=row.depends_on_task_id,
+            dependency_type=row.dependency_type,
+        )
+        for row in rows
+    ]

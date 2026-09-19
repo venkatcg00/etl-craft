@@ -9,6 +9,7 @@ loses nothing (no fixture/helper name collisions) and keeps file count down.
 import os
 import threading
 import time
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import yaml
@@ -17,8 +18,12 @@ from sqlalchemy import text
 from conftest import (
     CRAFT_CONNECTOR_YAML,
     insert_committed_business_rule,
+    insert_committed_cross_pipeline_task_dependency,
     insert_committed_dependency,
+    insert_committed_pipeline_dependency,
+    insert_committed_pipeline_run,
     insert_committed_task,
+    insert_committed_task_run,
     seed_active_run,
 )
 from etl_craft.cfg import (
@@ -27,8 +32,10 @@ from etl_craft.cfg import (
     fetch_business_rule_targets,
     fetch_cross_pipeline_task_edges,
     fetch_pipeline_dependencies,
+    fetch_pipeline_dependency_edge_ids,
     fetch_pipeline_detail,
     fetch_pipeline_graph,
+    fetch_task_cross_pipeline_dependency_ids,
     fetch_task_handler,
     resolve_pipeline_id,
     resolve_task_id,
@@ -41,6 +48,14 @@ from etl_craft.config import (
     ConnectorConfig,
     SourceConfig,
 )
+from etl_craft.crosspipe import (
+    _wait_for_pipeline_dependency_to_settle,
+    _wait_for_task_dependency_to_settle,
+    check_pipeline_dependencies,
+    check_task_cross_pipeline_dependencies,
+    consume_pipeline_dependency_edges,
+    consume_task_dependency_edges,
+)
 from etl_craft.generate_yml import generate_pipeline_dag
 from etl_craft.handlers import HandlerResult
 from etl_craft.orchestrator import OrchestratorModeRefusedError, init_pipeline_run, run_pipeline
@@ -51,7 +66,7 @@ from etl_craft.runlog import (
     resolve_run_for_task,
     update_task_run,
 )
-from etl_craft.runner import DependenciesNotMetError, ForceNotAllowedError, run_task
+from etl_craft.runner import ForceNotAllowedError, run_task
 from etl_craft.validate import validate_business_rule_keys, validate_graphs
 from etl_craft.warehouse import build_data_engine
 
@@ -575,6 +590,89 @@ def test_fetch_business_rule_targets_excludes_inactive(pg_conn, cfg_pipeline, cf
     assert fetch_business_rule_targets(pg_conn) == []
 
 
+def test_fetch_pipeline_dependency_edge_ids(pg_conn, cfg_pipeline):
+    other_id = pg_conn.execute(
+        text(
+            "INSERT INTO CFG_PIPELINES (PIPELINE_CODE, PIPELINE_NAME, REFRESH_TYPE) "
+            "VALUES ('TEST_XPIPE_UP', 'Upstream', 'INCREMENTAL') RETURNING PIPELINE_ID"
+        )
+    ).scalar_one()
+    edge_id = pg_conn.execute(
+        text(
+            "INSERT INTO CFG_PIPELINE_DEPENDENCY (PIPELINE_ID, DEPENDS_ON_PIPELINE_ID, "
+            "DEPENDENCY_TYPE) VALUES (:pid, :other, 'SUCCESS') RETURNING PIPELINE_DEPENDENCY_ID"
+        ),
+        {"pid": cfg_pipeline, "other": other_id},
+    ).scalar_one()
+
+    edges = fetch_pipeline_dependency_edge_ids(pg_conn, cfg_pipeline)
+
+    assert len(edges) == 1
+    assert edges[0].pipeline_dependency_id == edge_id
+    assert edges[0].depends_on_pipeline_id == other_id
+    assert edges[0].dependency_type == "SUCCESS"
+
+
+def test_fetch_task_cross_pipeline_dependency_ids(pg_conn, cfg_pipeline, cfg_task):
+    other_pipeline_id = pg_conn.execute(
+        text(
+            "INSERT INTO CFG_PIPELINES (PIPELINE_CODE, PIPELINE_NAME, REFRESH_TYPE) "
+            "VALUES ('TEST_XTASK_UP', 'Upstream', 'INCREMENTAL') RETURNING PIPELINE_ID"
+        )
+    ).scalar_one()
+    other_task_id = pg_conn.execute(
+        text(
+            "INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) "
+            "VALUES ('upstream_task', 'ETL', :pid, 'SQL') RETURNING TASK_ID"
+        ),
+        {"pid": other_pipeline_id},
+    ).scalar_one()
+    edge_id = pg_conn.execute(
+        text(
+            "INSERT INTO CFG_TASK_DEPENDENCY (PIPELINE_ID, TASK_ID, DEPENDS_ON_PIPELINE_ID, "
+            "DEPENDS_ON_TASK_ID, DEPENDENCY_TYPE) VALUES (:pid, :task, :other_pid, :other_task, "
+            "'FAILURE') RETURNING TASK_DEPENDENCY_ID"
+        ),
+        {
+            "pid": cfg_pipeline,
+            "task": cfg_task,
+            "other_pid": other_pipeline_id,
+            "other_task": other_task_id,
+        },
+    ).scalar_one()
+
+    edges = fetch_task_cross_pipeline_dependency_ids(pg_conn, cfg_task)
+
+    assert len(edges) == 1
+    assert edges[0].task_dependency_id == edge_id
+    assert edges[0].pipeline_id == cfg_pipeline
+    assert edges[0].depends_on_pipeline_id == other_pipeline_id
+    assert edges[0].depends_on_task_id == other_task_id
+    assert edges[0].dependency_type == "FAILURE"
+
+
+def test_fetch_task_cross_pipeline_dependency_ids_excludes_same_pipeline_edges(
+    pg_conn, cfg_pipeline, cfg_task
+):
+    other_task_id = pg_conn.execute(
+        text(
+            "INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) "
+            "VALUES ('task_b', 'ETL', :pid, 'SQL') RETURNING TASK_ID"
+        ),
+        {"pid": cfg_pipeline},
+    ).scalar_one()
+    pg_conn.execute(
+        text(
+            "INSERT INTO CFG_TASK_DEPENDENCY (PIPELINE_ID, TASK_ID, DEPENDS_ON_PIPELINE_ID, "
+            "DEPENDS_ON_TASK_ID, DEPENDENCY_TYPE) "
+            "VALUES (:pid, :task, :pid, :other_task, 'SUCCESS')"
+        ),
+        {"pid": cfg_pipeline, "task": cfg_task, "other_task": other_task_id},
+    )
+
+    assert fetch_task_cross_pipeline_dependency_ids(pg_conn, cfg_task) == []
+
+
 # ==============================================================================
 # validate.py — against real Postgres
 # ==============================================================================
@@ -902,6 +1000,362 @@ def test_generate_pipeline_dag_includes_cross_pipeline_task_dependencies(
 
 
 # ==============================================================================
+# crosspipe.py — against real Postgres
+# ==============================================================================
+#
+# crosspipe.py's functions each open their own connections (see its own
+# module docstring on why — never one held open across a poll's real
+# sleep), so every row a test here sets up must be genuinely committed via
+# postgres_engine/two_committed_pipelines, not the rolled-back pg_conn used
+# elsewhere in this file.
+
+
+class _FakeClock:
+    """A controllable clock: sleep() advances it instead of actually waiting."""
+
+    def __init__(self, start: datetime):
+        self._now = start
+        self.sleeps: list[float] = []
+
+    def now(self) -> datetime:
+        return self._now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self._now += timedelta(seconds=seconds)
+
+
+def test_check_pipeline_dependencies_satisfied_when_no_edges(
+    postgres_engine, two_committed_pipelines
+):
+    downstream_id, _ = two_committed_pipelines
+    assert check_pipeline_dependencies(postgres_engine, downstream_id) is None
+
+
+def test_check_pipeline_dependencies_not_satisfied_with_no_upstream_run(
+    postgres_engine, two_committed_pipelines
+):
+    downstream_id, upstream_id = two_committed_pipelines
+    insert_committed_pipeline_dependency(postgres_engine, downstream_id, upstream_id, "SUCCESS")
+
+    reason = check_pipeline_dependencies(postgres_engine, downstream_id)
+
+    assert reason is not None
+    assert f"pipeline_id={upstream_id}" in reason
+
+
+def test_check_pipeline_dependencies_success_type_satisfied_by_success_run(
+    postgres_engine, two_committed_pipelines
+):
+    downstream_id, upstream_id = two_committed_pipelines
+    insert_committed_pipeline_dependency(postgres_engine, downstream_id, upstream_id, "SUCCESS")
+    insert_committed_pipeline_run(
+        postgres_engine, upstream_id, "FAILED", end_date=datetime.now(UTC)
+    )
+    insert_committed_pipeline_run(
+        postgres_engine, upstream_id, "SUCCESS", end_date=datetime.now(UTC)
+    )
+
+    assert check_pipeline_dependencies(postgres_engine, downstream_id) is None
+
+
+def test_check_pipeline_dependencies_failure_type_satisfied_by_failed_run(
+    postgres_engine, two_committed_pipelines
+):
+    downstream_id, upstream_id = two_committed_pipelines
+    insert_committed_pipeline_dependency(postgres_engine, downstream_id, upstream_id, "FAILURE")
+    insert_committed_pipeline_run(
+        postgres_engine, upstream_id, "SUCCESS", end_date=datetime.now(UTC)
+    )
+
+    assert check_pipeline_dependencies(postgres_engine, downstream_id) is not None
+
+    insert_committed_pipeline_run(
+        postgres_engine, upstream_id, "FAILED", end_date=datetime.now(UTC)
+    )
+
+    assert check_pipeline_dependencies(postgres_engine, downstream_id) is None
+
+
+def test_check_pipeline_dependencies_always_type_satisfied_by_any_terminal_status(
+    postgres_engine, two_committed_pipelines
+):
+    downstream_id, upstream_id = two_committed_pipelines
+    insert_committed_pipeline_dependency(postgres_engine, downstream_id, upstream_id, "ALWAYS")
+    insert_committed_pipeline_run(
+        postgres_engine, upstream_id, "SKIPPED", end_date=datetime.now(UTC)
+    )
+
+    assert check_pipeline_dependencies(postgres_engine, downstream_id) is None
+
+
+def test_check_pipeline_dependencies_has_data_satisfied_by_any_task_with_data(
+    postgres_engine, two_committed_pipelines
+):
+    # [CHOICE] confirmed with the user: pipeline-level HAS_DATA means "the
+    # run succeeded AND at least one of its own tasks reported
+    # TARGET_COUNT > 0" — AUD_PIPELINES_RUN_LOG has no TARGET_COUNT itself.
+    downstream_id, upstream_id = two_committed_pipelines
+    upstream_task_id = insert_committed_task(postgres_engine, upstream_id, "upstream_task")
+    insert_committed_pipeline_dependency(postgres_engine, downstream_id, upstream_id, "HAS_DATA")
+    run_id = insert_committed_pipeline_run(
+        postgres_engine, upstream_id, "SUCCESS", end_date=datetime.now(UTC)
+    )
+
+    assert check_pipeline_dependencies(postgres_engine, downstream_id) is not None
+
+    insert_committed_task_run(postgres_engine, upstream_task_id, run_id, "SUCCESS", target_count=5)
+
+    assert check_pipeline_dependencies(postgres_engine, downstream_id) is None
+
+
+def test_consume_pipeline_dependency_edges_updates_tracker_and_blocks_reconsumption(
+    postgres_engine, two_committed_pipelines
+):
+    downstream_id, upstream_id = two_committed_pipelines
+    edge_id = insert_committed_pipeline_dependency(
+        postgres_engine, downstream_id, upstream_id, "SUCCESS"
+    )
+    run_id = insert_committed_pipeline_run(
+        postgres_engine, upstream_id, "SUCCESS", end_date=datetime.now(UTC)
+    )
+
+    consume_pipeline_dependency_edges(postgres_engine, downstream_id)
+
+    with postgres_engine.connect() as conn:
+        tracked = conn.execute(
+            text(
+                "SELECT LAST_CONSUMED_PIPELINE_RUN_ID FROM AUD_PIPELINE_DEPENDENCY_TRACKER "
+                "WHERE PIPELINE_DEPENDENCY_ID = :id"
+            ),
+            {"id": edge_id},
+        ).scalar_one()
+    assert tracked == run_id
+    # Re-checking now (no newer qualifying run since) correctly reports unmet.
+    assert check_pipeline_dependencies(postgres_engine, downstream_id) is not None
+
+
+def test_consume_pipeline_dependency_edges_is_a_noop_when_unsatisfied(
+    postgres_engine, two_committed_pipelines
+):
+    downstream_id, upstream_id = two_committed_pipelines
+    edge_id = insert_committed_pipeline_dependency(
+        postgres_engine, downstream_id, upstream_id, "SUCCESS"
+    )
+
+    consume_pipeline_dependency_edges(postgres_engine, downstream_id)
+
+    with postgres_engine.connect() as conn:
+        count = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM AUD_PIPELINE_DEPENDENCY_TRACKER "
+                "WHERE PIPELINE_DEPENDENCY_ID = :id"
+            ),
+            {"id": edge_id},
+        ).scalar_one()
+    assert count == 0
+
+
+def test_wait_for_pipeline_dependency_polls_then_settles(postgres_engine, two_committed_pipelines):
+    _, upstream_id = two_committed_pipelines
+    insert_committed_pipeline_run(postgres_engine, upstream_id, "IN-PROGRESS")
+
+    calls = {"n": 0}
+
+    def fake_sleep(seconds):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            with postgres_engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "UPDATE AUD_PIPELINES_RUN_LOG SET STATUS = 'SUCCESS', END_DATE = now() "
+                        "WHERE PIPELINE_ID = :pid"
+                    ),
+                    {"pid": upstream_id},
+                )
+
+    _wait_for_pipeline_dependency_to_settle(
+        postgres_engine, upstream_id, sleep=fake_sleep, now=lambda: datetime.now(UTC)
+    )
+
+    assert calls["n"] == 2
+
+
+def test_wait_for_pipeline_dependency_gives_up_after_poll_cap(
+    postgres_engine, two_committed_pipelines
+):
+    _, upstream_id = two_committed_pipelines
+    start = datetime.now(UTC)
+    insert_committed_pipeline_run(postgres_engine, upstream_id, "IN-PROGRESS", start_date=start)
+
+    clock = _FakeClock(start)
+    _wait_for_pipeline_dependency_to_settle(
+        postgres_engine, upstream_id, sleep=clock.sleep, now=clock.now
+    )
+
+    assert len(clock.sleeps) == 30
+    assert (clock.now() - start).total_seconds() < 3600
+
+
+def test_wait_for_pipeline_dependency_stops_at_deadline_mid_loop(
+    postgres_engine, two_committed_pipelines
+):
+    # Distinct from the poll-cap test above: this hits the wall-clock
+    # deadline check at the *top* of a later loop iteration, before the
+    # poll count (30) would ever be reached — the other way the loop can end.
+    _, upstream_id = two_committed_pipelines
+    start = datetime.now(UTC)
+    insert_committed_pipeline_run(postgres_engine, upstream_id, "IN-PROGRESS", start_date=start)
+
+    clock = _FakeClock(start)
+
+    def jump_sleep(seconds: float) -> None:
+        clock.sleeps.append(seconds)
+        clock._now += timedelta(hours=2)  # blow well past the 1-hour deadline in one jump
+
+    _wait_for_pipeline_dependency_to_settle(
+        postgres_engine, upstream_id, sleep=jump_sleep, now=clock.now
+    )
+
+    assert len(clock.sleeps) == 1
+
+
+def test_check_task_cross_pipeline_dependencies_satisfied_when_no_edges(
+    postgres_engine, two_committed_pipelines
+):
+    downstream_id, _ = two_committed_pipelines
+    downstream_task_id = insert_committed_task(postgres_engine, downstream_id, "task_a")
+    assert check_task_cross_pipeline_dependencies(postgres_engine, downstream_task_id) is None
+
+
+def test_check_task_cross_pipeline_dependencies_success_type(
+    postgres_engine, two_committed_pipelines
+):
+    downstream_id, upstream_id = two_committed_pipelines
+    downstream_task_id = insert_committed_task(postgres_engine, downstream_id, "task_a")
+    upstream_task_id = insert_committed_task(postgres_engine, upstream_id, "upstream_task")
+    run_id = insert_committed_pipeline_run(postgres_engine, upstream_id, "IN-PROGRESS")
+    insert_committed_cross_pipeline_task_dependency(
+        postgres_engine, downstream_id, downstream_task_id, upstream_id, upstream_task_id, "SUCCESS"
+    )
+
+    reason = check_task_cross_pipeline_dependencies(postgres_engine, downstream_task_id)
+    assert reason is not None
+
+    insert_committed_task_run(postgres_engine, upstream_task_id, run_id, "SUCCESS")
+
+    assert check_task_cross_pipeline_dependencies(postgres_engine, downstream_task_id) is None
+
+
+def test_check_task_cross_pipeline_dependencies_has_data_native(
+    postgres_engine, two_committed_pipelines
+):
+    downstream_id, upstream_id = two_committed_pipelines
+    downstream_task_id = insert_committed_task(postgres_engine, downstream_id, "task_a")
+    upstream_task_id = insert_committed_task(postgres_engine, upstream_id, "upstream_task")
+    # Both pipeline runs are minted terminal (not IN-PROGRESS) — this test
+    # only cares about task-level status, and ux_pipeline_run_one_active
+    # would block a second concurrent IN-PROGRESS run for the same pipeline.
+    run_id = insert_committed_pipeline_run(
+        postgres_engine, upstream_id, "SUCCESS", end_date=datetime.now(UTC)
+    )
+    insert_committed_cross_pipeline_task_dependency(
+        postgres_engine,
+        downstream_id,
+        downstream_task_id,
+        upstream_id,
+        upstream_task_id,
+        "HAS_DATA",
+    )
+    insert_committed_task_run(postgres_engine, upstream_task_id, run_id, "SUCCESS", target_count=0)
+
+    assert check_task_cross_pipeline_dependencies(postgres_engine, downstream_task_id) is not None
+
+    # A second, later run of the upstream task that genuinely reported data
+    # — ux_task_run_one_per_pipeline_run means one row per (task, run), so
+    # this needs its own pipeline run, same as a real second execution would.
+    second_run_id = insert_committed_pipeline_run(
+        postgres_engine, upstream_id, "SUCCESS", end_date=datetime.now(UTC)
+    )
+    insert_committed_task_run(
+        postgres_engine, upstream_task_id, second_run_id, "SUCCESS", target_count=5
+    )
+
+    assert check_task_cross_pipeline_dependencies(postgres_engine, downstream_task_id) is None
+
+
+def test_consume_task_dependency_edges_updates_tracker(postgres_engine, two_committed_pipelines):
+    downstream_id, upstream_id = two_committed_pipelines
+    downstream_task_id = insert_committed_task(postgres_engine, downstream_id, "task_a")
+    upstream_task_id = insert_committed_task(postgres_engine, upstream_id, "upstream_task")
+    run_id = insert_committed_pipeline_run(postgres_engine, upstream_id, "IN-PROGRESS")
+    edge_id = insert_committed_cross_pipeline_task_dependency(
+        postgres_engine, downstream_id, downstream_task_id, upstream_id, upstream_task_id, "SUCCESS"
+    )
+    task_run_id = insert_committed_task_run(postgres_engine, upstream_task_id, run_id, "SUCCESS")
+
+    consume_task_dependency_edges(postgres_engine, downstream_task_id)
+
+    with postgres_engine.connect() as conn:
+        tracked = conn.execute(
+            text(
+                "SELECT LAST_CONSUMED_TASK_RUN_ID FROM AUD_TASK_DEPENDENCY_TRACKER "
+                "WHERE TASK_DEPENDENCY_ID = :id"
+            ),
+            {"id": edge_id},
+        ).scalar_one()
+    assert tracked == task_run_id
+
+
+def test_wait_for_task_dependency_polls_then_settles(postgres_engine, two_committed_pipelines):
+    downstream_id, upstream_id = two_committed_pipelines
+    upstream_task_id = insert_committed_task(postgres_engine, upstream_id, "upstream_task")
+    run_id = insert_committed_pipeline_run(postgres_engine, upstream_id, "IN-PROGRESS")
+    insert_committed_task_run(postgres_engine, upstream_task_id, run_id, "IN-PROGRESS")
+
+    calls = {"n": 0}
+
+    def fake_sleep(seconds):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            with postgres_engine.begin() as conn:
+                conn.execute(
+                    text("UPDATE AUD_TASK_RUN_LOG SET STATUS = 'SUCCESS' WHERE TASK_ID = :task_id"),
+                    {"task_id": upstream_task_id},
+                )
+
+    _wait_for_task_dependency_to_settle(
+        postgres_engine, upstream_task_id, sleep=fake_sleep, now=lambda: datetime.now(UTC)
+    )
+
+    assert calls["n"] == 2
+
+
+def test_wait_for_task_dependency_stops_at_deadline_mid_loop(
+    postgres_engine, two_committed_pipelines
+):
+    _, upstream_id = two_committed_pipelines
+    upstream_task_id = insert_committed_task(postgres_engine, upstream_id, "upstream_task")
+    run_id = insert_committed_pipeline_run(postgres_engine, upstream_id, "IN-PROGRESS")
+    start = datetime.now(UTC)
+    insert_committed_task_run(
+        postgres_engine, upstream_task_id, run_id, "IN-PROGRESS", start_date=start
+    )
+
+    clock = _FakeClock(start)
+
+    def jump_sleep(seconds: float) -> None:
+        clock.sleeps.append(seconds)
+        clock._now += timedelta(hours=2)
+
+    _wait_for_task_dependency_to_settle(
+        postgres_engine, upstream_task_id, sleep=jump_sleep, now=clock.now
+    )
+
+    assert len(clock.sleeps) == 1
+
+
+# ==============================================================================
 # runner.py — against real Postgres
 # ==============================================================================
 #
@@ -974,15 +1428,28 @@ def test_run_task_short_circuits_on_existing_success(postgres_engine, committed_
     assert outcome.status == "SKIPPED"
 
 
-def test_run_task_raises_when_dependency_not_met(postgres_engine, committed_pipeline):
+def test_run_task_skips_when_same_pipeline_dependency_not_met(postgres_engine, committed_pipeline):
     # task_b depends on task_a via SUCCESS; task_a hasn't been run at all.
+    # [DEVIATION] used to raise DependenciesNotMetError (exit 1); now
+    # records SKIPPED (exit 0) instead — see runner.py's own docstring.
     task_a = insert_committed_task(postgres_engine, committed_pipeline, "task_a")
     task_b = insert_committed_task(postgres_engine, committed_pipeline, "task_b")
     insert_committed_dependency(postgres_engine, committed_pipeline, task_b, task_a)
     seed_active_run(postgres_engine, committed_pipeline)
 
-    with pytest.raises(DependenciesNotMetError):
-        run_task(postgres_engine, make_config(), "TEST_CONCURRENT_PL", "task_b")
+    outcome = run_task(postgres_engine, make_config(), "TEST_CONCURRENT_PL", "task_b")
+
+    assert outcome.status == "SKIPPED"
+    with postgres_engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT STATUS AS status, ERROR_MESSAGE AS error_message FROM AUD_TASK_RUN_LOG "
+                "WHERE TASK_ID = :id"
+            ),
+            {"id": task_b},
+        ).one()
+    assert row.status == "SKIPPED"
+    assert row.error_message is not None
 
 
 def test_run_task_proceeds_once_dependency_satisfied(postgres_engine, committed_pipeline):
@@ -1014,8 +1481,8 @@ def test_run_task_force_bypasses_dependency_check(postgres_engine, committed_pip
     insert_committed_dependency(postgres_engine, committed_pipeline, task_b, task_a)
     seed_active_run(postgres_engine, committed_pipeline)
 
-    # task_a was never run, so without --force this would raise
-    # DependenciesNotMetError (see test_run_task_raises_when_dependency_not_met).
+    # task_a was never run, so without --force this would be SKIPPED (see
+    # test_run_task_skips_when_same_pipeline_dependency_not_met).
     outcome = run_task(postgres_engine, make_config(), "TEST_CONCURRENT_PL", "task_b", force=True)
 
     assert outcome.status == "FAILED"  # got past the (skipped) dependency check to the stub handler
@@ -1032,6 +1499,70 @@ def test_run_task_force_refused_under_orchestrator_mode(postgres_engine, committ
             "task_a",
             force=True,
         )
+
+
+def test_run_task_skips_when_bound_pipeline_run_is_itself_skipped(
+    postgres_engine, committed_pipeline
+):
+    # Simulates what orchestrator.py leaves behind when a pipeline-level
+    # cross-pipeline dependency was never met: the run is minted but
+    # immediately finalized SKIPPED. Every task bound to it should also
+    # come back SKIPPED, without attempting any dependency check of its own.
+    task_a = insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+    run_id = seed_active_run(postgres_engine, committed_pipeline)
+    with postgres_engine.begin() as conn:
+        conn.execute(
+            text("UPDATE AUD_PIPELINES_RUN_LOG SET STATUS = 'SKIPPED' WHERE PIPELINE_RUN_ID = :id"),
+            {"id": run_id},
+        )
+
+    outcome = run_task(postgres_engine, make_config(), "TEST_CONCURRENT_PL", "task_a")
+
+    assert outcome.status == "SKIPPED"
+    with postgres_engine.connect() as conn:
+        status = conn.execute(
+            text("SELECT STATUS FROM AUD_TASK_RUN_LOG WHERE TASK_ID = :id"), {"id": task_a}
+        ).scalar_one()
+    assert status == "SKIPPED"
+
+
+def test_run_task_skips_when_cross_pipeline_task_dependency_not_met(
+    postgres_engine, two_committed_pipelines
+):
+    downstream_id, upstream_id = two_committed_pipelines
+    downstream_task_id = insert_committed_task(postgres_engine, downstream_id, "task_a")
+    upstream_task_id = insert_committed_task(postgres_engine, upstream_id, "upstream_task")
+    insert_committed_cross_pipeline_task_dependency(
+        postgres_engine, downstream_id, downstream_task_id, upstream_id, upstream_task_id, "SUCCESS"
+    )
+    seed_active_run(postgres_engine, downstream_id)
+
+    outcome = run_task(postgres_engine, make_config(), "TEST_XPIPE_DOWN", "task_a")
+
+    assert outcome.status == "SKIPPED"
+    assert "cross-pipeline" in outcome.message
+
+
+def test_run_task_proceeds_when_cross_pipeline_task_dependency_satisfied(
+    postgres_engine, two_committed_pipelines
+):
+    downstream_id, upstream_id = two_committed_pipelines
+    downstream_task_id = insert_committed_task(postgres_engine, downstream_id, "task_a")
+    upstream_task_id = insert_committed_task(postgres_engine, upstream_id, "upstream_task")
+    insert_committed_cross_pipeline_task_dependency(
+        postgres_engine, downstream_id, downstream_task_id, upstream_id, upstream_task_id, "SUCCESS"
+    )
+    upstream_run_id = insert_committed_pipeline_run(
+        postgres_engine, upstream_id, "SUCCESS", end_date=datetime.now(UTC)
+    )
+    insert_committed_task_run(postgres_engine, upstream_task_id, upstream_run_id, "SUCCESS")
+    seed_active_run(postgres_engine, downstream_id)
+
+    outcome = run_task(postgres_engine, make_config(), "TEST_XPIPE_DOWN", "task_a")
+
+    # Gets past the cross-pipeline gate and fails on the stub handler, same
+    # as any other task — proving it was the gate itself that mattered.
+    assert outcome.status == "FAILED"
 
 
 def test_run_task_marks_success_and_stamps_counts_when_handler_succeeds(
@@ -1234,6 +1765,35 @@ def test_init_pipeline_run_works_under_orchestrator_mode(postgres_engine, commit
 def test_run_pipeline_with_no_active_tasks_finalizes_success(postgres_engine, committed_pipeline):
     outcome = run_pipeline(postgres_engine, make_config(), "TEST_CONCURRENT_PL")
     assert outcome.status == "SUCCESS"
+
+
+def test_init_pipeline_run_mints_and_finalizes_skipped_when_dependency_unmet(
+    postgres_engine, two_committed_pipelines
+):
+    downstream_id, upstream_id = two_committed_pipelines
+    insert_committed_pipeline_dependency(postgres_engine, downstream_id, upstream_id, "SUCCESS")
+
+    outcome = init_pipeline_run(postgres_engine, make_config(), "TEST_XPIPE_DOWN")
+
+    assert "SKIPPED" in outcome.message
+    with postgres_engine.connect() as conn:
+        status = conn.execute(
+            text("SELECT STATUS FROM AUD_PIPELINES_RUN_LOG WHERE PIPELINE_RUN_ID = :id"),
+            {"id": outcome.pipeline_run_id},
+        ).scalar_one()
+    assert status == "SKIPPED"
+
+
+def test_run_pipeline_finalizes_skipped_when_dependency_unmet(
+    postgres_engine, two_committed_pipelines
+):
+    downstream_id, upstream_id = two_committed_pipelines
+    insert_committed_pipeline_dependency(postgres_engine, downstream_id, upstream_id, "SUCCESS")
+    insert_committed_task(postgres_engine, downstream_id, "task_a")
+
+    outcome = run_pipeline(postgres_engine, make_config(), "TEST_XPIPE_DOWN")
+
+    assert outcome.status == "SKIPPED"
 
 
 # ==============================================================================

@@ -43,20 +43,22 @@ from etl_craft.generate_yml import generate_pipeline_dag
 from etl_craft.orchestrator import OrchestratorModeRefusedError, init_pipeline_run, run_pipeline
 from etl_craft.resolver import ResolverError, build_graph
 from etl_craft.runlog import RunLogError
-from etl_craft.runner import DependenciesNotMetError, ForceNotAllowedError, run_task
+from etl_craft.runner import ForceNotAllowedError, run_task
 from etl_craft.validate import validate_business_rule_keys, validate_graphs
 from etl_craft.warehouse import build_data_engine
 
 # Every exception run_task/run_pipeline/init_pipeline_run can raise for
 # reasons short of a bug: bad --pipeline_code/--task_code, --force under
-# Mode=orchestrator, run_pipeline itself under Mode=orchestrator, unmet
-# dependencies, or a pipeline with no logged run at all to bind to. Caught
-# uniformly here as a clean one-line error rather than a raw traceback.
+# Mode=orchestrator, run_pipeline itself under Mode=orchestrator, or a
+# pipeline with no logged run at all to bind to. Caught uniformly here as a
+# clean one-line error rather than a raw traceback. (An unmet dependency,
+# same-pipeline or cross-pipeline, is no longer one of these — run_task/
+# run_pipeline record it as a SKIPPED outcome instead of raising, per
+# runner.py's own [DEVIATION] comment.)
 RUN_ERRORS = (
     CfgError,
     RunLogError,
     ForceNotAllowedError,
-    DependenciesNotMetError,
     OrchestratorModeRefusedError,
 )
 
