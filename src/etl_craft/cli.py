@@ -1,10 +1,17 @@
 """The `etl-craft` command-line entry point."""
 
-# Per CLAUDE.md's CLI surface: `run`, `list`, and `graph` are wired up here
-# so far (`configure`, `set-execution-mode`, `validate`, `generate-yml` are
-# still unbuilt). Within `run`, `--task_code` given dispatches to
-# runner.run_task (a single task); omitted dispatches to
-# orchestrator.run_pipeline (the whole dependency graph, wave by wave).
+# Per CLAUDE.md's CLI surface: `run`, `list`, `graph`, `set-execution-mode`,
+# and `configure --env` are wired up here so far (interactive `configure`
+# with no --env, `validate`, `generate-yml` are still unbuilt). Within
+# `run`, `--task_code` given dispatches to runner.run_task (a single task);
+# omitted dispatches to orchestrator.run_pipeline (the whole dependency
+# graph, wave by wave).
+#
+# `set-execution-mode` and `configure` are handled *before* this module's
+# usual load_config()/build_engine() setup, since both operate on a
+# craft-connector.yml that may not exist yet or may not have a resolvable
+# secret — unlike every other command, they don't need a working Engine DB
+# connection at all, just the ability to read/write the YAML file itself.
 
 from __future__ import annotations
 
@@ -23,7 +30,8 @@ from etl_craft.cfg import (
     fetch_task_codes,
     resolve_pipeline_id,
 )
-from etl_craft.config import ConfigError, ConnectorConfig, load_config
+from etl_craft.config import VALID_MODES, ConfigError, ConnectorConfig, load_config
+from etl_craft.configure import configure_from_env, set_execution_mode
 from etl_craft.db import build_engine
 from etl_craft.orchestrator import run_pipeline
 from etl_craft.resolver import build_graph
@@ -61,12 +69,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     graph_parser.add_argument("--name", required=True)
 
+    mode_parser = subparsers.add_parser(
+        "set-execution-mode", help="Lock Execution.Mode in craft-connector.yml"
+    )
+    mode_parser.add_argument("mode", choices=sorted(VALID_MODES))
+
+    configure_parser = subparsers.add_parser("configure", help="Set up craft-connector.yml")
+    configure_parser.add_argument(
+        "--env", help="Path to an env file for non-interactive setup (required for now)"
+    )
+
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Parse `argv` (default: sys.argv[1:]) and dispatch to the matching command."""
     args = build_parser().parse_args(argv)
+
+    if args.command == "set-execution-mode":
+        return _set_execution_mode_command(args)
+    if args.command == "configure":
+        return _configure_command(args)
+
     try:
         config = load_config()
         engine = build_engine(config)
@@ -84,6 +108,33 @@ def main(argv: Sequence[str] | None = None) -> int:
     # one of the branches above; this exists only to document that invariant
     # and satisfy the type checker, not as a path any test can reach.
     return 2  # pragma: no cover
+
+
+def _set_execution_mode_command(args: argparse.Namespace) -> int:
+    try:
+        set_execution_mode(args.mode)
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(f"Execution.Mode set to {args.mode!r}")
+    return 0
+
+
+def _configure_command(args: argparse.Namespace) -> int:
+    if args.env is None:
+        print(
+            "error: interactive `configure` (no --env) is not implemented yet — "
+            "pass --env <path> for non-interactive setup from an env file",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        configure_from_env(args.env)
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(f"craft-connector.yml written from {args.env}")
+    return 0
 
 
 def _run_command(args: argparse.Namespace, engine: Engine, config: ConnectorConfig) -> int:

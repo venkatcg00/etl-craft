@@ -11,11 +11,13 @@ import contextlib
 import runpy
 
 import pytest
+import yaml
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
 import etl_craft
+from etl_craft.cli import main as cli_main
 from etl_craft.config import (
     ConfigError,
     ConnectionProfile,
@@ -23,6 +25,7 @@ from etl_craft.config import (
     load_config,
     resolve_secret,
 )
+from etl_craft.configure import configure_from_env, set_execution_mode
 from etl_craft.db import AUTH_REGISTRY, ConnectionError_, build_engine, parse_jdbc_postgres
 from etl_craft.handlers import HandlerError, dispatch
 from etl_craft.resolver import (
@@ -706,6 +709,71 @@ def test_find_or_create_task_run_raises_if_winner_vanishes_after_losing_race():
 
 
 # ==============================================================================
+# cli.py — set-execution-mode / configure, the two commands that never need
+# a live Postgres connection (both are handled before load_config/
+# build_engine in main() — see cli.py's own module comment)
+# ==============================================================================
+
+
+def test_cli_set_execution_mode(tmp_path, monkeypatch, capsys):
+    write_config(tmp_path, VALID_YAML)
+    monkeypatch.chdir(tmp_path)
+
+    exit_code = cli_main(["set-execution-mode", "orchestrator"])
+
+    assert exit_code == 0
+    assert "orchestrator" in capsys.readouterr().out
+    assert load_config().mode == "orchestrator"
+
+
+def test_cli_set_execution_mode_invalid_choice_is_an_argparse_error(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main(["set-execution-mode", "bogus"])
+    assert exc_info.value.code == 2
+
+
+def test_cli_set_execution_mode_missing_file_reports_clean_error(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+
+    exit_code = cli_main(["set-execution-mode", "local"])
+
+    assert exit_code == 2
+    assert "error:" in capsys.readouterr().err
+
+
+def test_cli_configure_without_env_reports_not_implemented(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+
+    exit_code = cli_main(["configure"])
+
+    assert exit_code == 2
+    assert "not implemented yet" in capsys.readouterr().err
+
+
+def test_cli_configure_with_env(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    env_path = _write_env(tmp_path, VALID_ENV)
+
+    exit_code = cli_main(["configure", "--env", str(env_path)])
+
+    assert exit_code == 0
+    assert "craft-connector.yml written" in capsys.readouterr().out
+    assert load_config().postgres.active_profile == "dev"
+
+
+def test_cli_configure_with_env_reports_clean_error_on_bad_env(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    bad_env = VALID_ENV.replace("ETL_CRAFT_MODE=local", "ETL_CRAFT_MODE=bogus")
+    env_path = _write_env(tmp_path, bad_env)
+
+    exit_code = cli_main(["configure", "--env", str(env_path)])
+
+    assert exit_code == 2
+    assert "error:" in capsys.readouterr().err
+
+
+# ==============================================================================
 # __init__.py / __main__.py — the two console-script entry points
 # ==============================================================================
 #
@@ -727,3 +795,199 @@ def test_dunder_main_runs_cli_when_invoked_as_a_module(monkeypatch):
     with pytest.raises(SystemExit) as exc_info:
         runpy.run_module("etl_craft", run_name="__main__")
     assert exc_info.value.code == 2
+
+
+# ==============================================================================
+# configure.py — set_execution_mode / configure_from_env, no DB at all
+# ==============================================================================
+#
+# Both write craft-connector.yml directly (no engine, no secret resolution),
+# so these — and the CLI paths that dispatch to them — never need a live
+# Postgres connection, unlike every other command.
+
+
+def test_set_execution_mode_updates_only_mode(tmp_path):
+    path = write_config(tmp_path, VALID_YAML)
+
+    set_execution_mode("orchestrator", path)
+
+    reloaded = load_config(path)
+    assert reloaded.mode == "orchestrator"
+    assert reloaded.postgres.active.jdbc_url == "jdbc:postgresql://localhost:5432/etl_craft"
+    assert reloaded.cloning.enabled is True
+
+
+def test_set_execution_mode_rejects_invalid_mode(tmp_path):
+    path = write_config(tmp_path, VALID_YAML)
+    with pytest.raises(ConfigError):
+        set_execution_mode("bogus", path)
+
+
+def test_set_execution_mode_requires_existing_file(tmp_path):
+    with pytest.raises(ConfigError):
+        set_execution_mode("local", tmp_path / "does-not-exist.yml")
+
+
+def test_set_execution_mode_requires_execution_section(tmp_path):
+    path = tmp_path / "craft-connector.yml"
+    path.write_text("Postgres:\n  Active_profile: dev\n  Profiles: {}\n")
+    with pytest.raises(ConfigError):
+        set_execution_mode("local", path)
+
+
+def test_set_execution_mode_rejects_malformed_yaml(tmp_path):
+    path = tmp_path / "craft-connector.yml"
+    path.write_text("Execution: [unterminated")
+    with pytest.raises(ConfigError):
+        set_execution_mode("local", path)
+
+
+def _write_env(tmp_path, contents: str, name: str = "config.env"):
+    path = tmp_path / name
+    path.write_text(contents)
+    return path
+
+
+VALID_ENV = """
+ETL_CRAFT_MODE=local
+ETL_CRAFT_SOURCE_TYPE=environment
+ETL_CRAFT_POSTGRES_PROFILE=dev
+ETL_CRAFT_POSTGRES_JDBC_URL=jdbc:postgresql://localhost:5432/etl_craft
+ETL_CRAFT_POSTGRES_USER=etl_engine
+ETL_CRAFT_POSTGRES_AUTH_MODE=password
+"""
+
+
+def test_configure_from_env_creates_valid_config(tmp_path):
+    env_path = _write_env(tmp_path, VALID_ENV)
+    output_path = tmp_path / "craft-connector.yml"
+
+    configure_from_env(env_path, output_path)
+
+    config = load_config(output_path)
+    assert config.mode == "local"
+    assert config.source.type == "environment"
+    assert config.postgres.active_profile == "dev"
+    assert config.postgres.active.jdbc_url == "jdbc:postgresql://localhost:5432/etl_craft"
+    assert config.postgres.active.user == "etl_engine"
+    assert config.postgres.active.auth_mode == "password"
+    assert config.cloning.enabled is False
+    assert config.cloning.scope == "cfg"
+
+
+def test_configure_from_env_missing_env_file_raises(tmp_path):
+    with pytest.raises(ConfigError):
+        configure_from_env(tmp_path / "no-such.env", tmp_path / "craft-connector.yml")
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "ETL_CRAFT_MODE",
+        "ETL_CRAFT_SOURCE_TYPE",
+        "ETL_CRAFT_POSTGRES_PROFILE",
+        "ETL_CRAFT_POSTGRES_JDBC_URL",
+        "ETL_CRAFT_POSTGRES_USER",
+        "ETL_CRAFT_POSTGRES_AUTH_MODE",
+    ],
+)
+def test_configure_from_env_requires_each_field(tmp_path, key):
+    lines = [line for line in VALID_ENV.strip().splitlines() if not line.startswith(key)]
+    env_path = _write_env(tmp_path, "\n".join(lines))
+    with pytest.raises(ConfigError):
+        configure_from_env(env_path, tmp_path / "craft-connector.yml")
+
+
+def test_configure_from_env_rejects_invalid_mode(tmp_path):
+    env_path = _write_env(
+        tmp_path, VALID_ENV.replace("ETL_CRAFT_MODE=local", "ETL_CRAFT_MODE=bogus")
+    )
+    with pytest.raises(ConfigError):
+        configure_from_env(env_path, tmp_path / "craft-connector.yml")
+
+
+def test_configure_from_env_rejects_invalid_source_type(tmp_path):
+    env_path = _write_env(
+        tmp_path,
+        VALID_ENV.replace("ETL_CRAFT_SOURCE_TYPE=environment", "ETL_CRAFT_SOURCE_TYPE=bogus"),
+    )
+    with pytest.raises(ConfigError):
+        configure_from_env(env_path, tmp_path / "craft-connector.yml")
+
+
+def test_configure_from_env_file_source_requires_path(tmp_path):
+    env_path = _write_env(
+        tmp_path,
+        VALID_ENV.replace("ETL_CRAFT_SOURCE_TYPE=environment", "ETL_CRAFT_SOURCE_TYPE=file"),
+    )
+    with pytest.raises(ConfigError):
+        configure_from_env(env_path, tmp_path / "craft-connector.yml")
+
+
+def test_configure_from_env_file_source_with_path(tmp_path):
+    secrets_path = tmp_path / "secrets.env"
+    env = VALID_ENV.replace(
+        "ETL_CRAFT_SOURCE_TYPE=environment",
+        f"ETL_CRAFT_SOURCE_TYPE=file\nETL_CRAFT_SOURCE_PATH={secrets_path}",
+    )
+    env_path = _write_env(tmp_path, env)
+    output_path = tmp_path / "craft-connector.yml"
+
+    configure_from_env(env_path, output_path)
+
+    config = load_config(output_path)
+    assert config.source.type == "file"
+    assert config.source.path == str(secrets_path)
+
+
+def test_configure_from_env_rejects_invalid_auth_mode(tmp_path):
+    env_path = _write_env(
+        tmp_path,
+        VALID_ENV.replace(
+            "ETL_CRAFT_POSTGRES_AUTH_MODE=password", "ETL_CRAFT_POSTGRES_AUTH_MODE=bogus"
+        ),
+    )
+    with pytest.raises(ConfigError):
+        configure_from_env(env_path, tmp_path / "craft-connector.yml")
+
+
+def test_configure_from_env_rejects_invalid_cloning_scope(tmp_path):
+    env_path = _write_env(tmp_path, VALID_ENV + "ETL_CRAFT_CLONING_SCOPE=bogus\n")
+    with pytest.raises(ConfigError):
+        configure_from_env(env_path, tmp_path / "craft-connector.yml")
+
+
+def test_configure_from_env_enables_cloning(tmp_path):
+    env_path = _write_env(tmp_path, VALID_ENV + "ETL_CRAFT_CLONING_ENABLED=true\n")
+    output_path = tmp_path / "craft-connector.yml"
+
+    configure_from_env(env_path, output_path)
+
+    assert load_config(output_path).cloning.enabled is True
+
+
+def test_configure_from_env_includes_orchestrator_name(tmp_path):
+    env_path = _write_env(tmp_path, VALID_ENV + "ETL_CRAFT_ORCHESTRATOR_NAME=Airflow\n")
+    output_path = tmp_path / "craft-connector.yml"
+
+    configure_from_env(env_path, output_path)
+
+    raw = yaml.safe_load(output_path.read_text())
+    assert raw["Execution"]["Orchestrator name"] == "Airflow"
+
+
+def test_configure_from_env_merges_a_second_profile_without_losing_the_first(tmp_path):
+    output_path = tmp_path / "craft-connector.yml"
+    configure_from_env(_write_env(tmp_path, VALID_ENV, "dev.env"), output_path)
+
+    uat_env = VALID_ENV.replace(
+        "ETL_CRAFT_POSTGRES_PROFILE=dev", "ETL_CRAFT_POSTGRES_PROFILE=uat"
+    ).replace(
+        "jdbc:postgresql://localhost:5432/etl_craft", "jdbc:postgresql://uat-host:5432/etl_craft"
+    )
+    configure_from_env(_write_env(tmp_path, uat_env, "uat.env"), output_path)
+
+    config = load_config(output_path)
+    assert set(config.postgres.profiles) == {"dev", "uat"}
+    assert config.postgres.active_profile == "uat"
+    assert config.postgres.profiles["dev"].jdbc_url == "jdbc:postgresql://localhost:5432/etl_craft"
