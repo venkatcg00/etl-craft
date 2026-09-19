@@ -29,9 +29,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
+
+from etl_craft.resolver import TaskRunState
 
 TERMINAL_STATUSES = frozenset({"SUCCESS", "FAILED", "SKIPPED"})
 
@@ -206,3 +208,30 @@ def update_task_run(
             "task_log": task_log,
         },
     )
+
+
+def fetch_task_run_status(conn: Connection, task_id: int, pipeline_run_id: int) -> str | None:
+    """Return this task's current STATUS under `pipeline_run_id`, or None if unbound."""
+    return conn.execute(
+        text(
+            "SELECT STATUS FROM AUD_TASK_RUN_LOG "
+            "WHERE TASK_ID = :task_id AND PIPELINE_RUN_ID = :pipeline_run_id"
+        ),
+        {"task_id": task_id, "pipeline_run_id": pipeline_run_id},
+    ).scalar_one_or_none()
+
+
+def fetch_run_state(
+    conn: Connection, pipeline_run_id: int, task_ids: list[int]
+) -> dict[int, TaskRunState]:
+    """Fetch AUD_TASK_RUN_LOG state for `task_ids`, shaped for DependencyGraph.ready()."""
+    if not task_ids:
+        return {}
+    stmt = text(
+        "SELECT TASK_ID AS task_id, STATUS AS status, TARGET_COUNT AS target_count "
+        "FROM AUD_TASK_RUN_LOG WHERE PIPELINE_RUN_ID = :pipeline_run_id AND TASK_ID IN :task_ids"
+    ).bindparams(bindparam("task_ids", expanding=True))
+    rows = conn.execute(stmt, {"pipeline_run_id": pipeline_run_id, "task_ids": task_ids}).all()
+    return {
+        row.task_id: TaskRunState(status=row.status, target_count=row.target_count) for row in rows
+    }
