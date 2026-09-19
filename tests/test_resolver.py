@@ -2,6 +2,7 @@ import pytest
 
 from etl_craft.resolver import (
     CycleError,
+    ResolverError,
     SelfDependencyError,
     TaskEdge,
     TaskNode,
@@ -16,7 +17,9 @@ def nodes(*ids: int) -> list[TaskNode]:
 
 
 def edge(task_id: int, depends_on_task_id: int, dependency_type: str = "SUCCESS") -> TaskEdge:
-    return TaskEdge(task_id=task_id, depends_on_task_id=depends_on_task_id, dependency_type=dependency_type)
+    return TaskEdge(
+        task_id=task_id, depends_on_task_id=depends_on_task_id, dependency_type=dependency_type
+    )
 
 
 def test_no_dependencies_is_a_single_wave():
@@ -61,7 +64,7 @@ def test_unknown_task_id_in_edge_rejected():
 
 
 def test_unknown_dependency_type_rejected():
-    with pytest.raises(Exception):
+    with pytest.raises(ResolverError):
         build_graph(nodes(1, 2), [edge(1, 2, dependency_type="BOGUS")])
 
 
@@ -116,7 +119,9 @@ def test_ready_task_with_multiple_edges_needs_all_satisfied():
     # task 1 already SUCCESS (terminal, excluded); task 2 has no deps of its
     # own, so it's ready; task 3 still waits on task 2.
     assert graph.ready({1: TaskRunState(status="SUCCESS")}) == [2]
-    assert graph.ready({1: TaskRunState(status="SUCCESS"), 2: TaskRunState(status="SUCCESS")}) == [3]
+    assert graph.ready({1: TaskRunState(status="SUCCESS"), 2: TaskRunState(status="SUCCESS")}) == [
+        3
+    ]
 
 
 def test_ready_reattempts_failed_task_itself():

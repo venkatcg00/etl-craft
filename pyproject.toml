@@ -18,5 +18,35 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "black>=26.5.1",
+    "pydocstyle>=6.3.0",
     "pytest>=9.1.1",
+    "ruff>=0.16.8",
 ]
+
+[tool.pydocstyle]
+select = "D"
+# D203/D211 and D212/D213 are each an inherently contradictory pair under a
+# bare "select=D" (whichever style is used, the other rule in the pair always
+# fires) — add-ignore drops one side of each, same resolution pydocstyle's
+# own "pep257" convention uses.
+add-ignore = "D203,D213"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# D (docstrings) is deliberately left out of ruff's own selection — pydocstyle
+# above is the dedicated tool for that, so the two don't produce duplicate or
+# conflicting reports on the same lines.
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.format]
+# Ruff's formatter is not used — black owns formatting so there's a single
+# source of truth; `ruff` here is lint-only (see [tool.ruff.lint] above).
