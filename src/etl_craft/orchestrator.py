@@ -35,15 +35,14 @@
 # finalized SKIPPED rather than left IN-PROGRESS — runner.py's run_task
 # checks for exactly this and marks every task under it SKIPPED too.
 #
-# [Known gap, not fixed here] Once a run genuinely starts (its own gate
-# passed), nothing marks AUD_PIPELINES_RUN_LOG SUCCESS/FAILED under
-# Mode=orchestrator — finalize_pipeline_run is only ever called from
-# run_pipeline() below, which is refused under that mode. A real Airflow
-# DAG's tasks each finalize their own AUD_TASK_RUN_LOG row correctly, but
-# nothing finalizes the *pipeline* row once every task is done. This is a
-# pre-existing gap (not introduced by cross-pipeline polling) that a
-# synthetic "last task" mechanism, mirroring --init-only's synthetic first
-# one, would close — flagged for follow-up, out of scope here.
+# Closes the gap flagged during cross-pipeline polling: under
+# Mode=orchestrator, nothing used to mark AUD_PIPELINES_RUN_LOG SUCCESS/
+# FAILED once a run's tasks were all done, since finalize_pipeline_run was
+# only ever called from run_pipeline() (refused under that mode). The
+# generated DAG's synthetic *last* step, finalize_active_run() below,
+# mirrors init_pipeline_run's synthetic first one and closes it — wired
+# into generate_yml.py as a __finalize__ task depending (ALWAYS) on every
+# leaf task.
 #
 # Deliberately NOT included yet:
 #   * Orchestrator-level crash detection for a subprocess that dies without
@@ -74,6 +73,7 @@ from etl_craft.crosspipe import (
 )
 from etl_craft.resolver import DependencyGraph, TaskRunState, build_graph
 from etl_craft.runlog import (
+    RunLogError,
     fetch_active_pipeline_run_id,
     fetch_run_state,
     finalize_pipeline_run,
@@ -104,6 +104,74 @@ class InitOutcome:
 
     pipeline_run_id: int
     message: str
+
+
+@dataclass(frozen=True)
+class FinalizeOutcome:
+    """The result of one finalize_active_run() call."""
+
+    status: str  # "SUCCESS" or "FAILED"
+    message: str
+
+
+def _finalize_from_task_states(
+    engine: Engine, pipeline_id: int, pipeline_run_id: int, all_task_ids: list[int]
+) -> tuple[str, list[int]]:
+    """Compute SUCCESS/FAILED from every task's own settled status, finalize, consume trackers.
+
+    Returns (final_status, unsettled_task_ids) — the caller decides how
+    much detail about `unsettled` to put in its own outcome message.
+    """
+    with engine.connect() as conn:
+        final_state = fetch_run_state(conn, pipeline_run_id, all_task_ids)
+    unsettled = [
+        task_id
+        for task_id in all_task_ids
+        if final_state.get(task_id, TaskRunState()).status not in SETTLED_STATUSES
+    ]
+    final_status = "FAILED" if unsettled else "SUCCESS"
+    with engine.begin() as conn:
+        finalize_pipeline_run(conn, pipeline_run_id, final_status)
+    # Per CLAUDE.md: tracker updates only after the gated pipeline
+    # completes — this pipeline's own outgoing cross-pipeline edges (if
+    # any) are advanced now, regardless of whether it succeeded or failed.
+    consume_pipeline_dependency_edges(engine, pipeline_id)
+    return final_status, unsettled
+
+
+def finalize_active_run(
+    engine: Engine, config: ConnectorConfig, pipeline_code: str
+) -> FinalizeOutcome:
+    """Finalize `pipeline_code`'s active run — the generated DAG's synthetic last step.
+
+    Mirrors init_pipeline_run's synthetic first step: computes SUCCESS/
+    FAILED from every active task's own current status (same rule
+    run_pipeline's own finalize step uses) and writes it to
+    AUD_PIPELINES_RUN_LOG. Exists specifically for Mode=orchestrator, where
+    nothing else ever finalizes the *pipeline* row — run_pipeline(), the
+    only other caller of this same logic, is refused under that mode.
+    """
+    del config  # not needed — finalizing reads AUD_TASK_RUN_LOG state only
+    with engine.connect() as conn:
+        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+
+    with engine.connect() as conn:
+        pipeline_run_id = fetch_active_pipeline_run_id(conn, pipeline_id)
+    if pipeline_run_id is None:
+        raise RunLogError(
+            f"{pipeline_code}: no active (IN-PROGRESS) run to finalize — "
+            "--finalize-only runs after --init-only and the pipeline's tasks, not before them"
+        )
+
+    with engine.connect() as conn:
+        graph_data = fetch_pipeline_graph(conn, pipeline_id)
+    all_task_ids = [task.task_id for task in graph_data.tasks]
+
+    final_status, _ = _finalize_from_task_states(engine, pipeline_id, pipeline_run_id, all_task_ids)
+    return FinalizeOutcome(
+        status=final_status,
+        message=f"{pipeline_code}: pipeline_run_id={pipeline_run_id} {final_status}",
+    )
 
 
 def init_pipeline_run(
@@ -219,20 +287,9 @@ def run_pipeline(
             engine, graph, pipeline_run_id, all_task_ids, task_codes, pipeline_code
         )
 
-    with engine.connect() as conn:
-        final_state = fetch_run_state(conn, pipeline_run_id, all_task_ids)
-    unsettled = [
-        task_id
-        for task_id in all_task_ids
-        if final_state.get(task_id, TaskRunState()).status not in SETTLED_STATUSES
-    ]
-    final_status = "FAILED" if unsettled else "SUCCESS"
-    with engine.begin() as conn:
-        finalize_pipeline_run(conn, pipeline_run_id, final_status)
-    # Per CLAUDE.md: tracker updates only after the gated pipeline
-    # completes — this pipeline's own outgoing cross-pipeline edges (if
-    # any) are advanced now, regardless of whether it succeeded or failed.
-    consume_pipeline_dependency_edges(engine, pipeline_id)
+    final_status, unsettled = _finalize_from_task_states(
+        engine, pipeline_id, pipeline_run_id, all_task_ids
+    )
 
     if never_ready:
         failed_count = len(unsettled) - len(never_ready)

@@ -71,6 +71,16 @@ from etl_craft.resolver import build_graph
 # chain, so it's not repeated as a redundant direct edge everywhere.
 INIT_TASK_ID = "__init__"
 
+# [ADDITION] The synthetic *last* task, mirroring INIT_TASK_ID — closes the
+# gap flagged in orchestrator.py: under Mode=orchestrator, nothing marks
+# AUD_PIPELINES_RUN_LOG SUCCESS/FAILED once every task is done, since
+# finalize_pipeline_run only otherwise lives in run_pipeline(), refused
+# under that mode. Depends (ALWAYS) on every leaf task — one with nothing
+# else depending on it — so it always runs last, regardless of whether
+# those leaves succeeded or failed, and correctly resolves the pipeline's
+# own final status from whatever they actually ended up as.
+FINALIZE_TASK_ID = "__finalize__"
+
 _DEFAULT_RETRIES = 1
 _DEFAULT_RETRY_DELAY_MINUTES = 5
 
@@ -133,6 +143,21 @@ def generate_pipeline_dag(
             ),
             "depends_on": depends_on,
         }
+
+    depended_on_task_ids = {edge.depends_on_task_id for edge in graph_data.same_pipeline_edges}
+    leaf_task_codes = sorted(
+        task_codes[task.task_id]
+        for task in graph_data.tasks
+        if task.task_id not in depended_on_task_ids
+    )
+    tasks[FINALIZE_TASK_ID] = {
+        "bash_command": f"etl-craft run --pipeline_code {pipeline_code} --finalize-only",
+        "depends_on": (
+            [{"task": task_code, "dependency_type": "ALWAYS"} for task_code in leaf_task_codes]
+            if leaf_task_codes
+            else [{"task": INIT_TASK_ID, "dependency_type": "ALWAYS"}]
+        ),
+    }
 
     orch = config.orchestrator
     email_on_failure = _resolve(detail.email_on_failure, orch.email_on_failure, False)

@@ -40,7 +40,12 @@ from etl_craft.config import VALID_MODES, ConfigError, ConnectorConfig, load_con
 from etl_craft.configure import configure_from_env, set_execution_mode
 from etl_craft.db import build_engine
 from etl_craft.generate_yml import generate_global_dag, generate_pipeline_dag
-from etl_craft.orchestrator import OrchestratorModeRefusedError, init_pipeline_run, run_pipeline
+from etl_craft.orchestrator import (
+    OrchestratorModeRefusedError,
+    finalize_active_run,
+    init_pipeline_run,
+    run_pipeline,
+)
 from etl_craft.resolver import ResolverError, build_graph
 from etl_craft.runlog import RunLogError
 from etl_craft.runner import ForceNotAllowedError, run_task
@@ -79,6 +84,15 @@ def build_parser() -> argparse.ArgumentParser:
             "Only mint/reuse the active run, no task execution — what a generated Airflow "
             "DAG's synthetic first step invokes. Legal under both Mode=local and "
             "Mode=orchestrator, unlike the bare (no --task_code) form."
+        ),
+    )
+    task_group.add_argument(
+        "--finalize-only",
+        action="store_true",
+        help=(
+            "Only finalize the active run's SUCCESS/FAILED status from its tasks' current "
+            "state, no task execution — what a generated Airflow DAG's synthetic last step "
+            "invokes. Legal under both modes, like --init-only."
         ),
     )
     run_parser.add_argument("--force", action="store_true")
@@ -192,6 +206,10 @@ def _run_command(args: argparse.Namespace, engine: Engine, config: ConnectorConf
             init_outcome = init_pipeline_run(engine, config, args.pipeline_code)
             print(init_outcome.message)
             return 0
+        if args.finalize_only:
+            finalize_outcome = finalize_active_run(engine, config, args.pipeline_code)
+            print(finalize_outcome.message)
+            return 0 if finalize_outcome.status == "SUCCESS" else 1
         if args.task_code is None:
             outcome = run_pipeline(engine, config, args.pipeline_code, force=args.force)
         else:

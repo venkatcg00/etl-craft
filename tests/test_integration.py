@@ -60,9 +60,15 @@ from etl_craft.crosspipe import (
 )
 from etl_craft.generate_yml import GLOBAL_DAG_ID, generate_global_dag, generate_pipeline_dag
 from etl_craft.handlers import HandlerResult
-from etl_craft.orchestrator import OrchestratorModeRefusedError, init_pipeline_run, run_pipeline
+from etl_craft.orchestrator import (
+    OrchestratorModeRefusedError,
+    finalize_active_run,
+    init_pipeline_run,
+    run_pipeline,
+)
 from etl_craft.resolver import ResolverError
 from etl_craft.runlog import (
+    RunLogError,
     find_or_create_active_run,
     find_or_create_task_run,
     resolve_run_for_task,
@@ -930,7 +936,7 @@ def test_generate_pipeline_dag_linear_chain(pg_conn, cfg_pipeline, cfg_task):
         "depends_on_past": False,
         "email_on_failure": False,
     }
-    assert set(dag["tasks"]) == {"__init__", "test_task", "task_b"}
+    assert set(dag["tasks"]) == {"__init__", "test_task", "task_b", "__finalize__"}
     assert dag["tasks"]["__init__"]["depends_on"] == []
     assert (
         dag["tasks"]["__init__"]["bash_command"]
@@ -942,13 +948,64 @@ def test_generate_pipeline_dag_linear_chain(pg_conn, cfg_pipeline, cfg_task):
     assert dag["tasks"]["task_b"]["depends_on"] == [
         {"task": "test_task", "dependency_type": "SUCCESS"}
     ]
+    # __finalize__ depends only on the leaf (task_b) — test_task has
+    # something downstream of it, so it isn't a leaf.
+    assert dag["tasks"]["__finalize__"]["depends_on"] == [
+        {"task": "task_b", "dependency_type": "ALWAYS"}
+    ]
+    assert (
+        dag["tasks"]["__finalize__"]["bash_command"]
+        == "etl-craft run --pipeline_code TEST_PL --finalize-only"
+    )
     assert "pipeline_dependencies" not in dag
     assert "cross_pipeline_task_dependencies" not in dag
 
 
+def test_generate_pipeline_dag_finalize_depends_on_every_leaf_in_a_diamond(
+    pg_conn, cfg_pipeline, cfg_task
+):
+    # cfg_task -> {branch_a, branch_b} -> nothing further: both branches are
+    # leaves, so __finalize__ must wait on both, not just one.
+    branch_a = pg_conn.execute(
+        text(
+            "INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) "
+            "VALUES ('branch_a', 'ETL', :pipeline_id, 'SQL') RETURNING TASK_ID"
+        ),
+        {"pipeline_id": cfg_pipeline},
+    ).scalar_one()
+    branch_b = pg_conn.execute(
+        text(
+            "INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) "
+            "VALUES ('branch_b', 'ETL', :pipeline_id, 'SQL') RETURNING TASK_ID"
+        ),
+        {"pipeline_id": cfg_pipeline},
+    ).scalar_one()
+    for branch in (branch_a, branch_b):
+        pg_conn.execute(
+            text(
+                "INSERT INTO CFG_TASK_DEPENDENCY (PIPELINE_ID, TASK_ID, DEPENDS_ON_PIPELINE_ID, "
+                "DEPENDS_ON_TASK_ID, DEPENDENCY_TYPE) "
+                "VALUES (:pipeline_id, :branch, :pipeline_id, :cfg_task, 'SUCCESS')"
+            ),
+            {"pipeline_id": cfg_pipeline, "branch": branch, "cfg_task": cfg_task},
+        )
+
+    dag = generate_pipeline_dag(pg_conn, make_config(), "TEST_PL")
+
+    assert dag["tasks"]["__finalize__"]["depends_on"] == [
+        {"task": "branch_a", "dependency_type": "ALWAYS"},
+        {"task": "branch_b", "dependency_type": "ALWAYS"},
+    ]
+
+
 def test_generate_pipeline_dag_with_no_tasks_still_has_init(pg_conn, cfg_pipeline):
     dag = generate_pipeline_dag(pg_conn, make_config(), "TEST_PL")
-    assert set(dag["tasks"]) == {"__init__"}
+    assert set(dag["tasks"]) == {"__init__", "__finalize__"}
+    # No real tasks at all -> __finalize__ falls back to depending on
+    # __init__ directly, same as any real task with no dependencies would.
+    assert dag["tasks"]["__finalize__"]["depends_on"] == [
+        {"task": "__init__", "dependency_type": "ALWAYS"}
+    ]
 
 
 def test_generate_pipeline_dag_rejects_cycle(pg_conn, cfg_pipeline, cfg_task):
@@ -1916,6 +1973,59 @@ def test_run_pipeline_with_no_active_tasks_finalizes_success(postgres_engine, co
     assert outcome.status == "SUCCESS"
 
 
+def test_finalize_active_run_raises_when_no_active_run(postgres_engine, committed_pipeline):
+    with pytest.raises(RunLogError):
+        finalize_active_run(postgres_engine, make_config(), "TEST_CONCURRENT_PL")
+
+
+def test_finalize_active_run_marks_success_when_all_tasks_settled(
+    postgres_engine, committed_pipeline
+):
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+    run_id = seed_active_run(postgres_engine, committed_pipeline)
+    with postgres_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO AUD_TASK_RUN_LOG (TASK_ID, PIPELINE_RUN_ID, STATUS) "
+                "VALUES (:task_id, :run_id, 'SUCCESS')"
+            ),
+            {"task_id": task_id, "run_id": run_id},
+        )
+
+    outcome = finalize_active_run(postgres_engine, make_config(), "TEST_CONCURRENT_PL")
+
+    assert outcome.status == "SUCCESS"
+    with postgres_engine.connect() as conn:
+        status = conn.execute(
+            text("SELECT STATUS FROM AUD_PIPELINES_RUN_LOG WHERE PIPELINE_RUN_ID = :id"),
+            {"id": run_id},
+        ).scalar_one()
+    assert status == "SUCCESS"
+
+
+def test_finalize_active_run_marks_failed_when_a_task_is_unsettled(
+    postgres_engine, committed_pipeline
+):
+    # task_a never ran at all (no AUD_TASK_RUN_LOG row) — exactly what a
+    # real Airflow task that failed to even bind would look like.
+    insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    outcome = finalize_active_run(postgres_engine, make_config(), "TEST_CONCURRENT_PL")
+
+    assert outcome.status == "FAILED"
+
+
+def test_finalize_active_run_works_under_orchestrator_mode(postgres_engine, committed_pipeline):
+    # Unlike run_pipeline, finalize_active_run is legal under both modes —
+    # it's exactly what Mode=orchestrator's synthetic last step calls.
+    seed_active_run(postgres_engine, committed_pipeline)
+    outcome = finalize_active_run(
+        postgres_engine, make_config(mode="orchestrator"), "TEST_CONCURRENT_PL"
+    )
+    assert outcome.status == "SUCCESS"
+
+
 def test_init_pipeline_run_mints_and_finalizes_skipped_when_dependency_unmet(
     postgres_engine, two_committed_pipelines
 ):
@@ -2008,6 +2118,53 @@ def test_cli_run_init_only_and_task_code_are_mutually_exclusive(craft_connector_
     with pytest.raises(SystemExit) as exc_info:
         cli_main(
             ["run", "--pipeline_code", "TEST_CONCURRENT_PL", "--init-only", "--task_code", "t1"]
+        )
+    assert exc_info.value.code == 2
+
+
+def test_cli_run_finalize_only(
+    craft_connector_on_disk, postgres_engine, committed_pipeline, capsys
+):
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+    run_id = seed_active_run(postgres_engine, committed_pipeline)
+    with postgres_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO AUD_TASK_RUN_LOG (TASK_ID, PIPELINE_RUN_ID, STATUS) "
+                "VALUES (:task_id, :run_id, 'SUCCESS')"
+            ),
+            {"task_id": task_id, "run_id": run_id},
+        )
+
+    exit_code = cli_main(["run", "--pipeline_code", "TEST_CONCURRENT_PL", "--finalize-only"])
+
+    assert exit_code == 0
+    assert "SUCCESS" in capsys.readouterr().out
+
+
+def test_cli_run_finalize_only_reports_failed_with_nonzero_exit(
+    craft_connector_on_disk, postgres_engine, committed_pipeline, capsys
+):
+    insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    exit_code = cli_main(["run", "--pipeline_code", "TEST_CONCURRENT_PL", "--finalize-only"])
+
+    assert exit_code == 1
+    assert "FAILED" in capsys.readouterr().out
+
+
+def test_cli_run_finalize_only_and_task_code_are_mutually_exclusive(craft_connector_on_disk):
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main(
+            [
+                "run",
+                "--pipeline_code",
+                "TEST_CONCURRENT_PL",
+                "--finalize-only",
+                "--task_code",
+                "t1",
+            ]
         )
     assert exc_info.value.code == 2
 
@@ -2158,7 +2315,7 @@ def test_cli_generate_yml_prints_to_stdout(
     out = capsys.readouterr().out
     parsed = yaml.safe_load(out)
     assert parsed["dag_id"] == "TEST_CONCURRENT_PL"
-    assert set(parsed["tasks"]) == {"__init__", "task_a"}
+    assert set(parsed["tasks"]) == {"__init__", "task_a", "__finalize__"}
 
 
 def test_cli_generate_yml_writes_to_output_file(
