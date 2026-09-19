@@ -6,6 +6,7 @@ Organized by source module, one section per module, since combining them
 loses nothing (no fixture/helper name collisions) and keeps file count down.
 """
 
+import os
 import threading
 import time
 
@@ -740,6 +741,35 @@ def test_run_task_marks_success_and_stamps_counts_when_handler_succeeds(
     assert row.source_count == 10
     assert row.target_count == 9
     assert row.insert_count == 9
+
+
+def test_run_task_detects_a_child_that_dies_unannounced(
+    monkeypatch, postgres_engine, committed_pipeline
+):
+    # Proves the actual crash-detection path from CLAUDE.md's "Crash
+    # detection" section: a child that dies before writing its own outcome
+    # (os._exit, no exception the parent could observe) still leaves the
+    # row FAILED, written by the still-alive parent. fork is what makes
+    # this monkeypatch visible inside the forked child at all — see
+    # runner.py's own [CHOICE] comment on why spawn wouldn't work here.
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    def _crash(handler):
+        os._exit(1)
+
+    monkeypatch.setattr("etl_craft.runner.dispatch", _crash)
+
+    outcome = run_task(postgres_engine, make_config(), "TEST_CONCURRENT_PL", "task_a")
+
+    assert outcome.status == "FAILED"
+    assert "died unexpectedly" in outcome.message
+    with postgres_engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT STATUS AS status FROM AUD_TASK_RUN_LOG WHERE TASK_ID = :id"),
+            {"id": task_id},
+        ).one()
+    assert row.status == "FAILED"
 
 
 # ==============================================================================

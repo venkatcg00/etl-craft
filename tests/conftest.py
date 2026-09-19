@@ -42,6 +42,14 @@ def postgres_engine() -> Engine:
             f"no reachable Postgres at {url!r} — run `make db-up` "
             f"(see docker-compose.yml) or set {TEST_DATABASE_URL_VAR}"
         )
+    # runner.py's crash-detection fork rebuilds its own Engine via
+    # build_engine(config) rather than reusing whatever Engine a test passed
+    # in — deliberately, to avoid sharing DB connections across fork (see
+    # runner.py's own [CHOICE] comment). That means it needs a real,
+    # resolvable secret even in tests that otherwise bypass config/secret
+    # resolution entirely by injecting postgres_engine directly. setdefault
+    # so a real developer override (if any) is never clobbered.
+    os.environ.setdefault("ETL_CRAFT_POSTGRES_DEV_SECRET", "etl_craft")
     engine = create_engine(url)
     yield engine
     engine.dispose()
@@ -188,12 +196,20 @@ Cloning:
 
 
 @pytest.fixture
-def craft_connector_on_disk(tmp_path, monkeypatch):
+def craft_connector_on_disk(tmp_path, monkeypatch, postgres_engine):
     """Write a real craft-connector.yml pointing at the test Postgres, and chdir into it."""
     # Needed by anything that spawns a real `python -m etl_craft` subprocess
     # (orchestrator.run_pipeline, and cli.main indirectly through it) — the
     # child process resolves its own config from cwd, same as a real
     # deployment, so it can't reuse the parent test's in-memory config/engine.
+    #
+    # Depending on postgres_engine here — even though its value is unused —
+    # is load-bearing, not incidental: it's what runs the skip-if-unreachable
+    # check before any test that uses only this fixture (several CLI tests
+    # never touch postgres_engine directly) tries to connect for real. Found
+    # via a genuine failure: with Docker down, four CLI tests errored with a
+    # raw connection-refused traceback instead of skipping, contradicting
+    # this file's own module docstring that plain `pytest -q` never needs it.
     (tmp_path / "craft-connector.yml").write_text(CRAFT_CONNECTOR_YAML)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ETL_CRAFT_POSTGRES_DEV_SECRET", "etl_craft")

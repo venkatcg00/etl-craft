@@ -39,11 +39,17 @@ timeout = 60
 
 [tool.coverage.run]
 source = ["etl_craft"]
-# Without this, coverage.py only traces the main thread by default, so the
-# race-branch code in runlog.py's real concurrency test (multiple threads
-# hitting the same partial unique index) silently reads as uncovered even
-# though it genuinely runs.
-concurrency = ["thread"]
+# "thread": without this, coverage.py only traces the main thread by
+# default, so the race-branch code in runlog.py's real concurrency test
+# (multiple threads hitting the same partial unique index) silently reads
+# as uncovered even though it genuinely runs.
+# "multiprocessing": runner.py's crash-detection fork (a real
+# multiprocessing.Process, not a same-thread call) needs this too, plus
+# `parallel = true` below so each forked child writes its own data file
+# instead of racing the parent's — pytest-cov combines them automatically
+# at session end.
+concurrency = ["thread", "multiprocessing"]
+parallel = true
 
 [tool.coverage.report]
 fail_under = 100

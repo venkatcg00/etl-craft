@@ -221,6 +221,26 @@ def fetch_task_run_status(conn: Connection, task_id: int, pipeline_run_id: int) 
     ).scalar_one_or_none()
 
 
+@dataclass(frozen=True)
+class TaskRunResult:
+    """A task run's current STATUS and ERROR_MESSAGE, read back by TASK_RUN_ID after dispatch."""
+
+    status: str
+    error_message: str | None
+
+
+def fetch_task_run_result(conn: Connection, task_run_id: int) -> TaskRunResult:
+    """Return TASK_RUN_ID's current STATUS/ERROR_MESSAGE, to check for a crash after a fork."""
+    row = conn.execute(
+        text(
+            "SELECT STATUS AS status, ERROR_MESSAGE AS error_message "
+            "FROM AUD_TASK_RUN_LOG WHERE TASK_RUN_ID = :task_run_id"
+        ),
+        {"task_run_id": task_run_id},
+    ).one()
+    return TaskRunResult(status=row.status, error_message=row.error_message)
+
+
 def fetch_run_state(
     conn: Connection, pipeline_run_id: int, task_ids: list[int]
 ) -> dict[int, TaskRunState]:
