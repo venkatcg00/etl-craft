@@ -406,6 +406,55 @@ def test_warehouse_section_must_be_a_mapping_if_present(tmp_path):
         load_config(write_config(tmp_path, bad))
 
 
+def test_orchestrator_defaults_when_section_absent(tmp_path):
+    config = load_config(write_config(tmp_path, VALID_YAML))
+    orch = config.orchestrator
+    assert orch.global_dag is False
+    assert orch.catchup is None
+    assert orch.tags is None
+    assert orch.retries is None
+    assert orch.retry_delay_minutes is None
+    assert orch.depends_on_past is None
+    assert orch.email_on_failure is None
+    assert orch.email_recipients is None
+
+
+def test_orchestrator_parsed_when_present(tmp_path):
+    with_orchestrator = VALID_YAML + (
+        "\nOrchestrator:\n"
+        "  Global_dag: true\n"
+        "  Catchup: true\n"
+        "  Tags: [team-a, nightly]\n"
+        "  Retries: 3\n"
+        "  Retry_delay_minutes: 15\n"
+        "  Depends_on_past: true\n"
+        "  Email_on_failure: true\n"
+        "  Email_recipients: [oncall@example.com]\n"
+    )
+    config = load_config(write_config(tmp_path, with_orchestrator))
+    orch = config.orchestrator
+    assert orch.global_dag is True
+    assert orch.catchup is True
+    assert orch.tags == ["team-a", "nightly"]
+    assert orch.retries == 3
+    assert orch.retry_delay_minutes == 15
+    assert orch.depends_on_past is True
+    assert orch.email_on_failure is True
+    assert orch.email_recipients == ["oncall@example.com"]
+
+
+def test_orchestrator_tags_must_be_a_list_if_present(tmp_path):
+    bad = VALID_YAML + "\nOrchestrator:\n  Tags: not-a-list\n"
+    with pytest.raises(ConfigError):
+        load_config(write_config(tmp_path, bad))
+
+
+def test_orchestrator_email_recipients_must_be_a_list_if_present(tmp_path):
+    bad = VALID_YAML + "\nOrchestrator:\n  Email_recipients: not-a-list\n"
+    with pytest.raises(ConfigError):
+        load_config(write_config(tmp_path, bad))
+
+
 def test_resolve_secret_from_environment(tmp_path, monkeypatch):
     config = load_config(write_config(tmp_path, VALID_YAML))
     monkeypatch.setenv("ETL_CRAFT_POSTGRES_DEV_SECRET", "s3cr3t")

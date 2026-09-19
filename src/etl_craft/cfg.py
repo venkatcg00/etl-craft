@@ -179,6 +179,38 @@ def fetch_pipeline_dependencies(conn: Connection, pipeline_id: int) -> list[Pipe
 
 
 @dataclass(frozen=True)
+class GlobalPipelineDependencyEdge:
+    """One active CFG_PIPELINE_DEPENDENCY row, both sides resolved to codes — for the global DAG."""
+
+    pipeline_code: str
+    depends_on_pipeline_code: str
+    dependency_type: str
+
+
+def fetch_all_pipeline_dependency_edges(conn: Connection) -> list[GlobalPipelineDependencyEdge]:
+    """Fetch every active CFG_PIPELINE_DEPENDENCY edge, across all pipelines, for the global DAG."""
+    rows = conn.execute(
+        text(
+            "SELECT p.PIPELINE_CODE AS pipeline_code, "
+            "dp.PIPELINE_CODE AS depends_on_pipeline_code, "
+            "d.DEPENDENCY_TYPE AS dependency_type "
+            "FROM CFG_PIPELINE_DEPENDENCY d "
+            "JOIN CFG_PIPELINES p ON p.PIPELINE_ID = d.PIPELINE_ID "
+            "JOIN CFG_PIPELINES dp ON dp.PIPELINE_ID = d.DEPENDS_ON_PIPELINE_ID "
+            "WHERE d.ACTIVE_FLAG = 'Y' AND p.ACTIVE_FLAG = 'Y' AND dp.ACTIVE_FLAG = 'Y'"
+        )
+    ).all()
+    return [
+        GlobalPipelineDependencyEdge(
+            pipeline_code=row.pipeline_code,
+            depends_on_pipeline_code=row.depends_on_pipeline_code,
+            dependency_type=row.dependency_type,
+        )
+        for row in rows
+    ]
+
+
+@dataclass(frozen=True)
 class CrossPipelineTaskEdge:
     """One task-level CFG_TASK_DEPENDENCY row that crosses pipelines, resolved to codes."""
 
@@ -227,6 +259,17 @@ class PipelineDetail:
     sla_in_hours: float | None
     refresh_type: str
     created_by: str | None
+    # Per-pipeline overrides for generate-yml's Airflow-facing fields — all
+    # None when not set at this pipeline, in which case generate-yml falls
+    # back to craft-connector.yml's [Orchestrator] section, then a final
+    # hardcoded default. See config.OrchestratorConfig's own docstring.
+    catchup: bool | None
+    tags: list[str] | None
+    retries: int | None
+    retry_delay_minutes: int | None
+    depends_on_past: bool | None
+    email_on_failure: bool | None
+    email_recipients: list[str] | None
 
 
 def fetch_pipeline_detail(conn: Connection, pipeline_id: int) -> PipelineDetail:
@@ -236,7 +279,10 @@ def fetch_pipeline_detail(conn: Connection, pipeline_id: int) -> PipelineDetail:
             "SELECT PIPELINE_CODE AS pipeline_code, PIPELINE_NAME AS pipeline_name, "
             "DESCRIPTION AS description, RUN_SCHEDULE AS run_schedule, "
             "SLA_IN_HOURS AS sla_in_hours, REFRESH_TYPE AS refresh_type, "
-            "CREATED_BY AS created_by "
+            "CREATED_BY AS created_by, CATCHUP AS catchup, TAGS AS tags, "
+            "RETRIES AS retries, RETRY_DELAY_MINUTES AS retry_delay_minutes, "
+            "DEPENDS_ON_PAST AS depends_on_past, EMAIL_ON_FAILURE AS email_on_failure, "
+            "EMAIL_RECIPIENTS AS email_recipients "
             "FROM CFG_PIPELINES WHERE PIPELINE_ID = :pipeline_id"
         ),
         {"pipeline_id": pipeline_id},
@@ -252,6 +298,13 @@ def fetch_pipeline_detail(conn: Connection, pipeline_id: int) -> PipelineDetail:
         sla_in_hours=float(row.sla_in_hours) if row.sla_in_hours is not None else None,
         refresh_type=row.refresh_type,
         created_by=row.created_by,
+        catchup=row.catchup,
+        tags=row.tags,
+        retries=row.retries,
+        retry_delay_minutes=row.retry_delay_minutes,
+        depends_on_past=row.depends_on_past,
+        email_on_failure=row.email_on_failure,
+        email_recipients=row.email_recipients,
     )
 
 

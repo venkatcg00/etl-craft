@@ -106,6 +106,25 @@ class CloningConfig:
 
 
 @dataclass(frozen=True)
+class OrchestratorConfig:
+    """The [Orchestrator] section: global defaults/fallbacks for generate-yml's Airflow fields.
+
+    Per-field settings default to None ("not set globally either" — generate-
+    yml falls through to its own final hardcoded default); `global_dag`
+    defaults to False per explicit instruction ("defaults to false").
+    """
+
+    global_dag: bool = False
+    catchup: bool | None = None
+    tags: list[str] | None = None
+    retries: int | None = None
+    retry_delay_minutes: int | None = None
+    depends_on_past: bool | None = None
+    email_on_failure: bool | None = None
+    email_recipients: list[str] | None = None
+
+
+@dataclass(frozen=True)
 class ConnectorConfig:
     """The fully parsed, validated contents of craft-connector.yml."""
 
@@ -114,6 +133,7 @@ class ConnectorConfig:
     postgres: ConnectionSection
     cloning: CloningConfig
     warehouse: ConnectionSection | None = None
+    orchestrator: OrchestratorConfig = field(default_factory=OrchestratorConfig)
 
 
 def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> ConnectorConfig:
@@ -151,9 +171,15 @@ def _parse_config(raw: dict[str, Any], path: Path) -> ConnectorConfig:
         warehouse = _parse_connection_section("WAREHOUSE", warehouse_raw, path)
 
     cloning = _parse_cloning(raw.get("Cloning") or {}, path)
+    orchestrator = _parse_orchestrator(raw.get("Orchestrator") or {}, path)
 
     return ConnectorConfig(
-        mode=mode, source=source, postgres=postgres, cloning=cloning, warehouse=warehouse
+        mode=mode,
+        source=source,
+        postgres=postgres,
+        cloning=cloning,
+        warehouse=warehouse,
+        orchestrator=orchestrator,
     )
 
 
@@ -228,6 +254,32 @@ def _parse_cloning(raw: dict[str, Any], path: Path) -> CloningConfig:
             f"{path}: Cloning.Scope must be one of {sorted(VALID_CLONING_SCOPES)}, got {scope!r}"
         )
     return CloningConfig(enabled=enabled, scope=scope)
+
+
+def _parse_orchestrator(raw: dict[str, Any], path: Path) -> OrchestratorConfig:
+    if not raw:
+        return OrchestratorConfig()
+    tags = _require_list_if_present(raw, "Tags", path)
+    email_recipients = _require_list_if_present(raw, "Email_recipients", path)
+    return OrchestratorConfig(
+        global_dag=bool(raw.get("Global_dag", False)),
+        catchup=raw.get("Catchup"),
+        tags=tags,
+        retries=raw.get("Retries"),
+        retry_delay_minutes=raw.get("Retry_delay_minutes"),
+        depends_on_past=raw.get("Depends_on_past"),
+        email_on_failure=raw.get("Email_on_failure"),
+        email_recipients=email_recipients,
+    )
+
+
+def _require_list_if_present(raw: dict[str, Any], key: str, path: Path) -> list[str] | None:
+    value = raw.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise ConfigError(f"{path}: Orchestrator.{key} must be a list of strings if present")
+    return value
 
 
 def resolve_secret(config: ConnectorConfig, profile: ConnectionProfile) -> str:

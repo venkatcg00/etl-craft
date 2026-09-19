@@ -39,7 +39,7 @@ from etl_craft.cfg import (
 from etl_craft.config import VALID_MODES, ConfigError, ConnectorConfig, load_config
 from etl_craft.configure import configure_from_env, set_execution_mode
 from etl_craft.db import build_engine
-from etl_craft.generate_yml import generate_pipeline_dag
+from etl_craft.generate_yml import generate_global_dag, generate_pipeline_dag
 from etl_craft.orchestrator import OrchestratorModeRefusedError, init_pipeline_run, run_pipeline
 from etl_craft.resolver import ResolverError, build_graph
 from etl_craft.runlog import RunLogError
@@ -107,9 +107,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     generate_yml_parser = subparsers.add_parser(
-        "generate-yml", help="Emit hand-rolled, Airflow-YAML-inspired DAG YAML for a pipeline"
+        "generate-yml", help="Emit hand-rolled, Airflow-YAML-inspired DAG YAML"
     )
-    generate_yml_parser.add_argument("--pipeline_code", required=True)
+    generate_yml_target = generate_yml_parser.add_mutually_exclusive_group(required=True)
+    generate_yml_target.add_argument("--pipeline_code")
+    generate_yml_target.add_argument(
+        "--global",
+        action="store_true",
+        dest="global_dag",
+        help=(
+            "Emit the optional cross-pipeline trigger DAG instead of one pipeline's own "
+            "(requires [Orchestrator].Global_dag: true in craft-connector.yml)"
+        ),
+    )
     generate_yml_parser.add_argument("--output", help="Write to this path instead of stdout")
 
     subparsers.add_parser("validate", help="Config integrity check")
@@ -140,7 +150,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "graph":
         return _graph_command(args, engine)
     if args.command == "generate-yml":
-        return _generate_yml_command(args, engine)
+        return _generate_yml_command(args, engine, config)
     if args.command == "validate":
         return _validate_command(engine, config)
     # argparse's `required=True` on the subparsers guarantees args.command is
@@ -246,13 +256,24 @@ def _graph_command(args: argparse.Namespace, engine: Engine) -> int:
     return 0
 
 
-def _generate_yml_command(args: argparse.Namespace, engine: Engine) -> int:
-    try:
+def _generate_yml_command(args: argparse.Namespace, engine: Engine, config: ConnectorConfig) -> int:
+    if args.global_dag:
+        if not config.orchestrator.global_dag:
+            print(
+                "error: the global DAG is disabled — set [Orchestrator].Global_dag: true "
+                "in craft-connector.yml to enable it",
+                file=sys.stderr,
+            )
+            return 2
         with engine.connect() as conn:
-            dag = generate_pipeline_dag(conn, args.pipeline_code)
-    except (CfgError, ResolverError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
+            dag = generate_global_dag(conn)
+    else:
+        try:
+            with engine.connect() as conn:
+                dag = generate_pipeline_dag(conn, config, args.pipeline_code)
+        except (CfgError, ResolverError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
 
     yaml_text = yaml.safe_dump(dag, sort_keys=False, default_flow_style=False)
     if args.output:

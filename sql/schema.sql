@@ -113,12 +113,32 @@ CREATE TABLE CFG_PIPELINES (
                                                                         -- value") — every task in one pipeline run
                                                                         -- shares one mode.
     ACTIVE_FLAG    VARCHAR NOT NULL DEFAULT 'Y',
+    -- [ADDITION, post-signoff 2026-09-19] Per-pipeline overrides for
+    -- generate-yml's Airflow-facing DAG fields (default_args/catchup/
+    -- tags). All nullable by design: NULL means "not set at the pipeline
+    -- level" and generate-yml falls back to craft-connector.yml's
+    -- [Orchestrator] section, then to a final hardcoded default if that
+    -- isn't set either — never silently invented, always resolvable back
+    -- to either a real CFG_ row or a real config file setting. See
+    -- CLAUDE.md's "Where things stand" for the full three-tier resolution
+    -- and why EMAIL_RECIPIENTS exists (EMAIL_ON_FAILURE alone is inert in
+    -- real Airflow without addresses to send to).
+    CATCHUP              BOOLEAN,
+    TAGS                 VARCHAR[],
+    RETRIES              INTEGER,
+    RETRY_DELAY_MINUTES  INTEGER,
+    DEPENDS_ON_PAST      BOOLEAN,
+    EMAIL_ON_FAILURE     BOOLEAN,
+    EMAIL_RECIPIENTS     VARCHAR[],
     CREATED_BY     VARCHAR,
     CREATE_DATE    TIMESTAMPTZ,
     UPDATED_BY     VARCHAR,
     UPDATED_DATE   TIMESTAMPTZ,
     CONSTRAINT ck_pipelines_refresh_type CHECK (REFRESH_TYPE IN ('FULL', 'INCREMENTAL')),  -- [CHOICE]
-    CONSTRAINT ck_pipelines_active_flag  CHECK (ACTIVE_FLAG IN ('Y', 'N'))
+    CONSTRAINT ck_pipelines_active_flag  CHECK (ACTIVE_FLAG IN ('Y', 'N')),
+    CONSTRAINT ck_pipelines_retries_non_negative CHECK (RETRIES IS NULL OR RETRIES >= 0),  -- [ADDITION]
+    CONSTRAINT ck_pipelines_retry_delay_non_negative
+        CHECK (RETRY_DELAY_MINUTES IS NULL OR RETRY_DELAY_MINUTES >= 0)  -- [ADDITION]
 );
 
 CREATE UNIQUE INDEX ux_pipelines_code_active
@@ -513,4 +533,22 @@ COMMIT;
 --     schema has no way to make a key-value table enforce "this key must be
 --     present for this other row," short of a trigger that hardcodes every
 --     convention by name. Left as an application-level validation instead.
+-- ============================================================================
+
+-- ============================================================================
+-- POST-SIGNOFF CHANGES — additions made after the 2026-09-19 sign-off above,
+-- flagged separately rather than silently folded into the original block.
+-- ============================================================================
+--
+-- [ADDITION, 2026-09-19, explicitly requested] CFG_PIPELINES gains 7 nullable
+-- columns — CATCHUP, TAGS, RETRIES, RETRY_DELAY_MINUTES, DEPENDS_ON_PAST,
+-- EMAIL_ON_FAILURE, EMAIL_RECIPIENTS — per-pipeline overrides for
+-- generate-yml's Airflow-facing fields. NULL means "not set here"; `generate-
+-- yml` resolves each in three tiers: this row, then craft-connector.yml's new
+-- [Orchestrator] section, then a final hardcoded default. All nullable by
+-- design (a fresh pipeline needs to set none of these to get a working DAG).
+-- EMAIL_RECIPIENTS exists specifically because Airflow's own email_on_failure
+-- does nothing without a recipient list to send to. Two CHECK constraints
+-- (RETRIES/RETRY_DELAY_MINUTES >= 0 when set) are the only new validation;
+-- everything else is a plain nullable column, no enum-style CHECK needed.
 -- ============================================================================

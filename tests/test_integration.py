@@ -28,6 +28,7 @@ from conftest import (
 )
 from etl_craft.cfg import (
     CfgError,
+    fetch_all_pipeline_dependency_edges,
     fetch_all_pipelines,
     fetch_business_rule_targets,
     fetch_cross_pipeline_task_edges,
@@ -46,6 +47,7 @@ from etl_craft.config import (
     ConnectionProfile,
     ConnectionSection,
     ConnectorConfig,
+    OrchestratorConfig,
     SourceConfig,
 )
 from etl_craft.crosspipe import (
@@ -56,7 +58,7 @@ from etl_craft.crosspipe import (
     consume_pipeline_dependency_edges,
     consume_task_dependency_edges,
 )
-from etl_craft.generate_yml import generate_pipeline_dag
+from etl_craft.generate_yml import GLOBAL_DAG_ID, generate_global_dag, generate_pipeline_dag
 from etl_craft.handlers import HandlerResult
 from etl_craft.orchestrator import OrchestratorModeRefusedError, init_pipeline_run, run_pipeline
 from etl_craft.resolver import ResolverError
@@ -490,6 +492,49 @@ def test_fetch_pipeline_dependencies(pg_conn, cfg_pipeline):
     assert deps[0].dependency_type == "HAS_DATA"
 
 
+def test_fetch_all_pipeline_dependency_edges(pg_conn, cfg_pipeline):
+    other_pipeline = pg_conn.execute(
+        text(
+            "INSERT INTO CFG_PIPELINES (PIPELINE_CODE, PIPELINE_NAME, REFRESH_TYPE) "
+            "VALUES ('TEST_GLOBAL_UPSTREAM', 'Upstream', 'FULL') RETURNING PIPELINE_ID"
+        )
+    ).scalar_one()
+    pg_conn.execute(
+        text(
+            "INSERT INTO CFG_PIPELINE_DEPENDENCY "
+            "(PIPELINE_ID, DEPENDS_ON_PIPELINE_ID, DEPENDENCY_TYPE) "
+            "VALUES (:pipeline_id, :other_pipeline, 'SUCCESS')"
+        ),
+        {"pipeline_id": cfg_pipeline, "other_pipeline": other_pipeline},
+    )
+
+    edges = fetch_all_pipeline_dependency_edges(pg_conn)
+
+    assert len(edges) == 1
+    assert edges[0].pipeline_code == "TEST_PL"
+    assert edges[0].depends_on_pipeline_code == "TEST_GLOBAL_UPSTREAM"
+    assert edges[0].dependency_type == "SUCCESS"
+
+
+def test_fetch_all_pipeline_dependency_edges_excludes_inactive(pg_conn, cfg_pipeline):
+    other_pipeline = pg_conn.execute(
+        text(
+            "INSERT INTO CFG_PIPELINES (PIPELINE_CODE, PIPELINE_NAME, REFRESH_TYPE) "
+            "VALUES ('TEST_GLOBAL_UPSTREAM2', 'Upstream', 'FULL') RETURNING PIPELINE_ID"
+        )
+    ).scalar_one()
+    pg_conn.execute(
+        text(
+            "INSERT INTO CFG_PIPELINE_DEPENDENCY "
+            "(PIPELINE_ID, DEPENDS_ON_PIPELINE_ID, DEPENDENCY_TYPE, ACTIVE_FLAG) "
+            "VALUES (:pipeline_id, :other_pipeline, 'SUCCESS', 'N')"
+        ),
+        {"pipeline_id": cfg_pipeline, "other_pipeline": other_pipeline},
+    )
+
+    assert fetch_all_pipeline_dependency_edges(pg_conn) == []
+
+
 def test_fetch_cross_pipeline_task_edges(pg_conn, cfg_pipeline, cfg_task):
     other_pipeline = pg_conn.execute(
         text(
@@ -872,7 +917,7 @@ def test_generate_pipeline_dag_linear_chain(pg_conn, cfg_pipeline, cfg_task):
         {"pipeline_id": cfg_pipeline, "task_b": task_b, "cfg_task": cfg_task},
     )
 
-    dag = generate_pipeline_dag(pg_conn, "TEST_PL")
+    dag = generate_pipeline_dag(pg_conn, make_config(), "TEST_PL")
 
     assert dag["dag_id"] == "TEST_PL"
     assert dag["refresh_type"] == "INCREMENTAL"
@@ -902,7 +947,7 @@ def test_generate_pipeline_dag_linear_chain(pg_conn, cfg_pipeline, cfg_task):
 
 
 def test_generate_pipeline_dag_with_no_tasks_still_has_init(pg_conn, cfg_pipeline):
-    dag = generate_pipeline_dag(pg_conn, "TEST_PL")
+    dag = generate_pipeline_dag(pg_conn, make_config(), "TEST_PL")
     assert set(dag["tasks"]) == {"__init__"}
 
 
@@ -926,12 +971,12 @@ def test_generate_pipeline_dag_rejects_cycle(pg_conn, cfg_pipeline, cfg_task):
         )
 
     with pytest.raises(ResolverError):
-        generate_pipeline_dag(pg_conn, "TEST_PL")
+        generate_pipeline_dag(pg_conn, make_config(), "TEST_PL")
 
 
 def test_generate_pipeline_dag_unknown_pipeline_raises(pg_conn):
     with pytest.raises(CfgError):
-        generate_pipeline_dag(pg_conn, "NO_SUCH_PIPELINE")
+        generate_pipeline_dag(pg_conn, make_config(), "NO_SUCH_PIPELINE")
 
 
 def test_generate_pipeline_dag_includes_pipeline_dependencies(pg_conn, cfg_pipeline):
@@ -950,7 +995,7 @@ def test_generate_pipeline_dag_includes_pipeline_dependencies(pg_conn, cfg_pipel
         {"pipeline_id": cfg_pipeline, "other_pipeline": other_pipeline},
     )
 
-    dag = generate_pipeline_dag(pg_conn, "TEST_PL")
+    dag = generate_pipeline_dag(pg_conn, make_config(), "TEST_PL")
 
     assert dag["pipeline_dependencies"] == [
         {"depends_on_pipeline": "TEST_GENYML_UPSTREAM", "dependency_type": "HAS_DATA"}
@@ -987,7 +1032,7 @@ def test_generate_pipeline_dag_includes_cross_pipeline_task_dependencies(
         },
     )
 
-    dag = generate_pipeline_dag(pg_conn, "TEST_PL")
+    dag = generate_pipeline_dag(pg_conn, make_config(), "TEST_PL")
 
     assert dag["cross_pipeline_task_dependencies"] == [
         {
@@ -997,6 +1042,110 @@ def test_generate_pipeline_dag_includes_cross_pipeline_task_dependencies(
             "dependency_type": "SUCCESS",
         }
     ]
+
+
+def _config_with_orchestrator(**overrides) -> ConnectorConfig:
+    base = make_config()
+    orchestrator = OrchestratorConfig(**overrides)
+    return ConnectorConfig(
+        mode=base.mode,
+        source=base.source,
+        postgres=base.postgres,
+        cloning=base.cloning,
+        warehouse=base.warehouse,
+        orchestrator=orchestrator,
+    )
+
+
+def test_generate_pipeline_dag_pipeline_level_override_wins(pg_conn, cfg_pipeline, cfg_task):
+    # Tier 1 (CFG_PIPELINES column) beats both tier 2 (global config) and
+    # tier 3 (hardcoded default), even when a global default is also set.
+    pg_conn.execute(
+        text(
+            "UPDATE CFG_PIPELINES SET CATCHUP = TRUE, TAGS = ARRAY['from-pipeline'], "
+            "RETRIES = 7 WHERE PIPELINE_ID = :id"
+        ),
+        {"id": cfg_pipeline},
+    )
+    config = _config_with_orchestrator(catchup=False, tags=["from-global"], retries=2)
+
+    dag = generate_pipeline_dag(pg_conn, config, "TEST_PL")
+
+    assert dag["catchup"] is True
+    assert dag["tags"] == ["from-pipeline"]
+    assert dag["default_args"]["retries"] == 7
+
+
+def test_generate_pipeline_dag_falls_back_to_global_orchestrator_config(
+    pg_conn, cfg_pipeline, cfg_task
+):
+    # Tier 2: nothing set at the pipeline level, so the [Orchestrator]
+    # global default is used instead of the final hardcoded default.
+    config = _config_with_orchestrator(
+        catchup=True,
+        tags=["from-global"],
+        retries=9,
+        retry_delay_minutes=20,
+        depends_on_past=True,
+        email_on_failure=True,
+        email_recipients=["oncall@example.com"],
+    )
+
+    dag = generate_pipeline_dag(pg_conn, config, "TEST_PL")
+
+    assert dag["catchup"] is True
+    assert dag["tags"] == ["from-global"]
+    assert dag["default_args"] == {
+        "owner": "etl_craft",
+        "retries": 9,
+        "retry_delay_minutes": 20,
+        "depends_on_past": True,
+        "email_on_failure": True,
+        "email": ["oncall@example.com"],
+    }
+
+
+def test_generate_pipeline_dag_email_key_absent_when_email_on_failure_false(
+    pg_conn, cfg_pipeline, cfg_task
+):
+    dag = generate_pipeline_dag(pg_conn, make_config(), "TEST_PL")
+    assert "email" not in dag["default_args"]
+
+
+def test_generate_global_dag_includes_pipelines_on_either_side_of_an_edge(pg_conn, cfg_pipeline):
+    upstream_id = pg_conn.execute(
+        text(
+            "INSERT INTO CFG_PIPELINES (PIPELINE_CODE, PIPELINE_NAME, REFRESH_TYPE) "
+            "VALUES ('TEST_GLOBALDAG_UP', 'Upstream', 'FULL') RETURNING PIPELINE_ID"
+        )
+    ).scalar_one()
+    pg_conn.execute(
+        text(
+            "INSERT INTO CFG_PIPELINE_DEPENDENCY "
+            "(PIPELINE_ID, DEPENDS_ON_PIPELINE_ID, DEPENDENCY_TYPE) "
+            "VALUES (:pipeline_id, :upstream_id, 'SUCCESS')"
+        ),
+        {"pipeline_id": cfg_pipeline, "upstream_id": upstream_id},
+    )
+
+    dag = generate_global_dag(pg_conn)
+
+    assert dag["dag_id"] == GLOBAL_DAG_ID
+    assert dag["pipelines"]["TEST_PL"] == {
+        "trigger_dag_id": "TEST_PL",
+        "depends_on": [{"pipeline": "TEST_GLOBALDAG_UP", "dependency_type": "SUCCESS"}],
+    }
+    # The upstream pipeline is included too (nothing it depends on itself),
+    # since something else depending on it still needs a node to trigger.
+    assert dag["pipelines"]["TEST_GLOBALDAG_UP"] == {
+        "trigger_dag_id": "TEST_GLOBALDAG_UP",
+        "depends_on": [],
+    }
+
+
+def test_generate_global_dag_excludes_pipelines_with_no_dependency_edges(pg_conn, cfg_pipeline):
+    dag = generate_global_dag(pg_conn)
+    assert "TEST_PL" not in dag["pipelines"]
 
 
 # ==============================================================================
@@ -2046,6 +2195,71 @@ def test_cli_generate_yml_rejects_cycle(
     exit_code = cli_main(["generate-yml", "--pipeline_code", "TEST_CONCURRENT_PL"])
 
     assert exit_code == 1
+
+
+def test_cli_generate_yml_global_disabled_by_default(craft_connector_on_disk, capsys):
+    # craft_connector_on_disk's CRAFT_CONNECTOR_YAML has no [Orchestrator]
+    # section at all, so Global_dag defaults to false, per explicit
+    # instruction ("the global dag option ... defaults to false").
+    exit_code = cli_main(["generate-yml", "--global"])
+
+    assert exit_code == 2
+    assert "disabled" in capsys.readouterr().err
+
+
+def test_cli_generate_yml_global_enabled(
+    tmp_path, monkeypatch, postgres_engine, committed_pipeline, capsys
+):
+    (tmp_path / "craft-connector.yml").write_text(
+        CRAFT_CONNECTOR_YAML + "\nOrchestrator:\n  Global_dag: true\n"
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ETL_CRAFT_POSTGRES_DEV_SECRET", "etl_craft")
+    with postgres_engine.begin() as conn:
+        other_id = conn.execute(
+            text(
+                "INSERT INTO CFG_PIPELINES (PIPELINE_CODE, PIPELINE_NAME, REFRESH_TYPE) "
+                "VALUES ('TEST_CLI_GLOBAL_UP', 'Upstream', 'FULL') RETURNING PIPELINE_ID"
+            )
+        ).scalar_one()
+        conn.execute(
+            text(
+                "INSERT INTO CFG_PIPELINE_DEPENDENCY "
+                "(PIPELINE_ID, DEPENDS_ON_PIPELINE_ID, DEPENDENCY_TYPE) "
+                "VALUES (:pid, :other_id, 'SUCCESS')"
+            ),
+            {"pid": committed_pipeline, "other_id": other_id},
+        )
+
+    try:
+        exit_code = cli_main(["generate-yml", "--global"])
+    finally:
+        with postgres_engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM CFG_PIPELINE_DEPENDENCY WHERE PIPELINE_ID = :pid"),
+                {"pid": committed_pipeline},
+            )
+            conn.execute(
+                text("DELETE FROM CFG_PIPELINES WHERE PIPELINE_ID = :id"), {"id": other_id}
+            )
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert GLOBAL_DAG_ID in out
+    assert "TEST_CONCURRENT_PL" in out
+    assert "TEST_CLI_GLOBAL_UP" in out
+
+
+def test_cli_generate_yml_requires_pipeline_code_or_global(craft_connector_on_disk):
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main(["generate-yml"])
+    assert exc_info.value.code == 2
+
+
+def test_cli_generate_yml_pipeline_code_and_global_are_mutually_exclusive(craft_connector_on_disk):
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main(["generate-yml", "--pipeline_code", "X", "--global"])
+    assert exc_info.value.code == 2
 
 
 def test_cli_validate_ok_when_no_issues(

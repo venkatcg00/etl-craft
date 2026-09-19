@@ -12,42 +12,38 @@
 # downstream (a real Airflow DAG file, documentation, a reference
 # implementation repo) comes to depend on it.
 #
-# Cross-pipeline dependencies (pipeline-level CFG_PIPELINE_DEPENDENCY, and
-# task-level CFG_TASK_DEPENDENCY edges pointing at another pipeline) have no
-# DAG-native equivalent (CLAUDE.md: "one DAG can't natively depend on a task
-# in a separate DAG") and aren't resolved by anything built yet (the
-# self-check/poll step — see orchestrator.py). They're surfaced here purely
-# informationally, under their own top-level keys, never wired into `tasks:`.
+# Task-level cross-pipeline dependencies (CFG_TASK_DEPENDENCY edges pointing
+# at another pipeline) have no DAG-native equivalent (CLAUDE.md: "one DAG
+# can't natively depend on a task in a separate DAG") and are surfaced here
+# purely informationally, under their own top-level key, never wired into
+# `tasks:`. Pipeline-level dependencies (CFG_PIPELINE_DEPENDENCY) are
+# different: they now drive the optional global DAG below.
 #
-# [ADDITION] `default_args`/`catchup`/`tags` (added per explicit request to
-# make the output easier to wire straight into a real Airflow DAG). Every
-# value below is either read from real CFG_PIPELINES data or a deliberate,
-# explained design choice — nothing is an arbitrary placeholder:
-#   * `default_args.owner` <- CREATED_BY (whoever registered the pipeline;
-#     the closest real column to "owner" — CFG_PIPELINES has no dedicated
-#     owner field).
-#   * `default_args.email_on_failure: false` — CLAUDE.md's own EMAIL_ALERT
-#     handler is the engine's alerting mechanism (a task gated on another
-#     task's FAILURE); turning on Airflow's native email-on-failure too
-#     would double-alert on the same failure through two unrelated paths.
-#   * `default_args.depends_on_past: false` — CLAUDE.md's run-id model has
-#     no notion of "this run depends on the previous DAG run"; every run's
-#     dependencies come entirely from CFG_TASK_DEPENDENCY/
-#     CFG_PIPELINE_DEPENDENCY, so leaving Airflow's own past-run gating on
-#     would silently add ordering this design doesn't have.
-#   * `default_args.retries` / `retry_delay_minutes` — arbitrary starting
-#     numbers (1 retry, 5 minutes), *not* derived from CFG_ data, but a
-#     deliberate default rather than Airflow's bare 0: safe specifically
-#     because `run --task_code` is idempotent-retry-resumes (CLAUDE.md), so
-#     an Airflow-level retry of the exact same bash_command just continues
-#     the same task run rather than restarting it.
-#   * `catchup: false` — a metadata-driven run whose pipeline_run_id is
-#     minted via `ux_pipeline_run_one_active` doesn't have a meaningful
-#     notion of "backfill every missed schedule interval"; leaving Airflow's
-#     default catchup on would let a large number of missed-interval DAG
-#     runs all race to mint/reuse the same active run at once.
-#   * `tags` <- [REFRESH_TYPE.lower()] — genuinely derived from CFG_ data,
-#     for Airflow UI filtering.
+# [ADDITION] `default_args`/`catchup`/`tags`/`email_on_failure` (added per
+# explicit request to make the output easier to wire straight into a real
+# Airflow DAG). Every value resolves through three tiers, most-specific
+# first, and every tier traces back to something real — nothing is an
+# arbitrary placeholder baked into this module:
+#   1. The pipeline's own CFG_PIPELINES override column (CATCHUP, TAGS,
+#      RETRIES, RETRY_DELAY_MINUTES, DEPENDS_ON_PAST, EMAIL_ON_FAILURE,
+#      EMAIL_RECIPIENTS), if not NULL.
+#   2. craft-connector.yml's [Orchestrator] section (the same field names,
+#      title-cased), if set — a deployment-wide default.
+#   3. A final hardcoded default in `_DEFAULT_*` below, used only if
+#      neither of the above set it. Reasoning for each (unchanged from
+#      before these became configurable): `depends_on_past: false` because
+#      the run-id model has no notion of depending on the previous DAG
+#      run; `catchup: false` because a run minted via
+#      `ux_pipeline_run_one_active` has no backfill semantics — leaving it
+#      on would let missed-interval runs race to mint/reuse the same
+#      active run; `retries`/`retry_delay_minutes` nonzero (1, 5) because
+#      `run --task_code`'s idempotent retry-resumes design makes an
+#      Airflow-level retry of the same bash_command safe by construction;
+#      `email_on_failure: false` / `tags` <- `[REFRESH_TYPE.lower()]`.
+#   `owner` is not part of this three-tier resolution — it stays derived
+#   from CFG_PIPELINES.CREATED_BY (the closest real analog to "owner"),
+#   unchanged, since there's no per-pipeline/global override for who
+#   registered a pipeline.
 
 from __future__ import annotations
 
@@ -56,6 +52,7 @@ from typing import Any
 from sqlalchemy.engine import Connection
 
 from etl_craft.cfg import (
+    fetch_all_pipeline_dependency_edges,
     fetch_cross_pipeline_task_edges,
     fetch_pipeline_dependencies,
     fetch_pipeline_detail,
@@ -63,6 +60,7 @@ from etl_craft.cfg import (
     fetch_task_codes,
     resolve_pipeline_id,
 )
+from etl_craft.config import ConnectorConfig
 from etl_craft.resolver import build_graph
 
 # The synthetic first task every generated DAG gets, per CLAUDE.md's old
@@ -73,8 +71,27 @@ from etl_craft.resolver import build_graph
 # chain, so it's not repeated as a redundant direct edge everywhere.
 INIT_TASK_ID = "__init__"
 
+_DEFAULT_RETRIES = 1
+_DEFAULT_RETRY_DELAY_MINUTES = 5
 
-def generate_pipeline_dag(conn: Connection, pipeline_code: str) -> dict[str, Any]:
+# [ADDITION] Name of the optional cross-pipeline trigger DAG — nowhere
+# specified, this module's own choice, changeable if a different name is
+# preferred before anything downstream depends on it.
+GLOBAL_DAG_ID = "etl_craft_global_orchestration"
+
+
+def _resolve(pipeline_value: Any, global_value: Any, default: Any) -> Any:
+    """Three-tier resolution: pipeline override, then global default, then the final fallback."""
+    if pipeline_value is not None:
+        return pipeline_value
+    if global_value is not None:
+        return global_value
+    return default
+
+
+def generate_pipeline_dag(
+    conn: Connection, config: ConnectorConfig, pipeline_code: str
+) -> dict[str, Any]:
     """Build `pipeline_code`'s generated DAG as a plain dict, ready for yaml.safe_dump."""
     pipeline_id = resolve_pipeline_id(conn, pipeline_code)
     detail = fetch_pipeline_detail(conn, pipeline_id)
@@ -117,28 +134,39 @@ def generate_pipeline_dag(conn: Connection, pipeline_code: str) -> dict[str, Any
             "depends_on": depends_on,
         }
 
+    orch = config.orchestrator
+    email_on_failure = _resolve(detail.email_on_failure, orch.email_on_failure, False)
+    default_args: dict[str, Any] = {
+        "owner": detail.created_by,
+        "retries": _resolve(detail.retries, orch.retries, _DEFAULT_RETRIES),
+        "retry_delay_minutes": _resolve(
+            detail.retry_delay_minutes, orch.retry_delay_minutes, _DEFAULT_RETRY_DELAY_MINUTES
+        ),
+        "depends_on_past": _resolve(detail.depends_on_past, orch.depends_on_past, False),
+        "email_on_failure": email_on_failure,
+    }
+    if email_on_failure:
+        # Airflow's own email_on_failure is inert without a recipient list
+        # — only emitted when there's actually something to send to.
+        default_args["email"] = _resolve(detail.email_recipients, orch.email_recipients, [])
+
     dag: dict[str, Any] = {
         "dag_id": detail.pipeline_code,
         "description": detail.description,
         "schedule": detail.run_schedule,
         "sla_hours": detail.sla_in_hours,
         "refresh_type": detail.refresh_type,
-        "catchup": False,
-        "tags": [detail.refresh_type.lower()],
-        "default_args": {
-            "owner": detail.created_by,
-            "retries": 1,
-            "retry_delay_minutes": 5,
-            "depends_on_past": False,
-            "email_on_failure": False,
-        },
+        "catchup": _resolve(detail.catchup, orch.catchup, False),
+        "tags": _resolve(detail.tags, orch.tags, [detail.refresh_type.lower()]),
+        "default_args": default_args,
         "tasks": tasks,
     }
 
     pipeline_deps = fetch_pipeline_dependencies(conn, pipeline_id)
     if pipeline_deps:
-        # Not DAG-native (CLAUDE.md) — informational only, for whoever wires
-        # up the actual self-check/poll step this pipeline's own run needs.
+        # Not DAG-native (CLAUDE.md) — informational here regardless of the
+        # global DAG below, since a team generating just this one pipeline's
+        # YAML still needs to see what it depends on.
         dag["pipeline_dependencies"] = [
             {
                 "depends_on_pipeline": dep.depends_on_pipeline_code,
@@ -160,3 +188,40 @@ def generate_pipeline_dag(conn: Connection, pipeline_code: str) -> dict[str, Any
         ]
 
     return dag
+
+
+def generate_global_dag(conn: Connection) -> dict[str, Any]:
+    """Build the optional cross-pipeline trigger DAG — every pipeline touched by a real edge.
+
+    [Orchestrator].Global_dag must be enabled (checked by the caller, not
+    here — this function only needs `conn`, since resolving what to emit
+    is purely CFG_PIPELINE_DEPENDENCY data, not config).
+
+    Confirmed with the user: each node represents triggering that
+    pipeline's own already-generated DAG (Airflow's TriggerDagRunOperator,
+    described in this hand-rolled shape via `trigger_dag_id` — never
+    imported, same spirit as `bash_command` in generate_pipeline_dag),
+    gated on the CFG_PIPELINE_DEPENDENCY edge's own DEPENDENCY_TYPE. A
+    pipeline with nothing depending on it and nothing it depends on isn't
+    included — it has no cross-DAG ordering to represent here.
+    """
+    edges = fetch_all_pipeline_dependency_edges(conn)
+
+    edges_by_pipeline: dict[str, list] = {}
+    pipeline_codes: set[str] = set()
+    for edge in edges:
+        edges_by_pipeline.setdefault(edge.pipeline_code, []).append(edge)
+        pipeline_codes.add(edge.pipeline_code)
+        pipeline_codes.add(edge.depends_on_pipeline_code)
+
+    pipelines: dict[str, Any] = {}
+    for pipeline_code in sorted(pipeline_codes):
+        pipelines[pipeline_code] = {
+            "trigger_dag_id": pipeline_code,
+            "depends_on": [
+                {"pipeline": edge.depends_on_pipeline_code, "dependency_type": edge.dependency_type}
+                for edge in edges_by_pipeline.get(pipeline_code, [])
+            ],
+        }
+
+    return {"dag_id": GLOBAL_DAG_ID, "pipelines": pipelines}
