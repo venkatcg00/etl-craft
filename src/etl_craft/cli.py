@@ -1,8 +1,8 @@
 """The `etl-craft` command-line entry point."""
 
 # Per CLAUDE.md's CLI surface: `run`, `list`, `graph`, `set-execution-mode`,
-# and `configure --env` are wired up here so far (interactive `configure`
-# with no --env, `validate`, `generate-yml` are still unbuilt). Within
+# `configure --env`, and `generate-yml` are wired up here so far (interactive
+# `configure` with no --env, and `validate`, are still unbuilt). Within
 # `run`, `--task_code` dispatches to runner.run_task (a single task);
 # `--init-only` dispatches to orchestrator.init_pipeline_run (mint/reuse the
 # active run, no task execution — what a generated Airflow DAG's synthetic
@@ -21,7 +21,9 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
+import yaml
 from sqlalchemy.engine import Engine
 
 from etl_craft.cfg import (
@@ -36,8 +38,9 @@ from etl_craft.cfg import (
 from etl_craft.config import VALID_MODES, ConfigError, ConnectorConfig, load_config
 from etl_craft.configure import configure_from_env, set_execution_mode
 from etl_craft.db import build_engine
+from etl_craft.generate_yml import generate_pipeline_dag
 from etl_craft.orchestrator import OrchestratorModeRefusedError, init_pipeline_run, run_pipeline
-from etl_craft.resolver import build_graph
+from etl_craft.resolver import ResolverError, build_graph
 from etl_craft.runlog import RunLogError
 from etl_craft.runner import DependenciesNotMetError, ForceNotAllowedError, run_task
 
@@ -98,6 +101,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--env", help="Path to an env file for non-interactive setup (required for now)"
     )
 
+    generate_yml_parser = subparsers.add_parser(
+        "generate-yml", help="Emit hand-rolled, Airflow-YAML-inspired DAG YAML for a pipeline"
+    )
+    generate_yml_parser.add_argument("--pipeline_code", required=True)
+    generate_yml_parser.add_argument("--output", help="Write to this path instead of stdout")
+
     return parser
 
 
@@ -123,6 +132,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _list_command(engine)
     if args.command == "graph":
         return _graph_command(args, engine)
+    if args.command == "generate-yml":
+        return _generate_yml_command(args, engine)
     # argparse's `required=True` on the subparsers guarantees args.command is
     # one of the branches above; this exists only to document that invariant
     # and satisfy the type checker, not as a path any test can reach.
@@ -223,4 +234,21 @@ def _graph_command(args: argparse.Namespace, engine: Engine) -> int:
             )
     else:
         print("  (none)")
+    return 0
+
+
+def _generate_yml_command(args: argparse.Namespace, engine: Engine) -> int:
+    try:
+        with engine.connect() as conn:
+            dag = generate_pipeline_dag(conn, args.pipeline_code)
+    except (CfgError, ResolverError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    yaml_text = yaml.safe_dump(dag, sort_keys=False, default_flow_style=False)
+    if args.output:
+        Path(args.output).write_text(yaml_text)
+        print(f"DAG YAML written to {args.output}")
+    else:
+        print(yaml_text, end="")
     return 0

@@ -10,6 +10,7 @@ import threading
 import time
 
 import pytest
+import yaml
 from sqlalchemy import text
 
 from conftest import (
@@ -23,6 +24,7 @@ from etl_craft.cfg import (
     fetch_all_pipelines,
     fetch_cross_pipeline_task_edges,
     fetch_pipeline_dependencies,
+    fetch_pipeline_detail,
     fetch_pipeline_graph,
     fetch_task_handler,
     resolve_pipeline_id,
@@ -36,8 +38,10 @@ from etl_craft.config import (
     ConnectorConfig,
     SourceConfig,
 )
+from etl_craft.generate_yml import generate_pipeline_dag
 from etl_craft.handlers import HandlerResult
 from etl_craft.orchestrator import OrchestratorModeRefusedError, init_pipeline_run, run_pipeline
+from etl_craft.resolver import ResolverError
 from etl_craft.runlog import (
     find_or_create_active_run,
     find_or_create_task_run,
@@ -405,6 +409,172 @@ def test_fetch_cross_pipeline_task_edges(pg_conn, cfg_pipeline, cfg_task):
     assert edges[0].depends_on_pipeline_code == "TEST_UPSTREAM_PL2"
     assert edges[0].depends_on_task_code == "upstream_task"
     assert edges[0].dependency_type == "SUCCESS"
+
+
+def test_fetch_pipeline_detail(pg_conn, cfg_pipeline):
+    pg_conn.execute(
+        text(
+            "UPDATE CFG_PIPELINES SET DESCRIPTION = 'A test pipeline', "
+            "RUN_SCHEDULE = '0 6 * * *', SLA_IN_HOURS = 1.5 WHERE PIPELINE_ID = :id"
+        ),
+        {"id": cfg_pipeline},
+    )
+
+    detail = fetch_pipeline_detail(pg_conn, cfg_pipeline)
+
+    assert detail.pipeline_code == "TEST_PL"
+    assert detail.description == "A test pipeline"
+    assert detail.run_schedule == "0 6 * * *"
+    assert detail.sla_in_hours == 1.5
+    assert isinstance(detail.sla_in_hours, float)
+    assert detail.refresh_type == "INCREMENTAL"
+
+
+def test_fetch_pipeline_detail_nullable_fields_default_none(pg_conn, cfg_pipeline):
+    detail = fetch_pipeline_detail(pg_conn, cfg_pipeline)
+    assert detail.description is None
+    assert detail.run_schedule is None
+    assert detail.sla_in_hours is None
+
+
+# ==============================================================================
+# generate_yml.py — against real Postgres
+# ==============================================================================
+
+
+def test_generate_pipeline_dag_linear_chain(pg_conn, cfg_pipeline, cfg_task):
+    task_b = pg_conn.execute(
+        text(
+            "INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) "
+            "VALUES ('task_b', 'ETL', :pipeline_id, 'SQL') RETURNING TASK_ID"
+        ),
+        {"pipeline_id": cfg_pipeline},
+    ).scalar_one()
+    pg_conn.execute(
+        text(
+            "INSERT INTO CFG_TASK_DEPENDENCY "
+            "(PIPELINE_ID, TASK_ID, DEPENDS_ON_PIPELINE_ID, DEPENDS_ON_TASK_ID, DEPENDENCY_TYPE) "
+            "VALUES (:pipeline_id, :task_b, :pipeline_id, :cfg_task, 'SUCCESS')"
+        ),
+        {"pipeline_id": cfg_pipeline, "task_b": task_b, "cfg_task": cfg_task},
+    )
+
+    dag = generate_pipeline_dag(pg_conn, "TEST_PL")
+
+    assert dag["dag_id"] == "TEST_PL"
+    assert dag["refresh_type"] == "INCREMENTAL"
+    assert set(dag["tasks"]) == {"__init__", "test_task", "task_b"}
+    assert dag["tasks"]["__init__"]["depends_on"] == []
+    assert (
+        dag["tasks"]["__init__"]["bash_command"]
+        == "etl-craft run --pipeline_code TEST_PL --init-only"
+    )
+    assert dag["tasks"]["test_task"]["depends_on"] == [
+        {"task": "__init__", "dependency_type": "ALWAYS"}
+    ]
+    assert dag["tasks"]["task_b"]["depends_on"] == [
+        {"task": "test_task", "dependency_type": "SUCCESS"}
+    ]
+    assert "pipeline_dependencies" not in dag
+    assert "cross_pipeline_task_dependencies" not in dag
+
+
+def test_generate_pipeline_dag_with_no_tasks_still_has_init(pg_conn, cfg_pipeline):
+    dag = generate_pipeline_dag(pg_conn, "TEST_PL")
+    assert set(dag["tasks"]) == {"__init__"}
+
+
+def test_generate_pipeline_dag_rejects_cycle(pg_conn, cfg_pipeline, cfg_task):
+    task_b = pg_conn.execute(
+        text(
+            "INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) "
+            "VALUES ('task_b', 'ETL', :pipeline_id, 'SQL') RETURNING TASK_ID"
+        ),
+        {"pipeline_id": cfg_pipeline},
+    ).scalar_one()
+    for task_id, depends_on in [(task_b, cfg_task), (cfg_task, task_b)]:
+        pg_conn.execute(
+            text(
+                "INSERT INTO CFG_TASK_DEPENDENCY "
+                "(PIPELINE_ID, TASK_ID, DEPENDS_ON_PIPELINE_ID, DEPENDS_ON_TASK_ID, "
+                "DEPENDENCY_TYPE) "
+                "VALUES (:pipeline_id, :task_id, :pipeline_id, :depends_on, 'SUCCESS')"
+            ),
+            {"pipeline_id": cfg_pipeline, "task_id": task_id, "depends_on": depends_on},
+        )
+
+    with pytest.raises(ResolverError):
+        generate_pipeline_dag(pg_conn, "TEST_PL")
+
+
+def test_generate_pipeline_dag_unknown_pipeline_raises(pg_conn):
+    with pytest.raises(CfgError):
+        generate_pipeline_dag(pg_conn, "NO_SUCH_PIPELINE")
+
+
+def test_generate_pipeline_dag_includes_pipeline_dependencies(pg_conn, cfg_pipeline):
+    other_pipeline = pg_conn.execute(
+        text(
+            "INSERT INTO CFG_PIPELINES (PIPELINE_CODE, PIPELINE_NAME, REFRESH_TYPE) "
+            "VALUES ('TEST_GENYML_UPSTREAM', 'Upstream', 'FULL') RETURNING PIPELINE_ID"
+        )
+    ).scalar_one()
+    pg_conn.execute(
+        text(
+            "INSERT INTO CFG_PIPELINE_DEPENDENCY "
+            "(PIPELINE_ID, DEPENDS_ON_PIPELINE_ID, DEPENDENCY_TYPE) "
+            "VALUES (:pipeline_id, :other_pipeline, 'HAS_DATA')"
+        ),
+        {"pipeline_id": cfg_pipeline, "other_pipeline": other_pipeline},
+    )
+
+    dag = generate_pipeline_dag(pg_conn, "TEST_PL")
+
+    assert dag["pipeline_dependencies"] == [
+        {"depends_on_pipeline": "TEST_GENYML_UPSTREAM", "dependency_type": "HAS_DATA"}
+    ]
+
+
+def test_generate_pipeline_dag_includes_cross_pipeline_task_dependencies(
+    pg_conn, cfg_pipeline, cfg_task
+):
+    other_pipeline = pg_conn.execute(
+        text(
+            "INSERT INTO CFG_PIPELINES (PIPELINE_CODE, PIPELINE_NAME, REFRESH_TYPE) "
+            "VALUES ('TEST_GENYML_UPSTREAM2', 'Upstream 2', 'FULL') RETURNING PIPELINE_ID"
+        )
+    ).scalar_one()
+    other_task = pg_conn.execute(
+        text(
+            "INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) "
+            "VALUES ('upstream_task', 'ETL', :pipeline_id, 'SQL') RETURNING TASK_ID"
+        ),
+        {"pipeline_id": other_pipeline},
+    ).scalar_one()
+    pg_conn.execute(
+        text(
+            "INSERT INTO CFG_TASK_DEPENDENCY (PIPELINE_ID, TASK_ID, DEPENDS_ON_PIPELINE_ID, "
+            "DEPENDS_ON_TASK_ID, DEPENDENCY_TYPE) "
+            "VALUES (:pipeline_id, :task_id, :other_pipeline, :other_task, 'SUCCESS')"
+        ),
+        {
+            "pipeline_id": cfg_pipeline,
+            "task_id": cfg_task,
+            "other_pipeline": other_pipeline,
+            "other_task": other_task,
+        },
+    )
+
+    dag = generate_pipeline_dag(pg_conn, "TEST_PL")
+
+    assert dag["cross_pipeline_task_dependencies"] == [
+        {
+            "task": "test_task",
+            "depends_on_pipeline": "TEST_GENYML_UPSTREAM2",
+            "depends_on_task": "upstream_task",
+            "dependency_type": "SUCCESS",
+        }
+    ]
 
 
 # ==============================================================================
@@ -913,3 +1083,53 @@ def test_cli_graph_prints_waves_and_dependencies(
             )
     assert "Pipeline dependencies:" in out
     assert "Cross-pipeline task dependencies:" in out
+
+
+def test_cli_generate_yml_prints_to_stdout(
+    craft_connector_on_disk, postgres_engine, committed_pipeline, capsys
+):
+    insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+
+    exit_code = cli_main(["generate-yml", "--pipeline_code", "TEST_CONCURRENT_PL"])
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    parsed = yaml.safe_load(out)
+    assert parsed["dag_id"] == "TEST_CONCURRENT_PL"
+    assert set(parsed["tasks"]) == {"__init__", "task_a"}
+
+
+def test_cli_generate_yml_writes_to_output_file(
+    craft_connector_on_disk, postgres_engine, committed_pipeline, tmp_path, capsys
+):
+    insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+    output_path = tmp_path / "dag.yml"
+
+    exit_code = cli_main(
+        ["generate-yml", "--pipeline_code", "TEST_CONCURRENT_PL", "--output", str(output_path)]
+    )
+
+    assert exit_code == 0
+    assert "DAG YAML written" in capsys.readouterr().out
+    parsed = yaml.safe_load(output_path.read_text())
+    assert parsed["dag_id"] == "TEST_CONCURRENT_PL"
+
+
+def test_cli_generate_yml_unknown_pipeline(craft_connector_on_disk, capsys):
+    exit_code = cli_main(["generate-yml", "--pipeline_code", "NO_SUCH_PIPELINE"])
+
+    assert exit_code == 1
+    assert "error:" in capsys.readouterr().err
+
+
+def test_cli_generate_yml_rejects_cycle(
+    craft_connector_on_disk, postgres_engine, committed_pipeline
+):
+    task_a = insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+    task_b = insert_committed_task(postgres_engine, committed_pipeline, "task_b")
+    insert_committed_dependency(postgres_engine, committed_pipeline, task_b, task_a)
+    insert_committed_dependency(postgres_engine, committed_pipeline, task_a, task_b)
+
+    exit_code = cli_main(["generate-yml", "--pipeline_code", "TEST_CONCURRENT_PL"])
+
+    assert exit_code == 1

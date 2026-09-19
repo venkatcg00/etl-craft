@@ -214,3 +214,39 @@ def fetch_cross_pipeline_task_edges(
         )
         for row in rows
     ]
+
+
+@dataclass(frozen=True)
+class PipelineDetail:
+    """The CFG_PIPELINES fields `generate-yml` needs beyond what `list`/`graph` already fetch."""
+
+    pipeline_code: str
+    pipeline_name: str
+    description: str | None
+    run_schedule: str | None
+    sla_in_hours: float | None
+    refresh_type: str
+
+
+def fetch_pipeline_detail(conn: Connection, pipeline_id: int) -> PipelineDetail:
+    """Fetch `pipeline_id`'s full CFG_PIPELINES row (assumed to already be a valid, active id)."""
+    row = conn.execute(
+        text(
+            "SELECT PIPELINE_CODE AS pipeline_code, PIPELINE_NAME AS pipeline_name, "
+            "DESCRIPTION AS description, RUN_SCHEDULE AS run_schedule, "
+            "SLA_IN_HOURS AS sla_in_hours, REFRESH_TYPE AS refresh_type "
+            "FROM CFG_PIPELINES WHERE PIPELINE_ID = :pipeline_id"
+        ),
+        {"pipeline_id": pipeline_id},
+    ).one()
+    return PipelineDetail(
+        pipeline_code=row.pipeline_code,
+        pipeline_name=row.pipeline_name,
+        description=row.description,
+        run_schedule=row.run_schedule,
+        # NUMERIC comes back as decimal.Decimal, which yaml.safe_dump can't
+        # represent — this module exists specifically to feed YAML output,
+        # so convert here rather than push that concern onto every caller.
+        sla_in_hours=float(row.sla_in_hours) if row.sla_in_hours is not None else None,
+        refresh_type=row.refresh_type,
+    )
