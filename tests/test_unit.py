@@ -1,0 +1,993 @@
+"""The default, no-Docker-needed test suite: pure logic plus SQLite stand-ins.
+
+Everything here runs with plain `pytest -q` — no live Postgres required.
+Real-Postgres integration tests (which need Docker; see the Makefile) live
+in test_integration.py instead. Organized by source module, one section
+per module, since combining them loses nothing (no fixture/helper name
+collisions) and keeps file count down.
+"""
+
+import contextlib
+import runpy
+
+import pytest
+import yaml
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
+
+import etl_craft
+from etl_craft.cli import main as cli_main
+from etl_craft.config import (
+    ConfigError,
+    ConnectionProfile,
+    _load_dotenv_file,
+    load_config,
+    resolve_secret,
+)
+from etl_craft.configure import configure_from_env, set_execution_mode
+from etl_craft.db import AUTH_REGISTRY, ConnectionError_, build_engine, parse_jdbc_postgres
+from etl_craft.handlers import HandlerError, dispatch
+from etl_craft.resolver import (
+    CycleError,
+    DependencyGraph,
+    ResolverError,
+    SelfDependencyError,
+    TaskEdge,
+    TaskNode,
+    TaskRunState,
+    UnknownTaskError,
+    build_graph,
+)
+from etl_craft.runlog import (
+    RunLogError,
+    fetch_run_state,
+    find_or_create_active_run,
+    find_or_create_task_run,
+    resolve_run_for_task,
+    update_task_run,
+)
+
+# ==============================================================================
+# resolver.py — pure dependency-graph logic, no DB at all
+# ==============================================================================
+
+
+def nodes(*ids: int) -> list[TaskNode]:
+    return [TaskNode(task_id=i) for i in ids]
+
+
+def edge(task_id: int, depends_on_task_id: int, dependency_type: str = "SUCCESS") -> TaskEdge:
+    return TaskEdge(
+        task_id=task_id, depends_on_task_id=depends_on_task_id, dependency_type=dependency_type
+    )
+
+
+def test_no_dependencies_is_a_single_wave():
+    graph = build_graph(nodes(1, 2, 3), [])
+    assert graph.waves() == [[1, 2, 3]]
+
+
+def test_linear_chain_waves():
+    # 1 -> 2 -> 3  (2 depends on 1, 3 depends on 2)
+    graph = build_graph(nodes(1, 2, 3), [edge(2, 1), edge(3, 2)])
+    assert graph.waves() == [[1], [2], [3]]
+
+
+def test_diamond_shape_waves():
+    #     1
+    #    / \
+    #   2   3
+    #    \ /
+    #     4
+    graph = build_graph(nodes(1, 2, 3, 4), [edge(2, 1), edge(3, 1), edge(4, 2), edge(4, 3)])
+    assert graph.waves() == [[1], [2, 3], [4]]
+
+
+def test_self_dependency_rejected():
+    with pytest.raises(SelfDependencyError):
+        build_graph(nodes(1), [edge(1, 1)])
+
+
+def test_direct_cycle_rejected():
+    with pytest.raises(CycleError):
+        build_graph(nodes(1, 2), [edge(1, 2), edge(2, 1)])
+
+
+def test_indirect_cycle_rejected():
+    with pytest.raises(CycleError):
+        build_graph(nodes(1, 2, 3), [edge(1, 2), edge(2, 3), edge(3, 1)])
+
+
+def test_unknown_task_id_in_edge_rejected():
+    with pytest.raises(UnknownTaskError):
+        build_graph(nodes(1, 2), [edge(1, 99)])
+
+
+def test_unknown_dependency_type_rejected():
+    with pytest.raises(ResolverError):
+        build_graph(nodes(1, 2), [edge(1, 2, dependency_type="BOGUS")])
+
+
+def test_ready_with_no_edges_all_unstarted_tasks_ready():
+    graph = build_graph(nodes(1, 2), [])
+    assert graph.ready({}) == [1, 2]
+
+
+def test_ready_excludes_terminal_tasks():
+    graph = build_graph(nodes(1, 2), [])
+    state = {1: TaskRunState(status="SUCCESS")}
+    assert graph.ready(state) == [2]
+
+
+def test_ready_success_edge_blocks_until_upstream_succeeds():
+    # task 1 has no deps of its own, so its own retry-eligibility (tested
+    # separately) is irrelevant here — only whether 2's edge is satisfied.
+    graph = build_graph(nodes(1, 2), [edge(2, 1)])
+    assert 2 not in graph.ready({})
+    assert 2 not in graph.ready({1: TaskRunState(status="IN-PROGRESS")})
+    assert 2 not in graph.ready({1: TaskRunState(status="FAILED")})
+    assert graph.ready({1: TaskRunState(status="SUCCESS")}) == [2]
+
+
+def test_ready_failure_edge_only_satisfied_by_failed_upstream():
+    graph = build_graph(nodes(1, 2), [edge(2, 1, dependency_type="FAILURE")])
+    assert 2 not in graph.ready({1: TaskRunState(status="SUCCESS")})
+    assert 2 in graph.ready({1: TaskRunState(status="FAILED")})
+
+
+@pytest.mark.parametrize("upstream_status", ["SUCCESS", "FAILED", "SKIPPED"])
+def test_ready_always_edge_satisfied_by_any_terminal_status(upstream_status):
+    graph = build_graph(nodes(1, 2), [edge(2, 1, dependency_type="ALWAYS")])
+    assert 2 in graph.ready({1: TaskRunState(status=upstream_status)})
+
+
+def test_ready_always_edge_not_satisfied_while_upstream_in_progress():
+    graph = build_graph(nodes(1, 2), [edge(2, 1, dependency_type="ALWAYS")])
+    assert 2 not in graph.ready({1: TaskRunState(status="IN-PROGRESS")})
+
+
+def test_ready_has_data_edge_requires_success_and_positive_target_count():
+    graph = build_graph(nodes(1, 2), [edge(2, 1, dependency_type="HAS_DATA")])
+    assert 2 not in graph.ready({1: TaskRunState(status="SUCCESS", target_count=0)})
+    assert 2 not in graph.ready({1: TaskRunState(status="SUCCESS", target_count=None)})
+    assert graph.ready({1: TaskRunState(status="SUCCESS", target_count=5)}) == [2]
+    assert 2 not in graph.ready({1: TaskRunState(status="FAILED", target_count=5)})
+
+
+def test_ready_task_with_multiple_edges_needs_all_satisfied():
+    graph = build_graph(nodes(1, 2, 3), [edge(3, 1), edge(3, 2)])
+    # task 1 already SUCCESS (terminal, excluded); task 2 has no deps of its
+    # own, so it's ready; task 3 still waits on task 2.
+    assert graph.ready({1: TaskRunState(status="SUCCESS")}) == [2]
+    assert graph.ready({1: TaskRunState(status="SUCCESS"), 2: TaskRunState(status="SUCCESS")}) == [
+        3
+    ]
+
+
+def test_ready_reattempts_failed_task_itself():
+    graph = build_graph(nodes(1), [])
+    assert graph.ready({1: TaskRunState(status="FAILED")}) == [1]
+
+
+def test_ready_excludes_in_progress_task_itself():
+    graph = build_graph(nodes(1), [])
+    assert graph.ready({1: TaskRunState(status="IN-PROGRESS")}) == []
+
+
+def test_skipped_upstream_never_satisfies_success_edge():
+    graph = build_graph(nodes(1, 2), [edge(2, 1)])
+    assert graph.ready({1: TaskRunState(status="SKIPPED")}) == []
+
+
+def test_build_graph_rejects_duplicate_task_ids():
+    with pytest.raises(ResolverError):
+        build_graph(nodes(1, 1), [])
+
+
+def test_build_graph_rejects_edge_with_unknown_task_id():
+    # Distinct from test_unknown_task_id_in_edge_rejected: that one has an
+    # unknown depends_on_task_id with a valid task_id; this is the other
+    # side — task_id itself doesn't exist in the supplied task set.
+    with pytest.raises(UnknownTaskError):
+        build_graph(nodes(1, 2), [edge(99, 1)])
+
+
+def test_edge_satisfied_rejects_unknown_dependency_type():
+    # build_graph already validates dependency_type before a DependencyGraph
+    # is ever constructed, so this path is unreachable through the public
+    # API — exercised directly against the underlying building blocks instead.
+    with pytest.raises(ResolverError):
+        DependencyGraph._edge_satisfied(edge(2, 1, dependency_type="BOGUS"), TaskRunState())
+
+
+# ==============================================================================
+# config.py — craft-connector.yml loading, no DB at all
+# ==============================================================================
+
+VALID_YAML = """
+Execution:
+  Mode: local
+
+Source:
+  Type: environment
+
+Postgres:
+  Active_profile: dev
+  Profiles:
+    dev:
+      jdbc_url: jdbc:postgresql://localhost:5432/etl_craft
+      user: etl_engine
+      auth_mode: password
+    prod:
+      jdbc_url: jdbc:postgresql://prod-host:5432/etl_craft
+      user: etl_engine
+      auth_mode: key_file
+      key_file: /etc/etl-craft/prod.key
+
+Cloning:
+  Enabled: true
+  Scope: cfg
+"""
+
+
+def write_config(tmp_path, contents: str):
+    path = tmp_path / "craft-connector.yml"
+    path.write_text(contents)
+    return path
+
+
+def test_load_valid_config(tmp_path):
+    config = load_config(write_config(tmp_path, VALID_YAML))
+    assert config.mode == "local"
+    assert config.source.type == "environment"
+    assert config.postgres.active_profile == "dev"
+    assert config.postgres.active.jdbc_url == "jdbc:postgresql://localhost:5432/etl_craft"
+    assert config.postgres.active.auth_mode == "password"
+    assert config.postgres.profiles["prod"].extra["key_file"] == "/etc/etl-craft/prod.key"
+    assert config.cloning.enabled is True
+    assert config.cloning.scope == "cfg"
+
+
+def test_missing_file_raises(tmp_path):
+    with pytest.raises(ConfigError):
+        load_config(tmp_path / "does-not-exist.yml")
+
+
+def test_malformed_yaml_rejected(tmp_path):
+    with pytest.raises(ConfigError):
+        load_config(write_config(tmp_path, "Execution: [unterminated"))
+
+
+def test_missing_section_rejected(tmp_path):
+    no_postgres = VALID_YAML.replace("Postgres:", "NotPostgres:")
+    with pytest.raises(ConfigError):
+        load_config(write_config(tmp_path, no_postgres))
+
+
+def test_invalid_mode_rejected(tmp_path):
+    bad = VALID_YAML.replace("Mode: local", "Mode: bogus")
+    with pytest.raises(ConfigError):
+        load_config(write_config(tmp_path, bad))
+
+
+def test_active_profile_must_exist_in_profiles(tmp_path):
+    bad = VALID_YAML.replace("Active_profile: dev", "Active_profile: staging")
+    with pytest.raises(ConfigError):
+        load_config(write_config(tmp_path, bad))
+
+
+def test_invalid_auth_mode_rejected(tmp_path):
+    bad = VALID_YAML.replace("auth_mode: password", "auth_mode: bogus")
+    with pytest.raises(ConfigError):
+        load_config(write_config(tmp_path, bad))
+
+
+def test_file_source_requires_path(tmp_path):
+    bad = VALID_YAML.replace("Type: environment", "Type: file")
+    with pytest.raises(ConfigError):
+        load_config(write_config(tmp_path, bad))
+
+
+def test_invalid_source_type_rejected(tmp_path):
+    bad = VALID_YAML.replace("Type: environment", "Type: bogus")
+    with pytest.raises(ConfigError):
+        load_config(write_config(tmp_path, bad))
+
+
+def test_connection_section_requires_active_profile_and_profiles(tmp_path):
+    # Distinct from test_active_profile_must_exist_in_profiles: that one has
+    # a well-formed section whose Active_profile just doesn't match any
+    # entry; this is the section itself missing Active_profile outright.
+    bad = VALID_YAML.replace("  Active_profile: dev\n", "")
+    with pytest.raises(ConfigError):
+        load_config(write_config(tmp_path, bad))
+
+
+def test_invalid_cloning_scope_rejected(tmp_path):
+    bad = VALID_YAML.replace("Scope: cfg", "Scope: bogus")
+    with pytest.raises(ConfigError):
+        load_config(write_config(tmp_path, bad))
+
+
+def test_cloning_defaults_when_section_absent(tmp_path):
+    no_cloning = VALID_YAML.replace("Cloning:\n  Enabled: true\n  Scope: cfg\n", "")
+    config = load_config(write_config(tmp_path, no_cloning))
+    assert config.cloning.enabled is False
+    assert config.cloning.scope == "cfg"
+
+
+def test_resolve_secret_from_environment(tmp_path, monkeypatch):
+    config = load_config(write_config(tmp_path, VALID_YAML))
+    monkeypatch.setenv("ETL_CRAFT_POSTGRES_DEV_SECRET", "s3cr3t")
+    assert resolve_secret(config, config.postgres.active) == "s3cr3t"
+
+
+def test_resolve_secret_missing_raises(tmp_path, monkeypatch):
+    config = load_config(write_config(tmp_path, VALID_YAML))
+    monkeypatch.delenv("ETL_CRAFT_POSTGRES_DEV_SECRET", raising=False)
+    with pytest.raises(ConfigError):
+        resolve_secret(config, config.postgres.active)
+
+
+def test_resolve_secret_explicit_var_override(tmp_path, monkeypatch):
+    overridden = VALID_YAML.replace(
+        "auth_mode: password\n", "auth_mode: password\n      secret_var: MY_CUSTOM_SECRET\n"
+    )
+    config = load_config(write_config(tmp_path, overridden))
+    monkeypatch.setenv("MY_CUSTOM_SECRET", "hunter2")
+    assert resolve_secret(config, config.postgres.active) == "hunter2"
+
+
+def test_resolve_secret_from_file_source(tmp_path):
+    env_file = tmp_path / "secrets.env"
+    env_file.write_text("ETL_CRAFT_POSTGRES_DEV_SECRET=filesecret\n# comment\n\nOTHER=1\n")
+    file_source_yaml = VALID_YAML.replace(
+        "Source:\n  Type: environment\n",
+        f"Source:\n  Type: file\n  Path: {env_file}\n",
+    )
+    config = load_config(write_config(tmp_path, file_source_yaml))
+    assert resolve_secret(config, config.postgres.active) == "filesecret"
+
+
+def test_load_dotenv_file_requires_a_path():
+    # Reached in practice only via resolve_secret(Source.Type='file'), but
+    # _parse_source already refuses to load a config with Type=file and no
+    # Path at all — so this defensive check is unreachable through the
+    # public API. Exercised directly instead.
+    with pytest.raises(ConfigError):
+        _load_dotenv_file(None)
+
+
+# ==============================================================================
+# db.py — JDBC parsing and auth_mode wiring, no live DB required
+# ==============================================================================
+
+
+def test_parse_jdbc_postgres_with_explicit_port():
+    parts = parse_jdbc_postgres("jdbc:postgresql://myhost:6543/mydb")
+    assert parts == {"host": "myhost", "port": 6543, "database": "mydb"}
+
+
+def test_parse_jdbc_postgres_default_port():
+    parts = parse_jdbc_postgres("jdbc:postgresql://myhost/mydb")
+    assert parts == {"host": "myhost", "port": 5432, "database": "mydb"}
+
+
+def test_parse_jdbc_postgres_rejects_non_jdbc_url():
+    with pytest.raises(ConnectionError_):
+        parse_jdbc_postgres("postgresql://myhost:5432/mydb")
+
+
+def profile(auth_mode: str, **extra) -> ConnectionProfile:
+    return ConnectionProfile(
+        section="POSTGRES",
+        name="dev",
+        jdbc_url="jdbc:postgresql://localhost:5432/etl_craft",
+        user="etl_engine",
+        auth_mode=auth_mode,
+        extra=extra,
+    )
+
+
+def test_password_creator_returns_callable_that_calls_psycopg_connect(monkeypatch):
+    calls = {}
+
+    class FakeConnection:
+        pass
+
+    def fake_connect(**kwargs):
+        calls.update(kwargs)
+        return FakeConnection()
+
+    import psycopg
+
+    monkeypatch.setattr(psycopg, "connect", fake_connect)
+
+    creator = AUTH_REGISTRY["password"](profile("password"), "s3cr3t")
+    conn = creator()
+    assert isinstance(conn, FakeConnection)
+    assert calls == {
+        "host": "localhost",
+        "port": 5432,
+        "dbname": "etl_craft",
+        "user": "etl_engine",
+        "password": "s3cr3t",
+    }
+
+
+def test_key_file_creator_requires_key_file_in_extra():
+    with pytest.raises(ConnectionError_):
+        AUTH_REGISTRY["key_file"](profile("key_file"), "passphrase")
+
+
+def test_key_file_creator_returns_callable_using_sslkey(monkeypatch):
+    calls = {}
+
+    class FakeConnection:
+        pass
+
+    def fake_connect(**kwargs):
+        calls.update(kwargs)
+        return FakeConnection()
+
+    import psycopg
+
+    monkeypatch.setattr(psycopg, "connect", fake_connect)
+
+    creator = AUTH_REGISTRY["key_file"](profile("key_file", key_file="/etc/key.pem"), "passphrase")
+    creator()
+    assert calls["sslkey"] == "/etc/key.pem"
+    assert calls["sslpassword"] == b"passphrase"
+
+
+def test_token_and_sso_creators_are_not_implemented():
+    with pytest.raises(NotImplementedError):
+        AUTH_REGISTRY["token"](profile("token"), "unused")
+    with pytest.raises(NotImplementedError):
+        AUTH_REGISTRY["sso"](profile("sso"), "unused")
+
+
+def test_build_engine_rejects_unknown_auth_mode():
+    # config.py's own validation already rejects an auth_mode outside
+    # VALID_AUTH_MODES at load time, so this is unreachable via a normally-
+    # loaded config — exercised by constructing a ConnectionProfile directly
+    # instead. build_engine checks auth_mode before ever touching `config`
+    # when `profile` is passed explicitly, so `config=None` is fine here.
+    with pytest.raises(ConnectionError_):
+        build_engine(None, profile("bogus"))
+
+
+# ==============================================================================
+# handlers.py — no DB, no execution — every body is still a stub
+# ==============================================================================
+
+
+def test_dispatch_unknown_handler_rejected():
+    # CFG_TASKS.HANDLER has a DB-level CHECK constraint restricting it to the
+    # four known values, so this is unreachable via a real task row — still
+    # worth guarding directly since dispatch() takes a bare string.
+    with pytest.raises(HandlerError):
+        dispatch("BOGUS")
+
+
+# ==============================================================================
+# runlog.py — against an in-memory SQLite stand-in
+# ==============================================================================
+#
+# The real Engine DB is always Postgres (per CLAUDE.md), and its own
+# behavioral guarantees — the partial unique indexes in particular — are
+# covered by sql/schema_test.sql against a real Postgres instance, plus the
+# concurrency test in test_integration.py. This section instead exercises
+# runlog.py's own control flow (find-or-create races, short-circuiting,
+# update-in-place) against a lightweight SQLite schema that reproduces just
+# the constraints runlog.py depends on.
+
+RUNLOG_SCHEMA = """
+CREATE TABLE AUD_PIPELINES_RUN_LOG (
+    PIPELINE_RUN_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+    PIPELINE_ID INTEGER NOT NULL,
+    START_DATE TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    END_DATE TIMESTAMP,
+    STATUS TEXT NOT NULL
+);
+CREATE UNIQUE INDEX ux_pipeline_run_one_active
+    ON AUD_PIPELINES_RUN_LOG (PIPELINE_ID) WHERE STATUS = 'IN-PROGRESS';
+
+CREATE TABLE AUD_TASK_RUN_LOG (
+    TASK_RUN_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+    TASK_ID INTEGER NOT NULL,
+    PIPELINE_RUN_ID INTEGER NOT NULL,
+    START_DATE TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    END_DATE TIMESTAMP,
+    STATUS TEXT NOT NULL,
+    SOURCE_COUNT INTEGER,
+    TARGET_COUNT INTEGER,
+    INSERT_COUNT INTEGER,
+    UPDATE_COUNT INTEGER,
+    DELETE_COUNT INTEGER,
+    ERROR_MESSAGE TEXT,
+    TASK_LOG TEXT
+);
+CREATE UNIQUE INDEX ux_task_run_one_per_pipeline_run
+    ON AUD_TASK_RUN_LOG (TASK_ID, PIPELINE_RUN_ID);
+"""
+
+
+@pytest.fixture
+def runlog_engine() -> Engine:
+    """An in-memory SQLite engine with the audit tables runlog.py touches."""
+    engine = create_engine("sqlite:///:memory:")
+    with engine.begin() as conn:
+        for statement in RUNLOG_SCHEMA.strip().split(";"):
+            if statement.strip():
+                conn.execute(text(statement))
+    return engine
+
+
+def test_find_or_create_active_run_mints_new_run_when_none_exists(runlog_engine):
+    with runlog_engine.begin() as conn:
+        run_id = find_or_create_active_run(conn, pipeline_id=1)
+    with runlog_engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT PIPELINE_ID, STATUS FROM AUD_PIPELINES_RUN_LOG WHERE PIPELINE_RUN_ID = :id"
+            ),
+            {"id": run_id},
+        ).one()
+    assert row.PIPELINE_ID == 1
+    assert row.STATUS == "IN-PROGRESS"
+
+
+def test_find_or_create_active_run_reuses_existing_in_progress_run(runlog_engine):
+    with runlog_engine.begin() as conn:
+        first = find_or_create_active_run(conn, pipeline_id=1)
+    with runlog_engine.begin() as conn:
+        second = find_or_create_active_run(conn, pipeline_id=1)
+    assert first == second
+
+
+def test_find_or_create_active_run_is_independent_per_pipeline(runlog_engine):
+    with runlog_engine.begin() as conn:
+        run_for_1 = find_or_create_active_run(conn, pipeline_id=1)
+        run_for_2 = find_or_create_active_run(conn, pipeline_id=2)
+    assert run_for_1 != run_for_2
+
+
+def test_find_or_create_active_run_mints_a_fresh_run_after_the_last_one_finished(runlog_engine):
+    with runlog_engine.begin() as conn:
+        first = find_or_create_active_run(conn, pipeline_id=1)
+        conn.execute(
+            text("UPDATE AUD_PIPELINES_RUN_LOG SET STATUS = 'SUCCESS' WHERE PIPELINE_RUN_ID = :id"),
+            {"id": first},
+        )
+    with runlog_engine.begin() as conn:
+        second = find_or_create_active_run(conn, pipeline_id=1)
+    assert second != first
+
+
+def test_resolve_run_for_task_binds_to_active_run(runlog_engine):
+    with runlog_engine.begin() as conn:
+        active = find_or_create_active_run(conn, pipeline_id=1)
+    with runlog_engine.begin() as conn:
+        resolved = resolve_run_for_task(conn, pipeline_id=1)
+    assert resolved == active
+
+
+def test_resolve_run_for_task_falls_back_to_latest_logged_run(runlog_engine):
+    with runlog_engine.begin() as conn:
+        run_id = find_or_create_active_run(conn, pipeline_id=1)
+        conn.execute(
+            text("UPDATE AUD_PIPELINES_RUN_LOG SET STATUS = 'SUCCESS' WHERE PIPELINE_RUN_ID = :id"),
+            {"id": run_id},
+        )
+    with runlog_engine.begin() as conn:
+        resolved = resolve_run_for_task(conn, pipeline_id=1)
+    assert resolved == run_id
+    with runlog_engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT STATUS, END_DATE FROM AUD_PIPELINES_RUN_LOG WHERE PIPELINE_RUN_ID = :id"),
+            {"id": run_id},
+        ).one()
+    assert row.STATUS == "SUCCESS"  # status is left alone, not reopened
+    assert row.END_DATE is not None  # but the date is touched
+
+
+def test_resolve_run_for_task_raises_when_pipeline_never_ran(runlog_engine):
+    with runlog_engine.begin() as conn, pytest.raises(RunLogError):
+        resolve_run_for_task(conn, pipeline_id=999)
+
+
+def test_find_or_create_task_run_creates_then_reuses_binding(runlog_engine):
+    with runlog_engine.begin() as conn:
+        run_id = find_or_create_active_run(conn, pipeline_id=1)
+        first = find_or_create_task_run(conn, task_id=10, pipeline_run_id=run_id)
+    assert first.status == "IN-PROGRESS"
+    with runlog_engine.begin() as conn:
+        second = find_or_create_task_run(conn, task_id=10, pipeline_run_id=run_id)
+    assert second.task_run_id == first.task_run_id
+    assert second.status == "IN-PROGRESS"
+
+
+def test_find_or_create_task_run_reflects_updated_status(runlog_engine):
+    with runlog_engine.begin() as conn:
+        run_id = find_or_create_active_run(conn, pipeline_id=1)
+        binding = find_or_create_task_run(conn, task_id=10, pipeline_run_id=run_id)
+        update_task_run(conn, binding.task_run_id, status="SUCCESS", target_count=42)
+    with runlog_engine.begin() as conn:
+        rebound = find_or_create_task_run(conn, task_id=10, pipeline_run_id=run_id)
+    assert rebound.task_run_id == binding.task_run_id
+    assert rebound.status == "SUCCESS"
+    with runlog_engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT TARGET_COUNT, END_DATE FROM AUD_TASK_RUN_LOG WHERE TASK_RUN_ID = :id"),
+            {"id": binding.task_run_id},
+        ).one()
+    assert row.TARGET_COUNT == 42
+    assert row.END_DATE is not None
+
+
+def test_update_task_run_leaves_unspecified_counts_untouched(runlog_engine):
+    with runlog_engine.begin() as conn:
+        run_id = find_or_create_active_run(conn, pipeline_id=1)
+        binding = find_or_create_task_run(conn, task_id=10, pipeline_run_id=run_id)
+        update_task_run(conn, binding.task_run_id, status="IN-PROGRESS", source_count=100)
+        update_task_run(conn, binding.task_run_id, status="SUCCESS", target_count=99)
+    with runlog_engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT SOURCE_COUNT, TARGET_COUNT FROM AUD_TASK_RUN_LOG WHERE TASK_RUN_ID = :id"),
+            {"id": binding.task_run_id},
+        ).one()
+    assert row.SOURCE_COUNT == 100  # untouched by the second call
+    assert row.TARGET_COUNT == 99
+
+
+def test_find_or_create_task_run_is_independent_per_task(runlog_engine):
+    with runlog_engine.begin() as conn:
+        run_id = find_or_create_active_run(conn, pipeline_id=1)
+        a = find_or_create_task_run(conn, task_id=10, pipeline_run_id=run_id)
+        b = find_or_create_task_run(conn, task_id=11, pipeline_run_id=run_id)
+    assert a.task_run_id != b.task_run_id
+
+
+def test_fetch_run_state_with_no_task_ids_returns_empty_without_touching_the_connection():
+    # Guards the early return: with an empty task_ids list there's nothing
+    # to query, so this never even touches `conn` — passing None proves it.
+    assert fetch_run_state(None, pipeline_run_id=1, task_ids=[]) == {}
+
+
+class _FakeResult:
+    """A minimal stand-in for a SQLAlchemy CursorResult, just enough for runlog.py's own calls."""
+
+    def __init__(self, value):
+        self._value = value
+
+    def scalar_one_or_none(self):
+        return self._value
+
+    def scalar_one(self):
+        return self._value
+
+    def one_or_none(self):
+        return self._value
+
+
+class _RaceThenVanishConnection:
+    """Simulates: insert hits a unique violation, then the immediate re-SELECT finds nothing.
+
+    Against a real Postgres this can't happen — a unique_violation on
+    ux_pipeline_run_one_active/ux_task_run_one_per_pipeline_run means a
+    conflicting row exists by definition, so the re-SELECT right after
+    losing the race is guaranteed to find the winner. runlog.py's own
+    defensive RunLogError for that "impossible" case can only be exercised
+    by simulating it directly like this — see
+    tests/test_integration.py's deterministic race tests for the real,
+    non-simulated version of this same race.
+    """
+
+    def __init__(self):
+        self._call_count = 0
+
+    def begin_nested(self):
+        return contextlib.nullcontext()
+
+    def execute(self, *args, **kwargs):
+        self._call_count += 1
+        if self._call_count == 2:
+            raise IntegrityError("INSERT", {}, Exception("unique_violation"))
+        return _FakeResult(None)
+
+
+def test_find_or_create_active_run_raises_if_winner_vanishes_after_losing_race():
+    with pytest.raises(RunLogError):
+        find_or_create_active_run(_RaceThenVanishConnection(), pipeline_id=1)
+
+
+def test_find_or_create_task_run_raises_if_winner_vanishes_after_losing_race():
+    with pytest.raises(RunLogError):
+        find_or_create_task_run(_RaceThenVanishConnection(), task_id=1, pipeline_run_id=1)
+
+
+# ==============================================================================
+# cli.py — set-execution-mode / configure, the two commands that never need
+# a live Postgres connection (both are handled before load_config/
+# build_engine in main() — see cli.py's own module comment)
+# ==============================================================================
+
+
+def test_cli_set_execution_mode(tmp_path, monkeypatch, capsys):
+    write_config(tmp_path, VALID_YAML)
+    monkeypatch.chdir(tmp_path)
+
+    exit_code = cli_main(["set-execution-mode", "orchestrator"])
+
+    assert exit_code == 0
+    assert "orchestrator" in capsys.readouterr().out
+    assert load_config().mode == "orchestrator"
+
+
+def test_cli_set_execution_mode_invalid_choice_is_an_argparse_error(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main(["set-execution-mode", "bogus"])
+    assert exc_info.value.code == 2
+
+
+def test_cli_set_execution_mode_missing_file_reports_clean_error(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+
+    exit_code = cli_main(["set-execution-mode", "local"])
+
+    assert exit_code == 2
+    assert "error:" in capsys.readouterr().err
+
+
+def test_cli_configure_without_env_reports_not_implemented(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+
+    exit_code = cli_main(["configure"])
+
+    assert exit_code == 2
+    assert "not implemented yet" in capsys.readouterr().err
+
+
+def test_cli_configure_with_env(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    env_path = _write_env(tmp_path, VALID_ENV)
+
+    exit_code = cli_main(["configure", "--env", str(env_path)])
+
+    assert exit_code == 0
+    assert "craft-connector.yml written" in capsys.readouterr().out
+    assert load_config().postgres.active_profile == "dev"
+
+
+def test_cli_configure_with_env_reports_clean_error_on_bad_env(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    bad_env = VALID_ENV.replace("ETL_CRAFT_MODE=local", "ETL_CRAFT_MODE=bogus")
+    env_path = _write_env(tmp_path, bad_env)
+
+    exit_code = cli_main(["configure", "--env", str(env_path)])
+
+    assert exit_code == 2
+    assert "error:" in capsys.readouterr().err
+
+
+# ==============================================================================
+# __init__.py / __main__.py — the two console-script entry points
+# ==============================================================================
+#
+# Both are pure delegation to cli.main(); the fastest way to exercise them
+# for real (not just by inspection) without needing a working
+# craft-connector.yml is to trigger argparse's own "no command given"
+# SystemExit(2), which fires before any config loading happens.
+
+
+def test_init_main_delegates_to_cli_main(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["etl-craft"])
+    with pytest.raises(SystemExit) as exc_info:
+        etl_craft.main()
+    assert exc_info.value.code == 2
+
+
+def test_dunder_main_runs_cli_when_invoked_as_a_module(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["etl-craft"])
+    with pytest.raises(SystemExit) as exc_info:
+        runpy.run_module("etl_craft", run_name="__main__")
+    assert exc_info.value.code == 2
+
+
+# ==============================================================================
+# configure.py — set_execution_mode / configure_from_env, no DB at all
+# ==============================================================================
+#
+# Both write craft-connector.yml directly (no engine, no secret resolution),
+# so these — and the CLI paths that dispatch to them — never need a live
+# Postgres connection, unlike every other command.
+
+
+def test_set_execution_mode_updates_only_mode(tmp_path):
+    path = write_config(tmp_path, VALID_YAML)
+
+    set_execution_mode("orchestrator", path)
+
+    reloaded = load_config(path)
+    assert reloaded.mode == "orchestrator"
+    assert reloaded.postgres.active.jdbc_url == "jdbc:postgresql://localhost:5432/etl_craft"
+    assert reloaded.cloning.enabled is True
+
+
+def test_set_execution_mode_rejects_invalid_mode(tmp_path):
+    path = write_config(tmp_path, VALID_YAML)
+    with pytest.raises(ConfigError):
+        set_execution_mode("bogus", path)
+
+
+def test_set_execution_mode_requires_existing_file(tmp_path):
+    with pytest.raises(ConfigError):
+        set_execution_mode("local", tmp_path / "does-not-exist.yml")
+
+
+def test_set_execution_mode_requires_execution_section(tmp_path):
+    path = tmp_path / "craft-connector.yml"
+    path.write_text("Postgres:\n  Active_profile: dev\n  Profiles: {}\n")
+    with pytest.raises(ConfigError):
+        set_execution_mode("local", path)
+
+
+def test_set_execution_mode_rejects_malformed_yaml(tmp_path):
+    path = tmp_path / "craft-connector.yml"
+    path.write_text("Execution: [unterminated")
+    with pytest.raises(ConfigError):
+        set_execution_mode("local", path)
+
+
+def _write_env(tmp_path, contents: str, name: str = "config.env"):
+    path = tmp_path / name
+    path.write_text(contents)
+    return path
+
+
+VALID_ENV = """
+ETL_CRAFT_MODE=local
+ETL_CRAFT_SOURCE_TYPE=environment
+ETL_CRAFT_POSTGRES_PROFILE=dev
+ETL_CRAFT_POSTGRES_JDBC_URL=jdbc:postgresql://localhost:5432/etl_craft
+ETL_CRAFT_POSTGRES_USER=etl_engine
+ETL_CRAFT_POSTGRES_AUTH_MODE=password
+"""
+
+
+def test_configure_from_env_creates_valid_config(tmp_path):
+    env_path = _write_env(tmp_path, VALID_ENV)
+    output_path = tmp_path / "craft-connector.yml"
+
+    configure_from_env(env_path, output_path)
+
+    config = load_config(output_path)
+    assert config.mode == "local"
+    assert config.source.type == "environment"
+    assert config.postgres.active_profile == "dev"
+    assert config.postgres.active.jdbc_url == "jdbc:postgresql://localhost:5432/etl_craft"
+    assert config.postgres.active.user == "etl_engine"
+    assert config.postgres.active.auth_mode == "password"
+    assert config.cloning.enabled is False
+    assert config.cloning.scope == "cfg"
+
+
+def test_configure_from_env_missing_env_file_raises(tmp_path):
+    with pytest.raises(ConfigError):
+        configure_from_env(tmp_path / "no-such.env", tmp_path / "craft-connector.yml")
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "ETL_CRAFT_MODE",
+        "ETL_CRAFT_SOURCE_TYPE",
+        "ETL_CRAFT_POSTGRES_PROFILE",
+        "ETL_CRAFT_POSTGRES_JDBC_URL",
+        "ETL_CRAFT_POSTGRES_USER",
+        "ETL_CRAFT_POSTGRES_AUTH_MODE",
+    ],
+)
+def test_configure_from_env_requires_each_field(tmp_path, key):
+    lines = [line for line in VALID_ENV.strip().splitlines() if not line.startswith(key)]
+    env_path = _write_env(tmp_path, "\n".join(lines))
+    with pytest.raises(ConfigError):
+        configure_from_env(env_path, tmp_path / "craft-connector.yml")
+
+
+def test_configure_from_env_rejects_invalid_mode(tmp_path):
+    env_path = _write_env(
+        tmp_path, VALID_ENV.replace("ETL_CRAFT_MODE=local", "ETL_CRAFT_MODE=bogus")
+    )
+    with pytest.raises(ConfigError):
+        configure_from_env(env_path, tmp_path / "craft-connector.yml")
+
+
+def test_configure_from_env_rejects_invalid_source_type(tmp_path):
+    env_path = _write_env(
+        tmp_path,
+        VALID_ENV.replace("ETL_CRAFT_SOURCE_TYPE=environment", "ETL_CRAFT_SOURCE_TYPE=bogus"),
+    )
+    with pytest.raises(ConfigError):
+        configure_from_env(env_path, tmp_path / "craft-connector.yml")
+
+
+def test_configure_from_env_file_source_requires_path(tmp_path):
+    env_path = _write_env(
+        tmp_path,
+        VALID_ENV.replace("ETL_CRAFT_SOURCE_TYPE=environment", "ETL_CRAFT_SOURCE_TYPE=file"),
+    )
+    with pytest.raises(ConfigError):
+        configure_from_env(env_path, tmp_path / "craft-connector.yml")
+
+
+def test_configure_from_env_file_source_with_path(tmp_path):
+    secrets_path = tmp_path / "secrets.env"
+    env = VALID_ENV.replace(
+        "ETL_CRAFT_SOURCE_TYPE=environment",
+        f"ETL_CRAFT_SOURCE_TYPE=file\nETL_CRAFT_SOURCE_PATH={secrets_path}",
+    )
+    env_path = _write_env(tmp_path, env)
+    output_path = tmp_path / "craft-connector.yml"
+
+    configure_from_env(env_path, output_path)
+
+    config = load_config(output_path)
+    assert config.source.type == "file"
+    assert config.source.path == str(secrets_path)
+
+
+def test_configure_from_env_rejects_invalid_auth_mode(tmp_path):
+    env_path = _write_env(
+        tmp_path,
+        VALID_ENV.replace(
+            "ETL_CRAFT_POSTGRES_AUTH_MODE=password", "ETL_CRAFT_POSTGRES_AUTH_MODE=bogus"
+        ),
+    )
+    with pytest.raises(ConfigError):
+        configure_from_env(env_path, tmp_path / "craft-connector.yml")
+
+
+def test_configure_from_env_rejects_invalid_cloning_scope(tmp_path):
+    env_path = _write_env(tmp_path, VALID_ENV + "ETL_CRAFT_CLONING_SCOPE=bogus\n")
+    with pytest.raises(ConfigError):
+        configure_from_env(env_path, tmp_path / "craft-connector.yml")
+
+
+def test_configure_from_env_enables_cloning(tmp_path):
+    env_path = _write_env(tmp_path, VALID_ENV + "ETL_CRAFT_CLONING_ENABLED=true\n")
+    output_path = tmp_path / "craft-connector.yml"
+
+    configure_from_env(env_path, output_path)
+
+    assert load_config(output_path).cloning.enabled is True
+
+
+def test_configure_from_env_includes_orchestrator_name(tmp_path):
+    env_path = _write_env(tmp_path, VALID_ENV + "ETL_CRAFT_ORCHESTRATOR_NAME=Airflow\n")
+    output_path = tmp_path / "craft-connector.yml"
+
+    configure_from_env(env_path, output_path)
+
+    raw = yaml.safe_load(output_path.read_text())
+    assert raw["Execution"]["Orchestrator name"] == "Airflow"
+
+
+def test_configure_from_env_merges_a_second_profile_without_losing_the_first(tmp_path):
+    output_path = tmp_path / "craft-connector.yml"
+    configure_from_env(_write_env(tmp_path, VALID_ENV, "dev.env"), output_path)
+
+    uat_env = VALID_ENV.replace(
+        "ETL_CRAFT_POSTGRES_PROFILE=dev", "ETL_CRAFT_POSTGRES_PROFILE=uat"
+    ).replace(
+        "jdbc:postgresql://localhost:5432/etl_craft", "jdbc:postgresql://uat-host:5432/etl_craft"
+    )
+    configure_from_env(_write_env(tmp_path, uat_env, "uat.env"), output_path)
+
+    config = load_config(output_path)
+    assert set(config.postgres.profiles) == {"dev", "uat"}
+    assert config.postgres.active_profile == "uat"
+    assert config.postgres.profiles["dev"].jdbc_url == "jdbc:postgresql://localhost:5432/etl_craft"

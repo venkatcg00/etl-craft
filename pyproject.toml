@@ -1,0 +1,80 @@
+[project]
+name = "etl-craft"
+version = "0.1.0"
+description = "Standalone, metadata-driven ETL orchestration engine"
+readme = "README.md"
+authors = [
+    { name = "venkatcg00", email = "venkatcg0@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "psycopg[binary]>=3.3.6",
+    "pyyaml>=6.0.3",
+    "sqlalchemy>=2.0.54",
+]
+
+[project.scripts]
+etl-craft = "etl_craft:main"
+
+[build-system]
+requires = ["uv_build>=0.12.17,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "black>=26.5.1",
+    "pydocstyle>=6.3.0",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "pytest-timeout>=2.4.0",
+    "ruff>=0.16.8",
+]
+
+[tool.pytest.ini_options]
+# The orchestrator tests spawn real subprocesses in a wave loop — a bug
+# there (e.g. re-selecting a permanently-FAILED task forever) hangs, not
+# fails, so a global timeout turns that into a fast, legible test failure
+# instead of a stuck CI job or a stuck local dev shell.
+timeout = 60
+
+[tool.coverage.run]
+source = ["etl_craft"]
+# Without this, coverage.py only traces the main thread by default, so the
+# race-branch code in runlog.py's real concurrency test (multiple threads
+# hitting the same partial unique index) silently reads as uncovered even
+# though it genuinely runs.
+concurrency = ["thread"]
+
+[tool.coverage.report]
+fail_under = 100
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+]
+
+[tool.pydocstyle]
+select = "D"
+# D203/D211 and D212/D213 are each an inherently contradictory pair under a
+# bare "select=D" (whichever style is used, the other rule in the pair always
+# fires) — add-ignore drops one side of each, same resolution pydocstyle's
+# own "pep257" convention uses.
+add-ignore = "D203,D213"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# D (docstrings) is deliberately left out of ruff's own selection — pydocstyle
+# above is the dedicated tool for that, so the two don't produce duplicate or
+# conflicting reports on the same lines.
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.format]
+# Ruff's formatter is not used — black owns formatting so there's a single
+# source of truth; `ruff` here is lint-only (see [tool.ruff.lint] above).
