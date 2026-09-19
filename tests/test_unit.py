@@ -17,10 +17,15 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
 import etl_craft
+import etl_craft.warehouse as warehouse_module
 from etl_craft.cli import main as cli_main
 from etl_craft.config import (
+    CloningConfig,
     ConfigError,
     ConnectionProfile,
+    ConnectionSection,
+    ConnectorConfig,
+    SourceConfig,
     _load_dotenv_file,
     load_config,
     resolve_secret,
@@ -46,6 +51,11 @@ from etl_craft.runlog import (
     find_or_create_task_run,
     resolve_run_for_task,
     update_task_run,
+)
+from etl_craft.warehouse import (
+    WAREHOUSE_AUTH_REGISTRY,
+    build_data_engine,
+    translate_jdbc_url,
 )
 
 # ==============================================================================
@@ -317,6 +327,33 @@ def test_cloning_defaults_when_section_absent(tmp_path):
     assert config.cloning.scope == "cfg"
 
 
+def test_warehouse_is_none_when_section_absent(tmp_path):
+    config = load_config(write_config(tmp_path, VALID_YAML))
+    assert config.warehouse is None
+
+
+def test_warehouse_parsed_when_present(tmp_path):
+    with_warehouse = VALID_YAML + (
+        "\nWarehouse:\n"
+        "  Active_profile: dev\n"
+        "  Profiles:\n"
+        "    dev:\n"
+        "      jdbc_url: jdbc:postgresql://warehouse-host:5432/analytics\n"
+        "      user: etl_engine\n"
+        "      auth_mode: password\n"
+    )
+    config = load_config(write_config(tmp_path, with_warehouse))
+    assert config.warehouse.active_profile == "dev"
+    assert config.warehouse.active.jdbc_url == "jdbc:postgresql://warehouse-host:5432/analytics"
+    assert config.warehouse.active.secret_var == "ETL_CRAFT_WAREHOUSE_DEV_SECRET"
+
+
+def test_warehouse_section_must_be_a_mapping_if_present(tmp_path):
+    bad = VALID_YAML + "\nWarehouse: not-a-mapping\n"
+    with pytest.raises(ConfigError):
+        load_config(write_config(tmp_path, bad))
+
+
 def test_resolve_secret_from_environment(tmp_path, monkeypatch):
     config = load_config(write_config(tmp_path, VALID_YAML))
     monkeypatch.setenv("ETL_CRAFT_POSTGRES_DEV_SECRET", "s3cr3t")
@@ -456,6 +493,103 @@ def test_build_engine_rejects_unknown_auth_mode():
     # when `profile` is passed explicitly, so `config=None` is fine here.
     with pytest.raises(ConnectionError_):
         build_engine(None, profile("bogus"))
+
+
+# ==============================================================================
+# warehouse.py — JDBC/dialect translation and auth wiring, no live DB required
+# ==============================================================================
+
+
+def test_translate_jdbc_url_maps_known_scheme_and_defaults_port():
+    dialect, parts = translate_jdbc_url("jdbc:postgresql://myhost/mydb")
+    assert dialect == "postgresql+psycopg"
+    assert parts == {"host": "myhost", "port": None, "database": "mydb", "query": {}}
+
+
+def test_translate_jdbc_url_explicit_port_and_query():
+    dialect, parts = translate_jdbc_url("jdbc:mysql://myhost:3306/mydb?useSSL=true")
+    assert dialect == "mysql+pymysql"
+    assert parts["port"] == 3306
+    assert parts["query"] == {"useSSL": "true"}
+
+
+def test_translate_jdbc_url_unmapped_scheme_passes_through():
+    # Not in JDBC_SCHEME_TO_SQLALCHEMY_DIALECT — deliberately, per this
+    # module's own [ADDITION] comment: an unrecognized scheme is used
+    # verbatim as the SQLAlchemy dialect name rather than rejected.
+    dialect, _ = translate_jdbc_url("jdbc:oracle://myhost:1521/mydb")
+    assert dialect == "oracle"
+
+
+def test_translate_jdbc_url_rejects_malformed_url():
+    with pytest.raises(ConnectionError_):
+        translate_jdbc_url("not-a-jdbc-url")
+
+
+def warehouse_profile(
+    auth_mode: str, jdbc_url: str = "jdbc:postgresql://localhost/etl_craft", **extra
+):
+    return ConnectionProfile(
+        section="WAREHOUSE",
+        name="dev",
+        jdbc_url=jdbc_url,
+        user="etl_engine",
+        auth_mode=auth_mode,
+        extra=extra,
+    )
+
+
+def test_password_creator_builds_url_and_uses_generic_dbapi_connect(monkeypatch):
+    captured = {}
+
+    def fake_dbapi_connect(url):
+        captured["url"] = url
+        return "fake-connection"
+
+    monkeypatch.setattr(warehouse_module, "_dbapi_connect", fake_dbapi_connect)
+
+    creator = WAREHOUSE_AUTH_REGISTRY["password"](
+        warehouse_profile("password", "jdbc:mysql://myhost:3306/mydb"), "s3cr3t"
+    )
+    conn = creator()
+
+    assert conn == "fake-connection"
+    url = captured["url"]
+    assert url.drivername == "mysql+pymysql"
+    assert url.username == "etl_engine"
+    assert url.password == "s3cr3t"
+    assert url.host == "myhost"
+    assert url.port == 3306
+    assert url.database == "mydb"
+
+
+def test_warehouse_key_file_token_sso_creators_are_not_implemented():
+    with pytest.raises(NotImplementedError):
+        WAREHOUSE_AUTH_REGISTRY["key_file"](warehouse_profile("key_file"), "unused")
+    with pytest.raises(NotImplementedError):
+        WAREHOUSE_AUTH_REGISTRY["token"](warehouse_profile("token"), "unused")
+    with pytest.raises(NotImplementedError):
+        WAREHOUSE_AUTH_REGISTRY["sso"](warehouse_profile("sso"), "unused")
+
+
+def test_build_data_engine_raises_when_no_warehouse_configured():
+    config = ConnectorConfig(
+        mode="local",
+        source=SourceConfig(type="environment"),
+        postgres=ConnectionSection(active_profile="dev", profiles={"dev": profile("password")}),
+        cloning=CloningConfig(),
+        warehouse=None,
+    )
+    with pytest.raises(ConnectionError_):
+        build_data_engine(config)
+
+
+def test_build_data_engine_rejects_unknown_auth_mode():
+    # Mirrors test_build_engine_rejects_unknown_auth_mode above: passing a
+    # profile directly skips the config.warehouse lookup entirely, so
+    # config=None is fine here too.
+    with pytest.raises(ConnectionError_):
+        build_data_engine(None, warehouse_profile("bogus"))
 
 
 # ==============================================================================

@@ -23,9 +23,17 @@
 # before other tooling (e.g. `configure`) starts writing profiles that rely
 # on it.
 #
-# [ADDITION] The Data DB section (name unresolved — CLAUDE.md open question
-# #1) is intentionally not parsed here yet. This module covers only what the
-# Engine DB connection needs: [Execution], [Source], [Postgres], [Cloning].
+# [CHOICE] CLAUDE.md open question #1 (Data DB section name — "Data Db"/
+# "[Data Db 1]" explicitly rejected as too Informatica-shaped, no
+# replacement settled) is resolved here as `Warehouse`: it's the term
+# CLAUDE.md itself already uses throughout ("Data DB / warehouse"), reads
+# as a plain noun rather than a product-shaped label, and is a one-line
+# rename in _parse_config below if a different name is preferred. Unlike
+# [Postgres], [Warehouse] is optional at parse time — `list`/`graph`/
+# `set-execution-mode`/`configure`/`run --init-only` and friends never
+# touch the Data DB, so a file without one still loads; anything that
+# genuinely needs a Data DB connection (warehouse.build_data_engine, the
+# not-yet-built `validate`/cloning) raises its own clear error if absent.
 
 from __future__ import annotations
 
@@ -105,6 +113,7 @@ class ConnectorConfig:
     source: SourceConfig
     postgres: ConnectionSection
     cloning: CloningConfig
+    warehouse: ConnectionSection | None = None
 
 
 def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> ConnectorConfig:
@@ -133,9 +142,19 @@ def _parse_config(raw: dict[str, Any], path: Path) -> ConnectorConfig:
     postgres_raw = _require_section(raw, "Postgres", path)
     postgres = _parse_connection_section("POSTGRES", postgres_raw, path)
 
+    warehouse_raw = raw.get("Warehouse")
+    if warehouse_raw is None:
+        warehouse = None
+    elif not isinstance(warehouse_raw, dict):
+        raise ConfigError(f"{path}: Warehouse section must be a mapping if present")
+    else:
+        warehouse = _parse_connection_section("WAREHOUSE", warehouse_raw, path)
+
     cloning = _parse_cloning(raw.get("Cloning") or {}, path)
 
-    return ConnectorConfig(mode=mode, source=source, postgres=postgres, cloning=cloning)
+    return ConnectorConfig(
+        mode=mode, source=source, postgres=postgres, cloning=cloning, warehouse=warehouse
+    )
 
 
 def _require_section(raw: dict[str, Any], name: str, path: Path) -> dict[str, Any]:

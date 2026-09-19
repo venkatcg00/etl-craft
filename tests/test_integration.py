@@ -50,6 +50,7 @@ from etl_craft.runlog import (
     update_task_run,
 )
 from etl_craft.runner import DependenciesNotMetError, ForceNotAllowedError, run_task
+from etl_craft.warehouse import build_data_engine
 
 # ==============================================================================
 # runlog.py — against real Postgres
@@ -229,6 +230,60 @@ def test_find_or_create_task_run_second_transaction_hits_integrity_error_path(
 
     assert not errors, errors
     assert results["holder"] == results["racer"]
+
+
+# ==============================================================================
+# warehouse.py — against real Postgres, standing in for "any dialect"
+# ==============================================================================
+#
+# There's no second real warehouse engine available in this Docker setup to
+# prove connectivity against a genuinely different dialect — but the whole
+# point of build_data_engine's design is that it never hardcodes a driver;
+# it asks SQLAlchemy's own resolved dialect for connect args at pool-
+# checkout time (see warehouse.py's module docstring). Pointing it at this
+# same Postgres container with dialect "postgresql+psycopg" still proves
+# that exact generic mechanism executes for real, end to end — a mocked
+# DBAPI (as in test_unit.py) can't prove that part.
+
+
+def test_build_data_engine_connects_for_real(monkeypatch, postgres_engine):
+    # postgres_engine is otherwise unused here — build_data_engine opens its
+    # own connection independently of it — but depending on it is what runs
+    # the skip-if-unreachable check before this test tries to connect for
+    # real. Same class of gap as craft_connector_on_disk's own fix above.
+    monkeypatch.setenv("ETL_CRAFT_WAREHOUSE_DEV_SECRET", "etl_craft")
+    profile = ConnectionProfile(
+        section="WAREHOUSE",
+        name="dev",
+        jdbc_url="jdbc:postgresql://localhost:55432/etl_craft",
+        user="etl_craft",
+        auth_mode="password",
+    )
+    config = ConnectorConfig(
+        mode="local",
+        source=SourceConfig(type="environment"),
+        postgres=ConnectionSection(
+            active_profile="dev",
+            profiles={
+                "dev": ConnectionProfile(
+                    section="POSTGRES",
+                    name="dev",
+                    jdbc_url="jdbc:postgresql://localhost:55432/etl_craft",
+                    user="etl_craft",
+                    auth_mode="password",
+                )
+            },
+        ),
+        cloning=CloningConfig(),
+        warehouse=ConnectionSection(active_profile="dev", profiles={"dev": profile}),
+    )
+
+    engine = build_data_engine(config)
+    try:
+        with engine.connect() as conn:
+            assert conn.execute(text("SELECT 1")).scalar_one() == 1
+    finally:
+        engine.dispose()
 
 
 # ==============================================================================
