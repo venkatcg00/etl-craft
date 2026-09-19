@@ -226,6 +226,7 @@ class PipelineDetail:
     run_schedule: str | None
     sla_in_hours: float | None
     refresh_type: str
+    created_by: str | None
 
 
 def fetch_pipeline_detail(conn: Connection, pipeline_id: int) -> PipelineDetail:
@@ -234,7 +235,8 @@ def fetch_pipeline_detail(conn: Connection, pipeline_id: int) -> PipelineDetail:
         text(
             "SELECT PIPELINE_CODE AS pipeline_code, PIPELINE_NAME AS pipeline_name, "
             "DESCRIPTION AS description, RUN_SCHEDULE AS run_schedule, "
-            "SLA_IN_HOURS AS sla_in_hours, REFRESH_TYPE AS refresh_type "
+            "SLA_IN_HOURS AS sla_in_hours, REFRESH_TYPE AS refresh_type, "
+            "CREATED_BY AS created_by "
             "FROM CFG_PIPELINES WHERE PIPELINE_ID = :pipeline_id"
         ),
         {"pipeline_id": pipeline_id},
@@ -249,6 +251,7 @@ def fetch_pipeline_detail(conn: Connection, pipeline_id: int) -> PipelineDetail:
         # so convert here rather than push that concern onto every caller.
         sla_in_hours=float(row.sla_in_hours) if row.sla_in_hours is not None else None,
         refresh_type=row.refresh_type,
+        created_by=row.created_by,
     )
 
 

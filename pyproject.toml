@@ -16,6 +16,11 @@ dependencies = [
 [project.scripts]
 etl-craft = "etl_craft:main"
 
+[project.optional-dependencies]
+clickhouse = [
+    "clickhouse-sqlalchemy>=0.3.2",
+]
+
 [build-system]
 requires = ["uv_build>=0.12.17,<0.13.0"]
 build-backend = "uv_build"
@@ -23,6 +28,7 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "black>=26.5.1",
+    "etl-craft[clickhouse]",
     "pydocstyle>=6.3.0",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
@@ -82,5 +88,8 @@ src = ["src", "tests"]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.ruff.format]
+
+[tool.uv.sources]
+etl-craft = { workspace = true }
 # Ruff's formatter is not used — black owns formatting so there's a single
 # source of truth; `ruff` here is lint-only (see [tool.ruff.lint] above).

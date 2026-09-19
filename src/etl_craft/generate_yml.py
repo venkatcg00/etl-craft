@@ -18,6 +18,36 @@
 # in a separate DAG") and aren't resolved by anything built yet (the
 # self-check/poll step — see orchestrator.py). They're surfaced here purely
 # informationally, under their own top-level keys, never wired into `tasks:`.
+#
+# [ADDITION] `default_args`/`catchup`/`tags` (added per explicit request to
+# make the output easier to wire straight into a real Airflow DAG). Every
+# value below is either read from real CFG_PIPELINES data or a deliberate,
+# explained design choice — nothing is an arbitrary placeholder:
+#   * `default_args.owner` <- CREATED_BY (whoever registered the pipeline;
+#     the closest real column to "owner" — CFG_PIPELINES has no dedicated
+#     owner field).
+#   * `default_args.email_on_failure: false` — CLAUDE.md's own EMAIL_ALERT
+#     handler is the engine's alerting mechanism (a task gated on another
+#     task's FAILURE); turning on Airflow's native email-on-failure too
+#     would double-alert on the same failure through two unrelated paths.
+#   * `default_args.depends_on_past: false` — CLAUDE.md's run-id model has
+#     no notion of "this run depends on the previous DAG run"; every run's
+#     dependencies come entirely from CFG_TASK_DEPENDENCY/
+#     CFG_PIPELINE_DEPENDENCY, so leaving Airflow's own past-run gating on
+#     would silently add ordering this design doesn't have.
+#   * `default_args.retries` / `retry_delay_minutes` — arbitrary starting
+#     numbers (1 retry, 5 minutes), *not* derived from CFG_ data, but a
+#     deliberate default rather than Airflow's bare 0: safe specifically
+#     because `run --task_code` is idempotent-retry-resumes (CLAUDE.md), so
+#     an Airflow-level retry of the exact same bash_command just continues
+#     the same task run rather than restarting it.
+#   * `catchup: false` — a metadata-driven run whose pipeline_run_id is
+#     minted via `ux_pipeline_run_one_active` doesn't have a meaningful
+#     notion of "backfill every missed schedule interval"; leaving Airflow's
+#     default catchup on would let a large number of missed-interval DAG
+#     runs all race to mint/reuse the same active run at once.
+#   * `tags` <- [REFRESH_TYPE.lower()] — genuinely derived from CFG_ data,
+#     for Airflow UI filtering.
 
 from __future__ import annotations
 
@@ -93,6 +123,15 @@ def generate_pipeline_dag(conn: Connection, pipeline_code: str) -> dict[str, Any
         "schedule": detail.run_schedule,
         "sla_hours": detail.sla_in_hours,
         "refresh_type": detail.refresh_type,
+        "catchup": False,
+        "tags": [detail.refresh_type.lower()],
+        "default_args": {
+            "owner": detail.created_by,
+            "retries": 1,
+            "retry_delay_minutes": 5,
+            "depends_on_past": False,
+            "email_on_failure": False,
+        },
         "tasks": tasks,
     }
 

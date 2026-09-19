@@ -29,10 +29,29 @@ jobs:
           --health-interval 2s
           --health-timeout 3s
           --health-retries 30
+      # Stands in as a genuinely different SQLAlchemy dialect for
+      # warehouse.py's tests — see docker-compose.yml's own comment on the
+      # equivalent local service. Only exercised when the `clickhouse` extra
+      # is installed (it's in the dev group, so `uv sync --all-groups`
+      # below pulls it in); tests skip themselves otherwise.
+      clickhouse:
+        image: clickhouse/clickhouse-server:24
+        env:
+          CLICKHOUSE_USER: etl_craft
+          CLICKHOUSE_PASSWORD: etl_craft
+          CLICKHOUSE_DB: etl_craft
+        ports:
+          - 58123:8123
+        options: >-
+          --health-cmd "wget --spider -q http://localhost:8123/ping || exit 1"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
     env:
       # Used by the Python test suite (SQLAlchemy's dialect-qualified URI
       # scheme — psql/libpq don't understand "+psycopg").
       ETL_CRAFT_TEST_DATABASE_URL: postgresql+psycopg://etl_craft:etl_craft@localhost:55432/etl_craft
+      ETL_CRAFT_TEST_CLICKHOUSE_URL: clickhouse://etl_craft:etl_craft@localhost:58123/etl_craft
       # Used by the plain `psql` steps below instead: libpq's standard PG*
       # env vars, so those steps need no connection string at all. Keeping
       # these separate avoids the URI-scheme mismatch — the first version of

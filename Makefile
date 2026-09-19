@@ -2,7 +2,9 @@
 
 # Bring up a local Postgres 16 with sql/schema.sql already applied
 # (docker-entrypoint-initdb.d only runs on a fresh volume, so this is a
-# no-op on an already-initialized one — use db-reset to force a clean slate).
+# no-op on an already-initialized one — use db-reset to force a clean slate)
+# plus a local ClickHouse, which stands in as a genuinely different
+# SQLAlchemy dialect for warehouse.py's own tests (see docker-compose.yml).
 db-up:
 	docker compose up -d --wait
 

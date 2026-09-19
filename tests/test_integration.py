@@ -289,6 +289,48 @@ def test_build_data_engine_connects_for_real(monkeypatch, postgres_engine):
         engine.dispose()
 
 
+def test_build_data_engine_connects_to_real_clickhouse(monkeypatch, clickhouse_engine):
+    # Unlike the Postgres-standing-in-for-"some dialect" test above, this
+    # genuinely proves the generic, dialect-agnostic connect mechanism
+    # against a real *different* SQLAlchemy dialect — the actual point of
+    # warehouse.py never hardcoding a driver. Skips itself (via
+    # clickhouse_engine) if ClickHouse or the `clickhouse` extra isn't
+    # available, same as the Postgres suite skips when Docker is down.
+    monkeypatch.setenv("ETL_CRAFT_WAREHOUSE_DEV_SECRET", "etl_craft")
+    profile = ConnectionProfile(
+        section="WAREHOUSE",
+        name="dev",
+        jdbc_url="jdbc:clickhouse://localhost:58123/etl_craft",
+        user="etl_craft",
+        auth_mode="password",
+    )
+    config = ConnectorConfig(
+        mode="local",
+        source=SourceConfig(type="environment"),
+        postgres=ConnectionSection(
+            active_profile="dev",
+            profiles={
+                "dev": ConnectionProfile(
+                    section="POSTGRES",
+                    name="dev",
+                    jdbc_url="jdbc:postgresql://localhost:55432/etl_craft",
+                    user="etl_craft",
+                    auth_mode="password",
+                )
+            },
+        ),
+        cloning=CloningConfig(),
+        warehouse=ConnectionSection(active_profile="dev", profiles={"dev": profile}),
+    )
+
+    engine = build_data_engine(config)
+    try:
+        with engine.connect() as conn:
+            assert conn.execute(text("SELECT 1")).scalar_one() == 1
+    finally:
+        engine.dispose()
+
+
 # ==============================================================================
 # cfg.py — against real Postgres
 # ==============================================================================
@@ -487,6 +529,9 @@ def test_fetch_pipeline_detail(pg_conn, cfg_pipeline):
     assert detail.sla_in_hours == 1.5
     assert isinstance(detail.sla_in_hours, float)
     assert detail.refresh_type == "INCREMENTAL"
+    # Auto-stamped by trg_set_audit_columns to current_user on insert, never
+    # actually NULL in practice — the test role connecting here.
+    assert detail.created_by == "etl_craft"
 
 
 def test_fetch_pipeline_detail_nullable_fields_default_none(pg_conn, cfg_pipeline):
@@ -494,6 +539,7 @@ def test_fetch_pipeline_detail_nullable_fields_default_none(pg_conn, cfg_pipelin
     assert detail.description is None
     assert detail.run_schedule is None
     assert detail.sla_in_hours is None
+    assert detail.created_by == "etl_craft"
 
 
 def test_fetch_business_rule_targets(pg_conn, cfg_pipeline, cfg_task):
@@ -732,6 +778,15 @@ def test_generate_pipeline_dag_linear_chain(pg_conn, cfg_pipeline, cfg_task):
 
     assert dag["dag_id"] == "TEST_PL"
     assert dag["refresh_type"] == "INCREMENTAL"
+    assert dag["catchup"] is False
+    assert dag["tags"] == ["incremental"]
+    assert dag["default_args"] == {
+        "owner": "etl_craft",
+        "retries": 1,
+        "retry_delay_minutes": 5,
+        "depends_on_past": False,
+        "email_on_failure": False,
+    }
     assert set(dag["tasks"]) == {"__init__", "test_task", "task_b"}
     assert dag["tasks"]["__init__"]["depends_on"] == []
     assert (

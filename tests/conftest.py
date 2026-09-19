@@ -21,6 +21,15 @@ from etl_craft.runlog import find_or_create_active_run
 TEST_DATABASE_URL_VAR = "ETL_CRAFT_TEST_DATABASE_URL"
 DEFAULT_TEST_DATABASE_URL = "postgresql+psycopg://etl_craft:etl_craft@localhost:55432/etl_craft"
 
+# Stands in as a genuinely different SQLAlchemy dialect for warehouse.py's
+# tests — Postgres alone (the Engine DB) can't prove the generic,
+# dialect-agnostic connect mechanism works against anything but Postgres.
+# Needs the optional `clickhouse` extra installed (see pyproject.toml); if
+# it isn't, _reachable's broad except below just reports "not reachable",
+# same as Docker being down — a coarser message, but a clean skip either way.
+TEST_CLICKHOUSE_URL_VAR = "ETL_CRAFT_TEST_CLICKHOUSE_URL"
+DEFAULT_TEST_CLICKHOUSE_URL = "clickhouse://etl_craft:etl_craft@localhost:58123/etl_craft"
+
 
 def _reachable(url: str) -> bool:
     try:
@@ -50,6 +59,20 @@ def postgres_engine() -> Engine:
     # resolution entirely by injecting postgres_engine directly. setdefault
     # so a real developer override (if any) is never clobbered.
     os.environ.setdefault("ETL_CRAFT_POSTGRES_DEV_SECRET", "etl_craft")
+    engine = create_engine(url)
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture(scope="session")
+def clickhouse_engine() -> Engine:
+    """Build a real ClickHouse engine — skips if unreachable or the extra isn't installed."""
+    url = os.environ.get(TEST_CLICKHOUSE_URL_VAR, DEFAULT_TEST_CLICKHOUSE_URL)
+    if not _reachable(url):
+        pytest.skip(
+            f"no reachable ClickHouse at {url!r} — run `make db-up` (see docker-compose.yml), "
+            f"install the `clickhouse` extra, or set {TEST_CLICKHOUSE_URL_VAR}"
+        )
     engine = create_engine(url)
     yield engine
     engine.dispose()
