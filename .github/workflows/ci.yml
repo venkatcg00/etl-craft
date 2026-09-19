@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  checks:
+    name: black / ruff / pydocstyle / pytest / coverage
+    runs-on: ubuntu-latest
+    services:
+      # Native GitHub Actions service container — no Docker Compose needed
+      # here (that's for local dev; see docker-compose.yml/Makefile). This
+      # gives the Postgres-backed tests in tests/test_integration.py a real
+      # Engine DB to run against instead of skipping themselves.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: etl_craft
+          POSTGRES_PASSWORD: etl_craft
+          POSTGRES_DB: etl_craft
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U etl_craft -d etl_craft"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      ETL_CRAFT_TEST_DATABASE_URL: postgresql+psycopg://etl_craft:etl_craft@localhost:55432/etl_craft
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Apply sql/schema.sql
+        run: psql "$ETL_CRAFT_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f sql/schema.sql
+
+      - name: sql/schema_test.sql (schema behavioral smoke test)
+        run: psql "$ETL_CRAFT_TEST_DATABASE_URL" -f sql/schema_test.sql
+
+      - name: black --check
+        run: uv run black --check .
+
+      - name: ruff check
+        run: uv run ruff check .
+
+      - name: pydocstyle
+        run: uv run pydocstyle .
+
+      - name: pytest with coverage (fails under 100%)
+        run: uv run pytest -q --cov=etl_craft --cov-report=term-missing
