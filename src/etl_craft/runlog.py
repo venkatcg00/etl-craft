@@ -131,13 +131,13 @@ def find_or_create_task_run(conn: Connection, task_id: int, pipeline_run_id: int
     """Reuse this task's binding under `pipeline_run_id`, or create a new one."""
     existing = conn.execute(
         text(
-            "SELECT TASK_RUN_ID, STATUS FROM AUD_TASK_RUN_LOG "
+            "SELECT TASK_RUN_ID AS task_run_id, STATUS AS status FROM AUD_TASK_RUN_LOG "
             "WHERE TASK_ID = :task_id AND PIPELINE_RUN_ID = :pipeline_run_id"
         ),
         {"task_id": task_id, "pipeline_run_id": pipeline_run_id},
     ).one_or_none()
     if existing is not None:
-        return TaskRunBinding(task_run_id=existing.TASK_RUN_ID, status=existing.STATUS)
+        return TaskRunBinding(task_run_id=existing.task_run_id, status=existing.status)
 
     try:
         with conn.begin_nested():
@@ -153,7 +153,7 @@ def find_or_create_task_run(conn: Connection, task_id: int, pipeline_run_id: int
         # Lost the race against ux_task_run_one_per_pipeline_run.
         winner = conn.execute(
             text(
-                "SELECT TASK_RUN_ID, STATUS FROM AUD_TASK_RUN_LOG "
+                "SELECT TASK_RUN_ID AS task_run_id, STATUS AS status FROM AUD_TASK_RUN_LOG "
                 "WHERE TASK_ID = :task_id AND PIPELINE_RUN_ID = :pipeline_run_id"
             ),
             {"task_id": task_id, "pipeline_run_id": pipeline_run_id},
@@ -163,7 +163,7 @@ def find_or_create_task_run(conn: Connection, task_id: int, pipeline_run_id: int
                 f"task_id={task_id}, pipeline_run_id={pipeline_run_id}: insert failed on "
                 "a unique violation, but no row exists afterward"
             ) from None
-        return TaskRunBinding(task_run_id=winner.TASK_RUN_ID, status=winner.STATUS)
+        return TaskRunBinding(task_run_id=winner.task_run_id, status=winner.status)
 
 
 def update_task_run(
