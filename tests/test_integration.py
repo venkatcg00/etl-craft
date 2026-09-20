@@ -5143,6 +5143,129 @@ def test_email_alert_sends_with_substituted_subject_and_body(
     assert "RECIPIENT_COUNT = 2" in row.task_log
 
 
+def test_email_alert_picks_the_flavour_template_and_reports_the_run_status(
+    postgres_engine, committed_pipeline, fake_smtp
+):
+    # E2-43. The alert is a pipeline-level completion alert now: it computes
+    # the run's flavour from every active task's own status and picks the
+    # matching template. Here one task FAILED, so the run is FAILED.
+    work_id = insert_committed_task(postgres_engine, committed_pipeline, "flav_work")
+    task_id = insert_committed_task(
+        postgres_engine, committed_pipeline, "flav_alert", "EMAIL_ALERT"
+    )
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {
+            "EMAIL_TO": "ops@example.com",
+            "EMAIL_SUBJECT": "generic subject",
+            "EMAIL_SUBJECT_FAILED": "$$pipeline_code is $$status",
+            "EMAIL_BODY_FAILED": "something broke",
+        },
+    )
+    run_id = seed_active_run(postgres_engine, committed_pipeline)
+    insert_committed_task_run(postgres_engine, work_id, run_id, "FAILED")
+
+    outcome = run_task(postgres_engine, make_config(email=True), "TEST_CONCURRENT_PL", "flav_alert")
+
+    assert outcome.status == "SUCCESS"
+    sent = [e for e in _read_smtp_events(fake_smtp) if e["event"] == "sendmail"]
+    assert len(sent) == 1
+    # The FAILED-specific subject won over the generic one, and $$status
+    # resolved to the computed flavour.
+    assert "TEST_CONCURRENT_PL is FAILED" in sent[0]["message"]
+    row = _task_run_row(postgres_engine, task_id)
+    assert "RUN_STATUS = FAILED" in row.task_log
+
+
+def test_email_alert_reports_completed_with_errors_when_a_task_was_skipped(
+    postgres_engine, committed_pipeline, fake_smtp
+):
+    # The neutral middle flavour: nothing failed outright, but the run was not
+    # clean — "if the pipeline is marked success with failure then a neutral
+    # status like pipeline is COMPLETED with errors".
+    ok_id = insert_committed_task(postgres_engine, committed_pipeline, "cwe_ok")
+    skipped_id = insert_committed_task(postgres_engine, committed_pipeline, "cwe_skipped")
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "cwe_alert", "EMAIL_ALERT")
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {"EMAIL_TO": "ops@example.com", "EMAIL_SUBJECT": "$$status", "EMAIL_BODY": "b"},
+    )
+    run_id = seed_active_run(postgres_engine, committed_pipeline)
+    insert_committed_task_run(postgres_engine, ok_id, run_id, "SUCCESS")
+    insert_committed_task_run(postgres_engine, skipped_id, run_id, "SKIPPED")
+
+    assert (
+        run_task(postgres_engine, make_config(email=True), "TEST_CONCURRENT_PL", "cwe_alert").status
+        == "SUCCESS"
+    )
+
+    sent = [e for e in _read_smtp_events(fake_smtp) if e["event"] == "sendmail"]
+    assert "COMPLETED_WITH_ERRORS" in sent[0]["message"]
+
+
+def test_email_alert_sends_nothing_when_the_flavour_is_not_in_email_on_status(
+    postgres_engine, committed_pipeline, fake_smtp
+):
+    # E2-43. "if there are parameters saying which status to send, send only
+    # on that condition." The task still records SUCCESS — it ran and
+    # correctly decided not to act — which is also what keeps it out of the
+    # unsettled set and so unable to re-create E2-01.
+    work_id = insert_committed_task(postgres_engine, committed_pipeline, "onstat_work")
+    task_id = insert_committed_task(
+        postgres_engine, committed_pipeline, "onstat_alert", "EMAIL_ALERT"
+    )
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {
+            "EMAIL_TO": "ops@example.com",
+            "EMAIL_SUBJECT": "s",
+            "EMAIL_BODY": "b",
+            "EMAIL_ON_STATUS": "FAILED",
+        },
+    )
+    run_id = seed_active_run(postgres_engine, committed_pipeline)
+    insert_committed_task_run(postgres_engine, work_id, run_id, "SUCCESS")
+
+    outcome = run_task(
+        postgres_engine, make_config(email=True), "TEST_CONCURRENT_PL", "onstat_alert"
+    )
+
+    assert outcome.status == "SUCCESS"
+    assert [e for e in _read_smtp_events(fake_smtp) if e["event"] == "sendmail"] == []
+    row = _task_run_row(postgres_engine, task_id)
+    assert "EMAIL_SENT = false" in row.task_log
+    assert "no email sent" in row.task_log
+
+
+def test_email_alert_rejects_an_unknown_email_on_status_value(
+    postgres_engine, committed_pipeline, fake_smtp
+):
+    task_id = insert_committed_task(
+        postgres_engine, committed_pipeline, "badstat_alert", "EMAIL_ALERT"
+    )
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {
+            "EMAIL_TO": "ops@example.com",
+            "EMAIL_SUBJECT": "s",
+            "EMAIL_BODY": "b",
+            "EMAIL_ON_STATUS": "PARTIAL",
+        },
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    outcome = run_task(
+        postgres_engine, make_config(email=True), "TEST_CONCURRENT_PL", "badstat_alert"
+    )
+
+    assert outcome.status == "FAILED"
+    assert "unknown status" in outcome.message
+
+
 def test_email_alert_pulls_error_message_from_watched_failure_task(
     postgres_engine, committed_pipeline, fake_smtp
 ):

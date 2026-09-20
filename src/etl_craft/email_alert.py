@@ -15,6 +15,18 @@ CFG_TASK_DEPENDENCY/CFG_PIPELINE_DEPENDENCY machinery every other task uses
 execute() runs, the task has already been judged eligible to run. This
 module's only job is to actually send the email.
 
+[DEVIATION, 2026-09-20, E2-43] This handler is a **pipeline-level**
+completion alert, not a task-level one. Per explicit interview decision:
+"task level emails are noise", and "once you exhaust retries and all of the
+tasks that can be run are ran and failed, then send one email considering
+all". One email per run, whose flavour is computed by run_flavour() from
+every active task's own status under this pipeline_run_id -- read from
+AUD_TASK_RUN_LOG, deliberately *not* AUD_PIPELINES_RUN_LOG, which may not be
+finalized yet at the moment the alert runs. Three flavours, green/amber/red:
+SUCCESS, COMPLETED_WITH_ERRORS ("if the pipeline is marked success with
+failure then a neutral status like pipeline is COMPLETED with errors"), and
+FAILED. See run_flavour's own docstring for the exact rules.
+
 [ADDITION] Every email this module sends is HTML (with an inline <style>
 block -- email clients don't reliably fetch external stylesheets), per
 explicit instruction. Two distinguishable statuses matter visually above
@@ -26,10 +38,29 @@ AUD_ statuses (SKIPPED/IN-PROGRESS) and this module's own synthetic ones
 mirroring sql_actions.py's own module docstring as the authoritative
 reference:
   EMAIL_TO       pipe-separated recipient address list. Required.
-  EMAIL_SUBJECT  the subject line, substitution tokens allowed. Required.
+  EMAIL_SUBJECT  the subject line, substitution tokens allowed. Required,
+                 unless a per-flavour EMAIL_SUBJECT_<STATUS> covers every
+                 flavour this task can reach.
   EMAIL_BODY     an intro paragraph, substitution tokens allowed. Required
                  unless EMAIL_PIPELINES is set (a pure status-digest alert
-                 doesn't need one).
+                 doesn't need one) or a per-flavour EMAIL_BODY_<STATUS>
+                 covers it.
+  EMAIL_SUBJECT_<STATUS> / EMAIL_BODY_<STATUS>
+                 [ADDITION, E2-43] optional per-flavour overrides, where
+                 <STATUS> is SUCCESS, COMPLETED_WITH_ERRORS or FAILED — per
+                 explicit instruction, "have three templates as said in
+                 flavour answer and choose 1 as needed". Each falls back to
+                 the plain EMAIL_SUBJECT/EMAIL_BODY when not declared, so a
+                 task predating this keeps working unchanged.
+  EMAIL_ON_STATUS
+                 [ADDITION, E2-43] optional, pipe-separated flavour list.
+                 Per explicit instruction: "if there are parameters saying
+                 which status to send, send only on that condition, else
+                 send on all statuses". When the computed flavour is not in
+                 the list, the task records SUCCESS with "no email sent" in
+                 its own TASK_LOG rather than SKIPPED — it ran and correctly
+                 decided not to act, and SUCCESS also keeps it out of the
+                 unsettled set so it can never re-create E2-01.
   EMAIL_PIPELINES
                  optional. Per explicit instruction: "if it is all, send
                  the status of all pipelines for its latest [run]. if the
@@ -61,7 +92,8 @@ don't just show the content always-expanded, which is a safe, readable
 fallback, not a broken one.
 
 Substitution tokens (case-sensitive, literal $$ prefix like $$pipeline_id),
-usable in EMAIL_SUBJECT/EMAIL_BODY:
+usable in EMAIL_SUBJECT/EMAIL_BODY and their per-flavour variants:
+  $$status          [ADDITION, E2-43] this run's computed flavour
   $$pipeline_id     ctx.pipeline_run_id
   $$pipeline_code   ctx.pipeline_code
   $$task_code       ctx.task_code
@@ -108,7 +140,22 @@ from etl_craft.cfg import (
 from etl_craft.config import ConfigError, resolve_secret
 from etl_craft.execution import HandlerError, HandlerResult, TaskExecutionContext
 
+# [ADDITION, 2026-09-20, E2-43] The three flavours a completed run resolves
+# to, per explicit interview decision. Ordered worst-first — _run_flavour
+# returns the first that applies.
+FLAVOUR_FAILED = "FAILED"
+FLAVOUR_COMPLETED_WITH_ERRORS = "COMPLETED_WITH_ERRORS"
+FLAVOUR_SUCCESS = "SUCCESS"
+FLAVOURS = (FLAVOUR_FAILED, FLAVOUR_COMPLETED_WITH_ERRORS, FLAVOUR_SUCCESS)
+
+_FLAVOUR_COLORS = {
+    FLAVOUR_SUCCESS: "#1a7f37",
+    FLAVOUR_COMPLETED_WITH_ERRORS: "#9a6700",
+    FLAVOUR_FAILED: "#cf222e",
+}
+
 _TOKEN_PIPELINE_ID = "$$pipeline_id"
+_TOKEN_STATUS = "$$status"
 _TOKEN_PIPELINE_CODE = "$$pipeline_code"
 _TOKEN_TASK_CODE = "$$task_code"
 _TOKEN_ERROR_MESSAGE = "$$error_message"
@@ -138,13 +185,70 @@ def _resolve_error_message(cfg_conn: Connection, ctx: TaskExecutionContext) -> s
     return "; ".join(m.error_message for m in messages if m.error_message)
 
 
-def _substitute(text_: str, ctx: TaskExecutionContext, error_message: str) -> str:
+def _substitute(
+    text_: str, ctx: TaskExecutionContext, error_message: str, flavour: str = ""
+) -> str:
     """Plain-text token substitution -- see this module's own docstring for the token list."""
     return (
         text_.replace(_TOKEN_PIPELINE_ID, str(ctx.pipeline_run_id))
         .replace(_TOKEN_PIPELINE_CODE, ctx.pipeline_code)
         .replace(_TOKEN_TASK_CODE, ctx.task_code)
         .replace(_TOKEN_ERROR_MESSAGE, error_message)
+        .replace(_TOKEN_STATUS, flavour)
+    )
+
+
+def run_flavour(statuses: list[TaskStatusEntry], *, exclude_task_id: int) -> str:
+    """Resolve this pipeline run's own flavour from every active task's status.
+
+    [ADDITION, 2026-09-20, E2-43] Per explicit interview decision: an
+    EMAIL_ALERT is a *pipeline-level* completion alert, not a task-level one
+    ("task level emails are noise"), sent "once you exhaust retries and all of
+    the tasks that can be run are ran". The flavour is computed from
+    AUD_TASK_RUN_LOG rather than AUD_PIPELINES_RUN_LOG, which may not be
+    finalized yet at the moment the alert task runs.
+
+    `exclude_task_id` is the alerting task itself: it is necessarily
+    IN-PROGRESS while it runs, so counting it would make every run look
+    unfinished.
+
+    The rules, worst-first:
+      FAILED                 any task FAILED.
+      COMPLETED_WITH_ERRORS  no outright failure, but something short of
+                             clean -- a SKIPPED task, a task that succeeded
+                             while still carrying an ERROR_MESSAGE, or a task
+                             not settled yet. Per explicit instruction: "if
+                             the pipeline is marked success with failure then
+                             a neutral status like pipeline is COMPLETED with
+                             errors".
+      SUCCESS                every task SUCCESS, none carrying an error.
+
+    [CHOICE] Unsettled tasks (PENDING/IN-PROGRESS) land in the neutral middle
+    flavour rather than SUCCESS. The alert is designed to run at the end of a
+    run, but nothing forces that -- and reporting a plain SUCCESS for a run
+    that has not finished would be the one genuinely misleading answer of the
+    three.
+    """
+    relevant = [entry for entry in statuses if entry.task_id != exclude_task_id]
+    if not relevant:
+        return FLAVOUR_SUCCESS
+    if any(entry.status == "FAILED" for entry in relevant):
+        return FLAVOUR_FAILED
+    if all(entry.status == "SUCCESS" and not entry.error_message for entry in relevant):
+        return FLAVOUR_SUCCESS
+    return FLAVOUR_COMPLETED_WITH_ERRORS
+
+
+def _template_for(ctx: TaskExecutionContext, base_name: str, flavour: str) -> str | None:
+    """Pick EMAIL_<BASE>_<FLAVOUR> if declared, else fall back to plain EMAIL_<BASE>.
+
+    Per explicit instruction ("have three templates as said in flavour answer
+    and choose 1 as needed"). The fallback keeps every pre-E2-43 task working
+    unchanged: a task declaring only EMAIL_SUBJECT/EMAIL_BODY gets those for
+    all three flavours.
+    """
+    return ctx.task_params.get(f"EMAIL_{base_name}_{flavour}") or ctx.task_params.get(
+        f"EMAIL_{base_name}"
     )
 
 
@@ -246,28 +350,58 @@ def _send(ctx: TaskExecutionContext, recipients: list[str], subject: str, body_h
 
 
 def execute(cfg_conn: Connection, ctx: TaskExecutionContext) -> HandlerResult:
-    """Render this task's HTML email (intro + optional status digest) and send it."""
+    """Resolve this run's flavour, pick the matching template, and send -- or record why not."""
     to_raw = ctx.task_params.get("EMAIL_TO")
     if not to_raw:
         raise HandlerError("CFG_TASK_PARAMETERS.EMAIL_TO is required for HANDLER=EMAIL_ALERT")
     recipients = [addr.strip() for addr in to_raw.split("|") if addr.strip()]
 
-    subject_template = ctx.task_params.get("EMAIL_SUBJECT")
+    statuses = fetch_task_statuses_for_run(cfg_conn, ctx.pipeline_id, ctx.pipeline_run_id)
+    flavour = run_flavour(statuses, exclude_task_id=ctx.task_id)
+
+    # [ADDITION, 2026-09-20, E2-43] EMAIL_ON_STATUS, per explicit instruction:
+    # "if there are parameters saying which status to send, send only on that
+    # condition, else send on all statuses". Absent means always send.
+    on_status_raw = ctx.task_params.get("EMAIL_ON_STATUS")
+    if on_status_raw:
+        wanted = {part.strip().upper() for part in on_status_raw.split("|") if part.strip()}
+        unknown = wanted - set(FLAVOURS)
+        if unknown:
+            raise HandlerError(
+                f"CFG_TASK_PARAMETERS.EMAIL_ON_STATUS names unknown status(es) "
+                f"{sorted(unknown)} -- valid values are {list(FLAVOURS)}"
+            )
+        if flavour not in wanted:
+            # SUCCESS, deliberately not SKIPPED: the task ran and correctly
+            # decided not to send. SUCCESS also keeps it out of the unsettled
+            # set, so it can never re-create E2-01.
+            return HandlerResult(
+                variables={
+                    "RUN_STATUS": flavour,
+                    "EMAIL_SENT": "false",
+                    "REASON": f"no email sent: {flavour} not in EMAIL_ON_STATUS",
+                }
+            )
+
+    subject_template = _template_for(ctx, "SUBJECT", flavour)
     if not subject_template:
-        raise HandlerError("CFG_TASK_PARAMETERS.EMAIL_SUBJECT is required for HANDLER=EMAIL_ALERT")
+        raise HandlerError(
+            "CFG_TASK_PARAMETERS.EMAIL_SUBJECT (or EMAIL_SUBJECT_<STATUS>) is required "
+            "for HANDLER=EMAIL_ALERT"
+        )
 
     pipelines_param = ctx.task_params.get("EMAIL_PIPELINES")
-    body_template = ctx.task_params.get("EMAIL_BODY")
+    body_template = _template_for(ctx, "BODY", flavour)
     if not body_template and not pipelines_param:
         raise HandlerError(
-            "CFG_TASK_PARAMETERS.EMAIL_BODY is required for HANDLER=EMAIL_ALERT "
-            "when EMAIL_PIPELINES is not set"
+            "CFG_TASK_PARAMETERS.EMAIL_BODY (or EMAIL_BODY_<STATUS>) is required for "
+            "HANDLER=EMAIL_ALERT when EMAIL_PIPELINES is not set"
         )
 
     error_message = _resolve_error_message(cfg_conn, ctx)
-    subject = _substitute(subject_template, ctx, error_message)
+    subject = _substitute(subject_template, ctx, error_message, flavour)
     intro_html = (
-        f"<p>{html_lib.escape(_substitute(body_template, ctx, error_message))}</p>"
+        f"<p>{html_lib.escape(_substitute(body_template, ctx, error_message, flavour))}</p>"
         if body_template
         else ""
     )
@@ -278,11 +412,22 @@ def execute(cfg_conn: Connection, ctx: TaskExecutionContext) -> HandlerResult:
         entries = [_collect_pipeline_digest(cfg_conn, code) for code in codes]
         digest_html = _render_digest_html(entries)
 
+    banner = (
+        f'<p style="color:{_FLAVOUR_COLORS[flavour]};font-weight:600">'
+        f"{html_lib.escape(ctx.pipeline_code)}: {html_lib.escape(flavour)}</p>"
+    )
     body_html = (
-        f"<html><head><style>{_STYLE}</style></head><body>{intro_html}{digest_html}</body></html>"
+        f"<html><head><style>{_STYLE}</style></head><body>"
+        f"{banner}{intro_html}{digest_html}</body></html>"
     )
     _send(ctx, recipients, subject, body_html)
 
     return HandlerResult(
-        variables={"EMAIL_TO": to_raw, "EMAIL_SUBJECT": subject, "RECIPIENT_COUNT": len(recipients)}
+        variables={
+            "RUN_STATUS": flavour,
+            "EMAIL_SENT": "true",
+            "EMAIL_TO": to_raw,
+            "EMAIL_SUBJECT": subject,
+            "RECIPIENT_COUNT": len(recipients),
+        }
     )

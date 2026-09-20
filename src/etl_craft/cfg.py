@@ -822,6 +822,11 @@ class TaskStatusEntry:
     absence a template author has to special-case.
     """
 
+    # [ADDITION, 2026-09-20, E2-43] task_id is carried so email_alert.py can
+    # exclude the alerting task itself when computing a run's flavour — it is
+    # necessarily IN-PROGRESS while it runs, so counting it would make every
+    # run look unfinished.
+    task_id: int
     task_code: str
     status: str
     error_message: str | None
@@ -833,7 +838,8 @@ def fetch_task_statuses_for_run(
     """Fetch every active task's status under `pipeline_run_id` (PENDING if never bound)."""
     rows = conn.execute(
         text(
-            "SELECT t.TASK_CODE AS task_code, l.STATUS AS status, l.ERROR_MESSAGE AS error_message "
+            "SELECT t.TASK_ID AS task_id, t.TASK_CODE AS task_code, l.STATUS AS status, "
+            "l.ERROR_MESSAGE AS error_message "
             "FROM CFG_TASKS t LEFT JOIN AUD_TASK_RUN_LOG l "
             "ON l.TASK_ID = t.TASK_ID AND l.PIPELINE_RUN_ID = :pipeline_run_id "
             "WHERE t.PIPELINE_ID = :pipeline_id AND t.ACTIVE_FLAG = 'Y' "
@@ -843,7 +849,10 @@ def fetch_task_statuses_for_run(
     ).all()
     return [
         TaskStatusEntry(
-            task_code=row.task_code, status=row.status or "PENDING", error_message=row.error_message
+            task_id=row.task_id,
+            task_code=row.task_code,
+            status=row.status or "PENDING",
+            error_message=row.error_message,
         )
         for row in rows
     ]

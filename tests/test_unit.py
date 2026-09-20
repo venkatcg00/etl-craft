@@ -58,7 +58,7 @@ from etl_craft.docs_generator import (
 )
 from etl_craft.docs_generator import _render_index_html as render_docs_index_html
 from etl_craft.docs_generator import _render_pipeline_html as render_docs_pipeline_html
-from etl_craft.email_alert import _PipelineDigestEntry
+from etl_craft.email_alert import _PipelineDigestEntry, run_flavour
 from etl_craft.email_alert import _render_digest_html as render_email_digest_html
 from etl_craft.email_alert import _resolve_target_pipeline_codes as resolve_email_pipeline_codes
 from etl_craft.email_alert import _substitute as substitute_email_tokens
@@ -1177,6 +1177,43 @@ def test_resolve_email_pipeline_codes_some_pipe_separated():
     assert resolve_email_pipeline_codes(None, "PIPE_A|PIPE_B") == ["PIPE_A", "PIPE_B"]
 
 
+def _status(task_id, status, error=None):
+    return TaskStatusEntry(task_id, f"t{task_id}", status, error)
+
+
+def test_run_flavour_success_when_every_task_succeeded_cleanly():
+    statuses = [_status(1, "SUCCESS"), _status(2, "SUCCESS"), _status(99, "IN-PROGRESS")]
+    # 99 is the alerting task itself — necessarily IN-PROGRESS while it runs,
+    # so counting it would make every run look unfinished.
+    assert run_flavour(statuses, exclude_task_id=99) == "SUCCESS"
+
+
+def test_run_flavour_failed_when_any_task_failed():
+    statuses = [_status(1, "SUCCESS"), _status(2, "FAILED")]
+    assert run_flavour(statuses, exclude_task_id=99) == "FAILED"
+
+
+@pytest.mark.parametrize(
+    "statuses",
+    [
+        # A skipped task: nothing failed outright, but the run was not clean.
+        [_status(1, "SUCCESS"), _status(2, "SKIPPED")],
+        # Succeeded while still carrying an error — "success with failure",
+        # the literal case the neutral flavour exists for.
+        [_status(1, "SUCCESS", "a transient blip")],
+        # Not settled yet. Reporting plain SUCCESS for a run that has not
+        # finished would be the one genuinely misleading answer of the three.
+        [_status(1, "SUCCESS"), _status(2, "PENDING")],
+    ],
+)
+def test_run_flavour_completed_with_errors(statuses):
+    assert run_flavour(statuses, exclude_task_id=99) == "COMPLETED_WITH_ERRORS"
+
+
+def test_run_flavour_of_a_pipeline_whose_only_task_is_the_alert_itself():
+    assert run_flavour([_status(99, "IN-PROGRESS")], exclude_task_id=99) == "SUCCESS"
+
+
 def test_render_email_digest_html_color_codes_status_and_escapes_content():
     entries = [
         _PipelineDigestEntry(
@@ -1185,7 +1222,7 @@ def test_render_email_digest_html_color_codes_status_and_escapes_content():
             1,
             None,
             None,
-            [TaskStatusEntry("t1", "SUCCESS", None)],
+            [TaskStatusEntry(1, "t1", "SUCCESS", None)],
         ),
         _PipelineDigestEntry(
             "PIPE_B",
@@ -1193,7 +1230,7 @@ def test_render_email_digest_html_color_codes_status_and_escapes_content():
             2,
             None,
             None,
-            [TaskStatusEntry("t2", "FAILED", "<boom> & broke")],
+            [TaskStatusEntry(2, "t2", "FAILED", "<boom> & broke")],
         ),
     ]
     rendered = render_email_digest_html(entries)
