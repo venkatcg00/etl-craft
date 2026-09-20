@@ -26,6 +26,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import yaml
@@ -34,6 +35,7 @@ from etl_craft.config import (
     DEFAULT_CONFIG_PATH,
     VALID_AUTH_MODES,
     VALID_CLONING_SCOPES,
+    VALID_EMAIL_AUTH_MODES,
     VALID_MODES,
     VALID_SOURCE_TYPES,
     ConfigError,
@@ -130,6 +132,175 @@ def configure_from_env(env_path: Path | str, path: Path | str = DEFAULT_CONFIG_P
     raw["Cloning"] = {"Enabled": cloning_enabled, "Scope": cloning_scope}
 
     _write_raw_yaml(path, raw)
+
+
+def configure_interactive(
+    path: Path | str = DEFAULT_CONFIG_PATH,
+    *,
+    input_fn: Callable[[str], str] = input,
+    print_fn: Callable[[str], None] = print,
+) -> None:
+    """Interactively build (or update) craft-connector.yml by prompting on stdin/stdout.
+
+    [ADDITION] Closes the CLI surface's `configure` row (interactive setup
+    chain), previously refused outright with a "not implemented yet"
+    message and exit code 2. Mirrors configure_from_env's own section
+    shape and merge semantics — Execution/Source/Cloning are wholesale-
+    replaced, the one Postgres profile entered is merged in alongside any
+    others already on disk — so a team can freely mix an interactive
+    session with a later `configure --env` run against the same file
+    without either clobbering the other's profiles.
+
+    [ADDITION] Also offers two optional blocks configure_from_env's fixed
+    env-var contract never covered at all: [Warehouse] and [Email] — an
+    interactive session can naturally ask "do you want to set this up now?"
+    in a way a fixed list of required env vars can't. Declining either
+    leaves any existing section for it completely untouched, never cleared.
+    [CHOICE] The 7 [Orchestrator] Airflow-facing global defaults are
+    deliberately not prompted for here — real edge-case tuning is better
+    done by hand-editing the YAML (or a future `configure --env` extension)
+    than by walking through 7 more prompts most setups would just accept
+    the fallback default for anyway.
+
+    `input_fn`/`print_fn` are injectable (default: the real `input`/`print`)
+    so this is testable without a real terminal — same "injectable I/O"
+    spirit as crosspipe.py's own sleep/now parameters.
+    """
+    path = Path(path)
+    raw = _read_raw_yaml(path) if path.is_file() else {}
+
+    mode = _prompt(input_fn, print_fn, "Execution mode", choices=sorted(VALID_MODES))
+    orchestrator_name = _prompt(
+        input_fn, print_fn, "Orchestrator name (optional, informational only)", required=False
+    )
+    execution: dict[str, str] = {"Mode": mode}
+    if orchestrator_name:
+        execution["Orchestrator name"] = orchestrator_name
+    raw["Execution"] = execution
+
+    source_type = _prompt(
+        input_fn, print_fn, "Where do secret values live", choices=sorted(VALID_SOURCE_TYPES)
+    )
+    source: dict[str, str] = {"Type": source_type}
+    if source_type == "file":
+        source["Path"] = _prompt(input_fn, print_fn, "Path to the .env-style secrets file")
+    raw["Source"] = source
+
+    print_fn("-- Postgres (Engine DB, required) --")
+    raw["Postgres"] = _merge_profile_section(
+        raw.get("Postgres"), *_prompt_connection_profile(input_fn, print_fn)
+    )
+
+    if _prompt_yes_no(input_fn, print_fn, "Configure a [Warehouse] (Data DB) connection now?"):
+        print_fn("-- Warehouse (Data DB) --")
+        raw["Warehouse"] = _merge_profile_section(
+            raw.get("Warehouse"), *_prompt_connection_profile(input_fn, print_fn)
+        )
+
+    if _prompt_yes_no(input_fn, print_fn, "Configure an [Email] (SMTP) connection now?"):
+        print_fn("-- Email (SMTP) --")
+        raw["Email"] = _merge_profile_section(
+            raw.get("Email"), *_prompt_email_profile(input_fn, print_fn)
+        )
+
+    cloning_enabled = _prompt_yes_no(
+        input_fn, print_fn, "Enable Cloning (mirror Engine DB tables into the Data DB)?"
+    )
+    cloning: dict[str, object] = {"Enabled": cloning_enabled}
+    if cloning_enabled:
+        cloning["Scope"] = _prompt(
+            input_fn,
+            print_fn,
+            "Cloning scope",
+            choices=sorted(VALID_CLONING_SCOPES),
+            default="cfg",
+        )
+    raw["Cloning"] = cloning
+
+    _write_raw_yaml(path, raw)
+
+
+def _merge_profile_section(existing: object, profile_name: str, profile: dict) -> dict:
+    """Merge one named profile into an existing (or new) Active_profile/Profiles section."""
+    section = existing if isinstance(existing, dict) else {}
+    profiles = section.get("Profiles")
+    if not isinstance(profiles, dict):
+        profiles = {}
+    profiles[profile_name] = profile
+    return {"Active_profile": profile_name, "Profiles": profiles}
+
+
+def _prompt_connection_profile(
+    input_fn: Callable[[str], str], print_fn: Callable[[str], None]
+) -> tuple[str, dict]:
+    name = _prompt(input_fn, print_fn, "Profile name (e.g. dev/uat/prod)")
+    jdbc_url = _prompt(input_fn, print_fn, "JDBC URL (e.g. jdbc:postgresql://host:5432/db)")
+    user = _prompt(input_fn, print_fn, "User")
+    auth_mode = _prompt(input_fn, print_fn, "Auth mode", choices=sorted(VALID_AUTH_MODES))
+    profile: dict[str, object] = {"jdbc_url": jdbc_url, "user": user, "auth_mode": auth_mode}
+    if auth_mode == "key_file":
+        profile["key_file"] = _prompt(input_fn, print_fn, "Path to the key file")
+    return name, profile
+
+
+def _prompt_email_profile(
+    input_fn: Callable[[str], str], print_fn: Callable[[str], None]
+) -> tuple[str, dict]:
+    name = _prompt(input_fn, print_fn, "Profile name (e.g. dev/uat/prod)")
+    host = _prompt(input_fn, print_fn, "SMTP host")
+    port = _prompt(input_fn, print_fn, "SMTP port", default="587")
+    from_address = _prompt(input_fn, print_fn, "From address")
+    auth_mode = _prompt(
+        input_fn, print_fn, "Auth mode", choices=sorted(VALID_EMAIL_AUTH_MODES), default="none"
+    )
+    profile: dict[str, object] = {
+        "host": host,
+        "port": int(port),
+        "from_address": from_address,
+        "auth_mode": auth_mode,
+    }
+    if auth_mode == "password":
+        profile["user"] = _prompt(input_fn, print_fn, "SMTP user")
+    return name, profile
+
+
+def _prompt(
+    input_fn: Callable[[str], str],
+    print_fn: Callable[[str], None],
+    question: str,
+    *,
+    choices: list[str] | None = None,
+    default: str | None = None,
+    required: bool = True,
+) -> str:
+    suffix = f" [{'/'.join(choices)}]" if choices else ""
+    if default is not None:
+        suffix += f" (default: {default})"
+    while True:
+        answer = input_fn(f"{question}{suffix}: ").strip()
+        if not answer and default is not None:
+            return default
+        if not answer and not required:
+            return ""
+        if not answer:
+            print_fn("A value is required.")
+            continue
+        if choices and answer not in choices:
+            print_fn(f"Must be one of {choices}.")
+            continue
+        return answer
+
+
+def _prompt_yes_no(
+    input_fn: Callable[[str], str], print_fn: Callable[[str], None], question: str
+) -> bool:
+    while True:
+        answer = input_fn(f"{question} [y/N]: ").strip().lower()
+        if not answer or answer in {"n", "no"}:
+            return False
+        if answer in {"y", "yes"}:
+            return True
+        print_fn("Please answer y or n.")
 
 
 def _read_raw_yaml(path: Path) -> dict:

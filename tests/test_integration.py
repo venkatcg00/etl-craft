@@ -6,6 +6,7 @@ Organized by source module, one section per module, since combining them
 loses nothing (no fixture/helper name collisions) and keeps file count down.
 """
 
+import json
 import os
 import threading
 import time
@@ -13,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import yaml
-from sqlalchemy import text
+from sqlalchemy import create_engine, inspect, text
 
 from conftest import (
     CRAFT_CONNECTOR_YAML,
@@ -33,21 +34,28 @@ from etl_craft.cfg import (
     fetch_all_pipelines,
     fetch_business_rule_targets,
     fetch_cross_pipeline_task_edges,
+    fetch_failure_watch_messages,
     fetch_pipeline_dependencies,
     fetch_pipeline_dependency_edge_ids,
     fetch_pipeline_detail,
     fetch_pipeline_graph,
+    fetch_pipeline_run_history,
+    fetch_pipeline_steps,
     fetch_task_cross_pipeline_dependency_ids,
     fetch_task_handler,
+    fetch_task_run_history,
     resolve_pipeline_id,
     resolve_task_id,
 )
 from etl_craft.cli import main as cli_main
+from etl_craft.cloning import run_cloning_if_enabled
 from etl_craft.config import (
     CloningConfig,
     ConnectionProfile,
     ConnectionSection,
     ConnectorConfig,
+    EmailConfig,
+    EmailProfile,
     OrchestratorConfig,
     SourceConfig,
 )
@@ -59,6 +67,7 @@ from etl_craft.crosspipe import (
     consume_pipeline_dependency_edges,
     consume_task_dependency_edges,
 )
+from etl_craft.docs_generator import collect_docs, generate_docs
 from etl_craft.execution import HandlerResult
 from etl_craft.generate_yml import GLOBAL_DAG_ID, generate_global_dag, generate_pipeline_dag
 from etl_craft.migrate import MigrationError, apply_pending_migrations
@@ -354,6 +363,296 @@ def test_build_data_engine_connects_to_real_clickhouse(monkeypatch, clickhouse_e
             assert conn.execute(text("SELECT 1")).scalar_one() == 1
     finally:
         engine.dispose()
+
+
+# ==============================================================================
+# cloning.py — against real Postgres (Engine DB always) and, for the actual
+# copy mechanism, real ClickHouse as the Data DB -- proving the generic
+# mirroring mechanism against a genuinely different dialect, the same "prove
+# it for real" bar warehouse.py's own ClickHouse test already set. Testing
+# against Postgres-as-both-roles is deliberately *not* done for the real
+# copy path: since every mirrored table keeps its Engine DB name, doing so
+# would mean truncating and reinserting the actual CFG_/AUD_ tables from
+# their own reflection -- exactly the destructive scenario
+# cloning.run_cloning_if_enabled's own same-database guard exists to refuse.
+# ==============================================================================
+
+
+def _clickhouse_warehouse_config(monkeypatch, *, cloning: CloningConfig) -> ConnectorConfig:
+    monkeypatch.setenv("ETL_CRAFT_WAREHOUSE_DEV_SECRET", "etl_craft")
+    return ConnectorConfig(
+        mode="local",
+        source=SourceConfig(type="environment"),
+        postgres=ConnectionSection(
+            active_profile="dev",
+            profiles={
+                "dev": ConnectionProfile(
+                    section="POSTGRES",
+                    name="dev",
+                    jdbc_url="jdbc:postgresql://localhost:55432/etl_craft",
+                    user="etl_craft",
+                    auth_mode="password",
+                )
+            },
+        ),
+        cloning=cloning,
+        warehouse=ConnectionSection(
+            active_profile="dev",
+            profiles={
+                "dev": ConnectionProfile(
+                    section="WAREHOUSE",
+                    name="dev",
+                    jdbc_url="jdbc:clickhouse://localhost:58123/etl_craft",
+                    user="etl_craft",
+                    auth_mode="password",
+                )
+            },
+        ),
+    )
+
+
+@pytest.fixture
+def clickhouse_cfg_tables_cleanup(clickhouse_engine):
+    """Drop every table cloning.py's 'cfg' scope could have mirrored into ClickHouse."""
+    yield
+    with clickhouse_engine.begin() as conn:
+        for table_name in (
+            "cfg_pipelines",
+            "cfg_pipeline_dependency",
+            "cfg_tasks",
+            "cfg_task_dependency",
+            "cfg_task_parameters",
+            "cfg_business_rules",
+            "aud_pipelines_run_log",
+            "aud_task_run_log",
+        ):
+            conn.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
+
+
+def test_run_cloning_if_enabled_noop_when_disabled(postgres_engine):
+    config = ConnectorConfig(
+        mode="local",
+        source=SourceConfig(type="environment"),
+        postgres=ConnectionSection(
+            active_profile="dev",
+            profiles={
+                "dev": ConnectionProfile(
+                    section="POSTGRES",
+                    name="dev",
+                    jdbc_url="jdbc:postgresql://localhost:55432/etl_craft",
+                    user="etl_craft",
+                    auth_mode="password",
+                )
+            },
+        ),
+        cloning=CloningConfig(enabled=False),
+    )
+    run_cloning_if_enabled(postgres_engine, config)  # must not raise
+
+
+def test_run_cloning_if_enabled_raises_when_no_warehouse_configured(postgres_engine):
+    config = ConnectorConfig(
+        mode="local",
+        source=SourceConfig(type="environment"),
+        postgres=ConnectionSection(
+            active_profile="dev",
+            profiles={
+                "dev": ConnectionProfile(
+                    section="POSTGRES",
+                    name="dev",
+                    jdbc_url="jdbc:postgresql://localhost:55432/etl_craft",
+                    user="etl_craft",
+                    auth_mode="password",
+                )
+            },
+        ),
+        cloning=CloningConfig(enabled=True, scope="cfg"),
+    )
+    with pytest.raises(ValueError, match="no \\[Warehouse\\]"):
+        run_cloning_if_enabled(postgres_engine, config)
+
+
+def test_run_cloning_refuses_when_warehouse_is_the_same_database_as_engine(postgres_engine):
+    # A real, plausible misconfiguration this guard exists specifically to
+    # catch -- see cloning._same_database's own docstring for why this
+    # would otherwise be destructive, not merely redundant.
+    config = make_config(cloning=CloningConfig(enabled=True, scope="cfg"), warehouse=True)
+    with pytest.raises(ValueError, match="same database"):
+        run_cloning_if_enabled(postgres_engine, config)
+
+
+def test_run_cloning_clones_cfg_tables_into_real_clickhouse(
+    monkeypatch,
+    postgres_engine,
+    clickhouse_engine,
+    committed_pipeline,
+    clickhouse_cfg_tables_cleanup,
+):
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "t")
+    insert_committed_task_parameters(
+        postgres_engine, task_id, {"SQL_ACTION": "CREATE_TABLE", "TARGET_OBJECT": "public.x"}
+    )
+    config = _clickhouse_warehouse_config(
+        monkeypatch, cloning=CloningConfig(enabled=True, scope="cfg")
+    )
+
+    run_cloning_if_enabled(postgres_engine, config)
+
+    with clickhouse_engine.connect() as conn:
+        pipelines = list(
+            conn.execute(
+                text("SELECT pipeline_code FROM cfg_pipelines WHERE pipeline_id = :id"),
+                {"id": committed_pipeline},
+            )
+        )
+        tasks = list(
+            conn.execute(
+                text("SELECT task_code, handler FROM cfg_tasks WHERE task_id = :id"),
+                {"id": task_id},
+            )
+        )
+    assert pipelines == [("TEST_CONCURRENT_PL",)]
+    assert tasks == [("t", "SQL")]
+
+
+def test_run_cloning_serializes_jsonb_column_to_text(
+    monkeypatch,
+    postgres_engine,
+    clickhouse_engine,
+    committed_pipeline,
+    clickhouse_cfg_tables_cleanup,
+):
+    with postgres_engine.begin() as conn:
+        conn.execute(
+            text("UPDATE CFG_PIPELINES SET PIPELINE_PARAMETERS = :params WHERE PIPELINE_ID = :id"),
+            {"params": json.dumps({"CATCHUP": True}), "id": committed_pipeline},
+        )
+    config = _clickhouse_warehouse_config(
+        monkeypatch, cloning=CloningConfig(enabled=True, scope="cfg")
+    )
+
+    run_cloning_if_enabled(postgres_engine, config)
+
+    with clickhouse_engine.connect() as conn:
+        params = conn.execute(
+            text("SELECT pipeline_parameters FROM cfg_pipelines WHERE pipeline_id = :id"),
+            {"id": committed_pipeline},
+        ).scalar_one()
+    assert json.loads(params) == {"CATCHUP": True}
+
+
+def test_run_cloning_is_idempotent_across_repeated_runs(
+    monkeypatch,
+    postgres_engine,
+    clickhouse_engine,
+    committed_pipeline,
+    clickhouse_cfg_tables_cleanup,
+):
+    config = _clickhouse_warehouse_config(
+        monkeypatch, cloning=CloningConfig(enabled=True, scope="cfg")
+    )
+
+    run_cloning_if_enabled(postgres_engine, config)
+    run_cloning_if_enabled(postgres_engine, config)
+
+    with clickhouse_engine.connect() as conn:
+        count = conn.execute(
+            text("SELECT count(*) FROM cfg_pipelines WHERE pipeline_id = :id"),
+            {"id": committed_pipeline},
+        ).scalar_one()
+    assert count == 1
+
+
+@pytest.fixture
+def second_postgres_database(postgres_engine):
+    """A genuinely separate, schema-less Postgres database on the same server as the Engine DB.
+
+    For proving cloning's generic (non-ClickHouse) create-target-table path
+    for real: pointing [Warehouse] at *this* same Postgres server's default
+    "etl_craft" database would hit run_cloning_if_enabled's own same-
+    database refusal (correctly), so this fixture creates a second,
+    disposable one instead -- a genuinely different database, the same
+    Postgres dialect, no schema.sql applied to it.
+    """
+    db_name = "etl_craft_clone_target"
+    with postgres_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        conn.execute(text(f"DROP DATABASE IF EXISTS {db_name}"))
+        conn.execute(text(f"CREATE DATABASE {db_name}"))
+    yield db_name
+    with postgres_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        conn.execute(text(f"DROP DATABASE IF EXISTS {db_name}"))
+
+
+def test_run_cloning_creates_generic_target_table_on_a_different_postgres_database(
+    postgres_engine, committed_pipeline, second_postgres_database
+):
+    config = ConnectorConfig(
+        mode="local",
+        source=SourceConfig(type="environment"),
+        postgres=ConnectionSection(
+            active_profile="dev",
+            profiles={
+                "dev": ConnectionProfile(
+                    section="POSTGRES",
+                    name="dev",
+                    jdbc_url="jdbc:postgresql://localhost:55432/etl_craft",
+                    user="etl_craft",
+                    auth_mode="password",
+                )
+            },
+        ),
+        cloning=CloningConfig(enabled=True, scope="cfg"),
+        warehouse=ConnectionSection(
+            active_profile="dev",
+            profiles={
+                "dev": ConnectionProfile(
+                    section="WAREHOUSE",
+                    name="dev",
+                    jdbc_url=f"jdbc:postgresql://localhost:55432/{second_postgres_database}",
+                    user="etl_craft",
+                    auth_mode="password",
+                )
+            },
+        ),
+    )
+
+    run_cloning_if_enabled(postgres_engine, config)
+
+    target_engine = create_engine(
+        f"postgresql+psycopg://etl_craft:etl_craft@localhost:55432/{second_postgres_database}"
+    )
+    try:
+        with target_engine.connect() as conn:
+            pipeline_code = conn.execute(
+                text("SELECT pipeline_code FROM cfg_pipelines WHERE pipeline_id = :id"),
+                {"id": committed_pipeline},
+            ).scalar_one()
+        assert pipeline_code == "TEST_CONCURRENT_PL"
+    finally:
+        target_engine.dispose()
+
+
+def test_run_cloning_aud_scope_clones_only_aud_tables(
+    monkeypatch,
+    postgres_engine,
+    clickhouse_engine,
+    committed_pipeline,
+    clickhouse_cfg_tables_cleanup,
+):
+    seed_active_run(postgres_engine, committed_pipeline)
+    config = _clickhouse_warehouse_config(
+        monkeypatch, cloning=CloningConfig(enabled=True, scope="aud")
+    )
+
+    run_cloning_if_enabled(postgres_engine, config)
+
+    with clickhouse_engine.connect() as conn:
+        assert not inspect(clickhouse_engine).has_table("cfg_pipelines")
+        count = conn.execute(
+            text("SELECT count(*) FROM aud_pipelines_run_log WHERE pipeline_id = :id"),
+            {"id": committed_pipeline},
+        ).scalar_one()
+    assert count == 1
 
 
 # ==============================================================================
@@ -1574,7 +1873,14 @@ def test_wait_for_task_dependency_stops_at_deadline_mid_loop(
 # helpers, not the rolled-back pg_conn used in the sections above.
 
 
-def make_config(mode: str = "local", *, warehouse: bool = False) -> ConnectorConfig:
+def make_config(
+    mode: str = "local",
+    *,
+    warehouse: bool = False,
+    email: bool = False,
+    email_auth_mode: str = "none",
+    cloning: CloningConfig | None = None,
+) -> ConnectorConfig:
     profile = ConnectionProfile(
         section="POSTGRES",
         name="dev",
@@ -1599,11 +1905,31 @@ def make_config(mode: str = "local", *, warehouse: bool = False) -> ConnectorCon
                 )
             },
         )
+    email_section = None
+    if email:
+        # No real SMTP server is part of this project's test infra — every
+        # email_alert.py test mocks smtplib.SMTP itself, so host/port here
+        # are never actually dialed.
+        email_section = EmailConfig(
+            active_profile="dev",
+            profiles={
+                "dev": EmailProfile(
+                    section="EMAIL",
+                    name="dev",
+                    host="smtp.test.invalid",
+                    port=587,
+                    from_address="etl-craft@test.invalid",
+                    auth_mode=email_auth_mode,
+                    user="alerts@test.invalid" if email_auth_mode == "password" else None,
+                )
+            },
+        )
     return ConnectorConfig(
         mode=mode,
         source=SourceConfig(type="environment"),
+        email=email_section,
+        cloning=cloning or CloningConfig(),
         postgres=ConnectionSection(active_profile="dev", profiles={"dev": profile}),
-        cloning=CloningConfig(),
         warehouse=warehouse_section,
     )
 
@@ -2048,6 +2374,37 @@ def test_finalize_active_run_works_under_orchestrator_mode(postgres_engine, comm
         postgres_engine, make_config(mode="orchestrator"), "TEST_CONCURRENT_PL"
     )
     assert outcome.status == "SUCCESS"
+
+
+def test_finalize_active_run_invokes_cloning(postgres_engine, committed_pipeline, monkeypatch):
+    seed_active_run(postgres_engine, committed_pipeline)
+    calls = []
+    monkeypatch.setattr(
+        "etl_craft.orchestrator.run_cloning_if_enabled",
+        lambda engine, config: calls.append((engine, config)),
+    )
+    config = make_config()
+
+    outcome = finalize_active_run(postgres_engine, config, "TEST_CONCURRENT_PL")
+
+    assert outcome.status == "SUCCESS"
+    assert calls == [(postgres_engine, config)]
+
+
+def test_finalize_active_run_cloning_failure_does_not_fail_the_pipeline(
+    postgres_engine, committed_pipeline, monkeypatch, capsys
+):
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    def _raise(engine, config):
+        raise ValueError("Data DB unreachable")
+
+    monkeypatch.setattr("etl_craft.orchestrator.run_cloning_if_enabled", _raise)
+
+    outcome = finalize_active_run(postgres_engine, make_config(), "TEST_CONCURRENT_PL")
+
+    assert outcome.status == "SUCCESS"
+    assert "warning: cloning failed" in capsys.readouterr().err
 
 
 def test_init_pipeline_run_mints_and_finalizes_skipped_when_dependency_unmet(
@@ -4008,6 +4365,362 @@ def test_python_handler_ingestion_count_non_numeric_fails(
 
 
 # ------------------------------------------------------------------------------
+# email_alert.py — HANDLER=EMAIL_ALERT, against real Postgres (Engine DB reads
+# only, same as every other handler section here) with smtplib.SMTP mocked —
+# no real SMTP server is part of this project's test infra, and proving the
+# handler builds/sends the right message doesn't require actually delivering
+# one anywhere.
+# ------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def fake_smtp(tmp_path, monkeypatch):
+    """Replace smtplib.SMTP with a fake that appends each call's effect to a file.
+
+    run_task() forks the actual handler dispatch into a child process
+    (runner.py's crash detection) — an in-memory list a fake SMTP client
+    appended to would only ever be visible inside that child's own
+    copy-on-write memory, never back in this test's own process. A shared
+    file on disk is the same workaround the project's own crash-detection
+    test already uses for the identical reason (see runner.py's own
+    [CHOICE] on why fork, not spawn, and CLAUDE.md's "Bug caught and fixed"
+    note on that test) — a real cross-process-visible side effect, not an
+    in-memory one.
+    """
+    log_path = tmp_path / "fake_smtp_events.jsonl"
+
+    class _FakeSMTP:
+        def __init__(self, host, port):
+            self.host = host
+            self.port = port
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+        def _log(self, event: dict) -> None:
+            with log_path.open("a") as f:
+                f.write(json.dumps(event) + "\n")
+
+        def starttls(self):
+            self._log({"event": "starttls"})
+
+        def login(self, user, password):
+            self._log({"event": "login", "user": user, "password": password})
+
+        def sendmail(self, from_addr, to_addrs, message):
+            self._log({"event": "sendmail", "from": from_addr, "to": to_addrs, "message": message})
+
+    monkeypatch.setattr("smtplib.SMTP", _FakeSMTP)
+    return log_path
+
+
+def _read_smtp_events(log_path) -> list[dict]:
+    if not log_path.exists():
+        return []
+    return [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
+
+
+def test_email_alert_sends_with_substituted_subject_and_body(
+    postgres_engine, committed_pipeline, fake_smtp
+):
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "alert", "EMAIL_ALERT")
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {
+            "EMAIL_TO": "a@example.com|b@example.com",
+            "EMAIL_SUBJECT": "Pipeline $$pipeline_code failed",
+            "EMAIL_BODY": "Run $$pipeline_id, task $$task_code: $$error_message",
+        },
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    outcome = run_task(postgres_engine, make_config(email=True), "TEST_CONCURRENT_PL", "alert")
+
+    assert outcome.status == "SUCCESS"
+    events = _read_smtp_events(fake_smtp)
+    sent = [e for e in events if e["event"] == "sendmail"]
+    assert len(sent) == 1
+    assert sent[0]["to"] == ["a@example.com", "b@example.com"]
+    assert "Pipeline TEST_CONCURRENT_PL failed" in sent[0]["message"]
+    assert "task alert" in sent[0]["message"]
+    row = _task_run_row(postgres_engine, task_id)
+    assert "RECIPIENT_COUNT = 2" in row.task_log
+
+
+def test_email_alert_pulls_error_message_from_watched_failure_task(
+    postgres_engine, committed_pipeline, fake_smtp
+):
+    watched_id = insert_committed_task(postgres_engine, committed_pipeline, "watched")
+    insert_committed_task_parameters(
+        postgres_engine,
+        watched_id,
+        {"SQL_ACTION": "CREATE_TABLE", "TARGET_OBJECT": "public.whatever"},
+    )
+    alert_id = insert_committed_task(postgres_engine, committed_pipeline, "alert", "EMAIL_ALERT")
+    insert_committed_task_parameters(
+        postgres_engine,
+        alert_id,
+        {
+            "EMAIL_TO": "a@example.com",
+            "EMAIL_SUBJECT": "alert",
+            "EMAIL_BODY": "reason: $$error_message",
+        },
+    )
+    insert_committed_dependency(
+        postgres_engine, committed_pipeline, alert_id, watched_id, dependency_type="FAILURE"
+    )
+    run_id = seed_active_run(postgres_engine, committed_pipeline)
+    watched_run_id = insert_committed_task_run(postgres_engine, watched_id, run_id, "FAILED")
+    with postgres_engine.begin() as conn:
+        update_task_run(conn, watched_run_id, status="FAILED", error_message="table already exists")
+
+    outcome = run_task(postgres_engine, make_config(email=True), "TEST_CONCURRENT_PL", "alert")
+
+    assert outcome.status == "SUCCESS"
+    sent = [e for e in _read_smtp_events(fake_smtp) if e["event"] == "sendmail"]
+    assert "reason: table already exists" in sent[0]["message"]
+
+
+def test_email_alert_password_auth_mode_logs_in(postgres_engine, committed_pipeline, fake_smtp):
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "alert", "EMAIL_ALERT")
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {"EMAIL_TO": "a@example.com", "EMAIL_SUBJECT": "s", "EMAIL_BODY": "b"},
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+    os.environ.setdefault("ETL_CRAFT_EMAIL_DEV_SECRET", "smtp-secret")
+
+    outcome = run_task(
+        postgres_engine,
+        make_config(email=True, email_auth_mode="password"),
+        "TEST_CONCURRENT_PL",
+        "alert",
+    )
+
+    assert outcome.status == "SUCCESS"
+    events = _read_smtp_events(fake_smtp)
+    assert any(e["event"] == "starttls" for e in events)
+    logins = [(e["user"], e["password"]) for e in events if e["event"] == "login"]
+    assert logins == [("alerts@test.invalid", "smtp-secret")]
+
+
+def test_email_alert_missing_email_to_fails_clearly(postgres_engine, committed_pipeline, fake_smtp):
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "alert", "EMAIL_ALERT")
+    insert_committed_task_parameters(
+        postgres_engine, task_id, {"EMAIL_SUBJECT": "s", "EMAIL_BODY": "b"}
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    outcome = run_task(postgres_engine, make_config(email=True), "TEST_CONCURRENT_PL", "alert")
+
+    assert outcome.status == "FAILED"
+    assert "EMAIL_TO" in outcome.message
+
+
+def test_email_alert_missing_subject_or_body_fails_clearly(
+    postgres_engine, committed_pipeline, fake_smtp
+):
+    no_subject_id = insert_committed_task(
+        postgres_engine, committed_pipeline, "no_subject", "EMAIL_ALERT"
+    )
+    insert_committed_task_parameters(
+        postgres_engine, no_subject_id, {"EMAIL_TO": "a@example.com", "EMAIL_BODY": "b"}
+    )
+    no_body_id = insert_committed_task(
+        postgres_engine, committed_pipeline, "no_body", "EMAIL_ALERT"
+    )
+    insert_committed_task_parameters(
+        postgres_engine, no_body_id, {"EMAIL_TO": "a@example.com", "EMAIL_SUBJECT": "s"}
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    no_subject = run_task(
+        postgres_engine, make_config(email=True), "TEST_CONCURRENT_PL", "no_subject"
+    )
+    no_body = run_task(postgres_engine, make_config(email=True), "TEST_CONCURRENT_PL", "no_body")
+
+    assert no_subject.status == "FAILED" and "EMAIL_SUBJECT" in no_subject.message
+    assert no_body.status == "FAILED" and "EMAIL_BODY" in no_body.message
+
+
+def test_email_alert_no_email_section_configured_fails_clearly(
+    postgres_engine, committed_pipeline, fake_smtp
+):
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "alert", "EMAIL_ALERT")
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {"EMAIL_TO": "a@example.com", "EMAIL_SUBJECT": "s", "EMAIL_BODY": "b"},
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    outcome = run_task(postgres_engine, make_config(), "TEST_CONCURRENT_PL", "alert")
+
+    assert outcome.status == "FAILED"
+    assert "[Email]" in outcome.message
+    assert not _read_smtp_events(fake_smtp)
+
+
+def test_email_alert_smtp_failure_becomes_handler_error(
+    postgres_engine, committed_pipeline, monkeypatch
+):
+    def _raise(host, port):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr("smtplib.SMTP", _raise)
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "alert", "EMAIL_ALERT")
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {"EMAIL_TO": "a@example.com", "EMAIL_SUBJECT": "s", "EMAIL_BODY": "b"},
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    outcome = run_task(postgres_engine, make_config(email=True), "TEST_CONCURRENT_PL", "alert")
+
+    assert outcome.status == "FAILED"
+    assert "failed to send" in outcome.message
+
+
+def test_email_alert_pipelines_digest_for_one_named_pipeline(
+    postgres_engine, committed_pipeline, fake_smtp
+):
+    subject_task = insert_committed_task(postgres_engine, committed_pipeline, "watched")
+    insert_committed_task_parameters(
+        postgres_engine, subject_task, {"SQL_ACTION": "CREATE_TABLE", "TARGET_OBJECT": "public.x"}
+    )
+    alert_id = insert_committed_task(postgres_engine, committed_pipeline, "alert", "EMAIL_ALERT")
+    insert_committed_task_parameters(
+        postgres_engine,
+        alert_id,
+        {
+            "EMAIL_TO": "a@example.com",
+            "EMAIL_SUBJECT": "digest",
+            "EMAIL_PIPELINES": "TEST_CONCURRENT_PL",
+        },
+    )
+    run_id = seed_active_run(postgres_engine, committed_pipeline)
+    watched_run_id = insert_committed_task_run(postgres_engine, subject_task, run_id, "SUCCESS")
+    with postgres_engine.begin() as conn:
+        update_task_run(conn, watched_run_id, status="SUCCESS", target_count=1)
+
+    outcome = run_task(postgres_engine, make_config(email=True), "TEST_CONCURRENT_PL", "alert")
+
+    assert outcome.status == "SUCCESS"
+    sent = [e for e in _read_smtp_events(fake_smtp) if e["event"] == "sendmail"]
+    assert len(sent) == 1
+    message = sent[0]["message"]
+    assert "Content-Type: text/html" in message
+    assert "TEST_CONCURRENT_PL" in message
+    assert "<details>" in message and "<summary>" in message
+    assert "watched" in message  # per-task breakdown inside the collapsible section
+
+
+def test_email_alert_pipelines_digest_unknown_pipeline_does_not_fail_the_task(
+    postgres_engine, committed_pipeline, fake_smtp
+):
+    alert_id = insert_committed_task(postgres_engine, committed_pipeline, "alert", "EMAIL_ALERT")
+    insert_committed_task_parameters(
+        postgres_engine,
+        alert_id,
+        {
+            "EMAIL_TO": "a@example.com",
+            "EMAIL_SUBJECT": "digest",
+            "EMAIL_PIPELINES": "TEST_CONCURRENT_PL|NO_SUCH_PIPELINE",
+        },
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    outcome = run_task(postgres_engine, make_config(email=True), "TEST_CONCURRENT_PL", "alert")
+
+    assert outcome.status == "SUCCESS"
+    sent = [e for e in _read_smtp_events(fake_smtp) if e["event"] == "sendmail"]
+    assert "NO_SUCH_PIPELINE" in sent[0]["message"]
+
+
+def test_email_alert_pipelines_all_includes_every_active_pipeline(
+    postgres_engine, committed_pipeline, fake_smtp
+):
+    alert_id = insert_committed_task(postgres_engine, committed_pipeline, "alert", "EMAIL_ALERT")
+    insert_committed_task_parameters(
+        postgres_engine,
+        alert_id,
+        {"EMAIL_TO": "a@example.com", "EMAIL_SUBJECT": "digest", "EMAIL_PIPELINES": "ALL"},
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    outcome = run_task(postgres_engine, make_config(email=True), "TEST_CONCURRENT_PL", "alert")
+
+    assert outcome.status == "SUCCESS"
+    sent = [e for e in _read_smtp_events(fake_smtp) if e["event"] == "sendmail"]
+    assert "TEST_CONCURRENT_PL" in sent[0]["message"]
+
+
+def test_email_alert_pipelines_digest_never_run_pipeline(
+    postgres_engine, committed_pipeline, fake_smtp
+):
+    with postgres_engine.begin() as conn:
+        never_run_id = conn.execute(
+            text(
+                "INSERT INTO CFG_PIPELINES (PIPELINE_CODE, PIPELINE_NAME, REFRESH_TYPE) "
+                "VALUES ('TEST_NEVER_RUN_PL', 'Never Run', 'INCREMENTAL') RETURNING PIPELINE_ID"
+            )
+        ).scalar_one()
+    try:
+        alert_id = insert_committed_task(
+            postgres_engine, committed_pipeline, "alert", "EMAIL_ALERT"
+        )
+        insert_committed_task_parameters(
+            postgres_engine,
+            alert_id,
+            {
+                "EMAIL_TO": "a@example.com",
+                "EMAIL_SUBJECT": "digest",
+                "EMAIL_PIPELINES": "TEST_NEVER_RUN_PL",
+            },
+        )
+        seed_active_run(postgres_engine, committed_pipeline)
+
+        outcome = run_task(postgres_engine, make_config(email=True), "TEST_CONCURRENT_PL", "alert")
+
+        assert outcome.status == "SUCCESS"
+        sent = [e for e in _read_smtp_events(fake_smtp) if e["event"] == "sendmail"]
+        assert "NEVER_RUN" in sent[0]["message"]
+    finally:
+        with postgres_engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM CFG_PIPELINES WHERE PIPELINE_ID = :id"), {"id": never_run_id}
+            )
+
+
+def test_email_alert_intro_and_digest_both_present(postgres_engine, committed_pipeline, fake_smtp):
+    alert_id = insert_committed_task(postgres_engine, committed_pipeline, "alert", "EMAIL_ALERT")
+    insert_committed_task_parameters(
+        postgres_engine,
+        alert_id,
+        {
+            "EMAIL_TO": "a@example.com",
+            "EMAIL_SUBJECT": "digest",
+            "EMAIL_BODY": "Nightly status for $$pipeline_code",
+            "EMAIL_PIPELINES": "TEST_CONCURRENT_PL",
+        },
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    outcome = run_task(postgres_engine, make_config(email=True), "TEST_CONCURRENT_PL", "alert")
+
+    assert outcome.status == "SUCCESS"
+    message = [e for e in _read_smtp_events(fake_smtp) if e["event"] == "sendmail"][0]["message"]
+    assert "Nightly status for TEST_CONCURRENT_PL" in message
+    assert "Pipeline status summary" in message
+
+
+# ------------------------------------------------------------------------------
 # lineage CLI command — cfg.fetch_table_lineage
 # ------------------------------------------------------------------------------
 
@@ -4055,6 +4768,56 @@ def test_cli_lineage_reports_nothing_for_an_undeclared_table(craft_connector_on_
     exit_code = cli_main(["lineage", "--table", "public.nobody_uses_this"])
 
     assert exit_code == 0
+
+
+# ------------------------------------------------------------------------------
+# docs_generator.py -- against real Postgres for collect_docs (the one
+# DB-touching entry point); rendering itself is covered in test_unit.py.
+# ------------------------------------------------------------------------------
+
+
+def test_collect_docs_includes_pipeline_with_waves_and_steps(postgres_engine, committed_pipeline):
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "t")
+    insert_committed_task_parameters(
+        postgres_engine, task_id, {"SQL_ACTION": "CREATE_TABLE", "TARGET_OBJECT": "public.x"}
+    )
+
+    with postgres_engine.connect() as conn:
+        docs = collect_docs(conn)
+
+    entry = next(d for d in docs if d[0].pipeline_code == "TEST_CONCURRENT_PL")
+    summary, data = entry
+    assert summary.pipeline_name == "Concurrent Test Pipeline"
+    assert data.waves == [["t"]]
+    assert data.steps[0].task_code == "t"
+
+
+def test_generate_docs_writes_expected_files(postgres_engine, committed_pipeline, tmp_path):
+    output_dir = tmp_path / "docs-site"
+    with postgres_engine.connect() as conn:
+        generate_docs(conn, output_dir)
+
+    assert (output_dir / "index.html").is_file()
+    assert (output_dir / "style.css").is_file()
+    assert (output_dir / "search.js").is_file()
+    assert (output_dir / "search-index.json").is_file()
+    assert (output_dir / "TEST_CONCURRENT_PL.html").is_file()
+
+    index = json.loads((output_dir / "search-index.json").read_text())
+    assert any(e["pipeline_code"] == "TEST_CONCURRENT_PL" for e in index)
+    assert "TEST_CONCURRENT_PL" in (output_dir / "index.html").read_text()
+
+
+def test_cli_generate_docs_writes_site_and_reports_output_dir(
+    craft_connector_on_disk, committed_pipeline, tmp_path, capsys
+):
+    output_dir = tmp_path / "cli-docs-site"
+
+    exit_code = cli_main(["generate-docs", "--output", str(output_dir)])
+
+    assert exit_code == 0
+    assert (output_dir / "index.html").is_file()
+    assert str(output_dir) in capsys.readouterr().out
 
 
 # ------------------------------------------------------------------------------
@@ -4176,3 +4939,172 @@ def test_cli_migrate_reports_error_on_failed_migration(
 
     assert exit_code == 1
     assert "0001_bad.sql" in capsys.readouterr().err
+
+
+# ==============================================================================
+# cfg.py / cli.py -- `steps` and `history`, the two remaining read-only query
+# verbs CLAUDE.md's CLI surface section listed as "conceptually agreed but
+# not yet named or built" (dependency graph and table-level lineage were
+# already closed by `graph`/`lineage`).
+# ==============================================================================
+
+
+def test_fetch_pipeline_steps_returns_active_tasks_with_their_parameters(
+    postgres_engine, committed_pipeline
+):
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "t")
+    insert_committed_task_parameters(
+        postgres_engine, task_id, {"SQL_ACTION": "CREATE_TABLE", "TARGET_OBJECT": "public.x"}
+    )
+
+    with postgres_engine.connect() as conn:
+        steps = fetch_pipeline_steps(conn, committed_pipeline)
+
+    assert len(steps) == 1
+    assert steps[0].task_code == "t"
+    assert steps[0].handler == "SQL"
+    assert steps[0].parameters == {"SQL_ACTION": "CREATE_TABLE", "TARGET_OBJECT": "public.x"}
+
+
+def test_fetch_pipeline_run_history_orders_newest_first_and_respects_limit(
+    postgres_engine, committed_pipeline
+):
+    older = insert_committed_pipeline_run(
+        postgres_engine,
+        committed_pipeline,
+        "SUCCESS",
+        start_date=datetime.now(UTC) - timedelta(hours=2),
+    )
+    newer = insert_committed_pipeline_run(postgres_engine, committed_pipeline, "FAILED")
+
+    with postgres_engine.connect() as conn:
+        entries = fetch_pipeline_run_history(conn, committed_pipeline, limit=1)
+
+    assert [e.pipeline_run_id for e in entries] == [newer]
+    assert entries[0].status == "FAILED"
+    assert older != newer  # sanity: the two runs really are distinct rows
+
+
+def test_fetch_task_run_history_includes_error_message(postgres_engine, committed_pipeline):
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "t")
+    run_id = seed_active_run(postgres_engine, committed_pipeline)
+    task_run_id = insert_committed_task_run(postgres_engine, task_id, run_id, "FAILED")
+    with postgres_engine.begin() as conn:
+        update_task_run(conn, task_run_id, status="FAILED", error_message="boom")
+
+    with postgres_engine.connect() as conn:
+        entries = fetch_task_run_history(conn, task_id)
+
+    assert len(entries) == 1
+    assert entries[0].pipeline_run_id == run_id
+    assert entries[0].error_message == "boom"
+
+
+def test_fetch_failure_watch_messages_reads_latest_error_from_watched_task(
+    postgres_engine, committed_pipeline
+):
+    watched_id = insert_committed_task(postgres_engine, committed_pipeline, "watched")
+    alert_id = insert_committed_task(
+        postgres_engine, committed_pipeline, "alert", handler="EMAIL_ALERT"
+    )
+    insert_committed_dependency(
+        postgres_engine, committed_pipeline, alert_id, watched_id, dependency_type="FAILURE"
+    )
+    run_id = seed_active_run(postgres_engine, committed_pipeline)
+    watched_run_id = insert_committed_task_run(postgres_engine, watched_id, run_id, "FAILED")
+    with postgres_engine.begin() as conn:
+        update_task_run(conn, watched_run_id, status="FAILED", error_message="disk full")
+
+    with postgres_engine.connect() as conn:
+        messages = fetch_failure_watch_messages(conn, alert_id)
+
+    assert len(messages) == 1
+    assert messages[0].depends_on_task_code == "watched"
+    assert messages[0].error_message == "disk full"
+
+
+def test_cli_steps_lists_tasks_and_parameters(
+    craft_connector_on_disk, postgres_engine, committed_pipeline, capsys
+):
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "t")
+    insert_committed_task_parameters(postgres_engine, task_id, {"SQL_ACTION": "CREATE_TABLE"})
+
+    exit_code = cli_main(["steps", "--pipeline_code", "TEST_CONCURRENT_PL"])
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "t\tSQL\tSQL_ACTION=CREATE_TABLE" in out
+
+
+def test_cli_steps_unknown_pipeline_errors(craft_connector_on_disk, capsys):
+    exit_code = cli_main(["steps", "--pipeline_code", "NO_SUCH_PIPELINE"])
+
+    assert exit_code == 1
+    assert "no active pipeline" in capsys.readouterr().err
+
+
+def test_cli_history_pipeline_level(
+    craft_connector_on_disk, postgres_engine, committed_pipeline, capsys
+):
+    insert_committed_pipeline_run(postgres_engine, committed_pipeline, "SUCCESS")
+
+    exit_code = cli_main(["history", "--pipeline_code", "TEST_CONCURRENT_PL"])
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "SUCCESS" in out
+
+
+def test_cli_history_task_level(
+    craft_connector_on_disk, postgres_engine, committed_pipeline, capsys
+):
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "t")
+    run_id = seed_active_run(postgres_engine, committed_pipeline)
+    task_run_id = insert_committed_task_run(postgres_engine, task_id, run_id, "FAILED")
+    with postgres_engine.begin() as conn:
+        update_task_run(conn, task_run_id, status="FAILED", error_message="kaboom")
+
+    exit_code = cli_main(["history", "--pipeline_code", "TEST_CONCURRENT_PL", "--task_code", "t"])
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "FAILED" in out
+    assert "kaboom" in out
+
+
+def test_cli_history_unknown_task_errors(craft_connector_on_disk, committed_pipeline, capsys):
+    exit_code = cli_main(
+        ["history", "--pipeline_code", "TEST_CONCURRENT_PL", "--task_code", "no_such_task"]
+    )
+
+    assert exit_code == 1
+    assert "no active task" in capsys.readouterr().err
+
+
+def test_cli_history_no_logged_runs_prints_placeholder(
+    craft_connector_on_disk, committed_pipeline, capsys
+):
+    exit_code = cli_main(["history", "--pipeline_code", "TEST_CONCURRENT_PL"])
+
+    assert exit_code == 0
+    assert "(no logged runs)" in capsys.readouterr().out
+
+
+def test_cli_steps_no_active_tasks_prints_placeholder(
+    craft_connector_on_disk, committed_pipeline, capsys
+):
+    exit_code = cli_main(["steps", "--pipeline_code", "TEST_CONCURRENT_PL"])
+
+    assert exit_code == 0
+    assert "(no active tasks)" in capsys.readouterr().out
+
+
+def test_cli_history_task_level_no_logged_runs_prints_placeholder(
+    craft_connector_on_disk, postgres_engine, committed_pipeline, capsys
+):
+    insert_committed_task(postgres_engine, committed_pipeline, "t")
+
+    exit_code = cli_main(["history", "--pipeline_code", "TEST_CONCURRENT_PL", "--task_code", "t"])
+
+    assert exit_code == 0
+    assert "(no logged runs)" in capsys.readouterr().out

@@ -50,6 +50,16 @@ VALID_MODES = frozenset({"local", "orchestrator"})
 VALID_SOURCE_TYPES = frozenset({"file", "environment"})
 VALID_AUTH_MODES = frozenset({"password", "token", "sso", "key_file"})
 VALID_CLONING_SCOPES = frozenset({"cfg", "aud", "all"})
+# [ADDITION] EMAIL_ALERT's own, smaller auth vocabulary — per explicit
+# instruction, the transport is SMTP. Many internal relays accept anonymous
+# submission (no auth_mode concept needed at all); "password" covers the
+# other common real case (Gmail/O365-style app-password auth). token/sso
+# aren't included: an OAuth2 XOAUTH2 SMTP flow is a real thing some
+# providers support, but it's provider-specific in the same way db.py's own
+# token/sso stubs are, and no team's e-mail relay has been named yet to
+# build a concrete one against — left out rather than stubbed with a third
+# NotImplementedError for a mode nothing currently asks for.
+VALID_EMAIL_AUTH_MODES = frozenset({"none", "password"})
 
 
 class ConfigError(Exception):
@@ -106,6 +116,50 @@ class CloningConfig:
 
 
 @dataclass(frozen=True)
+class EmailProfile:
+    """One named [Email] profile — the SMTP relay email_alert.py sends through.
+
+    [ADDITION] CLAUDE.md's own open question named the transport as still
+    undecided ("SMTP creds vs. an API like SES/SendGrid"); resolved per
+    explicit instruction to SMTP. Shaped like ConnectionSection's own
+    active_profile/Profiles pattern (a team's dev/uat/prod relays can
+    genuinely differ), not a single flat section, for the same reason
+    [Postgres]/[Warehouse] already work that way.
+    """
+
+    section: str
+    name: str
+    host: str
+    port: int
+    from_address: str
+    auth_mode: str = "none"
+    user: str | None = None
+    use_tls: bool = True
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def secret_var(self) -> str:
+        """The env var name holding this profile's secret material (auth_mode='password' only)."""
+        override = self.extra.get("secret_var")
+        if override:
+            return str(override)
+        return f"ETL_CRAFT_{self.section}_{self.name}_SECRET".upper()
+
+
+@dataclass(frozen=True)
+class EmailConfig:
+    """The [Email] section: an active profile name plus all named profiles."""
+
+    active_profile: str
+    profiles: dict[str, EmailProfile]
+
+    @property
+    def active(self) -> EmailProfile:
+        """Return the profile currently selected by active_profile."""
+        return self.profiles[self.active_profile]
+
+
+@dataclass(frozen=True)
 class OrchestratorConfig:
     """The [Orchestrator] section: global defaults/fallbacks for generate-yml's Airflow fields.
 
@@ -134,6 +188,7 @@ class ConnectorConfig:
     cloning: CloningConfig
     warehouse: ConnectionSection | None = None
     orchestrator: OrchestratorConfig = field(default_factory=OrchestratorConfig)
+    email: EmailConfig | None = None
 
 
 def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> ConnectorConfig:
@@ -173,6 +228,14 @@ def _parse_config(raw: dict[str, Any], path: Path) -> ConnectorConfig:
     cloning = _parse_cloning(raw.get("Cloning") or {}, path)
     orchestrator = _parse_orchestrator(raw.get("Orchestrator") or {}, path)
 
+    email_raw = raw.get("Email")
+    if email_raw is None:
+        email = None
+    elif not isinstance(email_raw, dict):
+        raise ConfigError(f"{path}: Email section must be a mapping if present")
+    else:
+        email = _parse_email_section(email_raw, path)
+
     return ConnectorConfig(
         mode=mode,
         source=source,
@@ -180,6 +243,7 @@ def _parse_config(raw: dict[str, Any], path: Path) -> ConnectorConfig:
         cloning=cloning,
         warehouse=warehouse,
         orchestrator=orchestrator,
+        email=email,
     )
 
 
@@ -273,6 +337,55 @@ def _parse_orchestrator(raw: dict[str, Any], path: Path) -> OrchestratorConfig:
     )
 
 
+def _parse_email_section(raw: dict[str, Any], path: Path) -> EmailConfig:
+    active_profile = raw.get("Active_profile")
+    profiles_raw = raw.get("Profiles")
+    if not active_profile or not isinstance(profiles_raw, dict):
+        raise ConfigError(f"{path}: Email needs Active_profile and a Profiles mapping")
+    profiles = {
+        name: _parse_email_profile(name, profile_raw or {}, path)
+        for name, profile_raw in profiles_raw.items()
+    }
+    if active_profile not in profiles:
+        raise ConfigError(
+            f"{path}: Email.Active_profile {active_profile!r} has no matching entry in Profiles"
+        )
+    return EmailConfig(active_profile=active_profile, profiles=profiles)
+
+
+def _parse_email_profile(name: str, raw: dict[str, Any], path: Path) -> EmailProfile:
+    host = raw.get("host")
+    port = raw.get("port")
+    from_address = raw.get("from_address")
+    if not host or not port or not from_address:
+        raise ConfigError(f"{path}: Email.Profiles.{name} needs host, port, and from_address")
+    auth_mode = raw.get("auth_mode", "none")
+    if auth_mode not in VALID_EMAIL_AUTH_MODES:
+        raise ConfigError(
+            f"{path}: Email.Profiles.{name}.auth_mode must be one of "
+            f"{sorted(VALID_EMAIL_AUTH_MODES)}, got {auth_mode!r}"
+        )
+    user = raw.get("user")
+    if auth_mode == "password" and not user:
+        raise ConfigError(f"{path}: Email.Profiles.{name} needs user when auth_mode=password")
+    extra = {
+        k: v
+        for k, v in raw.items()
+        if k not in {"host", "port", "from_address", "auth_mode", "user", "use_tls"}
+    }
+    return EmailProfile(
+        section="EMAIL",
+        name=name,
+        host=host,
+        port=int(port),
+        from_address=from_address,
+        auth_mode=auth_mode,
+        user=user,
+        use_tls=bool(raw.get("use_tls", True)),
+        extra=extra,
+    )
+
+
 def _require_list_if_present(raw: dict[str, Any], key: str, path: Path) -> list[str] | None:
     value = raw.get(key)
     if value is None:
@@ -282,7 +395,7 @@ def _require_list_if_present(raw: dict[str, Any], key: str, path: Path) -> list[
     return value
 
 
-def resolve_secret(config: ConnectorConfig, profile: ConnectionProfile) -> str:
+def resolve_secret(config: ConnectorConfig, profile: ConnectionProfile | EmailProfile) -> str:
     """Resolve `profile`'s secret material via the [Source] section."""
     var_name = profile.secret_var
     if config.source.type == "environment":

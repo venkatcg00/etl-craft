@@ -9,6 +9,7 @@ collisions) and keeps file count down.
 
 import contextlib
 import runpy
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 import pytest
@@ -19,7 +20,16 @@ from sqlalchemy.exc import IntegrityError
 
 import etl_craft
 import etl_craft.warehouse as warehouse_module
+from etl_craft.cfg import (
+    CrossPipelineTaskEdge,
+    PipelineDependencyEdge,
+    PipelineStep,
+    PipelineSummary,
+    TaskStatusEntry,
+)
 from etl_craft.cli import main as cli_main
+from etl_craft.cloning import AUD_TABLES, CFG_TABLES, tables_for_scope
+from etl_craft.cloning import _same_database as same_database
 from etl_craft.config import (
     CloningConfig,
     ConfigError,
@@ -31,9 +41,24 @@ from etl_craft.config import (
     load_config,
     resolve_secret,
 )
-from etl_craft.configure import configure_from_env, set_execution_mode
+from etl_craft.configure import (
+    _prompt_yes_no,
+    configure_from_env,
+    configure_interactive,
+    set_execution_mode,
+)
 from etl_craft.crosspipe import MIN_POLL_INTERVAL_SECONDS, _default_now, _next_poll_delay
 from etl_craft.db import AUTH_REGISTRY, ConnectionError_, build_engine, parse_jdbc_postgres
+from etl_craft.docs_generator import (
+    PipelineDocData,
+    build_search_index,
+)
+from etl_craft.docs_generator import _render_index_html as render_docs_index_html
+from etl_craft.docs_generator import _render_pipeline_html as render_docs_pipeline_html
+from etl_craft.email_alert import _PipelineDigestEntry
+from etl_craft.email_alert import _render_digest_html as render_email_digest_html
+from etl_craft.email_alert import _resolve_target_pipeline_codes as resolve_email_pipeline_codes
+from etl_craft.email_alert import _substitute as substitute_email_tokens
 from etl_craft.handlers import HandlerError, TaskExecutionContext, dispatch
 from etl_craft.migrate import _split_statements
 from etl_craft.resolver import (
@@ -410,6 +435,127 @@ def test_warehouse_section_must_be_a_mapping_if_present(tmp_path):
         load_config(write_config(tmp_path, bad))
 
 
+def test_email_is_none_when_section_absent(tmp_path):
+    config = load_config(write_config(tmp_path, VALID_YAML))
+    assert config.email is None
+
+
+def test_email_parsed_when_present(tmp_path):
+    with_email = VALID_YAML + (
+        "\nEmail:\n"
+        "  Active_profile: dev\n"
+        "  Profiles:\n"
+        "    dev:\n"
+        "      host: smtp.example.com\n"
+        "      port: 587\n"
+        "      from_address: etl-craft@example.com\n"
+        "      auth_mode: password\n"
+        "      user: alerts@example.com\n"
+    )
+    config = load_config(write_config(tmp_path, with_email))
+    assert config.email.active_profile == "dev"
+    assert config.email.active.host == "smtp.example.com"
+    assert config.email.active.port == 587
+    assert config.email.active.use_tls is True
+    assert config.email.active.secret_var == "ETL_CRAFT_EMAIL_DEV_SECRET"
+
+
+def test_email_defaults_auth_mode_to_none_and_needs_no_user(tmp_path):
+    with_email = VALID_YAML + (
+        "\nEmail:\n"
+        "  Active_profile: dev\n"
+        "  Profiles:\n"
+        "    dev:\n"
+        "      host: smtp.example.com\n"
+        "      port: 25\n"
+        "      from_address: etl-craft@example.com\n"
+    )
+    config = load_config(write_config(tmp_path, with_email))
+    assert config.email.active.auth_mode == "none"
+    assert config.email.active.user is None
+
+
+def test_email_password_auth_mode_requires_user(tmp_path):
+    with_email = VALID_YAML + (
+        "\nEmail:\n"
+        "  Active_profile: dev\n"
+        "  Profiles:\n"
+        "    dev:\n"
+        "      host: smtp.example.com\n"
+        "      port: 587\n"
+        "      from_address: etl-craft@example.com\n"
+        "      auth_mode: password\n"
+    )
+    with pytest.raises(ConfigError, match="needs user"):
+        load_config(write_config(tmp_path, with_email))
+
+
+def test_email_invalid_auth_mode_rejected(tmp_path):
+    with_email = VALID_YAML + (
+        "\nEmail:\n"
+        "  Active_profile: dev\n"
+        "  Profiles:\n"
+        "    dev:\n"
+        "      host: smtp.example.com\n"
+        "      port: 587\n"
+        "      from_address: etl-craft@example.com\n"
+        "      auth_mode: bogus\n"
+    )
+    with pytest.raises(ConfigError):
+        load_config(write_config(tmp_path, with_email))
+
+
+def test_email_section_must_be_a_mapping_if_present(tmp_path):
+    bad = VALID_YAML + "\nEmail: not-a-mapping\n"
+    with pytest.raises(ConfigError):
+        load_config(write_config(tmp_path, bad))
+
+
+def test_email_requires_active_profile_and_profiles(tmp_path):
+    bad = VALID_YAML + "\nEmail:\n  Profiles:\n    dev:\n      host: h\n"
+    with pytest.raises(ConfigError, match="needs Active_profile"):
+        load_config(write_config(tmp_path, bad))
+
+
+def test_email_active_profile_must_exist_in_profiles(tmp_path):
+    bad = VALID_YAML + (
+        "\nEmail:\n"
+        "  Active_profile: staging\n"
+        "  Profiles:\n"
+        "    dev:\n"
+        "      host: smtp.example.com\n"
+        "      port: 587\n"
+        "      from_address: etl-craft@example.com\n"
+    )
+    with pytest.raises(ConfigError, match="has no matching entry"):
+        load_config(write_config(tmp_path, bad))
+
+
+def test_email_profile_requires_host_port_and_from_address(tmp_path):
+    bad = VALID_YAML + (
+        "\nEmail:\n  Active_profile: dev\n  Profiles:\n    dev:\n      host: smtp.example.com\n"
+    )
+    with pytest.raises(ConfigError, match="needs host, port, and from_address"):
+        load_config(write_config(tmp_path, bad))
+
+
+def test_email_secret_var_override(tmp_path):
+    with_email = VALID_YAML + (
+        "\nEmail:\n"
+        "  Active_profile: dev\n"
+        "  Profiles:\n"
+        "    dev:\n"
+        "      host: smtp.example.com\n"
+        "      port: 587\n"
+        "      from_address: etl-craft@example.com\n"
+        "      auth_mode: password\n"
+        "      user: alerts@example.com\n"
+        "      secret_var: MY_CUSTOM_SMTP_SECRET\n"
+    )
+    config = load_config(write_config(tmp_path, with_email))
+    assert config.email.active.secret_var == "MY_CUSTOM_SMTP_SECRET"
+
+
 def test_orchestrator_defaults_when_section_absent(tmp_path):
     config = load_config(write_config(tmp_path, VALID_YAML))
     orch = config.orchestrator
@@ -731,12 +877,211 @@ def test_dispatch_unknown_handler_rejected():
         dispatch(None, _dummy_ctx("BOGUS"))
 
 
-def test_dispatch_email_alert_not_implemented_yet():
-    # EMAIL_ALERT is the one HANDLER value this build doesn't implement —
-    # the send transport and $$-substitution-in-alert-bodies question are
-    # both still open per CLAUDE.md's own Handlers section.
-    with pytest.raises(HandlerError, match="EMAIL_ALERT"):
-        dispatch(None, _dummy_ctx("EMAIL_ALERT"))
+# ------------------------------------------------------------------------------
+# email_alert.py — the pure substitution logic (no DB/SMTP); the real send
+# path is covered in test_integration.py (against real Postgres, SMTP
+# mocked — no real mail server is part of this project's test infra).
+
+
+def test_email_substitute_replaces_every_known_token():
+    ctx = _dummy_ctx("EMAIL_ALERT")
+    rendered = substitute_email_tokens(
+        "run $$pipeline_id of $$pipeline_code failed at $$task_code: $$error_message",
+        ctx,
+        "disk full",
+    )
+    assert rendered == "run 1 of P failed at T: disk full"
+
+
+def test_email_substitute_leaves_unknown_tokens_untouched():
+    ctx = _dummy_ctx("EMAIL_ALERT")
+    rendered = substitute_email_tokens("see $$nonsense for details", ctx, "")
+    assert rendered == "see $$nonsense for details"
+
+
+def test_resolve_email_pipeline_codes_single():
+    assert resolve_email_pipeline_codes(None, "PIPE_A") == ["PIPE_A"]
+
+
+def test_resolve_email_pipeline_codes_some_pipe_separated():
+    assert resolve_email_pipeline_codes(None, "PIPE_A|PIPE_B") == ["PIPE_A", "PIPE_B"]
+
+
+def test_render_email_digest_html_color_codes_status_and_escapes_content():
+    entries = [
+        _PipelineDigestEntry(
+            "PIPE_A",
+            "SUCCESS",
+            1,
+            None,
+            None,
+            [TaskStatusEntry("t1", "SUCCESS", None)],
+        ),
+        _PipelineDigestEntry(
+            "PIPE_B",
+            "FAILED",
+            2,
+            None,
+            None,
+            [TaskStatusEntry("t2", "FAILED", "<boom> & broke")],
+        ),
+    ]
+    rendered = render_email_digest_html(entries)
+    assert "#1a7f37" in rendered  # SUCCESS color
+    assert "#cf222e" in rendered  # FAILED color
+    assert "<details>" in rendered and "<summary>" in rendered
+    # error message content is HTML-escaped, not injected raw
+    assert "&lt;boom&gt; &amp; broke" in rendered
+    assert "<boom>" not in rendered
+
+
+def test_render_email_digest_html_no_tasks_shows_placeholder():
+    entries = [_PipelineDigestEntry("PIPE_A", "NEVER_RUN", None, None, None, [])]
+    rendered = render_email_digest_html(entries)
+    assert "(no active tasks)" in rendered
+
+
+# ------------------------------------------------------------------------------
+# cloning.py — the pure table-list logic (no DB); the actual copy mechanism
+# is covered in test_integration.py, against real Postgres standing in as
+# both the Engine DB and the Data DB (same spirit as sql_actions.py's own
+# tests).
+
+
+def test_tables_for_scope_cfg():
+    assert tables_for_scope("cfg") == CFG_TABLES
+
+
+def test_tables_for_scope_aud():
+    assert tables_for_scope("aud") == AUD_TABLES
+
+
+def test_tables_for_scope_all_is_cfg_plus_aud_with_no_overlap():
+    all_tables = tables_for_scope("all")
+    assert set(all_tables) == set(CFG_TABLES) | set(AUD_TABLES)
+    assert len(all_tables) == len(CFG_TABLES) + len(AUD_TABLES)
+
+
+def _cloning_config(postgres_jdbc: str, warehouse_jdbc: str) -> ConnectorConfig:
+    return ConnectorConfig(
+        mode="local",
+        source=SourceConfig(type="environment"),
+        postgres=ConnectionSection(
+            active_profile="dev",
+            profiles={
+                "dev": ConnectionProfile(
+                    section="POSTGRES",
+                    name="dev",
+                    jdbc_url=postgres_jdbc,
+                    user="u",
+                    auth_mode="password",
+                )
+            },
+        ),
+        cloning=CloningConfig(),
+        warehouse=ConnectionSection(
+            active_profile="dev",
+            profiles={
+                "dev": ConnectionProfile(
+                    section="WAREHOUSE",
+                    name="dev",
+                    jdbc_url=warehouse_jdbc,
+                    user="u",
+                    auth_mode="password",
+                )
+            },
+        ),
+    )
+
+
+def test_same_database_true_for_identical_host_port_database():
+    config = _cloning_config(
+        "jdbc:postgresql://localhost:5432/etl_craft", "jdbc:postgresql://localhost:5432/etl_craft"
+    )
+    assert same_database(config) is True
+
+
+def test_same_database_false_for_different_database_name():
+    config = _cloning_config(
+        "jdbc:postgresql://localhost:5432/etl_craft", "jdbc:postgresql://localhost:5432/analytics"
+    )
+    assert same_database(config) is False
+
+
+def test_same_database_false_for_different_dialect_even_if_host_port_match():
+    config = _cloning_config(
+        "jdbc:postgresql://localhost:5432/etl_craft", "jdbc:clickhouse://localhost:5432/etl_craft"
+    )
+    assert same_database(config) is False
+
+
+# ------------------------------------------------------------------------------
+# docs_generator.py — the pure rendering pieces (no DB); the real read layer
+# (collect_docs) is covered in test_integration.py against real Postgres.
+
+
+def _sample_doc() -> tuple[PipelineSummary, PipelineDocData]:
+    summary = PipelineSummary(pipeline_code="PIPE_A", pipeline_name="Pipe A", refresh_type="FULL")
+    data = PipelineDocData(
+        waves=[["t1"], ["t2"]],
+        steps=[
+            PipelineStep(task_code="t1", handler="SQL", parameters={"SQL_ACTION": "CREATE_TABLE"}),
+            PipelineStep(task_code="t2", handler="PYTHON", parameters={}),
+        ],
+        pipeline_dependencies=[
+            PipelineDependencyEdge(depends_on_pipeline_code="PIPE_UP", dependency_type="SUCCESS")
+        ],
+        cross_task_dependencies=[
+            CrossPipelineTaskEdge(
+                task_code="t1",
+                depends_on_pipeline_code="PIPE_UP",
+                depends_on_task_code="up_task",
+                dependency_type="SUCCESS",
+            )
+        ],
+    )
+    return summary, data
+
+
+def test_build_search_index_has_one_pipeline_entry_and_one_per_task():
+    docs = [_sample_doc()]
+    index = build_search_index(docs)
+    types = [entry["type"] for entry in index]
+    assert types == ["pipeline", "task", "task"]
+    assert index[0]["url"] == "PIPE_A.html"
+    assert index[1]["url"] == "PIPE_A.html#t1"
+
+
+def test_build_search_index_task_text_includes_parameters():
+    docs = [_sample_doc()]
+    index = build_search_index(docs)
+    task_entry = next(e for e in index if e.get("task_code") == "t1")
+    assert "SQL_ACTION=CREATE_TABLE" in task_entry["text"]
+
+
+def test_render_docs_index_html_lists_pipeline_and_has_search_box():
+    rendered = render_docs_index_html([_sample_doc()])
+    assert "PIPE_A" in rendered
+    assert 'id="search-box"' in rendered
+    assert "search.js" in rendered
+
+
+def test_render_docs_pipeline_html_includes_waves_steps_and_dependencies():
+    summary, data = _sample_doc()
+    rendered = render_docs_pipeline_html(summary, data)
+    assert "Wave 1: t1" in rendered
+    assert "Wave 2: t2" in rendered
+    assert 'id="t1"' in rendered
+    assert "PIPE_UP" in rendered
+    assert "up_task" in rendered
+
+
+def test_render_docs_pipeline_html_escapes_content():
+    summary = PipelineSummary(pipeline_code="P", pipeline_name="<script>", refresh_type="FULL")
+    data = PipelineDocData(waves=[], steps=[], pipeline_dependencies=[], cross_task_dependencies=[])
+    rendered = render_docs_pipeline_html(summary, data)
+    assert "<script>" not in rendered
+    assert "&lt;script&gt;" in rendered
 
 
 # ------------------------------------------------------------------------------
@@ -1138,13 +1483,39 @@ def test_cli_set_execution_mode_missing_file_reports_clean_error(tmp_path, monke
     assert "error:" in capsys.readouterr().err
 
 
-def test_cli_configure_without_env_reports_not_implemented(tmp_path, monkeypatch, capsys):
+def test_cli_configure_without_env_calls_interactive_setup(tmp_path, monkeypatch, capsys):
+    # configure_interactive's own prompt-by-prompt behavior is tested
+    # directly (with an injected input_fn/print_fn, no real stdin/stdout
+    # involved) in the "configure_interactive" section below — this just
+    # proves the CLI wires a bare `configure` (no --env) to it, the same
+    # spirit as the existing apply_pending_migrations CLI-wiring tests.
     monkeypatch.chdir(tmp_path)
+    called = {}
+
+    def _fake_interactive():
+        called["ran"] = True
+
+    monkeypatch.setattr("etl_craft.cli.configure_interactive", _fake_interactive)
+
+    exit_code = cli_main(["configure"])
+
+    assert exit_code == 0
+    assert called == {"ran": True}
+    assert "craft-connector.yml written" in capsys.readouterr().out
+
+
+def test_cli_configure_without_env_reports_configerror(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+
+    def _raise():
+        raise ConfigError("boom")
+
+    monkeypatch.setattr("etl_craft.cli.configure_interactive", _raise)
 
     exit_code = cli_main(["configure"])
 
     assert exit_code == 2
-    assert "not implemented yet" in capsys.readouterr().err
+    assert "boom" in capsys.readouterr().err
 
 
 def test_cli_configure_with_env(tmp_path, monkeypatch, capsys):
@@ -1167,6 +1538,166 @@ def test_cli_configure_with_env_reports_clean_error_on_bad_env(tmp_path, monkeyp
 
     assert exit_code == 2
     assert "error:" in capsys.readouterr().err
+
+
+# ==============================================================================
+# configure_interactive — driven with a canned input_fn/print_fn, no real
+# stdin/stdout involved. Answers are supplied in the exact order the
+# function asks its questions, per its own docstring's section order:
+# Mode, Orchestrator name, Source type, Postgres profile (name/jdbc_url/
+# user/auth_mode), Warehouse y/n, Email y/n, Cloning y/n[/Scope].
+# ==============================================================================
+
+
+def _canned_input(answers: list[str]) -> Callable[[str], str]:
+    iterator = iter(answers)
+
+    def _input(_prompt: str) -> str:
+        try:
+            return next(iterator)
+        except StopIteration:
+            raise AssertionError(
+                "configure_interactive asked more questions than expected"
+            ) from None
+
+    return _input
+
+
+def test_configure_interactive_minimal_answers_declines_optional_sections(tmp_path):
+    path = tmp_path / "craft-connector.yml"
+    answers = [
+        "local",  # Execution mode
+        "",  # Orchestrator name (optional)
+        "environment",  # Source type
+        "dev",  # Postgres profile name
+        "jdbc:postgresql://localhost:5432/etl_craft",  # jdbc_url
+        "etl_engine",  # user
+        "password",  # auth_mode
+        "n",  # configure Warehouse?
+        "n",  # configure Email?
+        "n",  # enable Cloning?
+    ]
+    configure_interactive(path, input_fn=_canned_input(answers), print_fn=lambda _: None)
+
+    config = load_config(path)
+    assert config.mode == "local"
+    assert config.postgres.active_profile == "dev"
+    assert config.postgres.active.auth_mode == "password"
+    assert config.warehouse is None
+    assert config.email is None
+    assert config.cloning.enabled is False
+
+
+def test_configure_interactive_configures_warehouse_email_and_cloning(tmp_path):
+    path = tmp_path / "craft-connector.yml"
+    answers = [
+        "orchestrator",  # Execution mode
+        "airflow-prod",  # Orchestrator name
+        "file",  # Source type
+        "/etc/etl-craft/secrets.env",  # Source path
+        "dev",  # Postgres profile name
+        "jdbc:postgresql://localhost:5432/etl_craft",  # jdbc_url
+        "etl_engine",  # user
+        "password",  # auth_mode
+        "y",  # configure Warehouse?
+        "dev",  # Warehouse profile name
+        "jdbc:postgresql://warehouse-host:5432/analytics",  # jdbc_url
+        "etl_engine",  # user
+        "key_file",  # auth_mode
+        "/etc/etl-craft/wh.key",  # key_file path
+        "y",  # configure Email?
+        "dev",  # Email profile name
+        "smtp.example.com",  # host
+        "",  # port (default 587)
+        "etl-craft@example.com",  # from_address
+        "password",  # auth_mode
+        "alerts@example.com",  # user
+        "y",  # enable Cloning?
+        "all",  # Cloning scope
+    ]
+    configure_interactive(path, input_fn=_canned_input(answers), print_fn=lambda _: None)
+
+    config = load_config(path)
+    assert config.mode == "orchestrator"
+    assert config.source.type == "file"
+    assert config.source.path == "/etc/etl-craft/secrets.env"
+    assert config.warehouse.active.auth_mode == "key_file"
+    assert config.warehouse.active.extra["key_file"] == "/etc/etl-craft/wh.key"
+    assert config.email.active.host == "smtp.example.com"
+    assert config.email.active.port == 587
+    assert config.cloning.enabled is True
+    assert config.cloning.scope == "all"
+
+
+def test_configure_interactive_rejects_invalid_choice_and_reprompts(tmp_path):
+    path = tmp_path / "craft-connector.yml"
+    answers = [
+        "bogus",  # invalid Execution mode -> re-prompted
+        "local",
+        "",
+        "environment",
+        "dev",
+        "jdbc:postgresql://localhost:5432/etl_craft",
+        "etl_engine",
+        "password",
+        "n",
+        "n",
+        "n",
+    ]
+    configure_interactive(path, input_fn=_canned_input(answers), print_fn=lambda _: None)
+
+    assert load_config(path).mode == "local"
+
+
+def test_configure_interactive_merges_a_second_profile_alongside_the_first(tmp_path):
+    path = tmp_path / "craft-connector.yml"
+    first = [
+        "local",
+        "",
+        "environment",
+        "dev",
+        "jdbc:postgresql://localhost:5432/etl_craft",
+        "etl_engine",
+        "password",
+        "n",
+        "n",
+        "n",
+    ]
+    configure_interactive(path, input_fn=_canned_input(first), print_fn=lambda _: None)
+
+    second = [
+        "local",
+        "",
+        "environment",
+        "uat",
+        "jdbc:postgresql://uat-host:5432/etl_craft",
+        "etl_engine",
+        "password",
+        "n",
+        "n",
+        "n",
+    ]
+    configure_interactive(path, input_fn=_canned_input(second), print_fn=lambda _: None)
+
+    config = load_config(path)
+    assert config.postgres.active_profile == "uat"
+    assert set(config.postgres.profiles) == {"dev", "uat"}
+
+
+def test_configure_interactive_yes_no_reprompts_on_garbage():
+    answers = _canned_input(["maybe", "yes"])
+    messages = []
+    assert _prompt_yes_no(answers, messages.append, "Enable X?") is True
+    assert any("y or n" in m for m in messages)
+
+
+def test_configure_interactive_required_prompt_reprompts_on_blank_answer():
+    from etl_craft.configure import _prompt
+
+    answers = _canned_input(["", "real-answer"])
+    messages = []
+    assert _prompt(answers, messages.append, "Name") == "real-answer"
+    assert any("value is required" in m for m in messages)
 
 
 # ==============================================================================

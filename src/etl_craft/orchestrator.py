@@ -63,6 +63,7 @@ from dataclasses import dataclass
 from sqlalchemy.engine import Engine
 
 from etl_craft.cfg import fetch_pipeline_graph, fetch_task_codes, resolve_pipeline_id
+from etl_craft.cloning import run_cloning_if_enabled
 from etl_craft.config import ConnectorConfig
 from etl_craft.crosspipe import (
     NowFn,
@@ -115,7 +116,11 @@ class FinalizeOutcome:
 
 
 def _finalize_from_task_states(
-    engine: Engine, pipeline_id: int, pipeline_run_id: int, all_task_ids: list[int]
+    engine: Engine,
+    config: ConnectorConfig,
+    pipeline_id: int,
+    pipeline_run_id: int,
+    all_task_ids: list[int],
 ) -> tuple[str, list[int]]:
     """Compute SUCCESS/FAILED from every task's own settled status, finalize, consume trackers.
 
@@ -136,7 +141,23 @@ def _finalize_from_task_states(
     # completes — this pipeline's own outgoing cross-pipeline edges (if
     # any) are advanced now, regardless of whether it succeeded or failed.
     consume_pipeline_dependency_edges(engine, pipeline_id)
+    # "Runs after each pipeline run, only when enabled" — best-effort: a
+    # cloning failure (Data DB unreachable, ...) must never turn an
+    # otherwise-settled pipeline run into a reported failure, per Cloning's
+    # own "special-cased engine-internal machinery" status in CLAUDE.md.
+    _run_cloning_best_effort(engine, config)
     return final_status, unsettled
+
+
+def _run_cloning_best_effort(engine: Engine, config: ConnectorConfig) -> None:
+    # Deliberately broad: cloning can fail in ways this module has no
+    # business enumerating (a bad [Warehouse] secret, a Data DB connection
+    # error, an incompatible target dialect, ...) and none of them should
+    # ever surface as this *pipeline's* own failure.
+    try:
+        run_cloning_if_enabled(engine, config)
+    except Exception as exc:
+        print(f"warning: cloning failed: {exc}", file=sys.stderr)
 
 
 def finalize_active_run(
@@ -150,8 +171,10 @@ def finalize_active_run(
     AUD_PIPELINES_RUN_LOG. Exists specifically for Mode=orchestrator, where
     nothing else ever finalizes the *pipeline* row — run_pipeline(), the
     only other caller of this same logic, is refused under that mode.
+    Also where Cloning fires under Mode=orchestrator, per _finalize_from_
+    task_states — run_pipeline() is refused there, so this is the only
+    finalize path Mode=orchestrator ever actually reaches.
     """
-    del config  # not needed — finalizing reads AUD_TASK_RUN_LOG state only
     with engine.connect() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
 
@@ -167,7 +190,9 @@ def finalize_active_run(
         graph_data = fetch_pipeline_graph(conn, pipeline_id)
     all_task_ids = [task.task_id for task in graph_data.tasks]
 
-    final_status, _ = _finalize_from_task_states(engine, pipeline_id, pipeline_run_id, all_task_ids)
+    final_status, _ = _finalize_from_task_states(
+        engine, config, pipeline_id, pipeline_run_id, all_task_ids
+    )
     return FinalizeOutcome(
         status=final_status,
         message=f"{pipeline_code}: pipeline_run_id={pipeline_run_id} {final_status}",
@@ -269,6 +294,9 @@ def run_pipeline(
     all_task_ids = [task.task_id for task in graph_data.tasks]
 
     if not all_task_ids:
+        # [CHOICE] Deliberately bypasses _finalize_from_task_states (and so
+        # Cloning too) — an empty pipeline changed nothing worth mirroring,
+        # and this is the one finalize path outside that shared function.
         with engine.begin() as conn:
             finalize_pipeline_run(conn, pipeline_run_id, "SUCCESS")
         consume_pipeline_dependency_edges(engine, pipeline_id)
@@ -288,7 +316,7 @@ def run_pipeline(
         )
 
     final_status, unsettled = _finalize_from_task_states(
-        engine, pipeline_id, pipeline_run_id, all_task_ids
+        engine, config, pipeline_id, pipeline_run_id, all_task_ids
     )
 
     if never_ready:

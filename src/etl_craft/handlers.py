@@ -3,8 +3,8 @@
 The closed vocabulary from CLAUDE.md's Handlers section: PYTHON (ingestion
 scripts, scripts.py), SQL (the closed action vocabulary, sql_actions.py),
 BUSINESS_RULES (CFG_BUSINESS_RULES sequencing, business_rules.py),
-EMAIL_ALERT (still unbuilt — the send transport and $$-substitution-in-alert-
-bodies question are both still open per CLAUDE.md's own Handlers section).
+EMAIL_ALERT (SMTP send, email_alert.py — see that module's own docstring for
+how CLAUDE.md's open transport/substitution question was resolved).
 
 `HandlerError`/`HandlerResult`/`TaskExecutionContext` live in execution.py,
 not here — see that module's own docstring for why (this module dispatches
@@ -20,7 +20,7 @@ from __future__ import annotations
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
-from etl_craft import business_rules, scripts, sql_actions
+from etl_craft import business_rules, email_alert, scripts, sql_actions
 from etl_craft.config import ConfigError
 from etl_craft.execution import HandlerError, HandlerResult, TaskExecutionContext
 from etl_craft.warehouse import build_data_engine
@@ -45,16 +45,16 @@ def dispatch(engine: Engine, ctx: TaskExecutionContext) -> HandlerResult:
     """
     if ctx.handler not in HANDLERS:
         raise HandlerError(f"unknown HANDLER: {ctx.handler!r}")
-    if ctx.handler == "EMAIL_ALERT":
-        raise HandlerError(
-            "HANDLER='EMAIL_ALERT' has no execution implementation yet — the send transport "
-            "(SMTP vs. an API like SES/SendGrid) and whether $$-substitution applies inside "
-            "alert bodies are both still open per CLAUDE.md's Handlers section"
-        )
     try:
         if ctx.handler == "PYTHON":
             with engine.begin() as cfg_conn:
                 return scripts.execute(cfg_conn, ctx)
+        if ctx.handler == "EMAIL_ALERT":
+            # Read-only against the Engine DB (fetch_failure_watch_messages)
+            # -- no AUD_/CFG_ writes of its own, unlike PYTHON's offset-
+            # tracker upsert, so a plain connect() suffices.
+            with engine.connect() as cfg_conn:
+                return email_alert.execute(cfg_conn, ctx)
         # SQL and BUSINESS_RULES both need the Data DB — one engine, disposed
         # after this single task's use, same lifecycle as validate.py's own
         # build_data_engine(...)/dispose() pairing.

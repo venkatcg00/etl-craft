@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
@@ -635,6 +636,195 @@ class TableLineageEntry:
     pipeline_code: str
     task_code: str
     role: str  # "SOURCE" or "TARGET"
+
+
+@dataclass(frozen=True)
+class PipelineStep:
+    """One active task in a pipeline, with its own declared parameters — the `steps` CLI's data.
+
+    [ADDITION] Closes CLAUDE.md's "steps-in-a-pipeline" read-only query verb
+    (listed under CLI surface as "conceptually agreed but not yet named or
+    built"). Deliberately generic — dumps whatever CFG_TASK_PARAMETERS a task
+    declares rather than special-casing per HANDLER, the same "one canonical
+    read path, no bespoke per-handler formatting logic in the read layer"
+    spirit as fetch_table_lineage above.
+    """
+
+    task_code: str
+    handler: str
+    parameters: dict[str, str]
+
+
+def fetch_pipeline_steps(conn: Connection, pipeline_id: int) -> list[PipelineStep]:
+    """Fetch every active task in `pipeline_id`, each with its own active CFG_TASK_PARAMETERS."""
+    task_rows = conn.execute(
+        text(
+            "SELECT TASK_ID AS task_id, TASK_CODE AS task_code, HANDLER AS handler "
+            "FROM CFG_TASKS WHERE PIPELINE_ID = :pipeline_id AND ACTIVE_FLAG = 'Y' "
+            "ORDER BY TASK_CODE"
+        ),
+        {"pipeline_id": pipeline_id},
+    ).all()
+    return [
+        PipelineStep(
+            task_code=row.task_code,
+            handler=row.handler,
+            parameters=fetch_task_parameters(conn, row.task_id),
+        )
+        for row in task_rows
+    ]
+
+
+@dataclass(frozen=True)
+class PipelineRunHistoryEntry:
+    """One AUD_PIPELINES_RUN_LOG row — the `history` CLI's pipeline-level data."""
+
+    pipeline_run_id: int
+    status: str
+    start_date: datetime
+    end_date: datetime | None
+
+
+def fetch_pipeline_run_history(
+    conn: Connection, pipeline_id: int, limit: int = 20
+) -> list[PipelineRunHistoryEntry]:
+    """Fetch `pipeline_id`'s most recent runs, newest first.
+
+    [ADDITION] Closes CLAUDE.md's "run history" read-only query verb.
+    """
+    rows = conn.execute(
+        text(
+            "SELECT PIPELINE_RUN_ID AS pipeline_run_id, STATUS AS status, "
+            "START_DATE AS start_date, END_DATE AS end_date "
+            "FROM AUD_PIPELINES_RUN_LOG WHERE PIPELINE_ID = :pipeline_id "
+            "ORDER BY START_DATE DESC LIMIT :limit"
+        ),
+        {"pipeline_id": pipeline_id, "limit": limit},
+    ).all()
+    return [
+        PipelineRunHistoryEntry(
+            pipeline_run_id=row.pipeline_run_id,
+            status=row.status,
+            start_date=row.start_date,
+            end_date=row.end_date,
+        )
+        for row in rows
+    ]
+
+
+@dataclass(frozen=True)
+class TaskRunHistoryEntry:
+    """One AUD_TASK_RUN_LOG row — the `history --task_code` CLI's data."""
+
+    pipeline_run_id: int
+    status: str
+    start_date: datetime
+    end_date: datetime | None
+    error_message: str | None
+
+
+def fetch_task_run_history(
+    conn: Connection, task_id: int, limit: int = 20
+) -> list[TaskRunHistoryEntry]:
+    """Fetch `task_id`'s most recent runs (across every pipeline_run_id it's bound to)."""
+    rows = conn.execute(
+        text(
+            "SELECT PIPELINE_RUN_ID AS pipeline_run_id, STATUS AS status, "
+            "START_DATE AS start_date, END_DATE AS end_date, ERROR_MESSAGE AS error_message "
+            "FROM AUD_TASK_RUN_LOG WHERE TASK_ID = :task_id "
+            "ORDER BY START_DATE DESC LIMIT :limit"
+        ),
+        {"task_id": task_id, "limit": limit},
+    ).all()
+    return [
+        TaskRunHistoryEntry(
+            pipeline_run_id=row.pipeline_run_id,
+            status=row.status,
+            start_date=row.start_date,
+            end_date=row.end_date,
+            error_message=row.error_message,
+        )
+        for row in rows
+    ]
+
+
+@dataclass(frozen=True)
+class FailureWatchMessage:
+    """One FAILURE-typed CFG_TASK_DEPENDENCY edge's watched task and its latest ERROR_MESSAGE.
+
+    [ADDITION] Backs email_alert.py's $$error_message substitution token.
+    Reads the *latest* logged AUD_TASK_RUN_LOG row for the watched task,
+    regardless of pipeline_run_id — deliberately, since a watched task can be
+    in another pipeline entirely (a cross-pipeline FAILURE edge), where there
+    is no shared pipeline_run_id to match against in the first place. For the
+    much more common same-pipeline case this is equivalent to matching on
+    the current run, since a same-pipeline watched task's most recent row
+    already belongs to it.
+    """
+
+    depends_on_task_code: str
+    error_message: str | None
+
+
+def fetch_failure_watch_messages(conn: Connection, task_id: int) -> list[FailureWatchMessage]:
+    """Fetch every active FAILURE-typed dependency `task_id` watches, with its watched message."""
+    rows = conn.execute(
+        text(
+            "SELECT dt.TASK_CODE AS depends_on_task_code, "
+            "(SELECT l.ERROR_MESSAGE FROM AUD_TASK_RUN_LOG l WHERE l.TASK_ID = dt.TASK_ID "
+            "ORDER BY l.START_DATE DESC LIMIT 1) AS error_message "
+            "FROM CFG_TASK_DEPENDENCY d "
+            "JOIN CFG_TASKS dt ON dt.TASK_ID = d.DEPENDS_ON_TASK_ID "
+            "WHERE d.TASK_ID = :task_id AND d.ACTIVE_FLAG = 'Y' AND d.DEPENDENCY_TYPE = 'FAILURE' "
+            "ORDER BY dt.TASK_CODE"
+        ),
+        {"task_id": task_id},
+    ).all()
+    return [
+        FailureWatchMessage(
+            depends_on_task_code=row.depends_on_task_code, error_message=row.error_message
+        )
+        for row in rows
+    ]
+
+
+@dataclass(frozen=True)
+class TaskStatusEntry:
+    """One active task's status under a specific pipeline_run_id — email_alert.py's digest data.
+
+    [ADDITION] Backs the per-pipeline collapsible detail block in
+    email_alert.py's EMAIL_PIPELINES status digest. A task with no
+    AUD_TASK_RUN_LOG row at all under this run (never got a chance to run,
+    e.g. gated off or the run stopped before reaching it) reports as
+    "PENDING" rather than NULL/None — a real, renderable status, not an
+    absence a template author has to special-case.
+    """
+
+    task_code: str
+    status: str
+    error_message: str | None
+
+
+def fetch_task_statuses_for_run(
+    conn: Connection, pipeline_id: int, pipeline_run_id: int
+) -> list[TaskStatusEntry]:
+    """Fetch every active task's status under `pipeline_run_id` (PENDING if never bound)."""
+    rows = conn.execute(
+        text(
+            "SELECT t.TASK_CODE AS task_code, l.STATUS AS status, l.ERROR_MESSAGE AS error_message "
+            "FROM CFG_TASKS t LEFT JOIN AUD_TASK_RUN_LOG l "
+            "ON l.TASK_ID = t.TASK_ID AND l.PIPELINE_RUN_ID = :pipeline_run_id "
+            "WHERE t.PIPELINE_ID = :pipeline_id AND t.ACTIVE_FLAG = 'Y' "
+            "ORDER BY t.TASK_CODE"
+        ),
+        {"pipeline_id": pipeline_id, "pipeline_run_id": pipeline_run_id},
+    ).all()
+    return [
+        TaskStatusEntry(
+            task_code=row.task_code, status=row.status or "PENDING", error_message=row.error_message
+        )
+        for row in rows
+    ]
 
 
 def fetch_table_lineage(conn: Connection, table_ref: str) -> list[TableLineageEntry]:

@@ -33,13 +33,18 @@ from etl_craft.cfg import (
     fetch_cross_pipeline_task_edges,
     fetch_pipeline_dependencies,
     fetch_pipeline_graph,
+    fetch_pipeline_run_history,
+    fetch_pipeline_steps,
     fetch_table_lineage,
     fetch_task_codes,
+    fetch_task_run_history,
     resolve_pipeline_id,
+    resolve_task_id,
 )
 from etl_craft.config import VALID_MODES, ConfigError, ConnectorConfig, load_config
-from etl_craft.configure import configure_from_env, set_execution_mode
+from etl_craft.configure import configure_from_env, configure_interactive, set_execution_mode
 from etl_craft.db import build_engine
+from etl_craft.docs_generator import generate_docs
 from etl_craft.generate_yml import generate_global_dag, generate_pipeline_dag
 from etl_craft.migrate import MigrationError, apply_pending_migrations
 from etl_craft.orchestrator import (
@@ -160,6 +165,33 @@ def build_parser() -> argparse.ArgumentParser:
     # module docstring for scope/reasoning.
     subparsers.add_parser("migrate", help="Apply pending sql/migrations/*.sql files")
 
+    # [ADDITION] Close out CLAUDE.md's remaining "read-only query verbs
+    # conceptually agreed but not yet named or built": steps-in-a-pipeline
+    # and run history. Both are plain reads against CFG_/AUD_ tables, same
+    # spirit as `list`/`graph`/`lineage` above — meant to replace ad hoc SQL
+    # against the Engine DB, not to add any new mechanism.
+    steps_parser = subparsers.add_parser(
+        "steps", help="List a pipeline's active tasks and their declared parameters"
+    )
+    steps_parser.add_argument("--pipeline_code", required=True)
+
+    history_parser = subparsers.add_parser(
+        "history", help="Show recent run history for a pipeline, or one of its tasks"
+    )
+    history_parser.add_argument("--pipeline_code", required=True)
+    history_parser.add_argument("--task_code")
+    history_parser.add_argument("--limit", type=int, default=20)
+
+    # [ADDITION] The "documentation generator" CLAUDE.md's own CLI surface
+    # section anticipated: "the same read-layer queries as above, rendered
+    # as a static, searchable site." See docs_generator.py's own docstring.
+    docs_parser = subparsers.add_parser(
+        "generate-docs", help="Emit a static, searchable documentation site"
+    )
+    docs_parser.add_argument(
+        "--output", default="etl-craft-docs", help="Output directory (default: ./etl-craft-docs)"
+    )
+
     return parser
 
 
@@ -193,6 +225,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _lineage_command(args, engine)
     if args.command == "migrate":
         return _migrate_command(engine)
+    if args.command == "steps":
+        return _steps_command(args, engine)
+    if args.command == "history":
+        return _history_command(args, engine)
+    if args.command == "generate-docs":
+        return _generate_docs_command(args, engine)
     # argparse's `required=True` on the subparsers guarantees args.command is
     # one of the branches above; this exists only to document that invariant
     # and satisfy the type checker, not as a path any test can reach.
@@ -210,19 +248,16 @@ def _set_execution_mode_command(args: argparse.Namespace) -> int:
 
 
 def _configure_command(args: argparse.Namespace) -> int:
-    if args.env is None:
-        print(
-            "error: interactive `configure` (no --env) is not implemented yet — "
-            "pass --env <path> for non-interactive setup from an env file",
-            file=sys.stderr,
-        )
-        return 2
     try:
-        configure_from_env(args.env)
+        if args.env is None:
+            configure_interactive()
+            print("craft-connector.yml written")
+        else:
+            configure_from_env(args.env)
+            print(f"craft-connector.yml written from {args.env}")
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    print(f"craft-connector.yml written from {args.env}")
     return 0
 
 
@@ -381,4 +416,66 @@ def _migrate_command(engine: Engine) -> int:
     else:
         for version in applied:
             print(f"applied {version}")
+    return 0
+
+
+def _steps_command(args: argparse.Namespace, engine: Engine) -> int:
+    try:
+        with engine.connect() as conn:
+            pipeline_id = resolve_pipeline_id(conn, args.pipeline_code)
+            steps = fetch_pipeline_steps(conn, pipeline_id)
+    except CfgError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if not steps:
+        print("(no active tasks)")
+        return 0
+    for step in steps:
+        params = ", ".join(f"{name}={value}" for name, value in step.parameters.items())
+        print(f"{step.task_code}\t{step.handler}\t{params}")
+    return 0
+
+
+def _history_command(args: argparse.Namespace, engine: Engine) -> int:
+    try:
+        with engine.connect() as conn:
+            pipeline_id = resolve_pipeline_id(conn, args.pipeline_code)
+            if args.task_code is None:
+                pipeline_entries = fetch_pipeline_run_history(conn, pipeline_id, limit=args.limit)
+                task_entries = None
+            else:
+                task_id = resolve_task_id(conn, pipeline_id, args.task_code)
+                task_entries = fetch_task_run_history(conn, task_id, limit=args.limit)
+                pipeline_entries = None
+    except CfgError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    if task_entries is not None:
+        if not task_entries:
+            print("(no logged runs)")
+            return 0
+        for entry in task_entries:
+            print(
+                f"pipeline_run_id={entry.pipeline_run_id}\t{entry.status}\t{entry.start_date}\t"
+                f"{entry.end_date or ''}\t{entry.error_message or ''}"
+            )
+        return 0
+
+    if not pipeline_entries:
+        print("(no logged runs)")
+        return 0
+    for entry in pipeline_entries:
+        print(
+            f"pipeline_run_id={entry.pipeline_run_id}\t{entry.status}\t{entry.start_date}\t"
+            f"{entry.end_date or ''}"
+        )
+    return 0
+
+
+def _generate_docs_command(args: argparse.Namespace, engine: Engine) -> int:
+    output_dir = Path(args.output)
+    with engine.connect() as conn:
+        generate_docs(conn, output_dir)
+    print(f"documentation site written to {output_dir}/")
     return 0
