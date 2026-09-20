@@ -36,6 +36,11 @@ from sqlalchemy.exc import IntegrityError
 from etl_craft.resolver import TaskRunState
 
 TERMINAL_STATUSES = frozenset({"SUCCESS", "FAILED", "SKIPPED"})
+# [ADDITION, 2026-09-20, E2-48] Runs whose audit rows have already been
+# reported on, which resolve_run_for_task's dev/ad-hoc fallback therefore
+# refuses to rebind to without --force. SKIPPED is deliberately absent —
+# see that function.
+FINISHED_RUN_STATUSES = frozenset({"SUCCESS", "FAILED"})
 
 
 class RunLogError(Exception):
@@ -46,8 +51,17 @@ class RunLogError(Exception):
 class TaskRunBinding:
     """A task's current AUD_TASK_RUN_LOG row: its id and its logged status."""
 
+    # [ADDITION, 2026-09-20, E2-50] `created` says whether this call inserted
+    # the row or found one already there. A caller that only means to record
+    # an outcome for a task that never started — orchestrator's
+    # settle_unsatisfiable_tasks — must not write over a row some concurrent
+    # `run --task_code` created in the meantime and is actively executing.
+    # That is E2-02's clobber reached from the other side, and the window is
+    # real: settle runs on every wave pass while subprocesses are live.
+
     task_run_id: int
     status: str
+    created: bool = False
 
 
 def fetch_active_pipeline_run_id(conn: Connection, pipeline_id: int) -> int | None:
@@ -88,7 +102,7 @@ def find_or_create_active_run(conn: Connection, pipeline_id: int) -> int:
         return winner
 
 
-def resolve_run_for_task(conn: Connection, pipeline_id: int) -> int:
+def resolve_run_for_task(conn: Connection, pipeline_id: int, *, force: bool = False) -> int:
     """Resolve the pipeline_run_id a `run --task_code` invocation should bind to."""
     active = conn.execute(
         text(
@@ -121,6 +135,37 @@ def resolve_run_for_task(conn: Connection, pipeline_id: int) -> int:
             "invocation has nothing to bind to. Run the pipeline (or at least its "
             "first task) at least once first."
         )
+    status = conn.execute(
+        text("SELECT STATUS FROM AUD_PIPELINES_RUN_LOG WHERE PIPELINE_RUN_ID = :run_id"),
+        {"run_id": latest},
+    ).scalar_one()
+    if not force and status in FINISHED_RUN_STATUSES:
+        # [DEVIATION, 2026-09-20, E2-48] The fallback now refuses an
+        # already-finished run unless --force says this really is the ad-hoc
+        # invocation CLAUDE.md point 5 describes.
+        #
+        # CLAUDE.md calls this path a "dev/ad-hoc convenience... not an
+        # everyday scenario". It became an everyday scenario in orchestrator
+        # mode: a generated DAG's root tasks used to start even when
+        # __init__ failed, and every one of them landed here and rewrote the
+        # *previous* run's rows — silently editing history for a run that had
+        # already been reported. The generated DAG no longer does that (root
+        # tasks now wait on __init__ with all_success), but a human running a
+        # single task against a finished pipeline would still hit it, so the
+        # guard belongs here too rather than only in the emitted YAML.
+        #
+        # Deliberately SUCCESS/FAILED only, never SKIPPED: a SKIPPED run is
+        # what orchestrator.py writes when a pipeline's own cross-pipeline
+        # gate was never met, precisely so that every task binding to it
+        # records SKIPPED in turn (see run_task's own short-circuit). Binding
+        # there is additive and intended; binding to a SUCCESS or FAILED run
+        # overwrites rows that have already been reported on.
+        raise RunLogError(
+            f"pipeline_id={pipeline_id} has no active run — its latest run "
+            f"(pipeline_run_id={latest}) is already {status}, and binding to it would "
+            "rewrite a finished run's audit rows. Start a run first "
+            "(`run --pipeline_code X --init-only`), or pass --force to bind to it anyway."
+        )
     conn.execute(
         text("UPDATE AUD_PIPELINES_RUN_LOG SET END_DATE = :now WHERE PIPELINE_RUN_ID = :run_id"),
         {"run_id": latest, "now": datetime.now(UTC)},
@@ -138,7 +183,9 @@ def find_or_create_task_run(conn: Connection, task_id: int, pipeline_run_id: int
         {"task_id": task_id, "pipeline_run_id": pipeline_run_id},
     ).one_or_none()
     if existing is not None:
-        return TaskRunBinding(task_run_id=existing.task_run_id, status=existing.status)
+        return TaskRunBinding(
+            task_run_id=existing.task_run_id, status=existing.status, created=False
+        )
 
     try:
         with conn.begin_nested():
@@ -149,7 +196,7 @@ def find_or_create_task_run(conn: Connection, task_id: int, pipeline_run_id: int
                 ),
                 {"task_id": task_id, "pipeline_run_id": pipeline_run_id},
             ).scalar_one()
-        return TaskRunBinding(task_run_id=task_run_id, status="IN-PROGRESS")
+        return TaskRunBinding(task_run_id=task_run_id, status="IN-PROGRESS", created=True)
     except IntegrityError:
         # Lost the race against ux_task_run_one_per_pipeline_run.
         winner = conn.execute(

@@ -7,6 +7,26 @@ schema applied and exercised against real Postgres, CI green. This file is the *
 that picture — what a fresh review of the finished code found that should be better, ordered so
 it can be worked through top to bottom.
 
+## Status
+
+| Round | Date | Scope | Outcome |
+|---|---|---|---|
+| 1 | 2026-09-20 | The whole of iteration 1 | E2-01…E2-40 |
+| planning | 2026-09-20 | Design interview | E2-41…E2-43, phase order, settled decisions |
+| 2 | 2026-09-20 | Phase 1 as committed (`06fcdb7`) | **E2-44…E2-52**, at the end of this file |
+| phase 1b | 2026-09-20 | Round 2's findings | **All nine fixed**, 395 → 407 tests |
+
+**Phase 1 is landed and independently re-verified** (round 2 re-ran round 1's own probes against
+the current branch rather than trusting the phase notes): **E2-01 fixed**, **E2-02 fixed**,
+**E2-37 fixed**, E2-41 landed, E2-14's `trigger_rule` half landed. **E2-03 and E2-04 confirmed
+still open**, as expected — they are Phase 2. 368 → 395 tests, all passing.
+
+Phase 1's own test additions mirror the round-1 reproductions closely (`test_run_task_does_not_
+clobber_an_already_in_progress_row`, `test_run_pipeline_succeeds_end_to_end_with_a_failure_gated_
+alert_task`, `test_check_acyclic_handles_a_chain_deeper_than_the_recursion_limit`, and eight more
+around `unsatisfiable()`), which is the discipline this file asked for. Round 2's findings are
+almost all in the *new* surface that work created, not in what it fixed.
+
 ## How to use this file
 
 - Items are numbered `E2-nn` and never renumbered. Reference them in commits/PRs.
@@ -849,3 +869,265 @@ E2-21's `ATTEMPT_COUNT` is what makes it computable — until then the working d
 - E2-14's field-name freeze on the `generate-yml` shape, before the
   `metadata-etl-implementation` repo starts depending on it.
 - E2-22's retention policy for the `AUD_` tables.
+
+---
+
+# Round 2 review — findings against Phase 1 (2026-09-20)
+
+Same method as round 1: read the full Phase 1 diff (`schema-review..06fcdb7`), confirmed the
+baseline (395 passing), then wrote throwaway probes against the live Docker Postgres. Six of the
+nine findings below are reproduced; the probe files were deleted, so **turning each into a
+regression test is part of fixing it**, exactly as in round 1.
+
+The pattern worth naming: **E2-41's `RUN_CONDITION` was specified over "a task's dependencies",
+but implemented over `same_pipeline_edges` only.** `fetch_pipeline_graph` deliberately filters
+cross-pipeline edges out before `build_graph` ever sees them, so anything counting edges counts
+the wrong set. E2-44 and E2-45 are the two ends of that one mistake. E2-46 is a second instance of
+the same general shape — a per-edge value being used where a per-task one is needed.
+
+## E2-44 — `RUN_CONDITION='N'` counts only same-pipeline edges, so a cross-pipeline task hard-fails · reproduced
+
+**Where:** [resolver.py:341-345](src/etl_craft/resolver.py#L341-L345), [cfg.py:251-262](src/etl_craft/cfg.py#L251-L262)
+
+`build_graph`'s new guard compares `RUN_CONDITION_COUNT` against `edge_count[task.task_id]`, built
+from the `edges` it was handed. `fetch_pipeline_graph` hands it `same_pipeline_edges` only —
+cross-pipeline edges are split off into `cross_pipeline_task_ids` and never passed. A task author
+who writes "this depends on 2 things, and 2 must be satisfied" while one of those things lives in
+another pipeline gets told their config could never run.
+
+It is not a warning. `build_graph` raises, and **`run` and `graph` turn that into a raw traceback**
+(E2-49), so the whole pipeline becomes unusable from the CLI on the strength of a correct config.
+
+**Reproduction:** task `B` with one same-pipeline `SUCCESS` edge and one cross-pipeline `SUCCESS`
+edge, `RUN_CONDITION='N'`, `RUN_CONDITION_COUNT=2` →
+`ResolverError: task_id=… requires 2 satisfied dependencies but only has 1 — it could never run`.
+
+**Fix direction:** needs the user's call, because it is the same question as E2-45 — **does
+`RUN_CONDITION` range over all of a task's dependency edges, or only its same-pipeline ones?**
+The instruction it came from ("a task is dependent on 10 tasks but it can run at least one meets
+the condition") does not distinguish, and a task author has no reason to. If it ranges over all
+of them, `fetch_pipeline_graph` must report the cross-pipeline edge *count* to `build_graph` even
+though the edges themselves stay out of the graph, and `ready()` must combine both halves (E2-45).
+If it ranges over same-pipeline only, that has to be said in `schema.sql`'s `COMMENT ON COLUMN`
+and in `validate`, and the error message must stop claiming the task "could never run" when it
+plainly could. Either way, at minimum the guard belongs in `validate` — a config error spanning
+two tables should not be raised from the hot path of every `run`.
+
+## E2-45 — `RUN_CONDITION='ANY'` silently means "any same-pipeline edge **and** every cross-pipeline edge" · reproduced
+
+**Where:** [resolver.py:152-168](src/etl_craft/resolver.py#L152-L168), [runner.py:190-197](src/etl_craft/runner.py#L190-L197)
+
+`ready()` applies the cardinality to same-pipeline edges. `run_task` then, separately and
+unconditionally, calls `check_task_cross_pipeline_dependencies`, which requires **every**
+cross-pipeline edge to be satisfied ([crosspipe.py:399-407](src/etl_craft/crosspipe.py#L399-L407)
+returns on the first unsatisfied one). So a task declared `ANY` is gated as `ANY ∧ ALL`. Nothing
+in the schema comment, the resolver docstring, or `generate_yml`'s trigger-rule table says so, and
+`generate-yml` emits `one_success` — which is a third, different semantic again.
+
+**Reproduction:** task `B`, `RUN_CONDITION='ANY'`, one same-pipeline `SUCCESS` edge (satisfied,
+upstream `SUCCESS`) and one cross-pipeline `SUCCESS` edge (never run). `required_edge_count(B)`
+returns `1` and that edge *is* satisfied, yet `run_task` returned
+`SKIPPED — cross-pipeline task dependency on task_id=… (SUCCESS) not satisfied`.
+
+**Fix direction:** decide with E2-44 as one question. Note the fix is not just arithmetic: making
+`ANY` span both halves means the cross-pipeline check can no longer short-circuit on the first
+unsatisfied edge — it has to report *which* edges are satisfied and let the resolver count them,
+which changes `crosspipe.py`'s return shape from `str | None` to something per-edge.
+
+## E2-46 — One task with mixed `DEPENDENCY_TYPE`s emits several conflicting `trigger_rule`s · reproduced
+
+**Where:** [generate_yml.py:180-199](src/etl_craft/generate_yml.py#L180-L199)
+
+Airflow's `trigger_rule` is a property of the **task** — one value, applied to all its upstreams.
+The generated YAML puts it on each `depends_on` **edge**. That is fine only while every edge of a
+task shares one `DEPENDENCY_TYPE`, and nothing requires that: `DEPENDENCY_TYPE` is a per-row value
+on `CFG_TASK_DEPENDENCY`.
+
+This matters more than the two gaps the docstring *does* flag (`N` and `HAS_DATA`), because those
+are documented and safe in a stated direction, whereas this one silently hands a loader a choice
+it cannot make correctly — and the round-1 argument for emitting `trigger_rule` at all was
+precisely that leaving the mapping to the loader is what makes a generated DAG wrong.
+
+**Reproduction:** task `PMX_C` with a `SUCCESS` edge to `PMX_A` and an `ALWAYS` edge to `PMX_B` →
+`depends_on: [{task: PMX_A, trigger_rule: all_success}, {task: PMX_B, trigger_rule: all_done}]` —
+two rules for one Airflow task.
+
+**Fix direction:** resolve one rule per task, since that is what the target accepts. Options:
+(a) reject mixed types per task in `validate` and emit one task-level `trigger_rule` (simplest,
+and consistent with E2-41's own reasoning that `RUN_CONDITION` is per-task precisely so it maps
+1:1 onto a trigger rule); (b) emit the weakest safe rule (`all_done`) whenever types are mixed and
+let the engine gate, documenting it alongside `N`/`HAS_DATA`. Either way `trigger_rule` should move
+from the edge to the task in the emitted shape — ask before changing the shape, since E2-14's
+field-name freeze is still open.
+
+## E2-47 — A "not ready yet" single-task run writes a terminal `SKIPPED` that removes the task from the run for good · reproduced
+
+**Where:** [runner.py:190-204](src/etl_craft/runner.py#L190-L204), [resolver.py:31](src/etl_craft/resolver.py#L31)
+
+`run_task` writes `SKIPPED` for **both** "dependencies not met yet" and "dependencies can never be
+met". `_describe_unready` (new in Phase 1) carefully distinguishes the two — but only in the
+*message*. Both still call `_bind_as_skipped`, and `SKIPPED` is in `NOT_RETRYABLE` and
+`SETTLED_STATUSES`, so the task is permanently disqualified from that `pipeline_run_id`: `ready()`
+will never offer it again, `_run_until_settled` treats it as settled, and the pipeline finalizes
+**`SUCCESS` with that task never having run**.
+
+CLAUDE.md explicitly supports the paths that trigger this — "a manual single-task run, a backfill,
+a re-triggered task" — and says the engine must "verify same-pipeline dependencies itself". The
+verification is currently destructive.
+
+**Reproduction:** `B` depends on `A` (`SUCCESS`). Ran `B` first → `SKIPPED — same-pipeline
+dependencies not met`. Then set `A` to `SUCCESS` and ran `B` again → still `SKIPPED`, with the now
+actively false message *"same-pipeline dependencies not met … (needs 1 of 1 edge(s) satisfied)"*,
+and `B`'s row still reads `SKIPPED`.
+
+**Fix direction:** only the "can never be satisfied" branch should write a terminal row — that is
+E2-01's deliberate new behaviour and it should stay. "Not yet" should write **nothing**, report a
+distinct outcome, and exit 0 (the same shape E2-02 just established for `IN-PROGRESS`).
+`_describe_unready` already computes the distinction, so this is a branch, not new machinery.
+
+## E2-48 — With no active run, a task binds to and rewrites an already-finalized previous run · reproduced
+
+**Where:** [runlog.py:103-128](src/etl_craft/runlog.py#L103-L128), [generate_yml.py:186-192](src/etl_craft/generate_yml.py#L186-L192)
+
+`resolve_run_for_task`'s dev/ad-hoc fallback — bind to the latest logged run when nothing is
+`IN-PROGRESS` — is CLAUDE.md point 5 and is correctly implemented. What changed is its blast
+radius. Every generated root task now depends on `__init__` with `trigger_rule: all_done`, so when
+`__init__` fails (Engine DB blip, unmet cross-pipeline gate, bad secret) **Airflow starts every
+root task anyway**, and each one takes this fallback into the *previous, already-finalized* run —
+updating its `END_DATE` and rewriting its `AUD_TASK_RUN_LOG` rows.
+
+CLAUDE.md calls this path a "dev/ad-hoc convenience… not an everyday scenario — don't over-engineer
+around it". It is now an everyday scenario in orchestrator mode, which is a reason to revisit it
+rather than to leave it.
+
+**Reproduction:** a pipeline whose only run was finalized `FAILED`, with a `FAILED` task row under
+it. Called `run_task` with nothing `IN-PROGRESS` → the task bound to that finalized run id and
+overwrote its row; the task has exactly one row and it belongs to the old run.
+
+**Fix direction:** two independent halves. (1) Emit `all_success`, not `all_done`, for the
+`__init__` edge — a task whose run was never minted has nothing correct to do. (2) Make the
+fallback refuse to bind to a run that is already terminal unless something says this is an ad-hoc
+invocation (a `--force`, or an explicit flag), so the production path fails loudly instead of
+silently editing history. Both change documented behaviour, so confirm before building.
+
+## E2-49 — `ResolverError` escapes `run` and `graph` as a raw traceback · reproduced
+
+**Where:** [cli.py:74-79](src/etl_craft/cli.py#L74-L79) (`RUN_ERRORS`), [cli.py:309](src/etl_craft/cli.py#L309)
+
+`RUN_ERRORS` lists `CfgError`, `RunLogError`, `ForceNotAllowedError`,
+`OrchestratorModeRefusedError` — not `ResolverError`. `_graph_command` catches `CfgError` and then
+calls `build_graph` outside the `try`. Only `generate-yml` catches it, and only `validate` handles
+it properly (it reports it as a clean `[graph]` issue, which is the behaviour the others should
+have).
+
+Pre-existing, but Phase 1 made it much more reachable: `build_graph` gained four new ways to raise
+(unknown mode, count with no mode, count on a mode that ignores it, count exceeding the edge
+count), and `--finalize-only` now builds a graph where it previously did not — so a config problem
+can now take out the synthetic *last* step of a generated DAG too.
+
+**Reproduction:** with E2-44's config, `main(["graph", …])` and
+`main(["run", "--pipeline_code", …, "--task_code", …])` both raised `ResolverError` out of `main`;
+`main(["validate"])` printed `[graph] pipeline 'TEST_XPIPE_DOWN': …` and exited 1.
+
+**Fix direction:** add `ResolverError` to `RUN_ERRORS` and wrap `_graph_command`'s `build_graph`.
+Then, per E2-39, add the top-level `SQLAlchemyError` catch so `main` has no path left that
+tracebacks on a non-bug.
+
+## E2-50 — `settle_unsatisfiable_tasks` can re-create the E2-02 clobber through a different door · from code
+
+**Where:** [orchestrator.py:128-162](src/etl_craft/orchestrator.py#L128-L162)
+
+It reads `run_state` in one transaction, computes `unsatisfiable()`, then writes in a **second**
+transaction, with nothing re-checking that the rows are still absent. `unsatisfiable()` only
+returns tasks whose status is `None`, but between the read and the write a concurrent
+`run --task_code` can create that row and start executing — and `find_or_create_task_run` then
+returns the *live* row, which `update_task_run` overwrites with `SKIPPED`. That is precisely the
+failure E2-02 just fixed, reached from the other side.
+
+The window is real, not theoretical: `_run_until_settled` calls this **every pass** while task
+subprocesses are running, and in orchestrator mode `finalize_active_run` calls it while Airflow may
+still be running a task the `__finalize__` step's `all_done` rule did not wait for.
+
+**Fix direction:** make the write conditional on the row still being absent. `find_or_create_task_run`
+already returns a `TaskRunBinding` but cannot say whether it *created* the row — give it a
+`created: bool`, and only update when it did. A guarded `UPDATE … WHERE STATUS = 'IN-PROGRESS' AND
+END_DATE IS NULL` is not enough, since a freshly created row looks identical to a live one.
+
+## E2-51 — `waves()` ignores `RUN_CONDITION`, so `graph` and `--force` order `ANY`/`N` tasks wrongly · from code
+
+**Where:** [resolver.py:128-150](src/etl_craft/resolver.py#L128-L150)
+
+`waves()` still places a task only after **every** upstream resolves — the `all(...)` that `ready()`
+replaced with `required_edge_count`. Two consequences, both cosmetic-to-moderate rather than
+corrupting: `etl-craft graph` shows an `ANY` task in a later wave than it can genuinely run in, so
+the printed structure disagrees with what the engine does; and `run_pipeline(force=True)`, which
+uses `waves()` precisely because `ready()` can't gate under `--force`, serialises further than it
+needs to.
+
+**Fix direction:** decide whether `waves()` should model cardinality at all. There is a good case
+that it should not — it is the *static* view, and "earliest possible" and "guaranteed safe" are
+different questions — in which case say so in its docstring and in `graph`'s output rather than
+leaving the two definitions silently divergent.
+
+## E2-52 — "One vocabulary, not two" holds for `tasks:` only · from code
+
+**Where:** [generate_yml.py:281-295](src/etl_craft/generate_yml.py#L281-L295)
+
+The `pipeline_dependencies` and `cross_pipeline_task_dependencies` blocks still emit
+`dependency_type`, while `tasks:` and the global DAG now emit `trigger_rule`. Defensible — those
+two blocks are informational and have no Airflow equivalent to map to — but the design note says
+*"dont do two parameter types"* without qualification, and a reader of the generated file sees both
+words with no explanation of why.
+
+**Fix direction:** trivial either way; the point is to make it deliberate. Either keep
+`dependency_type` there and say in the generated file's own header that the informational blocks
+use the raw `CFG_` vocabulary on purpose, or carry `trigger_rule` through for consistency and note
+that nothing consumes it.
+
+## Suggested placement in the phase order
+
+- **E2-44, E2-45** fold into Phase 1's tail — they are E2-41's own unfinished half, and both need
+  the same single design answer. Worth raising **before** Phase 2 starts, since the answer may
+  touch `crosspipe.py`'s return shape.
+- **E2-47, E2-49, E2-50** join Phase 1's tail too: all three are small, all three are in code Phase
+  1 just touched, and E2-47 is a silent-data-loss path.
+- **E2-46, E2-48, E2-52** join Phase 4 (the install/consumability path) alongside E2-14 — they are
+  all about what a generated DAG actually does when a real Airflow runs it.
+- **E2-51** joins Phase 7 with the other cleanups.
+
+## Added to "still to raise rather than guess"
+
+- **Does `RUN_CONDITION` range over cross-pipeline edges?** (E2-44 / E2-45.) Blocks both, and the
+  answer changes `crosspipe.py`'s interface, so it is worth answering before Phase 2.
+- **Should `trigger_rule` move from the edge to the task in the generated shape?** (E2-46.) Part of
+  E2-14's field-name freeze.
+- **Should the dev/ad-hoc run-binding fallback still apply under `Mode=orchestrator`?** (E2-48.)
+  CLAUDE.md says not to over-engineer it; Phase 1 made it reachable in production.
+
+
+---
+
+# Round 2 outcome — all nine fixed (2026-09-20, phase 1b)
+
+Every finding above is closed. Three needed a design answer first, all three given explicitly:
+
+| Item | Resolution |
+|---|---|
+| E2-44 / E2-45 | **`RUN_CONDITION` ranges over ALL of a task's edges**, cross-pipeline included — a task author writing "depends on 10 tasks" has no reason to care which pipeline an upstream lives in. `TaskNode` gained `cross_pipeline_edge_count`, `fetch_pipeline_graph` reports it, and `crosspipe.check_task_cross_pipeline_dependencies` returns a `CrossPipelineCheck` (satisfied count + per-edge reasons) instead of the first-failure `str \| None` that could only ever express ALL. `runner.run_task` now counts both halves against one requirement. **Bonus the new shape buys:** an `ANY` task whose condition is already met from the same-pipeline side never polls its cross-pipeline edges at all, instead of blocking a worker slot for up to an hour on an edge it does not need. |
+| E2-46 | **`trigger_rule` moved from the edge to the task**, where Airflow actually wants it, and `depends_on` became a plain list of task names. Mixed `DEPENDENCY_TYPE`s resolve to the permissive `all_done` and let the engine gate — the same documented fail-safe already used for `N` and `HAS_DATA`. Preserves every currently-valid config. |
+| E2-48 | **Both halves.** The `__init__` edge emits `all_success`, so a failed run-minting step no longer lets every root task start; and `resolve_run_for_task` refuses to bind to an already-**finished** run without `--force`. Deliberately `SUCCESS`/`FAILED` only, never `SKIPPED` — a `SKIPPED` run is exactly what `run_task` is designed to bind to and record `SKIPPED` under, so catching it would have broken the cross-pipeline gating flow. That interaction was caught by an existing test, not by review. |
+
+The other six needed no design call:
+
+- **E2-47** — only "can never be satisfied" writes a terminal `SKIPPED` now. "Not yet" writes **nothing** and exits 0, the same shape E2-02 established for `IN-PROGRESS`, so a premature manual run no longer disqualifies a task from its own pipeline run.
+- **E2-49** — `ResolverError` joins `RUN_ERRORS`, and `_graph_command` builds its graph inside its own `try`. Taken together with **E2-39** (pulled forward from phase 7, since it is the same line of defence): `main()` now has a top-level `SQLAlchemyError` catch, so no command tracebacks on an unreachable Engine DB — `list` and `generate-docs` previously had no guard at all.
+- **E2-50** — `TaskRunBinding` gained `created: bool`; `settle_unsatisfiable_tasks` writes one transaction per task and only when *it* created the row.
+- **E2-51** — `waves()` stays the guaranteed-safe static order by deliberate choice, now stated in its own docstring; `graph` names any task whose `RUN_CONDITION` lets it start earlier, so the two definitions are no longer silently divergent.
+- **E2-52** — every generated file now carries a header explaining why `tasks:` speaks `trigger_rule` and the informational blocks speak `dependency_type`.
+
+**407 tests (up from 395), 99.8% coverage, `make check` and `make db-schema-test` clean.**
+
+Two things worth carrying forward as method notes:
+
+- **The E2-50 test initially passed for the wrong reason**, and coverage is what caught it: seeding the `IN-PROGRESS` row up front means `unsatisfiable()` excludes the task before the `created` guard is ever reached, so the guard line stayed uncovered while the test went green. It now drives the interleaving explicitly (monkeypatching `fetch_run_state` to create the row after returning state) and genuinely fails without the guard. A regression test for a race has to reach the race.
+- **One of round 2's own premises was wrong in a small way.** E2-45's fix is not purely arithmetic as suggested: because `ready()` is also the orchestrator's wave pre-filter, and the real cross-pipeline gate runs *inside* the spawned subprocess, counting unevaluated cross-pipeline edges pessimistically there would deadlock — the task would never be spawned, so the check that settles it would never run. `ready()` therefore treats unevaluated cross-pipeline edges optimistically and takes real counts only when a caller has them.

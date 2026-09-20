@@ -386,26 +386,61 @@ def _task_dependency_satisfied(
     return candidate is not None, candidate
 
 
+@dataclass(frozen=True)
+class CrossPipelineCheck:
+    """How many of a task's cross-pipeline edges are satisfied, and why the rest aren't.
+
+    [DEVIATION, 2026-09-20, E2-45] This replaces the previous `str | None`
+    return (the first unsatisfied edge's reason, or None). That shape could
+    only express "all of them" — it short-circuited on the first failure — so
+    a task declared RUN_CONDITION='ANY' was gated as ANY on its same-pipeline
+    edges *and* ALL on its cross-pipeline ones. RUN_CONDITION ranges over
+    every dependency, so the caller needs a count, not a verdict.
+    """
+
+    satisfied_count: int
+    total: int
+    reasons: tuple[str, ...]
+
+
 def check_task_cross_pipeline_dependencies(
     engine: Engine,
     task_id: int,
     *,
+    needed: int | None = None,
     sleep: SleepFn = time.sleep,
     now: NowFn = _default_now,
-) -> str | None:
-    """Check (and poll) `task_id`'s active cross-pipeline edges; None if satisfied."""
+) -> CrossPipelineCheck:
+    """Check (and poll) `task_id`'s active cross-pipeline edges, counting what's satisfied.
+
+    `needed` is how many of these edges the caller still requires. Once that
+    many are satisfied the remaining edges are left unevaluated and, crucially,
+    **unpolled** — a task whose RUN_CONDITION is already met has no reason to
+    block a process (and an orchestrator worker slot) for up to an hour waiting
+    on an edge it does not need. `None` means "all of them", the ALL default.
+    """
     with engine.connect() as conn:
         edges = fetch_task_cross_pipeline_dependency_ids(conn, task_id)
+    target = len(edges) if needed is None else needed
+
+    satisfied_count = 0
+    reasons: list[str] = []
     for edge in edges:
+        if satisfied_count >= target:
+            break
         _wait_for_task_dependency_to_settle(engine, edge.depends_on_task_id, sleep=sleep, now=now)
         with engine.connect() as conn:
             satisfied, _ = _task_dependency_satisfied(conn, edge)
-        if not satisfied:
-            return (
+        if satisfied:
+            satisfied_count += 1
+        else:
+            reasons.append(
                 f"cross-pipeline task dependency on task_id={edge.depends_on_task_id} "
                 f"({edge.dependency_type}) not satisfied"
             )
-    return None
+    return CrossPipelineCheck(
+        satisfied_count=satisfied_count, total=len(edges), reasons=tuple(reasons)
+    )
 
 
 def consume_task_dependency_edges(engine: Engine, task_id: int) -> None:

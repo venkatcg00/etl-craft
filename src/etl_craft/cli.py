@@ -45,7 +45,11 @@ from etl_craft.config import VALID_MODES, ConfigError, ConnectorConfig, load_con
 from etl_craft.configure import configure_from_env, configure_interactive, set_execution_mode
 from etl_craft.db import build_engine
 from etl_craft.docs_generator import generate_docs
-from etl_craft.generate_yml import generate_global_dag, generate_pipeline_dag
+from etl_craft.generate_yml import (
+    GENERATED_HEADER,
+    generate_global_dag,
+    generate_pipeline_dag,
+)
 from etl_craft.migrate import MigrationError, apply_pending_migrations
 from etl_craft.orchestrator import (
     OrchestratorModeRefusedError,
@@ -71,11 +75,20 @@ from etl_craft.warehouse import build_data_engine
 # same-pipeline or cross-pipeline, is no longer one of these — run_task/
 # run_pipeline record it as a SKIPPED outcome instead of raising, per
 # runner.py's own [DEVIATION] comment.)
+# [ADDITION, 2026-09-20, E2-49] ResolverError joins them. `run` builds the
+# pipeline's graph, so a cyclic or malformed CFG_TASK_DEPENDENCY/
+# CFG_TASKS.RUN_CONDITION config surfaced as a raw traceback — and E2-41 gave
+# build_graph four new ways to raise, while --finalize-only started building a
+# graph where it previously did not, so a config problem could take out a
+# generated DAG's synthetic last step too. `validate` already reports the same
+# condition as a clean [graph] issue, which is the behaviour every command
+# should have.
 RUN_ERRORS = (
     CfgError,
     RunLogError,
     ForceNotAllowedError,
     OrchestratorModeRefusedError,
+    ResolverError,
 )
 
 
@@ -211,26 +224,37 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    if args.command == "run":
-        return _run_command(args, engine, config)
-    if args.command == "list":
-        return _list_command(engine)
-    if args.command == "graph":
-        return _graph_command(args, engine)
-    if args.command == "generate-yml":
-        return _generate_yml_command(args, engine, config)
-    if args.command == "validate":
-        return _validate_command(engine, config)
-    if args.command == "lineage":
-        return _lineage_command(args, engine)
-    if args.command == "migrate":
-        return _migrate_command(engine)
-    if args.command == "steps":
-        return _steps_command(args, engine)
-    if args.command == "history":
-        return _history_command(args, engine)
-    if args.command == "generate-docs":
-        return _generate_docs_command(args, engine)
+    # [ADDITION, 2026-09-20, E2-39] One catch around every command for the
+    # most common real-world failure there is — Postgres unreachable, or
+    # dropping mid-command. `build_engine` above constructs a lazy Engine with
+    # a `creator`, so it never connects; the first real connection happens
+    # inside each command, outside any DB-error guard. `list` and
+    # `generate-docs` had no try/except at all, so an unreachable Engine DB
+    # printed a raw traceback.
+    try:
+        if args.command == "run":
+            return _run_command(args, engine, config)
+        if args.command == "list":
+            return _list_command(engine)
+        if args.command == "graph":
+            return _graph_command(args, engine)
+        if args.command == "generate-yml":
+            return _generate_yml_command(args, engine, config)
+        if args.command == "validate":
+            return _validate_command(engine, config)
+        if args.command == "lineage":
+            return _lineage_command(args, engine)
+        if args.command == "migrate":
+            return _migrate_command(engine)
+        if args.command == "steps":
+            return _steps_command(args, engine)
+        if args.command == "history":
+            return _history_command(args, engine)
+        if args.command == "generate-docs":
+            return _generate_docs_command(args, engine)
+    except SQLAlchemyError as exc:
+        print(f"error: Engine DB: {exc}", file=sys.stderr)
+        return 2
     # argparse's `required=True` on the subparsers guarantees args.command is
     # one of the branches above; this exists only to document that invariant
     # and satisfy the type checker, not as a path any test can reach.
@@ -302,17 +326,30 @@ def _graph_command(args: argparse.Namespace, engine: Engine) -> int:
             task_codes = fetch_task_codes(conn, pipeline_id)
             pipeline_deps = fetch_pipeline_dependencies(conn, pipeline_id)
             cross_task_deps = fetch_cross_pipeline_task_edges(conn, pipeline_id)
-    except CfgError as exc:
+        graph = build_graph(graph_data.tasks, graph_data.same_pipeline_edges)
+    except (CfgError, ResolverError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    graph = build_graph(graph_data.tasks, graph_data.same_pipeline_edges)
     print(f"Pipeline: {args.name}")
     print("Task waves (same-pipeline order):")
+    # [ADDITION, 2026-09-20, E2-51] Waves are the static ordering — see
+    # resolver.waves()'s own [CHOICE]. A task whose RUN_CONDITION is ANY or N
+    # can genuinely start before the wave shown here.
     if graph.task_ids:
         for wave_number, wave in enumerate(graph.waves(), start=1):
             codes = ", ".join(task_codes[task_id] for task_id in wave)
             print(f"  Wave {wave_number}: {codes}")
+        conditional = sorted(
+            task_codes[task.task_id]
+            for task in graph_data.tasks
+            if task.run_condition and task.run_condition != "ALL"
+        )
+        if conditional:
+            print(
+                "  (waves are the guaranteed-safe static order; these tasks have a "
+                "RUN_CONDITION and may start earlier: " + ", ".join(conditional) + ")"
+            )
     else:
         print("  (no active tasks)")
 
@@ -354,7 +391,7 @@ def _generate_yml_command(args: argparse.Namespace, engine: Engine, config: Conn
             print(f"error: {exc}", file=sys.stderr)
             return 1
 
-    yaml_text = yaml.safe_dump(dag, sort_keys=False, default_flow_style=False)
+    yaml_text = GENERATED_HEADER + yaml.safe_dump(dag, sort_keys=False, default_flow_style=False)
     if args.output:
         Path(args.output).write_text(yaml_text)
         print(f"DAG YAML written to {args.output}")

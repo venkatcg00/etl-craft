@@ -71,10 +71,23 @@ class TaskNode:
     # run_condition is None for the overwhelming majority of tasks, meaning
     # "ALL" — CFG_TASKS.RUN_CONDITION is nullable and every row predating
     # E2-41 has it unset. run_condition_count is only ever read for "N".
+    #
+    # [ADDITION, 2026-09-20, E2-44/E2-45] cross_pipeline_edge_count is how
+    # many of this task's CFG_TASK_DEPENDENCY rows point at another pipeline.
+    # Those edges are deliberately kept out of the graph itself (see this
+    # module's own scope note above — they have no DAG-native structure to
+    # resolve into waves, and are settled by crosspipe.py's polling instead).
+    # But RUN_CONDITION ranges over *all* of a task's dependencies, per
+    # explicit decision — a task author writing "depends on 10 tasks, any one
+    # will do" has no reason to care which pipeline an upstream lives in — so
+    # the arithmetic has to know the count even though the edges stay out.
+    # Without this, "ANY" silently meant "any same-pipeline edge AND every
+    # cross-pipeline edge", and "N" rejected valid configs outright.
 
     task_id: int
     run_condition: str | None = None
     run_condition_count: int | None = None
+    cross_pipeline_edge_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -126,12 +139,25 @@ class DependencyGraph:
         return list(self._dependencies_of[task_id])
 
     def waves(self) -> list[list[int]]:
-        """Compute static topological generations, ignoring any run-time status."""
+        """Compute static topological generations, ignoring run-time status and RUN_CONDITION."""
         # Wave 0 has no dependencies; wave N depends only on tasks in waves
         # < N. Used by `graph`/`generate-yml` to render structure — same-rank
         # tasks compile into parallel Airflow tasks, later ranks chain after
         # via `>>`. Cycle detection already happened in `build_graph`, so
         # this never raises.
+        #
+        # [CHOICE, 2026-09-20, E2-51] Deliberately places a task after *every*
+        # upstream, even one whose RUN_CONDITION is ANY or N and which could
+        # genuinely start sooner. This is the *static* view, and "earliest
+        # possible" and "guaranteed safe ordering" are different questions:
+        # waves() answers the second. Its two consumers both want that —
+        # `graph` prints structure a reader should be able to trust as an
+        # upper bound, and `run_pipeline(force=True)` uses it precisely
+        # because --force bypasses the status checks `ready()` needs, so it
+        # has nothing to evaluate a cardinality against. The cost is that an
+        # ANY task shows one wave later than it can run; `graph` says so in
+        # its own output rather than leaving the two definitions silently
+        # divergent.
         remaining = set(self._task_ids)
         resolved: set[int] = set()
         result: list[list[int]] = []
@@ -149,6 +175,13 @@ class DependencyGraph:
             remaining.difference_update(wave)
         return result
 
+    def total_edge_count(self, task_id: int) -> int:
+        """How many dependency edges `task_id` has in total, cross-pipeline ones included."""
+        return (
+            len(self._dependencies_of[task_id])
+            + self._nodes_by_id[task_id].cross_pipeline_edge_count
+        )
+
     def required_edge_count(self, task_id: int) -> int:
         """How many of `task_id`'s edges must be satisfied, per its RUN_CONDITION."""
         # [ADDITION, 2026-09-20, E2-41] Before this, the answer was always
@@ -157,17 +190,53 @@ class DependencyGraph:
         # identically. build_graph has already rejected an unknown mode, a
         # missing count for 'N', and a count larger than the task's own edge
         # count, so nothing here has to defend against those again.
-        edges = self._dependencies_of[task_id]
-        node = self._nodes_by_id[task_id]
-        condition = node.run_condition or "ALL"
+        #
+        # [DEVIATION, E2-44/E2-45] Counts cross-pipeline edges too — see
+        # TaskNode.cross_pipeline_edge_count for why.
+        total = self.total_edge_count(task_id)
+        condition = self._nodes_by_id[task_id].run_condition or "ALL"
         if condition == "ANY":
-            return 1 if edges else 0
+            return 1 if total else 0
         if condition == "N":
-            # Validated non-None by build_graph; assert-free narrowing for mypy.
-            return node.run_condition_count or 1
-        return len(edges)
+            # Validated non-None by build_graph.
+            return self._nodes_by_id[task_id].run_condition_count or 1
+        return total
 
-    def ready(self, run_state: dict[int, TaskRunState]) -> list[int]:
+    def satisfied_edge_count(
+        self,
+        task_id: int,
+        run_state: dict[int, TaskRunState],
+        cross_pipeline_satisfied: int | None = None,
+    ) -> int:
+        """How many of `task_id`'s edges are satisfied right now.
+
+        `cross_pipeline_satisfied` is how many of the task's cross-pipeline
+        edges have been confirmed satisfied by crosspipe.py. `None` means
+        "not evaluated" and is treated optimistically, as though all of them
+        were — which is what the orchestrator's wave pre-filter wants, since
+        the real cross-pipeline gate runs inside the spawned `run --task_code`
+        subprocess. Treating them pessimistically there would deadlock: the
+        task would never be spawned, so the check that settles it would never
+        run.
+        """
+        node = self._nodes_by_id[task_id]
+        cross = (
+            node.cross_pipeline_edge_count
+            if cross_pipeline_satisfied is None
+            else (cross_pipeline_satisfied)
+        )
+        same = sum(
+            1
+            for edge in self._dependencies_of[task_id]
+            if self._edge_satisfied(edge, run_state.get(edge.depends_on_task_id, TaskRunState()))
+        )
+        return same + cross
+
+    def ready(
+        self,
+        run_state: dict[int, TaskRunState],
+        cross_pipeline_satisfied: dict[int, int] | None = None,
+    ) -> list[int]:
         """Return the tasks that can run right now, given each task's current run state."""
         # A task is ready when it is itself retry-eligible and enough of its
         # dependency edges are satisfied. Per CLAUDE.md "Idempotent by
@@ -189,12 +258,18 @@ class DependencyGraph:
         #
         # An upstream with no logged run_state entry is treated as not yet
         # run (status=None), which never satisfies any edge type.
+        #
+        # `cross_pipeline_satisfied` maps task_id -> how many of that task's
+        # cross-pipeline edges are confirmed satisfied; omit it for the
+        # optimistic pre-filter described on satisfied_edge_count.
+        cross = cross_pipeline_satisfied or {}
         result = []
         for task_id in self._task_ids:
             state = run_state.get(task_id, TaskRunState())
             if state.status in NOT_RETRYABLE:
                 continue
-            if self._satisfied_edge_count(task_id, run_state) >= self.required_edge_count(task_id):
+            satisfied = self.satisfied_edge_count(task_id, run_state, cross.get(task_id))
+            if satisfied >= self.required_edge_count(task_id):
                 result.append(task_id)
         return sorted(result)
 
@@ -223,6 +298,10 @@ class DependencyGraph:
         # that already has a status either ran or was already settled — in
         # particular a FAILED task must stay FAILED and make the pipeline
         # report FAILED, not be quietly converted into a skip.
+        #
+        # Cross-pipeline edges are counted as still-possible throughout: this
+        # module cannot see AUD_*_DEPENDENCY_TRACKER, so it must never declare
+        # a task doomed on the strength of the half it can see.
         known = dict(run_state)
         result: set[int] = set()
         while True:
@@ -240,12 +319,11 @@ class DependencyGraph:
                 known[task_id] = TaskRunState(status="SKIPPED")
 
     def _is_unsatisfiable(self, task_id: int, run_state: dict[int, TaskRunState]) -> bool:
-        edges = self._dependencies_of[task_id]
-        if not edges:
+        if not self.total_edge_count(task_id):
             return False
-        still_possible = sum(
+        still_possible = self._nodes_by_id[task_id].cross_pipeline_edge_count + sum(
             1
-            for edge in edges
+            for edge in self._dependencies_of[task_id]
             if not self._edge_permanently_unsatisfiable(
                 edge, run_state.get(edge.depends_on_task_id, TaskRunState())
             )
@@ -257,13 +335,6 @@ class DependencyGraph:
         if upstream.status not in SETTLED_STATUSES:
             return False
         return not cls._edge_satisfied(edge, upstream)
-
-    def _satisfied_edge_count(self, task_id: int, run_state: dict[int, TaskRunState]) -> int:
-        return sum(
-            1
-            for edge in self._dependencies_of[task_id]
-            if self._edge_satisfied(edge, run_state.get(edge.depends_on_task_id, TaskRunState()))
-        )
 
     @staticmethod
     def _edge_satisfied(edge: TaskEdge, upstream: TaskRunState) -> bool:
@@ -338,10 +409,11 @@ def build_graph(tasks: list[TaskNode], edges: list[TaskEdge]) -> DependencyGraph
                 f"task_id={task.task_id} has run_condition='N' but "
                 f"run_condition_count={task.run_condition_count!r}"
             )
-        if task.run_condition_count > edge_count[task.task_id]:
+        total = edge_count[task.task_id] + task.cross_pipeline_edge_count
+        if task.run_condition_count > total:
             raise ResolverError(
                 f"task_id={task.task_id} requires {task.run_condition_count} satisfied "
-                f"dependencies but only has {edge_count[task.task_id]} — it could never run"
+                f"dependencies but only has {total} — it could never run"
             )
 
     graph = DependencyGraph(tuple(tasks), tuple(edges))

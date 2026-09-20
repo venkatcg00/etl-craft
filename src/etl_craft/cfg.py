@@ -230,23 +230,6 @@ class PipelineGraphData:
 
 def fetch_pipeline_graph(conn: Connection, pipeline_id: int) -> PipelineGraphData:
     """Fetch active tasks and same-pipeline dependency edges for `pipeline_id`."""
-    task_rows = conn.execute(
-        text(
-            "SELECT TASK_ID AS task_id, RUN_CONDITION AS run_condition, "
-            "RUN_CONDITION_COUNT AS run_condition_count FROM CFG_TASKS "
-            "WHERE PIPELINE_ID = :pipeline_id AND ACTIVE_FLAG = 'Y'"
-        ),
-        {"pipeline_id": pipeline_id},
-    ).all()
-    tasks = [
-        TaskNode(
-            task_id=row.task_id,
-            run_condition=row.run_condition,
-            run_condition_count=row.run_condition_count,
-        )
-        for row in task_rows
-    ]
-
     edge_rows = conn.execute(
         text(
             "SELECT TASK_ID AS task_id, DEPENDS_ON_TASK_ID AS depends_on_task_id, "
@@ -268,6 +251,37 @@ def fetch_pipeline_graph(conn: Connection, pipeline_id: int) -> PipelineGraphDat
     cross_pipeline_task_ids = frozenset(
         row.task_id for row in edge_rows if row.depends_on_pipeline_id != pipeline_id
     )
+    # [ADDITION, 2026-09-20, E2-44/E2-45] The cross-pipeline edges themselves
+    # stay out of the graph — the resolver has no way to settle them — but
+    # RUN_CONDITION ranges over every one of a task's dependencies, so their
+    # *count* has to reach the resolver. Without it, "ANY" meant "any
+    # same-pipeline edge and every cross-pipeline one", and "N" rejected
+    # perfectly valid configs as impossible.
+    cross_pipeline_edge_counts: dict[int, int] = {}
+    for row in edge_rows:
+        if row.depends_on_pipeline_id != pipeline_id:
+            cross_pipeline_edge_counts[row.task_id] = (
+                cross_pipeline_edge_counts.get(row.task_id, 0) + 1
+            )
+
+    task_rows = conn.execute(
+        text(
+            "SELECT TASK_ID AS task_id, RUN_CONDITION AS run_condition, "
+            "RUN_CONDITION_COUNT AS run_condition_count FROM CFG_TASKS "
+            "WHERE PIPELINE_ID = :pipeline_id AND ACTIVE_FLAG = 'Y'"
+        ),
+        {"pipeline_id": pipeline_id},
+    ).all()
+    tasks = [
+        TaskNode(
+            task_id=row.task_id,
+            run_condition=row.run_condition,
+            run_condition_count=row.run_condition_count,
+            cross_pipeline_edge_count=cross_pipeline_edge_counts.get(row.task_id, 0),
+        )
+        for row in task_rows
+    ]
+
     return PipelineGraphData(
         tasks=tasks,
         same_pipeline_edges=same_pipeline_edges,

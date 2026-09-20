@@ -75,7 +75,7 @@ from etl_craft.crosspipe import (
 from etl_craft.db import build_engine
 from etl_craft.execution import TaskExecutionContext, format_task_log
 from etl_craft.handlers import HandlerError, dispatch
-from etl_craft.resolver import DependencyGraph, TaskRunState, build_graph
+from etl_craft.resolver import DependencyGraph, build_graph
 from etl_craft.runlog import (
     fetch_pipeline_run_status,
     fetch_run_state,
@@ -118,7 +118,7 @@ def run_task(
         task_id = resolve_task_id(conn, pipeline_id, task_code)
 
     with engine.begin() as conn:
-        pipeline_run_id = resolve_run_for_task(conn, pipeline_id)
+        pipeline_run_id = resolve_run_for_task(conn, pipeline_id, force=force)
 
     if not force:
         with engine.connect() as conn:
@@ -188,20 +188,61 @@ def run_task(
         # replaces the previous same-pipeline-only DependenciesNotMetError
         # (raise, exit 1, nothing written) — see this module's own
         # docstring for the full reasoning.
-        skip_reason: str | None = None
-        if task_id not in set(graph.ready(run_state)):
-            # [ADDITION, 2026-09-20, E2-02] Name the real cause. This used to
-            # say "dependencies not met" unconditionally, which was wrong for
-            # a permanently gated-off task (E2-01) and wrong again for the
-            # IN-PROGRESS case now handled above.
-            skip_reason = _describe_unready(graph, task_id, run_state, pipeline_run_id)
-        elif task_id in graph_data.cross_pipeline_task_ids:
-            skip_reason = check_task_cross_pipeline_dependencies(
-                engine, task_id, sleep=sleep, now=now
+        # [DEVIATION, 2026-09-20, E2-45] Same-pipeline and cross-pipeline
+        # edges are counted against one requirement, not gated one after the
+        # other. RUN_CONDITION ranges over all of a task's dependencies, so
+        # checking the two halves independently made 'ANY' mean "any
+        # same-pipeline edge AND every cross-pipeline edge".
+        required = graph.required_edge_count(task_id)
+        same_satisfied = graph.satisfied_edge_count(task_id, run_state, 0)
+        still_needed = required - same_satisfied
+        cross_reasons: tuple[str, ...] = ()
+        if still_needed > 0 and task_id in graph_data.cross_pipeline_task_ids:
+            # Only polled when the same-pipeline half alone isn't already
+            # enough — an 'ANY' task whose condition is met has no reason to
+            # block for up to an hour on an edge it doesn't need.
+            cross = check_task_cross_pipeline_dependencies(
+                engine, task_id, needed=still_needed, sleep=sleep, now=now
             )
+            still_needed -= cross.satisfied_count
+            cross_reasons = cross.reasons
 
-        if skip_reason is not None:
-            return _bind_as_skipped(engine, task_id, pipeline_run_id, task_code, skip_reason)
+        if still_needed > 0:
+            # [DEVIATION, 2026-09-20, E2-47] "Not yet" and "never" are no
+            # longer recorded the same way. SKIPPED is terminal — it's in
+            # NOT_RETRYABLE and SETTLED_STATUSES — so writing it for a task
+            # whose dependency simply hasn't run *yet* permanently disqualified
+            # that task from the run, and the pipeline then finalized SUCCESS
+            # with the task never having run. CLAUDE.md explicitly supports the
+            # paths that hit this ("a manual single-task run, a backfill, a
+            # re-triggered task"), so the verification must not be destructive.
+            #
+            # A cross-pipeline edge that came back unsatisfied *has* had its
+            # chance — crosspipe.py just polled it to its budget — so that
+            # stays terminal, as CLAUDE.md's "correctly gated off by design"
+            # describes.
+            if cross_reasons:
+                return _bind_as_skipped(
+                    engine, task_id, pipeline_run_id, task_code, "; ".join(cross_reasons)
+                )
+            if task_id in set(graph.unsatisfiable(run_state)):
+                return _bind_as_skipped(
+                    engine,
+                    task_id,
+                    pipeline_run_id,
+                    task_code,
+                    _describe_unready(graph, task_id, pipeline_run_id, can_never=True),
+                )
+            # Nothing written at all, and exit 0 — the same shape the
+            # IN-PROGRESS branch above uses. A later invocation, once the
+            # upstream has run, finds the task exactly as it left it.
+            return TaskOutcome(
+                status="SKIPPED",
+                message=(
+                    f"{task_code}: {_describe_unready(graph, task_id, pipeline_run_id)} "
+                    "— nothing recorded, re-run once it is"
+                ),
+            )
 
     with engine.begin() as conn:
         binding = find_or_create_task_run(conn, task_id, pipeline_run_id)
@@ -240,20 +281,21 @@ def run_task(
 def _describe_unready(
     graph: DependencyGraph,
     task_id: int,
-    run_state: dict[int, TaskRunState],
     pipeline_run_id: int,
+    *,
+    can_never: bool = False,
 ) -> str:
     """Say why `task_id` is not ready, distinguishing "not yet" from "never will be"."""
-    required = graph.required_edge_count(task_id)
-    if task_id in set(graph.unsatisfiable(run_state)):
-        return (
-            f"dependencies can never be satisfied under pipeline_run_id={pipeline_run_id} "
-            f"(needs {required} of {len(graph.dependencies_of(task_id))} edge(s) satisfied)"
-        )
-    return (
-        f"same-pipeline dependencies not met for pipeline_run_id={pipeline_run_id} "
-        f"(needs {required} of {len(graph.dependencies_of(task_id))} edge(s) satisfied)"
+    counts = (
+        f"(needs {graph.required_edge_count(task_id)} of "
+        f"{graph.total_edge_count(task_id)} edge(s) satisfied)"
     )
+    if can_never:
+        return (
+            f"dependencies can never be satisfied under "
+            f"pipeline_run_id={pipeline_run_id} {counts}"
+        )
+    return f"dependencies not met yet for pipeline_run_id={pipeline_run_id} {counts}"
 
 
 def _bind_as_skipped(

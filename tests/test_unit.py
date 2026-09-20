@@ -291,6 +291,70 @@ def test_build_graph_rejects_malformed_run_conditions(condition, count):
         build_graph(tasks, [edge(2, 1)])
 
 
+def test_run_condition_counts_cross_pipeline_edges_too():
+    # E2-44 regression. fetch_pipeline_graph deliberately keeps cross-pipeline
+    # edges out of the graph, so the N guard used to compare the declared count
+    # against the same-pipeline edges alone and reject a valid config outright
+    # -- "requires 2 satisfied dependencies but only has 1". RUN_CONDITION
+    # ranges over all of a task's dependencies.
+    tasks = [
+        TaskNode(task_id=1),
+        TaskNode(task_id=2, run_condition="N", run_condition_count=2, cross_pipeline_edge_count=1),
+    ]
+    graph = build_graph(tasks, [edge(2, 1)])
+    assert graph.total_edge_count(2) == 2
+    assert graph.required_edge_count(2) == 2
+
+
+def test_run_condition_any_is_satisfied_by_a_same_pipeline_edge_alone():
+    # E2-45 regression, the pure half. ready() applied the cardinality to
+    # same-pipeline edges while run_task separately required *every*
+    # cross-pipeline edge, so 'ANY' was really 'ANY and ALL'. One satisfied
+    # edge is now enough whichever half it comes from.
+    tasks = [
+        TaskNode(task_id=1),
+        TaskNode(task_id=2, run_condition="ANY", cross_pipeline_edge_count=1),
+    ]
+    graph = build_graph(tasks, [edge(2, 1)])
+    state = {1: TaskRunState(status="SUCCESS")}
+    # cross_pipeline_satisfied={2: 0} -- not one cross-pipeline edge satisfied.
+    assert graph.satisfied_edge_count(2, state, 0) == 1
+    assert 2 in graph.ready(state, {2: 0})
+
+
+def test_ready_treats_unevaluated_cross_pipeline_edges_optimistically():
+    # The orchestrator's wave pre-filter passes no cross-pipeline counts: the
+    # real gate runs inside the spawned `run --task_code` subprocess. Treating
+    # them pessimistically here would deadlock -- the task would never be
+    # spawned, so the check that settles it would never run.
+    tasks = [TaskNode(task_id=1), TaskNode(task_id=2, cross_pipeline_edge_count=1)]
+    graph = build_graph(tasks, [edge(2, 1)])
+    state = {1: TaskRunState(status="SUCCESS")}
+    assert 2 in graph.ready(state)
+    assert 2 not in graph.ready(state, {2: 0})
+
+
+def test_unsatisfiable_counts_an_unevaluated_cross_pipeline_edge_as_still_possible():
+    # This module cannot see AUD_*_DEPENDENCY_TRACKER, so a cross-pipeline edge
+    # must always count as "could still be satisfied". Under ANY that is enough
+    # to keep the task alive even though its one same-pipeline edge is doomed.
+    tasks = [
+        TaskNode(task_id=1),
+        TaskNode(task_id=2, run_condition="ANY", cross_pipeline_edge_count=1),
+    ]
+    graph = build_graph(tasks, [edge(2, 1, dependency_type="FAILURE")])
+    assert graph.unsatisfiable({1: TaskRunState(status="SUCCESS")}) == []
+
+
+def test_unsatisfiable_still_dooms_an_all_task_whose_same_pipeline_edge_is_hopeless():
+    # The other side of the same boundary: under ALL every edge is required, so
+    # one hopeless same-pipeline edge dooms the task no matter what the
+    # cross-pipeline half might eventually do.
+    tasks = [TaskNode(task_id=1), TaskNode(task_id=2, cross_pipeline_edge_count=1)]
+    graph = build_graph(tasks, [edge(2, 1, dependency_type="FAILURE")])
+    assert graph.unsatisfiable({1: TaskRunState(status="SUCCESS")}) == [2]
+
+
 # ------------------------------------------------------------------------------
 # E2-01 — unsatisfiable(): tasks that can never become ready under this run
 # ------------------------------------------------------------------------------
@@ -1475,8 +1539,10 @@ def test_resolve_run_for_task_falls_back_to_latest_logged_run(runlog_engine):
             text("UPDATE AUD_PIPELINES_RUN_LOG SET STATUS = 'SUCCESS' WHERE PIPELINE_RUN_ID = :id"),
             {"id": run_id},
         )
+    with runlog_engine.begin() as conn, pytest.raises(RunLogError, match="already SUCCESS"):
+        resolve_run_for_task(conn, pipeline_id=1)
     with runlog_engine.begin() as conn:
-        resolved = resolve_run_for_task(conn, pipeline_id=1)
+        resolved = resolve_run_for_task(conn, pipeline_id=1, force=True)
     assert resolved == run_id
     with runlog_engine.connect() as conn:
         row = conn.execute(

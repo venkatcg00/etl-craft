@@ -15,7 +15,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 import yaml
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import OperationalError
 
+import etl_craft.orchestrator as orchestrator_module
 from conftest import (
     CRAFT_CONNECTOR_YAML,
     insert_committed_business_rule,
@@ -77,8 +79,9 @@ from etl_craft.orchestrator import (
     finalize_active_run,
     init_pipeline_run,
     run_pipeline,
+    settle_unsatisfiable_tasks,
 )
-from etl_craft.resolver import ResolverError
+from etl_craft.resolver import ResolverError, build_graph
 from etl_craft.runlog import (
     RunLogError,
     find_or_create_active_run,
@@ -123,8 +126,26 @@ def test_resolve_run_for_task_dev_fallback_against_real_schema(pg_conn, cfg_pipe
         text("UPDATE AUD_PIPELINES_RUN_LOG SET STATUS = 'FAILED' WHERE PIPELINE_RUN_ID = :id"),
         {"id": run_id},
     )
-    resolved = resolve_run_for_task(pg_conn, cfg_pipeline)
-    assert resolved == run_id
+    # [DEVIATION, E2-48] The fallback refuses a finished run by default now —
+    # binding to one rewrites audit rows that have already been reported on.
+    with pytest.raises(RunLogError, match="already FAILED"):
+        resolve_run_for_task(pg_conn, cfg_pipeline)
+
+    assert resolve_run_for_task(pg_conn, cfg_pipeline, force=True) == run_id
+
+
+def test_resolve_run_for_task_still_binds_to_a_skipped_run(pg_conn, cfg_pipeline):
+    # E2-48's guard must not catch SKIPPED. orchestrator.py writes that status
+    # when a pipeline's own cross-pipeline gate was never met, precisely so
+    # every task binding to it records SKIPPED in turn — binding there is
+    # additive and intended, unlike binding to a SUCCESS or FAILED run.
+    run_id = find_or_create_active_run(pg_conn, cfg_pipeline)
+    pg_conn.execute(
+        text("UPDATE AUD_PIPELINES_RUN_LOG SET STATUS = 'SKIPPED' WHERE PIPELINE_RUN_ID = :id"),
+        {"id": run_id},
+    )
+
+    assert resolve_run_for_task(pg_conn, cfg_pipeline) == run_id
 
 
 def test_find_or_create_task_run_short_circuits_on_success(pg_conn, cfg_pipeline, cfg_task):
@@ -1235,17 +1256,16 @@ def test_generate_pipeline_dag_linear_chain(pg_conn, cfg_pipeline, cfg_task):
         dag["tasks"]["__init__"]["bash_command"]
         == "etl-craft run --pipeline_code TEST_PL --init-only"
     )
-    assert dag["tasks"]["test_task"]["depends_on"] == [
-        {"task": "__init__", "trigger_rule": "all_done"}
-    ]
-    assert dag["tasks"]["task_b"]["depends_on"] == [
-        {"task": "test_task", "trigger_rule": "all_success"}
-    ]
+    # E2-48: all_success, not all_done — a root task whose run was never
+    # minted must not start and fall back into the previous, finalized run.
+    assert dag["tasks"]["test_task"]["depends_on"] == ["__init__"]
+    assert dag["tasks"]["test_task"]["trigger_rule"] == "all_success"
+    assert dag["tasks"]["task_b"]["depends_on"] == ["test_task"]
+    assert dag["tasks"]["task_b"]["trigger_rule"] == "all_success"
     # __finalize__ depends only on the leaf (task_b) — test_task has
     # something downstream of it, so it isn't a leaf.
-    assert dag["tasks"]["__finalize__"]["depends_on"] == [
-        {"task": "task_b", "trigger_rule": "all_done"}
-    ]
+    assert dag["tasks"]["__finalize__"]["depends_on"] == ["task_b"]
+    assert dag["tasks"]["__finalize__"]["trigger_rule"] == "all_done"
     assert (
         dag["tasks"]["__finalize__"]["bash_command"]
         == "etl-craft run --pipeline_code TEST_PL --finalize-only"
@@ -1285,10 +1305,7 @@ def test_generate_pipeline_dag_finalize_depends_on_every_leaf_in_a_diamond(
 
     dag = generate_pipeline_dag(pg_conn, make_config(), "TEST_PL")
 
-    assert dag["tasks"]["__finalize__"]["depends_on"] == [
-        {"task": "branch_a", "trigger_rule": "all_done"},
-        {"task": "branch_b", "trigger_rule": "all_done"},
-    ]
+    assert dag["tasks"]["__finalize__"]["depends_on"] == ["branch_a", "branch_b"]
 
 
 def test_generate_pipeline_dag_maps_run_condition_onto_airflow_trigger_rules(
@@ -1325,10 +1342,55 @@ def test_generate_pipeline_dag_maps_run_condition_onto_airflow_trigger_rules(
 
     # ANY + SUCCESS -> one_success, on every one of the task's edges. A
     # default (NULL) RUN_CONDITION on the same edge type stays all_success.
-    assert dag["tasks"]["any_task"]["depends_on"] == [
-        {"task": "test_task", "trigger_rule": "one_success"},
-        {"task": "upstream_b", "trigger_rule": "one_success"},
-    ]
+    assert dag["tasks"]["any_task"]["depends_on"] == ["test_task", "upstream_b"]
+    assert dag["tasks"]["any_task"]["trigger_rule"] == "one_success"
+
+
+def test_generate_pipeline_dag_emits_one_trigger_rule_per_task(pg_conn, cfg_pipeline, cfg_task):
+    # E2-46 regression. Airflow's trigger_rule is a property of the TASK — one
+    # value applied to all its upstreams — but this module emitted it per
+    # depends_on edge, which only works while every edge of a task shares one
+    # DEPENDENCY_TYPE. Nothing requires that: DEPENDENCY_TYPE is a per-row
+    # value on CFG_TASK_DEPENDENCY. A SUCCESS edge plus an ALWAYS edge emitted
+    # two conflicting rules and handed a loader a choice it cannot make — the
+    # very failure that emitting trigger_rule instead of dependency_type was
+    # meant to prevent.
+    second = pg_conn.execute(
+        text(
+            "INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) "
+            "VALUES ('mixed_up_b', 'ETL', :pipeline_id, 'SQL') RETURNING TASK_ID"
+        ),
+        {"pipeline_id": cfg_pipeline},
+    ).scalar_one()
+    mixed = pg_conn.execute(
+        text(
+            "INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) "
+            "VALUES ('mixed_task', 'ETL', :pipeline_id, 'SQL') RETURNING TASK_ID"
+        ),
+        {"pipeline_id": cfg_pipeline},
+    ).scalar_one()
+    for upstream, dep_type in ((cfg_task, "SUCCESS"), (second, "ALWAYS")):
+        pg_conn.execute(
+            text(
+                "INSERT INTO CFG_TASK_DEPENDENCY (PIPELINE_ID, TASK_ID, DEPENDS_ON_PIPELINE_ID, "
+                "DEPENDS_ON_TASK_ID, DEPENDENCY_TYPE) "
+                "VALUES (:pipeline_id, :task, :pipeline_id, :upstream, :dep_type)"
+            ),
+            {
+                "pipeline_id": cfg_pipeline,
+                "task": mixed,
+                "upstream": upstream,
+                "dep_type": dep_type,
+            },
+        )
+
+    dag = generate_pipeline_dag(pg_conn, make_config(), "TEST_PL")
+
+    task = dag["tasks"]["mixed_task"]
+    assert task["depends_on"] == ["test_task", "mixed_up_b"]
+    # One rule, and the permissive one — Airflow starts it, the engine's own
+    # per-edge gate decides. Same documented fail-safe as N and HAS_DATA.
+    assert task["trigger_rule"] == "all_done"
 
 
 def test_generate_pipeline_dag_with_no_tasks_still_has_init(pg_conn, cfg_pipeline):
@@ -1336,9 +1398,7 @@ def test_generate_pipeline_dag_with_no_tasks_still_has_init(pg_conn, cfg_pipelin
     assert set(dag["tasks"]) == {"__init__", "__finalize__"}
     # No real tasks at all -> __finalize__ falls back to depending on
     # __init__ directly, same as any real task with no dependencies would.
-    assert dag["tasks"]["__finalize__"]["depends_on"] == [
-        {"task": "__init__", "trigger_rule": "all_done"}
-    ]
+    assert dag["tasks"]["__finalize__"]["depends_on"] == ["__init__"]
 
 
 def test_generate_pipeline_dag_rejects_cycle(pg_conn, cfg_pipeline, cfg_task):
@@ -1524,13 +1584,15 @@ def test_generate_global_dag_includes_pipelines_on_either_side_of_an_edge(pg_con
     assert dag["dag_id"] == GLOBAL_DAG_ID
     assert dag["pipelines"]["TEST_PL"] == {
         "trigger_dag_id": "TEST_PL",
-        "depends_on": [{"pipeline": "TEST_GLOBALDAG_UP", "trigger_rule": "all_success"}],
+        "depends_on": ["TEST_GLOBALDAG_UP"],
+        "trigger_rule": "all_success",
     }
     # The upstream pipeline is included too (nothing it depends on itself),
     # since something else depending on it still needs a node to trigger.
     assert dag["pipelines"]["TEST_GLOBALDAG_UP"] == {
         "trigger_dag_id": "TEST_GLOBALDAG_UP",
         "depends_on": [],
+        "trigger_rule": "all_success",
     }
 
 
@@ -1765,7 +1827,8 @@ def test_check_task_cross_pipeline_dependencies_satisfied_when_no_edges(
 ):
     downstream_id, _ = two_committed_pipelines
     downstream_task_id = insert_committed_task(postgres_engine, downstream_id, "task_a")
-    assert check_task_cross_pipeline_dependencies(postgres_engine, downstream_task_id) is None
+    check = check_task_cross_pipeline_dependencies(postgres_engine, downstream_task_id)
+    assert (check.total, check.satisfied_count, check.reasons) == (0, 0, ())
 
 
 def test_check_task_cross_pipeline_dependencies_success_type(
@@ -1779,12 +1842,14 @@ def test_check_task_cross_pipeline_dependencies_success_type(
         postgres_engine, downstream_id, downstream_task_id, upstream_id, upstream_task_id, "SUCCESS"
     )
 
-    reason = check_task_cross_pipeline_dependencies(postgres_engine, downstream_task_id)
-    assert reason is not None
+    check = check_task_cross_pipeline_dependencies(postgres_engine, downstream_task_id)
+    assert (check.total, check.satisfied_count) == (1, 0)
+    assert check.reasons
 
     insert_committed_task_run(postgres_engine, upstream_task_id, run_id, "SUCCESS")
 
-    assert check_task_cross_pipeline_dependencies(postgres_engine, downstream_task_id) is None
+    check = check_task_cross_pipeline_dependencies(postgres_engine, downstream_task_id)
+    assert (check.total, check.satisfied_count, check.reasons) == (1, 1, ())
 
 
 def test_check_task_cross_pipeline_dependencies_has_data_native(
@@ -1809,7 +1874,7 @@ def test_check_task_cross_pipeline_dependencies_has_data_native(
     )
     insert_committed_task_run(postgres_engine, upstream_task_id, run_id, "SUCCESS", target_count=0)
 
-    assert check_task_cross_pipeline_dependencies(postgres_engine, downstream_task_id) is not None
+    assert check_task_cross_pipeline_dependencies(postgres_engine, downstream_task_id).reasons
 
     # A second, later run of the upstream task that genuinely reported data
     # — ux_task_run_one_per_pipeline_run means one row per (task, run), so
@@ -1821,7 +1886,7 @@ def test_check_task_cross_pipeline_dependencies_has_data_native(
         postgres_engine, upstream_task_id, second_run_id, "SUCCESS", target_count=5
     )
 
-    assert check_task_cross_pipeline_dependencies(postgres_engine, downstream_task_id) is None
+    assert check_task_cross_pipeline_dependencies(postgres_engine, downstream_task_id).reasons == ()
 
 
 def test_consume_task_dependency_edges_updates_tracker(postgres_engine, two_committed_pipelines):
@@ -2086,28 +2151,40 @@ def test_run_task_says_so_when_a_dependency_can_never_be_satisfied(
     assert "can never be satisfied" in row.error_message
 
 
-def test_run_task_skips_when_same_pipeline_dependency_not_met(postgres_engine, committed_pipeline):
+def test_run_task_writes_nothing_when_a_dependency_simply_has_not_run_yet(
+    postgres_engine, committed_pipeline
+):
     # task_b depends on task_a via SUCCESS; task_a hasn't been run at all.
-    # [DEVIATION] used to raise DependenciesNotMetError (exit 1); now
-    # records SKIPPED (exit 0) instead — see runner.py's own docstring.
+    #
+    # [DEVIATION, 2026-09-20, E2-47] Nothing is written now. This used to
+    # record SKIPPED — which is terminal (NOT_RETRYABLE, SETTLED_STATUSES), so
+    # it permanently disqualified task_b from the run: a later invocation,
+    # even with task_a genuinely SUCCESS, still refused, and the pipeline
+    # finalized SUCCESS with task_b never having run. CLAUDE.md explicitly
+    # supports the paths that hit this ("a manual single-task run, a backfill,
+    # a re-triggered task"), so the check must not be destructive.
+    #
+    # "Can never be satisfied" is a different case and still writes SKIPPED —
+    # see test_run_task_says_so_when_a_dependency_can_never_be_satisfied.
     task_a = insert_committed_task(postgres_engine, committed_pipeline, "task_a")
     task_b = insert_committed_task(postgres_engine, committed_pipeline, "task_b")
     insert_committed_dependency(postgres_engine, committed_pipeline, task_b, task_a)
-    seed_active_run(postgres_engine, committed_pipeline)
+    run_id = seed_active_run(postgres_engine, committed_pipeline)
 
     outcome = run_task(postgres_engine, make_config(), "TEST_CONCURRENT_PL", "task_b")
 
     assert outcome.status == "SKIPPED"
+    assert "not met yet" in outcome.message
     with postgres_engine.connect() as conn:
-        row = conn.execute(
-            text(
-                "SELECT STATUS AS status, ERROR_MESSAGE AS error_message FROM AUD_TASK_RUN_LOG "
-                "WHERE TASK_ID = :id"
-            ),
-            {"id": task_b},
-        ).one()
-    assert row.status == "SKIPPED"
-    assert row.error_message is not None
+        rows = conn.execute(
+            text("SELECT STATUS FROM AUD_TASK_RUN_LOG WHERE TASK_ID = :id"), {"id": task_b}
+        ).all()
+    assert rows == []
+
+    # And the task is still runnable once its dependency really does succeed.
+    insert_committed_task_run(postgres_engine, task_a, run_id, "SUCCESS")
+    retry = run_task(postgres_engine, make_config(), "TEST_CONCURRENT_PL", "task_b")
+    assert retry.status == "FAILED"  # got past the gate, hit the unconfigured handler
 
 
 def test_run_task_proceeds_once_dependency_satisfied(postgres_engine, committed_pipeline):
@@ -2199,6 +2276,77 @@ def test_run_task_skips_when_cross_pipeline_task_dependency_not_met(
 
     assert outcome.status == "SKIPPED"
     assert "cross-pipeline" in outcome.message
+
+
+def test_run_task_any_condition_does_not_require_every_cross_pipeline_edge(
+    postgres_engine, two_committed_pipelines
+):
+    # E2-45 regression. ready() applied RUN_CONDITION to same-pipeline edges
+    # while run_task separately demanded that *every* cross-pipeline edge be
+    # satisfied, so a task declared ANY was really gated ANY-and-ALL. Nothing
+    # said so: not the schema comment, not the resolver docstring, and
+    # generate-yml emitted one_success, a third semantic again.
+    #
+    # Also proves the upside: with the condition already met from the
+    # same-pipeline side, the cross-pipeline edge is never polled at all —
+    # an ANY task has no business blocking a worker slot for up to an hour on
+    # an edge it does not need.
+    downstream_id, upstream_id = two_committed_pipelines
+    same_upstream = insert_committed_task(postgres_engine, downstream_id, "any_same_up")
+    task_id = insert_committed_task(postgres_engine, downstream_id, "any_target")
+    with postgres_engine.begin() as conn:
+        conn.execute(
+            text("UPDATE CFG_TASKS SET RUN_CONDITION = 'ANY' WHERE TASK_ID = :id"),
+            {"id": task_id},
+        )
+    insert_committed_dependency(postgres_engine, downstream_id, task_id, same_upstream)
+    far_task = insert_committed_task(postgres_engine, upstream_id, "far_up")
+    insert_committed_cross_pipeline_task_dependency(
+        postgres_engine, downstream_id, task_id, upstream_id, far_task, "SUCCESS"
+    )
+    run_id = seed_active_run(postgres_engine, downstream_id)
+    insert_committed_task_run(postgres_engine, same_upstream, run_id, "SUCCESS")
+
+    def never_sleep(_seconds):  # pragma: no cover - must never be reached
+        raise AssertionError("polled a cross-pipeline edge the ANY condition did not need")
+
+    outcome = run_task(
+        postgres_engine, make_config(), "TEST_XPIPE_DOWN", "any_target", sleep=never_sleep
+    )
+
+    # Past the gate on the same-pipeline edge alone; fails on the
+    # unconfigured handler, which is what proves the gate let it through.
+    assert outcome.status == "FAILED"
+
+
+def test_check_task_cross_pipeline_dependencies_stops_once_enough_are_satisfied(
+    postgres_engine, two_committed_pipelines
+):
+    # E2-45's second half: `needed` must stop the loop, not just cap the count.
+    # An edge left unevaluated is also an edge left *unpolled*, which is the
+    # whole point — polling can block for up to an hour per edge.
+    downstream_id, upstream_id = two_committed_pipelines
+    task_id = insert_committed_task(postgres_engine, downstream_id, "needed_target")
+    run_id = insert_committed_pipeline_run(postgres_engine, upstream_id, "IN-PROGRESS")
+    first = insert_committed_task(postgres_engine, upstream_id, "needed_up_a")
+    second = insert_committed_task(postgres_engine, upstream_id, "needed_up_b")
+    insert_committed_task_run(postgres_engine, first, run_id, "SUCCESS")
+    # `second` never ran, so its edge is unsatisfied and would poll.
+    for upstream in (first, second):
+        insert_committed_cross_pipeline_task_dependency(
+            postgres_engine, downstream_id, task_id, upstream_id, upstream, "SUCCESS"
+        )
+
+    def never_sleep(_seconds):  # pragma: no cover - must never be reached
+        raise AssertionError("polled an edge beyond the number actually needed")
+
+    check = check_task_cross_pipeline_dependencies(
+        postgres_engine, task_id, needed=1, sleep=never_sleep
+    )
+
+    assert check.total == 2
+    assert check.satisfied_count == 1
+    assert check.reasons == ()
 
 
 def test_run_task_proceeds_when_cross_pipeline_task_dependency_satisfied(
@@ -2605,6 +2753,59 @@ def test_finalize_active_run_does_not_skip_a_task_whose_upstream_merely_failed(
     assert rows == []
 
 
+def test_settle_unsatisfiable_tasks_leaves_a_concurrently_created_row_alone(
+    postgres_engine, committed_pipeline, monkeypatch
+):
+    # E2-50 regression. settle reads run_state in one transaction and writes in
+    # another. Between the two, a concurrent `run --task_code` can create the
+    # row and start executing — and blindly updating it would overwrite a live
+    # task with SKIPPED, which is E2-02's clobber reached from the other side.
+    # The window is real: settle runs on every wave pass while subprocesses are
+    # live. Simulated here by creating the row after the doomed set is computed.
+    work_id = insert_committed_task(postgres_engine, committed_pipeline, "race_work")
+    alert_id = insert_committed_task(
+        postgres_engine, committed_pipeline, "race_alert", handler="EMAIL_ALERT"
+    )
+    insert_committed_dependency(
+        postgres_engine, committed_pipeline, alert_id, work_id, dependency_type="FAILURE"
+    )
+    run_id = seed_active_run(postgres_engine, committed_pipeline)
+    insert_committed_task_run(postgres_engine, work_id, run_id, "SUCCESS")
+
+    with postgres_engine.connect() as conn:
+        graph_data = fetch_pipeline_graph(conn, committed_pipeline)
+    graph = build_graph(graph_data.tasks, graph_data.same_pipeline_edges)
+    all_task_ids = [task.task_id for task in graph_data.tasks]
+
+    # Drive the race window precisely: return the real state (in which the
+    # alert has no row and so is genuinely doomed), then let the concurrent
+    # invocation create the row and start executing — exactly the interleaving
+    # that exists between settle's read transaction and its write transaction.
+    # Seeding the row up front instead would prove nothing: unsatisfiable()
+    # would exclude the task before the `created` guard was ever reached.
+    real_fetch_run_state = orchestrator_module.fetch_run_state
+
+    def fetch_then_race(conn, pipeline_run_id, task_ids):
+        state = real_fetch_run_state(conn, pipeline_run_id, task_ids)
+        insert_committed_task_run(postgres_engine, alert_id, run_id, "IN-PROGRESS")
+        return state
+
+    monkeypatch.setattr(orchestrator_module, "fetch_run_state", fetch_then_race)
+
+    settled = settle_unsatisfiable_tasks(postgres_engine, graph, run_id, all_task_ids)
+
+    assert settled == []
+    with postgres_engine.connect() as conn:
+        status = conn.execute(
+            text(
+                "SELECT STATUS FROM AUD_TASK_RUN_LOG "
+                "WHERE TASK_ID = :task_id AND PIPELINE_RUN_ID = :run_id"
+            ),
+            {"task_id": alert_id, "run_id": run_id},
+        ).scalar_one()
+    assert status == "IN-PROGRESS"
+
+
 def test_finalize_active_run_works_under_orchestrator_mode(postgres_engine, committed_pipeline):
     # Unlike run_pipeline, finalize_active_run is legal under both modes —
     # it's exactly what Mode=orchestrator's synthetic last step calls.
@@ -2851,6 +3052,46 @@ def test_cli_graph_with_no_active_tasks(craft_connector_on_disk, committed_pipel
     assert "(no active tasks)" in out
     assert "Pipeline dependencies:\n  (none)" in out
     assert "Cross-pipeline task dependencies:\n  (none)" in out
+
+
+def test_cli_graph_flags_tasks_that_can_start_before_their_wave(
+    craft_connector_on_disk, postgres_engine, committed_pipeline, capsys
+):
+    # E2-51. waves() is the guaranteed-safe static order and deliberately
+    # ignores RUN_CONDITION, so an ANY task is printed one wave later than it
+    # can genuinely run. That divergence is fine, but it must not be silent —
+    # a reader has no other way to tell the printed structure from the engine's
+    # actual behaviour.
+    task_a = insert_committed_task(postgres_engine, committed_pipeline, "wave_a")
+    task_b = insert_committed_task(postgres_engine, committed_pipeline, "wave_any")
+    insert_committed_dependency(postgres_engine, committed_pipeline, task_b, task_a)
+    with postgres_engine.begin() as conn:
+        conn.execute(
+            text("UPDATE CFG_TASKS SET RUN_CONDITION = 'ANY' WHERE TASK_ID = :id"),
+            {"id": task_b},
+        )
+
+    assert cli_main(["graph", "--name", "TEST_CONCURRENT_PL"]) == 0
+
+    out = capsys.readouterr().out
+    assert "may start earlier: wave_any" in out
+
+
+def test_cli_reports_an_unreachable_engine_db_as_a_clean_error(
+    craft_connector_on_disk, monkeypatch, capsys
+):
+    # E2-39. build_engine constructs a lazy Engine with a `creator`, so it
+    # never connects — the first real connection happens inside each command,
+    # which for `list` and `generate-docs` had no try/except at all. The most
+    # common real-world failure there is (Postgres unreachable, or dropping
+    # mid-command) printed a raw traceback.
+    def refuse(*_args, **_kwargs):
+        raise OperationalError("SELECT 1", {}, Exception("connection refused"))
+
+    monkeypatch.setattr("etl_craft.cli.fetch_all_pipelines", refuse)
+
+    assert cli_main(["list"]) == 2
+    assert "error: Engine DB:" in capsys.readouterr().err
 
 
 def test_cli_graph_prints_waves_and_dependencies(

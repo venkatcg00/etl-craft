@@ -147,9 +147,22 @@ def settle_unsatisfiable_tasks(
     doomed = graph.unsatisfiable(run_state)
     if not doomed:
         return []
-    with engine.begin() as conn:
-        for task_id in doomed:
+    settled: list[int] = []
+    for task_id in doomed:
+        # [ADDITION, 2026-09-20, E2-50] One transaction per task, and only
+        # write when *this* call created the row. run_state was read in an
+        # earlier transaction, so between that read and this write a
+        # concurrent `run --task_code` can have created the row and started
+        # executing — and blindly updating it would overwrite a live task with
+        # SKIPPED, which is exactly the E2-02 clobber reached from the other
+        # side. The window is real, not theoretical: this runs on every wave
+        # pass while task subprocesses are live, and under Mode=orchestrator
+        # finalize_active_run calls it while Airflow may still be running
+        # something the __finalize__ step's all_done rule did not wait for.
+        with engine.begin() as conn:
             binding = find_or_create_task_run(conn, task_id, pipeline_run_id)
+            if not binding.created:
+                continue
             update_task_run(
                 conn,
                 binding.task_run_id,
@@ -159,7 +172,8 @@ def settle_unsatisfiable_tasks(
                     f"pipeline_run_id={pipeline_run_id}"
                 ),
             )
-    return doomed
+            settled.append(task_id)
+    return settled
 
 
 def _finalize_from_task_states(
