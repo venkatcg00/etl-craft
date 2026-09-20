@@ -107,6 +107,29 @@ as the portable, three-statement equivalent every ANSI-ish engine supports:
 CREATE TABLE <new-shape> AS SELECT ... FROM <target>, DROP TABLE <target>,
 ALTER TABLE <new-shape> RENAME TO <target>.
 
+[ADDITION, post-signoff 2026-09-20] Audit-column-presence check, per explicit
+instruction ("fail the task if the target is already present and does not
+have the scoped audit columns for that sql action"): before comparing
+business columns at all, _check_or_evolve_schema now verifies every one of
+the action's own engine-managed columns (PIPELINE_RUN_ID plus whatever
+AUDIT_COLUMNS[action] lists) is actually present on an already-existing
+target, raising a clear HandlerError naming what's missing if not — instead
+of letting a stale/hand-built target fail later with a confusing raw
+"column ... does not exist" error from the real UPDATE/INSERT statement.
+This runs unconditionally, regardless of SCHEMA_EVOLUTION: that flag only
+ever governs adding new *business* columns the staged SELECT introduces, and
+was never meant to repair a target missing its own engine-managed columns.
+_delete_rows' soft-delete path (HARD_DELETE not "true") gets the same
+treatment for DELETE_FLAG specifically, since it depends on that column the
+same way OVERWRITE_TABLE/SCD1_MERGE/SCD2_MERGE depend on their own audit
+columns, but never goes through _check_or_evolve_schema itself (DELETE_ROWS
+does no schema comparison — it only matches on MERGE_KEY). [CHOICE] Presence
+only, not type — e.g. not verifying ACTIVE_FLAG is really VARCHAR(1) rather
+than, say, BOOLEAN. Column-type drift is a real but much rarer failure mode
+than "table predates this convention or was edited by hand"; per explicit
+instruction to scope this to "highly possible data engineering possibilities"
+rather than chase every hypothetical, that stays unhandled for now.
+
 Atomicity/idempotency ("all of them should be atomic and idempotent", per
 explicit instruction): every action's full statement sequence runs inside
 the one Data DB transaction the caller already opened (handlers.py wraps
@@ -131,7 +154,6 @@ correctly).
 
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime
 
 from sqlalchemy import text
@@ -197,7 +219,6 @@ AUDIT_COLUMN_TYPES: dict[str, str] = {
 }
 
 PIPELINE_ID_TOKEN = "$$pipeline_id"
-_WHERE_RE = re.compile(r"\bWHERE\b", re.IGNORECASE)
 
 
 class SchemaMismatchError(HandlerError):
@@ -207,7 +228,7 @@ class SchemaMismatchError(HandlerError):
 def substitute_pipeline_id(
     sql: str, *, refresh_type: str, pipeline_run_id: int, force_all: bool = False
 ) -> str:
-    r"""Resolve `sql`'s pipeline scoping per explicit instruction, in three cases.
+    """Substitute a literal $$pipeline_id token in `sql`, if one is present. Nothing else.
 
     FULL refresh (or `force_all`, business_rules.py's manual-invocation path)
     resolves to the unconditional `1=1`; INCREMENTAL resolves to a real
@@ -217,31 +238,28 @@ def substitute_pipeline_id(
     CLAUDE.md itself describes — it must land before the driver's own bind
     handling ever sees the SQL text.
 
-    Three cases, per explicit instruction:
-      1. `$$pipeline_id` literally appears somewhere in `sql` -> substitute
-         it in place (the author wrote `WHERE $$pipeline_id` themselves).
-      2. `$$pipeline_id` is absent and `sql` has no `WHERE` clause at all ->
-         the engine appends one itself, so a task author doesn't have to
-         remember the token on every ordinary query.
-      3. `$$pipeline_id` is absent but `sql` already has some other `WHERE`
-         clause -> left completely untouched. "you may need to enforce it
-         on static tables as well, which is wrong" — a SELECT against a
-         small reference/lookup table with its own real filter and no
-         PIPELINE_RUN_ID column at all must never get one silently AND'd on.
-    [CHOICE] Case 2's "has no WHERE clause" check is a plain `\bWHERE\b`
-    regex search, not a real SQL parse (ruled out elsewhere in this module
-    for the same reason) — a WHERE that exists only inside a subquery, with
-    none at the outer level, would be mis-detected as "has one" and skip the
-    auto-append. Flagged as a known heuristic limit, not solved further.
+    [DEVIATION, post-signoff 2026-09-20] An earlier version of this function
+    also auto-appended a `WHERE <condition>` when `$$pipeline_id` was absent
+    and no `WHERE` clause existed at all, on a "protect an author who forgot
+    the token" theory. Removed per explicit instruction ("this was a bad
+    idea"): it made a SELECT's real behavior depend on a hidden heuristic
+    (a regex `WHERE` search, which also had a real known blind spot for
+    subqueries) the author can't see just by reading their own SQL — a
+    bigger overreach than plain token substitution, and inconsistent with
+    CLAUDE.md's own model that the author supplies and owns "a bare,
+    validated, read-only SELECT." Only two cases now: the token is present
+    (substitute it) or it isn't (leave `sql` completely untouched, `WHERE`
+    clause or not) — the same rule whether or not the target happens to have
+    a real PIPELINE_RUN_ID-compatible filter to write. A task that forgets
+    the token on a genuinely incremental source will scan more than
+    intended, but that is a pipeline-definition mistake for review to catch
+    (pipeline creation is always manual/reviewed, per CLAUDE.md), not
+    something the engine should try to silently rescue by guessing.
     """
     replacement = (
         "1=1" if (force_all or refresh_type == "FULL") else f"pipeline_run_id = {pipeline_run_id}"
     )
-    if PIPELINE_ID_TOKEN in sql:
-        return sql.replace(PIPELINE_ID_TOKEN, replacement)
-    if not _WHERE_RE.search(sql):
-        return f"{sql} WHERE {replacement}"
-    return sql
+    return sql.replace(PIPELINE_ID_TOKEN, replacement)
 
 
 def qualify(object_ref: str, database: str) -> str:
@@ -389,7 +407,19 @@ def _check_or_evolve_schema(
         )
     stage_columns = _fetch_columns(conn, stage)
 
-    engine_managed = {c.lower() for c in (("PIPELINE_RUN_ID", *AUDIT_COLUMNS[action]))}
+    required_audit_columns = ("PIPELINE_RUN_ID", *AUDIT_COLUMNS[action])
+    engine_managed = {c.lower() for c in required_audit_columns}
+    target_name_set = {name.lower() for name, _ in target_columns}
+    missing_audit_columns = [c for c in required_audit_columns if c.lower() not in target_name_set]
+    if missing_audit_columns:
+        raise HandlerError(
+            f"{qualify(target_object, database)}: target table already exists but is missing "
+            f"the audit column(s) {missing_audit_columns} that SQL_ACTION={action} requires — "
+            "run a SETUP_TABLE task against it first, or fix its schema by hand. This check "
+            "runs regardless of SCHEMA_EVOLUTION, which only ever adds new business columns, "
+            "never repairs missing engine-managed ones."
+        )
+
     stage_names = [name for name, _ in stage_columns]
     stage_name_set = {name.lower() for name in stage_names}
     target_business_names = [
@@ -896,6 +926,17 @@ def _delete_rows(
             )
         )
     else:
+        schema_name, table_name = target_object.split(".", 1)
+        target_name_set = {
+            name.lower() for name, _ in _fetch_columns(conn, table_name, schema=schema_name)
+        }
+        if "delete_flag" not in target_name_set:
+            raise HandlerError(
+                f"{qualify(target_object, database)}: target table is missing the DELETE_FLAG "
+                "column that a soft DELETE_ROWS (HARD_DELETE not 'true') requires — run a "
+                "SETUP_TABLE task against it first, fix its schema by hand, or set "
+                "HARD_DELETE=true for this task"
+            )
         conn.execute(
             text(
                 f"UPDATE {qualified_target} t SET DELETE_FLAG = 'Y', UPDATE_DATE = :now, "

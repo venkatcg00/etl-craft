@@ -3295,6 +3295,103 @@ def test_sql_schema_evolution_enabled_adds_column_at_right_position(
     assert data == [(1, "a", "z")]
 
 
+def test_sql_overwrite_table_missing_audit_column_fails_clearly(
+    postgres_engine, committed_pipeline, data_db_tables
+):
+    # A target that predates this convention (or was hand-built) has its
+    # business columns and PIPELINE_RUN_ID, but never got UPDATE_DATE — the
+    # column OVERWRITE_TABLE itself needs to stamp. This must fail up front
+    # with a clear message, not partway through the real UPDATE/INSERT with
+    # a raw "column update_date does not exist".
+    target = f"public.sqlx_over_missing_audit_{committed_pipeline}"
+    data_db_tables.append(target)
+    with postgres_engine.begin() as conn:
+        conn.execute(text(f"CREATE TABLE {target} (id int, name varchar, pipeline_run_id bigint)"))
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "over")
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {
+            "SQL_ACTION": "OVERWRITE_TABLE",
+            "TARGET_OBJECT": target,
+            "SOURCE_SQL": "SELECT 1 AS id, 'a' AS name WHERE 1=1",
+        },
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    outcome = run_task(postgres_engine, make_config(warehouse=True), "TEST_CONCURRENT_PL", "over")
+
+    assert outcome.status == "FAILED"
+    assert "missing the audit column(s)" in outcome.message
+    assert "UPDATE_DATE" in outcome.message
+
+
+def test_sql_scd1_merge_missing_audit_column_fails_even_with_schema_evolution(
+    postgres_engine, committed_pipeline, data_db_tables
+):
+    # This check must fire regardless of SCHEMA_EVOLUTION: that flag only
+    # ever governs new *business* columns the staged SELECT introduces, never
+    # repairing a target's own missing engine-managed columns.
+    target = f"public.sqlx_scd1_missing_audit_{committed_pipeline}"
+    data_db_tables.append(target)
+    with postgres_engine.begin() as conn:
+        # Business columns + PIPELINE_RUN_ID, but no HASH_KEY/CREATE_DATE/
+        # CREATED_BY/UPDATE_DATE/UPDATED_BY/DELETE_FLAG at all.
+        conn.execute(text(f"CREATE TABLE {target} (id int, name varchar, pipeline_run_id bigint)"))
+    task_id = insert_committed_task(
+        postgres_engine, committed_pipeline, "merge", schema_evolution=True
+    )
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {
+            "SQL_ACTION": "SCD1_MERGE",
+            "TARGET_OBJECT": target,
+            "SOURCE_SQL": "SELECT 1 AS id, 'a' AS name WHERE 1=1",
+            "MERGE_KEY": "id",
+            "MERGE_COMPARE_COLUMNS": "name",
+        },
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    outcome = run_task(postgres_engine, make_config(warehouse=True), "TEST_CONCURRENT_PL", "merge")
+
+    assert outcome.status == "FAILED"
+    assert "missing the audit column(s)" in outcome.message
+    assert "HASH_KEY" in outcome.message
+
+
+def test_sql_delete_rows_soft_delete_missing_delete_flag_fails_clearly(
+    postgres_engine, committed_pipeline, data_db_tables
+):
+    # DELETE_ROWS never goes through _check_or_evolve_schema (it only
+    # matches on MERGE_KEY, no shape comparison) — its soft-delete path gets
+    # its own DELETE_FLAG-presence check for the same reason.
+    target = f"public.sqlx_delete_missing_flag_{committed_pipeline}"
+    data_db_tables.append(target)
+    with postgres_engine.begin() as conn:
+        conn.execute(text(f"CREATE TABLE {target} (id int, pipeline_run_id bigint)"))
+        conn.execute(text(f"INSERT INTO {target} (id, pipeline_run_id) VALUES (1, 1)"))
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "soft")
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {
+            "SQL_ACTION": "DELETE_ROWS",
+            "TARGET_OBJECT": target,
+            "SOURCE_SQL": f"SELECT id FROM {target} WHERE id = 1",
+            "MERGE_KEY": "id",
+        },
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    outcome = run_task(postgres_engine, make_config(warehouse=True), "TEST_CONCURRENT_PL", "soft")
+
+    assert outcome.status == "FAILED"
+    assert "DELETE_FLAG" in outcome.message
+    assert "HARD_DELETE=true" in outcome.message
+
+
 def test_sql_unknown_action_and_missing_params_fail_clearly(
     postgres_engine, committed_pipeline, data_db_tables
 ):

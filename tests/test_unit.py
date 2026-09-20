@@ -768,21 +768,22 @@ def test_substitute_pipeline_id(refresh_type, force_all, expected):
     assert result == f"SELECT 1 WHERE {expected}"
 
 
-def test_substitute_pipeline_id_appends_where_when_none_exists():
-    # Case 2: no $$pipeline_id token and no WHERE clause at all -> the
-    # engine appends the scoping itself, per explicit instruction.
-    result = substitute_pipeline_id(
-        "SELECT * FROM some_table", refresh_type="INCREMENTAL", pipeline_run_id=42
-    )
-    assert result == "SELECT * FROM some_table WHERE pipeline_run_id = 42"
+def test_substitute_pipeline_id_leaves_a_tokenless_query_with_no_where_untouched():
+    # No $$pipeline_id token, and no WHERE clause at all -> left completely
+    # untouched. An earlier version auto-appended a WHERE here; reverted
+    # per explicit instruction (see the [DEVIATION] note on the function
+    # itself) — a missing token on a genuinely incremental source is a
+    # pipeline-definition mistake for review to catch, not something the
+    # engine silently rescues by guessing at scoping.
+    sql = "SELECT * FROM some_table"
+    assert substitute_pipeline_id(sql, refresh_type="INCREMENTAL", pipeline_run_id=42) == sql
 
 
 def test_substitute_pipeline_id_leaves_an_unrelated_where_clause_alone():
-    # Case 3: a real WHERE clause already exists, with no $$pipeline_id
-    # token inside it -> left completely untouched. "you may need to
-    # enforce it on static tables as well, which is wrong" — a query
-    # against a small reference table with its own filter and no
-    # PIPELINE_RUN_ID column must never get one silently AND'd on.
+    # No $$pipeline_id token, but a real WHERE clause already exists -> also
+    # left completely untouched. A query against a small reference table
+    # with its own filter and no PIPELINE_RUN_ID column must never get one
+    # silently AND'd on.
     sql = "SELECT * FROM reference_table WHERE active = true"
     assert substitute_pipeline_id(sql, refresh_type="INCREMENTAL", pipeline_run_id=42) == sql
 
