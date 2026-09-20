@@ -147,6 +147,8 @@ def _same_database(config: ConnectorConfig) -> bool:
     Compares the two profiles' own `jdbc_url` strings instead — config-level
     data that exists regardless of how either Engine object gets built.
     """
+    if config.warehouse is None:  # pragma: no cover - callers check first
+        return False
     postgres_dialect, postgres_parts = translate_jdbc_url(config.postgres.active.jdbc_url)
     warehouse_dialect, warehouse_parts = translate_jdbc_url(config.warehouse.active.jdbc_url)
     return postgres_dialect == warehouse_dialect and (

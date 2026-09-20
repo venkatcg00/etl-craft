@@ -3,14 +3,25 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  # [ADDITION, 2026-09-20, E2-28] Nothing ran on push, so `main` could be
+  # broken by a merge whose base had moved since the PR was last checked.
+  push:
+    branches: [main]
 
 permissions:
   contents: read
 
 jobs:
   checks:
-    name: black / ruff / pydocstyle / pytest / coverage
+    name: py${{ matrix.python-version }} / lint / types / tests
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # [ADDITION, 2026-09-20, E2-28] requires-python is ">=3.11", and only
+        # 3.11 was ever tested, so 3.12/3.13 support was a claim rather than a
+        # fact.
+        python-version: ["3.11", "3.12", "3.13"]
     services:
       # Native GitHub Actions service container — no Docker Compose needed
       # here (that's for local dev; see docker-compose.yml/Makefile). This
@@ -72,13 +83,25 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --locked --all-groups
+        run: uv sync --locked --all-groups --python ${{ matrix.python-version }}
 
       - name: Apply src/etl_craft/sql/schema.sql
         run: psql -v ON_ERROR_STOP=1 -f src/etl_craft/sql/schema.sql
 
-      - name: src/etl_craft/sql/schema_test.sql (schema behavioral smoke test)
-        run: psql -f src/etl_craft/sql/schema_test.sql
+      # [DEVIATION, 2026-09-20, E2-26/E2-27] Two fixes. ON_ERROR_STOP=1, because
+      # schema_test.sql is now self-asserting and its exit code is the result —
+      # without it this step always exited 0 and nobody read the output. And a
+      # disposable database, mirroring the Makefile: schema_test.sql leaves its
+      # own PL_A/PL_B rows behind, which already broke a globally-scoped query
+      # once, and it hardcodes PIPELINE_ID = 1/2 so it is only correct against
+      # a genuinely empty database.
+      - name: schema_test.sql (self-asserting, disposable database)
+        run: |
+          psql -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS etl_craft_schema_test"
+          psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE etl_craft_schema_test"
+          psql -v ON_ERROR_STOP=1 -d etl_craft_schema_test -f src/etl_craft/sql/schema.sql
+          psql -v ON_ERROR_STOP=1 -d etl_craft_schema_test -f src/etl_craft/sql/schema_test.sql
+          psql -v ON_ERROR_STOP=1 -c "DROP DATABASE etl_craft_schema_test"
 
       - name: black --check
         run: uv run black --check .
@@ -89,5 +112,45 @@ jobs:
       - name: pydocstyle
         run: uv run pydocstyle .
 
+      - name: mypy
+        run: uv run mypy src/etl_craft
+
       - name: pytest with coverage (fails under 80%)
         run: uv run pytest -q --cov=etl_craft --cov-report=term-missing
+
+  # [ADDITION, 2026-09-20, E2-28] The gap that hid E2-13: a test suite always
+  # running from the git checkout cannot see packaging bugs at all. This builds
+  # the wheel, installs it into a clean venv outside the checkout, and drives
+  # it against a disposable database.
+  wheel:
+    name: wheel build / install / smoke test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: etl_craft
+          POSTGRES_PASSWORD: etl_craft
+          POSTGRES_DB: etl_craft
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U etl_craft -d etl_craft"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      PGHOST: localhost
+      PGPORT: "55432"
+      PGUSER: etl_craft
+      PGPASSWORD: etl_craft
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Build, install and smoke-test the wheel
+        run: ./scripts/wheel-smoke.sh

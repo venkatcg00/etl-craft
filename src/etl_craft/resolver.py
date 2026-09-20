@@ -345,11 +345,8 @@ class DependencyGraph:
         if edge.dependency_type == "ALWAYS":
             return upstream.status in TERMINAL_STATUSES
         if edge.dependency_type == "HAS_DATA":
-            return (
-                upstream.status == "SUCCESS"
-                and bool(upstream.target_count)
-                and upstream.target_count > 0
-            )
+            count = upstream.target_count
+            return upstream.status == "SUCCESS" and count is not None and count > 0
         raise ResolverError(f"unknown dependency_type: {edge.dependency_type!r}")
 
 

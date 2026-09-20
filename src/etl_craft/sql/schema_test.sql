@@ -7,12 +7,21 @@
 --   psql -d etl_craft_test -f sql/schema_test.sql
 --   dropdb etl_craft_test
 --
--- Each statement below is its own autocommit transaction (psql's default),
--- so a statement marked "EXPECT FAIL" rolling back does not abort the ones
--- after it. The ERROR lines you'll see in the output for those statements
--- are the test passing, not a problem — read the \echo above each block to
--- know which outcome is correct. There is no pass/fail summary line; verify
--- by eye that failures land exactly on the statements marked EXPECT FAIL.
+-- [DEVIATION, 2026-09-20, E2-26] This file is now SELF-ASSERTING and must be
+-- run under -v ON_ERROR_STOP=1 (the Makefile and CI both do). Every
+-- "EXPECT FAIL" case is wrapped in a DO block that runs the statement, raises
+-- if it *succeeded*, and swallows only the specific SQLSTATE class named in
+-- its own \echo. So psql's exit code now means something, and there is no
+-- "verify by eye" step.
+--
+-- That note used to read: "There is no pass/fail summary line; verify by eye
+-- that failures land exactly on the statements marked EXPECT FAIL." Nobody
+-- was looking — CI ran this without ON_ERROR_STOP, so the step always exited
+-- 0 and a regression that made an EXPECT FAIL case start *succeeding* (the
+-- exact class of bug this file exists to catch) passed silently.
+--
+-- EXPECT SUCCEED statements are left as plain statements: under
+-- ON_ERROR_STOP=1, any of them failing aborts the run, which is the assertion.
 
 \echo '=== SETUP: two pipelines ==='
 INSERT INTO CFG_PIPELINES (PIPELINE_CODE, PIPELINE_NAME, REFRESH_TYPE) VALUES ('PL_A', 'Pipeline A', 'INCREMENTAL') RETURNING PIPELINE_ID, CREATED_BY, CREATE_DATE, UPDATED_BY, UPDATED_DATE;
@@ -46,7 +55,11 @@ INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE) VALUE
 INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE) VALUES (2, 'SCHEMA_EVOLUTION', 'true') RETURNING TASK_PARAMETER_ID;
 
 \echo '=== EXPECT FAIL (check_violation): HANDLER not in allowed list ==='
-INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) VALUES ('bad_handler', 'INGESTION', 1, 'BOGUS');
+DO $do$ BEGIN
+    INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) VALUES ('bad_handler', 'INGESTION', 1, 'BOGUS');
+    RAISE EXCEPTION 'EXPECT FAIL did not fail: HANDLER not in allowed list';
+EXCEPTION WHEN check_violation THEN RAISE NOTICE 'ok (expected check_violation)';
+END $do$;
 
 \echo '=== EXPECT SUCCEED: EMAIL_ALERT handler (the added 4th value) ==='
 INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) VALUES ('alert', 'ETL', 1, 'EMAIL_ALERT') RETURNING TASK_ID, HANDLER;
@@ -62,16 +75,32 @@ INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER, RUN_CONDITION
 INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER, RUN_CONDITION, RUN_CONDITION_COUNT) VALUES ('rc_n', 'ETL', 1, 'SQL', 'N', 2) RETURNING TASK_ID, RUN_CONDITION, RUN_CONDITION_COUNT;
 
 \echo '--- EXPECT FAIL (check_violation): RUN_CONDITION outside ALL/ANY/N ---'
-INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER, RUN_CONDITION) VALUES ('rc_bogus', 'ETL', 1, 'SQL', 'MOST');
+DO $do$ BEGIN
+    INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER, RUN_CONDITION) VALUES ('rc_bogus', 'ETL', 1, 'SQL', 'MOST');
+    RAISE EXCEPTION 'EXPECT FAIL did not fail: RUN_CONDITION outside ALL/ANY/N';
+EXCEPTION WHEN check_violation THEN RAISE NOTICE 'ok (expected check_violation)';
+END $do$;
 
 \echo '--- EXPECT FAIL (check_violation): RUN_CONDITION = N without a count ---'
-INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER, RUN_CONDITION) VALUES ('rc_n_nocount', 'ETL', 1, 'SQL', 'N');
+DO $do$ BEGIN
+    INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER, RUN_CONDITION) VALUES ('rc_n_nocount', 'ETL', 1, 'SQL', 'N');
+    RAISE EXCEPTION 'EXPECT FAIL did not fail: RUN_CONDITION = N without a count';
+EXCEPTION WHEN check_violation THEN RAISE NOTICE 'ok (expected check_violation)';
+END $do$;
 
 \echo '--- EXPECT FAIL (check_violation): a count on a mode that ignores it ---'
-INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER, RUN_CONDITION, RUN_CONDITION_COUNT) VALUES ('rc_any_count', 'ETL', 1, 'SQL', 'ANY', 2);
+DO $do$ BEGIN
+    INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER, RUN_CONDITION, RUN_CONDITION_COUNT) VALUES ('rc_any_count', 'ETL', 1, 'SQL', 'ANY', 2);
+    RAISE EXCEPTION 'EXPECT FAIL did not fail: a count on a mode that ignores it';
+EXCEPTION WHEN check_violation THEN RAISE NOTICE 'ok (expected check_violation)';
+END $do$;
 
 \echo '--- EXPECT FAIL (check_violation): RUN_CONDITION = N with a zero count ---'
-INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER, RUN_CONDITION, RUN_CONDITION_COUNT) VALUES ('rc_n_zero', 'ETL', 1, 'SQL', 'N', 0);
+DO $do$ BEGIN
+    INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER, RUN_CONDITION, RUN_CONDITION_COUNT) VALUES ('rc_n_zero', 'ETL', 1, 'SQL', 'N', 0);
+    RAISE EXCEPTION 'EXPECT FAIL did not fail: RUN_CONDITION = N with a zero count';
+EXCEPTION WHEN check_violation THEN RAISE NOTICE 'ok (expected check_violation)';
+END $do$;
 
 \echo '=== TEST: partial unique index lets a deactivated TASK_CODE be reused, blocks a second active duplicate ==='
 INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) VALUES ('reuse_me', 'ETL', 1, 'SQL') RETURNING TASK_ID;
@@ -79,17 +108,29 @@ UPDATE CFG_TASKS SET ACTIVE_FLAG = 'N' WHERE TASK_CODE = 'reuse_me' AND PIPELINE
 \echo '--- EXPECT SUCCEED: re-registering the now-inactive code ---'
 INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) VALUES ('reuse_me', 'ETL', 1, 'SQL') RETURNING TASK_ID, ACTIVE_FLAG;
 \echo '--- EXPECT FAIL (unique_violation): a second ACTIVE row with the same code ---'
-INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) VALUES ('reuse_me', 'ETL', 1, 'SQL');
+DO $do$ BEGIN
+    INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) VALUES ('reuse_me', 'ETL', 1, 'SQL');
+    RAISE EXCEPTION 'EXPECT FAIL did not fail: a second ACTIVE row with the same code';
+EXCEPTION WHEN unique_violation THEN RAISE NOTICE 'ok (expected unique_violation)';
+END $do$;
 
 \echo '=== TEST: DEPENDS_ON_PIPELINE_ID auto-fills from PIPELINE_ID when NULL (expect depends_on_pipeline_id=1, not null) ==='
 INSERT INTO CFG_TASK_DEPENDENCY (PIPELINE_ID, TASK_ID, DEPENDS_ON_PIPELINE_ID, DEPENDS_ON_TASK_ID, DEPENDENCY_TYPE)
 VALUES (1, 2, NULL, 1, 'SUCCESS') RETURNING TASK_DEPENDENCY_ID, PIPELINE_ID, DEPENDS_ON_PIPELINE_ID;
 
 \echo '=== EXPECT FAIL (check_violation): task depending on itself ==='
-INSERT INTO CFG_TASK_DEPENDENCY (PIPELINE_ID, TASK_ID, DEPENDS_ON_TASK_ID, DEPENDENCY_TYPE) VALUES (1, 1, 1, 'SUCCESS');
+DO $do$ BEGIN
+    INSERT INTO CFG_TASK_DEPENDENCY (PIPELINE_ID, TASK_ID, DEPENDS_ON_TASK_ID, DEPENDENCY_TYPE) VALUES (1, 1, 1, 'SUCCESS');
+    RAISE EXCEPTION 'EXPECT FAIL did not fail: task depending on itself';
+EXCEPTION WHEN check_violation THEN RAISE NOTICE 'ok (expected check_violation)';
+END $do$;
 
 \echo '=== EXPECT FAIL (check_violation): pipeline depending on itself ==='
-INSERT INTO CFG_PIPELINE_DEPENDENCY (PIPELINE_ID, DEPENDS_ON_PIPELINE_ID, DEPENDENCY_TYPE) VALUES (1, 1, 'SUCCESS');
+DO $do$ BEGIN
+    INSERT INTO CFG_PIPELINE_DEPENDENCY (PIPELINE_ID, DEPENDS_ON_PIPELINE_ID, DEPENDENCY_TYPE) VALUES (1, 1, 'SUCCESS');
+    RAISE EXCEPTION 'EXPECT FAIL did not fail: pipeline depending on itself';
+EXCEPTION WHEN check_violation THEN RAISE NOTICE 'ok (expected check_violation)';
+END $do$;
 
 \echo '=== EXPECT SUCCEED: real cross-pipeline dependency, A depends on B ==='
 INSERT INTO CFG_PIPELINE_DEPENDENCY (PIPELINE_ID, DEPENDS_ON_PIPELINE_ID, DEPENDENCY_TYPE) VALUES (1, 2, 'HAS_DATA') RETURNING PIPELINE_DEPENDENCY_ID;
@@ -98,7 +139,11 @@ INSERT INTO CFG_PIPELINE_DEPENDENCY (PIPELINE_ID, DEPENDS_ON_PIPELINE_ID, DEPEND
 \echo '--- EXPECT SUCCEED: first IN-PROGRESS run for pipeline 1 ---'
 INSERT INTO AUD_PIPELINES_RUN_LOG (PIPELINE_ID, STATUS) VALUES (1, 'IN-PROGRESS') RETURNING PIPELINE_RUN_ID;
 \echo '--- EXPECT FAIL (unique_violation): a second concurrent IN-PROGRESS run for the SAME pipeline ---'
-INSERT INTO AUD_PIPELINES_RUN_LOG (PIPELINE_ID, STATUS) VALUES (1, 'IN-PROGRESS');
+DO $do$ BEGIN
+    INSERT INTO AUD_PIPELINES_RUN_LOG (PIPELINE_ID, STATUS) VALUES (1, 'IN-PROGRESS');
+    RAISE EXCEPTION 'EXPECT FAIL did not fail: a second concurrent IN-PROGRESS run for the SAME pipeline';
+EXCEPTION WHEN unique_violation THEN RAISE NOTICE 'ok (expected unique_violation)';
+END $do$;
 \echo '--- EXPECT SUCCEED: a different pipeline can have its own independent IN-PROGRESS run at the same time ---'
 INSERT INTO AUD_PIPELINES_RUN_LOG (PIPELINE_ID, STATUS) VALUES (2, 'IN-PROGRESS') RETURNING PIPELINE_RUN_ID;
 \echo '--- EXPECT SUCCEED: a SUCCESS-status row for pipeline 1 does not collide with its IN-PROGRESS row (partial index only covers IN-PROGRESS) ---'
@@ -108,7 +153,11 @@ INSERT INTO AUD_PIPELINES_RUN_LOG (PIPELINE_ID, STATUS) VALUES (1, 'SUCCESS') RE
 \echo '--- EXPECT SUCCEED: first attempt at task 1 under run 1 ---'
 INSERT INTO AUD_TASK_RUN_LOG (TASK_ID, PIPELINE_RUN_ID, STATUS) VALUES (1, 1, 'FAILED') RETURNING TASK_RUN_ID;
 \echo '--- EXPECT FAIL (unique_violation): a SECOND row for the same task+run instead of updating the existing one in place ---'
-INSERT INTO AUD_TASK_RUN_LOG (TASK_ID, PIPELINE_RUN_ID, STATUS) VALUES (1, 1, 'IN-PROGRESS');
+DO $do$ BEGIN
+    INSERT INTO AUD_TASK_RUN_LOG (TASK_ID, PIPELINE_RUN_ID, STATUS) VALUES (1, 1, 'IN-PROGRESS');
+    RAISE EXCEPTION 'EXPECT FAIL did not fail: a SECOND row for the same task+run instead of updating the existing one in place';
+EXCEPTION WHEN unique_violation THEN RAISE NOTICE 'ok (expected unique_violation)';
+END $do$;
 \echo '--- EXPECT SUCCEED: the correct retry pattern is UPDATE, not INSERT ---'
 UPDATE AUD_TASK_RUN_LOG SET STATUS = 'SUCCESS', END_DATE = now() WHERE TASK_ID = 1 AND PIPELINE_RUN_ID = 1 RETURNING TASK_RUN_ID, STATUS;
 
@@ -123,7 +172,11 @@ RETURNING PIPELINE_DEPENDENCY_ID;
 
 \echo '=== TEST: plain FK actually blocks orphan references ==='
 \echo '--- EXPECT FAIL (foreign_key_violation): CFG_TASKS referencing a nonexistent pipeline ---'
-INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) VALUES ('orphan', 'ETL', 9999, 'SQL');
+DO $do$ BEGIN
+    INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) VALUES ('orphan', 'ETL', 9999, 'SQL');
+    RAISE EXCEPTION 'EXPECT FAIL did not fail: CFG_TASKS referencing a nonexistent pipeline';
+EXCEPTION WHEN foreign_key_violation THEN RAISE NOTICE 'ok (expected foreign_key_violation)';
+END $do$;
 
 \echo '=== TEST: CFG_BUSINESS_RULES/AUD_BUSINESS_RULES_RESULTS accept the new REPORT type (expect both rows back with REPORT) ==='
 INSERT INTO CFG_BUSINESS_RULES (BUSINESS_RULE_NAME, PIPELINE_ID, TASK_ID, BUSINESS_RULE_SQL, BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE, SEQUENCE_NUMBER)
@@ -132,8 +185,12 @@ INSERT INTO AUD_BUSINESS_RULES_RUN_LOG (BUSINESS_RULE_ID, TASK_RUN_ID, STATUS) V
 INSERT INTO AUD_BUSINESS_RULES_RESULTS (BUSINESS_RULE_RUN_ID, BUSINESS_RULE_ID, BUSINESS_RULE_KEY, TARGET_TABLE, STATUS) VALUES (1, 1, 'K1', 'public.some_target', 'REPORT') RETURNING BUSINESS_RULE_RESULT_ID, STATUS;
 
 \echo '=== EXPECT FAIL (check_violation): BUSINESS_RULE_TYPE outside INCOMPLETE/REJECT/REPORT ==='
-INSERT INTO CFG_BUSINESS_RULES (BUSINESS_RULE_NAME, PIPELINE_ID, TASK_ID, BUSINESS_RULE_SQL, BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE, SEQUENCE_NUMBER)
-VALUES ('bad_type_rule', 1, 2, 'SELECT 1', 'BOGUS', 'id', 'public.some_target', 1);
+DO $do$ BEGIN
+    INSERT INTO CFG_BUSINESS_RULES (BUSINESS_RULE_NAME, PIPELINE_ID, TASK_ID, BUSINESS_RULE_SQL, BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE, SEQUENCE_NUMBER)
+    VALUES ('bad_type_rule', 1, 2, 'SELECT 1', 'BOGUS', 'id', 'public.some_target', 1);
+    RAISE EXCEPTION 'EXPECT FAIL did not fail: BUSINESS_RULE_TYPE outside INCOMPLETE/REJECT/REPORT';
+EXCEPTION WHEN check_violation THEN RAISE NOTICE 'ok (expected check_violation)';
+END $do$;
 
 \echo '=== FINAL ROW COUNTS (sanity check, not a strict assertion) ==='
 SELECT 'CFG_PIPELINES' t, count(*) FROM CFG_PIPELINES

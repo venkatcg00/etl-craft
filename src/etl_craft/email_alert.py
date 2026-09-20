@@ -340,6 +340,11 @@ def _send(ctx: TaskExecutionContext, recipients: list[str], subject: str, body_h
             if profile.use_tls:
                 server.starttls()
             if profile.auth_mode == "password":
+                if not profile.user:
+                    raise HandlerError(
+                        f"[Email] profile {profile.name!r} has auth_mode=password but no "
+                        "user to log in as"
+                    )
                 secret = resolve_secret(ctx.config, profile)
                 server.login(profile.user, secret)
             server.sendmail(profile.from_address, recipients, message.as_string())

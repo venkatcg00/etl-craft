@@ -57,6 +57,8 @@ source-include = ["src/etl_craft/sql/**", "src/etl_craft/py.typed"]
 dev = [
     "black>=26.5.1",
     "etl-craft[clickhouse]",
+    "mypy>=1.11",
+    "types-pyyaml>=6.0.12",
     "pydocstyle>=6.3.0",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
@@ -95,6 +97,26 @@ show_missing = true
 exclude_lines = [
     "pragma: no cover",
 ]
+
+# [ADDITION, 2026-09-20, E2-29] Every module uses `from __future__ import
+# annotations` and complete signatures, and nothing checked them. Not
+# --strict: the goal is to catch real defects (the split(".", 1) unpacking
+# hazard, untyped config values) rather than to spend the iteration annotating
+# test helpers and third-party seams. Tests are excluded for the same reason —
+# they are exercised by running them.
+[tool.mypy]
+python_version = "3.11"
+files = ["src/etl_craft"]
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+check_untyped_defs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+# No per-module overrides: third-party dialects are never imported directly
+# (CLAUDE.md's Non-goals), so there is nothing to ignore.
 
 [tool.pydocstyle]
 select = "D"

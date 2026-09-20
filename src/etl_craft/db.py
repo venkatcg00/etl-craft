@@ -80,7 +80,10 @@ def _key_file_creator(profile: ConnectionProfile, secret: str) -> Callable[[], A
             dbname=parts["database"],
             user=profile.user,
             sslkey=key_file,
-            sslpassword=secret.encode() if secret else None,
+            # str, not bytes: psycopg's own signature is str | int | None, and
+            # libpq treats it as text. Encoding it was accepted at runtime but
+            # wrong by the driver's contract (caught by mypy, E2-29).
+            sslpassword=secret if secret else None,
         )
 
     return _connect

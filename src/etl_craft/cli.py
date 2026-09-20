@@ -61,13 +61,14 @@ from etl_craft.init_db import InitDbError, init_db
 from etl_craft.migrate import MigrationError, apply_pending_migrations
 from etl_craft.orchestrator import (
     OrchestratorModeRefusedError,
+    PipelineOutcome,
     finalize_active_run,
     init_pipeline_run,
     run_pipeline,
 )
 from etl_craft.resolver import ResolverError, build_graph
 from etl_craft.runlog import RunLogError
-from etl_craft.runner import ForceNotAllowedError, run_task
+from etl_craft.runner import ForceNotAllowedError, TaskOutcome, run_task
 from etl_craft.validate import (
     validate_business_rule_keys,
     validate_graphs,
@@ -331,6 +332,11 @@ def _configure_command(args: argparse.Namespace, config_path: Path) -> int:
     return 0
 
 
+def _outcome_of(outcome: PipelineOutcome | TaskOutcome) -> tuple[str, str]:
+    """Reduce either outcome type to the (status, message) pair the CLI prints."""
+    return outcome.status, outcome.message
+
+
 def _run_command(args: argparse.Namespace, engine: Engine, config: ConnectorConfig) -> int:
     try:
         if args.init_only:
@@ -342,15 +348,19 @@ def _run_command(args: argparse.Namespace, engine: Engine, config: ConnectorConf
             print(finalize_outcome.message)
             return 0 if finalize_outcome.status == "SUCCESS" else 1
         if args.task_code is None:
-            outcome = run_pipeline(engine, config, args.pipeline_code, force=args.force)
+            status, message = _outcome_of(
+                run_pipeline(engine, config, args.pipeline_code, force=args.force)
+            )
         else:
-            outcome = run_task(engine, config, args.pipeline_code, args.task_code, force=args.force)
+            status, message = _outcome_of(
+                run_task(engine, config, args.pipeline_code, args.task_code, force=args.force)
+            )
     except RUN_ERRORS as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    print(outcome.message)
-    return 0 if outcome.status in ("SUCCESS", "SKIPPED") else 1
+    print(message)
+    return 0 if status in ("SUCCESS", "SKIPPED") else 1
 
 
 def _list_command(engine: Engine) -> int:
@@ -408,10 +418,10 @@ def _graph_command(args: argparse.Namespace, engine: Engine) -> int:
 
     print("Cross-pipeline task dependencies:")
     if cross_task_deps:
-        for dep in cross_task_deps:
+        for cross_dep in cross_task_deps:
             print(
-                f"  {dep.task_code} -> {dep.depends_on_pipeline_code}."
-                f"{dep.depends_on_task_code} ({dep.dependency_type})"
+                f"  {cross_dep.task_code} -> {cross_dep.depends_on_pipeline_code}."
+                f"{cross_dep.depends_on_task_code} ({cross_dep.dependency_type})"
             )
     else:
         print("  (none)")
@@ -578,10 +588,10 @@ def _history_command(args: argparse.Namespace, engine: Engine) -> int:
     if not pipeline_entries:
         print("(no logged runs)")
         return 0
-    for entry in pipeline_entries:
+    for pipeline_entry in pipeline_entries:
         print(
-            f"pipeline_run_id={entry.pipeline_run_id}\t{entry.status}\t{entry.start_date}\t"
-            f"{entry.end_date or ''}"
+            f"pipeline_run_id={pipeline_entry.pipeline_run_id}\t{pipeline_entry.status}\t"
+            f"{pipeline_entry.start_date}\t{pipeline_entry.end_date or ''}"
         )
     return 0
 

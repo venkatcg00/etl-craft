@@ -1169,7 +1169,10 @@ def test_key_file_creator_returns_callable_using_sslkey(monkeypatch):
     creator = AUTH_REGISTRY["key_file"](profile("key_file", key_file="/etc/key.pem"), "passphrase")
     creator()
     assert calls["sslkey"] == "/etc/key.pem"
-    assert calls["sslpassword"] == b"passphrase"
+    # str, not bytes: psycopg's own signature is str | int | None and libpq
+    # treats it as text. Encoding it happened to work but was wrong by the
+    # driver's contract — caught by mypy's first pass (E2-29).
+    assert calls["sslpassword"] == "passphrase"
 
 
 def test_token_and_sso_creators_are_not_implemented():

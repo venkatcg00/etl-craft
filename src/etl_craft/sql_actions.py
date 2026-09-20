@@ -768,9 +768,10 @@ def execute(
     if not target_object:
         raise HandlerError("CFG_TASK_PARAMETERS.TARGET_OBJECT is required for every SQL_ACTION")
     database = active_database(ctx.config)
-    updated_by = (
-        ctx.config.warehouse.active.user
-    )  # active_database() already proved warehouse is set
+    warehouse = ctx.config.warehouse
+    if warehouse is None:  # pragma: no cover - active_database already raised
+        raise HandlerError("no [Warehouse] section configured in craft-connector.yml")
+    updated_by = warehouse.active.user
     now = datetime.now(UTC)
 
     if action == "DROP_TABLE":
