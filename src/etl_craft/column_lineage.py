@@ -267,7 +267,9 @@ class TaskLineage:
     error: str | None = None
 
 
-def lineage_for_tasks(conn: Connection, *, refresh: bool = False) -> list[TaskLineage]:
+def lineage_for_tasks(
+    conn: Connection, *, refresh: bool = False, cache: bool = True
+) -> list[TaskLineage]:
     """Resolve column lineage for every active SQL task, using the cache where valid.
 
     Per explicit instruction lineage is both computed and cached. A cached row
@@ -275,6 +277,14 @@ def lineage_for_tasks(conn: Connection, *, refresh: bool = False) -> list[TaskLi
     CFG_TASK_PARAMETERS, so an edit invalidates it with nothing to remember.
     `refresh=True` re-parses regardless, for when sqlglot itself has been
     upgraded and might resolve something it previously could not.
+
+    [ADDITION, 2026-09-20, E2-56] `cache=False` reads the cache but never
+    writes it, for callers that must not have side effects. `generate-docs`
+    passes it: a documentation build is a read-only verb, and pointing one at
+    a read-only replica or role is completely reasonable — it would have
+    failed outright once this started writing. Its own connection did not
+    commit either, so every row it parsed was silently discarded, which is how
+    this went unnoticed.
     """
     rows = conn.execute(
         text(
@@ -312,7 +322,7 @@ def lineage_for_tasks(conn: Connection, *, refresh: bool = False) -> list[TaskLi
                 )
                 continue
         parsed = extract_column_lineage(row.source_sql, row.target_object)
-        if parsed.ok:
+        if parsed.ok and cache:
             store_lineage(conn, row.task_id, sql_hash, parsed.edges)
         results.append(
             TaskLineage(

@@ -9,21 +9,34 @@ plain HTML/CSS/JS files plus one JSON search index, all written to a local
 output directory a team then serves or deploys however it likes (GitHub
 Pages, any static host, or just opened from disk).
 
-Reuses exactly the read-layer functions the CLI's own `list`/`graph`/
-`steps`/`lineage` commands already use (cfg.py, resolver.py) -- this module
-adds no new query logic of its own beyond assembling their results into
-pages, per "the same read-layer queries as above."
+Reuses the read-layer functions the CLI's own `list`/`graph`/`steps`/
+`lineage` commands already use (cfg.py, resolver.py), plus column lineage
+parsed from each SQL task's SOURCE_SQL (column_lineage.py) and each task's
+DOCUMENTATION parameter.
 
-[CHOICE] The client-side search is a small, dependency-free vanilla-JS
-substring search over the generated search-index.json, not a vendored copy
-of Fuse.js/Lunr.js. CLAUDE.md's own phrasing ("Fuse.js/Lunr.js-class") reads
-as "a client-side index of this general shape," not a literal library
-requirement, and a team's own copy of this site may end up served from an
-internal network with no CDN access at all -- a zero-dependency search
-stays functional wherever the static files themselves do. Flagged as a real
-trade-off: no fuzzy matching, no relevance ranking, just substring matches
-against each entry's own text blob -- plenty for a metadata site with at
-most a few hundred pipelines/tasks, not built to scale past that.
+[DEVIATION, 2026-09-20, E2-56] This module is **read-only**, and deliberately
+so. It briefly was not: `collect_docs` recorded documentation versions and
+wrote the column-lineage cache, through a connection the CLI never commits --
+so every write was silently discarded, and against a read-only replica or
+role, which is a perfectly reasonable place to point a documentation build,
+it would have failed outright. `docs-version` and `lineage --column` are the
+verbs that write. A page shows the DOCUMENTATION parameter's *current* text,
+with its recorded version if one exists and "unversioned" if not, so an edit
+is never hidden behind someone remembering to run another command.
+
+[DEVIATION, 2026-09-20] The client-side search is **Fuse.js**, vendored into
+the generated output from src/etl_craft/vendor/. This docstring previously
+said the opposite -- "a small, dependency-free vanilla-JS substring search
+... not a vendored copy of Fuse.js/Lunr.js" -- and went on describing "no
+fuzzy matching, no relevance ranking" as an accepted trade-off, thirty lines
+above the code that copies Fuse into the output. Superseded by explicit
+instruction ("fuzzy matching ... dont re-invent the wheel use any existing
+package").
+
+The original no-CDN reasoning still holds and is exactly why Fuse is
+*vendored* rather than linked: a team's copy of this site may be served from
+an internal network with no outbound access, where a CDN script tag would
+leave the search box silently dead. 15 KB buys a site that works everywhere.
 
 [CHOICE] Every generated page is genuinely static HTML (fetch()-based search
 excepted) -- no build step beyond running `etl-craft generate-docs` again.
@@ -56,7 +69,7 @@ from etl_craft.cfg import (
     resolve_pipeline_id,
 )
 from etl_craft.column_lineage import ColumnEdge, TaskLineage, lineage_for_tasks
-from etl_craft.documentation import fetch_current_documentation, refresh_all
+from etl_craft.documentation import fetch_recorded_versions
 from etl_craft.resolver import build_graph
 
 
@@ -87,16 +100,22 @@ def _collect_pipeline_doc_data(
     task_codes = fetch_task_codes(conn, pipeline_id)
     graph = build_graph(graph_data.tasks, graph_data.same_pipeline_edges)
     waves = [[task_codes[task_id] for task_id in wave] for wave in graph.waves()]
-    docs_by_task_id = fetch_current_documentation(conn)
+    # The prose comes from the task's own DOCUMENTATION parameter, so a page
+    # always shows what is configured right now. The *version* comes from
+    # AUD_TASK_DOCUMENTATION and is simply absent until `docs-version` has
+    # recorded one — which keeps this build read-only without ever showing
+    # stale text.
+    recorded_versions = fetch_recorded_versions(conn)
+    steps = fetch_pipeline_steps(conn, pipeline_id)
     return PipelineDocData(
         waves=waves,
-        steps=fetch_pipeline_steps(conn, pipeline_id),
+        steps=steps,
         pipeline_dependencies=fetch_pipeline_dependencies(conn, pipeline_id),
         cross_task_dependencies=fetch_cross_pipeline_task_edges(conn, pipeline_id),
         documentation={
-            task_codes[task_id]: entry
-            for task_id, entry in docs_by_task_id.items()
-            if task_id in task_codes
+            step.task_code: (prose, recorded_versions.get(step.task_code, 0))
+            for step in steps
+            if (prose := step.parameters.get("DOCUMENTATION"))
         },
         column_lineage={
             task.task_code: task.edges
@@ -114,8 +133,13 @@ def collect_docs(conn: Connection) -> list[PipelineDoc]:
     reads, and a page for pipeline A legitimately wants to show that its column
     came from a table pipeline B writes.
     """
-    refresh_all(conn)
-    lineage = lineage_for_tasks(conn)
+    # [DEVIATION, 2026-09-20, E2-56] Read-only. This used to record
+    # documentation versions and write the lineage cache — through a
+    # connection the CLI never commits, so both were silently discarded,
+    # and against a read-only replica or role it would have failed
+    # outright. `docs-version` and `lineage --column` are the verbs that
+    # write; a documentation build reads.
+    lineage = lineage_for_tasks(conn, cache=False)
     return [
         (summary, _collect_pipeline_doc_data(conn, summary.pipeline_code, lineage))
         for summary in fetch_all_pipelines(conn)
@@ -202,10 +226,12 @@ def _render_step(step: PipelineStep, data: PipelineDocData) -> str:
     documented = data.documentation.get(step.task_code)
     if documented is not None:
         prose, version = documented
-        parts.append(
-            f'<p class="doc">{html.escape(prose)}'
-            f'<span class="doc-version">docs v{version}</span></p>'
+        badge = (
+            f'<span class="doc-version">docs v{version}</span>'
+            if version
+            else '<span class="doc-version">unversioned</span>'
         )
+        parts.append(f'<p class="doc">{html.escape(prose)}{badge}</p>')
 
     edges = data.column_lineage.get(step.task_code) or []
     if edges:

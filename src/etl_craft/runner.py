@@ -121,7 +121,7 @@ def run_task(
         task_id = resolve_task_id(conn, pipeline_id, task_code)
 
     with engine.begin() as conn:
-        pipeline_run_id = resolve_run_for_task(conn, pipeline_id, force=force)
+        pipeline_run_id = resolve_run_for_task(conn, pipeline_id, force=force, mode=config.mode)
 
     if not force:
         with engine.connect() as conn:

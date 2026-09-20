@@ -50,6 +50,7 @@ from etl_craft.cfg import (
     KNOWN_PARAMETERS,
     fetch_all_pipelines,
     fetch_business_rule_targets,
+    fetch_dependency_edge_detail,
     fetch_pipeline_graph,
     fetch_sql_snippets,
     fetch_tasks_missing_source_or_target,
@@ -296,6 +297,83 @@ def validate_task_parameters(conn: Connection) -> list[ValidationIssue]:
         unknown = sorted(set(params) - KNOWN_PARAMETERS)
         if unknown:
             add(f"unrecognized CFG_TASK_PARAMETERS name(s) {unknown} — a typo will be ignored")
+    return issues
+
+
+# [ADDITION, 2026-09-20, E2-59] Handlers that never report a TARGET_COUNT, so
+# a HAS_DATA edge on one can never be satisfied. E2-08 fixed this for PYTHON by
+# having INGESTION_COUNT populate target_count; these two report no row count
+# at all, and there is no obvious one to report.
+HANDLERS_WITHOUT_ROW_COUNTS = frozenset({"BUSINESS_RULES", "EMAIL_ALERT"})
+
+
+def validate_dependency_edges(conn: Connection) -> list[ValidationIssue]:
+    """Check edges whose upstream handler can never satisfy them, and alert-task ordering.
+
+    Two checks that only make sense across a whole pipeline:
+
+    * **E2-59** A `HAS_DATA` edge means "upstream SUCCESS *and* TARGET_COUNT >
+      0". `BUSINESS_RULES` and `EMAIL_ALERT` report no row count, so such an
+      edge is permanently unsatisfiable. E2-01's `unsatisfiable()` made this
+      worse rather than better: the downstream task is now *silently* recorded
+      SKIPPED and the run finalizes SUCCESS, where before it at least showed up
+      as stuck. A config mistake the engine can detect statically should not
+      look like a clean run.
+    * **E2-60** `EMAIL_ALERT` is a pipeline-level completion alert (E2-43) whose
+      flavour is computed from every task's status — but nothing makes it run
+      last. Gate it on one task rather than on every leaf and it runs mid-flight,
+      sees unsettled tasks, and sends the amber "something went wrong" email for
+      a run that goes on to finish cleanly. This requires what the design
+      already assumes.
+    """
+    issues: list[ValidationIssue] = []
+    for pipeline in fetch_all_pipelines(conn):
+        pipeline_id = resolve_pipeline_id(conn, pipeline.pipeline_code)
+        edges = fetch_dependency_edge_detail(conn, pipeline_id)
+        for edge in edges:
+            if (
+                edge.dependency_type == "HAS_DATA"
+                and edge.depends_on_handler in HANDLERS_WITHOUT_ROW_COUNTS
+            ):
+                issues.append(
+                    ValidationIssue(
+                        category="dependency",
+                        message=(
+                            f"{pipeline.pipeline_code}.{edge.task_code}: HAS_DATA edge on "
+                            f"{edge.depends_on_task_code!r}, whose HANDLER="
+                            f"{edge.depends_on_handler} never reports a TARGET_COUNT — this "
+                            "edge can never be satisfied, and the task will be silently "
+                            "recorded SKIPPED on every run"
+                        ),
+                    )
+                )
+        issues.extend(_alert_ordering_issues(pipeline.pipeline_code, edges))
+    return issues
+
+
+def _alert_ordering_issues(pipeline_code: str, edges: list) -> list[ValidationIssue]:
+    """Require each EMAIL_ALERT task to wait on every non-alert leaf in its pipeline."""
+    alerts = {e.task_code for e in edges if e.handler == "EMAIL_ALERT"}
+    if not alerts:
+        return []
+    all_tasks = {e.task_code for e in edges} | {e.depends_on_task_code for e in edges}
+    depended_on = {e.depends_on_task_code for e in edges}
+    leaves = {t for t in all_tasks - depended_on if t not in alerts}
+    issues: list[ValidationIssue] = []
+    for alert in sorted(alerts):
+        waits_for = {e.depends_on_task_code for e in edges if e.task_code == alert}
+        missing = sorted(leaves - waits_for)
+        if missing:
+            issues.append(
+                ValidationIssue(
+                    category="alert_ordering",
+                    message=(
+                        f"{pipeline_code}.{alert}: HANDLER='EMAIL_ALERT' reports on the whole "
+                        f"run, but does not depend on {missing} — it can run before those "
+                        "finish and report COMPLETED_WITH_ERRORS for a run that succeeds"
+                    ),
+                )
+            )
     return issues
 
 

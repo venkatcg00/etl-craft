@@ -75,6 +75,7 @@ from etl_craft.runner import ForceNotAllowedError, TaskOutcome, run_task
 from etl_craft.setup_command import run_setup
 from etl_craft.validate import (
     validate_business_rule_keys,
+    validate_dependency_edges,
     validate_graphs,
     validate_read_only_sql,
     validate_task_lineage_declarations,
@@ -527,6 +528,7 @@ def _validate_command(engine: Engine, config: ConnectorConfig) -> int:
         issues += validate_task_lineage_declarations(conn)
         issues += validate_read_only_sql(conn)
         issues += validate_task_parameters(conn)
+        issues += validate_dependency_edges(conn)
 
         data_engine = None
         if config.warehouse is not None:

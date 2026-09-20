@@ -74,7 +74,7 @@ from etl_craft.crosspipe import (
 )
 from etl_craft.docs_generator import collect_docs, generate_docs
 from etl_craft.doctor import run_checks
-from etl_craft.documentation import fetch_history, refresh_task_documentation
+from etl_craft.documentation import fetch_history, refresh_all, refresh_task_documentation
 from etl_craft.execution import HandlerError, HandlerResult
 from etl_craft.generate_yml import GLOBAL_DAG_ID, generate_global_dag, generate_pipeline_dag
 from etl_craft.init_db import InitDbError, init_db
@@ -138,6 +138,31 @@ def test_resolve_run_for_task_dev_fallback_against_real_schema(pg_conn, cfg_pipe
         resolve_run_for_task(pg_conn, cfg_pipeline)
 
     assert resolve_run_for_task(pg_conn, cfg_pipeline, force=True) == run_id
+
+
+def test_resolve_run_for_task_advice_is_mode_aware(pg_conn, cfg_pipeline):
+    # E2-55. The message used to recommend --force unconditionally -- which
+    # Mode=orchestrator refuses outright. So in the mode a real deployment runs
+    # in, "clear a failed task and re-run it" had no route AND the error
+    # pointed at a flag that would be rejected. Reproduced across all four
+    # mode/force combinations during round 3.
+    run_id = find_or_create_active_run(pg_conn, cfg_pipeline)
+    pg_conn.execute(
+        text("UPDATE AUD_PIPELINES_RUN_LOG SET STATUS = 'FAILED' WHERE PIPELINE_RUN_ID = :id"),
+        {"id": run_id},
+    )
+
+    with pytest.raises(RunLogError) as local_exc:
+        resolve_run_for_task(pg_conn, cfg_pipeline, mode="local")
+    assert "--force" in str(local_exc.value)
+
+    with pytest.raises(RunLogError) as orch_exc:
+        resolve_run_for_task(pg_conn, cfg_pipeline, mode="orchestrator")
+    message = str(orch_exc.value)
+    assert "--init-only" in message
+    assert "NEW pipeline_run_id" in message
+    # It must not recommend a flag this mode refuses.
+    assert "pass --force" not in message
 
 
 def test_resolve_run_for_task_still_binds_to_a_skipped_run(pg_conn, cfg_pipeline):
@@ -2025,6 +2050,7 @@ def make_config(
     mode: str = "local",
     *,
     warehouse: bool = False,
+    clickhouse_warehouse: bool = False,
     email: bool = False,
     email_auth_mode: str = "none",
     cloning: CloningConfig | None = None,
@@ -2037,7 +2063,25 @@ def make_config(
         auth_mode="password",
     )
     warehouse_section = None
-    if warehouse:
+    if clickhouse_warehouse:
+        # [ADDITION, 2026-09-20, E2-53] The gap that let three ClickHouse DDL
+        # failures through: every SQL-action test pointed [Warehouse] at the
+        # same Postgres, so the whole action vocabulary was exercised against
+        # exactly one dialect -- while the code carried ClickHouse branches
+        # nothing ran.
+        warehouse_section = ConnectionSection(
+            active_profile="dev",
+            profiles={
+                "dev": ConnectionProfile(
+                    section="WAREHOUSE",
+                    name="dev",
+                    jdbc_url="jdbc:clickhouse://localhost:58123/etl_craft",
+                    user="etl_craft",
+                    auth_mode="password",
+                )
+            },
+        )
+    elif warehouse:
         # Same test Postgres, standing in as the Data DB — same pattern
         # test_build_data_engine_connects_for_real above uses. Needs
         # ETL_CRAFT_WAREHOUSE_DEV_SECRET set (see the warehouse_config fixture).
@@ -2195,6 +2239,57 @@ def test_run_task_counts_attempts_and_resets_the_row_on_a_retry(
     # The failed attempt's error is gone, not carried into the successful one.
     assert row.error_message is None
     assert row.target_count == 5
+
+
+def test_validate_flags_a_has_data_edge_on_a_handler_with_no_row_count(
+    postgres_engine, committed_pipeline, craft_connector_on_disk, capsys
+):
+    # E2-59. HAS_DATA means "upstream SUCCESS and TARGET_COUNT > 0", and
+    # BUSINESS_RULES reports no row count -- so the edge can never be
+    # satisfied. E2-01's unsatisfiable() made that *worse*: the downstream task
+    # is now silently recorded SKIPPED and the run finalizes SUCCESS, where
+    # before it at least showed up as stuck.
+    br_id = insert_committed_task(
+        postgres_engine, committed_pipeline, "hd_rules", handler="BUSINESS_RULES"
+    )
+    downstream = insert_committed_task(postgres_engine, committed_pipeline, "hd_after")
+    insert_committed_dependency(
+        postgres_engine, committed_pipeline, downstream, br_id, dependency_type="HAS_DATA"
+    )
+
+    assert cli_main(["validate"]) == 1
+
+    out = capsys.readouterr().out
+    assert "[dependency]" in out
+    assert "never reports a TARGET_COUNT" in out
+
+
+def test_validate_requires_an_email_alert_to_wait_on_every_leaf(
+    postgres_engine, committed_pipeline, craft_connector_on_disk, capsys
+):
+    # E2-60. EMAIL_ALERT is a pipeline-level completion alert (E2-43) whose
+    # flavour is computed from every task's status -- but nothing made it run
+    # last. Gated on one task rather than every leaf, it runs mid-flight, sees
+    # unsettled tasks, and sends the amber "something went wrong" email for a
+    # run that goes on to finish cleanly.
+    first = insert_committed_task(postgres_engine, committed_pipeline, "leaf_one")
+    second = insert_committed_task(postgres_engine, committed_pipeline, "leaf_two")
+    alert = insert_committed_task(
+        postgres_engine, committed_pipeline, "leaf_alert", handler="EMAIL_ALERT"
+    )
+    # Waits on leaf_one only; leaf_two is a leaf it ignores.
+    insert_committed_dependency(
+        postgres_engine, committed_pipeline, alert, first, dependency_type="ALWAYS"
+    )
+    insert_committed_dependency(
+        postgres_engine, committed_pipeline, second, first, dependency_type="SUCCESS"
+    )
+
+    assert cli_main(["validate"]) == 1
+
+    out = capsys.readouterr().out
+    assert "[alert_ordering]" in out
+    assert "leaf_two" in out
 
 
 def test_validate_flags_an_incomplete_sql_task(
@@ -3758,6 +3853,10 @@ def test_sql_setup_table_infers_audit_columns_from_scd2_sibling(
         "updated_by",
         "delete_flag",
         "active_flag",
+        # E2-54: the identity surrogate key, added after the CTAS. SCD2 is
+        # exactly the case that motivated it -- several rows per merge key
+        # by design, so the natural key can never be the primary key.
+        "row_id",
     ]
     assert count == 0
 
@@ -3794,7 +3893,10 @@ def test_sql_setup_table_no_sibling_falls_back_to_no_audit_columns(
             .scalars()
             .all()
         )
-    assert cols == ["id", "name", "pipeline_run_id"]
+    # row_id: every engine-created target now carries an identity surrogate
+    # key (E2-54), which is what makes the single-column-PK convention
+    # satisfiable on an SCD2 target too.
+    assert cols == ["id", "name", "pipeline_run_id", "row_id"]
 
 
 def test_sql_overwrite_table_truncates_and_reinserts(
@@ -3895,6 +3997,203 @@ def test_sql_overwrite_table_creates_a_missing_target(
     assert {"id", "pipeline_run_id", "update_date"} <= columns
 
 
+def test_sql_create_table_runs_against_real_clickhouse(
+    postgres_engine, clickhouse_engine, committed_pipeline, monkeypatch
+):
+    # E2-53 regression. Three independent DDL failures shipped because no test
+    # ever ran a SQL_ACTION against a second dialect: no ENGINE clause
+    # (Code: 42), CAST(NULL AS <non-nullable>) (Code: 70), and
+    # "TIMESTAMP WITH TIME ZONE" being a syntax error there (Code: 62) -- that
+    # last one a regression this iteration introduced via E2-33.
+    monkeypatch.setenv("ETL_CRAFT_WAREHOUSE_DEV_SECRET", "etl_craft")
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "ch_create")
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {
+            "SQL_ACTION": "SETUP_TABLE",
+            "TARGET_OBJECT": "etl_craft.ch_setup_probe",
+            "SOURCE_SQL": "SELECT 1 AS id, 'x' AS name",
+        },
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+    try:
+        outcome = run_task(
+            postgres_engine,
+            make_config(clickhouse_warehouse=True),
+            "TEST_CONCURRENT_PL",
+            "ch_create",
+        )
+        assert outcome.status == "SUCCESS", outcome.message
+        with clickhouse_engine.connect() as conn:
+            columns = {
+                row[0].lower()
+                for row in conn.execute(
+                    text(
+                        "SELECT name FROM system.columns "
+                        "WHERE database = 'etl_craft' AND table = 'ch_setup_probe'"
+                    )
+                )
+            }
+        assert {"id", "name", "pipeline_run_id"} <= columns
+    finally:
+        with clickhouse_engine.begin() as conn:
+            conn.execute(text("DROP TABLE IF EXISTS etl_craft.ch_setup_probe"))
+
+
+def test_sql_overwrite_table_runs_against_real_clickhouse(
+    postgres_engine, clickhouse_engine, committed_pipeline, monkeypatch
+):
+    # OVERWRITE_TABLE exercises the audit-column CAST types that failed with
+    # Code: 70 (Nullable), the TRUNCATE-and-insert path, and the
+    # create-if-absent shape builder -- all against a second dialect.
+    monkeypatch.setenv("ETL_CRAFT_WAREHOUSE_DEV_SECRET", "etl_craft")
+    with clickhouse_engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS etl_craft.ch_scd1_src"))
+        conn.execute(
+            text(
+                "CREATE TABLE etl_craft.ch_scd1_src (id Int64, name String) "
+                "ENGINE = MergeTree() ORDER BY tuple()"
+            )
+        )
+        conn.execute(text("INSERT INTO etl_craft.ch_scd1_src VALUES (1, 'a')"))
+
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "ch_merge")
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {
+            "SQL_ACTION": "OVERWRITE_TABLE",
+            "TARGET_OBJECT": "etl_craft.ch_scd1_tgt",
+            "SOURCE_SQL": "SELECT id, name FROM etl_craft.ch_scd1_src WHERE 1=1",
+        },
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+    try:
+        outcome = run_task(
+            postgres_engine,
+            make_config(clickhouse_warehouse=True),
+            "TEST_CONCURRENT_PL",
+            "ch_merge",
+        )
+        assert outcome.status == "SUCCESS", outcome.message
+        with clickhouse_engine.connect() as conn:
+            rows = conn.execute(
+                text("SELECT id, name, UPDATE_DATE FROM etl_craft.ch_scd1_tgt")
+            ).all()
+        assert len(rows) == 1
+        assert rows[0][0] == 1
+        # UPDATE_DATE exists and is populated -- the column whose declared type
+        # ("TIMESTAMP WITH TIME ZONE") was a syntax error here until now.
+        assert rows[0][2] is not None
+    finally:
+        with clickhouse_engine.begin() as conn:
+            conn.execute(text("DROP TABLE IF EXISTS etl_craft.ch_scd1_src"))
+            conn.execute(text("DROP TABLE IF EXISTS etl_craft.ch_scd1_tgt"))
+
+
+def test_sql_scd_merge_is_refused_on_clickhouse_with_a_clear_reason(
+    postgres_engine, clickhouse_engine, committed_pipeline, monkeypatch
+):
+    # E2-53. ClickHouse has no UPDATE statement -- its ALTER TABLE ... UPDATE
+    # mutations are asynchronous background rewrites, so a merge built on them
+    # would report SUCCESS before the target had actually changed. Refusing is
+    # the honest answer; the previous behaviour was a raw
+    # "Syntax error: failed at position 1 ('UPDATE')" from deep inside the
+    # merge, after the stage had already been built.
+    monkeypatch.setenv("ETL_CRAFT_WAREHOUSE_DEV_SECRET", "etl_craft")
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "ch_scd")
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {
+            "SQL_ACTION": "SCD1_MERGE",
+            "TARGET_OBJECT": "etl_craft.ch_never",
+            "SOURCE_SQL": "SELECT 1 AS id, 'a' AS name",
+            "MERGE_KEY": "id",
+            "MERGE_COMPARE_COLUMNS": "name",
+        },
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    outcome = run_task(
+        postgres_engine, make_config(clickhouse_warehouse=True), "TEST_CONCURRENT_PL", "ch_scd"
+    )
+
+    assert outcome.status == "FAILED"
+    assert "updates rows in place" in outcome.message
+    assert "OVERWRITE_TABLE" in outcome.message
+
+
+def test_sql_scd2_merge_keeps_history_with_a_surrogate_primary_key(
+    postgres_engine, committed_pipeline, data_db_tables
+):
+    # E2-54 regression, reproduced against real Postgres during round 3. The
+    # earlier PRIMARY_KEY parameter named a *business* column, and an SCD2
+    # target holds several rows per merge key by design -- so declaring the
+    # natural key as the primary key worked for exactly one run and then
+    # failed permanently with a unique violation, leaving the target holding
+    # only the OLD version of every changed row. The history the merge exists
+    # to record was never written.
+    #
+    # Per explicit correction -- "all primary keys are basically identity
+    # columns. merge keys are natural keys" -- the engine generates ROW_ID
+    # instead, so the natural key is free to repeat.
+    target = f"public.sqlx_scd2pk_{committed_pipeline}"
+    src = f"sqlx_scd2pk_src_{committed_pipeline}"
+    data_db_tables.extend([target, src])
+    with postgres_engine.begin() as conn:
+        conn.execute(text(f"CREATE TABLE {src} (id int, name varchar)"))
+        conn.execute(text(f"INSERT INTO {src} VALUES (1, 'a')"))
+
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "scd2pk")
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {
+            "SQL_ACTION": "SCD2_MERGE",
+            "TARGET_OBJECT": target,
+            "SOURCE_SQL": f"SELECT id, name FROM {src} WHERE 1=1",
+            "MERGE_KEY": "id",
+            "MERGE_COMPARE_COLUMNS": "name",
+        },
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    assert (
+        run_task(
+            postgres_engine, make_config(warehouse=True), "TEST_CONCURRENT_PL", "scd2pk"
+        ).status
+        == "SUCCESS"
+    )
+
+    # A genuine value change: the merge must deactivate the old version and
+    # insert a new one -- two rows sharing merge key 1.
+    with postgres_engine.begin() as conn:
+        conn.execute(text(f"UPDATE {src} SET name = 'b' WHERE id = 1"))
+        conn.execute(
+            text("UPDATE AUD_TASK_RUN_LOG SET STATUS = 'FAILED' WHERE TASK_ID = :id"),
+            {"id": task_id},
+        )
+
+    assert (
+        run_task(
+            postgres_engine, make_config(warehouse=True), "TEST_CONCURRENT_PL", "scd2pk"
+        ).status
+        == "SUCCESS"
+    )
+
+    with postgres_engine.connect() as conn:
+        rows = conn.execute(text(f"SELECT name, ACTIVE_FLAG FROM {target} ORDER BY name")).all()
+        pk = inspect(postgres_engine).get_pk_constraint(target.split(".", 1)[1], schema="public")
+        row_ids = conn.execute(text(f"SELECT COUNT(DISTINCT ROW_ID) FROM {target}")).scalar_one()
+    # Both versions present: the history survived.
+    assert rows == [("a", "N"), ("b", "Y")]
+    # And the single-column PK convention holds, on the surrogate key.
+    assert pk["constrained_columns"] == ["row_id"]
+    assert row_ids == 2
+
+
 def test_sql_create_table_target_passes_validates_own_primary_key_check(
     postgres_engine, committed_pipeline, data_db_tables, pg_conn, cfg_pipeline, cfg_task
 ):
@@ -3915,7 +4214,6 @@ def test_sql_create_table_target_passes_validates_own_primary_key_check(
             "SQL_ACTION": "CREATE_TABLE",
             "TARGET_OBJECT": target,
             "SOURCE_SQL": "SELECT 1 AS id, 'x' AS val WHERE 1=1",
-            "PRIMARY_KEY": "id",
         },
     )
     seed_active_run(postgres_engine, committed_pipeline)
@@ -3927,7 +4225,11 @@ def test_sql_create_table_target_passes_validates_own_primary_key_check(
         == "SUCCESS"
     )
 
-    _insert_business_rule(pg_conn, cfg_pipeline, cfg_task, "pk_rule", target, "id")
+    # [DEVIATION, E2-54] The key is ROW_ID, generated by the engine, not a
+    # business column the author named. "all primary keys are basically
+    # identity columns. merge keys are natural keys" -- which is also what
+    # makes this convention satisfiable on an SCD2 target.
+    _insert_business_rule(pg_conn, cfg_pipeline, cfg_task, "pk_rule", target, "row_id")
     assert validate_business_rule_keys(pg_conn, postgres_engine) == []
 
 
@@ -4512,7 +4814,7 @@ def test_sql_schema_evolution_enabled_adds_column_at_right_position(
         data = conn.execute(text(f"SELECT id, name, extra FROM {target}")).all()
     # "extra" lands right after "name" (the SELECT's own column order), not
     # appended after the engine-managed columns.
-    assert cols == ["id", "name", "extra", "pipeline_run_id", "update_date"]
+    assert cols == ["id", "name", "extra", "pipeline_run_id", "update_date", "row_id"]
     assert data == [(1, "a", "z")]
 
 
@@ -6230,6 +6532,38 @@ def test_column_lineage_is_computed_then_served_from_the_cache(postgres_engine, 
     assert [e.target_column for e in edited.edges] == ["cust_email"]
 
 
+def test_generate_docs_writes_nothing_to_the_database(
+    postgres_engine, committed_pipeline, tmp_path
+):
+    # E2-56 regression. generate-docs called a write path through a connection
+    # the CLI never commits, so the lineage AND documentation-version writes
+    # were both silently discarded -- and against a read-only replica or role,
+    # a perfectly reasonable place to point a docs build, it would have failed
+    # outright. Reproduced by running it exactly as the CLI does.
+    _documented_sql_task(
+        postgres_engine,
+        committed_pipeline,
+        "ro_task",
+        "SELECT c.id AS cust_id FROM raw.customers c",
+        doc="Read-only probe.",
+    )
+    with postgres_engine.begin() as conn:
+        conn.execute(text("DELETE FROM AUD_COLUMN_LINEAGE"))
+        conn.execute(text("DELETE FROM AUD_TASK_DOCUMENTATION"))
+
+    with postgres_engine.connect() as conn:  # exactly what the CLI does
+        generate_docs(conn, tmp_path)
+
+    with postgres_engine.connect() as conn:
+        lineage_rows = conn.execute(text("SELECT COUNT(*) FROM AUD_COLUMN_LINEAGE")).scalar_one()
+        doc_rows = conn.execute(text("SELECT COUNT(*) FROM AUD_TASK_DOCUMENTATION")).scalar_one()
+    assert (lineage_rows, doc_rows) == (0, 0)
+    # And it still renders the documentation and lineage it computed.
+    page = (tmp_path / "TEST_CONCURRENT_PL.html").read_text()
+    assert "Read-only probe." in page
+    assert "raw.customers.id" in page
+
+
 def test_cli_lineage_column_reports_producers_and_consumers(
     postgres_engine, committed_pipeline, craft_connector_on_disk, capsys
 ):
@@ -6335,7 +6669,11 @@ def test_generated_docs_include_documentation_and_column_lineage(
 
     page = (tmp_path / "TEST_CONCURRENT_PL.html").read_text()
     assert "Loads customers from the raw layer." in page
-    assert "docs v1" in page
+    # [DEVIATION, E2-56] generate-docs is read-only now, so it shows the
+    # current DOCUMENTATION text with "unversioned" until `docs-version` has
+    # recorded one. Showing the recorded *text* instead would make an edit
+    # invisible until someone remembered to run that command.
+    assert "unversioned" in page
     assert "Column lineage" in page
     assert "raw.customers.id" in page
     # Fuse is vendored into the output, not loaded from a CDN -- this site
@@ -6343,6 +6681,13 @@ def test_generated_docs_include_documentation_and_column_lineage(
     assert (tmp_path / "fuse.min.js").is_file()
     assert "Fuse.js" in (tmp_path / "fuse.min.js").read_text()
     assert "new Fuse(" in (tmp_path / "search.js").read_text()
+    # Once a version has been recorded, the badge shows it.
+    with postgres_engine.begin() as conn:
+        refresh_all(conn)
+    with postgres_engine.connect() as conn:
+        generate_docs(conn, tmp_path)
+    assert "docs v1" in (tmp_path / "TEST_CONCURRENT_PL.html").read_text()
+
     index_entry = json.loads((tmp_path / "search-index.json").read_text())
     documented = [e for e in index_entry if e.get("task_code") == "docs_task"]
     assert documented and "Loads customers" in documented[0]["documentation"]

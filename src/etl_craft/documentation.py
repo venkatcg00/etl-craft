@@ -100,11 +100,20 @@ def refresh_task_documentation(conn: Connection, task_id: int, documentation: st
     return next_version
 
 
-def refresh_all(conn: Connection) -> list[tuple[str, str, int, bool]]:
-    """Refresh every documented task. Returns (pipeline, task, version, changed) per task."""
+def refresh_all(conn: Connection, *, record: bool = True) -> list[tuple[str, str, int, bool]]:
+    """Refresh every documented task. Returns (pipeline, task, version, changed) per task.
+
+    [ADDITION, 2026-09-20, E2-56] `record=False` reports the current versions
+    without writing new ones, for `generate-docs` — a documentation build is a
+    read-only verb, and its own connection never committed anyway, so every
+    version it recorded was silently discarded.
+    """
     results: list[tuple[str, str, int, bool]] = []
     for task_id, pipeline_code, task_code, documentation in fetch_documented_tasks(conn):
         before = current_version(conn, task_id)
+        if not record:
+            results.append((pipeline_code, task_code, before or 0, False))
+            continue
         version = refresh_task_documentation(conn, task_id, documentation)
         results.append((pipeline_code, task_code, version, version != before))
     return results
@@ -134,12 +143,21 @@ def fetch_history(conn: Connection, task_id: int) -> list[tuple[int, str, object
     return [(int(r.version), r.documentation, r.recorded_at) for r in rows]
 
 
-def fetch_current_documentation(conn: Connection) -> dict[int, tuple[str, int]]:
-    """Map task_id -> (documentation, version) for every task with a recorded version."""
+def fetch_recorded_versions(conn: Connection) -> dict[str, int]:
+    """Map task_code -> its latest recorded documentation version.
+
+    [DEVIATION, 2026-09-20, E2-56] Replaces `fetch_current_documentation`,
+    which returned the recorded *text* as well. A documentation page should
+    show what the DOCUMENTATION parameter says right now, not what was last
+    recorded — otherwise an edit is invisible until someone runs
+    `docs-version`. Only the version number needs the audit table, and it is
+    simply absent until a version has been recorded.
+    """
     rows = conn.execute(
         text(
-            "SELECT DISTINCT ON (TASK_ID) TASK_ID AS task_id, DOCUMENTATION AS documentation, "
-            "VERSION AS version FROM AUD_TASK_DOCUMENTATION ORDER BY TASK_ID, VERSION DESC"
+            "SELECT DISTINCT ON (d.TASK_ID) t.TASK_CODE AS task_code, d.VERSION AS version "
+            "FROM AUD_TASK_DOCUMENTATION d JOIN CFG_TASKS t ON t.TASK_ID = d.TASK_ID "
+            "ORDER BY d.TASK_ID, d.VERSION DESC"
         )
     ).all()
-    return {r.task_id: (r.documentation, int(r.version)) for r in rows}
+    return {r.task_code: int(r.version) for r in rows}

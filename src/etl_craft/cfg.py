@@ -781,6 +781,45 @@ def fetch_tasks_with_parameters(conn: Connection) -> list[TaskWithParameters]:
 
 
 @dataclass(frozen=True)
+class DependencyEdgeDetail:
+    """One same-pipeline edge with both ends' handlers — what `validate` needs to judge it."""
+
+    task_code: str
+    handler: str
+    depends_on_task_code: str
+    depends_on_handler: str
+    dependency_type: str
+
+
+def fetch_dependency_edge_detail(conn: Connection, pipeline_id: int) -> list[DependencyEdgeDetail]:
+    """Fetch this pipeline's active same-pipeline edges, with the handler at each end."""
+    rows = conn.execute(
+        text(
+            "SELECT t.TASK_CODE AS task_code, t.HANDLER AS handler, "
+            "u.TASK_CODE AS depends_on_task_code, u.HANDLER AS depends_on_handler, "
+            "d.DEPENDENCY_TYPE AS dependency_type "
+            "FROM CFG_TASK_DEPENDENCY d "
+            "JOIN CFG_TASKS t ON t.TASK_ID = d.TASK_ID "
+            "JOIN CFG_TASKS u ON u.TASK_ID = d.DEPENDS_ON_TASK_ID "
+            "WHERE d.PIPELINE_ID = :pipeline_id AND d.ACTIVE_FLAG = 'Y' "
+            "AND d.DEPENDS_ON_PIPELINE_ID = :pipeline_id "
+            "AND t.ACTIVE_FLAG = 'Y' AND u.ACTIVE_FLAG = 'Y'"
+        ),
+        {"pipeline_id": pipeline_id},
+    ).all()
+    return [
+        DependencyEdgeDetail(
+            task_code=r.task_code,
+            handler=r.handler,
+            depends_on_task_code=r.depends_on_task_code,
+            depends_on_handler=r.depends_on_handler,
+            dependency_type=r.dependency_type,
+        )
+        for r in rows
+    ]
+
+
+@dataclass(frozen=True)
 class SqlSnippet:
     """One author-supplied SQL string, with enough context to name it in a report.
 

@@ -101,7 +101,9 @@ def find_or_create_active_run(conn: Connection, pipeline_id: int) -> int:
         return winner
 
 
-def resolve_run_for_task(conn: Connection, pipeline_id: int, *, force: bool = False) -> int:
+def resolve_run_for_task(
+    conn: Connection, pipeline_id: int, *, force: bool = False, mode: str = "local"
+) -> int:
     """Resolve the pipeline_run_id a `run --task_code` invocation should bind to."""
     active = conn.execute(
         text(
@@ -159,11 +161,30 @@ def resolve_run_for_task(conn: Connection, pipeline_id: int, *, force: bool = Fa
         # records SKIPPED in turn (see run_task's own short-circuit). Binding
         # there is additive and intended; binding to a SUCCESS or FAILED run
         # overwrites rows that have already been reported on.
+        # [DEVIATION, 2026-09-20, E2-55] The advice is mode-aware now. It
+        # used to recommend --force unconditionally — which Mode=orchestrator
+        # refuses outright (ForceNotAllowedError), so in the mode a real
+        # deployment runs in, the single most common operational action
+        # ("clear a failed task and re-run it") had no route and the error
+        # pointed at a flag that would be rejected. Reproduced across all four
+        # mode/force combinations.
+        if mode == "orchestrator":
+            remedy = (
+                "Start a new run with `etl-craft run --pipeline_code <code> --init-only`, "
+                "then re-run this task — note that gives it a NEW pipeline_run_id; the "
+                "finished run is left exactly as it was. (--force is not available under "
+                "Mode=orchestrator.)"
+            )
+        else:
+            remedy = (
+                "Start a new run with `etl-craft run --pipeline_code <code> --init-only` "
+                "(a NEW pipeline_run_id), or pass --force to bind to the finished run "
+                "anyway and rewrite its rows."
+            )
         raise RunLogError(
             f"pipeline_id={pipeline_id} has no active run — its latest run "
             f"(pipeline_run_id={latest}) is already {status}, and binding to it would "
-            "rewrite a finished run's audit rows. Start a run first "
-            "(`run --pipeline_code X --init-only`), or pass --force to bind to it anyway."
+            f"rewrite a finished run's audit rows. {remedy}"
         )
     conn.execute(
         text("UPDATE AUD_PIPELINES_RUN_LOG SET END_DATE = :now WHERE PIPELINE_RUN_ID = :run_id"),

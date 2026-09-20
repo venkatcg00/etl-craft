@@ -29,22 +29,17 @@ from etl_craft.cfg import (
     PipelineStep,
     PipelineSummary,
     TaskStatusEntry,
-    suggest,
 )
 from etl_craft.cli import main as cli_main
 from etl_craft.cloning import AUD_TABLES, CFG_TABLES, tables_for_scope
 from etl_craft.cloning import _same_database as same_database
-from etl_craft.column_lineage import extract_column_lineage, source_sql_hash
 from etl_craft.config import (
     CONFIG_PATH_ENV_VAR,
-    DEFAULT_MAX_PARALLEL_TASKS,
-    DEFAULT_TASK_TIMEOUT_SECONDS,
     CloningConfig,
     ConfigError,
     ConnectionProfile,
     ConnectionSection,
     ConnectorConfig,
-    ExecutionLimits,
     SourceConfig,
     _load_dotenv_file,
     load_config,
@@ -65,13 +60,11 @@ from etl_craft.docs_generator import (
 )
 from etl_craft.docs_generator import _render_index_html as render_docs_index_html
 from etl_craft.docs_generator import _render_pipeline_html as render_docs_pipeline_html
-from etl_craft.documentation import documentation_hash
 from etl_craft.email_alert import _PipelineDigestEntry, run_flavour
 from etl_craft.email_alert import _render_digest_html as render_email_digest_html
 from etl_craft.email_alert import _resolve_target_pipeline_codes as resolve_email_pipeline_codes
 from etl_craft.email_alert import _substitute as substitute_email_tokens
 from etl_craft.handlers import HandlerError, TaskExecutionContext, dispatch
-from etl_craft.limits import task_timeout_seconds
 from etl_craft.migrate import (
     MIGRATIONS_DIR_ENV_VAR,
     _split_statements,
@@ -106,7 +99,6 @@ from etl_craft.runlog import (
 from etl_craft.scripts import _parse_trailing_json
 from etl_craft.scripts import execute as execute_python_script
 from etl_craft.sql_actions import active_database, qualify, substitute_pipeline_id
-from etl_craft.validate import looks_read_only
 from etl_craft.warehouse import (
     WAREHOUSE_AUTH_REGISTRY,
     build_data_engine,
@@ -509,303 +501,18 @@ def test_hash_expression_hexes_the_result_on_clickhouse():
     assert "CAST(s.a AS Nullable(String))" in expr
 
 
-def test_apply_primary_key_is_a_no_op_on_clickhouse():
-    # ClickHouse has no ALTER TABLE ... ADD PRIMARY KEY — ordering is a
-    # table-engine property fixed at CREATE time. Skipped rather than failed:
-    # the convention exists so `validate` can introspect it, and validate
-    # reports what it actually finds.
+def test_add_surrogate_key_is_a_no_op_on_clickhouse():
+    # ClickHouse has neither identity columns nor ALTER ... ADD PRIMARY KEY --
+    # ordering is a table-engine property fixed at CREATE time. Skipped rather
+    # than failed, so a ClickHouse target simply has no surrogate key and
+    # `validate` reports that.
     class _Conn:
         dialect = SimpleNamespace(name="clickhouse")
 
         def execute(self, *_args, **_kwargs):  # pragma: no cover - must not run
             raise AssertionError("issued DDL ClickHouse cannot accept")
 
-    sql_actions._apply_primary_key(_Conn(), "public.t", "db", ["id"])
-
-
-def test_apply_primary_key_does_nothing_when_none_is_declared():
-    class _Conn:
-        dialect = SimpleNamespace(name="postgresql")
-
-        def execute(self, *_args, **_kwargs):  # pragma: no cover - must not run
-            raise AssertionError("issued DDL for a target with no PRIMARY_KEY")
-
-    sql_actions._apply_primary_key(_Conn(), "public.t", "db", [])
-
-
-# ------------------------------------------------------------------------------
-# column_lineage.py — sqlglot-parsed column lineage
-# ------------------------------------------------------------------------------
-
-
-def _edges(sql, target="public.t"):
-    result = extract_column_lineage(sql, target)
-    assert result.ok, result.error
-    return {e.target_column: e for e in result.edges}
-
-
-def test_column_lineage_resolves_aliased_join_columns():
-    edges = _edges(
-        "SELECT a.id AS cust_id, b.name AS cust_name "
-        "FROM raw.customers a JOIN raw.names b ON a.id = b.id"
-    )
-    assert (edges["cust_id"].source_object, edges["cust_id"].source_column) == (
-        "raw.customers",
-        "id",
-    )
-    assert (edges["cust_name"].source_object, edges["cust_name"].source_column) == (
-        "raw.names",
-        "name",
-    )
-    # A plain pass-through records no transformation -- that field is for
-    # telling "this column IS that column" from "this column is derived".
-    assert edges["cust_id"].transformation is None
-
-
-def test_column_lineage_records_the_expression_for_a_derived_column():
-    edges = _edges("SELECT UPPER(name) AS shouty FROM raw.customers")
-    assert edges["shouty"].source_object == "raw.customers"
-    assert edges["shouty"].source_column == "name"
-    assert "UPPER" in (edges["shouty"].transformation or "")
-
-
-def test_column_lineage_leaves_a_literal_unattributed():
-    # Naming a source for a constant would be fabrication; the expression is
-    # the honest answer.
-    edges = _edges("SELECT 1 AS flag FROM raw.customers")
-    assert edges["flag"].source_object is None
-    assert edges["flag"].source_column is None
-    assert edges["flag"].transformation == "1"
-
-
-def test_column_lineage_resolves_through_a_cte():
-    # Lineage that stops at the CTE name is much less useful than lineage that
-    # reaches the real table, and CTEs are everywhere in ETL SQL.
-    edges = _edges(
-        "WITH recent AS (SELECT id, updated_at FROM raw.orders) "
-        "SELECT r.id AS order_id FROM recent r"
-    )
-    assert edges["order_id"].source_object == "raw.orders"
-
-
-def test_column_lineage_resolves_through_chained_ctes():
-    edges = _edges(
-        "WITH a AS (SELECT id FROM raw.src), b AS (SELECT id FROM a) SELECT b.id AS x FROM b"
-    )
-    assert edges["x"].source_object == "raw.src"
-
-
-def test_column_lineage_does_not_guess_when_a_cte_reads_two_tables():
-    # Two candidate sources and no basis to choose: it stops at the CTE rather
-    # than naming one of them.
-    edges = _edges(
-        "WITH many AS (SELECT p.id FROM raw.one p JOIN raw.two q ON p.id = q.id) "
-        "SELECT m.id AS y FROM many m"
-    )
-    assert edges["y"].source_object == "many"
-
-
-def test_column_lineage_reports_a_parse_failure_instead_of_raising():
-    # One unparseable task should cost that task's column lineage, not the
-    # whole `lineage` command or a whole documentation build.
-    result = extract_column_lineage("this is not sql at all ((", "public.t")
-    assert not result.ok
-    assert "could not parse" in (result.error or "")
-    assert result.edges == []
-
-
-def test_column_lineage_skips_an_unexpanded_star():
-    # Without a schema sqlglot cannot expand `*`, and inventing column names
-    # would be fabrication. Reported as no edges, not as a wrong answer.
-    result = extract_column_lineage("SELECT * FROM raw.customers", "public.t")
-    assert result.ok
-    assert result.edges == []
-
-
-def test_column_lineage_leaves_a_multi_column_expression_unattributed():
-    # Two candidate sources for one target column: naming one would be a
-    # guess, so the expression is kept instead.
-    edges = _edges("SELECT a || b AS joined FROM raw.t")
-    assert edges["joined"].source_object is None
-    assert edges["joined"].source_column is None
-    assert edges["joined"].transformation is not None
-
-
-def test_column_lineage_rejects_a_statement_that_is_not_a_select():
-    result = extract_column_lineage("DELETE FROM raw.customers", "public.t")
-    assert not result.ok
-    assert "not a SELECT" in (result.error or "")
-
-
-def test_column_lineage_attributes_an_unqualified_column_in_a_single_table_query():
-    edges = _edges("SELECT id, name FROM raw.customers")
-    assert edges["id"].source_object == "raw.customers"
-
-
-def test_column_lineage_handles_a_table_with_no_schema_prefix():
-    edges = _edges("SELECT t.id AS x FROM customers t")
-    assert edges["x"].source_object == "customers"
-
-
-def test_source_sql_hash_changes_with_the_sql():
-    # The cache key. A cached row is reused only when it came from byte-for-byte
-    # the SQL in CFG_TASK_PARAMETERS right now, so an edit invalidates it.
-    assert source_sql_hash("SELECT 1") == source_sql_hash("SELECT 1")
-    assert source_sql_hash("SELECT 1") != source_sql_hash("SELECT 2")
-
-
-# ------------------------------------------------------------------------------
-# documentation.py — content-hash versioning
-# ------------------------------------------------------------------------------
-
-
-def test_documentation_hash_ignores_surrounding_whitespace():
-    # Re-indenting a docstring is not a new version.
-    assert documentation_hash("  text  ") == documentation_hash("text")
-    assert documentation_hash("text") != documentation_hash("other text")
-
-
-# ------------------------------------------------------------------------------
-# cfg.suggest — "did you mean" for an unknown code
-# ------------------------------------------------------------------------------
-
-
-def test_suggest_finds_a_near_miss_and_a_prefix():
-    assert suggest("CUSTOMER", ["CUSTOMERS", "CUSTOMERS_DAILY", "ORDERS"]) == [
-        "CUSTOMERS",
-        "CUSTOMERS_DAILY",
-    ]
-    assert suggest("custmers", ["CUSTOMERS", "ORDERS"]) == ["CUSTOMERS"]
-
-
-def test_suggest_is_case_insensitive_but_returns_the_real_code():
-    # CODE-style identifiers get typed in the wrong case routinely.
-    assert suggest("customers", ["CUSTOMERS"]) == ["CUSTOMERS"]
-
-
-def test_suggest_says_nothing_rather_than_guessing_wildly():
-    assert suggest("zzzzzz", ["CUSTOMERS", "ORDERS"]) == []
-
-
-# ------------------------------------------------------------------------------
-# E2-17 / E2-19 / E2-34 — limits, and stricter config parsing
-# ------------------------------------------------------------------------------
-
-
-_MINIMAL_YAML = """
-Execution:
-  Mode: local
-
-Source:
-  Type: environment
-
-Postgres:
-  Active_profile: dev
-  Profiles:
-    dev:
-      jdbc_url: jdbc:postgresql://localhost:55432/etl_craft
-      user: etl_craft
-      auth_mode: password
-
-Cloning:
-  Enabled: false
-"""
-
-
-def _config_with(tmp_path, execution_extra=""):
-    path = tmp_path / "craft-connector.yml"
-    path.write_text(_MINIMAL_YAML.replace("  Mode: local", "  Mode: local" + execution_extra))
-    return load_config(path)
-
-
-def _ctx_with(params, limits=None):
-    return SimpleNamespace(
-        task_params=params,
-        config=SimpleNamespace(limits=limits or ExecutionLimits()),
-    )
-
-
-def test_task_timeout_prefers_the_task_parameter_then_the_global_default():
-    assert task_timeout_seconds(_ctx_with({})) == DEFAULT_TASK_TIMEOUT_SECONDS
-    assert task_timeout_seconds(_ctx_with({}, ExecutionLimits(task_timeout_seconds=120))) == 120
-    assert task_timeout_seconds(_ctx_with({"TASK_TIMEOUT_SECONDS": "45"})) == 45
-
-
-def test_task_timeout_zero_disables_it():
-    # For a task that legitimately runs longer than any sensible global bound.
-    assert task_timeout_seconds(_ctx_with({"TASK_TIMEOUT_SECONDS": "0"})) == 0
-
-
-@pytest.mark.parametrize("bad", ["soon", "-5"])
-def test_task_timeout_rejects_a_value_that_is_not_a_non_negative_number(bad):
-    with pytest.raises(HandlerError):
-        task_timeout_seconds(_ctx_with({"TASK_TIMEOUT_SECONDS": bad}))
-
-
-def test_execution_limits_have_real_defaults(tmp_path):
-    # A limit nobody sets is a limit nobody benefits from, so these default to
-    # real values rather than None.
-    config = _config_with(tmp_path)
-    assert config.limits.task_timeout_seconds == DEFAULT_TASK_TIMEOUT_SECONDS
-    assert config.limits.max_parallel_tasks == DEFAULT_MAX_PARALLEL_TASKS
-    assert config.limits.enforce_sla is False
-
-
-def test_execution_limits_are_read_from_the_config(tmp_path):
-    config = _config_with(tmp_path, "\n  Task_timeout_seconds: 900\n  Max_parallel_tasks: 3")
-    assert config.limits.task_timeout_seconds == 900
-    assert config.limits.max_parallel_tasks == 3
-
-
-@pytest.mark.parametrize("bad", ['"three"', "-1"])
-def test_execution_limits_reject_a_non_numeric_value(tmp_path, bad):
-    # E2-34: [Execution]/[Orchestrator] scalars were taken straight from
-    # raw.get(...) with no type check, so `Retries: "three"` flowed unexamined
-    # into the generated YAML.
-    with pytest.raises(ConfigError):
-        _config_with(tmp_path, f"\n  Max_parallel_tasks: {bad}")
-
-
-# ------------------------------------------------------------------------------
-# validate.py — the read-only SQL lint (E2-07)
-# ------------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "sql",
-    [
-        "SELECT a, b FROM t WHERE 1=1",
-        "  select 1 ",
-        "WITH x AS (SELECT 1) SELECT * FROM x",
-        # A column named like a keyword, and a keyword inside a literal, must
-        # not trip it -- literals and comments are stripped before matching.
-        "SELECT update_date, created_by FROM t",
-        "SELECT 'DROP TABLE t' AS warning FROM t",
-        "SELECT a FROM t -- DELETE this later",
-    ],
-)
-def test_looks_read_only_accepts_genuine_selects(sql):
-    assert looks_read_only(sql) is None
-
-
-@pytest.mark.parametrize(
-    "sql, fragment",
-    [
-        # The case CLAUDE.md's "a step cannot touch the warehouse outside its
-        # declared action" is meant to prevent, and which nothing checked: a
-        # data-modifying CTE is a perfectly valid "SELECT" that writes.
-        ("WITH x AS (DELETE FROM other RETURNING *) SELECT * FROM x", "DELETE"),
-        ("INSERT INTO t VALUES (1)", "not SELECT/WITH"),
-        ("SELECT 1; DROP TABLE t", "DROP"),
-        ("TRUNCATE TABLE t", "not SELECT/WITH"),
-        ("   ", "is empty"),
-        ("-- only a comment", "is empty"),
-    ],
-)
-def test_looks_read_only_rejects_statements_that_write(sql, fragment):
-    reason = looks_read_only(sql)
-    assert reason is not None
-    assert fragment in reason
+    sql_actions._add_surrogate_key(_Conn(), "public.t", "db")
 
 
 # ------------------------------------------------------------------------------

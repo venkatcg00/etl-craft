@@ -17,6 +17,7 @@ it can be worked through top to bottom.
 | phase 1b | 2026-09-20 | Round 2's findings | **All nine fixed**, 395 → 407 tests |
 | **complete** | 2026-09-20 | Phases 2–7 + a mid-iteration addendum | **All 52 items closed**, 368 → 500 tests |
 | 3 | 2026-09-20 | The completed iteration 2 (`314e0c3`) | **E2-53…E2-60**, at the end of this file. Note E2-57: two items are marked closed that were not built |
+| phase 3b | 2026-09-20 | Round 3's findings | **All eight fixed**, 500 → 470 tests (net: 9 obsolete removed, 13 added) |
 
 **Phase 1 is landed and independently re-verified** (round 2 re-ran round 1's own probes against
 the current branch rather than trusting the phase notes): **E2-01 fixed**, **E2-02 fixed**,
@@ -1449,3 +1450,60 @@ is pipeline-level.
   new one, or stay refused with a better message.
 - **How does an SCD2 target satisfy the single-column primary key convention?** (E2-54.)
 - **Should `generate-docs` be allowed to write?** (E2-56.)
+
+
+---
+
+# Round 3 outcome — all eight fixed (2026-09-20, phase 3b)
+
+Every finding is closed. Each was re-verified against the live Docker Postgres and the live
+ClickHouse container before being acted on, rather than taken from the write-up.
+
+| Item | Resolution |
+|---|---|
+| **E2-57** | **Fixed first, and it was the fair one.** The completion claim was wrong: the phase-7 range was written `E2-17…E2-24`, sweeping in E2-18 (logging) and E2-20 (task output), neither of which was built. Both are now listed as **deferred, not done**, with the reason. |
+| **E2-53** | **ClickHouse is supported, per explicit decision** — fixed *and* tested. One shared `create_table_as` with the engine clause (hoisted from cloning, as the review suggested), per-dialect `AUDIT_COLUMN_TYPES`, and — the root cause — `make_config(clickhouse_warehouse=True)` plus real SQL-action tests against the container. |
+| **E2-54** | **`PRIMARY_KEY` is gone; the engine generates `ROW_ID` instead.** Per explicit correction: "all primary keys are basically identity columns. merge keys are natural keys". That makes the single-column-PK convention satisfiable on *every* target including SCD2, with no exemption for `validate` to know about. |
+| **E2-55** | The advice is mode-aware: under `orchestrator` it names `--init-only` and says plainly that gives a new `pipeline_run_id`, instead of pointing at a flag that mode refuses. |
+| **E2-56** | `generate-docs` is genuinely read-only. Also **wider than reported** — see below. |
+| **E2-58** | Both passages rewritten. The no-CDN reasoning is kept, since it is exactly why Fuse is vendored rather than linked. |
+| **E2-59** | `validate` rejects a `HAS_DATA` edge whose upstream handler never reports a row count. |
+| **E2-60** | `validate` requires each `EMAIL_ALERT` to depend on every non-alert leaf — the design's premise, now enforced instead of hoped for. |
+
+## Two corrections to the review
+
+- **E2-56 was wider than reported.** The write-up named the lineage cache; the documentation-version
+  writes were discarded through the same uncommitted connection. Probed directly: after a
+  `generate_docs` through `engine.connect()`, both `AUD_COLUMN_LINEAGE` and
+  `AUD_TASK_DOCUMENTATION` held **0 rows**. Fixing it also exposed a design question the review
+  did not reach — a page was rendering the last *recorded* documentation text, so an edit stayed
+  invisible until someone ran `docs-version`. Pages now show the current parameter text with the
+  recorded version beside it, or "unversioned".
+- **E2-53 had a fourth and a fifth failure the review did not reach**, both found by the first test
+  to run a SQL action against ClickHouse:
+  4. **The staging table.** ClickHouse's temporary tables are session-scoped and its HTTP driver
+     issues each statement in its own session, so the stage vanished between the `CREATE` and the
+     next statement reading it. Every action builds a stage, so this blocked the whole vocabulary,
+     not one action. Now an ordinary table there.
+  5. **`UPDATE` does not exist.** ClickHouse has only asynchronous `ALTER TABLE … UPDATE`
+     mutations, which are explicitly not row-level updates. An SCD merge built on them would
+     report `SUCCESS` before the target had changed — strictly worse than failing. `SCD1_MERGE`
+     and `SCD2_MERGE` are now **refused up front** on such a dialect with a clear reason, rather
+     than producing a raw syntax error from deep inside a merge after the stage was built.
+
+     **This is a real scope limit, stated rather than papered over**: on ClickHouse the
+     insert-only actions (`CREATE_TABLE`, `SETUP_TABLE`, `OVERWRITE_TABLE`) work and are tested;
+     the merges cannot, short of a genuinely different implementation built on `ReplacingMergeTree`
+     and inserts. Worth raising before anyone plans an SCD pipeline on it.
+
+## Also worth carrying forward
+
+- **`qualify()` now takes the dialect.** ClickHouse names objects `database.table` — a three-part
+  name is a syntax error — so the profile's database wins and the CFG_ row's schema part is
+  dropped there. That keeps the environment-agnostic property but means two CFG_ rows differing
+  only by schema **collide on a two-level engine**. `validate` cannot catch it without knowing
+  the dialect, so it is a documented limit of pointing `[Warehouse]` at ClickHouse.
+- **The E2-33 regression is instructive.** Changing `TIMESTAMP` → `TIMESTAMP WITH TIME ZONE` was
+  correct for Postgres and broke a dialect the project claims to support, and it survived a full
+  iteration because no test ran a SQL action against a second dialect. The fix that matters is
+  the test shape, not the type string.
