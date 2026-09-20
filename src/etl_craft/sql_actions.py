@@ -47,6 +47,15 @@ CFG_TASK_PARAMETERS). Every task with HANDLER='SQL' needs:
   HARD_DELETE     optional, DELETE_ROWS only. "true" performs a real DELETE;
                   anything else (including absent) soft-deletes via
                   DELETE_FLAG='Y' instead — per explicit instruction.
+  SCHEMA_EVOLUTION
+                  optional, OVERWRITE_TABLE/SCD1_MERGE/SCD2_MERGE only.
+                  "true" opts this task into the schema-evolution rebuild
+                  path below; anything else (including absent) means false.
+                  [DEVIATION, post-signoff 2026-09-20] Was its own CFG_TASKS
+                  BOOLEAN column — moved here per explicit instruction (see
+                  execution.TaskExecutionContext's own docstring): it's only
+                  ever meaningful for a subset of SQL_ACTIONs, not every
+                  task regardless of HANDLER.
 
 [ADDITION] Engine-managed audit columns, per action (never present in the
 author's own SELECT — the engine appends them). Every action also always
@@ -89,7 +98,7 @@ the target's own business columns (its full column set minus PIPELINE_RUN_ID
 and this action's own audit columns). A staged SELECT missing a column the
 target already has is always a hard failure, evolvable or not (this module
 only ever adds columns, never silently drops one). A staged SELECT with a
-genuinely new column fails with a clear reason when CFG_TASKS.SCHEMA_EVOLUTION
+genuinely new column fails with a clear reason when CFG_TASK_PARAMETERS.SCHEMA_EVOLUTION
 is false (the default); when true, the target is rebuilt with that column
 added at the position the SELECT's own column order implies, existing rows
 backfilled NULL for it. [CHOICE] Postgres itself has no CREATE OR REPLACE
@@ -260,6 +269,19 @@ def _split_pipe_list(value: str | None, *, param_name: str) -> list[str]:
     if not value:
         raise HandlerError(f"CFG_TASK_PARAMETERS.{param_name} is required for this SQL_ACTION")
     return [part.strip() for part in value.split("|") if part.strip()]
+
+
+def _schema_evolution_enabled(ctx: TaskExecutionContext) -> bool:
+    """Parse CFG_TASK_PARAMETERS.SCHEMA_EVOLUTION; absent/anything but "true" means false.
+
+    [DEVIATION, post-signoff 2026-09-20] Used to be its own CFG_TASKS
+    BOOLEAN NOT NULL DEFAULT FALSE column; moved into CFG_TASK_PARAMETERS
+    per explicit instruction (see execution.TaskExecutionContext's own
+    docstring) — it's only ever meaningful for SQL_ACTIONs that write into
+    an existing target (OVERWRITE_TABLE/SCD1_MERGE/SCD2_MERGE), not every
+    task regardless of HANDLER.
+    """
+    return (ctx.task_params.get("SCHEMA_EVOLUTION") or "").strip().lower() == "true"
 
 
 def _fetch_columns(
@@ -599,7 +621,7 @@ def _overwrite_table(
         database=database,
         action="OVERWRITE_TABLE",
         stage=stage,
-        schema_evolution=ctx.schema_evolution,
+        schema_evolution=_schema_evolution_enabled(ctx),
     )
     stage_columns = [name for name, _ in _fetch_columns(conn, stage)]
     qualified_target = qualify(target_object, database)
@@ -637,7 +659,7 @@ def _scd1_merge(
         database=database,
         action="SCD1_MERGE",
         stage=stage,
-        schema_evolution=ctx.schema_evolution,
+        schema_evolution=_schema_evolution_enabled(ctx),
     )
     _add_hash_key(conn, stage, merge_compare_columns)
     stage_columns = [name for name, _ in _fetch_columns(conn, stage)]
@@ -722,7 +744,7 @@ def _scd2_merge(
         database=database,
         action="SCD2_MERGE",
         stage=stage,
-        schema_evolution=ctx.schema_evolution,
+        schema_evolution=_schema_evolution_enabled(ctx),
     )
     _add_hash_key(conn, stage, merge_compare_columns)
     stage_columns = [name for name, _ in _fetch_columns(conn, stage)]

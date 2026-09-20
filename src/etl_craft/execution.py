@@ -67,6 +67,17 @@ class TaskExecutionContext:
     runner.py's own [CHOICE] comment on why `fork`, not `spawn`, makes that
     safe: the child gets the parent's already-bound objects directly, not a
     serialized copy).
+
+    [DEVIATION, post-signoff 2026-09-20] `schema_evolution`/`script_name`/
+    `return_values` used to be dedicated fields here, sourced from their own
+    CFG_TASKS columns. Per explicit instruction ("why special treatment for
+    ingestion task alone... make these as something we give as parameter
+    values"), all three moved into CFG_TASK_PARAMETERS instead — a handler
+    module now reads `ctx.task_params.get("SCRIPT_NAME")` etc. directly,
+    the same way it already reads SQL_ACTION/TARGET_OBJECT/MERGE_KEY.
+    Removing the dedicated fields isn't just cosmetic: it's the concrete
+    expression of "no special treatment" — this dataclass now only carries
+    what's true of *every* task regardless of HANDLER.
     """
 
     config: ConnectorConfig
@@ -78,9 +89,6 @@ class TaskExecutionContext:
     pipeline_run_id: int
     handler: str
     refresh_type: str
-    schema_evolution: bool
-    script_name: str | None
-    return_values: str | None
     task_params: dict[str, str]
     # Per explicit instruction: a manually/ad-hoc-triggered task (--force)
     # runs a BUSINESS_RULES check against *all* data, not scoped to this

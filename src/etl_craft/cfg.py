@@ -58,15 +58,20 @@ def fetch_task_handler(conn: Connection, task_id: int) -> str:
 
 @dataclass(frozen=True)
 class TaskExecutionDetail:
-    """Everything handlers.dispatch() needs about a task beyond its HANDLER value."""
+    """Everything handlers.dispatch() needs about a task beyond its HANDLER value.
+
+    [DEVIATION, post-signoff 2026-09-20] Used to also carry SCHEMA_EVOLUTION/
+    SCRIPT_NAME/RETURN_VALUES, each fetched from its own CFG_TASKS column.
+    All three moved to CFG_TASK_PARAMETERS (see that table's own comment in
+    schema.sql) — handler modules now read them via `ctx.task_params.get(...)`
+    like any other parameter, so there's nothing left for this dataclass to
+    carry beyond what's true of every task regardless of HANDLER.
+    """
 
     handler: str
     task_code: str
     pipeline_code: str
     refresh_type: str
-    schema_evolution: bool
-    script_name: str | None
-    return_values: str | None
 
 
 def fetch_task_execution_detail(conn: Connection, task_id: int) -> TaskExecutionDetail:
@@ -74,9 +79,7 @@ def fetch_task_execution_detail(conn: Connection, task_id: int) -> TaskExecution
     row = conn.execute(
         text(
             "SELECT t.HANDLER AS handler, t.TASK_CODE AS task_code, "
-            "p.PIPELINE_CODE AS pipeline_code, p.REFRESH_TYPE AS refresh_type, "
-            "t.SCHEMA_EVOLUTION AS schema_evolution, t.SCRIPT_NAME AS script_name, "
-            "t.RETURN_VALUES AS return_values "
+            "p.PIPELINE_CODE AS pipeline_code, p.REFRESH_TYPE AS refresh_type "
             "FROM CFG_TASKS t JOIN CFG_PIPELINES p ON p.PIPELINE_ID = t.PIPELINE_ID "
             "WHERE t.TASK_ID = :task_id"
         ),
@@ -87,9 +90,6 @@ def fetch_task_execution_detail(conn: Connection, task_id: int) -> TaskExecution
         task_code=row.task_code,
         pipeline_code=row.pipeline_code,
         refresh_type=row.refresh_type,
-        schema_evolution=row.schema_evolution,
-        script_name=row.script_name,
-        return_values=row.return_values,
     )
 
 
@@ -418,20 +418,26 @@ class PipelineDetail:
 
 
 def fetch_pipeline_detail(conn: Connection, pipeline_id: int) -> PipelineDetail:
-    """Fetch `pipeline_id`'s full CFG_PIPELINES row (assumed to already be a valid, active id)."""
+    """Fetch `pipeline_id`'s full CFG_PIPELINES row (assumed to already be a valid, active id).
+
+    [DEVIATION, post-signoff 2026-09-20] The seven Airflow-facing override
+    fields used to be their own CFG_PIPELINES columns; now read out of the
+    single PIPELINE_PARAMETERS JSONB column instead (psycopg3 already
+    deserializes JSONB into a plain dict — no json.loads needed). Kept as
+    individual typed fields on PipelineDetail itself, unchanged, so
+    generate_yml.py — the only consumer — needed no changes at all.
+    """
     row = conn.execute(
         text(
             "SELECT PIPELINE_CODE AS pipeline_code, PIPELINE_NAME AS pipeline_name, "
             "DESCRIPTION AS description, RUN_SCHEDULE AS run_schedule, "
             "SLA_IN_HOURS AS sla_in_hours, REFRESH_TYPE AS refresh_type, "
-            "CREATED_BY AS created_by, CATCHUP AS catchup, TAGS AS tags, "
-            "RETRIES AS retries, RETRY_DELAY_MINUTES AS retry_delay_minutes, "
-            "DEPENDS_ON_PAST AS depends_on_past, EMAIL_ON_FAILURE AS email_on_failure, "
-            "EMAIL_RECIPIENTS AS email_recipients "
+            "CREATED_BY AS created_by, PIPELINE_PARAMETERS AS pipeline_parameters "
             "FROM CFG_PIPELINES WHERE PIPELINE_ID = :pipeline_id"
         ),
         {"pipeline_id": pipeline_id},
     ).one()
+    params = row.pipeline_parameters or {}
     return PipelineDetail(
         pipeline_code=row.pipeline_code,
         pipeline_name=row.pipeline_name,
@@ -443,13 +449,13 @@ def fetch_pipeline_detail(conn: Connection, pipeline_id: int) -> PipelineDetail:
         sla_in_hours=float(row.sla_in_hours) if row.sla_in_hours is not None else None,
         refresh_type=row.refresh_type,
         created_by=row.created_by,
-        catchup=row.catchup,
-        tags=row.tags,
-        retries=row.retries,
-        retry_delay_minutes=row.retry_delay_minutes,
-        depends_on_past=row.depends_on_past,
-        email_on_failure=row.email_on_failure,
-        email_recipients=row.email_recipients,
+        catchup=params.get("CATCHUP"),
+        tags=params.get("TAGS"),
+        retries=params.get("RETRIES"),
+        retry_delay_minutes=params.get("RETRY_DELAY_MINUTES"),
+        depends_on_past=params.get("DEPENDS_ON_PAST"),
+        email_on_failure=params.get("EMAIL_ON_FAILURE"),
+        email_recipients=params.get("EMAIL_RECIPIENTS"),
     )
 
 

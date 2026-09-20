@@ -1121,8 +1121,9 @@ def test_generate_pipeline_dag_pipeline_level_override_wins(pg_conn, cfg_pipelin
     # tier 3 (hardcoded default), even when a global default is also set.
     pg_conn.execute(
         text(
-            "UPDATE CFG_PIPELINES SET CATCHUP = TRUE, TAGS = ARRAY['from-pipeline'], "
-            "RETRIES = 7 WHERE PIPELINE_ID = :id"
+            "UPDATE CFG_PIPELINES SET PIPELINE_PARAMETERS = "
+            '\'{"CATCHUP": true, "TAGS": ["from-pipeline"], "RETRIES": 7}\'::jsonb '
+            "WHERE PIPELINE_ID = :id"
         ),
         {"id": cfg_pipeline},
     )

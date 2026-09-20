@@ -113,32 +113,34 @@ CREATE TABLE CFG_PIPELINES (
                                                                         -- value") — every task in one pipeline run
                                                                         -- shares one mode.
     ACTIVE_FLAG    VARCHAR NOT NULL DEFAULT 'Y',
-    -- [ADDITION, post-signoff 2026-09-19] Per-pipeline overrides for
-    -- generate-yml's Airflow-facing DAG fields (default_args/catchup/
-    -- tags). All nullable by design: NULL means "not set at the pipeline
-    -- level" and generate-yml falls back to craft-connector.yml's
-    -- [Orchestrator] section, then to a final hardcoded default if that
-    -- isn't set either — never silently invented, always resolvable back
-    -- to either a real CFG_ row or a real config file setting. See
-    -- CLAUDE.md's "Where things stand" for the full three-tier resolution
-    -- and why EMAIL_RECIPIENTS exists (EMAIL_ON_FAILURE alone is inert in
-    -- real Airflow without addresses to send to).
-    CATCHUP              BOOLEAN,
-    TAGS                 VARCHAR[],
-    RETRIES              INTEGER,
-    RETRY_DELAY_MINUTES  INTEGER,
-    DEPENDS_ON_PAST      BOOLEAN,
-    EMAIL_ON_FAILURE     BOOLEAN,
-    EMAIL_RECIPIENTS     VARCHAR[],
+    -- [DEVIATION, post-signoff 2026-09-20] Was 7 separate nullable columns
+    -- (CATCHUP, TAGS, RETRIES, RETRY_DELAY_MINUTES, DEPENDS_ON_PAST,
+    -- EMAIL_ON_FAILURE, EMAIL_RECIPIENTS), added 2026-09-19 for
+    -- generate-yml's Airflow-facing DAG fields. Collapsed into one JSONB
+    -- column per explicit instruction ("these all as one pipeline_parameters
+    -- column... think like an data modelling architect") — a cohesive bag
+    -- of optional, generate-yml-specific settings doesn't need a dedicated
+    -- typed column per key, and JSONB lets this set grow (a new
+    -- Airflow-facing field) without another migration. Same three-tier
+    -- resolution as before, unchanged in spirit: a key absent from this
+    -- JSON (or the whole column NULL) means "not set at the pipeline
+    -- level," and generate-yml falls back to craft-connector.yml's
+    -- [Orchestrator] section, then a final hardcoded default. Keys are
+    -- the same UPPERCASE names the removed columns used
+    -- (CATCHUP/TAGS/RETRIES/RETRY_DELAY_MINUTES/DEPENDS_ON_PAST/
+    -- EMAIL_ON_FAILURE/EMAIL_RECIPIENTS), matching CFG_TASK_PARAMETERS'
+    -- own PARAMETER_NAME convention rather than inventing a second casing
+    -- style. No CHECK constraint on shape/value ranges (RETRIES >= 0 etc.)
+    -- — same "not enforceable at this level, enforce at the application
+    -- layer" reasoning already used for CFG_TASK_PARAMETERS' own
+    -- conventions; cfg.py/generate_yml.py validate what they read.
+    PIPELINE_PARAMETERS  JSONB,
     CREATED_BY     VARCHAR,
     CREATE_DATE    TIMESTAMPTZ,
     UPDATED_BY     VARCHAR,
     UPDATED_DATE   TIMESTAMPTZ,
     CONSTRAINT ck_pipelines_refresh_type CHECK (REFRESH_TYPE IN ('FULL', 'INCREMENTAL')),  -- [CHOICE]
-    CONSTRAINT ck_pipelines_active_flag  CHECK (ACTIVE_FLAG IN ('Y', 'N')),
-    CONSTRAINT ck_pipelines_retries_non_negative CHECK (RETRIES IS NULL OR RETRIES >= 0),  -- [ADDITION]
-    CONSTRAINT ck_pipelines_retry_delay_non_negative
-        CHECK (RETRY_DELAY_MINUTES IS NULL OR RETRY_DELAY_MINUTES >= 0)  -- [ADDITION]
+    CONSTRAINT ck_pipelines_active_flag  CHECK (ACTIVE_FLAG IN ('Y', 'N'))
 );
 
 CREATE UNIQUE INDEX ux_pipelines_code_active
@@ -189,46 +191,34 @@ CREATE TABLE CFG_TASKS (
     TASK_TYPE      VARCHAR NOT NULL,
     PIPELINE_ID    BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
     HANDLER        VARCHAR NOT NULL,
-    SCRIPT_NAME    VARCHAR,
-    RETURN_VALUES  VARCHAR,
     ACTIVE_FLAG    VARCHAR NOT NULL DEFAULT 'Y',
-    -- [ADDITION, post-signoff 2026-09-19] Per-task opt-in to the SQL
-    -- execution engine's schema-evolution path: when a HANDLER=SQL task's
-    -- staged SELECT shape gains a column the target table doesn't have yet,
-    -- FALSE (the default) fails the task with a clear reason instead of
-    -- silently writing a mismatched shape; TRUE rebuilds the target with the
-    -- new column added at the position the SELECT puts it. See
-    -- sql_actions.py for the full mechanism (information_schema-driven
-    -- comparison, portable rebuild-and-swap in place of vendor-specific
-    -- CREATE OR REPLACE TABLE, which Postgres itself doesn't support).
-    SCHEMA_EVOLUTION BOOLEAN NOT NULL DEFAULT FALSE,
     CREATED_BY     VARCHAR,
     CREATE_DATE    TIMESTAMPTZ,
     UPDATED_BY     VARCHAR,
     UPDATED_DATE   TIMESTAMPTZ,
     CONSTRAINT ck_tasks_task_type       CHECK (TASK_TYPE IN ('INGESTION','ETL')),  -- [CHOICE]
     CONSTRAINT ck_tasks_handler         CHECK (HANDLER IN ('PYTHON','SQL','BUSINESS_RULES','EMAIL_ALERT')),  -- [DEVIATION] EMAIL_ALERT added per later decision; neither pasted draft has it
-    CONSTRAINT ck_tasks_script_required CHECK (HANDLER <> 'PYTHON' OR SCRIPT_NAME IS NOT NULL),  -- [CHOICE] "required for python scripts"
-    CONSTRAINT ck_tasks_return_values   CHECK (                                    -- [CHOICE]
-        RETURN_VALUES IS NULL OR
-        RETURN_VALUES ~ '^[A-Z][A-Z0-9_]*(\|[A-Z][A-Z0-9_]*)*$'
-    ),  -- [DEVIATION, post-signoff 2026-09-19] Was a closed two-token allow-list
-        -- (INGESTION_COUNT/LATEST_OFFSET_UPDATE only, comma-separated).
-        -- Relaxed per explicit instruction: a HANDLER=PYTHON script "can
-        -- return more variables, but all of the variable names to expect
-        -- should be enlisted" here — an arbitrary, per-task-declared set,
-        -- not a fixed vocabulary. Pipe-separated, not comma: "any column
-        -- that has a need to store more than one value must use | as
-        -- separator" (per later explicit instruction, applied retroactively
-        -- here for consistency with MERGE_KEY/MERGE_COMPARE_COLUMNS/
-        -- SOURCE_OBJECT/TARGET_OBJECT, all pipe-separated from the start).
-        -- The DB level only validates shape (pipe-separated uppercase
-        -- identifiers); scripts.py enforces at runtime that the two
-        -- always-mandatory names, INGESTION_COUNT and LATEST_OFFSET_UPDATE,
-        -- are both present — the same "not enforceable as a CHECK, enforce
-        -- at the application layer" reasoning already used elsewhere here.
     CONSTRAINT ck_tasks_active_flag     CHECK (ACTIVE_FLAG IN ('Y','N'))
 );
+-- [DEVIATION, post-signoff 2026-09-20] SCRIPT_NAME, RETURN_VALUES (added
+-- with CFG_TASKS originally/post-signoff) and SCHEMA_EVOLUTION (added
+-- post-signoff 2026-09-19) all removed from this table and moved into
+-- CFG_TASK_PARAMETERS as ordinary PARAMETER_NAME/PARAMETER_VALUE rows
+-- ('SCRIPT_NAME', 'RETURN_VALUES', 'SCHEMA_EVOLUTION') — per explicit
+-- instruction ("why special treatment for ingestion task alone... make
+-- these as something we give as parameter values"). All three are only
+-- ever meaningful for a subset of rows (SCRIPT_NAME/RETURN_VALUES for
+-- HANDLER='PYTHON' alone, SCHEMA_EVOLUTION for HANDLER='SQL' alone) —
+-- exactly the class of column CFG_TASK_PARAMETERS' own flexible
+-- key-value design already exists to hold, rather than every CFG_TASKS
+-- row carrying columns most handlers never use. CFG_TASKS itself now
+-- holds only what's true of *every* task regardless of HANDLER. Their
+-- old CHECK constraints (ck_tasks_script_required, ck_tasks_return_values)
+-- are gone with them — same "not enforceable as a schema constraint once
+-- it's a CFG_TASK_PARAMETERS convention, check at the application layer"
+-- reasoning already used for every other PARAMETER_NAME. See
+-- sql_actions.py's/scripts.py's own module docstrings for the current,
+-- authoritative parameter vocabulary.
 
 CREATE UNIQUE INDEX ux_tasks_code_active
     ON CFG_TASKS (PIPELINE_ID, TASK_CODE) WHERE ACTIVE_FLAG = 'Y';    -- [ADDITION] scoped per-pipeline, not global
@@ -315,7 +305,10 @@ COMMENT ON TABLE CFG_TASK_PARAMETERS IS
     'TARGET_OBJECT ("schema.table", database name always supplied at runtime from the active [Warehouse] profile — never stored here), '
     'SOURCE_SQL (the bare read-only SELECT; required for every SQL_ACTION except DROP_TABLE), '
     'MERGE_KEY / MERGE_COMPARE_COLUMNS (pipe-separated column lists; required for SCD1_MERGE/SCD2_MERGE, MERGE_KEY alone also required for DELETE_ROWS), '
-    'HARD_DELETE (DELETE_ROWS only; "true" deletes for real, anything else soft-deletes via DELETE_FLAG).';
+    'HARD_DELETE (DELETE_ROWS only; "true" deletes for real, anything else soft-deletes via DELETE_FLAG), '
+    'SCHEMA_EVOLUTION (SQL actions only; "true" opts a task into the schema-evolution rebuild path, default/absent is false), '
+    'SCRIPT_NAME / RETURN_VALUES (HANDLER=PYTHON only; the script path, and its pipe-separated declared return-variable names — see scripts.py''s own module docstring), '
+    'SOURCE_OBJECT / TARGET_OBJECT (every task, any HANDLER; pipe-separated "schema.table" lists for lineage — see cfg.py''s own LINEAGE_SOURCE_PARAM/LINEAGE_TARGET_PARAM comment).';
 
 -- ----------------------------------------------------------------------------
 -- CFG_BUSINESS_RULES
@@ -663,4 +656,17 @@ COMMIT;
 -- for consistency with every other multi-value CFG_TASK_PARAMETERS
 -- convention (MERGE_KEY, MERGE_COMPARE_COLUMNS, SOURCE_OBJECT,
 -- TARGET_OBJECT), all pipe-separated from the start.
+--
+-- [DEVIATION, 2026-09-20, explicitly requested, supersedes three entries
+-- above] The three CFG_TASKS.* additions above this point in the file
+-- (SCRIPT_NAME/RETURN_VALUES, SCHEMA_EVOLUTION) are removed from that table
+-- entirely and now live as CFG_TASK_PARAMETERS rows instead — see
+-- CFG_TASKS' own comment, right where those columns used to be defined,
+-- for the full reasoning ("why special treatment for ingestion task
+-- alone"). Likewise, CFG_PIPELINES' 7-column addition above (CATCHUP
+-- through EMAIL_RECIPIENTS) is collapsed into one PIPELINE_PARAMETERS
+-- JSONB column — see CFG_PIPELINES' own comment. Kept as separate entries
+-- here, not edited away, so this block still reads as an accurate history
+-- of what actually happened and when, per this file's own established
+-- practice for post-signoff changes.
 -- ============================================================================

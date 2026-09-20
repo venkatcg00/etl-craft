@@ -193,9 +193,6 @@ def run_task(
         pipeline_run_id=pipeline_run_id,
         handler=detail.handler,
         refresh_type=detail.refresh_type,
-        schema_evolution=detail.schema_evolution,
-        script_name=detail.script_name,
-        return_values=detail.return_values,
         task_params=task_params,
         force=force,
     )

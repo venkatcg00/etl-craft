@@ -716,9 +716,6 @@ def _dummy_ctx(handler: str) -> TaskExecutionContext:
         pipeline_run_id=1,
         handler=handler,
         refresh_type="FULL",
-        schema_evolution=False,
-        script_name=None,
-        return_values=None,
         task_params={},
         force=False,
     )

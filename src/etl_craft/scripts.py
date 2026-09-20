@@ -5,7 +5,7 @@ them; the team's own script is responsible for fetching and including
 pipeline_run_id in whatever it inserts." Everything else in this module's
 contract came from later, explicit instruction:
 
-Contract: the script named by CFG_TASKS.SCRIPT_NAME is run as
+Contract: the script named by CFG_TASK_PARAMETERS.SCRIPT_NAME is run as
 `<python> <script>`, inheriting this process's environment plus
 ETL_CRAFT_PIPELINE_CODE / ETL_CRAFT_TASK_CODE (so the script can resolve its
 own pipeline_run_id — e.g. via `etl-craft`'s own craft-connector.yml, in the
@@ -18,11 +18,12 @@ stderr is empty).
 must report at least two variables (INGESTION_COUNT — a plain number —
 and LATEST_OFFSET_UPDATE — a `value|datatype` pair, e.g.
 "2023-01-01 00:00:00|timestamp") and may report more; every name it's
-expected to report must be declared up front, in CFG_TASKS.RETURN_VALUES
-(pipe-separated — "any column that has a need to store more than one value
-must use | as separator" — `ck_tasks_return_values` in schema.sql; see that
-constraint's own post-signoff comment for why it moved from a closed
-two-token list to an open one). The script reports back by printing one
+expected to report must be declared up front, in CFG_TASK_PARAMETERS.
+RETURN_VALUES (pipe-separated — "any column that has a need to store more
+than one value must use | as separator"; formerly its own CFG_TASKS column
+with a shape-only CHECK constraint, moved here per explicit instruction —
+"why special treatment for ingestion task alone" — see schema.sql's CFG_TASKS
+comment). The script reports back by printing one
 JSON object as the *last* line of stdout (everything before it is free-form
 log output, ignored — not captured into TASK_LOG, unlike an earlier version
 of this module; see "log all the variables... as rows with variable = value
@@ -88,7 +89,7 @@ def _parse_return_values(return_values: str | None) -> list[str]:
     missing = [name for name in MANDATORY_RETURN_VARS if name not in declared]
     if missing:
         raise HandlerError(
-            f"CFG_TASKS.RETURN_VALUES must declare {list(MANDATORY_RETURN_VARS)} for "
+            f"CFG_TASK_PARAMETERS.RETURN_VALUES must declare {list(MANDATORY_RETURN_VARS)} for "
             f"HANDLER=PYTHON (a script always reports at least these two) — missing {missing}"
         )
     return declared
@@ -133,29 +134,34 @@ def _upsert_offset_tracker(
 
 
 def execute(cfg_conn: Connection, ctx: TaskExecutionContext) -> HandlerResult:
-    """Run this task's SCRIPT_NAME as a subprocess; return its reported variables."""
-    if not ctx.script_name:
-        raise HandlerError("CFG_TASKS.SCRIPT_NAME is required for HANDLER=PYTHON")
-    declared = _parse_return_values(ctx.return_values)
+    """Run this task's SCRIPT_NAME as a subprocess; return its reported variables.
+
+    [DEVIATION, post-signoff 2026-09-20] SCRIPT_NAME/RETURN_VALUES read from
+    `ctx.task_params` (CFG_TASK_PARAMETERS), not dedicated CFG_TASKS
+    columns/TaskExecutionContext fields — see execution.TaskExecutionContext's
+    own docstring for why.
+    """
+    script_name = ctx.task_params.get("SCRIPT_NAME")
+    if not script_name:
+        raise HandlerError("CFG_TASK_PARAMETERS.SCRIPT_NAME is required for HANDLER=PYTHON")
+    declared = _parse_return_values(ctx.task_params.get("RETURN_VALUES"))
 
     env = dict(os.environ)
     env["ETL_CRAFT_PIPELINE_CODE"] = ctx.pipeline_code
     env["ETL_CRAFT_TASK_CODE"] = ctx.task_code
 
-    process = subprocess.run(
-        [sys.executable, ctx.script_name], env=env, capture_output=True, text=True
-    )
+    process = subprocess.run([sys.executable, script_name], env=env, capture_output=True, text=True)
     if process.returncode != 0:
         detail = (process.stderr or process.stdout or "").strip()[-2000:]
         raise HandlerError(
-            f"script {ctx.script_name!r} exited {process.returncode}: {detail or '(no output)'}"
+            f"script {script_name!r} exited {process.returncode}: {detail or '(no output)'}"
         )
 
     reported = _parse_trailing_json(process.stdout)
     missing_mandatory = [name for name in MANDATORY_RETURN_VARS if name not in reported]
     if missing_mandatory:
         raise HandlerError(
-            f"script {ctx.script_name!r} did not report {missing_mandatory} — "
+            f"script {script_name!r} did not report {missing_mandatory} — "
             f"HANDLER=PYTHON always requires both {list(MANDATORY_RETURN_VARS)}"
         )
 
@@ -164,7 +170,7 @@ def execute(cfg_conn: Connection, ctx: TaskExecutionContext) -> HandlerResult:
     offset_raw = str(reported[LATEST_OFFSET_UPDATE_VAR])
     if "|" not in offset_raw:
         raise HandlerError(
-            f"script {ctx.script_name!r} reported {LATEST_OFFSET_UPDATE_VAR}={offset_raw!r}, "
+            f"script {script_name!r} reported {LATEST_OFFSET_UPDATE_VAR}={offset_raw!r}, "
             "expected 'value|datatype' (e.g. '2023-01-01 00:00:00|timestamp')"
         )
     offset_value, offset_type = offset_raw.split("|", 1)
@@ -174,7 +180,7 @@ def execute(cfg_conn: Connection, ctx: TaskExecutionContext) -> HandlerResult:
         ingestion_count = int(reported[INGESTION_COUNT_VAR])
     except (TypeError, ValueError) as exc:
         raise HandlerError(
-            f"script {ctx.script_name!r} reported {INGESTION_COUNT_VAR}="
+            f"script {script_name!r} reported {INGESTION_COUNT_VAR}="
             f"{reported[INGESTION_COUNT_VAR]!r}, expected a number"
         ) from exc
 

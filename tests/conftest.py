@@ -215,25 +215,33 @@ def insert_committed_task(
     script_name: str | None = None,
     return_values: str | None = None,
 ) -> int:
-    """Insert and commit one CFG_TASKS row — for code-under-test that opens its own connections."""
+    """Insert and commit one CFG_TASKS row — for code-under-test that opens its own connections.
+
+    [DEVIATION, post-signoff 2026-09-20] SCHEMA_EVOLUTION/SCRIPT_NAME/
+    RETURN_VALUES are no longer CFG_TASKS columns (see that table's own
+    comment in schema.sql) — this helper keeps the same convenience kwargs
+    for existing call sites, but now writes them as CFG_TASK_PARAMETERS rows
+    instead. `schema_evolution=False` (the default) writes nothing, matching
+    the "absent means false" convention sql_actions.py itself uses.
+    """
     with engine.begin() as conn:
-        return conn.execute(
+        task_id = conn.execute(
             text(
-                "INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER, "
-                "SCHEMA_EVOLUTION, SCRIPT_NAME, RETURN_VALUES) "
-                "VALUES (:task_code, 'ETL', :pipeline_id, :handler, :schema_evolution, "
-                ":script_name, :return_values) "
-                "RETURNING TASK_ID"
+                "INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) "
+                "VALUES (:task_code, 'ETL', :pipeline_id, :handler) RETURNING TASK_ID"
             ),
-            {
-                "task_code": task_code,
-                "pipeline_id": pipeline_id,
-                "handler": handler,
-                "schema_evolution": schema_evolution,
-                "script_name": script_name,
-                "return_values": return_values,
-            },
+            {"task_code": task_code, "pipeline_id": pipeline_id, "handler": handler},
         ).scalar_one()
+    params = {}
+    if schema_evolution:
+        params["SCHEMA_EVOLUTION"] = "true"
+    if script_name is not None:
+        params["SCRIPT_NAME"] = script_name
+    if return_values is not None:
+        params["RETURN_VALUES"] = return_values
+    if params:
+        insert_committed_task_parameters(engine, task_id, params)
+    return task_id
 
 
 def insert_committed_task_parameters(engine: Engine, task_id: int, params: dict[str, str]) -> None:
