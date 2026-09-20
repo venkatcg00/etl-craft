@@ -15,6 +15,7 @@ it can be worked through top to bottom.
 | planning | 2026-09-20 | Design interview | E2-41…E2-43, phase order, settled decisions |
 | 2 | 2026-09-20 | Phase 1 as committed (`06fcdb7`) | **E2-44…E2-52**, at the end of this file |
 | phase 1b | 2026-09-20 | Round 2's findings | **All nine fixed**, 395 → 407 tests |
+| **complete** | 2026-09-20 | Phases 2–7 + a mid-iteration addendum | **All 52 items closed**, 368 → 500 tests |
 
 **Phase 1 is landed and independently re-verified** (round 2 re-ran round 1's own probes against
 the current branch rather than trusting the phase notes): **E2-01 fixed**, **E2-02 fixed**,
@@ -1131,3 +1132,53 @@ Two things worth carrying forward as method notes:
 
 - **The E2-50 test initially passed for the wrong reason**, and coverage is what caught it: seeding the `IN-PROGRESS` row up front means `unsatisfiable()` excludes the task before the `created` guard is ever reached, so the guard line stayed uncovered while the test went green. It now drives the interleaving explicitly (monkeypatching `fetch_run_state` to create the row after returning state) and genuinely fails without the guard. A regression test for a race has to reach the race.
 - **One of round 2's own premises was wrong in a small way.** E2-45's fix is not purely arithmetic as suggested: because `ready()` is also the orchestrator's wave pre-filter, and the real cross-pipeline gate runs *inside* the spawned subprocess, counting unevaluated cross-pipeline edges pessimistically there would deadlock — the task would never be spawned, so the check that settles it would never run. `ready()` therefore treats unevaluated cross-pipeline edges optimistically and takes real counts only when a caller has them.
+
+
+---
+
+# Iteration 2 complete (2026-09-20)
+
+**Every item on this list is closed: E2-01 through E2-52.** 368 → 500 tests, 97% coverage,
+`make check` (black / ruff / pydocstyle / mypy / self-asserting schema test / pytest) and a
+wheel build-install-smoke test both clean. Each phase's full reasoning lives in `CLAUDE.md`'s
+"Where things stand" section, dated and flagged; this is the index.
+
+| Phase | Items | What changed |
+|---|---|---|
+| 1 | E2-01, E2-02, E2-41, E2-37, E2-14a | Dependency semantics and run status; `RUN_CONDITION`; `trigger_rule` |
+| 1b | E2-44…E2-52, E2-39 | The round-2 review's own findings against phase 1 |
+| 2 | E2-03, E2-04, E2-42, E2-31, E2-33, E2-25a | SQL action correctness; `PRIMARY_KEY`; merge dedupe; portability |
+| 3 | E2-43 | `EMAIL_ALERT` as a pipeline-level, three-flavour completion alert |
+| 4 | E2-13, E2-05, E2-06, E2-15, E2-16 | The install path: packaging, `init-db`, `migrate`, `--config`, docs, `doctor` |
+| 5 | E2-26, E2-27, E2-28, E2-29 | Gates that actually gate: self-asserting schema test, matrix CI, wheel job, mypy |
+| 6 | E2-07…E2-12 | Remaining correctness |
+| addendum | — | Column-level lineage (sqlglot), `DOCUMENTATION` + versioning, fuzzy search, `setup` |
+| 7 | E2-17…E2-24, E2-34…E2-40, E2-25b | Operability and cleanups |
+
+## Scope added during the iteration, beyond this list
+
+Three items came from design decisions (E2-41/E2-42/E2-43, above), and a fourth block came
+from a mid-iteration instruction: column-level lineage via sqlglot, a `DOCUMENTATION` task
+parameter versioned by content hash, fuzzy matching in both the docs site and CLI errors, and
+replacing interactive `configure` with an idempotent dbt-style `setup`. That block **reversed a
+Non-goal** — "no SQL parser dependency" — on explicit instruction and on its own stated terms.
+`CLAUDE.md`'s Non-goals section records the reversal rather than quietly dropping the entry.
+
+## What the next review should know
+
+- **Three settled decisions were reversed this iteration**, each deliberately and each recorded
+  where the original decision lived: the SQL parser Non-goal, interactive `configure`, and
+  `run_task`'s "unmet dependency writes SKIPPED" behaviour (E2-47 — only "can never be
+  satisfied" writes a terminal row now).
+- **Two bugs were found by tests that were passing for the wrong reason**, both surfaced by
+  unrelated work rather than by reading: the crash-detection test's stub had a stale signature,
+  so its child died of a `TypeError` and never reached the `os._exit` it claimed to exercise;
+  and a settle-race test seeded its row too early, so the guard it existed to prove was never
+  reached. Coverage caught the second. Worth a skim of any test whose subject is a race or a
+  process boundary.
+- **Everything `from code` in this file got a confirming test**, and the four reproduced P0s
+  were each watched to fail against the pre-fix code before the fix was kept.
+- **Still open, deliberately** — these were raised and *not* built, for reasons recorded in
+  `CLAUDE.md`: E2-11's shape (an hour-long in-process poll holds a worker slot; an Airflow
+  `reschedule` sensor would not, but that is orchestrator-shaped), E2-14's field-name freeze on
+  the `generate-yml` shape, and E2-22's retention policy for the `AUD_` tables.
