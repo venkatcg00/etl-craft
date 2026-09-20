@@ -44,6 +44,23 @@ CFG_TASK_PARAMETERS). Every task with HANDLER='SQL' needs:
                   is "changed" when its target and staged HASH_KEY differ
                   (IS DISTINCT FROM, the ANSI SQL:1999 null-safe comparison
                   operator), not by OR-chaining a per-column comparison.
+  MERGE_DEDUPE_ORDER
+                  optional, SCD1_MERGE/SCD2_MERGE only. [ADDITION, E2-04] An
+                  ORDER BY fragment (e.g. "updated_at DESC") deciding which
+                  row wins when SOURCE_SQL returns more than one for the same
+                  MERGE_KEY. Absent, duplicates are a clean failure *before*
+                  any statement touches the target — the engine will not
+                  invent an ordering nobody declared, since which row survived
+                  would then be undefined and could differ between runs.
+  PRIMARY_KEY     optional, every creating action. [ADDITION, E2-03] Applied
+                  as ALTER TABLE ... ADD PRIMARY KEY once the target has been
+                  created, and re-applied after a schema-evolution rebuild.
+                  Deliberately independent of MERGE_KEY, per explicit
+                  instruction ("a merge can have both primary key and merge
+                  key") — a target's identity and the columns a merge matches
+                  on are different questions even when they coincide. This is
+                  what lets an engine-created table satisfy the single-column
+                  primary key convention `validate` enforces.
   HARD_DELETE     optional, DELETE_ROWS only. "true" performs a real DELETE;
                   anything else (including absent) soft-deletes via
                   DELETE_FLAG='Y' instead — per explicit instruction.
@@ -135,7 +152,17 @@ explicit instruction): every action's full statement sequence runs inside
 the one Data DB transaction the caller already opened (handlers.py wraps
 dispatch in `data_engine.begin()`) — a failure partway through rolls back
 everything this module did, so a retried task always starts from the
-target's last genuinely-committed state, not a half-written one. Idempotency
+target's last genuinely-committed state, not a half-written one.
+
+[DEVIATION, 2026-09-20, E2-31] That guarantee is **not** universal, and
+saying so plainly here rather than leaving it implied: CREATE_TABLE,
+SETUP_TABLE, _create_target_shape, _evolve_schema and TRUNCATE are all DDL,
+and DDL auto-commits on MySQL and Oracle. On those engines a failure partway
+through leaves the completed DDL in place. Postgres (this project's own
+Engine DB, and what every test runs against) has transactional DDL, so the
+guarantee holds there in full. A team adopting a non-transactional-DDL
+warehouse should expect "retry resumes" to mean re-deriving from whatever
+state the last attempt left, which every action's own logic already does. Idempotency
 follows from each action's own logic re-deriving its effect from current
 state on every run (CREATE_TABLE/OVERWRITE_TABLE always fully replace;
 SCD1_MERGE/SCD2_MERGE only touch rows the comparison actually finds changed;
@@ -208,12 +235,18 @@ AUDIT_COLUMNS: dict[str, tuple[str, ...]] = {
 # NULL literal would otherwise default to whatever the dialect's "unknown"
 # type is, which some engines reject outright in a persisted CREATE TABLE AS
 # SELECT.
+# [DEVIATION, 2026-09-20, E2-31/E2-33] Two corrections here. CREATE_DATE and
+# UPDATE_DATE were plain TIMESTAMP while schema.sql uses TIMESTAMPTZ
+# throughout and the engine writes datetime.now(UTC) — every warehouse-side
+# audit timestamp silently lost its offset. And bare VARCHAR with no length is
+# rejected in DDL by several dialects (Oracle, MySQL in strict mode), so
+# CREATED_BY/UPDATED_BY carry one.
 AUDIT_COLUMN_TYPES: dict[str, str] = {
     "HASH_KEY": "VARCHAR(32)",
-    "CREATE_DATE": "TIMESTAMP",
-    "UPDATE_DATE": "TIMESTAMP",
-    "CREATED_BY": "VARCHAR",
-    "UPDATED_BY": "VARCHAR",
+    "CREATE_DATE": "TIMESTAMP WITH TIME ZONE",
+    "UPDATE_DATE": "TIMESTAMP WITH TIME ZONE",
+    "CREATED_BY": "VARCHAR(255)",
+    "UPDATED_BY": "VARCHAR(255)",
     "DELETE_FLAG": "VARCHAR(1)",
     "ACTIVE_FLAG": "VARCHAR(1)",
 }
@@ -262,6 +295,26 @@ def substitute_pipeline_id(
     return sql.replace(PIPELINE_ID_TOKEN, replacement)
 
 
+def split_object_ref(object_ref: str, *, param_name: str = "TARGET_OBJECT") -> tuple[str, str]:
+    """Split a `schema.table` reference, rejecting anything that isn't exactly that.
+
+    [ADDITION, 2026-09-20, E2-25] Every call site used to do a bare
+    `object_ref.split(".", 1)` straight into a two-name unpack, so a value with
+    no dot raised `ValueError: not enough values to unpack` — a traceback, from
+    inside a forked child, about a config typo. `qualify()` didn't validate
+    either: it just prefixed the database, so CREATE_TABLE/SETUP_TABLE/
+    OVERWRITE_TABLE silently emitted a malformed two-part name instead.
+    """
+    parts = [part.strip() for part in object_ref.split(".")]
+    if len(parts) != 2 or not all(parts):
+        raise HandlerError(
+            f"CFG_TASK_PARAMETERS.{param_name}={object_ref!r} must be exactly "
+            "'schema.table' — no database/catalog prefix (that comes from the active "
+            "[Warehouse] profile at runtime) and no bare table name"
+        )
+    return parts[0], parts[1]
+
+
 def qualify(object_ref: str, database: str) -> str:
     """Prefix a `schema.table` reference with `database` — the ANSI catalog.schema.table form.
 
@@ -272,7 +325,8 @@ def qualify(object_ref: str, database: str) -> str:
     schema.table pair resolves to a different real object in dev vs. uat vs.
     prod without any CFG_ row ever changing across a promotion.
     """
-    return f"{database}.{object_ref}"
+    schema_name, table_name = split_object_ref(object_ref)
+    return f"{database}.{schema_name}.{table_name}"
 
 
 def active_database(config: ConnectorConfig) -> str:
@@ -339,7 +393,7 @@ def _stage_name(task_run_id: int) -> str:
     return f"etl_stage_{task_run_id}"
 
 
-def _hash_expression(columns: list[str], alias: str) -> str:
+def _hash_expression(columns: list[str], alias: str, dialect: str) -> str:
     """Build an MD5 hash expression over `columns`, NULL-safe, for change detection.
 
     [ADDITION] "scd tables should also have hashkey created by merge_compare
@@ -354,7 +408,23 @@ def _hash_expression(columns: list[str], alias: str) -> str:
     to NULL, which would make every NULL-containing row hash identically
     regardless of its other values.
     """
-    parts = " || '|' || ".join(f"COALESCE({alias}.{c}::text, '')" for c in columns)
+    # [DEVIATION, 2026-09-20, E2-31] ClickHouse needs a different cast target,
+    # verified directly against the local container: CAST(col AS VARCHAR) on a
+    # nullable column raises CANNOT_INSERT_NULL_IN_ORDINARY_COLUMN the moment
+    # any value is NULL, and the surrounding COALESCE cannot rescue it because
+    # the cast is evaluated first. Nullable(String) casts cleanly for nullable
+    # and non-nullable columns alike, so COALESCE then does its job.
+    cast_type = "Nullable(String)" if dialect == "clickhouse" else "VARCHAR"
+    parts = " || '|' || ".join(f"COALESCE(CAST({alias}.{c} AS {cast_type}), '')" for c in columns)
+    if dialect == "clickhouse":
+        # [DEVIATION, 2026-09-20, E2-31] Verified directly against the local
+        # ClickHouse, not assumed: its MD5() returns FixedString(16) — raw
+        # bytes — where Postgres's returns 32 hex characters. Storing that in
+        # HASH_KEY VARCHAR(32) is simply wrong, so hex() brings it back to the
+        # same shape every other dialect produces. Keyed off the dialect
+        # *name*, never an import, the pattern cloning.py already established
+        # for its own ClickHouse-specific DDL.
+        return f"lower(hex(MD5({parts})))"
     return f"MD5({parts})"
 
 
@@ -390,21 +460,30 @@ def _check_or_evolve_schema(
     action: str,
     stage: str,
     schema_evolution: bool,
+    primary_key: list[str],
 ) -> list[tuple[str, str]]:
     """Verify (or evolve) the target's shape against `stage`; return the target's columns.
 
-    Raises HandlerError if the target doesn't exist yet (OVERWRITE_TABLE/
-    SCD1_MERGE/SCD2_MERGE all assume a SETUP_TABLE or CREATE_TABLE task
-    already established it), or SchemaMismatchError if the shapes genuinely
-    disagree and can't (or aren't allowed to) evolve.
+    Creates the target if it doesn't exist yet (E2-42), or raises
+    SchemaMismatchError if the shapes genuinely disagree and can't (or aren't
+    allowed to) evolve.
     """
-    schema_name, table_name = target_object.split(".", 1)
+    schema_name, table_name = split_object_ref(target_object)
     target_columns = _fetch_columns(conn, table_name, schema=schema_name)
     if not target_columns:
-        raise HandlerError(
-            f"target table {qualify(target_object, database)!r} does not exist — run a "
-            "SETUP_TABLE or CREATE_TABLE task against it first"
+        # [DEVIATION, 2026-09-20, E2-42] Used to raise "does not exist — run a
+        # SETUP_TABLE or CREATE_TABLE task against it first". Per explicit
+        # instruction every action but DROP_TABLE/DELETE_ROWS bootstraps its
+        # own target, so a first run no longer needs a separate setup task.
+        _create_target_shape(
+            conn,
+            stage=stage,
+            target_object=target_object,
+            database=database,
+            audit_columns=AUDIT_COLUMNS[action],
+            primary_key=primary_key,
         )
+        return _fetch_columns(conn, table_name, schema=schema_name)
     stage_columns = _fetch_columns(conn, stage)
 
     required_audit_columns = ("PIPELINE_RUN_ID", *AUDIT_COLUMNS[action])
@@ -452,6 +531,7 @@ def _check_or_evolve_schema(
         engine_managed=engine_managed,
         stage_columns=stage_columns,
         target_columns=target_columns,
+        primary_key=primary_key,
     )
     return _fetch_columns(conn, table_name, schema=schema_name)
 
@@ -464,6 +544,7 @@ def _evolve_schema(
     engine_managed: set[str],
     stage_columns: list[tuple[str, str]],
     target_columns: list[tuple[str, str]],
+    primary_key: list[str],
 ) -> None:
     """Rebuild the target with `stage_columns`' business-column shape/order, data preserved.
 
@@ -484,7 +565,7 @@ def _evolve_schema(
     ]
     select_parts.extend(f"t.{col}" for col in engine_cols)
 
-    schema_name, table_name = target_object.split(".", 1)
+    schema_name, table_name = split_object_ref(target_object)
     evolve_table = f"{table_name}__etl_evolve"
     qualified_target = qualify(target_object, database)
     qualified_evolve = qualify(f"{schema_name}.{evolve_table}", database)
@@ -498,6 +579,13 @@ def _evolve_schema(
     )
     conn.execute(text(f"DROP TABLE {qualified_target}"))
     conn.execute(text(f"ALTER TABLE {qualified_evolve} RENAME TO {table_name}"))
+    # [ADDITION, 2026-09-20, E2-03] The drop-and-rename above destroys the
+    # target's primary key along with the old table, so it is re-added here.
+    # Known, accepted limit of the same mechanism: indexes and grants on the
+    # original are *not* recreated — only the primary key this module knows
+    # about from CFG_TASK_PARAMETERS. A target carrying either needs them
+    # reapplied by hand after a schema evolution.
+    _apply_primary_key(conn, target_object, database, primary_key)
 
 
 def _add_hash_key(conn: Connection, stage: str, merge_compare_columns: list[str]) -> None:
@@ -512,9 +600,156 @@ def _add_hash_key(conn: Connection, stage: str, merge_compare_columns: list[str]
     expects to see, breaking the "shapes agree" check for every SCD run.
     """
     conn.execute(text(f"ALTER TABLE {stage} ADD COLUMN HASH_KEY VARCHAR(32)"))
+    # [DEVIATION, 2026-09-20, E2-31] No alias on the UPDATE target — an alias
+    # there is not ANSI and several dialects reject it. The hash expression is
+    # built against the table name instead.
     conn.execute(
-        text(f"UPDATE {stage} AS s SET HASH_KEY = {_hash_expression(merge_compare_columns, 's')}")
+        text(
+            f"UPDATE {stage} SET HASH_KEY = "
+            f"{_hash_expression(merge_compare_columns, stage, conn.dialect.name)}"
+        )
     )
+
+
+def _dedupe_stage(
+    conn: Connection,
+    *,
+    stage: str,
+    merge_key: list[str],
+    dedupe_order: str | None,
+    target_object: str,
+) -> str:
+    """Ensure `stage` holds one row per MERGE_KEY. Returns the stage to merge from.
+
+    [ADDITION, 2026-09-20, E2-04] Nothing checked this before, and the target
+    has no primary key of its own to catch it either (E2-03), so two source
+    rows sharing a key silently corrupted an SCD1 target on run 1 — both rows
+    took the NOT EXISTS insert leg, leaving two "current" rows for one key,
+    reported SUCCESS. Run 2, once any compared value changed, then died on
+    `SET col = (SELECT ... WHERE t.k = s.k)` with a cardinality violation, and
+    stayed dead: the duplicates were now in the *target*, so no retry could
+    recover it without manual SQL.
+
+    The check runs before any merge statement touches the target, so a bad
+    source fails the run rather than corrupting anything.
+
+    Per explicit decision, duplicates are resolved by a declared ordering
+    (CFG_TASK_PARAMETERS.MERGE_DEDUPE_ORDER, an ORDER BY fragment such as
+    "updated_at DESC"), and rejected outright when none is declared — the
+    engine will not invent an ordering nobody gave it, since which row
+    survives would then be undefined and could differ between runs.
+    """
+    key_sql = ", ".join(merge_key)
+    duplicates = conn.execute(
+        text(f"SELECT {key_sql} FROM {stage} GROUP BY {key_sql} HAVING COUNT(*) > 1 LIMIT 5")
+    ).all()
+    if not duplicates:
+        return stage
+
+    if not dedupe_order:
+        sample = ", ".join(str(tuple(row)) for row in duplicates)
+        raise HandlerError(
+            f"{target_object}: SOURCE_SQL returns more than one row for the same "
+            f"MERGE_KEY ({key_sql}) — e.g. {sample}. A merge needs one row per key. "
+            "Either make SOURCE_SQL return one, or declare "
+            "CFG_TASK_PARAMETERS.MERGE_DEDUPE_ORDER (an ORDER BY fragment, e.g. "
+            "'updated_at DESC') to say which row should win."
+        )
+
+    # ROW_NUMBER() is ANSI SQL:2003 and available on every dialect this
+    # project has touched. A new table rather than a DELETE, because deleting
+    # duplicates in place needs a row identity (ctid, ROWID) that is
+    # dialect-specific — the one thing this module works hardest to avoid.
+    deduped = f"{stage}_dedup"
+    columns_sql = ", ".join(name for name, _ in _fetch_columns(conn, stage))
+    conn.execute(text(f"DROP TABLE IF EXISTS {deduped}"))
+    conn.execute(
+        text(
+            f"CREATE TEMPORARY TABLE {deduped} AS SELECT {columns_sql} FROM ("
+            f"SELECT {columns_sql}, ROW_NUMBER() OVER ("
+            f"PARTITION BY {key_sql} ORDER BY {dedupe_order}) AS etl_dedupe_rn "
+            f"FROM {stage}) AS ranked WHERE etl_dedupe_rn = 1"
+        )
+    )
+    _drop_stage(conn, stage)
+    return deduped
+
+
+def _primary_key_columns(ctx: TaskExecutionContext) -> list[str]:
+    """Parse CFG_TASK_PARAMETERS.PRIMARY_KEY; empty list when not declared.
+
+    [ADDITION, 2026-09-20, E2-03] CLAUDE.md states that "every target table is
+    required to have a single-column primary key — an enforced framework
+    convention", checked by `validate` through introspection. But every table
+    this module creates is built with CREATE TABLE ... AS SELECT, which never
+    creates a primary key, so the engine's own tables could never satisfy the
+    engine's own convention — `validate` reported them all.
+
+    Deliberately independent of MERGE_KEY, per explicit instruction ("a merge
+    can have both primary key and merge key"): a target's identity and the
+    columns a merge matches on are different questions, even when they happen
+    to coincide. Pipe-separated like every other multi-value parameter, though
+    the convention `validate` enforces is a single column.
+    """
+    raw = ctx.task_params.get("PRIMARY_KEY")
+    if not raw:
+        return []
+    return [part.strip() for part in raw.split("|") if part.strip()]
+
+
+def _apply_primary_key(
+    conn: Connection, target_object: str, database: str, primary_key: list[str]
+) -> None:
+    """Add PRIMARY KEY to a freshly created target. No-op when none is declared."""
+    if not primary_key:
+        return
+    if conn.dialect.name == "clickhouse":
+        # ClickHouse has no ALTER TABLE ... ADD PRIMARY KEY — ordering is a
+        # table-engine property fixed at CREATE time. Skipped rather than
+        # failed: the convention exists so `validate` can introspect it, and
+        # `validate` already reports what it actually finds.
+        return
+    conn.execute(
+        text(
+            f"ALTER TABLE {qualify(target_object, database)} "
+            f"ADD PRIMARY KEY ({', '.join(primary_key)})"
+        )
+    )
+
+
+def _create_target_shape(
+    conn: Connection,
+    *,
+    stage: str,
+    target_object: str,
+    database: str,
+    audit_columns: tuple[str, ...],
+    primary_key: list[str],
+) -> None:
+    """Create `target_object` empty, shaped from `stage` plus `audit_columns`.
+
+    [ADDITION, 2026-09-20, E2-42] Per explicit instruction: "apart from drop
+    and delete, everything should create a table if the target does not exist,
+    using select query and adding audit columns". Previously only CREATE_TABLE
+    and SETUP_TABLE created anything, so a first run of OVERWRITE_TABLE or
+    either SCD merge failed on a target nobody had bootstrapped yet.
+
+    Rows are excluded (`WHERE 1 = 0`) because the caller's own write path —
+    TRUNCATE-and-insert, or the merge's NOT EXISTS leg — is what populates it,
+    and stamps the audit columns correctly while doing so.
+    """
+    select_parts = [f"s.{name}" for name, _ in _fetch_columns(conn, stage)]
+    select_parts.append("CAST(NULL AS BIGINT) AS PIPELINE_RUN_ID")
+    select_parts.extend(
+        f"CAST(NULL AS {AUDIT_COLUMN_TYPES[col]}) AS {col}" for col in audit_columns
+    )
+    conn.execute(
+        text(
+            f"CREATE TABLE {qualify(target_object, database)} AS "
+            f"SELECT {', '.join(select_parts)} FROM {stage} AS s WHERE 1 = 0"
+        )
+    )
+    _apply_primary_key(conn, target_object, database, primary_key)
 
 
 def _count(conn: Connection, sql: str, params: dict) -> int:
@@ -600,6 +835,7 @@ def _create_table(
         ),
         {"pipeline_run_id": ctx.pipeline_run_id},
     )
+    _apply_primary_key(conn, target_object, database, _primary_key_columns(ctx))
     _drop_stage(conn, stage)
     return HandlerResult(
         source_count=source_count, target_count=source_count, insert_count=source_count
@@ -631,6 +867,7 @@ def _setup_table(
             f"CREATE TABLE {qualified_target} AS SELECT {', '.join(select_parts)} FROM {stage} AS s"
         )
     )
+    _apply_primary_key(conn, target_object, database, _primary_key_columns(ctx))
     _drop_stage(conn, stage)
     return HandlerResult(source_count=0, target_count=0, insert_count=0)
 
@@ -652,6 +889,7 @@ def _overwrite_table(
         action="OVERWRITE_TABLE",
         stage=stage,
         schema_evolution=_schema_evolution_enabled(ctx),
+        primary_key=_primary_key_columns(ctx),
     )
     stage_columns = [name for name, _ in _fetch_columns(conn, stage)]
     qualified_target = qualify(target_object, database)
@@ -683,6 +921,13 @@ def _scd1_merge(
 ) -> HandlerResult:
     stage = _build_stage(conn, ctx.task_run_id, select_sql)
     source_count = _count(conn, f"SELECT COUNT(*) FROM {stage}", {})
+    stage = _dedupe_stage(
+        conn,
+        stage=stage,
+        merge_key=merge_key,
+        dedupe_order=ctx.task_params.get("MERGE_DEDUPE_ORDER"),
+        target_object=target_object,
+    )
     _check_or_evolve_schema(
         conn,
         target_object=target_object,
@@ -690,6 +935,7 @@ def _scd1_merge(
         action="SCD1_MERGE",
         stage=stage,
         schema_evolution=_schema_evolution_enabled(ctx),
+        primary_key=_primary_key_columns(ctx),
     )
     _add_hash_key(conn, stage, merge_compare_columns)
     stage_columns = [name for name, _ in _fetch_columns(conn, stage)]
@@ -768,6 +1014,13 @@ def _scd2_merge(
 ) -> HandlerResult:
     stage = _build_stage(conn, ctx.task_run_id, select_sql)
     source_count = _count(conn, f"SELECT COUNT(*) FROM {stage}", {})
+    stage = _dedupe_stage(
+        conn,
+        stage=stage,
+        merge_key=merge_key,
+        dedupe_order=ctx.task_params.get("MERGE_DEDUPE_ORDER"),
+        target_object=target_object,
+    )
     _check_or_evolve_schema(
         conn,
         target_object=target_object,
@@ -775,6 +1028,7 @@ def _scd2_merge(
         action="SCD2_MERGE",
         stage=stage,
         schema_evolution=_schema_evolution_enabled(ctx),
+        primary_key=_primary_key_columns(ctx),
     )
     _add_hash_key(conn, stage, merge_compare_columns)
     stage_columns = [name for name, _ in _fetch_columns(conn, stage)]
@@ -926,7 +1180,7 @@ def _delete_rows(
             )
         )
     else:
-        schema_name, table_name = target_object.split(".", 1)
+        schema_name, table_name = split_object_ref(target_object)
         target_name_set = {
             name.lower() for name, _ in _fetch_columns(conn, table_name, schema=schema_name)
         }

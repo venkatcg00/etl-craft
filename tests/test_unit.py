@@ -12,6 +12,7 @@ import runpy
 import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -20,6 +21,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
 import etl_craft
+import etl_craft.sql_actions as sql_actions
 import etl_craft.warehouse as warehouse_module
 from etl_craft.cfg import (
     CrossPipelineTaskEdge,
@@ -457,6 +459,57 @@ def test_edge_satisfied_rejects_unknown_dependency_type():
     # API — exercised directly against the underlying building blocks instead.
     with pytest.raises(ResolverError):
         DependencyGraph._edge_satisfied(edge(2, 1, dependency_type="BOGUS"), TaskRunState())
+
+
+# ------------------------------------------------------------------------------
+# sql_actions.py — dialect portability (E2-31)
+# ------------------------------------------------------------------------------
+
+
+def test_hash_expression_uses_ansi_cast_not_postgres_shorthand():
+    # E2-31. `::text` is Postgres-only shorthand; this module uses ANSI CAST
+    # everywhere else and explains each exception it makes.
+    expr = sql_actions._hash_expression(["a", "b"], "s", "postgresql")
+    assert "::text" not in expr
+    assert "COALESCE(CAST(s.a AS VARCHAR), '')" in expr
+    assert expr.startswith("MD5(")
+
+
+def test_hash_expression_hexes_the_result_on_clickhouse():
+    # E2-31. Verified directly against the local ClickHouse before writing
+    # this: its MD5() returns FixedString(16) — raw bytes — where Postgres's
+    # returns 32 hex characters, so HASH_KEY VARCHAR(32) was simply wrong
+    # there. hex() brings it back to the shape every other dialect produces.
+    expr = sql_actions._hash_expression(["a"], "s", "clickhouse")
+    assert expr.startswith("lower(hex(MD5(")
+    # And a different cast target: CAST(col AS VARCHAR) raises
+    # CANNOT_INSERT_NULL_IN_ORDINARY_COLUMN on a nullable ClickHouse column the
+    # moment any value is NULL, with the COALESCE unable to rescue it.
+    assert "CAST(s.a AS Nullable(String))" in expr
+
+
+def test_apply_primary_key_is_a_no_op_on_clickhouse():
+    # ClickHouse has no ALTER TABLE ... ADD PRIMARY KEY — ordering is a
+    # table-engine property fixed at CREATE time. Skipped rather than failed:
+    # the convention exists so `validate` can introspect it, and validate
+    # reports what it actually finds.
+    class _Conn:
+        dialect = SimpleNamespace(name="clickhouse")
+
+        def execute(self, *_args, **_kwargs):  # pragma: no cover - must not run
+            raise AssertionError("issued DDL ClickHouse cannot accept")
+
+    sql_actions._apply_primary_key(_Conn(), "public.t", "db", ["id"])
+
+
+def test_apply_primary_key_does_nothing_when_none_is_declared():
+    class _Conn:
+        dialect = SimpleNamespace(name="postgresql")
+
+        def execute(self, *_args, **_kwargs):  # pragma: no cover - must not run
+            raise AssertionError("issued DDL for a target with no PRIMARY_KEY")
+
+    sql_actions._apply_primary_key(_Conn(), "public.t", "db", [])
 
 
 # ==============================================================================

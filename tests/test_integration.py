@@ -18,6 +18,7 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import OperationalError
 
 import etl_craft.orchestrator as orchestrator_module
+import etl_craft.sql_actions as sql_actions_module
 from conftest import (
     CRAFT_CONNECTOR_YAML,
     insert_committed_business_rule,
@@ -343,6 +344,35 @@ def test_build_data_engine_connects_for_real(monkeypatch, postgres_engine):
             assert conn.execute(text("SELECT 1")).scalar_one() == 1
     finally:
         engine.dispose()
+
+
+def test_hash_expression_really_yields_32_hex_chars_on_clickhouse(clickhouse_engine):
+    # E2-31, proved for real rather than asserted in theory — the same bar
+    # warehouse.py's own ClickHouse test set. Postgres's MD5() returns 32 hex
+    # characters; ClickHouse's returns FixedString(16) raw bytes, so
+    # HASH_KEY VARCHAR(32) silently stored the wrong thing there. This runs
+    # the expression the engine actually builds and checks its real shape.
+    # A NULL in a nullable column is the case that matters: CAST(col AS
+    # VARCHAR) raises CANNOT_INSERT_NULL_IN_ORDINARY_COLUMN there, and the
+    # surrounding COALESCE cannot rescue it because the cast runs first.
+    expr = sql_actions_module._hash_expression(["a", "b"], "s", "clickhouse")
+    with clickhouse_engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS ch_hash_probe"))
+        conn.execute(
+            text(
+                "CREATE TABLE ch_hash_probe (a String, b Nullable(String)) "
+                "ENGINE = MergeTree() ORDER BY tuple()"
+            )
+        )
+        conn.execute(text("INSERT INTO ch_hash_probe VALUES ('x', NULL)"))
+    try:
+        with clickhouse_engine.connect() as conn:
+            value = conn.execute(text(f"SELECT {expr} FROM ch_hash_probe AS s")).scalar_one()
+    finally:
+        with clickhouse_engine.begin() as conn:
+            conn.execute(text("DROP TABLE IF EXISTS ch_hash_probe"))
+    assert len(value) == 32
+    assert set(value) <= set("0123456789abcdef")
 
 
 def test_build_data_engine_connects_to_real_clickhouse(monkeypatch, clickhouse_engine):
@@ -3653,10 +3683,16 @@ def test_sql_overwrite_table_truncates_and_reinserts(
         assert conn.execute(text(f"SELECT id, name FROM {target} ORDER BY id")).all() == [(3, "c")]
 
 
-def test_sql_overwrite_table_missing_target_fails_clearly(
+def test_sql_overwrite_table_creates_a_missing_target(
     postgres_engine, committed_pipeline, data_db_tables
 ):
+    # [DEVIATION, E2-42] This used to assert FAILED with "does not exist — run
+    # a SETUP_TABLE or CREATE_TABLE task against it first". Per explicit
+    # instruction every action except DROP_TABLE/DELETE_ROWS now bootstraps its
+    # own target from the staged SELECT plus that action's own audit columns,
+    # so a first run needs no separate setup task.
     target = f"public.sqlx_over_missing_{committed_pipeline}"
+    data_db_tables.append(target)
     task_id = insert_committed_task(postgres_engine, committed_pipeline, "over")
     insert_committed_task_parameters(
         postgres_engine,
@@ -3665,15 +3701,191 @@ def test_sql_overwrite_table_missing_target_fails_clearly(
             "SQL_ACTION": "OVERWRITE_TABLE",
             "TARGET_OBJECT": target,
             "SOURCE_SQL": "SELECT 1 AS id WHERE 1=1",
+            "PRIMARY_KEY": "id",
         },
     )
     seed_active_run(postgres_engine, committed_pipeline)
 
     outcome = run_task(postgres_engine, make_config(warehouse=True), "TEST_CONCURRENT_PL", "over")
 
+    assert outcome.status == "SUCCESS"
+    with postgres_engine.connect() as conn:
+        rows = conn.execute(text(f"SELECT id FROM {target}")).all()
+        # OVERWRITE_TABLE's own audit column is present on the created shape.
+        columns = {
+            row[0].lower()
+            for row in conn.execute(
+                text("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS " "WHERE TABLE_NAME = :t"),
+                {"t": target.split(".", 1)[1]},
+            )
+        }
+    assert rows == [(1,)]
+    assert {"id", "pipeline_run_id", "update_date"} <= columns
+
+
+def test_sql_create_table_target_passes_validates_own_primary_key_check(
+    postgres_engine, committed_pipeline, data_db_tables, pg_conn, cfg_pipeline, cfg_task
+):
+    # E2-03 regression, reproduced against real Postgres during the iteration-1
+    # review. CLAUDE.md states "every target table is required to have a
+    # single-column primary key — an enforced framework convention", checked by
+    # validate through introspection. But CREATE_TABLE builds the target with
+    # CREATE TABLE ... AS SELECT, which never creates one, so every table the
+    # engine made failed the engine's own convention:
+    #   "'public.probe_pk_…' must have exactly one primary key column, found []"
+    target = f"public.sqlx_pk_{committed_pipeline}"
+    data_db_tables.append(target)
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "pk_create")
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {
+            "SQL_ACTION": "CREATE_TABLE",
+            "TARGET_OBJECT": target,
+            "SOURCE_SQL": "SELECT 1 AS id, 'x' AS val WHERE 1=1",
+            "PRIMARY_KEY": "id",
+        },
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    assert (
+        run_task(
+            postgres_engine, make_config(warehouse=True), "TEST_CONCURRENT_PL", "pk_create"
+        ).status
+        == "SUCCESS"
+    )
+
+    _insert_business_rule(pg_conn, cfg_pipeline, cfg_task, "pk_rule", target, "id")
+    assert validate_business_rule_keys(pg_conn, postgres_engine) == []
+
+
+def test_sql_action_rejects_a_target_object_with_no_schema(postgres_engine, committed_pipeline):
+    # E2-25. A TARGET_OBJECT with no dot used to raise a bare
+    # "ValueError: not enough values to unpack" from inside the crash-detection
+    # fork, so the parent reported only its generic "died unexpectedly"
+    # fallback — a traceback-shaped message about a config typo. qualify()
+    # didn't validate either, so the creating actions silently emitted a
+    # malformed two-part name instead of failing.
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "bad_target")
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {
+            "SQL_ACTION": "CREATE_TABLE",
+            "TARGET_OBJECT": "no_schema_here",
+            "SOURCE_SQL": "SELECT 1 AS id WHERE 1=1",
+        },
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    outcome = run_task(
+        postgres_engine, make_config(warehouse=True), "TEST_CONCURRENT_PL", "bad_target"
+    )
+
     assert outcome.status == "FAILED"
-    assert "does not exist" in outcome.message
-    assert "SETUP_TABLE or CREATE_TABLE" in outcome.message
+    assert "must be exactly 'schema.table'" in outcome.message
+    assert "died unexpectedly" not in outcome.message
+
+
+def test_sql_scd1_merge_rejects_duplicate_merge_keys_before_touching_the_target(
+    postgres_engine, committed_pipeline, data_db_tables
+):
+    # E2-04 regression, reproduced against real Postgres during the iteration-1
+    # review. With two source rows sharing a MERGE_KEY: run 1 took the NOT
+    # EXISTS insert leg and wrote *both*, leaving two "current" rows for one
+    # key and reporting SUCCESS — silent corruption. Run 2, once any compared
+    # value changed, died on the correlated `SET col = (SELECT ...)` with a
+    # cardinality violation, and stayed dead: the duplicates were in the
+    # target by then, so no retry could recover it without manual SQL.
+    #
+    # The guard runs before any merge statement, so the target is untouched.
+    target = f"public.sqlx_dupe_{committed_pipeline}"
+    src = f"sqlx_dupe_src_{committed_pipeline}"
+    data_db_tables.extend([target, src])
+    with postgres_engine.begin() as conn:
+        conn.execute(text(f"CREATE TABLE {src} (id int, name varchar)"))
+        conn.execute(text(f"INSERT INTO {src} VALUES (1, 'a'), (1, 'b')"))
+
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "dupe_merge")
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {
+            "SQL_ACTION": "SCD1_MERGE",
+            "TARGET_OBJECT": target,
+            "SOURCE_SQL": f"SELECT * FROM {src} WHERE 1=1",
+            "MERGE_KEY": "id",
+            "MERGE_COMPARE_COLUMNS": "name",
+        },
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    outcome = run_task(
+        postgres_engine, make_config(warehouse=True), "TEST_CONCURRENT_PL", "dupe_merge"
+    )
+
+    assert outcome.status == "FAILED"
+    assert "more than one row for the same MERGE_KEY" in outcome.message
+    assert "MERGE_DEDUPE_ORDER" in outcome.message
+    with postgres_engine.connect() as conn:
+        exists = conn.execute(text("SELECT to_regclass(:t)"), {"t": target}).scalar_one_or_none()
+    # Nothing was created or written — the run failed before touching it.
+    assert exists is None
+
+
+def test_sql_scd1_merge_dedupes_by_declared_order_across_two_runs(
+    postgres_engine, committed_pipeline, data_db_tables
+):
+    # The other half of E2-04's decision: duplicates ARE allowed, but only when
+    # the task says which row wins. Run twice, because run 1 exercises the
+    # insert leg and run 2 the correlated-UPDATE leg — the statement that
+    # actually died with a cardinality violation before this guard existed.
+    target = f"public.sqlx_dedupe_{committed_pipeline}"
+    src = f"sqlx_dedupe_src_{committed_pipeline}"
+    data_db_tables.extend([target, src])
+    with postgres_engine.begin() as conn:
+        conn.execute(text(f"CREATE TABLE {src} (id int, name varchar, seen int)"))
+        conn.execute(text(f"INSERT INTO {src} VALUES (1, 'old', 1), (1, 'new', 2)"))
+
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "dedupe_merge")
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {
+            "SQL_ACTION": "SCD1_MERGE",
+            "TARGET_OBJECT": target,
+            "SOURCE_SQL": f"SELECT * FROM {src} WHERE 1=1",
+            "MERGE_KEY": "id",
+            "MERGE_COMPARE_COLUMNS": "name",
+            "MERGE_DEDUPE_ORDER": "seen DESC",
+            "PRIMARY_KEY": "id",
+        },
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+    assert (
+        run_task(
+            postgres_engine, make_config(warehouse=True), "TEST_CONCURRENT_PL", "dedupe_merge"
+        ).status
+        == "SUCCESS"
+    )
+    with postgres_engine.connect() as conn:
+        assert conn.execute(text(f"SELECT id, name FROM {target}")).all() == [(1, "new")]
+
+    # Run 2 with a changed winner — the correlated UPDATE leg.
+    with postgres_engine.begin() as conn:
+        conn.execute(text(f"UPDATE {src} SET name = 'newest' WHERE seen = 2"))
+        conn.execute(
+            text("UPDATE AUD_TASK_RUN_LOG SET STATUS = 'FAILED' WHERE TASK_ID = :id"),
+            {"id": task_id},
+        )
+    assert (
+        run_task(
+            postgres_engine, make_config(warehouse=True), "TEST_CONCURRENT_PL", "dedupe_merge"
+        ).status
+        == "SUCCESS"
+    )
+    with postgres_engine.connect() as conn:
+        assert conn.execute(text(f"SELECT id, name FROM {target}")).all() == [(1, "newest")]
 
 
 def test_sql_scd1_merge_inserts_updates_and_skips_unchanged(
