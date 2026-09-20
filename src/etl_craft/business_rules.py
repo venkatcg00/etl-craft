@@ -90,24 +90,42 @@ from etl_craft.execution import HandlerError, HandlerResult, TaskExecutionContex
 from etl_craft.sql_actions import active_database, qualify
 
 
-def _find_or_create_run_log(conn: Connection, business_rule_id: int, task_run_id: int) -> int:
-    """Resume-not-restart bookkeeping for one CFG_BUSINESS_RULES row under `task_run_id`."""
+def _find_or_create_run_log(
+    conn: Connection, business_rule_id: int, task_run_id: int
+) -> tuple[int, bool]:
+    """Resume-not-restart bookkeeping for one CFG_BUSINESS_RULES row under `task_run_id`.
+
+    Returns (business_rule_run_id, already_succeeded).
+
+    [ADDITION, 2026-09-20, E2-40] The second half of the tuple is new.
+    CLAUDE.md's "retry resumes, not restarts" held at task level but not
+    inside a BUSINESS_RULES task: this reused the existing row but never
+    short-circuited on an existing SUCCESS, so a retry re-ran every rule in
+    every earlier wave. Idempotent, but wasteful and inconsistent with the
+    stated principle — a task with thirty rules that failed on the last one
+    re-ran all thirty.
+    """
     existing = conn.execute(
         text(
-            "SELECT BUSINESS_RULE_RUN_ID FROM AUD_BUSINESS_RULES_RUN_LOG "
+            "SELECT BUSINESS_RULE_RUN_ID AS business_rule_run_id, STATUS AS status "
+            "FROM AUD_BUSINESS_RULES_RUN_LOG "
             "WHERE BUSINESS_RULE_ID = :business_rule_id AND TASK_RUN_ID = :task_run_id"
         ),
         {"business_rule_id": business_rule_id, "task_run_id": task_run_id},
-    ).scalar_one_or_none()
+    ).one_or_none()
     if existing is not None:
-        return existing
-    return conn.execute(
-        text(
-            "INSERT INTO AUD_BUSINESS_RULES_RUN_LOG (BUSINESS_RULE_ID, TASK_RUN_ID, STATUS) "
-            "VALUES (:business_rule_id, :task_run_id, 'IN-PROGRESS') RETURNING BUSINESS_RULE_RUN_ID"
-        ),
-        {"business_rule_id": business_rule_id, "task_run_id": task_run_id},
-    ).scalar_one()
+        return existing.business_rule_run_id, existing.status == "SUCCESS"
+    return (
+        conn.execute(
+            text(
+                "INSERT INTO AUD_BUSINESS_RULES_RUN_LOG (BUSINESS_RULE_ID, TASK_RUN_ID, STATUS) "
+                "VALUES (:business_rule_id, :task_run_id, 'IN-PROGRESS') "
+                "RETURNING BUSINESS_RULE_RUN_ID"
+            ),
+            {"business_rule_id": business_rule_id, "task_run_id": task_run_id},
+        ).scalar_one(),
+        False,
+    )
 
 
 def _mark_run_log(conn: Connection, business_rule_run_id: int, status: str) -> None:
@@ -149,7 +167,19 @@ def _run_one_rule(
 ) -> tuple[int, int]:
     """Run one rule to completion; return (newly_flagged_count, deactivated_count)."""
     with engine.begin() as conn:
-        business_rule_run_id = _find_or_create_run_log(conn, rule.business_rule_id, ctx.task_run_id)
+        business_rule_run_id, already_succeeded = _find_or_create_run_log(
+            conn, rule.business_rule_id, ctx.task_run_id
+        )
+    if already_succeeded and not ctx.force:
+        # E2-40: this rule already ran to completion under this task run. Its
+        # results are in AUD_BUSINESS_RULES_RESULTS; re-running would re-derive
+        # the same answer at full cost.
+        #
+        # --force deliberately bypasses this, as it bypasses every other gate:
+        # a forced business-rule run means "scan all data", which is a
+        # different question from the one the previous run answered under its
+        # PIPELINE_RUN_ID scope. Caught by an existing test, not by review.
+        return 0, 0
     qualified_target = qualify(rule.target_table, database)
     try:
         with data_engine.connect() as data_conn:
@@ -229,7 +259,14 @@ def _run_wave(
     ctx: TaskExecutionContext,
     wave: list[BusinessRuleDetail],
 ) -> tuple[int, int]:
-    """Run every rule in `wave` concurrently; return summed (flagged, deactivated) counts."""
+    """Run every rule in `wave` concurrently; return summed (flagged, deactivated) counts.
+
+    [DEVIATION, 2026-09-20, E2-19] Capped at `[Execution] Max_parallel_tasks`.
+    This used to be `max_workers=len(wave)`, so a wave of thirty rules opened
+    thirty Data DB connections at once — a connection budget set by how many
+    rules someone happened to give the same SEQUENCE_NUMBER.
+    """
+    max_workers = max(ctx.config.limits.max_parallel_tasks, 1)
     if len(wave) == 1:
         # Not worth a thread pool for the overwhelmingly common case of one
         # rule per SEQUENCE_NUMBER.
@@ -238,7 +275,7 @@ def _run_wave(
     total_flagged = 0
     total_deactivated = 0
     first_error: HandlerError | None = None
-    with ThreadPoolExecutor(max_workers=len(wave)) as executor:
+    with ThreadPoolExecutor(max_workers=min(len(wave), max_workers)) as executor:
         futures = {
             executor.submit(_run_one_rule, data_engine, engine, database, scope, ctx, rule): rule
             for rule in wave

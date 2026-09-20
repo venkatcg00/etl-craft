@@ -258,6 +258,13 @@ def _ensure_target_table(
     return Table(target_name, MetaData(), autoload_with=data_engine, schema=schema)
 
 
+# [ADDITION, 2026-09-20, E2-22] How many rows are held in memory at once
+# while mirroring a table. Large enough that the round trips are not the
+# bottleneck, small enough that an AUD_ table with millions of rows costs a
+# bounded amount of memory rather than all of it.
+CLONE_BATCH_ROWS = 5_000
+
+
 def _serialize_row(row: dict) -> dict:
     return {k: (json.dumps(v) if isinstance(v, (dict, list)) else v) for k, v in row.items()}
 
@@ -265,21 +272,33 @@ def _serialize_row(row: dict) -> dict:
 def _clone_table(
     engine: Engine, data_engine: Engine, table_name: str, warehouse_database: str
 ) -> None:
-    source_table = _reflect(engine, table_name)
-    with engine.connect() as conn:
-        rows = [dict(row) for row in conn.execute(select(source_table)).mappings().all()]
+    """Mirror one Engine DB table into the Data DB, streaming rather than materializing.
 
+    [DEVIATION, 2026-09-20, E2-22] This used to be
+    `rows = [dict(r) for r in conn.execute(select(t)).mappings().all()]` — the
+    entire table into a Python list, after every pipeline run. For
+    AUD_TASK_RUN_LOG after a year of daily runs that is millions of rows held
+    in memory at once, on a box that also has a pipeline to run. Streamed in
+    batches now: memory is bounded by CLONE_BATCH_ROWS regardless of table
+    size.
+    """
+    source_table = _reflect(engine, table_name)
     target_table = _ensure_target_table(data_engine, source_table, warehouse_database)
     qualified_name = (
         f"{target_table.schema}.{target_table.name}" if target_table.schema else target_table.name
     )
-    with data_engine.begin() as conn:
+    with data_engine.begin() as target_conn:
         # TRUNCATE, not Table.delete() with no predicate: ClickHouse's own
         # DELETE compiler refuses an unconditional DELETE outright ("WHERE
         # clause is required") -- verified directly, not assumed. TRUNCATE
         # is already this project's own established "clear a table for a
         # full rewrite" idiom (sql_actions.py's OVERWRITE_TABLE) and every
         # dialect touched so far, Postgres included, supports it.
-        conn.execute(text(f"TRUNCATE TABLE {qualified_name}"))
-        if rows:
-            conn.execute(target_table.insert(), [_serialize_row(row) for row in rows])
+        target_conn.execute(text(f"TRUNCATE TABLE {qualified_name}"))
+        with engine.connect().execution_options(
+            stream_results=True, yield_per=CLONE_BATCH_ROWS
+        ) as source_conn:
+            for partition in source_conn.execute(select(source_table)).mappings().partitions():
+                batch = [_serialize_row(dict(row)) for row in partition]
+                if batch:
+                    target_conn.execute(target_table.insert(), batch)

@@ -18,7 +18,7 @@ from typing import Any
 from urllib.parse import parse_qsl
 
 from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import URL, Engine
 
 from etl_craft.config import ConfigError, ConnectionProfile, ConnectorConfig, resolve_secret
 
@@ -141,4 +141,26 @@ def build_engine(
     secret = resolve_secret(config, profile)
     creator = creator_factory(profile, secret)
     engine_kwargs.setdefault("pool_pre_ping", True)
-    return create_engine("postgresql+psycopg://", creator=creator, **engine_kwargs)
+    if profile.auth_mode in {"token", "sso"}:  # pragma: no cover - modes not implemented yet
+        # CLAUDE.md: for these, pool_recycle should sit comfortably under the
+        # credential's real lifetime, so a checked-out connection always has
+        # meaningful life left. TOKEN_POOL_RECYCLE_SECONDS was declared for
+        # this and then never used (E2-35).
+        engine_kwargs.setdefault("pool_recycle", TOKEN_POOL_RECYCLE_SECONDS)
+    # [DEVIATION, 2026-09-20, E2-24] A real URL, minus the password. The blank
+    # "postgresql+psycopg://" this replaced kept every secret out of a logged
+    # engine URL — a good goal — but left `engine.url` empty, which has already
+    # broken two real things: cloning's same-database guard and ClickHouse's
+    # table-engine reflection. SQLAlchemy never logs a password it was not
+    # given, so omitting just the password preserves the original goal while
+    # making engine.url truthful.
+    parts = parse_jdbc_postgres(profile.jdbc_url)
+    url = URL.create(
+        "postgresql+psycopg",
+        username=profile.user,
+        host=parts["host"],
+        port=parts["port"],
+        database=parts["database"],
+        query=parts["query"],
+    )
+    return create_engine(url, creator=creator, **engine_kwargs)

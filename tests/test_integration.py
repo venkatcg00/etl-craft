@@ -45,7 +45,6 @@ from etl_craft.cfg import (
     fetch_pipeline_run_history,
     fetch_pipeline_steps,
     fetch_task_cross_pipeline_dependency_ids,
-    fetch_task_handler,
     fetch_task_run_history,
     resolve_pipeline_id,
     resolve_task_id,
@@ -76,7 +75,7 @@ from etl_craft.crosspipe import (
 from etl_craft.docs_generator import collect_docs, generate_docs
 from etl_craft.doctor import run_checks
 from etl_craft.documentation import fetch_history, refresh_task_documentation
-from etl_craft.execution import HandlerResult
+from etl_craft.execution import HandlerError, HandlerResult
 from etl_craft.generate_yml import GLOBAL_DAG_ID, generate_global_dag, generate_pipeline_dag
 from etl_craft.init_db import InitDbError, init_db
 from etl_craft.migrate import MigrationError, apply_pending_migrations
@@ -737,10 +736,6 @@ def test_resolve_task_id(pg_conn, cfg_pipeline, cfg_task):
 def test_resolve_task_id_unknown_code_raises(pg_conn, cfg_pipeline):
     with pytest.raises(CfgError):
         resolve_task_id(pg_conn, cfg_pipeline, "no_such_task")
-
-
-def test_fetch_task_handler(pg_conn, cfg_task):
-    assert fetch_task_handler(pg_conn, cfg_task) == "SQL"
 
 
 def test_fetch_pipeline_graph_no_dependencies(pg_conn, cfg_pipeline, cfg_task):
@@ -2135,6 +2130,101 @@ def test_run_task_short_circuits_on_existing_success(postgres_engine, committed_
     assert outcome.status == "SKIPPED"
 
 
+def test_run_task_times_out_a_wedged_handler_instead_of_hanging(
+    postgres_engine, committed_pipeline, monkeypatch
+):
+    # E2-17. An unbounded join() on a hung handler left the row stuck
+    # IN-PROGRESS forever -- and IN-PROGRESS is in resolver.NOT_RETRYABLE, so
+    # that task became permanently un-retryable without someone editing
+    # AUD_TASK_RUN_LOG by hand. The pipeline could never recover.
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "wedged_task")
+    insert_committed_task_parameters(postgres_engine, task_id, {"TASK_TIMEOUT_SECONDS": "1"})
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    def _hang(engine, ctx):
+        time.sleep(60)
+
+    monkeypatch.setattr("etl_craft.runner.dispatch", _hang)
+
+    outcome = run_task(postgres_engine, make_config(), "TEST_CONCURRENT_PL", "wedged_task")
+
+    assert outcome.status == "FAILED"
+    assert "timeout" in outcome.message
+    row = _task_run_row(postgres_engine, task_id)
+    assert row.status == "FAILED"
+
+
+def test_run_task_counts_attempts_and_resets_the_row_on_a_retry(
+    postgres_engine, committed_pipeline, monkeypatch
+):
+    # E2-21. One row per task per run is load-bearing, so attempts are counted
+    # within the row. The reset matters too: START_DATE previously spanned
+    # from the first attempt, and that duration feeds the cross-pipeline poll
+    # cadence.
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "retried_task")
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    def _fail(engine, ctx):
+        raise HandlerError("first attempt blew up")
+
+    monkeypatch.setattr("etl_craft.runner.dispatch", _fail)
+    assert (
+        run_task(postgres_engine, make_config(), "TEST_CONCURRENT_PL", "retried_task").status
+        == "FAILED"
+    )
+
+    monkeypatch.setattr(
+        "etl_craft.runner.dispatch", lambda engine, ctx: HandlerResult(target_count=5)
+    )
+    assert (
+        run_task(postgres_engine, make_config(), "TEST_CONCURRENT_PL", "retried_task").status
+        == "SUCCESS"
+    )
+
+    with postgres_engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT ATTEMPT_COUNT AS attempt_count, STATUS AS status, "
+                "ERROR_MESSAGE AS error_message, TARGET_COUNT AS target_count "
+                "FROM AUD_TASK_RUN_LOG WHERE TASK_ID = :id"
+            ),
+            {"id": task_id},
+        ).one()
+    assert row.attempt_count == 2
+    assert row.status == "SUCCESS"
+    # The failed attempt's error is gone, not carried into the successful one.
+    assert row.error_message is None
+    assert row.target_count == 5
+
+
+def test_validate_flags_an_incomplete_sql_task(
+    postgres_engine, committed_pipeline, craft_connector_on_disk, capsys
+):
+    # E2-25. These are conventions the execution code already depends on;
+    # checking them here means a config mistake surfaces from `validate`
+    # rather than from a task failing at 3 a.m. halfway through a run.
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "incomplete")
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {
+            "SOURCE_OBJECT": "public.src",
+            "TARGET_OBJECT": "public.tgt",
+            "SQL_ACTION": "SCD1_MERGE",
+            "SOURCE_SQL": "SELECT 1 AS id FROM public.src",
+            # MERGE_KEY and MERGE_COMPARE_COLUMNS are missing, and this one is
+            # a typo that would otherwise be silently ignored at runtime.
+            "MEREG_KEY": "id",
+        },
+    )
+
+    assert cli_main(["validate"]) == 1
+
+    out = capsys.readouterr().out
+    assert "requires a MERGE_KEY parameter" in out
+    assert "MEREG_KEY" in out
+
+
 def test_run_task_does_not_clobber_an_already_in_progress_row(postgres_engine, committed_pipeline):
     # E2-02 regression, reproduced against real Postgres during the iteration-1
     # review. resolver.ready() excludes an IN-PROGRESS task deliberately
@@ -3388,7 +3478,15 @@ def test_cli_validate_ok_when_no_issues(
     insert_committed_task_parameters(
         postgres_engine,
         task_id,
-        {"SOURCE_OBJECT": "public.src", "TARGET_OBJECT": "public.tgt"},
+        # A complete SQL task, not just its lineage declarations: E2-25's
+        # parameter checks now flag a HANDLER='SQL' task with no SQL_ACTION,
+        # which this one genuinely was.
+        {
+            "SOURCE_OBJECT": "public.src",
+            "TARGET_OBJECT": "public.tgt",
+            "SQL_ACTION": "CREATE_TABLE",
+            "SOURCE_SQL": "SELECT 1 AS id FROM public.src",
+        },
     )
 
     exit_code = cli_main(["validate"])
@@ -3471,7 +3569,12 @@ def test_cli_validate_ok_with_warehouse_configured_and_matching_pk(
     insert_committed_task_parameters(
         postgres_engine,
         task_id,
-        {"SOURCE_OBJECT": "public.src", "TARGET_OBJECT": "public.validate_cli_test_good"},
+        {
+            "SOURCE_OBJECT": "public.src",
+            "TARGET_OBJECT": "public.validate_cli_test_good",
+            "SQL_ACTION": "CREATE_TABLE",
+            "SOURCE_SQL": "SELECT 1 AS id FROM public.src",
+        },
     )
     with postgres_engine.begin() as conn:
         conn.execute(text("DROP TABLE IF EXISTS validate_cli_test_good"))
@@ -5151,9 +5254,13 @@ def fake_smtp(tmp_path, monkeypatch):
     log_path = tmp_path / "fake_smtp_events.jsonl"
 
     class _FakeSMTP:
-        def __init__(self, host, port):
+        def __init__(self, host, port, timeout=None):
             self.host = host
             self.port = port
+            # E2-17: the real client is constructed with a timeout now. An
+            # unreachable-but-accepting relay otherwise blocks on the default
+            # socket timeout, which is None.
+            self.timeout = timeout
 
         def __enter__(self):
             return self
@@ -5453,7 +5560,7 @@ def test_email_alert_no_email_section_configured_fails_clearly(
 def test_email_alert_smtp_failure_becomes_handler_error(
     postgres_engine, committed_pipeline, monkeypatch
 ):
-    def _raise(host, port):
+    def _raise(host, port, timeout=None):
         raise OSError("connection refused")
 
     monkeypatch.setattr("smtplib.SMTP", _raise)

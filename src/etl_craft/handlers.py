@@ -23,6 +23,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from etl_craft import business_rules, email_alert, scripts, sql_actions
 from etl_craft.config import ConfigError
 from etl_craft.execution import HandlerError, HandlerResult, TaskExecutionContext
+from etl_craft.limits import task_timeout_seconds
 from etl_craft.warehouse import build_data_engine
 
 __all__ = ["HandlerError", "HandlerResult", "TaskExecutionContext", "dispatch"]
@@ -48,7 +49,12 @@ def dispatch(engine: Engine, ctx: TaskExecutionContext) -> HandlerResult:
     try:
         if ctx.handler == "PYTHON":
             with engine.begin() as cfg_conn:
-                return scripts.execute(cfg_conn, ctx)
+                # Slightly under the task's own limit, so a wedged script
+                # reports its own stderr rather than the blunter "terminated
+                # by the task timeout" from runner.py's fork watchdog.
+                task_limit = task_timeout_seconds(ctx)
+                script_limit = max(task_limit - 30, 1) if task_limit else 0
+                return scripts.execute(cfg_conn, ctx, script_limit)
         if ctx.handler == "EMAIL_ALERT":
             # Read-only against the Engine DB (fetch_failure_watch_messages)
             # -- no AUD_/CFG_ writes of its own, unlike PYTHON's offset-

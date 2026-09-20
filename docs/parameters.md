@@ -14,7 +14,7 @@ pipe-separated (`a|b|c`). This is project-wide, with no exceptions.
 |---|---|---|
 | `SOURCE_OBJECT` | yes | `schema.table` (pipe-separated for several) this task reads. Declarative — used by `lineage`, checked by `validate`, not verified against the SQL. |
 | `TARGET_OBJECT` | yes | `schema.table` this task writes. For `HANDLER='SQL'` this is also functional and must name exactly one table. |
-| `TASK_TIMEOUT_SECONDS` | no | Wall-clock limit for this task. Falls back to `[Execution] Task_timeout_seconds`, then no limit. |
+| `TASK_TIMEOUT_SECONDS` | no | Wall-clock limit for this task, in seconds. Falls back to `[Execution] Task_timeout_seconds` (6 hours by default). `0` disables it. |
 | `DOCUMENTATION` | no | Prose describing what this task does. Rendered on the generated documentation site and searchable there. Its **version is derived from the text**: `etl-craft docs-version` records a new version only when the wording genuinely changes, so a version can never silently disagree with what it describes. `etl-craft docs-version --pipeline_code X --task_code Y` shows the full history. |
 
 ## `HANDLER = 'SQL'`

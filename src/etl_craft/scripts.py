@@ -58,6 +58,7 @@ import os
 import subprocess
 import sys
 from datetime import UTC, datetime
+from pathlib import Path
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
@@ -133,7 +134,9 @@ def _upsert_offset_tracker(
         )
 
 
-def execute(cfg_conn: Connection, ctx: TaskExecutionContext) -> HandlerResult:
+def execute(
+    cfg_conn: Connection, ctx: TaskExecutionContext, timeout_seconds: int = 0
+) -> HandlerResult:
     """Run this task's SCRIPT_NAME as a subprocess; return its reported variables.
 
     [DEVIATION, post-signoff 2026-09-20] SCRIPT_NAME/RETURN_VALUES read from
@@ -150,7 +153,38 @@ def execute(cfg_conn: Connection, ctx: TaskExecutionContext) -> HandlerResult:
     env["ETL_CRAFT_PIPELINE_CODE"] = ctx.pipeline_code
     env["ETL_CRAFT_TASK_CODE"] = ctx.task_code
 
-    process = subprocess.run([sys.executable, script_name], env=env, capture_output=True, text=True)
+    # [ADDITION, 2026-09-20, E2-09] Checked up front. A nonexistent
+    # SCRIPT_NAME is the single most common HANDLER=PYTHON misconfiguration,
+    # and it used to surface as Python's own "can't open file" on stderr —
+    # or, for an unreadable one, an OSError that crashed the forked child.
+    script_path = Path(script_name)
+    if not script_path.is_file():
+        raise HandlerError(
+            f"CFG_TASK_PARAMETERS.SCRIPT_NAME={script_name!r} does not exist "
+            f"(looked in {Path.cwd()})"
+        )
+    if not os.access(script_path, os.R_OK):
+        raise HandlerError(f"script {script_name!r} exists but is not readable")
+
+    # [ADDITION, 2026-09-20, E2-17] timeout, so a wedged script cannot hold
+    # the task open indefinitely. Slightly under the task's own limit, so the
+    # script's own stderr is what gets reported rather than the blunter
+    # "terminated by the task timeout".
+    limit = timeout_seconds or None
+    try:
+        process = subprocess.run(
+            [sys.executable, script_name],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=limit,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise HandlerError(
+            f"script {script_name!r} exceeded its {limit}s timeout and was terminated"
+        ) from exc
+    except OSError as exc:
+        raise HandlerError(f"could not run script {script_name!r}: {exc}") from exc
     if process.returncode != 0:
         detail = (process.stderr or process.stdout or "").strip()[-2000:]
         raise HandlerError(

@@ -154,6 +154,8 @@ _FLAVOUR_COLORS = {
     FLAVOUR_FAILED: "#cf222e",
 }
 
+SMTP_TIMEOUT_SECONDS = 30.0
+
 _TOKEN_PIPELINE_ID = "$$pipeline_id"
 _TOKEN_STATUS = "$$status"
 _TOKEN_PIPELINE_CODE = "$$pipeline_code"
@@ -216,8 +218,9 @@ def run_flavour(statuses: list[TaskStatusEntry], *, exclude_task_id: int) -> str
       FAILED                 any task FAILED.
       COMPLETED_WITH_ERRORS  no outright failure, but something short of
                              clean -- a SKIPPED task, a task that succeeded
-                             while still carrying an ERROR_MESSAGE, or a task
-                             not settled yet. Per explicit instruction: "if
+                             only after a retry (ATTEMPT_COUNT > 1), a task
+                             that succeeded while still carrying an
+                             ERROR_MESSAGE, or a task not settled yet. Per explicit instruction: "if
                              the pipeline is marked success with failure then
                              a neutral status like pipeline is COMPLETED with
                              errors".
@@ -234,7 +237,10 @@ def run_flavour(statuses: list[TaskStatusEntry], *, exclude_task_id: int) -> str
         return FLAVOUR_SUCCESS
     if any(entry.status == "FAILED" for entry in relevant):
         return FLAVOUR_FAILED
-    if all(entry.status == "SUCCESS" and not entry.error_message for entry in relevant):
+    if all(
+        entry.status == "SUCCESS" and not entry.error_message and entry.attempt_count <= 1
+        for entry in relevant
+    ):
         return FLAVOUR_SUCCESS
     return FLAVOUR_COMPLETED_WITH_ERRORS
 
@@ -336,7 +342,9 @@ def _send(ctx: TaskExecutionContext, recipients: list[str], subject: str, body_h
     message["To"] = ", ".join(recipients)
 
     try:
-        with smtplib.SMTP(profile.host, profile.port) as server:
+        # [ADDITION, 2026-09-20, E2-17] timeout. An unreachable-but-accepting
+        # relay otherwise blocks on the default socket timeout, which is None.
+        with smtplib.SMTP(profile.host, profile.port, timeout=SMTP_TIMEOUT_SECONDS) as server:
             if profile.use_tls:
                 server.starttls()
             if profile.auth_mode == "password":

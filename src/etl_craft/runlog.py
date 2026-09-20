@@ -35,7 +35,6 @@ from sqlalchemy.exc import IntegrityError
 
 from etl_craft.resolver import TaskRunState
 
-TERMINAL_STATUSES = frozenset({"SUCCESS", "FAILED", "SKIPPED"})
 # [ADDITION, 2026-09-20, E2-48] Runs whose audit rows have already been
 # reported on, which resolve_run_for_task's dev/ad-hoc fallback therefore
 # refuses to rebind to without --force. SKIPPED is deliberately absent —
@@ -227,18 +226,26 @@ def update_task_run(
     error_message: str | None = None,
     task_log: str | None = None,
 ) -> None:
-    """Update `task_run_id` in place — never insert a second row per retry."""
+    """Update `task_run_id` in place — never insert a second row per retry.
+
+    [DEVIATION, 2026-09-20, E2-21] Counts are no longer `COALESCE`d forward
+    from a previous attempt. A retry that reports fewer fields used to inherit
+    the earlier attempt's values, so one row could hold numbers from two
+    different attempts with nothing saying so. Each attempt now writes exactly
+    what it measured, and `begin_attempt` resets the row's per-attempt state
+    on the way in.
+    """
     conn.execute(
         text(
             "UPDATE AUD_TASK_RUN_LOG SET "
             "STATUS = :status, END_DATE = :now, "
-            "SOURCE_COUNT = COALESCE(:source_count, SOURCE_COUNT), "
-            "TARGET_COUNT = COALESCE(:target_count, TARGET_COUNT), "
-            "INSERT_COUNT = COALESCE(:insert_count, INSERT_COUNT), "
-            "UPDATE_COUNT = COALESCE(:update_count, UPDATE_COUNT), "
-            "DELETE_COUNT = COALESCE(:delete_count, DELETE_COUNT), "
-            "ERROR_MESSAGE = COALESCE(:error_message, ERROR_MESSAGE), "
-            "TASK_LOG = COALESCE(:task_log, TASK_LOG) "
+            "SOURCE_COUNT = :source_count, "
+            "TARGET_COUNT = :target_count, "
+            "INSERT_COUNT = :insert_count, "
+            "UPDATE_COUNT = :update_count, "
+            "DELETE_COUNT = :delete_count, "
+            "ERROR_MESSAGE = :error_message, "
+            "TASK_LOG = :task_log "
             "WHERE TASK_RUN_ID = :task_run_id"
         ),
         {
@@ -254,6 +261,31 @@ def update_task_run(
             "task_log": task_log,
         },
     )
+
+
+def begin_attempt(conn: Connection, task_run_id: int) -> int:
+    """Mark a fresh attempt on an existing row: bump ATTEMPT_COUNT, reset its state.
+
+    [ADDITION, 2026-09-20, E2-21] START_DATE is reset too. It previously kept
+    the *first* attempt's timestamp, so a task retried an hour later reported a
+    duration spanning the gap — and that duration feeds
+    crosspipe._average_task_duration_seconds, which drives how often a
+    downstream pipeline polls. The poll cadence was being computed from time
+    nothing spent running.
+
+    Returns the new attempt number.
+    """
+    return conn.execute(
+        text(
+            "UPDATE AUD_TASK_RUN_LOG SET "
+            "ATTEMPT_COUNT = ATTEMPT_COUNT + 1, START_DATE = :now, END_DATE = NULL, "
+            "STATUS = 'IN-PROGRESS', ERROR_MESSAGE = NULL, TASK_LOG = NULL, "
+            "SOURCE_COUNT = NULL, TARGET_COUNT = NULL, INSERT_COUNT = NULL, "
+            "UPDATE_COUNT = NULL, DELETE_COUNT = NULL "
+            "WHERE TASK_RUN_ID = :task_run_id RETURNING ATTEMPT_COUNT"
+        ),
+        {"task_run_id": task_run_id, "now": datetime.now(UTC)},
+    ).scalar_one()
 
 
 def fetch_task_run_status(conn: Connection, task_id: int, pipeline_run_id: int) -> str | None:

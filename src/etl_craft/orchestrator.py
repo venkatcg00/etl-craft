@@ -64,7 +64,7 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.cfg import fetch_pipeline_graph, fetch_task_codes, resolve_pipeline_id
 from etl_craft.cloning import run_cloning_if_enabled
-from etl_craft.config import ConnectorConfig
+from etl_craft.config import ConnectorConfig, ExecutionLimits
 from etl_craft.crosspipe import (
     NowFn,
     SleepFn,
@@ -380,11 +380,17 @@ def run_pipeline(
         # instead, which still preserves execution order without caring
         # about anyone's current AUD_TASK_RUN_LOG status.
         for wave in graph.waves():
-            _run_wave(wave, task_codes, pipeline_code, force=True)
+            _run_wave(wave, task_codes, pipeline_code, force=True, limits=config.limits)
         never_ready: list[int] = []
     else:
         never_ready = _run_until_settled(
-            engine, graph, pipeline_run_id, all_task_ids, task_codes, pipeline_code
+            engine,
+            graph,
+            pipeline_run_id,
+            all_task_ids,
+            task_codes,
+            pipeline_code,
+            config.limits,
         )
 
     final_status, unsettled = _finalize_from_task_states(
@@ -411,6 +417,7 @@ def _run_until_settled(
     all_task_ids: list[int],
     task_codes: dict[int, str],
     pipeline_code: str,
+    limits: ExecutionLimits,
 ) -> list[int]:
     """Loop waves until every task is settled or none are ready. Return the never-ready ones."""
     # attempted tracks task_ids already spawned in *this* invocation. Per
@@ -441,27 +448,52 @@ def _run_until_settled(
         if not ready:
             return pending  # none of these ever got a chance to run this pass — stuck
         attempted.update(ready)
-        _run_wave(ready, task_codes, pipeline_code, force=False)
+        _run_wave(ready, task_codes, pipeline_code, force=False, limits=limits)
 
 
 def _run_wave(
-    task_ids: list[int], task_codes: dict[int, str], pipeline_code: str, *, force: bool
+    task_ids: list[int],
+    task_codes: dict[int, str],
+    pipeline_code: str,
+    *,
+    force: bool,
+    limits: ExecutionLimits,
 ) -> None:
-    """Spawn one `python -m etl_craft run --task_code` subprocess per task_id, wait for all."""
-    processes = []
-    for task_id in task_ids:
-        cmd = [
-            sys.executable,
-            "-m",
-            "etl_craft",
-            "run",
-            "--pipeline_code",
-            pipeline_code,
-            "--task_code",
-            task_codes[task_id],
-        ]
-        if force:
-            cmd.append("--force")
-        processes.append(subprocess.Popen(cmd))
-    for process in processes:
-        process.wait()
+    """Spawn `run --task_code` subprocesses for a wave, at most `max_parallel_tasks` at once.
+
+    [DEVIATION, 2026-09-20, E2-19] Batched. This used to spawn one process per
+    ready task simultaneously, so a 40-task wave meant 40 Python processes,
+    each building its own Engine DB engine and each forking a child that built
+    another one. The connection budget was an emergent property of how wide
+    someone's pipeline happened to be.
+
+    [ADDITION, E2-17] Each wait is bounded. An unbounded `wait()` on one hung
+    subprocess stalled the whole wave, and with it the pipeline.
+    """
+    batch_size = max(limits.max_parallel_tasks, 1)
+    deadline = limits.task_timeout_seconds or None
+    for start in range(0, len(task_ids), batch_size):
+        processes = []
+        for task_id in task_ids[start : start + batch_size]:
+            cmd = [
+                sys.executable,
+                "-m",
+                "etl_craft",
+                "run",
+                "--pipeline_code",
+                pipeline_code,
+                "--task_code",
+                task_codes[task_id],
+            ]
+            if force:
+                cmd.append("--force")
+            processes.append(subprocess.Popen(cmd))
+        for process in processes:
+            try:
+                # A generous outer bound: the task's own watchdog inside
+                # run_task is the real timeout, and should fire first. This
+                # only catches a subprocess wedged before it gets that far.
+                process.wait(timeout=None if deadline is None else deadline + 120)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()

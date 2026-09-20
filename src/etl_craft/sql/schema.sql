@@ -448,6 +448,14 @@ CREATE TABLE AUD_TASK_RUN_LOG (
     DELETE_COUNT     BIGINT,
     ERROR_MESSAGE    VARCHAR,   -- [DEVIATION] fixed from ERROR_MESSGAE typo in the earlier pasted draft (already fixed in the later one too)
     TASK_LOG         VARCHAR,
+    -- [ADDITION, post-signoff 2026-09-20, E2-21] How many times this task has
+    -- been dispatched under this run. The one-row-per-task-per-run rule is
+    -- load-bearing and unchanged — this counts attempts *within* that row,
+    -- rather than adding rows. Without it AUD_TASK_RUN_LOG could not answer
+    -- "how many times did this fail before it worked?", and START_DATE spanned
+    -- from the first attempt, which fed the cross-pipeline poll cadence a
+    -- duration nothing actually took.
+    ATTEMPT_COUNT    INT NOT NULL DEFAULT 1,
     CONSTRAINT ck_task_run_status CHECK (STATUS IN ('IN-PROGRESS','SUCCESS','FAILED','SKIPPED'))  -- [CHOICE]
 );
 
@@ -782,4 +790,17 @@ COMMIT;
 -- is named RUN_CONDITION and not RUN_TYPE. Carried to an already-deployed
 -- database by sql/migrations/0001_add_run_condition.sql — the first real
 -- migration file this repo has ever had.
+-- ============================================================================
+--
+-- [ADDITION, 2026-09-20, iteration 2] Three more, all additive:
+--   * AUD_COLUMN_LINEAGE — cached column-level lineage, parsed from each SQL
+--     task's SOURCE_SQL with sqlglot. Carried by
+--     sql/migrations/0002_column_lineage_and_docs.sql.
+--   * AUD_TASK_DOCUMENTATION — version history for the DOCUMENTATION task
+--     parameter, versioned by content hash. Same migration.
+--   * AUD_TASK_RUN_LOG.ATTEMPT_COUNT (E2-21) — how many times a task has been
+--     dispatched under this run. The one-row-per-task-per-run rule is
+--     unchanged and still load-bearing; this counts attempts *within* that
+--     row rather than adding rows. Carried by
+--     sql/migrations/0003_task_attempt_count.sql.
 -- ============================================================================

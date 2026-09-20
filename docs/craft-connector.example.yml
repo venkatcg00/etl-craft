@@ -14,6 +14,15 @@ Execution:
   Mode: local
   # Informational only. The engine never acts on this.
   Orchestrator name: airflow
+  # Operational limits. Both have real defaults (6 hours, 8) rather than being
+  # unset -- a limit nobody sets is a limit nobody benefits from. A per-task
+  # TASK_TIMEOUT_SECONDS parameter overrides the timeout; 0 disables it.
+  Task_timeout_seconds: 21600
+  Max_parallel_tasks: 8
+  # Opt-in: compare each run against CFG_PIPELINES.SLA_IN_HOURS. Off by
+  # default, because for many teams SLA really is pass-through metadata for
+  # the orchestrator rather than something the engine should act on.
+  Enforce_sla: false
 
 Source:
   # Where secret values actually live.

@@ -110,14 +110,6 @@ def resolve_task_id(conn: Connection, pipeline_id: int, task_code: str) -> int:
     return task_id
 
 
-def fetch_task_handler(conn: Connection, task_id: int) -> str:
-    """Fetch the HANDLER value for `task_id` (assumed to already be a valid, active task)."""
-    return conn.execute(
-        text("SELECT HANDLER FROM CFG_TASKS WHERE TASK_ID = :task_id"),
-        {"task_id": task_id},
-    ).scalar_one()
-
-
 @dataclass(frozen=True)
 class TaskExecutionDetail:
     """Everything handlers.dispatch() needs about a task beyond its HANDLER value.
@@ -712,6 +704,82 @@ def fetch_tasks_missing_source_or_target(conn: Connection) -> list[TaskLineageGa
     return gaps
 
 
+# [ADDITION, 2026-09-20, E2-25] Every PARAMETER_NAME any handler actually
+# reads. A name outside this set is silently ignored at runtime, which makes a
+# typo ("MEREG_KEY") behave exactly like forgetting the parameter — so
+# `validate` flags it instead.
+KNOWN_PARAMETERS = frozenset(
+    {
+        # every task
+        "SOURCE_OBJECT",
+        "TARGET_OBJECT",
+        "DOCUMENTATION",
+        "TASK_TIMEOUT_SECONDS",
+        # HANDLER=SQL
+        "SQL_ACTION",
+        "SOURCE_SQL",
+        "PRIMARY_KEY",
+        "MERGE_KEY",
+        "MERGE_COMPARE_COLUMNS",
+        "MERGE_DEDUPE_ORDER",
+        "SCHEMA_EVOLUTION",
+        "HARD_DELETE",
+        # HANDLER=PYTHON
+        "SCRIPT_NAME",
+        "RETURN_VALUES",
+        # HANDLER=EMAIL_ALERT
+        "EMAIL_TO",
+        "EMAIL_SUBJECT",
+        "EMAIL_BODY",
+        "EMAIL_SUBJECT_SUCCESS",
+        "EMAIL_BODY_SUCCESS",
+        "EMAIL_SUBJECT_COMPLETED_WITH_ERRORS",
+        "EMAIL_BODY_COMPLETED_WITH_ERRORS",
+        "EMAIL_SUBJECT_FAILED",
+        "EMAIL_BODY_FAILED",
+        "EMAIL_ON_STATUS",
+        "EMAIL_PIPELINES",
+    }
+)
+
+
+@dataclass(frozen=True)
+class TaskWithParameters:
+    """One active task and every parameter it declares — what `validate` checks."""
+
+    pipeline_code: str
+    task_code: str
+    handler: str
+    parameters: dict[str, str]
+
+
+def fetch_tasks_with_parameters(conn: Connection) -> list[TaskWithParameters]:
+    """Fetch every active task across every pipeline, with its own parameters."""
+    rows = conn.execute(
+        text(
+            "SELECT p.PIPELINE_CODE AS pipeline_code, t.TASK_CODE AS task_code, "
+            "t.HANDLER AS handler, par.PARAMETER_NAME AS parameter_name, "
+            "par.PARAMETER_VALUE AS parameter_value "
+            "FROM CFG_TASKS t "
+            "JOIN CFG_PIPELINES p ON p.PIPELINE_ID = t.PIPELINE_ID "
+            "LEFT JOIN CFG_TASK_PARAMETERS par "
+            "ON par.TASK_ID = t.TASK_ID AND par.ACTIVE_FLAG = 'Y' "
+            "WHERE t.ACTIVE_FLAG = 'Y' AND p.ACTIVE_FLAG = 'Y' "
+            "ORDER BY p.PIPELINE_CODE, t.TASK_CODE"
+        )
+    ).all()
+    grouped: dict[tuple[str, str, str], dict[str, str]] = {}
+    for row in rows:
+        key = (row.pipeline_code, row.task_code, row.handler)
+        params = grouped.setdefault(key, {})
+        if row.parameter_name is not None:
+            params[row.parameter_name] = row.parameter_value
+    return [
+        TaskWithParameters(pipeline_code=code, task_code=task, handler=handler, parameters=params)
+        for (code, task, handler), params in grouped.items()
+    ]
+
+
 @dataclass(frozen=True)
 class SqlSnippet:
     """One author-supplied SQL string, with enough context to name it in a report.
@@ -937,6 +1005,10 @@ class TaskStatusEntry:
     task_code: str
     status: str
     error_message: str | None
+    # [ADDITION, 2026-09-20, E2-21] Lets email_alert distinguish "succeeded"
+    # from "succeeded on the third try" — the case COMPLETED_WITH_ERRORS was
+    # designed for but could not previously see.
+    attempt_count: int = 1
 
 
 def fetch_task_statuses_for_run(
@@ -946,7 +1018,8 @@ def fetch_task_statuses_for_run(
     rows = conn.execute(
         text(
             "SELECT t.TASK_ID AS task_id, t.TASK_CODE AS task_code, l.STATUS AS status, "
-            "l.ERROR_MESSAGE AS error_message "
+            "l.ERROR_MESSAGE AS error_message, "
+            "COALESCE(l.ATTEMPT_COUNT, 1) AS attempt_count "
             "FROM CFG_TASKS t LEFT JOIN AUD_TASK_RUN_LOG l "
             "ON l.TASK_ID = t.TASK_ID AND l.PIPELINE_RUN_ID = :pipeline_run_id "
             "WHERE t.PIPELINE_ID = :pipeline_id AND t.ACTIVE_FLAG = 'Y' "
@@ -960,6 +1033,7 @@ def fetch_task_statuses_for_run(
             task_code=row.task_code,
             status=row.status or "PENDING",
             error_message=row.error_message,
+            attempt_count=row.attempt_count,
         )
         for row in rows
     ]

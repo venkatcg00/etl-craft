@@ -47,11 +47,13 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import NoSuchTableError
 
 from etl_craft.cfg import (
+    KNOWN_PARAMETERS,
     fetch_all_pipelines,
     fetch_business_rule_targets,
     fetch_pipeline_graph,
     fetch_sql_snippets,
     fetch_tasks_missing_source_or_target,
+    fetch_tasks_with_parameters,
     resolve_pipeline_id,
 )
 from etl_craft.resolver import ResolverError, build_graph
@@ -210,6 +212,90 @@ def validate_read_only_sql(conn: Connection) -> list[ValidationIssue]:
         for entry in fetch_sql_snippets(conn)
         if (reason := looks_read_only(entry.sql)) is not None
     ]
+    return issues
+
+
+# [ADDITION, 2026-09-20, E2-25] What each SQL_ACTION requires. These are
+# conventions the execution code already depends on; checking them here means
+# a config mistake surfaces from `validate` rather than from a task failing at
+# 3 a.m. halfway through a run.
+_REQUIRED_SQL_PARAMS: dict[str, tuple[str, ...]] = {
+    "CREATE_TABLE": ("SOURCE_SQL",),
+    "SETUP_TABLE": ("SOURCE_SQL",),
+    "OVERWRITE_TABLE": ("SOURCE_SQL",),
+    "SCD1_MERGE": ("SOURCE_SQL", "MERGE_KEY", "MERGE_COMPARE_COLUMNS"),
+    "SCD2_MERGE": ("SOURCE_SQL", "MERGE_KEY", "MERGE_COMPARE_COLUMNS"),
+    "DROP_TABLE": (),
+    "DELETE_ROWS": ("MERGE_KEY",),
+}
+
+# Identifiers are interpolated unquoted into SQL text and into generate-yml's
+# bash_command, so they must be safe in both.
+_SAFE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_SAFE_OBJECT_REF = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def validate_task_parameters(conn: Connection) -> list[ValidationIssue]:
+    """Check each task declares the parameters its own HANDLER and SQL_ACTION require."""
+    issues: list[ValidationIssue] = []
+    for task in fetch_tasks_with_parameters(conn):
+        where = f"{task.pipeline_code}.{task.task_code}"
+        params = task.parameters
+
+        def add(message: str, where: str = where) -> None:
+            issues.append(
+                ValidationIssue(category="task_parameters", message=f"{where}: {message}")
+            )
+
+        if not _SAFE_IDENTIFIER.match(task.task_code):
+            add(
+                f"TASK_CODE {task.task_code!r} is not a safe identifier — codes are "
+                "interpolated unquoted into SQL and into generate-yml's bash_command"
+            )
+
+        target = params.get("TARGET_OBJECT")
+        if target and "|" in target and task.handler == "SQL":
+            # E2-32: lineage allows pipe-separated multi-values, but a SQL
+            # action writes exactly one table and qualify() would produce
+            # "db.a.b|c.d".
+            add("HANDLER='SQL' requires a single TARGET_OBJECT, not a pipe-separated list")
+        elif target and not _SAFE_OBJECT_REF.match(target) and task.handler == "SQL":
+            add(f"TARGET_OBJECT {target!r} must be exactly 'schema.table'")
+
+        if task.handler == "SQL":
+            action = params.get("SQL_ACTION")
+            if action is None:
+                add("HANDLER='SQL' requires a SQL_ACTION parameter")
+            elif action not in _REQUIRED_SQL_PARAMS:
+                add(f"SQL_ACTION={action!r} is not one of {sorted(_REQUIRED_SQL_PARAMS)}")
+            else:
+                for required in _REQUIRED_SQL_PARAMS[action]:
+                    if not params.get(required):
+                        add(f"SQL_ACTION={action} requires a {required} parameter")
+
+        if task.handler == "PYTHON":
+            if not params.get("SCRIPT_NAME"):
+                add("HANDLER='PYTHON' requires a SCRIPT_NAME parameter")
+            declared = {
+                part.strip() for part in (params.get("RETURN_VALUES") or "").split("|") if part
+            }
+            for mandatory in ("INGESTION_COUNT", "LATEST_OFFSET_UPDATE"):
+                if mandatory not in declared:
+                    add(f"HANDLER='PYTHON' must declare {mandatory} in RETURN_VALUES")
+
+        if task.handler == "EMAIL_ALERT":
+            if not params.get("EMAIL_TO"):
+                add("HANDLER='EMAIL_ALERT' requires an EMAIL_TO parameter")
+            has_body = any(
+                params.get(name)
+                for name in ("EMAIL_BODY", "EMAIL_BODY_SUCCESS", "EMAIL_BODY_FAILED")
+            )
+            if not has_body and not params.get("EMAIL_PIPELINES"):
+                add("HANDLER='EMAIL_ALERT' requires EMAIL_BODY (or EMAIL_PIPELINES)")
+
+        unknown = sorted(set(params) - KNOWN_PARAMETERS)
+        if unknown:
+            add(f"unrecognized CFG_TASK_PARAMETERS name(s) {unknown} — a typo will be ignored")
     return issues
 
 

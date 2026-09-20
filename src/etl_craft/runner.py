@@ -76,8 +76,10 @@ from etl_craft.crosspipe import (
 from etl_craft.db import build_engine
 from etl_craft.execution import TaskExecutionContext, format_task_log
 from etl_craft.handlers import HandlerError, dispatch
+from etl_craft.limits import task_timeout_seconds
 from etl_craft.resolver import DependencyGraph, build_graph
 from etl_craft.runlog import (
+    begin_attempt,
     fetch_pipeline_run_status,
     fetch_run_state,
     fetch_task_run_result,
@@ -249,6 +251,13 @@ def run_task(
 
     with engine.begin() as conn:
         binding = find_or_create_task_run(conn, task_id, pipeline_run_id)
+        if not binding.created:
+            # [ADDITION, 2026-09-20, E2-21] A row that already existed means
+            # this is a retry of a FAILED attempt (SUCCESS/SKIPPED/IN-PROGRESS
+            # all short-circuited above). Bump the counter and reset the row's
+            # per-attempt state, so its counts and duration describe *this*
+            # attempt rather than a mix of two.
+            begin_attempt(conn, binding.task_run_id)
         detail = fetch_task_execution_detail(conn, task_id)
         task_params = fetch_task_parameters(conn, task_id)
 
@@ -323,7 +332,33 @@ def _dispatch_with_crash_detection(engine: Engine, ctx: TaskExecutionContext) ->
     mp_ctx = multiprocessing.get_context("fork")
     process = mp_ctx.Process(target=_dispatch_and_record, args=(ctx,))
     process.start()
-    process.join()
+
+    # [ADDITION, 2026-09-20, E2-17] Bounded. An unbounded join() on a hung
+    # query left the row stuck IN-PROGRESS forever — and IN-PROGRESS is in
+    # resolver.NOT_RETRYABLE, so that task became permanently un-retryable
+    # without someone editing AUD_TASK_RUN_LOG by hand.
+    limit = task_timeout_seconds(ctx)
+    process.join(timeout=limit or None)
+    if process.is_alive():
+        process.terminate()
+        process.join(timeout=30)
+        if process.is_alive():  # pragma: no cover - only a wedged, unkillable child
+            process.kill()
+            process.join()
+        with engine.begin() as conn:
+            current = fetch_task_run_result(conn, ctx.task_run_id)
+            if current.status == "IN-PROGRESS":
+                update_task_run(
+                    conn,
+                    ctx.task_run_id,
+                    status="FAILED",
+                    error_message=(
+                        f"task exceeded its {limit}s timeout and was terminated "
+                        "(set CFG_TASK_PARAMETERS.TASK_TIMEOUT_SECONDS, or "
+                        "[Execution] Task_timeout_seconds, to change this)"
+                    ),
+                )
+        return
 
     if process.exitcode != 0:
         with engine.begin() as conn:

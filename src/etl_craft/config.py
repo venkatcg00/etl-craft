@@ -211,6 +211,34 @@ class OrchestratorConfig:
     email_recipients: list[str] | None = None
 
 
+# [ADDITION, 2026-09-20, E2-17/E2-19] Deployment-wide operational limits.
+# Nothing in the engine had a timeout or a parallelism cap: a hung query, a
+# wedged ingestion script or an unreachable-but-accepting SMTP relay blocked a
+# task forever with its AUD_TASK_RUN_LOG row stuck IN-PROGRESS — which, per
+# resolver.NOT_RETRYABLE, makes that task permanently un-retryable without
+# manual SQL. And a 40-task wave spawned 40 processes at once, each opening its
+# own engines.
+#
+# [CHOICE] Conservative but real defaults rather than None. A limit nobody sets
+# is a limit nobody benefits from, and "six hours" is generous enough that any
+# task hitting it is genuinely wedged. Per-task TASK_TIMEOUT_SECONDS overrides
+# it; 0 disables it entirely for a task that legitimately runs longer.
+DEFAULT_TASK_TIMEOUT_SECONDS = 6 * 60 * 60
+DEFAULT_MAX_PARALLEL_TASKS = 8
+
+
+@dataclass(frozen=True)
+class ExecutionLimits:
+    """Deployment-wide timeouts and parallelism caps, from [Execution]."""
+
+    task_timeout_seconds: int = DEFAULT_TASK_TIMEOUT_SECONDS
+    max_parallel_tasks: int = DEFAULT_MAX_PARALLEL_TASKS
+    # SLA_IN_HOURS was read, emitted into the generated YAML, and enforced
+    # nowhere (E2-23). Enforcing it engine-side is opt-in: for many teams it
+    # really is pass-through metadata for the orchestrator.
+    enforce_sla: bool = False
+
+
 @dataclass(frozen=True)
 class ConnectorConfig:
     """The fully parsed, validated contents of craft-connector.yml."""
@@ -222,6 +250,7 @@ class ConnectorConfig:
     warehouse: ConnectionSection | None = None
     orchestrator: OrchestratorConfig = field(default_factory=OrchestratorConfig)
     email: EmailConfig | None = None
+    limits: ExecutionLimits = field(default_factory=ExecutionLimits)
 
 
 def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> ConnectorConfig:
@@ -236,6 +265,24 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> ConnectorConfig:
     return _parse_config(raw, path)
 
 
+def _positive_int(section: dict[str, Any], key: str, default: int, path: Path) -> int:
+    """Read an optional non-negative integer, rejecting a value that is not one.
+
+    [ADDITION, 2026-09-20, E2-34] `[Orchestrator]` scalars were taken straight
+    from `raw.get(...)` with no type check, so `Retries: "three"` flowed
+    unexamined into the generated YAML. A setting that means a number should
+    say so when it is handed something else.
+    """
+    value = section.get(key)
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigError(f"{path}: {key} must be a whole number, got {value!r}")
+    if value < 0:
+        raise ConfigError(f"{path}: {key} must not be negative, got {value!r}")
+    return value
+
+
 def _parse_config(raw: dict[str, Any], path: Path) -> ConnectorConfig:
     execution = _require_section(raw, "Execution", path)
     mode = execution.get("Mode")
@@ -243,6 +290,16 @@ def _parse_config(raw: dict[str, Any], path: Path) -> ConnectorConfig:
         raise ConfigError(
             f"{path}: Execution.Mode must be one of {sorted(VALID_MODES)}, got {mode!r}"
         )
+
+    limits = ExecutionLimits(
+        task_timeout_seconds=_positive_int(
+            execution, "Task_timeout_seconds", DEFAULT_TASK_TIMEOUT_SECONDS, path
+        ),
+        max_parallel_tasks=_positive_int(
+            execution, "Max_parallel_tasks", DEFAULT_MAX_PARALLEL_TASKS, path
+        ),
+        enforce_sla=bool(execution.get("Enforce_sla", False)),
+    )
 
     source_raw = _require_section(raw, "Source", path)
     source = _parse_source(source_raw, path)
@@ -276,6 +333,7 @@ def _parse_config(raw: dict[str, Any], path: Path) -> ConnectorConfig:
         cloning=cloning,
         warehouse=warehouse,
         orchestrator=orchestrator,
+        limits=limits,
         email=email,
     )
 

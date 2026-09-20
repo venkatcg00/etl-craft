@@ -146,6 +146,20 @@ def build_data_engine(
         raise ConnectionError_(f"unknown auth_mode: {profile.auth_mode!r}")
     secret = resolve_secret(config, profile)
     creator = creator_factory(profile, secret)
-    dialect_name, _ = translate_jdbc_url(profile.jdbc_url)
+    dialect_name, parts = translate_jdbc_url(profile.jdbc_url)
     engine_kwargs.setdefault("pool_pre_ping", True)
-    return create_engine(f"{dialect_name}://", creator=creator, **engine_kwargs)
+    # [DEVIATION, 2026-09-20, E2-24] A real URL, minus the password. The blank
+    # "dialect://" this replaced kept secrets out of a logged engine URL — a
+    # good goal — but left engine.url empty, which broke cloning's
+    # same-database guard and ClickHouse's table-engine reflection, both
+    # documented in cloning.py. SQLAlchemy never logs a password it was not
+    # given, so omitting only the password preserves the goal.
+    url = URL.create(
+        dialect_name,
+        username=profile.user,
+        host=parts["host"],
+        port=parts["port"],
+        database=parts["database"],
+        query=parts["query"],
+    )
+    return create_engine(url, creator=creator, **engine_kwargs)

@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Sequence
+from importlib.metadata import version
 from pathlib import Path
 
 import yaml
@@ -77,6 +78,7 @@ from etl_craft.validate import (
     validate_graphs,
     validate_read_only_sql,
     validate_task_lineage_declarations,
+    validate_task_parameters,
 )
 from etl_craft.warehouse import build_data_engine
 
@@ -108,6 +110,11 @@ RUN_ERRORS = (
 def build_parser() -> argparse.ArgumentParser:
     """Build the top-level `etl-craft` argument parser."""
     parser = argparse.ArgumentParser(prog="etl-craft")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"etl-craft {version('etl-craft')}",
+    )
     parser.add_argument(
         "--config",
         help=(
@@ -152,7 +159,14 @@ def build_parser() -> argparse.ArgumentParser:
     graph_parser = subparsers.add_parser(
         "graph", help="Print dependency chain / lineage for a pipeline"
     )
-    graph_parser.add_argument("--name", required=True)
+    # [DEVIATION, 2026-09-20, E2-36] --pipeline_code is accepted too. CLAUDE.md's
+    # CLI table wrote this one command as `graph --name <pipeline>`, unlike
+    # every other command's --pipeline_code — an inconsistency in the source
+    # doc rather than a deliberate difference. Both spellings work rather than
+    # breaking anything already scripted against --name.
+    graph_target = graph_parser.add_mutually_exclusive_group(required=True)
+    graph_target.add_argument("--name", dest="name")
+    graph_target.add_argument("--pipeline_code", dest="name")
 
     mode_parser = subparsers.add_parser(
         "set-execution-mode", help="Lock Execution.Mode in craft-connector.yml"
@@ -369,8 +383,8 @@ def _setup_command(args: argparse.Namespace, config_path: Path) -> int:
 
     print(f"  config   : {report.config_action}")
     print(f"  database : {report.database_action}")
-    for version in report.applied_migrations:
-        print(f"             applied {version}")
+    for applied in report.applied_migrations:
+        print(f"             applied {applied}")
     if report.required_secrets:
         print("  secrets  : this configuration expects")
         for label, var in report.required_secrets:
@@ -512,6 +526,7 @@ def _validate_command(engine: Engine, config: ConnectorConfig) -> int:
         issues = validate_graphs(conn)
         issues += validate_task_lineage_declarations(conn)
         issues += validate_read_only_sql(conn)
+        issues += validate_task_parameters(conn)
 
         data_engine = None
         if config.warehouse is not None:

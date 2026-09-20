@@ -56,6 +56,19 @@ generated DAG passes `--mode`.
 
 `--force` bypasses dependency and state checks. It is only legal under `Mode: local`.
 
+## Operational limits
+
+`[Execution]` carries two limits, both with real defaults rather than being unset:
+
+| Setting | Default | What it bounds |
+|---|---|---|
+| `Task_timeout_seconds` | `21600` (6 hours) | A single task. Overridden per task by the `TASK_TIMEOUT_SECONDS` parameter; `0` disables it. |
+| `Max_parallel_tasks` | `8` | How many task subprocesses one wave spawns at once, and how many business rules in one `SEQUENCE_NUMBER` run concurrently. |
+
+The timeout matters more than it looks. A task with no limit that hangs leaves its
+`AUD_TASK_RUN_LOG` row stuck `IN-PROGRESS` — and an `IN-PROGRESS` task is never offered for
+retry, so the pipeline can never recover without someone editing the table by hand.
+
 ## The two databases
 
 **Engine DB** — always Postgres, no exceptions. Holds every `CFG_`/`AUD_` table. Postgres

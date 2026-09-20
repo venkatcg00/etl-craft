@@ -461,8 +461,8 @@ def _check_or_evolve_schema(
     stage: str,
     schema_evolution: bool,
     primary_key: list[str],
-) -> list[tuple[str, str]]:
-    """Verify (or evolve) the target's shape against `stage`; return the target's columns.
+) -> None:
+    """Verify (or evolve) the target's shape against `stage`.
 
     Creates the target if it doesn't exist yet (E2-42), or raises
     SchemaMismatchError if the shapes genuinely disagree and can't (or aren't
@@ -483,7 +483,7 @@ def _check_or_evolve_schema(
             audit_columns=AUDIT_COLUMNS[action],
             primary_key=primary_key,
         )
-        return _fetch_columns(conn, table_name, schema=schema_name)
+        return
     stage_columns = _fetch_columns(conn, stage)
 
     required_audit_columns = ("PIPELINE_RUN_ID", *AUDIT_COLUMNS[action])
@@ -507,7 +507,7 @@ def _check_or_evolve_schema(
     target_business_set = {name.lower() for name in target_business_names}
 
     if stage_name_set == target_business_set:
-        return target_columns
+        return
 
     missing_in_stage = [n for n in target_business_names if n.lower() not in stage_name_set]
     if missing_in_stage:
@@ -533,7 +533,6 @@ def _check_or_evolve_schema(
         target_columns=target_columns,
         primary_key=primary_key,
     )
-    return _fetch_columns(conn, table_name, schema=schema_name)
 
 
 def _evolve_schema(

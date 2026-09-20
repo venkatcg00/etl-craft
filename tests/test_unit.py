@@ -37,11 +37,14 @@ from etl_craft.cloning import _same_database as same_database
 from etl_craft.column_lineage import extract_column_lineage, source_sql_hash
 from etl_craft.config import (
     CONFIG_PATH_ENV_VAR,
+    DEFAULT_MAX_PARALLEL_TASKS,
+    DEFAULT_TASK_TIMEOUT_SECONDS,
     CloningConfig,
     ConfigError,
     ConnectionProfile,
     ConnectionSection,
     ConnectorConfig,
+    ExecutionLimits,
     SourceConfig,
     _load_dotenv_file,
     load_config,
@@ -68,6 +71,7 @@ from etl_craft.email_alert import _render_digest_html as render_email_digest_htm
 from etl_craft.email_alert import _resolve_target_pipeline_codes as resolve_email_pipeline_codes
 from etl_craft.email_alert import _substitute as substitute_email_tokens
 from etl_craft.handlers import HandlerError, TaskExecutionContext, dispatch
+from etl_craft.limits import task_timeout_seconds
 from etl_craft.migrate import (
     MIGRATIONS_DIR_ENV_VAR,
     _split_statements,
@@ -92,6 +96,7 @@ from etl_craft.resolver import (
 )
 from etl_craft.runlog import (
     RunLogError,
+    begin_attempt,
     fetch_run_state,
     find_or_create_active_run,
     find_or_create_task_run,
@@ -680,6 +685,85 @@ def test_suggest_is_case_insensitive_but_returns_the_real_code():
 
 def test_suggest_says_nothing_rather_than_guessing_wildly():
     assert suggest("zzzzzz", ["CUSTOMERS", "ORDERS"]) == []
+
+
+# ------------------------------------------------------------------------------
+# E2-17 / E2-19 / E2-34 — limits, and stricter config parsing
+# ------------------------------------------------------------------------------
+
+
+_MINIMAL_YAML = """
+Execution:
+  Mode: local
+
+Source:
+  Type: environment
+
+Postgres:
+  Active_profile: dev
+  Profiles:
+    dev:
+      jdbc_url: jdbc:postgresql://localhost:55432/etl_craft
+      user: etl_craft
+      auth_mode: password
+
+Cloning:
+  Enabled: false
+"""
+
+
+def _config_with(tmp_path, execution_extra=""):
+    path = tmp_path / "craft-connector.yml"
+    path.write_text(_MINIMAL_YAML.replace("  Mode: local", "  Mode: local" + execution_extra))
+    return load_config(path)
+
+
+def _ctx_with(params, limits=None):
+    return SimpleNamespace(
+        task_params=params,
+        config=SimpleNamespace(limits=limits or ExecutionLimits()),
+    )
+
+
+def test_task_timeout_prefers_the_task_parameter_then_the_global_default():
+    assert task_timeout_seconds(_ctx_with({})) == DEFAULT_TASK_TIMEOUT_SECONDS
+    assert task_timeout_seconds(_ctx_with({}, ExecutionLimits(task_timeout_seconds=120))) == 120
+    assert task_timeout_seconds(_ctx_with({"TASK_TIMEOUT_SECONDS": "45"})) == 45
+
+
+def test_task_timeout_zero_disables_it():
+    # For a task that legitimately runs longer than any sensible global bound.
+    assert task_timeout_seconds(_ctx_with({"TASK_TIMEOUT_SECONDS": "0"})) == 0
+
+
+@pytest.mark.parametrize("bad", ["soon", "-5"])
+def test_task_timeout_rejects_a_value_that_is_not_a_non_negative_number(bad):
+    with pytest.raises(HandlerError):
+        task_timeout_seconds(_ctx_with({"TASK_TIMEOUT_SECONDS": bad}))
+
+
+def test_execution_limits_have_real_defaults(tmp_path):
+    # A limit nobody sets is a limit nobody benefits from, so these default to
+    # real values rather than None.
+    config = _config_with(tmp_path)
+    assert config.limits.task_timeout_seconds == DEFAULT_TASK_TIMEOUT_SECONDS
+    assert config.limits.max_parallel_tasks == DEFAULT_MAX_PARALLEL_TASKS
+    assert config.limits.enforce_sla is False
+
+
+def test_execution_limits_are_read_from_the_config(tmp_path):
+    config = _config_with(tmp_path, "\n  Task_timeout_seconds: 900\n  Max_parallel_tasks: 3")
+    assert config.limits.task_timeout_seconds == 900
+    assert config.limits.max_parallel_tasks == 3
+
+
+@pytest.mark.parametrize("bad", ['"three"', "-1"])
+def test_execution_limits_reject_a_non_numeric_value(tmp_path, bad):
+    # E2-34: [Execution]/[Orchestrator] scalars were taken straight from
+    # raw.get(...) with no type check, so `Retries: "three"` flowed unexamined
+    # into the generated YAML.
+    with pytest.raises(ConfigError):
+        _config_with(tmp_path, f"\n  Max_parallel_tasks: {bad}")
 
 
 # ------------------------------------------------------------------------------
@@ -1962,7 +2046,8 @@ CREATE TABLE AUD_TASK_RUN_LOG (
     UPDATE_COUNT INTEGER,
     DELETE_COUNT INTEGER,
     ERROR_MESSAGE TEXT,
-    TASK_LOG TEXT
+    TASK_LOG TEXT,
+    ATTEMPT_COUNT INTEGER NOT NULL DEFAULT 1
 );
 CREATE UNIQUE INDEX ux_task_run_one_per_pipeline_run
     ON AUD_TASK_RUN_LOG (TASK_ID, PIPELINE_RUN_ID);
@@ -2084,7 +2169,12 @@ def test_find_or_create_task_run_reflects_updated_status(runlog_engine):
     assert row.END_DATE is not None
 
 
-def test_update_task_run_leaves_unspecified_counts_untouched(runlog_engine):
+def test_update_task_run_writes_exactly_what_this_attempt_measured(runlog_engine):
+    # [DEVIATION, 2026-09-20, E2-21] This used to assert the opposite: that an
+    # unspecified count was COALESCE'd forward from the previous call. That
+    # meant one row could hold numbers from two different attempts, with
+    # nothing saying which was which. Each write now says exactly what it
+    # measured, and begin_attempt resets the row on the way into a retry.
     with runlog_engine.begin() as conn:
         run_id = find_or_create_active_run(conn, pipeline_id=1)
         binding = find_or_create_task_run(conn, task_id=10, pipeline_run_id=run_id)
@@ -2095,8 +2185,44 @@ def test_update_task_run_leaves_unspecified_counts_untouched(runlog_engine):
             text("SELECT SOURCE_COUNT, TARGET_COUNT FROM AUD_TASK_RUN_LOG WHERE TASK_RUN_ID = :id"),
             {"id": binding.task_run_id},
         ).one()
-    assert row.SOURCE_COUNT == 100  # untouched by the second call
+    assert row.SOURCE_COUNT is None
     assert row.TARGET_COUNT == 99
+
+
+def test_begin_attempt_counts_retries_and_resets_the_rows_state(runlog_engine):
+    # E2-21. The one-row-per-task-per-run rule is load-bearing, so attempts are
+    # counted *within* the row. START_DATE is reset too: it previously kept the
+    # first attempt's timestamp, so a task retried an hour later reported a
+    # duration spanning the gap -- and that duration feeds the cross-pipeline
+    # poll cadence.
+    with runlog_engine.begin() as conn:
+        run_id = find_or_create_active_run(conn, pipeline_id=1)
+        binding = find_or_create_task_run(conn, task_id=10, pipeline_run_id=run_id)
+        assert binding.created is True
+        update_task_run(
+            conn,
+            binding.task_run_id,
+            status="FAILED",
+            error_message="first attempt blew up",
+            source_count=7,
+        )
+
+        assert begin_attempt(conn, binding.task_run_id) == 2
+
+    with runlog_engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT ATTEMPT_COUNT, STATUS, ERROR_MESSAGE, SOURCE_COUNT, END_DATE "
+                "FROM AUD_TASK_RUN_LOG WHERE TASK_RUN_ID = :id"
+            ),
+            {"id": binding.task_run_id},
+        ).one()
+    assert row.ATTEMPT_COUNT == 2
+    assert row.STATUS == "IN-PROGRESS"
+    # The previous attempt's outcome is gone, not carried into this one.
+    assert row.ERROR_MESSAGE is None
+    assert row.SOURCE_COUNT is None
+    assert row.END_DATE is None
 
 
 def test_find_or_create_task_run_is_independent_per_task(runlog_engine):
