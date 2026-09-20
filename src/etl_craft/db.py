@@ -15,14 +15,22 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import parse_qsl
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConfigError, ConnectionProfile, ConnectorConfig, resolve_secret
 
+# [DEVIATION, 2026-09-20, E2-10] The query string is captured now, not
+# discarded. This pattern had no `query` group and stopped the database
+# capture at "?", so `jdbc:postgresql://host/db?sslmode=require` connected
+# **without** TLS, silently. warehouse.py's own translator parsed and
+# forwarded query parameters all along, which made the Engine DB — the one
+# that is always Postgres and always required — the weaker of the two.
 _JDBC_POSTGRES_RE = re.compile(
     r"^jdbc:postgresql://(?P<host>[^:/]+)(:(?P<port>\d+))?/(?P<database>[^?]+)"
+    r"(\?(?P<query>.*))?$"
 )
 
 DEFAULT_PORT = 5432
@@ -43,7 +51,13 @@ def parse_jdbc_postgres(jdbc_url: str) -> dict[str, Any]:
     if not match:
         raise ConnectionError_(f"not a recognized jdbc:postgresql:// URL: {jdbc_url!r}")
     port = int(match["port"]) if match["port"] else DEFAULT_PORT
-    return {"host": match["host"], "port": port, "database": match["database"]}
+    query = dict(parse_qsl(match["query"])) if match["query"] else {}
+    return {
+        "host": match["host"],
+        "port": port,
+        "database": match["database"],
+        "query": query,
+    }
 
 
 def _password_creator(profile: ConnectionProfile, secret: str) -> Callable[[], Any]:
@@ -58,6 +72,10 @@ def _password_creator(profile: ConnectionProfile, secret: str) -> Callable[[], A
             dbname=parts["database"],
             user=profile.user,
             password=secret,
+            # Forwarded, not dropped: sslmode and friends are part of the URL
+            # a team wrote down, and silently ignoring sslmode=require is
+            # worse than failing on it (E2-10).
+            **parts["query"],
         )
 
     return _connect
@@ -84,6 +102,7 @@ def _key_file_creator(profile: ConnectionProfile, secret: str) -> Callable[[], A
             # libpq treats it as text. Encoding it was accepted at runtime but
             # wrong by the driver's contract (caught by mypy, E2-29).
             sslpassword=secret if secret else None,
+            **parts["query"],
         )
 
     return _connect

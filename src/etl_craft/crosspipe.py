@@ -177,8 +177,41 @@ def _pipeline_tracker_last_consumed(conn: Connection, pipeline_dependency_id: in
     ).scalar_one_or_none()
 
 
+@dataclass
+class PollBudget:
+    """One gate check's shared poll allowance, spanning every edge it waits on.
+
+    [DEVIATION, 2026-09-20, E2-11] CLAUDE.md specifies "a hard 1-hour timeout
+    overall". Both the deadline and MAX_POLLS used to be computed *inside* the
+    per-edge wait helper, which is called once per edge in a loop — so a task
+    with three cross-pipeline edges could wait three hours and spend ninety
+    polls. Created once per check_* call now, and shared.
+    """
+
+    deadline: datetime
+    polls_left: int
+
+    @classmethod
+    def start(cls, now: NowFn) -> PollBudget:
+        """Open a fresh budget: the full wall clock and the full poll count."""
+        return cls(deadline=now() + timedelta(seconds=POLL_TIMEOUT_SECONDS), polls_left=MAX_POLLS)
+
+    def exhausted(self, now: NowFn) -> bool:
+        """Report whether this check has run out of either polls or wall clock."""
+        return self.polls_left <= 0 or now() >= self.deadline
+
+    def spend(self) -> None:
+        """Record that one poll was used."""
+        self.polls_left -= 1
+
+
 def _wait_for_pipeline_dependency_to_settle(
-    engine: Engine, depends_on_pipeline_id: int, *, sleep: SleepFn, now: NowFn
+    engine: Engine,
+    depends_on_pipeline_id: int,
+    *,
+    budget: PollBudget,
+    sleep: SleepFn,
+    now: NowFn,
 ) -> None:
     """Poll while `depends_on_pipeline_id`'s latest run is IN-PROGRESS; return once it isn't.
 
@@ -194,17 +227,15 @@ def _wait_for_pipeline_dependency_to_settle(
             _average_pipeline_duration_seconds(conn, depends_on_pipeline_id)
             or DEFAULT_ASSUMED_DURATION_SECONDS
         )
-    deadline = now() + timedelta(seconds=POLL_TIMEOUT_SECONDS)
     fraction = FIRST_POLL_FRACTION
-    for _ in range(MAX_POLLS):
+    while not budget.exhausted(now):
         current = now()
-        if current >= deadline:
-            return
         elapsed = (current - latest.start_date).total_seconds()
-        remaining = (deadline - current).total_seconds()
+        remaining = (budget.deadline - current).total_seconds()
         delay = _next_poll_delay(avg_duration, elapsed, fraction, remaining)
         if delay > 0:
             sleep(delay)
+        budget.spend()
         fraction += POLL_FRACTION_STEP
         with engine.connect() as conn:
             latest = _latest_pipeline_run(conn, depends_on_pipeline_id)
@@ -225,37 +256,86 @@ def _pipeline_dependency_satisfied(
     return candidate is not None, candidate
 
 
+@dataclass(frozen=True)
+class PipelineGateResult:
+    """A pipeline-level gate check: why it failed, or which run satisfied each edge."""
+
+    reason: str | None
+    # edge id -> the run id that satisfied it, captured at gate time (E2-12).
+    consumed: dict[int, int]
+
+    @property
+    def satisfied(self) -> bool:
+        """Report whether every edge was satisfied."""
+        return self.reason is None
+
+
 def check_pipeline_dependencies(
     engine: Engine,
     pipeline_id: int,
     *,
     sleep: SleepFn = time.sleep,
     now: NowFn = _default_now,
-) -> str | None:
-    """Check (and poll) `pipeline_id`'s active cross-pipeline edges; None if satisfied."""
+) -> PipelineGateResult:
+    """Check (and poll) `pipeline_id`'s active cross-pipeline edges, under one shared budget."""
     with engine.connect() as conn:
         edges = fetch_pipeline_dependency_edge_ids(conn, pipeline_id)
+    budget = PollBudget.start(now)
+    resolved: dict[int, int] = {}
     for edge in edges:
         _wait_for_pipeline_dependency_to_settle(
-            engine, edge.depends_on_pipeline_id, sleep=sleep, now=now
+            engine, edge.depends_on_pipeline_id, budget=budget, sleep=sleep, now=now
         )
         with engine.connect() as conn:
-            satisfied, _ = _pipeline_dependency_satisfied(conn, edge)
+            satisfied, candidate = _pipeline_dependency_satisfied(conn, edge)
         if not satisfied:
-            return (
-                f"cross-pipeline dependency on pipeline_id={edge.depends_on_pipeline_id} "
-                f"({edge.dependency_type}) not satisfied"
+            return PipelineGateResult(
+                reason=(
+                    f"cross-pipeline dependency on pipeline_id="
+                    f"{edge.depends_on_pipeline_id} ({edge.dependency_type}) not satisfied"
+                ),
+                consumed={},
             )
-    return None
+        if candidate is not None:
+            resolved[edge.pipeline_dependency_id] = candidate
+    # [DEVIATION, 2026-09-20, E2-12] The run id that actually satisfied each
+    # edge is carried out to the caller, which threads it back into
+    # consume_pipeline_dependency_edges at finalize time. It used to be
+    # discarded here (`satisfied, _ =`) and re-derived during consume — so if
+    # the upstream completed a *second* qualifying run while this one was
+    # executing, the watermark jumped past it and marked it consumed by a
+    # pipeline that never read its data. That makes the tracker's whole claim
+    # ("the run last consumed for each edge") false in exactly the
+    # different-cadence case it was designed for.
+    return PipelineGateResult(reason=None, consumed=resolved)
 
 
-def consume_pipeline_dependency_edges(engine: Engine, pipeline_id: int) -> None:
-    """After `pipeline_id`'s own run finishes, advance each edge's tracker if newly satisfied."""
+def consume_pipeline_dependency_edges(
+    engine: Engine, pipeline_id: int, consumed: dict[int, int] | None = None
+) -> None:
+    """After `pipeline_id`'s own run finishes, advance each edge's tracker to what it used.
+
+    [DEVIATION, 2026-09-20, E2-12] `consumed` is what the gate actually
+    resolved at start time, edge id -> run id. This used to re-evaluate
+    satisfaction here and record whatever qualified *then* — so if the
+    upstream completed a second qualifying run while this one executed, the
+    watermark jumped past it and marked it consumed by a pipeline that never
+    read its data. The tracker's whole purpose is "the run last consumed for
+    each edge", and that made the claim false in precisely the
+    different-cadence case it exists for.
+
+    `None` keeps the old re-derive behaviour, for the callers that finalize a
+    run they did not gate themselves.
+    """
     with engine.connect() as conn:
         edges = fetch_pipeline_dependency_edge_ids(conn, pipeline_id)
     for edge in edges:
         with engine.begin() as conn:
-            satisfied, candidate = _pipeline_dependency_satisfied(conn, edge)
+            if consumed is not None:
+                candidate = consumed.get(edge.pipeline_dependency_id)
+                satisfied = candidate is not None
+            else:
+                satisfied, candidate = _pipeline_dependency_satisfied(conn, edge)
             if satisfied:
                 conn.execute(
                     text(
@@ -342,7 +422,12 @@ def _task_tracker_last_consumed(conn: Connection, task_dependency_id: int) -> in
 
 
 def _wait_for_task_dependency_to_settle(
-    engine: Engine, depends_on_task_id: int, *, sleep: SleepFn, now: NowFn
+    engine: Engine,
+    depends_on_task_id: int,
+    *,
+    budget: PollBudget,
+    sleep: SleepFn,
+    now: NowFn,
 ) -> None:
     """Poll while `depends_on_task_id`'s latest run is IN-PROGRESS; return once it isn't.
 
@@ -358,17 +443,15 @@ def _wait_for_task_dependency_to_settle(
             _average_task_duration_seconds(conn, depends_on_task_id)
             or DEFAULT_ASSUMED_DURATION_SECONDS
         )
-    deadline = now() + timedelta(seconds=POLL_TIMEOUT_SECONDS)
     fraction = FIRST_POLL_FRACTION
-    for _ in range(MAX_POLLS):
+    while not budget.exhausted(now):
         current = now()
-        if current >= deadline:
-            return
         elapsed = (current - latest.start_date).total_seconds()
-        remaining = (deadline - current).total_seconds()
+        remaining = (budget.deadline - current).total_seconds()
         delay = _next_poll_delay(avg_duration, elapsed, fraction, remaining)
         if delay > 0:
             sleep(delay)
+        budget.spend()
         fraction += POLL_FRACTION_STEP
         with engine.connect() as conn:
             latest = _latest_task_run(conn, depends_on_task_id)
@@ -401,6 +484,8 @@ class CrossPipelineCheck:
     satisfied_count: int
     total: int
     reasons: tuple[str, ...]
+    # edge id -> the run id that satisfied it, captured at gate time (E2-12).
+    consumed: dict[int, int]
 
 
 def check_task_cross_pipeline_dependencies(
@@ -423,33 +508,50 @@ def check_task_cross_pipeline_dependencies(
         edges = fetch_task_cross_pipeline_dependency_ids(conn, task_id)
     target = len(edges) if needed is None else needed
 
+    budget = PollBudget.start(now)
     satisfied_count = 0
+    consumed: dict[int, int] = {}
     reasons: list[str] = []
     for edge in edges:
         if satisfied_count >= target:
             break
-        _wait_for_task_dependency_to_settle(engine, edge.depends_on_task_id, sleep=sleep, now=now)
+        _wait_for_task_dependency_to_settle(
+            engine, edge.depends_on_task_id, budget=budget, sleep=sleep, now=now
+        )
         with engine.connect() as conn:
-            satisfied, _ = _task_dependency_satisfied(conn, edge)
+            satisfied, candidate = _task_dependency_satisfied(conn, edge)
         if satisfied:
             satisfied_count += 1
+            if candidate is not None:
+                consumed[edge.task_dependency_id] = candidate
         else:
             reasons.append(
                 f"cross-pipeline task dependency on task_id={edge.depends_on_task_id} "
                 f"({edge.dependency_type}) not satisfied"
             )
     return CrossPipelineCheck(
-        satisfied_count=satisfied_count, total=len(edges), reasons=tuple(reasons)
+        satisfied_count=satisfied_count,
+        total=len(edges),
+        reasons=tuple(reasons),
+        consumed=consumed,
     )
 
 
-def consume_task_dependency_edges(engine: Engine, task_id: int) -> None:
+def consume_task_dependency_edges(
+    engine: Engine, task_id: int, consumed: dict[int, int] | None = None
+) -> None:
     """After `task_id`'s own run finishes, advance each edge's tracker if newly satisfied."""
     with engine.connect() as conn:
         edges = fetch_task_cross_pipeline_dependency_ids(conn, task_id)
     for edge in edges:
         with engine.begin() as conn:
-            satisfied, candidate = _task_dependency_satisfied(conn, edge)
+            # See consume_pipeline_dependency_edges for why the gate-time run
+            # id is threaded through rather than re-derived here (E2-12).
+            if consumed is not None:
+                candidate = consumed.get(edge.task_dependency_id)
+                satisfied = candidate is not None
+            else:
+                satisfied, candidate = _task_dependency_satisfied(conn, edge)
             if satisfied:
                 conn.execute(
                     text(

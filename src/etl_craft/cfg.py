@@ -652,6 +652,52 @@ def fetch_tasks_missing_source_or_target(conn: Connection) -> list[TaskLineageGa
 
 
 @dataclass(frozen=True)
+class SqlSnippet:
+    """One author-supplied SQL string, with enough context to name it in a report.
+
+    [ADDITION, 2026-09-20, E2-07] Backs validate.validate_read_only_sql, which
+    lints every SOURCE_SQL and BUSINESS_RULE_SQL for statements a read-only
+    SELECT has no business containing.
+    """
+
+    pipeline_code: str
+    task_code: str
+    parameter_name: str
+    sql: str
+
+
+def fetch_sql_snippets(conn: Connection) -> list[SqlSnippet]:
+    """Fetch every active task's SOURCE_SQL and every active rule's BUSINESS_RULE_SQL."""
+    rows = conn.execute(
+        text(
+            "SELECT p.PIPELINE_CODE AS pipeline_code, t.TASK_CODE AS task_code, "
+            "par.PARAMETER_NAME AS parameter_name, par.PARAMETER_VALUE AS sql_text "
+            "FROM CFG_TASK_PARAMETERS par "
+            "JOIN CFG_TASKS t ON t.TASK_ID = par.TASK_ID "
+            "JOIN CFG_PIPELINES p ON p.PIPELINE_ID = t.PIPELINE_ID "
+            "WHERE par.PARAMETER_NAME = 'SOURCE_SQL' AND par.ACTIVE_FLAG = 'Y' "
+            "AND t.ACTIVE_FLAG = 'Y' AND p.ACTIVE_FLAG = 'Y' "
+            "UNION ALL "
+            "SELECT p.PIPELINE_CODE, t.TASK_CODE, "
+            "'BUSINESS_RULE_SQL (' || br.BUSINESS_RULE_NAME || ')', br.BUSINESS_RULE_SQL "
+            "FROM CFG_BUSINESS_RULES br "
+            "JOIN CFG_TASKS t ON t.TASK_ID = br.TASK_ID "
+            "JOIN CFG_PIPELINES p ON p.PIPELINE_ID = br.PIPELINE_ID "
+            "WHERE br.ACTIVE_FLAG = 'Y' AND t.ACTIVE_FLAG = 'Y' AND p.ACTIVE_FLAG = 'Y'"
+        )
+    ).all()
+    return [
+        SqlSnippet(
+            pipeline_code=row.pipeline_code,
+            task_code=row.task_code,
+            parameter_name=row.parameter_name,
+            sql=row.sql_text,
+        )
+        for row in rows
+    ]
+
+
+@dataclass(frozen=True)
 class TableLineageEntry:
     """One task that reads (SOURCE_OBJECT) or writes (TARGET_OBJECT) a given table."""
 

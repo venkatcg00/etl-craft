@@ -64,6 +64,7 @@ from etl_craft.config import (
     SourceConfig,
 )
 from etl_craft.crosspipe import (
+    PollBudget,
     _wait_for_pipeline_dependency_to_settle,
     _wait_for_task_dependency_to_settle,
     check_pipeline_dependencies,
@@ -1663,7 +1664,7 @@ def test_check_pipeline_dependencies_satisfied_when_no_edges(
     postgres_engine, two_committed_pipelines
 ):
     downstream_id, _ = two_committed_pipelines
-    assert check_pipeline_dependencies(postgres_engine, downstream_id) is None
+    assert check_pipeline_dependencies(postgres_engine, downstream_id).satisfied
 
 
 def test_check_pipeline_dependencies_not_satisfied_with_no_upstream_run(
@@ -1672,7 +1673,7 @@ def test_check_pipeline_dependencies_not_satisfied_with_no_upstream_run(
     downstream_id, upstream_id = two_committed_pipelines
     insert_committed_pipeline_dependency(postgres_engine, downstream_id, upstream_id, "SUCCESS")
 
-    reason = check_pipeline_dependencies(postgres_engine, downstream_id)
+    reason = check_pipeline_dependencies(postgres_engine, downstream_id).reason
 
     assert reason is not None
     assert f"pipeline_id={upstream_id}" in reason
@@ -1690,7 +1691,7 @@ def test_check_pipeline_dependencies_success_type_satisfied_by_success_run(
         postgres_engine, upstream_id, "SUCCESS", end_date=datetime.now(UTC)
     )
 
-    assert check_pipeline_dependencies(postgres_engine, downstream_id) is None
+    assert check_pipeline_dependencies(postgres_engine, downstream_id).satisfied
 
 
 def test_check_pipeline_dependencies_failure_type_satisfied_by_failed_run(
@@ -1702,13 +1703,13 @@ def test_check_pipeline_dependencies_failure_type_satisfied_by_failed_run(
         postgres_engine, upstream_id, "SUCCESS", end_date=datetime.now(UTC)
     )
 
-    assert check_pipeline_dependencies(postgres_engine, downstream_id) is not None
+    assert not check_pipeline_dependencies(postgres_engine, downstream_id).satisfied
 
     insert_committed_pipeline_run(
         postgres_engine, upstream_id, "FAILED", end_date=datetime.now(UTC)
     )
 
-    assert check_pipeline_dependencies(postgres_engine, downstream_id) is None
+    assert check_pipeline_dependencies(postgres_engine, downstream_id).satisfied
 
 
 def test_check_pipeline_dependencies_always_type_satisfied_by_any_terminal_status(
@@ -1720,7 +1721,7 @@ def test_check_pipeline_dependencies_always_type_satisfied_by_any_terminal_statu
         postgres_engine, upstream_id, "SKIPPED", end_date=datetime.now(UTC)
     )
 
-    assert check_pipeline_dependencies(postgres_engine, downstream_id) is None
+    assert check_pipeline_dependencies(postgres_engine, downstream_id).satisfied
 
 
 def test_check_pipeline_dependencies_has_data_satisfied_by_any_task_with_data(
@@ -1736,11 +1737,11 @@ def test_check_pipeline_dependencies_has_data_satisfied_by_any_task_with_data(
         postgres_engine, upstream_id, "SUCCESS", end_date=datetime.now(UTC)
     )
 
-    assert check_pipeline_dependencies(postgres_engine, downstream_id) is not None
+    assert not check_pipeline_dependencies(postgres_engine, downstream_id).satisfied
 
     insert_committed_task_run(postgres_engine, upstream_task_id, run_id, "SUCCESS", target_count=5)
 
-    assert check_pipeline_dependencies(postgres_engine, downstream_id) is None
+    assert check_pipeline_dependencies(postgres_engine, downstream_id).satisfied
 
 
 def test_consume_pipeline_dependency_edges_updates_tracker_and_blocks_reconsumption(
@@ -1766,7 +1767,7 @@ def test_consume_pipeline_dependency_edges_updates_tracker_and_blocks_reconsumpt
         ).scalar_one()
     assert tracked == run_id
     # Re-checking now (no newer qualifying run since) correctly reports unmet.
-    assert check_pipeline_dependencies(postgres_engine, downstream_id) is not None
+    assert not check_pipeline_dependencies(postgres_engine, downstream_id).satisfied
 
 
 def test_consume_pipeline_dependency_edges_is_a_noop_when_unsatisfied(
@@ -1809,7 +1810,11 @@ def test_wait_for_pipeline_dependency_polls_then_settles(postgres_engine, two_co
                 )
 
     _wait_for_pipeline_dependency_to_settle(
-        postgres_engine, upstream_id, sleep=fake_sleep, now=lambda: datetime.now(UTC)
+        postgres_engine,
+        upstream_id,
+        sleep=fake_sleep,
+        now=lambda: datetime.now(UTC),
+        budget=PollBudget.start(lambda: datetime.now(UTC)),
     )
 
     assert calls["n"] == 2
@@ -1824,7 +1829,11 @@ def test_wait_for_pipeline_dependency_gives_up_after_poll_cap(
 
     clock = _FakeClock(start)
     _wait_for_pipeline_dependency_to_settle(
-        postgres_engine, upstream_id, sleep=clock.sleep, now=clock.now
+        postgres_engine,
+        upstream_id,
+        sleep=clock.sleep,
+        now=clock.now,
+        budget=PollBudget.start(clock.now),
     )
 
     assert len(clock.sleeps) == 30
@@ -1848,7 +1857,11 @@ def test_wait_for_pipeline_dependency_stops_at_deadline_mid_loop(
         clock._now += timedelta(hours=2)  # blow well past the 1-hour deadline in one jump
 
     _wait_for_pipeline_dependency_to_settle(
-        postgres_engine, upstream_id, sleep=jump_sleep, now=clock.now
+        postgres_engine,
+        upstream_id,
+        sleep=jump_sleep,
+        now=clock.now,
+        budget=PollBudget.start(clock.now),
     )
 
     assert len(clock.sleeps) == 1
@@ -1962,7 +1975,11 @@ def test_wait_for_task_dependency_polls_then_settles(postgres_engine, two_commit
                 )
 
     _wait_for_task_dependency_to_settle(
-        postgres_engine, upstream_task_id, sleep=fake_sleep, now=lambda: datetime.now(UTC)
+        postgres_engine,
+        upstream_task_id,
+        sleep=fake_sleep,
+        now=lambda: datetime.now(UTC),
+        budget=PollBudget.start(lambda: datetime.now(UTC)),
     )
 
     assert calls["n"] == 2
@@ -1986,7 +2003,11 @@ def test_wait_for_task_dependency_stops_at_deadline_mid_loop(
         clock._now += timedelta(hours=2)
 
     _wait_for_task_dependency_to_settle(
-        postgres_engine, upstream_task_id, sleep=jump_sleep, now=clock.now
+        postgres_engine,
+        upstream_task_id,
+        sleep=jump_sleep,
+        now=clock.now,
+        budget=PollBudget.start(clock.now),
     )
 
     assert len(clock.sleeps) == 1
@@ -2351,6 +2372,41 @@ def test_run_task_any_condition_does_not_require_every_cross_pipeline_edge(
     assert outcome.status == "FAILED"
 
 
+def test_cross_pipeline_poll_budget_is_shared_across_every_edge(
+    postgres_engine, two_committed_pipelines
+):
+    # E2-11. CLAUDE.md specifies "a hard 1-hour timeout overall", but both the
+    # deadline and MAX_POLLS were computed inside the per-edge wait helper,
+    # which is called once per edge in a loop -- so a task with three
+    # cross-pipeline edges could wait three hours and spend ninety polls.
+    downstream_id, upstream_id = two_committed_pipelines
+    task_id = insert_committed_task(postgres_engine, downstream_id, "budget_target")
+    start = datetime.now(UTC)
+    run_id = insert_committed_pipeline_run(
+        postgres_engine, upstream_id, "IN-PROGRESS", start_date=start
+    )
+    # Two upstream tasks, both stuck IN-PROGRESS, so both edges want to poll.
+    for name in ("budget_up_a", "budget_up_b"):
+        upstream_task = insert_committed_task(postgres_engine, upstream_id, name)
+        insert_committed_task_run(
+            postgres_engine, upstream_task, run_id, "IN-PROGRESS", start_date=start
+        )
+        insert_committed_cross_pipeline_task_dependency(
+            postgres_engine, downstream_id, task_id, upstream_id, upstream_task, "SUCCESS"
+        )
+
+    clock = _FakeClock(start)
+    check = check_task_cross_pipeline_dependencies(
+        postgres_engine, task_id, sleep=clock.sleep, now=clock.now
+    )
+
+    assert check.satisfied_count == 0
+    # One budget across both edges, not one each: at most MAX_POLLS total, and
+    # the wall clock never passes the single one-hour deadline.
+    assert len(clock.sleeps) <= 30
+    assert (clock.now() - start).total_seconds() < 3600
+
+
 def test_check_task_cross_pipeline_dependencies_stops_once_enough_are_satisfied(
     postgres_engine, two_committed_pipelines
 ):
@@ -2449,7 +2505,15 @@ def test_run_task_detects_a_child_that_dies_unannounced(
     task_id = insert_committed_task(postgres_engine, committed_pipeline, "task_a")
     seed_active_run(postgres_engine, committed_pipeline)
 
-    def _crash(handler):
+    # (engine, ctx), matching dispatch's real signature. It used to be
+    # `_crash(handler)` -- a stale one-argument stub left over from an earlier
+    # dispatch signature -- so the child actually died of a TypeError inside
+    # runner, never reaching os._exit at all. The test passed anyway, because
+    # any non-zero exit produced the same "died unexpectedly" row. E2-09's
+    # BaseException handler exposed it: a TypeError now gets a real message,
+    # which is exactly what this test asserts must NOT happen for a genuine
+    # unannounced death.
+    def _crash(engine, ctx):
         os._exit(1)
 
     monkeypatch.setattr("etl_craft.runner.dispatch", _crash)
@@ -5858,6 +5922,75 @@ def test_init_db_wraps_a_failure_with_the_file_it_was_applying(postgres_engine, 
     )
     with pytest.raises(InitDbError, match="failed applying schema.sql"):
         init_db(postgres_engine, force=True)
+
+
+def test_consume_task_edges_records_the_run_the_gate_used_not_a_newer_one(
+    postgres_engine, two_committed_pipelines
+):
+    # E2-12. consume_* used to re-evaluate satisfaction at finalize time and
+    # record whatever qualified *then*. If the upstream completed a second
+    # qualifying run while this one executed, the watermark jumped past it and
+    # marked it consumed by a task that never read its data -- making the
+    # tracker's own claim ("the run last consumed for each edge") false in
+    # exactly the different-cadence case it exists for.
+    downstream_id, upstream_id = two_committed_pipelines
+    task_id = insert_committed_task(postgres_engine, downstream_id, "e212_target")
+    upstream_task = insert_committed_task(postgres_engine, upstream_id, "e212_up")
+    edge_id = insert_committed_cross_pipeline_task_dependency(
+        postgres_engine, downstream_id, task_id, upstream_id, upstream_task, "SUCCESS"
+    )
+
+    first_run = insert_committed_pipeline_run(postgres_engine, upstream_id, "SUCCESS")
+    first_task_run = insert_committed_task_run(postgres_engine, upstream_task, first_run, "SUCCESS")
+
+    # The gate resolves against the run that exists now.
+    check = check_task_cross_pipeline_dependencies(postgres_engine, task_id)
+    assert check.satisfied_count == 1
+    assert check.consumed == {edge_id: first_task_run}
+
+    # While this task executes, the upstream completes another qualifying run.
+    second_run = insert_committed_pipeline_run(postgres_engine, upstream_id, "SUCCESS")
+    second_task_run = insert_committed_task_run(
+        postgres_engine, upstream_task, second_run, "SUCCESS"
+    )
+    assert second_task_run > first_task_run
+
+    consume_task_dependency_edges(postgres_engine, task_id, check.consumed)
+
+    with postgres_engine.connect() as conn:
+        recorded = conn.execute(
+            text(
+                "SELECT LAST_CONSUMED_TASK_RUN_ID FROM AUD_TASK_DEPENDENCY_TRACKER "
+                "WHERE TASK_DEPENDENCY_ID = :edge_id"
+            ),
+            {"edge_id": edge_id},
+        ).scalar_one()
+    # The run the gate actually used, not the newer one nobody read.
+    assert recorded == first_task_run
+
+
+def test_validate_flags_source_sql_that_is_not_read_only(
+    postgres_engine, committed_pipeline, craft_connector_on_disk, capsys
+):
+    # E2-07 at the level it is actually enforced. A data-modifying CTE is a
+    # valid "SELECT" that writes, and nothing checked SOURCE_SQL at all.
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "writer_task")
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {
+            "SOURCE_OBJECT": "public.src",
+            "TARGET_OBJECT": "public.tgt",
+            "SOURCE_SQL": "WITH x AS (DELETE FROM public.other RETURNING *) SELECT * FROM x",
+        },
+    )
+
+    exit_code = cli_main(["validate"])
+
+    assert exit_code == 1
+    out = capsys.readouterr().out
+    assert "[sql_read_only]" in out
+    assert "writer_task" in out
 
 
 def test_cli_migrate_reports_a_missing_migrations_directory(

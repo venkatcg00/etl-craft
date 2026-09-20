@@ -39,6 +39,7 @@ another function feeding the same list.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from sqlalchemy import inspect
@@ -49,6 +50,7 @@ from etl_craft.cfg import (
     fetch_all_pipelines,
     fetch_business_rule_targets,
     fetch_pipeline_graph,
+    fetch_sql_snippets,
     fetch_tasks_missing_source_or_target,
     resolve_pipeline_id,
 )
@@ -135,6 +137,79 @@ def validate_business_rule_keys(
                     ),
                 )
             )
+    return issues
+
+
+# [ADDITION, 2026-09-20, E2-07] Statements a read-only SELECT has no business
+# containing. Matched as whole words, after comments and string literals are
+# stripped, so a column called `update_date` or a literal 'DROP' is not a hit.
+_WRITE_KEYWORDS = (
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "MERGE",
+    "TRUNCATE",
+    "DROP",
+    "ALTER",
+    "CREATE",
+    "GRANT",
+    "REVOKE",
+    "COPY",
+)
+_COMMENT_RE = re.compile(r"/\*.*?\*/|--[^\n]*", re.DOTALL)
+_LITERAL_RE = re.compile(r"'(?:[^']|'')*'")
+
+
+def _strip_noise(sql: str) -> str:
+    """Remove comments and string literals so keyword matching sees only real SQL."""
+    return _LITERAL_RE.sub("''", _COMMENT_RE.sub(" ", sql))
+
+
+def looks_read_only(sql: str) -> str | None:
+    """Return why `sql` does not look like a read-only SELECT, or None if it does.
+
+    [ADDITION, 2026-09-20, E2-07] CLAUDE.md's core principle is that each SQL
+    task supplies "a bare, **validated**, read-only SELECT" and that "a step
+    cannot touch the warehouse outside its declared action" — but nothing
+    validated it. SOURCE_SQL is interpolated straight into
+    `CREATE TEMPORARY TABLE stage AS {select}`, and Postgres supports
+    data-modifying CTEs, so `WITH x AS (DELETE FROM other RETURNING *)
+    SELECT * FROM x` is a perfectly valid "SELECT" that writes.
+
+    **This is a lint, not a security boundary.** Adding a real SQL parser is
+    ruled out by Non-goals, and a determined author can defeat any string
+    check. The real control is that CFG_ rows are git-reviewed; this catches
+    the honest mistake and makes the intent explicit. It lives in `validate`
+    rather than at runtime for the same reason: a config problem should be
+    findable before 3 a.m., and a runtime check on every execution would cost
+    something for no extra safety.
+    """
+    stripped = _strip_noise(sql).strip()
+    if not stripped:
+        return "is empty"
+    first = re.match(r"[(\s]*(\w+)", stripped)
+    if first is None or first.group(1).upper() not in {"SELECT", "WITH", "TABLE", "VALUES"}:
+        got = first.group(1) if first else stripped[:20]
+        return f"starts with {got!r}, not SELECT/WITH"
+    found = [kw for kw in _WRITE_KEYWORDS if re.search(rf"\b{kw}\b", stripped, re.IGNORECASE)]
+    if found:
+        return f"contains {found} — a read-only SELECT should not"
+    return None
+
+
+def validate_read_only_sql(conn: Connection) -> list[ValidationIssue]:
+    """Lint every active SOURCE_SQL and BUSINESS_RULE_SQL for statements that write."""
+    issues = [
+        ValidationIssue(
+            category="sql_read_only",
+            message=(
+                f"{entry.pipeline_code}.{entry.task_code}: CFG_TASK_PARAMETERS."
+                f"{entry.parameter_name} {reason}"
+            ),
+        )
+        for entry in fetch_sql_snippets(conn)
+        if (reason := looks_read_only(entry.sql)) is not None
+    ]
     return issues
 
 

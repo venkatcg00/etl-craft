@@ -184,4 +184,14 @@ def execute(cfg_conn: Connection, ctx: TaskExecutionContext) -> HandlerResult:
             f"{reported[INGESTION_COUNT_VAR]!r}, expected a number"
         ) from exc
 
-    return HandlerResult(source_count=ingestion_count, variables=variables)
+    # [DEVIATION, 2026-09-20, E2-08] target_count as well as source_count.
+    # HAS_DATA is defined as "upstream SUCCESS and TARGET_COUNT > 0", and this
+    # handler set only source_count — so a HAS_DATA edge on an ingestion task,
+    # the most natural place to want one, was permanently unsatisfiable. What
+    # an ingestion script wrote is exactly what a downstream HAS_DATA means.
+    return HandlerResult(
+        source_count=ingestion_count,
+        target_count=ingestion_count,
+        insert_count=ingestion_count,
+        variables=variables,
+    )

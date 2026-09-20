@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import multiprocessing
 import time
+import traceback
 from dataclasses import dataclass
 
 from sqlalchemy.engine import Engine
@@ -193,6 +194,7 @@ def run_task(
         # other. RUN_CONDITION ranges over all of a task's dependencies, so
         # checking the two halves independently made 'ANY' mean "any
         # same-pipeline edge AND every cross-pipeline edge".
+        consumed_edges: dict[int, int] = {}
         required = graph.required_edge_count(task_id)
         same_satisfied = graph.satisfied_edge_count(task_id, run_state, 0)
         still_needed = required - same_satisfied
@@ -206,6 +208,7 @@ def run_task(
             )
             still_needed -= cross.satisfied_count
             cross_reasons = cross.reasons
+            consumed_edges = cross.consumed
 
         if still_needed > 0:
             # [DEVIATION, 2026-09-20, E2-47] "Not yet" and "never" are no
@@ -269,7 +272,14 @@ def run_task(
     # what an edge is waiting for (SUCCESS/FAILURE/ALWAYS/HAS_DATA) is
     # about *this* task's own outcome, independent of whether it succeeded.
     # A no-op when task_id has no cross-pipeline edges of its own.
-    consume_task_dependency_edges(engine, task_id)
+    #
+    # [DEVIATION, 2026-09-20, E2-12] Passed the run ids the gate actually
+    # resolved, rather than letting consume re-derive them now — an upstream
+    # that completed another qualifying run while this task executed would
+    # otherwise have its watermark advanced past a run nobody read. `--force`
+    # skips the gate entirely, so there is nothing captured to pass and the
+    # old re-derive behaviour is what applies there.
+    consume_task_dependency_edges(engine, task_id, None if force else consumed_edges)
 
     with engine.connect() as conn:
         result = fetch_task_run_result(conn, binding.task_run_id)
@@ -341,6 +351,31 @@ def _dispatch_and_record(ctx: TaskExecutionContext) -> None:
         with engine.begin() as conn:
             update_task_run(conn, ctx.task_run_id, status="FAILED", error_message=str(exc))
         return
+    except BaseException as exc:
+        # [ADDITION, 2026-09-20, E2-09] Everything else, too. handlers.dispatch
+        # wraps only ConfigError and SQLAlchemyError into HandlerError, so
+        # anything outside that pair — an OSError from a missing SCRIPT_NAME,
+        # a NotImplementedError from an unbuilt warehouse auth mode, a plain
+        # bug — killed this child with its message never written anywhere, and
+        # the parent then reported only "task process died unexpectedly (exit
+        # code 1) before recording its own outcome". That fallback should only
+        # ever cover what it was designed for: OOM-kill and segfault, where
+        # there genuinely is nothing to write.
+        #
+        # The traceback goes to TASK_LOG rather than ERROR_MESSAGE: the
+        # one-line message is what `run`'s own output and any alert show, and
+        # a traceback there would bury it.
+        with engine.begin() as conn:
+            update_task_run(
+                conn,
+                ctx.task_run_id,
+                status="FAILED",
+                error_message=f"{type(exc).__name__}: {exc}",
+                task_log="".join(traceback.format_exception(type(exc), exc, exc.__traceback__))[
+                    -4000:
+                ],
+            )
+        raise
     with engine.begin() as conn:
         update_task_run(
             conn,

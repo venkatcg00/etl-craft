@@ -297,7 +297,8 @@ def init_pipeline_run(
     # fallback still returns the right row either way, but in that rare
     # window this caller's gate conclusion — not the winner's — is what
     # gets recorded. Accepted as rare enough not to engineer around.)
-    skip_reason = check_pipeline_dependencies(engine, pipeline_id, sleep=sleep, now=now)
+    gate = check_pipeline_dependencies(engine, pipeline_id, sleep=sleep, now=now)
+    skip_reason = gate.reason
     with engine.begin() as conn:
         pipeline_run_id = find_or_create_active_run(conn, pipeline_id)
         if skip_reason is not None:
@@ -340,7 +341,8 @@ def run_pipeline(
         with engine.connect() as conn:
             existing = fetch_active_pipeline_run_id(conn, pipeline_id)
         if existing is None:
-            skip_reason = check_pipeline_dependencies(engine, pipeline_id, sleep=sleep, now=now)
+            gate = check_pipeline_dependencies(engine, pipeline_id, sleep=sleep, now=now)
+            skip_reason = gate.reason
             if skip_reason is not None:
                 with engine.begin() as conn:
                     pipeline_run_id = find_or_create_active_run(conn, pipeline_id)

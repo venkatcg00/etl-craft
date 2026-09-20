@@ -101,6 +101,7 @@ from etl_craft.runlog import (
 from etl_craft.scripts import _parse_trailing_json
 from etl_craft.scripts import execute as execute_python_script
 from etl_craft.sql_actions import active_database, qualify, substitute_pipeline_id
+from etl_craft.validate import looks_read_only
 from etl_craft.warehouse import (
     WAREHOUSE_AUTH_REGISTRY,
     build_data_engine,
@@ -525,6 +526,48 @@ def test_apply_primary_key_does_nothing_when_none_is_declared():
             raise AssertionError("issued DDL for a target with no PRIMARY_KEY")
 
     sql_actions._apply_primary_key(_Conn(), "public.t", "db", [])
+
+
+# ------------------------------------------------------------------------------
+# validate.py — the read-only SQL lint (E2-07)
+# ------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT a, b FROM t WHERE 1=1",
+        "  select 1 ",
+        "WITH x AS (SELECT 1) SELECT * FROM x",
+        # A column named like a keyword, and a keyword inside a literal, must
+        # not trip it -- literals and comments are stripped before matching.
+        "SELECT update_date, created_by FROM t",
+        "SELECT 'DROP TABLE t' AS warning FROM t",
+        "SELECT a FROM t -- DELETE this later",
+    ],
+)
+def test_looks_read_only_accepts_genuine_selects(sql):
+    assert looks_read_only(sql) is None
+
+
+@pytest.mark.parametrize(
+    "sql, fragment",
+    [
+        # The case CLAUDE.md's "a step cannot touch the warehouse outside its
+        # declared action" is meant to prevent, and which nothing checked: a
+        # data-modifying CTE is a perfectly valid "SELECT" that writes.
+        ("WITH x AS (DELETE FROM other RETURNING *) SELECT * FROM x", "DELETE"),
+        ("INSERT INTO t VALUES (1)", "not SELECT/WITH"),
+        ("SELECT 1; DROP TABLE t", "DROP"),
+        ("TRUNCATE TABLE t", "not SELECT/WITH"),
+        ("   ", "is empty"),
+        ("-- only a comment", "is empty"),
+    ],
+)
+def test_looks_read_only_rejects_statements_that_write(sql, fragment):
+    reason = looks_read_only(sql)
+    assert reason is not None
+    assert fragment in reason
 
 
 # ------------------------------------------------------------------------------
@@ -1097,12 +1140,25 @@ def test_load_dotenv_file_requires_a_path():
 
 def test_parse_jdbc_postgres_with_explicit_port():
     parts = parse_jdbc_postgres("jdbc:postgresql://myhost:6543/mydb")
-    assert parts == {"host": "myhost", "port": 6543, "database": "mydb"}
+    assert parts == {"host": "myhost", "port": 6543, "database": "mydb", "query": {}}
 
 
 def test_parse_jdbc_postgres_default_port():
     parts = parse_jdbc_postgres("jdbc:postgresql://myhost/mydb")
-    assert parts == {"host": "myhost", "port": 5432, "database": "mydb"}
+    assert parts == {"host": "myhost", "port": 5432, "database": "mydb", "query": {}}
+
+
+def test_parse_jdbc_postgres_keeps_the_query_string():
+    # E2-10, security-relevant: the pattern had no `query` group and stopped
+    # the database capture at "?", so jdbc:postgresql://host/db?sslmode=require
+    # connected *without* TLS and said nothing. warehouse.py forwarded query
+    # parameters all along, which made the Engine DB -- always Postgres,
+    # always required -- the weaker of the two.
+    parts = parse_jdbc_postgres(
+        "jdbc:postgresql://myhost/mydb?sslmode=require&application_name=etl"
+    )
+    assert parts["database"] == "mydb"
+    assert parts["query"] == {"sslmode": "require", "application_name": "etl"}
 
 
 def test_parse_jdbc_postgres_rejects_non_jdbc_url():
@@ -1110,15 +1166,36 @@ def test_parse_jdbc_postgres_rejects_non_jdbc_url():
         parse_jdbc_postgres("postgresql://myhost:5432/mydb")
 
 
-def profile(auth_mode: str, **extra) -> ConnectionProfile:
+def profile(auth_mode: str, *, jdbc_url: str | None = None, **extra) -> ConnectionProfile:
     return ConnectionProfile(
         section="POSTGRES",
         name="dev",
-        jdbc_url="jdbc:postgresql://localhost:5432/etl_craft",
+        jdbc_url=jdbc_url or "jdbc:postgresql://localhost:5432/etl_craft",
         user="etl_engine",
         auth_mode=auth_mode,
         extra=extra,
     )
+
+
+def test_password_creator_forwards_query_parameters_to_the_driver(monkeypatch):
+    calls: dict = {}
+
+    class FakeConnection:
+        pass
+
+    def fake_connect(**kwargs):
+        calls.update(kwargs)
+        return FakeConnection()
+
+    import psycopg
+
+    monkeypatch.setattr(psycopg, "connect", fake_connect)
+    creator = AUTH_REGISTRY["password"](
+        profile("password", jdbc_url="jdbc:postgresql://h/d?sslmode=require"), "pw"
+    )
+    creator()
+
+    assert calls["sslmode"] == "require"
 
 
 def test_password_creator_returns_callable_that_calls_psycopg_connect(monkeypatch):
