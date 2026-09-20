@@ -17,13 +17,24 @@ concrete and explicitly called for elsewhere — nothing added is guessed at:
     introspection, not here." Checked via SQLAlchemy's `Inspector` against
     the Data DB, the same dialect-agnostic approach warehouse.py uses,
     never a hardcoded driver call.
+  * [ADDITION] A third check, per explicit instruction: "every task should
+    have atleast 1 source_table and target_table" — every active task
+    (any HANDLER) must declare CFG_TASK_PARAMETERS.SOURCE_OBJECT and
+    TARGET_OBJECT (cfg.py's own lineage convention — see its module-level
+    comment on LINEAGE_SOURCE_PARAM/LINEAGE_TARGET_PARAM). Purely
+    declarative bookkeeping for the `lineage` CLI command's traceability
+    goal, checked here rather than enforced as a hard runtime failure in
+    the handler modules themselves — same "not enforceable as a schema
+    constraint, so check it at validate time" reasoning schema.sql's own
+    closing summary already uses for CFG_TASK_PARAMETERS conventions in
+    general.
 
 [ADDITION] CLAUDE.md's wording ("including") implies `validate` could grow
-more checks later; these two are the only ones it or schema.sql explicitly
-call for today. Every issue found is collected into a flat list rather than
-raised on the first failure, so one bad pipeline or rule doesn't hide the
-rest — and so a future check can be added as just another function feeding
-the same list.
+more checks later; these three are the only ones it, schema.sql, or later
+explicit instruction call for today. Every issue found is collected into a
+flat list rather than raised on the first failure, so one bad pipeline or
+rule doesn't hide the rest — and so a future check can be added as just
+another function feeding the same list.
 """
 
 from __future__ import annotations
@@ -38,6 +49,7 @@ from etl_craft.cfg import (
     fetch_all_pipelines,
     fetch_business_rule_targets,
     fetch_pipeline_graph,
+    fetch_tasks_missing_source_or_target,
     resolve_pipeline_id,
 )
 from etl_craft.resolver import ResolverError, build_graph
@@ -124,3 +136,17 @@ def validate_business_rule_keys(
                 )
             )
     return issues
+
+
+def validate_task_lineage_declarations(conn: Connection) -> list[ValidationIssue]:
+    """Check every active task (any HANDLER) declares SOURCE_OBJECT and TARGET_OBJECT."""
+    return [
+        ValidationIssue(
+            category="task_lineage",
+            message=(
+                f"{gap.pipeline_code}.{gap.task_code}: missing CFG_TASK_PARAMETERS "
+                f"{', '.join(gap.missing)}"
+            ),
+        )
+        for gap in fetch_tasks_missing_source_or_target(conn)
+    ]

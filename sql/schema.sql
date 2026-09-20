@@ -211,8 +211,22 @@ CREATE TABLE CFG_TASKS (
     CONSTRAINT ck_tasks_script_required CHECK (HANDLER <> 'PYTHON' OR SCRIPT_NAME IS NOT NULL),  -- [CHOICE] "required for python scripts"
     CONSTRAINT ck_tasks_return_values   CHECK (                                    -- [CHOICE]
         RETURN_VALUES IS NULL OR
-        RETURN_VALUES ~ '^(INGESTION_COUNT|LATEST_OFFSET_UPDATE)(,(INGESTION_COUNT|LATEST_OFFSET_UPDATE))*$'
-    ),
+        RETURN_VALUES ~ '^[A-Z][A-Z0-9_]*(\|[A-Z][A-Z0-9_]*)*$'
+    ),  -- [DEVIATION, post-signoff 2026-09-19] Was a closed two-token allow-list
+        -- (INGESTION_COUNT/LATEST_OFFSET_UPDATE only, comma-separated).
+        -- Relaxed per explicit instruction: a HANDLER=PYTHON script "can
+        -- return more variables, but all of the variable names to expect
+        -- should be enlisted" here — an arbitrary, per-task-declared set,
+        -- not a fixed vocabulary. Pipe-separated, not comma: "any column
+        -- that has a need to store more than one value must use | as
+        -- separator" (per later explicit instruction, applied retroactively
+        -- here for consistency with MERGE_KEY/MERGE_COMPARE_COLUMNS/
+        -- SOURCE_OBJECT/TARGET_OBJECT, all pipe-separated from the start).
+        -- The DB level only validates shape (pipe-separated uppercase
+        -- identifiers); scripts.py enforces at runtime that the two
+        -- always-mandatory names, INGESTION_COUNT and LATEST_OFFSET_UPDATE,
+        -- are both present — the same "not enforceable as a CHECK, enforce
+        -- at the application layer" reasoning already used elsewhere here.
     CONSTRAINT ck_tasks_active_flag     CHECK (ACTIVE_FLAG IN ('Y','N'))
 );
 
@@ -514,6 +528,29 @@ CREATE TABLE AUD_TASK_DEPENDENCY_TRACKER (
 COMMENT ON TABLE AUD_TASK_DEPENDENCY_TRACKER IS
     '[ADDITION] Same fix as AUD_PIPELINE_DEPENDENCY_TRACKER, at task grain. Only meaningful for genuinely cross-pipeline task edges (DEPENDS_ON_PIPELINE_ID <> PIPELINE_ID on the CFG row) — a same-pipeline task dependency is checked live against AUD_TASK_RUN_LOG scoped by the shared pipeline_run_id instead, and never touches this table.';
 
+-- ----------------------------------------------------------------------------
+-- SCHEMA_MIGRATIONS   [ADDITION, 2026-09-20] — closes CLAUDE.md open question
+-- #7 ("No migration tooling... has been discussed"), per explicit permission
+-- ("you may implement the migration mechanism as well").
+-- ----------------------------------------------------------------------------
+-- [CHOICE] This file (schema.sql) stays the single authoritative *full*
+-- definition for a brand-new install — that role is unchanged. Migration
+-- files under sql/migrations/ are for carrying an *already-deployed*
+-- database forward incrementally from here on; nothing already baked into
+-- schema.sql above gets a retroactive migration file (that would misstate
+-- history — every one of those changes already happened as a direct edit
+-- to this file, flagged in its own POST-SIGNOFF CHANGES block). Zero
+-- migration files exist yet as of this table's own creation, so a fresh
+-- install (via this file) and this table starting empty are consistent by
+-- construction — nothing here is "pending" that a fresh database is
+-- missing. See migrate.py for the runner this table backs.
+CREATE TABLE SCHEMA_MIGRATIONS (
+    VERSION      VARCHAR PRIMARY KEY,   -- migration filename, e.g. '0001_add_thing.sql'
+    APPLIED_AT   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE SCHEMA_MIGRATIONS IS 'Bookkeeping for migrate.py: one row per sql/migrations/*.sql file already applied to this database. schema.sql itself is never re-run against an existing database — this table is only ever consulted/written by `etl-craft migrate`.';
+
 COMMIT;
 
 -- ============================================================================
@@ -609,4 +646,21 @@ COMMIT;
 -- information_schema.columns (both the target table and a materialized
 -- temp-table staging of the task's own SELECT), not a separate persisted
 -- "what shape should this table be" table.
+--
+-- [DEVIATION, 2026-09-19, explicitly requested] CFG_TASKS.RETURN_VALUES'
+-- CHECK constraint relaxed from a closed two-token allow-list
+-- (INGESTION_COUNT/LATEST_OFFSET_UPDATE only) to any pipe-separated list of
+-- uppercase identifiers — a HANDLER=PYTHON script can report an arbitrary,
+-- per-task-declared set of variables, not just those two fixed ones. See the
+-- ck_tasks_return_values constraint's own comment above and scripts.py for
+-- the runtime rule this shifts onto the application layer: both mandatory
+-- names must still be present in whatever a task actually declares, checked
+-- there rather than by a CHECK constraint this table alone can't express.
+--
+-- [DEVIATION, 2026-09-20, explicitly requested] "any column that has a need
+-- to store more than one value must use | as separator" — RETURN_VALUES was
+-- comma-separated when first relaxed (above); switched to pipe-separated
+-- for consistency with every other multi-value CFG_TASK_PARAMETERS
+-- convention (MERGE_KEY, MERGE_COMPARE_COLUMNS, SOURCE_OBJECT,
+-- TARGET_OBJECT), all pipe-separated from the start.
 -- ============================================================================

@@ -20,14 +20,41 @@ class HandlerError(Exception):
 
 @dataclass(frozen=True)
 class HandlerResult:
-    """Counts a handler reports back, to stamp onto AUD_TASK_RUN_LOG via update_task_run."""
+    """Counts (and optional named facts) a handler reports back for AUD_TASK_RUN_LOG.
+
+    `variables`, when set, is what `format_task_log` renders into
+    AUD_TASK_RUN_LOG.TASK_LOG — one "NAME = value" line per entry, in
+    insertion order. [ADDITION] Per explicit instruction ("log all the
+    variables in task log table's task log column as rows with variable =
+    value semantics"): scripts.py populates this with every RETURN_VALUES
+    name a script actually reported (INGESTION_COUNT, LATEST_OFFSET_UPDATE,
+    and any custom ones a task declares); sql_actions.py/business_rules.py
+    leave it unset and get the same "NAME = value" shape for free, rendered
+    from whichever of the typed count fields below are non-None instead —
+    one shared formatter, not a bespoke one per handler.
+    """
 
     source_count: int | None = None
     target_count: int | None = None
     insert_count: int | None = None
     update_count: int | None = None
     delete_count: int | None = None
-    task_log: str | None = None
+    variables: dict[str, object] | None = None
+
+
+def format_task_log(result: HandlerResult) -> str | None:
+    """Render `result` as "NAME = value" lines for AUD_TASK_RUN_LOG.TASK_LOG."""
+    if result.variables:
+        return "\n".join(f"{name} = {value}" for name, value in result.variables.items())
+    counts = {
+        "SOURCE_COUNT": result.source_count,
+        "TARGET_COUNT": result.target_count,
+        "INSERT_COUNT": result.insert_count,
+        "UPDATE_COUNT": result.update_count,
+        "DELETE_COUNT": result.delete_count,
+    }
+    lines = [f"{name} = {value}" for name, value in counts.items() if value is not None]
+    return "\n".join(lines) or None
 
 
 @dataclass(frozen=True)
@@ -53,6 +80,7 @@ class TaskExecutionContext:
     refresh_type: str
     schema_evolution: bool
     script_name: str | None
+    return_values: str | None
     task_params: dict[str, str]
     # Per explicit instruction: a manually/ad-hoc-triggered task (--force)
     # runs a BUSINESS_RULES check against *all* data, not scoped to this

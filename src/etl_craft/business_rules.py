@@ -56,16 +56,36 @@ including the "FAILED" status this module had just written for the *broken*
 rule, and any earlier rules' genuinely-succeeded results in the same task.
 Found by asserting AUD_BUSINESS_RULES_RUN_LOG.STATUS == 'FAILED' after a
 deliberately malformed rule and watching the row not exist at all.
+
+[ADDITION] Sequencing, per explicit instruction ("it sequence would be
+like a dense rank. run in waves. every rule sharing same number for a task
+can run parallel"): CFG_BUSINESS_RULES.SEQUENCE_NUMBER groups rules into
+waves (consecutive equal-SEQUENCE_NUMBER runs, since
+cfg.fetch_business_rules_for_task already orders by SEQUENCE_NUMBER); one
+wave fully completes — every rule in it, success or failure — before the
+next wave starts, and a same-wave rule genuinely runs concurrently with its
+wave-mates via a thread pool (these are I/O-bound DB round trips, not CPU
+work, so threads — not the fork-based approach runner.py's own crash
+detection uses for a different reason). Each thread opens its own Data DB
+connection from `data_engine` (never shares one — SQLAlchemy Connections
+aren't safe for concurrent use across threads) and, thanks to the
+independently-committed-per-rule transaction above, its own Engine DB
+transaction too. If any rule in a wave fails, every other rule in that same
+wave still runs to completion (parallel means genuinely independent, not
+cancel-on-first-failure) — only once the whole wave finishes does the first
+failure propagate, stopping any later wave from starting.
 """
 
 from __future__ import annotations
 
+import itertools
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 
 from sqlalchemy import bindparam, text
 from sqlalchemy.engine import Connection, Engine
 
-from etl_craft.cfg import fetch_business_rules_for_task
+from etl_craft.cfg import BusinessRuleDetail, fetch_business_rules_for_task
 from etl_craft.execution import HandlerError, HandlerResult, TaskExecutionContext
 from etl_craft.sql_actions import active_database, qualify
 
@@ -119,27 +139,20 @@ def _fetch_already_active_keys(
     )
 
 
-def execute(data_conn: Connection, engine: Engine, ctx: TaskExecutionContext) -> HandlerResult:
-    """Run every active CFG_BUSINESS_RULES row for this task; return aggregate counts.
-
-    `engine` is the Engine DB — deliberately an Engine, not a shared
-    Connection, so each rule's own bookkeeping commits independently (see
-    this module's own "[Bug caught and fixed]" note above).
-    """
-    with engine.connect() as conn:
-        rules = fetch_business_rules_for_task(conn, ctx.task_id)
-    database = active_database(ctx.config)
-    scope = "1=1" if ctx.force else f"t.PIPELINE_RUN_ID = {ctx.pipeline_run_id}"
-
-    total_flagged = 0
-    total_deactivated = 0
-    for rule in rules:
-        with engine.begin() as conn:
-            business_rule_run_id = _find_or_create_run_log(
-                conn, rule.business_rule_id, ctx.task_run_id
-            )
-        qualified_target = qualify(rule.target_table, database)
-        try:
+def _run_one_rule(
+    data_engine: Engine,
+    engine: Engine,
+    database: str,
+    scope: str,
+    ctx: TaskExecutionContext,
+    rule: BusinessRuleDetail,
+) -> tuple[int, int]:
+    """Run one rule to completion; return (newly_flagged_count, deactivated_count)."""
+    with engine.begin() as conn:
+        business_rule_run_id = _find_or_create_run_log(conn, rule.business_rule_id, ctx.task_run_id)
+    qualified_target = qualify(rule.target_table, database)
+    try:
+        with data_engine.connect() as data_conn:
             failing_keys = _fetch_keys(
                 data_conn,
                 f"SELECT DISTINCT t.{rule.business_rule_key_column} FROM {qualified_target} AS t "
@@ -150,61 +163,119 @@ def execute(data_conn: Connection, engine: Engine, ctx: TaskExecutionContext) ->
                 f"SELECT DISTINCT t.{rule.business_rule_key_column} FROM {qualified_target} AS t "
                 f"WHERE {scope} AND NOT EXISTS ({rule.business_rule_sql})",
             )
-        except Exception as exc:
-            with engine.begin() as conn:
-                _mark_run_log(conn, business_rule_run_id, "FAILED")
-            raise HandlerError(
-                f"business rule {rule.business_rule_name!r} failed to execute: {exc}"
-            ) from exc
-
+    except Exception as exc:
         with engine.begin() as conn:
-            already_active = _fetch_already_active_keys(conn, rule.business_rule_id, failing_keys)
-            new_keys = [key for key in failing_keys if key not in already_active]
-            now = datetime.now(UTC)
-            if new_keys:
-                conn.execute(
-                    text(
-                        "INSERT INTO AUD_BUSINESS_RULES_RESULTS "
-                        "(BUSINESS_RULE_RUN_ID, BUSINESS_RULE_ID, BUSINESS_RULE_KEY, TARGET_TABLE, "
-                        "STATUS, ACTIVE_FLAG, START_DATE) "
-                        "VALUES (:run_id, :business_rule_id, :key, :target_table, :status, "
-                        "'Y', :now)"
-                    ),
-                    [
-                        {
-                            "run_id": business_rule_run_id,
-                            "business_rule_id": rule.business_rule_id,
-                            "key": key,
-                            "target_table": rule.target_table,
-                            "status": rule.business_rule_type,
-                            "now": now,
-                        }
-                        for key in new_keys
-                    ],
-                )
-                total_flagged += len(new_keys)
+            _mark_run_log(conn, business_rule_run_id, "FAILED")
+        raise HandlerError(
+            f"business rule {rule.business_rule_name!r} failed to execute: {exc}"
+        ) from exc
 
-            # Same "never trust the driver's own rowcount" discipline as
-            # sql_actions.py: figure out exactly which passing keys are
-            # currently active *before* deactivating them, rather than
-            # reading back how many the UPDATE claims to have touched.
-            to_deactivate = _fetch_already_active_keys(conn, rule.business_rule_id, passing_keys)
-            if to_deactivate:
-                stmt = text(
-                    "UPDATE AUD_BUSINESS_RULES_RESULTS SET ACTIVE_FLAG = 'N', END_DATE = :now "
-                    "WHERE BUSINESS_RULE_ID = :business_rule_id AND ACTIVE_FLAG = 'Y' "
-                    "AND BUSINESS_RULE_KEY IN :keys"
-                ).bindparams(bindparam("keys", expanding=True))
-                conn.execute(
-                    stmt,
+    with engine.begin() as conn:
+        already_active = _fetch_already_active_keys(conn, rule.business_rule_id, failing_keys)
+        new_keys = [key for key in failing_keys if key not in already_active]
+        now = datetime.now(UTC)
+        if new_keys:
+            conn.execute(
+                text(
+                    "INSERT INTO AUD_BUSINESS_RULES_RESULTS "
+                    "(BUSINESS_RULE_RUN_ID, BUSINESS_RULE_ID, BUSINESS_RULE_KEY, TARGET_TABLE, "
+                    "STATUS, ACTIVE_FLAG, START_DATE) "
+                    "VALUES (:run_id, :business_rule_id, :key, :target_table, :status, "
+                    "'Y', :now)"
+                ),
+                [
                     {
+                        "run_id": business_rule_run_id,
                         "business_rule_id": rule.business_rule_id,
-                        "keys": list(to_deactivate),
+                        "key": key,
+                        "target_table": rule.target_table,
+                        "status": rule.business_rule_type,
                         "now": now,
-                    },
-                )
-                total_deactivated += len(to_deactivate)
+                    }
+                    for key in new_keys
+                ],
+            )
 
-            _mark_run_log(conn, business_rule_run_id, "SUCCESS")
+        # Same "never trust the driver's own rowcount" discipline as
+        # sql_actions.py: figure out exactly which passing keys are
+        # currently active *before* deactivating them, rather than
+        # reading back how many the UPDATE claims to have touched.
+        to_deactivate = _fetch_already_active_keys(conn, rule.business_rule_id, passing_keys)
+        if to_deactivate:
+            stmt = text(
+                "UPDATE AUD_BUSINESS_RULES_RESULTS SET ACTIVE_FLAG = 'N', END_DATE = :now "
+                "WHERE BUSINESS_RULE_ID = :business_rule_id AND ACTIVE_FLAG = 'Y' "
+                "AND BUSINESS_RULE_KEY IN :keys"
+            ).bindparams(bindparam("keys", expanding=True))
+            conn.execute(
+                stmt,
+                {
+                    "business_rule_id": rule.business_rule_id,
+                    "keys": list(to_deactivate),
+                    "now": now,
+                },
+            )
+
+        _mark_run_log(conn, business_rule_run_id, "SUCCESS")
+
+    return len(new_keys), len(to_deactivate)
+
+
+def _run_wave(
+    data_engine: Engine,
+    engine: Engine,
+    database: str,
+    scope: str,
+    ctx: TaskExecutionContext,
+    wave: list[BusinessRuleDetail],
+) -> tuple[int, int]:
+    """Run every rule in `wave` concurrently; return summed (flagged, deactivated) counts."""
+    if len(wave) == 1:
+        # Not worth a thread pool for the overwhelmingly common case of one
+        # rule per SEQUENCE_NUMBER.
+        return _run_one_rule(data_engine, engine, database, scope, ctx, wave[0])
+
+    total_flagged = 0
+    total_deactivated = 0
+    first_error: HandlerError | None = None
+    with ThreadPoolExecutor(max_workers=len(wave)) as executor:
+        futures = {
+            executor.submit(_run_one_rule, data_engine, engine, database, scope, ctx, rule): rule
+            for rule in wave
+        }
+        for future in as_completed(futures):
+            try:
+                flagged, deactivated = future.result()
+            except HandlerError as exc:
+                if first_error is None:
+                    first_error = exc
+                continue
+            total_flagged += flagged
+            total_deactivated += deactivated
+    if first_error is not None:
+        raise first_error
+    return total_flagged, total_deactivated
+
+
+def execute(data_engine: Engine, engine: Engine, ctx: TaskExecutionContext) -> HandlerResult:
+    """Run every active CFG_BUSINESS_RULES row for this task, wave by wave; return counts.
+
+    `data_engine`/`engine` are both Engines, not shared Connections — each
+    rule opens its own connection to each database, required for genuine
+    thread-safe concurrency within a wave (see this module's own "Sequencing"
+    note above) and for the independently-committed-per-rule transaction
+    ("[Bug caught and fixed]" above).
+    """
+    with engine.connect() as conn:
+        rules = fetch_business_rules_for_task(conn, ctx.task_id)
+    database = active_database(ctx.config)
+    scope = "1=1" if ctx.force else f"t.PIPELINE_RUN_ID = {ctx.pipeline_run_id}"
+
+    total_flagged = 0
+    total_deactivated = 0
+    for _sequence_number, wave_iter in itertools.groupby(rules, key=lambda r: r.sequence_number):
+        flagged, deactivated = _run_wave(data_engine, engine, database, scope, ctx, list(wave_iter))
+        total_flagged += flagged
+        total_deactivated += deactivated
 
     return HandlerResult(insert_count=total_flagged, update_count=total_deactivated)

@@ -45,7 +45,7 @@ test: db-up
 # Coverage is only meaningful against the full suite (unit + integration) —
 # most of the source is exercised through the Postgres-backed tests, so
 # without db-up this reports large, misleading gaps rather than the real
-# ones. fail_under=100 lives in pyproject.toml's [tool.coverage.report].
+# ones. fail_under=80 lives in pyproject.toml's [tool.coverage.report].
 coverage: db-up
 	uv run pytest -q --cov=etl_craft --cov-report=term-missing
 

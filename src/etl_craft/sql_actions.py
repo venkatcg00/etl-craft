@@ -39,9 +39,11 @@ CFG_TASK_PARAMETERS). Every task with HANDLER='SQL' needs:
                   SCD2_MERGE, DELETE_ROWS.
   MERGE_COMPARE_COLUMNS
                   pipe-separated column list — required for SCD1_MERGE,
-                  SCD2_MERGE. Columns compared with IS DISTINCT FROM (the
-                  ANSI SQL:1999 null-safe comparison operator) to decide
-                  whether a matched row actually changed.
+                  SCD2_MERGE. Per explicit instruction, hashed into a single
+                  HASH_KEY column (see below) at staging time; a matched row
+                  is "changed" when its target and staged HASH_KEY differ
+                  (IS DISTINCT FROM, the ANSI SQL:1999 null-safe comparison
+                  operator), not by OR-chaining a per-column comparison.
   HARD_DELETE     optional, DELETE_ROWS only. "true" performs a real DELETE;
                   anything else (including absent) soft-deletes via
                   DELETE_FLAG='Y' instead — per explicit instruction.
@@ -54,16 +56,23 @@ placed immediately after the SELECT's own business columns and before these:
   CREATE_TABLE     (none)
   SETUP_TABLE      inferred from whichever other active task in the same
                     pipeline actually writes this TARGET_OBJECT (see
-                    cfg.fetch_sibling_target_sql_action) — SETUP_TABLE only
+                    cfg.fetch_sibling_target_writer) — SETUP_TABLE only
                     ever establishes a *shape* ahead of the real writer, so
                     its column set must match what that writer will need.
                     Falls back to CREATE_TABLE's (none) if no sibling writer
                     is found.
   OVERWRITE_TABLE  UPDATE_DATE
-  SCD1_MERGE       CREATE_DATE, CREATED_BY, UPDATE_DATE, UPDATED_BY,
-                    DELETE_FLAG
-  SCD2_MERGE       CREATE_DATE, CREATED_BY, UPDATE_DATE, UPDATED_BY,
-                    DELETE_FLAG, ACTIVE_FLAG
+  SCD1_MERGE       HASH_KEY, CREATE_DATE, CREATED_BY, UPDATE_DATE,
+                    UPDATED_BY, DELETE_FLAG
+  SCD2_MERGE       HASH_KEY, CREATE_DATE, CREATED_BY, UPDATE_DATE,
+                    UPDATED_BY, DELETE_FLAG, ACTIVE_FLAG
+[ADDITION] HASH_KEY (`_hash_expression`/`_add_hash_key`): an MD5 hash of
+MERGE_COMPARE_COLUMNS, computed once at staging time (after the schema
+check, so the comparison never sees it — see `_add_hash_key`'s own
+docstring) and stamped onto every row the merge touches. Per explicit
+instruction ("scd tables should also have hashkey created by merge_compare
+columns"). MD5 isn't ANSI SQL, but no hash function is — the same accepted
+exception this module already makes for TRUNCATE.
 [CHOICE] CREATED_BY/UPDATED_BY are stamped with the active [Warehouse]
 profile's `user` (the DB user actually executing the write), not a SQL
 current_user() call — the Data DB, unlike the Engine DB, has no "one
@@ -113,14 +122,16 @@ correctly).
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from etl_craft.cfg import fetch_sibling_target_sql_action
+from etl_craft.cfg import fetch_sibling_target_writer
 from etl_craft.config import ConnectorConfig
 from etl_craft.execution import HandlerError, HandlerResult, TaskExecutionContext
+from etl_craft.runlog import fetch_task_run_status
 from etl_craft.warehouse import translate_jdbc_url
 
 SQL_ACTIONS = frozenset(
@@ -142,8 +153,16 @@ SQL_ACTIONS = frozenset(
 AUDIT_COLUMNS: dict[str, tuple[str, ...]] = {
     "CREATE_TABLE": (),
     "OVERWRITE_TABLE": ("UPDATE_DATE",),
-    "SCD1_MERGE": ("CREATE_DATE", "CREATED_BY", "UPDATE_DATE", "UPDATED_BY", "DELETE_FLAG"),
+    "SCD1_MERGE": (
+        "HASH_KEY",
+        "CREATE_DATE",
+        "CREATED_BY",
+        "UPDATE_DATE",
+        "UPDATED_BY",
+        "DELETE_FLAG",
+    ),
     "SCD2_MERGE": (
+        "HASH_KEY",
         "CREATE_DATE",
         "CREATED_BY",
         "UPDATE_DATE",
@@ -159,6 +178,7 @@ AUDIT_COLUMNS: dict[str, tuple[str, ...]] = {
 # type is, which some engines reject outright in a persisted CREATE TABLE AS
 # SELECT.
 AUDIT_COLUMN_TYPES: dict[str, str] = {
+    "HASH_KEY": "VARCHAR(32)",
     "CREATE_DATE": "TIMESTAMP",
     "UPDATE_DATE": "TIMESTAMP",
     "CREATED_BY": "VARCHAR",
@@ -168,6 +188,7 @@ AUDIT_COLUMN_TYPES: dict[str, str] = {
 }
 
 PIPELINE_ID_TOKEN = "$$pipeline_id"
+_WHERE_RE = re.compile(r"\bWHERE\b", re.IGNORECASE)
 
 
 class SchemaMismatchError(HandlerError):
@@ -177,20 +198,41 @@ class SchemaMismatchError(HandlerError):
 def substitute_pipeline_id(
     sql: str, *, refresh_type: str, pipeline_run_id: int, force_all: bool = False
 ) -> str:
-    """Replace every literal $$pipeline_id token per CLAUDE.md's substitution rule.
+    r"""Resolve `sql`'s pipeline scoping per explicit instruction, in three cases.
 
     FULL refresh (or `force_all`, business_rules.py's manual-invocation path)
-    becomes unconditional (`1=1`); INCREMENTAL becomes a real
+    resolves to the unconditional `1=1`; INCREMENTAL resolves to a real
     `pipeline_run_id = <this run's id>` filter. `pipeline_run_id` is an
     engine-resolved integer, never external input, so direct interpolation
     here (rather than a bind param) is the plain-text substitution pass
     CLAUDE.md itself describes — it must land before the driver's own bind
     handling ever sees the SQL text.
+
+    Three cases, per explicit instruction:
+      1. `$$pipeline_id` literally appears somewhere in `sql` -> substitute
+         it in place (the author wrote `WHERE $$pipeline_id` themselves).
+      2. `$$pipeline_id` is absent and `sql` has no `WHERE` clause at all ->
+         the engine appends one itself, so a task author doesn't have to
+         remember the token on every ordinary query.
+      3. `$$pipeline_id` is absent but `sql` already has some other `WHERE`
+         clause -> left completely untouched. "you may need to enforce it
+         on static tables as well, which is wrong" — a SELECT against a
+         small reference/lookup table with its own real filter and no
+         PIPELINE_RUN_ID column at all must never get one silently AND'd on.
+    [CHOICE] Case 2's "has no WHERE clause" check is a plain `\bWHERE\b`
+    regex search, not a real SQL parse (ruled out elsewhere in this module
+    for the same reason) — a WHERE that exists only inside a subquery, with
+    none at the outer level, would be mis-detected as "has one" and skip the
+    auto-append. Flagged as a known heuristic limit, not solved further.
     """
     replacement = (
         "1=1" if (force_all or refresh_type == "FULL") else f"pipeline_run_id = {pipeline_run_id}"
     )
-    return sql.replace(PIPELINE_ID_TOKEN, replacement)
+    if PIPELINE_ID_TOKEN in sql:
+        return sql.replace(PIPELINE_ID_TOKEN, replacement)
+    if not _WHERE_RE.search(sql):
+        return f"{sql} WHERE {replacement}"
+    return sql
 
 
 def qualify(object_ref: str, database: str) -> str:
@@ -255,6 +297,25 @@ def _fetch_columns(
 
 def _stage_name(task_run_id: int) -> str:
     return f"etl_stage_{task_run_id}"
+
+
+def _hash_expression(columns: list[str], alias: str) -> str:
+    """Build an MD5 hash expression over `columns`, NULL-safe, for change detection.
+
+    [ADDITION] "scd tables should also have hashkey created by merge_compare
+    columns" — per explicit instruction. MD5 isn't ANSI SQL (no hash
+    function is), but it's the one near-universally available exception
+    already accepted elsewhere in this module for the same reason TRUNCATE
+    is: every mainstream engine has *some* MD5, even though the exact
+    function/return shape varies (Postgres returns hex text directly;
+    others may differ) — flagged, not solved further, same spirit as
+    translate_jdbc_url's own documented dialect limits. COALESCE to empty
+    string per column stops one NULL from collapsing the whole concatenation
+    to NULL, which would make every NULL-containing row hash identically
+    regardless of its other values.
+    """
+    parts = " || '|' || ".join(f"COALESCE({alias}.{c}::text, '')" for c in columns)
+    return f"MD5({parts})"
 
 
 def _build_stage(
@@ -387,6 +448,23 @@ def _evolve_schema(
     conn.execute(text(f"ALTER TABLE {qualified_evolve} RENAME TO {table_name}"))
 
 
+def _add_hash_key(conn: Connection, stage: str, merge_compare_columns: list[str]) -> None:
+    """Add HASH_KEY to `stage` after its shape is already confirmed against the target.
+
+    Deliberately a follow-up ALTER, not baked into the stage's own CREATE ...
+    AS SELECT: the schema check (_check_or_evolve_schema) compares stage's
+    columns against the target's *business* columns, and HASH_KEY is one of
+    SCD1_MERGE/SCD2_MERGE's own engine-managed audit columns (excluded from
+    that comparison on the target side) — computing it before the check
+    would make stage carry a column the target-side comparison never
+    expects to see, breaking the "shapes agree" check for every SCD run.
+    """
+    conn.execute(text(f"ALTER TABLE {stage} ADD COLUMN HASH_KEY VARCHAR(32)"))
+    conn.execute(
+        text(f"UPDATE {stage} AS s SET HASH_KEY = {_hash_expression(merge_compare_columns, 's')}")
+    )
+
+
 def _count(conn: Connection, sql: str, params: dict) -> int:
     return conn.execute(text(sql), params).scalar_one()
 
@@ -484,10 +562,8 @@ def _setup_table(
     target_object: str,
     database: str,
 ) -> HandlerResult:
-    sibling_action = fetch_sibling_target_sql_action(
-        cfg_conn, ctx.pipeline_id, ctx.task_id, target_object
-    )
-    audit_columns = AUDIT_COLUMNS.get(sibling_action, ())
+    sibling = fetch_sibling_target_writer(cfg_conn, ctx.pipeline_id, ctx.task_id, target_object)
+    audit_columns = AUDIT_COLUMNS.get(sibling.sql_action, ()) if sibling else ()
 
     stage = _build_stage(conn, ctx.task_run_id, select_sql, empty=True)
     stage_columns = _fetch_columns(conn, stage)
@@ -563,12 +639,19 @@ def _scd1_merge(
         stage=stage,
         schema_evolution=ctx.schema_evolution,
     )
+    _add_hash_key(conn, stage, merge_compare_columns)
     stage_columns = [name for name, _ in _fetch_columns(conn, stage)]
+    # HASH_KEY is deliberately included here (not treated as a key column) —
+    # a matched-and-changed row must have its target-side HASH_KEY refreshed
+    # too, or it would permanently compare as "changed" on every future run.
     non_key_columns = [c for c in stage_columns if c.lower() not in {k.lower() for k in merge_key}]
     qualified_target = qualify(target_object, database)
 
     key_match = " AND ".join(f"t.{k} = s.{k}" for k in merge_key)
-    changed = " OR ".join(f"t.{c} IS DISTINCT FROM s.{c}" for c in merge_compare_columns)
+    # A single HASH_KEY comparison, not an OR-chain over every compare
+    # column — "scd tables should also have hashkey created by
+    # merge_compare columns," per explicit instruction.
+    changed = "t.HASH_KEY IS DISTINCT FROM s.HASH_KEY"
 
     update_count = _count(
         conn,
@@ -641,11 +724,18 @@ def _scd2_merge(
         stage=stage,
         schema_evolution=ctx.schema_evolution,
     )
+    _add_hash_key(conn, stage, merge_compare_columns)
     stage_columns = [name for name, _ in _fetch_columns(conn, stage)]
     qualified_target = qualify(target_object, database)
 
     key_match = " AND ".join(f"t.{k} = s.{k}" for k in merge_key)
-    changed = " OR ".join(f"t.{c} IS DISTINCT FROM s.{c}" for c in merge_compare_columns)
+    # A single HASH_KEY comparison, not an OR-chain over every compare
+    # column — "scd tables should also have hashkey created by
+    # merge_compare columns," per explicit instruction. The new version
+    # inserted for a changed row carries its own freshly-computed HASH_KEY
+    # (via columns_sql/stage below) — no separate refresh needed the way
+    # SCD1_MERGE's matched-in-place UPDATE requires.
+    changed = "t.HASH_KEY IS DISTINCT FROM s.HASH_KEY"
 
     # Materialize the changed-and-matched key set once, so the deactivate
     # step and the new-version-insert step agree on exactly the same rows —
@@ -726,14 +816,23 @@ def _drop_table(
     target_object: str,
     database: str,
 ) -> HandlerResult:
-    sibling_action = fetch_sibling_target_sql_action(
-        cfg_conn, ctx.pipeline_id, ctx.task_id, target_object
-    )
-    if sibling_action != "CREATE_TABLE":
+    sibling = fetch_sibling_target_writer(cfg_conn, ctx.pipeline_id, ctx.task_id, target_object)
+    if sibling is None or sibling.sql_action != "CREATE_TABLE":
         raise HandlerError(
             f"DROP_TABLE refused for {target_object!r}: no other active task in this pipeline "
             "creates it via SQL_ACTION=CREATE_TABLE — DROP_TABLE only ever removes tables this "
             "pipeline itself is responsible for creating"
+        )
+    # "created by this pipeline using create_table before this drop table
+    # step" — per explicit instruction, not just declared in CFG_ somewhere:
+    # the CREATE_TABLE sibling must have genuinely already run and succeeded
+    # under *this* pipeline_run_id.
+    sibling_status = fetch_task_run_status(cfg_conn, sibling.task_id, ctx.pipeline_run_id)
+    if sibling_status != "SUCCESS":
+        raise HandlerError(
+            f"DROP_TABLE refused for {target_object!r}: its CREATE_TABLE task "
+            f"(task_id={sibling.task_id}) hasn't completed successfully yet under this run "
+            f"(status={sibling_status!r}) — DROP_TABLE requires that task to have already run"
         )
     conn.execute(text(f"DROP TABLE IF EXISTS {qualify(target_object, database)}"))
     return HandlerResult()

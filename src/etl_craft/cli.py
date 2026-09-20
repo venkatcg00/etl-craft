@@ -33,6 +33,7 @@ from etl_craft.cfg import (
     fetch_cross_pipeline_task_edges,
     fetch_pipeline_dependencies,
     fetch_pipeline_graph,
+    fetch_table_lineage,
     fetch_task_codes,
     resolve_pipeline_id,
 )
@@ -40,6 +41,7 @@ from etl_craft.config import VALID_MODES, ConfigError, ConnectorConfig, load_con
 from etl_craft.configure import configure_from_env, set_execution_mode
 from etl_craft.db import build_engine
 from etl_craft.generate_yml import generate_global_dag, generate_pipeline_dag
+from etl_craft.migrate import MigrationError, apply_pending_migrations
 from etl_craft.orchestrator import (
     OrchestratorModeRefusedError,
     finalize_active_run,
@@ -49,7 +51,11 @@ from etl_craft.orchestrator import (
 from etl_craft.resolver import ResolverError, build_graph
 from etl_craft.runlog import RunLogError
 from etl_craft.runner import ForceNotAllowedError, run_task
-from etl_craft.validate import validate_business_rule_keys, validate_graphs
+from etl_craft.validate import (
+    validate_business_rule_keys,
+    validate_graphs,
+    validate_task_lineage_declarations,
+)
 from etl_craft.warehouse import build_data_engine
 
 # Every exception run_task/run_pipeline/init_pipeline_run can raise for
@@ -138,6 +144,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("validate", help="Config integrity check")
 
+    # [ADDITION] Per explicit instruction ("take a target table and query
+    # this ask cli to fetch dependencies, it should return all the tasks
+    # that read the table and write the table") — one of the "read-only
+    # query verbs conceptually agreed but not yet named or built" CLAUDE.md
+    # already anticipated as "table-level lineage." [CHOICE] Named
+    # `lineage`, not folded into `graph` (which is pipeline-scoped, not
+    # cross-pipeline/table-scoped the way this query is).
+    lineage_parser = subparsers.add_parser(
+        "lineage", help="List every task that reads or writes a given table"
+    )
+    lineage_parser.add_argument("--table", required=True, help="schema.table, as declared in CFG_")
+
+    # [ADDITION] Closes CLAUDE.md open question #7 — see migrate.py's own
+    # module docstring for scope/reasoning.
+    subparsers.add_parser("migrate", help="Apply pending sql/migrations/*.sql files")
+
     return parser
 
 
@@ -167,6 +189,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _generate_yml_command(args, engine, config)
     if args.command == "validate":
         return _validate_command(engine, config)
+    if args.command == "lineage":
+        return _lineage_command(args, engine)
+    if args.command == "migrate":
+        return _migrate_command(engine)
     # argparse's `required=True` on the subparsers guarantees args.command is
     # one of the branches above; this exists only to document that invariant
     # and satisfy the type checker, not as a path any test can reach.
@@ -305,6 +331,7 @@ def _generate_yml_command(args: argparse.Namespace, engine: Engine, config: Conn
 def _validate_command(engine: Engine, config: ConnectorConfig) -> int:
     with engine.connect() as conn:
         issues = validate_graphs(conn)
+        issues += validate_task_lineage_declarations(conn)
 
         data_engine = None
         if config.warehouse is not None:
@@ -330,3 +357,28 @@ def _validate_command(engine: Engine, config: ConnectorConfig) -> int:
     for issue in issues:
         print(f"[{issue.category}] {issue.message}")
     return 1
+
+
+def _lineage_command(args: argparse.Namespace, engine: Engine) -> int:
+    with engine.connect() as conn:
+        entries = fetch_table_lineage(conn, args.table)
+    if not entries:
+        print(f"(no active task declares {args.table!r} as a SOURCE_OBJECT or TARGET_OBJECT)")
+        return 0
+    for entry in entries:
+        print(f"{entry.pipeline_code}.{entry.task_code}\t{entry.role}")
+    return 0
+
+
+def _migrate_command(engine: Engine) -> int:
+    try:
+        applied = apply_pending_migrations(engine)
+    except MigrationError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if not applied:
+        print("migrate: already up to date")
+    else:
+        for version in applied:
+            print(f"applied {version}")
+    return 0

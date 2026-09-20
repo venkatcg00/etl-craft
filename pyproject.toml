@@ -58,7 +58,11 @@ concurrency = ["thread", "multiprocessing"]
 parallel = true
 
 [tool.coverage.report]
-fail_under = 100
+# [DEVIATION, 2026-09-19] Relaxed from 100 per explicit instruction — write
+# high-quality tests for genuinely new behavior, not exhaustive line-hunting
+# to keep a 100% gate green. Existing tests stay as-is; this only changes
+# how hard future additions must chase the last few percent.
+fail_under = 80
 show_missing = true
 exclude_lines = [
     "pragma: no cover",

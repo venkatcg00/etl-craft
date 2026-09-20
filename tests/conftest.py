@@ -213,15 +213,16 @@ def insert_committed_task(
     *,
     schema_evolution: bool = False,
     script_name: str | None = None,
+    return_values: str | None = None,
 ) -> int:
     """Insert and commit one CFG_TASKS row — for code-under-test that opens its own connections."""
     with engine.begin() as conn:
         return conn.execute(
             text(
                 "INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER, "
-                "SCHEMA_EVOLUTION, SCRIPT_NAME) "
+                "SCHEMA_EVOLUTION, SCRIPT_NAME, RETURN_VALUES) "
                 "VALUES (:task_code, 'ETL', :pipeline_id, :handler, :schema_evolution, "
-                ":script_name) "
+                ":script_name, :return_values) "
                 "RETURNING TASK_ID"
             ),
             {
@@ -230,6 +231,7 @@ def insert_committed_task(
                 "handler": handler,
                 "schema_evolution": schema_evolution,
                 "script_name": script_name,
+                "return_values": return_values,
             },
         ).scalar_one()
 

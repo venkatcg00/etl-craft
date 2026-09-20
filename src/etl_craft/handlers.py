@@ -67,13 +67,12 @@ def dispatch(engine: Engine, ctx: TaskExecutionContext) -> HandlerResult:
                 # sql_action), so sharing engine's transaction costs nothing.
                 with engine.begin() as cfg_conn, data_engine.begin() as data_conn:
                     return sql_actions.execute(data_conn, cfg_conn, ctx)
-            # business_rules.py manages its own per-rule Engine DB
-            # transactions (see its own module docstring's "[Bug caught and
-            # fixed]" note) — it takes the Engine directly, not a shared
-            # Connection, so one rule's failure never rolls back another
-            # rule's already-committed result or its own FAILED marker.
-            with data_engine.connect() as data_conn:
-                return business_rules.execute(data_conn, engine, ctx)
+            # business_rules.py manages its own per-rule connections to both
+            # databases (see its own module docstring's "[Bug caught and
+            # fixed]" and "Sequencing" notes) — genuine same-wave
+            # parallelism needs a fresh Data DB connection per thread, not
+            # one shared Connection, so it takes data_engine directly.
+            return business_rules.execute(data_engine, engine, ctx)
         finally:
             data_engine.dispose()
     except HandlerError:

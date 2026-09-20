@@ -73,7 +73,7 @@ from etl_craft.crosspipe import (
     consume_task_dependency_edges,
 )
 from etl_craft.db import build_engine
-from etl_craft.execution import TaskExecutionContext
+from etl_craft.execution import TaskExecutionContext, format_task_log
 from etl_craft.handlers import HandlerError, dispatch
 from etl_craft.resolver import build_graph
 from etl_craft.runlog import (
@@ -195,6 +195,7 @@ def run_task(
         refresh_type=detail.refresh_type,
         schema_evolution=detail.schema_evolution,
         script_name=detail.script_name,
+        return_values=detail.return_values,
         task_params=task_params,
         force=force,
     )
@@ -267,5 +268,5 @@ def _dispatch_and_record(ctx: TaskExecutionContext) -> None:
             insert_count=result.insert_count,
             update_count=result.update_count,
             delete_count=result.delete_count,
-            task_log=result.task_log,
+            task_log=format_task_log(result),
         )

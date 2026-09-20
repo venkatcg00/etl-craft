@@ -61,6 +61,7 @@ from etl_craft.crosspipe import (
 )
 from etl_craft.execution import HandlerResult
 from etl_craft.generate_yml import GLOBAL_DAG_ID, generate_global_dag, generate_pipeline_dag
+from etl_craft.migrate import MigrationError, apply_pending_migrations
 from etl_craft.orchestrator import (
     OrchestratorModeRefusedError,
     finalize_active_run,
@@ -2446,12 +2447,30 @@ def test_cli_generate_yml_pipeline_code_and_global_are_mutually_exclusive(craft_
 def test_cli_validate_ok_when_no_issues(
     craft_connector_on_disk, postgres_engine, committed_pipeline, capsys
 ):
-    insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {"SOURCE_OBJECT": "public.src", "TARGET_OBJECT": "public.tgt"},
+    )
 
     exit_code = cli_main(["validate"])
 
     assert exit_code == 0
     assert "OK" in capsys.readouterr().out
+
+
+def test_cli_validate_reports_task_missing_lineage_declarations(
+    craft_connector_on_disk, postgres_engine, committed_pipeline, capsys
+):
+    insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+
+    exit_code = cli_main(["validate"])
+
+    assert exit_code == 1
+    out = capsys.readouterr().out
+    assert "[task_lineage]" in out
+    assert "SOURCE_OBJECT" in out and "TARGET_OBJECT" in out
 
 
 def test_cli_validate_reports_cycle(
@@ -2512,6 +2531,11 @@ def test_cli_validate_ok_with_warehouse_configured_and_matching_pk(
     tmp_path, monkeypatch, postgres_engine, committed_pipeline, capsys
 ):
     task_id = insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {"SOURCE_OBJECT": "public.src", "TARGET_OBJECT": "public.validate_cli_test_good"},
+    )
     with postgres_engine.begin() as conn:
         conn.execute(text("DROP TABLE IF EXISTS validate_cli_test_good"))
         conn.execute(text("CREATE TABLE validate_cli_test_good (id INT PRIMARY KEY)"))
@@ -2594,7 +2618,7 @@ def _task_run_row(engine, task_id: int):
                 "SELECT STATUS AS status, ERROR_MESSAGE AS error_message, "
                 "SOURCE_COUNT AS source_count, TARGET_COUNT AS target_count, "
                 "INSERT_COUNT AS insert_count, UPDATE_COUNT AS update_count, "
-                "DELETE_COUNT AS delete_count "
+                "DELETE_COUNT AS delete_count, TASK_LOG AS task_log "
                 "FROM AUD_TASK_RUN_LOG WHERE TASK_ID = :task_id "
                 "ORDER BY START_DATE DESC LIMIT 1"
             ),
@@ -2621,7 +2645,7 @@ def test_sql_create_table_stamps_pipeline_run_id_and_counts(
         {
             "SQL_ACTION": "CREATE_TABLE",
             "TARGET_OBJECT": target,
-            "SOURCE_SQL": "SELECT id, name FROM (VALUES (1,'a'),(2,'b')) AS v(id, name)",
+            "SOURCE_SQL": "SELECT id, name FROM (VALUES (1,'a'),(2,'b')) AS v(id, name) WHERE 1=1",
         },
     )
     run_id = seed_active_run(postgres_engine, committed_pipeline)
@@ -2650,7 +2674,7 @@ def test_sql_setup_table_infers_audit_columns_from_scd2_sibling(
         {
             "SQL_ACTION": "SETUP_TABLE",
             "TARGET_OBJECT": target,
-            "SOURCE_SQL": "SELECT id, name FROM (VALUES (1,'a')) AS v(id, name)",
+            "SOURCE_SQL": "SELECT id, name FROM (VALUES (1,'a')) AS v(id, name) WHERE 1=1",
         },
     )
     sibling_id = insert_committed_task(postgres_engine, committed_pipeline, "merger")
@@ -2687,6 +2711,7 @@ def test_sql_setup_table_infers_audit_columns_from_scd2_sibling(
         "id",
         "name",
         "pipeline_run_id",
+        "hash_key",
         "create_date",
         "created_by",
         "update_date",
@@ -2709,7 +2734,7 @@ def test_sql_setup_table_no_sibling_falls_back_to_no_audit_columns(
         {
             "SQL_ACTION": "SETUP_TABLE",
             "TARGET_OBJECT": target,
-            "SOURCE_SQL": "SELECT id, name FROM (VALUES (1,'a')) AS v(id, name)",
+            "SOURCE_SQL": "SELECT id, name FROM (VALUES (1,'a')) AS v(id, name) WHERE 1=1",
         },
     )
     seed_active_run(postgres_engine, committed_pipeline)
@@ -2749,7 +2774,7 @@ def test_sql_overwrite_table_truncates_and_reinserts(
         {
             "SQL_ACTION": "SETUP_TABLE",
             "TARGET_OBJECT": target,
-            "SOURCE_SQL": f"SELECT * FROM {src}",
+            "SOURCE_SQL": f"SELECT * FROM {src} WHERE 1=1",
         },
     )
     over_id = insert_committed_task(postgres_engine, committed_pipeline, "over")
@@ -2759,7 +2784,7 @@ def test_sql_overwrite_table_truncates_and_reinserts(
         {
             "SQL_ACTION": "OVERWRITE_TABLE",
             "TARGET_OBJECT": target,
-            "SOURCE_SQL": f"SELECT * FROM {src}",
+            "SOURCE_SQL": f"SELECT * FROM {src} WHERE 1=1",
         },
     )
     run1 = seed_active_run(postgres_engine, committed_pipeline)
@@ -2798,7 +2823,11 @@ def test_sql_overwrite_table_missing_target_fails_clearly(
     insert_committed_task_parameters(
         postgres_engine,
         task_id,
-        {"SQL_ACTION": "OVERWRITE_TABLE", "TARGET_OBJECT": target, "SOURCE_SQL": "SELECT 1 AS id"},
+        {
+            "SQL_ACTION": "OVERWRITE_TABLE",
+            "TARGET_OBJECT": target,
+            "SOURCE_SQL": "SELECT 1 AS id WHERE 1=1",
+        },
     )
     seed_active_run(postgres_engine, committed_pipeline)
 
@@ -2826,7 +2855,7 @@ def test_sql_scd1_merge_inserts_updates_and_skips_unchanged(
         {
             "SQL_ACTION": "SETUP_TABLE",
             "TARGET_OBJECT": target,
-            "SOURCE_SQL": f"SELECT * FROM {src}",
+            "SOURCE_SQL": f"SELECT * FROM {src} WHERE 1=1",
         },
     )
     merge_id = insert_committed_task(postgres_engine, committed_pipeline, "merge")
@@ -2836,7 +2865,7 @@ def test_sql_scd1_merge_inserts_updates_and_skips_unchanged(
         {
             "SQL_ACTION": "SCD1_MERGE",
             "TARGET_OBJECT": target,
-            "SOURCE_SQL": f"SELECT * FROM {src}",
+            "SOURCE_SQL": f"SELECT * FROM {src} WHERE 1=1",
             "MERGE_KEY": "id",
             "MERGE_COMPARE_COLUMNS": "name",
         },
@@ -2891,7 +2920,7 @@ def test_sql_scd2_merge_deactivates_and_inserts_new_version(
         {
             "SQL_ACTION": "SETUP_TABLE",
             "TARGET_OBJECT": target,
-            "SOURCE_SQL": f"SELECT * FROM {src}",
+            "SOURCE_SQL": f"SELECT * FROM {src} WHERE 1=1",
         },
     )
     merge_id = insert_committed_task(postgres_engine, committed_pipeline, "merge")
@@ -2901,7 +2930,7 @@ def test_sql_scd2_merge_deactivates_and_inserts_new_version(
         {
             "SQL_ACTION": "SCD2_MERGE",
             "TARGET_OBJECT": target,
-            "SOURCE_SQL": f"SELECT * FROM {src}",
+            "SOURCE_SQL": f"SELECT * FROM {src} WHERE 1=1",
             "MERGE_KEY": "id",
             "MERGE_COMPARE_COLUMNS": "name",
         },
@@ -2960,7 +2989,11 @@ def test_sql_drop_table_succeeds_with_create_table_sibling(
     insert_committed_task_parameters(
         postgres_engine,
         create_id,
-        {"SQL_ACTION": "CREATE_TABLE", "TARGET_OBJECT": target, "SOURCE_SQL": "SELECT 1 AS id"},
+        {
+            "SQL_ACTION": "CREATE_TABLE",
+            "TARGET_OBJECT": target,
+            "SOURCE_SQL": "SELECT 1 AS id WHERE 1=1",
+        },
     )
     drop_id = insert_committed_task(postgres_engine, committed_pipeline, "dropper")
     insert_committed_task_parameters(
@@ -3015,6 +3048,37 @@ def test_sql_drop_table_refused_without_create_table_sibling(
     assert exists is not None
 
 
+def test_sql_drop_table_refused_when_create_table_sibling_has_not_run_yet(
+    postgres_engine, committed_pipeline, data_db_tables
+):
+    # A CREATE_TABLE sibling exists in CFG_ (the earlier test covers that
+    # part) but hasn't actually executed under *this* run — "created by
+    # this pipeline using create_table before this drop table step," per
+    # explicit instruction, not just declared somewhere in config.
+    target = f"public.sqlx_drop_not_run_{committed_pipeline}"
+    data_db_tables.append(target)
+    creator_id = insert_committed_task(postgres_engine, committed_pipeline, "creator")
+    insert_committed_task_parameters(
+        postgres_engine,
+        creator_id,
+        {"SQL_ACTION": "CREATE_TABLE", "TARGET_OBJECT": target, "SOURCE_SQL": "SELECT 1 AS id"},
+    )
+    # Deliberately never run_task(..., "creator") — the whole point is that
+    # its AUD_TASK_RUN_LOG has no SUCCESS row yet under this run.
+    drop_id = insert_committed_task(postgres_engine, committed_pipeline, "dropper")
+    insert_committed_task_parameters(
+        postgres_engine, drop_id, {"SQL_ACTION": "DROP_TABLE", "TARGET_OBJECT": target}
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    outcome = run_task(
+        postgres_engine, make_config(warehouse=True), "TEST_CONCURRENT_PL", "dropper"
+    )
+
+    assert outcome.status == "FAILED"
+    assert "hasn't completed successfully yet" in outcome.message
+
+
 def test_sql_delete_rows_hard_and_soft(postgres_engine, committed_pipeline, data_db_tables):
     target = f"public.sqlx_delete_{committed_pipeline}"
     data_db_tables.append(target)
@@ -3025,7 +3089,7 @@ def test_sql_delete_rows_hard_and_soft(postgres_engine, committed_pipeline, data
         {
             "SQL_ACTION": "SETUP_TABLE",
             "TARGET_OBJECT": target,
-            "SOURCE_SQL": "SELECT id, name FROM (VALUES (1,'a')) AS v(id, name)",
+            "SOURCE_SQL": "SELECT id, name FROM (VALUES (1,'a')) AS v(id, name) WHERE 1=1",
         },
     )
     merge_id = insert_committed_task(postgres_engine, committed_pipeline, "merge")
@@ -3035,7 +3099,7 @@ def test_sql_delete_rows_hard_and_soft(postgres_engine, committed_pipeline, data
         {
             "SQL_ACTION": "SCD1_MERGE",
             "TARGET_OBJECT": target,
-            "SOURCE_SQL": "SELECT id, name FROM (VALUES (1,'a'),(2,'b')) AS v(id, name)",
+            "SOURCE_SQL": "SELECT id, name FROM (VALUES (1,'a'),(2,'b')) AS v(id, name) WHERE 1=1",
             "MERGE_KEY": "id",
             "MERGE_COMPARE_COLUMNS": "name",
         },
@@ -3101,7 +3165,7 @@ def test_sql_schema_check_fails_when_stage_missing_a_target_column(
         {
             "SQL_ACTION": "SETUP_TABLE",
             "TARGET_OBJECT": target,
-            "SOURCE_SQL": "SELECT id, name FROM (VALUES (1,'a')) AS v(id, name)",
+            "SOURCE_SQL": "SELECT id, name FROM (VALUES (1,'a')) AS v(id, name) WHERE 1=1",
         },
     )
     over_id = insert_committed_task(
@@ -3113,7 +3177,7 @@ def test_sql_schema_check_fails_when_stage_missing_a_target_column(
         {
             "SQL_ACTION": "OVERWRITE_TABLE",
             "TARGET_OBJECT": target,
-            "SOURCE_SQL": "SELECT id FROM (VALUES (1)) AS v(id)",  # missing "name"
+            "SOURCE_SQL": "SELECT id FROM (VALUES (1)) AS v(id) WHERE 1=1",  # missing "name"
         },
     )
     seed_active_run(postgres_engine, committed_pipeline)
@@ -3141,7 +3205,7 @@ def test_sql_schema_evolution_disabled_fails_on_new_column(
         {
             "SQL_ACTION": "SETUP_TABLE",
             "TARGET_OBJECT": target,
-            "SOURCE_SQL": "SELECT id, name FROM (VALUES (1,'a')) AS v(id, name)",
+            "SOURCE_SQL": "SELECT id, name FROM (VALUES (1,'a')) AS v(id, name) WHERE 1=1",
         },
     )
     over_id = insert_committed_task(
@@ -3153,7 +3217,10 @@ def test_sql_schema_evolution_disabled_fails_on_new_column(
         {
             "SQL_ACTION": "OVERWRITE_TABLE",
             "TARGET_OBJECT": target,
-            "SOURCE_SQL": "SELECT id, name, extra FROM (VALUES (1,'a','z')) AS v(id, name, extra)",
+            "SOURCE_SQL": (
+                "SELECT id, name, extra FROM (VALUES (1,'a','z')) AS v(id, name, extra) "
+                "WHERE 1=1"
+            ),
         },
     )
     seed_active_run(postgres_engine, committed_pipeline)
@@ -3181,7 +3248,7 @@ def test_sql_schema_evolution_enabled_adds_column_at_right_position(
         {
             "SQL_ACTION": "SETUP_TABLE",
             "TARGET_OBJECT": target,
-            "SOURCE_SQL": "SELECT id, name FROM (VALUES (1,'a')) AS v(id, name)",
+            "SOURCE_SQL": "SELECT id, name FROM (VALUES (1,'a')) AS v(id, name) WHERE 1=1",
         },
     )
     over_id = insert_committed_task(
@@ -3193,7 +3260,10 @@ def test_sql_schema_evolution_enabled_adds_column_at_right_position(
         {
             "SQL_ACTION": "OVERWRITE_TABLE",
             "TARGET_OBJECT": target,
-            "SOURCE_SQL": "SELECT id, name, extra FROM (VALUES (1,'a','z')) AS v(id, name, extra)",
+            "SOURCE_SQL": (
+                "SELECT id, name, extra FROM (VALUES (1,'a','z')) AS v(id, name, extra) "
+                "WHERE 1=1"
+            ),
         },
     )
     seed_active_run(postgres_engine, committed_pipeline)
@@ -3420,6 +3490,126 @@ def test_business_rules_force_scans_all_data(postgres_engine, committed_pipeline
     assert [(r.key, r.status) for r in results] == [("99", "REPORT")]
 
 
+def test_business_rules_same_sequence_number_rules_run_as_one_wave(
+    postgres_engine, committed_pipeline, data_db_tables
+):
+    # "it sequence would be like a dense rank. run in waves. every rule
+    # sharing same number for a task can run parallel" — two rules at the
+    # same SEQUENCE_NUMBER exercise the ThreadPoolExecutor wave path
+    # (single-rule waves take a separate, sequential fast path), and both
+    # must still produce correct, independent results.
+    target = f"public.brx_wave_{committed_pipeline}"
+    bare_table = target.split(".", 1)[1]
+    data_db_tables.append(target)
+    with postgres_engine.begin() as conn:
+        conn.execute(
+            text(f"CREATE TABLE {bare_table} (id int, flag varchar, pipeline_run_id bigint)")
+        )
+
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "check", "BUSINESS_RULES")
+    insert_committed_business_rule(
+        postgres_engine,
+        committed_pipeline,
+        task_id,
+        "flag_a",
+        target,
+        "id",
+        business_rule_sql="SELECT 1 WHERE t.flag = 'A'",
+        business_rule_type="REJECT",
+        sequence_number=1,
+    )
+    insert_committed_business_rule(
+        postgres_engine,
+        committed_pipeline,
+        task_id,
+        "flag_b",
+        target,
+        "id",
+        business_rule_sql="SELECT 1 WHERE t.flag = 'B'",
+        business_rule_type="INCOMPLETE",
+        sequence_number=1,
+    )
+    run_id = seed_active_run(postgres_engine, committed_pipeline)
+    with postgres_engine.begin() as conn:
+        conn.execute(
+            text(f"INSERT INTO {target} VALUES (1, 'A', :run), (2, 'B', :run)"), {"run": run_id}
+        )
+
+    outcome = run_task(postgres_engine, make_config(warehouse=True), "TEST_CONCURRENT_PL", "check")
+
+    assert outcome.status == "SUCCESS"
+    with postgres_engine.connect() as conn:
+        results = conn.execute(
+            text(
+                "SELECT BUSINESS_RULE_KEY AS key, STATUS AS status FROM AUD_BUSINESS_RULES_RESULTS "
+                "ORDER BY BUSINESS_RULE_KEY"
+            )
+        ).all()
+    assert [(r.key, r.status) for r in results] == [("1", "REJECT"), ("2", "INCOMPLETE")]
+
+
+def test_business_rules_one_bad_rule_in_a_wave_does_not_block_its_wave_mate(
+    postgres_engine, committed_pipeline, data_db_tables
+):
+    # "every rule sharing same number for a task can run parallel" — one
+    # rule in the wave has malformed SQL; its wave-mate is independent and
+    # must still run to completion and keep its own result, even though the
+    # task as a whole still ends up FAILED because of the broken one.
+    target = f"public.brx_wave_fail_{committed_pipeline}"
+    bare_table = target.split(".", 1)[1]
+    data_db_tables.append(target)
+    with postgres_engine.begin() as conn:
+        conn.execute(
+            text(f"CREATE TABLE {bare_table} (id int, flag varchar, pipeline_run_id bigint)")
+        )
+
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "check", "BUSINESS_RULES")
+    insert_committed_business_rule(
+        postgres_engine,
+        committed_pipeline,
+        task_id,
+        "good_rule",
+        target,
+        "id",
+        business_rule_sql="SELECT 1 WHERE t.flag = 'BAD'",
+        business_rule_type="REJECT",
+        sequence_number=1,
+    )
+    bad_rule_id = insert_committed_business_rule(
+        postgres_engine,
+        committed_pipeline,
+        task_id,
+        "bad_rule",
+        target,
+        "id",
+        business_rule_sql="this is not valid sql",
+        business_rule_type="REJECT",
+        sequence_number=1,
+    )
+    run_id = seed_active_run(postgres_engine, committed_pipeline)
+    with postgres_engine.begin() as conn:
+        conn.execute(text(f"INSERT INTO {target} VALUES (1, 'BAD', :run)"), {"run": run_id})
+
+    outcome = run_task(postgres_engine, make_config(warehouse=True), "TEST_CONCURRENT_PL", "check")
+
+    assert outcome.status == "FAILED"
+    assert "bad_rule" in outcome.message
+    with postgres_engine.connect() as conn:
+        good_result = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM AUD_BUSINESS_RULES_RESULTS WHERE BUSINESS_RULE_KEY = '1' "
+                "AND BUSINESS_RULE_ID <> :bad_id"
+            ),
+            {"bad_id": bad_rule_id},
+        ).scalar_one()
+        bad_rule_status = conn.execute(
+            text("SELECT STATUS FROM AUD_BUSINESS_RULES_RUN_LOG WHERE BUSINESS_RULE_ID = :id"),
+            {"id": bad_rule_id},
+        ).scalar_one()
+    assert good_result == 1
+    assert bad_rule_status == "FAILED"
+
+
 def test_business_rules_bad_rule_sql_fails_and_marks_run_log_failed(
     postgres_engine, committed_pipeline, data_db_tables
 ):
@@ -3464,16 +3654,27 @@ def _write_script(tmp_path, name: str, body: str) -> str:
     return str(path)
 
 
+PYTHON_RETURN_VALUES = "INGESTION_COUNT|LATEST_OFFSET_UPDATE"
+
+
 def test_python_handler_runs_script_and_records_ingestion_count(
     postgres_engine, committed_pipeline, tmp_path
 ):
     script = _write_script(
         tmp_path,
         "ok.py",
-        "import json\nprint('doing work')\nprint(json.dumps({'ingestion_count': 7}))\n",
+        "import json\n"
+        "print('doing work')\n"
+        "print(json.dumps({'INGESTION_COUNT': 7, "
+        "'LATEST_OFFSET_UPDATE': '2023-01-01 00:00:00|timestamp'}))\n",
     )
     task_id = insert_committed_task(
-        postgres_engine, committed_pipeline, "ingest", "PYTHON", script_name=script
+        postgres_engine,
+        committed_pipeline,
+        "ingest",
+        "PYTHON",
+        script_name=script,
+        return_values=PYTHON_RETURN_VALUES,
     )
     seed_active_run(postgres_engine, committed_pipeline)
 
@@ -3482,6 +3683,9 @@ def test_python_handler_runs_script_and_records_ingestion_count(
     assert outcome.status == "SUCCESS"
     row = _task_run_row(postgres_engine, task_id)
     assert row.source_count == 7
+    # "log all the variables... as rows with variable = value semantics"
+    assert "INGESTION_COUNT = 7" in row.task_log
+    assert "LATEST_OFFSET_UPDATE = 2023-01-01 00:00:00|timestamp" in row.task_log
 
 
 def test_python_handler_script_failure_becomes_handler_error(
@@ -3491,7 +3695,12 @@ def test_python_handler_script_failure_becomes_handler_error(
         tmp_path, "bad.py", "import sys\nprint('boom', file=sys.stderr)\nsys.exit(3)\n"
     )
     insert_committed_task(
-        postgres_engine, committed_pipeline, "ingest", "PYTHON", script_name=script
+        postgres_engine,
+        committed_pipeline,
+        "ingest",
+        "PYTHON",
+        script_name=script,
+        return_values=PYTHON_RETURN_VALUES,
     )
     seed_active_run(postgres_engine, committed_pipeline)
 
@@ -3510,10 +3719,16 @@ def test_python_handler_offset_tracker_insert_then_update(
         "offset.py",
         "import json, os\n"
         "value = os.environ.get('ETL_CRAFT_TEST_OFFSET', '100')\n"
-        "print(json.dumps({'latest_offset_value': value, 'latest_offset_type': 'NUMBER'}))\n",
+        "print(json.dumps({'INGESTION_COUNT': 1, "
+        "'LATEST_OFFSET_UPDATE': value + '|number'}))\n",
     )
     task_id = insert_committed_task(
-        postgres_engine, committed_pipeline, "ingest", "PYTHON", script_name=script
+        postgres_engine,
+        committed_pipeline,
+        "ingest",
+        "PYTHON",
+        script_name=script,
+        return_values=PYTHON_RETURN_VALUES,
     )
     run1 = seed_active_run(postgres_engine, committed_pipeline)
 
@@ -3550,8 +3765,55 @@ def test_python_handler_invalid_offset_type_fails(postgres_engine, committed_pip
         tmp_path,
         "badoffset.py",
         "import json\n"
-        "print(json.dumps({'latest_offset_value': 'x', 'latest_offset_type': 'BOGUS'}))\n",
+        "print(json.dumps({'INGESTION_COUNT': 1, 'LATEST_OFFSET_UPDATE': 'x|bogus'}))\n",
     )
+    insert_committed_task(
+        postgres_engine,
+        committed_pipeline,
+        "ingest",
+        "PYTHON",
+        script_name=script,
+        return_values=PYTHON_RETURN_VALUES,
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    outcome = run_task(postgres_engine, make_config(), "TEST_CONCURRENT_PL", "ingest")
+
+    assert outcome.status == "FAILED"
+    assert "BOGUS" in outcome.message
+
+
+def test_python_handler_no_trailing_json_fails_missing_mandatory_variables(
+    postgres_engine, committed_pipeline, tmp_path
+):
+    # Under the new contract, INGESTION_COUNT/LATEST_OFFSET_UPDATE are
+    # always mandatory — a script reporting neither is a real failure, not
+    # a quiet no-op the way it was before this contract firmed up.
+    script = _write_script(tmp_path, "quiet.py", "print('just a log line, no JSON')\n")
+    insert_committed_task(
+        postgres_engine,
+        committed_pipeline,
+        "ingest",
+        "PYTHON",
+        script_name=script,
+        return_values=PYTHON_RETURN_VALUES,
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    outcome = run_task(postgres_engine, make_config(), "TEST_CONCURRENT_PL", "ingest")
+
+    assert outcome.status == "FAILED"
+    assert "INGESTION_COUNT" in outcome.message
+    assert "LATEST_OFFSET_UPDATE" in outcome.message
+
+
+def test_python_handler_return_values_not_declared_fails_before_running_script(
+    postgres_engine, committed_pipeline, tmp_path
+):
+    # CFG_TASKS.RETURN_VALUES omitted entirely -> caught before the
+    # subprocess even runs, per "all of the variable names to expect should
+    # be enlisted."
+    script = _write_script(tmp_path, "unreachable.py", "raise SystemExit('should never run')\n")
     insert_committed_task(
         postgres_engine, committed_pipeline, "ingest", "PYTHON", script_name=script
     )
@@ -3560,18 +3822,226 @@ def test_python_handler_invalid_offset_type_fails(postgres_engine, committed_pip
     outcome = run_task(postgres_engine, make_config(), "TEST_CONCURRENT_PL", "ingest")
 
     assert outcome.status == "FAILED"
-    assert "latest_offset_type" in outcome.message
+    assert "RETURN_VALUES" in outcome.message
 
 
-def test_python_handler_no_trailing_json_is_fine(postgres_engine, committed_pipeline, tmp_path):
-    script = _write_script(tmp_path, "quiet.py", "print('just a log line, no JSON')\n")
-    task_id = insert_committed_task(
-        postgres_engine, committed_pipeline, "ingest", "PYTHON", script_name=script
+def test_python_handler_offset_update_missing_pipe_separator_fails(
+    postgres_engine, committed_pipeline, tmp_path
+):
+    script = _write_script(
+        tmp_path,
+        "nopipe.py",
+        "import json\n"
+        "print(json.dumps({'INGESTION_COUNT': 1, 'LATEST_OFFSET_UPDATE': 'no_separator_here'}))\n",
+    )
+    insert_committed_task(
+        postgres_engine,
+        committed_pipeline,
+        "ingest",
+        "PYTHON",
+        script_name=script,
+        return_values=PYTHON_RETURN_VALUES,
     )
     seed_active_run(postgres_engine, committed_pipeline)
 
     outcome = run_task(postgres_engine, make_config(), "TEST_CONCURRENT_PL", "ingest")
 
-    assert outcome.status == "SUCCESS"
-    row = _task_run_row(postgres_engine, task_id)
-    assert row.source_count is None
+    assert outcome.status == "FAILED"
+    assert "value|datatype" in outcome.message
+
+
+def test_python_handler_ingestion_count_non_numeric_fails(
+    postgres_engine, committed_pipeline, tmp_path
+):
+    script = _write_script(
+        tmp_path,
+        "badcount.py",
+        "import json\n"
+        "print(json.dumps({'INGESTION_COUNT': 'not-a-number', "
+        "'LATEST_OFFSET_UPDATE': '1|number'}))\n",
+    )
+    insert_committed_task(
+        postgres_engine,
+        committed_pipeline,
+        "ingest",
+        "PYTHON",
+        script_name=script,
+        return_values=PYTHON_RETURN_VALUES,
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    outcome = run_task(postgres_engine, make_config(), "TEST_CONCURRENT_PL", "ingest")
+
+    assert outcome.status == "FAILED"
+    assert "expected a number" in outcome.message
+
+
+# ------------------------------------------------------------------------------
+# lineage CLI command — cfg.fetch_table_lineage
+# ------------------------------------------------------------------------------
+
+
+def test_cli_lineage_lists_source_and_target_tasks_across_pipelines(
+    craft_connector_on_disk, postgres_engine, committed_pipeline, capsys
+):
+    # Two tasks in the same pipeline: one reads the table (SOURCE_OBJECT),
+    # one writes it (TARGET_OBJECT) — "return all the tasks that read the
+    # table and write the table," per explicit instruction. A pipe-separated
+    # SOURCE_OBJECT with a second, unrelated table proves the multi-value
+    # convention is actually parsed, not just exact-matched whole.
+    reader_id = insert_committed_task(postgres_engine, committed_pipeline, "reader")
+    insert_committed_task_parameters(
+        postgres_engine,
+        reader_id,
+        {
+            "SOURCE_OBJECT": "public.lineage_target|public.other_table",
+            "TARGET_OBJECT": "public.out",
+        },
+    )
+    writer_id = insert_committed_task(postgres_engine, committed_pipeline, "writer")
+    insert_committed_task_parameters(
+        postgres_engine,
+        writer_id,
+        {"SOURCE_OBJECT": "public.in", "TARGET_OBJECT": "public.lineage_target"},
+    )
+    unrelated_id = insert_committed_task(postgres_engine, committed_pipeline, "unrelated")
+    insert_committed_task_parameters(
+        postgres_engine,
+        unrelated_id,
+        {"SOURCE_OBJECT": "public.something_else", "TARGET_OBJECT": "public.another"},
+    )
+
+    exit_code = cli_main(["lineage", "--table", "public.lineage_target"])
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "TEST_CONCURRENT_PL.reader\tSOURCE" in out
+    assert "TEST_CONCURRENT_PL.writer\tTARGET" in out
+    assert "unrelated" not in out
+
+
+def test_cli_lineage_reports_nothing_for_an_undeclared_table(craft_connector_on_disk):
+    exit_code = cli_main(["lineage", "--table", "public.nobody_uses_this"])
+
+    assert exit_code == 0
+
+
+# ------------------------------------------------------------------------------
+# migrate.py
+# ------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def migrations_cleanup(postgres_engine):
+    """Delete any SCHEMA_MIGRATIONS rows this test's own migration files added."""
+    versions: list[str] = []
+    yield versions
+    if versions:
+        with postgres_engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM SCHEMA_MIGRATIONS WHERE VERSION = ANY(:versions)"),
+                {"versions": versions},
+            )
+
+
+def _write_migration(tmp_path, name: str, body: str):
+    (tmp_path / name).write_text(body)
+
+
+def test_apply_pending_migrations_applies_in_order_and_records_them(
+    postgres_engine, tmp_path, migrations_cleanup
+):
+    _write_migration(
+        tmp_path,
+        "0001_create_table.sql",
+        "CREATE TABLE migrate_test_t1 (id int);",
+    )
+    _write_migration(
+        tmp_path,
+        "0002_add_column.sql",
+        # Multiple statements in one file, semicolon-split.
+        "ALTER TABLE migrate_test_t1 ADD COLUMN name varchar; "
+        "INSERT INTO migrate_test_t1 (id, name) VALUES (1, 'a');",
+    )
+    migrations_cleanup.extend(["0001_create_table.sql", "0002_add_column.sql"])
+
+    try:
+        applied = apply_pending_migrations(postgres_engine, tmp_path)
+        assert applied == ["0001_create_table.sql", "0002_add_column.sql"]
+        with postgres_engine.connect() as conn:
+            row = conn.execute(text("SELECT id, name FROM migrate_test_t1")).one()
+            assert (row.id, row.name) == (1, "a")
+            versions = (
+                conn.execute(
+                    text(
+                        "SELECT VERSION FROM SCHEMA_MIGRATIONS WHERE VERSION LIKE '000%' "
+                        "ORDER BY VERSION"
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert versions == ["0001_create_table.sql", "0002_add_column.sql"]
+
+        # Idempotent on rerun — nothing pending, nothing re-applied.
+        assert apply_pending_migrations(postgres_engine, tmp_path) == []
+    finally:
+        with postgres_engine.begin() as conn:
+            conn.execute(text("DROP TABLE IF EXISTS migrate_test_t1"))
+
+
+def test_apply_pending_migrations_stops_and_does_not_record_a_failed_file(
+    postgres_engine, tmp_path, migrations_cleanup
+):
+    _write_migration(tmp_path, "0001_bad.sql", "this is not valid sql;")
+    migrations_cleanup.append("0001_bad.sql")
+
+    with pytest.raises(MigrationError, match="0001_bad.sql"):
+        apply_pending_migrations(postgres_engine, tmp_path)
+
+    with postgres_engine.connect() as conn:
+        exists = conn.execute(
+            text("SELECT 1 FROM SCHEMA_MIGRATIONS WHERE VERSION = '0001_bad.sql'")
+        ).scalar_one_or_none()
+    assert exists is None
+
+
+def test_cli_migrate_reports_up_to_date_with_no_pending_files(craft_connector_on_disk, capsys):
+    # sql/migrations/ is genuinely empty by design (see its own README) —
+    # this exercises the real default directory, not a test-scoped one.
+    exit_code = cli_main(["migrate"])
+
+    assert exit_code == 0
+    assert "up to date" in capsys.readouterr().out
+
+
+def test_cli_migrate_reports_applied_files(craft_connector_on_disk, monkeypatch, capsys):
+    # Real success-with-results and failure paths both mock
+    # apply_pending_migrations directly (same spirit as the runner.dispatch
+    # monkeypatch elsewhere) — the function itself is already proven for
+    # real against Postgres above; this just proves the CLI wires its
+    # result/exception into the right message and exit code.
+    monkeypatch.setattr(
+        "etl_craft.cli.apply_pending_migrations", lambda engine: ["0001_x.sql", "0002_y.sql"]
+    )
+
+    exit_code = cli_main(["migrate"])
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "applied 0001_x.sql" in out
+    assert "applied 0002_y.sql" in out
+
+
+def test_cli_migrate_reports_error_on_failed_migration(
+    craft_connector_on_disk, monkeypatch, capsys
+):
+    def _raise(engine):
+        raise MigrationError("0001_bad.sql failed to apply: syntax error")
+
+    monkeypatch.setattr("etl_craft.cli.apply_pending_migrations", _raise)
+
+    exit_code = cli_main(["migrate"])
+
+    assert exit_code == 1
+    assert "0001_bad.sql" in capsys.readouterr().err

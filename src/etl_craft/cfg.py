@@ -66,6 +66,7 @@ class TaskExecutionDetail:
     refresh_type: str
     schema_evolution: bool
     script_name: str | None
+    return_values: str | None
 
 
 def fetch_task_execution_detail(conn: Connection, task_id: int) -> TaskExecutionDetail:
@@ -74,7 +75,8 @@ def fetch_task_execution_detail(conn: Connection, task_id: int) -> TaskExecution
         text(
             "SELECT t.HANDLER AS handler, t.TASK_CODE AS task_code, "
             "p.PIPELINE_CODE AS pipeline_code, p.REFRESH_TYPE AS refresh_type, "
-            "t.SCHEMA_EVOLUTION AS schema_evolution, t.SCRIPT_NAME AS script_name "
+            "t.SCHEMA_EVOLUTION AS schema_evolution, t.SCRIPT_NAME AS script_name, "
+            "t.RETURN_VALUES AS return_values "
             "FROM CFG_TASKS t JOIN CFG_PIPELINES p ON p.PIPELINE_ID = t.PIPELINE_ID "
             "WHERE t.TASK_ID = :task_id"
         ),
@@ -87,6 +89,7 @@ def fetch_task_execution_detail(conn: Connection, task_id: int) -> TaskExecution
         refresh_type=row.refresh_type,
         schema_evolution=row.schema_evolution,
         script_name=row.script_name,
+        return_values=row.return_values,
     )
 
 
@@ -109,25 +112,36 @@ def fetch_task_parameters(conn: Connection, task_id: int) -> dict[str, str]:
     return {row.parameter_name: row.parameter_value for row in rows}
 
 
-def fetch_sibling_target_sql_action(
+@dataclass(frozen=True)
+class SiblingTargetWriter:
+    """Another active SQL task in the same pipeline that writes a given TARGET_OBJECT."""
+
+    task_id: int
+    sql_action: str
+
+
+def fetch_sibling_target_writer(
     conn: Connection, pipeline_id: int, task_id: int, target_object: str
-) -> str | None:
+) -> SiblingTargetWriter | None:
     """Find another active SQL task in `pipeline_id` that writes the same TARGET_OBJECT.
 
-    [ADDITION] Backs SETUP_TABLE's "infer audit columns from the rest of the
-    pipeline where a task writes to it" behavior (sql_actions.py) — a
-    SETUP_TABLE task establishes a target's *shape* ahead of the real writer,
-    so its audit-column set must mirror whatever that real writer's own
-    SQL_ACTION would add, not guess independently. Excludes `task_id` itself
-    and any other SETUP_TABLE task (SETUP_TABLE never adds audit columns of
-    its own — there is nothing useful to infer from another SETUP_TABLE).
+    [ADDITION] Backs two things in sql_actions.py: SETUP_TABLE's "infer
+    audit columns from the rest of the pipeline where a task writes to it"
+    (a SETUP_TABLE task establishes a target's *shape* ahead of the real
+    writer, so its audit-column set must mirror whatever that real writer's
+    own SQL_ACTION would add) and DROP_TABLE's "only ever drop a table this
+    pipeline itself created via CREATE_TABLE" guard. Excludes any other
+    SETUP_TABLE sibling in both cases — it never adds audit columns of its
+    own (nothing to infer), and it's never what DROP_TABLE looks for either
+    (a SETUP_TABLE writer isn't a CREATE_TABLE one), so leaving one in the
+    running could only ever produce a false result via the tie-break below.
     [CHOICE] If more than one sibling writes the same TARGET_OBJECT (a real
     but unusual config), the lowest TASK_ID wins — deterministic, not a
     conflict check; flagged rather than silently ambiguous.
     """
-    return conn.execute(
+    row = conn.execute(
         text(
-            "SELECT a.PARAMETER_VALUE AS sql_action "
+            "SELECT t.TASK_ID AS task_id, a.PARAMETER_VALUE AS sql_action "
             "FROM CFG_TASK_PARAMETERS target_param "
             "JOIN CFG_TASKS t ON t.TASK_ID = target_param.TASK_ID "
             "JOIN CFG_TASK_PARAMETERS a "
@@ -140,7 +154,10 @@ def fetch_sibling_target_sql_action(
             "ORDER BY t.TASK_ID LIMIT 1"
         ),
         {"pipeline_id": pipeline_id, "task_id": task_id, "target_object": target_object},
-    ).scalar_one_or_none()
+    ).one_or_none()
+    if row is None:
+        return None
+    return SiblingTargetWriter(task_id=row.task_id, sql_action=row.sql_action)
 
 
 @dataclass(frozen=True)
@@ -532,3 +549,120 @@ def fetch_task_cross_pipeline_dependency_ids(
         )
         for row in rows
     ]
+
+
+# [ADDITION] Lineage convention, per explicit instruction ("every task
+# should have atleast 1 source_table and target_table" / "one of our goals
+# to maintain traceability"): every active task, regardless of HANDLER,
+# declares SOURCE_OBJECT and TARGET_OBJECT in CFG_TASK_PARAMETERS —
+# pipe-separated for tasks with more than one of either (an ingestion
+# script pulling from several sources, a BUSINESS_RULES task whose rules
+# target different tables). This is purely declarative bookkeeping for
+# lineage: HANDLER=SQL already has its own real, functionally-load-bearing
+# TARGET_OBJECT (sql_actions.py); HANDLER=BUSINESS_RULES already has a real
+# per-rule TARGET_TABLE (CFG_BUSINESS_RULES); this convention doesn't
+# replace either — validate.py checks it's present, fetch_table_lineage
+# below is the only thing that reads it back.
+LINEAGE_SOURCE_PARAM = "SOURCE_OBJECT"
+LINEAGE_TARGET_PARAM = "TARGET_OBJECT"
+
+
+@dataclass(frozen=True)
+class TaskLineageGap:
+    """One active task missing SOURCE_OBJECT and/or TARGET_OBJECT — a validate.py finding."""
+
+    pipeline_code: str
+    task_code: str
+    missing: tuple[str, ...]
+
+
+def fetch_tasks_missing_source_or_target(conn: Connection) -> list[TaskLineageGap]:
+    """Find every active task (any HANDLER) missing SOURCE_OBJECT and/or TARGET_OBJECT.
+
+    [Bug caught and fixed before shipping]: a task with *no* active
+    CFG_TASK_PARAMETERS rows at all makes the LEFT JOIN produce a single
+    all-NULL row for it — `bool_or(NULL = 'SOURCE_OBJECT')` over that is
+    `NULL`, not FALSE (bool_or ignores NULL inputs and only returns FALSE
+    when it saw a real FALSE), so an un-COALESCEd `NOT bool_or(...)` in the
+    HAVING clause evaluates to NULL, which HAVING treats as "excluded" —
+    the exact tasks this check most needs to catch (declaring nothing at
+    all) silently vanished from the result. Reproduced directly against
+    Postgres (`SELECT bool_or(NULL::boolean)` -> NULL) before fixing.
+    """
+    rows = conn.execute(
+        text(
+            "SELECT p.PIPELINE_CODE AS pipeline_code, t.TASK_CODE AS task_code, "
+            "COALESCE(bool_or(tp.PARAMETER_NAME = 'SOURCE_OBJECT'), FALSE) AS has_source, "
+            "COALESCE(bool_or(tp.PARAMETER_NAME = 'TARGET_OBJECT'), FALSE) AS has_target "
+            "FROM CFG_TASKS t "
+            "JOIN CFG_PIPELINES p ON p.PIPELINE_ID = t.PIPELINE_ID "
+            "LEFT JOIN CFG_TASK_PARAMETERS tp ON tp.TASK_ID = t.TASK_ID AND tp.ACTIVE_FLAG = 'Y' "
+            "WHERE t.ACTIVE_FLAG = 'Y' AND p.ACTIVE_FLAG = 'Y' "
+            "GROUP BY t.TASK_ID, p.PIPELINE_CODE, t.TASK_CODE "
+            "HAVING NOT COALESCE(bool_or(tp.PARAMETER_NAME = 'SOURCE_OBJECT'), FALSE) "
+            "OR NOT COALESCE(bool_or(tp.PARAMETER_NAME = 'TARGET_OBJECT'), FALSE) "
+            "ORDER BY p.PIPELINE_CODE, t.TASK_CODE"
+        )
+    ).all()
+    gaps = []
+    for row in rows:
+        missing = tuple(
+            name
+            for name, present in (
+                (LINEAGE_SOURCE_PARAM, row.has_source),
+                (LINEAGE_TARGET_PARAM, row.has_target),
+            )
+            if not present
+        )
+        gaps.append(
+            TaskLineageGap(
+                pipeline_code=row.pipeline_code, task_code=row.task_code, missing=missing
+            )
+        )
+    return gaps
+
+
+@dataclass(frozen=True)
+class TableLineageEntry:
+    """One task that reads (SOURCE_OBJECT) or writes (TARGET_OBJECT) a given table."""
+
+    pipeline_code: str
+    task_code: str
+    role: str  # "SOURCE" or "TARGET"
+
+
+def fetch_table_lineage(conn: Connection, table_ref: str) -> list[TableLineageEntry]:
+    """Find every active task that declares `table_ref` as a SOURCE_OBJECT or TARGET_OBJECT.
+
+    [CHOICE] Reads only CFG_TASK_PARAMETERS' own SOURCE_OBJECT/TARGET_OBJECT
+    convention, not CFG_BUSINESS_RULES.TARGET_TABLE — keeping one canonical
+    place lineage is read from, rather than two overlapping ones that could
+    disagree for a BUSINESS_RULES task with several differently-targeted
+    rules. Filtered in Python, not SQL: PARAMETER_VALUE can be a
+    pipe-separated list, and building a single portable SQL predicate that
+    correctly matches "one exact element of a pipe-separated list" (exact
+    value, or a prefix/suffix/middle segment) is more fragile than just
+    fetching the (small) candidate rows and splitting them here.
+    """
+    rows = conn.execute(
+        text(
+            "SELECT p.PIPELINE_CODE AS pipeline_code, t.TASK_CODE AS task_code, "
+            "tp.PARAMETER_NAME AS parameter_name, tp.PARAMETER_VALUE AS parameter_value "
+            "FROM CFG_TASK_PARAMETERS tp "
+            "JOIN CFG_TASKS t ON t.TASK_ID = tp.TASK_ID "
+            "JOIN CFG_PIPELINES p ON p.PIPELINE_ID = t.PIPELINE_ID "
+            "WHERE tp.ACTIVE_FLAG = 'Y' AND t.ACTIVE_FLAG = 'Y' AND p.ACTIVE_FLAG = 'Y' "
+            "AND tp.PARAMETER_NAME IN ('SOURCE_OBJECT', 'TARGET_OBJECT')"
+        )
+    ).all()
+    entries = []
+    for row in rows:
+        values = [v.strip() for v in row.parameter_value.split("|") if v.strip()]
+        if table_ref in values:
+            role = "SOURCE" if row.parameter_name == LINEAGE_SOURCE_PARAM else "TARGET"
+            entries.append(
+                TableLineageEntry(
+                    pipeline_code=row.pipeline_code, task_code=row.task_code, role=role
+                )
+            )
+    return sorted(entries, key=lambda e: (e.pipeline_code, e.task_code, e.role))

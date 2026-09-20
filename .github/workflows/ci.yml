@@ -89,5 +89,5 @@ jobs:
       - name: pydocstyle
         run: uv run pydocstyle .
 
-      - name: pytest with coverage (fails under 100%)
+      - name: pytest with coverage (fails under 80%)
         run: uv run pytest -q --cov=etl_craft --cov-report=term-missing

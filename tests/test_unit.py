@@ -35,6 +35,7 @@ from etl_craft.configure import configure_from_env, set_execution_mode
 from etl_craft.crosspipe import MIN_POLL_INTERVAL_SECONDS, _default_now, _next_poll_delay
 from etl_craft.db import AUTH_REGISTRY, ConnectionError_, build_engine, parse_jdbc_postgres
 from etl_craft.handlers import HandlerError, TaskExecutionContext, dispatch
+from etl_craft.migrate import _split_statements
 from etl_craft.resolver import (
     CycleError,
     DependencyGraph,
@@ -717,6 +718,7 @@ def _dummy_ctx(handler: str) -> TaskExecutionContext:
         refresh_type="FULL",
         schema_evolution=False,
         script_name=None,
+        return_values=None,
         task_params={},
         force=False,
     )
@@ -767,6 +769,25 @@ def test_substitute_pipeline_id(refresh_type, force_all, expected):
         force_all=force_all,
     )
     assert result == f"SELECT 1 WHERE {expected}"
+
+
+def test_substitute_pipeline_id_appends_where_when_none_exists():
+    # Case 2: no $$pipeline_id token and no WHERE clause at all -> the
+    # engine appends the scoping itself, per explicit instruction.
+    result = substitute_pipeline_id(
+        "SELECT * FROM some_table", refresh_type="INCREMENTAL", pipeline_run_id=42
+    )
+    assert result == "SELECT * FROM some_table WHERE pipeline_run_id = 42"
+
+
+def test_substitute_pipeline_id_leaves_an_unrelated_where_clause_alone():
+    # Case 3: a real WHERE clause already exists, with no $$pipeline_id
+    # token inside it -> left completely untouched. "you may need to
+    # enforce it on static tables as well, which is wrong" — a query
+    # against a small reference table with its own filter and no
+    # PIPELINE_RUN_ID column must never get one silently AND'd on.
+    sql = "SELECT * FROM reference_table WHERE active = true"
+    assert substitute_pipeline_id(sql, refresh_type="INCREMENTAL", pipeline_run_id=42) == sql
 
 
 def test_qualify_prepends_the_active_profiles_database():
@@ -1368,3 +1389,20 @@ def test_configure_from_env_merges_a_second_profile_without_losing_the_first(tmp
     assert set(config.postgres.profiles) == {"dev", "uat"}
     assert config.postgres.active_profile == "uat"
     assert config.postgres.profiles["dev"].jdbc_url == "jdbc:postgresql://localhost:5432/etl_craft"
+
+
+# ==============================================================================
+# migrate.py — the pure statement-splitting piece; apply_pending_migrations
+# itself needs a real Postgres (SCHEMA_MIGRATIONS table) — see
+# test_integration.py.
+# ==============================================================================
+
+
+def test_split_statements_ignores_blank_and_whitespace_only_segments():
+    sql_text = "ALTER TABLE t ADD COLUMN c int;  \n\n  UPDATE t SET c = 1; \n ;"
+    assert _split_statements(sql_text) == ["ALTER TABLE t ADD COLUMN c int", "UPDATE t SET c = 1"]
+
+
+def test_split_statements_empty_input_returns_empty_list():
+    assert _split_statements("") == []
+    assert _split_statements("   \n  ") == []
