@@ -191,6 +191,8 @@ CREATE TABLE CFG_TASKS (
     TASK_TYPE      VARCHAR NOT NULL,
     PIPELINE_ID    BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
     HANDLER        VARCHAR NOT NULL,
+    RUN_CONDITION        VARCHAR,   -- [ADDITION, post-signoff 2026-09-20] see COMMENT ON COLUMN below
+    RUN_CONDITION_COUNT  INT,       -- [ADDITION, post-signoff 2026-09-20] only meaningful when RUN_CONDITION = 'N'
     ACTIVE_FLAG    VARCHAR NOT NULL DEFAULT 'Y',
     CREATED_BY     VARCHAR,
     CREATE_DATE    TIMESTAMPTZ,
@@ -198,7 +200,15 @@ CREATE TABLE CFG_TASKS (
     UPDATED_DATE   TIMESTAMPTZ,
     CONSTRAINT ck_tasks_task_type       CHECK (TASK_TYPE IN ('INGESTION','ETL')),  -- [CHOICE]
     CONSTRAINT ck_tasks_handler         CHECK (HANDLER IN ('PYTHON','SQL','BUSINESS_RULES','EMAIL_ALERT')),  -- [DEVIATION] EMAIL_ALERT added per later decision; neither pasted draft has it
-    CONSTRAINT ck_tasks_active_flag     CHECK (ACTIVE_FLAG IN ('Y','N'))
+    CONSTRAINT ck_tasks_active_flag     CHECK (ACTIVE_FLAG IN ('Y','N')),
+    CONSTRAINT ck_tasks_run_condition   CHECK (RUN_CONDITION IS NULL OR RUN_CONDITION IN ('ALL','ANY','N')),
+    -- RUN_CONDITION_COUNT is required by, and only meaningful for, mode 'N'.
+    -- Both halves are enforced: 'N' without a count is as broken as a count
+    -- on a mode that ignores it.
+    CONSTRAINT ck_tasks_run_condition_count CHECK (
+        (RUN_CONDITION = 'N' AND RUN_CONDITION_COUNT IS NOT NULL AND RUN_CONDITION_COUNT >= 1)
+        OR (RUN_CONDITION IS DISTINCT FROM 'N' AND RUN_CONDITION_COUNT IS NULL)
+    )
 );
 -- [DEVIATION, post-signoff 2026-09-20] SCRIPT_NAME, RETURN_VALUES (added
 -- with CFG_TASKS originally/post-signoff) and SCHEMA_EVOLUTION (added
@@ -228,6 +238,33 @@ CREATE TRIGGER trg_audit_cfg_tasks
     FOR EACH ROW EXECUTE FUNCTION trg_set_audit_columns();
 
 COMMENT ON TABLE CFG_TASKS IS 'REFRESH_TYPE intentionally absent here — moved to CFG_PIPELINES, see comment there. Do not re-add it here out of habit when comparing against the pasted schema notes.';
+
+-- [ADDITION, post-signoff 2026-09-20] RUN_CONDITION / RUN_CONDITION_COUNT.
+-- How many of a task's own CFG_TASK_DEPENDENCY edges must be satisfied for
+-- it to become ready: 'ALL' (every edge — the historical behaviour, and what
+-- NULL means), 'ANY' (at least one), or 'N' (at least RUN_CONDITION_COUNT).
+-- Per explicit instruction: "a task is dependent on 10 tasks but it can run
+-- at least one meets the condition, it should be possible".
+--
+-- [CHOICE] It lives on CFG_TASKS, per explicit instruction ("it should be in
+-- cfg_tasks ... because these should be resolved while dag chain generation
+-- itself"), and applies uniformly to all of that task's edges rather than
+-- being an OR-group on CFG_TASK_DEPENDENCY. That placement is what lets
+-- generate-yml map (RUN_CONDITION, DEPENDENCY_TYPE) onto a single Airflow
+-- trigger_rule (all_success / one_success / all_failed / one_failed /
+-- all_done / one_done) at DAG-generation time — OR-groups have no Airflow
+-- equivalent and could only ever be gated engine-side. The cost is that
+-- "all of A,B plus any of C,D" cannot be expressed; flag it if that shape
+-- is ever needed rather than bolting a second mechanism on.
+--
+-- [CHOICE] Named RUN_CONDITION rather than RUN_TYPE (both were offered):
+-- CFG_PIPELINES.REFRESH_TYPE already owns the *_TYPE shape in this schema,
+-- and "run type" would read as a sibling of it.
+--
+-- 'N' and HAS_DATA have no Airflow trigger_rule equivalent — see
+-- generate_yml.py's own docstring for what it emits for those and why.
+COMMENT ON COLUMN CFG_TASKS.RUN_CONDITION IS 'ALL | ANY | N — how many of this task''s dependency edges must be satisfied. NULL means ALL.';
+COMMENT ON COLUMN CFG_TASKS.RUN_CONDITION_COUNT IS 'How many edges must be satisfied when RUN_CONDITION = ''N''. Must be NULL for every other mode.';
 
 -- ----------------------------------------------------------------------------
 -- CFG_TASK_DEPENDENCY
@@ -669,4 +706,23 @@ COMMIT;
 -- here, not edited away, so this block still reads as an accurate history
 -- of what actually happened and when, per this file's own established
 -- practice for post-signoff changes.
+-- ============================================================================
+--
+-- [ADDITION, 2026-09-20, explicitly requested — iteration 2, E2-41]
+-- CFG_TASKS gains RUN_CONDITION (VARCHAR, NULL) and RUN_CONDITION_COUNT
+-- (INT, NULL), with ck_tasks_run_condition and
+-- ck_tasks_run_condition_count. They say how many of a task's own
+-- CFG_TASK_DEPENDENCY edges must be satisfied before it becomes ready:
+-- 'ALL' (every edge — the historical behaviour, and what NULL means),
+-- 'ANY' (at least one), or 'N' (at least RUN_CONDITION_COUNT of them).
+-- Per explicit instruction: "the dependency should have something like
+-- all, one, some etc to have conditional dependency. lets say a task is
+-- dependent on 10 tasks but it can run at least one meets the condition".
+-- Fully backward compatible — every existing row has RUN_CONDITION NULL,
+-- which resolver.py reads as 'ALL', exactly what it did before. See
+-- CFG_TASKS' own COMMENT ON COLUMN block for why it sits on this table
+-- rather than as an OR-group on CFG_TASK_DEPENDENCY, and why the column
+-- is named RUN_CONDITION and not RUN_TYPE. Carried to an already-deployed
+-- database by sql/migrations/0001_add_run_condition.sql — the first real
+-- migration file this repo has ever had.
 -- ============================================================================

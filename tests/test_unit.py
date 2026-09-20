@@ -9,6 +9,7 @@ collisions) and keeps file count down.
 
 import contextlib
 import runpy
+import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
 
@@ -232,6 +233,158 @@ def test_build_graph_rejects_edge_with_unknown_task_id():
     # side — task_id itself doesn't exist in the supplied task set.
     with pytest.raises(UnknownTaskError):
         build_graph(nodes(1, 2), [edge(99, 1)])
+
+
+# ------------------------------------------------------------------------------
+# E2-41 — RUN_CONDITION (ALL / ANY / N) cardinality on a task's own edges
+# ------------------------------------------------------------------------------
+
+
+def test_run_condition_defaults_to_all_when_unset():
+    # Every CFG_TASKS row predating E2-41 has RUN_CONDITION NULL, and must
+    # behave exactly as it did before: all edges, or nothing runs.
+    graph = build_graph(nodes(1, 2, 3), [edge(3, 1), edge(3, 2)])
+    assert graph.required_edge_count(3) == 2
+    assert 3 not in graph.ready({1: TaskRunState(status="SUCCESS")})
+    assert 3 in graph.ready({1: TaskRunState(status="SUCCESS"), 2: TaskRunState(status="SUCCESS")})
+
+
+def test_run_condition_any_runs_once_a_single_edge_is_satisfied():
+    # The literal case that motivated E2-41: "a task is dependent on 10 tasks
+    # but it can run at least one meets the condition".
+    tasks = [TaskNode(task_id=i) for i in (1, 2, 3)] + [TaskNode(task_id=4, run_condition="ANY")]
+    graph = build_graph(tasks, [edge(4, 1), edge(4, 2), edge(4, 3)])
+    assert graph.required_edge_count(4) == 1
+    assert 4 in graph.ready({1: TaskRunState(status="SUCCESS")})
+
+
+def test_run_condition_n_requires_that_many_edges():
+    tasks = [TaskNode(task_id=i) for i in (1, 2, 3)] + [
+        TaskNode(task_id=4, run_condition="N", run_condition_count=2)
+    ]
+    graph = build_graph(tasks, [edge(4, 1), edge(4, 2), edge(4, 3)])
+    assert graph.required_edge_count(4) == 2
+    assert 4 not in graph.ready({1: TaskRunState(status="SUCCESS")})
+    assert 4 in graph.ready({1: TaskRunState(status="SUCCESS"), 2: TaskRunState(status="SUCCESS")})
+
+
+def test_build_graph_rejects_an_n_count_larger_than_the_edge_count():
+    # Beyond what any CHECK constraint can express — it compares a CFG_TASKS
+    # column against a count of CFG_TASK_DEPENDENCY rows. `validate` surfaces
+    # it through validate_graphs, which is where a two-table config error
+    # belongs.
+    tasks = [TaskNode(task_id=1), TaskNode(task_id=2, run_condition="N", run_condition_count=3)]
+    with pytest.raises(ResolverError, match="could never run"):
+        build_graph(tasks, [edge(2, 1)])
+
+
+@pytest.mark.parametrize(
+    "condition, count",
+    [("BOGUS", None), ("N", None), ("N", 0), ("ALL", 2), (None, 2)],
+)
+def test_build_graph_rejects_malformed_run_conditions(condition, count):
+    tasks = [
+        TaskNode(task_id=1),
+        TaskNode(task_id=2, run_condition=condition, run_condition_count=count),
+    ]
+    with pytest.raises(ResolverError):
+        build_graph(tasks, [edge(2, 1)])
+
+
+# ------------------------------------------------------------------------------
+# E2-01 — unsatisfiable(): tasks that can never become ready under this run
+# ------------------------------------------------------------------------------
+
+
+def test_unsatisfiable_flags_a_failure_edge_whose_upstream_succeeded():
+    # The recommended EMAIL_ALERT pattern, on a run where nothing failed.
+    graph = build_graph(nodes(1, 2), [edge(2, 1, dependency_type="FAILURE")])
+    assert graph.unsatisfiable({1: TaskRunState(status="SUCCESS")}) == [2]
+
+
+def test_unsatisfiable_ignores_an_upstream_that_merely_failed():
+    # FAILED stays retry-eligible — "retry resumes" — so a SUCCESS edge on it
+    # is "not yet", not "never". Converting this into a skip would report a
+    # broken run as SUCCESS.
+    graph = build_graph(nodes(1, 2), [edge(2, 1)])
+    assert graph.unsatisfiable({1: TaskRunState(status="FAILED")}) == []
+
+
+def test_unsatisfiable_ignores_an_upstream_still_in_progress():
+    graph = build_graph(nodes(1, 2), [edge(2, 1)])
+    assert graph.unsatisfiable({1: TaskRunState(status="IN-PROGRESS")}) == []
+
+
+def test_unsatisfiable_flags_a_has_data_edge_whose_upstream_wrote_nothing():
+    graph = build_graph(nodes(1, 2), [edge(2, 1, dependency_type="HAS_DATA")])
+    state = {1: TaskRunState(status="SUCCESS", target_count=0)}
+    assert graph.unsatisfiable(state) == [2]
+
+
+def test_unsatisfiable_cascades_to_a_fixpoint():
+    # 1 SUCCESS -> 2 (FAILURE) can never run -> 3 (SUCCESS on 2) can never
+    # run either, once 2 is settled SKIPPED. One pass would only find 2.
+    graph = build_graph(nodes(1, 2, 3), [edge(2, 1, dependency_type="FAILURE"), edge(3, 2)])
+    assert graph.unsatisfiable({1: TaskRunState(status="SUCCESS")}) == [2, 3]
+
+
+def test_unsatisfiable_does_not_cascade_through_an_always_edge():
+    # An ALWAYS edge is satisfied by the SKIPPED that 2 is about to get, so 3
+    # is genuinely still runnable — the cascade must not over-reach.
+    graph = build_graph(
+        nodes(1, 2, 3),
+        [edge(2, 1, dependency_type="FAILURE"), edge(3, 2, dependency_type="ALWAYS")],
+    )
+    assert graph.unsatisfiable({1: TaskRunState(status="SUCCESS")}) == [2]
+
+
+def test_unsatisfiable_under_any_needs_every_edge_to_be_hopeless():
+    tasks = [TaskNode(task_id=1), TaskNode(task_id=2)] + [TaskNode(task_id=3, run_condition="ANY")]
+    graph = build_graph(
+        tasks,
+        [edge(3, 1, dependency_type="FAILURE"), edge(3, 2, dependency_type="FAILURE")],
+    )
+    # One upstream succeeded (that edge is hopeless), the other hasn't run.
+    assert graph.unsatisfiable({1: TaskRunState(status="SUCCESS")}) == []
+    assert graph.unsatisfiable(
+        {1: TaskRunState(status="SUCCESS"), 2: TaskRunState(status="SUCCESS")}
+    ) == [3]
+
+
+def test_unsatisfiable_leaves_tasks_that_already_have_a_row_alone():
+    # Only never-run tasks are reported. A task that already ran owns its own
+    # status, whatever it is.
+    graph = build_graph(nodes(1, 2), [edge(2, 1, dependency_type="FAILURE")])
+    state = {1: TaskRunState(status="SUCCESS"), 2: TaskRunState(status="FAILED")}
+    assert graph.unsatisfiable(state) == []
+
+
+def test_check_acyclic_handles_a_chain_deeper_than_the_recursion_limit():
+    # E2-37: the recursive version raised RecursionError — not ResolverError —
+    # turning a config problem into what reads like an engine bug.
+    depth = sys.getrecursionlimit() + 500
+    ids = list(range(1, depth + 1))
+    chain = [edge(i + 1, i) for i in range(1, depth)]
+    graph = build_graph(nodes(*ids), chain)
+    assert len(graph.waves()) == depth
+
+
+def test_check_acyclic_skips_a_root_already_visited_as_a_descendant():
+    # Task ids carry no ordering guarantee relative to the dependency
+    # direction — 1 depending on 2 is perfectly ordinary. Walking roots in id
+    # order then reaches 2 as a descendant of 1 first, so the outer loop must
+    # skip it rather than restart the traversal.
+    graph = build_graph(nodes(1, 2), [edge(1, 2)])
+    assert graph.waves() == [[2], [1]]
+
+
+def test_check_acyclic_still_finds_a_cycle_at_depth():
+    depth = 2000
+    ids = list(range(1, depth + 1))
+    chain = [edge(i + 1, i) for i in range(1, depth)]
+    chain.append(edge(1, depth))
+    with pytest.raises(CycleError):
+        build_graph(nodes(*ids), chain)
 
 
 def test_edge_satisfied_rejects_unknown_dependency_type():

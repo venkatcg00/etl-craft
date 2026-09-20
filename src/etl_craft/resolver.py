@@ -17,13 +17,25 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 DEPENDENCY_TYPES = frozenset({"SUCCESS", "FAILURE", "ALWAYS", "HAS_DATA"})
 TERMINAL_STATUSES = frozenset({"SUCCESS", "FAILED", "SKIPPED"})
+# How many of a task's own edges must be satisfied for it to become ready.
+# [ADDITION, 2026-09-20, E2-41] ALL is the historical behaviour and what a
+# NULL CFG_TASKS.RUN_CONDITION means; ANY and N are new.
+RUN_CONDITIONS = frozenset({"ALL", "ANY", "N"})
 # A task's own status blocks it from ready() only for these — FAILED and
 # None ("never logged") remain retry-eligible. See DependencyGraph.ready().
 NOT_RETRYABLE = frozenset({"SUCCESS", "SKIPPED", "IN-PROGRESS"})
+# Statuses a task can never leave. Narrower than NOT_RETRYABLE (IN-PROGRESS
+# will transition) and than TERMINAL_STATUSES (FAILED stays retry-eligible,
+# which is the whole point of "retry resumes"). This is the set `unsatisfiable`
+# reasons about: once an upstream is SUCCESS or SKIPPED, any edge it does not
+# already satisfy it never will. orchestrator.py imports it from here as the
+# set of tasks needing no further action, rather than keeping its own copy.
+SETTLED_STATUSES = frozenset({"SUCCESS", "SKIPPED"})
 
 
 class ResolverError(Exception):
@@ -56,7 +68,13 @@ class UnknownTaskError(ResolverError):
 class TaskNode:
     """A single CFG_TASKS row, reduced to what the resolver needs."""
 
+    # run_condition is None for the overwhelming majority of tasks, meaning
+    # "ALL" — CFG_TASKS.RUN_CONDITION is nullable and every row predating
+    # E2-41 has it unset. run_condition_count is only ever read for "N".
+
     task_id: int
+    run_condition: str | None = None
+    run_condition_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -87,12 +105,14 @@ class DependencyGraph:
 
     # Construct via `build_graph`, not directly.
 
-    def __init__(self, tasks: tuple[int, ...], edges: tuple[TaskEdge, ...]) -> None:
+    def __init__(self, nodes: tuple[TaskNode, ...], edges: tuple[TaskEdge, ...]) -> None:
         """Index `edges` by their owning task_id for fast dependency lookups."""
-        self._task_ids = tasks
+        self._nodes = nodes
+        self._task_ids = tuple(node.task_id for node in nodes)
+        self._nodes_by_id = {node.task_id: node for node in nodes}
         self._edges = edges
         # dependents[t] = edges whose task_id == t (what t depends on)
-        self._dependencies_of: dict[int, list[TaskEdge]] = {t: [] for t in tasks}
+        self._dependencies_of: dict[int, list[TaskEdge]] = {t: [] for t in self._task_ids}
         for edge in edges:
             self._dependencies_of[edge.task_id].append(edge)
 
@@ -129,16 +149,37 @@ class DependencyGraph:
             remaining.difference_update(wave)
         return result
 
+    def required_edge_count(self, task_id: int) -> int:
+        """How many of `task_id`'s edges must be satisfied, per its RUN_CONDITION."""
+        # [ADDITION, 2026-09-20, E2-41] Before this, the answer was always
+        # "all of them" — the literal `all(...)` this replaced. NULL/ALL keeps
+        # exactly that behaviour, so every pre-E2-41 CFG_TASKS row resolves
+        # identically. build_graph has already rejected an unknown mode, a
+        # missing count for 'N', and a count larger than the task's own edge
+        # count, so nothing here has to defend against those again.
+        edges = self._dependencies_of[task_id]
+        node = self._nodes_by_id[task_id]
+        condition = node.run_condition or "ALL"
+        if condition == "ANY":
+            return 1 if edges else 0
+        if condition == "N":
+            # Validated non-None by build_graph; assert-free narrowing for mypy.
+            return node.run_condition_count or 1
+        return len(edges)
+
     def ready(self, run_state: dict[int, TaskRunState]) -> list[int]:
         """Return the tasks that can run right now, given each task's current run state."""
-        # A task is ready when it is itself retry-eligible and every one of
-        # its dependency edges is satisfied. Per CLAUDE.md "Idempotent by
+        # A task is ready when it is itself retry-eligible and enough of its
+        # dependency edges are satisfied. Per CLAUDE.md "Idempotent by
         # construction, retry resumes": a retry skips what's already SUCCESS
         # or SKIPPED and only re-attempts what actually failed or never ran.
         # So a task's own status blocks it from `ready()` only when it's
         # SUCCESS, SKIPPED, or IN-PROGRESS (already running — not to be
         # dispatched a second time concurrently); FAILED and "never logged"
         # (status=None) both remain eligible.
+        #
+        # "Enough" is `required_edge_count` — every edge under the default
+        # ALL, one under ANY, RUN_CONDITION_COUNT under N.
         #
         # Edge satisfaction:
         #   SUCCESS  -> upstream status == SUCCESS
@@ -153,12 +194,76 @@ class DependencyGraph:
             state = run_state.get(task_id, TaskRunState())
             if state.status in NOT_RETRYABLE:
                 continue
-            if all(
-                self._edge_satisfied(edge, run_state.get(edge.depends_on_task_id, TaskRunState()))
-                for edge in self._dependencies_of[task_id]
-            ):
+            if self._satisfied_edge_count(task_id, run_state) >= self.required_edge_count(task_id):
                 result.append(task_id)
         return sorted(result)
+
+    def unsatisfiable(self, run_state: dict[int, TaskRunState]) -> list[int]:
+        """Return the never-run tasks that can never become ready under this run.
+
+        [ADDITION, 2026-09-20, E2-01] The counterpart to `ready()`. Without
+        it, a task gated only on something that will never happen — the
+        `EMAIL_ALERT`-on-a-`FAILURE`-edge pattern CLAUDE.md's Handlers section
+        recommends, when the watched task succeeds — simply never gets an
+        AUD_TASK_RUN_LOG row, and orchestrator.py counts a task with no row as
+        unsettled, so every successful pipeline using that pattern reported
+        FAILED. Callers record these SKIPPED, which SETTLED_STATUSES accepts.
+        """
+        # An edge is *permanently* unsatisfiable only when its upstream can
+        # never change again (SETTLED_STATUSES — deliberately not FAILED,
+        # which a later `run` invocation may still retry into SUCCESS, and
+        # deliberately not IN-PROGRESS, which is about to transition).
+        #
+        # Computed to a fixpoint rather than in one pass, because recording a
+        # task SKIPPED settles it, which cascades: a downstream ALWAYS edge
+        # then becomes satisfiable, while a downstream SUCCESS edge becomes
+        # permanently unsatisfiable in turn.
+        #
+        # Only tasks with no log row at all (status None) are reported. A task
+        # that already has a status either ran or was already settled — in
+        # particular a FAILED task must stay FAILED and make the pipeline
+        # report FAILED, not be quietly converted into a skip.
+        known = dict(run_state)
+        result: set[int] = set()
+        while True:
+            newly = [
+                task_id
+                for task_id in self._task_ids
+                if task_id not in result
+                and known.get(task_id, TaskRunState()).status is None
+                and self._is_unsatisfiable(task_id, known)
+            ]
+            if not newly:
+                return sorted(result)
+            for task_id in newly:
+                result.add(task_id)
+                known[task_id] = TaskRunState(status="SKIPPED")
+
+    def _is_unsatisfiable(self, task_id: int, run_state: dict[int, TaskRunState]) -> bool:
+        edges = self._dependencies_of[task_id]
+        if not edges:
+            return False
+        still_possible = sum(
+            1
+            for edge in edges
+            if not self._edge_permanently_unsatisfiable(
+                edge, run_state.get(edge.depends_on_task_id, TaskRunState())
+            )
+        )
+        return still_possible < self.required_edge_count(task_id)
+
+    @classmethod
+    def _edge_permanently_unsatisfiable(cls, edge: TaskEdge, upstream: TaskRunState) -> bool:
+        if upstream.status not in SETTLED_STATUSES:
+            return False
+        return not cls._edge_satisfied(edge, upstream)
+
+    def _satisfied_edge_count(self, task_id: int, run_state: dict[int, TaskRunState]) -> int:
+        return sum(
+            1
+            for edge in self._dependencies_of[task_id]
+            if self._edge_satisfied(edge, run_state.get(edge.depends_on_task_id, TaskRunState()))
+        )
 
     @staticmethod
     def _edge_satisfied(edge: TaskEdge, upstream: TaskRunState) -> bool:
@@ -188,6 +293,7 @@ def build_graph(tasks: list[TaskNode], edges: list[TaskEdge]) -> DependencyGraph
     if len(task_id_set) != len(task_ids):
         raise ResolverError("duplicate task_id in tasks list")
 
+    edge_count: dict[int, int] = dict.fromkeys(task_ids, 0)
     for edge in edges:
         if edge.dependency_type not in DEPENDENCY_TYPES:
             raise ResolverError(f"unknown dependency_type: {edge.dependency_type!r}")
@@ -199,31 +305,86 @@ def build_graph(tasks: list[TaskNode], edges: list[TaskEdge]) -> DependencyGraph
             )
         if edge.task_id == edge.depends_on_task_id:
             raise SelfDependencyError(f"task_id={edge.task_id} depends on itself")
+        edge_count[edge.task_id] += 1
 
-    graph = DependencyGraph(task_ids, tuple(edges))
+    # [ADDITION, 2026-09-20, E2-41] CFG_TASKS' own CHECK constraints already
+    # reject a bad mode or a missing/negative count at insert time; these
+    # repeat that so the resolver stays safe to use standalone and in tests
+    # without a live Engine DB, exactly like the self-dependency check above.
+    # The last one is genuinely beyond what any CHECK can express, since it
+    # compares a CFG_TASKS column against a count of CFG_TASK_DEPENDENCY rows
+    # — `validate` surfaces it via validate_graphs, which is where a config
+    # error spanning two tables belongs.
+    for task in tasks:
+        if task.run_condition is None:
+            if task.run_condition_count is not None:
+                raise ResolverError(
+                    f"task_id={task.task_id} sets run_condition_count with no run_condition"
+                )
+            continue
+        if task.run_condition not in RUN_CONDITIONS:
+            raise ResolverError(
+                f"task_id={task.task_id} has unknown run_condition: {task.run_condition!r}"
+            )
+        if task.run_condition != "N":
+            if task.run_condition_count is not None:
+                raise ResolverError(
+                    f"task_id={task.task_id} sets run_condition_count with "
+                    f"run_condition={task.run_condition!r}, which ignores it"
+                )
+            continue
+        if task.run_condition_count is None or task.run_condition_count < 1:
+            raise ResolverError(
+                f"task_id={task.task_id} has run_condition='N' but "
+                f"run_condition_count={task.run_condition_count!r}"
+            )
+        if task.run_condition_count > edge_count[task.task_id]:
+            raise ResolverError(
+                f"task_id={task.task_id} requires {task.run_condition_count} satisfied "
+                f"dependencies but only has {edge_count[task.task_id]} — it could never run"
+            )
+
+    graph = DependencyGraph(tuple(tasks), tuple(edges))
     _check_acyclic(graph)
     return graph
 
 
 def _check_acyclic(graph: DependencyGraph) -> None:
     """Raise CycleError with the offending cycle if one exists in `graph`."""
+    # [DEVIATION, 2026-09-20, E2-37] An explicit stack, not recursion. The
+    # recursive version raised RecursionError — not ResolverError — on a
+    # dependency chain deeper than Python's own limit, turning a config
+    # problem into what reads like an engine bug. Same colouring, same
+    # traversal order, same cycle tuple; only the bookkeeping moved onto the
+    # heap.
     WHITE, GRAY, BLACK = 0, 1, 2
-    color: dict[int, int] = {t: WHITE for t in graph.task_ids}
-    path: list[int] = []
+    color: dict[int, int] = dict.fromkeys(graph.task_ids, WHITE)
 
-    def visit(task_id: int) -> None:
-        color[task_id] = GRAY
-        path.append(task_id)
-        for edge in graph.dependencies_of(task_id):
-            upstream = edge.depends_on_task_id
-            if color[upstream] == WHITE:
-                visit(upstream)
-            elif color[upstream] == GRAY:
-                cycle_start = path.index(upstream)
-                raise CycleError(tuple(path[cycle_start:] + [upstream]))
-        path.pop()
-        color[task_id] = BLACK
+    def upstreams_of(task_id: int) -> Iterator[int]:
+        return iter([edge.depends_on_task_id for edge in graph.dependencies_of(task_id)])
 
-    for task_id in graph.task_ids:
-        if color[task_id] == WHITE:
-            visit(task_id)
+    for root in graph.task_ids:
+        if color[root] != WHITE:
+            continue
+        path: list[int] = [root]
+        color[root] = GRAY
+        stack: list[tuple[int, Iterator[int]]] = [(root, upstreams_of(root))]
+        while stack:
+            task_id, pending = stack[-1]
+            descended = False
+            for upstream in pending:
+                if color[upstream] == GRAY:
+                    cycle_start = path.index(upstream)
+                    raise CycleError(tuple(path[cycle_start:] + [upstream]))
+                if color[upstream] == WHITE:
+                    color[upstream] = GRAY
+                    path.append(upstream)
+                    # `pending` keeps its position, so popping back to this
+                    # frame resumes where this loop left off.
+                    stack.append((upstream, upstreams_of(upstream)))
+                    descended = True
+                    break
+            if not descended:
+                stack.pop()
+                path.pop()
+                color[task_id] = BLACK

@@ -12,6 +12,27 @@
 # downstream (a real Airflow DAG file, documentation, a reference
 # implementation repo) comes to depend on it.
 #
+# [DEVIATION, 2026-09-20, E2-14/E2-41] Each `depends_on` entry carries a
+# `trigger_rule`, not the raw `dependency_type` it used to emit — one
+# vocabulary, not two side by side. The raw type was Airflow-meaningless and
+# pushed the mapping onto whoever wrote a loader, which is exactly the thing
+# that makes a generated EMAIL_ALERT task behave wrongly. The rule is derived
+# from (CFG_TASKS.RUN_CONDITION, CFG_TASK_DEPENDENCY.DEPENDENCY_TYPE) by
+# _TRIGGER_RULES below.
+#
+# Two combinations genuinely have no Airflow equivalent, and are stated
+# rather than papered over:
+#   * RUN_CONDITION = 'N' ("at least N of these edges"). Airflow has
+#     all_*/one_* and nothing in between, so the emitted rule is `all_done`
+#     and the engine's own gate (resolver.required_edge_count) is what
+#     actually enforces the count when the task runs.
+#   * DEPENDENCY_TYPE = 'HAS_DATA' (upstream succeeded *and* wrote rows).
+#     Airflow cannot see TARGET_COUNT at all, so the emitted rule is the
+#     upstream-success half (`all_success`/`one_success`) and the engine's
+#     own in-task check enforces the rest — which it already did.
+# Both cases are safe in the same direction: Airflow lets the task start,
+# and the engine then records it SKIPPED if the real condition isn't met.
+
 # Task-level cross-pipeline dependencies (CFG_TASK_DEPENDENCY edges pointing
 # at another pipeline) have no DAG-native equivalent (CLAUDE.md: "one DAG
 # can't natively depend on a task in a separate DAG") and are surfaced here
@@ -61,7 +82,7 @@ from etl_craft.cfg import (
     resolve_pipeline_id,
 )
 from etl_craft.config import ConnectorConfig
-from etl_craft.resolver import build_graph
+from etl_craft.resolver import ResolverError, build_graph
 
 # The synthetic first task every generated DAG gets, per CLAUDE.md's old
 # design-notes phrasing: "an additional pipeline id creation step that
@@ -99,6 +120,39 @@ def _resolve(pipeline_value: Any, global_value: Any, default: Any) -> Any:
     return default
 
 
+# [ADDITION, 2026-09-20, E2-41] (RUN_CONDITION, DEPENDENCY_TYPE) -> Airflow
+# trigger rule. See this module's own docstring for the two combinations that
+# have no exact Airflow equivalent and what is emitted for them instead.
+_TRIGGER_RULES: dict[tuple[str, str], str] = {
+    ("ALL", "SUCCESS"): "all_success",
+    ("ALL", "FAILURE"): "all_failed",
+    ("ALL", "ALWAYS"): "all_done",
+    ("ALL", "HAS_DATA"): "all_success",
+    ("ANY", "SUCCESS"): "one_success",
+    ("ANY", "FAILURE"): "one_failed",
+    ("ANY", "ALWAYS"): "one_done",
+    ("ANY", "HAS_DATA"): "one_success",
+    # 'N' has no Airflow equivalent at any dependency type — Airflow offers
+    # all_*/one_* and nothing in between. all_done lets the task start and
+    # leaves the real count to the engine's own gate.
+    ("N", "SUCCESS"): "all_done",
+    ("N", "FAILURE"): "all_done",
+    ("N", "ALWAYS"): "all_done",
+    ("N", "HAS_DATA"): "all_done",
+}
+
+
+def trigger_rule_for(run_condition: str, dependency_type: str) -> str:
+    """Map a task's RUN_CONDITION plus one edge's DEPENDENCY_TYPE to an Airflow trigger rule."""
+    try:
+        return _TRIGGER_RULES[(run_condition, dependency_type)]
+    except KeyError:  # pragma: no cover - build_graph rejects both values first
+        raise ResolverError(
+            f"no Airflow trigger rule for run_condition={run_condition!r} "
+            f"dependency_type={dependency_type!r}"
+        ) from None
+
+
 def generate_pipeline_dag(
     conn: Connection, config: ConnectorConfig, pipeline_code: str
 ) -> dict[str, Any]:
@@ -123,6 +177,7 @@ def generate_pipeline_dag(
             "depends_on": [],
         }
     }
+    run_conditions = {task.task_id: (task.run_condition or "ALL") for task in graph_data.tasks}
     for task in graph_data.tasks:
         task_code = task_codes[task.task_id]
         edges = same_pipeline_edges_by_task[task.task_id]
@@ -130,12 +185,14 @@ def generate_pipeline_dag(
             [
                 {
                     "task": task_codes[edge.depends_on_task_id],
-                    "dependency_type": edge.dependency_type,
+                    "trigger_rule": trigger_rule_for(
+                        run_conditions[task.task_id], edge.dependency_type
+                    ),
                 }
                 for edge in edges
             ]
             if edges
-            else [{"task": INIT_TASK_ID, "dependency_type": "ALWAYS"}]
+            else [{"task": INIT_TASK_ID, "trigger_rule": "all_done"}]
         )
         tasks[task_code] = {
             "bash_command": (
@@ -153,9 +210,9 @@ def generate_pipeline_dag(
     tasks[FINALIZE_TASK_ID] = {
         "bash_command": f"etl-craft run --pipeline_code {pipeline_code} --finalize-only",
         "depends_on": (
-            [{"task": task_code, "dependency_type": "ALWAYS"} for task_code in leaf_task_codes]
+            [{"task": task_code, "trigger_rule": "all_done"} for task_code in leaf_task_codes]
             if leaf_task_codes
-            else [{"task": INIT_TASK_ID, "dependency_type": "ALWAYS"}]
+            else [{"task": INIT_TASK_ID, "trigger_rule": "all_done"}]
         ),
     }
 
@@ -244,7 +301,13 @@ def generate_global_dag(conn: Connection) -> dict[str, Any]:
         pipelines[pipeline_code] = {
             "trigger_dag_id": pipeline_code,
             "depends_on": [
-                {"pipeline": edge.depends_on_pipeline_code, "dependency_type": edge.dependency_type}
+                {
+                    "pipeline": edge.depends_on_pipeline_code,
+                    # Pipeline-level edges have no RUN_CONDITION of their own
+                    # (that column is on CFG_TASKS), so they always resolve
+                    # as ALL — every declared upstream must qualify.
+                    "trigger_rule": trigger_rule_for("ALL", edge.dependency_type),
+                }
                 for edge in edges_by_pipeline.get(pipeline_code, [])
             ],
         }

@@ -32,12 +32,16 @@ forward from one version of `schema.sql` to the next, one file at a time.
   change is a new forward migration, same as everywhere else in this
   engine's "no destructive shortcuts" philosophy.
 
-## Why no files exist here yet
+## Why history starts at 0001
 
 Every schema change made before this mechanism existed already landed as a
 direct edit to `sql/schema.sql` (each one flagged in its own "POST-SIGNOFF
-CHANGES" block there) — none of those get a retroactive migration file,
+CHANGES" block there) — none of those got a retroactive migration file,
 since that would misstate when and how they actually happened. This
-directory starts genuinely empty; the first real file here should be for
-the *next* schema change from this point forward, not a reconstruction of
-history.
+directory started genuinely empty, and the first real file here is for the
+first schema change made *after* the mechanism existed:
+
+- `0001_add_run_condition.sql` — CFG_TASKS.RUN_CONDITION /
+  RUN_CONDITION_COUNT (iteration 2, E2-41). Also the first file this runner
+  has ever actually applied, so it is what proves the plumbing works rather
+  than only the tests that pass it a `tmp_path`.

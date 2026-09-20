@@ -232,12 +232,20 @@ def fetch_pipeline_graph(conn: Connection, pipeline_id: int) -> PipelineGraphDat
     """Fetch active tasks and same-pipeline dependency edges for `pipeline_id`."""
     task_rows = conn.execute(
         text(
-            "SELECT TASK_ID AS task_id FROM CFG_TASKS "
+            "SELECT TASK_ID AS task_id, RUN_CONDITION AS run_condition, "
+            "RUN_CONDITION_COUNT AS run_condition_count FROM CFG_TASKS "
             "WHERE PIPELINE_ID = :pipeline_id AND ACTIVE_FLAG = 'Y'"
         ),
         {"pipeline_id": pipeline_id},
     ).all()
-    tasks = [TaskNode(task_id=row.task_id) for row in task_rows]
+    tasks = [
+        TaskNode(
+            task_id=row.task_id,
+            run_condition=row.run_condition,
+            run_condition_count=row.run_condition_count,
+        )
+        for row in task_rows
+    ]
 
     edge_rows = conn.execute(
         text(

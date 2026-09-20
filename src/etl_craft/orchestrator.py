@@ -72,19 +72,29 @@ from etl_craft.crosspipe import (
     check_pipeline_dependencies,
     consume_pipeline_dependency_edges,
 )
-from etl_craft.resolver import DependencyGraph, TaskRunState, build_graph
+from etl_craft.resolver import (
+    SETTLED_STATUSES,
+    DependencyGraph,
+    TaskRunState,
+    build_graph,
+)
 from etl_craft.runlog import (
     RunLogError,
     fetch_active_pipeline_run_id,
     fetch_run_state,
     finalize_pipeline_run,
     find_or_create_active_run,
+    find_or_create_task_run,
+    update_task_run,
 )
 
-# Tasks in this state need no further action. FAILED is deliberately not
-# included here — per "retry resumes", a FAILED task is still retry-eligible
-# and graph.ready() will offer it again once its own upstream deps allow.
-SETTLED_STATUSES = frozenset({"SUCCESS", "SKIPPED"})
+# SETTLED_STATUSES (tasks needing no further action) is imported from
+# resolver.py rather than defined here — the resolver is the layer that
+# reasons about which statuses can still change, and two copies of the same
+# frozenset are exactly the kind of thing that drifts. FAILED is
+# deliberately not in it: per "retry resumes", a FAILED task is still
+# retry-eligible and graph.ready() will offer it again on a later
+# invocation once its own upstream deps allow.
 
 
 class OrchestratorModeRefusedError(Exception):
@@ -115,9 +125,47 @@ class FinalizeOutcome:
     message: str
 
 
+def settle_unsatisfiable_tasks(
+    engine: Engine,
+    graph: DependencyGraph,
+    pipeline_run_id: int,
+    all_task_ids: list[int],
+) -> list[int]:
+    """Record SKIPPED for every never-run task that can never become ready. Return their ids.
+
+    [ADDITION, 2026-09-20, E2-01] The write half of resolver.unsatisfiable().
+    A task gated only on something that will never happen — the recommended
+    `EMAIL_ALERT`-on-a-`FAILURE`-edge pattern, when the watched task succeeds
+    — otherwise never gets an AUD_TASK_RUN_LOG row at all, and a task with no
+    row counts as unsettled below, so every successful pipeline using that
+    pattern reported FAILED. Called from both the wave loop and the finalize
+    path, so `--finalize-only` under Mode=orchestrator (where the wave loop
+    never runs) is correct too.
+    """
+    with engine.connect() as conn:
+        run_state = fetch_run_state(conn, pipeline_run_id, all_task_ids)
+    doomed = graph.unsatisfiable(run_state)
+    if not doomed:
+        return []
+    with engine.begin() as conn:
+        for task_id in doomed:
+            binding = find_or_create_task_run(conn, task_id, pipeline_run_id)
+            update_task_run(
+                conn,
+                binding.task_run_id,
+                status="SKIPPED",
+                error_message=(
+                    "dependencies can never be satisfied under "
+                    f"pipeline_run_id={pipeline_run_id}"
+                ),
+            )
+    return doomed
+
+
 def _finalize_from_task_states(
     engine: Engine,
     config: ConnectorConfig,
+    graph: DependencyGraph,
     pipeline_id: int,
     pipeline_run_id: int,
     all_task_ids: list[int],
@@ -127,6 +175,9 @@ def _finalize_from_task_states(
     Returns (final_status, unsettled_task_ids) — the caller decides how
     much detail about `unsettled` to put in its own outcome message.
     """
+    # Settle anything permanently gated off *before* counting, or it reads as
+    # unsettled and drags the whole run to FAILED — see E2-01.
+    settle_unsatisfiable_tasks(engine, graph, pipeline_run_id, all_task_ids)
     with engine.connect() as conn:
         final_state = fetch_run_state(conn, pipeline_run_id, all_task_ids)
     unsettled = [
@@ -189,9 +240,14 @@ def finalize_active_run(
     with engine.connect() as conn:
         graph_data = fetch_pipeline_graph(conn, pipeline_id)
     all_task_ids = [task.task_id for task in graph_data.tasks]
+    # Built here purely so _finalize_from_task_states can settle permanently
+    # gated-off tasks (E2-01). This is Mode=orchestrator's only finalize
+    # path, so without it a generated DAG's __finalize__ step would keep
+    # writing FAILED for a run that genuinely succeeded.
+    graph = build_graph(graph_data.tasks, graph_data.same_pipeline_edges)
 
     final_status, _ = _finalize_from_task_states(
-        engine, config, pipeline_id, pipeline_run_id, all_task_ids
+        engine, config, graph, pipeline_id, pipeline_run_id, all_task_ids
     )
     return FinalizeOutcome(
         status=final_status,
@@ -316,7 +372,7 @@ def run_pipeline(
         )
 
     final_status, unsettled = _finalize_from_task_states(
-        engine, config, pipeline_id, pipeline_run_id, all_task_ids
+        engine, config, graph, pipeline_id, pipeline_run_id, all_task_ids
     )
 
     if never_ready:
@@ -350,6 +406,11 @@ def _run_until_settled(
     # forever, since its own status never becomes SUCCESS/SKIPPED/IN-PROGRESS.
     attempted: set[int] = set()
     while True:
+        # [ADDITION, 2026-09-20, E2-01] Settle permanently gated-off tasks
+        # first, every pass. Doing it inside the loop rather than once at the
+        # end matters because recording one SKIPPED can unblock a downstream
+        # ALWAYS edge, which then genuinely has a wave to run.
+        settle_unsatisfiable_tasks(engine, graph, pipeline_run_id, all_task_ids)
         with engine.connect() as conn:
             run_state = fetch_run_state(conn, pipeline_run_id, all_task_ids)
         pending = [

@@ -75,7 +75,7 @@ from etl_craft.crosspipe import (
 from etl_craft.db import build_engine
 from etl_craft.execution import TaskExecutionContext, format_task_log
 from etl_craft.handlers import HandlerError, dispatch
-from etl_craft.resolver import build_graph
+from etl_craft.resolver import DependencyGraph, TaskRunState, build_graph
 from etl_craft.runlog import (
     fetch_pipeline_run_status,
     fetch_run_state,
@@ -135,6 +135,29 @@ def run_task(
                 ),
             )
 
+        if existing_status == "IN-PROGRESS":
+            # [ADDITION, 2026-09-20, E2-02] Its own distinct outcome, and it
+            # must come before the dependency check below. resolver.ready()
+            # excludes an IN-PROGRESS task deliberately ("never re-dispatch"),
+            # which that check could only read as "dependencies not met" —
+            # so a second invocation used to call _bind_as_skipped and
+            # overwrite the *live* row with STATUS='SKIPPED'. That lied about
+            # a task that was still executing, disarmed the original
+            # process's crash detection (which only writes FAILED while the
+            # row still reads IN-PROGRESS), and left the final status
+            # depending on which process wrote last. Reachable by ordinary
+            # means: an Airflow retry firing while the first attempt still
+            # runs, or a human running a task the local orchestrator already
+            # spawned. Write nothing at all, and exit 0 — the run already
+            # under way owns this row.
+            return TaskOutcome(
+                status="SKIPPED",
+                message=(
+                    f"{task_code}: already IN-PROGRESS under "
+                    f"pipeline_run_id={pipeline_run_id} — not re-dispatching"
+                ),
+            )
+
         with engine.connect() as conn:
             pipeline_run_status = fetch_pipeline_run_status(conn, pipeline_run_id)
         if pipeline_run_status == "SKIPPED":
@@ -167,9 +190,11 @@ def run_task(
         # docstring for the full reasoning.
         skip_reason: str | None = None
         if task_id not in set(graph.ready(run_state)):
-            skip_reason = (
-                f"same-pipeline dependencies not met for pipeline_run_id={pipeline_run_id}"
-            )
+            # [ADDITION, 2026-09-20, E2-02] Name the real cause. This used to
+            # say "dependencies not met" unconditionally, which was wrong for
+            # a permanently gated-off task (E2-01) and wrong again for the
+            # IN-PROGRESS case now handled above.
+            skip_reason = _describe_unready(graph, task_id, run_state, pipeline_run_id)
         elif task_id in graph_data.cross_pipeline_task_ids:
             skip_reason = check_task_cross_pipeline_dependencies(
                 engine, task_id, sleep=sleep, now=now
@@ -210,6 +235,25 @@ def run_task(
     if result.status == "SUCCESS":
         return TaskOutcome(status="SUCCESS", message=f"{task_code}: SUCCESS")
     return TaskOutcome(status="FAILED", message=f"{task_code}: {result.error_message}")
+
+
+def _describe_unready(
+    graph: DependencyGraph,
+    task_id: int,
+    run_state: dict[int, TaskRunState],
+    pipeline_run_id: int,
+) -> str:
+    """Say why `task_id` is not ready, distinguishing "not yet" from "never will be"."""
+    required = graph.required_edge_count(task_id)
+    if task_id in set(graph.unsatisfiable(run_state)):
+        return (
+            f"dependencies can never be satisfied under pipeline_run_id={pipeline_run_id} "
+            f"(needs {required} of {len(graph.dependencies_of(task_id))} edge(s) satisfied)"
+        )
+    return (
+        f"same-pipeline dependencies not met for pipeline_run_id={pipeline_run_id} "
+        f"(needs {required} of {len(graph.dependencies_of(task_id))} edge(s) satisfied)"
+    )
 
 
 def _bind_as_skipped(
