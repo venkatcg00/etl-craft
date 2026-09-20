@@ -3392,6 +3392,39 @@ def test_sql_delete_rows_soft_delete_missing_delete_flag_fails_clearly(
     assert "HARD_DELETE=true" in outcome.message
 
 
+def test_sql_delete_rows_hard_delete_ignores_missing_delete_flag(
+    postgres_engine, committed_pipeline, data_db_tables
+):
+    # HARD_DELETE=true issues a real DELETE and never touches DELETE_FLAG at
+    # all -- unlike the soft-delete path above, a target that never had that
+    # column must NOT be rejected by the audit-column check.
+    target = f"public.sqlx_hard_delete_no_flag_{committed_pipeline}"
+    data_db_tables.append(target)
+    with postgres_engine.begin() as conn:
+        conn.execute(text(f"CREATE TABLE {target} (id int, pipeline_run_id bigint)"))
+        conn.execute(text(f"INSERT INTO {target} (id, pipeline_run_id) VALUES (1, 1)"))
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "hard")
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {
+            "SQL_ACTION": "DELETE_ROWS",
+            "TARGET_OBJECT": target,
+            "SOURCE_SQL": f"SELECT id FROM {target} WHERE id = 1",
+            "MERGE_KEY": "id",
+            "HARD_DELETE": "true",
+        },
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    outcome = run_task(postgres_engine, make_config(warehouse=True), "TEST_CONCURRENT_PL", "hard")
+
+    assert outcome.status == "SUCCESS"
+    with postgres_engine.connect() as conn:
+        rows = conn.execute(text(f"SELECT id FROM {target}")).all()
+    assert rows == []
+
+
 def test_sql_unknown_action_and_missing_params_fail_clearly(
     postgres_engine, committed_pipeline, data_db_tables
 ):
