@@ -11,7 +11,7 @@ runtime dependency is a Postgres connection.
 
 ```bash
 uv add etl-craft          # or: pip install etl-craft
-etl-craft init-db         # create the schema in an empty database
+etl-craft setup           # writes the config, creates or updates the schema
 etl-craft doctor          # check config, secrets and every connection
 ```
 
@@ -39,26 +39,35 @@ docker run -d --name etl-craft-pg -p 55432:5432 \
   postgres:16
 ```
 
-**2. Install and configure.**
+**2. Describe your environment in a `.env` file.**
 
 ```bash
-uv add etl-craft
-etl-craft configure          # interactive; or see docs/craft-connector.example.yml
-```
-
-`configure` prints the exact environment variable each profile's secret is read from —
-for the default `dev` profile that is `ETL_CRAFT_POSTGRES_DEV_SECRET`:
-
-```bash
+cat > .env <<'EOF'
+ETL_CRAFT_MODE=local
+ETL_CRAFT_SOURCE_TYPE=environment
+ETL_CRAFT_POSTGRES_PROFILE=dev
+ETL_CRAFT_POSTGRES_JDBC_URL=jdbc:postgresql://localhost:55432/etl_craft
+ETL_CRAFT_POSTGRES_USER=etl_craft
+ETL_CRAFT_POSTGRES_AUTH_MODE=password
+EOF
 export ETL_CRAFT_POSTGRES_DEV_SECRET=etl_craft
 ```
 
-**3. Create the schema and check everything.**
+**3. Run `setup`. Once, and then whenever anything changes.**
 
 ```bash
-etl-craft init-db
-etl-craft doctor
+uv add etl-craft
+etl-craft setup      # writes craft-connector.yml, then creates or migrates the schema
+etl-craft doctor     # verifies every secret and connection
 ```
+
+`setup` is idempotent, in the dbt sense: the first run sets everything up, and every run
+after that brings it to current. There is no separate first-run path and no prompts, so it
+behaves identically on a laptop and in CI. Already have the settings exported in your
+environment? `etl-craft setup --from-environment` skips the file entirely.
+
+It also prints the exact secret variable each profile expects, so you never discover the
+name from a later command failing.
 
 **4. Register a pipeline.** Pipeline creation is deliberately *not* a CLI verb — it is
 git-managed SQL, reviewed like any other change. See
@@ -77,9 +86,9 @@ etl-craft history --pipeline_code MY_PIPELINE
 
 | Command | Purpose |
 |---|---|
+| `setup` | **Start here.** Set up or update this deployment: config, then schema/migrations. Idempotent — run it again after any change |
 | `init-db` | Apply the packaged schema to an empty Engine DB |
 | `migrate` | Apply pending `sql/migrations/*.sql` to an existing Engine DB |
-| `configure [--env FILE]` | Write `craft-connector.yml`, interactively or from an env file |
 | `set-execution-mode local\|orchestrator` | One-time-per-environment mode lock |
 | `doctor` | Check config, every secret, and every configured connection |
 | `validate` | Config integrity checks no database constraint can enforce |
@@ -89,6 +98,8 @@ etl-craft history --pipeline_code MY_PIPELINE
 | `steps --pipeline_code X` | List a pipeline's tasks and their parameters |
 | `history --pipeline_code X [--task_code Y] [--limit N]` | Recent run history |
 | `lineage --table schema.table` | Every task declaring that table as a source or target |
+| `lineage --column schema.table.column` | Column-level lineage, parsed from `SOURCE_SQL` |
+| `docs-version` | Record a new documentation version for any task whose text changed |
 | `generate-yml [--pipeline_code X \| --global]` | Emit an Airflow-shaped DAG description |
 | `generate-docs [--output DIR]` | Emit a static, searchable documentation site |
 
@@ -111,7 +122,19 @@ searches upward from the current directory for `craft-connector.yml`.
 - [docs/craft-connector.example.yml](docs/craft-connector.example.yml) — a commented example
 
 `etl-craft generate-docs` produces a searchable site describing *your* pipelines, from the
-metadata in your own Engine DB. It complements these docs rather than replacing them.
+metadata in your own Engine DB — including each task's `DOCUMENTATION` (with its version)
+and its column-level lineage. Search is fuzzy, and the site ships everything it needs, so
+it works on a network with no outbound access. It complements these docs rather than
+replacing them.
+
+### Lineage
+
+`etl-craft lineage --table schema.table` lists the tasks declaring a table as a source or
+target. `etl-craft lineage --column schema.table.column` goes further: it parses each SQL
+task's `SOURCE_SQL` with [sqlglot](https://sqlglot.com) and resolves which upstream column
+actually feeds it — through aliases, joins and CTEs — along with the expression applied.
+Results are cached in `AUD_COLUMN_LINEAGE`, keyed by a hash of the SQL they came from, so
+editing a query invalidates them automatically.
 
 ## Requirements
 

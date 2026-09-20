@@ -53,12 +53,18 @@ def _secret_check(config: ConnectorConfig, label: str, profile: object) -> Check
 
 
 def _engine_db_check(config: ConnectorConfig) -> CheckResult:
+    engine = None
     try:
         engine = build_engine(config)
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
     except (ConfigError, SQLAlchemyError) as exc:
         return CheckResult("Engine DB connection", False, str(exc))
+    finally:
+        # Same reason setup disposes its engine: a probe that leaves pooled
+        # connections open blocks anything trying to drop the database.
+        if engine is not None:
+            engine.dispose()
     return CheckResult("Engine DB connection", True, f"connected as {config.postgres.active.user}")
 
 

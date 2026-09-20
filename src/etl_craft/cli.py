@@ -41,6 +41,7 @@ from etl_craft.cfg import (
     resolve_pipeline_id,
     resolve_task_id,
 )
+from etl_craft.column_lineage import column_lineage_for
 from etl_craft.config import (
     VALID_MODES,
     ConfigError,
@@ -48,10 +49,11 @@ from etl_craft.config import (
     load_config,
     resolve_config_path,
 )
-from etl_craft.configure import configure_from_env, configure_interactive, set_execution_mode
+from etl_craft.configure import set_execution_mode
 from etl_craft.db import build_engine
 from etl_craft.docs_generator import generate_docs
 from etl_craft.doctor import run_checks
+from etl_craft.documentation import fetch_history, refresh_all
 from etl_craft.generate_yml import (
     GENERATED_HEADER,
     generate_global_dag,
@@ -69,6 +71,7 @@ from etl_craft.orchestrator import (
 from etl_craft.resolver import ResolverError, build_graph
 from etl_craft.runlog import RunLogError
 from etl_craft.runner import ForceNotAllowedError, TaskOutcome, run_task
+from etl_craft.setup_command import run_setup
 from etl_craft.validate import (
     validate_business_rule_keys,
     validate_graphs,
@@ -156,9 +159,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     mode_parser.add_argument("mode", choices=sorted(VALID_MODES))
 
-    configure_parser = subparsers.add_parser("configure", help="Set up craft-connector.yml")
-    configure_parser.add_argument(
-        "--env", help="Path to an env file for non-interactive setup (required for now)"
+    setup_parser = subparsers.add_parser(
+        "setup",
+        help="Set up or update this deployment: config, then schema/migrations",
+    )
+    setup_source = setup_parser.add_mutually_exclusive_group()
+    setup_source.add_argument(
+        "--env",
+        help="Settings file to read (default: ./.env)",
+    )
+    setup_source.add_argument(
+        "--from-environment",
+        action="store_true",
+        help="Read settings from the process environment instead of a file",
+    )
+    setup_parser.add_argument(
+        "--migrations-dir",
+        help="Directory of *.sql migration files (same resolution as `migrate`)",
     )
 
     generate_yml_parser = subparsers.add_parser(
@@ -186,10 +203,27 @@ def build_parser() -> argparse.ArgumentParser:
     # already anticipated as "table-level lineage." [CHOICE] Named
     # `lineage`, not folded into `graph` (which is pipeline-scoped, not
     # cross-pipeline/table-scoped the way this query is).
-    lineage_parser = subparsers.add_parser(
-        "lineage", help="List every task that reads or writes a given table"
+    lineage_parser = subparsers.add_parser("lineage", help="Show table- or column-level lineage")
+    lineage_target = lineage_parser.add_mutually_exclusive_group(required=True)
+    lineage_target.add_argument("--table", help="schema.table, as declared in CFG_")
+    lineage_target.add_argument(
+        "--column",
+        help="schema.table.column — parsed from SOURCE_SQL, cached in AUD_COLUMN_LINEAGE",
     )
-    lineage_parser.add_argument("--table", required=True, help="schema.table, as declared in CFG_")
+    lineage_parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Re-parse instead of using cached column lineage",
+    )
+
+    docs_version_parser = subparsers.add_parser(
+        "docs-version",
+        help="Record a new version for any task whose DOCUMENTATION changed",
+    )
+    docs_version_parser.add_argument(
+        "--task_code", help="Show one task's full documentation history instead"
+    )
+    docs_version_parser.add_argument("--pipeline_code", help="Required with --task_code")
 
     # [ADDITION] Closes CLAUDE.md open question #7 — see migrate.py's own
     # module docstring for scope/reasoning.
@@ -255,8 +289,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "set-execution-mode":
         return _set_execution_mode_command(args, config_path)
-    if args.command == "configure":
-        return _configure_command(args, config_path)
+    if args.command == "setup":
+        return _setup_command(args, config_path)
     # doctor deliberately runs before build_engine: its entire job is to
     # diagnose a configuration that does not work yet, and the shared setup
     # below would exit 2 on an unresolvable secret before doctor said a word.
@@ -290,6 +324,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _validate_command(engine, config)
         if args.command == "lineage":
             return _lineage_command(args, engine)
+        if args.command == "docs-version":
+            return _docs_version_command(args, engine)
         if args.command == "migrate":
             return _migrate_command(args, engine)
         if args.command == "init-db":
@@ -319,17 +355,31 @@ def _set_execution_mode_command(args: argparse.Namespace, config_path: Path) -> 
     return 0
 
 
-def _configure_command(args: argparse.Namespace, config_path: Path) -> int:
+def _setup_command(args: argparse.Namespace, config_path: Path) -> int:
     try:
-        if args.env is None:
-            configure_interactive(path=config_path)
-            print(f"{config_path} written")
-        else:
-            configure_from_env(args.env, config_path)
-            print(f"{config_path} written from {args.env}")
+        report = run_setup(
+            config_path=config_path,
+            env_path=args.env,
+            from_environment=args.from_environment,
+            migrations_dir=args.migrations_dir,
+        )
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+
+    print(f"  config   : {report.config_action}")
+    print(f"  database : {report.database_action}")
+    for version in report.applied_migrations:
+        print(f"             applied {version}")
+    if report.required_secrets:
+        print("  secrets  : this configuration expects")
+        for label, var in report.required_secrets:
+            print(f"             {label:<22} {var}")
+    for problem in report.problems:
+        print(f"error: {problem}", file=sys.stderr)
+    if not report.ok:
+        return 1
+    print("\nsetup: ready — run `etl-craft doctor` to verify every connection")
     return 0
 
 
@@ -490,6 +540,8 @@ def _validate_command(engine: Engine, config: ConnectorConfig) -> int:
 
 
 def _lineage_command(args: argparse.Namespace, engine: Engine) -> int:
+    if args.column:
+        return _column_lineage_command(args, engine)
     with engine.connect() as conn:
         entries = fetch_table_lineage(conn, args.table)
     if not entries:
@@ -497,6 +549,73 @@ def _lineage_command(args: argparse.Namespace, engine: Engine) -> int:
         return 0
     for entry in entries:
         print(f"{entry.pipeline_code}.{entry.task_code}\t{entry.role}")
+    return 0
+
+
+def _column_lineage_command(args: argparse.Namespace, engine: Engine) -> int:
+    with engine.begin() as conn:
+        try:
+            produced_by, feeds = column_lineage_for(conn, args.column, refresh=args.refresh)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+
+    if not produced_by and not feeds:
+        print(f"(no SQL task's SOURCE_SQL mentions {args.column!r})")
+        return 0
+
+    if produced_by:
+        print(f"{args.column} is produced by:")
+        for task in produced_by:
+            for edge in task.edges:
+                origin = (
+                    f"{edge.source_object}.{edge.source_column}"
+                    if edge.source_object and edge.source_column
+                    else "(a literal or computed value)"
+                )
+                suffix = f"  [{edge.transformation}]" if edge.transformation else ""
+                print(f"  {task.pipeline_code}.{task.task_code}  <- {origin}{suffix}")
+    if feeds:
+        print(f"{args.column} feeds:")
+        for task in feeds:
+            for edge in task.edges:
+                print(
+                    f"  {task.pipeline_code}.{task.task_code}  -> "
+                    f"{edge.target_object}.{edge.target_column}"
+                )
+    return 0
+
+
+def _docs_version_command(args: argparse.Namespace, engine: Engine) -> int:
+    if args.task_code:
+        if not args.pipeline_code:
+            print("error: --pipeline_code is required with --task_code", file=sys.stderr)
+            return 2
+        with engine.connect() as conn:
+            try:
+                pipeline_id = resolve_pipeline_id(conn, args.pipeline_code)
+                task_id = resolve_task_id(conn, pipeline_id, args.task_code)
+            except CfgError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 1
+            history = fetch_history(conn, task_id)
+        if not history:
+            print(f"(no recorded documentation for {args.pipeline_code}.{args.task_code})")
+            return 0
+        for version, documentation, recorded_at in history:
+            print(f"v{version}\t{recorded_at}\n  {documentation}\n")
+        return 0
+
+    with engine.begin() as conn:
+        results = refresh_all(conn)
+    if not results:
+        print("(no active task declares a DOCUMENTATION parameter)")
+        return 0
+    changed = [r for r in results if r[3]]
+    for pipeline_code, task_code, version, was_changed in results:
+        marker = "updated" if was_changed else "unchanged"
+        print(f"{pipeline_code}.{task_code}\tv{version}\t{marker}")
+    print(f"\ndocs-version: {len(changed)} of {len(results)} task(s) updated")
     return 0
 
 

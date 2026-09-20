@@ -173,6 +173,25 @@ def committed_pipeline(postgres_engine: Engine):
         )
         conn.execute(
             text(
+                # [ADDITION, 2026-09-20] The two tables added with column
+                # lineage and documentation versioning. Both reference
+                # CFG_TASKS, so leaving them out makes the whole FK-ordered
+                # teardown fail -- and then the *next* run collides on
+                # PIPELINE_CODE, which is a confusing way to learn about it.
+                "DELETE FROM AUD_COLUMN_LINEAGE WHERE TASK_ID IN "
+                "(SELECT TASK_ID FROM CFG_TASKS WHERE PIPELINE_ID = :id)"
+            ),
+            {"id": pipeline_id},
+        )
+        conn.execute(
+            text(
+                "DELETE FROM AUD_TASK_DOCUMENTATION WHERE TASK_ID IN "
+                "(SELECT TASK_ID FROM CFG_TASKS WHERE PIPELINE_ID = :id)"
+            ),
+            {"id": pipeline_id},
+        )
+        conn.execute(
+            text(
                 "DELETE FROM AUD_TASK_OFFSET_TRACKER WHERE TASK_ID IN "
                 "(SELECT TASK_ID FROM CFG_TASKS WHERE PIPELINE_ID = :id)"
             ),

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import difflib
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -19,6 +20,40 @@ class CfgError(Exception):
     """Raised when a --pipeline_code/--task_code doesn't resolve to an active CFG_ row."""
 
 
+def suggest(unknown: str, candidates: list[str], *, limit: int = 3) -> list[str]:
+    """Rank `candidates` by similarity to `unknown`, for a "did you mean" hint.
+
+    [ADDITION, 2026-09-20] Per explicit instruction to add fuzzy matching.
+    Uses difflib from the standard library rather than a dependency: a CLI
+    suggestion needs to be roughly right and instant, and rapidfuzz-grade
+    scoring would buy nothing a user could notice. (The generated docs site is
+    the other half of that instruction, and does use a real fuzzy library —
+    see docs_generator.py — because ranking hundreds of entries as you type is
+    a genuinely different problem.)
+
+    The cutoff is deliberately generous: a typo is usually one or two
+    characters, and a wrong suggestion costs a glance, while no suggestion
+    costs a round trip through `etl-craft list`. Case-insensitive, since
+    CODE-style identifiers are routinely typed in the wrong case.
+    """
+    folded = {candidate.lower(): candidate for candidate in candidates}
+    matches = difflib.get_close_matches(unknown.lower(), list(folded), n=limit, cutoff=0.5)
+    ranked = [folded[m] for m in matches]
+    # A prefix match is what a half-typed code looks like, and difflib ranks
+    # those poorly when the candidate is much longer than the input.
+    for candidate in candidates:
+        if candidate.lower().startswith(unknown.lower()) and candidate not in ranked:
+            ranked.append(candidate)
+    return ranked[:limit]
+
+
+def _with_suggestions(message: str, unknown: str, candidates: list[str]) -> str:
+    hints = suggest(unknown, candidates)
+    if not hints:
+        return message
+    return message + " — did you mean: " + ", ".join(hints)
+
+
 def resolve_pipeline_id(conn: Connection, pipeline_code: str) -> int:
     """Resolve an active PIPELINE_CODE to its PIPELINE_ID."""
     pipeline_id = conn.execute(
@@ -29,7 +64,18 @@ def resolve_pipeline_id(conn: Connection, pipeline_code: str) -> int:
         {"pipeline_code": pipeline_code},
     ).scalar_one_or_none()
     if pipeline_id is None:
-        raise CfgError(f"no active pipeline with PIPELINE_CODE={pipeline_code!r}")
+        known = (
+            conn.execute(text("SELECT PIPELINE_CODE FROM CFG_PIPELINES WHERE ACTIVE_FLAG = 'Y'"))
+            .scalars()
+            .all()
+        )
+        raise CfgError(
+            _with_suggestions(
+                f"no active pipeline with PIPELINE_CODE={pipeline_code!r}",
+                pipeline_code,
+                list(known),
+            )
+        )
     return pipeline_id
 
 
@@ -43,8 +89,23 @@ def resolve_task_id(conn: Connection, pipeline_id: int, task_code: str) -> int:
         {"pipeline_id": pipeline_id, "task_code": task_code},
     ).scalar_one_or_none()
     if task_id is None:
+        known = (
+            conn.execute(
+                text(
+                    "SELECT TASK_CODE FROM CFG_TASKS "
+                    "WHERE PIPELINE_ID = :pipeline_id AND ACTIVE_FLAG = 'Y'"
+                ),
+                {"pipeline_id": pipeline_id},
+            )
+            .scalars()
+            .all()
+        )
         raise CfgError(
-            f"no active task with TASK_CODE={task_code!r} under pipeline_id={pipeline_id}"
+            _with_suggestions(
+                f"no active task with TASK_CODE={task_code!r} under pipeline_id={pipeline_id}",
+                task_code,
+                list(known),
+            )
         )
     return task_id
 

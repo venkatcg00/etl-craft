@@ -5,8 +5,8 @@ reviewed like any other change: a new external connection, a new action type, or
 destructive schema change should be harder to make than editing a row.
 
 This walkthrough builds a two-task pipeline that creates a table and then merges into it.
-It assumes you have completed the [README](../README.md) quickstart: `init-db` has run and
-`etl-craft doctor` passes.
+It assumes you have completed the [README](../README.md) quickstart: `etl-craft setup` has
+run and `etl-craft doctor` passes.
 
 ## 1. A warehouse to write to
 
@@ -118,6 +118,45 @@ etl-craft generate-yml --pipeline_code CUSTOMERS
 The emitted description gives each task its `bash_command` and one Airflow `trigger_rule`,
 derived from the dependency rows you wrote above. Feed it to your own loader, or ignore it
 entirely and keep using `etl-craft run`.
+
+## Documenting it
+
+Add a `DOCUMENTATION` parameter to any task and it becomes prose on the generated
+documentation site, searchable alongside everything else:
+
+```sql
+INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE)
+SELECT TASK_ID, 'DOCUMENTATION',
+       'Builds the customer dimension from the raw layer. Full refresh: the whole '
+       'table is rebuilt each run.'
+FROM CFG_TASKS WHERE TASK_CODE = 'build_customers';
+```
+
+```bash
+etl-craft docs-version     # records v1
+etl-craft generate-docs
+```
+
+The version comes from the text itself. Re-run `docs-version` after editing the wording
+and it becomes v2; run it twice with no change and nothing moves. That is deliberate — a
+version somebody has to remember to bump is a version that quietly lies. See the full
+history for one task with
+`etl-craft docs-version --pipeline_code CUSTOMERS --task_code build_customers`.
+
+## Tracing a column
+
+```bash
+etl-craft lineage --column public.customers.name
+```
+
+```
+public.customers.name is produced by:
+  CUSTOMERS.build_customers  <- staging.customers_raw.name
+```
+
+This is parsed from the task's own `SOURCE_SQL`, so it follows aliases, joins and CTEs to
+the real table rather than stopping at whatever the query happened to call it. Ask the same
+question of a source column and you get the other direction — everything it feeds.
 
 ## Conditional dependencies
 

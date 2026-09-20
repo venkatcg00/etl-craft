@@ -526,6 +526,63 @@ CREATE TABLE AUD_TASK_OFFSET_TRACKER (
 COMMENT ON TABLE AUD_TASK_OFFSET_TRACKER IS 'Watermark for incremental ingestion. Only ever consulted at read time; everything downstream of ingestion filters on pipeline_run_id instead — see CLAUDE.md "Incremental / full-refresh mechanics".';
 
 -- ----------------------------------------------------------------------------
+-- AUD_COLUMN_LINEAGE
+-- [ADDITION, post-signoff 2026-09-20] Column-level lineage, parsed from each
+-- SQL task's own SOURCE_SQL with sqlglot. Per explicit instruction the result
+-- is both computed on demand *and* cached here, so repeat reads (the `lineage`
+-- CLI verb, generate-docs) are a plain SELECT.
+--
+-- [CHOICE] Cache invalidation is by SOURCE_SQL_HASH, not a timestamp: a row
+-- is only reused when it was derived from byte-for-byte the SQL that is in
+-- CFG_TASK_PARAMETERS right now. Editing SOURCE_SQL therefore invalidates it
+-- automatically, with nothing to remember — the same reasoning as HASH_KEY
+-- for SCD change detection.
+-- ----------------------------------------------------------------------------
+CREATE TABLE AUD_COLUMN_LINEAGE (
+    COLUMN_LINEAGE_ID  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    TASK_ID            BIGINT NOT NULL REFERENCES CFG_TASKS(TASK_ID),
+    SOURCE_SQL_HASH    VARCHAR NOT NULL,
+    TARGET_OBJECT      VARCHAR NOT NULL,
+    TARGET_COLUMN      VARCHAR NOT NULL,
+    SOURCE_OBJECT      VARCHAR,   -- NULL when the column has no upstream (a literal, or a constant)
+    SOURCE_COLUMN      VARCHAR,
+    TRANSFORMATION     VARCHAR,   -- the expression, when the column isn't a plain pass-through
+    COMPUTED_AT        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX ix_column_lineage_task ON AUD_COLUMN_LINEAGE (TASK_ID, SOURCE_SQL_HASH);
+CREATE INDEX ix_column_lineage_target ON AUD_COLUMN_LINEAGE (TARGET_OBJECT, TARGET_COLUMN);
+CREATE INDEX ix_column_lineage_source ON AUD_COLUMN_LINEAGE (SOURCE_OBJECT, SOURCE_COLUMN);
+
+COMMENT ON TABLE AUD_COLUMN_LINEAGE IS 'Cached column-level lineage, keyed by the SOURCE_SQL hash it was derived from. Stale rows are replaced, never read.';
+
+-- ----------------------------------------------------------------------------
+-- AUD_TASK_DOCUMENTATION
+-- [ADDITION, post-signoff 2026-09-20] Version history for the DOCUMENTATION
+-- task parameter, per explicit instruction ("the documentation update is per
+-- task. the versioning should be per task. updated on demand").
+--
+-- [CHOICE] The version is derived from a content hash and bumped only when
+-- the text genuinely changes, rather than being a parameter an author sets by
+-- hand — a hand-set version drifts out of sync the moment someone edits one
+-- and not the other, and the whole point of a version here is to tell current
+-- documentation from stale.
+-- ----------------------------------------------------------------------------
+CREATE TABLE AUD_TASK_DOCUMENTATION (
+    TASK_DOCUMENTATION_ID  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    TASK_ID                BIGINT NOT NULL REFERENCES CFG_TASKS(TASK_ID),
+    VERSION                INT NOT NULL,
+    DOCUMENTATION_HASH     VARCHAR NOT NULL,
+    DOCUMENTATION          VARCHAR NOT NULL,
+    RECORDED_AT            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ux_task_documentation_version UNIQUE (TASK_ID, VERSION)
+);
+
+CREATE INDEX ix_task_documentation_task ON AUD_TASK_DOCUMENTATION (TASK_ID, VERSION DESC);
+
+COMMENT ON TABLE AUD_TASK_DOCUMENTATION IS 'Per-task DOCUMENTATION history. A new row appears only when the text''s hash changes, so VERSION counts real edits.';
+
+-- ----------------------------------------------------------------------------
 -- AUD_PIPELINE_DEPENDENCY_TRACKER   [ADDITION] — not in either pasted draft
 -- ----------------------------------------------------------------------------
 CREATE TABLE AUD_PIPELINE_DEPENDENCY_TRACKER (

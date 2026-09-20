@@ -29,7 +29,7 @@ So the `dev` profile under `Postgres` reads `ETL_CRAFT_POSTGRES_DEV_SECRET`. Ove
 per profile with `secret_var: MY_NAME`. Where those values are *read from* is `[Source]`:
 the process environment, or a `.env`-style file.
 
-`etl-craft configure` prints the exact names your configuration will expect.
+`etl-craft setup` prints the exact names your configuration will expect.
 `etl-craft doctor` then resolves each one and opens each connection, reporting every check
 rather than stopping at the first failure:
 
@@ -71,6 +71,26 @@ one directly.
 database name always comes from the active `[Warehouse]` profile at runtime. The same
 `CFG_` row therefore means a different real object in dev, uat and prod without any row
 changing across a promotion.
+
+## One command: `setup`
+
+```bash
+etl-craft setup                    # settings from ./.env
+etl-craft setup --env prod.env     # ...or a named file
+etl-craft setup --from-environment # ...or whatever is already exported
+```
+
+`setup` is the dbt shape: you keep your settings in a file (or the environment), and one
+command reconciles reality with them. It writes or updates `craft-connector.yml`, then
+brings the Engine DB to current — applying the packaged schema if the database is empty,
+or pending migrations if it is not — and names the secrets the result expects.
+
+It is idempotent by design. Run it on a fresh machine and it sets everything up; run it
+again after any change and it updates. There is no separate first-run path to get wrong
+and no prompts, so it behaves identically on a laptop and in CI.
+
+If the Engine DB is not reachable yet, that is *reported* rather than raised: writing the
+config is useful on its own, and is often exactly the step that fixes the connection.
 
 ## Creating and upgrading the schema
 

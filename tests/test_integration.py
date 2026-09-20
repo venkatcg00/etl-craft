@@ -53,6 +53,7 @@ from etl_craft.cfg import (
 from etl_craft.cli import main as cli_main
 from etl_craft.cloning import run_cloning_if_enabled
 from etl_craft.cloning import tables_for_scope as cloning_tables_for_scope
+from etl_craft.column_lineage import lineage_for_tasks
 from etl_craft.config import (
     CloningConfig,
     ConnectionProfile,
@@ -74,6 +75,7 @@ from etl_craft.crosspipe import (
 )
 from etl_craft.docs_generator import collect_docs, generate_docs
 from etl_craft.doctor import run_checks
+from etl_craft.documentation import fetch_history, refresh_task_documentation
 from etl_craft.execution import HandlerResult
 from etl_craft.generate_yml import GLOBAL_DAG_ID, generate_global_dag, generate_pipeline_dag
 from etl_craft.init_db import InitDbError, init_db
@@ -94,6 +96,7 @@ from etl_craft.runlog import (
     update_task_run,
 )
 from etl_craft.runner import ForceNotAllowedError, run_task
+from etl_craft.setup_command import run_setup
 from etl_craft.validate import validate_business_rule_keys, validate_graphs
 from etl_craft.warehouse import build_data_engine
 
@@ -5785,6 +5788,77 @@ def test_apply_pending_migrations_stops_and_does_not_record_a_failed_file(
     assert exists is None
 
 
+def test_setup_brings_a_real_database_up_then_keeps_it_current(
+    postgres_engine, tmp_path, monkeypatch
+):
+    # The dbt-route promise, end to end against real Postgres: run it once and
+    # everything exists; run it again and it reports "already up to date"
+    # rather than doing anything twice. Per explicit instruction: "one single
+    # command with required files and it should itself up. so, everytime the
+    # command is ran, it either set itself up, or updates the setup with
+    # newest data."
+    with postgres_engine.connect() as conn:
+        url = conn.engine.url
+    admin = create_engine(
+        url.set(database="postgres").render_as_string(hide_password=False),
+        isolation_level="AUTOCOMMIT",
+    )
+    db_name = "etl_craft_setup_test"
+    try:
+        with admin.connect() as conn:
+            conn.execute(text(f"DROP DATABASE IF EXISTS {db_name}"))
+            conn.execute(text(f"CREATE DATABASE {db_name}"))
+
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".env").write_text(
+            "ETL_CRAFT_MODE=local\n"
+            "ETL_CRAFT_SOURCE_TYPE=environment\n"
+            "ETL_CRAFT_POSTGRES_PROFILE=dev\n"
+            f"ETL_CRAFT_POSTGRES_JDBC_URL=jdbc:postgresql://{url.host}:{url.port}/{db_name}\n"
+            f"ETL_CRAFT_POSTGRES_USER={url.username}\n"
+            "ETL_CRAFT_POSTGRES_AUTH_MODE=password\n"
+        )
+        monkeypatch.setenv("ETL_CRAFT_POSTGRES_DEV_SECRET", url.password)
+
+        first = run_setup(
+            config_path=tmp_path / "craft-connector.yml",
+            env_path=None,
+            from_environment=False,
+        )
+        assert first.ok, first.problems
+        assert "created" in first.config_action
+        assert "schema created" in first.database_action
+
+        second = run_setup(
+            config_path=tmp_path / "craft-connector.yml",
+            env_path=None,
+            from_environment=False,
+        )
+        assert second.ok, second.problems
+        assert "already current" in second.config_action
+        assert second.database_action == "already up to date"
+
+        target = create_engine(url.set(database=db_name).render_as_string(hide_password=False))
+        try:
+            with target.connect() as conn:
+                # The tables the migrations add, not just schema.sql's own.
+                assert (
+                    conn.execute(
+                        text(
+                            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES "
+                            "WHERE LOWER(TABLE_NAME) = 'aud_column_lineage'"
+                        )
+                    ).scalar_one()
+                    == 1
+                )
+        finally:
+            target.dispose()
+    finally:
+        with admin.connect() as conn:
+            conn.execute(text(f"DROP DATABASE IF EXISTS {db_name}"))
+        admin.dispose()
+
+
 def test_init_db_creates_the_schema_and_then_refuses(postgres_engine):
     # E2-13. There was previously no way to create the Engine DB from an
     # installed package at all: schema.sql is the single authoritative full
@@ -5991,6 +6065,180 @@ def test_validate_flags_source_sql_that_is_not_read_only(
     out = capsys.readouterr().out
     assert "[sql_read_only]" in out
     assert "writer_task" in out
+
+
+def _documented_sql_task(engine, pipeline_id, task_code, source_sql, doc=None):
+    task_id = insert_committed_task(engine, pipeline_id, task_code)
+    params = {
+        "SQL_ACTION": "CREATE_TABLE",
+        "SOURCE_OBJECT": "raw.customers",
+        "TARGET_OBJECT": f"public.{task_code}_out",
+        "SOURCE_SQL": source_sql,
+    }
+    if doc is not None:
+        params["DOCUMENTATION"] = doc
+    insert_committed_task_parameters(engine, task_id, params)
+    return task_id
+
+
+def test_column_lineage_is_computed_then_served_from_the_cache(postgres_engine, committed_pipeline):
+    # Per explicit instruction lineage is both computed and cached. The cache
+    # key is the SOURCE_SQL hash, so an edit invalidates it with nothing to
+    # remember -- the same reasoning as HASH_KEY for SCD change detection.
+    task_id = _documented_sql_task(
+        postgres_engine,
+        committed_pipeline,
+        "cl_task",
+        "SELECT c.id AS cust_id, UPPER(c.name) AS shouty FROM raw.customers c",
+    )
+
+    with postgres_engine.begin() as conn:
+        first = lineage_for_tasks(conn)
+    mine = [t for t in first if t.task_id == task_id]
+    assert len(mine) == 1
+    assert mine[0].cached is False
+    by_column = {e.target_column: e for e in mine[0].edges}
+    assert by_column["cust_id"].source_object == "raw.customers"
+    assert "UPPER" in (by_column["shouty"].transformation or "")
+
+    # Second read: same SQL, so the cached rows are used.
+    with postgres_engine.begin() as conn:
+        second = lineage_for_tasks(conn)
+    assert [t for t in second if t.task_id == task_id][0].cached is True
+
+    # Edit the SQL: the cache must miss, not serve a stale answer.
+    with postgres_engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE = "
+                "'SELECT c.email AS cust_email FROM raw.customers c' "
+                "WHERE TASK_ID = :id AND PARAMETER_NAME = 'SOURCE_SQL'"
+            ),
+            {"id": task_id},
+        )
+    with postgres_engine.begin() as conn:
+        third = lineage_for_tasks(conn)
+    edited = [t for t in third if t.task_id == task_id][0]
+    assert edited.cached is False
+    assert [e.target_column for e in edited.edges] == ["cust_email"]
+
+
+def test_cli_lineage_column_reports_producers_and_consumers(
+    postgres_engine, committed_pipeline, craft_connector_on_disk, capsys
+):
+    _documented_sql_task(
+        postgres_engine,
+        committed_pipeline,
+        "cl_writer",
+        "SELECT c.id AS cust_id FROM raw.customers c",
+    )
+
+    assert cli_main(["lineage", "--column", "public.cl_writer_out.cust_id"]) == 0
+
+    out = capsys.readouterr().out
+    assert "is produced by" in out
+    assert "raw.customers.id" in out
+
+
+def test_cli_lineage_column_rejects_a_reference_that_is_not_a_column(
+    craft_connector_on_disk, capsys
+):
+    assert cli_main(["lineage", "--column", "nodots"]) == 2
+    assert "schema.table.column" in capsys.readouterr().err
+
+
+def test_documentation_versions_bump_only_when_the_text_changes(
+    postgres_engine, committed_pipeline
+):
+    # A hand-set version drifts out of sync the moment someone edits one and
+    # not the other, which is why the version is derived from the text.
+    task_id = _documented_sql_task(
+        postgres_engine,
+        committed_pipeline,
+        "doc_task",
+        "SELECT 1 AS x",
+        doc="Builds the customer dimension.",
+    )
+
+    with postgres_engine.begin() as conn:
+        assert refresh_task_documentation(conn, task_id, "Builds the customer dimension.") == 1
+        # Same text again -- not a new version.
+        assert refresh_task_documentation(conn, task_id, "Builds the customer dimension.") == 1
+        # Re-indented only -- still not a new version.
+        assert refresh_task_documentation(conn, task_id, "  Builds the customer dimension. ") == 1
+        # Genuinely different.
+        assert refresh_task_documentation(conn, task_id, "Builds it, and dedupes.") == 2
+
+    with postgres_engine.connect() as conn:
+        history = fetch_history(conn, task_id)
+    assert [v for v, _, _ in history] == [2, 1]
+
+
+def test_cli_docs_version_refreshes_and_shows_history(
+    postgres_engine, committed_pipeline, craft_connector_on_disk, capsys
+):
+    _documented_sql_task(
+        postgres_engine,
+        committed_pipeline,
+        "dv_task",
+        "SELECT 1 AS x",
+        doc="First description.",
+    )
+
+    assert cli_main(["docs-version"]) == 0
+    out = capsys.readouterr().out
+    assert "dv_task\tv1\tupdated" in out
+
+    # Idempotent: nothing changed, so nothing bumps.
+    assert cli_main(["docs-version"]) == 0
+    assert "unchanged" in capsys.readouterr().out
+
+    assert (
+        cli_main(
+            ["docs-version", "--pipeline_code", "TEST_CONCURRENT_PL", "--task_code", "dv_task"]
+        )
+        == 0
+    )
+    assert "First description." in capsys.readouterr().out
+
+
+def test_unknown_pipeline_code_suggests_a_near_miss(postgres_engine, committed_pipeline):
+    # The fuzzy half that applies to the CLI. difflib, not a dependency: three
+    # candidates for an error message is a different problem from ranking
+    # hundreds of entries as someone types.
+    with postgres_engine.connect() as conn, pytest.raises(CfgError) as excinfo:
+        resolve_pipeline_id(conn, "TEST_CONCURRENT_P")
+    assert "did you mean" in str(excinfo.value)
+    assert "TEST_CONCURRENT_PL" in str(excinfo.value)
+
+
+def test_generated_docs_include_documentation_and_column_lineage(
+    postgres_engine, committed_pipeline, tmp_path
+):
+    _documented_sql_task(
+        postgres_engine,
+        committed_pipeline,
+        "docs_task",
+        "SELECT c.id AS cust_id FROM raw.customers c",
+        doc="Loads customers from the raw layer.",
+    )
+
+    with postgres_engine.begin() as conn:
+        generate_docs(conn, tmp_path)
+
+    page = (tmp_path / "TEST_CONCURRENT_PL.html").read_text()
+    assert "Loads customers from the raw layer." in page
+    assert "docs v1" in page
+    assert "Column lineage" in page
+    assert "raw.customers.id" in page
+    # Fuse is vendored into the output, not loaded from a CDN -- this site
+    # gets published to networks with no outbound access.
+    assert (tmp_path / "fuse.min.js").is_file()
+    assert "Fuse.js" in (tmp_path / "fuse.min.js").read_text()
+    assert "new Fuse(" in (tmp_path / "search.js").read_text()
+    index_entry = json.loads((tmp_path / "search-index.json").read_text())
+    documented = [e for e in index_entry if e.get("task_code") == "docs_task"]
+    assert documented and "Loads customers" in documented[0]["documentation"]
 
 
 def test_cli_migrate_reports_a_missing_migrations_directory(

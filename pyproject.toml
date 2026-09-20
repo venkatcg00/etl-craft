@@ -23,6 +23,17 @@ classifiers = [
 dependencies = [
     "psycopg[binary]>=3.3.6",
     "pyyaml>=6.0.3",
+    # [DEVIATION, 2026-09-20] CLAUDE.md's Non-goals ruled out a SQL parser
+    # dependency, and E2-07/E2-25 deliberately used lint-grade string checks
+    # instead. Reversed by explicit instruction, to get column-level lineage:
+    # "dont re-invent the wheel use metadata and any existing package that can
+    # do this", and "if it is easy implement our own, else go with hard
+    # dependency, our product should ship with it". Writing our own is not
+    # easy — sqlglot is tens of thousands of lines across 20+ dialects, and a
+    # hand-rolled parser would get column resolution wrong in exactly the
+    # cases lineage exists for. sqlglot itself has zero dependencies, so this
+    # adds one package and nothing transitive.
+    "sqlglot>=27",
     "sqlalchemy>=2.0.54",
 ]
 
@@ -51,7 +62,11 @@ build-backend = "uv_build"
 # is why sql/ moved under src/etl_craft/ rather than being included from the
 # repo root.
 [tool.uv.build-backend]
-source-include = ["src/etl_craft/sql/**", "src/etl_craft/py.typed"]
+source-include = [
+    "src/etl_craft/sql/**",
+    "src/etl_craft/vendor/**",
+    "src/etl_craft/py.typed",
+]
 
 [dependency-groups]
 dev = [

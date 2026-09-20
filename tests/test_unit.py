@@ -10,7 +10,6 @@ collisions) and keeps file count down.
 import contextlib
 import runpy
 import sys
-from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -30,10 +29,12 @@ from etl_craft.cfg import (
     PipelineStep,
     PipelineSummary,
     TaskStatusEntry,
+    suggest,
 )
 from etl_craft.cli import main as cli_main
 from etl_craft.cloning import AUD_TABLES, CFG_TABLES, tables_for_scope
 from etl_craft.cloning import _same_database as same_database
+from etl_craft.column_lineage import extract_column_lineage, source_sql_hash
 from etl_craft.config import (
     CONFIG_PATH_ENV_VAR,
     CloningConfig,
@@ -48,11 +49,9 @@ from etl_craft.config import (
     resolve_secret,
 )
 from etl_craft.configure import (
-    _prompt_yes_no,
     _report_required_secrets,
     _required_secret_vars,
     configure_from_env,
-    configure_interactive,
     set_execution_mode,
 )
 from etl_craft.crosspipe import MIN_POLL_INTERVAL_SECONDS, _default_now, _next_poll_delay
@@ -63,6 +62,7 @@ from etl_craft.docs_generator import (
 )
 from etl_craft.docs_generator import _render_index_html as render_docs_index_html
 from etl_craft.docs_generator import _render_pipeline_html as render_docs_pipeline_html
+from etl_craft.documentation import documentation_hash
 from etl_craft.email_alert import _PipelineDigestEntry, run_flavour
 from etl_craft.email_alert import _render_digest_html as render_email_digest_html
 from etl_craft.email_alert import _resolve_target_pipeline_codes as resolve_email_pipeline_codes
@@ -526,6 +526,160 @@ def test_apply_primary_key_does_nothing_when_none_is_declared():
             raise AssertionError("issued DDL for a target with no PRIMARY_KEY")
 
     sql_actions._apply_primary_key(_Conn(), "public.t", "db", [])
+
+
+# ------------------------------------------------------------------------------
+# column_lineage.py — sqlglot-parsed column lineage
+# ------------------------------------------------------------------------------
+
+
+def _edges(sql, target="public.t"):
+    result = extract_column_lineage(sql, target)
+    assert result.ok, result.error
+    return {e.target_column: e for e in result.edges}
+
+
+def test_column_lineage_resolves_aliased_join_columns():
+    edges = _edges(
+        "SELECT a.id AS cust_id, b.name AS cust_name "
+        "FROM raw.customers a JOIN raw.names b ON a.id = b.id"
+    )
+    assert (edges["cust_id"].source_object, edges["cust_id"].source_column) == (
+        "raw.customers",
+        "id",
+    )
+    assert (edges["cust_name"].source_object, edges["cust_name"].source_column) == (
+        "raw.names",
+        "name",
+    )
+    # A plain pass-through records no transformation -- that field is for
+    # telling "this column IS that column" from "this column is derived".
+    assert edges["cust_id"].transformation is None
+
+
+def test_column_lineage_records_the_expression_for_a_derived_column():
+    edges = _edges("SELECT UPPER(name) AS shouty FROM raw.customers")
+    assert edges["shouty"].source_object == "raw.customers"
+    assert edges["shouty"].source_column == "name"
+    assert "UPPER" in (edges["shouty"].transformation or "")
+
+
+def test_column_lineage_leaves_a_literal_unattributed():
+    # Naming a source for a constant would be fabrication; the expression is
+    # the honest answer.
+    edges = _edges("SELECT 1 AS flag FROM raw.customers")
+    assert edges["flag"].source_object is None
+    assert edges["flag"].source_column is None
+    assert edges["flag"].transformation == "1"
+
+
+def test_column_lineage_resolves_through_a_cte():
+    # Lineage that stops at the CTE name is much less useful than lineage that
+    # reaches the real table, and CTEs are everywhere in ETL SQL.
+    edges = _edges(
+        "WITH recent AS (SELECT id, updated_at FROM raw.orders) "
+        "SELECT r.id AS order_id FROM recent r"
+    )
+    assert edges["order_id"].source_object == "raw.orders"
+
+
+def test_column_lineage_resolves_through_chained_ctes():
+    edges = _edges(
+        "WITH a AS (SELECT id FROM raw.src), b AS (SELECT id FROM a) SELECT b.id AS x FROM b"
+    )
+    assert edges["x"].source_object == "raw.src"
+
+
+def test_column_lineage_does_not_guess_when_a_cte_reads_two_tables():
+    # Two candidate sources and no basis to choose: it stops at the CTE rather
+    # than naming one of them.
+    edges = _edges(
+        "WITH many AS (SELECT p.id FROM raw.one p JOIN raw.two q ON p.id = q.id) "
+        "SELECT m.id AS y FROM many m"
+    )
+    assert edges["y"].source_object == "many"
+
+
+def test_column_lineage_reports_a_parse_failure_instead_of_raising():
+    # One unparseable task should cost that task's column lineage, not the
+    # whole `lineage` command or a whole documentation build.
+    result = extract_column_lineage("this is not sql at all ((", "public.t")
+    assert not result.ok
+    assert "could not parse" in (result.error or "")
+    assert result.edges == []
+
+
+def test_column_lineage_skips_an_unexpanded_star():
+    # Without a schema sqlglot cannot expand `*`, and inventing column names
+    # would be fabrication. Reported as no edges, not as a wrong answer.
+    result = extract_column_lineage("SELECT * FROM raw.customers", "public.t")
+    assert result.ok
+    assert result.edges == []
+
+
+def test_column_lineage_leaves_a_multi_column_expression_unattributed():
+    # Two candidate sources for one target column: naming one would be a
+    # guess, so the expression is kept instead.
+    edges = _edges("SELECT a || b AS joined FROM raw.t")
+    assert edges["joined"].source_object is None
+    assert edges["joined"].source_column is None
+    assert edges["joined"].transformation is not None
+
+
+def test_column_lineage_rejects_a_statement_that_is_not_a_select():
+    result = extract_column_lineage("DELETE FROM raw.customers", "public.t")
+    assert not result.ok
+    assert "not a SELECT" in (result.error or "")
+
+
+def test_column_lineage_attributes_an_unqualified_column_in_a_single_table_query():
+    edges = _edges("SELECT id, name FROM raw.customers")
+    assert edges["id"].source_object == "raw.customers"
+
+
+def test_column_lineage_handles_a_table_with_no_schema_prefix():
+    edges = _edges("SELECT t.id AS x FROM customers t")
+    assert edges["x"].source_object == "customers"
+
+
+def test_source_sql_hash_changes_with_the_sql():
+    # The cache key. A cached row is reused only when it came from byte-for-byte
+    # the SQL in CFG_TASK_PARAMETERS right now, so an edit invalidates it.
+    assert source_sql_hash("SELECT 1") == source_sql_hash("SELECT 1")
+    assert source_sql_hash("SELECT 1") != source_sql_hash("SELECT 2")
+
+
+# ------------------------------------------------------------------------------
+# documentation.py — content-hash versioning
+# ------------------------------------------------------------------------------
+
+
+def test_documentation_hash_ignores_surrounding_whitespace():
+    # Re-indenting a docstring is not a new version.
+    assert documentation_hash("  text  ") == documentation_hash("text")
+    assert documentation_hash("text") != documentation_hash("other text")
+
+
+# ------------------------------------------------------------------------------
+# cfg.suggest — "did you mean" for an unknown code
+# ------------------------------------------------------------------------------
+
+
+def test_suggest_finds_a_near_miss_and_a_prefix():
+    assert suggest("CUSTOMER", ["CUSTOMERS", "CUSTOMERS_DAILY", "ORDERS"]) == [
+        "CUSTOMERS",
+        "CUSTOMERS_DAILY",
+    ]
+    assert suggest("custmers", ["CUSTOMERS", "ORDERS"]) == ["CUSTOMERS"]
+
+
+def test_suggest_is_case_insensitive_but_returns_the_real_code():
+    # CODE-style identifiers get typed in the wrong case routinely.
+    assert suggest("customers", ["CUSTOMERS"]) == ["CUSTOMERS"]
+
+
+def test_suggest_says_nothing_rather_than_guessing_wildly():
+    assert suggest("zzzzzz", ["CUSTOMERS", "ORDERS"]) == []
 
 
 # ------------------------------------------------------------------------------
@@ -2045,226 +2199,90 @@ def test_cli_set_execution_mode_missing_file_reports_clean_error(tmp_path, monke
     assert "error:" in capsys.readouterr().err
 
 
-def test_cli_configure_without_env_calls_interactive_setup(tmp_path, monkeypatch, capsys):
-    # configure_interactive's own prompt-by-prompt behavior is tested
-    # directly (with an injected input_fn/print_fn, no real stdin/stdout
-    # involved) in the "configure_interactive" section below — this just
-    # proves the CLI wires a bare `configure` (no --env) to it, the same
-    # spirit as the existing apply_pending_migrations CLI-wiring tests.
+def test_cli_setup_creates_config_and_reports_what_it_did(tmp_path, monkeypatch, capsys):
+    # [DEVIATION, 2026-09-20] `configure` is gone. Per explicit instruction
+    # ("remove the ineractive setup, lets go in dbt route. one single command
+    # with required files and it should itself up"), `setup` is idempotent:
+    # first run sets up, later runs update. The Engine DB is unreachable here,
+    # which must be *reported*, not raised -- writing the config is useful on
+    # its own, and is often the step that fixes the connection.
     monkeypatch.chdir(tmp_path)
-    called = {}
+    (tmp_path / ".env").write_text(
+        "ETL_CRAFT_MODE=local\n"
+        "ETL_CRAFT_SOURCE_TYPE=environment\n"
+        "ETL_CRAFT_POSTGRES_PROFILE=dev\n"
+        "ETL_CRAFT_POSTGRES_JDBC_URL=jdbc:postgresql://127.0.0.1:1/nope\n"
+        "ETL_CRAFT_POSTGRES_USER=u\n"
+        "ETL_CRAFT_POSTGRES_AUTH_MODE=password\n"
+    )
+    monkeypatch.setenv("ETL_CRAFT_POSTGRES_DEV_SECRET", "s")
 
-    def _fake_interactive(path=None):
-        called["ran"] = True
-        called["path"] = path
+    exit_code = cli_main(["setup"])
 
-    monkeypatch.setattr("etl_craft.cli.configure_interactive", _fake_interactive)
-
-    exit_code = cli_main(["configure"])
-
-    assert exit_code == 0
-    assert called["ran"] is True
-    assert "craft-connector.yml written" in capsys.readouterr().out
-    # E2-06: the resolved --config path reaches the writer too, so the flag
-    # means the same thing for the verbs that create the file as for those
-    # that read it.
-    assert called["path"] is not None
+    out = capsys.readouterr()
+    assert "created" in out.out
+    assert "ETL_CRAFT_POSTGRES_DEV_SECRET" in out.out
+    assert (tmp_path / "craft-connector.yml").is_file()
+    # Unreachable database -> reported as a problem, exit 1, config still written.
+    assert exit_code == 1
+    assert "not reachable" in out.out
 
 
-def test_cli_configure_without_env_reports_configerror(tmp_path, monkeypatch, capsys):
+def test_cli_setup_is_idempotent(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text(
+        "ETL_CRAFT_MODE=local\n"
+        "ETL_CRAFT_SOURCE_TYPE=environment\n"
+        "ETL_CRAFT_POSTGRES_PROFILE=dev\n"
+        "ETL_CRAFT_POSTGRES_JDBC_URL=jdbc:postgresql://127.0.0.1:1/nope\n"
+        "ETL_CRAFT_POSTGRES_USER=u\n"
+        "ETL_CRAFT_POSTGRES_AUTH_MODE=password\n"
+    )
+    cli_main(["setup"])
+    capsys.readouterr()
+
+    cli_main(["setup"])
+
+    assert "already current" in capsys.readouterr().out
+
+
+def test_cli_setup_reads_the_environment_when_asked(tmp_path, monkeypatch, capsys):
+    # Per explicit instruction: "the craft connector can take values from .env
+    # or the environment itself based on the options". A container or CI
+    # runner already has these exported; writing a file first would be a step
+    # backwards.
+    monkeypatch.chdir(tmp_path)
+    for key, value in {
+        "ETL_CRAFT_MODE": "local",
+        "ETL_CRAFT_SOURCE_TYPE": "environment",
+        "ETL_CRAFT_POSTGRES_PROFILE": "prod",
+        "ETL_CRAFT_POSTGRES_JDBC_URL": "jdbc:postgresql://127.0.0.1:1/nope",
+        "ETL_CRAFT_POSTGRES_USER": "u",
+        "ETL_CRAFT_POSTGRES_AUTH_MODE": "password",
+    }.items():
+        monkeypatch.setenv(key, value)
+
+    cli_main(["setup", "--from-environment"])
+
+    written = yaml.safe_load((tmp_path / "craft-connector.yml").read_text())
+    assert written["Postgres"]["Active_profile"] == "prod"
+    assert "ETL_CRAFT_POSTGRES_PROD_SECRET" in capsys.readouterr().out
+
+
+def test_cli_setup_without_any_settings_source_says_so(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
 
-    def _raise(path=None):
-        raise ConfigError("boom")
-
-    monkeypatch.setattr("etl_craft.cli.configure_interactive", _raise)
-
-    exit_code = cli_main(["configure"])
+    exit_code = cli_main(["setup"])
 
     assert exit_code == 2
-    assert "boom" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "no settings file" in err
+    assert "--from-environment" in err
 
 
-def test_cli_configure_with_env(tmp_path, monkeypatch, capsys):
-    monkeypatch.chdir(tmp_path)
-    env_path = _write_env(tmp_path, VALID_ENV)
-
-    exit_code = cli_main(["configure", "--env", str(env_path)])
-
-    assert exit_code == 0
-    assert "craft-connector.yml written" in capsys.readouterr().out
-    assert load_config().postgres.active_profile == "dev"
-
-
-def test_cli_configure_with_env_reports_clean_error_on_bad_env(tmp_path, monkeypatch, capsys):
-    monkeypatch.chdir(tmp_path)
-    bad_env = VALID_ENV.replace("ETL_CRAFT_MODE=local", "ETL_CRAFT_MODE=bogus")
-    env_path = _write_env(tmp_path, bad_env)
-
-    exit_code = cli_main(["configure", "--env", str(env_path)])
-
-    assert exit_code == 2
-    assert "error:" in capsys.readouterr().err
-
-
-# ==============================================================================
-# configure_interactive — driven with a canned input_fn/print_fn, no real
-# stdin/stdout involved. Answers are supplied in the exact order the
-# function asks its questions, per its own docstring's section order:
-# Mode, Orchestrator name, Source type, Postgres profile (name/jdbc_url/
-# user/auth_mode), Warehouse y/n, Email y/n, Cloning y/n[/Scope].
-# ==============================================================================
-
-
-def _canned_input(answers: list[str]) -> Callable[[str], str]:
-    iterator = iter(answers)
-
-    def _input(_prompt: str) -> str:
-        try:
-            return next(iterator)
-        except StopIteration:
-            raise AssertionError(
-                "configure_interactive asked more questions than expected"
-            ) from None
-
-    return _input
-
-
-def test_configure_interactive_minimal_answers_declines_optional_sections(tmp_path):
-    path = tmp_path / "craft-connector.yml"
-    answers = [
-        "local",  # Execution mode
-        "",  # Orchestrator name (optional)
-        "environment",  # Source type
-        "dev",  # Postgres profile name
-        "jdbc:postgresql://localhost:5432/etl_craft",  # jdbc_url
-        "etl_engine",  # user
-        "password",  # auth_mode
-        "n",  # configure Warehouse?
-        "n",  # configure Email?
-        "n",  # enable Cloning?
-    ]
-    configure_interactive(path, input_fn=_canned_input(answers), print_fn=lambda _: None)
-
-    config = load_config(path)
-    assert config.mode == "local"
-    assert config.postgres.active_profile == "dev"
-    assert config.postgres.active.auth_mode == "password"
-    assert config.warehouse is None
-    assert config.email is None
-    assert config.cloning.enabled is False
-
-
-def test_configure_interactive_configures_warehouse_email_and_cloning(tmp_path):
-    path = tmp_path / "craft-connector.yml"
-    answers = [
-        "orchestrator",  # Execution mode
-        "airflow-prod",  # Orchestrator name
-        "file",  # Source type
-        "/etc/etl-craft/secrets.env",  # Source path
-        "dev",  # Postgres profile name
-        "jdbc:postgresql://localhost:5432/etl_craft",  # jdbc_url
-        "etl_engine",  # user
-        "password",  # auth_mode
-        "y",  # configure Warehouse?
-        "dev",  # Warehouse profile name
-        "jdbc:postgresql://warehouse-host:5432/analytics",  # jdbc_url
-        "etl_engine",  # user
-        "key_file",  # auth_mode
-        "/etc/etl-craft/wh.key",  # key_file path
-        "y",  # configure Email?
-        "dev",  # Email profile name
-        "smtp.example.com",  # host
-        "",  # port (default 587)
-        "etl-craft@example.com",  # from_address
-        "password",  # auth_mode
-        "alerts@example.com",  # user
-        "y",  # enable Cloning?
-        "all",  # Cloning scope
-    ]
-    configure_interactive(path, input_fn=_canned_input(answers), print_fn=lambda _: None)
-
-    config = load_config(path)
-    assert config.mode == "orchestrator"
-    assert config.source.type == "file"
-    assert config.source.path == "/etc/etl-craft/secrets.env"
-    assert config.warehouse.active.auth_mode == "key_file"
-    assert config.warehouse.active.extra["key_file"] == "/etc/etl-craft/wh.key"
-    assert config.email.active.host == "smtp.example.com"
-    assert config.email.active.port == 587
-    assert config.cloning.enabled is True
-    assert config.cloning.scope == "all"
-
-
-def test_configure_interactive_rejects_invalid_choice_and_reprompts(tmp_path):
-    path = tmp_path / "craft-connector.yml"
-    answers = [
-        "bogus",  # invalid Execution mode -> re-prompted
-        "local",
-        "",
-        "environment",
-        "dev",
-        "jdbc:postgresql://localhost:5432/etl_craft",
-        "etl_engine",
-        "password",
-        "n",
-        "n",
-        "n",
-    ]
-    configure_interactive(path, input_fn=_canned_input(answers), print_fn=lambda _: None)
-
-    assert load_config(path).mode == "local"
-
-
-def test_configure_interactive_merges_a_second_profile_alongside_the_first(tmp_path):
-    path = tmp_path / "craft-connector.yml"
-    first = [
-        "local",
-        "",
-        "environment",
-        "dev",
-        "jdbc:postgresql://localhost:5432/etl_craft",
-        "etl_engine",
-        "password",
-        "n",
-        "n",
-        "n",
-    ]
-    configure_interactive(path, input_fn=_canned_input(first), print_fn=lambda _: None)
-
-    second = [
-        "local",
-        "",
-        "environment",
-        "uat",
-        "jdbc:postgresql://uat-host:5432/etl_craft",
-        "etl_engine",
-        "password",
-        "n",
-        "n",
-        "n",
-    ]
-    configure_interactive(path, input_fn=_canned_input(second), print_fn=lambda _: None)
-
-    config = load_config(path)
-    assert config.postgres.active_profile == "uat"
-    assert set(config.postgres.profiles) == {"dev", "uat"}
-
-
-def test_configure_interactive_yes_no_reprompts_on_garbage():
-    answers = _canned_input(["maybe", "yes"])
-    messages = []
-    assert _prompt_yes_no(answers, messages.append, "Enable X?") is True
-    assert any("y or n" in m for m in messages)
-
-
-def test_configure_interactive_required_prompt_reprompts_on_blank_answer():
-    from etl_craft.configure import _prompt
-
-    answers = _canned_input(["", "real-answer"])
-    messages = []
-    assert _prompt(answers, messages.append, "Name") == "real-answer"
-    assert any("value is required" in m for m in messages)
+def test_configure_from_env_reports_a_missing_file(tmp_path):
+    with pytest.raises(ConfigError, match="env file not found"):
+        configure_from_env(tmp_path / "absent.env", tmp_path / "craft-connector.yml")
 
 
 # ==============================================================================
