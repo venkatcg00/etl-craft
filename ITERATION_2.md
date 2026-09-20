@@ -16,6 +16,7 @@ it can be worked through top to bottom.
 | 2 | 2026-09-20 | Phase 1 as committed (`06fcdb7`) | **E2-44…E2-52**, at the end of this file |
 | phase 1b | 2026-09-20 | Round 2's findings | **All nine fixed**, 395 → 407 tests |
 | **complete** | 2026-09-20 | Phases 2–7 + a mid-iteration addendum | **All 52 items closed**, 368 → 500 tests |
+| 3 | 2026-09-20 | The completed iteration 2 (`314e0c3`) | **E2-53…E2-60**, at the end of this file. Note E2-57: two items are marked closed that were not built |
 
 **Phase 1 is landed and independently re-verified** (round 2 re-ran round 1's own probes against
 the current branch rather than trusting the phase notes): **E2-01 fixed**, **E2-02 fixed**,
@@ -1138,7 +1139,7 @@ Two things worth carrying forward as method notes:
 
 # Iteration 2 complete (2026-09-20)
 
-**Every item on this list is closed: E2-01 through E2-52.** 368 → 500 tests, 97% coverage,
+**E2-01 through E2-52 are closed except two, named below.** 368 → 500 tests, 97% coverage,
 `make check` (black / ruff / pydocstyle / mypy / self-asserting schema test / pytest) and a
 wheel build-install-smoke test both clean. Each phase's full reasoning lives in `CLAUDE.md`'s
 "Where things stand" section, dated and flagged; this is the index.
@@ -1153,7 +1154,7 @@ wheel build-install-smoke test both clean. Each phase's full reasoning lives in 
 | 5 | E2-26, E2-27, E2-28, E2-29 | Gates that actually gate: self-asserting schema test, matrix CI, wheel job, mypy |
 | 6 | E2-07…E2-12 | Remaining correctness |
 | addendum | — | Column-level lineage (sqlglot), `DOCUMENTATION` + versioning, fuzzy search, `setup` |
-| 7 | E2-17…E2-24, E2-34…E2-40, E2-25b | Operability and cleanups |
+| 7 | E2-17, E2-19, E2-21…E2-24, E2-34…E2-40, E2-25b | Operability and cleanups |
 
 ## Scope added during the iteration, beyond this list
 
@@ -1178,7 +1179,273 @@ Non-goal** — "no SQL parser dependency" — on explicit instruction and on its
   process boundary.
 - **Everything `from code` in this file got a confirming test**, and the four reproduced P0s
   were each watched to fail against the pre-fix code before the fix was kept.
-- **Still open, deliberately** — these were raised and *not* built, for reasons recorded in
-  `CLAUDE.md`: E2-11's shape (an hour-long in-process poll holds a worker slot; an Airflow
-  `reschedule` sensor would not, but that is orchestrator-shaped), E2-14's field-name freeze on
-  the `generate-yml` shape, and E2-22's retention policy for the `AUD_` tables.
+- **Deferred, not done — corrected 2026-09-20 after round 3 caught the overstatement (E2-57).**
+  The completion claim above originally read "every item is closed" and the phase-7 range was
+  written as `E2-17…E2-24`, which swept in two items that were never built:
+  - **E2-18 (logging).** There is still no `logging` use anywhere in `src/etl_craft` — verified,
+    `grep` returns nothing — no verbosity flag, no log file, and no way to correlate output
+    across the parent process, the crash-detection fork and N task subprocesses. `cli.py` alone
+    has 71 `print(` calls. It is a genuinely large change and deserves to be its own, but that
+    is a reason to defer it, not to record it as done.
+  - **E2-20 (task output thrown away).** `orchestrator._run_wave` still uses a bare
+    `subprocess.Popen(cmd)` with inherited stdout/stderr, so parallel tasks interleave
+    unattributed and nothing is persisted; `scripts.py` still discards a successful script's
+    stdout and stderr. Largely blocked on E2-18.
+- **Still open, deliberately** — raised and *not* built, for reasons recorded in `CLAUDE.md`:
+  E2-11's shape (an hour-long in-process poll holds a worker slot; an Airflow `reschedule`
+  sensor would not, but that is orchestrator-shaped), E2-14's field-name freeze on the
+  `generate-yml` shape, and E2-22's retention policy for the `AUD_` tables.
+
+---
+
+# Round 3 review — findings against completed iteration 2 (2026-09-20)
+
+Same method. Confirmed the baseline first (500 passing, `mypy` clean, `ruff`/`black`/`pydocstyle`
+clean), **ran `scripts/wheel-smoke.sh` for real** (builds, installs outside the checkout,
+`init-db` → refuse → `migrate` → `migrate` → `list`/`validate`/`doctor`: all pass), re-ran round 1
+and round 2's own probes, then wrote new throwaway probes against the live Docker Postgres **and
+the live ClickHouse container**. Probe files deleted; turning each reproduction into a regression
+test is part of the fix.
+
+**Independently re-verified as genuinely fixed**, not taken from the phase notes: E2-01, E2-02,
+E2-03, E2-04, E2-13, E2-05, E2-06, E2-37. The install path works end to end from a wheel, which
+was the biggest single adoption blocker. E2-17's timeouts, E2-21's `ATTEMPT_COUNT`, E2-24's real
+engine URL, E2-40's business-rule resume and E2-10's query-string forwarding all read correctly.
+
+Two themes in what follows. First, **the dialect story is now lopsided**: ClickHouse is proven for
+connecting, hashing and cloning, and the SQL-action bodies have ClickHouse-specific branches — but
+no test has ever run a SQL action against it, and the DDL path does not work (E2-53). Second,
+**three of this round's findings are at the seams between two fixes that were each correct alone**
+— E2-03 vs. SCD2 (E2-54), E2-48 vs. the mode check (E2-55), the lineage cache vs. read-only
+command transactions (E2-56).
+
+## E2-53 — Every SQL action's target-creation path fails on ClickHouse · reproduced
+
+**Where:** [sql_actions.py:_create_target_shape](src/etl_craft/sql_actions.py), `_create_table`, `_setup_table`, `_evolve_schema`, [AUDIT_COLUMN_TYPES](src/etl_craft/sql_actions.py)
+
+Three independent failures, each confirmed by executing the exact DDL these functions emit
+against the running `clickhouse/clickhouse-server:24` container:
+
+1. **No `ENGINE` clause.** `CREATE TABLE … AS SELECT …` →
+   `Code: 42. ORDER BY or PRIMARY KEY clause is missing. Consider using extended storage
+   definition syntax`. `cloning.py` already solved exactly this with `_create_clickhouse_table`
+   (a literal `ENGINE = MergeTree() ORDER BY tuple()`, reached via the dialect *name*, never an
+   import) — `sql_actions.py` did not reuse the lesson.
+2. **`CAST(NULL AS <type>)` into a non-nullable type.** →
+   `Code: 70. Cannot convert NULL to a non-nullable type`. Affects every audit column
+   `_create_target_shape` and `_setup_table` emit, and `_evolve_schema`'s new-column backfill.
+   ClickHouse needs `Nullable(...)` — which `_hash_expression` already learned this iteration,
+   for the same reason, two functions away.
+3. **`TIMESTAMP WITH TIME ZONE` is a syntax error on ClickHouse.** →
+   `Code: 62. Syntax error: failed at position 80 ('WITH')`. **This one is a regression introduced
+   by this iteration**: E2-33 changed `AUDIT_COLUMN_TYPES`' `CREATE_DATE`/`UPDATE_DATE` from plain
+   `TIMESTAMP` to `TIMESTAMP WITH TIME ZONE`. Correct for Postgres, and it broke a dialect the
+   project explicitly supports.
+
+The root cause is a coverage shape, not carelessness: `make_config(warehouse=True)` points
+`[Warehouse]` at the *same Postgres*, so every one of the many SQL-action tests exercises one
+dialect. ClickHouse has fixtures and is used by `cloning` and `_hash_expression` tests, but no
+test ever runs an actual `SQL_ACTION` against it.
+
+**Fix direction:** hoist cloning's pattern into one place both modules use — a small
+`create_table_as(conn, name, select_sql)` that appends the engine clause when
+`conn.dialect.name == "clickhouse"` — and make `AUDIT_COLUMN_TYPES` a per-dialect lookup rather
+than one dict (it already needs three ClickHouse spellings). Then add at least one end-to-end
+`SQL_ACTION` test against `clickhouse_engine`, since that is the gap that let this through. Worth
+confirming with the user first **how supported ClickHouse actually is** — if the answer is "proven
+for cloning, best-effort for actions", say that in CLAUDE.md and stop adding per-dialect branches;
+if it is "supported", it needs the same test treatment Postgres gets.
+
+## E2-54 — `PRIMARY_KEY` and `SCD2_MERGE` are mutually exclusive · reproduced
+
+**Where:** [sql_actions.py:_apply_primary_key](src/etl_craft/sql_actions.py), `_scd2_merge`, [validate.py:validate_business_rule_keys](src/etl_craft/validate.py)
+
+E2-03 added `PRIMARY_KEY` so an engine-created table can satisfy the single-column-primary-key
+convention `validate` enforces. But an SCD2 target holds **several rows per merge key** by
+design — that is what SCD2 *is*. Declaring the natural key as `PRIMARY_KEY` therefore works for
+exactly one run and then breaks permanently.
+
+**Reproduction:** SCD2 target, `MERGE_KEY=id`, `PRIMARY_KEY=id`. Run 1 (all new) → `SUCCESS`. Run 2
+with a genuine value change → `FAILED`, `duplicate key value violates unique constraint
+"…_pkey"`, and the target still holds only the *old* version — the history the merge exists to
+record was never written.
+
+The bind: `validate` requires a single-column PK on every business-rule `TARGET_TABLE`, so an SCD2
+target with a business rule attached cannot satisfy both rules at once. The only shape that
+satisfies both is a surrogate key, which nothing generates.
+
+**Fix direction:** needs a design decision, so **ask before building**. Either (a) SCD2 targets get
+an engine-generated surrogate key column that becomes the PK (and `validate`'s convention is then
+genuinely satisfiable everywhere), or (b) `PRIMARY_KEY` is rejected by `validate` on `SCD2_MERGE`
+tasks and the PK convention is documented as not applying to SCD2 targets — in which case
+`validate_business_rule_keys` needs to know which targets those are. Whichever way, `validate`
+should catch `PRIMARY_KEY ⊆ MERGE_KEY` on an SCD2 task, because that combination is never valid.
+
+## E2-55 — Under `Mode=orchestrator` a failed task cannot be re-run, and the error recommends a flag that mode refuses · reproduced
+
+**Where:** [runlog.py:resolve_run_for_task](src/etl_craft/runlog.py), [runner.py:run_task](src/etl_craft/runner.py)
+
+E2-48's guard is right: binding to an already-`SUCCESS`/`FAILED` run rewrites audit rows that have
+been reported on. But it lands on top of `ForceNotAllowedError`, and the two together close the
+door completely.
+
+**Reproduction**, one pipeline whose latest run is finalized `FAILED` with a `FAILED` task row:
+
+| invocation | result |
+|---|---|
+| `local`, plain | `RunLogError: … is already FAILED … or pass --force` |
+| `local`, `--force` | proceeds |
+| `orchestrator`, plain | `RunLogError: … or pass --force` |
+| `orchestrator`, `--force` | `ForceNotAllowedError: --force is only legal under Mode=local` |
+
+So in the mode a real deployment runs in, the "clear a failed task and re-run it" recovery — the
+single most common operational action in Airflow — has no route, and the error message points at
+a flag that will be refused. A workaround exists (`run --init-only` mints a fresh run, which the
+task then binds to) but it changes the `pipeline_run_id`, which is not what someone retrying one
+task expects, and nothing says so.
+
+**Fix direction:** at minimum, make the message mode-aware — under `orchestrator` it should name
+`--init-only`, not `--force`. Better: decide what a single-task retry against a finished run
+should *mean*. Re-opening the run (setting it back to `IN-PROGRESS`) is the semantically honest
+answer and has a real objection — `ux_pipeline_run_one_active` and the existing note in
+`resolve_run_for_task` about not reopening terminal runs — so this is a question to raise, not to
+guess.
+
+## E2-56 — `generate-docs` writes the lineage cache through a connection that never commits · reproduced
+
+**Where:** [cli.py:_generate_docs_command](src/etl_craft/cli.py), [docs_generator.py:118](src/etl_craft/docs_generator.py#L118), [column_lineage.py:lineage_for_tasks](src/etl_craft/column_lineage.py)
+
+`lineage_for_tasks` calls `store_lineage`, which issues `DELETE` + `INSERT` against
+`AUD_COLUMN_LINEAGE`. `_column_lineage_command` opens `engine.begin()` and commits. But
+`_generate_docs_command` opens `engine.connect()`, whose implicit transaction is **rolled back on
+close** — so every row the docs build parses is discarded.
+
+**Reproduction:** one active SQL task with a parsable `SOURCE_SQL`; ran `generate_docs` through
+`engine.connect()` exactly as the CLI does → `AUD_COLUMN_LINEAGE` holds **0 rows** afterwards.
+
+Two consequences, and the second is the one that matters:
+
+1. The cache never populates from `generate-docs`, so every docs build re-parses every task.
+   Invisible, because the output is identical either way.
+2. **A read-only verb now writes.** `docs_generator`'s own docstring still says it "adds no new
+   query logic of its own". Against a read-only replica or a read-only DB role — a completely
+   reasonable place to point a docs generator — it will now fail outright.
+
+**Fix direction:** decide whether caching is a side effect a read command may have at all. The
+cleanest answer is that it is not: give `lineage_for_tasks` a `cache: bool = True` and have
+`generate-docs` pass `cache=False`, with an explicit `--refresh-lineage` (or the existing
+`lineage --refresh`) as the one verb that writes. If caching in the docs build is wanted, the
+command must use `engine.begin()` and say in its help that it writes.
+
+## E2-57 — E2-18 and E2-20 are recorded as closed but were not built · verified
+
+**Where:** this file's "Iteration 2 complete" section; [f21ef57](src/etl_craft/orchestrator.py) (phase 7)
+
+This file states "**Every item on this list is closed: E2-01 through E2-52**", and its
+"Still open, deliberately" list names only E2-11's shape, E2-14's field-name freeze and E2-22's
+retention policy. Two items in phase 7's stated range are in neither list and were not done:
+
+- **E2-18 (no logging, only `print`).** `grep -rn logging src/etl_craft` returns **nothing**. There
+  is still no `logging` use anywhere, no verbosity flag, no log file, no way to correlate output
+  across the parent, the crash-detection fork and N task subprocesses. `cli.py` alone has 71
+  `print(` calls. The phase-7 commit message enumerates E2-17, E2-19, E2-21, E2-22, E2-24, E2-34,
+  E2-35, E2-36, E2-40 and E2-25's remainder — E2-18 is not mentioned.
+- **E2-20 (task output thrown away).** `orchestrator._run_wave` still does a bare
+  `subprocess.Popen(cmd)` with inherited stdout/stderr, so parallel tasks still interleave
+  unattributed and nothing is persisted; `scripts.py` still reads only the trailing JSON line and
+  discards a successful script's stdout and stderr entirely.
+
+Both are defensible to defer — E2-18 is a genuinely large change and E2-20 largely depends on it.
+Neither is defensible to mark closed. The value of this file is that its status line can be
+trusted; an inaccurate one costs more than the items themselves.
+
+**Fix direction:** move both to an explicit "deferred, not done" list with the reason, and correct
+the completion claim. Then, if logging is wanted, do it as its own change: `logging` throughout,
+one `_setup_logging(verbosity)` in `cli.py`, `pipeline_code`/`task_code`/`pipeline_run_id` on every
+record, and stdout kept clean for the verbs whose output is meant to be piped.
+
+## E2-58 — `docs_generator`'s docstring and CLAUDE.md's CLI section both state the opposite of what the code does · verified
+
+**Where:** [docs_generator.py:12-26](src/etl_craft/docs_generator.py#L12-L26), CLAUDE.md's "CLI surface" closing paragraph
+
+The module docstring says the search is "a small, dependency-free vanilla-JS substring search over
+the generated search-index.json, **not a vendored copy of Fuse.js/Lunr.js**", and calls out "no
+fuzzy matching, no relevance ranking" as the accepted trade-off. Thirty lines further down the
+same file, a `[DEVIATION]` says Fuse.js is vendored and used, and `generate_docs` copies
+`vendor/fuse.min.js` into the output. CLAUDE.md's CLI-surface paragraph repeats the stale claim
+verbatim, while CLAUDE.md's "Where things stand" correctly records the change — so the same file
+says both things.
+
+The same docstring's "this module adds no new query logic of its own beyond assembling their
+results into pages" is also no longer true: it now parses SQL with sqlglot and writes to
+`AUD_COLUMN_LINEAGE` (E2-56).
+
+Small, but this repo's whole method rests on superseded text being marked rather than left to
+contradict the code — the `[DEVIATION]`/`[ADDITION]`/`[CHOICE]` convention exists for exactly this.
+
+**Fix direction:** rewrite both passages to describe what the code does, keeping the original
+no-CDN reasoning (which still holds and is why Fuse is vendored rather than linked).
+
+## E2-59 — E2-08 was fixed for `PYTHON` only; `HAS_DATA` on a `BUSINESS_RULES` or `EMAIL_ALERT` upstream is now *silently* unsatisfiable · from code
+
+**Where:** [business_rules.py:318](src/etl_craft/business_rules.py#L318), [email_alert.py:438](src/etl_craft/email_alert.py#L438), [validate.py](src/etl_craft/validate.py)
+
+`scripts.py` now reports `target_count` (E2-08, correctly). `business_rules.execute` still returns
+`HandlerResult(insert_count=…, update_count=…)` and `email_alert.execute` returns only
+`variables` — neither sets `target_count`. `HAS_DATA` is "upstream `SUCCESS` **and**
+`TARGET_COUNT > 0`", so an edge on either handler can never be satisfied.
+
+E2-08's own fix direction called for a `validate` check rejecting a `HAS_DATA` edge whose upstream
+handler cannot produce a count. There is none — `grep HAS_DATA src/etl_craft/validate.py` is empty.
+
+E2-01's `unsatisfiable()` makes this worse rather than better: the downstream task is now
+**silently recorded `SKIPPED`** and the pipeline finalizes `SUCCESS`, where before it at least
+showed up as stuck. A config mistake the engine can detect statically now looks like a clean run.
+
+**Fix direction:** the `validate` check E2-08 already specified — cheap, and it turns a silent skip
+into a startup error. Decide separately whether `BUSINESS_RULES` should report a count at all
+(rows checked? rows flagged?); if the answer is "no meaningful count", then `HAS_DATA` on a
+`BUSINESS_RULES` upstream should simply be rejected.
+
+## E2-60 — Nothing makes the pipeline-level `EMAIL_ALERT` actually run last · from code
+
+**Where:** [email_alert.py:run_flavour](src/etl_craft/email_alert.py), [generate_yml.py](src/etl_craft/generate_yml.py)
+
+E2-43 redesigned `EMAIL_ALERT` into a pipeline-level completion alert — "one email per run",
+"once you exhaust retries and all of the tasks that can be run are ran". Its flavour is computed
+from every active task's status under this run. But how the alert task is *gated* is unchanged:
+an ordinary `CFG_TASK_DEPENDENCY`, chosen by whoever writes the config.
+
+Gate it on one task rather than on every leaf and it runs while the rest of the pipeline is still
+going. `run_flavour` then sees unsettled tasks and returns `COMPLETED_WITH_ERRORS` — the amber
+"something went wrong" email — for a run that goes on to finish cleanly. The `[CHOICE]` in the
+docstring is honest that "nothing forces that", but the design's own premise is that this runs at
+the end, and nothing in the tooling or `validate` enforces or even warns about it. A second
+`EMAIL_ALERT` task in the same pipeline compounds it: `exclude_task_id` excludes only the task
+computing the flavour, so each sees the other as unsettled and both send amber.
+
+**Fix direction:** `validate` should require an active `EMAIL_ALERT` task to depend (`ALWAYS`) on
+every leaf that isn't itself an alert — the same computation `generate_yml` already does for
+`__finalize__`. Cheap, and it makes the design's premise true instead of hoped for. Raise with the
+user whether more than one `EMAIL_ALERT` per pipeline should be allowed at all now that the alert
+is pipeline-level.
+
+## Suggested handling
+
+- **E2-57 first**, and it costs minutes: correct the completion claim and list E2-18/E2-20 as
+  deferred. Everything else in this file depends on its status being trustworthy.
+- **E2-54, E2-55** next — both are silent-failure or no-recovery paths in normal operation, and
+  both need a design answer before code.
+- **E2-53** is a scope question before it is a bug: how supported is ClickHouse? The answer decides
+  whether this is three small fixes plus a test, or a documentation change.
+- **E2-56, E2-59, E2-60** are each small and self-contained.
+- **E2-58** with whatever next touches `docs_generator`.
+
+## Added to "still to raise rather than guess"
+
+- **How supported is a non-Postgres warehouse?** (E2-53.) The code carries per-dialect branches but
+  the tests exercise one dialect.
+- **What should a single-task retry against a finished run do?** (E2-55.) Re-open the run, mint a
+  new one, or stay refused with a better message.
+- **How does an SCD2 target satisfy the single-column primary key convention?** (E2-54.)
+- **Should `generate-docs` be allowed to write?** (E2-56.)
