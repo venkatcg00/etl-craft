@@ -49,6 +49,7 @@ from etl_craft.cfg import (
 )
 from etl_craft.cli import main as cli_main
 from etl_craft.cloning import run_cloning_if_enabled
+from etl_craft.cloning import tables_for_scope as cloning_tables_for_scope
 from etl_craft.config import (
     CloningConfig,
     ConnectionProfile,
@@ -413,20 +414,11 @@ def _clickhouse_warehouse_config(monkeypatch, *, cloning: CloningConfig) -> Conn
 
 @pytest.fixture
 def clickhouse_cfg_tables_cleanup(clickhouse_engine):
-    """Drop every table cloning.py's 'cfg' scope could have mirrored into ClickHouse."""
+    """Drop every table cloning.py's 'cfg' or 'aud' scope could have mirrored into ClickHouse."""
     yield
     with clickhouse_engine.begin() as conn:
-        for table_name in (
-            "cfg_pipelines",
-            "cfg_pipeline_dependency",
-            "cfg_tasks",
-            "cfg_task_dependency",
-            "cfg_task_parameters",
-            "cfg_business_rules",
-            "aud_pipelines_run_log",
-            "aud_task_run_log",
-        ):
-            conn.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
+        for table_name in cloning_tables_for_scope("all"):
+            conn.execute(text(f"DROP TABLE IF EXISTS {table_name.lower()}"))
 
 
 def test_run_cloning_if_enabled_noop_when_disabled(postgres_engine):
