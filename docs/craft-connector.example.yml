@@ -1,0 +1,85 @@
+# craft-connector.yml — etl-craft's connection and execution configuration.
+#
+# Analogous to a dbt profiles.yml: versioned and committed, with NO secret
+# values in it. Secrets are looked up by name at runtime through [Source].
+#
+# `etl-craft configure` writes this file for you and prints the exact secret
+# variable names it will expect. `etl-craft doctor` then verifies the whole
+# thing before you run anything real.
+
+Execution:
+  # Set once per environment via `etl-craft set-execution-mode`, not per run.
+  #   local        — `run --pipeline_code X` acts as its own wave scheduler.
+  #   orchestrator — that form is refused; Airflow drives each task instead.
+  Mode: local
+  # Informational only. The engine never acts on this.
+  Orchestrator name: airflow
+
+Source:
+  # Where secret values actually live.
+  #   environment — read from the process environment
+  #   file        — read from a .env-style file named by Path
+  Type: environment
+  # Path: /etc/etl-craft/secrets.env      # required when Type is `file`
+
+Postgres:
+  # The Engine DB. Required, and always Postgres — its partial unique index is
+  # what makes concurrent run-id creation race-safe.
+  Active_profile: dev
+  Profiles:
+    dev:
+      # JDBC form is the storage convention; the engine translates it.
+      jdbc_url: jdbc:postgresql://localhost:55432/etl_craft
+      user: etl_craft
+      # password | key_file are implemented; token | sso raise NotImplementedError,
+      # since which provider mints the credential is necessarily team-specific.
+      auth_mode: password
+      # The secret is read from ETL_CRAFT_POSTGRES_DEV_SECRET unless overridden:
+      # secret_var: MY_OWN_VAR_NAME
+    prod:
+      jdbc_url: jdbc:postgresql://pg.internal:5432/etl_craft
+      user: etl_craft_svc
+      auth_mode: password
+
+Warehouse:
+  # The Data DB — where your actual tables live. Optional: only SQL and
+  # BUSINESS_RULES tasks need it. Exactly one warehouse per deployment.
+  Active_profile: dev
+  Profiles:
+    dev:
+      jdbc_url: jdbc:postgresql://localhost:55432/analytics
+      user: etl_craft
+      auth_mode: password
+
+Email:
+  # Optional. Only needed if any active task uses HANDLER=EMAIL_ALERT.
+  Active_profile: dev
+  Profiles:
+    dev:
+      host: localhost
+      port: 1025
+      from_address: etl-craft@example.com
+      # `none` or `password` only — an OAuth2 SMTP flow is as provider-specific
+      # as the token/sso database auth modes, so it is left out rather than stubbed.
+      auth_mode: none
+      use_tls: false
+
+Cloning:
+  # Mirror the engine's own CFG_/AUD_ tables into the Data DB, so a team can
+  # query engine config and audit history without a second connection.
+  # Off by default; runs after each pipeline run when enabled.
+  Enabled: false
+  Scope: cfg        # cfg | aud | all
+
+Orchestrator:
+  # Optional deployment-wide defaults for the Airflow-facing fields
+  # `generate-yml` emits. A pipeline's own PIPELINE_PARAMETERS override these,
+  # and a built-in default applies when neither is set.
+  Global_dag: false
+  Catchup: false
+  Tags: [nightly]
+  Retries: 1
+  Retry_delay_minutes: 5
+  Depends_on_past: false
+  Email_on_failure: false
+  Email_recipients: [data-alerts@example.com]

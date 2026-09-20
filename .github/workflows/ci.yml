@@ -74,11 +74,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-groups
 
-      - name: Apply sql/schema.sql
-        run: psql -v ON_ERROR_STOP=1 -f sql/schema.sql
+      - name: Apply src/etl_craft/sql/schema.sql
+        run: psql -v ON_ERROR_STOP=1 -f src/etl_craft/sql/schema.sql
 
-      - name: sql/schema_test.sql (schema behavioral smoke test)
-        run: psql -f sql/schema_test.sql
+      - name: src/etl_craft/sql/schema_test.sql (schema behavioral smoke test)
+        run: psql -f src/etl_craft/sql/schema_test.sql
 
       - name: black --check
         run: uv run black --check .

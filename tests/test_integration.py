@@ -72,8 +72,10 @@ from etl_craft.crosspipe import (
     consume_task_dependency_edges,
 )
 from etl_craft.docs_generator import collect_docs, generate_docs
+from etl_craft.doctor import run_checks
 from etl_craft.execution import HandlerResult
 from etl_craft.generate_yml import GLOBAL_DAG_ID, generate_global_dag, generate_pipeline_dag
+from etl_craft.init_db import InitDbError, init_db
 from etl_craft.migrate import MigrationError, apply_pending_migrations
 from etl_craft.orchestrator import (
     OrchestratorModeRefusedError,
@@ -5719,6 +5721,178 @@ def test_apply_pending_migrations_stops_and_does_not_record_a_failed_file(
     assert exists is None
 
 
+def test_init_db_creates_the_schema_and_then_refuses(postgres_engine):
+    # E2-13. There was previously no way to create the Engine DB from an
+    # installed package at all: schema.sql is the single authoritative full
+    # definition and it lived only in the git checkout. Run against a real,
+    # genuinely empty throwaway database -- not the shared test one, which
+    # already has the schema.
+    with postgres_engine.connect() as conn:
+        url = conn.engine.url
+    # render_as_string(hide_password=False): str(url) masks the password.
+    admin = create_engine(
+        url.set(database="postgres").render_as_string(hide_password=False),
+        isolation_level="AUTOCOMMIT",
+    )
+    db_name = "etl_craft_initdb_test"
+    try:
+        with admin.connect() as conn:
+            conn.execute(text(f"DROP DATABASE IF EXISTS {db_name}"))
+            conn.execute(text(f"CREATE DATABASE {db_name}"))
+        target = create_engine(url.set(database=db_name).render_as_string(hide_password=False))
+        try:
+            count = init_db(target)
+            assert count > 0
+            with target.connect() as conn:
+                assert conn.execute(text("SELECT COUNT(*) FROM CFG_PIPELINES")).scalar_one() == 0
+                # The trigger functions survived statement splitting -- the
+                # case a naive split(";") shreds (E2-05).
+                assert (
+                    conn.execute(
+                        text(
+                            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.ROUTINES "
+                            "WHERE ROUTINE_NAME = 'trg_set_audit_columns'"
+                        )
+                    ).scalar_one()
+                    == 1
+                )
+
+            # schema.sql is plain CREATE TABLE and deliberately not idempotent,
+            # so a second run must refuse rather than fail half-applied.
+            with pytest.raises(InitDbError, match="already has engine table"):
+                init_db(target)
+        finally:
+            target.dispose()
+    finally:
+        with admin.connect() as conn:
+            conn.execute(text(f"DROP DATABASE IF EXISTS {db_name}"))
+        admin.dispose()
+
+
+def test_doctor_reports_every_check_and_names_a_missing_secret(
+    postgres_engine, monkeypatch, capsys
+):
+    # E2-16. `configure` writes a profile whose secret is looked up as
+    # ETL_CRAFT_{SECTION}_{PROFILE}_SECRET and never mentions that name, so the
+    # first sign of trouble was a later command failing. doctor names it.
+    config = make_config()
+    monkeypatch.delenv("ETL_CRAFT_POSTGRES_DEV_SECRET", raising=False)
+
+    results = run_checks(config)
+
+    by_name = {r.name: r for r in results}
+    secret = by_name["Engine DB secret"]
+    assert secret.ok is False
+    assert "ETL_CRAFT_POSTGRES_DEV_SECRET" in secret.detail
+    # Every check still reports -- one failure must not hide the rest.
+    assert by_name["Execution mode"].ok is True
+    assert "no [Warehouse] section" in by_name["Data DB"].detail
+
+
+def test_doctor_passes_against_a_real_engine_db(postgres_engine):
+    results = run_checks(make_config())
+    assert [r.name for r in results if not r.ok] == []
+    assert any(r.name == "Engine DB connection" and r.ok for r in results)
+
+
+def test_doctor_checks_a_configured_warehouse_and_email_relay(postgres_engine, monkeypatch, capsys):
+    # The warehouse and email branches, which the no-section default skips.
+    # Postgres stands in as the Data DB (as elsewhere in this suite), and the
+    # relay is unreachable on purpose -- doctor must report it rather than
+    # raise, and must still report every other check alongside it.
+    monkeypatch.setenv("ETL_CRAFT_WAREHOUSE_DEV_SECRET", "etl_craft")
+    config = make_config(warehouse=True, email=True)
+
+    results = run_checks(config)
+    by_name = {r.name: r for r in results}
+
+    assert by_name["Data DB secret"].ok is True
+    assert by_name["Data DB connection"].ok is True
+    # make_config's email profile points at a port nothing is listening on.
+    assert by_name["Email relay"].ok is False
+
+
+def test_cli_doctor_reports_failures_with_exit_1(craft_connector_on_disk, monkeypatch, capsys):
+    monkeypatch.delenv("ETL_CRAFT_POSTGRES_DEV_SECRET", raising=False)
+
+    exit_code = cli_main(["doctor"])
+
+    assert exit_code == 1
+    out = capsys.readouterr()
+    assert "ETL_CRAFT_POSTGRES_DEV_SECRET" in out.out
+    assert "check(s) failed" in out.err
+
+
+def test_cli_doctor_reports_a_missing_config_file_as_a_check(tmp_path, monkeypatch, capsys):
+    # doctor runs before build_engine on purpose: its whole job is to diagnose
+    # a configuration that does not work yet. The first version dispatched it
+    # after the shared setup, so a missing secret exited 2 from build_engine
+    # before doctor said a word.
+    monkeypatch.delenv("ETL_CRAFT_CONFIG", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    exit_code = cli_main(["doctor"])
+
+    assert exit_code == 1
+    assert "[FAIL] Configuration:" in capsys.readouterr().err
+
+
+def test_cli_doctor_passes_with_exit_0(craft_connector_on_disk, capsys):
+    assert cli_main(["doctor"]) == 0
+    assert "all checks passed" in capsys.readouterr().out
+
+
+def test_cli_init_db_refuses_an_already_initialized_database(craft_connector_on_disk, capsys):
+    # craft_connector_on_disk points at the shared test database, which already
+    # has the schema -- exactly the case init-db must refuse rather than
+    # half-apply, since schema.sql is deliberately not idempotent.
+    exit_code = cli_main(["init-db"])
+
+    assert exit_code == 1
+    assert "already has engine table" in capsys.readouterr().err
+
+
+def test_init_db_wraps_a_failure_with_the_file_it_was_applying(postgres_engine, monkeypatch):
+    monkeypatch.setattr(
+        "etl_craft.init_db.read_packaged_schema", lambda: "SELECT this_is_not_valid_sql("
+    )
+    with pytest.raises(InitDbError, match="failed applying schema.sql"):
+        init_db(postgres_engine, force=True)
+
+
+def test_cli_migrate_reports_a_missing_migrations_directory(
+    craft_connector_on_disk, tmp_path, capsys
+):
+    # E2-05's headline failure: the old package-relative default resolved to a
+    # path that does not exist once installed, and Path.glob on a missing
+    # directory yields nothing without error -- so migrate printed "already up
+    # to date" and silently skipped a team's migrations.
+    missing = tmp_path / "nope"
+
+    exit_code = cli_main(["migrate", "--migrations-dir", str(missing)])
+
+    assert exit_code == 1
+    err = capsys.readouterr().err
+    assert "does not exist" in err
+    assert "up to date" not in err
+
+
+def test_migrate_creates_schema_migrations_when_the_table_is_absent(
+    postgres_engine, tmp_path, migrations_cleanup
+):
+    # The other half of E2-05: SELECT VERSION FROM SCHEMA_MIGRATIONS raised a
+    # raw ProgrammingError from outside the try against any database predating
+    # that table, and nothing could bootstrap it.
+    with postgres_engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS SCHEMA_MIGRATIONS"))
+    (tmp_path / "0001_bootstrap_probe.sql").write_text("SELECT 1")
+    migrations_cleanup.append("0001_bootstrap_probe.sql")
+
+    applied = apply_pending_migrations(postgres_engine, tmp_path)
+
+    assert applied == ["0001_bootstrap_probe.sql"]
+
+
 def test_cli_migrate_applies_the_real_migrations_directory_and_is_idempotent(
     craft_connector_on_disk, postgres_engine, capsys
 ):
@@ -5760,7 +5934,8 @@ def test_cli_migrate_reports_applied_files(craft_connector_on_disk, monkeypatch,
     # real against Postgres above; this just proves the CLI wires its
     # result/exception into the right message and exit code.
     monkeypatch.setattr(
-        "etl_craft.cli.apply_pending_migrations", lambda engine: ["0001_x.sql", "0002_y.sql"]
+        "etl_craft.cli.apply_pending_migrations",
+        lambda engine, migrations_dir=None: ["0001_x.sql", "0002_y.sql"],
     )
 
     exit_code = cli_main(["migrate"])
@@ -5774,7 +5949,7 @@ def test_cli_migrate_reports_applied_files(craft_connector_on_disk, monkeypatch,
 def test_cli_migrate_reports_error_on_failed_migration(
     craft_connector_on_disk, monkeypatch, capsys
 ):
-    def _raise(engine):
+    def _raise(engine, migrations_dir=None):
         raise MigrationError("0001_bad.sql failed to apply: syntax error")
 
     monkeypatch.setattr("etl_craft.cli.apply_pending_migrations", _raise)

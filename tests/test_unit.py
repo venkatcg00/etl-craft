@@ -12,6 +12,7 @@ import runpy
 import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -34,6 +35,7 @@ from etl_craft.cli import main as cli_main
 from etl_craft.cloning import AUD_TABLES, CFG_TABLES, tables_for_scope
 from etl_craft.cloning import _same_database as same_database
 from etl_craft.config import (
+    CONFIG_PATH_ENV_VAR,
     CloningConfig,
     ConfigError,
     ConnectionProfile,
@@ -42,10 +44,13 @@ from etl_craft.config import (
     SourceConfig,
     _load_dotenv_file,
     load_config,
+    resolve_config_path,
     resolve_secret,
 )
 from etl_craft.configure import (
     _prompt_yes_no,
+    _report_required_secrets,
+    _required_secret_vars,
     configure_from_env,
     configure_interactive,
     set_execution_mode,
@@ -63,7 +68,17 @@ from etl_craft.email_alert import _render_digest_html as render_email_digest_htm
 from etl_craft.email_alert import _resolve_target_pipeline_codes as resolve_email_pipeline_codes
 from etl_craft.email_alert import _substitute as substitute_email_tokens
 from etl_craft.handlers import HandlerError, TaskExecutionContext, dispatch
-from etl_craft.migrate import _split_statements
+from etl_craft.migrate import (
+    MIGRATIONS_DIR_ENV_VAR,
+    _split_statements,
+    resolve_migrations_dir,
+    split_statements,
+)
+from etl_craft.packaged_sql import (
+    packaged_migrations_dir,
+    packaged_schema_path,
+    read_packaged_schema,
+)
 from etl_craft.resolver import (
     CycleError,
     DependencyGraph,
@@ -510,6 +525,164 @@ def test_apply_primary_key_does_nothing_when_none_is_declared():
             raise AssertionError("issued DDL for a target with no PRIMARY_KEY")
 
     sql_actions._apply_primary_key(_Conn(), "public.t", "db", [])
+
+
+# ------------------------------------------------------------------------------
+# migrate.py / packaged_sql.py / config.py — the install path (E2-05, E2-06, E2-13)
+# ------------------------------------------------------------------------------
+
+
+def test_split_statements_keeps_dollar_quoted_bodies_whole():
+    # E2-05. This used to be sql_text.split(";"), which shredded exactly the
+    # thing anyone would migrate first: schema.sql's own trigger functions are
+    # CREATE FUNCTION ... $$ ... ; ... $$ bodies.
+    sql = (
+        "CREATE FUNCTION f() RETURNS TRIGGER AS $$ BEGIN "
+        "NEW.a := 1; NEW.b := 2; RETURN NEW; END; $$ LANGUAGE plpgsql;\n"
+        "SELECT 1;"
+    )
+    statements = split_statements(sql)
+    assert len(statements) == 2
+    assert statements[0].startswith("CREATE FUNCTION")
+    assert statements[0].count(";") == 4  # every semicolon inside the body survived
+    assert statements[1] == "SELECT 1"
+
+
+def test_split_statements_ignores_semicolons_in_literals_and_comments():
+    sql = (
+        "INSERT INTO t VALUES ('a;b', 'it''s; fine');\n"
+        "-- a trailing comment; with a semicolon\n"
+        "/* and a block; comment */\n"
+        "SELECT 2;"
+    )
+    statements = split_statements(sql)
+    assert len(statements) == 2
+    assert "'a;b'" in statements[0]
+    assert statements[1].endswith("SELECT 2")
+
+
+def test_split_statements_handles_tagged_dollar_quotes():
+    sql = "DO $fn$ BEGIN RAISE NOTICE 'x;y'; END $fn$;\nSELECT 3;"
+    assert len(split_statements(sql)) == 2
+
+
+def test_the_real_packaged_schema_splits_into_whole_statements():
+    # The case init-db actually depends on, against the file that really ships.
+    statements = split_statements(read_packaged_schema())
+    functions = [s for s in statements if "CREATE OR REPLACE FUNCTION" in s]
+    assert functions, "schema.sql should define trigger functions"
+    assert all(s.rstrip().endswith("plpgsql") for s in functions)
+
+
+def test_packaged_sql_files_are_readable_from_the_installed_package():
+    # E2-13. The wheel used to ship 24 .py files and nothing else, so there was
+    # no way to create the Engine DB from an installed package at all.
+    assert packaged_schema_path().is_file()
+    assert packaged_migrations_dir().is_dir()
+    assert "CREATE TABLE CFG_PIPELINES" in read_packaged_schema()
+
+
+def test_resolve_migrations_dir_precedence(tmp_path, monkeypatch):
+    explicit = tmp_path / "explicit"
+    from_env = tmp_path / "from_env"
+    local = tmp_path / "project" / "sql" / "migrations"
+    local.mkdir(parents=True)
+
+    monkeypatch.setenv(MIGRATIONS_DIR_ENV_VAR, str(from_env))
+    assert resolve_migrations_dir(explicit) == explicit
+    assert resolve_migrations_dir() == from_env
+
+    monkeypatch.delenv(MIGRATIONS_DIR_ENV_VAR)
+    monkeypatch.chdir(tmp_path / "project")
+    assert resolve_migrations_dir() == local
+
+    # Nothing local either: fall back to the copy inside the package, which is
+    # what makes `migrate` work from an installed wheel at all.
+    monkeypatch.chdir(tmp_path)
+    assert resolve_migrations_dir() == packaged_migrations_dir()
+
+
+@pytest.mark.parametrize(
+    "sql, expected",
+    [
+        ("SELECT $", 1),  # a lone $ is not a dollar quote
+        ("SELECT $1 + $2", 1),  # $1 is a placeholder, not a tag
+        ("SELECT $a-b$ x $a-b$", 1),  # not a valid tag either
+    ],
+)
+def test_split_statements_does_not_mistake_other_dollars_for_quotes(sql, expected):
+    assert len(split_statements(sql)) == expected
+
+
+def test_required_secret_vars_names_each_profiles_variable():
+    # E2-16. The whole point: the name is derivable from what the user just
+    # entered, so there is no reason to make them discover it from a failure.
+    raw = {
+        "Postgres": {"Active_profile": "dev", "Profiles": {"dev": {"auth_mode": "password"}}},
+        "Warehouse": {
+            "Active_profile": "prod",
+            "Profiles": {"prod": {"auth_mode": "password", "secret_var": "MY_OWN_VAR"}},
+        },
+        # auth_mode none needs no secret, so it must not be listed.
+        "Email": {"Active_profile": "dev", "Profiles": {"dev": {"auth_mode": "none"}}},
+    }
+    assert _required_secret_vars(raw) == [
+        ("Postgres.dev", "ETL_CRAFT_POSTGRES_DEV_SECRET"),
+        ("Warehouse.prod", "MY_OWN_VAR"),
+    ]
+
+
+def test_required_secret_vars_ignores_malformed_sections():
+    assert _required_secret_vars({"Postgres": "not-a-dict"}) == []
+    assert _required_secret_vars({"Postgres": {"Active_profile": "dev", "Profiles": {}}}) == []
+
+
+def test_report_required_secrets_points_at_the_env_file_when_source_is_a_file():
+    printed: list[str] = []
+    raw = {
+        "Source": {"Type": "file", "Path": "/etc/secrets.env"},
+        "Postgres": {"Active_profile": "dev", "Profiles": {"dev": {"auth_mode": "password"}}},
+    }
+    _report_required_secrets(raw, printed.append)
+    out = "\n".join(printed)
+    assert "ETL_CRAFT_POSTGRES_DEV_SECRET" in out
+    assert "/etc/secrets.env" in out
+    assert "doctor" in out
+
+
+def test_report_required_secrets_says_nothing_when_nothing_is_needed():
+    printed: list[str] = []
+    _report_required_secrets({"Source": {"Type": "environment"}}, printed.append)
+    assert printed == []
+
+
+def test_resolve_config_path_precedence(tmp_path, monkeypatch):
+    # E2-06. There was no --config and no env var, so every command had to run
+    # with cwd set to the directory holding the file -- a poor fit for an
+    # Airflow BashOperator, whose cwd a DAG author does not control.
+    explicit = tmp_path / "explicit.yml"
+    from_env = tmp_path / "env.yml"
+    project = tmp_path / "project"
+    nested = project / "a" / "b"
+    nested.mkdir(parents=True)
+    (project / "craft-connector.yml").write_text("Execution:\n  Mode: local\n")
+
+    monkeypatch.setenv(CONFIG_PATH_ENV_VAR, str(from_env))
+    assert resolve_config_path(explicit) == explicit
+    assert resolve_config_path() == from_env
+
+    monkeypatch.delenv(CONFIG_PATH_ENV_VAR)
+    # Upward search from a subdirectory, the pyproject.toml/.git pattern.
+    monkeypatch.chdir(nested)
+    assert resolve_config_path() == project / "craft-connector.yml"
+
+
+def test_resolve_config_path_falls_back_to_the_plain_relative_name(tmp_path, monkeypatch):
+    # Nothing found anywhere: the "not found" error should still name something
+    # a reader recognizes, not an absolute path from a failed search.
+    monkeypatch.delenv(CONFIG_PATH_ENV_VAR, raising=False)
+    monkeypatch.chdir(tmp_path)
+    assert resolve_config_path() == Path("craft-connector.yml")
 
 
 # ==============================================================================
@@ -1801,22 +1974,27 @@ def test_cli_configure_without_env_calls_interactive_setup(tmp_path, monkeypatch
     monkeypatch.chdir(tmp_path)
     called = {}
 
-    def _fake_interactive():
+    def _fake_interactive(path=None):
         called["ran"] = True
+        called["path"] = path
 
     monkeypatch.setattr("etl_craft.cli.configure_interactive", _fake_interactive)
 
     exit_code = cli_main(["configure"])
 
     assert exit_code == 0
-    assert called == {"ran": True}
+    assert called["ran"] is True
     assert "craft-connector.yml written" in capsys.readouterr().out
+    # E2-06: the resolved --config path reaches the writer too, so the flag
+    # means the same thing for the verbs that create the file as for those
+    # that read it.
+    assert called["path"] is not None
 
 
 def test_cli_configure_without_env_reports_configerror(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
 
-    def _raise():
+    def _raise(path=None):
         raise ConfigError("boom")
 
     monkeypatch.setattr("etl_craft.cli.configure_interactive", _raise)

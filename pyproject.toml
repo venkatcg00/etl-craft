@@ -7,6 +7,19 @@ authors = [
     { name = "venkatcg00", email = "venkatcg0@gmail.com" }
 ]
 requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+keywords = ["etl", "orchestration", "metadata-driven", "data-engineering", "airflow"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
+]
 dependencies = [
     "psycopg[binary]>=3.3.6",
     "pyyaml>=6.0.3",
@@ -21,9 +34,24 @@ clickhouse = [
     "clickhouse-sqlalchemy>=0.3.2",
 ]
 
+[project.urls]
+Homepage = "https://github.com/venkatcg00/etl-craft"
+Repository = "https://github.com/venkatcg00/etl-craft"
+Issues = "https://github.com/venkatcg00/etl-craft/issues"
+
 [build-system]
 requires = ["uv_build>=0.12.17,<0.13.0"]
 build-backend = "uv_build"
+
+# [ADDITION, 2026-09-20, E2-13] The built wheel shipped 24 .py files and
+# nothing else — no sql/, no py.typed, no license. There was therefore no way
+# to create the Engine DB from an installed package at all (schema.sql existed
+# only in the git checkout), and `etl-craft migrate` silently no-opped against
+# a directory that does not exist. uv_build packages src/<module>/ only, which
+# is why sql/ moved under src/etl_craft/ rather than being included from the
+# repo root.
+[tool.uv.build-backend]
+source-include = ["src/etl_craft/sql/**", "src/etl_craft/py.typed"]
 
 [dependency-groups]
 dev = [

@@ -43,11 +43,11 @@ from etl_craft.config import (
 )
 
 
-def set_execution_mode(mode: str, path: Path | str = DEFAULT_CONFIG_PATH) -> None:
+def set_execution_mode(mode: str, path: Path | str | None = None) -> None:
     """Update Execution.Mode in an existing craft-connector.yml, leaving everything else as-is."""
     if mode not in VALID_MODES:
         raise ConfigError(f"mode must be one of {sorted(VALID_MODES)}, got {mode!r}")
-    path = Path(path)
+    path = Path(path) if path is not None else DEFAULT_CONFIG_PATH
     raw = _read_raw_yaml(path)
     if not isinstance(raw.get("Execution"), dict):
         raise ConfigError(f"{path}: missing or invalid 'Execution' section — run `configure` first")
@@ -55,10 +55,10 @@ def set_execution_mode(mode: str, path: Path | str = DEFAULT_CONFIG_PATH) -> Non
     _write_raw_yaml(path, raw)
 
 
-def configure_from_env(env_path: Path | str, path: Path | str = DEFAULT_CONFIG_PATH) -> None:
+def configure_from_env(env_path: Path | str, path: Path | str | None = None) -> None:
     """Build (or update) craft-connector.yml from an env file, non-interactively."""
     env_path = Path(env_path)
-    path = Path(path)
+    path = Path(path) if path is not None else DEFAULT_CONFIG_PATH
     if not env_path.is_file():
         raise ConfigError(f"env file not found at {env_path}")
     values = _load_dotenv_file(str(env_path))
@@ -135,7 +135,7 @@ def configure_from_env(env_path: Path | str, path: Path | str = DEFAULT_CONFIG_P
 
 
 def configure_interactive(
-    path: Path | str = DEFAULT_CONFIG_PATH,
+    path: Path | str | None = None,
     *,
     input_fn: Callable[[str], str] = input,
     print_fn: Callable[[str], None] = print,
@@ -166,7 +166,7 @@ def configure_interactive(
     so this is testable without a real terminal — same "injectable I/O"
     spirit as crosspipe.py's own sleep/now parameters.
     """
-    path = Path(path)
+    path = Path(path) if path is not None else DEFAULT_CONFIG_PATH
     raw = _read_raw_yaml(path) if path.is_file() else {}
 
     mode = _prompt(input_fn, print_fn, "Execution mode", choices=sorted(VALID_MODES))
@@ -218,6 +218,51 @@ def configure_interactive(
     raw["Cloning"] = cloning
 
     _write_raw_yaml(path, raw)
+    _report_required_secrets(raw, print_fn)
+
+
+def _required_secret_vars(raw: dict) -> list[tuple[str, str]]:
+    """List the (section, env var) pairs the written config will look for at runtime.
+
+    [ADDITION, 2026-09-20, E2-16] `configure` used to write profiles whose
+    secrets are looked up as ETL_CRAFT_{SECTION}_{PROFILE}_SECRET and never
+    mention that name, so the flow was: answer every prompt, then watch the
+    next command fail with "secret 'ETL_CRAFT_POSTGRES_DEV_SECRET' not found".
+    The name is derivable from what was just entered, so there is no reason
+    not to say it.
+    """
+    required: list[tuple[str, str]] = []
+    for section in ("Postgres", "Warehouse", "Email"):
+        block = raw.get(section)
+        if not isinstance(block, dict):
+            continue
+        name = block.get("Active_profile")
+        profile = (block.get("Profiles") or {}).get(name)
+        if not isinstance(profile, dict):
+            continue
+        if profile.get("auth_mode") == "none":
+            continue
+        override = profile.get("secret_var")
+        var = override if override else f"ETL_CRAFT_{section}_{name}_SECRET".upper()
+        required.append((f"{section}.{name}", var))
+    return required
+
+
+def _report_required_secrets(raw: dict, print_fn: Callable[[str], None]) -> None:
+    """Print the exact secret variable names the new configuration expects."""
+    required = _required_secret_vars(raw)
+    if not required:
+        return
+    source = raw.get("Source") or {}
+    print_fn("")
+    print_fn("This configuration expects the following secret(s):")
+    for label, var in required:
+        print_fn(f"  {label:<24} {var}")
+    if source.get("Type") == "file":
+        print_fn(f"Add them as KEY=VALUE lines in {source.get('Path')}.")
+    else:
+        print_fn("Set them in the environment before running any command.")
+    print_fn("Run `etl-craft doctor` to check the whole configuration once they are set.")
 
 
 def _merge_profile_section(existing: object, profile_name: str, profile: dict) -> dict:

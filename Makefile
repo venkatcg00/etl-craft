@@ -1,6 +1,6 @@
 .PHONY: db-up db-down db-reset db-schema-test test coverage check
 
-# Bring up a local Postgres 16 with sql/schema.sql already applied
+# Bring up a local Postgres 16 with src/etl_craft/sql/schema.sql already applied
 # (docker-entrypoint-initdb.d only runs on a fresh volume, so this is a
 # no-op on an already-initialized one — use db-reset to force a clean slate)
 # plus a local ClickHouse, which stands in as a genuinely different
@@ -18,7 +18,7 @@ db-reset:
 	docker compose down -v
 	$(MAKE) db-up
 
-# Runs sql/schema_test.sql's own EXPECT-FAIL/EXPECT-SUCCEED smoke test,
+# Runs src/etl_craft/sql/schema_test.sql's own EXPECT-FAIL/EXPECT-SUCCEED smoke test,
 # against a genuinely disposable database created/dropped inside the same
 # running container — never the persistent `etl_craft` dev database that
 # `make test`/`postgres_engine` use, matching schema_test.sql's own header

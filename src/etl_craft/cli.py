@@ -41,15 +41,23 @@ from etl_craft.cfg import (
     resolve_pipeline_id,
     resolve_task_id,
 )
-from etl_craft.config import VALID_MODES, ConfigError, ConnectorConfig, load_config
+from etl_craft.config import (
+    VALID_MODES,
+    ConfigError,
+    ConnectorConfig,
+    load_config,
+    resolve_config_path,
+)
 from etl_craft.configure import configure_from_env, configure_interactive, set_execution_mode
 from etl_craft.db import build_engine
 from etl_craft.docs_generator import generate_docs
+from etl_craft.doctor import run_checks
 from etl_craft.generate_yml import (
     GENERATED_HEADER,
     generate_global_dag,
     generate_pipeline_dag,
 )
+from etl_craft.init_db import InitDbError, init_db
 from etl_craft.migrate import MigrationError, apply_pending_migrations
 from etl_craft.orchestrator import (
     OrchestratorModeRefusedError,
@@ -95,6 +103,13 @@ RUN_ERRORS = (
 def build_parser() -> argparse.ArgumentParser:
     """Build the top-level `etl-craft` argument parser."""
     parser = argparse.ArgumentParser(prog="etl-craft")
+    parser.add_argument(
+        "--config",
+        help=(
+            "Path to craft-connector.yml. Defaults to $ETL_CRAFT_CONFIG, then the "
+            "nearest craft-connector.yml searching upward from the current directory."
+        ),
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     run_parser = subparsers.add_parser("run", help="Run a pipeline or a single task")
@@ -176,7 +191,27 @@ def build_parser() -> argparse.ArgumentParser:
 
     # [ADDITION] Closes CLAUDE.md open question #7 — see migrate.py's own
     # module docstring for scope/reasoning.
-    subparsers.add_parser("migrate", help="Apply pending sql/migrations/*.sql files")
+    migrate_parser = subparsers.add_parser(
+        "migrate", help="Apply pending sql/migrations/*.sql files"
+    )
+    migrate_parser.add_argument(
+        "--migrations-dir",
+        help=(
+            "Directory of *.sql migration files. Defaults to $ETL_CRAFT_MIGRATIONS_DIR, "
+            "then ./sql/migrations, then the copy packaged with etl-craft."
+        ),
+    )
+
+    subparsers.add_parser("doctor", help="Check config, secrets and every configured connection")
+
+    init_db_parser = subparsers.add_parser(
+        "init-db", help="Apply the packaged schema to an empty Engine DB"
+    )
+    init_db_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Apply the schema even if engine tables already exist",
+    )
 
     # [ADDITION] Close out CLAUDE.md's remaining "read-only query verbs
     # conceptually agreed but not yet named or built": steps-in-a-pipeline
@@ -211,14 +246,23 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     """Parse `argv` (default: sys.argv[1:]) and dispatch to the matching command."""
     args = build_parser().parse_args(argv)
+    # [ADDITION, 2026-09-20, E2-06] Resolved once, here, and threaded into
+    # every command — including the two that *write* the file, so
+    # `--config` means the same thing whichever verb is used.
+    config_path = resolve_config_path(args.config)
 
     if args.command == "set-execution-mode":
-        return _set_execution_mode_command(args)
+        return _set_execution_mode_command(args, config_path)
     if args.command == "configure":
-        return _configure_command(args)
+        return _configure_command(args, config_path)
+    # doctor deliberately runs before build_engine: its entire job is to
+    # diagnose a configuration that does not work yet, and the shared setup
+    # below would exit 2 on an unresolvable secret before doctor said a word.
+    if args.command == "doctor":
+        return _doctor_command(config_path)
 
     try:
-        config = load_config()
+        config = load_config(config_path)
         engine = build_engine(config)
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -245,7 +289,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "lineage":
             return _lineage_command(args, engine)
         if args.command == "migrate":
-            return _migrate_command(engine)
+            return _migrate_command(args, engine)
+        if args.command == "init-db":
+            return _init_db_command(args, engine)
         if args.command == "steps":
             return _steps_command(args, engine)
         if args.command == "history":
@@ -261,9 +307,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 2  # pragma: no cover
 
 
-def _set_execution_mode_command(args: argparse.Namespace) -> int:
+def _set_execution_mode_command(args: argparse.Namespace, config_path: Path) -> int:
     try:
-        set_execution_mode(args.mode)
+        set_execution_mode(args.mode, config_path)
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -271,14 +317,14 @@ def _set_execution_mode_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def _configure_command(args: argparse.Namespace) -> int:
+def _configure_command(args: argparse.Namespace, config_path: Path) -> int:
     try:
         if args.env is None:
-            configure_interactive()
-            print("craft-connector.yml written")
+            configure_interactive(path=config_path)
+            print(f"{config_path} written")
         else:
-            configure_from_env(args.env)
-            print(f"craft-connector.yml written from {args.env}")
+            configure_from_env(args.env, config_path)
+            print(f"{config_path} written from {args.env}")
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -442,9 +488,39 @@ def _lineage_command(args: argparse.Namespace, engine: Engine) -> int:
     return 0
 
 
-def _migrate_command(engine: Engine) -> int:
+def _doctor_command(config_path: Path) -> int:
     try:
-        applied = apply_pending_migrations(engine)
+        config = load_config(config_path)
+    except ConfigError as exc:
+        # Reported as a check, not as the usual exit-2 setup failure: a
+        # missing or malformed config file is exactly what doctor exists to
+        # tell you about.
+        print(f"[FAIL] Configuration: {exc}", file=sys.stderr)
+        return 1
+    results = run_checks(config)
+    for result in results:
+        print(f"[{result.marker}] {result.name}: {result.detail}")
+    failures = [r for r in results if not r.ok]
+    if failures:
+        print(f"\ndoctor: {len(failures)} check(s) failed", file=sys.stderr)
+        return 1
+    print("\ndoctor: all checks passed")
+    return 0
+
+
+def _init_db_command(args: argparse.Namespace, engine: Engine) -> int:
+    try:
+        count = init_db(engine, force=args.force)
+    except (InitDbError, FileNotFoundError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"init-db: applied {count} statement(s) from the packaged schema")
+    return 0
+
+
+def _migrate_command(args: argparse.Namespace, engine: Engine) -> int:
+    try:
+        applied = apply_pending_migrations(engine, args.migrations_dir)
     except MigrationError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

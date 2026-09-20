@@ -45,6 +45,39 @@ from typing import Any
 import yaml
 
 DEFAULT_CONFIG_PATH = Path("craft-connector.yml")
+CONFIG_PATH_ENV_VAR = "ETL_CRAFT_CONFIG"
+CONFIG_FILENAME = "craft-connector.yml"
+
+
+def resolve_config_path(explicit: Path | str | None = None) -> Path:
+    """Find craft-connector.yml, most-specific first: --config, env var, then upward search.
+
+    [ADDITION, 2026-09-20, E2-06] Every command used to require the process
+    cwd to be the directory holding the file, with no flag and no env var to
+    say otherwise. That is a poor fit for exactly the deployment CLAUDE.md
+    targets: an Airflow BashOperator's cwd is not something a DAG author
+    controls reliably, and `generate-yml` emits bare `etl-craft run ...` with
+    no `cd`. The same assumption reached into HANDLER=PYTHON, whose scripts
+    are documented as resolving config "in the same directory".
+
+    The upward search is the `pyproject.toml`/`.git` pattern, so running from
+    a subdirectory of a configured project works the way every other
+    developer tool behaves. It stops at the filesystem root and falls back to
+    the plain relative path, so the "not found" error still names something a
+    reader recognizes.
+    """
+    if explicit is not None:
+        return Path(explicit)
+    from_env = os.environ.get(CONFIG_PATH_ENV_VAR)
+    if from_env:
+        return Path(from_env)
+    here = Path.cwd().resolve()
+    for directory in (here, *here.parents):
+        candidate = directory / CONFIG_FILENAME
+        if candidate.is_file():
+            return candidate
+    return DEFAULT_CONFIG_PATH
+
 
 VALID_MODES = frozenset({"local", "orchestrator"})
 VALID_SOURCE_TYPES = frozenset({"file", "environment"})
