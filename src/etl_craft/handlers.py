@@ -24,7 +24,7 @@ from etl_craft import business_rules, email_alert, scripts, sql_actions
 from etl_craft.config import ConfigError
 from etl_craft.execution import HandlerError, HandlerResult, TaskExecutionContext
 from etl_craft.limits import task_timeout_seconds
-from etl_craft.warehouse import build_data_engine
+from etl_craft.warehouse import data_db
 
 __all__ = ["HandlerError", "HandlerResult", "TaskExecutionContext", "dispatch"]
 
@@ -63,9 +63,15 @@ def dispatch(engine: Engine, ctx: TaskExecutionContext) -> HandlerResult:
                 return email_alert.execute(cfg_conn, ctx)
         # SQL and BUSINESS_RULES both need the Data DB — one engine, disposed
         # after this single task's use, same lifecycle as validate.py's own
-        # build_data_engine(...)/dispose() pairing.
-        data_engine = build_data_engine(ctx.config)
-        try:
+        # pairing.
+        #
+        # [DEVIATION, 2026-09-21, E2-61] Through warehouse.data_db, not a bare
+        # build_data_engine: on a single-writer warehouse this queues behind
+        # any other task already using it, instead of failing with DuckDB's
+        # raw "Could not set lock on file". No-op for Postgres. The wait is
+        # bounded by the task's own timeout — a task that would outlive its
+        # limit waiting is better off failing with a clear reason.
+        with data_db(ctx.config, engine, wait_seconds=task_timeout_seconds(ctx)) as data_engine:
             if ctx.handler == "SQL":
                 # sql_actions.py's own writes must be atomic (per explicit
                 # instruction) — one Data DB transaction for the whole
@@ -79,8 +85,6 @@ def dispatch(engine: Engine, ctx: TaskExecutionContext) -> HandlerResult:
             # parallelism needs a fresh Data DB connection per thread, not
             # one shared Connection, so it takes data_engine directly.
             return business_rules.execute(data_engine, engine, ctx)
-        finally:
-            data_engine.dispose()
     except HandlerError:
         raise
     except (ConfigError, SQLAlchemyError) as exc:

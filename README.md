@@ -49,8 +49,18 @@ ETL_CRAFT_POSTGRES_PROFILE=dev
 ETL_CRAFT_POSTGRES_JDBC_URL=jdbc:postgresql://localhost:55432/etl_craft
 ETL_CRAFT_POSTGRES_USER=etl_craft
 ETL_CRAFT_POSTGRES_AUTH_MODE=password
+
+# The warehouse your tables live in. Optional — needed only for SQL and
+# BUSINESS_RULES tasks. Postgres:
+ETL_CRAFT_WAREHOUSE_JDBC_URL=jdbc:postgresql://localhost:55432/analytics
+ETL_CRAFT_WAREHOUSE_USER=etl_craft
+ETL_CRAFT_WAREHOUSE_AUTH_MODE=password
+# ...or DuckDB, which is a file and has nothing to authenticate to:
+# ETL_CRAFT_WAREHOUSE_JDBC_URL=jdbc:duckdb:/data/warehouse.duckdb
+# ETL_CRAFT_WAREHOUSE_AUTH_MODE=none
 EOF
 export ETL_CRAFT_POSTGRES_DEV_SECRET=etl_craft
+export ETL_CRAFT_WAREHOUSE_DEV_SECRET=etl_craft   # not needed for auth_mode=none
 ```
 
 **3. Run `setup`. Once, and then whenever anything changes.**
@@ -141,11 +151,14 @@ editing a query invalidates them automatically.
 - Python 3.11+
 - Postgres for the Engine DB (its constraint guarantees are load-bearing — a partial unique
   index is what makes run-id creation race-safe)
-- A warehouse for the data itself, if you run `SQL` or `BUSINESS_RULES` tasks. **Postgres
-  and DuckDB are the two supported warehouses** and both ship working out of the box —
-  DuckDB is embedded, so there is no server to stand up. Any other SQLAlchemy-supported
-  engine will likely work, but is an optional dialect you install yourself (`uv add
-  sqlalchemy-<dialect>`) and is not covered by the test suite.
+- A warehouse for the data itself, if you run `SQL` or `BUSINESS_RULES` tasks:
+  **PostgreSQL, or DuckDB**. Postgres is the one with no caveats — tasks in a parallel
+  wave run genuinely concurrently. DuckDB is embedded, so there is no server to stand up,
+  but it admits only one *writing process* at a time; the engine handles that by
+  serializing Data DB access, so a parallel wave queues rather than failing. (Iceberg-backed
+  DuckDB, which removes that constraint, is planned — see `ITERATION_2.md`.) Any other
+  SQLAlchemy-supported engine will likely work, but is an optional dialect you install
+  yourself (`uv add sqlalchemy-<dialect>`) and is not covered by the test suite.
 
 ## License
 

@@ -676,8 +676,28 @@ def _dedupe_stage(
 ROW_ID_COLUMN = "ROW_ID"
 
 
-def _sequence_name(table_name: str) -> str:
-    return f"etl_seq_{table_name}_{ROW_ID_COLUMN.lower()}"
+def _sequence_name(target_object: str, database: str) -> str:
+    """Fully-qualified name for a target's own ROW_ID sequence (DuckDB only).
+
+    [DEVIATION, 2026-09-21, E2-64] Schema-qualified, and created in the
+    target's own schema. This was previously the bare table name, created
+    unqualified -- so `staging.orders` and `marts.orders`, two perfectly
+    ordinary targets, shared one sequence.
+
+    Probed on a single connection that looks self-limiting: DuckDB refuses the
+    `DROP SEQUENCE IF EXISTS` with a dependency error. But every task runs in
+    its own process with its own connection, and there the DROP *succeeds
+    silently*. Building the second table then reset the shared sequence to 1,
+    and the next insert into the first table -- untouched by that run --
+    collided with a ROW_ID it already held (Duplicate key ROW_ID: 2 violates
+    primary key constraint), leaving it un-writable until someone repaired the
+    sequence by hand. Verified at both levels, not reasoned about.
+    """
+    schema_name, table_name = split_object_ref(target_object)
+    return qualify(
+        f"{schema_name}.etl_seq_{table_name}_{ROW_ID_COLUMN.lower()}",
+        database,
+    )
 
 
 def _add_surrogate_key(conn: Connection, target_object: str, database: str) -> None:
@@ -711,9 +731,8 @@ def _add_surrogate_key(conn: Connection, target_object: str, database: str) -> N
     every later insert.
     """
     qualified = qualify(target_object, database)
-    _, table_name = split_object_ref(target_object)
     if conn.dialect.name == "duckdb":
-        sequence = _sequence_name(table_name)
+        sequence = _sequence_name(target_object, database)
         conn.execute(text(f"DROP SEQUENCE IF EXISTS {sequence}"))
         conn.execute(text(f"CREATE SEQUENCE {sequence} START 1"))
         conn.execute(
@@ -754,7 +773,7 @@ def _restore_surrogate_key(conn: Connection, target_object: str, database: str) 
         # The sequence survived the table rebuild (it is a separate object),
         # but its position has to skip whatever the carried-across values
         # already occupy.
-        sequence = _sequence_name(table_name)
+        sequence = _sequence_name(target_object, database)
         conn.execute(text(f"DROP SEQUENCE IF EXISTS {sequence}"))
         conn.execute(text(f"CREATE SEQUENCE {sequence} START {next_value}"))
         conn.execute(

@@ -524,6 +524,31 @@ Cloning:
 
 
 @pytest.fixture
+def duckdb_craft_connector_on_disk(tmp_path, monkeypatch, postgres_engine):
+    """craft-connector.yml with a real DuckDB [Warehouse], for subprocess-spawning tests.
+
+    [ADDITION, 2026-09-21, E2-61] Exists because every other DuckDB test runs
+    in one process with its own tmp_path file, and every orchestrator test
+    that spawns real subprocesses points [Warehouse] at Postgres -- so nothing
+    exercised the combination that actually breaks: two task subprocesses,
+    one embedded warehouse. Same structural blind spot E2-53 identified, one
+    level up.
+    """
+    warehouse = tmp_path / "warehouse.duckdb"
+    (tmp_path / "craft-connector.yml").write_text(CRAFT_CONNECTOR_YAML + f"""
+Warehouse:
+  Active_profile: dev
+  Profiles:
+    dev:
+      jdbc_url: jdbc:duckdb:{warehouse}
+      auth_mode: none
+""")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ETL_CRAFT_POSTGRES_DEV_SECRET", "etl_craft")
+    return warehouse
+
+
+@pytest.fixture
 def craft_connector_on_disk(tmp_path, monkeypatch, postgres_engine):
     """Write a real craft-connector.yml pointing at the test Postgres, and chdir into it."""
     # Needed by anything that spawns a real `python -m etl_craft` subprocess

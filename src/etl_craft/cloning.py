@@ -65,7 +65,7 @@ from sqlalchemy.sql.sqltypes import Text as GenericText
 from sqlalchemy.types import TypeEngine
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.warehouse import build_data_engine, translate_jdbc_url
+from etl_craft.warehouse import data_db, translate_jdbc_url
 
 # [ADDITION] CLAUDE.md names these table groups ("Scope: cfg | aud | all —
 # which table groups mirror into the Data DB") but never enumerates the
@@ -156,12 +156,15 @@ def run_cloning_if_enabled(engine: Engine, config: ConnectorConfig) -> None:
             "reinsert CFG_/AUD_ tables in place. Point [Warehouse] at a genuinely "
             "separate database, or disable Cloning."
         )
-    data_engine = build_data_engine(config)
-    try:
+    # [DEVIATION, 2026-09-21, E2-61] Queues behind any task still using a
+    # single-writer warehouse rather than failing on its file lock. Cloning
+    # runs at a pipeline's finalize point, which under Mode=orchestrator is a
+    # separate process from every task — exactly the contention case.
+    # Unbounded wait: this is already best-effort (see _run_cloning_best_effort
+    # in orchestrator.py), so waiting costs nothing a failure would not.
+    with data_db(config, engine) as data_engine:
         for table_name in tables_for_scope(config.cloning.scope):
             _clone_table(engine, data_engine, table_name)
-    finally:
-        data_engine.dispose()
 
 
 def _generic_type(source_type: TypeEngine) -> TypeEngine:

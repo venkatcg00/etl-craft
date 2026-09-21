@@ -61,6 +61,7 @@ from etl_craft.config import (
     EmailProfile,
     OrchestratorConfig,
     SourceConfig,
+    load_config,
 )
 from etl_craft.crosspipe import (
     PollBudget,
@@ -71,6 +72,7 @@ from etl_craft.crosspipe import (
     consume_pipeline_dependency_edges,
     consume_task_dependency_edges,
 )
+from etl_craft.db import ConnectionError_
 from etl_craft.docs_generator import collect_docs, generate_docs
 from etl_craft.doctor import run_checks
 from etl_craft.documentation import fetch_history, refresh_all, refresh_task_documentation
@@ -96,7 +98,7 @@ from etl_craft.runlog import (
 from etl_craft.runner import ForceNotAllowedError, run_task
 from etl_craft.setup_command import run_setup
 from etl_craft.validate import validate_business_rule_keys, validate_graphs
-from etl_craft.warehouse import build_data_engine
+from etl_craft.warehouse import build_data_engine, data_db
 
 # ==============================================================================
 # runlog.py — against real Postgres
@@ -2748,6 +2750,68 @@ def test_run_pipeline_runs_independent_tasks_and_finalizes_failed(
     assert len(rows) == 2  # both tasks actually got spawned and logged
 
 
+def test_run_pipeline_runs_a_parallel_wave_against_a_duckdb_warehouse(
+    duckdb_craft_connector_on_disk, postgres_engine, committed_pipeline
+):
+    # E2-61, and the test the review said would have caught it. Two
+    # independent SQL tasks are one wave, so orchestrator._run_wave spawns two
+    # real subprocesses at once -- and DuckDB admits exactly one writing OS
+    # process, refusing the second with "IO Error: Could not set lock on
+    # file". Max_parallel_tasks defaults to 8, so this was the default
+    # behaviour on an embedded warehouse, not an edge case.
+    #
+    # Nothing caught it because every DuckDB test ran in a single process and
+    # every subprocess-spawning orchestrator test pointed [Warehouse] at
+    # Postgres. This is the combination.
+    warehouse = duckdb_craft_connector_on_disk
+    seed = create_engine(f"duckdb:///{warehouse}")
+    try:
+        with seed.begin() as conn:
+            conn.execute(text("CREATE SCHEMA IF NOT EXISTS staging"))
+            conn.execute(text("CREATE TABLE staging.src AS SELECT 1 AS id"))
+    finally:
+        # Handed back before anything forks or spawns: an open handle here
+        # would take the lock these subprocesses need.
+        seed.dispose()
+
+    for task_code, target in (("wave_a", "staging.out_a"), ("wave_b", "staging.out_b")):
+        task_id = insert_committed_task(postgres_engine, committed_pipeline, task_code)
+        insert_committed_task_parameters(
+            postgres_engine,
+            task_id,
+            {
+                "SQL_ACTION": "CREATE_TABLE",
+                "TARGET_OBJECT": target,
+                "SOURCE_SQL": "SELECT id FROM staging.src WHERE 1=1",
+            },
+        )
+
+    outcome = run_pipeline(postgres_engine, load_config(), "TEST_CONCURRENT_PL")
+
+    assert outcome.status == "SUCCESS", outcome.message
+    with postgres_engine.connect() as conn:
+        statuses = {
+            row.status
+            for row in conn.execute(
+                text(
+                    "SELECT STATUS AS status FROM AUD_TASK_RUN_LOG t "
+                    "JOIN CFG_TASKS c ON c.TASK_ID = t.TASK_ID WHERE c.PIPELINE_ID = :pid"
+                ),
+                {"pid": committed_pipeline},
+            )
+        }
+    # Both genuinely ran and wrote -- the wave queued rather than one of them
+    # dying on the file lock.
+    assert statuses == {"SUCCESS"}
+    check = create_engine(f"duckdb:///{warehouse}")
+    try:
+        with check.connect() as conn:
+            assert conn.execute(text("SELECT id FROM staging.out_a")).scalars().all() == [1]
+            assert conn.execute(text("SELECT id FROM staging.out_b")).scalars().all() == [1]
+    finally:
+        check.dispose()
+
+
 def test_run_pipeline_never_spawns_downstream_of_a_failed_dependency(
     craft_connector_on_disk, postgres_engine, committed_pipeline
 ):
@@ -4100,6 +4164,112 @@ def test_sql_actions_run_end_to_end_against_real_duckdb(
             return conn.execute(text("SELECT name FROM staging.dim")).all()
 
     assert with_data_db(check_second_run) == [("b",)]
+
+
+def test_data_db_times_out_with_a_clear_reason_when_the_warehouse_is_busy(
+    postgres_engine, tmp_path
+):
+    # E2-61's failure path. Queueing has to be bounded, or one wedged holder
+    # blocks every other task indefinitely -- and when the bound is hit the
+    # message has to say why, because "Could not set lock on file" tells
+    # someone nothing about what to do.
+    config = make_config(duckdb_warehouse=str(tmp_path / "warehouse.duckdb"))
+    holding = threading.Event()
+    release = threading.Event()
+
+    def hold_the_warehouse():
+        with data_db(config, postgres_engine):
+            holding.set()
+            release.wait(timeout=30)
+
+    holder = threading.Thread(target=hold_the_warehouse)
+    holder.start()
+    try:
+        assert holding.wait(timeout=10)
+        with (
+            pytest.raises(ConnectionError_, match="only one writing process at a time"),
+            data_db(config, postgres_engine, wait_seconds=1),
+        ):
+            pass  # pragma: no cover - the lock must not be granted
+    finally:
+        release.set()
+        holder.join(timeout=10)
+
+
+def test_sql_same_table_name_in_two_schemas_on_duckdb(
+    postgres_engine, committed_pipeline, tmp_path
+):
+    # E2-64, and the failure is worse than a shared name looks. The DuckDB
+    # surrogate-key sequence was named from the *bare* table name and created
+    # unqualified, so staging.orders and marts.orders -- two perfectly
+    # ordinary targets -- shared one sequence.
+    #
+    # Probing it on a single connection makes it look self-limiting: DuckDB
+    # refuses the DROP SEQUENCE with a dependency error, so nothing is
+    # corrupted. But the engine runs every task in its own process with its
+    # own connection, and there the DROP *succeeds silently*. The second
+    # table's creation then resets the shared sequence to 1, and the next
+    # insert into the first table -- which this run never touched -- collides
+    # with a ROW_ID it already holds:
+    #
+    #   Constraint Error: Duplicate key "ROW_ID: 2" violates primary key
+    #
+    # Verified directly at both levels. So this asserts the *aftermath*, not
+    # merely that both tables get built: a test that stops at creation passes
+    # against the bug.
+    config = make_config(duckdb_warehouse=str(tmp_path / "warehouse.duckdb"))
+
+    def with_data_db(fn):
+        engine = build_data_engine(config)
+        try:
+            return fn(engine)
+        finally:
+            engine.dispose()
+
+    def seed(engine):
+        with engine.begin() as conn:
+            conn.execute(text("CREATE SCHEMA IF NOT EXISTS staging"))
+            conn.execute(text("CREATE SCHEMA IF NOT EXISTS marts"))
+            conn.execute(text("CREATE TABLE staging.src AS SELECT * FROM range(5) t(id)"))
+            conn.execute(text("CREATE TABLE marts.src AS SELECT 1 AS id"))
+
+    with_data_db(seed)
+
+    # Deliberately different row counts: with equal counts the shared counter
+    # happens to land clear of the first table's keys and the bug hides.
+    for task_code, target, source in (
+        ("duck_stg", "staging.orders", "staging.src"),
+        ("duck_mart", "marts.orders", "marts.src"),
+    ):
+        _duckdb_sql_task(
+            postgres_engine,
+            committed_pipeline,
+            task_code,
+            {
+                "SQL_ACTION": "CREATE_TABLE",
+                "TARGET_OBJECT": target,
+                "SOURCE_SQL": f"SELECT id FROM {source} WHERE 1=1",
+            },
+        )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    first = run_task(postgres_engine, config, "TEST_CONCURRENT_PL", "duck_stg")
+    assert first.status == "SUCCESS", first.message
+    second = run_task(postgres_engine, config, "TEST_CONCURRENT_PL", "duck_mart")
+    assert second.status == "SUCCESS", second.message
+
+    def insert_into_first(engine):
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO staging.orders (id) VALUES (99)"))
+            return (
+                conn.execute(text("SELECT ROW_ID FROM staging.orders ORDER BY ROW_ID"))
+                .scalars()
+                .all()
+            )
+
+    # Building marts.orders must leave staging.orders' own key allocation
+    # untouched and still usable.
+    assert with_data_db(insert_into_first) == [1, 2, 3, 4, 5, 6]
 
 
 def test_sql_schema_evolution_restores_the_surrogate_key_on_duckdb(

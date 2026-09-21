@@ -81,7 +81,7 @@ from etl_craft.validate import (
     validate_task_lineage_declarations,
     validate_task_parameters,
 )
-from etl_craft.warehouse import build_data_engine
+from etl_craft.warehouse import READ_ONLY_WAIT_SECONDS, data_db
 
 # Every exception run_task/run_pipeline/init_pipeline_run can raise for
 # reasons short of a bug: bad --pipeline_code/--task_code, --force under
@@ -530,23 +530,24 @@ def _validate_command(engine: Engine, config: ConnectorConfig) -> int:
         issues += validate_task_parameters(conn)
         issues += validate_dependency_edges(conn)
 
-        data_engine = None
-        if config.warehouse is not None:
+        if config.warehouse is None:
+            issues += validate_business_rule_keys(conn, None)
+        else:
             try:
-                data_engine = build_data_engine(config)
+                # [DEVIATION, 2026-09-21, E2-61] Through data_db, so a
+                # single-writer warehouse queues briefly instead of failing
+                # outright while a task is running. No-op for Postgres.
+                with data_db(config, engine, wait_seconds=READ_ONLY_WAIT_SECONDS) as data_engine:
+                    issues += validate_business_rule_keys(conn, data_engine)
             except ConfigError as exc:
                 print(f"error: {exc}", file=sys.stderr)
                 return 2
-        try:
-            issues += validate_business_rule_keys(conn, data_engine)
-        except SQLAlchemyError as exc:
-            print(
-                f"error: could not check business rules against the Data DB: {exc}", file=sys.stderr
-            )
-            return 2
-        finally:
-            if data_engine is not None:
-                data_engine.dispose()
+            except SQLAlchemyError as exc:
+                print(
+                    f"error: could not check business rules against the Data DB: {exc}",
+                    file=sys.stderr,
+                )
+                return 2
 
     if not issues:
         print("validate: OK — no issues found")

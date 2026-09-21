@@ -31,13 +31,15 @@ ever importing a specific driver.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, Engine
+from sqlalchemy.exc import OperationalError
 
 from etl_craft.config import ConnectionProfile, ConnectorConfig, resolve_secret
 from etl_craft.db import ConnectionError_
@@ -45,6 +47,9 @@ from etl_craft.db import ConnectionError_
 # DuckDB is embedded, so its URL names a file rather than a server.
 # `jdbc:duckdb:` alone means an in-memory database.
 _DUCKDB_URL_RE = re.compile(r"^jdbc:duckdb:(?P<path>.*)$")
+
+# The catalog name qualify() interpolates unquoted into database.schema.table.
+_SAFE_CATALOG = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 _JDBC_URL_RE = re.compile(
     r"^jdbc:(?P<scheme>[a-zA-Z0-9_+-]+)://(?P<host>[^:/?]+)(:(?P<port>\d+))?/(?P<database>[^?]+)"
@@ -86,12 +91,50 @@ def translate_jdbc_url(jdbc_url: str) -> tuple[str, dict[str, Any]]:
         # qualify()'s three-part `catalog.schema.table` form needs. An
         # in-memory database's catalog is `memory`.
         path = duckdb["path"] or ""
-        stem = Path(path).stem if path else ""
+        if not path:
+            # [DEVIATION, 2026-09-21, E2-63] The bare form is in-memory, and
+            # now genuinely is. This used to fall through with path="" so the
+            # creator below reached for `database` instead -- the literal
+            # string "memory" -- and built `duckdb:///memory`, which DuckDB
+            # reads as *a file named `memory` in the current working
+            # directory*. Reproduced: two task subprocesses against
+            # `jdbc:duckdb:` left a 274 KB file called `memory` in the repo
+            # root and the second saw the first's data, which a real
+            # in-memory database could not have shared. Each process also
+            # starts wherever it happened to start, so cwd differences
+            # between the orchestrator, a task subprocess and an Airflow
+            # worker could produce several unrelated "warehouses".
+            return "duckdb", {
+                "host": None,
+                "port": None,
+                "path": ":memory:",
+                "database": "memory",
+                "query": {},
+            }
+        stem = Path(path).stem
+        # [ADDITION, 2026-09-21, E2-62] The catalog name is the file stem, and
+        # qualify() interpolates it unquoted into `catalog.schema.table`. A
+        # hyphen is not an exotic filename, but `my-warehouse.public.t` is a
+        # parser error that never mentions the file -- so check it here, where
+        # it is derived, rather than letting every SQL action fail obscurely.
+        # validate's own identifier check cannot catch this: it checks CFG_
+        # values, and this one comes from craft-connector.yml.
+        #
+        # [CHOICE] Reject rather than quote. Quoting would make the catalog
+        # case-sensitive and diverge from how the Postgres path builds the
+        # same name.
+        if not _SAFE_CATALOG.match(stem):
+            raise ConnectionError_(
+                f"DuckDB warehouse file {path!r} gives the catalog name {stem!r}, which is not "
+                "a usable SQL identifier — it is interpolated unquoted into "
+                "database.schema.table. Rename the file to use only letters, digits and "
+                "underscores, starting with a letter or underscore."
+            )
         return "duckdb", {
             "host": None,
             "port": None,
             "path": path,
-            "database": stem or "memory",
+            "database": stem,
             "query": {},
         }
 
@@ -245,3 +288,113 @@ def build_data_engine(
         query=parts["query"],
     )
     return create_engine(url, creator=creator, **engine_kwargs)
+
+
+# [ADDITION, 2026-09-21, E2-61] Warehouses that permit exactly one writing OS
+# process at a time. DuckDB is embedded: its state is a file plus the writing
+# process's buffers, and it takes an exclusive lock -- a second process is
+# refused outright ("IO Error: Could not set lock on file"), and so is a
+# *read-only* connection while a writer holds it. Verified directly.
+#
+# That collides with the engine's core execution model, which is one
+# subprocess per ready task: with Max_parallel_tasks defaulting to 8, any wave
+# holding two SQL/BUSINESS_RULES tasks would fail all but one, and the same
+# applies under Airflow, whose parallel tasks are separate processes too.
+SINGLE_WRITER_DIALECTS = frozenset({"duckdb"})
+
+# Arbitrary but fixed, and deliberately distinct from migrate.py's own key:
+# every process coordinating Data DB access has to agree on it.
+_WAREHOUSE_ADVISORY_LOCK_KEY = 0x657463_7761
+
+# How long a read-only verb (validate, doctor) waits for a busy single-writer
+# warehouse before giving up. Deliberately short: these are interactive
+# commands someone runs *because* something looks wrong, so a clear "a task is
+# using it" beats a long silent hang.
+READ_ONLY_WAIT_SECONDS = 30
+
+
+def is_in_memory(config: ConnectorConfig) -> bool:
+    """Whether the configured warehouse is an in-memory DuckDB database."""
+    if config.warehouse is None:
+        return False
+    try:
+        dialect_name, parts = translate_jdbc_url(config.warehouse.active.jdbc_url)
+    except ConnectionError_:
+        return False
+    return dialect_name == "duckdb" and parts.get("path") == ":memory:"
+
+
+def is_single_writer(config: ConnectorConfig) -> bool:
+    """Whether the configured warehouse admits only one writing process at a time."""
+    if config.warehouse is None:
+        return False
+    try:
+        dialect_name, _ = translate_jdbc_url(config.warehouse.active.jdbc_url)
+    except ConnectionError_:
+        return False
+    return dialect_name.split("+", 1)[0] in SINGLE_WRITER_DIALECTS
+
+
+@contextmanager
+def data_db(
+    config: ConnectorConfig,
+    engine_db: Engine | None = None,
+    *,
+    wait_seconds: int = 0,
+    **engine_kwargs: Any,
+) -> Iterator[Engine]:
+    """Open the Data DB for one unit of work, serializing it when the warehouse is single-writer.
+
+    [ADDITION, 2026-09-21, E2-61] The one way the engine reaches the Data DB.
+    For Postgres -- and any other warehouse that accepts concurrent writers --
+    this is exactly the previous `build_data_engine(...)` / `dispose()` pairing
+    and costs nothing: no lock is taken and waves stay fully parallel.
+
+    For a single-writer warehouse it additionally holds a Postgres advisory
+    lock in the *Engine DB* for the duration, so concurrent tasks queue
+    instead of erroring. The Engine DB is the right place for it: CLAUDE.md
+    makes a valid Engine DB connection the one hard runtime dependency of
+    every action, so it is reachable from every process that could contend --
+    including Airflow workers on other machines, where the engine does not own
+    the process model at all and therefore cannot serialize by spawning less.
+    `migrate.py` already coordinates concurrent runs the same way.
+
+    [CHOICE] Queueing, not retrying. Per explicit decision the subprocess-per-
+    task model stays (it is what crash detection and "local runs mirror an
+    orchestrator" are built on), so the contention is real and has to be
+    waited out. An advisory lock queues fairly and cannot starve a waiter the
+    way a retry loop on DuckDB's own IOException would.
+
+    `wait_seconds` bounds the wait so a wedged holder cannot block a caller
+    forever; 0 means wait indefinitely. Postgres's `lock_timeout` does apply
+    to `pg_advisory_xact_lock` -- verified, not assumed.
+    """
+    if engine_db is None or not is_single_writer(config):
+        data_engine = build_data_engine(config, **engine_kwargs)
+        try:
+            yield data_engine
+        finally:
+            data_engine.dispose()
+        return
+
+    with engine_db.begin() as lock_conn:
+        if wait_seconds:
+            # No bind parameter: SET takes a literal. wait_seconds is an int
+            # from config/limits, never user text.
+            lock_conn.execute(text(f"SET LOCAL lock_timeout = '{int(wait_seconds)}s'"))
+        try:
+            lock_conn.execute(
+                text("SELECT pg_advisory_xact_lock(:key)"),
+                {"key": _WAREHOUSE_ADVISORY_LOCK_KEY},
+            )
+        except OperationalError as exc:
+            raise ConnectionError_(
+                f"timed out after {wait_seconds}s waiting for the Data DB: the configured "
+                "warehouse allows only one writing process at a time, and another task is "
+                "still using it"
+            ) from exc
+        data_engine = build_data_engine(config, **engine_kwargs)
+        try:
+            yield data_engine
+        finally:
+            data_engine.dispose()

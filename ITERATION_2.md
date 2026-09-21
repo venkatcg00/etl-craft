@@ -18,6 +18,8 @@ it can be worked through top to bottom.
 | **complete** | 2026-09-20 | Phases 2–7 + a mid-iteration addendum | **All 52 items closed**, 368 → 500 tests |
 | 3 | 2026-09-20 | The completed iteration 2 (`314e0c3`) | **E2-53…E2-60**, at the end of this file. Note E2-57: two items are marked closed that were not built |
 | phase 3b | 2026-09-20 | Round 3's findings | **All eight fixed**, 500 → 470 tests (net: 9 obsolete removed, 13 added) |
+| warehouse change | 2026-09-21 | ClickHouse dropped, DuckDB added (`f34c2ae`) | Supported warehouses are now **PostgreSQL and DuckDB** |
+| 4 | 2026-09-21 | Round 3's fixes + the DuckDB move | **E2-61…E2-64**, at the end of this file. All of round 3 verified fixed; every finding is about DuckDB |
 
 **Phase 1 is landed and independently re-verified** (round 2 re-ran round 1's own probes against
 the current branch rather than trusting the phase notes): **E2-01 fixed**, **E2-02 fixed**,
@@ -1552,3 +1554,292 @@ See `CLAUDE.md`'s dated entry under "Where things stand" for the full change lis
 DuckDB-specific hazard found by probing: a forked child's writes are silently lost if the parent
 had the warehouse file open at fork time. The engine is safe by construction; the constraint is
 written into `runner.py` where a future change could break it.
+
+---
+
+# Round 4 review — round 3's fixes, and the DuckDB move (2026-09-21)
+
+Same method. Baseline confirmed first: **473 passing, `mypy`/`ruff`/`black`/`pydocstyle` clean**.
+Then re-ran round 3's own probes, then probed DuckDB directly — SQL shapes, process model,
+URL handling — against real DuckDB files.
+
+## Round 3 is genuinely fixed — verified, not taken from the notes
+
+| Item | Verified how |
+|---|---|
+| E2-53 | Superseded by the warehouse change, and **the root cause is actually closed**: `test_sql_actions_run_end_to_end_against_real_duckdb` runs real actions against a second dialect. The fix was the test shape, which is what that entry argued for. |
+| E2-54 | Re-ran the probe: SCD2 with a generated key now produces proper history — `[(1,'a','N'), (1,'b','Y')]` across two runs. The surrogate-key route is the right answer. |
+| E2-55 | Re-ran the probe: the message is mode-aware now and names `etl-craft run … --init-only` instead of the `--force` that mode refuses. |
+| E2-56 | `docs_generator` is read-only again, and says so; `docs-version`/`lineage --column` are the verbs that write. |
+| E2-57 | **Fixed the honest way**: E2-18 and E2-20 are recorded as deferred-not-done with reasons, rather than the claim being quietly widened. |
+| E2-58, E2-59, E2-60 | Docstring rewritten; `validate` has a `HAS_DATA`-upstream guard; `_alert_ordering_issues` requires each `EMAIL_ALERT` to wait on every non-alert leaf. |
+
+**And the headline positive.** I ran every SQL shape `sql_actions.py` emits against a real DuckDB
+file — staging temp table, CTAS with audit casts, `ALTER TABLE … ADD PRIMARY KEY`, `TRUNCATE`,
+`MD5` hashing, the correlated `UPDATE` with a target alias, `DELETE … WHERE EXISTS`, the
+drop-and-rename rebuild, `information_schema.columns`, `ROW_NUMBER() OVER (PARTITION BY …)`.
+**All ten work unmodified.** The ANSI discipline this module has been held to since iteration 1
+is what made a warehouse swap cost one dialect branch instead of a rewrite. That is worth saying
+plainly, because the four findings below are all about the *process* model, not the SQL.
+
+## E2-61 — DuckDB's file lock is exclusive across processes, and the execution model is subprocess-per-task · reproduced
+
+**Where:** [orchestrator.py:_run_wave](src/etl_craft/orchestrator.py), [handlers.py:dispatch](src/etl_craft/handlers.py), [runner.py:31-61](src/etl_craft/runner.py#L31-L61)
+
+`runner.py` documents the *fork* half of this hazard carefully — if the parent holds the warehouse
+file open at fork time the child's writes are lost, and the comment warns a future change not to
+open it earlier. That is correct, and it is the smaller sibling. **The larger one is unaddressed:
+DuckDB refuses a second process entirely**, and the engine's core execution model is one
+subprocess per ready task.
+
+Probed against a real DuckDB file:
+
+| Shape | Result |
+|---|---|
+| 4 threads, 4 pooled connections, one process (`business_rules._run_wave`) | **OK** |
+| A second `Engine` in the same process (`handlers.dispatch` per task) | **OK** |
+| Two task subprocesses, one wave (`orchestrator._run_wave`) | **one OK, one `IO Error: Could not set lock on file … Conflicting lock is held`** |
+| A read-only verb in another process while a task holds the file | **`Could not set lock on file`** |
+
+So same-process concurrency is fine — business-rule waves genuinely work — and cross-process
+concurrency is not. What that costs:
+
+1. **Any wave with two or more `SQL`/`BUSINESS_RULES` tasks fails all but one.** `Max_parallel_tasks`
+   defaults to 8, so this is the default behaviour, not an edge case.
+2. **Airflow parallelism hits the same wall** — parallel tasks in a DAG are separate processes too,
+   so `Mode=orchestrator` is no safer than local.
+3. **Two pipelines running at once conflict.** That is ordinary operation —
+   `ux_pipeline_run_one_active` is deliberately scoped *per pipeline* precisely so pipelines can
+   overlap.
+4. **Read-only verbs fail during a run.** `validate`, `doctor`, `generate-docs`, `lineage --column`
+   all open the Data DB, so any of them run while a task is executing errors out — including
+   `doctor`, the command someone reaches for *because* something looks wrong.
+
+Nothing in `orchestrator.py`, `limits.py` or `config.py` is DuckDB-aware, so nothing caps or
+serializes this. The tests miss it for the same structural reason E2-53 identified: every DuckDB
+test is single-process (its own `tmp_path` file), and the orchestrator's real subprocess tests
+point `[Warehouse]` at Postgres.
+
+**Fix direction — needs a decision, so ask first.** The options are genuinely different products:
+
+- **Serialize Data DB access when the warehouse is embedded.** Resolve `Max_parallel_tasks` to 1
+  for a `duckdb` warehouse and say so in `doctor`'s output. Honest, tiny, and gives up the
+  parallelism the wave model exists for.
+- **Retry on the lock.** A bounded wait-and-retry around `build_data_engine` turns the hard failure
+  into queueing. Cheap, keeps the model, but serializes anyway while looking like it doesn't — and
+  a task blocked on a lock still holds an Airflow worker slot.
+- **Run a DuckDB pipeline in-process.** Contradicts "local runs mirror what an orchestrator does",
+  which is load-bearing elsewhere, and does nothing for Airflow.
+- ~~**Scope DuckDB to single-writer use** — dev, local, single-task deployments — and document it
+  as such rather than as a peer of Postgres.~~ **Ruled out (2026-09-21, explicit):** *"duckdb is
+  our preferred warehouse along with postgres, while postgres is the only engine"*. DuckDB is a
+  first-class production warehouse, so this has to be **solved**, not documented as a limitation.
+
+That leaves the first three, and it narrows them usefully: whatever is chosen has to keep a
+DuckDB deployment correct under a real multi-task wave, not merely warn about it. Serializing is
+the honest floor; retry-on-lock is the same thing with better ergonomics and worse legibility;
+in-process execution is the only option that preserves parallelism, and it is the one that
+conflicts with "local runs mirror what an orchestrator does" — and does nothing for Airflow,
+where the processes are Airflow's, not ours. Worth noting that under `Mode=orchestrator` the
+engine does not own the process model at all, so the first two are the only ones available there.
+
+Whichever way, two things should land regardless: `doctor` should report the constraint, and
+there should be one orchestrator test with a real multi-task wave against DuckDB, since that is
+the test that would have caught this.
+
+## E2-62 — The DuckDB catalog name comes from the file stem, unvalidated · reproduced
+
+**Where:** [warehouse.py:translate_jdbc_url](src/etl_craft/warehouse.py), [sql_actions.py:qualify](src/etl_craft/sql_actions.py)
+
+`qualify()` emits `catalog.schema.table`, and for DuckDB the catalog is `Path(path).stem`. Nothing
+checks that the stem is a usable SQL identifier:
+
+| `jdbc_url` | catalog | emitted | result |
+|---|---|---|---|
+| `…/warehouse.duckdb` | `warehouse` | `warehouse.public.t` | fine |
+| `…/my-warehouse.duckdb` | `my-warehouse` | `my-warehouse.public.t` | **`Parser Error: syntax error at or near "-"`** |
+| `…/etl.craft.duckdb` | `etl.craft` | `etl.craft.public.t` | a four-part name |
+| `…/2024_wh.duckdb` | `2024_wh` | `2024_wh.public.t` | leading digit |
+
+Confirmed by creating a table through a `my-warehouse.duckdb` profile: every SQL action fails with
+a parser error that never mentions the file name. A hyphen in a filename is not an exotic choice,
+and this is the sort of thing found at 3am rather than at setup.
+
+`validate`'s identifier-safety check (E2-25b) cannot catch it — it checks `CFG_` values, and this
+one comes from `craft-connector.yml`.
+
+**Fix direction:** validate the derived catalog where it is derived, and fail in `doctor`/`setup`
+with a message naming the file, not at the first action. Quoting the identifier is the other
+option and is worse here: it would make the catalog case-sensitive and diverge from how the
+Postgres path builds the same name.
+
+## E2-63 — `jdbc:duckdb:` is documented as in-memory but creates a file called `memory` · reproduced
+
+**Where:** [warehouse.py:translate_jdbc_url](src/etl_craft/warehouse.py), `_none_creator`
+
+`translate_jdbc_url`'s own comment says "`jdbc:duckdb:` alone means an in-memory database" and "An
+in-memory database's catalog is `memory`". But `path` is `""` for the bare form, so `_none_creator`
+falls through to `database=parts["database"]` — the literal string `"memory"` — and builds
+`duckdb:///memory`. DuckDB reads that as **a file named `memory` in the current working
+directory**.
+
+**Reproduction:** running two task subprocesses against `jdbc:duckdb:` left a **274 KB file named
+`memory` in the repo root**, and the second process saw the first's data — which is how I noticed,
+since a real in-memory database could not have shared it. (Deleted; the repo is clean.)
+
+Three consequences: the documented in-memory form does not give in-memory; a stray file appears
+wherever each process happened to start, so cwd differences between the orchestrator, a task
+subprocess and an Airflow worker can produce several unrelated "warehouses"; and it silently
+inherits E2-61's lock problem while looking like it could not.
+
+**Fix direction:** map the bare form to `:memory:` explicitly (`duckdb:///:memory:`). Then decide
+whether to support it at all — with `handlers.dispatch` building a fresh engine per task and every
+task in its own process, a genuine in-memory warehouse is empty at the start of every task, which
+is a worse failure than the current one because nothing errors. If it stays, `doctor` should refuse
+it outside a single-process context.
+
+## E2-64 — The DuckDB surrogate-key sequence is named from the bare table name · reproduced
+
+**Where:** [sql_actions.py:_sequence_name](src/etl_craft/sql_actions.py), `_add_surrogate_key`, `_restore_surrogate_key`
+
+`_sequence_name` is `f"etl_seq_{table_name}_{ROW_ID_COLUMN.lower()}"` — the **bare** table name,
+with no schema — and the sequence is created unqualified. So `staging.orders` and `marts.orders`,
+two perfectly ordinary targets, share one sequence name, and creating the second runs
+`DROP SEQUENCE IF EXISTS` against the one the first table's column default depends on.
+
+**Reproduction:** created `staging.orders` with a `ROW_ID` sequence default, inserted rows (ids
+1,2), then created `marts.orders` exactly as `_add_surrogate_key` does →
+`Dependency Error: Cannot drop entry "etl_seq_orders_row_id" because there are entries that depend
+on it`. The first table survived intact (ids 1,2,3 still correct), so this fails **loudly** rather
+than corrupting anything — but a valid multi-schema warehouse cannot be built on DuckDB, and the
+error names an internal sequence rather than the real cause.
+
+**Fix direction:** include the schema in the sequence name and create it in the target's schema —
+`{schema}.etl_seq_{schema}_{table}_row_id`. Worth checking the same question for the
+`{table_name}__etl_evolve` rebuild table in `_evolve_schema`, which is schema-qualified and so
+looks fine, but shares the shape.
+
+## Suggested handling
+
+- **E2-61 first, and as a question, not a task.** It decides whether DuckDB is a peer of Postgres
+  or a single-writer/dev warehouse, and everything else about it follows from the answer. The
+  cheapest honest interim step is a `doctor` warning.
+- **E2-63 then E2-62** — both small, both in `translate_jdbc_url`/`_none_creator`, both produce
+  failures that point nowhere near their cause.
+- **E2-64** is a one-line naming fix plus a test.
+
+## Added to "still to raise rather than guess"
+
+- ~~**Is DuckDB a peer of Postgres, or a single-writer warehouse?**~~ **Answered (2026-09-21):** a
+  peer. *"we have replaced clickhouse with DuckDB because clickhouse does not support ansi very
+  well. duckdb is our preferred warehouse along with postgres, while postgres is the only
+  engine"*. So E2-61 is a bug to fix, not a limitation to document — see its narrowed options
+  above. **Still open, and now the actual question: which of the three?**
+- **Should a bare in-memory DuckDB warehouse be supported at all?** (E2-63.) Every task is its own
+  process, so a real in-memory warehouse is empty at the start of each one.
+
+## A note on method
+
+Three of this round's four findings came from probing the *process model* rather than reading the
+diff — the code is correct in isolation and the SQL is genuinely portable. Round 3's lesson was
+"the fix that matters is the test shape, not the type string"; round 4's is the same lesson one
+level up. The DuckDB tests prove the dialect. What is missing is a test that proves the
+*deployment*: a real multi-task wave, in real subprocesses, against a real DuckDB file. That one
+test would have caught E2-61 and E2-63 together.
+
+---
+
+# Round 4 outcome, and the warehouse decision (2026-09-21)
+
+## Architecture, settled
+
+> "engine: postgres / warehouse: postgres, (duckdb + iceberg)"
+
+- **Engine DB: PostgreSQL.** Unchanged, and still the one hard runtime dependency.
+- **Warehouse: PostgreSQL, or DuckDB + Iceberg.** Postgres is a first-class warehouse and the
+  one with no caveats. The DuckDB path is intended to become DuckDB-as-compute over
+  Iceberg-as-storage; the plain DuckDB *file* is what ships today.
+
+## E2-61 — fixed, by queueing (decision: keep subprocesses)
+
+The subprocess-per-task model stays: it is what crash detection and "local runs mirror an
+orchestrator" are built on. `warehouse.data_db()` is now the single way the engine reaches the
+Data DB, and on a **single-writer** warehouse it holds a Postgres advisory lock in the *Engine DB*
+for the duration, so concurrent tasks queue instead of erroring. For Postgres it is exactly the
+old `build_data_engine(...)`/`dispose()` pairing and costs nothing — waves stay fully parallel.
+
+The Engine DB is the right place for the lock because CLAUDE.md makes a valid Engine DB
+connection the one hard dependency of every action, so it is reachable from every process that
+could contend — including Airflow workers on other machines, where the engine does not own the
+process model and therefore cannot serialize by spawning less. `migrate.py` already coordinates
+concurrent runs the same way.
+
+**[CHOICE] Queueing, not retrying.** An advisory lock queues fairly; a retry loop on DuckDB's own
+`IOException` would spin and can starve a waiter. The wait is bounded — by the task's own timeout
+for a task, by 30s for a read-only verb — and the timeout message says what is happening rather
+than surfacing "Could not set lock on file".
+
+`doctor` now reports the constraint, and `test_run_pipeline_runs_a_parallel_wave_against_a_duckdb_warehouse`
+is the test the review asked for: a real two-task wave, real subprocesses, real DuckDB file.
+Verified to fail without the lock (`wave_a` dies on the file lock, pipeline reports `FAILED`).
+
+**When Iceberg lands this largely dissolves**: with tables in object storage behind a catalog,
+there is no shared DuckDB file to lock, so `is_single_writer` returns False for an Iceberg-backed
+warehouse and the lock stops being taken. The mechanism is written to make that a one-line change.
+
+## E2-62, E2-63, E2-64 — fixed
+
+- **E2-62**: the derived DuckDB catalog name is validated where it is derived. A file whose stem
+  is not a usable SQL identifier (`my-warehouse.duckdb`) is refused with a message naming the
+  file, instead of every SQL action failing with a parser error that never mentions it.
+  **[CHOICE]** reject rather than quote — quoting would make the catalog case-sensitive and
+  diverge from how the Postgres path builds the same name.
+- **E2-63**: `jdbc:duckdb:` now maps to `:memory:` and genuinely is in-memory. `doctor` then
+  refuses it, because every task runs in its own process and would start against an empty
+  database — nothing errors, targets simply are not there.
+- **E2-64, and it was worse than reported.** The review probed on a single connection, where
+  DuckDB refuses the `DROP SEQUENCE` with a dependency error — "fails loudly rather than
+  corrupting anything". The engine uses **one connection per task process**, and there the DROP
+  **succeeds silently**: both tables end up sharing one sequence that has just been reset. A later
+  insert into a table the run never touched then dies with
+  `Duplicate key "ROW_ID: 2" violates primary key constraint`, leaving it un-writable until
+  someone repairs the sequence by hand. Sequences are now schema-qualified and created in the
+  target's own schema. The regression test asserts the *aftermath*, not merely that both tables
+  build — a test that stops at creation passes against the bug, which the first draft of it did.
+
+## Also fixed, found while doing the above
+
+**`setup` never wrote a `[Warehouse]` section at all.** The one command meant to take a team from
+nothing to a working deployment produced a config in which every `SQL` and `BUSINESS_RULES` task
+failed with "no [Warehouse] section configured". Same class of gap as E2-13: the install path
+stopped short of a working state. `configure_from_env` now writes `[Warehouse]` from
+`ETL_CRAFT_WAREHOUSE_JDBC_URL`/`_PROFILE`/`_USER`/`_AUTH_MODE`, merged the same way `[Postgres]`
+is, and optional so an Engine-DB-only setup is unchanged.
+
+## Added to scope: Iceberg as the warehouse storage layer
+
+Recorded as scope, not built. What the analysis turned up, so it is not re-derived:
+
+- **Iceberg is a table format, not a query engine.** It does not execute SQL. Tables are Parquet
+  plus metadata in object storage and a catalog tracks snapshots; something still has to run
+  `CREATE TABLE AS SELECT` and the SCD merges. Per the decision above that something is **DuckDB**,
+  so this is DuckDB-as-compute over Iceberg-as-storage — the `[Warehouse]` profile keeps naming a
+  DuckDB connection, and the Iceberg catalog is attached to it.
+- **Reads are near-universal; writes are not.** "Supported everywhere" is true of Iceberg reads.
+  Write support is newer and catalog-specific, and etl-craft is entirely a write engine — all
+  seven actions mutate. **Verify DuckDB's Iceberg write support against a real catalog before
+  committing to a design**; that probe was not completed.
+- **It genuinely solves cross-process concurrency**, which is the strongest argument for it:
+  optimistic concurrency with atomic catalog commits permits many concurrent writers, which a
+  DuckDB file fundamentally cannot. That is a better answer than the queueing above.
+- **Iceberg has no primary keys and no sequences.** The spec has no constraint concept. E2-54 made
+  `ROW_ID` — a generated identity primary key — the answer for every engine-created table, and
+  CLAUDE.md makes single-column PK a framework convention that `validate` enforces by
+  introspection. **This needs a decision before any build**: most likely an engine-generated
+  `ROW_ID` (a window function over the staged rows plus the current max, rather than a sequence)
+  that is a real single-column key but is not database-enforced, with `validate`'s PK check
+  reporting "not enforceable on Iceberg" rather than failing.
+- **It needs infrastructure**: a catalog (REST/Glue/Nessie/Polaris) plus object storage. That
+  voids the justification used two commits ago for making `duckdb-engine` a hard dependency
+  ("DuckDB is embedded — there is no server to stand up"), so shipping it should be revisited
+  when this lands.

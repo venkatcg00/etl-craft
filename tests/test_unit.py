@@ -101,6 +101,8 @@ from etl_craft.sql_actions import active_database, qualify, substitute_pipeline_
 from etl_craft.warehouse import (
     WAREHOUSE_AUTH_REGISTRY,
     build_data_engine,
+    is_in_memory,
+    is_single_writer,
     translate_jdbc_url,
 )
 
@@ -510,6 +512,86 @@ def test_translate_jdbc_url_handles_duckdbs_file_form(
     dialect, parts = translate_jdbc_url(jdbc_url)
     assert dialect == expected_dialect
     assert parts["database"] == expected_database
+
+
+def test_is_single_writer_and_is_in_memory_classify_each_warehouse():
+    # E2-61/E2-63. These two predicates decide whether Data DB access gets
+    # serialized and whether doctor refuses the config, so the classification
+    # itself is worth pinning: Postgres must stay fully parallel.
+    def cfg(jdbc_url: str | None) -> ConnectorConfig:
+        warehouse = None
+        if jdbc_url is not None:
+            warehouse = ConnectionSection(
+                active_profile="dev",
+                profiles={
+                    "dev": ConnectionProfile(
+                        section="WAREHOUSE",
+                        name="dev",
+                        jdbc_url=jdbc_url,
+                        user="",
+                        auth_mode="none",
+                    )
+                },
+            )
+        return ConnectorConfig(
+            mode="local",
+            source=SourceConfig(type="environment"),
+            postgres=ConnectionSection(
+                active_profile="dev",
+                profiles={
+                    "dev": ConnectionProfile(
+                        section="POSTGRES",
+                        name="dev",
+                        jdbc_url="jdbc:postgresql://h:5432/db",
+                        user="u",
+                        auth_mode="password",
+                    )
+                },
+            ),
+            cloning=CloningConfig(),
+            warehouse=warehouse,
+        )
+
+    assert is_single_writer(cfg(None)) is False
+    assert is_single_writer(cfg("jdbc:postgresql://h:5432/db")) is False
+    assert is_single_writer(cfg("jdbc:duckdb:/data/warehouse.duckdb")) is True
+    assert is_single_writer(cfg("nonsense")) is False
+
+    assert is_in_memory(cfg(None)) is False
+    assert is_in_memory(cfg("jdbc:duckdb:/data/warehouse.duckdb")) is False
+    assert is_in_memory(cfg("jdbc:duckdb:")) is True
+    assert is_in_memory(cfg("nonsense")) is False
+
+
+def test_translate_jdbc_url_bare_duckdb_is_genuinely_in_memory():
+    # E2-63. The bare form was documented as in-memory but produced
+    # `duckdb:///memory`, which DuckDB reads as a *file named `memory`* in the
+    # cwd. Reproduced: two task subprocesses against jdbc:duckdb: left a 274KB
+    # file called `memory` in the repo root, and the second saw the first's
+    # data -- which a real in-memory database could not have shared.
+    _, parts = translate_jdbc_url("jdbc:duckdb:")
+    assert parts["path"] == ":memory:"
+
+
+@pytest.mark.parametrize(
+    "filename",
+    ["my-warehouse.duckdb", "2024_wh.duckdb", "etl craft.duckdb"],
+)
+def test_translate_jdbc_url_rejects_an_unusable_duckdb_catalog_name(filename):
+    # E2-62. The catalog is the file stem, and qualify() interpolates it
+    # unquoted into database.schema.table -- so `my-warehouse` becomes
+    # `my-warehouse.public.t`, a parser error that never mentions the file.
+    # A hyphen in a filename is not an exotic choice. validate's own
+    # identifier check cannot catch this: it checks CFG_ values, and this one
+    # comes from craft-connector.yml.
+    with pytest.raises(ConnectionError_, match="not a usable SQL identifier"):
+        translate_jdbc_url(f"jdbc:duckdb:/data/{filename}")
+
+
+def test_translate_jdbc_url_accepts_an_ordinary_duckdb_catalog_name():
+    # The guard must not reject the ordinary case it exists to protect.
+    _, parts = translate_jdbc_url("jdbc:duckdb:/data/warehouse.duckdb")
+    assert parts["database"] == "warehouse"
 
 
 def test_translate_jdbc_url_rejects_an_unrecognized_shape():
@@ -2220,6 +2302,61 @@ def test_configure_from_env_creates_valid_config(tmp_path):
     assert config.postgres.active.auth_mode == "password"
     assert config.cloning.enabled is False
     assert config.cloning.scope == "cfg"
+
+
+def test_configure_from_env_writes_a_warehouse_section(tmp_path):
+    # `setup` never wrote [Warehouse] at all, so the one command that is meant
+    # to take a team from nothing to a working deployment produced a config in
+    # which every SQL and BUSINESS_RULES task failed with "no [Warehouse]
+    # section configured". Same class of gap as E2-13.
+    env_path = _write_env(
+        tmp_path,
+        VALID_ENV + "ETL_CRAFT_WAREHOUSE_JDBC_URL=jdbc:postgresql://localhost:5432/analytics\n"
+        "ETL_CRAFT_WAREHOUSE_USER=warehouse_user\n",
+    )
+    output_path = tmp_path / "craft-connector.yml"
+
+    configure_from_env(env_path, output_path)
+
+    config = load_config(output_path)
+    assert config.warehouse is not None
+    assert config.warehouse.active.jdbc_url == "jdbc:postgresql://localhost:5432/analytics"
+    assert config.warehouse.active.user == "warehouse_user"
+    # Defaults to the Postgres profile name, so a single-environment setup
+    # needs one fewer variable.
+    assert config.warehouse.active_profile == "dev"
+
+
+def test_configure_from_env_warehouse_is_optional(tmp_path):
+    # An Engine-DB-only setup (PYTHON/EMAIL_ALERT tasks only) is unchanged,
+    # and no existing .env file breaks.
+    output_path = tmp_path / "craft-connector.yml"
+    configure_from_env(_write_env(tmp_path, VALID_ENV), output_path)
+    assert load_config(output_path).warehouse is None
+
+
+def test_configure_from_env_duckdb_warehouse_needs_no_user(tmp_path):
+    env_path = _write_env(
+        tmp_path,
+        VALID_ENV + "ETL_CRAFT_WAREHOUSE_JDBC_URL=jdbc:duckdb:/data/warehouse.duckdb\n"
+        "ETL_CRAFT_WAREHOUSE_AUTH_MODE=none\n",
+    )
+    output_path = tmp_path / "craft-connector.yml"
+
+    configure_from_env(env_path, output_path)
+
+    config = load_config(output_path)
+    assert config.warehouse is not None
+    assert config.warehouse.active.auth_mode == "none"
+
+
+def test_configure_from_env_warehouse_requires_a_user_when_authenticating(tmp_path):
+    env_path = _write_env(
+        tmp_path,
+        VALID_ENV + "ETL_CRAFT_WAREHOUSE_JDBC_URL=jdbc:postgresql://localhost:5432/analytics\n",
+    )
+    with pytest.raises(ConfigError, match="ETL_CRAFT_WAREHOUSE_USER is required"):
+        configure_from_env(env_path, tmp_path / "craft-connector.yml")
 
 
 def test_configure_from_env_missing_env_file_raises(tmp_path):

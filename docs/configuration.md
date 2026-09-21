@@ -76,10 +76,28 @@ specifically because a partial unique index is what makes concurrent run-id crea
 race-safe; an application-level check cannot close that race.
 
 **Data DB (`[Warehouse]`)** — exactly one per deployment. Optional: only `SQL` and
-`BUSINESS_RULES` tasks need it. **Postgres and DuckDB are the two supported warehouses**,
-both exercised by the test suite against real databases; DuckDB is embedded, so its
-`jdbc_url` names a file (`jdbc:duckdb:/data/warehouse.duckdb`, or bare `jdbc:duckdb:` for
-in-memory) and its profile uses `auth_mode: none` — there is no server to authenticate to.
+`BUSINESS_RULES` tasks need it. **PostgreSQL or DuckDB**, both exercised by the test suite
+against real databases.
+
+Postgres is the one with no caveats: tasks in a parallel wave write concurrently.
+
+DuckDB is embedded, so its `jdbc_url` names a file (`jdbc:duckdb:/data/warehouse.duckdb`)
+and its profile uses `auth_mode: none` — there is no server to authenticate to. Two things
+follow from it being a file:
+
+- **One writing process at a time.** A second process is refused outright, and so is a
+  read-only connection while a writer holds it. Because the engine runs one subprocess per
+  task, it serializes Data DB access for an embedded warehouse behind an Engine DB advisory
+  lock — so a parallel wave *queues* instead of failing, in both execution modes. `doctor`
+  reports this. Iceberg-backed DuckDB, which removes the constraint entirely, is planned.
+- **The file name becomes the catalog name**, because `TARGET_OBJECT` resolves to
+  `database.schema.table`. It must be a usable SQL identifier — letters, digits and
+  underscores, starting with a letter or underscore. `my-warehouse.duckdb` is rejected at
+  setup rather than failing later inside every SQL action.
+
+A bare `jdbc:duckdb:` (no path) is in-memory and is refused: every task runs in its own
+process, so each would start against an empty database.
+
 Any other SQLAlchemy-supported engine is an optional dialect you install yourself; the
 engine never imports one directly, so it is discovered through SQLAlchemy's own entry
 points, but nothing here tests it.

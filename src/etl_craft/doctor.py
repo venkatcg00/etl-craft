@@ -8,7 +8,7 @@ found`. There was also no way to verify a configuration at all short of
 running a real pipeline.
 
 This is deliberately a read-only report built entirely from code that already
-exists — `load_config`, `resolve_secret`, `build_engine`, `build_data_engine`,
+exists — `load_config`, `resolve_secret`, `build_engine`, `warehouse.data_db`,
 and the `[Email]` profile — rather than new machinery. It reports every check
 rather than stopping at the first failure, for the same reason `validate`
 does: one broken profile shouldn't hide the rest of the picture.
@@ -20,11 +20,17 @@ import smtplib
 from dataclasses import dataclass
 
 from sqlalchemy import text
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConfigError, ConnectorConfig, resolve_secret
 from etl_craft.db import build_engine
-from etl_craft.warehouse import build_data_engine
+from etl_craft.warehouse import (
+    READ_ONLY_WAIT_SECONDS,
+    data_db,
+    is_in_memory,
+    is_single_writer,
+)
 
 SMTP_PROBE_TIMEOUT_SECONDS = 10.0
 
@@ -79,16 +85,61 @@ def _warehouse_check(config: ConnectorConfig) -> list[CheckResult]:
         ]
     profile = config.warehouse.active
     results = [] if profile.auth_mode == "none" else [_secret_check(config, "Data DB", profile)]
+
+    # [ADDITION, 2026-09-21, E2-63] Refuse an in-memory warehouse here, where
+    # it is cheap to notice. Every task runs in its own process and builds its
+    # own Data DB engine, so an in-memory warehouse is empty at the start of
+    # every task -- nothing errors, targets simply are not there, and the
+    # pipeline fails somewhere far from the cause. Failing at doctor/setup
+    # beats failing at 3am.
+    if is_in_memory(config):
+        results.append(
+            CheckResult(
+                "Data DB",
+                False,
+                "an in-memory DuckDB warehouse (jdbc:duckdb: with no path) cannot hold data "
+                "between tasks — each task runs in its own process, so every task would start "
+                "against an empty database. Use jdbc:duckdb:<path>.",
+            )
+        )
+        return results
+
+    # [ADDITION, 2026-09-21, E2-61] Report the constraint, so someone reading
+    # doctor's output learns it here rather than from a task failing under a
+    # parallel wave. A single-writer warehouse admits one writing OS process
+    # at a time, so the engine serializes Data DB access across processes.
+    if is_single_writer(config):
+        results.append(
+            CheckResult(
+                "Data DB concurrency",
+                True,
+                "single-writer warehouse: Data DB access is serialized across processes, so "
+                "tasks in a parallel wave queue rather than run concurrently",
+            )
+        )
+
+    # Take the same queueing route every other Data DB caller takes, so doctor
+    # works while a task is running instead of erroring on the file lock —
+    # which is exactly when someone reaches for it. The Engine DB engine is
+    # what holds that lock; if it cannot be built, fall through unserialized
+    # rather than failing a check that is about the Data DB.
+    engine_db: Engine | None = None
     try:
-        data_engine = build_data_engine(config)
-        try:
-            with data_engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
-        finally:
-            data_engine.dispose()
+        engine_db = build_engine(config)
+    except (ConfigError, SQLAlchemyError):
+        engine_db = None
+    try:
+        with (
+            data_db(config, engine_db, wait_seconds=READ_ONLY_WAIT_SECONDS) as data_engine,
+            data_engine.connect() as conn,
+        ):
+            conn.execute(text("SELECT 1"))
     except (ConfigError, SQLAlchemyError, NotImplementedError) as exc:
         results.append(CheckResult("Data DB connection", False, str(exc)))
         return results
+    finally:
+        if engine_db is not None:
+            engine_db.dispose()
     results.append(CheckResult("Data DB connection", True, "connected"))
     return results
 

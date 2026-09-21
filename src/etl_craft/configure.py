@@ -46,6 +46,7 @@ from pathlib import Path
 import yaml
 
 from etl_craft.config import (
+    AUTH_MODES_WITHOUT_USER,
     DEFAULT_CONFIG_PATH,
     VALID_AUTH_MODES,
     VALID_CLONING_SCOPES,
@@ -122,6 +123,34 @@ def configure_from_env(env_path: Path | str | None, path: Path | str | None = No
             f"{sorted(VALID_AUTH_MODES)}, got {auth_mode!r}"
         )
 
+    # [ADDITION, 2026-09-21] The [Warehouse] section, which this command never
+    # wrote — so `etl-craft setup`, the one command that is supposed to take a
+    # team from nothing to a working deployment, produced a config in which
+    # every SQL and BUSINESS_RULES task failed with "no [Warehouse] section
+    # configured". Same class of gap as E2-13: the install path stopped short
+    # of a working state.
+    #
+    # Optional, so an Engine-DB-only setup (a team running PYTHON and
+    # EMAIL_ALERT tasks) is unchanged and no existing .env file breaks.
+    # ETL_CRAFT_WAREHOUSE_JDBC_URL is what turns it on.
+    warehouse_url = values.get("ETL_CRAFT_WAREHOUSE_JDBC_URL")
+    warehouse_profile = values.get("ETL_CRAFT_WAREHOUSE_PROFILE", profile_name)
+    warehouse_user = values.get("ETL_CRAFT_WAREHOUSE_USER", "")
+    # [CHOICE] Defaults to `password`, matching [Postgres]. DuckDB sets
+    # `none` explicitly — it is a file, with nothing to authenticate to.
+    warehouse_auth_mode = values.get("ETL_CRAFT_WAREHOUSE_AUTH_MODE", "password")
+    if warehouse_url:
+        if warehouse_auth_mode not in VALID_AUTH_MODES:
+            raise ConfigError(
+                f"{origin}: ETL_CRAFT_WAREHOUSE_AUTH_MODE must be one of "
+                f"{sorted(VALID_AUTH_MODES)}, got {warehouse_auth_mode!r}"
+            )
+        if warehouse_auth_mode not in AUTH_MODES_WITHOUT_USER and not warehouse_user:
+            raise ConfigError(
+                f"{origin}: ETL_CRAFT_WAREHOUSE_USER is required when "
+                f"ETL_CRAFT_WAREHOUSE_AUTH_MODE={warehouse_auth_mode}"
+            )
+
     cloning_scope = values.get("ETL_CRAFT_CLONING_SCOPE", "cfg")
     if cloning_scope not in VALID_CLONING_SCOPES:
         raise ConfigError(
@@ -153,6 +182,19 @@ def configure_from_env(env_path: Path | str | None, path: Path | str | None = No
         "auth_mode": auth_mode,
     }
     raw["Postgres"] = postgres
+
+    if warehouse_url:
+        # Merged the same way [Postgres] is: add/update just this one profile
+        # and make it active, leaving any others already on disk alone.
+        warehouse = raw.get("Warehouse")
+        if not isinstance(warehouse, dict) or not isinstance(warehouse.get("Profiles"), dict):
+            warehouse = {"Profiles": {}}
+        warehouse["Active_profile"] = warehouse_profile
+        entry: dict[str, str] = {"jdbc_url": warehouse_url, "auth_mode": warehouse_auth_mode}
+        if warehouse_user:
+            entry["user"] = warehouse_user
+        warehouse["Profiles"][warehouse_profile] = entry
+        raw["Warehouse"] = warehouse
 
     raw["Cloning"] = {"Enabled": cloning_enabled, "Scope": cloning_scope}
 
