@@ -25,35 +25,5 @@ services:
       timeout: 3s
       retries: 30
 
-  # Stands in as a genuinely different SQLAlchemy dialect for the Data DB /
-  # warehouse connector (warehouse.py) — Postgres alone can't prove the
-  # generic, dialect-agnostic connect mechanism actually works against
-  # anything other than Postgres. Only reachable with the `clickhouse` extra
-  # installed (`clickhouse-sqlalchemy`, in the dev dependency group here) —
-  # per CLAUDE.md's Non-goals, it's never a hard dependency of the base
-  # package, so tests needing it skip themselves the same way the Postgres-
-  # backed suite skips when Docker itself isn't up.
-  clickhouse:
-    image: clickhouse/clickhouse-server:24
-    environment:
-      CLICKHOUSE_USER: etl_craft
-      CLICKHOUSE_PASSWORD: etl_craft
-      CLICKHOUSE_DB: etl_craft
-    ports:
-      # Host port 58123 (not 8123) for the same reason Postgres uses 55432 —
-      # avoid colliding with a locally-installed ClickHouse. HTTP interface
-      # only; warehouse.py's generic connector uses clickhouse-sqlalchemy's
-      # HTTP driver (clickhouse+http, requests-based), not the native
-      # protocol on 9000.
-      - "58123:8123"
-    volumes:
-      - etl_craft_chdata:/var/lib/clickhouse
-    healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://localhost:8123/ping || exit 1"]
-      interval: 2s
-      timeout: 3s
-      retries: 30
-
 volumes:
   etl_craft_pgdata:
-  etl_craft_chdata:

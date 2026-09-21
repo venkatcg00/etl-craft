@@ -35,34 +35,13 @@ as a warning, never allowed to turn an otherwise-successful pipeline run
 into a reported failure -- this is explicitly "special-cased engine-internal
 machinery," per CLAUDE.md, secondary to the pipeline's own correctness.
 
-[CHOICE, a real flagged dialect exception, verified directly against a real
-ClickHouse target, not assumed] Two genuine ClickHouse-specific gaps
-surfaced building this against a real second dialect (the same "prove it
-for real" bar warehouse.py's own ClickHouse test already set):
-  1. ClickHouse refuses any plain CREATE TABLE with no explicit table
-     ENGINE clause -- something no other mainstream dialect this project
-     has touched requires. clickhouse-sqlalchemy only accepts that clause
-     via its own Engine construct (clickhouse_sqlalchemy.engines.*), which
-     this module deliberately never imports -- per CLAUDE.md's Non-goals,
-     no third-party dialect is a hard or direct dependency of engine code.
-     `_create_clickhouse_table` below is the pragmatic exception instead: a
-     hand-built, literal CREATE TABLE with `ENGINE = MergeTree() ORDER BY
-     tuple()` (no natural sort key -- this generic mirroring mechanism has
-     no basis to pick one), reached only when `data_engine.dialect.name ==
-     "clickhouse"` -- a dialect *name* string, not an import.
-  2. clickhouse-sqlalchemy's own table-engine reflection resolves the
-     target database from `connection.engine.url.database`, not the live
-     DBAPI connection's actual database -- which is always blank for
-     warehouse.py's own creator-based engines (`create_engine(f"{dialect}
-     ://", creator=...)`, deliberately never rendering the password into a
-     URL). Every other dialect this project has used resolves its own
-     default schema from the live connection itself and needs nothing
-     passed; ClickHouse alone needs the real database name passed
-     explicitly as `schema=`, resolved once via warehouse.translate_jdbc_url
-     the same way warehouse.py itself already parses a profile's JDBC URL.
-Both are the same spirit as sql_actions.py's own accepted MD5/TRUNCATE
-exceptions: flagged, not silently papered over, and scoped to the one real
-dialect this project has actually proven needs them.
+[DEVIATION, 2026-09-20] This module used to carry two ClickHouse-specific
+exceptions -- a hand-built CREATE TABLE for its mandatory ENGINE clause, and
+an explicit `schema=` for its table-engine reflection. Both are gone with
+ClickHouse itself, which is no longer a supported warehouse: per explicit
+decision the supported pair is Postgres and DuckDB, both of which take the
+plain SQLAlchemy metadata path. The generic mechanism is unchanged and still
+never imports a dialect.
 """
 
 from __future__ import annotations
@@ -109,17 +88,6 @@ AUD_TABLES: tuple[str, ...] = (
     "AUD_PIPELINE_DEPENDENCY_TRACKER",
     "AUD_TASK_DEPENDENCY_TRACKER",
 )
-
-# [ADDITION] See this module's own docstring for why ClickHouse specifically
-# needs this — a small, literal type-name map for the one raw-SQL fallback
-# path, not a general per-dialect type system.
-_CLICKHOUSE_TYPE_NAMES: dict[str, str] = {
-    "BIGINT": "Int64",
-    "NUMERIC": "Float64",
-    "BOOLEAN": "UInt8",
-    "DATETIME": "DateTime",
-    "TEXT": "String",
-}
 
 
 def tables_for_scope(scope: str) -> tuple[str, ...]:
@@ -190,10 +158,8 @@ def run_cloning_if_enabled(engine: Engine, config: ConnectorConfig) -> None:
         )
     data_engine = build_data_engine(config)
     try:
-        _, parts = translate_jdbc_url(config.warehouse.active.jdbc_url)
-        warehouse_database = parts["database"]
         for table_name in tables_for_scope(config.cloning.scope):
-            _clone_table(engine, data_engine, table_name, warehouse_database)
+            _clone_table(engine, data_engine, table_name)
     finally:
         data_engine.dispose()
 
@@ -224,38 +190,15 @@ def _reflect(engine: Engine, table_name: str) -> Table:
     return Table(table_name.lower(), MetaData(), autoload_with=engine)
 
 
-def _clickhouse_schema(data_engine: Engine, warehouse_database: str) -> str | None:
-    """Resolve the `schema=` reflection needs -- ClickHouse only. See module docstring."""
-    return warehouse_database if data_engine.dialect.name == "clickhouse" else None
-
-
-def _create_clickhouse_table(data_engine: Engine, table_name: str, columns: list[Column]) -> None:
-    """Hand-built CREATE TABLE for ClickHouse's mandatory ENGINE clause -- see module docstring."""
-    column_defs = ", ".join(
-        f"{col.name} Nullable({_CLICKHOUSE_TYPE_NAMES.get(str(col.type), 'String')})"
-        for col in columns
-    )
-    with data_engine.begin() as conn:
-        conn.execute(
-            text(f"CREATE TABLE {table_name} ({column_defs}) ENGINE = MergeTree() ORDER BY tuple()")
-        )
-
-
-def _ensure_target_table(
-    data_engine: Engine, source_table: Table, warehouse_database: str
-) -> Table:
+def _ensure_target_table(data_engine: Engine, source_table: Table) -> Table:
     target_name = source_table.name
-    schema = _clickhouse_schema(data_engine, warehouse_database)
-    if inspect(data_engine).has_table(target_name, schema=schema):
-        return Table(target_name, MetaData(), autoload_with=data_engine, schema=schema)
+    if inspect(data_engine).has_table(target_name):
+        return Table(target_name, MetaData(), autoload_with=data_engine)
     columns = [Column(col.name, _generic_type(col.type)) for col in source_table.columns]
-    if schema is not None:
-        _create_clickhouse_table(data_engine, target_name, columns)
-    else:
-        target_metadata = MetaData()
-        Table(target_name, target_metadata, *columns)
-        target_metadata.create_all(data_engine)
-    return Table(target_name, MetaData(), autoload_with=data_engine, schema=schema)
+    target_metadata = MetaData()
+    Table(target_name, target_metadata, *columns)
+    target_metadata.create_all(data_engine)
+    return Table(target_name, MetaData(), autoload_with=data_engine)
 
 
 # [ADDITION, 2026-09-20, E2-22] How many rows are held in memory at once
@@ -269,9 +212,7 @@ def _serialize_row(row: dict) -> dict:
     return {k: (json.dumps(v) if isinstance(v, (dict, list)) else v) for k, v in row.items()}
 
 
-def _clone_table(
-    engine: Engine, data_engine: Engine, table_name: str, warehouse_database: str
-) -> None:
+def _clone_table(engine: Engine, data_engine: Engine, table_name: str) -> None:
     """Mirror one Engine DB table into the Data DB, streaming rather than materializing.
 
     [DEVIATION, 2026-09-20, E2-22] This used to be
@@ -283,17 +224,18 @@ def _clone_table(
     size.
     """
     source_table = _reflect(engine, table_name)
-    target_table = _ensure_target_table(data_engine, source_table, warehouse_database)
+    target_table = _ensure_target_table(data_engine, source_table)
     qualified_name = (
         f"{target_table.schema}.{target_table.name}" if target_table.schema else target_table.name
     )
     with data_engine.begin() as target_conn:
-        # TRUNCATE, not Table.delete() with no predicate: ClickHouse's own
-        # DELETE compiler refuses an unconditional DELETE outright ("WHERE
-        # clause is required") -- verified directly, not assumed. TRUNCATE
-        # is already this project's own established "clear a table for a
-        # full rewrite" idiom (sql_actions.py's OVERWRITE_TABLE) and every
-        # dialect touched so far, Postgres included, supports it.
+        # TRUNCATE, not Table.delete() with no predicate. It is already this
+        # project's own established "clear a table for a full rewrite" idiom
+        # (sql_actions.py's OVERWRITE_TABLE) and both supported warehouses
+        # implement it. It was originally chosen because ClickHouse's DELETE
+        # compiler refuses an unconditional DELETE outright ("WHERE clause is
+        # required"); ClickHouse is gone, but the idiom is the more portable
+        # one regardless, so it stays.
         target_conn.execute(text(f"TRUNCATE TABLE {qualified_name}"))
         with engine.connect().execution_options(
             stream_results=True, yield_per=CLONE_BATCH_ROWS

@@ -21,14 +21,10 @@ from etl_craft.runlog import find_or_create_active_run
 TEST_DATABASE_URL_VAR = "ETL_CRAFT_TEST_DATABASE_URL"
 DEFAULT_TEST_DATABASE_URL = "postgresql+psycopg://etl_craft:etl_craft@localhost:55432/etl_craft"
 
-# Stands in as a genuinely different SQLAlchemy dialect for warehouse.py's
-# tests — Postgres alone (the Engine DB) can't prove the generic,
-# dialect-agnostic connect mechanism works against anything but Postgres.
-# Needs the optional `clickhouse` extra installed (see pyproject.toml); if
-# it isn't, _reachable's broad except below just reports "not reachable",
-# same as Docker being down — a coarser message, but a clean skip either way.
-TEST_CLICKHOUSE_URL_VAR = "ETL_CRAFT_TEST_CLICKHOUSE_URL"
-DEFAULT_TEST_CLICKHOUSE_URL = "clickhouse://etl_craft:etl_craft@localhost:58123/etl_craft"
+# [DEVIATION, 2026-09-20] Replaces the ClickHouse fixture. DuckDB is the
+# second supported warehouse now, and being embedded it needs no container at
+# all — a tmp_path file per test, which is both faster and one less thing that
+# can be "not reachable". `make db-up` is still needed for the Engine DB.
 
 
 def _reachable(url: str) -> bool:
@@ -69,16 +65,15 @@ def postgres_engine() -> Engine:
     engine.dispose()
 
 
-@pytest.fixture(scope="session")
-def clickhouse_engine() -> Engine:
-    """Build a real ClickHouse engine — skips if unreachable or the extra isn't installed."""
-    url = os.environ.get(TEST_CLICKHOUSE_URL_VAR, DEFAULT_TEST_CLICKHOUSE_URL)
-    if not _reachable(url):
-        pytest.skip(
-            f"no reachable ClickHouse at {url!r} — run `make db-up` (see docker-compose.yml), "
-            f"install the `clickhouse` extra, or set {TEST_CLICKHOUSE_URL_VAR}"
-        )
-    engine = create_engine(url)
+@pytest.fixture
+def duckdb_engine(tmp_path) -> Engine:
+    """Build a real DuckDB engine on a throwaway file — the second supported warehouse.
+
+    Deliberately not session-scoped, unlike the Postgres fixture: a DuckDB
+    database is a file, so each test gets its own and nothing leaks between
+    them. No container, so this never skips.
+    """
+    engine = create_engine(f"duckdb:///{tmp_path / 'warehouse.duckdb'}")
     yield engine
     engine.dispose()
 

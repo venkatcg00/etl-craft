@@ -51,7 +51,6 @@ from etl_craft.cfg import (
 )
 from etl_craft.cli import main as cli_main
 from etl_craft.cloning import run_cloning_if_enabled
-from etl_craft.cloning import tables_for_scope as cloning_tables_for_scope
 from etl_craft.column_lineage import lineage_for_tasks
 from etl_craft.config import (
     CloningConfig,
@@ -376,82 +375,69 @@ def test_build_data_engine_connects_for_real(monkeypatch, postgres_engine):
         engine.dispose()
 
 
-def test_hash_expression_really_yields_32_hex_chars_on_clickhouse(clickhouse_engine):
-    # E2-31, proved for real rather than asserted in theory — the same bar
-    # warehouse.py's own ClickHouse test set. Postgres's MD5() returns 32 hex
-    # characters; ClickHouse's returns FixedString(16) raw bytes, so
-    # HASH_KEY VARCHAR(32) silently stored the wrong thing there. This runs
-    # the expression the engine actually builds and checks its real shape.
-    # A NULL in a nullable column is the case that matters: CAST(col AS
-    # VARCHAR) raises CANNOT_INSERT_NULL_IN_ORDINARY_COLUMN there, and the
-    # surrounding COALESCE cannot rescue it because the cast runs first.
-    expr = sql_actions_module._hash_expression(["a", "b"], "s", "clickhouse")
-    with clickhouse_engine.begin() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS ch_hash_probe"))
-        conn.execute(
-            text(
-                "CREATE TABLE ch_hash_probe (a String, b Nullable(String)) "
-                "ENGINE = MergeTree() ORDER BY tuple()"
-            )
-        )
-        conn.execute(text("INSERT INTO ch_hash_probe VALUES ('x', NULL)"))
-    try:
-        with clickhouse_engine.connect() as conn:
-            value = conn.execute(text(f"SELECT {expr} FROM ch_hash_probe AS s")).scalar_one()
-    finally:
-        with clickhouse_engine.begin() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS ch_hash_probe"))
-    assert len(value) == 32
-    assert set(value) <= set("0123456789abcdef")
+def test_hash_expression_yields_the_same_32_hex_chars_on_both_warehouses(
+    postgres_engine, duckdb_engine
+):
+    # [DEVIATION, 2026-09-20] Was a ClickHouse test proving its MD5 needed
+    # hex()-ing. ClickHouse is gone; the point now is the opposite and
+    # stronger one -- Postgres and DuckDB produce the *identical* HASH_KEY for
+    # the same row, so an SCD target is portable between them and
+    # VARCHAR(32) is right for both.
+    expr = sql_actions_module._hash_expression(["a", "b"], "s")
+    sql = f"SELECT {expr} FROM (SELECT 'x' AS a, CAST(NULL AS VARCHAR) AS b) AS s"
+
+    with postgres_engine.connect() as conn:
+        pg_value = conn.execute(text(sql)).scalar_one()
+    with duckdb_engine.connect() as conn:
+        duck_value = conn.execute(text(sql)).scalar_one()
+
+    assert len(pg_value) == 32
+    assert set(pg_value) <= set("0123456789abcdef")
+    assert pg_value == duck_value
 
 
-def test_build_data_engine_connects_to_real_clickhouse(monkeypatch, clickhouse_engine):
+def test_build_data_engine_connects_to_real_duckdb(tmp_path):
     # Unlike the Postgres-standing-in-for-"some dialect" test above, this
-    # genuinely proves the generic, dialect-agnostic connect mechanism
-    # against a real *different* SQLAlchemy dialect — the actual point of
-    # warehouse.py never hardcoding a driver. Skips itself (via
-    # clickhouse_engine) if ClickHouse or the `clickhouse` extra isn't
-    # available, same as the Postgres suite skips when Docker is down.
-    monkeypatch.setenv("ETL_CRAFT_WAREHOUSE_DEV_SECRET", "etl_craft")
+    # genuinely proves the generic, dialect-agnostic connect mechanism against
+    # a real *different* SQLAlchemy dialect -- the actual point of
+    # warehouse.py never hardcoding a driver.
+    #
+    # It also covers auth_mode='none': DuckDB is a file, so there is no user
+    # to be and no password to present, and requiring one would mean inventing
+    # a secret that authenticates nothing.
+    path = tmp_path / "warehouse.duckdb"
     profile = ConnectionProfile(
         section="WAREHOUSE",
         name="dev",
-        jdbc_url="jdbc:clickhouse://localhost:58123/etl_craft",
-        user="etl_craft",
-        auth_mode="password",
+        jdbc_url=f"jdbc:duckdb:{path}",
+        user="",
+        auth_mode="none",
     )
     config = ConnectorConfig(
         mode="local",
         source=SourceConfig(type="environment"),
-        postgres=ConnectionSection(
-            active_profile="dev",
-            profiles={
-                "dev": ConnectionProfile(
-                    section="POSTGRES",
-                    name="dev",
-                    jdbc_url="jdbc:postgresql://localhost:55432/etl_craft",
-                    user="etl_craft",
-                    auth_mode="password",
-                )
-            },
-        ),
-        cloning=CloningConfig(),
+        postgres=ConnectionSection(active_profile="dev", profiles={"dev": profile}),
+        cloning=CloningConfig(enabled=False),
         warehouse=ConnectionSection(active_profile="dev", profiles={"dev": profile}),
     )
 
     engine = build_data_engine(config)
     try:
-        with engine.connect() as conn:
-            assert conn.execute(text("SELECT 1")).scalar_one() == 1
+        with engine.begin() as conn:
+            conn.execute(text("CREATE TABLE probe AS SELECT 1 AS id"))
+            assert conn.execute(text("SELECT id FROM probe")).scalar_one() == 1
+            # The catalog DuckDB derives from the file stem, which is what
+            # qualify()'s three-part catalog.schema.table form needs.
+            assert conn.execute(text("SELECT current_catalog()")).scalar_one() == "warehouse"
     finally:
         engine.dispose()
 
 
 # ==============================================================================
 # cloning.py — against real Postgres (Engine DB always) and, for the actual
-# copy mechanism, real ClickHouse as the Data DB -- proving the generic
-# mirroring mechanism against a genuinely different dialect, the same "prove
-# it for real" bar warehouse.py's own ClickHouse test already set. Testing
+# copy mechanism, real DuckDB as the Data DB -- proving the generic mirroring
+# mechanism against a genuinely different dialect, the same "prove it for
+# real" bar warehouse.py's own second-warehouse test already set. Testing
 # against Postgres-as-both-roles is deliberately *not* done for the real
 # copy path: since every mirrored table keeps its Engine DB name, doing so
 # would mean truncating and reinserting the actual CFG_/AUD_ tables from
@@ -460,8 +446,8 @@ def test_build_data_engine_connects_to_real_clickhouse(monkeypatch, clickhouse_e
 # ==============================================================================
 
 
-def _clickhouse_warehouse_config(monkeypatch, *, cloning: CloningConfig) -> ConnectorConfig:
-    monkeypatch.setenv("ETL_CRAFT_WAREHOUSE_DEV_SECRET", "etl_craft")
+def _duckdb_warehouse_config(tmp_path, *, cloning: CloningConfig) -> ConnectorConfig:
+    """Engine DB on real Postgres, Data DB on a throwaway DuckDB file."""
     return ConnectorConfig(
         mode="local",
         source=SourceConfig(type="environment"),
@@ -484,22 +470,13 @@ def _clickhouse_warehouse_config(monkeypatch, *, cloning: CloningConfig) -> Conn
                 "dev": ConnectionProfile(
                     section="WAREHOUSE",
                     name="dev",
-                    jdbc_url="jdbc:clickhouse://localhost:58123/etl_craft",
-                    user="etl_craft",
-                    auth_mode="password",
+                    jdbc_url=f"jdbc:duckdb:{tmp_path / 'warehouse.duckdb'}",
+                    user="",
+                    auth_mode="none",
                 )
             },
         ),
     )
-
-
-@pytest.fixture
-def clickhouse_cfg_tables_cleanup(clickhouse_engine):
-    """Drop every table cloning.py's 'cfg' or 'aud' scope could have mirrored into ClickHouse."""
-    yield
-    with clickhouse_engine.begin() as conn:
-        for table_name in cloning_tables_for_scope("all"):
-            conn.execute(text(f"DROP TABLE IF EXISTS {table_name.lower()}"))
 
 
 def test_run_cloning_if_enabled_noop_when_disabled(postgres_engine):
@@ -554,24 +531,20 @@ def test_run_cloning_refuses_when_warehouse_is_the_same_database_as_engine(postg
         run_cloning_if_enabled(postgres_engine, config)
 
 
-def test_run_cloning_clones_cfg_tables_into_real_clickhouse(
-    monkeypatch,
+def test_run_cloning_clones_cfg_tables_into_real_duckdb(
+    tmp_path,
     postgres_engine,
-    clickhouse_engine,
     committed_pipeline,
-    clickhouse_cfg_tables_cleanup,
 ):
     task_id = insert_committed_task(postgres_engine, committed_pipeline, "t")
     insert_committed_task_parameters(
         postgres_engine, task_id, {"SQL_ACTION": "CREATE_TABLE", "TARGET_OBJECT": "public.x"}
     )
-    config = _clickhouse_warehouse_config(
-        monkeypatch, cloning=CloningConfig(enabled=True, scope="cfg")
-    )
+    config = _duckdb_warehouse_config(tmp_path, cloning=CloningConfig(enabled=True, scope="cfg"))
 
     run_cloning_if_enabled(postgres_engine, config)
 
-    with clickhouse_engine.connect() as conn:
+    with build_data_engine(config).connect() as conn:
         pipelines = list(
             conn.execute(
                 text("SELECT pipeline_code FROM cfg_pipelines WHERE pipeline_id = :id"),
@@ -589,24 +562,20 @@ def test_run_cloning_clones_cfg_tables_into_real_clickhouse(
 
 
 def test_run_cloning_serializes_jsonb_column_to_text(
-    monkeypatch,
+    tmp_path,
     postgres_engine,
-    clickhouse_engine,
     committed_pipeline,
-    clickhouse_cfg_tables_cleanup,
 ):
     with postgres_engine.begin() as conn:
         conn.execute(
             text("UPDATE CFG_PIPELINES SET PIPELINE_PARAMETERS = :params WHERE PIPELINE_ID = :id"),
             {"params": json.dumps({"CATCHUP": True}), "id": committed_pipeline},
         )
-    config = _clickhouse_warehouse_config(
-        monkeypatch, cloning=CloningConfig(enabled=True, scope="cfg")
-    )
+    config = _duckdb_warehouse_config(tmp_path, cloning=CloningConfig(enabled=True, scope="cfg"))
 
     run_cloning_if_enabled(postgres_engine, config)
 
-    with clickhouse_engine.connect() as conn:
+    with build_data_engine(config).connect() as conn:
         params = conn.execute(
             text("SELECT pipeline_parameters FROM cfg_pipelines WHERE pipeline_id = :id"),
             {"id": committed_pipeline},
@@ -615,20 +584,16 @@ def test_run_cloning_serializes_jsonb_column_to_text(
 
 
 def test_run_cloning_is_idempotent_across_repeated_runs(
-    monkeypatch,
+    tmp_path,
     postgres_engine,
-    clickhouse_engine,
     committed_pipeline,
-    clickhouse_cfg_tables_cleanup,
 ):
-    config = _clickhouse_warehouse_config(
-        monkeypatch, cloning=CloningConfig(enabled=True, scope="cfg")
-    )
+    config = _duckdb_warehouse_config(tmp_path, cloning=CloningConfig(enabled=True, scope="cfg"))
 
     run_cloning_if_enabled(postgres_engine, config)
     run_cloning_if_enabled(postgres_engine, config)
 
-    with clickhouse_engine.connect() as conn:
+    with build_data_engine(config).connect() as conn:
         count = conn.execute(
             text("SELECT count(*) FROM cfg_pipelines WHERE pipeline_id = :id"),
             {"id": committed_pipeline},
@@ -640,8 +605,8 @@ def test_run_cloning_is_idempotent_across_repeated_runs(
 def second_postgres_database(postgres_engine):
     """A genuinely separate, schema-less Postgres database on the same server as the Engine DB.
 
-    For proving cloning's generic (non-ClickHouse) create-target-table path
-    for real: pointing [Warehouse] at *this* same Postgres server's default
+    For proving cloning's create-target-table path against Postgres itself
+    for real against a second Postgres: pointing [Warehouse] at *this* same server's default
     "etl_craft" database would hit run_cloning_if_enabled's own same-
     database refusal (correctly), so this fixture creates a second,
     disposable one instead -- a genuinely different database, the same
@@ -706,21 +671,18 @@ def test_run_cloning_creates_generic_target_table_on_a_different_postgres_databa
 
 
 def test_run_cloning_aud_scope_clones_only_aud_tables(
-    monkeypatch,
+    tmp_path,
     postgres_engine,
-    clickhouse_engine,
     committed_pipeline,
-    clickhouse_cfg_tables_cleanup,
 ):
     seed_active_run(postgres_engine, committed_pipeline)
-    config = _clickhouse_warehouse_config(
-        monkeypatch, cloning=CloningConfig(enabled=True, scope="aud")
-    )
+    config = _duckdb_warehouse_config(tmp_path, cloning=CloningConfig(enabled=True, scope="aud"))
 
     run_cloning_if_enabled(postgres_engine, config)
 
-    with clickhouse_engine.connect() as conn:
-        assert not inspect(clickhouse_engine).has_table("cfg_pipelines")
+    data_engine = build_data_engine(config)
+    with data_engine.connect() as conn:
+        assert not inspect(data_engine).has_table("cfg_pipelines")
         count = conn.execute(
             text("SELECT count(*) FROM aud_pipelines_run_log WHERE pipeline_id = :id"),
             {"id": committed_pipeline},
@@ -1209,6 +1171,41 @@ def test_validate_business_rule_keys_matching_single_column_pk_is_ok(
     finally:
         with postgres_engine.begin() as conn:
             conn.execute(text("DROP TABLE validate_pk_test_good"))
+
+
+def test_validate_business_rule_keys_sees_a_duckdb_primary_key(
+    pg_conn, cfg_pipeline, cfg_task, duckdb_engine
+):
+    # duckdb_engine does not reflect primary keys: Inspector.get_pk_constraint
+    # returns an empty constrained_columns list even for a table DuckDB is
+    # genuinely enforcing one on (verified directly -- a duplicate insert
+    # fails at commit). Taken at face value that makes validate report *every*
+    # target on the newly-primary warehouse as having no primary key, so the
+    # check that enforces CLAUDE.md's single-column-PK convention fails
+    # exactly where the convention is being honoured. Same shape as E2-53: a
+    # code path that only ever ran against one dialect.
+    with duckdb_engine.begin() as conn:
+        conn.execute(text("CREATE SCHEMA staging"))
+        conn.execute(text("CREATE TABLE staging.dim (id BIGINT PRIMARY KEY, val TEXT)"))
+    _insert_business_rule(pg_conn, cfg_pipeline, cfg_task, "br1", "staging.dim", "ID")
+
+    assert validate_business_rule_keys(pg_conn, duckdb_engine) == []
+
+
+def test_validate_business_rule_keys_reports_a_duckdb_table_with_no_pk(
+    pg_conn, cfg_pipeline, cfg_task, duckdb_engine
+):
+    # The counterpart, so the fix above cannot be "return [] on duckdb": a
+    # DuckDB table genuinely without a primary key must still be reported.
+    with duckdb_engine.begin() as conn:
+        conn.execute(text("CREATE SCHEMA staging"))
+        conn.execute(text("CREATE TABLE staging.dim (id BIGINT, val TEXT)"))
+    _insert_business_rule(pg_conn, cfg_pipeline, cfg_task, "br1", "staging.dim", "ID")
+
+    issues = validate_business_rule_keys(pg_conn, duckdb_engine)
+
+    assert len(issues) == 1
+    assert "must have exactly one primary key column" in issues[0].message
 
 
 def test_validate_business_rule_keys_no_pk_reported(
@@ -2050,7 +2047,7 @@ def make_config(
     mode: str = "local",
     *,
     warehouse: bool = False,
-    clickhouse_warehouse: bool = False,
+    duckdb_warehouse: str = "",
     email: bool = False,
     email_auth_mode: str = "none",
     cloning: CloningConfig | None = None,
@@ -2063,21 +2060,22 @@ def make_config(
         auth_mode="password",
     )
     warehouse_section = None
-    if clickhouse_warehouse:
-        # [ADDITION, 2026-09-20, E2-53] The gap that let three ClickHouse DDL
-        # failures through: every SQL-action test pointed [Warehouse] at the
-        # same Postgres, so the whole action vocabulary was exercised against
-        # exactly one dialect -- while the code carried ClickHouse branches
-        # nothing ran.
+    if duckdb_warehouse:
+        # [DEVIATION, 2026-09-20] Was `clickhouse_warehouse`. The gap this
+        # exists to close is unchanged and still the important one: every
+        # other SQL-action test points [Warehouse] at the same Postgres, so
+        # without this the whole action vocabulary is exercised against
+        # exactly one dialect. DuckDB is the second supported warehouse now,
+        # and being embedded it needs no container.
         warehouse_section = ConnectionSection(
             active_profile="dev",
             profiles={
                 "dev": ConnectionProfile(
                     section="WAREHOUSE",
                     name="dev",
-                    jdbc_url="jdbc:clickhouse://localhost:58123/etl_craft",
-                    user="etl_craft",
-                    auth_mode="password",
+                    jdbc_url=f"jdbc:duckdb:{duckdb_warehouse}",
+                    user="",
+                    auth_mode="none",
                 )
             },
         )
@@ -3997,132 +3995,220 @@ def test_sql_overwrite_table_creates_a_missing_target(
     assert {"id", "pipeline_run_id", "update_date"} <= columns
 
 
-def test_sql_create_table_runs_against_real_clickhouse(
-    postgres_engine, clickhouse_engine, committed_pipeline, monkeypatch
+def _duckdb_sql_task(engine, pipeline_id, task_code, params):
+    task_id = insert_committed_task(engine, pipeline_id, task_code)
+    insert_committed_task_parameters(engine, task_id, params)
+    return task_id
+
+
+def test_sql_actions_run_end_to_end_against_real_duckdb(
+    postgres_engine, committed_pipeline, tmp_path
 ):
-    # E2-53 regression. Three independent DDL failures shipped because no test
-    # ever ran a SQL_ACTION against a second dialect: no ENGINE clause
-    # (Code: 42), CAST(NULL AS <non-nullable>) (Code: 70), and
-    # "TIMESTAMP WITH TIME ZONE" being a syntax error there (Code: 62) -- that
-    # last one a regression this iteration introduced via E2-33.
-    monkeypatch.setenv("ETL_CRAFT_WAREHOUSE_DEV_SECRET", "etl_craft")
-    task_id = insert_committed_task(postgres_engine, committed_pipeline, "ch_create")
-    insert_committed_task_parameters(
+    # [DEVIATION, 2026-09-20] Was a ClickHouse test. The gap it closes is
+    # unchanged and is the one that mattered: every other SQL-action test
+    # points [Warehouse] at the same Postgres, so without a second dialect the
+    # whole action vocabulary is exercised against exactly one engine -- which
+    # is how three ClickHouse DDL failures and a TIMESTAMP regression shipped.
+    # DuckDB is the second supported warehouse now, and unlike ClickHouse it
+    # is close enough to ANSI that the *full* vocabulary works, merges
+    # included.
+    #
+    # Every Data DB engine here is disposed before any run_task call and
+    # rebuilt after. DuckDB is embedded: if this process still holds the file
+    # open when runner.py forks for crash detection, the forked child inherits
+    # that in-memory database state and its writes are silently lost -- it
+    # reports SUCCESS and the table is not there. Verified directly. The
+    # engine itself is safe because run_task never opens the Data DB in the
+    # parent (handlers.py builds it inside the child), but a test that seeds
+    # fixture data has to hand the file back first.
+    config = make_config(duckdb_warehouse=str(tmp_path / "warehouse.duckdb"))
+
+    def with_data_db(fn):
+        engine = build_data_engine(config)
+        try:
+            return fn(engine)
+        finally:
+            engine.dispose()
+
+    def seed(engine):
+        with engine.begin() as conn:
+            conn.execute(text("CREATE SCHEMA IF NOT EXISTS staging"))
+            conn.execute(text("CREATE TABLE staging.src AS SELECT 1 AS id, 'a' AS name"))
+
+    with_data_db(seed)
+
+    _duckdb_sql_task(
         postgres_engine,
-        task_id,
+        committed_pipeline,
+        "duck_create",
         {
-            "SQL_ACTION": "SETUP_TABLE",
-            "TARGET_OBJECT": "etl_craft.ch_setup_probe",
-            "SOURCE_SQL": "SELECT 1 AS id, 'x' AS name",
+            "SQL_ACTION": "CREATE_TABLE",
+            "TARGET_OBJECT": "staging.customers",
+            "SOURCE_SQL": "SELECT id, name FROM staging.src WHERE 1=1",
         },
     )
-    seed_active_run(postgres_engine, committed_pipeline)
-    try:
-        outcome = run_task(
-            postgres_engine,
-            make_config(clickhouse_warehouse=True),
-            "TEST_CONCURRENT_PL",
-            "ch_create",
-        )
-        assert outcome.status == "SUCCESS", outcome.message
-        with clickhouse_engine.connect() as conn:
-            columns = {
-                row[0].lower()
-                for row in conn.execute(
-                    text(
-                        "SELECT name FROM system.columns "
-                        "WHERE database = 'etl_craft' AND table = 'ch_setup_probe'"
-                    )
-                )
-            }
-        assert {"id", "name", "pipeline_run_id"} <= columns
-    finally:
-        with clickhouse_engine.begin() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS etl_craft.ch_setup_probe"))
-
-
-def test_sql_overwrite_table_runs_against_real_clickhouse(
-    postgres_engine, clickhouse_engine, committed_pipeline, monkeypatch
-):
-    # OVERWRITE_TABLE exercises the audit-column CAST types that failed with
-    # Code: 70 (Nullable), the TRUNCATE-and-insert path, and the
-    # create-if-absent shape builder -- all against a second dialect.
-    monkeypatch.setenv("ETL_CRAFT_WAREHOUSE_DEV_SECRET", "etl_craft")
-    with clickhouse_engine.begin() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS etl_craft.ch_scd1_src"))
-        conn.execute(
-            text(
-                "CREATE TABLE etl_craft.ch_scd1_src (id Int64, name String) "
-                "ENGINE = MergeTree() ORDER BY tuple()"
-            )
-        )
-        conn.execute(text("INSERT INTO etl_craft.ch_scd1_src VALUES (1, 'a')"))
-
-    task_id = insert_committed_task(postgres_engine, committed_pipeline, "ch_merge")
-    insert_committed_task_parameters(
+    merge_task = _duckdb_sql_task(
         postgres_engine,
-        task_id,
-        {
-            "SQL_ACTION": "OVERWRITE_TABLE",
-            "TARGET_OBJECT": "etl_craft.ch_scd1_tgt",
-            "SOURCE_SQL": "SELECT id, name FROM etl_craft.ch_scd1_src WHERE 1=1",
-        },
-    )
-    seed_active_run(postgres_engine, committed_pipeline)
-    try:
-        outcome = run_task(
-            postgres_engine,
-            make_config(clickhouse_warehouse=True),
-            "TEST_CONCURRENT_PL",
-            "ch_merge",
-        )
-        assert outcome.status == "SUCCESS", outcome.message
-        with clickhouse_engine.connect() as conn:
-            rows = conn.execute(
-                text("SELECT id, name, UPDATE_DATE FROM etl_craft.ch_scd1_tgt")
-            ).all()
-        assert len(rows) == 1
-        assert rows[0][0] == 1
-        # UPDATE_DATE exists and is populated -- the column whose declared type
-        # ("TIMESTAMP WITH TIME ZONE") was a syntax error here until now.
-        assert rows[0][2] is not None
-    finally:
-        with clickhouse_engine.begin() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS etl_craft.ch_scd1_src"))
-            conn.execute(text("DROP TABLE IF EXISTS etl_craft.ch_scd1_tgt"))
-
-
-def test_sql_scd_merge_is_refused_on_clickhouse_with_a_clear_reason(
-    postgres_engine, clickhouse_engine, committed_pipeline, monkeypatch
-):
-    # E2-53. ClickHouse has no UPDATE statement -- its ALTER TABLE ... UPDATE
-    # mutations are asynchronous background rewrites, so a merge built on them
-    # would report SUCCESS before the target had actually changed. Refusing is
-    # the honest answer; the previous behaviour was a raw
-    # "Syntax error: failed at position 1 ('UPDATE')" from deep inside the
-    # merge, after the stage had already been built.
-    monkeypatch.setenv("ETL_CRAFT_WAREHOUSE_DEV_SECRET", "etl_craft")
-    task_id = insert_committed_task(postgres_engine, committed_pipeline, "ch_scd")
-    insert_committed_task_parameters(
-        postgres_engine,
-        task_id,
+        committed_pipeline,
+        "duck_merge",
         {
             "SQL_ACTION": "SCD1_MERGE",
-            "TARGET_OBJECT": "etl_craft.ch_never",
-            "SOURCE_SQL": "SELECT 1 AS id, 'a' AS name",
+            "TARGET_OBJECT": "staging.dim",
+            "SOURCE_SQL": "SELECT id, name FROM staging.src WHERE 1=1",
             "MERGE_KEY": "id",
             "MERGE_COMPARE_COLUMNS": "name",
         },
     )
     seed_active_run(postgres_engine, committed_pipeline)
 
-    outcome = run_task(
-        postgres_engine, make_config(clickhouse_warehouse=True), "TEST_CONCURRENT_PL", "ch_scd"
-    )
+    created = run_task(postgres_engine, config, "TEST_CONCURRENT_PL", "duck_create")
+    assert created.status == "SUCCESS", created.message
+    merged = run_task(postgres_engine, config, "TEST_CONCURRENT_PL", "duck_merge")
+    assert merged.status == "SUCCESS", merged.message
 
-    assert outcome.status == "FAILED"
-    assert "updates rows in place" in outcome.message
-    assert "OVERWRITE_TABLE" in outcome.message
+    def check_first_run(engine):
+        with engine.connect() as conn:
+            assert conn.execute(text("SELECT id, name FROM staging.customers")).all() == [(1, "a")]
+            return conn.execute(text("SELECT id, name, HASH_KEY, ROW_ID FROM staging.dim")).one()
+
+    row = with_data_db(check_first_run)
+    assert (row[0], row[1]) == (1, "a")
+    # The engine-managed columns really landed: a 32-hex hash, and the
+    # surrogate identity key, which DuckDB needs a sequence for because it
+    # rejects adding an identity column after table creation.
+    assert len(row[2]) == 32
+    assert row[3] == 1
+
+    # A changed value exercises the correlated UPDATE leg -- the thing
+    # ClickHouse could not do at all.
+    def change_source(engine):
+        with engine.begin() as conn:
+            conn.execute(text("UPDATE staging.src SET name = 'b' WHERE id = 1"))
+
+    with_data_db(change_source)
+    with postgres_engine.begin() as conn:
+        conn.execute(
+            text("UPDATE AUD_TASK_RUN_LOG SET STATUS = 'FAILED' WHERE TASK_ID = :id"),
+            {"id": merge_task},
+        )
+
+    again = run_task(postgres_engine, config, "TEST_CONCURRENT_PL", "duck_merge")
+    assert again.status == "SUCCESS", again.message
+
+    def check_second_run(engine):
+        with engine.connect() as conn:
+            return conn.execute(text("SELECT name FROM staging.dim")).all()
+
+    assert with_data_db(check_second_run) == [("b",)]
+
+
+def test_sql_schema_evolution_restores_the_surrogate_key_on_duckdb(
+    postgres_engine, committed_pipeline, tmp_path
+):
+    # The evolution rebuild (CTAS -> drop -> rename) does not carry a primary
+    # key or an identity across, so _restore_surrogate_key has to rebuild it
+    # -- and on DuckDB that means repositioning the sequence past the values
+    # already carried over. Nothing else in the suite reaches that branch:
+    # every other evolution test runs against Postgres, where the identity is
+    # restarted instead. An unrepositioned sequence hands the next insert
+    # ROW_ID 1 again, colliding with the primary key it just re-added, so this
+    # asserts the new row's own ROW_ID rather than merely that evolution
+    # succeeded.
+    config = make_config(duckdb_warehouse=str(tmp_path / "warehouse.duckdb"))
+
+    def with_data_db(fn):
+        engine = build_data_engine(config)
+        try:
+            return fn(engine)
+        finally:
+            engine.dispose()
+
+    def seed(engine):
+        with engine.begin() as conn:
+            conn.execute(text("CREATE SCHEMA IF NOT EXISTS staging"))
+            conn.execute(text("CREATE TABLE staging.src AS SELECT 1 AS id, 'a' AS name"))
+
+    with_data_db(seed)
+
+    first = _duckdb_sql_task(
+        postgres_engine,
+        committed_pipeline,
+        "duck_evo",
+        {
+            "SQL_ACTION": "SCD1_MERGE",
+            "TARGET_OBJECT": "staging.evo",
+            "SOURCE_SQL": "SELECT id, name FROM staging.src WHERE 1=1",
+            "MERGE_KEY": "id",
+            "MERGE_COMPARE_COLUMNS": "name",
+        },
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+    assert run_task(postgres_engine, config, "TEST_CONCURRENT_PL", "duck_evo").status == "SUCCESS"
+
+    # A genuinely new column *and* a new row: the column forces the rebuild,
+    # the row proves the restored sequence does not hand out a taken value.
+    def widen_source(engine):
+        with engine.begin() as conn:
+            conn.execute(text("DROP TABLE staging.src"))
+            conn.execute(
+                text(
+                    "CREATE TABLE staging.src AS "
+                    "SELECT 1 AS id, 'a' AS name, 'z' AS extra "
+                    "UNION ALL SELECT 2, 'b', 'y'"
+                )
+            )
+
+    with_data_db(widen_source)
+    with postgres_engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE = :v "
+                "WHERE TASK_ID = :id AND PARAMETER_NAME = 'SOURCE_SQL'"
+            ),
+            {"id": first, "v": "SELECT id, name, extra FROM staging.src WHERE 1=1"},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE) "
+                "VALUES (:id, 'SCHEMA_EVOLUTION', 'true')"
+            ),
+            {"id": first},
+        )
+        conn.execute(
+            text("UPDATE AUD_TASK_RUN_LOG SET STATUS = 'FAILED' WHERE TASK_ID = :id"),
+            {"id": first},
+        )
+
+    outcome = run_task(postgres_engine, config, "TEST_CONCURRENT_PL", "duck_evo")
+    assert outcome.status == "SUCCESS", outcome.message
+
+    def check(engine):
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text("SELECT id, name, extra, ROW_ID FROM staging.evo ORDER BY id")
+            ).all()
+            # Not Inspector.get_pk_constraint: duckdb_engine does not reflect
+            # primary keys at all (the same gap validate._primary_key_columns
+            # works around), so it would report none here whether the rebuild
+            # restored one or not -- which is exactly the assertion this test
+            # needs to be able to make.
+            pk = conn.execute(
+                text(
+                    "SELECT constraint_column_names FROM duckdb_constraints() "
+                    "WHERE table_name = 'evo' AND constraint_type = 'PRIMARY KEY'"
+                )
+            ).all()
+            return rows, pk
+
+    rows, pk = with_data_db(check)
+    # The pre-existing row kept its own ROW_ID; the new one got the next free
+    # value, not a duplicate of it. Its `extra` is NULL rather than 'z' -- and
+    # that is correct, not a gap in evolution: `extra` is not in
+    # MERGE_COMPARE_COLUMNS, so the row's HASH_KEY did not change and SCD1
+    # left it alone. An evolved-in column is backfilled NULL on existing rows
+    # and stays that way until something the merge actually watches changes.
+    assert rows == [(1, "a", None, 1), (2, "b", "y", 2)]
+    assert [[c.lower() for c in row[0]] for row in pk] == [["row_id"]]
 
 
 def test_sql_scd2_merge_keeps_history_with_a_surrogate_primary_key(

@@ -35,15 +35,20 @@ dependencies = [
     # adds one package and nothing transitive.
     "sqlglot>=27",
     "sqlalchemy>=2.0.54",
+    # [DEVIATION, 2026-09-20] A SQLAlchemy dialect as a hard dependency, which
+    # Non-goals rules out in general. Scoped reversal, per explicit decision:
+    # "DuckDB is our warehouse now ... duckdb and postgresql are the ones we
+    # want to majorly support". DuckDB is embedded — there is no server to
+    # stand up — so shipping it is what makes `etl-craft setup` reach a working
+    # warehouse with no extra step, which is the whole point of the dbt-route
+    # setup. Other dialects stay exactly as they were: optional extras a team
+    # installs itself, discovered through SQLAlchemy's entry points, never
+    # imported by engine code.
+    "duckdb-engine>=0.13",
 ]
 
 [project.scripts]
 etl-craft = "etl_craft:main"
-
-[project.optional-dependencies]
-clickhouse = [
-    "clickhouse-sqlalchemy>=0.3.2",
-]
 
 [project.urls]
 Homepage = "https://github.com/venkatcg00/etl-craft"
@@ -71,7 +76,6 @@ source-include = [
 [dependency-groups]
 dev = [
     "black>=26.5.1",
-    "etl-craft[clickhouse]",
     "mypy>=1.11",
     "types-pyyaml>=6.0.12",
     "pydocstyle>=6.3.0",
@@ -158,7 +162,5 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.ruff.format]
 
-[tool.uv.sources]
-etl-craft = { workspace = true }
 # Ruff's formatter is not used — black owns formatting so there's a single
 # source of truth; `ruff` here is lint-only (see [tool.ruff.lint] above).

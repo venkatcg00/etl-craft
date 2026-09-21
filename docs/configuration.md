@@ -75,10 +75,14 @@ retry, so the pipeline can never recover without someone editing the table by ha
 specifically because a partial unique index is what makes concurrent run-id creation
 race-safe; an application-level check cannot close that race.
 
-**Data DB (`[Warehouse]`)** — exactly one per deployment, any SQLAlchemy-supported engine.
-Optional: only `SQL` and `BUSINESS_RULES` tasks need it. Third-party dialects are optional
-extras you install yourself (`uv add "etl-craft[clickhouse]"`); the engine never imports
-one directly.
+**Data DB (`[Warehouse]`)** — exactly one per deployment. Optional: only `SQL` and
+`BUSINESS_RULES` tasks need it. **Postgres and DuckDB are the two supported warehouses**,
+both exercised by the test suite against real databases; DuckDB is embedded, so its
+`jdbc_url` names a file (`jdbc:duckdb:/data/warehouse.duckdb`, or bare `jdbc:duckdb:` for
+in-memory) and its profile uses `auth_mode: none` — there is no server to authenticate to.
+Any other SQLAlchemy-supported engine is an optional dialect you install yourself; the
+engine never imports one directly, so it is discovered through SQLAlchemy's own entry
+points, but nothing here tests it.
 
 `TARGET_OBJECT` is stored as bare `schema.table`, deliberately environment-agnostic — the
 database name always comes from the active `[Warehouse]` profile at runtime. The same

@@ -42,8 +42,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy.exc import NoSuchTableError
 
 from etl_craft.cfg import (
@@ -85,6 +86,38 @@ def validate_graphs(conn: Connection) -> list[ValidationIssue]:
     return issues
 
 
+def _primary_key_columns(
+    data_engine: Engine, inspector: Inspector, table: str, schema: str | None
+) -> list[str]:
+    """Return a table's primary-key columns, working around DuckDB's missing reflection.
+
+    [ADDITION, 2026-09-21] `duckdb_engine` does not reflect primary keys:
+    `Inspector.get_pk_constraint()` returns an empty `constrained_columns`
+    list even for a table DuckDB is genuinely enforcing one on — verified
+    directly, a duplicate insert fails at commit. Taken at face value that
+    makes this whole check report *every* target on DuckDB as having no
+    primary key, i.e. fail precisely where the convention is being honoured.
+
+    The catalog knows, so ask it. Keyed off the dialect *name*, never an
+    import, and only when reflection came back empty, so a future
+    `duckdb_engine` that does reflect keys silently takes over.
+    """
+    pk = inspector.get_pk_constraint(table, schema=schema)
+    columns = list(pk.get("constrained_columns") or [])
+    if columns or data_engine.dialect.name != "duckdb":
+        return columns
+    with data_engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT constraint_column_names FROM duckdb_constraints() "
+                "WHERE table_name = :table AND constraint_type = 'PRIMARY KEY' "
+                "AND (CAST(:schema AS VARCHAR) IS NULL OR schema_name = :schema)"
+            ),
+            {"table": table, "schema": schema},
+        ).first()
+    return list(row[0]) if row else []
+
+
 def validate_business_rule_keys(
     conn: Connection, data_engine: Engine | None
 ) -> list[ValidationIssue]:
@@ -108,7 +141,7 @@ def validate_business_rule_keys(
     for target in targets:
         schema, _, table = target.target_table.rpartition(".")
         try:
-            pk = inspector.get_pk_constraint(table, schema=schema or None)
+            columns = _primary_key_columns(data_engine, inspector, table, schema or None)
         except NoSuchTableError:
             issues.append(
                 ValidationIssue(
@@ -118,7 +151,6 @@ def validate_business_rule_keys(
                 )
             )
             continue
-        columns = pk.get("constrained_columns") or []
         if len(columns) != 1:
             issues.append(
                 ValidationIssue(

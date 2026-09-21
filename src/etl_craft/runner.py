@@ -49,6 +49,17 @@ is expected, routine behavior, not an execution error — a real error
 # react correctly — spawn would re-import everything fresh in the child and
 # silently ignore any monkeypatch applied in the test process.
 #
+# [ADDITION, 2026-09-20] Reason (1) above is load-bearing for DuckDB
+# specifically, not just good hygiene. DuckDB is embedded: its state is a
+# file plus this process's in-memory buffers on it. If the parent has the
+# warehouse file open at fork time, the child inherits that state, and the
+# child's writes are then **silently lost** — it commits, reports SUCCESS,
+# and the rows are not there afterwards. Verified directly, not reasoned
+# about. This module is safe because it never opens the Data DB in the
+# parent at all: handlers.dispatch builds it inside the child, after the
+# fork. Anything added here that opens the warehouse before _fork_dispatch
+# would break every DuckDB deployment without failing a single test loudly.
+#
 from __future__ import annotations
 
 import multiprocessing

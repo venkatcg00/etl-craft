@@ -12,7 +12,6 @@ import runpy
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -480,39 +479,42 @@ def test_edge_satisfied_rejects_unknown_dependency_type():
 
 
 def test_hash_expression_uses_ansi_cast_not_postgres_shorthand():
-    # E2-31. `::text` is Postgres-only shorthand; this module uses ANSI CAST
-    # everywhere else and explains each exception it makes.
-    expr = sql_actions._hash_expression(["a", "b"], "s", "postgresql")
+    # `::text` is Postgres-only shorthand; this module uses ANSI CAST
+    # everywhere and explains each exception it makes. Both supported
+    # warehouses return MD5 as 32 hex characters, which is what
+    # HASH_KEY VARCHAR(32) expects.
+    expr = sql_actions._hash_expression(["a", "b"], "s")
     assert "::text" not in expr
     assert "COALESCE(CAST(s.a AS VARCHAR), '')" in expr
     assert expr.startswith("MD5(")
 
 
-def test_hash_expression_hexes_the_result_on_clickhouse():
-    # E2-31. Verified directly against the local ClickHouse before writing
-    # this: its MD5() returns FixedString(16) — raw bytes — where Postgres's
-    # returns 32 hex characters, so HASH_KEY VARCHAR(32) was simply wrong
-    # there. hex() brings it back to the shape every other dialect produces.
-    expr = sql_actions._hash_expression(["a"], "s", "clickhouse")
-    assert expr.startswith("lower(hex(MD5(")
-    # And a different cast target: CAST(col AS VARCHAR) raises
-    # CANNOT_INSERT_NULL_IN_ORDINARY_COLUMN on a nullable ClickHouse column the
-    # moment any value is NULL, with the COALESCE unable to rescue it.
-    assert "CAST(s.a AS Nullable(String))" in expr
+@pytest.mark.parametrize(
+    "jdbc_url, expected_dialect, expected_database",
+    [
+        ("jdbc:duckdb:/data/warehouse.duckdb", "duckdb", "warehouse"),
+        # Bare form: an in-memory database, whose catalog DuckDB calls
+        # "memory" -- which is what qualify()'s three-part name needs.
+        ("jdbc:duckdb:", "duckdb", "memory"),
+        ("jdbc:postgresql://h:5432/db", "postgresql+psycopg", "db"),
+    ],
+)
+def test_translate_jdbc_url_handles_duckdbs_file_form(
+    jdbc_url, expected_dialect, expected_database
+):
+    # [ADDITION, 2026-09-20] DuckDB is embedded: `jdbc:duckdb:<path>`, with no
+    # host, port or query string. Exactly the "vendor whose JDBC URL shape
+    # isn't scheme://host[:port]/database at all" case this translator's own
+    # comment flagged as needing its own parsing once such a vendor was
+    # actually chosen.
+    dialect, parts = translate_jdbc_url(jdbc_url)
+    assert dialect == expected_dialect
+    assert parts["database"] == expected_database
 
 
-def test_add_surrogate_key_is_a_no_op_on_clickhouse():
-    # ClickHouse has neither identity columns nor ALTER ... ADD PRIMARY KEY --
-    # ordering is a table-engine property fixed at CREATE time. Skipped rather
-    # than failed, so a ClickHouse target simply has no surrogate key and
-    # `validate` reports that.
-    class _Conn:
-        dialect = SimpleNamespace(name="clickhouse")
-
-        def execute(self, *_args, **_kwargs):  # pragma: no cover - must not run
-            raise AssertionError("issued DDL ClickHouse cannot accept")
-
-    sql_actions._add_surrogate_key(_Conn(), "public.t", "db")
+def test_translate_jdbc_url_rejects_an_unrecognized_shape():
+    with pytest.raises(ConnectionError_, match="not a recognized JDBC URL"):
+        translate_jdbc_url("postgresql://h/db")
 
 
 # ------------------------------------------------------------------------------
@@ -1515,7 +1517,7 @@ def test_same_database_false_for_different_database_name():
 
 def test_same_database_false_for_different_dialect_even_if_host_port_match():
     config = _cloning_config(
-        "jdbc:postgresql://localhost:5432/etl_craft", "jdbc:clickhouse://localhost:5432/etl_craft"
+        "jdbc:postgresql://localhost:5432/etl_craft", "jdbc:duckdb:/data/etl_craft.duckdb"
     )
     assert same_database(config) is False
 

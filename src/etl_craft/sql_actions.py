@@ -110,7 +110,7 @@ schema-registry table. The task's own SOURCE_SQL is materialized into a
 uniquely-named temp table (also what supplies row counts and drives every
 merge statement below, so the SELECT only ever executes once), then its
 shape is compared — via information_schema.columns on both sides, which
-every mainstream SQL engine (Postgres, ClickHouse included) exposes — against
+every mainstream SQL engine (both supported warehouses included) exposes — against
 the target's own business columns (its full column set minus PIPELINE_RUN_ID
 and this action's own audit columns). A staged SELECT missing a column the
 target already has is always a hard failure, evolvable or not (this module
@@ -251,88 +251,18 @@ AUDIT_COLUMN_TYPES: dict[str, str] = {
     "ACTIVE_FLAG": "VARCHAR(1)",
 }
 
-# [ADDITION, 2026-09-20, E2-53] ClickHouse spellings for the same columns,
-# verified against the running container rather than inferred:
-#   * "TIMESTAMP WITH TIME ZONE" is a *syntax error* there (Code: 62). That
-#     spelling was introduced by E2-33 this iteration, correct for Postgres,
-#     and it broke a dialect this project explicitly supports — the first
-#     regression of the iteration, and it survived because no test ever ran a
-#     SQL action against ClickHouse.
-#   * Every CAST(NULL AS <non-nullable>) fails with Code: 70, so each type has
-#     to be Nullable(...) — the same lesson _hash_expression learned two
-#     functions away, for the same reason.
-CLICKHOUSE_AUDIT_COLUMN_TYPES: dict[str, str] = {
-    "HASH_KEY": "Nullable(String)",
-    "CREATE_DATE": "Nullable(DateTime64(3))",
-    "UPDATE_DATE": "Nullable(DateTime64(3))",
-    "CREATED_BY": "Nullable(String)",
-    "UPDATED_BY": "Nullable(String)",
-    "DELETE_FLAG": "Nullable(String)",
-    "ACTIVE_FLAG": "Nullable(String)",
-}
-
-
-def audit_column_type(column: str, dialect: str) -> str:
-    """Return the CAST target type for one engine-managed column, per dialect."""
-    if dialect == "clickhouse":
-        return CLICKHOUSE_AUDIT_COLUMN_TYPES[column]
-    return AUDIT_COLUMN_TYPES[column]
-
-
-def pipeline_run_id_type(dialect: str) -> str:
-    """Return the CAST target type for PIPELINE_RUN_ID, per dialect."""
-    return "Nullable(Int64)" if dialect == "clickhouse" else "BIGINT"
-
-
-# [ADDITION, 2026-09-20, E2-53] Actions that update existing rows in place.
-# ClickHouse has no `UPDATE` statement at all: its `ALTER TABLE ... UPDATE`
-# mutations are asynchronous, eventually-consistent background rewrites,
-# explicitly not row-level updates, and an SCD merge built on them would report
-# SUCCESS while the target had not changed yet. That is a worse failure than
-# refusing, so these actions are refused there with a clear message instead.
-#
-# Discovered by the first test to run a SQL action against ClickHouse: the
-# previous behaviour was a raw "Syntax error: failed at position 1 ('UPDATE')"
-# from deep inside a merge, after the stage had already been built.
-IN_PLACE_UPDATE_ACTIONS = frozenset({"SCD1_MERGE", "SCD2_MERGE"})
-DIALECTS_WITHOUT_UPDATE = frozenset({"clickhouse"})
-
-
-def require_update_support(conn: Connection, action: str) -> None:
-    """Refuse an in-place-update action on a dialect that has no UPDATE statement."""
-    if conn.dialect.name in DIALECTS_WITHOUT_UPDATE:
-        raise HandlerError(
-            f"SQL_ACTION={action} updates rows in place, which "
-            f"{conn.dialect.name!r} does not support — its mutations are asynchronous "
-            "background rewrites, not row-level updates, so a merge built on them would "
-            "report SUCCESS before the target had changed. Use CREATE_TABLE or "
-            "OVERWRITE_TABLE on this warehouse, or point [Warehouse] at an engine with "
-            "real UPDATE support."
-        )
-
 
 def create_table_as(conn: Connection, qualified_name: str, select_sql: str) -> None:
-    """Issue CREATE TABLE ... AS SELECT, adding the engine clause ClickHouse requires.
+    """Issue CREATE TABLE ... AS SELECT.
 
-    [ADDITION, 2026-09-20, E2-53] ClickHouse rejects a CREATE TABLE with no
-    explicit table ENGINE outright (Code: 42, "ORDER BY or PRIMARY KEY clause
-    is missing"). cloning.py already solved exactly this — a literal
-    `ENGINE = MergeTree() ORDER BY tuple()` reached via the dialect *name*,
-    never an import — and this module simply had not reused the lesson. One
-    helper now, so the next action added gets it for free.
-
-    `ORDER BY tuple()` because this module has no basis to pick a sort key:
-    MERGE_KEY is a natural key that may repeat, and ROW_ID does not exist
-    until after the table is created.
+    [DEVIATION, 2026-09-20] This briefly carried a ClickHouse branch (a literal
+    `ENGINE = MergeTree() ORDER BY tuple()`, mandatory there and rejected
+    everywhere else). ClickHouse is no longer a supported warehouse — see this
+    module's own docstring — so both supported engines take the plain ANSI
+    form. Kept as a named helper anyway: it is where a future dialect's
+    creation quirk belongs, and having it is what made the ClickHouse quirk a
+    two-line change rather than five call sites.
     """
-    if conn.dialect.name == "clickhouse":
-        conn.execute(
-            text(
-                f"CREATE TABLE {qualified_name} ENGINE = MergeTree() ORDER BY tuple() "
-                f"AS {select_sql}"
-            )
-        )
-        return
     conn.execute(text(f"CREATE TABLE {qualified_name} AS {select_sql}"))
 
 
@@ -400,7 +330,7 @@ def split_object_ref(object_ref: str, *, param_name: str = "TARGET_OBJECT") -> t
     return parts[0], parts[1]
 
 
-def qualify(object_ref: str, database: str, dialect: str = "") -> str:
+def qualify(object_ref: str, database: str) -> str:
     """Prefix a `schema.table` reference with `database` — the ANSI catalog.schema.table form.
 
     [ADDITION] Per explicit instruction: CFG_TASK_PARAMETERS.TARGET_OBJECT (and
@@ -411,21 +341,6 @@ def qualify(object_ref: str, database: str, dialect: str = "") -> str:
     prod without any CFG_ row ever changing across a promotion.
     """
     schema_name, table_name = split_object_ref(object_ref)
-    if dialect == "clickhouse":
-        # [DEVIATION, 2026-09-20, E2-53] ClickHouse names objects
-        # `database.table` — there is no schema level, and a three-part name
-        # is a syntax error. The profile's database wins and the CFG_ row's
-        # schema part is dropped, which keeps the environment-agnostic
-        # property that matters most (the same CFG_ row resolves to a
-        # different real database in dev/uat/prod) and matches what cloning.py
-        # already does there.
-        #
-        # The real cost, flagged rather than hidden: two CFG_ rows that differ
-        # only by schema — `a.customers` and `b.customers` — collide on a
-        # two-level engine. `validate` cannot catch that without knowing the
-        # dialect, so it is a documented limit of pointing [Warehouse] at
-        # ClickHouse rather than something the engine resolves.
-        return f"{database}.{table_name}"
     return f"{database}.{schema_name}.{table_name}"
 
 
@@ -493,7 +408,7 @@ def _stage_name(task_run_id: int) -> str:
     return f"etl_stage_{task_run_id}"
 
 
-def _hash_expression(columns: list[str], alias: str, dialect: str) -> str:
+def _hash_expression(columns: list[str], alias: str) -> str:
     """Build an MD5 hash expression over `columns`, NULL-safe, for change detection.
 
     [ADDITION] "scd tables should also have hashkey created by merge_compare
@@ -508,54 +423,23 @@ def _hash_expression(columns: list[str], alias: str, dialect: str) -> str:
     to NULL, which would make every NULL-containing row hash identically
     regardless of its other values.
     """
-    # [DEVIATION, 2026-09-20, E2-31] ClickHouse needs a different cast target,
-    # verified directly against the local container: CAST(col AS VARCHAR) on a
-    # nullable column raises CANNOT_INSERT_NULL_IN_ORDINARY_COLUMN the moment
-    # any value is NULL, and the surrounding COALESCE cannot rescue it because
-    # the cast is evaluated first. Nullable(String) casts cleanly for nullable
-    # and non-nullable columns alike, so COALESCE then does its job.
-    cast_type = "Nullable(String)" if dialect == "clickhouse" else "VARCHAR"
-    parts = " || '|' || ".join(f"COALESCE(CAST({alias}.{c} AS {cast_type}), '')" for c in columns)
-    if dialect == "clickhouse":
-        # [DEVIATION, 2026-09-20, E2-31] Verified directly against the local
-        # ClickHouse, not assumed: its MD5() returns FixedString(16) — raw
-        # bytes — where Postgres's returns 32 hex characters. Storing that in
-        # HASH_KEY VARCHAR(32) is simply wrong, so hex() brings it back to the
-        # same shape every other dialect produces. Keyed off the dialect
-        # *name*, never an import, the pattern cloning.py already established
-        # for its own ClickHouse-specific DDL.
-        return f"lower(hex(MD5({parts})))"
+    # ANSI CAST, not Postgres's `::text` shorthand — this module avoids the
+    # shorthand everywhere. Both supported engines return MD5 as 32 hex
+    # characters, which is what HASH_KEY VARCHAR(32) expects.
+    parts = " || '|' || ".join(f"COALESCE(CAST({alias}.{c} AS VARCHAR), '')" for c in columns)
     return f"MD5({parts})"
 
 
 def _build_stage(
     conn: Connection, task_run_id: int, select_sql: str, *, empty: bool = False
 ) -> str:
-    """Materialize `select_sql` into a uniquely-named staging table; return its name.
-
-    [DEVIATION, 2026-09-20, E2-53] A *temporary* table everywhere except
-    ClickHouse, where it must be an ordinary one. Found by the first test ever
-    to run a SQL action against ClickHouse: its temporary tables are
-    session-scoped, and clickhouse-sqlalchemy's HTTP driver issues each
-    statement in its own session — so the stage vanished between the CREATE
-    and the very next `SELECT COUNT(*)` from it ("Code: 60. Unknown table
-    expression identifier 'etl_stage_5924'"). Every action builds a stage, so
-    this blocked the whole vocabulary there, not one action.
-
-    The name is already unique per task run and `_drop_stage` already removes
-    it, so the practical difference is that a ClickHouse stage left behind by
-    a hard crash is visible until the next run of that task drops it — worth
-    knowing, and the reason the name is unmistakably prefixed.
-    """
+    """Materialize `select_sql` into a uniquely-named temporary table; return its name."""
     stage = _stage_name(task_run_id)
     conn.execute(text(f"DROP TABLE IF EXISTS {stage}"))
     # ANSI-portable "no rows, same shape" trick for `empty` — used by
     # SETUP_TABLE, which only ever wants the column shape, never real data.
     body = f"SELECT * FROM ({select_sql}) AS etl_src WHERE 1=0" if empty else select_sql
-    if conn.dialect.name == "clickhouse":
-        create_table_as(conn, stage, body)
-    else:
-        conn.execute(text(f"CREATE TEMPORARY TABLE {stage} AS {body}"))
+    conn.execute(text(f"CREATE TEMPORARY TABLE {stage} AS {body}"))
     return stage
 
 
@@ -606,7 +490,7 @@ def _check_or_evolve_schema(
     missing_audit_columns = [c for c in required_audit_columns if c.lower() not in target_name_set]
     if missing_audit_columns:
         raise HandlerError(
-            f"{qualify(target_object, database, conn.dialect.name)}: target table already "
+            f"{qualify(target_object, database)}: target table already "
             "exists but is missing "
             f"the audit column(s) {missing_audit_columns} that SQL_ACTION={action} requires — "
             "run a SETUP_TABLE task against it first, or fix its schema by hand. This check "
@@ -627,7 +511,7 @@ def _check_or_evolve_schema(
     missing_in_stage = [n for n in target_business_names if n.lower() not in stage_name_set]
     if missing_in_stage:
         raise SchemaMismatchError(
-            f"{qualify(target_object, database, conn.dialect.name)}: staged SELECT is "
+            f"{qualify(target_object, database)}: staged SELECT is "
             "missing column(s) "
             f"{missing_in_stage} that the target already has — schema evolution only adds "
             "columns, it never removes them"
@@ -636,7 +520,7 @@ def _check_or_evolve_schema(
     new_columns = [n for n in stage_names if n.lower() not in target_business_set]
     if not schema_evolution:
         raise SchemaMismatchError(
-            f"{qualify(target_object, database, conn.dialect.name)}: staged SELECT has "
+            f"{qualify(target_object, database)}: staged SELECT has "
             "new column(s) "
             f"{new_columns} not present in the target, and SCHEMA_EVOLUTION is false for "
             "this task"
@@ -673,21 +557,16 @@ def _evolve_schema(
     }
     engine_cols = [name for name, _ in target_columns if name.lower() in engine_managed]
 
-    nullable = conn.dialect.name == "clickhouse"
     select_parts = [
-        (
-            f"t.{name}"
-            if name.lower() in old_business_types
-            else f"CAST(NULL AS {f'Nullable({dtype})' if nullable else dtype}) AS {name}"
-        )
+        (f"t.{name}" if name.lower() in old_business_types else f"CAST(NULL AS {dtype}) AS {name}")
         for name, dtype in stage_columns
     ]
     select_parts.extend(f"t.{col}" for col in engine_cols)
 
     schema_name, table_name = split_object_ref(target_object)
     evolve_table = f"{table_name}__etl_evolve"
-    qualified_target = qualify(target_object, database, conn.dialect.name)
-    qualified_evolve = qualify(f"{schema_name}.{evolve_table}", database, conn.dialect.name)
+    qualified_target = qualify(target_object, database)
+    qualified_evolve = qualify(f"{schema_name}.{evolve_table}", database)
 
     conn.execute(text(f"DROP TABLE IF EXISTS {qualified_evolve}"))
     create_table_as(
@@ -726,10 +605,7 @@ def _add_hash_key(conn: Connection, stage: str, merge_compare_columns: list[str]
     # there is not ANSI and several dialects reject it. The hash expression is
     # built against the table name instead.
     conn.execute(
-        text(
-            f"UPDATE {stage} SET HASH_KEY = "
-            f"{_hash_expression(merge_compare_columns, stage, conn.dialect.name)}"
-        )
+        text(f"UPDATE {stage} SET HASH_KEY = " f"{_hash_expression(merge_compare_columns, stage)}")
     )
 
 
@@ -800,13 +676,17 @@ def _dedupe_stage(
 ROW_ID_COLUMN = "ROW_ID"
 
 
+def _sequence_name(table_name: str) -> str:
+    return f"etl_seq_{table_name}_{ROW_ID_COLUMN.lower()}"
+
+
 def _add_surrogate_key(conn: Connection, target_object: str, database: str) -> None:
     """Add the engine-generated identity primary key to a freshly created target.
 
-    [DEVIATION, 2026-09-20, E2-54] Replaces the `PRIMARY_KEY` parameter added
-    earlier this iteration, which named an existing *business* column. Per
-    explicit correction — "all primary keys are basically identity columns.
-    merge keys are natural keys" — the engine generates the key instead.
+    [DEVIATION, 2026-09-20, E2-54] Replaces the `PRIMARY_KEY` parameter, which
+    named an existing *business* column. Per explicit correction — "all primary
+    keys are basically identity columns. merge keys are natural keys" — the
+    engine generates the key instead.
 
     The parameter version was not merely awkward, it was unusable on an SCD2
     target: SCD2 holds several rows per merge key by design, so declaring the
@@ -820,29 +700,41 @@ def _add_surrogate_key(conn: Connection, target_object: str, database: str) -> N
     should name this column.
 
     [CHOICE] Unprefixed `ROW_ID`, matching the other engine-managed columns
-    (PIPELINE_RUN_ID, HASH_KEY, CREATE_DATE) rather than introducing a
-    prefix convention for one column.
+    (PIPELINE_RUN_ID, HASH_KEY, CREATE_DATE) rather than introducing a prefix
+    convention for one column.
+
+    [DEVIATION, 2026-09-20] DuckDB takes a different route, verified against a
+    real database: it rejects `ALTER TABLE ... ADD COLUMN ... GENERATED ALWAYS
+    AS IDENTITY` outright ("Adding generated columns after table creation is
+    not supported yet"), but a sequence plus a column `DEFAULT nextval(...)`
+    behaves identically — it backfills the rows already there and auto-fills
+    every later insert.
     """
-    if conn.dialect.name == "clickhouse":
-        # ClickHouse has neither identity columns nor ALTER ... ADD PRIMARY
-        # KEY — ordering is a table-engine property fixed at CREATE time.
-        # Skipped rather than failed, same as the previous implementation.
-        return
-    qualified = qualify(target_object, database, conn.dialect.name)
-    conn.execute(
-        text(
-            f"ALTER TABLE {qualified} ADD COLUMN {ROW_ID_COLUMN} BIGINT "
-            "GENERATED ALWAYS AS IDENTITY"
+    qualified = qualify(target_object, database)
+    _, table_name = split_object_ref(target_object)
+    if conn.dialect.name == "duckdb":
+        sequence = _sequence_name(table_name)
+        conn.execute(text(f"DROP SEQUENCE IF EXISTS {sequence}"))
+        conn.execute(text(f"CREATE SEQUENCE {sequence} START 1"))
+        conn.execute(
+            text(
+                f"ALTER TABLE {qualified} ADD COLUMN {ROW_ID_COLUMN} BIGINT "
+                f"DEFAULT nextval('{sequence}')"
+            )
         )
-    )
+    else:
+        conn.execute(
+            text(
+                f"ALTER TABLE {qualified} ADD COLUMN {ROW_ID_COLUMN} BIGINT "
+                "GENERATED ALWAYS AS IDENTITY"
+            )
+        )
     conn.execute(text(f"ALTER TABLE {qualified} ADD PRIMARY KEY ({ROW_ID_COLUMN})"))
 
 
 def _restore_surrogate_key(conn: Connection, target_object: str, database: str) -> None:
-    """Re-promote a carried-across ROW_ID column to an identity primary key."""
-    if conn.dialect.name == "clickhouse":
-        return
-    qualified = qualify(target_object, database, conn.dialect.name)
+    """Re-promote a carried-across ROW_ID column to a primary key after a rebuild."""
+    qualified = qualify(target_object, database)
     schema_name, table_name = split_object_ref(target_object)
     has_row_id = any(
         name.lower() == ROW_ID_COLUMN.lower()
@@ -852,26 +744,42 @@ def _restore_surrogate_key(conn: Connection, target_object: str, database: str) 
         # A target that predates the surrogate key: give it one now.
         _add_surrogate_key(conn, target_object, database)
         return
-    # NOT NULL first: Postgres refuses to attach an identity to a nullable
-    # column ("must be declared NOT NULL before identity can be added"), and
-    # the column arrives nullable because CREATE TABLE AS SELECT does not
-    # carry the constraint across.
-    conn.execute(text(f"ALTER TABLE {qualified} ALTER COLUMN {ROW_ID_COLUMN} SET NOT NULL"))
-    conn.execute(
-        text(
-            f"ALTER TABLE {qualified} ALTER COLUMN {ROW_ID_COLUMN} "
-            "ADD GENERATED ALWAYS AS IDENTITY"
-        )
+
+    next_value = int(
+        conn.execute(
+            text(f"SELECT COALESCE(MAX({ROW_ID_COLUMN}), 0) + 1 FROM {qualified}")
+        ).scalar_one()
     )
-    next_value = conn.execute(
-        text(f"SELECT COALESCE(MAX({ROW_ID_COLUMN}), 0) + 1 FROM {qualified}")
-    ).scalar_one()
-    conn.execute(
-        text(
-            f"ALTER TABLE {qualified} ALTER COLUMN {ROW_ID_COLUMN} "
-            f"RESTART WITH {int(next_value)}"
+    if conn.dialect.name == "duckdb":
+        # The sequence survived the table rebuild (it is a separate object),
+        # but its position has to skip whatever the carried-across values
+        # already occupy.
+        sequence = _sequence_name(table_name)
+        conn.execute(text(f"DROP SEQUENCE IF EXISTS {sequence}"))
+        conn.execute(text(f"CREATE SEQUENCE {sequence} START {next_value}"))
+        conn.execute(
+            text(
+                f"ALTER TABLE {qualified} ALTER COLUMN {ROW_ID_COLUMN} "
+                f"SET DEFAULT nextval('{sequence}')"
+            )
         )
-    )
+    else:
+        # NOT NULL first: Postgres refuses to attach an identity to a nullable
+        # column, and the column arrives nullable because CREATE TABLE AS
+        # SELECT does not carry the constraint across.
+        conn.execute(text(f"ALTER TABLE {qualified} ALTER COLUMN {ROW_ID_COLUMN} SET NOT NULL"))
+        conn.execute(
+            text(
+                f"ALTER TABLE {qualified} ALTER COLUMN {ROW_ID_COLUMN} "
+                "ADD GENERATED ALWAYS AS IDENTITY"
+            )
+        )
+        conn.execute(
+            text(
+                f"ALTER TABLE {qualified} ALTER COLUMN {ROW_ID_COLUMN} "
+                f"RESTART WITH {next_value}"
+            )
+        )
     conn.execute(text(f"ALTER TABLE {qualified} ADD PRIMARY KEY ({ROW_ID_COLUMN})"))
 
 
@@ -895,15 +803,14 @@ def _create_target_shape(
     TRUNCATE-and-insert, or the merge's NOT EXISTS leg — is what populates it,
     and stamps the audit columns correctly while doing so.
     """
-    dialect = conn.dialect.name
     select_parts = [f"s.{name}" for name, _ in _fetch_columns(conn, stage)]
-    select_parts.append(f"CAST(NULL AS {pipeline_run_id_type(dialect)}) AS PIPELINE_RUN_ID")
+    select_parts.append("CAST(NULL AS BIGINT) AS PIPELINE_RUN_ID")
     select_parts.extend(
-        f"CAST(NULL AS {audit_column_type(col, dialect)}) AS {col}" for col in audit_columns
+        f"CAST(NULL AS {AUDIT_COLUMN_TYPES[col]}) AS {col}" for col in audit_columns
     )
     create_table_as(
         conn,
-        qualify(target_object, database, dialect),
+        qualify(target_object, database),
         f"SELECT {', '.join(select_parts)} FROM {stage} AS s WHERE 1 = 0",
     )
     _add_surrogate_key(conn, target_object, database)
@@ -984,13 +891,12 @@ def _create_table(
 ) -> HandlerResult:
     stage = _build_stage(conn, ctx.task_run_id, select_sql)
     source_count = _count(conn, f"SELECT COUNT(*) FROM {stage}", {})
-    qualified_target = qualify(target_object, database, conn.dialect.name)
+    qualified_target = qualify(target_object, database)
     conn.execute(text(f"DROP TABLE IF EXISTS {qualified_target}"))
-    run_id_type = pipeline_run_id_type(conn.dialect.name)
     create_table_as(
         conn,
         qualified_target,
-        f"SELECT s.*, CAST({ctx.pipeline_run_id} AS {run_id_type}) AS PIPELINE_RUN_ID "
+        f"SELECT s.*, CAST({ctx.pipeline_run_id} AS BIGINT) AS PIPELINE_RUN_ID "
         f"FROM {stage} AS s",
     )
     _add_surrogate_key(conn, target_object, database)
@@ -1013,13 +919,12 @@ def _setup_table(
 
     stage = _build_stage(conn, ctx.task_run_id, select_sql, empty=True)
     stage_columns = _fetch_columns(conn, stage)
-    dialect = conn.dialect.name
     select_parts = [f"s.{name}" for name, _ in stage_columns]
-    select_parts.append(f"CAST(NULL AS {pipeline_run_id_type(dialect)}) AS PIPELINE_RUN_ID")
+    select_parts.append("CAST(NULL AS BIGINT) AS PIPELINE_RUN_ID")
     for col in audit_columns:
-        select_parts.append(f"CAST(NULL AS {audit_column_type(col, dialect)}) AS {col}")
+        select_parts.append(f"CAST(NULL AS {AUDIT_COLUMN_TYPES[col]}) AS {col}")
 
-    qualified_target = qualify(target_object, database, conn.dialect.name)
+    qualified_target = qualify(target_object, database)
     conn.execute(text(f"DROP TABLE IF EXISTS {qualified_target}"))
     create_table_as(conn, qualified_target, f"SELECT {', '.join(select_parts)} FROM {stage} AS s")
     _add_surrogate_key(conn, target_object, database)
@@ -1046,7 +951,7 @@ def _overwrite_table(
         schema_evolution=_schema_evolution_enabled(ctx),
     )
     stage_columns = [name for name, _ in _fetch_columns(conn, stage)]
-    qualified_target = qualify(target_object, database, conn.dialect.name)
+    qualified_target = qualify(target_object, database)
     conn.execute(text(f"TRUNCATE TABLE {qualified_target}"))
     columns_sql = ", ".join(stage_columns)
     conn.execute(
@@ -1075,7 +980,6 @@ def _scd1_merge(
 ) -> HandlerResult:
     stage = _build_stage(conn, ctx.task_run_id, select_sql)
     source_count = _count(conn, f"SELECT COUNT(*) FROM {stage}", {})
-    require_update_support(conn, "SCD1_MERGE")
     stage = _dedupe_stage(
         conn,
         stage=stage,
@@ -1097,7 +1001,7 @@ def _scd1_merge(
     # a matched-and-changed row must have its target-side HASH_KEY refreshed
     # too, or it would permanently compare as "changed" on every future run.
     non_key_columns = [c for c in stage_columns if c.lower() not in {k.lower() for k in merge_key}]
-    qualified_target = qualify(target_object, database, conn.dialect.name)
+    qualified_target = qualify(target_object, database)
 
     key_match = " AND ".join(f"t.{k} = s.{k}" for k in merge_key)
     # A single HASH_KEY comparison, not an OR-chain over every compare
@@ -1168,7 +1072,6 @@ def _scd2_merge(
 ) -> HandlerResult:
     stage = _build_stage(conn, ctx.task_run_id, select_sql)
     source_count = _count(conn, f"SELECT COUNT(*) FROM {stage}", {})
-    require_update_support(conn, "SCD2_MERGE")
     stage = _dedupe_stage(
         conn,
         stage=stage,
@@ -1186,7 +1089,7 @@ def _scd2_merge(
     )
     _add_hash_key(conn, stage, merge_compare_columns)
     stage_columns = [name for name, _ in _fetch_columns(conn, stage)]
-    qualified_target = qualify(target_object, database, conn.dialect.name)
+    qualified_target = qualify(target_object, database)
 
     key_match = " AND ".join(f"t.{k} = s.{k}" for k in merge_key)
     # A single HASH_KEY comparison, not an OR-chain over every compare
@@ -1294,9 +1197,7 @@ def _drop_table(
             f"(task_id={sibling.task_id}) hasn't completed successfully yet under this run "
             f"(status={sibling_status!r}) — DROP_TABLE requires that task to have already run"
         )
-    conn.execute(
-        text(f"DROP TABLE IF EXISTS {qualify(target_object, database, conn.dialect.name)}")
-    )
+    conn.execute(text(f"DROP TABLE IF EXISTS {qualify(target_object, database)}"))
     return HandlerResult()
 
 
@@ -1319,7 +1220,7 @@ def _delete_rows(
         source_sql_raw, refresh_type=ctx.refresh_type, pipeline_run_id=ctx.pipeline_run_id
     )
     stage = _build_stage(conn, ctx.task_run_id, select_sql)
-    qualified_target = qualify(target_object, database, conn.dialect.name)
+    qualified_target = qualify(target_object, database)
     key_match = " AND ".join(f"t.{k} = s.{k}" for k in merge_key)
 
     delete_count = _count(
@@ -1342,7 +1243,7 @@ def _delete_rows(
         }
         if "delete_flag" not in target_name_set:
             raise HandlerError(
-                f"{qualify(target_object, database, conn.dialect.name)}: target table is "
+                f"{qualify(target_object, database)}: target table is "
                 "missing the DELETE_FLAG "
                 "column that a soft DELETE_ROWS (HARD_DELETE not 'true') requires — run a "
                 "SETUP_TABLE task against it first, fix its schema by hand, or set "

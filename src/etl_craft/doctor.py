@@ -77,7 +77,8 @@ def _warehouse_check(config: ConnectorConfig) -> list[CheckResult]:
                 "no [Warehouse] section configured (only needed for SQL/BUSINESS_RULES tasks)",
             )
         ]
-    results = [_secret_check(config, "Data DB", config.warehouse.active)]
+    profile = config.warehouse.active
+    results = [] if profile.auth_mode == "none" else [_secret_check(config, "Data DB", profile)]
     try:
         data_engine = build_data_engine(config)
         try:

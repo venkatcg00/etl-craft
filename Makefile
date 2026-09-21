@@ -2,9 +2,9 @@
 
 # Bring up a local Postgres 16 with src/etl_craft/sql/schema.sql already applied
 # (docker-entrypoint-initdb.d only runs on a fresh volume, so this is a
-# no-op on an already-initialized one — use db-reset to force a clean slate)
-# plus a local ClickHouse, which stands in as a genuinely different
-# SQLAlchemy dialect for warehouse.py's own tests (see docker-compose.yml).
+# no-op on an already-initialized one — use db-reset to force a clean slate).
+# The second supported warehouse, DuckDB, is embedded and needs no service
+# at all — its tests use a tmp_path file (see tests/conftest.py).
 db-up:
 	docker compose up -d --wait
 

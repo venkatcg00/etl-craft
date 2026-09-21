@@ -81,7 +81,13 @@ def resolve_config_path(explicit: Path | str | None = None) -> Path:
 
 VALID_MODES = frozenset({"local", "orchestrator"})
 VALID_SOURCE_TYPES = frozenset({"file", "environment"})
-VALID_AUTH_MODES = frozenset({"password", "token", "sso", "key_file"})
+# [ADDITION, 2026-09-20] "none" joins the list for embedded warehouses like
+# DuckDB, which is a file rather than a server: there is no user to be and
+# no password to present. [Email] already uses the same value for the same
+# reason, so this is an existing vocabulary rather than a new one.
+VALID_AUTH_MODES = frozenset({"none", "password", "token", "sso", "key_file"})
+# Modes where a `user` is meaningless and therefore not required.
+AUTH_MODES_WITHOUT_USER = frozenset({"none"})
 VALID_CLONING_SCOPES = frozenset({"cfg", "aud", "all"})
 # [ADDITION] EMAIL_ALERT's own, smaller auth vocabulary — per explicit
 # instruction, the transport is SMTP. Many internal relays accept anonymous
@@ -383,17 +389,18 @@ def _parse_profile(
     jdbc_url = raw.get("jdbc_url")
     user = raw.get("user")
     auth_mode = raw.get("auth_mode")
-    if not jdbc_url or not user or auth_mode not in VALID_AUTH_MODES:
+    needs_user = auth_mode not in AUTH_MODES_WITHOUT_USER
+    if not jdbc_url or (needs_user and not user) or auth_mode not in VALID_AUTH_MODES:
         raise ConfigError(
-            f"{path}: {section_name}.Profiles.{profile_name} needs jdbc_url, user, "
-            f"and auth_mode in {sorted(VALID_AUTH_MODES)}"
+            f"{path}: {section_name}.Profiles.{profile_name} needs jdbc_url, "
+            f"auth_mode in {sorted(VALID_AUTH_MODES)}" + (", and user" if needs_user else "")
         )
     extra = {k: v for k, v in raw.items() if k not in {"jdbc_url", "user", "auth_mode"}}
     return ConnectionProfile(
         section=section_name,
         name=profile_name,
         jdbc_url=jdbc_url,
-        user=user,
+        user=user or "",
         auth_mode=auth_mode,
         extra=extra,
     )

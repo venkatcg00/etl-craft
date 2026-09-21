@@ -141,8 +141,11 @@ editing a query invalidates them automatically.
 - Python 3.11+
 - Postgres for the Engine DB (its constraint guarantees are load-bearing — a partial unique
   index is what makes run-id creation race-safe)
-- Optionally, any SQLAlchemy-supported warehouse for the data itself. Dialects are optional
-  extras you install yourself: `uv add "etl-craft[clickhouse]"`
+- A warehouse for the data itself, if you run `SQL` or `BUSINESS_RULES` tasks. **Postgres
+  and DuckDB are the two supported warehouses** and both ship working out of the box —
+  DuckDB is embedded, so there is no server to stand up. Any other SQLAlchemy-supported
+  engine will likely work, but is an optional dialect you install yourself (`uv add
+  sqlalchemy-<dialect>`) and is not covered by the test suite.
 
 ## License
 

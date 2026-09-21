@@ -53,12 +53,23 @@ Postgres:
 Warehouse:
   # The Data DB — where your actual tables live. Optional: only SQL and
   # BUSINESS_RULES tasks need it. Exactly one warehouse per deployment.
+  #
+  # Postgres and DuckDB are the two supported warehouses. Both profiles below
+  # are real and working; pick one as Active_profile.
   Active_profile: dev
   Profiles:
     dev:
       jdbc_url: jdbc:postgresql://localhost:55432/analytics
       user: etl_craft
       auth_mode: password
+    # DuckDB is embedded: the URL names a file, not a server, so there is
+    # nothing to authenticate to and no `user`. `jdbc:duckdb:` on its own
+    # means an in-memory database. The catalog name qualify()'s three-part
+    # database.schema.table form uses comes from the file stem — here,
+    # `warehouse`.
+    duck:
+      jdbc_url: jdbc:duckdb:/var/lib/etl-craft/warehouse.duckdb
+      auth_mode: none
 
 Email:
   # Optional. Only needed if any active task uses HANDLER=EMAIL_ALERT.

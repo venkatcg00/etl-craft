@@ -1507,3 +1507,48 @@ ClickHouse container before being acted on, rather than taken from the write-up.
   correct for Postgres and broke a dialect the project claims to support, and it survived a full
   iteration because no test ran a SQL action against a second dialect. The fix that matters is
   the test shape, not the type string.
+
+---
+
+# Superseded: ClickHouse is no longer a supported warehouse (2026-09-21)
+
+Per explicit decision after round 3 landed:
+
+> "okay, then clickhouse goes away. DuckDB is our warehouse now. duckdb and postgresql are the
+> ones we want to majorly support. because clickhouse is not really great on ansi"
+
+**This supersedes E2-53 in full**, and with it the "Also worth carrying forward" notes directly
+above. Everything E2-53 built for ClickHouse — the per-dialect `AUDIT_COLUMN_TYPES`, the shared
+`create_table_as` engine clause, the `Nullable(String)` hash cast, the non-temporary staging
+table, the dialect argument on `qualify()`, and the up-front merge refusal — is **deleted**, not
+kept behind a flag.
+
+The decision is the one E2-53's own write-up argued for without taking. That entry had to record
+that `SCD1_MERGE`/`SCD2_MERGE` **cannot work** on ClickHouse (no row-level `UPDATE`), that two
+`CFG_` rows differing only by schema **collide** on its two-level namespace, and that its
+session-scoped temp tables broke the staging step every single action depends on. It closed by
+saying the scope question — "how supported is ClickHouse actually?" — should be answered first.
+It has been, in the other direction: half the action vocabulary did not work there and could not
+be made to, so five dialect branches were being carried for a dialect nobody runs.
+
+**DuckDB replaces it as the second supported warehouse**, and closes the real gap E2-53 identified
+— that the whole action vocabulary was only ever exercised against one dialect. Unlike ClickHouse,
+DuckDB runs **all** of it, merges included, so the end-to-end test is a genuine second-dialect
+proof rather than a subset. It is also embedded, which is why `duckdb-engine` became a hard
+dependency (a scoped, documented reversal of the Non-goal on bundling dialects — there is no
+server to stand up, so shipping it is what makes `setup` reach a working warehouse in one step).
+
+The two ClickHouse-shaped hazards that were documented as permanent limits are gone with it: the
+`database.schema.table` collision (`qualify()` is back to always emitting three parts) and the
+merge refusal. One genuine DuckDB branch replaces the five: it rejects adding an identity column
+to an existing table, so `ROW_ID` uses a sequence default there.
+
+**The lesson from E2-33 still stands and is the reason this is a net improvement, not a retreat**:
+the fix that matters is the test shape, not the type string. There is still a second real dialect
+in CI — it is just one where passing tests mean the vocabulary works, rather than one where they
+mean two thirds of it does.
+
+See `CLAUDE.md`'s dated entry under "Where things stand" for the full change list, including a
+DuckDB-specific hazard found by probing: a forked child's writes are silently lost if the parent
+had the warehouse file open at fork time. The engine is safe by construction; the constraint is
+written into `runner.py` where a future change could break it.
