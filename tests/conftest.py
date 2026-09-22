@@ -65,6 +65,33 @@ def postgres_engine() -> Engine:
     engine.dispose()
 
 
+TRINO_URL = os.environ.get("ETL_CRAFT_TEST_TRINO_URL", "trino://etl@localhost:58080/iceberg")
+
+
+@pytest.fixture(scope="session")
+def trino_engine() -> Engine:
+    """Build a real Trino engine over the local Iceberg REST catalog + MinIO.
+
+    [ADDITION, 2026-09-22] This is the warehouse shape the project supports
+    for everything except Postgres -- a SQL engine over Iceberg -- and until
+    this existed there was no reachable one, so the Iceberg code path was
+    tested only for producing well-formed SQL. Databricks and Snowflake both
+    need a cloud account, and Snowflake cannot use a local MinIO at all (its
+    external volumes are read by Snowflake's own cloud service). Trino + REST
+    + MinIO runs locally and in CI and exercises the same code path.
+
+    Skips, like the Postgres fixture, rather than failing when the stack is
+    not up: `pytest -q` alone never requires Docker.
+    """
+    if not _reachable(TRINO_URL):
+        pytest.skip(f"Trino not reachable at {TRINO_URL} — run `make db-up`")
+    engine = create_engine(TRINO_URL)
+    with engine.begin() as conn:
+        conn.execute(text("CREATE SCHEMA IF NOT EXISTS iceberg.etltest"))
+    yield engine
+    engine.dispose()
+
+
 @pytest.fixture
 def duckdb_engine(tmp_path) -> Engine:
     """Build a real DuckDB engine on a throwaway file — the second supported warehouse.

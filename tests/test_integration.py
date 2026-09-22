@@ -4196,6 +4196,112 @@ def test_data_db_times_out_with_a_clear_reason_when_the_warehouse_is_busy(
         holder.join(timeout=10)
 
 
+def _trino_config() -> ConnectorConfig:
+    """Engine DB on real Postgres, Data DB on the real local Trino/Iceberg stack."""
+    return ConnectorConfig(
+        mode="local",
+        source=SourceConfig(type="environment"),
+        postgres=ConnectionSection(
+            active_profile="dev",
+            profiles={
+                "dev": ConnectionProfile(
+                    section="POSTGRES",
+                    name="dev",
+                    jdbc_url="jdbc:postgresql://localhost:55432/etl_craft",
+                    user="etl_craft",
+                    auth_mode="password",
+                )
+            },
+        ),
+        cloning=CloningConfig(),
+        warehouse=ConnectionSection(
+            active_profile="dev",
+            profiles={
+                "dev": ConnectionProfile(
+                    section="WAREHOUSE",
+                    name="dev",
+                    # auth_mode=none: an unauthenticated local Trino. Not only
+                    # embedded warehouses use it, which is what made the
+                    # host-dropping bug in _none_creator visible.
+                    jdbc_url="jdbc:trino://localhost:58080/iceberg/etltest",
+                    user="etl",
+                    auth_mode="none",
+                )
+            },
+        ),
+    )
+
+
+def test_sql_actions_run_end_to_end_against_real_trino_iceberg(
+    postgres_engine, trino_engine, committed_pipeline
+):
+    # The Iceberg execution path, against a real SQL engine over real Iceberg
+    # tables in real object storage -- the gap that was previously stated as
+    # unverified, since Databricks and Snowflake both need a cloud account.
+    #
+    # Four things only a real run can prove, each of which was genuinely
+    # broken when this first ran:
+    #   * Trino has no temporary tables, so the stage had to become an
+    #     ordinary (still uniquely-named, still explicitly dropped) table.
+    #   * Trino's md5() takes and returns varbinary, so HASH_KEY needed
+    #     hex-encoding to be the 32 characters VARCHAR(32) expects.
+    #   * Trino's UPDATE rejects a table alias, so correlated updates qualify
+    #     by table name instead.
+    #   * Iceberg has no identity columns, so ROW_ID is computed -- and has to
+    #     stay stable for an updated row while a new row gets the next value.
+    config = _trino_config()
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "ice_merge")
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {
+            "SQL_ACTION": "SCD1_MERGE",
+            "TARGET_OBJECT": "etltest.dim_trino",
+            "SOURCE_SQL": "SELECT id, name FROM iceberg.etltest.src_trino WHERE 1=1",
+            "MERGE_KEY": "id",
+            "MERGE_COMPARE_COLUMNS": "name",
+        },
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+    with trino_engine.begin() as conn:
+        for table in ("src_trino", "dim_trino"):
+            conn.execute(text(f"DROP TABLE IF EXISTS iceberg.etltest.{table}"))
+        conn.execute(text("CREATE TABLE iceberg.etltest.src_trino AS SELECT 1 AS id, 'a' AS name"))
+
+    first = run_task(postgres_engine, config, "TEST_CONCURRENT_PL", "ice_merge")
+    assert first.status == "SUCCESS", first.message
+
+    with trino_engine.connect() as conn:
+        rows = conn.execute(
+            text("SELECT id, name, ROW_ID, length(HASH_KEY) FROM iceberg.etltest.dim_trino")
+        ).all()
+        # A genuine Iceberg table, not whatever the engine's default is.
+        created = conn.execute(text("SHOW CREATE TABLE iceberg.etltest.dim_trino")).scalar_one()
+    assert rows == [(1, "a", 1, 32)]
+    assert "format = 'PARQUET'" in created
+
+    # One changed row and one new row: the correlated UPDATE leg and the
+    # computed-ROW_ID leg, in one pass.
+    with trino_engine.begin() as conn:
+        conn.execute(text("UPDATE iceberg.etltest.src_trino SET name = 'b' WHERE id = 1"))
+        conn.execute(text("INSERT INTO iceberg.etltest.src_trino VALUES (2, 'c')"))
+    with postgres_engine.begin() as conn:
+        conn.execute(
+            text("UPDATE AUD_TASK_RUN_LOG SET STATUS = 'FAILED' WHERE TASK_ID = :id"),
+            {"id": task_id},
+        )
+
+    second = run_task(postgres_engine, config, "TEST_CONCURRENT_PL", "ice_merge")
+    assert second.status == "SUCCESS", second.message
+
+    with trino_engine.connect() as conn:
+        rows = conn.execute(
+            text("SELECT id, name, ROW_ID FROM iceberg.etltest.dim_trino ORDER BY id")
+        ).all()
+    # The updated row kept its ROW_ID; the new one took the next value.
+    assert rows == [(1, "b", 1), (2, "c", 2)]
+
+
 def test_sql_actions_assign_row_ids_on_an_iceberg_backed_warehouse(
     postgres_engine, committed_pipeline, data_db_tables, monkeypatch
 ):

@@ -333,7 +333,7 @@ def _password_creator(profile: ConnectionProfile, secret: str) -> Callable[[], A
 
 
 def _none_creator(profile: ConnectionProfile, secret: str) -> Callable[[], Any]:
-    """Connect with no credentials at all — for an embedded warehouse like DuckDB.
+    """Connect with no credentials — an embedded warehouse, or an unauthenticated server.
 
     [ADDITION, 2026-09-20] DuckDB is a file, not a server: there is no user to
     be and no password to present, so requiring one would mean inventing a
@@ -341,14 +341,30 @@ def _none_creator(profile: ConnectionProfile, secret: str) -> Callable[[], Any]:
     `[Email]` already uses the same value for the same reason, so this is an
     existing vocabulary rather than a new one.
 
+    [DEVIATION, 2026-09-22] It is no longer only about embedded warehouses.
+    The first version built a URL from the file path alone, dropping host and
+    port — correct for DuckDB and silently wrong for anything else, which
+    surfaced the moment a Trino cluster with authentication disabled (an
+    ordinary local/dev setup) tried to connect and the driver resolved the
+    literal hostname "none". A server profile keeps its host, port, user and
+    query; only a pathless one falls back to the file form.
+
     `secret` is accepted and ignored to keep one registry signature.
     """
     del secret
     dialect_name, parts = translate_jdbc_url(profile.jdbc_url)
-    url = URL.create(
-        drivername=dialect_name,
-        database=parts.get("path") or parts["database"],
-    )
+    if parts.get("path"):
+        # Embedded: the path *is* the database, and there is no server.
+        url = URL.create(drivername=dialect_name, database=parts["path"])
+    else:
+        url = URL.create(
+            drivername=dialect_name,
+            username=profile.user or None,
+            host=parts["host"],
+            port=parts["port"],
+            database=parts["database"],
+            query=parts["query"],
+        )
 
     def _connect() -> Any:
         return _dbapi_connect(url)

@@ -97,8 +97,21 @@ jobs:
       - name: mypy
         run: uv run mypy src/etl_craft
 
+      # The Iceberg warehouse (MinIO + Iceberg REST catalog + Trino) comes up
+      # through Compose rather than `services:` above, because it needs an
+      # init container to create the bucket and a config-file mount for
+      # Trino's catalog — neither of which `services:` can express. Postgres
+      # is deliberately excluded here: it is already a service container on
+      # port 55432 and would collide.
+      - name: Start the local Iceberg warehouse (MinIO + REST catalog + Trino)
+        run: docker compose up -d --wait minio minio-init iceberg-rest trino
+
       - name: pytest with coverage (fails under 80%)
         run: uv run pytest -q --cov=etl_craft --cov-report=term-missing
+
+      - name: Stop the Iceberg warehouse
+        if: always()
+        run: docker compose down -v
 
   # [ADDITION, 2026-09-20, E2-28] The gap that hid E2-13: a test suite always
   # running from the git checkout cannot see packaging bugs at all. This builds

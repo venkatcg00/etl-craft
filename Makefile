@@ -1,10 +1,16 @@
 .PHONY: db-up db-down db-reset db-schema-test test coverage typecheck wheel-smoke check
 
-# Bring up a local Postgres 16 with src/etl_craft/sql/schema.sql already applied
-# (docker-entrypoint-initdb.d only runs on a fresh volume, so this is a
-# no-op on an already-initialized one — use db-reset to force a clean slate).
-# The second supported warehouse, DuckDB, is embedded and needs no service
-# at all — its tests use a tmp_path file (see tests/conftest.py).
+# Brings up everything the test suite can use:
+#   * Postgres 16 (the Engine DB) with src/etl_craft/sql/schema.sql applied
+#     — docker-entrypoint-initdb.d only runs on a fresh volume, so this is a
+#     no-op on an already-initialized one; use db-reset to force a clean slate.
+#   * A complete local Iceberg warehouse — MinIO, an Iceberg REST catalog and
+#     Trino — which is what exercises the Iceberg code path for real. That is
+#     the warehouse shape this project supports for everything except
+#     Postgres, and no cloud account is needed for it.
+# DuckDB needs no service at all: it is embedded and its tests use a tmp_path
+# file (see tests/conftest.py). Every one of these skips cleanly if it is not
+# running, so plain `pytest -q` never requires Docker.
 db-up:
 	docker compose up -d --wait
 

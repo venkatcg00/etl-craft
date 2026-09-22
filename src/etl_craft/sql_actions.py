@@ -548,7 +548,11 @@ def _stage_name(task_run_id: int) -> str:
     return f"etl_stage_{task_run_id}"
 
 
-def _hash_expression(columns: list[str], alias: str) -> str:
+# Engines whose md5() takes and returns binary rather than hex text.
+_BINARY_MD5_DIALECTS = frozenset({"trino"})
+
+
+def _hash_expression(columns: list[str], alias: str, dialect_name: str = "") -> str:
     """Build an MD5 hash expression over `columns`, NULL-safe, for change detection.
 
     [ADDITION] "scd tables should also have hashkey created by merge_compare
@@ -564,10 +568,23 @@ def _hash_expression(columns: list[str], alias: str) -> str:
     regardless of its other values.
     """
     # ANSI CAST, not Postgres's `::text` shorthand — this module avoids the
-    # shorthand everywhere. Both supported engines return MD5 as 32 hex
-    # characters, which is what HASH_KEY VARCHAR(32) expects.
+    # shorthand everywhere.
     parts = " || '|' || ".join(f"COALESCE(CAST({alias}.{c} AS VARCHAR), '')" for c in columns)
+    # [DEVIATION, 2026-09-22] The return shape genuinely varies, as the
+    # docstring above always warned. Postgres and DuckDB return 32 hex
+    # characters directly; Trino's md5() takes and returns varbinary, so a
+    # plain MD5(varchar) is a type error and the result needs hex-encoding to
+    # be the VARCHAR(32) HASH_KEY expects. Verified against a real
+    # Trino/Iceberg warehouse, not inferred.
+    if dialect_name in _BINARY_MD5_DIALECTS:
+        return f"lower(to_hex(md5(to_utf8({parts}))))"
     return f"MD5({parts})"
+
+
+# Engines with no temporary tables of any kind. Trino is the one supported
+# here; its stage is an ordinary table, which is safe because the stage name is
+# already unique per task run and _drop_stage removes it on every path.
+NO_TEMPORARY_TABLE_DIALECTS = frozenset({"trino"})
 
 
 def _build_stage(
@@ -579,7 +596,15 @@ def _build_stage(
     # ANSI-portable "no rows, same shape" trick for `empty` — used by
     # SETUP_TABLE, which only ever wants the column shape, never real data.
     body = f"SELECT * FROM ({select_sql}) AS etl_src WHERE 1=0" if empty else select_sql
-    conn.execute(text(f"CREATE TEMPORARY TABLE {stage} AS {body}"))
+    # [DEVIATION, 2026-09-22] Not every engine has temporary tables. Trino has
+    # none at all ("mismatched input" on CREATE TEMPORARY TABLE — verified
+    # against a real Trino/Iceberg warehouse), and it is the engine shape this
+    # project supports for plain Iceberg. The stage is already given a unique,
+    # task-run-scoped name and dropped explicitly by _drop_stage on every
+    # path, so an ordinary table behaves the same; TEMPORARY only ever added
+    # automatic cleanup on top of cleanup this module already does itself.
+    keyword = "TABLE" if conn.dialect.name in NO_TEMPORARY_TABLE_DIALECTS else "TEMPORARY TABLE"
+    conn.execute(text(f"CREATE {keyword} {stage} AS {body}"))
     return stage
 
 
@@ -745,7 +770,10 @@ def _add_hash_key(conn: Connection, stage: str, merge_compare_columns: list[str]
     # there is not ANSI and several dialects reject it. The hash expression is
     # built against the table name instead.
     conn.execute(
-        text(f"UPDATE {stage} SET HASH_KEY = " f"{_hash_expression(merge_compare_columns, stage)}")
+        text(
+            f"UPDATE {stage} SET HASH_KEY = "
+            f"{_hash_expression(merge_compare_columns, stage, conn.dialect.name)}"
+        )
     )
 
 
@@ -838,6 +866,26 @@ def _sequence_name(target_object: str, database: str) -> str:
         f"{schema_name}.etl_seq_{table_name}_{ROW_ID_COLUMN.lower()}",
         database,
     )
+
+
+# Engines whose UPDATE takes no table alias. Trino is one: `UPDATE tbl t SET`
+# is a syntax error there, and the target's columns are qualified by the
+# table's own name instead. Verified against a real Trino/Iceberg warehouse.
+NO_UPDATE_ALIAS_DIALECTS = frozenset({"trino"})
+
+
+def _update_target(conn: Connection, qualified_target: str) -> tuple[str, str]:
+    """Return (UPDATE target clause, column qualifier) for a correlated UPDATE.
+
+    [ADDITION, 2026-09-22] Every correlated UPDATE here qualifies the target
+    row so the subquery over the stage can be told apart from it. Most engines
+    take an alias; Trino rejects one outright and qualifies by table name.
+    Only the UPDATE statements need this -- a plain SELECT can alias freely on
+    every engine, so the count queries are untouched.
+    """
+    if conn.dialect.name in NO_UPDATE_ALIAS_DIALECTS:
+        return qualified_target, qualified_target.rsplit(".", 1)[-1]
+    return f"{qualified_target} t", "t"
 
 
 def _row_id_insert_parts(conn: Connection, qualified_target: str) -> tuple[str, str]:
@@ -1266,14 +1314,19 @@ def _scd1_merge(
     # explicit instruction) — the outer `t` in `key_match` correlates
     # against this UPDATE's own target row, same as any ANSI-portable
     # correlated UPDATE.
-    set_pieces = [f"{c} = (SELECT s.{c} FROM {stage} s WHERE {key_match})" for c in non_key_columns]
+    update_target, uq = _update_target(conn, qualified_target)
+    upd_key_match = " AND ".join(f"{uq}.{k} = s.{k}" for k in merge_key)
+    upd_changed = f"{uq}.HASH_KEY IS DISTINCT FROM s.HASH_KEY"
+    set_pieces = [
+        f"{c} = (SELECT s.{c} FROM {stage} s WHERE {upd_key_match})" for c in non_key_columns
+    ]
     set_pieces.append("PIPELINE_RUN_ID = :pipeline_run_id")
     set_pieces.append("UPDATE_DATE = :now")
     set_pieces.append("UPDATED_BY = :updated_by")
     conn.execute(
         text(
-            f"UPDATE {qualified_target} t SET {', '.join(set_pieces)} "
-            f"WHERE EXISTS (SELECT 1 FROM {stage} s WHERE {key_match} AND ({changed}))"
+            f"UPDATE {update_target} SET {', '.join(set_pieces)} "
+            f"WHERE EXISTS (SELECT 1 FROM {stage} s WHERE {upd_key_match} AND ({upd_changed}))"
         ),
         {"pipeline_run_id": ctx.pipeline_run_id, "now": now, "updated_by": updated_by},
     )
@@ -1364,16 +1417,17 @@ def _scd2_merge(
             f"WHERE t.ACTIVE_FLAG = 'Y' AND {key_match} AND ({changed}))"
         )
     )
-    changed_key_match = " AND ".join(f"t.{k} = ck.{k}" for k in merge_key)
     stage_changed_key_match = " AND ".join(f"s.{k} = ck.{k}" for k in merge_key)
 
     deactivate_count = _count(conn, f"SELECT COUNT(*) FROM {changed_keys}", {})
+    update_target, uq = _update_target(conn, qualified_target)
+    upd_changed_key_match = " AND ".join(f"{uq}.{k} = ck.{k}" for k in merge_key)
     conn.execute(
         text(
-            f"UPDATE {qualified_target} t SET ACTIVE_FLAG = 'N', UPDATE_DATE = :now, "
+            f"UPDATE {update_target} SET ACTIVE_FLAG = 'N', UPDATE_DATE = :now, "
             f"UPDATED_BY = :updated_by "
-            f"WHERE t.ACTIVE_FLAG = 'Y' AND EXISTS "
-            f"(SELECT 1 FROM {changed_keys} ck WHERE {changed_key_match})"
+            f"WHERE {uq}.ACTIVE_FLAG = 'Y' AND EXISTS "
+            f"(SELECT 1 FROM {changed_keys} ck WHERE {upd_changed_key_match})"
         ),
         {"now": now, "updated_by": updated_by},
     )
@@ -1501,11 +1555,13 @@ def _delete_rows(
                 "SETUP_TABLE task against it first, fix its schema by hand, or set "
                 "HARD_DELETE=true for this task"
             )
+        update_target, uq = _update_target(conn, qualified_target)
+        upd_key_match = " AND ".join(f"{uq}.{k} = s.{k}" for k in merge_key)
         conn.execute(
             text(
-                f"UPDATE {qualified_target} t SET DELETE_FLAG = 'Y', UPDATE_DATE = :now, "
+                f"UPDATE {update_target} SET DELETE_FLAG = 'Y', UPDATE_DATE = :now, "
                 f"UPDATED_BY = :updated_by "
-                f"WHERE EXISTS (SELECT 1 FROM {stage} s WHERE {key_match})"
+                f"WHERE EXISTS (SELECT 1 FROM {stage} s WHERE {upd_key_match})"
             ),
             {"now": now, "updated_by": updated_by},
         )
