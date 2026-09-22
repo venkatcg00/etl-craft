@@ -100,6 +100,7 @@ from etl_craft.runner import ForceNotAllowedError, run_task
 from etl_craft.setup_command import run_setup
 from etl_craft.validate import (
     requested_table_formats,
+    validate_business_rule_key_stability,
     validate_business_rule_keys,
     validate_graphs,
     validate_task_parameters,
@@ -1257,24 +1258,97 @@ def test_validate_business_rule_keys_composite_pk_reported(
             conn.execute(text("DROP TABLE validate_pk_test_composite"))
 
 
-def test_validate_business_rule_keys_mismatched_column_reported(
+def test_validate_business_rule_key_need_not_be_the_primary_key(
     pg_conn, cfg_pipeline, cfg_task, postgres_engine
 ):
+    # [DEVIATION, 2026-09-22] This asserted the opposite until it turned out to
+    # force the broken configuration. E2-54 made ROW_ID the primary key of
+    # every engine-created table, so requiring BUSINESS_RULE_KEY_COLUMN to
+    # *equal* the primary key meant every rule had to key on ROW_ID -- which a
+    # full-replace action regenerates, so its flags could never be deactivated.
+    # Naming the stable business key, which is the correct choice, failed
+    # validation.
+    #
+    # CLAUDE.md's convention is that a target *has* a single-column primary
+    # key, "which is why BUSINESS_RULE_KEY_COLUMN can safely stay a single
+    # column rather than a list" -- never that they are the same column.
     with postgres_engine.begin() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS validate_pk_test_mismatch"))
-        conn.execute(text("CREATE TABLE validate_pk_test_mismatch (id INT PRIMARY KEY, val INT)"))
+        conn.execute(text("DROP TABLE IF EXISTS validate_pk_test_natural"))
+        conn.execute(
+            text(
+                "CREATE TABLE validate_pk_test_natural "
+                "(ROW_ID INT PRIMARY KEY, cust_id INT, val INT)"
+            )
+        )
     try:
         _insert_business_rule(
-            pg_conn, cfg_pipeline, cfg_task, "br1", "validate_pk_test_mismatch", "val"
+            pg_conn, cfg_pipeline, cfg_task, "br1", "validate_pk_test_natural", "cust_id"
+        )
+
+        assert validate_business_rule_keys(pg_conn, postgres_engine) == []
+    finally:
+        with postgres_engine.begin() as conn:
+            conn.execute(text("DROP TABLE validate_pk_test_natural"))
+
+
+def test_validate_business_rule_key_must_exist_on_the_target(
+    pg_conn, cfg_pipeline, cfg_task, postgres_engine
+):
+    # Relaxing "must be the primary key" must not relax "must be a real
+    # column" -- a typo'd key column silently flags nothing.
+    with postgres_engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS validate_pk_test_missing_col"))
+        conn.execute(
+            text("CREATE TABLE validate_pk_test_missing_col (ROW_ID INT PRIMARY KEY, val INT)")
+        )
+    try:
+        _insert_business_rule(
+            pg_conn, cfg_pipeline, cfg_task, "br1", "validate_pk_test_missing_col", "no_such_col"
         )
 
         issues = validate_business_rule_keys(pg_conn, postgres_engine)
 
         assert len(issues) == 1
-        assert "does not match" in issues[0].message
+        assert "no_such_col" in issues[0].message
     finally:
         with postgres_engine.begin() as conn:
-            conn.execute(text("DROP TABLE validate_pk_test_mismatch"))
+            conn.execute(text("DROP TABLE validate_pk_test_missing_col"))
+
+
+def test_validate_flags_a_business_rule_keyed_on_a_regenerated_row_id(
+    pg_conn, cfg_pipeline, cfg_task
+):
+    # The defect this whole check exists for. A flag is recorded against a
+    # BUSINESS_RULE_KEY_COLUMN value and deactivated only for keys the "no
+    # longer violates" query returns -- which means keys still in the target.
+    # OVERWRITE_TABLE regenerates every ROW_ID, so a flagged key never comes
+    # back: on Postgres the flag points at nothing forever, and on Iceberg the
+    # value is reused, so it comes back pointing at a different row entirely.
+    # Reproduced both ways against real warehouses.
+    _insert_task_parameters(
+        pg_conn,
+        cfg_task,
+        {"SQL_ACTION": "OVERWRITE_TABLE", "TARGET_OBJECT": "public.brk_target"},
+    )
+    _insert_business_rule(pg_conn, cfg_pipeline, cfg_task, "br1", "public.brk_target", "ROW_ID")
+
+    issues = validate_business_rule_key_stability(pg_conn)
+
+    assert len(issues) == 1
+    assert "regenerates every ROW_ID" in issues[0].message
+
+
+def test_validate_allows_row_id_as_a_key_on_a_merge_target(pg_conn, cfg_pipeline, cfg_task):
+    # SCD1_MERGE updates rows in place, so ROW_ID survives and is a legitimate
+    # key there. The check must not fire for it.
+    _insert_task_parameters(
+        pg_conn,
+        cfg_task,
+        {"SQL_ACTION": "SCD1_MERGE", "TARGET_OBJECT": "public.brk_merge"},
+    )
+    _insert_business_rule(pg_conn, cfg_pipeline, cfg_task, "br1", "public.brk_merge", "ROW_ID")
+
+    assert validate_business_rule_key_stability(pg_conn) == []
 
 
 # ==============================================================================

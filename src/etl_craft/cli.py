@@ -74,6 +74,7 @@ from etl_craft.runlog import RunLogError
 from etl_craft.runner import ForceNotAllowedError, TaskOutcome, run_task
 from etl_craft.setup_command import run_setup
 from etl_craft.validate import (
+    validate_business_rule_key_stability,
     validate_business_rule_keys,
     validate_dependency_edges,
     validate_graphs,
@@ -540,6 +541,7 @@ def _validate_command(engine: Engine, config: ConnectorConfig) -> int:
                 # outright while a task is running. No-op for Postgres.
                 with data_db(config, engine, wait_seconds=READ_ONLY_WAIT_SECONDS) as data_engine:
                     issues += validate_business_rule_keys(conn, data_engine)
+                    issues += validate_business_rule_key_stability(conn)
                     issues += validate_warehouse_storage(conn, config, data_engine)
             except ConfigError as exc:
                 print(f"error: {exc}", file=sys.stderr)
