@@ -30,7 +30,6 @@ from etl_craft.warehouse import (
     data_db,
     is_in_memory,
     is_single_writer,
-    verify_iceberg_catalog,
 )
 
 SMTP_PROBE_TIMEOUT_SECONDS = 10.0
@@ -142,28 +141,14 @@ def _warehouse_check(config: ConnectorConfig) -> list[CheckResult]:
         if engine_db is not None:
             engine_db.dispose()
     results.append(CheckResult("Data DB connection", True, "connected"))
-
-    # [ADDITION, 2026-09-22, E2-69] Whether the warehouse really stores Iceberg
-    # is a fact on Trino, not an inference from the dialect name — see
-    # warehouse.verify_iceberg_catalog.
-    engine_db2: Engine | None = None
-    try:
-        engine_db2 = build_engine(config)
-    except (ConfigError, SQLAlchemyError):
-        engine_db2 = None
-    try:
-        with data_db(config, engine_db2, wait_seconds=READ_ONLY_WAIT_SECONDS) as data_engine:
-            problem = verify_iceberg_catalog(config, data_engine)
-    except (ConfigError, SQLAlchemyError, NotImplementedError) as exc:
-        results.append(CheckResult("Iceberg catalog", False, str(exc)))
-        return results
-    finally:
-        if engine_db2 is not None:
-            engine_db2.dispose()
-    if problem:
-        results.append(CheckResult("Iceberg catalog", False, problem))
-    else:
-        results.append(CheckResult("Iceberg catalog", True, "storage format confirmed"))
+    # [DEVIATION, 2026-09-22, E2-72] The Iceberg-catalog check lived here and
+    # moved to `validate`. It has to know every active task's TABLE_FORMAT
+    # override, and doctor reads no CFG_ rows -- so from here it got the
+    # question wrong in both directions: skipping the check for a task that
+    # asked for Iceberg against a native default, and failing it for a catalog
+    # nothing needed. `validate` already reads task parameters and already
+    # talks to the Data DB, which is where a cross-database config check
+    # belongs. One home, not two.
     return results
 
 

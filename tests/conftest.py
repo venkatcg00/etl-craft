@@ -16,6 +16,7 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
+from etl_craft.config import ConnectionProfile
 from etl_craft.runlog import find_or_create_active_run
 
 TEST_DATABASE_URL_VAR = "ETL_CRAFT_TEST_DATABASE_URL"
@@ -63,6 +64,88 @@ def postgres_engine() -> Engine:
     engine = create_engine(url)
     yield engine
     engine.dispose()
+
+
+# [ADDITION, 2026-09-22] Databricks and Snowflake, gated on credentials being
+# present exactly as the container fixtures are gated on a container running.
+#
+# Neither can be stood up locally -- Databricks needs a workspace and Snowflake
+# needs cloud object storage for an Iceberg external volume -- so these skip by
+# default and there is no way around that. What this removes is the *other*
+# blocker: with the tests written and waiting, verifying either one is now
+# "export these variables and run the suite", locally or from CI secrets,
+# rather than "someone writes the tests first".
+#
+# Set, for Databricks:
+#   ETL_CRAFT_TEST_DATABRICKS_JDBC_URL   jdbc:databricks://<host>:443/default;
+#                                        httpPath=<path>;ConnCatalog=<catalog>
+#   ETL_CRAFT_TEST_DATABRICKS_TOKEN      a personal access token
+#   ETL_CRAFT_TEST_DATABRICKS_SCHEMA     a schema the token may create in
+#
+# ...and for Snowflake:
+#   ETL_CRAFT_TEST_SNOWFLAKE_JDBC_URL    jdbc:snowflake://<account>.snowflakecomputing.com/
+#                                        ?db=<db>&schema=<schema>&warehouse=<wh>
+#   ETL_CRAFT_TEST_SNOWFLAKE_USER
+#   ETL_CRAFT_TEST_SNOWFLAKE_SECRET      password, or the key passphrase
+#   ETL_CRAFT_TEST_SNOWFLAKE_KEY_FILE    optional; set it to use key-pair auth
+#   ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA      a schema the user may create in
+#   ETL_CRAFT_TEST_SNOWFLAKE_EXTERNAL_VOLUME / _BASE_LOCATION
+#                                        optional; without them the Iceberg
+#                                        tests skip and the native ones run
+def _cloud_warehouse_profile(prefix: str) -> ConnectionProfile | None:
+    """Build a [Warehouse] profile from ETL_CRAFT_TEST_<PREFIX>_* , or None if unset."""
+    jdbc_url = os.environ.get(f"ETL_CRAFT_TEST_{prefix}_JDBC_URL")
+    if not jdbc_url:
+        return None
+    secret_env = f"ETL_CRAFT_TEST_{prefix}_SECRET"
+    if prefix == "DATABRICKS":
+        secret_env = f"ETL_CRAFT_TEST_{prefix}_TOKEN"
+        auth_mode, user = "token", ""
+    elif os.environ.get(f"ETL_CRAFT_TEST_{prefix}_KEY_FILE"):
+        auth_mode = "key_file"
+        user = os.environ.get(f"ETL_CRAFT_TEST_{prefix}_USER", "")
+    else:
+        auth_mode = "password"
+        user = os.environ.get(f"ETL_CRAFT_TEST_{prefix}_USER", "")
+    # The engine reads the secret by the variable name the profile implies, so
+    # mirror the test variable onto it rather than inventing a second path.
+    os.environ.setdefault("ETL_CRAFT_WAREHOUSE_DEV_SECRET", os.environ.get(secret_env, ""))
+    extra = {}
+    key_file = os.environ.get(f"ETL_CRAFT_TEST_{prefix}_KEY_FILE")
+    if key_file:
+        extra["key_file"] = key_file
+    return ConnectionProfile(
+        section="WAREHOUSE",
+        name="dev",
+        jdbc_url=jdbc_url,
+        user=user,
+        auth_mode=auth_mode,
+        extra=extra,
+    )
+
+
+@pytest.fixture(scope="session")
+def databricks_profile() -> ConnectionProfile:
+    """Build a real Databricks [Warehouse] profile, or skip."""
+    profile = _cloud_warehouse_profile("DATABRICKS")
+    if profile is None:
+        pytest.skip(
+            "Databricks not configured — set ETL_CRAFT_TEST_DATABRICKS_JDBC_URL and "
+            "ETL_CRAFT_TEST_DATABRICKS_TOKEN to run this against a real workspace"
+        )
+    return profile
+
+
+@pytest.fixture(scope="session")
+def snowflake_profile() -> ConnectionProfile:
+    """Build a real Snowflake [Warehouse] profile, or skip."""
+    profile = _cloud_warehouse_profile("SNOWFLAKE")
+    if profile is None:
+        pytest.skip(
+            "Snowflake not configured — set ETL_CRAFT_TEST_SNOWFLAKE_JDBC_URL, _USER and "
+            "_SECRET (plus _KEY_FILE for key-pair auth) to run this against a real account"
+        )
+    return profile
 
 
 TRINO_URL = os.environ.get("ETL_CRAFT_TEST_TRINO_URL", "trino://etl@localhost:58080/iceberg")

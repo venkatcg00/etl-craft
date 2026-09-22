@@ -27,7 +27,6 @@ needs. Your `SELECT` must never project an engine-managed column itself.
 |---|---|---|
 | `SQL_ACTION` | yes | One of `CREATE_TABLE`, `SETUP_TABLE`, `OVERWRITE_TABLE`, `SCD1_MERGE`, `SCD2_MERGE`, `DROP_TABLE`, `DELETE_ROWS`. |
 | `SOURCE_SQL` | all but `DROP_TABLE` | The bare `SELECT`. May contain the literal token `$$pipeline_id`. |
-| `PRIMARY_KEY` | no | Applied as `ADD PRIMARY KEY` when the engine creates the target, and re-applied after a schema evolution. Independent of `MERGE_KEY` — a merge target legitimately has both. |
 | `MERGE_KEY` | SCD merges | Columns the merge matches on. |
 | `MERGE_COMPARE_COLUMNS` | SCD merges | Columns hashed into `HASH_KEY` for change detection. |
 | `MERGE_DEDUPE_ORDER` | no | An `ORDER BY` fragment (`updated_at DESC`) deciding which row wins when the source has duplicate `MERGE_KEY`s. Without it, duplicates are a clean failure *before* the target is touched — the engine will not invent an ordering you did not declare. |
@@ -38,7 +37,7 @@ needs. Your `SELECT` must never project an engine-managed column itself.
 
 | Action | Effect | Audit columns appended |
 |---|---|---|
-| `CREATE_TABLE` | Replace the target entirely from the `SELECT`. | `PIPELINE_RUN_ID` |
+| `CREATE_TABLE` | Replace the target entirely from the `SELECT`. | `PIPELINE_RUN_ID`, `ROW_ID` |
 | `SETUP_TABLE` | Create the target's *shape* only, zero rows. Infers audit columns from whichever sibling task actually writes it. | inferred |
 | `OVERWRITE_TABLE` | Truncate and reinsert. | `+ UPDATE_DATE` |
 | `SCD1_MERGE` | Update changed rows in place, insert new ones. | `+ HASH_KEY, CREATE_DATE, CREATED_BY, UPDATE_DATE, UPDATED_BY, DELETE_FLAG` |
@@ -48,6 +47,23 @@ needs. Your `SELECT` must never project an engine-managed column itself.
 
 Every action except `DROP_TABLE` and `DELETE_ROWS` **creates the target if it does not
 exist**, so a first run needs no separate setup task.
+
+### `ROW_ID` — the key you do not declare
+
+Every table the engine creates gets **`ROW_ID`**, a generated single-column key, and it is
+appended by every creating action (the `+` rows above are in addition to it). You never
+declare it: there is no `PRIMARY_KEY` parameter, because declaring a natural key as the
+primary key is unusable on an `SCD2_MERGE` target, which holds several rows per merge key
+by design.
+
+**This is the column `CFG_BUSINESS_RULES.BUSINESS_RULE_KEY_COLUMN` should name.** `validate`
+checks that every business-rule target has a single-column primary key, and on Postgres and
+DuckDB `ROW_ID` is that key, enforced by the database.
+
+On an Iceberg warehouse it is computed instead (largest value present plus a row number)
+because Iceberg has no identity columns, no sequences and no enforced constraints — so it is
+a real, stable key per row, but uniqueness is not database-enforced. `validate` reports that
+once for such a warehouse rather than failing every rule.
 
 ### `$$pipeline_id`
 

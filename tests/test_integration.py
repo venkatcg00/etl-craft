@@ -98,7 +98,13 @@ from etl_craft.runlog import (
 )
 from etl_craft.runner import ForceNotAllowedError, run_task
 from etl_craft.setup_command import run_setup
-from etl_craft.validate import validate_business_rule_keys, validate_graphs
+from etl_craft.validate import (
+    requested_table_formats,
+    validate_business_rule_keys,
+    validate_graphs,
+    validate_task_parameters,
+    validate_warehouse_storage,
+)
 from etl_craft.warehouse import build_data_engine, data_db, verify_iceberg_catalog
 
 # ==============================================================================
@@ -4485,6 +4491,163 @@ def test_every_sql_action_runs_on_real_trino_iceberg(
     assert scd2 == [(1, "Y", 1), (2, "Y", 2)]
     # Nothing leaked, across six actions.
     assert not [t for t in tables if t.startswith("etl_stage_")]
+
+
+def _insert_task_parameters(conn, task_id: int, params: dict[str, str]) -> None:
+    """Insert CFG_TASK_PARAMETERS rows through the rolled-back pg_conn fixture."""
+    for name, value in params.items():
+        conn.execute(
+            text(
+                "INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE) "
+                "VALUES (:task_id, :name, :value)"
+            ),
+            {"task_id": task_id, "name": name, "value": value},
+        )
+
+
+def test_validate_reports_the_removed_primary_key_parameter(
+    pg_conn, cfg_pipeline, cfg_task, postgres_engine
+):
+    # E2-71. PRIMARY_KEY was replaced by a generated ROW_ID in E2-54, but it
+    # stayed in KNOWN_PARAMETERS, so validate's unrecognized-parameter check --
+    # built precisely to catch "a typo will be ignored" -- stayed silent while
+    # three separate documents told a reader to set it. Removing it from the
+    # vocabulary is what makes the check speak.
+    _insert_task_parameters(pg_conn, cfg_task, {"PRIMARY_KEY": "id", "SQL_ACTION": "CREATE_TABLE"})
+
+    issues = validate_task_parameters(pg_conn)
+
+    assert any("PRIMARY_KEY" in issue.message for issue in issues)
+
+
+def test_validate_rejects_an_unrecognized_table_format(pg_conn, cfg_pipeline, cfg_task):
+    # E2-73. The vocabulary was enforced only at execution, so a typo passed
+    # validate and failed the task.
+    _insert_task_parameters(
+        pg_conn, cfg_task, {"SQL_ACTION": "CREATE_TABLE", "TABLE_FORMAT": "icberg"}
+    )
+
+    issues = validate_task_parameters(pg_conn)
+
+    assert any("TABLE_FORMAT" in issue.message for issue in issues)
+
+
+def test_requested_table_formats_unions_the_warehouse_default_with_task_overrides(
+    pg_conn, cfg_pipeline, cfg_task
+):
+    # E2-72. The catalog guard was warehouse-level while the declaration is
+    # task-level, so a native default plus one task overriding to iceberg
+    # skipped the check for the task that needed it.
+    _insert_task_parameters(
+        pg_conn, cfg_task, {"SQL_ACTION": "CREATE_TABLE", "TABLE_FORMAT": "iceberg"}
+    )
+    native = replace(make_config(warehouse=True), warehouse_table_format="native")
+
+    assert requested_table_formats(pg_conn, native) == {"native", "iceberg"}
+
+
+def test_validate_flags_a_trino_catalog_that_cannot_serve_a_requested_iceberg_format(
+    pg_conn, cfg_pipeline, cfg_task, trino_engine
+):
+    # The whole point of E2-72: a task that explicitly asked for Iceberg
+    # against a non-Iceberg catalog would get Hive tables while everything
+    # reported success.
+    _insert_task_parameters(
+        pg_conn, cfg_task, {"SQL_ACTION": "CREATE_TABLE", "TABLE_FORMAT": "iceberg"}
+    )
+    config = _trino_config()
+    config = replace(config, warehouse_table_format="native")
+    config.warehouse.profiles["dev"] = replace(
+        config.warehouse.active, jdbc_url="jdbc:trino://localhost:58080/system/runtime"
+    )
+
+    issues = validate_warehouse_storage(pg_conn, config, trino_engine)
+
+    assert any("not an Iceberg catalog" in issue.message for issue in issues)
+
+
+def _cloud_config(profile, table_format: str) -> ConnectorConfig:
+    """Engine DB on the test Postgres, Data DB on a real cloud warehouse."""
+    return ConnectorConfig(
+        mode="local",
+        source=SourceConfig(type="environment"),
+        postgres=ConnectionSection(
+            active_profile="dev",
+            profiles={
+                "dev": ConnectionProfile(
+                    section="POSTGRES",
+                    name="dev",
+                    jdbc_url="jdbc:postgresql://localhost:55432/etl_craft",
+                    user="etl_craft",
+                    auth_mode="password",
+                )
+            },
+        ),
+        cloning=CloningConfig(),
+        warehouse=ConnectionSection(active_profile="dev", profiles={"dev": profile}),
+        warehouse_table_format=table_format,
+    )
+
+
+def _run_cloud_vocabulary(postgres_engine, pipeline_id, config, schema, extra_params):
+    """Walk the SQL action vocabulary against a real cloud warehouse."""
+    seed_active_run(postgres_engine, pipeline_id)
+    src = "SELECT 1 AS id, 'a' AS name"
+    results = {}
+    for code, params in (
+        ("cw_create", {"SQL_ACTION": "CREATE_TABLE", "TARGET_OBJECT": f"{schema}.cw_create"}),
+        ("cw_over", {"SQL_ACTION": "OVERWRITE_TABLE", "TARGET_OBJECT": f"{schema}.cw_over"}),
+        (
+            "cw_scd1",
+            {
+                "SQL_ACTION": "SCD1_MERGE",
+                "TARGET_OBJECT": f"{schema}.cw_scd1",
+                "MERGE_KEY": "id",
+                "MERGE_COMPARE_COLUMNS": "name",
+            },
+        ),
+    ):
+        task_id = insert_committed_task(postgres_engine, pipeline_id, code)
+        insert_committed_task_parameters(
+            postgres_engine, task_id, {**params, "SOURCE_SQL": src, **extra_params}
+        )
+        results[params["SQL_ACTION"]] = run_task(
+            postgres_engine, config, "TEST_CONCURRENT_PL", code
+        )
+    return results
+
+
+def test_sql_actions_run_against_real_databricks(
+    postgres_engine, databricks_profile, committed_pipeline
+):
+    # Skips unless ETL_CRAFT_TEST_DATABRICKS_* are set. This is the test that
+    # turns "the Databricks path is unverified" into a one-command answer:
+    # export the credentials (or put them in CI secrets) and run the suite.
+    schema = os.environ.get("ETL_CRAFT_TEST_DATABRICKS_SCHEMA", "default")
+    config = _cloud_config(databricks_profile, "iceberg")
+    results = _run_cloud_vocabulary(postgres_engine, committed_pipeline, config, schema, {})
+    for action, outcome in results.items():
+        assert outcome.status == "SUCCESS", f"{action}: {outcome.message}"
+
+
+def test_sql_actions_run_against_real_snowflake(
+    postgres_engine, snowflake_profile, committed_pipeline
+):
+    # Snowflake Iceberg tables need an EXTERNAL VOLUME over real cloud storage,
+    # which a trial account does not include -- so without it this runs the
+    # `native` path instead of skipping outright. Connection, auth and the
+    # whole action vocabulary are still exercised either way.
+    schema = os.environ.get("ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA", "PUBLIC")
+    volume = os.environ.get("ETL_CRAFT_TEST_SNOWFLAKE_EXTERNAL_VOLUME", "")
+    base = os.environ.get("ETL_CRAFT_TEST_SNOWFLAKE_BASE_LOCATION", "")
+    if volume and base:
+        table_format, extra = "iceberg", {"EXTERNAL_VOLUME": volume, "BASE_LOCATION": base}
+    else:
+        table_format, extra = "native", {}
+    config = _cloud_config(snowflake_profile, table_format)
+    results = _run_cloud_vocabulary(postgres_engine, committed_pipeline, config, schema, extra)
+    for action, outcome in results.items():
+        assert outcome.status == "SUCCESS", f"{action}: {outcome.message}"
 
 
 def test_table_format_native_still_runs_end_to_end(

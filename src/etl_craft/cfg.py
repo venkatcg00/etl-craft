@@ -718,7 +718,6 @@ KNOWN_PARAMETERS = frozenset(
         # HANDLER=SQL
         "SQL_ACTION",
         "SOURCE_SQL",
-        "PRIMARY_KEY",
         "MERGE_KEY",
         "MERGE_COMPARE_COLUMNS",
         "MERGE_DEDUPE_ORDER",

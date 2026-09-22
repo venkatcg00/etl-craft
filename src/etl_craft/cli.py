@@ -80,6 +80,7 @@ from etl_craft.validate import (
     validate_read_only_sql,
     validate_task_lineage_declarations,
     validate_task_parameters,
+    validate_warehouse_storage,
 )
 from etl_craft.warehouse import READ_ONLY_WAIT_SECONDS, data_db
 
@@ -539,6 +540,7 @@ def _validate_command(engine: Engine, config: ConnectorConfig) -> int:
                 # outright while a task is running. No-op for Postgres.
                 with data_db(config, engine, wait_seconds=READ_ONLY_WAIT_SECONDS) as data_engine:
                     issues += validate_business_rule_keys(conn, data_engine)
+                    issues += validate_warehouse_storage(conn, config, data_engine)
             except ConfigError as exc:
                 print(f"error: {exc}", file=sys.stderr)
                 return 2

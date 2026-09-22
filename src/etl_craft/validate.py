@@ -58,7 +58,10 @@ from etl_craft.cfg import (
     fetch_tasks_with_parameters,
     resolve_pipeline_id,
 )
+from etl_craft.config import VALID_TABLE_FORMATS, ConnectorConfig
 from etl_craft.resolver import ResolverError, build_graph
+from etl_craft.sql_actions import ICEBERG_CREATE_PREFIX
+from etl_craft.warehouse import verify_iceberg_catalog
 
 
 @dataclass(frozen=True)
@@ -296,6 +299,101 @@ _SAFE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SAFE_OBJECT_REF = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$")
 
 
+def requested_table_formats(conn: Connection, config: ConnectorConfig) -> set[str]:
+    """Every storage format this deployment actually asks for.
+
+    [ADDITION, 2026-09-22, E2-72] The warehouse default plus every active
+    task's own TABLE_FORMAT override -- resolved the way execution resolves it,
+    because the more specific setting is the one that wins at execution.
+
+    Checking only the warehouse default (which is all `doctor` could see, since
+    it reads no CFG_ rows) got this backwards in both directions: with
+    `Table_format: native` and one task overriding to `iceberg`, the catalog
+    check was skipped for a task that genuinely needed it; with the defaults
+    swapped, it failed for a catalog nothing needed.
+    """
+    formats = {config.warehouse_table_format}
+    for task in fetch_tasks_with_parameters(conn):
+        declared = (task.parameters.get("TABLE_FORMAT") or "").strip().lower()
+        if declared in VALID_TABLE_FORMATS:
+            formats.add(declared)
+    return formats
+
+
+def validate_warehouse_storage(
+    conn: Connection, config: ConnectorConfig, data_engine: Engine | None
+) -> list[ValidationIssue]:
+    """Check the warehouse can actually produce the formats the config asks for.
+
+    [ADDITION, 2026-09-22, E2-72/E2-73] Two cross-database questions that only
+    have an answer once both the CFG_ rows and the live warehouse are in hand,
+    which is exactly what this module already does for the business-rule
+    primary-key check:
+
+      * On Trino the storage format is a property of the *catalog*, so a task
+        asking for Iceberg against a Hive catalog gets Hive tables while
+        everything reports success.
+      * On Snowflake an Iceberg table needs EXTERNAL_VOLUME and BASE_LOCATION,
+        a static cross-parameter requirement of the same kind already checked
+        for the SCD merges -- but only Snowflake needs it, so the dialect has
+        to be known.
+    """
+    if data_engine is None or config.warehouse is None:
+        return []
+    issues: list[ValidationIssue] = []
+    formats = requested_table_formats(conn, config)
+
+    if "iceberg" in formats:
+        problem = verify_iceberg_catalog(config, data_engine)
+        if problem:
+            issues.append(ValidationIssue(category="warehouse_storage", message=problem))
+
+    if data_engine.dialect.name in ICEBERG_CREATE_PREFIX:
+        for task in fetch_tasks_with_parameters(conn):
+            params = task.parameters
+            declared = (params.get("TABLE_FORMAT") or "").strip().lower()
+            effective = declared or config.warehouse_table_format
+            if effective != "iceberg" or not params.get("SQL_ACTION"):
+                continue
+            missing = [
+                name
+                for name in ("EXTERNAL_VOLUME", "BASE_LOCATION")
+                if not (params.get(name) or "").strip()
+            ]
+            if missing:
+                issues.append(
+                    ValidationIssue(
+                        category="warehouse_storage",
+                        message=(
+                            f"{task.pipeline_code}.{task.task_code}: an Iceberg table on "
+                            f"{data_engine.dialect.name} needs {', '.join(missing)} — the task "
+                            "would be refused at execution rather than silently creating a "
+                            "non-Iceberg table"
+                        ),
+                    )
+                )
+        if config.cloning.enabled and "iceberg" in formats:
+            missing_clone = [
+                label
+                for label, value in (
+                    ("Cloning.External_volume", config.cloning.external_volume),
+                    ("Cloning.Base_location", config.cloning.base_location),
+                )
+                if not value
+            ]
+            if missing_clone:
+                issues.append(
+                    ValidationIssue(
+                        category="warehouse_storage",
+                        message=(
+                            "Cloning is enabled and mirrors would be Iceberg tables, but "
+                            f"{', '.join(missing_clone)} is not set"
+                        ),
+                    )
+                )
+    return issues
+
+
 def validate_task_parameters(conn: Connection) -> list[ValidationIssue]:
     """Check each task declares the parameters its own HANDLER and SQL_ACTION require."""
     issues: list[ValidationIssue] = []
@@ -307,6 +405,15 @@ def validate_task_parameters(conn: Connection) -> list[ValidationIssue]:
             issues.append(
                 ValidationIssue(category="task_parameters", message=f"{where}: {message}")
             )
+
+        declared_format = (params.get("TABLE_FORMAT") or "").strip().lower()
+        if declared_format and declared_format not in VALID_TABLE_FORMATS:
+            # [ADDITION, 2026-09-22, E2-73] Enforced in sql_actions at
+            # execution, which means `TABLE_FORMAT: icberg` passed validate and
+            # failed the task. The newest parameters had the least pre-flight
+            # checking, on the warehouse path with the fewest people able to
+            # test it.
+            add(f"TABLE_FORMAT={declared_format!r} is not one of " f"{sorted(VALID_TABLE_FORMATS)}")
 
         if not _SAFE_IDENTIFIER.match(task.task_code):
             add(

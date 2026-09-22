@@ -679,11 +679,13 @@ def verify_iceberg_catalog(config: ConnectorConfig, data_engine: Engine) -> str 
     """
     if data_engine.dialect.name != "trino":
         return None
-    # [DEVIATION, 2026-09-22] Only when Iceberg is what this deployment asked
-    # for. A team running native tables on a Hive catalog is not misconfigured,
-    # and failing doctor for it would be the check inventing a requirement.
-    if config.warehouse_table_format != "iceberg":
-        return None
+    # [DEVIATION, 2026-09-22, E2-72] Deliberately does NOT consult
+    # config.warehouse_table_format. This answers one question -- is this
+    # catalog an Iceberg catalog -- and *when to ask* belongs to the caller,
+    # which is validate, because only validate can see the per-task
+    # TABLE_FORMAT overrides. Filtering here as well short-circuited on the
+    # warehouse default and silently skipped a task that had overridden it:
+    # E2-72 again, one layer in. Caught by its own regression test.
     _, parts = (
         translate_jdbc_url(config.warehouse.active.jdbc_url) if config.warehouse else ("", {})
     )

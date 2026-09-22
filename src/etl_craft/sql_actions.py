@@ -52,15 +52,15 @@ CFG_TASK_PARAMETERS). Every task with HANDLER='SQL' needs:
                   any statement touches the target — the engine will not
                   invent an ordering nobody declared, since which row survived
                   would then be undefined and could differ between runs.
-  PRIMARY_KEY     optional, every creating action. [ADDITION, E2-03] Applied
-                  as ALTER TABLE ... ADD PRIMARY KEY once the target has been
-                  created, and re-applied after a schema-evolution rebuild.
-                  Deliberately independent of MERGE_KEY, per explicit
-                  instruction ("a merge can have both primary key and merge
-                  key") — a target's identity and the columns a merge matches
-                  on are different questions even when they coincide. This is
-                  what lets an engine-created table satisfy the single-column
-                  primary key convention `validate` enforces.
+  (PRIMARY_KEY    removed 2026-09-20 by E2-54, and this text described it as
+                  live until E2-71 caught the contradiction. Every table the
+                  engine creates gets ROW_ID, a generated key, instead —
+                  declaring a natural key as the primary key is unusable on an
+                  SCD2 target, which holds several rows per merge key by
+                  design. ROW_ID is what CFG_BUSINESS_RULES.
+                  BUSINESS_RULE_KEY_COLUMN should name. The parameter is gone
+                  from KNOWN_PARAMETERS too, so `validate` now reports it as
+                  unrecognized rather than ignoring it silently.)
   HARD_DELETE     optional, DELETE_ROWS only. "true" performs a real DELETE;
                   anything else (including absent) soft-deletes via
                   DELETE_FLAG='Y' instead — per explicit instruction.

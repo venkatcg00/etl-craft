@@ -23,6 +23,9 @@ it can be worked through top to bottom.
 | phase 4b | 2026-09-21 | Round 4's findings | **All four fixed**; E2-61 solved with an Engine DB advisory lock, and **E2-64 was corrected — the review had it wrong in the dangerous direction** |
 | warehouse scope | 2026-09-22 | Iceberg added: Trino/Databricks/Snowflake | Warehouse is now **Postgres, or a SQL engine over Iceberg**; DuckDB stays for local dev |
 | 5 | 2026-09-22 | Round 4's fixes + the Iceberg work | **E2-65…E2-69**, at the end of this file. Every finding is on the Iceberg path |
+| phase 5b | 2026-09-22 | Round 5's findings | **All five fixed, plus E2-70 the review missed** — `SCD2_MERGE` was entirely broken on Trino |
+| table formats | 2026-09-22 | Native (Delta / Snowflake) allowed alongside Iceberg | `TABLE_FORMAT` task parameter over `[Warehouse].Table_format`; `iceberg` stays the default |
+| 6 | 2026-09-22 | Round 5's fixes + the native-format work | **E2-71…E2-73**, at the end of this file |
 
 **Phase 1 is landed and independently re-verified** (round 2 re-ran round 1's own probes against
 the current branch rather than trusting the phase notes): **E2-01 fixed**, **E2-02 fixed**,
@@ -2154,3 +2157,206 @@ actions the deployment test covered**. Two of this round's six defects (E2-65, E
 same mistake in two places, and both were invisible to every unit test and to two review passes.
 The test that catches this class is the one that runs the *whole vocabulary* against the real
 engine — which now exists.
+
+---
+
+# Round 6 review — round 5's fixes, and declared table formats (2026-09-22)
+
+Baseline: **526 passing**, `mypy`/`ruff`/`black`/`pydocstyle` clean. Re-probed round 5's
+reproductions against the live Trino/Iceberg stack, then read the two new commits.
+
+## Round 5 is fixed, and the follow-up it recommended paid for itself
+
+E2-65 through E2-69 are all closed. **E2-66 re-probed against the live stack**: the same failing
+`OVERWRITE_TABLE` that leaked `etl_stage_11387` now leaks nothing — the `finally` sweep genuinely
+reaches Trino, and it correctly stays best-effort so a cleanup failure can't mask the real one.
+E2-69's `verify_iceberg_catalog` asks `system.metadata.catalogs` instead of inferring, and
+`doctor` fails with something actionable.
+
+**E2-70 is the one that matters, and this file should record why.** Round 5 called extending the
+end-to-end Trino test across the whole vocabulary "the single highest-value follow-up"; doing it
+immediately found `SCD2_MERGE` **entirely broken** on Trino — it builds a *second* scratch table
+(the changed-key set) that was still emitting `CREATE TEMPORARY TABLE` directly, untouched by the
+E2-66 work. Two of that round's six defects were the same mistake in two places, and both survived
+two review passes.
+
+**Why the round-5 probe missed it, since that is the reusable part:** the probe hand-wrote the SQL
+shapes and ran them directly — including `CREATE TABLE AS … ROW_NUMBER()`, which works fine on
+Trino. What it never did was *drive the engine* and see which keyword the code actually emitted.
+Probing the shape proves the dialect accepts it; only exercising the code proves the code produces
+it. Every reproduction from here should go through `run_task`, not through hand-written SQL.
+(Small corroboration that the lessons in `CLAUDE.md` are live ones: this round's own probe tripped
+over `:ref::regclass` — SQLAlchemy's escaped-colon pitfall that file already documents.)
+
+The vocabulary is now genuinely covered on Trino: `CREATE_TABLE`, `SETUP_TABLE`, `OVERWRITE_TABLE`,
+`SCD2_MERGE`, `DROP_TABLE` in one walk, plus `SCD1_MERGE` and `DELETE_ROWS` in their own tests.
+
+The native-format work is well reasoned — declared rather than inferred, `iceberg` kept as the
+default so no existing pipeline silently changes format, `USING DELTA` named explicitly rather
+than falling through to a workspace default, and `_is_iceberg_backed` deliberately left alone
+because it governs the `ROW_ID` strategy (a dialect question) and not storage. All three findings
+below are about what the last two rounds of change left behind, not about that reasoning.
+
+## E2-71 — `PRIMARY_KEY` is documented as working in three places and does nothing · reproduced
+
+**Where:** [docs/parameters.md:30](docs/parameters.md), [sql_actions.py:55](src/etl_craft/sql_actions.py#L55), [cfg.py:721](src/etl_craft/cfg.py#L721)
+
+E2-54 replaced the `PRIMARY_KEY` parameter with an engine-generated `ROW_ID`, for a good reason
+(declaring a natural key as the PK is unusable on an SCD2 target). `sql_actions.py:1049` says so.
+But the same file's **module docstring** still documents `PRIMARY_KEY` as live — *"optional, every
+creating action … Applied as ALTER TABLE … ADD PRIMARY KEY once the target has been created"* —
+and so does the user-facing reference:
+
+> `PRIMARY_KEY` | no | Applied as `ADD PRIMARY KEY` when the engine creates the target, and
+> re-applied after a schema evolution.
+
+It isn't. And `KNOWN_PARAMETERS` still lists it, so `validate`'s unrecognized-parameter check —
+built in E2-25b precisely to catch "a typo will be ignored" — stays silent.
+
+**Reproduction**, a `CREATE_TABLE` task declaring `PRIMARY_KEY: id` exactly as the docs instruct:
+
+```
+outcome:               SUCCESS
+target columns:        ['id', 'name', 'pipeline_run_id', 'row_id']
+actual primary key:    ['row_id']          <- not 'id'
+validate complaints:   []
+```
+
+So the documented path succeeds, silently ignores what was declared, and nothing warns. The
+reverse gap compounds it: **`ROW_ID` is not mentioned anywhere in `docs/parameters.md`** — not as a
+parameter, not in the per-action "Audit columns appended" table (which still lists only
+`PIPELINE_RUN_ID` for `CREATE_TABLE`), even though it is added to every created target *and* is
+the column `CFG_BUSINESS_RULES.BUSINESS_RULE_KEY_COLUMN` must now name for `validate`'s PK check to
+pass. A team following the reference cannot configure a business rule correctly.
+
+This is the same class as E2-58, found and fixed in round 3 — superseded text left contradicting
+the code — so it is a recurrence rather than a new kind of gap.
+
+**Fix direction:** delete `PRIMARY_KEY` from the module docstring, `docs/parameters.md` and
+`KNOWN_PARAMETERS` (removing it from the last one is what makes `validate` catch anyone still
+setting it); document `ROW_ID` in the audit-column table and say that it is what
+`BUSINESS_RULE_KEY_COLUMN` should name. Worth a quick sweep for other parameters that changed
+hands during iteration 2 — `SCHEMA_EVOLUTION`, `RETURN_VALUES` and `SCRIPT_NAME` all moved from
+`CFG_TASKS` columns to parameters, and the same three-places-to-update shape applies.
+
+## E2-72 — The Iceberg catalog guard is warehouse-level; the format declaration is task-level · from code
+
+**Where:** [warehouse.py:660-686](src/etl_craft/warehouse.py#L660-L686)
+
+`verify_iceberg_catalog(config, data_engine)` takes no task parameters — structurally it cannot —
+and returns early unless `config.warehouse_table_format == "iceberg"`. But `TABLE_FORMAT` is a
+*per-task* override, and the more specific setting is the one that wins at execution.
+
+So with `[Warehouse] Table_format: native` and a single task declaring `TABLE_FORMAT: iceberg`,
+`doctor` skips the catalog check entirely, and on Trino that task then creates tables in whatever
+the catalog actually is — because `iceberg_clause("trino")` is empty for both formats, the format
+really is the catalog's. A task that explicitly asked for Iceberg silently gets Hive tables. That
+is E2-69's exact failure, reached through the override rather than the default.
+
+The other direction is milder but also wrong: `Table_format: iceberg` with every task overriding
+to `native` fails `doctor` for a catalog nothing needs.
+
+**Fix direction:** resolve the question the way execution does. The set of formats a deployment
+actually asks for is `{[Warehouse].Table_format} ∪ {every active task's TABLE_FORMAT}`, which is a
+plain `CFG_TASK_PARAMETERS` read `doctor` can already do; check the catalog when `iceberg` is in
+that set. If keeping `doctor` free of `CFG_` reads is preferred, `validate` is the natural home
+instead — it already reads every task's parameters and already talks to the Data DB.
+
+## E2-73 — None of the three new parameters is checked by `validate` · from code
+
+**Where:** [validate.py](src/etl_craft/validate.py) — `TABLE_FORMAT`, `EXTERNAL_VOLUME` and `BASE_LOCATION` appear zero times
+
+`validate_task_parameters` was extended in E2-25b to check required parameters per `SQL_ACTION`,
+per-handler requirements, identifier safety and unrecognized names — on the stated reasoning that
+a parameter problem should surface at `validate` rather than at 3am. The three parameters added
+since are not covered:
+
+- **`TABLE_FORMAT`'s vocabulary.** `VALID_TABLE_FORMATS` is enforced in `sql_actions.py` at
+  execution. `TABLE_FORMAT: icberg` therefore passes `validate` and fails the task.
+- **The Snowflake pairing.** `TABLE_FORMAT=iceberg` on Snowflake requires `EXTERNAL_VOLUME` and
+  `BASE_LOCATION`, and `create_table_as` rightly refuses without them — at execution. This is a
+  static, cross-parameter requirement of exactly the kind `validate` already checks for the SCD
+  merges (`MERGE_KEY` + `MERGE_COMPARE_COLUMNS`).
+- **The same pairing for `[Cloning]`**, which now carries the storage for mirrored tables.
+
+Individually small; together they mean the newest and least familiar parameters are the ones with
+the least pre-flight checking, on the warehouse path with the fewest people able to test it.
+
+**Fix direction:** add them to `validate_task_parameters` alongside the existing per-action
+requirements. The dialect is knowable there — `validate` already builds the Data DB engine for the
+business-rule PK check — so the Snowflake pairing can be checked conditionally rather than always.
+
+## Suggested handling
+
+- **E2-71** first: it is documentation plus a one-line `KNOWN_PARAMETERS` deletion, and it is
+  actively misleading a reader right now — including about the column business rules must name.
+- **E2-73** next, as one change with E2-72 if `validate` is chosen as the home for both.
+- **E2-72** needs a small decision (`doctor` or `validate`) but not a design one.
+
+## A note on method
+
+Round 5's recommendation was right and the follow-up proved it — but the recommendation was only
+needed because that round's probe tested SQL shapes by hand instead of driving the engine. The
+correction is concrete and belongs in how these reviews are run: **reproduce through `run_task`,
+not through hand-written SQL.** Every reproduction in this round went that way, which is how E2-71
+surfaced — the parameter looks fine in the code and only shows as inert when a real task runs and
+the target's actual primary key is read back.
+
+---
+
+# Round 6 outcome (2026-09-22) — all three fixed, plus the cloud test harness
+
+530 tests (2 skipped, awaiting credentials), 96% coverage, `make check` / `make db-schema-test` /
+the wheel smoke test all clean.
+
+- **E2-71 — fixed in all three places, and the one that matters is `KNOWN_PARAMETERS`.** Removing
+  `PRIMARY_KEY` from the vocabulary is what makes `validate` *report* it rather than ignore it, so
+  anyone still following the old docs now gets told. `ROW_ID` is documented: in the audit-column
+  table, and explicitly as the column `CFG_BUSINESS_RULES.BUSINESS_RULE_KEY_COLUMN` must name —
+  the gap that meant a team following the reference could not configure a business rule.
+- **E2-72 — resolved in `validate`, not `doctor`, and `doctor`'s copy deleted.** The review offered
+  either; `validate` already reads every task's parameters *and* already talks to the Data DB for
+  the business-rule PK check, so it is the only one that can see a per-task `TABLE_FORMAT`
+  override. Keeping a copy in `doctor` would have recreated the two-implementations problem E2-68
+  had just been about.
+  - **The fix caught itself repeating.** `verify_iceberg_catalog` still had its own
+    `warehouse_table_format != "iceberg"` early return, so it short-circuited on the warehouse
+    default even when a task had overridden it — E2-72 again, one layer in. The regression test
+    failed and found it. The function now answers only "is this catalog Iceberg", and *when to
+    ask* belongs to the caller.
+- **E2-73 — the three new parameters are checked.** `TABLE_FORMAT`'s vocabulary in
+  `validate_task_parameters`; the Snowflake `EXTERNAL_VOLUME`/`BASE_LOCATION` pairing and the same
+  for `[Cloning]` in the new `validate_warehouse_storage`, conditioned on the real dialect.
+
+## Databricks and Snowflake: the blocker that was ours, removed
+
+Five rounds of "unverified, and stated rather than implied" was an honest caveat that had stopped
+being useful. Neither can be stood up locally — Databricks needs a workspace, and Snowflake needs
+cloud object storage for an Iceberg external volume — so the tests will always skip by default.
+That part is not solvable.
+
+What *was* ours to fix is that the tests did not exist, so verifying either one meant writing them
+first. They exist now, gated on credentials exactly as the container fixtures are gated on a
+container running, and they skip with the variable names in the message:
+
+```
+ETL_CRAFT_TEST_DATABRICKS_JDBC_URL / _TOKEN / _SCHEMA
+ETL_CRAFT_TEST_SNOWFLAKE_JDBC_URL / _USER / _SECRET / _KEY_FILE / _SCHEMA
+ETL_CRAFT_TEST_SNOWFLAKE_EXTERNAL_VOLUME / _BASE_LOCATION   (optional)
+```
+
+Each walks `CREATE_TABLE`, `OVERWRITE_TABLE` and `SCD1_MERGE` through `run_task` — per this
+round's own method note, driving the engine rather than hand-written SQL. **Snowflake without an
+external volume runs the `native` path instead of skipping**, so a trial account still exercises
+connection, auth and the whole vocabulary; supply the volume and the same test runs Iceberg.
+
+So the answer to "when do we actually test Databricks and Snowflake" is now: whenever credentials
+are exported, locally or from CI secrets. Nothing else is in the way.
+
+## A note on method
+
+The round-6 correction — **reproduce through `run_task`, not hand-written SQL** — is what the
+cloud tests are built on, and it is worth stating why it keeps mattering: probing a SQL shape
+proves the *dialect* accepts it; only driving the engine proves the *code emits* it. Every defect
+that survived a review pass this iteration (E2-65, E2-70, and E2-72's recurrence today) was
+invisible to the first kind of check and obvious to the second.
