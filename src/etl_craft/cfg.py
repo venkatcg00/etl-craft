@@ -724,6 +724,12 @@ KNOWN_PARAMETERS = frozenset(
         "MERGE_DEDUPE_ORDER",
         "SCHEMA_EVOLUTION",
         "HARD_DELETE",
+        # HANDLER=SQL, Snowflake Iceberg targets only. Snowflake cannot
+        # express Iceberg as a clause the way Databricks can -- it needs
+        # CREATE ICEBERG TABLE plus storage that is deployment-specific, so
+        # these name it. See sql_actions.ICEBERG_CREATE_PREFIX.
+        "EXTERNAL_VOLUME",
+        "BASE_LOCATION",
         # HANDLER=PYTHON
         "SCRIPT_NAME",
         "RETURN_VALUES",

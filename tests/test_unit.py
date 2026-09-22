@@ -99,6 +99,7 @@ from etl_craft.runlog import (
 from etl_craft.scripts import _parse_trailing_json
 from etl_craft.scripts import execute as execute_python_script
 from etl_craft.sql_actions import (
+    TASK_PARAMS_INFO_KEY,
     active_database,
     create_table_as,
     iceberg_clause,
@@ -681,21 +682,54 @@ def test_iceberg_clause_per_dialect(dialect_name, expected):
 class _FakeDialectConn:
     """Just enough Connection for the dialect-name branches, which is all they read."""
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, info: dict | None = None) -> None:
         self.dialect = SimpleNamespace(name=name)
+        self.info = info if info is not None else {}
+        self.statements: list[str] = []
 
-    def execute(self, *_args, **_kwargs):  # pragma: no cover - never reached in these tests
-        raise AssertionError("no statement should be issued")
+    def execute(self, clause, *_args, **_kwargs):
+        self.statements.append(str(clause))
+        return None
 
 
-def test_create_table_as_refuses_snowflake_rather_than_making_a_non_iceberg_table():
+def test_create_table_as_refuses_snowflake_without_iceberg_storage():
     # Snowflake's Iceberg tables need a different statement (CREATE ICEBERG
-    # TABLE) plus an EXTERNAL_VOLUME and BASE_LOCATION that have no home in
-    # CFG_ metadata yet. Refusing beats silently creating an ordinary
-    # Snowflake table that looks fine and is not Iceberg -- producing the
-    # wrong thing successfully is worse than failing.
+    # TABLE) plus an EXTERNAL_VOLUME and BASE_LOCATION. With neither declared,
+    # refusing beats silently creating an ordinary Snowflake table that looks
+    # fine and is not Iceberg -- producing the wrong thing successfully is
+    # worse than failing.
+    conn = _FakeDialectConn("snowflake")
     with pytest.raises(HandlerError, match="EXTERNAL_VOLUME"):
-        create_table_as(_FakeDialectConn("snowflake"), "db.sch.t", "SELECT 1")
+        create_table_as(conn, "db.sch.t", "SELECT 1")
+    assert conn.statements == []
+
+
+def test_create_table_as_builds_a_snowflake_iceberg_table_when_storage_is_declared():
+    conn = _FakeDialectConn(
+        "snowflake",
+        info={
+            TASK_PARAMS_INFO_KEY: {
+                "EXTERNAL_VOLUME": "my_vol",
+                "BASE_LOCATION": "analytics/customers",
+            }
+        },
+    )
+    create_table_as(conn, "db.sch.t", "SELECT 1")
+    statement = conn.statements[0]
+    assert statement.startswith("CREATE ICEBERG TABLE db.sch.t")
+    assert "EXTERNAL_VOLUME = 'my_vol'" in statement
+    assert "BASE_LOCATION = 'analytics/customers'" in statement
+    assert statement.endswith("AS SELECT 1")
+
+
+def test_create_table_as_rejects_a_quote_in_snowflake_storage_values():
+    conn = _FakeDialectConn(
+        "snowflake",
+        info={TASK_PARAMS_INFO_KEY: {"EXTERNAL_VOLUME": "v'; DROP", "BASE_LOCATION": "b"}},
+    )
+    with pytest.raises(HandlerError, match="must not contain a quote"):
+        create_table_as(conn, "db.sch.t", "SELECT 1")
+    assert conn.statements == []
 
 
 def test_validate_reports_that_iceberg_cannot_enforce_primary_keys(monkeypatch):
@@ -1538,16 +1572,93 @@ def test_warehouse_token_creator_needs_a_user_on_an_unknown_dialect():
         WAREHOUSE_AUTH_REGISTRY["token"](profile, "secret")
 
 
-def test_warehouse_key_file_and_sso_creators_are_not_implemented():
-    # `token` left this list on 2026-09-22: Databricks personal access tokens
-    # are a long-lived bearer credential presented like a password, and the
-    # engine cannot reach Databricks without it. A *minted* token (OAuth2
-    # client-credentials, STS AssumeRole) is still unimplemented and is a
-    # genuinely different mechanism.
-    with pytest.raises(NotImplementedError):
-        WAREHOUSE_AUTH_REGISTRY["key_file"](warehouse_profile("key_file"), "unused")
+def test_warehouse_sso_creator_is_not_implemented():
+    # `token` and `key_file` both left this list on 2026-09-22 -- the engine
+    # cannot reach Databricks without the first or authenticate a Snowflake
+    # service account the corporate way without the second. A *minted* token
+    # (OAuth2 client-credentials, STS AssumeRole) and browser SSO remain
+    # unimplemented, and are genuinely different mechanisms.
     with pytest.raises(NotImplementedError):
         WAREHOUSE_AUTH_REGISTRY["sso"](warehouse_profile("sso"), "unused")
+
+
+def test_warehouse_key_file_creator_passes_snowflake_key_pair_via_connect_args(monkeypatch):
+    # Snowflake key-pair (RSA) is the corporate-standard way to authenticate a
+    # service account there -- Snowflake has been moving service accounts off
+    # single-factor passwords.
+    #
+    # The key path and passphrase go through connect_args, never the URL:
+    # Snowflake's own dialect *refuses* private_key_file in a URL query string
+    # "for safety reasons" (verified -- it raises ArgumentError), and this is
+    # the path it tells you to use.
+    captured = {}
+
+    def fake_connect(url, extra=None):
+        captured["url"] = url
+        captured["extra"] = extra
+        return object()
+
+    monkeypatch.setattr("etl_craft.warehouse._dbapi_connect", fake_connect)
+    profile = ConnectionProfile(
+        section="WAREHOUSE",
+        name="dev",
+        jdbc_url="jdbc:snowflake://myacct.snowflakecomputing.com/?db=ANALYTICS&schema=PUBLIC",
+        user="SVC_ETL",
+        auth_mode="key_file",
+        extra={"key_file": "/keys/rsa_key.p8"},
+    )
+    WAREHOUSE_AUTH_REGISTRY["key_file"](profile, "passphrase")()
+
+    assert captured["extra"] == {
+        "private_key_file": "/keys/rsa_key.p8",
+        "private_key_file_pwd": "passphrase",
+    }
+    # Nothing secret in the URL itself.
+    assert captured["url"].password is None
+    assert "private_key_file" not in dict(captured["url"].query)
+
+
+def test_warehouse_key_file_creator_omits_the_passphrase_for_an_unencrypted_key(monkeypatch):
+    monkeypatch.setattr("etl_craft.warehouse._dbapi_connect", lambda url, extra=None: extra)
+    profile = ConnectionProfile(
+        section="WAREHOUSE",
+        name="dev",
+        jdbc_url="jdbc:snowflake://myacct.snowflakecomputing.com/?db=ANALYTICS",
+        user="SVC_ETL",
+        auth_mode="key_file",
+        extra={"key_file": "/keys/rsa_key.p8"},
+    )
+    assert WAREHOUSE_AUTH_REGISTRY["key_file"](profile, "")() == {
+        "private_key_file": "/keys/rsa_key.p8"
+    }
+
+
+def test_warehouse_key_file_creator_requires_a_key_path():
+    profile = ConnectionProfile(
+        section="WAREHOUSE",
+        name="dev",
+        jdbc_url="jdbc:snowflake://myacct.snowflakecomputing.com/?db=ANALYTICS",
+        user="SVC_ETL",
+        auth_mode="key_file",
+    )
+    with pytest.raises(ConnectionError_, match="requires a `key_file:` path"):
+        WAREHOUSE_AUTH_REGISTRY["key_file"](profile, "secret")
+
+
+def test_warehouse_key_file_creator_still_unimplemented_for_other_dialects():
+    # The original reasoning holds for everything else: Postgres SSL client
+    # certs and Snowflake key-pair auth share nothing, so there is no generic
+    # mapping to write -- only a per-vendor one.
+    profile = ConnectionProfile(
+        section="WAREHOUSE",
+        name="dev",
+        jdbc_url="jdbc:trino://trino.internal:8080/iceberg/analytics",
+        user="u",
+        auth_mode="key_file",
+        extra={"key_file": "/keys/k.p8"},
+    )
+    with pytest.raises(NotImplementedError, match="trino"):
+        WAREHOUSE_AUTH_REGISTRY["key_file"](profile, "secret")
 
 
 def test_build_data_engine_raises_when_no_warehouse_configured():
@@ -2523,6 +2634,55 @@ def test_configure_from_env_duckdb_warehouse_needs_no_user(tmp_path):
     config = load_config(output_path)
     assert config.warehouse is not None
     assert config.warehouse.active.auth_mode == "none"
+
+
+def test_configure_from_env_writes_a_snowflake_key_pair_profile(tmp_path):
+    # Key-pair is the corporate-standard Snowflake auth, so `setup` has to be
+    # able to write it: the key *path* goes in the profile, the passphrase
+    # stays a secret, and the key itself is in neither.
+    env_path = _write_env(
+        tmp_path,
+        VALID_ENV
+        + "ETL_CRAFT_WAREHOUSE_JDBC_URL=jdbc:snowflake://acct.snowflakecomputing.com/?db=AN\n"
+        "ETL_CRAFT_WAREHOUSE_USER=SVC_ETL\n"
+        "ETL_CRAFT_WAREHOUSE_AUTH_MODE=key_file\n"
+        "ETL_CRAFT_WAREHOUSE_KEY_FILE=/keys/rsa_key.p8\n",
+    )
+    output_path = tmp_path / "craft-connector.yml"
+
+    configure_from_env(env_path, output_path)
+
+    profile = load_config(output_path).warehouse.active
+    assert profile.auth_mode == "key_file"
+    assert profile.extra["key_file"] == "/keys/rsa_key.p8"
+
+
+def test_configure_from_env_key_file_auth_requires_a_key_path(tmp_path):
+    env_path = _write_env(
+        tmp_path,
+        VALID_ENV
+        + "ETL_CRAFT_WAREHOUSE_JDBC_URL=jdbc:snowflake://acct.snowflakecomputing.com/?db=AN\n"
+        "ETL_CRAFT_WAREHOUSE_USER=SVC_ETL\n"
+        "ETL_CRAFT_WAREHOUSE_AUTH_MODE=key_file\n",
+    )
+    with pytest.raises(ConfigError, match="ETL_CRAFT_WAREHOUSE_KEY_FILE is required"):
+        configure_from_env(env_path, tmp_path / "craft-connector.yml")
+
+
+def test_configure_from_env_token_auth_needs_no_user(tmp_path):
+    # Databricks' username is the literal "token" and the creator supplies it.
+    # Requiring one here rejected a valid profile at setup — caught by testing
+    # the shipped .env template end to end rather than only reading it.
+    env_path = _write_env(
+        tmp_path,
+        VALID_ENV + "ETL_CRAFT_WAREHOUSE_JDBC_URL=jdbc:databricks://h:443/default;httpPath=/sql/x\n"
+        "ETL_CRAFT_WAREHOUSE_AUTH_MODE=token\n",
+    )
+    output_path = tmp_path / "craft-connector.yml"
+
+    configure_from_env(env_path, output_path)
+
+    assert load_config(output_path).warehouse.active.auth_mode == "token"
 
 
 def test_configure_from_env_warehouse_requires_a_user_when_authenticating(tmp_path):

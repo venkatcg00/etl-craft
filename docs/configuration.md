@@ -99,13 +99,24 @@ all.
 |---|---|---|
 | PostgreSQL | `jdbc:postgresql://host:5432/analytics` | `password` |
 | Databricks | `jdbc:databricks://<host>:443/default;httpPath=/sql/1.0/warehouses/<id>;ConnCatalog=<catalog>` | `token` |
-| Snowflake | `jdbc:snowflake://<account>.snowflakecomputing.com/?db=<db>&schema=<schema>&warehouse=<wh>` | `password` |
+| Snowflake | `jdbc:snowflake://<account>.snowflakecomputing.com/?db=<db>&schema=<schema>&warehouse=<wh>` | `key_file` (preferred) or `password` |
 | Trino | `jdbc:trino://host:8080/<catalog>/<schema>` | `password` |
 | DuckDB (local dev) | `jdbc:duckdb:/data/warehouse.duckdb` | `none` |
 
 For Databricks, `auth_mode: token` takes a personal access token from the usual
 `ETL_CRAFT_WAREHOUSE_<PROFILE>_SECRET` variable and sends it in the password position; the
 username is the literal `token` and does not need setting.
+
+For Snowflake, **`auth_mode: key_file` (key-pair/RSA) is what a corporate project should
+use** — Snowflake has been moving service accounts off single-factor passwords, and
+key-pair is the mechanism that keeps working unattended once MFA is enforced. Add
+`key_file:` to the profile (the path to the `.p8` private key) and let the secret be its
+passphrase; the key itself never goes in `craft-connector.yml`. Both values reach the
+driver through connect args rather than the URL, which is what Snowflake's own dialect
+insists on. `auth_mode: password` still works and is fine for exploring an account by hand.
+
+See [warehouse-test.env.example](warehouse-test.env.example) for a fillable `.env`
+covering every warehouse, including how to carry the key through CI from a secret store.
 
 ### What Iceberg cannot do, stated rather than implied
 

@@ -139,6 +139,9 @@ def configure_from_env(env_path: Path | str | None, path: Path | str | None = No
     # [CHOICE] Defaults to `password`, matching [Postgres]. DuckDB sets
     # `none` explicitly — it is a file, with nothing to authenticate to.
     warehouse_auth_mode = values.get("ETL_CRAFT_WAREHOUSE_AUTH_MODE", "password")
+    # The private key's path, for auth_mode=key_file (Snowflake key-pair). The
+    # key itself is never written here -- only where to find it.
+    warehouse_key_file = values.get("ETL_CRAFT_WAREHOUSE_KEY_FILE", "")
     if warehouse_url:
         if warehouse_auth_mode not in VALID_AUTH_MODES:
             raise ConfigError(
@@ -149,6 +152,12 @@ def configure_from_env(env_path: Path | str | None, path: Path | str | None = No
             raise ConfigError(
                 f"{origin}: ETL_CRAFT_WAREHOUSE_USER is required when "
                 f"ETL_CRAFT_WAREHOUSE_AUTH_MODE={warehouse_auth_mode}"
+            )
+        if warehouse_auth_mode == "key_file" and not warehouse_key_file:
+            raise ConfigError(
+                f"{origin}: ETL_CRAFT_WAREHOUSE_KEY_FILE is required when "
+                "ETL_CRAFT_WAREHOUSE_AUTH_MODE=key_file — it is the path to the private key, "
+                "which is never stored in craft-connector.yml itself"
             )
 
     cloning_scope = values.get("ETL_CRAFT_CLONING_SCOPE", "cfg")
@@ -193,6 +202,8 @@ def configure_from_env(env_path: Path | str | None, path: Path | str | None = No
         entry: dict[str, str] = {"jdbc_url": warehouse_url, "auth_mode": warehouse_auth_mode}
         if warehouse_user:
             entry["user"] = warehouse_user
+        if warehouse_key_file:
+            entry["key_file"] = warehouse_key_file
         warehouse["Profiles"][warehouse_profile] = entry
         raw["Warehouse"] = warehouse
 

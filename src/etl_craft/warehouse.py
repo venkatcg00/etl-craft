@@ -282,7 +282,7 @@ def translate_jdbc_url(jdbc_url: str) -> tuple[str, dict[str, Any]]:
     return parser(jdbc_url)
 
 
-def _dbapi_connect(url: URL) -> Any:
+def _dbapi_connect(url: URL, extra: dict[str, Any] | None = None) -> Any:
     """Open one raw DBAPI connection for `url` via its own resolved dialect.
 
     [DEVIATION, 2026-09-20] Calls `dialect.connect(...)`, not
@@ -304,6 +304,13 @@ def _dbapi_connect(url: URL) -> Any:
     # DefaultDialect, so this is a stub gap rather than a live hazard.
     dialect = dialect_cls(dbapi=dialect_cls.import_dbapi())  # type: ignore[call-arg]
     cargs, cparams = dialect.create_connect_args(url)
+    if extra:
+        # Applied after create_connect_args deliberately: credentials that
+        # must never travel in a URL go here. Snowflake's own dialect refuses
+        # `private_key_file` in a URL query string "for safety reasons" and
+        # tells you to use connect_args — this is that path, and it means the
+        # key path and passphrase are never rendered into anything loggable.
+        cparams.update(extra)
     return dialect.connect(*cargs, **cparams)
 
 
@@ -349,13 +356,72 @@ def _none_creator(profile: ConnectionProfile, secret: str) -> Callable[[], Any]:
     return _connect
 
 
+# How each dialect names a private-key credential in its own connect args.
+# Deliberately per-dialect: this was left unimplemented for years precisely
+# because "Postgres SSL client certs and Snowflake private-key auth share
+# nothing", which is still true -- there is no generic mapping, only a
+# per-vendor one, and now there is a vendor to write.
+KEY_FILE_CONNECT_ARGS: dict[str, tuple[str, str]] = {
+    # (path argument, passphrase argument)
+    "snowflake": ("private_key_file", "private_key_file_pwd"),
+}
+
+
 def _key_file_creator(profile: ConnectionProfile, secret: str) -> Callable[[], Any]:
-    raise NotImplementedError(
-        "auth_mode='key_file' has no generic Data DB implementation — how a private-key/cert "
-        "credential maps to DBAPI connect args is genuinely dialect-specific (Postgres SSL "
-        "client certs and, say, Snowflake private-key auth share nothing), and CLAUDE.md "
-        "doesn't pin a warehouse dialect down yet to build against."
+    """Connect with a private key — Snowflake's key-pair (RSA) authentication.
+
+    [DEVIATION, 2026-09-22] Implemented for Snowflake. **This is the
+    corporate-standard way to authenticate a Snowflake service account**:
+    Snowflake has been moving service accounts off single-factor passwords,
+    and key-pair is what automation is expected to use. `password` still works
+    and is fine for a human exploring an account.
+
+    The profile names the key file (`key_file:` in its `extra`, the same
+    convention db.py's Postgres key_file mode already uses) and the secret is
+    the key's passphrase — empty if the key is unencrypted. The key itself
+    never goes in craft-connector.yml, and neither value is ever rendered into
+    a URL: they are injected after `create_connect_args`, which is exactly
+    what Snowflake's own dialect insists on.
+
+    For CI, write the key from a secret store to a file in a setup step and
+    point `key_file` at it -- there is deliberately no inline-PEM mode, which
+    would mean parsing the key here and taking a crypto dependency the engine
+    does not otherwise need.
+    """
+    dialect_name, parts = translate_jdbc_url(profile.jdbc_url)
+    base_dialect = dialect_name.split("+", 1)[0]
+    arg_names = KEY_FILE_CONNECT_ARGS.get(base_dialect)
+    if arg_names is None:
+        raise NotImplementedError(
+            f"auth_mode='key_file' has no implementation for dialect {base_dialect!r} — how a "
+            "private-key credential maps to DBAPI connect args is genuinely vendor-specific "
+            "(Postgres SSL client certs and Snowflake key-pair auth share nothing). "
+            f"Implemented so far: {sorted(KEY_FILE_CONNECT_ARGS)}."
+        )
+    key_file = profile.extra.get("key_file")
+    if not key_file:
+        raise ConnectionError_(
+            f"profile {profile.name!r}: auth_mode=key_file requires a `key_file:` path in the "
+            "profile — the private key itself is never stored in craft-connector.yml"
+        )
+    path_arg, passphrase_arg = arg_names
+    extra: dict[str, Any] = {path_arg: str(key_file)}
+    if secret:
+        extra[passphrase_arg] = secret
+
+    url = URL.create(
+        drivername=dialect_name,
+        username=profile.user,
+        host=parts["host"],
+        port=parts["port"],
+        database=parts["database"],
+        query=parts["query"],
     )
+
+    def _connect() -> Any:
+        return _dbapi_connect(url, extra)
+
+    return _connect
 
 
 # Warehouses whose "token" is a long-lived bearer credential presented in the

@@ -304,7 +304,25 @@ def iceberg_clause(dialect_name: str) -> str:
     return ICEBERG_TABLE_CLAUSE.get(dialect_name, "")
 
 
-def create_table_as(conn: Connection, qualified_name: str, select_sql: str) -> None:
+# The key `execute()` stashes this task's CFG_TASK_PARAMETERS under, on the
+# Connection's own per-connection `info` dict.
+#
+# [CHOICE, 2026-09-22] Via conn.info rather than an extra argument threaded
+# through every caller. Only Snowflake needs these values, and the five
+# create_table_as call sites sit behind two private helpers
+# (_evolve_schema -> _restore_surrogate_key -> _add_computed_surrogate_key),
+# so an argument would mean churning signatures on paths that have no
+# business knowing about storage. `info` is SQLAlchemy's own slot for
+# connection-scoped state, and the connection here is scoped to exactly one
+# task (handlers.py opens it per dispatch).
+TASK_PARAMS_INFO_KEY = "etl_craft_task_params"
+
+
+def create_table_as(
+    conn: Connection,
+    qualified_name: str,
+    select_sql: str,
+) -> None:
     """Issue CREATE TABLE ... AS SELECT, as an Iceberg table where that is not the default.
 
     [DEVIATION, 2026-09-20] This briefly carried a ClickHouse branch (a literal
@@ -312,19 +330,68 @@ def create_table_as(conn: Connection, qualified_name: str, select_sql: str) -> N
     everywhere else). ClickHouse is no longer a supported warehouse. Kept as a
     named helper, which is what made adding Iceberg support a change here
     rather than at five call sites.
+
+    Dialects whose Iceberg tables cannot be expressed as a clause — Snowflake,
+    which names its storage explicitly — read that storage from the task's own
+    CFG_TASK_PARAMETERS via `conn.info`; see TASK_PARAMS_INFO_KEY.
     """
     dialect_name = conn.dialect.name
-    if dialect_name in ICEBERG_CREATE_PREFIX:
-        raise HandlerError(
-            f"{dialect_name} needs CREATE {ICEBERG_CREATE_PREFIX[dialect_name]} with an "
-            "EXTERNAL_VOLUME and BASE_LOCATION to produce an Iceberg table, and neither has "
-            "a home in CFG_ metadata yet — refusing rather than silently creating a "
-            "non-Iceberg table. See sql_actions.ICEBERG_CREATE_PREFIX."
+    prefix_kind = ICEBERG_CREATE_PREFIX.get(dialect_name)
+    if prefix_kind:
+        params: dict[str, str] = conn.info.get(TASK_PARAMS_INFO_KEY) or {}
+        return _create_iceberg_table_with_storage(
+            conn, dialect_name, prefix_kind, qualified_name, select_sql, params
         )
     clause = iceberg_clause(dialect_name)
     prefix = f"CREATE TABLE {qualified_name}"
     statement = f"{prefix} {clause} AS {select_sql}" if clause else f"{prefix} AS {select_sql}"
     conn.execute(text(statement))
+    return None
+
+
+def _create_iceberg_table_with_storage(
+    conn: Connection,
+    dialect_name: str,
+    prefix_kind: str,
+    qualified_name: str,
+    select_sql: str,
+    params: dict[str, str],
+) -> None:
+    """Create an Iceberg table on a dialect that names its storage explicitly (Snowflake).
+
+    [ADDITION, 2026-09-22] Snowflake's Iceberg tables are a different statement
+    (`CREATE ICEBERG TABLE`) and need an `EXTERNAL_VOLUME` plus a
+    `BASE_LOCATION`, both deployment-specific. They are ordinary
+    CFG_TASK_PARAMETERS, which is where every other deployment-specific value
+    already lives -- not craft-connector.yml, because a team can legitimately
+    point different targets at different volumes.
+
+    Still refuses when they are absent, rather than falling back to an
+    ordinary Snowflake table: that would look like success and silently
+    produce something no other engine in the lakehouse can read, which is the
+    whole failure this is guarding against.
+    """
+    external_volume = (params.get("EXTERNAL_VOLUME") or "").strip()
+    base_location = (params.get("BASE_LOCATION") or "").strip()
+    if not external_volume or not base_location:
+        raise HandlerError(
+            f"{dialect_name} needs CREATE {prefix_kind} with EXTERNAL_VOLUME and BASE_LOCATION "
+            "to produce an Iceberg table — add both as CFG_TASK_PARAMETERS. Refusing rather "
+            "than creating an ordinary (non-Iceberg) table that nothing else in the lakehouse "
+            "could read."
+        )
+    for value, name in ((external_volume, "EXTERNAL_VOLUME"), (base_location, "BASE_LOCATION")):
+        if "'" in value:
+            raise HandlerError(f"CFG_TASK_PARAMETERS.{name} must not contain a quote: {value!r}")
+    conn.execute(
+        text(
+            f"CREATE {prefix_kind} {qualified_name} "
+            f"EXTERNAL_VOLUME = '{external_volume}' "
+            "CATALOG = 'SNOWFLAKE' "
+            f"BASE_LOCATION = '{base_location}' "
+            f"AS {select_sql}"
+        )
+    )
 
 
 PIPELINE_ID_TOKEN = "$$pipeline_id"
@@ -998,6 +1065,10 @@ def execute(
 ) -> HandlerResult:
     """Run this task's SQL_ACTION against the Data DB; return counts for AUD_TASK_RUN_LOG."""
     params = ctx.task_params
+    # Storage parameters a Snowflake Iceberg CREATE needs, reachable from the
+    # create_table_as calls nested inside the rebuild helpers. See
+    # TASK_PARAMS_INFO_KEY for why this is not an argument.
+    data_conn.info[TASK_PARAMS_INFO_KEY] = params
     action = params.get("SQL_ACTION")
     if action not in SQL_ACTIONS:
         raise HandlerError(f"CFG_TASK_PARAMETERS.SQL_ACTION missing or unrecognized: {action!r}")

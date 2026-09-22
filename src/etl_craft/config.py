@@ -86,8 +86,19 @@ VALID_SOURCE_TYPES = frozenset({"file", "environment"})
 # no password to present. [Email] already uses the same value for the same
 # reason, so this is an existing vocabulary rather than a new one.
 VALID_AUTH_MODES = frozenset({"none", "password", "token", "sso", "key_file"})
-# Modes where a `user` is meaningless and therefore not required.
-AUTH_MODES_WITHOUT_USER = frozenset({"none"})
+# Modes where a `user` is not required in the profile.
+#
+# `none`: an embedded warehouse is a file — there is nobody to be.
+#
+# [DEVIATION, 2026-09-22] `token` joined it. A bearer token carries its own
+# username convention — Databricks' is the literal string "token" — and
+# warehouse._token_creator is where that is known, per dialect. Requiring one
+# here too meant two places deciding one rule, and they disagreed: a valid
+# Databricks profile was rejected at setup with "ETL_CRAFT_WAREHOUSE_USER is
+# required", for a value the creator would have supplied. A profile that
+# genuinely needs one (an unknown dialect) still gets a clear error from the
+# creator, which is the single place that can actually tell.
+AUTH_MODES_WITHOUT_USER = frozenset({"none", "token"})
 VALID_CLONING_SCOPES = frozenset({"cfg", "aud", "all"})
 # [ADDITION] EMAIL_ALERT's own, smaller auth vocabulary — per explicit
 # instruction, the transport is SMTP. Many internal relays accept anonymous
