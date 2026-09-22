@@ -86,6 +86,13 @@ def validate_graphs(conn: Connection) -> list[ValidationIssue]:
     return issues
 
 
+# Warehouses that genuinely enforce a primary key, and so can be introspected
+# for one. Everything else in the supported set is a SQL engine over Iceberg,
+# which has no constraint concept -- Databricks accepts primary keys only as
+# unenforced informational metadata, and Trino/Iceberg rejects them outright.
+ENFORCED_PRIMARY_KEY_DIALECTS = frozenset({"postgresql", "duckdb"})
+
+
 def _primary_key_columns(
     data_engine: Engine, inspector: Inspector, table: str, schema: str | None
 ) -> list[str]:
@@ -132,6 +139,27 @@ def validate_business_rule_keys(
                 message=(
                     f"{len(targets)} active business rule(s) declare a TARGET_TABLE, but no "
                     "[Warehouse] is configured in craft-connector.yml to check them against"
+                ),
+            )
+        ]
+
+    # [ADDITION, 2026-09-22] Iceberg has no constraint concept at all -- no
+    # primary keys to introspect -- so running this check against an
+    # Iceberg-backed warehouse would report *every* target as failing, the
+    # same false-failure class as duckdb's missing PK reflection below. The
+    # engine still gives each target a single-column ROW_ID
+    # (sql_actions._add_computed_surrogate_key), so the convention holds; what
+    # does not hold is database *enforcement* of it. Say that, once, rather
+    # than repeating a failure per rule.
+    if data_engine.dialect.name not in ENFORCED_PRIMARY_KEY_DIALECTS:
+        return [
+            ValidationIssue(
+                category="business_rule_pk",
+                message=(
+                    f"{len(targets)} active business rule(s) checked against a "
+                    f"{data_engine.dialect.name} warehouse, which cannot enforce primary keys "
+                    "(Iceberg has no constraint concept) — the engine still assigns each target "
+                    "a single-column ROW_ID, but uniqueness is not database-enforced"
                 ),
             )
         ]

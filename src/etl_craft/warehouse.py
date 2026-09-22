@@ -51,6 +51,17 @@ _DUCKDB_URL_RE = re.compile(r"^jdbc:duckdb:(?P<path>.*)$")
 # The catalog name qualify() interpolates unquoted into database.schema.table.
 _SAFE_CATALOG = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+_JDBC_SCHEME_RE = re.compile(r"^jdbc:(?P<scheme>[a-zA-Z0-9_+-]+):")
+
+_DATABRICKS_URL_RE = re.compile(
+    r"^jdbc:databricks://(?P<host>[^:/;]+)(:(?P<port>\d+))?"
+    r"(/(?P<schema>[^;]*))?(;(?P<params>.*))?$"
+)
+
+_SNOWFLAKE_URL_RE = re.compile(
+    r"^jdbc:snowflake://(?P<host>[^:/?]+)(:(?P<port>\d+))?/?(\?(?P<query>.*))?$"
+)
+
 _JDBC_URL_RE = re.compile(
     r"^jdbc:(?P<scheme>[a-zA-Z0-9_+-]+)://(?P<host>[^:/?]+)(:(?P<port>\d+))?/(?P<database>[^?]+)"
     r"(\?(?P<query>.*))?$"
@@ -75,8 +86,8 @@ JDBC_SCHEME_TO_SQLALCHEMY_DIALECT: dict[str, str] = {
 }
 
 
-def translate_jdbc_url(jdbc_url: str) -> tuple[str, dict[str, Any]]:
-    """Split a JDBC URL into (dialect, parts). Handles DuckDB's file form too."""
+def _parse_duckdb(jdbc_url: str) -> tuple[str, dict[str, Any]]:
+    """Parse `jdbc:duckdb:<path>` — a file, not a server."""
     duckdb = _DUCKDB_URL_RE.match(jdbc_url)
     if duckdb:
         # [ADDITION, 2026-09-20] DuckDB is embedded: its JDBC URL is
@@ -137,7 +148,95 @@ def translate_jdbc_url(jdbc_url: str) -> tuple[str, dict[str, Any]]:
             "database": stem,
             "query": {},
         }
+    raise ConnectionError_(f"not a recognized DuckDB JDBC URL: {jdbc_url!r}")
 
+
+def _parse_databricks(jdbc_url: str) -> tuple[str, dict[str, Any]]:
+    """Parse Databricks' semicolon-parameter JDBC form.
+
+    [ADDITION, 2026-09-22] `jdbc:databricks://<host>:443/<schema>;httpPath=...;
+    ConnCatalog=...` — semicolon-separated parameters after the path, not a
+    query string, so the generic parser cannot read it.
+
+    Only the parameters the SQLAlchemy dialect actually consumes are carried
+    over (`http_path`, `catalog`, `schema`, verified against
+    `create_connect_args`). Transport/auth parameters a JDBC driver needs and
+    this one does not — `AuthMech`, `transportMode`, `ssl`, `UID`, `PWD` — are
+    dropped rather than passed through, since `PWD` in particular would put
+    the token in the URL, which this module goes out of its way to avoid.
+    """
+    match = _DATABRICKS_URL_RE.match(jdbc_url)
+    if not match:
+        raise ConnectionError_(
+            f"not a recognized Databricks JDBC URL: {jdbc_url!r} — expected "
+            "jdbc:databricks://<host>:443/<schema>;httpPath=/sql/1.0/warehouses/<id>"
+        )
+    params: dict[str, str] = {}
+    for chunk in (match["params"] or "").split(";"):
+        if "=" in chunk:
+            key, _, value = chunk.partition("=")
+            params[key.strip().lower()] = value.strip()
+
+    http_path = params.get("httppath")
+    if not http_path:
+        raise ConnectionError_(
+            f"Databricks JDBC URL {jdbc_url!r} has no httpPath — it names the SQL warehouse "
+            "or cluster to run against (e.g. httpPath=/sql/1.0/warehouses/<id>)"
+        )
+    query = {"http_path": http_path}
+    catalog = params.get("conncatalog") or params.get("catalog")
+    schema = params.get("connschema") or params.get("schema") or match["schema"]
+    if catalog:
+        query["catalog"] = catalog
+    if schema and schema != "default":
+        query["schema"] = schema
+    return "databricks", {
+        "host": match["host"],
+        "port": int(match["port"]) if match["port"] else None,
+        # qualify()'s three-part name needs the Unity Catalog catalog here.
+        "database": catalog or "",
+        "query": query,
+    }
+
+
+def _parse_snowflake(jdbc_url: str) -> tuple[str, dict[str, Any]]:
+    """Parse Snowflake's account-host JDBC form.
+
+    [ADDITION, 2026-09-22] `jdbc:snowflake://<account>.snowflakecomputing.com/
+    ?db=<db>&schema=<schema>&warehouse=<wh>&role=<role>` — the path is empty
+    and the database lives in the query string, which the generic parser (it
+    requires a non-empty path segment) cannot read.
+
+    The SQLAlchemy dialect takes database and schema as a two-segment
+    `database/schema` path and splits them itself — verified against
+    `create_connect_args`, which produced `database='MYDB', schema='PUBLIC'`.
+    """
+    match = _SNOWFLAKE_URL_RE.match(jdbc_url)
+    if not match:
+        raise ConnectionError_(
+            f"not a recognized Snowflake JDBC URL: {jdbc_url!r} — expected "
+            "jdbc:snowflake://<account>.snowflakecomputing.com/?db=<db>&schema=<schema>"
+        )
+    query = dict(parse_qsl(match["query"] or ""))
+    database = query.pop("db", "") or query.pop("database", "")
+    schema = query.pop("schema", "")
+    if not database:
+        raise ConnectionError_(
+            f"Snowflake JDBC URL {jdbc_url!r} has no db= parameter — it names the database "
+            "qualify() resolves schema.table against"
+        )
+    return "snowflake", {
+        "host": match["host"],
+        "port": int(match["port"]) if match["port"] else None,
+        "database": f"{database}/{schema}" if schema else database,
+        # The catalog half of qualify()'s three-part name.
+        "catalog": database,
+        "query": query,
+    }
+
+
+def _parse_generic(jdbc_url: str) -> tuple[str, dict[str, Any]]:
+    """Parse the ordinary `jdbc:<scheme>://host[:port]/database[?query]` form."""
     match = _JDBC_URL_RE.match(jdbc_url)
     if not match:
         raise ConnectionError_(
@@ -147,12 +246,40 @@ def translate_jdbc_url(jdbc_url: str) -> tuple[str, dict[str, Any]]:
     dialect = JDBC_SCHEME_TO_SQLALCHEMY_DIALECT.get(match["scheme"], match["scheme"])
     port = int(match["port"]) if match["port"] else None
     query = dict(parse_qsl(match["query"])) if match["query"] else {}
+    database = match["database"]
     return dialect, {
         "host": match["host"],
         "port": port,
-        "database": match["database"],
+        "database": database,
+        # Trino (and any other engine whose path is `catalog/schema`) names
+        # the catalog first; qualify() wants that half alone.
+        "catalog": database.split("/", 1)[0],
         "query": query,
     }
+
+
+# [ADDITION, 2026-09-22] A parser per vendor whose JDBC URL is not the ordinary
+# `scheme://host[:port]/database[?query]` shape, which this module's own
+# comment always said would be needed "when that vendor is actually chosen".
+# Three now are. A scheme absent from this map takes the generic parser, which
+# is what makes "any sql tool over plain iceberg" need no code here at all —
+# only a dialect on the path.
+JDBC_PARSERS: dict[str, Callable[[str], tuple[str, dict[str, Any]]]] = {
+    "duckdb": _parse_duckdb,
+    "databricks": _parse_databricks,
+    "snowflake": _parse_snowflake,
+}
+
+
+def translate_jdbc_url(jdbc_url: str) -> tuple[str, dict[str, Any]]:
+    """Split a JDBC URL into (dialect name, parts), via that vendor's own parser."""
+    scheme_match = _JDBC_SCHEME_RE.match(jdbc_url)
+    if not scheme_match:
+        raise ConnectionError_(
+            f"not a recognized JDBC URL: {jdbc_url!r} — expected jdbc:<vendor>:..."
+        )
+    parser = JDBC_PARSERS.get(scheme_match["scheme"].lower(), _parse_generic)
+    return parser(jdbc_url)
 
 
 def _dbapi_connect(url: URL) -> Any:
@@ -231,11 +358,52 @@ def _key_file_creator(profile: ConnectionProfile, secret: str) -> Callable[[], A
     )
 
 
+# Warehouses whose "token" is a long-lived bearer credential presented in the
+# password position, rather than something minted per connection. Databricks
+# personal access tokens work exactly this way -- the dialect's own
+# create_connect_args maps username/password onto server_hostname/access_token
+# (verified directly).
+_STATIC_TOKEN_USERNAMES: dict[str, str] = {"databricks": "token"}
+
+
 def _token_creator(profile: ConnectionProfile, secret: str) -> Callable[[], Any]:
-    raise NotImplementedError(
-        "auth_mode='token' has no concrete implementation yet — the credential-minting "
-        "provider (which cloud/SDK) is team-specific and unspecified in CLAUDE.md."
+    """Connect with a bearer token.
+
+    [DEVIATION, 2026-09-22] Implemented, where it previously raised
+    NotImplementedError on the grounds that "the credential-minting provider
+    is team-specific". That reasoning still holds for tokens a provider mints
+    per connection (an OAuth2 client-credentials exchange, an STS
+    AssumeRole) -- none of which is specified -- but it conflated those with
+    the far commoner case: a long-lived token the team already has, presented
+    like a password. Databricks personal access tokens are exactly that, and
+    the engine cannot reach Databricks at all without it.
+
+    So this handles the static case and nothing more. A minted/refreshed token
+    remains unimplemented and is a genuinely different mechanism, which is why
+    `pool_recycle` guidance exists for it in CLAUDE.md.
+    """
+    dialect_name, parts = translate_jdbc_url(profile.jdbc_url)
+    base_dialect = dialect_name.split("+", 1)[0]
+    username = profile.user or _STATIC_TOKEN_USERNAMES.get(base_dialect)
+    if not username:
+        raise ConnectionError_(
+            f"auth_mode='token' needs a `user` for dialect {base_dialect!r} — it is sent in "
+            "the username position alongside the token. Databricks uses the literal 'token'."
+        )
+    url = URL.create(
+        drivername=dialect_name,
+        username=username,
+        password=secret,
+        host=parts["host"],
+        port=parts["port"],
+        database=parts["database"],
+        query=parts["query"],
     )
+
+    def _connect() -> Any:
+        return _dbapi_connect(url)
+
+    return _connect
 
 
 def _sso_creator(profile: ConnectionProfile, secret: str) -> Callable[[], Any]:

@@ -12,6 +12,7 @@ import runpy
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -97,7 +98,14 @@ from etl_craft.runlog import (
 )
 from etl_craft.scripts import _parse_trailing_json
 from etl_craft.scripts import execute as execute_python_script
-from etl_craft.sql_actions import active_database, qualify, substitute_pipeline_id
+from etl_craft.sql_actions import (
+    active_database,
+    create_table_as,
+    iceberg_clause,
+    qualify,
+    substitute_pipeline_id,
+)
+from etl_craft.validate import validate_business_rule_keys
 from etl_craft.warehouse import (
     WAREHOUSE_AUTH_REGISTRY,
     build_data_engine,
@@ -592,6 +600,116 @@ def test_translate_jdbc_url_accepts_an_ordinary_duckdb_catalog_name():
     # The guard must not reject the ordinary case it exists to protect.
     _, parts = translate_jdbc_url("jdbc:duckdb:/data/warehouse.duckdb")
     assert parts["database"] == "warehouse"
+
+
+def test_translate_jdbc_url_parses_databricks_semicolon_parameters():
+    # Databricks' JDBC form is semicolon-separated after the path, not a query
+    # string, so the generic parser cannot read it at all.
+    dialect, parts = translate_jdbc_url(
+        "jdbc:databricks://dbc-a1b2.cloud.databricks.com:443/default;"
+        "httpPath=/sql/1.0/warehouses/abc123;ConnCatalog=main;ConnSchema=analytics;AuthMech=3"
+    )
+    assert dialect == "databricks"
+    assert parts["host"] == "dbc-a1b2.cloud.databricks.com"
+    assert parts["port"] == 443
+    assert parts["query"]["http_path"] == "/sql/1.0/warehouses/abc123"
+    assert parts["query"]["catalog"] == "main"
+    # qualify()'s three-part name needs the Unity Catalog catalog.
+    assert parts["database"] == "main"
+    # Transport/auth parameters a JDBC driver needs and this one does not are
+    # dropped rather than forwarded -- PWD in particular would put the token
+    # in the URL, which this module goes out of its way to avoid.
+    assert "authmech" not in parts["query"]
+
+
+def test_translate_jdbc_url_databricks_without_http_path_is_rejected():
+    with pytest.raises(ConnectionError_, match="no httpPath"):
+        translate_jdbc_url("jdbc:databricks://host:443/default;ConnCatalog=main")
+
+
+def test_translate_jdbc_url_parses_snowflakes_account_host_form():
+    # The path is empty and the database lives in the query string -- the
+    # exact shape this module's own comment named years ago as needing its own
+    # parser "when that vendor is actually chosen".
+    dialect, parts = translate_jdbc_url(
+        "jdbc:snowflake://myacct.snowflakecomputing.com/"
+        "?db=ANALYTICS&schema=PUBLIC&warehouse=COMPUTE_WH&role=SYSADMIN"
+    )
+    assert dialect == "snowflake"
+    assert parts["host"] == "myacct.snowflakecomputing.com"
+    # The dialect splits `database/schema` itself.
+    assert parts["database"] == "ANALYTICS/PUBLIC"
+    # ...but qualify() needs the catalog half alone.
+    assert parts["catalog"] == "ANALYTICS"
+    assert parts["query"] == {"warehouse": "COMPUTE_WH", "role": "SYSADMIN"}
+
+
+def test_translate_jdbc_url_snowflake_without_a_database_is_rejected():
+    with pytest.raises(ConnectionError_, match="no db="):
+        translate_jdbc_url("jdbc:snowflake://myacct.snowflakecomputing.com/?warehouse=WH")
+
+
+def test_translate_jdbc_url_trino_takes_the_generic_parser():
+    # The point of the registry: "any sql tool over plain iceberg" needs no
+    # code here, only a dialect on the path. Trino's catalog/schema path
+    # already fits the generic shape.
+    dialect, parts = translate_jdbc_url("jdbc:trino://trino.internal:8080/iceberg/analytics")
+    assert dialect == "trino"
+    assert parts["database"] == "iceberg/analytics"
+    assert parts["catalog"] == "iceberg"
+
+
+@pytest.mark.parametrize(
+    "dialect_name, expected",
+    [
+        ("postgresql+psycopg", ""),
+        ("duckdb", ""),
+        ("databricks", "USING ICEBERG"),
+        # An engine pointed at an Iceberg catalog writes Iceberg without being
+        # told to, and a clause would be a syntax error.
+        ("trino", ""),
+    ],
+)
+def test_iceberg_clause_per_dialect(dialect_name, expected):
+    # "if the warehouse is not postgres, every table we create or operate
+    # should be iceberg compatible" -- getting this wrong is silent: the table
+    # is created, the pipeline succeeds, and nothing else in the lakehouse can
+    # read it.
+    assert iceberg_clause(dialect_name) == expected
+
+
+class _FakeDialectConn:
+    """Just enough Connection for the dialect-name branches, which is all they read."""
+
+    def __init__(self, name: str) -> None:
+        self.dialect = SimpleNamespace(name=name)
+
+    def execute(self, *_args, **_kwargs):  # pragma: no cover - never reached in these tests
+        raise AssertionError("no statement should be issued")
+
+
+def test_create_table_as_refuses_snowflake_rather_than_making_a_non_iceberg_table():
+    # Snowflake's Iceberg tables need a different statement (CREATE ICEBERG
+    # TABLE) plus an EXTERNAL_VOLUME and BASE_LOCATION that have no home in
+    # CFG_ metadata yet. Refusing beats silently creating an ordinary
+    # Snowflake table that looks fine and is not Iceberg -- producing the
+    # wrong thing successfully is worse than failing.
+    with pytest.raises(HandlerError, match="EXTERNAL_VOLUME"):
+        create_table_as(_FakeDialectConn("snowflake"), "db.sch.t", "SELECT 1")
+
+
+def test_validate_reports_that_iceberg_cannot_enforce_primary_keys(monkeypatch):
+    # Running the PK introspection against an Iceberg-backed warehouse would
+    # report every target as failing, the same false-failure class as duckdb's
+    # missing PK reflection. One honest issue, not one per rule.
+    monkeypatch.setattr(
+        "etl_craft.validate.fetch_business_rule_targets", lambda _conn: [object(), object()]
+    )
+    issues = validate_business_rule_keys(
+        object(), SimpleNamespace(dialect=SimpleNamespace(name="trino"))
+    )
+    assert len(issues) == 1
+    assert "cannot enforce primary keys" in issues[0].message
 
 
 def test_translate_jdbc_url_rejects_an_unrecognized_shape():
@@ -1306,7 +1424,16 @@ def test_build_engine_rejects_unknown_auth_mode():
 def test_translate_jdbc_url_maps_known_scheme_and_defaults_port():
     dialect, parts = translate_jdbc_url("jdbc:postgresql://myhost/mydb")
     assert dialect == "postgresql+psycopg"
-    assert parts == {"host": "myhost", "port": None, "database": "mydb", "query": {}}
+    # `catalog` joined the parts dict when Trino/Snowflake landed: their URL
+    # path is `catalog/schema`, and qualify()'s three-part name needs the
+    # catalog half alone. For an ordinary one-segment path the two agree.
+    assert parts == {
+        "host": "myhost",
+        "port": None,
+        "database": "mydb",
+        "catalog": "mydb",
+        "query": {},
+    }
 
 
 def test_translate_jdbc_url_explicit_port_and_query():
@@ -1366,11 +1493,59 @@ def test_password_creator_builds_url_and_uses_generic_dbapi_connect(monkeypatch)
     assert url.database == "mydb"
 
 
-def test_warehouse_key_file_token_sso_creators_are_not_implemented():
+def test_warehouse_token_creator_builds_a_databricks_url(monkeypatch):
+    # Databricks personal access tokens are a long-lived bearer credential
+    # presented in the password position -- verified against the dialect's own
+    # create_connect_args, which maps username/password onto
+    # server_hostname/access_token. The engine cannot reach Databricks at all
+    # without this, which is why `token` stopped raising NotImplementedError.
+    captured = {}
+
+    def fake_connect(url):
+        captured["url"] = url
+        return object()
+
+    monkeypatch.setattr("etl_craft.warehouse._dbapi_connect", fake_connect)
+    profile = ConnectionProfile(
+        section="WAREHOUSE",
+        name="dev",
+        jdbc_url=(
+            "jdbc:databricks://dbc-a1b2.cloud.databricks.com:443/default;"
+            "httpPath=/sql/1.0/warehouses/abc123;ConnCatalog=main"
+        ),
+        user="",
+        auth_mode="token",
+    )
+    WAREHOUSE_AUTH_REGISTRY["token"](profile, "dapi-secret")()
+
+    url = captured["url"]
+    assert url.drivername == "databricks"
+    # Databricks' own convention: the literal username "token".
+    assert url.username == "token"
+    assert url.password == "dapi-secret"
+    assert url.query["http_path"] == "/sql/1.0/warehouses/abc123"
+
+
+def test_warehouse_token_creator_needs_a_user_on_an_unknown_dialect():
+    profile = ConnectionProfile(
+        section="WAREHOUSE",
+        name="dev",
+        jdbc_url="jdbc:trino://trino.internal:8080/iceberg/analytics",
+        user="",
+        auth_mode="token",
+    )
+    with pytest.raises(ConnectionError_, match="needs a `user`"):
+        WAREHOUSE_AUTH_REGISTRY["token"](profile, "secret")
+
+
+def test_warehouse_key_file_and_sso_creators_are_not_implemented():
+    # `token` left this list on 2026-09-22: Databricks personal access tokens
+    # are a long-lived bearer credential presented like a password, and the
+    # engine cannot reach Databricks without it. A *minted* token (OAuth2
+    # client-credentials, STS AssumeRole) is still unimplemented and is a
+    # genuinely different mechanism.
     with pytest.raises(NotImplementedError):
         WAREHOUSE_AUTH_REGISTRY["key_file"](warehouse_profile("key_file"), "unused")
-    with pytest.raises(NotImplementedError):
-        WAREHOUSE_AUTH_REGISTRY["token"](warehouse_profile("token"), "unused")
     with pytest.raises(NotImplementedError):
         WAREHOUSE_AUTH_REGISTRY["sso"](warehouse_profile("sso"), "unused")
 

@@ -252,18 +252,79 @@ AUDIT_COLUMN_TYPES: dict[str, str] = {
 }
 
 
+# [ADDITION, 2026-09-22] Per explicit instruction: "if the warehouse is not
+# postgres, every table we create or operate should be iceberg compatible."
+#
+# Postgres is the one warehouse that stores its own tables natively; every
+# other supported warehouse is a SQL engine *over Iceberg*, so every table
+# this module creates there has to be an Iceberg table rather than that
+# engine's own default format. Getting this wrong is silent: the table is
+# created, the pipeline succeeds, and it is simply not readable by anything
+# else in the lakehouse — which is the entire reason for choosing Iceberg.
+#
+# Expressed as the clause each dialect needs between `CREATE TABLE <name>` and
+# `AS <select>`, because that is the only part that differs:
+#
+#   * Databricks — `USING ICEBERG` names the format in Unity Catalog.
+#   * Trino — tables in an Iceberg catalog are Iceberg by construction; the
+#     catalog in the URL is what decides it, so no clause is needed and
+#     adding one would be a syntax error.
+#   * Snowflake — deliberately absent, see ICEBERG_CREATE_PREFIX below.
+#
+# A dialect not listed here gets no clause. That is the right default for
+# "any sql tool over plain iceberg" (Trino's case, generalized): an engine
+# pointed at an Iceberg catalog writes Iceberg without being told to.
+ICEBERG_TABLE_CLAUSE: dict[str, str] = {"databricks": "USING ICEBERG"}
+
+# Snowflake is the one that cannot be expressed as a clause: its Iceberg
+# tables use a different statement (`CREATE ICEBERG TABLE`) and require an
+# EXTERNAL_VOLUME plus a BASE_LOCATION that are deployment-specific and have
+# no home in CFG_ metadata today.
+#
+# [CHOICE] Refused up front with a clear reason rather than silently creating
+# an ordinary Snowflake table that looks fine and is not Iceberg. Same
+# reasoning as refusing SCD merges on ClickHouse: producing the wrong thing
+# successfully is worse than failing.
+#
+# Worth stating plainly, because the instruction named them together:
+# Snowflake **hybrid tables and Iceberg tables are different features** — the
+# first is a row-store with enforced primary keys, the second is external
+# Iceberg format — and a table cannot be both. "Iceberg-compatible" is the
+# binding requirement, so Iceberg tables are the target here.
+ICEBERG_CREATE_PREFIX: dict[str, str] = {"snowflake": "ICEBERG TABLE"}
+
+# The warehouse that stores its own tables, and so needs no Iceberg handling.
+NATIVE_STORAGE_DIALECTS = frozenset({"postgresql", "duckdb"})
+
+
+def iceberg_clause(dialect_name: str) -> str:
+    """Return the clause that makes a CREATE TABLE produce an Iceberg table here."""
+    if dialect_name.split("+", 1)[0] in NATIVE_STORAGE_DIALECTS:
+        return ""
+    return ICEBERG_TABLE_CLAUSE.get(dialect_name, "")
+
+
 def create_table_as(conn: Connection, qualified_name: str, select_sql: str) -> None:
-    """Issue CREATE TABLE ... AS SELECT.
+    """Issue CREATE TABLE ... AS SELECT, as an Iceberg table where that is not the default.
 
     [DEVIATION, 2026-09-20] This briefly carried a ClickHouse branch (a literal
     `ENGINE = MergeTree() ORDER BY tuple()`, mandatory there and rejected
-    everywhere else). ClickHouse is no longer a supported warehouse — see this
-    module's own docstring — so both supported engines take the plain ANSI
-    form. Kept as a named helper anyway: it is where a future dialect's
-    creation quirk belongs, and having it is what made the ClickHouse quirk a
-    two-line change rather than five call sites.
+    everywhere else). ClickHouse is no longer a supported warehouse. Kept as a
+    named helper, which is what made adding Iceberg support a change here
+    rather than at five call sites.
     """
-    conn.execute(text(f"CREATE TABLE {qualified_name} AS {select_sql}"))
+    dialect_name = conn.dialect.name
+    if dialect_name in ICEBERG_CREATE_PREFIX:
+        raise HandlerError(
+            f"{dialect_name} needs CREATE {ICEBERG_CREATE_PREFIX[dialect_name]} with an "
+            "EXTERNAL_VOLUME and BASE_LOCATION to produce an Iceberg table, and neither has "
+            "a home in CFG_ metadata yet — refusing rather than silently creating a "
+            "non-Iceberg table. See sql_actions.ICEBERG_CREATE_PREFIX."
+        )
+    clause = iceberg_clause(dialect_name)
+    prefix = f"CREATE TABLE {qualified_name}"
+    statement = f"{prefix} {clause} AS {select_sql}" if clause else f"{prefix} AS {select_sql}"
+    conn.execute(text(statement))
 
 
 PIPELINE_ID_TOKEN = "$$pipeline_id"
@@ -349,7 +410,19 @@ def active_database(config: ConnectorConfig) -> str:
     if config.warehouse is None:
         raise HandlerError("no [Warehouse] section configured in craft-connector.yml")
     _, parts = translate_jdbc_url(config.warehouse.active.jdbc_url)
-    return parts["database"]
+    # [ADDITION, 2026-09-22] `catalog` where the two differ. Snowflake and
+    # Trino carry database and schema in one `database/schema` URL segment,
+    # because that is what their dialects split themselves — but qualify()'s
+    # three-part `catalog.schema.table` needs the catalog half alone, and the
+    # schema comes from CFG_TASK_PARAMETERS.TARGET_OBJECT, not the profile.
+    database = parts.get("catalog") or parts["database"]
+    if not database:
+        raise HandlerError(
+            "the active [Warehouse] profile's jdbc_url names no catalog/database, so "
+            "TARGET_OBJECT's schema.table cannot be resolved to a full name — add one "
+            "(e.g. ConnCatalog=<catalog> for Databricks, db=<database> for Snowflake)"
+        )
+    return database
 
 
 def _split_pipe_list(value: str | None, *, param_name: str) -> list[str]:
@@ -700,6 +773,79 @@ def _sequence_name(target_object: str, database: str) -> str:
     )
 
 
+def _row_id_insert_parts(conn: Connection, qualified_target: str) -> tuple[str, str]:
+    """Extra (columns, values) an INSERT needs where ROW_ID cannot auto-fill itself.
+
+    [ADDITION, 2026-09-22] Postgres fills ROW_ID from its identity and DuckDB
+    from a sequence default, so their INSERTs never mention it. Iceberg has
+    neither, so every insert has to supply the value.
+
+    The base is read with its own query *before* the mutating statement runs,
+    rather than as a subquery over the target inside the INSERT itself: this
+    module's own rule for counts, and here it also avoids referencing a table
+    in the same statement that is writing to it -- which engines disagree
+    about.
+    """
+    if not _is_iceberg_backed(conn.dialect.name):
+        return "", ""
+    base = int(
+        conn.execute(
+            text(f"SELECT COALESCE(MAX({ROW_ID_COLUMN}), 0) FROM {qualified_target}")
+        ).scalar_one()
+    )
+    return (
+        f", {ROW_ID_COLUMN}",
+        f", {base} + CAST(ROW_NUMBER() OVER () AS BIGINT)",
+    )
+
+
+def _is_iceberg_backed(dialect_name: str) -> bool:
+    """Whether this warehouse stores its tables as Iceberg rather than natively."""
+    return dialect_name.split("+", 1)[0] not in NATIVE_STORAGE_DIALECTS
+
+
+def _add_computed_surrogate_key(conn: Connection, qualified: str) -> None:
+    """Give an Iceberg-backed target a ROW_ID without an identity column or a sequence.
+
+    [ADDITION, 2026-09-22] Iceberg has neither. The spec has no constraint
+    concept at all -- no primary keys, no identity, no sequences -- so the
+    route both other warehouses take (Postgres `GENERATED ALWAYS AS IDENTITY`,
+    DuckDB a sequence default) does not exist here.
+
+    ROW_ID is therefore *computed*: the largest value already in the table
+    plus a row number over the rows being added. That keeps what ROW_ID is
+    actually for -- a stable single-column key per row, which
+    AUD_BUSINESS_RULES_RESULTS references -- and is what makes CLAUDE.md's
+    single-column-key convention hold on every warehouse.
+
+    **[CHOICE] What is genuinely given up, stated rather than implied:**
+    uniqueness is not enforced by the database, because Iceberg cannot enforce
+    it. Two concurrent writers to the same target could compute the same
+    ROW_ID. That is acceptable here and nowhere near as bad as it sounds --
+    `ux_pipeline_run_one_active` already permits only one active run per
+    pipeline, and one task writes one target within it -- but it is a real
+    difference from the Postgres path and `validate` reports it rather than
+    pretending the convention is enforced.
+
+    No `ADD PRIMARY KEY` is issued: Databricks accepts primary keys only as
+    informational, unenforced metadata, and Trino/Iceberg rejects the
+    statement outright.
+    """
+    # Rebuilt rather than ALTER-then-UPDATE: a correlated UPDATE assigning a
+    # window function is not portable across these engines, and the
+    # drop-and-rename shape is one this module already relies on in
+    # _evolve_schema.
+    rebuild = f"{qualified}__etl_rowid"
+    conn.execute(text(f"DROP TABLE IF EXISTS {rebuild}"))
+    create_table_as(
+        conn,
+        rebuild,
+        f"SELECT *, CAST(ROW_NUMBER() OVER () AS BIGINT) AS {ROW_ID_COLUMN} FROM {qualified}",
+    )
+    conn.execute(text(f"DROP TABLE {qualified}"))
+    conn.execute(text(f"ALTER TABLE {rebuild} RENAME TO {qualified.rsplit('.', 1)[-1]}"))
+
+
 def _add_surrogate_key(conn: Connection, target_object: str, database: str) -> None:
     """Add the engine-generated identity primary key to a freshly created target.
 
@@ -731,6 +877,9 @@ def _add_surrogate_key(conn: Connection, target_object: str, database: str) -> N
     every later insert.
     """
     qualified = qualify(target_object, database)
+    if _is_iceberg_backed(conn.dialect.name):
+        _add_computed_surrogate_key(conn, qualified)
+        return
     if conn.dialect.name == "duckdb":
         sequence = _sequence_name(target_object, database)
         conn.execute(text(f"DROP SEQUENCE IF EXISTS {sequence}"))
@@ -769,6 +918,11 @@ def _restore_surrogate_key(conn: Connection, target_object: str, database: str) 
             text(f"SELECT COALESCE(MAX({ROW_ID_COLUMN}), 0) + 1 FROM {qualified}")
         ).scalar_one()
     )
+    if _is_iceberg_backed(conn.dialect.name):
+        # Nothing to restore: an Iceberg ROW_ID is a plain BIGINT with no
+        # sequence or identity behind it, and the rebuild carried its values
+        # across like any other column.
+        return
     if conn.dialect.name == "duckdb":
         # The sequence survived the table rebuild (it is a separate object),
         # but its position has to skip whatever the carried-across values
@@ -973,10 +1127,12 @@ def _overwrite_table(
     qualified_target = qualify(target_object, database)
     conn.execute(text(f"TRUNCATE TABLE {qualified_target}"))
     columns_sql = ", ".join(stage_columns)
+    rid_cols, rid_vals = _row_id_insert_parts(conn, qualified_target)
     conn.execute(
         text(
-            f"INSERT INTO {qualified_target} ({columns_sql}, PIPELINE_RUN_ID, UPDATE_DATE) "
-            f"SELECT {columns_sql}, :pipeline_run_id, :now FROM {stage}"
+            f"INSERT INTO {qualified_target} "
+            f"({columns_sql}, PIPELINE_RUN_ID, UPDATE_DATE{rid_cols}) "
+            f"SELECT {columns_sql}, :pipeline_run_id, :now{rid_vals} FROM {stage}"
         ),
         {"pipeline_run_id": ctx.pipeline_run_id, "now": now},
     )
@@ -1058,11 +1214,13 @@ def _scd1_merge(
         {},
     )
     columns_sql = ", ".join(stage_columns)
+    rid_cols, rid_vals = _row_id_insert_parts(conn, qualified_target)
     conn.execute(
         text(
             f"INSERT INTO {qualified_target} ({columns_sql}, PIPELINE_RUN_ID, CREATE_DATE, "
-            "CREATED_BY, UPDATE_DATE, UPDATED_BY, DELETE_FLAG) "
-            f"SELECT {columns_sql}, :pipeline_run_id, :now, :updated_by, :now, :updated_by, 'N' "
+            f"CREATED_BY, UPDATE_DATE, UPDATED_BY, DELETE_FLAG{rid_cols}) "
+            f"SELECT {columns_sql}, :pipeline_run_id, :now, :updated_by, :now, :updated_by, "
+            f"'N'{rid_vals} "
             f"FROM {stage} s WHERE NOT EXISTS "
             f"(SELECT 1 FROM {qualified_target} t WHERE {key_match})"
         ),
@@ -1150,12 +1308,14 @@ def _scd2_merge(
     )
 
     columns_sql = ", ".join(stage_columns)
+    rid_cols, rid_vals = _row_id_insert_parts(conn, qualified_target)
     conn.execute(
         text(
             f"INSERT INTO {qualified_target} ({columns_sql}, PIPELINE_RUN_ID, CREATE_DATE, "
-            "CREATED_BY, UPDATE_DATE, UPDATED_BY, DELETE_FLAG, ACTIVE_FLAG) "
+            f"CREATED_BY, UPDATE_DATE, UPDATED_BY, DELETE_FLAG, ACTIVE_FLAG{rid_cols}) "
             "SELECT "
-            f"{columns_sql}, :pipeline_run_id, :now, :updated_by, :now, :updated_by, 'N', 'Y' "
+            f"{columns_sql}, :pipeline_run_id, :now, :updated_by, :now, :updated_by, "
+            f"'N', 'Y'{rid_vals} "
             f"FROM {stage} s WHERE EXISTS "
             f"(SELECT 1 FROM {changed_keys} ck WHERE {stage_changed_key_match})"
         ),
@@ -1168,12 +1328,14 @@ def _scd2_merge(
         f"(SELECT 1 FROM {qualified_target} t WHERE {key_match})",
         {},
     )
+    rid_cols, rid_vals = _row_id_insert_parts(conn, qualified_target)
     conn.execute(
         text(
             f"INSERT INTO {qualified_target} ({columns_sql}, PIPELINE_RUN_ID, CREATE_DATE, "
-            "CREATED_BY, UPDATE_DATE, UPDATED_BY, DELETE_FLAG, ACTIVE_FLAG) "
+            f"CREATED_BY, UPDATE_DATE, UPDATED_BY, DELETE_FLAG, ACTIVE_FLAG{rid_cols}) "
             "SELECT "
-            f"{columns_sql}, :pipeline_run_id, :now, :updated_by, :now, :updated_by, 'N', 'Y' "
+            f"{columns_sql}, :pipeline_run_id, :now, :updated_by, :now, :updated_by, "
+            f"'N', 'Y'{rid_vals} "
             f"FROM {stage} s WHERE NOT EXISTS "
             f"(SELECT 1 FROM {qualified_target} t WHERE {key_match})"
         ),

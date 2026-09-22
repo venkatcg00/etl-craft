@@ -76,31 +76,69 @@ specifically because a partial unique index is what makes concurrent run-id crea
 race-safe; an application-level check cannot close that race.
 
 **Data DB (`[Warehouse]`)** — exactly one per deployment. Optional: only `SQL` and
-`BUSINESS_RULES` tasks need it. **PostgreSQL or DuckDB**, both exercised by the test suite
-against real databases.
+`BUSINESS_RULES` tasks need it. Two shapes are supported:
 
-Postgres is the one with no caveats: tasks in a parallel wave write concurrently.
+**PostgreSQL**, which stores its own tables natively. Fully concurrent, enforced primary
+keys, no caveats. This is the reference warehouse and the one the test suite exercises
+end to end.
 
-DuckDB is embedded, so its `jdbc_url` names a file (`jdbc:duckdb:/data/warehouse.duckdb`)
-and its profile uses `auth_mode: none` — there is no server to authenticate to. Two things
+**A SQL engine over Iceberg** — Databricks (Unity Catalog), Snowflake, Trino, or any other
+engine with a SQLAlchemy dialect pointed at an Iceberg catalog. **Every table the engine
+creates on a non-Postgres warehouse is an Iceberg table**, so it stays readable by
+everything else in the lakehouse. Install the dialect you use as an extra:
+
+```bash
+uv add "etl-craft[databricks]"   # or [snowflake], or [trino]
+```
+
+The engine never imports any of them — SQLAlchemy discovers whichever is installed through
+its own entry points, which is why "any SQL tool over plain Iceberg" needs no code here at
+all.
+
+| Warehouse | `jdbc_url` | `auth_mode` |
+|---|---|---|
+| PostgreSQL | `jdbc:postgresql://host:5432/analytics` | `password` |
+| Databricks | `jdbc:databricks://<host>:443/default;httpPath=/sql/1.0/warehouses/<id>;ConnCatalog=<catalog>` | `token` |
+| Snowflake | `jdbc:snowflake://<account>.snowflakecomputing.com/?db=<db>&schema=<schema>&warehouse=<wh>` | `password` |
+| Trino | `jdbc:trino://host:8080/<catalog>/<schema>` | `password` |
+| DuckDB (local dev) | `jdbc:duckdb:/data/warehouse.duckdb` | `none` |
+
+For Databricks, `auth_mode: token` takes a personal access token from the usual
+`ETL_CRAFT_WAREHOUSE_<PROFILE>_SECRET` variable and sends it in the password position; the
+username is the literal `token` and does not need setting.
+
+### What Iceberg cannot do, stated rather than implied
+
+Iceberg has no constraint concept — no primary keys, no identity columns, no sequences. The
+engine still gives every target a single-column `ROW_ID`, so CLAUDE.md's
+single-column-key convention holds, but it is **computed** (the largest value present plus
+a row number) rather than database-generated, and **uniqueness is not enforced**. `validate`
+reports this once for an Iceberg warehouse instead of failing every business rule.
+
+**Snowflake Iceberg tables and Snowflake hybrid tables are different features** — the first
+is external Iceberg format, the second a row-store with enforced primary keys — and a table
+cannot be both. Because Iceberg compatibility is the binding requirement, Iceberg tables are
+the target. Creating one needs `CREATE ICEBERG TABLE` with an `EXTERNAL_VOLUME` and
+`BASE_LOCATION`, which have no home in `CFG_` metadata yet, so the engine **refuses**
+Snowflake table creation with a clear reason rather than silently making an ordinary
+Snowflake table that looks fine and is not Iceberg.
+
+### DuckDB
+
+Still supported and useful for local development, but no longer a headline warehouse. It is
+embedded, so its `jdbc_url` names a file and its profile uses `auth_mode: none`. Two things
 follow from it being a file:
 
 - **One writing process at a time.** A second process is refused outright, and so is a
   read-only connection while a writer holds it. Because the engine runs one subprocess per
   task, it serializes Data DB access for an embedded warehouse behind an Engine DB advisory
-  lock — so a parallel wave *queues* instead of failing, in both execution modes. `doctor`
-  reports this. Iceberg-backed DuckDB, which removes the constraint entirely, is planned.
-- **The file name becomes the catalog name**, because `TARGET_OBJECT` resolves to
-  `database.schema.table`. It must be a usable SQL identifier — letters, digits and
-  underscores, starting with a letter or underscore. `my-warehouse.duckdb` is rejected at
-  setup rather than failing later inside every SQL action.
+  lock — so a parallel wave *queues* instead of failing. `doctor` reports this. No other
+  supported warehouse has this constraint.
+- **The file name becomes the catalog name.** It must be a usable SQL identifier;
+  `my-warehouse.duckdb` is rejected at setup rather than failing inside every SQL action.
 
 A bare `jdbc:duckdb:` (no path) is in-memory and is refused: every task runs in its own
 process, so each would start against an empty database.
-
-Any other SQLAlchemy-supported engine is an optional dialect you install yourself; the
-engine never imports one directly, so it is discovered through SQLAlchemy's own entry
-points, but nothing here tests it.
 
 `TARGET_OBJECT` is stored as bare `schema.table`, deliberately environment-agnostic — the
 database name always comes from the active `[Warehouse]` profile at runtime. The same

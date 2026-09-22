@@ -47,6 +47,23 @@ dependencies = [
     "duckdb-engine>=0.13",
 ]
 
+# [ADDITION, 2026-09-22] The warehouse dialects this engine is built for, as
+# optional extras a team installs for the one it uses. Per explicit decision:
+# "engine: always postgres / warehouse: postgres (pg analytics), databricks
+# with iceberg unity catalog, snowflake with iceberg hybrid tables, maybe be
+# trino with iceberg or any sql tool over plain iceberg."
+#
+# They stay *extras*, not hard dependencies, exactly as Non-goals requires:
+# engine code never imports any of them. SQLAlchemy discovers whichever one is
+# installed through its own entry points, and warehouse.py reaches it through
+# the resolved dialect alone (see _dbapi_connect). The last entry is the point
+# of the design — "any sql tool over plain iceberg" needs no code here at all,
+# only a dialect on the path.
+[project.optional-dependencies]
+databricks = ["databricks-sqlalchemy>=2"]
+snowflake = ["snowflake-sqlalchemy>=1.7"]
+trino = ["trino[sqlalchemy]>=0.330"]
+
 [project.scripts]
 etl-craft = "etl_craft:main"
 
@@ -83,6 +100,11 @@ dev = [
     "pytest-cov>=7.1.0",
     "pytest-timeout>=2.4.0",
     "ruff>=0.16.8",
+    # Self-referential, so this repo's own suite can verify each dialect
+    # genuinely resolves through SQLAlchemy's entry points — the same shape
+    # the ClickHouse extra used, and the reason that resolution was proven
+    # rather than assumed.
+    "etl-craft[databricks,snowflake,trino]",
 ]
 
 [tool.pytest.ini_options]

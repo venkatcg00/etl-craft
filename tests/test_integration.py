@@ -4196,6 +4196,76 @@ def test_data_db_times_out_with_a_clear_reason_when_the_warehouse_is_busy(
         holder.join(timeout=10)
 
 
+def test_sql_actions_assign_row_ids_on_an_iceberg_backed_warehouse(
+    postgres_engine, committed_pipeline, data_db_tables, monkeypatch
+):
+    # Iceberg has no identity columns, no sequences and no enforced primary
+    # keys, so ROW_ID has to be *computed* -- max already present, plus a row
+    # number over the rows being added -- and every INSERT has to supply it,
+    # where Postgres and DuckDB let the column fill itself.
+    #
+    # There is no Iceberg warehouse reachable from the test suite, so this
+    # forces that code path on against real Postgres by taking Postgres out of
+    # NATIVE_STORAGE_DIALECTS. What it proves is what most of the risk
+    # actually is: the generated SQL is well-formed and the ROW_ID arithmetic
+    # is right across runs. What it does NOT prove is that Databricks,
+    # Snowflake or Trino accept these statements -- that needs a real
+    # endpoint, and is stated as unverified rather than implied.
+    monkeypatch.setattr(sql_actions_module, "NATIVE_STORAGE_DIALECTS", frozenset({"duckdb"}))
+    target = f"public.iceberg_rows_{committed_pipeline}"
+    data_db_tables.append(target)
+
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "ice")
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {
+            "SQL_ACTION": "SCD1_MERGE",
+            "TARGET_OBJECT": target,
+            "SOURCE_SQL": (
+                "SELECT id, name FROM (VALUES (1,'a'),(2,'b')) AS v(id, name) WHERE 1=1"
+            ),
+            "MERGE_KEY": "id",
+            "MERGE_COMPARE_COLUMNS": "name",
+        },
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+    config = make_config(warehouse=True)
+
+    first = run_task(postgres_engine, config, "TEST_CONCURRENT_PL", "ice")
+    assert first.status == "SUCCESS", first.message
+
+    with postgres_engine.connect() as conn:
+        rows = conn.execute(text(f"SELECT id, ROW_ID FROM {target} ORDER BY id")).all()
+    assert rows == [(1, 1), (2, 2)]
+
+    # A second run adding a row must continue the numbering rather than
+    # restarting it -- the whole point of reading the current max first.
+    with postgres_engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE = :v "
+                "WHERE TASK_ID = :id AND PARAMETER_NAME = 'SOURCE_SQL'"
+            ),
+            {
+                "id": task_id,
+                "v": "SELECT id, name FROM (VALUES (1,'a'),(2,'b'),(3,'c')) "
+                "AS v(id, name) WHERE 1=1",
+            },
+        )
+        conn.execute(
+            text("UPDATE AUD_TASK_RUN_LOG SET STATUS = 'FAILED' WHERE TASK_ID = :id"),
+            {"id": task_id},
+        )
+
+    second = run_task(postgres_engine, config, "TEST_CONCURRENT_PL", "ice")
+    assert second.status == "SUCCESS", second.message
+
+    with postgres_engine.connect() as conn:
+        rows = conn.execute(text(f"SELECT id, ROW_ID FROM {target} ORDER BY id")).all()
+    assert rows == [(1, 1), (2, 2), (3, 3)]
+
+
 def test_sql_same_table_name_in_two_schemas_on_duckdb(
     postgres_engine, committed_pipeline, tmp_path
 ):

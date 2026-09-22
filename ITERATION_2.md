@@ -1843,3 +1843,64 @@ Recorded as scope, not built. What the analysis turned up, so it is not re-deriv
   voids the justification used two commits ago for making `duckdb-engine` a hard dependency
   ("DuckDB is embedded — there is no server to stand up"), so shipping it should be revisited
   when this lands.
+
+---
+
+# Warehouse architecture: SQL engines over Iceberg (2026-09-22)
+
+> "engine: always postgres / warehouse: postgres (pg analytics), databricks with iceberg unity
+> catalog, snowflake with iceberg hybrid tables, maybe be trino with iceberg or any sql tool over
+> plain iceberg" ... "if the warehouse is not postgres, every table we create or operate should be
+> iceberg compatible"
+
+**This supersedes the 2026-09-21 "Postgres and DuckDB" framing and the "Iceberg is added scope,
+not built" section above.** Iceberg is built. DuckDB remains supported for local development but
+is no longer a headline warehouse.
+
+## What the existing design absorbed for free
+
+All three new dialects register under their plain vendor name and connect through
+`warehouse.py`'s existing `_dbapi_connect` with **no vendor-specific connection code** — verified
+via `entry_points(group="sqlalchemy.dialects")` and each dialect's own `create_connect_args`.
+They are optional extras, never imported by engine code. "Any SQL tool over plain Iceberg" needs
+no code at all, only a dialect on the path — which is the whole point of the `creator`-based
+design, now actually exercised.
+
+## What had to be built
+
+- **`JDBC_PARSERS`**, a per-vendor URL registry. Databricks' parameters are semicolon-separated
+  after the path; Snowflake's path is empty with the database in the query string. Neither is
+  readable by the generic parser. Trino fits the generic shape, which is what the fallback is for.
+- **`auth_mode='token'`**, previously `NotImplementedError`. A *minted* token is still
+  unimplemented and genuinely different; a long-lived Databricks PAT presented like a password is
+  not, and the engine cannot reach Databricks without it.
+- **Iceberg table creation.** `create_table_as` adds the clause each dialect needs. Getting this
+  wrong is **silent** — the table is created, the pipeline succeeds, and nothing else in the
+  lakehouse can read it.
+- **A third `ROW_ID` strategy.** Iceberg has no primary keys, identity columns or sequences, so
+  it is computed (max present + row number) and every INSERT supplies it. Uniqueness is not
+  database-enforced; `validate` reports that once rather than failing every business rule.
+
+## Two things stated rather than implied
+
+- **Snowflake hybrid tables and Iceberg tables are different features** — a row-store with
+  enforced primary keys versus external Iceberg format — and a table cannot be both. Iceberg
+  compatibility is binding, so Iceberg tables are the target. Snowflake table *creation* is
+  **refused** rather than approximated: `CREATE ICEBERG TABLE` needs an `EXTERNAL_VOLUME` and
+  `BASE_LOCATION` with no home in `CFG_` metadata yet, and silently creating an ordinary
+  Snowflake table that looks fine and is not Iceberg is worse than failing.
+- **The Databricks/Snowflake/Trino execution paths are unverified.** No such endpoint is
+  reachable from the test suite. URL parsing, dialect resolution, token-URL construction and
+  Iceberg clause selection are genuinely tested; the Iceberg execution path is proven only to
+  produce well-formed SQL with correct ROW_ID arithmetic, by forcing it on against real Postgres.
+  That is most of the risk but not all of it. **This is E2-53's lesson**, so it is recorded as a
+  known gap rather than implied to work.
+
+## Next, for whoever has credentials
+
+1. `ETL_CRAFT_WAREHOUSE_<PROFILE>_SECRET=<token>` plus a Databricks `jdbc_url`, then
+   `etl-craft doctor` — proves connection and auth.
+2. A one-task `CREATE_TABLE` pipeline, then confirm in Unity Catalog that the table is Iceberg
+   format, not Delta.
+3. An `SCD1_MERGE` over two runs — the correlated UPDATE leg and ROW_ID continuity are the two
+   things most likely to differ.

@@ -152,13 +152,13 @@ editing a query invalidates them automatically.
 - Postgres for the Engine DB (its constraint guarantees are load-bearing — a partial unique
   index is what makes run-id creation race-safe)
 - A warehouse for the data itself, if you run `SQL` or `BUSINESS_RULES` tasks:
-  **PostgreSQL, or DuckDB**. Postgres is the one with no caveats — tasks in a parallel
-  wave run genuinely concurrently. DuckDB is embedded, so there is no server to stand up,
-  but it admits only one *writing process* at a time; the engine handles that by
-  serializing Data DB access, so a parallel wave queues rather than failing. (Iceberg-backed
-  DuckDB, which removes that constraint, is planned — see `ITERATION_2.md`.) Any other
-  SQLAlchemy-supported engine will likely work, but is an optional dialect you install
-  yourself (`uv add sqlalchemy-<dialect>`) and is not covered by the test suite.
+  **PostgreSQL**, or **a SQL engine over Iceberg** — Databricks (Unity Catalog),
+  Snowflake, Trino, or anything else with a SQLAlchemy dialect pointed at an Iceberg
+  catalog. Every table the engine creates on a non-Postgres warehouse is an Iceberg
+  table. Install the dialect you use as an extra:
+  `uv add "etl-craft[databricks]"` (or `[snowflake]`, `[trino]`). DuckDB also works and
+  is handy for local development. See [docs/configuration.md](docs/configuration.md) for
+  each one's `jdbc_url` form, and for what Iceberg cannot enforce.
 
 ## License
 
