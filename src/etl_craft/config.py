@@ -163,6 +163,12 @@ class CloningConfig:
 
     enabled: bool = False
     scope: str = "cfg"
+    # [ADDITION, 2026-09-22, E2-68] Where a mirrored table's Iceberg storage
+    # lives, for warehouses that name it explicitly (Snowflake). Every other
+    # target gets these from CFG_TASK_PARAMETERS, but cloning has no task --
+    # the mirror is engine-internal machinery -- so [Cloning] is its home.
+    external_volume: str = ""
+    base_location: str = ""
 
 
 @dataclass(frozen=True)
@@ -426,7 +432,12 @@ def _parse_cloning(raw: dict[str, Any], path: Path) -> CloningConfig:
         raise ConfigError(
             f"{path}: Cloning.Scope must be one of {sorted(VALID_CLONING_SCOPES)}, got {scope!r}"
         )
-    return CloningConfig(enabled=enabled, scope=scope)
+    return CloningConfig(
+        enabled=enabled,
+        scope=scope,
+        external_volume=str(raw.get("External_volume") or ""),
+        base_location=str(raw.get("Base_location") or ""),
+    )
 
 
 def _parse_orchestrator(raw: dict[str, Any], path: Path) -> OrchestratorConfig:

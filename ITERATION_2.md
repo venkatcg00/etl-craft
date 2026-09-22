@@ -20,6 +20,9 @@ it can be worked through top to bottom.
 | phase 3b | 2026-09-20 | Round 3's findings | **All eight fixed**, 500 → 470 tests (net: 9 obsolete removed, 13 added) |
 | warehouse change | 2026-09-21 | ClickHouse dropped, DuckDB added (`f34c2ae`) | Supported warehouses are now **PostgreSQL and DuckDB** |
 | 4 | 2026-09-21 | Round 3's fixes + the DuckDB move | **E2-61…E2-64**, at the end of this file. All of round 3 verified fixed; every finding is about DuckDB |
+| phase 4b | 2026-09-21 | Round 4's findings | **All four fixed**; E2-61 solved with an Engine DB advisory lock, and **E2-64 was corrected — the review had it wrong in the dangerous direction** |
+| warehouse scope | 2026-09-22 | Iceberg added: Trino/Databricks/Snowflake | Warehouse is now **Postgres, or a SQL engine over Iceberg**; DuckDB stays for local dev |
+| 5 | 2026-09-22 | Round 4's fixes + the Iceberg work | **E2-65…E2-69**, at the end of this file. Every finding is on the Iceberg path |
 
 **Phase 1 is landed and independently re-verified** (round 2 re-ran round 1's own probes against
 the current branch rather than trusting the phase notes): **E2-01 fixed**, **E2-02 fixed**,
@@ -1904,3 +1907,250 @@ design, now actually exercised.
    format, not Delta.
 3. An `SCD1_MERGE` over two runs — the correlated UPDATE leg and ROW_ID continuity are the two
    things most likely to differ.
+
+---
+
+# Round 5 review — round 4's fixes, and the Iceberg warehouse (2026-09-22)
+
+Same method. Baseline first: **510 passing, `mypy`/`ruff`/`black`/`pydocstyle` clean**. Then
+re-read the diff, then probed the **live local Trino/Iceberg stack** (Trino + Iceberg REST +
+MinIO, now in `docker-compose.yml`) with the SQL shapes `sql_actions.py` actually emits.
+
+## Round 4 is fixed — and one of its findings was wrong in the dangerous direction
+
+**E2-64 was worse than this file recorded it, and the fix caught that.** The round-4 probe drove
+the `DROP SEQUENCE` on a *single* connection, where DuckDB refuses it loudly with a dependency
+error — so the finding was written up as "fails loudly, nothing corrupted". The engine uses **one
+connection per task process**, and there the `DROP` succeeds *silently*: `staging.orders` and
+`marts.orders` end up sharing a sequence reset to 1, and a later insert into a table the run never
+touched dies with a duplicate `ROW_ID`, leaving it un-writable. A review probe that does not
+reproduce the engine's own connection topology can understate severity, not just miss things.
+Worth carrying forward as a method note, because it is the second time the *shape* of a test, not
+its subject, was the thing that mattered.
+
+**E2-61's fix is the right one.** The subprocess model stays — it is what crash detection and
+"local runs mirror an orchestrator" are built on — and Data DB access queues behind a Postgres
+advisory lock held in the **Engine DB**. That is the correct place: the Engine DB is the one hard
+dependency of every action, so it is reachable from every contending process including Airflow
+workers on other machines. Queueing rather than retrying is also right (a retry loop on DuckDB's
+`IOException` can starve a waiter), and `doctor` now reports the constraint. E2-62/E2-63 are fixed,
+with `doctor` refusing an in-memory warehouse up front.
+
+**And the Iceberg work found four real dialect defects by probing rather than assuming** — no
+temporary tables, `md5()` over varbinary, `UPDATE` rejecting a table alias, no identity columns —
+each fixed and covered by a real end-to-end test against real Iceberg tables in real object
+storage. That is the test shape rounds 3 and 4 kept asking for.
+
+The five findings below all sit on the Iceberg path, and three of them share one root cause:
+**Trino does not roll back.**
+
+## E2-65 — `DELETE_ROWS` with `HARD_DELETE=true` uses a table alias Trino rejects · reproduced
+
+**Where:** [sql_actions.py:1539-1544](src/etl_craft/sql_actions.py#L1539-L1544), [`_update_target`](src/etl_craft/sql_actions.py#L877)
+
+The alias problem was found and fixed for `UPDATE` — `_update_target` returns the bare qualified
+name on Trino, and the soft-delete path uses it. The hard-delete path one branch above still emits
+`DELETE FROM {qualified_target} t WHERE EXISTS (...)`. `_update_target`'s own docstring states the
+assumption that made this a miss: *"Only the UPDATE statements need this"*. Trino rejects an alias
+on `DELETE` the same way.
+
+**Reproduction**, against the live stack:
+
+```
+FAIL  DELETE FROM iceberg.probe.tgt t WHERE EXISTS (...)
+      TrinoUserError(SYNTAX_ERROR, "line 1:31: mismatched input 't'")
+OK    DELETE FROM iceberg.probe.tgt WHERE EXISTS (...)      -- no alias
+```
+
+The end-to-end Iceberg test covers `SCD1_MERGE` only, so no test reaches this. `DELETE_ROWS` with
+`HARD_DELETE=true` is simply unavailable on the warehouse the architecture now centres on.
+
+**Fix direction:** route the hard-delete through the same helper, and rename it to say what it is
+(`_mutation_target`, not `_update_target`) so the next mutating statement inherits the fix instead
+of repeating the miss. Then extend the end-to-end Trino test past `SCD1_MERGE` — the remaining
+five actions are all unexercised there, and this is the one that was broken.
+
+## E2-66 — A failed action leaves a real Iceberg table behind, forever · reproduced
+
+**Where:** [sql_actions.py:_build_stage](src/etl_craft/sql_actions.py#L590), `_drop_stage`
+
+Trino has no temporary tables, so the stage is created as an **ordinary table** —
+`etl_stage_<task_run_id>`, in the warehouse's own default schema. The reasoning given is sound as
+far as it goes: the name is unique and `_drop_stage` runs on every path. But `_drop_stage` runs
+*inside the transaction*, and Trino does not roll one back (E2-67), so a failure between
+`_build_stage` and `_drop_stage` leaves the table committed.
+
+**Reproduction:** an `OVERWRITE_TABLE` task against a target missing its audit columns — the check
+fires after the stage is built. Task correctly reported `FAILED`; afterwards
+`SHOW TABLES FROM iceberg.etltest` listed **`etl_stage_11387`**.
+
+The name is scoped to `task_run_id`, so a retry does not reuse it: every failed attempt adds
+another permanent Iceberg table, with real Parquet files and metadata in object storage, in the
+schema the team's own data lives in. Nothing ever cleans them up, and `validate`/`doctor` do not
+look. On Postgres and DuckDB this is invisible — a `TEMPORARY` table dies with the session.
+
+**Fix direction:** drop the stage outside the action's transaction, in a `finally`, so it runs on
+the failure path too. That alone fixes the common case. Worth pairing with a sweep — the names are
+already engine-owned and carry the `task_run_id`, so `etl-craft doctor` (or a `--prune` verb) can
+list and remove stages whose task run is terminal. Consider putting stages in their own schema
+rather than the warehouse default, so a sweep can never touch a team's table and a leak is obvious.
+
+## E2-67 — The atomicity caveat names MySQL and Oracle, but not the warehouse the architecture now centres on · reproduced
+
+**Where:** [sql_actions.py:150-170](src/etl_craft/sql_actions.py#L150-L170)
+
+The module docstring is careful and explicit: every action runs inside one Data DB transaction and
+"a failure partway through rolls back everything this module did" — with a documented `[DEVIATION]`
+that DDL auto-commits on **MySQL and Oracle**, so the guarantee is weaker there. Trino is not
+mentioned, and on Trino nothing rolls back at all — DML included.
+
+**Reproduction:** inside one `engine.begin()`, two `CREATE TABLE ... AS SELECT` statements followed
+by a deliberate error. The error propagated; **both tables survived**.
+
+So on the Iceberg path the stated guarantee is not merely weaker, it is absent: a merge that fails
+after its `UPDATE` leg but before its `INSERT` leg leaves the target half-written, and "a retried
+task always starts from the target's last genuinely-committed state" is not true. The actions are
+individually idempotent — that is what actually saves this — but the docstring promises something
+stronger than the engine delivers on its primary non-Postgres target, and a team reading it would
+plan recovery around a rollback that will not happen.
+
+**Fix direction:** documentation, and say it where it will be read — the module docstring, plus
+CLAUDE.md's warehouse section. Worth stating the consequence rather than only the mechanism:
+on Iceberg, "atomic" means "each statement commits on its own and every action re-derives its
+effect on retry", which is a different promise. Related and worth a line in the same place: Iceberg
+enforces no primary key, so the computed `ROW_ID` (max-present + row_number, read before the
+insert) has nothing to catch a collision if two tasks ever append to one target concurrently.
+
+## E2-68 — Cloning creates non-Iceberg tables on exactly the warehouses that need the clause · from code
+
+**Where:** [cloning.py:203](src/etl_craft/cloning.py#L203)
+
+CLAUDE.md states the invariant plainly: *"if the warehouse is not postgres, every table we create
+or operate should be iceberg compatible"*. `sql_actions.create_table_as` upholds it carefully —
+`USING ICEBERG` on Databricks, `CREATE ICEBERG TABLE` with `EXTERNAL_VOLUME`/`BASE_LOCATION` on
+Snowflake, and an outright **refusal** there when the storage parameters are missing, on the stated
+grounds that falling back "would look like success and silently produce something no other engine
+in the lakehouse can read".
+
+`cloning.py` still builds its mirrored `CFG_`/`AUD_` tables with
+`target_metadata.create_all(data_engine)` — plain SQLAlchemy DDL, which emits a bare `CREATE TABLE`
+and knows nothing about either clause. On Trino this is harmless (the catalog decides the format).
+On Databricks and Snowflake — the two cloud warehouses the architecture names — the mirror is
+exactly the silently-unreadable artifact the Snowflake guard exists to prevent.
+
+Not reproduced: both need a cloud account. The code path is unambiguous.
+
+**Fix direction:** route cloning's table creation through `create_table_as` (or a shared helper that
+owns the clause), so the invariant has one implementation rather than two. That also picks up the
+Snowflake refusal — though cloning has no `CFG_TASK_PARAMETERS` to read storage from, so where
+`EXTERNAL_VOLUME`/`BASE_LOCATION` come from for a mirrored table is a real question to settle, not
+an oversight to patch. `[Cloning]` in `craft-connector.yml` is the obvious home.
+
+## E2-69 — "Is this warehouse Iceberg-backed?" is answered by dialect name alone · from code
+
+**Where:** [sql_actions.py:917-919](src/etl_craft/sql_actions.py#L917-L919)
+
+```python
+def _is_iceberg_backed(dialect_name: str) -> bool:
+    return dialect_name.split("+", 1)[0] not in NATIVE_STORAGE_DIALECTS
+```
+
+For Trino this is an assumption, not a fact: the table format comes from the **catalog**, and a
+Trino deployment routinely has several. `jdbc:trino://host:8080/hive/analytics` is a perfectly
+valid `[Warehouse]` URL that this treats as Iceberg-backed — computed `ROW_ID` instead of an
+identity column, no primary key expected — while actually creating Hive tables. Everything
+"succeeds"; the lakehouse invariant is silently false.
+
+This is the same failure the Snowflake path refuses to allow, decided differently for Trino only
+because the dialect name happens to be the only thing consulted. (The local stack has one catalog,
+so this could not be demonstrated here — the logic is plain from reading.)
+
+**Fix direction:** verify rather than infer, once, at connect or in `doctor` — Trino exposes the
+catalog's connector through `system.metadata.catalogs`, and a cheap `SHOW CREATE TABLE` on the
+first table the engine creates confirms the format. Failing in `doctor` with "catalog `hive` is not
+an Iceberg catalog" is the same bargain the Snowflake guard already makes.
+
+## Suggested handling
+
+- **E2-65** first — a whole action is unavailable on the primary warehouse, and the fix is one call
+  plus a rename that prevents the next instance.
+- **E2-66** next, with the `finally` alone as the immediate fix; the sweep and the separate schema
+  are the durable version.
+- **E2-67** is documentation, but it is the kind that changes how a team plans recovery.
+- **E2-68, E2-69** together — both are "the invariant has one careful implementation and one
+  careless one".
+
+## Added to "still to raise rather than guess"
+
+- **Where do Snowflake `EXTERNAL_VOLUME`/`BASE_LOCATION` come from for cloned tables?** (E2-68.)
+  They are `CFG_TASK_PARAMETERS` for a task's target; cloning has no task.
+- **Should stage tables live in their own schema on Iceberg warehouses?** (E2-66.) It makes leaks
+  obvious and a sweep safe, at the cost of one more thing to provision.
+
+## A note on method
+
+Round 4's lesson was "test the deployment, not just the dialect". This round it held in both
+directions. The Iceberg work applied it — the end-to-end Trino test found four real defects no
+unit test would have — and the gap that remains is the same shape one level in: **that test covers
+`SCD1_MERGE` only**, and the one action probed outside it (`DELETE_ROWS`) was broken. Three
+findings here are Postgres-shaped assumptions surviving into a warehouse that does not share them;
+the fourth and fifth are an invariant with two implementations. Extending the Trino test across
+the remaining six actions is the single highest-value follow-up, and it is what would have caught
+E2-65 and E2-66 without a review.
+
+---
+
+# Round 5 outcome (2026-09-22) — all five fixed, and a sixth the review missed
+
+Commit below. 516 tests, 96% coverage, `make check` / `make db-schema-test` / the wheel smoke
+test all clean.
+
+- **E2-65 — fixed, and the helper renamed so the next one inherits it.** `_update_target` became
+  `_mutation_target` and the `HARD_DELETE` branch routes through it. The review was exactly right
+  about the cause: the helper's own docstring claimed "only the UPDATE statements need this", and
+  that claim is what made the omission invisible.
+- **E2-66 — fixed at the dispatch point, not the seven call sites.** The stage is swept in a
+  `finally` in `execute()`, so it runs on the failure path. Reproduced first: a failed
+  `OVERWRITE_TABLE` left a real Iceberg table behind, and the regression test was verified to fail
+  against the pre-fix code. **A note on that verification**: reverting the fix to check the test
+  leaked a stage table that then made the *restored* run fail too — the bug demonstrating its own
+  persistence. The test now compares against a before-snapshot rather than asserting the schema
+  holds no stages at all, so it cannot fail for somebody else's leak.
+- **E2-67 — documented where it will be read**, in `sql_actions.py`'s own atomicity note and in
+  CLAUDE.md. Verified first: two CTAS statements plus a deliberate error inside one
+  `engine.begin()` left **both** tables. The note now states the consequence rather than the
+  mechanism — on Iceberg, idempotency is what makes a retry safe, not atomicity — and carries the
+  reviewer's related point that Iceberg enforces no primary key, so a computed `ROW_ID` has
+  nothing to catch a concurrent collision.
+- **E2-68 — one implementation instead of two.** `cloning.py` builds its mirrors through the
+  Iceberg-aware path now, including the Snowflake refusal. **Open question answered**:
+  `EXTERNAL_VOLUME`/`BASE_LOCATION` for a mirrored table come from `[Cloning]`
+  (`External_volume`/`Base_location`) — the reviewer's own suggestion, and right, because cloning
+  has no task whose `CFG_TASK_PARAMETERS` could carry them.
+- **E2-69 — verified, not inferred.** `warehouse.verify_iceberg_catalog` asks Trino's
+  `system.metadata.catalogs` what the catalog's connector actually is, and `doctor` fails with
+  "catalog 'hive' is not an Iceberg catalog". Three tests, including the real rejection case
+  against a genuinely non-Iceberg catalog (`system`).
+
+## E2-70 — `SCD2_MERGE` was entirely broken on Trino · found by taking the review's advice
+
+The round-5 note called extending the end-to-end Trino test across the remaining actions "the
+single highest-value follow-up". Doing it found a sixth defect immediately: `SCD2_MERGE` builds a
+**second** scratch table (the changed-key set) and was still emitting `CREATE TEMPORARY TABLE`
+directly, which Trino rejects. The E2-66 work had fixed `_build_stage` only.
+
+So the whole action failed on the warehouse the architecture centres on, and no review caught it —
+including the one that correctly diagnosed the identical problem one function away. Both scratch
+tables now go through one `_create_scratch_table`, and both are swept on failure.
+
+`test_every_sql_action_runs_on_real_trino_iceberg` walks `CREATE_TABLE`, `SETUP_TABLE`,
+`OVERWRITE_TABLE`, `SCD2_MERGE`, `DROP_TABLE` and (separately) `DELETE_ROWS` with `HARD_DELETE`,
+and asserts nothing leaked across all six.
+
+## A note on method
+
+Round 5's own lesson, confirmed by acting on it: the gap was never the dialect, it was **which
+actions the deployment test covered**. Two of this round's six defects (E2-65, E2-70) were the
+same mistake in two places, and both were invisible to every unit test and to two review passes.
+The test that catches this class is the one that runs the *whole vocabulary* against the real
+engine — which now exists.

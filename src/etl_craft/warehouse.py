@@ -39,7 +39,7 @@ from urllib.parse import parse_qsl
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, Engine
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from etl_craft.config import ConnectionProfile, ConnectorConfig, resolve_secret
 from etl_craft.db import ConnectionError_
@@ -648,3 +648,61 @@ def data_db(
             yield data_engine
         finally:
             data_engine.dispose()
+
+
+# Trino catalogs whose connector genuinely stores Iceberg tables. Trino is the
+# one supported engine where the table format is a property of the *catalog*
+# rather than the connection, so it is the one where "is this Iceberg-backed?"
+# can be asked and answered rather than assumed.
+ICEBERG_CONNECTORS = frozenset({"iceberg"})
+
+
+def verify_iceberg_catalog(config: ConnectorConfig, data_engine: Engine) -> str | None:
+    """Check the warehouse really stores Iceberg; return a problem string, or None.
+
+    [ADDITION, 2026-09-22, E2-69] `sql_actions._is_iceberg_backed` decides from
+    the dialect name alone, which for Trino is an assumption rather than a
+    fact: the format comes from the catalog, and a Trino deployment routinely
+    has several. `jdbc:trino://host:8080/hive/analytics` is a perfectly valid
+    [Warehouse] URL that the engine would treat as Iceberg-backed -- computed
+    ROW_ID instead of an identity column, no primary key expected -- while
+    actually creating Hive tables. Everything "succeeds" and the lakehouse
+    invariant is silently false.
+
+    That is the same failure the Snowflake path refuses to allow, and it was
+    decided differently for Trino only because the dialect name happened to be
+    the only thing consulted. So verify it once, here, where `doctor` can fail
+    with something a human can act on.
+
+    Returns None when there is nothing to check -- a warehouse whose format is
+    fixed by the connection rather than a catalog.
+    """
+    if data_engine.dialect.name != "trino":
+        return None
+    _, parts = (
+        translate_jdbc_url(config.warehouse.active.jdbc_url) if config.warehouse else ("", {})
+    )
+    catalog = (parts or {}).get("catalog")
+    if not catalog:
+        return None
+    try:
+        with data_engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT connector_name FROM system.metadata.catalogs "
+                    "WHERE catalog_name = :name"
+                ),
+                {"name": catalog},
+            ).first()
+    except SQLAlchemyError as exc:
+        return f"could not check whether catalog {catalog!r} is an Iceberg catalog: {exc}"
+    if row is None:
+        return f"catalog {catalog!r} does not exist on this Trino server"
+    connector = str(row[0])
+    if connector not in ICEBERG_CONNECTORS:
+        return (
+            f"catalog {catalog!r} is a {connector!r} catalog, not an Iceberg catalog — the "
+            "engine would create tables there while treating them as Iceberg, so the lakehouse "
+            "invariant would be silently false. Point [Warehouse] at an Iceberg catalog."
+        )
+    return None

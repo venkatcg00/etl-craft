@@ -10,6 +10,7 @@ import json
 import os
 import threading
 import time
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -98,7 +99,7 @@ from etl_craft.runlog import (
 from etl_craft.runner import ForceNotAllowedError, run_task
 from etl_craft.setup_command import run_setup
 from etl_craft.validate import validate_business_rule_keys, validate_graphs
-from etl_craft.warehouse import build_data_engine, data_db
+from etl_craft.warehouse import build_data_engine, data_db, verify_iceberg_catalog
 
 # ==============================================================================
 # runlog.py — against real Postgres
@@ -4300,6 +4301,190 @@ def test_sql_actions_run_end_to_end_against_real_trino_iceberg(
         ).all()
     # The updated row kept its ROW_ID; the new one took the next value.
     assert rows == [(1, "b", 1), (2, "c", 2)]
+
+
+def _run_trino_task(postgres_engine, pipeline_id, code, params, config):
+    task_id = insert_committed_task(postgres_engine, pipeline_id, code)
+    insert_committed_task_parameters(postgres_engine, task_id, params)
+    return task_id, run_task(postgres_engine, config, "TEST_CONCURRENT_PL", code)
+
+
+def test_sql_hard_delete_rows_works_on_real_trino_iceberg(
+    postgres_engine, trino_engine, committed_pipeline
+):
+    # E2-65. The table-alias problem was found and fixed for UPDATE, but the
+    # HARD_DELETE branch one level up still emitted `DELETE FROM <target> t`,
+    # which Trino rejects the same way -- so a whole action was unavailable on
+    # the warehouse the architecture centres on. Nothing caught it because the
+    # end-to-end Iceberg test covered SCD1_MERGE only.
+    config = _trino_config()
+    with trino_engine.begin() as conn:
+        for table in ("del_src", "del_tgt"):
+            conn.execute(text(f"DROP TABLE IF EXISTS iceberg.etltest.{table}"))
+        conn.execute(
+            text("CREATE TABLE iceberg.etltest.del_src AS SELECT 1 AS id UNION ALL SELECT 2")
+        )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    _, created = _run_trino_task(
+        postgres_engine,
+        committed_pipeline,
+        "ice_seed",
+        {
+            "SQL_ACTION": "CREATE_TABLE",
+            "TARGET_OBJECT": "etltest.del_tgt",
+            "SOURCE_SQL": ("SELECT id FROM (VALUES (1),(2),(3)) AS v(id) WHERE 1=1"),
+        },
+        config,
+    )
+    assert created.status == "SUCCESS", created.message
+
+    _, deleted = _run_trino_task(
+        postgres_engine,
+        committed_pipeline,
+        "ice_del",
+        {
+            "SQL_ACTION": "DELETE_ROWS",
+            "TARGET_OBJECT": "etltest.del_tgt",
+            "SOURCE_SQL": "SELECT id FROM iceberg.etltest.del_src WHERE 1=1",
+            "MERGE_KEY": "id",
+            "HARD_DELETE": "true",
+        },
+        config,
+    )
+    assert deleted.status == "SUCCESS", deleted.message
+
+    with trino_engine.connect() as conn:
+        remaining = conn.execute(text("SELECT id FROM iceberg.etltest.del_tgt")).scalars().all()
+    assert remaining == [3]
+
+
+def test_a_failed_action_leaves_no_stage_table_behind_on_trino(
+    postgres_engine, trino_engine, committed_pipeline
+):
+    # E2-66. Trino has no temporary tables, so the stage is an ordinary table
+    # -- and Trino does not roll back, so a failure between building the stage
+    # and dropping it committed a real Iceberg table into the schema the
+    # team's own data lives in. The name carries task_run_id, so a retry never
+    # reused it: every failed attempt leaked another one, permanently, and
+    # nothing looked for them.
+    config = _trino_config()
+    with trino_engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS iceberg.etltest.leak_tgt"))
+        # A target missing the audit columns OVERWRITE_TABLE requires: the
+        # check fires *after* the stage is built, which is the window.
+        conn.execute(text("CREATE TABLE iceberg.etltest.leak_tgt AS SELECT 1 AS id"))
+    seed_active_run(postgres_engine, committed_pipeline)
+    with trino_engine.connect() as conn:
+        before = set(conn.execute(text("SHOW TABLES FROM iceberg.etltest")).scalars().all())
+
+    _, outcome = _run_trino_task(
+        postgres_engine,
+        committed_pipeline,
+        "ice_leak",
+        {
+            "SQL_ACTION": "OVERWRITE_TABLE",
+            "TARGET_OBJECT": "etltest.leak_tgt",
+            "SOURCE_SQL": "SELECT id FROM (VALUES (1)) AS v(id) WHERE 1=1",
+        },
+        config,
+    )
+    assert outcome.status == "FAILED", outcome.message
+
+    with trino_engine.connect() as conn:
+        after = set(conn.execute(text("SHOW TABLES FROM iceberg.etltest")).scalars().all())
+    # Compared against a before-snapshot rather than asserting the schema holds
+    # no stages at all: a leak from some *other* run is a real problem but not
+    # this test's, and a shared schema would otherwise make this fail for
+    # somebody else's reason.
+    leaked = sorted(t for t in after - before if t.startswith("etl_stage_"))
+    assert leaked == [], f"failed action leaked stage table(s): {leaked}"
+
+
+def test_verify_iceberg_catalog_accepts_a_real_iceberg_catalog(trino_engine):
+    # E2-69. "Is this warehouse Iceberg-backed?" was answered by dialect name
+    # alone, which on Trino is an assumption: the format comes from the
+    # CATALOG, and a deployment routinely has several. So verify it.
+    assert verify_iceberg_catalog(_trino_config(), trino_engine) is None
+
+
+def test_verify_iceberg_catalog_rejects_a_non_iceberg_catalog(trino_engine):
+    # The failure this exists to catch: a valid [Warehouse] URL pointing at a
+    # non-Iceberg catalog, which the engine would happily create tables in
+    # while treating them as Iceberg -- everything "succeeds" and the
+    # lakehouse invariant is silently false. `system` is a real Trino catalog
+    # and is definitively not an Iceberg one.
+    config = _trino_config()
+    config.warehouse.profiles["dev"] = replace(
+        config.warehouse.active, jdbc_url="jdbc:trino://localhost:58080/system/runtime"
+    )
+    problem = verify_iceberg_catalog(config, trino_engine)
+    assert problem is not None
+    assert "not an Iceberg catalog" in problem
+
+
+def test_verify_iceberg_catalog_is_silent_where_the_question_does_not_apply(postgres_engine):
+    # Postgres's storage is fixed by the connection, so there is nothing to
+    # check and nothing to report.
+    assert verify_iceberg_catalog(make_config(warehouse=True), postgres_engine) is None
+
+
+def test_every_sql_action_runs_on_real_trino_iceberg(
+    postgres_engine, trino_engine, committed_pipeline
+):
+    # Round 5's headline follow-up. The end-to-end Iceberg test covered
+    # SCD1_MERGE only, and the single action probed outside it (DELETE_ROWS,
+    # E2-65) turned out to be broken -- so the remaining actions were
+    # unexercised on the warehouse the architecture centres on. This walks the
+    # whole vocabulary there.
+    config = _trino_config()
+    seed_active_run(postgres_engine, committed_pipeline)
+    src = "SELECT id, name FROM (VALUES (1,'a'),(2,'b')) AS v(id, name) WHERE 1=1"
+    with trino_engine.begin() as conn:
+        for table in ("all_create", "all_setup", "all_over", "all_scd2", "all_drop"):
+            conn.execute(text(f"DROP TABLE IF EXISTS iceberg.etltest.{table}"))
+
+    for code, params in (
+        ("a_create", {"SQL_ACTION": "CREATE_TABLE", "TARGET_OBJECT": "etltest.all_create"}),
+        ("a_setup", {"SQL_ACTION": "SETUP_TABLE", "TARGET_OBJECT": "etltest.all_setup"}),
+        ("a_over", {"SQL_ACTION": "OVERWRITE_TABLE", "TARGET_OBJECT": "etltest.all_over"}),
+        (
+            "a_scd2",
+            {
+                "SQL_ACTION": "SCD2_MERGE",
+                "TARGET_OBJECT": "etltest.all_scd2",
+                "MERGE_KEY": "id",
+                "MERGE_COMPARE_COLUMNS": "name",
+            },
+        ),
+        ("a_dropsrc", {"SQL_ACTION": "CREATE_TABLE", "TARGET_OBJECT": "etltest.all_drop"}),
+    ):
+        _, outcome = _run_trino_task(
+            postgres_engine, committed_pipeline, code, {**params, "SOURCE_SQL": src}, config
+        )
+        assert outcome.status == "SUCCESS", f"{params['SQL_ACTION']}: {outcome.message}"
+
+    # DROP_TABLE is gated on a CREATE_TABLE sibling for the same target having
+    # already succeeded in this run, which a_dropsrc above is.
+    _, dropped = _run_trino_task(
+        postgres_engine,
+        committed_pipeline,
+        "a_drop",
+        {"SQL_ACTION": "DROP_TABLE", "TARGET_OBJECT": "etltest.all_drop"},
+        config,
+    )
+    assert dropped.status == "SUCCESS", dropped.message
+
+    with trino_engine.connect() as conn:
+        tables = set(conn.execute(text("SHOW TABLES FROM iceberg.etltest")).scalars().all())
+        scd2 = conn.execute(
+            text("SELECT id, ACTIVE_FLAG, ROW_ID FROM iceberg.etltest.all_scd2 ORDER BY id")
+        ).all()
+    assert {"all_create", "all_setup", "all_over", "all_scd2"} <= tables
+    assert "all_drop" not in tables
+    assert scd2 == [(1, "Y", 1), (2, "Y", 2)]
+    # Nothing leaked, across six actions.
+    assert not [t for t in tables if t.startswith("etl_stage_")]
 
 
 def test_sql_actions_assign_row_ids_on_an_iceberg_backed_warehouse(

@@ -160,9 +160,29 @@ SETUP_TABLE, _create_target_shape, _evolve_schema and TRUNCATE are all DDL,
 and DDL auto-commits on MySQL and Oracle. On those engines a failure partway
 through leaves the completed DDL in place. Postgres (this project's own
 Engine DB, and what every test runs against) has transactional DDL, so the
-guarantee holds there in full. A team adopting a non-transactional-DDL
-warehouse should expect "retry resumes" to mean re-deriving from whatever
-state the last attempt left, which every action's own logic already does. Idempotency
+guarantee holds there in full.
+
+[DEVIATION, 2026-09-22, E2-67] **On an Iceberg warehouse the guarantee is
+absent, not merely weaker — including for DML.** Trino does not roll back at
+all: two CREATE TABLE ... AS SELECT statements inside one `engine.begin()`
+followed by a deliberate error left *both* tables in place (verified against
+a real Trino/Iceberg warehouse, not inferred). The caveat above named MySQL
+and Oracle, which are not warehouses this project supports, and said nothing
+about the one it now centres on.
+
+What this means concretely, because the mechanism matters less than the
+consequence: an SCD merge that fails after its UPDATE leg but before its
+INSERT leg leaves the target **half-written**, and "a retried task always
+starts from the target's last genuinely-committed state" is simply not true
+there. What saves it is idempotency, not atomicity — each action re-derives
+its whole effect from current state on every run, so a retry converges. A
+team planning recovery around a rollback that will not happen is planning
+around the wrong thing.
+
+Related, and worth knowing in the same breath: Iceberg enforces no primary
+key, so the computed ROW_ID (largest present + row_number, read before the
+insert) has nothing to catch a collision if two tasks ever append to the same
+target concurrently. Idempotency
 follows from each action's own logic re-deriving its effect from current
 state on every run (CREATE_TABLE/OVERWRITE_TABLE always fully replace;
 SCD1_MERGE/SCD2_MERGE only touch rows the comparison actually finds changed;
@@ -181,6 +201,7 @@ correctly).
 
 from __future__ import annotations
 
+import contextlib
 from datetime import UTC, datetime
 
 from sqlalchemy import text
@@ -603,9 +624,22 @@ def _build_stage(
     # task-run-scoped name and dropped explicitly by _drop_stage on every
     # path, so an ordinary table behaves the same; TEMPORARY only ever added
     # automatic cleanup on top of cleanup this module already does itself.
-    keyword = "TABLE" if conn.dialect.name in NO_TEMPORARY_TABLE_DIALECTS else "TEMPORARY TABLE"
-    conn.execute(text(f"CREATE {keyword} {stage} AS {body}"))
+    _create_scratch_table(conn, stage, body)
     return stage
+
+
+def _create_scratch_table(conn: Connection, name: str, body: str) -> None:
+    """Create one engine-owned scratch table, TEMPORARY where the dialect has them.
+
+    [DEVIATION, 2026-09-22] Extracted so there is one place that knows about
+    this. SCD2_MERGE builds a *second* scratch table (the changed-key set)
+    and was still emitting CREATE TEMPORARY TABLE directly, so SCD2_MERGE was
+    entirely broken on Trino — found by extending the end-to-end Iceberg test
+    across the whole action vocabulary, which is exactly the gap that had let
+    the hard-delete bug through.
+    """
+    keyword = "TABLE" if conn.dialect.name in NO_TEMPORARY_TABLE_DIALECTS else "TEMPORARY TABLE"
+    conn.execute(text(f"CREATE {keyword} {name} AS {body}"))
 
 
 def _drop_stage(conn: Connection, stage: str) -> None:
@@ -871,19 +905,23 @@ def _sequence_name(target_object: str, database: str) -> str:
 # Engines whose UPDATE takes no table alias. Trino is one: `UPDATE tbl t SET`
 # is a syntax error there, and the target's columns are qualified by the
 # table's own name instead. Verified against a real Trino/Iceberg warehouse.
-NO_UPDATE_ALIAS_DIALECTS = frozenset({"trino"})
+NO_MUTATION_ALIAS_DIALECTS = frozenset({"trino"})
 
 
-def _update_target(conn: Connection, qualified_target: str) -> tuple[str, str]:
-    """Return (UPDATE target clause, column qualifier) for a correlated UPDATE.
+def _mutation_target(conn: Connection, qualified_target: str) -> tuple[str, str]:
+    """Return (target clause, column qualifier) for any correlated UPDATE or DELETE.
 
-    [ADDITION, 2026-09-22] Every correlated UPDATE here qualifies the target
+    [ADDITION, 2026-09-22] Every correlated mutation here qualifies the target
     row so the subquery over the stage can be told apart from it. Most engines
-    take an alias; Trino rejects one outright and qualifies by table name.
-    Only the UPDATE statements need this -- a plain SELECT can alias freely on
-    every engine, so the count queries are untouched.
+    take an alias; Trino rejects one outright -- on DELETE as well as UPDATE --
+    and qualifies by table name instead.
+
+    [DEVIATION, E2-65] Named _update_target until its docstring's own claim
+    ("only the UPDATE statements need this") turned out to be wrong and left
+    HARD_DELETE broken on Trino. Only *mutating* statements need it: a plain
+    SELECT aliases freely everywhere, so the count queries are untouched.
     """
-    if conn.dialect.name in NO_UPDATE_ALIAS_DIALECTS:
+    if conn.dialect.name in NO_MUTATION_ALIAS_DIALECTS:
         return qualified_target, qualified_target.rsplit(".", 1)[-1]
     return f"{qualified_target} t", "t"
 
@@ -1111,7 +1149,48 @@ def _count(conn: Connection, sql: str, params: dict) -> int:
 def execute(
     data_conn: Connection, cfg_conn: Connection, ctx: TaskExecutionContext
 ) -> HandlerResult:
-    """Run this task's SQL_ACTION against the Data DB; return counts for AUD_TASK_RUN_LOG."""
+    """Run this task's SQL_ACTION against the Data DB; return counts for AUD_TASK_RUN_LOG.
+
+    [ADDITION, 2026-09-22, E2-66] The stage is swept in a `finally`, so it goes
+    on the failure path too.
+
+    Each action already dropped its own stage on success, which is all a
+    TEMPORARY table ever needed -- it dies with the session anyway. But Trino
+    has no temporary tables, so the stage is an ordinary table, *and* Trino
+    does not roll back (see this module's atomicity note). A failure between
+    building the stage and dropping it therefore committed a real Iceberg
+    table, with Parquet files and metadata in object storage, into the schema
+    the team's own data lives in. The name carries task_run_id, so a retry
+    never reuses it: every failed attempt leaked another one, permanently, and
+    nothing looked for them. Reproduced -- a failed OVERWRITE_TABLE left
+    `etl_stage_11387` behind.
+    """
+    try:
+        return _execute(data_conn, cfg_conn, ctx)
+    finally:
+        _sweep_stage(data_conn, ctx.task_run_id)
+
+
+def _sweep_stage(conn: Connection, task_run_id: int) -> None:
+    """Drop this task run's stage, ignoring anything that goes wrong doing so.
+
+    Best-effort by design: this runs while an exception may already be on its
+    way out, and replacing a real failure with a cleanup failure would hide the
+    thing worth reading.
+    """
+    # Both engine-owned scratch tables, not just the stage: SCD2_MERGE builds
+    # a changed-key set too, and it leaks the same way for the same reason.
+    #
+    # suppress(Exception), not a bare try/except/pass: same behaviour, and it
+    # states that swallowing is the point rather than looking like an omission.
+    for name in (_stage_name(task_run_id), f"etl_changed_keys_{task_run_id}"):
+        with contextlib.suppress(Exception):
+            _drop_stage(conn, name)
+
+
+def _execute(
+    data_conn: Connection, cfg_conn: Connection, ctx: TaskExecutionContext
+) -> HandlerResult:
     params = ctx.task_params
     # Storage parameters a Snowflake Iceberg CREATE needs, reachable from the
     # create_table_as calls nested inside the rebuild helpers. See
@@ -1314,7 +1393,7 @@ def _scd1_merge(
     # explicit instruction) — the outer `t` in `key_match` correlates
     # against this UPDATE's own target row, same as any ANSI-portable
     # correlated UPDATE.
-    update_target, uq = _update_target(conn, qualified_target)
+    update_target, uq = _mutation_target(conn, qualified_target)
     upd_key_match = " AND ".join(f"{uq}.{k} = s.{k}" for k in merge_key)
     upd_changed = f"{uq}.HASH_KEY IS DISTINCT FROM s.HASH_KEY"
     set_pieces = [
@@ -1409,18 +1488,17 @@ def _scd2_merge(
     changed_keys = f"etl_changed_keys_{ctx.task_run_id}"
     conn.execute(text(f"DROP TABLE IF EXISTS {changed_keys}"))
     key_columns_sql = ", ".join(merge_key)
-    conn.execute(
-        text(
-            f"CREATE TEMPORARY TABLE {changed_keys} AS "
-            f"SELECT DISTINCT {key_columns_sql} FROM {stage} s WHERE EXISTS "
-            f"(SELECT 1 FROM {qualified_target} t "
-            f"WHERE t.ACTIVE_FLAG = 'Y' AND {key_match} AND ({changed}))"
-        )
+    _create_scratch_table(
+        conn,
+        changed_keys,
+        f"SELECT DISTINCT {key_columns_sql} FROM {stage} s WHERE EXISTS "
+        f"(SELECT 1 FROM {qualified_target} t "
+        f"WHERE t.ACTIVE_FLAG = 'Y' AND {key_match} AND ({changed}))",
     )
     stage_changed_key_match = " AND ".join(f"s.{k} = ck.{k}" for k in merge_key)
 
     deactivate_count = _count(conn, f"SELECT COUNT(*) FROM {changed_keys}", {})
-    update_target, uq = _update_target(conn, qualified_target)
+    update_target, uq = _mutation_target(conn, qualified_target)
     upd_changed_key_match = " AND ".join(f"{uq}.{k} = ck.{k}" for k in merge_key)
     conn.execute(
         text(
@@ -1536,10 +1614,20 @@ def _delete_rows(
         {},
     )
     if hard_delete:
+        # [DEVIATION, 2026-09-22, E2-65] Through the same helper the UPDATEs
+        # use. This emitted a bare `DELETE FROM <target> t`, and Trino rejects
+        # an alias on DELETE exactly as it does on UPDATE -- so HARD_DELETE was
+        # simply unavailable on the warehouse the architecture centres on. The
+        # helper's docstring used to say "only the UPDATE statements need
+        # this", which is the assumption that made this a miss; it is named
+        # _mutation_target now so the next mutating statement inherits the fix
+        # rather than repeating the omission.
+        delete_target, dq = _mutation_target(conn, qualified_target)
+        del_key_match = " AND ".join(f"{dq}.{k} = s.{k}" for k in merge_key)
         conn.execute(
             text(
-                f"DELETE FROM {qualified_target} t "
-                f"WHERE EXISTS (SELECT 1 FROM {stage} s WHERE {key_match})"
+                f"DELETE FROM {delete_target} "
+                f"WHERE EXISTS (SELECT 1 FROM {stage} s WHERE {del_key_match})"
             )
         )
     else:
@@ -1555,7 +1643,7 @@ def _delete_rows(
                 "SETUP_TABLE task against it first, fix its schema by hand, or set "
                 "HARD_DELETE=true for this task"
             )
-        update_target, uq = _update_target(conn, qualified_target)
+        update_target, uq = _mutation_target(conn, qualified_target)
         upd_key_match = " AND ".join(f"{uq}.{k} = s.{k}" for k in merge_key)
         conn.execute(
             text(
