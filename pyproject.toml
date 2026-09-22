@@ -180,7 +180,18 @@ src = ["src", "tests"]
 # D (docstrings) is deliberately left out of ruff's own selection — pydocstyle
 # above is the dedicated tool for that, so the two don't produce duplicate or
 # conflicting reports on the same lines.
-select = ["E", "F", "I", "UP", "B", "SIM"]
+#
+# PLW1514 (unspecified-encoding) is added for E2-76: every read/write in the
+# package used the process's locale encoding, so `init-db` and `setup` — the
+# first two commands a new adopter runs — died with a UnicodeDecodeError on
+# any non-UTF-8 locale, because schema.sql's own comments contain em-dashes.
+# Invisible from a developer checkout under a developer's locale, so a lint
+# rule is what holds the line rather than a test. It needs `preview` to run;
+# explicit-preview-rules keeps that to this one rule, so enabling it does not
+# also pull in every other preview rule in the selected categories.
+preview = true
+explicit-preview-rules = true
+select = ["E", "F", "I", "UP", "B", "SIM", "PLW1514"]
 
 [tool.ruff.format]
 

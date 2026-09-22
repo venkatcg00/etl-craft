@@ -214,6 +214,18 @@ def run_flavour(statuses: list[TaskStatusEntry], *, exclude_task_id: int) -> str
     IN-PROGRESS while it runs, so counting it would make every run look
     unfinished.
 
+    [DEVIATION, 2026-09-22, E2-77] *Every* EMAIL_ALERT task is excluded, not
+    just this one. Excluding only self is correct for one alert and breaks for
+    two, and two is a supported configuration: validate._alert_ordering_issues
+    treats alerts as a set and excludes all of them from the leaf requirement,
+    and EMAIL_ON_STATUS exists precisely so one alert can go to ops on FAILED
+    while another goes to stakeholders on SUCCESS. Both then depend on the
+    same leaves and land in the same wave, so whichever ran first saw the
+    other as PENDING/IN-PROGRESS -- which lands in the neutral middle -- and
+    the team got two contradictory emails about the same run, the amber one
+    false, on a perfectly clean run. exclude_task_id is kept alongside the
+    handler filter so self-exclusion does not depend on the handler lookup.
+
     The rules, worst-first:
       FAILED                 any task FAILED.
       COMPLETED_WITH_ERRORS  no outright failure, but something short of
@@ -232,7 +244,11 @@ def run_flavour(statuses: list[TaskStatusEntry], *, exclude_task_id: int) -> str
     that has not finished would be the one genuinely misleading answer of the
     three.
     """
-    relevant = [entry for entry in statuses if entry.task_id != exclude_task_id]
+    relevant = [
+        entry
+        for entry in statuses
+        if entry.task_id != exclude_task_id and entry.handler != "EMAIL_ALERT"
+    ]
     if not relevant:
         return FLAVOUR_SUCCESS
     if any(entry.status == "FAILED" for entry in relevant):

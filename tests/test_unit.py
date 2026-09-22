@@ -112,7 +112,7 @@ from etl_craft.sql_actions import (
 from etl_craft.validate import validate_business_rule_keys
 from etl_craft.warehouse import (
     WAREHOUSE_AUTH_REGISTRY,
-    build_data_engine,
+    build_warehouse_engine,
     is_in_memory,
     is_single_writer,
     translate_jdbc_url,
@@ -362,6 +362,44 @@ def test_ready_treats_unevaluated_cross_pipeline_edges_optimistically():
     assert 2 not in graph.ready(state, {2: 0})
 
 
+def test_ready_holds_an_any_task_whose_same_pipeline_upstream_has_not_run_yet():
+    # E2-82. Optimistic cross-pipeline counting is right (see the test above:
+    # pessimism here would deadlock), but under ANY the requirement is 1, so
+    # one unevaluated cross edge met it on its own -- and task 2 was
+    # dispatched in the *same wave as task 1*, the task it depends on. Inside
+    # run_task the same-pipeline half was of course unsatisfied, so it polled
+    # the cross edge for up to an hour and, if unsatisfied, recorded itself
+    # SKIPPED -- permanently out of the run, even though task 1 succeeded
+    # moments later and would have met its ANY condition.
+    tasks = [
+        TaskNode(task_id=1),
+        TaskNode(task_id=2, run_condition="ANY", cross_pipeline_edge_count=1),
+    ]
+    graph = build_graph(tasks, [edge(2, 1)])
+
+    # Nothing has run: only the upstream goes.
+    assert graph.ready({}) == [1]
+    # Still running: still held.
+    assert graph.ready({1: TaskRunState(status="IN-PROGRESS")}) == []
+    # Succeeded: the same-pipeline edge alone satisfies ANY, so it goes and
+    # never polls the cross edge at all -- E2-45's win, intact.
+    assert 2 in graph.ready({1: TaskRunState(status="SUCCESS")})
+
+
+def test_ready_releases_an_any_task_once_its_same_pipeline_upstream_has_failed():
+    # The boundary that keeps the hold from becoming its own bug. The task is
+    # held only while an upstream is *not yet terminal*, not until it is
+    # SETTLED: a permanently FAILED upstream has had its say, and the cross
+    # edge may still satisfy ANY -- which is precisely what ANY is for.
+    tasks = [
+        TaskNode(task_id=1),
+        TaskNode(task_id=2, run_condition="ANY", cross_pipeline_edge_count=1),
+    ]
+    graph = build_graph(tasks, [edge(2, 1)])
+
+    assert 2 in graph.ready({1: TaskRunState(status="FAILED")})
+
+
 def test_unsatisfiable_counts_an_unevaluated_cross_pipeline_edge_as_still_possible():
     # This module cannot see AUD_*_DEPENDENCY_TRACKER, so a cross-pipeline edge
     # must always count as "could still be satisfied". Under ANY that is enough
@@ -527,7 +565,7 @@ def test_translate_jdbc_url_handles_duckdbs_file_form(
 
 
 def test_is_single_writer_and_is_in_memory_classify_each_warehouse():
-    # E2-61/E2-63. These two predicates decide whether Data DB access gets
+    # E2-61/E2-63. These two predicates decide whether warehouse access gets
     # serialized and whether doctor refuses the config, so the classification
     # itself is worth pinning: Postgres must stay fully parallel.
     def cfg(jdbc_url: str | None) -> ConnectorConfig:
@@ -1395,6 +1433,33 @@ def test_resolve_secret_from_file_source(tmp_path):
     assert resolve_secret(config, config.postgres.active) == "filesecret"
 
 
+def test_load_dotenv_file_keeps_a_quote_that_is_part_of_the_secret(tmp_path):
+    # E2-86. `value.strip("'\"")` removes *every* leading and trailing quote
+    # character, repeatedly -- so a secret that legitimately ends in one (not
+    # rare in a generated password or token) was silently truncated, and one
+    # that both began and ended with one lost both. The failure is an
+    # authentication error with nothing saying the value had been altered, and
+    # `doctor` reporting the secret as found, because it was.
+    env = tmp_path / "secrets.env"
+    env.write_text(
+        'TRAILING=p@ssw0rd"\n'
+        'LEADING="p@ssw0rd\n'
+        "BOTH_REAL='\"p@ssw0rd\"'\n"
+        'WRAPPED="p@ssw0rd"\n'
+        "PLAIN=p@ssw0rd\n",
+        encoding="utf-8",
+    )
+
+    values = _load_dotenv_file(str(env))
+
+    assert values["TRAILING"] == 'p@ssw0rd"'
+    assert values["LEADING"] == '"p@ssw0rd'
+    # One matching pair removed, and only one.
+    assert values["BOTH_REAL"] == '"p@ssw0rd"'
+    assert values["WRAPPED"] == "p@ssw0rd"
+    assert values["PLAIN"] == "p@ssw0rd"
+
+
 def test_load_dotenv_file_requires_a_path():
     # Reached in practice only via resolve_secret(Source.Type='file'), but
     # _parse_source already refuses to load a config with Type=file and no
@@ -1751,7 +1816,7 @@ def test_warehouse_key_file_creator_still_unimplemented_for_other_dialects():
         WAREHOUSE_AUTH_REGISTRY["key_file"](profile, "secret")
 
 
-def test_build_data_engine_raises_when_no_warehouse_configured():
+def test_build_warehouse_engine_raises_when_no_warehouse_configured():
     config = ConnectorConfig(
         mode="local",
         source=SourceConfig(type="environment"),
@@ -1760,15 +1825,15 @@ def test_build_data_engine_raises_when_no_warehouse_configured():
         warehouse=None,
     )
     with pytest.raises(ConnectionError_):
-        build_data_engine(config)
+        build_warehouse_engine(config)
 
 
-def test_build_data_engine_rejects_unknown_auth_mode():
+def test_build_warehouse_engine_rejects_unknown_auth_mode():
     # Mirrors test_build_engine_rejects_unknown_auth_mode above: passing a
     # profile directly skips the config.warehouse lookup entirely, so
     # config=None is fine here too.
     with pytest.raises(ConnectionError_):
-        build_data_engine(None, warehouse_profile("bogus"))
+        build_warehouse_engine(None, warehouse_profile("bogus"))
 
 
 # ==============================================================================
@@ -1835,8 +1900,8 @@ def test_resolve_email_pipeline_codes_some_pipe_separated():
     assert resolve_email_pipeline_codes(None, "PIPE_A|PIPE_B") == ["PIPE_A", "PIPE_B"]
 
 
-def _status(task_id, status, error=None):
-    return TaskStatusEntry(task_id, f"t{task_id}", status, error)
+def _status(task_id, status, error=None, handler="SQL"):
+    return TaskStatusEntry(task_id, f"t{task_id}", status, error, handler=handler)
 
 
 def test_run_flavour_success_when_every_task_succeeded_cleanly():
@@ -1870,6 +1935,25 @@ def test_run_flavour_completed_with_errors(statuses):
 
 def test_run_flavour_of_a_pipeline_whose_only_task_is_the_alert_itself():
     assert run_flavour([_status(99, "IN-PROGRESS")], exclude_task_id=99) == "SUCCESS"
+
+
+def test_run_flavour_ignores_a_sibling_email_alert_task():
+    # E2-77. Excluding only self is correct for one alert and breaks for two,
+    # and two is a supported configuration: validate's leaf check treats
+    # alerts as a set, and EMAIL_ON_STATUS exists so one can go to ops on
+    # FAILED and another to stakeholders on SUCCESS. Both depend on the same
+    # leaves, so both land in the same wave -- and whichever ran first saw the
+    # other as PENDING, which lands in the neutral middle. On this perfectly
+    # clean run the team got two contradictory emails, the amber one false.
+    statuses = [
+        _status(1, "SUCCESS"),
+        _status(98, "PENDING", handler="EMAIL_ALERT"),
+        _status(99, "IN-PROGRESS", handler="EMAIL_ALERT"),
+    ]
+
+    assert run_flavour(statuses, exclude_task_id=99) == "SUCCESS"
+    # And the other alert, running moments later, agrees.
+    assert run_flavour(statuses, exclude_task_id=98) == "SUCCESS"
 
 
 def test_render_email_digest_html_color_codes_status_and_escapes_content():
@@ -1909,7 +1993,7 @@ def test_render_email_digest_html_no_tasks_shows_placeholder():
 # ------------------------------------------------------------------------------
 # cloning.py — the pure table-list logic (no DB); the actual copy mechanism
 # is covered in test_integration.py, against real Postgres standing in as
-# both the Engine DB and the Data DB (same spirit as sql_actions.py's own
+# both the Engine DB and the warehouse (same spirit as sql_actions.py's own
 # tests).
 
 

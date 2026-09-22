@@ -413,14 +413,17 @@ def generate_docs(conn: Connection, output_dir: Path) -> None:
     """Generate the full static site under `output_dir` (created if missing)."""
     docs = collect_docs(conn)
     output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "search-index.json").write_text(json.dumps(build_search_index(docs), indent=2))
-    (output_dir / "style.css").write_text(_STYLE_CSS)
-    (output_dir / "fuse.min.js").write_text(
-        (files("etl_craft") / "vendor" / "fuse.min.js").read_text()
+    (output_dir / "search-index.json").write_text(
+        json.dumps(build_search_index(docs), indent=2), encoding="utf-8"
     )
-    (output_dir / "search.js").write_text(_SEARCH_JS)
-    (output_dir / "index.html").write_text(_render_index_html(docs))
+    (output_dir / "style.css").write_text(_STYLE_CSS, encoding="utf-8")
+    (output_dir / "fuse.min.js").write_text(
+        (files("etl_craft") / "vendor" / "fuse.min.js").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    (output_dir / "search.js").write_text(_SEARCH_JS, encoding="utf-8")
+    (output_dir / "index.html").write_text(_render_index_html(docs), encoding="utf-8")
     for summary, data in docs:
         (output_dir / f"{summary.pipeline_code}.html").write_text(
-            _render_pipeline_html(summary, data)
+            _render_pipeline_html(summary, data), encoding="utf-8"
         )

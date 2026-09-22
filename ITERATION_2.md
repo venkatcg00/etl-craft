@@ -2360,3 +2360,151 @@ cloud tests are built on, and it is worth stating why it keeps mattering: probin
 proves the *dialect* accepts it; only driving the engine proves the *code emits* it. Every defect
 that survived a review pass this iteration (E2-65, E2-70, and E2-72's recurrence today) was
 invisible to the first kind of check and obvious to the second.
+
+---
+
+# Round 7 — E2-74…E2-89, all fixed (2026-09-22)
+
+All sixteen findings from `REVIEW_ROUND_7.md` are closed. Baseline going in was 533 passed /
+2 skipped; out is **546 passed / 2 skipped, 96% coverage, `make check` and the wheel smoke test
+both clean**. Every fix for a *reproduced* finding has a regression test that was verified to
+**fail against the pre-fix code** before being kept — the review's own rule, applied to all of
+E2-74, E2-75, E2-76, E2-77, E2-78, E2-79, E2-81, E2-82, E2-83, E2-86 and E2-87.
+
+## The two that lost data
+
+- **E2-74 — `SCD2_MERGE` now converges.** The two legs disagreed about what "already present"
+  means: `changed_keys` required an `ACTIVE_FLAG = 'Y'` row, the new-row `NOT EXISTS` looked at
+  every row regardless of flag, so a key holding rows but **no active row** fell through both,
+  forever — SUCCESS reported, current version never written. Fixed by scoping the new-row leg to
+  active rows only, which is what "new" means for SCD2: *no current version present*. Safe on the
+  ordinary path because that leg runs *after* the deactivate and the changed-key insert, so a key
+  handled there already has its new active row and is not matched twice. Reproduced first, exactly
+  as the review described (`[(1, 'x', 'N')]` and nothing else, on the retry).
+- **E2-75 — `MERGE_DEDUPE_ORDER` works on Trino, and no longer leaks.** `_dedupe_stage` was the
+  third and last site still emitting `CREATE TEMPORARY TABLE` directly, so the whole E2-04 guard —
+  the only thing between duplicate source rows and a permanently corrupted SCD target — was
+  unreachable on the Iceberg warehouse. Routed through `_create_scratch_table`, and the
+  `{stage}_dedup` name added to `_sweep_stage` via a new shared `_dedupe_table_name` so the two
+  cannot drift again. `test_every_sql_action_runs_on_real_trino_iceberg` gained a genuinely
+  duplicate-bearing merge, which is what the vocabulary walk never had: its sources were clean, so
+  `_dedupe_stage` always returned early at `if not duplicates` and the bug was unreachable from
+  the test that looked like it covered it.
+
+## What the code assumed about its environment
+
+The review's own closing observation — that E2-76, E2-79 and E2-83 are not about what the code
+does but what it assumes about its surroundings — held up, and all three are the install path.
+
+- **E2-76 — every read and write in `src/` now passes `encoding="utf-8"`.** `schema.sql` has 74
+  non-ASCII lines, so `init-db` and `setup` died on any non-UTF-8 locale. Confirmed both ways
+  under `LC_ALL=C PYTHONCOERCECLOCALE=0`: the bare `read_text()` raises, the fixed one does not.
+  Held by **ruff `PLW1514`**, enabled with `preview = true` + `explicit-preview-rules = true` so
+  the one rule comes in without every other preview rule in the selected categories.
+- **E2-79 — `exec_driver_sql`, not `execute(text(...))`,** in both `migrate` and `init_db`.
+  `_split_statements` is carefully quote-aware; `text()` then ran its own, *not* quote-aware,
+  `:name` scan over the same text. A migration containing `':name'` or `'docs/#:ref'` failed
+  naming a bind parameter its author never wrote. The three shipped migrations escape it only by
+  luck, since SQLAlchemy's lookbehind protects a digit before a colon. A fixture migration
+  carrying both spellings is now in the suite.
+- **E2-83 — `setup` and `init-db` record the packaged migrations instead of running them.** New
+  `migrate.mark_packaged_migrations_applied`. **The part the review did not draw, and it matters:**
+  the marking is scoped to the migrations that ship *inside the package*, not to whatever
+  `resolve_migrations_dir` picks. `schema.sql` is the authoritative definition of the *engine's*
+  schema, so the engine's own migrations are by definition already in it — but a team's
+  `./sql/migrations/` holds changes `schema.sql` knows nothing about, and recording those
+  unexecuted would silently skip a team's migration, which is a worse bug than the one being
+  fixed. Two tests: `setup` on a fresh database applies **nothing**, and a team's own
+  non-re-runnable migration still runs.
+
+## Correctness
+
+- **E2-77 — every `EMAIL_ALERT` is excluded from a run's flavour, not just self.** Two alerts per
+  pipeline is a supported configuration (`validate` treats them as a set; `EMAIL_ON_STATUS` exists
+  precisely so one goes to ops on `FAILED` and another to stakeholders on `SUCCESS`), and they
+  land in the same wave — so whichever ran first saw the other as `PENDING`, landed in the neutral
+  middle, and sent a false amber email about a perfectly clean run. `TaskStatusEntry` carries
+  `handler`, the same one-field extension `task_id` needed when this exclusion was first built.
+- **E2-78 — `--config` reaches every spawned task.** `ConnectorConfig` now carries `config_path`,
+  `_run_wave` appends it, and — caught by the test rather than by reading — it has to go **before**
+  the verb, since `--config` is a top-level flag. Pre-fix the test fails with exactly the
+  "config not found" the review predicted.
+- **E2-82 — resolved by taking *both* shapes the review offered, because neither alone is
+  enough.** `ready()` no longer lets an optimistic cross-pipeline count *alone* start an `ANY`/`N`
+  task whose same-pipeline upstreams have not run; and `run_task` writes nothing (exit 0, E2-47's
+  shape) rather than a terminal `SKIPPED` when `cross_reasons` is all that is short but a
+  same-pipeline upstream is still pending. Option 2 alone is insufficient because
+  `_run_until_settled` tracks an `attempted` set, so a task that exits 0 writing nothing is never
+  re-dispatched within that `run_pipeline` call — it would convert "permanently SKIPPED" into
+  "permanently unsettled". Option 1 alone is insufficient because a manual `run --task_code` never
+  goes through the wave pre-filter at all.
+  - **The boundary that keeps the fix from becoming its own bug:** the task is held only while an
+    upstream is *not yet terminal*, **not** until it is `SETTLED`. A permanently `FAILED` upstream
+    has had its say, and the cross edge may still satisfy `ANY` — which is precisely what `ANY` is
+    for. Pinned by its own test.
+- **E2-80/E2-81 — one pass over `handlers.dispatch`.** The Engine DB write transaction is gone
+  from around both long-running handlers: `scripts.execute` takes the `Engine` and opens its one
+  connection *after* `subprocess.run` returns, and `sql_actions.execute` takes the `Engine` with
+  `_setup_table`/`_drop_table` opening short connections for their two reads. An open Postgres
+  transaction pins the `xmin` horizon for the whole database, so eight parallel tasks holding one
+  for hours stopped autovacuum reclaiming anything, anywhere. And `HANDLER=PYTHON` now takes the
+  single-writer lock: new `warehouse.single_writer_lock`, split out of `open_warehouse` so a
+  caller can take the queueing **without** opening a warehouse engine — which matters because an
+  ingestion task legitimately runs with no `[Warehouse]` section at all, and requiring one would
+  have been a regression. Verified to fail pre-fix: without the lock the script runs alongside the
+  holder and leaves its marker file.
+  - **Known interaction, left deliberately:** `dispatch` gives the lock the task's own timeout as
+    its wait bound, so the lock and the fork watchdog expire together and the watchdog's blunter
+    message usually reports first. Shortening the lock's budget to win that race would make a team
+    running a short `TASK_TIMEOUT_SECONDS` fail tasks that should have queued — a worse trade than
+    a blunter message. The review's own instruction was to keep the bound at the task's timeout.
+
+## Hardening
+
+- **E2-84** `PIPELINE_CODE` is checked by `_SAFE_IDENTIFIER` where `TASK_CODE` already was. The
+  shell case is covered by CFG_ rows being git-reviewed; the `generate-docs` case
+  (`f"{pipeline_code}.html"`) is a plain bug for an innocent code.
+- **E2-85** `MERGE_KEY` and `MERGE_COMPARE_COLUMNS` get an identifier check per pipe-separated
+  element. `MERGE_DEDUPE_ORDER` is deliberately a SQL fragment, so it gets the conservative shape
+  check the review described — column name, optional `ASC`/`DESC`, optional `NULLS FIRST`/`LAST`,
+  comma-separated — and the message says what was expected, since a legitimately more exotic
+  fragment is rejected.
+- **E2-86** `.env` values lose one *matching pair* of wrapping quotes, not every leading and
+  trailing quote character. A secret ending in `"` was silently truncated and `doctor` reported it
+  as found, because it was. The supported subset is now stated in `docs/configuration.md`.
+- **E2-87** the lineage cache key hashes `SOURCE_SQL`, `TARGET_OBJECT` **and** the parse dialect,
+  NUL-separated. Renaming a target without touching its SQL served stale lineage indefinitely.
+- **E2-88** `scripts/wheel-smoke.sh` drives `etl-craft setup --env` instead of writing
+  `craft-connector.yml` with a heredoc, asserts the result carries **both** `Postgres:` and
+  `Warehouse:`, and that a second `setup` is idempotent — then still exercises `init-db`/`migrate`
+  as standalone verbs against a fresh database. `setup` was the only verb in CLAUDE.md's CLI table
+  the install-path test skipped, and it is the command that shipped without writing `[Warehouse]`
+  at all. Run for real; it passes, and its output now shows E2-83 working.
+- **E2-89** one wall-clock deadline for a whole batch, not a fresh clock per `wait()`. The real
+  bound was `N x (timeout + 120)` — over two days at the six-hour default — against the
+  `timeout + 120` the comment claimed.
+
+## Still deferred, still not closed
+
+**E2-18 (logging) and E2-20 (task output)** remain deferred, for the third round running.
+`grep -rn logging src/etl_craft` still returns nothing. Round 3 was right that recording them as
+closed would have been the dishonest option, and round 7 is right that they are now the largest
+remaining operability gap — E2-80's diagnosis in particular is harder than it should be without
+them.
+
+## A note on method
+
+Two things earned their keep again.
+
+**A regression test must reach the thing it claims to test.** E2-75 is the sharpest example this
+round: `test_every_sql_action_runs_on_real_trino_iceberg` walked the whole action vocabulary on
+the real Iceberg stack and still could not see a broken `_dedupe_stage`, because its sources were
+duplicate-free and the dedupe returned early at its own guard. A test that exercises the function
+but not the branch is a test that looks like coverage.
+
+**A finding's suggested fix is a starting point, not a specification.** E2-83's suggestion
+("insert every present migration filename into `SCHEMA_MIGRATIONS` without executing it") is
+correct for the engine's own migrations and actively harmful for a team's, and the difference is
+invisible unless you ask which directory `resolve_migrations_dir` actually resolved. E2-82 was
+offered as a choice between two shapes and needed both. E2-81's suggestion to reuse `data_db`
+would have made `[Warehouse]` mandatory for ingestion tasks that never had it.

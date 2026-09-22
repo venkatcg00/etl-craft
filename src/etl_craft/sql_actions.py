@@ -13,7 +13,7 @@ the authoritative definition, mirrored in schema.sql's own COMMENT ON TABLE
 CFG_TASK_PARAMETERS). Every task with HANDLER='SQL' needs:
   SQL_ACTION      one of CREATE_TABLE | SETUP_TABLE | OVERWRITE_TABLE |
                   SCD1_MERGE | SCD2_MERGE | DROP_TABLE | DELETE_ROWS
-  TARGET_OBJECT   "schema.table" in the Data DB — deliberately never a
+  TARGET_OBJECT   "schema.table" in the warehouse — deliberately never a
                   database/catalog prefix. Per explicit instruction, the
                   database name always comes from the active [Warehouse]
                   profile for the running environment, not from CFG_
@@ -101,7 +101,7 @@ columns"). MD5 isn't ANSI SQL, but no hash function is — the same accepted
 exception this module already makes for TRUNCATE.
 [CHOICE] CREATED_BY/UPDATED_BY are stamped with the active [Warehouse]
 profile's `user` (the DB user actually executing the write), not a SQL
-current_user() call — the Data DB, unlike the Engine DB, has no "one
+current_user() call — the warehouse, unlike the Engine DB, has no "one
 Postgres role per human" convention to make current_user() meaningful, and a
 literal bind value works identically across every dialect.
 
@@ -149,8 +149,8 @@ rather than chase every hypothetical, that stays unhandled for now.
 
 Atomicity/idempotency ("all of them should be atomic and idempotent", per
 explicit instruction): every action's full statement sequence runs inside
-the one Data DB transaction the caller already opened (handlers.py wraps
-dispatch in `data_engine.begin()`) — a failure partway through rolls back
+the one warehouse transaction the caller already opened (handlers.py wraps
+dispatch in `warehouse_engine.begin()`) — a failure partway through rolls back
 everything this module did, so a retried task always starts from the
 target's last genuinely-committed state, not a half-written one.
 
@@ -205,7 +205,7 @@ import contextlib
 from datetime import UTC, datetime
 
 from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.cfg import fetch_sibling_target_writer
 from etl_craft.config import DEFAULT_TABLE_FORMAT, VALID_TABLE_FORMATS, ConnectorConfig
@@ -582,7 +582,7 @@ def _fetch_columns(
     """Return [(column_name, data_type), ...] in ordinal position, via information_schema.
 
     [CHOICE] No schema.sql / registry involvement at all, per explicit
-    direction — this queries the Data DB's own information_schema.columns
+    direction — this queries the warehouse's own information_schema.columns
     live, both for the target (schema-qualified) and the staging temp table
     (matched by name alone: Postgres exposes a session's temp tables under a
     per-backend pg_temp_N schema that varies at runtime, and this module's
@@ -611,6 +611,15 @@ def _fetch_columns(
 
 def _stage_name(task_run_id: int) -> str:
     return f"etl_stage_{task_run_id}"
+
+
+def _dedupe_table_name(stage: str) -> str:
+    """Name of the deduped copy of `stage`, so _dedupe_stage and _sweep_stage agree.
+
+    [ADDITION, 2026-09-22, E2-75] The dedupe table used to be spelled inline
+    in _dedupe_stage alone, and the sweep did not know about it.
+    """
+    return f"{stage}_dedup"
 
 
 # Engines whose md5() takes and returns binary rather than hex text.
@@ -904,16 +913,25 @@ def _dedupe_stage(
     # project has touched. A new table rather than a DELETE, because deleting
     # duplicates in place needs a row identity (ctid, ROWID) that is
     # dialect-specific — the one thing this module works hardest to avoid.
-    deduped = f"{stage}_dedup"
+    # [DEVIATION, 2026-09-22, E2-75] Through _create_scratch_table, not a
+    # direct CREATE TEMPORARY TABLE. This was the third such site and the last
+    # one missed: Trino has no temporary tables at all, so the whole E2-04
+    # guard -- the one thing standing between duplicate source rows and a
+    # permanently corrupted SCD target -- was unreachable on the Iceberg
+    # warehouse, failing instead with a syntax error naming TEMPORARY, which
+    # says nothing about the team's data. The end-to-end Iceberg test walked
+    # the whole vocabulary but with duplicate-free sources, so _dedupe_stage
+    # always returned early at its `if not duplicates` guard.
+    deduped = _dedupe_table_name(stage)
     columns_sql = ", ".join(name for name, _ in _fetch_columns(conn, stage))
     conn.execute(text(f"DROP TABLE IF EXISTS {deduped}"))
-    conn.execute(
-        text(
-            f"CREATE TEMPORARY TABLE {deduped} AS SELECT {columns_sql} FROM ("
-            f"SELECT {columns_sql}, ROW_NUMBER() OVER ("
-            f"PARTITION BY {key_sql} ORDER BY {dedupe_order}) AS etl_dedupe_rn "
-            f"FROM {stage}) AS ranked WHERE etl_dedupe_rn = 1"
-        )
+    _create_scratch_table(
+        conn,
+        deduped,
+        f"SELECT {columns_sql} FROM ("
+        f"SELECT {columns_sql}, ROW_NUMBER() OVER ("
+        f"PARTITION BY {key_sql} ORDER BY {dedupe_order}) AS etl_dedupe_rn "
+        f"FROM {stage}) AS ranked WHERE etl_dedupe_rn = 1",
     )
     _drop_stage(conn, stage)
     return deduped
@@ -1191,9 +1209,18 @@ def _count(conn: Connection, sql: str, params: dict) -> int:
 
 
 def execute(
-    data_conn: Connection, cfg_conn: Connection, ctx: TaskExecutionContext
+    warehouse_conn: Connection, cfg_engine: Engine, ctx: TaskExecutionContext
 ) -> HandlerResult:
-    """Run this task's SQL_ACTION against the Data DB; return counts for AUD_TASK_RUN_LOG.
+    """Run this task's SQL_ACTION against the warehouse; return counts for AUD_TASK_RUN_LOG.
+
+    [DEVIATION, 2026-09-22, E2-80] Takes the Engine DB *Engine*, not an open
+    Connection. handlers.dispatch used to hold `engine.begin()` -- a write
+    transaction -- around the whole action, however long the merge ran. An
+    open Postgres transaction pins the xmin horizon for the entire database,
+    so autovacuum could not reclaim dead tuples anywhere while it was held,
+    and AUD_TASK_RUN_LOG is written on every attempt of every task. The two
+    reads that actually need the Engine DB (SETUP_TABLE's and DROP_TABLE's
+    sibling lookups) open their own short connections instead.
 
     [ADDITION, 2026-09-22, E2-66] The stage is swept in a `finally`, so it goes
     on the failure path too.
@@ -1210,9 +1237,9 @@ def execute(
     `etl_stage_11387` behind.
     """
     try:
-        return _execute(data_conn, cfg_conn, ctx)
+        return _execute(warehouse_conn, cfg_engine, ctx)
     finally:
-        _sweep_stage(data_conn, ctx.task_run_id)
+        _sweep_stage(warehouse_conn, ctx.task_run_id)
 
 
 def _sweep_stage(conn: Connection, task_run_id: int) -> None:
@@ -1222,25 +1249,30 @@ def _sweep_stage(conn: Connection, task_run_id: int) -> None:
     way out, and replacing a real failure with a cleanup failure would hide the
     thing worth reading.
     """
-    # Both engine-owned scratch tables, not just the stage: SCD2_MERGE builds
-    # a changed-key set too, and it leaks the same way for the same reason.
+    # Every engine-owned scratch table, not just the stage: SCD2_MERGE builds
+    # a changed-key set too, and a deduped merge builds a third (E2-75) --
+    # each leaks the same way for the same reason. On Trino these are real
+    # Iceberg tables with Parquet files in object storage and there is no
+    # rollback, so a name missed here is a permanent leak into the schema the
+    # team's own data lives in.
     #
     # suppress(Exception), not a bare try/except/pass: same behaviour, and it
     # states that swallowing is the point rather than looking like an omission.
-    for name in (_stage_name(task_run_id), f"etl_changed_keys_{task_run_id}"):
+    stage = _stage_name(task_run_id)
+    for name in (stage, _dedupe_table_name(stage), f"etl_changed_keys_{task_run_id}"):
         with contextlib.suppress(Exception):
             _drop_stage(conn, name)
 
 
 def _execute(
-    data_conn: Connection, cfg_conn: Connection, ctx: TaskExecutionContext
+    warehouse_conn: Connection, cfg_engine: Engine, ctx: TaskExecutionContext
 ) -> HandlerResult:
     params = ctx.task_params
     # Storage parameters a Snowflake Iceberg CREATE needs, reachable from the
     # create_table_as calls nested inside the rebuild helpers. See
     # TASK_PARAMS_INFO_KEY for why this is not an argument.
-    data_conn.info[TASK_PARAMS_INFO_KEY] = params
-    data_conn.info[TABLE_FORMAT_INFO_KEY] = resolve_table_format(ctx)
+    warehouse_conn.info[TASK_PARAMS_INFO_KEY] = params
+    warehouse_conn.info[TABLE_FORMAT_INFO_KEY] = resolve_table_format(ctx)
     action = params.get("SQL_ACTION")
     if action not in SQL_ACTIONS:
         raise HandlerError(f"CFG_TASK_PARAMETERS.SQL_ACTION missing or unrecognized: {action!r}")
@@ -1255,9 +1287,9 @@ def _execute(
     now = datetime.now(UTC)
 
     if action == "DROP_TABLE":
-        return _drop_table(data_conn, cfg_conn, ctx, target_object, database)
+        return _drop_table(warehouse_conn, cfg_engine, ctx, target_object, database)
     if action == "DELETE_ROWS":
-        return _delete_rows(data_conn, ctx, params, target_object, database, updated_by, now)
+        return _delete_rows(warehouse_conn, ctx, params, target_object, database, updated_by, now)
 
     source_sql_raw = params.get("SOURCE_SQL")
     if not source_sql_raw:
@@ -1267,11 +1299,11 @@ def _execute(
     )
 
     if action == "CREATE_TABLE":
-        return _create_table(data_conn, ctx, select_sql, target_object, database)
+        return _create_table(warehouse_conn, ctx, select_sql, target_object, database)
     if action == "SETUP_TABLE":
-        return _setup_table(data_conn, cfg_conn, ctx, select_sql, target_object, database)
+        return _setup_table(warehouse_conn, cfg_engine, ctx, select_sql, target_object, database)
     if action == "OVERWRITE_TABLE":
-        return _overwrite_table(data_conn, ctx, select_sql, target_object, database, now)
+        return _overwrite_table(warehouse_conn, ctx, select_sql, target_object, database, now)
     # SCD1_MERGE / SCD2_MERGE
     merge_key = _split_pipe_list(params.get("MERGE_KEY"), param_name="MERGE_KEY")
     merge_compare_columns = _split_pipe_list(
@@ -1279,7 +1311,7 @@ def _execute(
     )
     if action == "SCD1_MERGE":
         return _scd1_merge(
-            data_conn,
+            warehouse_conn,
             ctx,
             select_sql,
             target_object,
@@ -1290,7 +1322,7 @@ def _execute(
             now,
         )
     return _scd2_merge(
-        data_conn,
+        warehouse_conn,
         ctx,
         select_sql,
         target_object,
@@ -1324,13 +1356,15 @@ def _create_table(
 
 def _setup_table(
     conn: Connection,
-    cfg_conn: Connection,
+    cfg_engine: Engine,
     ctx: TaskExecutionContext,
     select_sql: str,
     target_object: str,
     database: str,
 ) -> HandlerResult:
-    sibling = fetch_sibling_target_writer(cfg_conn, ctx.pipeline_id, ctx.task_id, target_object)
+    # One short read, not a connection held for the action's duration (E2-80).
+    with cfg_engine.connect() as cfg_conn:
+        sibling = fetch_sibling_target_writer(cfg_conn, ctx.pipeline_id, ctx.task_id, target_object)
     audit_columns = AUDIT_COLUMNS.get(sibling.sql_action, ()) if sibling else ()
 
     stage = _build_stage(conn, ctx.task_run_id, select_sql, empty=True)
@@ -1570,12 +1604,29 @@ def _scd2_merge(
         {"pipeline_run_id": ctx.pipeline_run_id, "now": now, "updated_by": updated_by},
     )
 
-    new_count = _count(
-        conn,
-        f"SELECT COUNT(*) FROM {stage} s WHERE NOT EXISTS "
-        f"(SELECT 1 FROM {qualified_target} t WHERE {key_match})",
-        {},
+    # [DEVIATION, 2026-09-22, E2-74] "New" means *no current version present*,
+    # not "no row at all". Without the ACTIVE_FLAG filter this leg and the
+    # changed_keys leg above disagreed about what "already present" means:
+    # changed_keys requires an active row, this required no row whatsoever, so
+    # a key holding rows but no active one fell through both, forever. The
+    # merge reported SUCCESS and never wrote the current version.
+    #
+    # That is not hypothetical on an Iceberg warehouse. It is exactly the
+    # half-written state this module's own atomicity note describes -- the
+    # deactivate UPDATE commits, the following INSERT does not, and Trino does
+    # not roll back -- so the docstring's promise that "each action re-derives
+    # its whole effect from current state, so a retry converges" was false for
+    # SCD2_MERGE precisely where it matters most. It converges now: the key is
+    # picked up here and a fresh current version is inserted.
+    #
+    # Safe for the ordinary path because this leg runs *after* the deactivate
+    # and the changed-key INSERT above, so a key handled there already has its
+    # new active row and is not matched twice.
+    no_active_version = (
+        f"NOT EXISTS (SELECT 1 FROM {qualified_target} t "
+        f"WHERE {key_match} AND t.ACTIVE_FLAG = 'Y')"
     )
+    new_count = _count(conn, f"SELECT COUNT(*) FROM {stage} s WHERE {no_active_version}", {})
     rid_cols, rid_vals = _row_id_insert_parts(conn, qualified_target)
     conn.execute(
         text(
@@ -1584,8 +1635,7 @@ def _scd2_merge(
             "SELECT "
             f"{columns_sql}, :pipeline_run_id, :now, :updated_by, :now, :updated_by, "
             f"'N', 'Y'{rid_vals} "
-            f"FROM {stage} s WHERE NOT EXISTS "
-            f"(SELECT 1 FROM {qualified_target} t WHERE {key_match})"
+            f"FROM {stage} s WHERE {no_active_version}"
         ),
         {"pipeline_run_id": ctx.pipeline_run_id, "now": now, "updated_by": updated_by},
     )
@@ -1603,12 +1653,20 @@ def _scd2_merge(
 
 def _drop_table(
     conn: Connection,
-    cfg_conn: Connection,
+    cfg_engine: Engine,
     ctx: TaskExecutionContext,
     target_object: str,
     database: str,
 ) -> HandlerResult:
-    sibling = fetch_sibling_target_writer(cfg_conn, ctx.pipeline_id, ctx.task_id, target_object)
+    # Both Engine DB reads together, in one short connection, before anything
+    # touches the warehouse (E2-80).
+    with cfg_engine.connect() as cfg_conn:
+        sibling = fetch_sibling_target_writer(cfg_conn, ctx.pipeline_id, ctx.task_id, target_object)
+        sibling_status = (
+            fetch_task_run_status(cfg_conn, sibling.task_id, ctx.pipeline_run_id)
+            if sibling is not None
+            else None
+        )
     if sibling is None or sibling.sql_action != "CREATE_TABLE":
         raise HandlerError(
             f"DROP_TABLE refused for {target_object!r}: no other active task in this pipeline "
@@ -1619,7 +1677,6 @@ def _drop_table(
     # step" — per explicit instruction, not just declared in CFG_ somewhere:
     # the CREATE_TABLE sibling must have genuinely already run and succeeded
     # under *this* pipeline_run_id.
-    sibling_status = fetch_task_run_status(cfg_conn, sibling.task_id, ctx.pipeline_run_id)
     if sibling_status != "SUCCESS":
         raise HandlerError(
             f"DROP_TABLE refused for {target_object!r}: its CREATE_TABLE task "

@@ -50,4 +50,4 @@ def read_packaged_schema() -> str:
             f"packaged schema not found at {str(path)!r} — the installed package is "
             "missing its sql/ data files"
         )
-    return path.read_text()
+    return path.read_text(encoding="utf-8")

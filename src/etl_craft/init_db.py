@@ -67,7 +67,12 @@ def init_db(engine: Engine, *, force: bool = False) -> int:
     try:
         with engine.begin() as conn:
             for statement in statements:
-                conn.execute(text(statement))
+                # exec_driver_sql, not execute(text(...)) — see the same
+                # change in migrate.apply_pending_migrations (E2-79). schema.sql
+                # is a trusted file of whole DDL statements with nothing to
+                # bind, and text() would re-scan it for :name parameters with
+                # none of _split_statements' quote awareness.
+                conn.exec_driver_sql(statement)
     except Exception as exc:
         raise InitDbError(f"failed applying {packaged_schema_path().name}: {exc}") from exc
     return len(statements)

@@ -58,7 +58,7 @@ def postgres_engine() -> Engine:
     os.environ.setdefault("ETL_CRAFT_POSTGRES_DEV_SECRET", "etl_craft")
     # Same reasoning, for handlers.py's own fresh-Data-DB-engine-per-dispatch
     # (sql_actions.py/business_rules.py tests configure [Warehouse] pointing
-    # at this same Postgres, standing in as the Data DB — see
+    # at this same Postgres, standing in as the warehouse — see
     # test_integration.py's make_config(warehouse=True)).
     os.environ.setdefault("ETL_CRAFT_WAREHOUSE_DEV_SECRET", "etl_craft")
     engine = create_engine(url)
@@ -224,14 +224,14 @@ def cfg_task(pg_conn, cfg_pipeline: int) -> int:
 
 
 @pytest.fixture
-def data_db_tables(postgres_engine: Engine):
+def warehouse_tables(postgres_engine: Engine):
     """Yield a list; any table name a test appends is dropped after the test.
 
     For sql_actions.py/business_rules.py tests, which point [Warehouse] at
     this same Postgres (make_config(warehouse=True)) and create/drop real
     tables there as a side effect of running a SQL_ACTION — this is separate
     cleanup from committed_pipeline's own (which only ever touches CFG_/AUD_
-    rows, never anything in the Data DB "warehouse" side of the same
+    rows, never anything in the warehouse "warehouse" side of the same
     physical database).
     """
     tables: list[str] = []

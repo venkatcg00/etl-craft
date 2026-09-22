@@ -268,10 +268,53 @@ class DependencyGraph:
             state = run_state.get(task_id, TaskRunState())
             if state.status in NOT_RETRYABLE:
                 continue
-            satisfied = self.satisfied_edge_count(task_id, run_state, cross.get(task_id))
-            if satisfied >= self.required_edge_count(task_id):
-                result.append(task_id)
+            required = self.required_edge_count(task_id)
+            supplied = cross.get(task_id)
+            if self.satisfied_edge_count(task_id, run_state, supplied) < required:
+                continue
+            # [ADDITION, 2026-09-22, E2-82] An optimistic cross-pipeline count
+            # must not, on its own, start a task whose same-pipeline upstreams
+            # have not even run yet.
+            #
+            # Two individually-correct decisions combined badly. The optimism
+            # above is right (see satisfied_edge_count: counting cross edges
+            # pessimistically here would deadlock, because the real gate runs
+            # inside the spawned subprocess). But for RUN_CONDITION='ANY',
+            # required is 1, so a single unevaluated cross edge already met it
+            # -- and the task was dispatched in the *same wave* as the
+            # upstream it depends on. Inside run_task the same-pipeline half
+            # was of course still unsatisfied, so it polled the cross edge to
+            # its budget (up to an hour) and, if that edge was unsatisfied,
+            # recorded itself SKIPPED. SKIPPED is in SETTLED_STATUSES, so the
+            # task was then permanently out of the run even though the
+            # upstream succeeded moments later and would have met its ANY
+            # condition. E2-47 went to real trouble to stop "not yet" being
+            # recorded as terminal; this recreated it for the cross-pipeline
+            # half, because that edge genuinely did have its chance while the
+            # same-pipeline edge had not yet had its.
+            #
+            # Held only while an upstream is *not yet terminal* (never run, or
+            # still running) -- not until it is SETTLED. A permanently FAILED
+            # upstream must still let an ANY task through on its cross edge,
+            # which is exactly the case ANY exists for.
+            if supplied is None and self._optimism_is_load_bearing(task_id, run_state, required):
+                continue
+            result.append(task_id)
         return sorted(result)
+
+    def _optimism_is_load_bearing(
+        self, task_id: int, run_state: dict[int, TaskRunState], required: int
+    ) -> bool:
+        """Whether unevaluated cross-pipeline edges are what carried `task_id` over `required`."""
+        # Only then does holding it change anything: if the same-pipeline
+        # edges alone already meet the requirement, the task is genuinely
+        # ready and E2-45's "never poll an edge you do not need" still applies.
+        if self.satisfied_edge_count(task_id, run_state, 0) >= required:
+            return False
+        return any(
+            run_state.get(edge.depends_on_task_id, TaskRunState()).status not in TERMINAL_STATUSES
+            for edge in self._dependencies_of[task_id]
+        )
 
     def unsatisfiable(self, run_state: dict[int, TaskRunState]) -> list[int]:
         """Return the never-run tasks that can never become ready under this run.

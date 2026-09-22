@@ -61,7 +61,11 @@ from etl_craft.generate_yml import (
     generate_pipeline_dag,
 )
 from etl_craft.init_db import InitDbError, init_db
-from etl_craft.migrate import MigrationError, apply_pending_migrations
+from etl_craft.migrate import (
+    MigrationError,
+    apply_pending_migrations,
+    mark_packaged_migrations_applied,
+)
 from etl_craft.orchestrator import (
     OrchestratorModeRefusedError,
     PipelineOutcome,
@@ -83,7 +87,7 @@ from etl_craft.validate import (
     validate_task_parameters,
     validate_warehouse_storage,
 )
-from etl_craft.warehouse import READ_ONLY_WAIT_SECONDS, data_db
+from etl_craft.warehouse import READ_ONLY_WAIT_SECONDS, open_warehouse
 
 # Every exception run_task/run_pipeline/init_pipeline_run can raise for
 # reasons short of a bug: bad --pipeline_code/--task_code, --force under
@@ -517,7 +521,7 @@ def _generate_yml_command(args: argparse.Namespace, engine: Engine, config: Conn
 
     yaml_text = GENERATED_HEADER + yaml.safe_dump(dag, sort_keys=False, default_flow_style=False)
     if args.output:
-        Path(args.output).write_text(yaml_text)
+        Path(args.output).write_text(yaml_text, encoding="utf-8")
         print(f"DAG YAML written to {args.output}")
     else:
         print(yaml_text, end="")
@@ -536,19 +540,21 @@ def _validate_command(engine: Engine, config: ConnectorConfig) -> int:
             issues += validate_business_rule_keys(conn, None)
         else:
             try:
-                # [DEVIATION, 2026-09-21, E2-61] Through data_db, so a
+                # [DEVIATION, 2026-09-21, E2-61] Through open_warehouse, so a
                 # single-writer warehouse queues briefly instead of failing
                 # outright while a task is running. No-op for Postgres.
-                with data_db(config, engine, wait_seconds=READ_ONLY_WAIT_SECONDS) as data_engine:
-                    issues += validate_business_rule_keys(conn, data_engine)
+                with open_warehouse(
+                    config, engine, wait_seconds=READ_ONLY_WAIT_SECONDS
+                ) as warehouse_engine:
+                    issues += validate_business_rule_keys(conn, warehouse_engine)
                     issues += validate_business_rule_key_stability(conn)
-                    issues += validate_warehouse_storage(conn, config, data_engine)
+                    issues += validate_warehouse_storage(conn, config, warehouse_engine)
             except ConfigError as exc:
                 print(f"error: {exc}", file=sys.stderr)
                 return 2
             except SQLAlchemyError as exc:
                 print(
-                    f"error: could not check business rules against the Data DB: {exc}",
+                    f"error: could not check business rules against the warehouse: {exc}",
                     file=sys.stderr,
                 )
                 return 2
@@ -664,10 +670,22 @@ def _doctor_command(config_path: Path) -> int:
 def _init_db_command(args: argparse.Namespace, engine: Engine) -> int:
     try:
         count = init_db(engine, force=args.force)
+        # [ADDITION, 2026-09-22, E2-83] `init-db && migrate` had the same
+        # shape as `setup` on a fresh database: schema.sql already contains
+        # everything the engine's own migrations add, but `migrate` then ran
+        # all of them against it anyway. It worked only because all three are
+        # written re-runnably, which nothing enforces. Recording them here is
+        # scoped to the *packaged* migrations, so a team's own still run.
+        recorded = mark_packaged_migrations_applied(engine)
     except (InitDbError, FileNotFoundError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     print(f"init-db: applied {count} statement(s) from the packaged schema")
+    if recorded:
+        print(
+            f"init-db: recorded {len(recorded)} packaged migration(s) as already applied "
+            "(the schema includes them)"
+        )
     return 0
 
 

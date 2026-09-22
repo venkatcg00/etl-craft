@@ -55,7 +55,7 @@ is expected, routine behavior, not an execution error — a real error
 # warehouse file open at fork time, the child inherits that state, and the
 # child's writes are then **silently lost** — it commits, reports SUCCESS,
 # and the rows are not there afterwards. Verified directly, not reasoned
-# about. This module is safe because it never opens the Data DB in the
+# about. This module is safe because it never opens the warehouse in the
 # parent at all: handlers.dispatch builds it inside the child, after the
 # fork. Anything added here that opens the warehouse before _fork_dispatch
 # would break every DuckDB deployment without failing a single test loudly.
@@ -88,7 +88,7 @@ from etl_craft.db import build_engine
 from etl_craft.execution import TaskExecutionContext, format_task_log
 from etl_craft.handlers import HandlerError, dispatch
 from etl_craft.limits import task_timeout_seconds
-from etl_craft.resolver import DependencyGraph, build_graph
+from etl_craft.resolver import TERMINAL_STATUSES, DependencyGraph, TaskRunState, build_graph
 from etl_craft.runlog import (
     begin_attempt,
     fetch_pipeline_run_status,
@@ -237,9 +237,30 @@ def run_task(
             # chance — crosspipe.py just polled it to its budget — so that
             # stays terminal, as CLAUDE.md's "correctly gated off by design"
             # describes.
-            if cross_reasons:
+            if cross_reasons and not _same_pipeline_edge_still_pending(graph, task_id, run_state):
                 return _bind_as_skipped(
                     engine, task_id, pipeline_run_id, task_code, "; ".join(cross_reasons)
+                )
+            if cross_reasons:
+                # [ADDITION, 2026-09-22, E2-82] The cross edge has had its
+                # chance, but a same-pipeline upstream has not even run yet --
+                # and under ANY/N that upstream alone may still satisfy this
+                # task. Recording SKIPPED here would settle it permanently and
+                # the upstream succeeding moments later could no longer help,
+                # which is exactly the "not yet" recorded as "never" that E2-47
+                # removed for the same-pipeline half. Nothing written, exit 0.
+                #
+                # Reachable without the orchestrator too: a manual
+                # `run --task_code` never goes through the wave pre-filter that
+                # now holds this task back, so the guard has to be here as
+                # well, not only there.
+                return TaskOutcome(
+                    status="SKIPPED",
+                    message=(
+                        f"{task_code}: {'; '.join(cross_reasons)} — but "
+                        f"{_describe_unready(graph, task_id, pipeline_run_id)}, so nothing was "
+                        "recorded; re-run once it has"
+                    ),
                 )
             if task_id in set(graph.unsatisfiable(run_state)):
                 return _bind_as_skipped(
@@ -306,6 +327,24 @@ def run_task(
     if result.status == "SUCCESS":
         return TaskOutcome(status="SUCCESS", message=f"{task_code}: SUCCESS")
     return TaskOutcome(status="FAILED", message=f"{task_code}: {result.error_message}")
+
+
+def _same_pipeline_edge_still_pending(
+    graph: DependencyGraph, task_id: int, run_state: dict[int, TaskRunState]
+) -> bool:
+    """Whether any same-pipeline upstream of `task_id` has yet to reach a terminal status.
+
+    [ADDITION, 2026-09-22, E2-82] The counterpart to resolver's own
+    `_optimism_is_load_bearing`, asked at the other end: the wave pre-filter
+    holds such a task back, and this stops a manual invocation of one from
+    recording itself terminally on the strength of a cross-pipeline edge
+    alone. A *terminal* upstream (including FAILED) has had its say; one that
+    has never run, or is still running, has not.
+    """
+    return any(
+        run_state.get(edge.depends_on_task_id, TaskRunState()).status not in TERMINAL_STATUSES
+        for edge in graph.dependencies_of(task_id)
+    )
 
 
 def _describe_unready(

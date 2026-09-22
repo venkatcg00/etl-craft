@@ -15,7 +15,7 @@ concrete and explicitly called for elsewhere — nothing added is guessed at:
     BUSINESS_RULE_KEY_COLUMN relies on — sql/schema.sql's own comment on
     that table names this exact check: "Enforce it at `validate` time via
     introspection, not here." Checked via SQLAlchemy's `Inspector` against
-    the Data DB, the same dialect-agnostic approach warehouse.py uses,
+    the warehouse, the same dialect-agnostic approach warehouse.py uses,
     never a hardcoded driver call.
   * [ADDITION] A third check, per explicit instruction: "every task should
     have atleast 1 source_table and target_table" — every active task
@@ -97,7 +97,7 @@ ENFORCED_PRIMARY_KEY_DIALECTS = frozenset({"postgresql", "duckdb"})
 
 
 def _primary_key_columns(
-    data_engine: Engine, inspector: Inspector, table: str, schema: str | None
+    warehouse_engine: Engine, inspector: Inspector, table: str, schema: str | None
 ) -> list[str]:
     """Return a table's primary-key columns, working around DuckDB's missing reflection.
 
@@ -114,9 +114,9 @@ def _primary_key_columns(
     """
     pk = inspector.get_pk_constraint(table, schema=schema)
     columns = list(pk.get("constrained_columns") or [])
-    if columns or data_engine.dialect.name != "duckdb":
+    if columns or warehouse_engine.dialect.name != "duckdb":
         return columns
-    with data_engine.connect() as conn:
+    with warehouse_engine.connect() as conn:
         row = conn.execute(
             text(
                 "SELECT constraint_column_names FROM duckdb_constraints() "
@@ -129,7 +129,7 @@ def _primary_key_columns(
 
 
 def validate_business_rule_keys(
-    conn: Connection, data_engine: Engine | None
+    conn: Connection, warehouse_engine: Engine | None
 ) -> list[ValidationIssue]:
     """Check every active business rule's TARGET_TABLE has a single-column primary key.
 
@@ -149,7 +149,7 @@ def validate_business_rule_keys(
     targets = fetch_business_rule_targets(conn)
     if not targets:
         return []
-    if data_engine is None:
+    if warehouse_engine is None:
         return [
             ValidationIssue(
                 category="business_rule_pk",
@@ -168,13 +168,13 @@ def validate_business_rule_keys(
     # (sql_actions._add_computed_surrogate_key), so the convention holds; what
     # does not hold is database *enforcement* of it. Say that, once, rather
     # than repeating a failure per rule.
-    if data_engine.dialect.name not in ENFORCED_PRIMARY_KEY_DIALECTS:
+    if warehouse_engine.dialect.name not in ENFORCED_PRIMARY_KEY_DIALECTS:
         return [
             ValidationIssue(
                 category="business_rule_pk",
                 message=(
                     f"{len(targets)} active business rule(s) checked against a "
-                    f"{data_engine.dialect.name} warehouse, which cannot enforce primary keys "
+                    f"{warehouse_engine.dialect.name} warehouse, which cannot enforce primary keys "
                     "(Iceberg has no constraint concept) — the engine still assigns each target "
                     "a single-column ROW_ID, but uniqueness is not database-enforced"
                 ),
@@ -182,17 +182,17 @@ def validate_business_rule_keys(
         ]
 
     issues: list[ValidationIssue] = []
-    inspector = inspect(data_engine)
+    inspector = inspect(warehouse_engine)
     for target in targets:
         schema, _, table = target.target_table.rpartition(".")
         try:
-            columns = _primary_key_columns(data_engine, inspector, table, schema or None)
+            columns = _primary_key_columns(warehouse_engine, inspector, table, schema or None)
         except NoSuchTableError:
             issues.append(
                 ValidationIssue(
                     category="business_rule_pk",
                     message=f"{target.business_rule_name!r}: TARGET_TABLE "
-                    f"{target.target_table!r} does not exist in the Data DB",
+                    f"{target.target_table!r} does not exist in the warehouse",
                 )
             )
             continue
@@ -375,6 +375,25 @@ _REQUIRED_SQL_PARAMS: dict[str, tuple[str, ...]] = {
 _SAFE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SAFE_OBJECT_REF = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$")
 
+# [ADDITION, 2026-09-22, E2-85] Parameters whose pipe-separated elements are
+# column names interpolated unquoted into SQL text. _split_pipe_list only
+# strips whitespace, so `MERGE_KEY: "customer id"` passed validate and failed
+# the task at run time with a warehouse syntax error naming neither the
+# parameter nor the task -- exactly the class of thing E2-25 was raised to
+# surface here instead of at 3 a.m.
+_COLUMN_LIST_PARAMS = ("MERGE_KEY", "MERGE_COMPARE_COLUMNS")
+
+# [ADDITION, 2026-09-22, E2-85] MERGE_DEDUPE_ORDER is deliberately a SQL
+# fragment (an ORDER BY body), so it cannot be an identifier check. This is
+# the most that fits without a parser: comma-separated column names, each with
+# an optional ASC/DESC and an optional NULLS FIRST/LAST. A fragment that is
+# legitimately more exotic than this is rejected, which is the trade -- and it
+# is stated in the message so the author knows what was expected.
+_SAFE_ORDER_TERM = re.compile(
+    r"^[A-Za-z_][A-Za-z0-9_]*(\s+(ASC|DESC))?(\s+NULLS\s+(FIRST|LAST))?$",
+    re.IGNORECASE,
+)
+
 
 def requested_table_formats(conn: Connection, config: ConnectorConfig) -> set[str]:
     """Every storage format this deployment actually asks for.
@@ -398,7 +417,7 @@ def requested_table_formats(conn: Connection, config: ConnectorConfig) -> set[st
 
 
 def validate_warehouse_storage(
-    conn: Connection, config: ConnectorConfig, data_engine: Engine | None
+    conn: Connection, config: ConnectorConfig, warehouse_engine: Engine | None
 ) -> list[ValidationIssue]:
     """Check the warehouse can actually produce the formats the config asks for.
 
@@ -415,17 +434,17 @@ def validate_warehouse_storage(
         for the SCD merges -- but only Snowflake needs it, so the dialect has
         to be known.
     """
-    if data_engine is None or config.warehouse is None:
+    if warehouse_engine is None or config.warehouse is None:
         return []
     issues: list[ValidationIssue] = []
     formats = requested_table_formats(conn, config)
 
     if "iceberg" in formats:
-        problem = verify_iceberg_catalog(config, data_engine)
+        problem = verify_iceberg_catalog(config, warehouse_engine)
         if problem:
             issues.append(ValidationIssue(category="warehouse_storage", message=problem))
 
-    if data_engine.dialect.name in ICEBERG_CREATE_PREFIX:
+    if warehouse_engine.dialect.name in ICEBERG_CREATE_PREFIX:
         for task in fetch_tasks_with_parameters(conn):
             params = task.parameters
             declared = (params.get("TABLE_FORMAT") or "").strip().lower()
@@ -443,7 +462,8 @@ def validate_warehouse_storage(
                         category="warehouse_storage",
                         message=(
                             f"{task.pipeline_code}.{task.task_code}: an Iceberg table on "
-                            f"{data_engine.dialect.name} needs {', '.join(missing)} — the task "
+                            f"{warehouse_engine.dialect.name} needs {', '.join(missing)} — "
+                            "the task "
                             "would be refused at execution rather than silently creating a "
                             "non-Iceberg table"
                         ),
@@ -497,6 +517,53 @@ def validate_task_parameters(conn: Connection) -> list[ValidationIssue]:
                 f"TASK_CODE {task.task_code!r} is not a safe identifier — codes are "
                 "interpolated unquoted into SQL and into generate-yml's bash_command"
             )
+
+        # [ADDITION, 2026-09-22, E2-84] PIPELINE_CODE gets the identical
+        # treatment in the identical places and was checked by nothing -- not
+        # here, and not by a CHECK in schema.sql. generate_yml emits it into
+        # `bash_command`, where a space, quote or `;` produces a command that
+        # does something other than what it reads as; and docs_generator writes
+        # `f"{pipeline_code}.html"`, where a `/` or `..` writes outside the
+        # output directory and a space or colon produces a file the generated
+        # href does not point at. The shell case is covered by CFG_ rows being
+        # git-reviewed; the generate-docs case is a plain bug for an entirely
+        # innocent code.
+        if not _SAFE_IDENTIFIER.match(task.pipeline_code):
+            add(
+                f"PIPELINE_CODE {task.pipeline_code!r} is not a safe identifier — codes are "
+                "interpolated unquoted into generate-yml's bash_command and into "
+                "generate-docs' output filenames"
+            )
+
+        # E2-85: the column-name parameters reach SQL text unquoted too.
+        for name in _COLUMN_LIST_PARAMS:
+            raw = params.get(name)
+            if not raw:
+                continue
+            bad = [
+                part.strip()
+                for part in raw.split("|")
+                if part.strip() and not _SAFE_IDENTIFIER.match(part.strip())
+            ]
+            if bad:
+                add(
+                    f"{name} names {bad}, which are not safe identifiers — they are "
+                    "interpolated unquoted into the merge SQL"
+                )
+
+        dedupe_order = params.get("MERGE_DEDUPE_ORDER")
+        if dedupe_order:
+            bad_terms = [
+                term.strip()
+                for term in dedupe_order.split(",")
+                if term.strip() and not _SAFE_ORDER_TERM.match(term.strip())
+            ]
+            if bad_terms:
+                add(
+                    f"MERGE_DEDUPE_ORDER term(s) {bad_terms} are not a recognized shape — "
+                    "expected comma-separated column names, each optionally followed by "
+                    "ASC/DESC and NULLS FIRST/LAST"
+                )
 
         target = params.get("TARGET_OBJECT")
         if target and "|" in target and task.handler == "SQL":

@@ -51,7 +51,7 @@ Postgres:
       auth_mode: password
 
 Warehouse:
-  # The Data DB — where your actual tables live. Optional: only SQL and
+  # The warehouse — where your actual tables live. Optional: only SQL and
   # BUSINESS_RULES tasks need it. Exactly one warehouse per deployment.
   #
   # Postgres and DuckDB are the two supported warehouses. Both profiles below
@@ -85,7 +85,7 @@ Email:
       use_tls: false
 
 Cloning:
-  # Mirror the engine's own CFG_/AUD_ tables into the Data DB, so a team can
+  # Mirror the engine's own CFG_/AUD_ tables into the warehouse, so a team can
   # query engine config and audit history without a second connection.
   # Off by default; runs after each pipeline run when enabled.
   Enabled: false

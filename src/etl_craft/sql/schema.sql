@@ -358,7 +358,7 @@ CREATE TABLE CFG_BUSINESS_RULES (
     BUSINESS_RULE_SQL         VARCHAR NOT NULL,
     BUSINESS_RULE_TYPE        VARCHAR NOT NULL,
     BUSINESS_RULE_KEY_COLUMN  VARCHAR NOT NULL,
-    TARGET_TABLE              VARCHAR NOT NULL,   -- schema.table in the Data DB
+    TARGET_TABLE              VARCHAR NOT NULL,   -- schema.table in the warehouse
     SEQUENCE_NUMBER           BIGINT NOT NULL,    -- dense rank per TASK_ID; same rank = parallel, different rank = sequential
     ACTIVE_FLAG               VARCHAR NOT NULL DEFAULT 'Y',
     CREATED_BY                VARCHAR,
@@ -396,7 +396,7 @@ CREATE TRIGGER trg_audit_cfg_business_rules
     FOR EACH ROW EXECUTE FUNCTION trg_set_audit_columns();
 
 COMMENT ON TABLE CFG_BUSINESS_RULES IS
-    'BUSINESS_RULE_KEY_COLUMN can safely stay a single column because every TARGET_TABLE is required to have a single-column primary key — an enforced framework convention this schema cannot itself check, since TARGET_TABLE lives in the Data DB, a separate connection and possibly a separate database engine entirely. Enforce it at `validate` time via introspection, not here.';
+    'BUSINESS_RULE_KEY_COLUMN can safely stay a single column because every TARGET_TABLE is required to have a single-column primary key — an enforced framework convention this schema cannot itself check, since TARGET_TABLE lives in the warehouse, a separate connection and possibly a separate database engine entirely. Enforce it at `validate` time via introspection, not here.';
 
 
 -- ============================================================================
@@ -518,7 +518,7 @@ CREATE TABLE AUD_BUSINESS_RULES_RESULTS (
 CREATE INDEX ix_brresults_run ON AUD_BUSINESS_RULES_RESULTS (BUSINESS_RULE_RUN_ID);   -- [ADDITION]
 CREATE INDEX ix_brresults_rule ON AUD_BUSINESS_RULES_RESULTS (BUSINESS_RULE_ID);      -- [ADDITION]
 
-COMMENT ON TABLE AUD_BUSINESS_RULES_RESULTS IS 'One row per flagged record. Cloned to the Data DB after pipeline completion when [Cloning] is enabled in craft-connector.yml and a BR step ran that pipeline.';
+COMMENT ON TABLE AUD_BUSINESS_RULES_RESULTS IS 'One row per flagged record. Cloned to the warehouse after pipeline completion when [Cloning] is enabled in craft-connector.yml and a BR step ran that pipeline.';
 
 -- ----------------------------------------------------------------------------
 -- AUD_TASK_OFFSET_TRACKER

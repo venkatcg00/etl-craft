@@ -38,9 +38,24 @@ $ etl-craft doctor
 [OK  ] Execution mode: local
 [OK  ] Secret source: environment
 [FAIL] Engine DB secret: secret 'ETL_CRAFT_POSTGRES_DEV_SECRET' not found (...)
-[OK  ] Data DB: no [Warehouse] section configured
+[OK  ] Warehouse: no [Warehouse] section configured
 ...
 ```
+
+### The `.env` file format
+
+When `[Source]` is a file, the engine parses a deliberately small subset — enough for
+secrets, and nothing that invites surprises:
+
+* `KEY=VALUE`, one per line. Whitespace around either side is trimmed.
+* Blank lines are ignored, and `#` starts a comment **only at the start of a line**. A `#`
+  inside a value is part of the value.
+* A value may be wrapped in one matching pair of single or double quotes, which is
+  removed. Only one pair: `"p@ss"` reads as `p@ss`, while `"p@ss"` written as `""p@ss""`
+  reads as `"p@ss"`. A quote that is genuinely part of the secret — a generated password
+  ending in `"` — is kept.
+* There are **no escape sequences and no multi-line values**. A backslash is a literal
+  backslash.
 
 ## Execution mode
 
@@ -75,7 +90,7 @@ retry, so the pipeline can never recover without someone editing the table by ha
 specifically because a partial unique index is what makes concurrent run-id creation
 race-safe; an application-level check cannot close that race.
 
-**Data DB (`[Warehouse]`)** — exactly one per deployment. Optional: only `SQL` and
+**warehouse (`[Warehouse]`)** — exactly one per deployment. Optional: only `SQL` and
 `BUSINESS_RULES` tasks need it. Two shapes are supported:
 
 **PostgreSQL**, which stores its own tables natively. Fully concurrent, enforced primary
@@ -142,7 +157,7 @@ follow from it being a file:
 
 - **One writing process at a time.** A second process is refused outright, and so is a
   read-only connection while a writer holds it. Because the engine runs one subprocess per
-  task, it serializes Data DB access for an embedded warehouse behind an Engine DB advisory
+  task, it serializes warehouse access for an embedded warehouse behind an Engine DB advisory
   lock — so a parallel wave *queues* instead of failing. `doctor` reports this. No other
   supported warehouse has this constraint.
 - **The file name becomes the catalog name.** It must be a usable SQL identifier;

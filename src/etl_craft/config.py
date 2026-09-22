@@ -23,16 +23,16 @@
 # before other tooling (e.g. `configure`) starts writing profiles that rely
 # on it.
 #
-# [CHOICE] CLAUDE.md open question #1 (Data DB section name — "Data Db"/
+# [CHOICE] CLAUDE.md open question #1 (warehouse section name — "Data Db"/
 # "[Data Db 1]" explicitly rejected as too Informatica-shaped, no
 # replacement settled) is resolved here as `Warehouse`: it's the term
-# CLAUDE.md itself already uses throughout ("Data DB / warehouse"), reads
+# CLAUDE.md itself already uses throughout ("warehouse"), reads
 # as a plain noun rather than a product-shaped label, and is a one-line
 # rename in _parse_config below if a different name is preferred. Unlike
 # [Postgres], [Warehouse] is optional at parse time — `list`/`graph`/
 # `set-execution-mode`/`configure`/`run --init-only` and friends never
-# touch the Data DB, so a file without one still loads; anything that
-# genuinely needs a Data DB connection (warehouse.build_data_engine, the
+# touch the warehouse, so a file without one still loads; anything that
+# genuinely needs a warehouse connection (warehouse.build_warehouse_engine, the
 # not-yet-built `validate`/cloning) raises its own clear error if absent.
 
 from __future__ import annotations
@@ -172,7 +172,7 @@ class SourceConfig:
 
 @dataclass(frozen=True)
 class CloningConfig:
-    """The [Cloning] section: merge-style copy of Engine DB tables into the Data DB."""
+    """The [Cloning] section: merge-style copy of Engine DB tables into the warehouse."""
 
     enabled: bool = False
     scope: str = "cfg"
@@ -290,6 +290,14 @@ class ConnectorConfig:
     orchestrator: OrchestratorConfig = field(default_factory=OrchestratorConfig)
     email: EmailConfig | None = None
     limits: ExecutionLimits = field(default_factory=ExecutionLimits)
+    # [ADDITION, 2026-09-22, E2-78] Where this config was actually read from.
+    # orchestrator._run_wave has to pass it on to every task subprocess it
+    # spawns: E2-06 added `--config PATH` precisely because an Airflow
+    # BashOperator's cwd is not something a DAG author controls, and the
+    # spawned tasks were re-resolving a *different* config from their
+    # inherited cwd. None when the config was built in memory rather than
+    # loaded from a file, as the test helpers do.
+    config_path: Path | None = None
 
 
 def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> ConnectorConfig:
@@ -298,7 +306,7 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> ConnectorConfig:
     if not path.is_file():
         raise ConfigError(f"craft-connector.yml not found at {path}")
     try:
-        raw = yaml.safe_load(path.read_text()) or {}
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as exc:
         raise ConfigError(f"{path} is not valid YAML: {exc}") from exc
     return _parse_config(raw, path)
@@ -376,6 +384,7 @@ def _parse_config(raw: dict[str, Any], path: Path) -> ConnectorConfig:
         orchestrator=orchestrator,
         limits=limits,
         email=email,
+        config_path=path,
     )
 
 
@@ -546,14 +555,36 @@ def resolve_secret(config: ConnectorConfig, profile: ConnectionProfile | EmailPr
 
 
 def _load_dotenv_file(path: str | None) -> dict[str, str]:
-    """Parse a minimal .env-style file: KEY=VALUE per line, '#' comments, blank lines ignored."""
+    """Parse a minimal .env-style file: KEY=VALUE per line, '#' comments, blank lines ignored.
+
+    The supported subset is deliberately small, and is documented in
+    docs/configuration.md: no escape sequences, no multi-line values, and `#`
+    only as a whole-line comment. A value may be wrapped in one matching pair
+    of single or double quotes, which is removed.
+    """
     if not path:
         raise ConfigError("Source.Path is required when Source.Type == 'file'")
     values: dict[str, str] = {}
-    for line in Path(path).read_text().splitlines():
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
         key, _, value = stripped.partition("=")
-        values[key.strip()] = value.strip().strip("'\"")
+        values[key.strip()] = _unquote(value.strip())
     return values
+
+
+def _unquote(value: str) -> str:
+    """Remove one matching pair of wrapping quotes, and only that.
+
+    [DEVIATION, 2026-09-22, E2-86] This used to hand the quote characters to
+    str.strip, which removes *every* leading and trailing character in the
+    set, repeatedly. A secret that legitimately ends in a quote -- not rare in
+    a generated password or token -- was silently truncated, and one that both
+    began and ended with one lost both. The result is an authentication
+    failure with nothing anywhere saying the value had been altered, and
+    `doctor` reporting the secret as found, because it was.
+    """
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return value

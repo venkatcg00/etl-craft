@@ -212,6 +212,50 @@ def _pending_migrations(engine: Engine, migrations_dir: Path) -> list[Path]:
     return [f for f in files if f.name not in applied]
 
 
+def mark_packaged_migrations_applied(engine: Engine) -> list[str]:
+    """Record the *packaged* migrations as applied, without executing any of them.
+
+    [ADDITION, 2026-09-22, E2-83] `setup` on a fresh database used to call
+    init_db and then apply_pending_migrations, under a comment claiming the
+    migrations were "recorded rather than meaningfully re-run". They were not:
+    apply_pending_migrations genuinely runs each file's statements and then
+    records it, with no record-only path. So every fresh install executed all
+    three migrations on top of a schema that already contained everything they
+    add. That worked only because all three happen to be written re-runnably,
+    an invariant nothing enforced -- the first migration written as a plain
+    `ALTER TABLE x ADD COLUMN y` would break `setup` on every new environment,
+    and the first one carrying a data backfill would apply it twice.
+
+    Scoped to the migrations that ship *inside the package*, deliberately, and
+    not to whatever `resolve_migrations_dir` happens to pick. schema.sql is
+    the authoritative full definition of the engine's own schema, so the
+    engine's own migrations are by definition already reflected in it. A
+    team's `./sql/migrations/` holds *their* changes, which schema.sql knows
+    nothing about -- recording those unexecuted would silently skip them,
+    which is a worse bug than the one this fixes.
+    """
+    directory = packaged_migrations_dir()
+    if not directory.is_dir():
+        return []
+    names = sorted(p.name for p in directory.glob("*.sql") if p.is_file())
+    if not names:
+        return []
+    _ensure_bookkeeping_table(engine)
+    with engine.begin() as conn:
+        for name in names:
+            # ON CONFLICT DO NOTHING: this is also reachable for a database
+            # where some of them are already recorded, and re-recording one is
+            # not an error worth failing a fresh install over.
+            conn.execute(
+                text(
+                    "INSERT INTO SCHEMA_MIGRATIONS (VERSION) VALUES (:version) "
+                    "ON CONFLICT (VERSION) DO NOTHING"
+                ),
+                {"version": name},
+            )
+    return names
+
+
 def apply_pending_migrations(engine: Engine, migrations_dir: Path | str | None = None) -> list[str]:
     """Apply every not-yet-applied migration file, in filename order.
 
@@ -238,8 +282,24 @@ def apply_pending_migrations(engine: Engine, migrations_dir: Path | str | None =
         for path in _pending_migrations(engine, resolved):
             try:
                 with engine.begin() as conn:
-                    for statement in _split_statements(path.read_text()):
-                        conn.execute(text(statement))
+                    for statement in _split_statements(path.read_text(encoding="utf-8")):
+                        # [DEVIATION, 2026-09-22, E2-79] exec_driver_sql, not
+                        # execute(text(...)). _split_statements is carefully
+                        # quote-aware -- it has to be, for schema.sql's $$ ... $$
+                        # trigger bodies -- and text() then ran its *own*, not
+                        # quote-aware, :name bind-parameter scan over the same
+                        # text. So a migration containing an ordinary string
+                        # literal like ':name' or 'docs/#:ref' (seeding a
+                        # CFG_TASK_PARAMETERS value, a COMMENT ON, a CHECK
+                        # regex) failed with a message about a bind parameter
+                        # its author never wrote. The three shipped migrations
+                        # escape it only by luck, since SQLAlchemy's own
+                        # lookbehind protects a digit before a colon.
+                        #
+                        # These are whole DDL statements from trusted files
+                        # with no parameters to bind, so SQLAlchemy's parsing
+                        # buys nothing here.
+                        conn.exec_driver_sql(statement)
                     conn.execute(
                         text("INSERT INTO SCHEMA_MIGRATIONS (VERSION) VALUES (:version)"),
                         {"version": path.name},

@@ -43,7 +43,11 @@ from etl_craft.config import ConfigError, load_config
 from etl_craft.configure import _read_raw_yaml, _required_secret_vars, configure_from_env
 from etl_craft.db import build_engine
 from etl_craft.init_db import InitDbError, existing_engine_tables, init_db
-from etl_craft.migrate import MigrationError, apply_pending_migrations
+from etl_craft.migrate import (
+    MigrationError,
+    apply_pending_migrations,
+    mark_packaged_migrations_applied,
+)
 
 DEFAULT_ENV_FILE = Path(".env")
 
@@ -132,8 +136,15 @@ def _bring_database_current(
             if not tables:
                 count = init_db(engine)
                 report.database_action = f"schema created ({count} statements)"
-                # A brand-new schema is already at the latest state, so its
-                # migrations are recorded rather than meaningfully re-run.
+                # [DEVIATION, 2026-09-22, E2-83] The comment that used to sit
+                # here claimed the engine's own migrations were "recorded
+                # rather than meaningfully re-run". They were not --
+                # apply_pending_migrations has no record-only path, so every
+                # fresh install executed all three on top of a schema that
+                # already contained everything they add. Now the claim is
+                # true, and it is made of the packaged migrations only: a
+                # team's own migrations are not in schema.sql and still run.
+                mark_packaged_migrations_applied(engine)
                 report.applied_migrations = apply_pending_migrations(engine, migrations_dir)
             else:
                 report.applied_migrations = apply_pending_migrations(engine, migrations_dir)

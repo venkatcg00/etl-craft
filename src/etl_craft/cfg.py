@@ -537,7 +537,7 @@ def fetch_pipeline_detail(conn: Connection, pipeline_id: int) -> PipelineDetail:
 
 @dataclass(frozen=True)
 class BusinessRuleTarget:
-    """One active CFG_BUSINESS_RULES row's Data DB target — what `validate`'s PK check needs."""
+    """One active CFG_BUSINESS_RULES row's warehouse target — what `validate`'s PK check needs."""
 
     business_rule_name: str
     target_table: str
@@ -1051,6 +1051,14 @@ class TaskStatusEntry:
     task_code: str
     status: str
     error_message: str | None
+    # [ADDITION, 2026-09-22, E2-77] The handler, so email_alert.py can exclude
+    # *every* EMAIL_ALERT task from a run's flavour rather than only itself.
+    # Several alerts per pipeline is a supported configuration -- validate's
+    # own leaf check treats them as a set, and EMAIL_ON_STATUS exists so one
+    # can go to ops on FAILED and another to stakeholders on SUCCESS -- and
+    # they land in the same wave, so whichever ran first saw the other as
+    # PENDING and reported a false COMPLETED_WITH_ERRORS.
+    handler: str = ""
     # [ADDITION, 2026-09-20, E2-21] Lets email_alert distinguish "succeeded"
     # from "succeeded on the third try" — the case COMPLETED_WITH_ERRORS was
     # designed for but could not previously see.
@@ -1063,8 +1071,8 @@ def fetch_task_statuses_for_run(
     """Fetch every active task's status under `pipeline_run_id` (PENDING if never bound)."""
     rows = conn.execute(
         text(
-            "SELECT t.TASK_ID AS task_id, t.TASK_CODE AS task_code, l.STATUS AS status, "
-            "l.ERROR_MESSAGE AS error_message, "
+            "SELECT t.TASK_ID AS task_id, t.TASK_CODE AS task_code, t.HANDLER AS handler, "
+            "l.STATUS AS status, l.ERROR_MESSAGE AS error_message, "
             "COALESCE(l.ATTEMPT_COUNT, 1) AS attempt_count "
             "FROM CFG_TASKS t LEFT JOIN AUD_TASK_RUN_LOG l "
             "ON l.TASK_ID = t.TASK_ID AND l.PIPELINE_RUN_ID = :pipeline_run_id "
@@ -1080,6 +1088,7 @@ def fetch_task_statuses_for_run(
             status=row.status or "PENDING",
             error_message=row.error_message,
             attempt_count=row.attempt_count,
+            handler=row.handler,
         )
         for row in rows
     ]

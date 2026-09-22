@@ -80,7 +80,11 @@ from etl_craft.documentation import fetch_history, refresh_all, refresh_task_doc
 from etl_craft.execution import HandlerError, HandlerResult
 from etl_craft.generate_yml import GLOBAL_DAG_ID, generate_global_dag, generate_pipeline_dag
 from etl_craft.init_db import InitDbError, init_db
-from etl_craft.migrate import MigrationError, apply_pending_migrations
+from etl_craft.migrate import (
+    MigrationError,
+    apply_pending_migrations,
+    mark_packaged_migrations_applied,
+)
 from etl_craft.orchestrator import (
     OrchestratorModeRefusedError,
     finalize_active_run,
@@ -88,6 +92,7 @@ from etl_craft.orchestrator import (
     run_pipeline,
     settle_unsatisfiable_tasks,
 )
+from etl_craft.packaged_sql import packaged_migrations_dir
 from etl_craft.resolver import ResolverError, build_graph
 from etl_craft.runlog import (
     RunLogError,
@@ -106,7 +111,7 @@ from etl_craft.validate import (
     validate_task_parameters,
     validate_warehouse_storage,
 )
-from etl_craft.warehouse import build_data_engine, data_db, verify_iceberg_catalog
+from etl_craft.warehouse import build_warehouse_engine, open_warehouse, verify_iceberg_catalog
 
 # ==============================================================================
 # runlog.py — against real Postgres
@@ -337,7 +342,7 @@ def test_find_or_create_task_run_second_transaction_hits_integrity_error_path(
 #
 # There's no second real warehouse engine available in this Docker setup to
 # prove connectivity against a genuinely different dialect — but the whole
-# point of build_data_engine's design is that it never hardcodes a driver;
+# point of build_warehouse_engine's design is that it never hardcodes a driver;
 # it asks SQLAlchemy's own resolved dialect for connect args at pool-
 # checkout time (see warehouse.py's module docstring). Pointing it at this
 # same Postgres container with dialect "postgresql+psycopg" still proves
@@ -345,8 +350,8 @@ def test_find_or_create_task_run_second_transaction_hits_integrity_error_path(
 # DBAPI (as in test_unit.py) can't prove that part.
 
 
-def test_build_data_engine_connects_for_real(monkeypatch, postgres_engine):
-    # postgres_engine is otherwise unused here — build_data_engine opens its
+def test_build_warehouse_engine_connects_for_real(monkeypatch, postgres_engine):
+    # postgres_engine is otherwise unused here — build_warehouse_engine opens its
     # own connection independently of it — but depending on it is what runs
     # the skip-if-unreachable check before this test tries to connect for
     # real. Same class of gap as craft_connector_on_disk's own fix above.
@@ -377,7 +382,7 @@ def test_build_data_engine_connects_for_real(monkeypatch, postgres_engine):
         warehouse=ConnectionSection(active_profile="dev", profiles={"dev": profile}),
     )
 
-    engine = build_data_engine(config)
+    engine = build_warehouse_engine(config)
     try:
         with engine.connect() as conn:
             assert conn.execute(text("SELECT 1")).scalar_one() == 1
@@ -406,7 +411,7 @@ def test_hash_expression_yields_the_same_32_hex_chars_on_both_warehouses(
     assert pg_value == duck_value
 
 
-def test_build_data_engine_connects_to_real_duckdb(tmp_path):
+def test_build_warehouse_engine_connects_to_real_duckdb(tmp_path):
     # Unlike the Postgres-standing-in-for-"some dialect" test above, this
     # genuinely proves the generic, dialect-agnostic connect mechanism against
     # a real *different* SQLAlchemy dialect -- the actual point of
@@ -431,7 +436,7 @@ def test_build_data_engine_connects_to_real_duckdb(tmp_path):
         warehouse=ConnectionSection(active_profile="dev", profiles={"dev": profile}),
     )
 
-    engine = build_data_engine(config)
+    engine = build_warehouse_engine(config)
     try:
         with engine.begin() as conn:
             conn.execute(text("CREATE TABLE probe AS SELECT 1 AS id"))
@@ -445,7 +450,7 @@ def test_build_data_engine_connects_to_real_duckdb(tmp_path):
 
 # ==============================================================================
 # cloning.py — against real Postgres (Engine DB always) and, for the actual
-# copy mechanism, real DuckDB as the Data DB -- proving the generic mirroring
+# copy mechanism, real DuckDB as the warehouse -- proving the generic mirroring
 # mechanism against a genuinely different dialect, the same "prove it for
 # real" bar warehouse.py's own second-warehouse test already set. Testing
 # against Postgres-as-both-roles is deliberately *not* done for the real
@@ -457,7 +462,7 @@ def test_build_data_engine_connects_to_real_duckdb(tmp_path):
 
 
 def _duckdb_warehouse_config(tmp_path, *, cloning: CloningConfig) -> ConnectorConfig:
-    """Engine DB on real Postgres, Data DB on a throwaway DuckDB file."""
+    """Engine DB on real Postgres, warehouse on a throwaway DuckDB file."""
     return ConnectorConfig(
         mode="local",
         source=SourceConfig(type="environment"),
@@ -554,7 +559,7 @@ def test_run_cloning_clones_cfg_tables_into_real_duckdb(
 
     run_cloning_if_enabled(postgres_engine, config)
 
-    with build_data_engine(config).connect() as conn:
+    with build_warehouse_engine(config).connect() as conn:
         pipelines = list(
             conn.execute(
                 text("SELECT pipeline_code FROM cfg_pipelines WHERE pipeline_id = :id"),
@@ -585,7 +590,7 @@ def test_run_cloning_serializes_jsonb_column_to_text(
 
     run_cloning_if_enabled(postgres_engine, config)
 
-    with build_data_engine(config).connect() as conn:
+    with build_warehouse_engine(config).connect() as conn:
         params = conn.execute(
             text("SELECT pipeline_parameters FROM cfg_pipelines WHERE pipeline_id = :id"),
             {"id": committed_pipeline},
@@ -603,7 +608,7 @@ def test_run_cloning_is_idempotent_across_repeated_runs(
     run_cloning_if_enabled(postgres_engine, config)
     run_cloning_if_enabled(postgres_engine, config)
 
-    with build_data_engine(config).connect() as conn:
+    with build_warehouse_engine(config).connect() as conn:
         count = conn.execute(
             text("SELECT count(*) FROM cfg_pipelines WHERE pipeline_id = :id"),
             {"id": committed_pipeline},
@@ -690,9 +695,9 @@ def test_run_cloning_aud_scope_clones_only_aud_tables(
 
     run_cloning_if_enabled(postgres_engine, config)
 
-    data_engine = build_data_engine(config)
-    with data_engine.connect() as conn:
-        assert not inspect(data_engine).has_table("cfg_pipelines")
+    warehouse_engine = build_warehouse_engine(config)
+    with warehouse_engine.connect() as conn:
+        assert not inspect(warehouse_engine).has_table("cfg_pipelines")
         count = conn.execute(
             text("SELECT count(*) FROM aud_pipelines_run_log WHERE pipeline_id = :id"),
             {"id": committed_pipeline},
@@ -2163,8 +2168,8 @@ def make_config(
             },
         )
     elif warehouse:
-        # Same test Postgres, standing in as the Data DB — same pattern
-        # test_build_data_engine_connects_for_real above uses. Needs
+        # Same test Postgres, standing in as the warehouse — same pattern
+        # test_build_warehouse_engine_connects_for_real above uses. Needs
         # ETL_CRAFT_WAREHOUSE_DEV_SECRET set (see the warehouse_config fixture).
         warehouse_section = ConnectionSection(
             active_profile="dev",
@@ -2212,7 +2217,7 @@ def test_run_task_with_no_dependencies_hits_stub_handler_and_fails(
 ):
     # make_config() has no [Warehouse] section — a task with no blocking
     # dependencies should get all the way through the dependency check and
-    # binding, then fail on dispatch (HANDLER=SQL needs a Data DB to run
+    # binding, then fail on dispatch (HANDLER=SQL needs a warehouse to run
     # against). Proves the failure path end to end without needing a real
     # [Warehouse] configured.
     insert_committed_task(postgres_engine, committed_pipeline, "task_a")
@@ -2641,6 +2646,51 @@ def test_run_task_any_condition_does_not_require_every_cross_pipeline_edge(
     assert outcome.status == "FAILED"
 
 
+def test_run_task_does_not_settle_an_any_task_whose_same_pipeline_upstream_has_not_run(
+    postgres_engine, two_committed_pipelines
+):
+    # E2-82, the run_task half. The wave pre-filter now holds such a task
+    # back, but a manual `run --task_code` never goes through it -- so
+    # without this guard an operator running the task by hand, before its
+    # same-pipeline upstream had run, would poll the cross-pipeline edge to
+    # its budget and then record SKIPPED. SKIPPED is in SETTLED_STATUSES, so
+    # the task would be permanently out of the run even though the upstream
+    # succeeding moments later would have met its ANY condition. That is the
+    # "not yet" recorded as "never" that E2-47 removed for the same-pipeline
+    # half, reappearing through the cross-pipeline half.
+    downstream_id, upstream_id = two_committed_pipelines
+    same_upstream = insert_committed_task(postgres_engine, downstream_id, "pending_up")
+    task_id = insert_committed_task(postgres_engine, downstream_id, "any_target")
+    with postgres_engine.begin() as conn:
+        conn.execute(
+            text("UPDATE CFG_TASKS SET RUN_CONDITION = 'ANY' WHERE TASK_ID = :id"),
+            {"id": task_id},
+        )
+    insert_committed_dependency(postgres_engine, downstream_id, task_id, same_upstream)
+    far_task = insert_committed_task(postgres_engine, upstream_id, "far_up")
+    insert_committed_cross_pipeline_task_dependency(
+        postgres_engine, downstream_id, task_id, upstream_id, far_task, "SUCCESS"
+    )
+    run_id = seed_active_run(postgres_engine, downstream_id)
+
+    outcome = run_task(
+        postgres_engine, make_config(), "TEST_XPIPE_DOWN", "any_target", sleep=lambda _s: None
+    )
+
+    assert outcome.status == "SKIPPED"
+    assert "nothing was recorded" in outcome.message
+    # Nothing written, so a later invocation finds the task exactly as it
+    # left it -- the shape E2-02/E2-47 established.
+    with postgres_engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT STATUS FROM AUD_TASK_RUN_LOG " "WHERE TASK_ID = :t AND PIPELINE_RUN_ID = :r"
+            ),
+            {"t": task_id, "r": run_id},
+        ).scalar_one_or_none()
+    assert row is None
+
+
 def test_cross_pipeline_poll_budget_is_shared_across_every_edge(
     postgres_engine, two_committed_pipelines
 ):
@@ -2891,6 +2941,46 @@ def test_run_pipeline_runs_a_parallel_wave_against_a_duckdb_warehouse(
             assert conn.execute(text("SELECT id FROM staging.out_b")).scalars().all() == [1]
     finally:
         check.dispose()
+
+
+def test_run_pipeline_passes_config_to_every_task_subprocess(
+    tmp_path, monkeypatch, postgres_engine, committed_pipeline
+):
+    # E2-78. E2-06 added a top-level --config PATH to every verb precisely
+    # because a process's cwd is not always something the caller controls, and
+    # _run_wave dropped it -- so the wave planner resolved one config while
+    # every spawned task independently re-resolved a *different* one from its
+    # inherited cwd. $ETL_CRAFT_CONFIG happened to survive, because Popen
+    # inherits the environment; only the explicit flag was lost, which is what
+    # made this look like it worked right up until someone used the flag.
+    #
+    # The cwd here has no craft-connector.yml anywhere above it, so a
+    # subprocess that does not receive --config cannot resolve one at all and
+    # exits before writing any AUD_TASK_RUN_LOG row.
+    config_file = tmp_path / "elsewhere" / "craft-connector.yml"
+    config_file.parent.mkdir()
+    config_file.write_text(CRAFT_CONNECTOR_YAML, encoding="utf-8")
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    monkeypatch.setenv("ETL_CRAFT_POSTGRES_DEV_SECRET", "etl_craft")
+    monkeypatch.delenv("ETL_CRAFT_CONFIG", raising=False)
+    insert_committed_task(postgres_engine, committed_pipeline, "task_a")
+
+    run_pipeline(postgres_engine, load_config(config_file), "TEST_CONCURRENT_PL")
+
+    with postgres_engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT STATUS AS status FROM AUD_TASK_RUN_LOG t "
+                "JOIN CFG_TASKS c ON c.TASK_ID = t.TASK_ID WHERE c.PIPELINE_ID = :pid"
+            ),
+            {"pid": committed_pipeline},
+        ).all()
+    # The row exists at all only if the subprocess resolved the config it was
+    # given and reached the Engine DB. (It then fails on the stub handler,
+    # which is beside the point here.)
+    assert len(rows) == 1
 
 
 def test_run_pipeline_never_spawns_downstream_of_a_failed_dependency(
@@ -3264,7 +3354,7 @@ def test_finalize_active_run_cloning_failure_does_not_fail_the_pipeline(
     seed_active_run(postgres_engine, committed_pipeline)
 
     def _raise(engine, config):
-        raise ValueError("Data DB unreachable")
+        raise ValueError("warehouse unreachable")
 
     monkeypatch.setattr("etl_craft.orchestrator.run_cloning_if_enabled", _raise)
 
@@ -3329,7 +3419,7 @@ def test_cli_run_end_to_end_hits_stub_handler(
     craft_connector_on_disk, postgres_engine, committed_pipeline, capsys
 ):
     # CRAFT_CONNECTOR_YAML (conftest.py) has no [Warehouse] section — a
-    # HANDLER=SQL task correctly fails needing a Data DB it has none of.
+    # HANDLER=SQL task correctly fails needing a warehouse it has none of.
     insert_committed_task(postgres_engine, committed_pipeline, "task_a")
     seed_active_run(postgres_engine, committed_pipeline)
 
@@ -3835,7 +3925,7 @@ def test_cli_validate_ok_with_warehouse_configured_and_matching_pk(
     assert "OK" in capsys.readouterr().out
 
 
-def test_cli_validate_reports_config_error_building_data_engine(
+def test_cli_validate_reports_config_error_building_warehouse_engine(
     tmp_path, monkeypatch, postgres_engine, committed_pipeline, capsys
 ):
     (tmp_path / "craft-connector.yml").write_text(CRAFT_CONNECTOR_YAML + WAREHOUSE_YAML_SUFFIX)
@@ -3874,7 +3964,7 @@ def test_cli_validate_reports_connection_error_checking_business_rules(
 # ==============================================================================
 #
 # All against real Postgres, standing in as *both* the Engine DB (its usual
-# role) and the Data DB / [Warehouse] (make_config(warehouse=True) points
+# role) and the warehouse / [Warehouse] (make_config(warehouse=True) points
 # both at the same instance) — the same "one dialect stands in for the
 # generic mechanism" spirit as warehouse.py's own tests. Every test drives
 # the real `run_task()` entry point end to end (CFG_ setup -> dispatch ->
@@ -3883,8 +3973,8 @@ def test_cli_validate_reports_connection_error_checking_business_rules(
 # exercises handlers.py's own wiring (including its HandlerError-wrapping of
 # ConfigError/SQLAlchemyError) for free, not just the leaf modules.
 #
-# data_db_tables (conftest.py) tracks/drops every real table a test creates
-# in the Data DB side of this same Postgres instance — separate from
+# warehouse_tables (conftest.py) tracks/drops every real table a test creates
+# in the warehouse side of this same Postgres instance — separate from
 # committed_pipeline's own CFG_/AUD_ cleanup.
 
 
@@ -3912,10 +4002,10 @@ def finalize_pipeline_run_stub(conn, pipeline_run_id):
 
 
 def test_sql_create_table_stamps_pipeline_run_id_and_counts(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     target = f"public.sqlx_create_{committed_pipeline}"
-    data_db_tables.append(target)
+    warehouse_tables.append(target)
     task_id = insert_committed_task(postgres_engine, committed_pipeline, "t")
     insert_committed_task_parameters(
         postgres_engine,
@@ -3941,10 +4031,10 @@ def test_sql_create_table_stamps_pipeline_run_id_and_counts(
 
 
 def test_sql_setup_table_infers_audit_columns_from_scd2_sibling(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     target = f"public.sqlx_setup_scd2_{committed_pipeline}"
-    data_db_tables.append(target)
+    warehouse_tables.append(target)
     setup_id = insert_committed_task(postgres_engine, committed_pipeline, "setup")
     insert_committed_task_parameters(
         postgres_engine,
@@ -4005,10 +4095,10 @@ def test_sql_setup_table_infers_audit_columns_from_scd2_sibling(
 
 
 def test_sql_setup_table_no_sibling_falls_back_to_no_audit_columns(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     target = f"public.sqlx_setup_solo_{committed_pipeline}"
-    data_db_tables.append(target)
+    warehouse_tables.append(target)
     task_id = insert_committed_task(postgres_engine, committed_pipeline, "setup")
     insert_committed_task_parameters(
         postgres_engine,
@@ -4043,11 +4133,11 @@ def test_sql_setup_table_no_sibling_falls_back_to_no_audit_columns(
 
 
 def test_sql_overwrite_table_truncates_and_reinserts(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     target = f"public.sqlx_over_{committed_pipeline}"
     src = f"sqlx_over_src_{committed_pipeline}"
-    data_db_tables.extend([target, src])
+    warehouse_tables.extend([target, src])
     with postgres_engine.begin() as conn:
         conn.execute(text(f"CREATE TABLE {src} (id int, name varchar)"))
         conn.execute(text(f"INSERT INTO {src} VALUES (1, 'a'), (2, 'b')"))
@@ -4101,7 +4191,7 @@ def test_sql_overwrite_table_truncates_and_reinserts(
 
 
 def test_sql_overwrite_table_creates_a_missing_target(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     # [DEVIATION, E2-42] This used to assert FAILED with "does not exist — run
     # a SETUP_TABLE or CREATE_TABLE task against it first". Per explicit
@@ -4109,7 +4199,7 @@ def test_sql_overwrite_table_creates_a_missing_target(
     # own target from the staged SELECT plus that action's own audit columns,
     # so a first run needs no separate setup task.
     target = f"public.sqlx_over_missing_{committed_pipeline}"
-    data_db_tables.append(target)
+    warehouse_tables.append(target)
     task_id = insert_committed_task(postgres_engine, committed_pipeline, "over")
     insert_committed_task_parameters(
         postgres_engine,
@@ -4158,18 +4248,18 @@ def test_sql_actions_run_end_to_end_against_real_duckdb(
     # is close enough to ANSI that the *full* vocabulary works, merges
     # included.
     #
-    # Every Data DB engine here is disposed before any run_task call and
+    # Every warehouse engine here is disposed before any run_task call and
     # rebuilt after. DuckDB is embedded: if this process still holds the file
     # open when runner.py forks for crash detection, the forked child inherits
     # that in-memory database state and its writes are silently lost -- it
     # reports SUCCESS and the table is not there. Verified directly. The
-    # engine itself is safe because run_task never opens the Data DB in the
+    # engine itself is safe because run_task never opens the warehouse in the
     # parent (handlers.py builds it inside the child), but a test that seeds
     # fixture data has to hand the file back first.
     config = make_config(duckdb_warehouse=str(tmp_path / "warehouse.duckdb"))
 
-    def with_data_db(fn):
-        engine = build_data_engine(config)
+    def with_warehouse(fn):
+        engine = build_warehouse_engine(config)
         try:
             return fn(engine)
         finally:
@@ -4180,7 +4270,7 @@ def test_sql_actions_run_end_to_end_against_real_duckdb(
             conn.execute(text("CREATE SCHEMA IF NOT EXISTS staging"))
             conn.execute(text("CREATE TABLE staging.src AS SELECT 1 AS id, 'a' AS name"))
 
-    with_data_db(seed)
+    with_warehouse(seed)
 
     _duckdb_sql_task(
         postgres_engine,
@@ -4216,7 +4306,7 @@ def test_sql_actions_run_end_to_end_against_real_duckdb(
             assert conn.execute(text("SELECT id, name FROM staging.customers")).all() == [(1, "a")]
             return conn.execute(text("SELECT id, name, HASH_KEY, ROW_ID FROM staging.dim")).one()
 
-    row = with_data_db(check_first_run)
+    row = with_warehouse(check_first_run)
     assert (row[0], row[1]) == (1, "a")
     # The engine-managed columns really landed: a 32-hex hash, and the
     # surrogate identity key, which DuckDB needs a sequence for because it
@@ -4230,7 +4320,7 @@ def test_sql_actions_run_end_to_end_against_real_duckdb(
         with engine.begin() as conn:
             conn.execute(text("UPDATE staging.src SET name = 'b' WHERE id = 1"))
 
-    with_data_db(change_source)
+    with_warehouse(change_source)
     with postgres_engine.begin() as conn:
         conn.execute(
             text("UPDATE AUD_TASK_RUN_LOG SET STATUS = 'FAILED' WHERE TASK_ID = :id"),
@@ -4244,10 +4334,10 @@ def test_sql_actions_run_end_to_end_against_real_duckdb(
         with engine.connect() as conn:
             return conn.execute(text("SELECT name FROM staging.dim")).all()
 
-    assert with_data_db(check_second_run) == [("b",)]
+    assert with_warehouse(check_second_run) == [("b",)]
 
 
-def test_data_db_times_out_with_a_clear_reason_when_the_warehouse_is_busy(
+def test_open_warehouse_times_out_with_a_clear_reason_when_the_warehouse_is_busy(
     postgres_engine, tmp_path
 ):
     # E2-61's failure path. Queueing has to be bounded, or one wedged holder
@@ -4259,7 +4349,7 @@ def test_data_db_times_out_with_a_clear_reason_when_the_warehouse_is_busy(
     release = threading.Event()
 
     def hold_the_warehouse():
-        with data_db(config, postgres_engine):
+        with open_warehouse(config, postgres_engine):
             holding.set()
             release.wait(timeout=30)
 
@@ -4269,7 +4359,7 @@ def test_data_db_times_out_with_a_clear_reason_when_the_warehouse_is_busy(
         assert holding.wait(timeout=10)
         with (
             pytest.raises(ConnectionError_, match="only one writing process at a time"),
-            data_db(config, postgres_engine, wait_seconds=1),
+            open_warehouse(config, postgres_engine, wait_seconds=1),
         ):
             pass  # pragma: no cover - the lock must not be granted
     finally:
@@ -4277,8 +4367,79 @@ def test_data_db_times_out_with_a_clear_reason_when_the_warehouse_is_busy(
         holder.join(timeout=10)
 
 
+def test_single_writer_lock_also_queues_an_ingestion_task(
+    postgres_engine, committed_pipeline, tmp_path
+):
+    # E2-81. E2-61 introduced open_warehouse as "the one way the engine reaches
+    # the warehouse" and routed SQL and BUSINESS_RULES through it -- but not
+    # PYTHON, which went straight to scripts.execute. PYTHON is the *ingestion*
+    # handler: CLAUDE.md's own rule is that "the team's own script is
+    # responsible for fetching and including pipeline_run_id in whatever it
+    # inserts", so writing to the warehouse is its whole purpose. On a DuckDB
+    # warehouse an ingestion task in the same wave as any SQL task therefore
+    # raced for the file lock, and whichever lost failed with the raw
+    # "Could not set lock on file" that E2-61 exists to prevent -- in the
+    # handler most likely to be doing the writing.
+    #
+    # The engine cannot make a team's script take the lock, but it can hold it
+    # around the script, which is the queueing asserted here.
+    config = make_config(duckdb_warehouse=str(tmp_path / "warehouse.duckdb"))
+    marker = tmp_path / "the-script-ran"
+    script = tmp_path / "ingest.py"
+    script.write_text(
+        f"import pathlib; pathlib.Path({str(marker)!r}).write_text('ran', encoding='utf-8')\n"
+        'print(\'{"INGESTION_COUNT": 1, "LATEST_OFFSET_UPDATE": "1|int"}\')\n',
+        encoding="utf-8",
+    )
+    task_id = insert_committed_task(
+        postgres_engine, committed_pipeline, "ingest_q", handler="PYTHON"
+    )
+    insert_committed_task_parameters(
+        postgres_engine,
+        task_id,
+        {
+            "SCRIPT_NAME": str(script),
+            "RETURN_VALUES": "INGESTION_COUNT|LATEST_OFFSET_UPDATE",
+            "TASK_TIMEOUT_SECONDS": "1",
+        },
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    holding = threading.Event()
+    release = threading.Event()
+
+    def hold_the_warehouse():
+        with open_warehouse(config, postgres_engine):
+            holding.set()
+            release.wait(timeout=30)
+
+    holder = threading.Thread(target=hold_the_warehouse)
+    holder.start()
+    try:
+        assert holding.wait(timeout=10)
+        outcome = run_task(postgres_engine, config, "TEST_CONCURRENT_PL", "ingest_q")
+    finally:
+        release.set()
+        holder.join(timeout=10)
+
+    # It queued behind the holder instead of running alongside it, which is
+    # the whole point: before this, the script ran and raced for DuckDB's file
+    # lock itself. Having queued past its own (deliberately tiny) budget, the
+    # task then fails -- correctly, and without the script having touched the
+    # warehouse.
+    #
+    # The message here is the fork watchdog's rather than the lock's, because
+    # handlers.dispatch gives the lock the task's *own* timeout as its wait
+    # bound, so the two expire together and the outer one reports first. Left
+    # as-is deliberately: shortening the lock's budget to win the race would
+    # make a team running a short TASK_TIMEOUT_SECONDS fail tasks that should
+    # have queued, which is a worse trade than a blunter message.
+    assert outcome.status == "FAILED"
+    assert not marker.exists()
+
+
 def _trino_config() -> ConnectorConfig:
-    """Engine DB on real Postgres, Data DB on the real local Trino/Iceberg stack."""
+    """Engine DB on real Postgres, warehouse on the real local Trino/Iceberg stack."""
     return ConnectorConfig(
         mode="local",
         source=SourceConfig(type="environment"),
@@ -4521,7 +4682,7 @@ def test_every_sql_action_runs_on_real_trino_iceberg(
     seed_active_run(postgres_engine, committed_pipeline)
     src = "SELECT id, name FROM (VALUES (1,'a'),(2,'b')) AS v(id, name) WHERE 1=1"
     with trino_engine.begin() as conn:
-        for table in ("all_create", "all_setup", "all_over", "all_scd2", "all_drop"):
+        for table in ("all_create", "all_setup", "all_over", "all_scd2", "all_drop", "all_dedup"):
             conn.execute(text(f"DROP TABLE IF EXISTS iceberg.etltest.{table}"))
 
     for code, params in (
@@ -4555,15 +4716,46 @@ def test_every_sql_action_runs_on_real_trino_iceberg(
     )
     assert dropped.status == "SUCCESS", dropped.message
 
+    # E2-75. Duplicate source rows, so _dedupe_stage actually builds its
+    # scratch table -- the one path the vocabulary walk above never reaches,
+    # because its sources are duplicate-free and the dedupe returns early at
+    # its `if not duplicates` guard. That is why a third direct
+    # CREATE TEMPORARY TABLE survived two rounds of Trino work: the E2-04
+    # guard, the only thing standing between duplicate source rows and a
+    # permanently corrupted SCD target, was unreachable on Iceberg.
+    _, deduped = _run_trino_task(
+        postgres_engine,
+        committed_pipeline,
+        "a_dedup",
+        {
+            "SQL_ACTION": "SCD1_MERGE",
+            "TARGET_OBJECT": "etltest.all_dedup",
+            "SOURCE_SQL": (
+                "SELECT id, name FROM (VALUES (1,'v1'),(1,'v2'),(2,'b')) AS v(id, name) WHERE 1=1"
+            ),
+            "MERGE_KEY": "id",
+            "MERGE_COMPARE_COLUMNS": "name",
+            "MERGE_DEDUPE_ORDER": "name DESC",
+        },
+        config,
+    )
+    assert deduped.status == "SUCCESS", deduped.message
+
     with trino_engine.connect() as conn:
         tables = set(conn.execute(text("SHOW TABLES FROM iceberg.etltest")).scalars().all())
         scd2 = conn.execute(
             text("SELECT id, ACTIVE_FLAG, ROW_ID FROM iceberg.etltest.all_scd2 ORDER BY id")
         ).all()
-    assert {"all_create", "all_setup", "all_over", "all_scd2"} <= tables
+        dedup_rows = conn.execute(
+            text("SELECT id, name FROM iceberg.etltest.all_dedup ORDER BY id")
+        ).all()
+    assert {"all_create", "all_setup", "all_over", "all_scd2", "all_dedup"} <= tables
     assert "all_drop" not in tables
     assert scd2 == [(1, "Y", 1), (2, "Y", 2)]
-    # Nothing leaked, across six actions.
+    # The declared ordering picked the winner; one row per key reached the target.
+    assert dedup_rows == [(1, "v2"), (2, "b")]
+    # Nothing leaked, across seven actions -- including the `_dedup` scratch
+    # table, which _sweep_stage did not know about until E2-75.
     assert not [t for t in tables if t.startswith("etl_stage_")]
 
 
@@ -4592,6 +4784,80 @@ def test_validate_reports_the_removed_primary_key_parameter(
     issues = validate_task_parameters(pg_conn)
 
     assert any("PRIMARY_KEY" in issue.message for issue in issues)
+
+
+def test_validate_rejects_an_unsafe_pipeline_code(pg_conn, cfg_pipeline, cfg_task):
+    # E2-84. TASK_CODE was checked with the right reason -- codes are
+    # interpolated unquoted into SQL and into generate-yml's bash_command --
+    # and PIPELINE_CODE, which gets the identical treatment in the identical
+    # places, was checked by nothing: not here, and not by a CHECK in
+    # schema.sql. docs_generator writes f"{pipeline_code}.html", so a code
+    # containing `/` or `..` writes outside the output directory, and one
+    # containing a space produces a file the generated href does not point at.
+    _insert_task_parameters(
+        pg_conn, cfg_task, {"SQL_ACTION": "CREATE_TABLE", "SOURCE_SQL": "SELECT 1 WHERE 1=1"}
+    )
+    pg_conn.execute(
+        text("UPDATE CFG_PIPELINES SET PIPELINE_CODE = '../escape' WHERE PIPELINE_ID = :p"),
+        {"p": cfg_pipeline},
+    )
+
+    issues = validate_task_parameters(pg_conn)
+
+    assert any("PIPELINE_CODE" in issue.message for issue in issues)
+
+
+def test_validate_rejects_a_merge_key_that_is_not_an_identifier(pg_conn, cfg_pipeline, cfg_task):
+    # E2-85. _split_pipe_list only strips whitespace and the result is
+    # interpolated unquoted into the merge SQL, so a typo like "customer id"
+    # passed validate and failed the task at run time with a warehouse syntax
+    # error naming neither the parameter nor the task.
+    _insert_task_parameters(
+        pg_conn,
+        cfg_task,
+        {
+            "SQL_ACTION": "SCD1_MERGE",
+            "TARGET_OBJECT": "public.t",
+            "SOURCE_SQL": "SELECT 1 WHERE 1=1",
+            "MERGE_KEY": "customer id",
+            "MERGE_COMPARE_COLUMNS": "name",
+        },
+    )
+
+    issues = validate_task_parameters(pg_conn)
+
+    assert any("MERGE_KEY" in issue.message for issue in issues)
+
+
+def test_validate_accepts_a_well_formed_merge_dedupe_order_and_rejects_a_strange_one(
+    pg_conn, cfg_pipeline, cfg_task
+):
+    # E2-85's narrower half. MERGE_DEDUPE_ORDER is deliberately a SQL fragment,
+    # so it gets a shape check rather than an identifier check -- the most that
+    # fits without a parser.
+    base = {
+        "SQL_ACTION": "SCD1_MERGE",
+        "TARGET_OBJECT": "public.t",
+        "SOURCE_SQL": "SELECT 1 WHERE 1=1",
+        "MERGE_KEY": "id",
+        "MERGE_COMPARE_COLUMNS": "name",
+    }
+    _insert_task_parameters(
+        pg_conn, cfg_task, {**base, "MERGE_DEDUPE_ORDER": "updated_at DESC, id ASC NULLS LAST"}
+    )
+    assert not [i for i in validate_task_parameters(pg_conn) if "MERGE_DEDUPE_ORDER" in i.message]
+
+    pg_conn.execute(
+        text(
+            "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE = 'updated_at; DROP TABLE t' "
+            "WHERE TASK_ID = :t AND PARAMETER_NAME = 'MERGE_DEDUPE_ORDER'"
+        ),
+        {"t": cfg_task},
+    )
+
+    issues = validate_task_parameters(pg_conn)
+
+    assert any("MERGE_DEDUPE_ORDER" in issue.message for issue in issues)
 
 
 def test_validate_rejects_an_unrecognized_table_format(pg_conn, cfg_pipeline, cfg_task):
@@ -4641,7 +4907,7 @@ def test_validate_flags_a_trino_catalog_that_cannot_serve_a_requested_iceberg_fo
 
 
 def _cloud_config(profile, table_format: str) -> ConnectorConfig:
-    """Engine DB on the test Postgres, Data DB on a real cloud warehouse."""
+    """Engine DB on the test Postgres, warehouse on a real cloud warehouse."""
     return ConnectorConfig(
         mode="local",
         source=SourceConfig(type="environment"),
@@ -4757,7 +5023,7 @@ def test_table_format_native_still_runs_end_to_end(
 
 
 def test_sql_actions_assign_row_ids_on_an_iceberg_backed_warehouse(
-    postgres_engine, committed_pipeline, data_db_tables, monkeypatch
+    postgres_engine, committed_pipeline, warehouse_tables, monkeypatch
 ):
     # Iceberg has no identity columns, no sequences and no enforced primary
     # keys, so ROW_ID has to be *computed* -- max already present, plus a row
@@ -4773,7 +5039,7 @@ def test_sql_actions_assign_row_ids_on_an_iceberg_backed_warehouse(
     # endpoint, and is stated as unverified rather than implied.
     monkeypatch.setattr(sql_actions_module, "NATIVE_STORAGE_DIALECTS", frozenset({"duckdb"}))
     target = f"public.iceberg_rows_{committed_pipeline}"
-    data_db_tables.append(target)
+    warehouse_tables.append(target)
 
     task_id = insert_committed_task(postgres_engine, committed_pipeline, "ice")
     insert_committed_task_parameters(
@@ -4849,8 +5115,8 @@ def test_sql_same_table_name_in_two_schemas_on_duckdb(
     # against the bug.
     config = make_config(duckdb_warehouse=str(tmp_path / "warehouse.duckdb"))
 
-    def with_data_db(fn):
-        engine = build_data_engine(config)
+    def with_warehouse(fn):
+        engine = build_warehouse_engine(config)
         try:
             return fn(engine)
         finally:
@@ -4863,7 +5129,7 @@ def test_sql_same_table_name_in_two_schemas_on_duckdb(
             conn.execute(text("CREATE TABLE staging.src AS SELECT * FROM range(5) t(id)"))
             conn.execute(text("CREATE TABLE marts.src AS SELECT 1 AS id"))
 
-    with_data_db(seed)
+    with_warehouse(seed)
 
     # Deliberately different row counts: with equal counts the shared counter
     # happens to land clear of the first table's keys and the bug hides.
@@ -4899,7 +5165,7 @@ def test_sql_same_table_name_in_two_schemas_on_duckdb(
 
     # Building marts.orders must leave staging.orders' own key allocation
     # untouched and still usable.
-    assert with_data_db(insert_into_first) == [1, 2, 3, 4, 5, 6]
+    assert with_warehouse(insert_into_first) == [1, 2, 3, 4, 5, 6]
 
 
 def test_sql_schema_evolution_restores_the_surrogate_key_on_duckdb(
@@ -4916,8 +5182,8 @@ def test_sql_schema_evolution_restores_the_surrogate_key_on_duckdb(
     # succeeded.
     config = make_config(duckdb_warehouse=str(tmp_path / "warehouse.duckdb"))
 
-    def with_data_db(fn):
-        engine = build_data_engine(config)
+    def with_warehouse(fn):
+        engine = build_warehouse_engine(config)
         try:
             return fn(engine)
         finally:
@@ -4928,7 +5194,7 @@ def test_sql_schema_evolution_restores_the_surrogate_key_on_duckdb(
             conn.execute(text("CREATE SCHEMA IF NOT EXISTS staging"))
             conn.execute(text("CREATE TABLE staging.src AS SELECT 1 AS id, 'a' AS name"))
 
-    with_data_db(seed)
+    with_warehouse(seed)
 
     first = _duckdb_sql_task(
         postgres_engine,
@@ -4958,7 +5224,7 @@ def test_sql_schema_evolution_restores_the_surrogate_key_on_duckdb(
                 )
             )
 
-    with_data_db(widen_source)
+    with_warehouse(widen_source)
     with postgres_engine.begin() as conn:
         conn.execute(
             text(
@@ -5000,7 +5266,7 @@ def test_sql_schema_evolution_restores_the_surrogate_key_on_duckdb(
             ).all()
             return rows, pk
 
-    rows, pk = with_data_db(check)
+    rows, pk = with_warehouse(check)
     # The pre-existing row kept its own ROW_ID; the new one got the next free
     # value, not a duplicate of it. Its `extra` is NULL rather than 'z' -- and
     # that is correct, not a gap in evolution: `extra` is not in
@@ -5012,7 +5278,7 @@ def test_sql_schema_evolution_restores_the_surrogate_key_on_duckdb(
 
 
 def test_sql_scd2_merge_keeps_history_with_a_surrogate_primary_key(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     # E2-54 regression, reproduced against real Postgres during round 3. The
     # earlier PRIMARY_KEY parameter named a *business* column, and an SCD2
@@ -5027,7 +5293,7 @@ def test_sql_scd2_merge_keeps_history_with_a_surrogate_primary_key(
     # instead, so the natural key is free to repeat.
     target = f"public.sqlx_scd2pk_{committed_pipeline}"
     src = f"sqlx_scd2pk_src_{committed_pipeline}"
-    data_db_tables.extend([target, src])
+    warehouse_tables.extend([target, src])
     with postgres_engine.begin() as conn:
         conn.execute(text(f"CREATE TABLE {src} (id int, name varchar)"))
         conn.execute(text(f"INSERT INTO {src} VALUES (1, 'a')"))
@@ -5081,7 +5347,7 @@ def test_sql_scd2_merge_keeps_history_with_a_surrogate_primary_key(
 
 
 def test_sql_create_table_target_passes_validates_own_primary_key_check(
-    postgres_engine, committed_pipeline, data_db_tables, pg_conn, cfg_pipeline, cfg_task
+    postgres_engine, committed_pipeline, warehouse_tables, pg_conn, cfg_pipeline, cfg_task
 ):
     # E2-03 regression, reproduced against real Postgres during the iteration-1
     # review. CLAUDE.md states "every target table is required to have a
@@ -5091,7 +5357,7 @@ def test_sql_create_table_target_passes_validates_own_primary_key_check(
     # engine made failed the engine's own convention:
     #   "'public.probe_pk_…' must have exactly one primary key column, found []"
     target = f"public.sqlx_pk_{committed_pipeline}"
-    data_db_tables.append(target)
+    warehouse_tables.append(target)
     task_id = insert_committed_task(postgres_engine, committed_pipeline, "pk_create")
     insert_committed_task_parameters(
         postgres_engine,
@@ -5148,7 +5414,7 @@ def test_sql_action_rejects_a_target_object_with_no_schema(postgres_engine, comm
 
 
 def test_sql_scd1_merge_rejects_duplicate_merge_keys_before_touching_the_target(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     # E2-04 regression, reproduced against real Postgres during the iteration-1
     # review. With two source rows sharing a MERGE_KEY: run 1 took the NOT
@@ -5161,7 +5427,7 @@ def test_sql_scd1_merge_rejects_duplicate_merge_keys_before_touching_the_target(
     # The guard runs before any merge statement, so the target is untouched.
     target = f"public.sqlx_dupe_{committed_pipeline}"
     src = f"sqlx_dupe_src_{committed_pipeline}"
-    data_db_tables.extend([target, src])
+    warehouse_tables.extend([target, src])
     with postgres_engine.begin() as conn:
         conn.execute(text(f"CREATE TABLE {src} (id int, name varchar)"))
         conn.execute(text(f"INSERT INTO {src} VALUES (1, 'a'), (1, 'b')"))
@@ -5194,7 +5460,7 @@ def test_sql_scd1_merge_rejects_duplicate_merge_keys_before_touching_the_target(
 
 
 def test_sql_scd1_merge_dedupes_by_declared_order_across_two_runs(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     # The other half of E2-04's decision: duplicates ARE allowed, but only when
     # the task says which row wins. Run twice, because run 1 exercises the
@@ -5202,7 +5468,7 @@ def test_sql_scd1_merge_dedupes_by_declared_order_across_two_runs(
     # actually died with a cardinality violation before this guard existed.
     target = f"public.sqlx_dedupe_{committed_pipeline}"
     src = f"sqlx_dedupe_src_{committed_pipeline}"
-    data_db_tables.extend([target, src])
+    warehouse_tables.extend([target, src])
     with postgres_engine.begin() as conn:
         conn.execute(text(f"CREATE TABLE {src} (id int, name varchar, seen int)"))
         conn.execute(text(f"INSERT INTO {src} VALUES (1, 'old', 1), (1, 'new', 2)"))
@@ -5249,11 +5515,11 @@ def test_sql_scd1_merge_dedupes_by_declared_order_across_two_runs(
 
 
 def test_sql_scd1_merge_inserts_updates_and_skips_unchanged(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     target = f"public.sqlx_scd1_{committed_pipeline}"
     src = f"sqlx_scd1_src_{committed_pipeline}"
-    data_db_tables.extend([target, src])
+    warehouse_tables.extend([target, src])
     with postgres_engine.begin() as conn:
         conn.execute(text(f"CREATE TABLE {src} (id int, name varchar)"))
         conn.execute(text(f"INSERT INTO {src} VALUES (1, 'a'), (2, 'b')"))
@@ -5314,11 +5580,11 @@ def test_sql_scd1_merge_inserts_updates_and_skips_unchanged(
 
 
 def test_sql_scd2_merge_deactivates_and_inserts_new_version(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     target = f"public.sqlx_scd2_{committed_pipeline}"
     src = f"sqlx_scd2_src_{committed_pipeline}"
-    data_db_tables.extend([target, src])
+    warehouse_tables.extend([target, src])
     with postgres_engine.begin() as conn:
         conn.execute(text(f"CREATE TABLE {src} (id int, name varchar)"))
         conn.execute(text(f"INSERT INTO {src} VALUES (1, 'x')"))
@@ -5369,7 +5635,76 @@ def test_sql_scd2_merge_deactivates_and_inserts_new_version(
     assert rows == [(1, "x", "N"), (1, "x-updated", "Y")]
 
 
-def test_sql_scd_merge_missing_merge_key_fails(postgres_engine, committed_pipeline, data_db_tables):
+def test_sql_scd2_merge_converges_for_a_key_left_with_no_active_row(
+    postgres_engine, committed_pipeline, warehouse_tables
+):
+    # E2-74. The two legs disagreed about what "already present" means:
+    # changed_keys required an ACTIVE_FLAG = 'Y' row, while the new-row
+    # NOT EXISTS looked at every row regardless of flag. A key holding rows
+    # but no active one fell through *both* legs, forever -- the merge
+    # reported SUCCESS on every retry and never wrote the current version.
+    #
+    # That state is exactly what a committed deactivate followed by a failed
+    # INSERT leaves behind, which on Trino/Iceberg is an ordinary failure
+    # mode rather than a hypothetical: this module promises idempotency
+    # rather than atomicity there, and for SCD2_MERGE the promise was false.
+    # Flipping ACTIVE_FLAG is what that half-written state looks like.
+    target = f"public.sqlx_scd2conv_{committed_pipeline}"
+    src = f"sqlx_scd2conv_src_{committed_pipeline}"
+    warehouse_tables.extend([target, src])
+    with postgres_engine.begin() as conn:
+        conn.execute(text(f"CREATE TABLE {src} (id int, name varchar)"))
+        conn.execute(text(f"INSERT INTO {src} VALUES (1, 'x')"))
+
+    setup_id = insert_committed_task(postgres_engine, committed_pipeline, "setup")
+    insert_committed_task_parameters(
+        postgres_engine,
+        setup_id,
+        {
+            "SQL_ACTION": "SETUP_TABLE",
+            "TARGET_OBJECT": target,
+            "SOURCE_SQL": f"SELECT * FROM {src} WHERE 1=1",
+        },
+    )
+    merge_id = insert_committed_task(postgres_engine, committed_pipeline, "merge")
+    insert_committed_task_parameters(
+        postgres_engine,
+        merge_id,
+        {
+            "SQL_ACTION": "SCD2_MERGE",
+            "TARGET_OBJECT": target,
+            "SOURCE_SQL": f"SELECT * FROM {src} WHERE 1=1",
+            "MERGE_KEY": "id",
+            "MERGE_COMPARE_COLUMNS": "name",
+        },
+    )
+    run1 = seed_active_run(postgres_engine, committed_pipeline)
+    config = make_config(warehouse=True)
+    for code in ("setup", "merge"):
+        assert run_task(postgres_engine, config, "TEST_CONCURRENT_PL", code).status == "SUCCESS"
+
+    # The half-written state: the deactivate committed for the x -> y change,
+    # the INSERT of the new version did not.
+    with postgres_engine.begin() as conn:
+        finalize_pipeline_run_stub(conn, run1)
+        conn.execute(text(f"UPDATE {src} SET name = 'y' WHERE id = 1"))
+        conn.execute(text(f"UPDATE {target} SET active_flag = 'N' WHERE id = 1"))
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    outcome = run_task(postgres_engine, make_config(warehouse=True), "TEST_CONCURRENT_PL", "merge")
+
+    assert outcome.status == "SUCCESS", outcome.message
+    with postgres_engine.connect() as conn:
+        rows = conn.execute(
+            text(f"SELECT id, name, active_flag FROM {target} ORDER BY active_flag, name")
+        ).all()
+    # The retry converged: the current version is present and active again.
+    assert rows == [(1, "x", "N"), (1, "y", "Y")]
+
+
+def test_sql_scd_merge_missing_merge_key_fails(
+    postgres_engine, committed_pipeline, warehouse_tables
+):
     target = f"public.sqlx_scd_nomkey_{committed_pipeline}"
     task_id = insert_committed_task(postgres_engine, committed_pipeline, "merge")
     insert_committed_task_parameters(
@@ -5391,10 +5726,10 @@ def test_sql_scd_merge_missing_merge_key_fails(postgres_engine, committed_pipeli
 
 
 def test_sql_drop_table_succeeds_with_create_table_sibling(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     target = f"public.sqlx_drop_ok_{committed_pipeline}"
-    data_db_tables.append(target)
+    warehouse_tables.append(target)
     create_id = insert_committed_task(postgres_engine, committed_pipeline, "creator")
     insert_committed_task_parameters(
         postgres_engine,
@@ -5431,11 +5766,11 @@ def test_sql_drop_table_succeeds_with_create_table_sibling(
 
 
 def test_sql_drop_table_refused_without_create_table_sibling(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     target = f"public.sqlx_drop_refuse_{committed_pipeline}"
     bare_table = target.split(".", 1)[1]
-    data_db_tables.append(target)
+    warehouse_tables.append(target)
     with postgres_engine.begin() as conn:
         conn.execute(text(f"CREATE TABLE {bare_table} (id int)"))
     drop_id = insert_committed_task(postgres_engine, committed_pipeline, "dropper")
@@ -5459,14 +5794,14 @@ def test_sql_drop_table_refused_without_create_table_sibling(
 
 
 def test_sql_drop_table_refused_when_create_table_sibling_has_not_run_yet(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     # A CREATE_TABLE sibling exists in CFG_ (the earlier test covers that
     # part) but hasn't actually executed under *this* run — "created by
     # this pipeline using create_table before this drop table step," per
     # explicit instruction, not just declared somewhere in config.
     target = f"public.sqlx_drop_not_run_{committed_pipeline}"
-    data_db_tables.append(target)
+    warehouse_tables.append(target)
     creator_id = insert_committed_task(postgres_engine, committed_pipeline, "creator")
     insert_committed_task_parameters(
         postgres_engine,
@@ -5489,9 +5824,9 @@ def test_sql_drop_table_refused_when_create_table_sibling_has_not_run_yet(
     assert "hasn't completed successfully yet" in outcome.message
 
 
-def test_sql_delete_rows_hard_and_soft(postgres_engine, committed_pipeline, data_db_tables):
+def test_sql_delete_rows_hard_and_soft(postgres_engine, committed_pipeline, warehouse_tables):
     target = f"public.sqlx_delete_{committed_pipeline}"
-    data_db_tables.append(target)
+    warehouse_tables.append(target)
     setup_id = insert_committed_task(postgres_engine, committed_pipeline, "setup")
     insert_committed_task_parameters(
         postgres_engine,
@@ -5564,10 +5899,10 @@ def test_sql_delete_rows_hard_and_soft(postgres_engine, committed_pipeline, data
 
 
 def test_sql_schema_check_fails_when_stage_missing_a_target_column(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     target = f"public.sqlx_missing_col_{committed_pipeline}"
-    data_db_tables.append(target)
+    warehouse_tables.append(target)
     setup_id = insert_committed_task(postgres_engine, committed_pipeline, "setup")
     insert_committed_task_parameters(
         postgres_engine,
@@ -5604,10 +5939,10 @@ def test_sql_schema_check_fails_when_stage_missing_a_target_column(
 
 
 def test_sql_schema_evolution_disabled_fails_on_new_column(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     target = f"public.sqlx_evolve_off_{committed_pipeline}"
-    data_db_tables.append(target)
+    warehouse_tables.append(target)
     setup_id = insert_committed_task(postgres_engine, committed_pipeline, "setup")
     insert_committed_task_parameters(
         postgres_engine,
@@ -5647,10 +5982,10 @@ def test_sql_schema_evolution_disabled_fails_on_new_column(
 
 
 def test_sql_schema_evolution_enabled_adds_column_at_right_position(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     target = f"public.sqlx_evolve_on_{committed_pipeline}"
-    data_db_tables.extend([target, f"{target}__etl_evolve"])
+    warehouse_tables.extend([target, f"{target}__etl_evolve"])
     setup_id = insert_committed_task(postgres_engine, committed_pipeline, "setup")
     insert_committed_task_parameters(
         postgres_engine,
@@ -5705,7 +6040,7 @@ def test_sql_schema_evolution_enabled_adds_column_at_right_position(
 
 
 def test_sql_overwrite_table_missing_audit_column_fails_clearly(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     # A target that predates this convention (or was hand-built) has its
     # business columns and PIPELINE_RUN_ID, but never got UPDATE_DATE — the
@@ -5713,7 +6048,7 @@ def test_sql_overwrite_table_missing_audit_column_fails_clearly(
     # with a clear message, not partway through the real UPDATE/INSERT with
     # a raw "column update_date does not exist".
     target = f"public.sqlx_over_missing_audit_{committed_pipeline}"
-    data_db_tables.append(target)
+    warehouse_tables.append(target)
     with postgres_engine.begin() as conn:
         conn.execute(text(f"CREATE TABLE {target} (id int, name varchar, pipeline_run_id bigint)"))
     task_id = insert_committed_task(postgres_engine, committed_pipeline, "over")
@@ -5736,13 +6071,13 @@ def test_sql_overwrite_table_missing_audit_column_fails_clearly(
 
 
 def test_sql_scd1_merge_missing_audit_column_fails_even_with_schema_evolution(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     # This check must fire regardless of SCHEMA_EVOLUTION: that flag only
     # ever governs new *business* columns the staged SELECT introduces, never
     # repairing a target's own missing engine-managed columns.
     target = f"public.sqlx_scd1_missing_audit_{committed_pipeline}"
-    data_db_tables.append(target)
+    warehouse_tables.append(target)
     with postgres_engine.begin() as conn:
         # Business columns + PIPELINE_RUN_ID, but no HASH_KEY/CREATE_DATE/
         # CREATED_BY/UPDATE_DATE/UPDATED_BY/DELETE_FLAG at all.
@@ -5771,13 +6106,13 @@ def test_sql_scd1_merge_missing_audit_column_fails_even_with_schema_evolution(
 
 
 def test_sql_delete_rows_soft_delete_missing_delete_flag_fails_clearly(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     # DELETE_ROWS never goes through _check_or_evolve_schema (it only
     # matches on MERGE_KEY, no shape comparison) — its soft-delete path gets
     # its own DELETE_FLAG-presence check for the same reason.
     target = f"public.sqlx_delete_missing_flag_{committed_pipeline}"
-    data_db_tables.append(target)
+    warehouse_tables.append(target)
     with postgres_engine.begin() as conn:
         conn.execute(text(f"CREATE TABLE {target} (id int, pipeline_run_id bigint)"))
         conn.execute(text(f"INSERT INTO {target} (id, pipeline_run_id) VALUES (1, 1)"))
@@ -5802,13 +6137,13 @@ def test_sql_delete_rows_soft_delete_missing_delete_flag_fails_clearly(
 
 
 def test_sql_delete_rows_hard_delete_ignores_missing_delete_flag(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     # HARD_DELETE=true issues a real DELETE and never touches DELETE_FLAG at
     # all -- unlike the soft-delete path above, a target that never had that
     # column must NOT be rejected by the audit-column check.
     target = f"public.sqlx_hard_delete_no_flag_{committed_pipeline}"
-    data_db_tables.append(target)
+    warehouse_tables.append(target)
     with postgres_engine.begin() as conn:
         conn.execute(text(f"CREATE TABLE {target} (id int, pipeline_run_id bigint)"))
         conn.execute(text(f"INSERT INTO {target} (id, pipeline_run_id) VALUES (1, 1)"))
@@ -5835,7 +6170,7 @@ def test_sql_delete_rows_hard_delete_ignores_missing_delete_flag(
 
 
 def test_sql_unknown_action_and_missing_params_fail_clearly(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     bad_action_id = insert_committed_task(postgres_engine, committed_pipeline, "bad_action")
     insert_committed_task_parameters(
@@ -5915,11 +6250,11 @@ def test_sql_malformed_source_sql_wrapped_as_handler_error_not_a_crash(
 
 
 def test_business_rules_flags_deactivates_and_skips_rerun(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     target = f"public.brx_target_{committed_pipeline}"
     bare_table = target.split(".", 1)[1]
-    data_db_tables.append(target)
+    warehouse_tables.append(target)
     with postgres_engine.begin() as conn:
         conn.execute(
             text(f"CREATE TABLE {bare_table} (id int, flag varchar, pipeline_run_id bigint)")
@@ -5985,10 +6320,10 @@ def test_business_rules_flags_deactivates_and_skips_rerun(
     assert [(r.key, r.active_flag) for r in results2] == [("1", "N")]
 
 
-def test_business_rules_force_scans_all_data(postgres_engine, committed_pipeline, data_db_tables):
+def test_business_rules_force_scans_all_data(postgres_engine, committed_pipeline, warehouse_tables):
     target = f"public.brx_force_{committed_pipeline}"
     bare_table = target.split(".", 1)[1]
-    data_db_tables.append(target)
+    warehouse_tables.append(target)
     with postgres_engine.begin() as conn:
         conn.execute(
             text(f"CREATE TABLE {bare_table} (id int, flag varchar, pipeline_run_id bigint)")
@@ -6031,7 +6366,7 @@ def test_business_rules_force_scans_all_data(postgres_engine, committed_pipeline
 
 
 def test_business_rules_same_sequence_number_rules_run_as_one_wave(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     # "it sequence would be like a dense rank. run in waves. every rule
     # sharing same number for a task can run parallel" — two rules at the
@@ -6040,7 +6375,7 @@ def test_business_rules_same_sequence_number_rules_run_as_one_wave(
     # must still produce correct, independent results.
     target = f"public.brx_wave_{committed_pipeline}"
     bare_table = target.split(".", 1)[1]
-    data_db_tables.append(target)
+    warehouse_tables.append(target)
     with postgres_engine.begin() as conn:
         conn.execute(
             text(f"CREATE TABLE {bare_table} (id int, flag varchar, pipeline_run_id bigint)")
@@ -6089,7 +6424,7 @@ def test_business_rules_same_sequence_number_rules_run_as_one_wave(
 
 
 def test_business_rules_one_bad_rule_in_a_wave_does_not_block_its_wave_mate(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     # "every rule sharing same number for a task can run parallel" — one
     # rule in the wave has malformed SQL; its wave-mate is independent and
@@ -6097,7 +6432,7 @@ def test_business_rules_one_bad_rule_in_a_wave_does_not_block_its_wave_mate(
     # task as a whole still ends up FAILED because of the broken one.
     target = f"public.brx_wave_fail_{committed_pipeline}"
     bare_table = target.split(".", 1)[1]
-    data_db_tables.append(target)
+    warehouse_tables.append(target)
     with postgres_engine.begin() as conn:
         conn.execute(
             text(f"CREATE TABLE {bare_table} (id int, flag varchar, pipeline_run_id bigint)")
@@ -6151,11 +6486,11 @@ def test_business_rules_one_bad_rule_in_a_wave_does_not_block_its_wave_mate(
 
 
 def test_business_rules_bad_rule_sql_fails_and_marks_run_log_failed(
-    postgres_engine, committed_pipeline, data_db_tables
+    postgres_engine, committed_pipeline, warehouse_tables
 ):
     target = f"public.brx_bad_{committed_pipeline}"
     bare_table = target.split(".", 1)[1]
-    data_db_tables.append(target)
+    warehouse_tables.append(target)
     with postgres_engine.begin() as conn:
         conn.execute(text(f"CREATE TABLE {bare_table} (id int, pipeline_run_id bigint)"))
 
@@ -7018,7 +7353,7 @@ def migrations_cleanup(postgres_engine):
 
 
 def _write_migration(tmp_path, name: str, body: str):
-    (tmp_path / name).write_text(body)
+    (tmp_path / name).write_text(body, encoding="utf-8")
 
 
 def test_apply_pending_migrations_applies_in_order_and_records_them(
@@ -7067,6 +7402,36 @@ def test_apply_pending_migrations_applies_in_order_and_records_them(
             conn.execute(text("DROP TABLE IF EXISTS migrate_test_t1"))
 
 
+def test_apply_pending_migrations_handles_a_colon_in_a_string_literal(
+    postgres_engine, tmp_path, migrations_cleanup
+):
+    # E2-79. _split_statements is carefully quote-aware; text() then ran its
+    # own, not quote-aware, :name bind-parameter scan over the same text, so a
+    # migration containing an ordinary string literal with a colon in it --
+    # seeding a CFG_TASK_PARAMETERS value, a COMMENT ON, a CHECK regex --
+    # failed with a message about a bind parameter the author never wrote.
+    # The three shipped migrations avoid it only by luck: SQLAlchemy's own
+    # lookbehind protects a digit before a colon, so '12:30:00' is fine and
+    # ':name' is not.
+    _write_migration(
+        tmp_path,
+        "0001_colon_literal.sql",
+        "CREATE TABLE migrate_colon_t (id int, note varchar); "
+        "INSERT INTO migrate_colon_t (id, note) VALUES (1, 'see docs/#:ref for :name');",
+    )
+    migrations_cleanup.append("0001_colon_literal.sql")
+
+    try:
+        assert apply_pending_migrations(postgres_engine, tmp_path) == ["0001_colon_literal.sql"]
+        with postgres_engine.connect() as conn:
+            note = conn.execute(text("SELECT note FROM migrate_colon_t")).scalar_one()
+        # The literal reached the database untouched.
+        assert note == "see docs/#:ref for :name"
+    finally:
+        with postgres_engine.begin() as conn:
+            conn.execute(text("DROP TABLE IF EXISTS migrate_colon_t"))
+
+
 def test_apply_pending_migrations_stops_and_does_not_record_a_failed_file(
     postgres_engine, tmp_path, migrations_cleanup
 ):
@@ -7081,6 +7446,37 @@ def test_apply_pending_migrations_stops_and_does_not_record_a_failed_file(
             text("SELECT 1 FROM SCHEMA_MIGRATIONS WHERE VERSION = '0001_bad.sql'")
         ).scalar_one_or_none()
     assert exists is None
+
+
+def test_mark_packaged_migrations_applied_leaves_a_teams_own_migration_pending(
+    postgres_engine, tmp_path, monkeypatch, migrations_cleanup
+):
+    # E2-83, and the part worth being careful about. schema.sql is the
+    # authoritative definition of the *engine's* schema, so the engine's own
+    # migrations are by definition already reflected in it -- but a team's
+    # ./sql/migrations/ holds changes schema.sql knows nothing about.
+    # Recording those unexecuted would silently skip a team's migration,
+    # which is a worse bug than the one this fixes, so the marking is scoped
+    # to the packaged directory rather than to whatever resolve_migrations_dir
+    # happens to pick.
+    team = tmp_path / "sql" / "migrations"
+    team.mkdir(parents=True)
+    # Deliberately *not* re-runnable — a plain CREATE TABLE, the common
+    # spelling — so running it twice would fail outright.
+    _write_migration(team, "0009_team_thing.sql", "CREATE TABLE team_thing (id int);")
+    monkeypatch.chdir(tmp_path)
+    migrations_cleanup.append("0009_team_thing.sql")
+
+    try:
+        recorded = mark_packaged_migrations_applied(postgres_engine)
+
+        assert recorded == sorted(p.name for p in packaged_migrations_dir().glob("*.sql"))
+        assert "0009_team_thing.sql" not in recorded
+        # Still genuinely pending, so `migrate` runs it for real.
+        assert apply_pending_migrations(postgres_engine, team) == ["0009_team_thing.sql"]
+    finally:
+        with postgres_engine.begin() as conn:
+            conn.execute(text("DROP TABLE IF EXISTS team_thing"))
 
 
 def test_setup_brings_a_real_database_up_then_keeps_it_current(
@@ -7123,6 +7519,14 @@ def test_setup_brings_a_real_database_up_then_keeps_it_current(
         assert first.ok, first.problems
         assert "created" in first.config_action
         assert "schema created" in first.database_action
+        # E2-83. Nothing was *executed*. schema.sql already contains
+        # everything the packaged migrations add, and running all of them on
+        # top of the schema it had just created worked only because all three
+        # happen to be written re-runnably -- an invariant nothing enforces.
+        # The first migration written as an ordinary ALTER TABLE ADD COLUMN
+        # would have broken setup on every new environment, and the first one
+        # carrying a data backfill would have applied it twice.
+        assert first.applied_migrations == []
 
         second = run_setup(
             config_path=tmp_path / "craft-connector.yml",
@@ -7146,6 +7550,12 @@ def test_setup_brings_a_real_database_up_then_keeps_it_current(
                     ).scalar_one()
                     == 1
                 )
+                # ...and they are recorded, so a later `migrate` does not
+                # reach for them either.
+                recorded = set(
+                    conn.execute(text("SELECT VERSION FROM SCHEMA_MIGRATIONS")).scalars().all()
+                )
+            assert {p.name for p in packaged_migrations_dir().glob("*.sql")} <= recorded
         finally:
             target.dispose()
     finally:
@@ -7219,7 +7629,7 @@ def test_doctor_reports_every_check_and_names_a_missing_secret(
     assert "ETL_CRAFT_POSTGRES_DEV_SECRET" in secret.detail
     # Every check still reports -- one failure must not hide the rest.
     assert by_name["Execution mode"].ok is True
-    assert "no [Warehouse] section" in by_name["Data DB"].detail
+    assert "no [Warehouse] section" in by_name["Warehouse"].detail
 
 
 def test_doctor_passes_against_a_real_engine_db(postgres_engine):
@@ -7230,7 +7640,7 @@ def test_doctor_passes_against_a_real_engine_db(postgres_engine):
 
 def test_doctor_checks_a_configured_warehouse_and_email_relay(postgres_engine, monkeypatch, capsys):
     # The warehouse and email branches, which the no-section default skips.
-    # Postgres stands in as the Data DB (as elsewhere in this suite), and the
+    # Postgres stands in as the warehouse (as elsewhere in this suite), and the
     # relay is unreachable on purpose -- doctor must report it rather than
     # raise, and must still report every other check alongside it.
     monkeypatch.setenv("ETL_CRAFT_WAREHOUSE_DEV_SECRET", "etl_craft")
@@ -7239,8 +7649,8 @@ def test_doctor_checks_a_configured_warehouse_and_email_relay(postgres_engine, m
     results = run_checks(config)
     by_name = {r.name: r for r in results}
 
-    assert by_name["Data DB secret"].ok is True
-    assert by_name["Data DB connection"].ok is True
+    assert by_name["Warehouse secret"].ok is True
+    assert by_name["Warehouse connection"].ok is True
     # make_config's email profile points at a port nothing is listening on.
     assert by_name["Email relay"].ok is False
 
@@ -7378,8 +7788,9 @@ def _documented_sql_task(engine, pipeline_id, task_code, source_sql, doc=None):
 
 def test_column_lineage_is_computed_then_served_from_the_cache(postgres_engine, committed_pipeline):
     # Per explicit instruction lineage is both computed and cached. The cache
-    # key is the SOURCE_SQL hash, so an edit invalidates it with nothing to
-    # remember -- the same reasoning as HASH_KEY for SCD change detection.
+    # key is a hash of everything the lineage was derived from, so an edit
+    # invalidates it with nothing to remember -- the same reasoning as
+    # HASH_KEY for SCD change detection.
     task_id = _documented_sql_task(
         postgres_engine,
         committed_pipeline,
@@ -7416,6 +7827,42 @@ def test_column_lineage_is_computed_then_served_from_the_cache(postgres_engine, 
     edited = [t for t in third if t.task_id == task_id][0]
     assert edited.cached is False
     assert [e.target_column for e in edited.edges] == ["cust_email"]
+
+
+def test_column_lineage_cache_misses_when_only_the_target_object_changes(
+    postgres_engine, committed_pipeline
+):
+    # E2-87. The key hashed SOURCE_SQL alone, with TARGET_OBJECT merely stored
+    # on the cached row -- but lineage is a function of both, since the target
+    # names the left-hand side of every edge. Renaming a task's TARGET_OBJECT
+    # without touching its SOURCE_SQL is an ordinary thing to do, and
+    # `lineage --column` then kept reporting the old target name indefinitely,
+    # with nothing to invalidate it and no way to tell the answer was stale.
+    task_id = _documented_sql_task(
+        postgres_engine,
+        committed_pipeline,
+        "cl_rename",
+        "SELECT c.id AS cust_id FROM raw.customers c",
+    )
+    with postgres_engine.begin() as conn:
+        first = [t for t in lineage_for_tasks(conn) if t.task_id == task_id][0]
+    assert first.cached is False
+    assert first.edges[0].target_object == "public.cl_rename_out"
+
+    with postgres_engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE = 'public.renamed_out' "
+                "WHERE TASK_ID = :id AND PARAMETER_NAME = 'TARGET_OBJECT'"
+            ),
+            {"id": task_id},
+        )
+
+    with postgres_engine.begin() as conn:
+        second = [t for t in lineage_for_tasks(conn) if t.task_id == task_id][0]
+
+    assert second.cached is False
+    assert second.edges[0].target_object == "public.renamed_out"
 
 
 def test_generate_docs_writes_nothing_to_the_database(

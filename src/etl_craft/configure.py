@@ -270,10 +270,12 @@ def _read_raw_yaml(path: Path) -> dict:
     if not path.is_file():
         raise ConfigError(f"craft-connector.yml not found at {path}")
     try:
-        return yaml.safe_load(path.read_text()) or {}
+        return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as exc:
         raise ConfigError(f"{path} is not valid YAML: {exc}") from exc
 
 
 def _write_raw_yaml(path: Path, raw: dict) -> None:
-    path.write_text(yaml.safe_dump(raw, sort_keys=False, default_flow_style=False))
+    path.write_text(
+        yaml.safe_dump(raw, sort_keys=False, default_flow_style=False), encoding="utf-8"
+    )

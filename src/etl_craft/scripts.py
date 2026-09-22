@@ -61,7 +61,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.execution import HandlerError, HandlerResult, TaskExecutionContext
 
@@ -135,9 +135,22 @@ def _upsert_offset_tracker(
 
 
 def execute(
-    cfg_conn: Connection, ctx: TaskExecutionContext, timeout_seconds: int = 0
+    cfg_engine: Engine, ctx: TaskExecutionContext, timeout_seconds: int = 0
 ) -> HandlerResult:
     """Run this task's SCRIPT_NAME as a subprocess; return its reported variables.
+
+    [DEVIATION, 2026-09-22, E2-80] Takes the Engine DB *Engine*, not an open
+    Connection. handlers.dispatch used to wrap this whole function --
+    subprocess.run included -- in `engine.begin()`, a write transaction held
+    for as long as the script ran, bounded only by `Task_timeout_seconds`
+    (default six hours). An open Postgres transaction pins the xmin horizon
+    for the entire database, so autovacuum could not reclaim dead tuples
+    anywhere while it was held, and AUD_TASK_RUN_LOG is updated on every
+    attempt of every task. Eight of them at once (the Max_parallel_tasks
+    default) is ordinary operation. The Engine DB is only actually touched
+    here for one offset upsert, *after* the script returns, so the connection
+    is opened there and nowhere else. Same reasoning crosspipe.py already
+    applied to its own polling loop.
 
     [DEVIATION, post-signoff 2026-09-20] SCRIPT_NAME/RETURN_VALUES read from
     `ctx.task_params` (CFG_TASK_PARAMETERS), not dedicated CFG_TASKS
@@ -208,7 +221,10 @@ def execute(
             "expected 'value|datatype' (e.g. '2023-01-01 00:00:00|timestamp')"
         )
     offset_value, offset_type = offset_raw.split("|", 1)
-    _upsert_offset_tracker(cfg_conn, ctx.task_id, offset_type, offset_value.strip())
+    # The one and only Engine DB write this handler makes, taken now that the
+    # script has finished rather than held across it.
+    with cfg_engine.begin() as cfg_conn:
+        _upsert_offset_tracker(cfg_conn, ctx.task_id, offset_type, offset_value.strip())
 
     try:
         ingestion_count = int(reported[INGESTION_COUNT_VAR])

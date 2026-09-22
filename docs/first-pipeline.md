@@ -10,7 +10,7 @@ run and `etl-craft doctor` passes.
 
 ## 1. A warehouse to write to
 
-The Data DB is where your actual tables live. For this walkthrough, point `[Warehouse]` at
+The warehouse is where your actual tables live. For this walkthrough, point `[Warehouse]` at
 a second database on the same Postgres and create a source table:
 
 ```sql

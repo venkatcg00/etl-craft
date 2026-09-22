@@ -72,9 +72,30 @@ class LineageResult:
         return self.error is None
 
 
-def source_sql_hash(source_sql: str) -> str:
-    """Hash a SOURCE_SQL string for cache-key purposes."""
-    return hashlib.md5(source_sql.encode(), usedforsecurity=False).hexdigest()
+def lineage_cache_key(
+    source_sql: str, target_object: str, dialect: str | None = DEFAULT_DIALECT
+) -> str:
+    """Hash everything a cached lineage row was derived from.
+
+    [DEVIATION, 2026-09-22, E2-87] This used to hash SOURCE_SQL alone, with
+    TARGET_OBJECT merely stored on the cached row. But lineage is a function of
+    both parameters -- the target names the left-hand side of every edge -- and
+    only one of them was in the key. Rename a task's TARGET_OBJECT without
+    touching its SOURCE_SQL, which is an ordinary thing to do, and
+    `lineage --column` kept reporting the old target name indefinitely, with
+    nothing to invalidate it and no way to tell from the output that it was
+    stale. The parse dialect belongs here for the same reason, since sqlglot
+    parses per dialect.
+
+    Keeps the property the original design chose deliberately: the key is
+    derived entirely from current inputs, so editing any of them invalidates
+    the row with nothing to remember -- the same reasoning as HASH_KEY for SCD
+    change detection.
+    """
+    # NUL separators: no identifier or SQL text can contain one, so no pair of
+    # different inputs can collide by concatenating to the same string.
+    material = "\0".join((source_sql, target_object, dialect or ""))
+    return hashlib.md5(material.encode(), usedforsecurity=False).hexdigest()
 
 
 def _table_name(table: exp.Table | None) -> str | None:
@@ -273,8 +294,10 @@ def lineage_for_tasks(
     """Resolve column lineage for every active SQL task, using the cache where valid.
 
     Per explicit instruction lineage is both computed and cached. A cached row
-    is reused only when its SOURCE_SQL_HASH matches the SQL currently in
-    CFG_TASK_PARAMETERS, so an edit invalidates it with nothing to remember.
+    is reused only when its SOURCE_SQL_HASH matches `lineage_cache_key` over
+    everything currently in CFG_TASK_PARAMETERS -- the SOURCE_SQL, the
+    TARGET_OBJECT and the parse dialect -- so an edit to any of them
+    invalidates it with nothing to remember (E2-87).
     `refresh=True` re-parses regardless, for when sqlglot itself has been
     upgraded and might resolve something it previously could not.
 
@@ -307,7 +330,7 @@ def lineage_for_tasks(
     for row in rows:
         if not row.source_sql or not row.target_object:
             continue
-        sql_hash = source_sql_hash(row.source_sql)
+        sql_hash = lineage_cache_key(row.source_sql, row.target_object)
         if not refresh:
             cached = cached_lineage(conn, row.task_id, sql_hash)
             if cached is not None:

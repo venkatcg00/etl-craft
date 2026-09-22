@@ -59,6 +59,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 from sqlalchemy.engine import Engine
 
@@ -207,7 +208,7 @@ def _finalize_from_task_states(
     # any) are advanced now, regardless of whether it succeeded or failed.
     consume_pipeline_dependency_edges(engine, pipeline_id)
     # "Runs after each pipeline run, only when enabled" — best-effort: a
-    # cloning failure (Data DB unreachable, ...) must never turn an
+    # cloning failure (warehouse unreachable, ...) must never turn an
     # otherwise-settled pipeline run into a reported failure, per Cloning's
     # own "special-cased engine-internal machinery" status in CLAUDE.md.
     _run_cloning_best_effort(engine, config)
@@ -216,7 +217,7 @@ def _finalize_from_task_states(
 
 def _run_cloning_best_effort(engine: Engine, config: ConnectorConfig) -> None:
     # Deliberately broad: cloning can fail in ways this module has no
-    # business enumerating (a bad [Warehouse] secret, a Data DB connection
+    # business enumerating (a bad [Warehouse] secret, a warehouse connection
     # error, an incompatible target dialect, ...) and none of them should
     # ever surface as this *pipeline's* own failure.
     try:
@@ -380,7 +381,14 @@ def run_pipeline(
         # instead, which still preserves execution order without caring
         # about anyone's current AUD_TASK_RUN_LOG status.
         for wave in graph.waves():
-            _run_wave(wave, task_codes, pipeline_code, force=True, limits=config.limits)
+            _run_wave(
+                wave,
+                task_codes,
+                pipeline_code,
+                force=True,
+                limits=config.limits,
+                config_path=config.config_path,
+            )
         never_ready: list[int] = []
     else:
         never_ready = _run_until_settled(
@@ -391,6 +399,7 @@ def run_pipeline(
             task_codes,
             pipeline_code,
             config.limits,
+            config_path=config.config_path,
         )
 
     final_status, unsettled = _finalize_from_task_states(
@@ -418,6 +427,8 @@ def _run_until_settled(
     task_codes: dict[int, str],
     pipeline_code: str,
     limits: ExecutionLimits,
+    *,
+    config_path: Path | None = None,
 ) -> list[int]:
     """Loop waves until every task is settled or none are ready. Return the never-ready ones."""
     # attempted tracks task_ids already spawned in *this* invocation. Per
@@ -448,7 +459,14 @@ def _run_until_settled(
         if not ready:
             return pending  # none of these ever got a chance to run this pass — stuck
         attempted.update(ready)
-        _run_wave(ready, task_codes, pipeline_code, force=False, limits=limits)
+        _run_wave(
+            ready,
+            task_codes,
+            pipeline_code,
+            force=False,
+            limits=limits,
+            config_path=config_path,
+        )
 
 
 def _run_wave(
@@ -458,6 +476,7 @@ def _run_wave(
     *,
     force: bool,
     limits: ExecutionLimits,
+    config_path: Path | None = None,
 ) -> None:
     """Spawn `run --task_code` subprocesses for a wave, at most `max_parallel_tasks` at once.
 
@@ -469,16 +488,37 @@ def _run_wave(
 
     [ADDITION, E2-17] Each wait is bounded. An unbounded `wait()` on one hung
     subprocess stalled the whole wave, and with it the pipeline.
+
+    [DEVIATION, 2026-09-22, E2-89] The bound is one wall-clock deadline for the
+    whole batch, not a fresh clock per process. Each `wait(timeout=...)` used to
+    start its own, so a batch of 8 wedged subprocesses was bounded at
+    8 x (Task_timeout_seconds + 120) -- over two days at the six-hour default --
+    rather than the `timeout + 120` the comment implied. This is the outer net
+    rather than the primary control (each subprocess has its own watchdog), but
+    the stated bound and the real one should not differ by the batch width.
+
+    [ADDITION, 2026-09-22, E2-78] `--config` is passed on. E2-06 added that
+    flag to every verb precisely because a process's cwd is not always
+    something the caller controls, and this dropped it: `run --pipeline_code X
+    --config /elsewhere/craft-connector.yml` resolved one config for the wave
+    planner and let every spawned task independently re-resolve a *different*
+    one from its inherited cwd. Either a clean "config not found" per task or,
+    quieter and worse, tasks running against a different environment's
+    [Warehouse] than the one named on the command line. $ETL_CRAFT_CONFIG
+    happened to work all along, because Popen inherits the environment — only
+    the explicit flag was lost, which is what made it look like it worked
+    right up until someone used the flag.
     """
     batch_size = max(limits.max_parallel_tasks, 1)
     deadline = limits.task_timeout_seconds or None
     for start in range(0, len(task_ids), batch_size):
         processes = []
         for task_id in task_ids[start : start + batch_size]:
-            cmd = [
-                sys.executable,
-                "-m",
-                "etl_craft",
+            cmd = [sys.executable, "-m", "etl_craft"]
+            # --config is a top-level flag, so it goes *before* the verb.
+            if config_path is not None:
+                cmd += ["--config", str(config_path)]
+            cmd += [
                 "run",
                 "--pipeline_code",
                 pipeline_code,
@@ -488,12 +528,22 @@ def _run_wave(
             if force:
                 cmd.append("--force")
             processes.append(subprocess.Popen(cmd))
+        # One clock for the batch, started once every process in it is up.
+        batch_expiry = None if deadline is None else time.monotonic() + deadline + 120
         for process in processes:
             try:
                 # A generous outer bound: the task's own watchdog inside
                 # run_task is the real timeout, and should fire first. This
                 # only catches a subprocess wedged before it gets that far.
-                process.wait(timeout=None if deadline is None else deadline + 120)
+                #
+                # max(..., 1) rather than a negative or zero remainder: once
+                # the batch deadline has passed, still give each remaining
+                # process a moment to be reaped rather than asking wait() for
+                # a timeout it treats as "poll once".
+                remaining = (
+                    None if batch_expiry is None else max(batch_expiry - time.monotonic(), 1)
+                )
+                process.wait(timeout=remaining)
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()

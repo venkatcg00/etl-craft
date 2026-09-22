@@ -60,27 +60,56 @@ EC="$WORK/venv/bin/etl-craft"
 echo "==> preparing a disposable database"
 psql_admin -q -c "DROP DATABASE IF EXISTS $DB_NAME" -c "CREATE DATABASE $DB_NAME"
 
+# [ADDITION, 2026-09-22, E2-88] The config is written by `setup`, not by a
+# heredoc here. CLAUDE.md's CLI table names `setup` as the one command that
+# takes a team from nothing to a working deployment, and it was the only verb
+# in that table this install-path test did not exercise -- while writing the
+# config by hand is exactly the step `setup` exists to replace. Not
+# speculative: `setup` shipped without writing a [Warehouse] section at all, so
+# every SQL/BUSINESS_RULES task on a setup-produced deployment failed with "no
+# [Warehouse] section configured". That bug lived in the one command this test
+# skipped, and was found by hand months later.
 mkdir -p "$WORK/adopter"
-cat > "$WORK/adopter/craft-connector.yml" <<YAML
-Execution:
-  Mode: local
-Source:
-  Type: environment
-Postgres:
-  Active_profile: dev
-  Profiles:
-    dev:
-      jdbc_url: jdbc:postgresql://$PGHOST:$PGPORT/$DB_NAME
-      user: $PGUSER
-      auth_mode: password
-Cloning:
-  Enabled: false
-YAML
+cat > "$WORK/adopter/.env" <<ENV
+ETL_CRAFT_MODE=local
+ETL_CRAFT_SOURCE_TYPE=environment
+ETL_CRAFT_POSTGRES_PROFILE=dev
+ETL_CRAFT_POSTGRES_JDBC_URL=jdbc:postgresql://$PGHOST:$PGPORT/$DB_NAME
+ETL_CRAFT_POSTGRES_USER=$PGUSER
+ETL_CRAFT_POSTGRES_AUTH_MODE=password
+ETL_CRAFT_WAREHOUSE_JDBC_URL=jdbc:postgresql://$PGHOST:$PGPORT/$DB_NAME
+ETL_CRAFT_WAREHOUSE_USER=$PGUSER
+ETL_CRAFT_WAREHOUSE_AUTH_MODE=password
+ENV
 export ETL_CRAFT_POSTGRES_DEV_SECRET="$PGPASSWORD"
+export ETL_CRAFT_WAREHOUSE_DEV_SECRET="$PGPASSWORD"
 cd "$WORK/adopter"
 
 echo "==> --help"
 "$EC" --help >/dev/null
+
+echo "==> setup: from nothing to a working deployment in one command"
+"$EC" setup
+
+echo "==> the config setup wrote must carry both sections"
+"$WORK/venv/bin/python" - "$WORK/adopter/craft-connector.yml" <<'PYEOF'
+import sys, pathlib, re
+text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+for section in ("Postgres:", "Warehouse:"):
+    if not re.search(rf"^{re.escape(section)}", text, re.MULTILINE):
+        sys.exit(f"setup wrote no {section} section:\n{text}")
+print("    Postgres and Warehouse both written")
+PYEOF
+
+echo "==> setup again must be idempotent"
+"$EC" setup | grep -qi "already current"
+
+echo "==> the read verbs work against a setup-produced deployment"
+"$EC" list >/dev/null
+"$EC" doctor >/dev/null
+
+echo "==> and init-db/migrate still work as standalone verbs"
+psql_admin -q -c "DROP DATABASE IF EXISTS $DB_NAME" -c "CREATE DATABASE $DB_NAME"
 
 echo "==> init-db against an empty database"
 "$EC" init-db
@@ -91,8 +120,7 @@ if "$EC" init-db >/dev/null 2>&1; then
     exit 1
 fi
 
-echo "==> migrate, then migrate again"
-"$EC" migrate
+echo "==> migrate reports nothing pending: init-db records the packaged ones"
 "$EC" migrate | grep -q "up to date"
 
 echo "==> the read verbs work against the installed package"

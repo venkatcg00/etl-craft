@@ -1,7 +1,7 @@
-"""Build a SQLAlchemy Engine for the Data DB / warehouse (CLAUDE.md's [Warehouse] section).
+"""Build a SQLAlchemy Engine for the warehouse (CLAUDE.md's [Warehouse] section).
 
 Unlike db.py's Engine DB connector — pinned to Postgres, no exceptions — the
-Data DB can be any SQLAlchemy-supported relational engine.
+warehouse can be any SQLAlchemy-supported relational engine.
 
 [DEVIATION, 2026-09-20] **Postgres and DuckDB are the two supported
 warehouses**, per explicit decision: "DuckDB is our warehouse now ... duckdb
@@ -504,10 +504,10 @@ WAREHOUSE_AUTH_REGISTRY: dict[str, Callable[[ConnectionProfile, str], Callable[[
 }
 
 
-def build_data_engine(
+def build_warehouse_engine(
     config: ConnectorConfig, profile: ConnectionProfile | None = None, **engine_kwargs: Any
 ) -> Engine:
-    """Build a SQLAlchemy Engine for the Data DB (default profile: config.warehouse.active)."""
+    """Build a SQLAlchemy Engine for the warehouse (default profile: config.warehouse.active)."""
     if profile is None:
         if config.warehouse is None:
             raise ConnectionError_(
@@ -553,7 +553,7 @@ def build_data_engine(
 SINGLE_WRITER_DIALECTS = frozenset({"duckdb"})
 
 # Arbitrary but fixed, and deliberately distinct from migrate.py's own key:
-# every process coordinating Data DB access has to agree on it.
+# every process coordinating warehouse access has to agree on it.
 _WAREHOUSE_ADVISORY_LOCK_KEY = 0x657463_7761
 
 # How long a read-only verb (validate, doctor) waits for a busy single-writer
@@ -586,18 +586,18 @@ def is_single_writer(config: ConnectorConfig) -> bool:
 
 
 @contextmanager
-def data_db(
+def open_warehouse(
     config: ConnectorConfig,
     engine_db: Engine | None = None,
     *,
     wait_seconds: int = 0,
     **engine_kwargs: Any,
 ) -> Iterator[Engine]:
-    """Open the Data DB for one unit of work, serializing it when the warehouse is single-writer.
+    """Open the warehouse for one unit of work, serializing it when the warehouse is single-writer.
 
-    [ADDITION, 2026-09-21, E2-61] The one way the engine reaches the Data DB.
+    [ADDITION, 2026-09-21, E2-61] The one way the engine reaches the warehouse.
     For Postgres -- and any other warehouse that accepts concurrent writers --
-    this is exactly the previous `build_data_engine(...)` / `dispose()` pairing
+    this is exactly the previous `build_warehouse_engine(...)` / `dispose()` pairing
     and costs nothing: no lock is taken and waves stay fully parallel.
 
     For a single-writer warehouse it additionally holds a Postgres advisory
@@ -619,12 +619,41 @@ def data_db(
     forever; 0 means wait indefinitely. Postgres's `lock_timeout` does apply
     to `pg_advisory_xact_lock` -- verified, not assumed.
     """
-    if engine_db is None or not is_single_writer(config):
-        data_engine = build_data_engine(config, **engine_kwargs)
+    with single_writer_lock(config, engine_db, wait_seconds=wait_seconds):
+        warehouse_engine = build_warehouse_engine(config, **engine_kwargs)
         try:
-            yield data_engine
+            yield warehouse_engine
         finally:
-            data_engine.dispose()
+            warehouse_engine.dispose()
+
+
+@contextmanager
+def single_writer_lock(
+    config: ConnectorConfig, engine_db: Engine | None = None, *, wait_seconds: int = 0
+) -> Iterator[None]:
+    """Serialize warehouse access when the warehouse admits one writing process; else a no-op.
+
+    [ADDITION, 2026-09-22, E2-81] Split out of `open_warehouse` so a caller can take
+    the queueing without opening a warehouse engine of its own. HANDLER=PYTHON
+    is exactly that caller: it is the *ingestion* handler -- CLAUDE.md's own
+    rule is that "the team's own script is responsible for fetching and
+    including pipeline_run_id in whatever it inserts", so writing to the
+    warehouse is its whole purpose -- but the engine opens no warehouse
+    connection for it, the team's script does, in its own process. Before
+    this, an ingestion task in the same wave as any SQL task raced for
+    DuckDB's file lock and whichever lost failed with the raw "Could not set
+    lock on file" that E2-61 exists to prevent, in the handler most likely to
+    be doing the writing.
+
+    The engine cannot make a team's script take the lock, but it can hold it
+    *around* the script for exactly the same reason it holds it around a SQL
+    action -- the point is the queueing, not the engine object.
+
+    A no-op when no [Warehouse] is configured, so wrapping a PYTHON task in it
+    never invents a requirement the task did not previously have.
+    """
+    if engine_db is None or not is_single_writer(config):
+        yield
         return
 
     with engine_db.begin() as lock_conn:
@@ -639,15 +668,11 @@ def data_db(
             )
         except OperationalError as exc:
             raise ConnectionError_(
-                f"timed out after {wait_seconds}s waiting for the Data DB: the configured "
+                f"timed out after {wait_seconds}s waiting for the warehouse: the configured "
                 "warehouse allows only one writing process at a time, and another task is "
                 "still using it"
             ) from exc
-        data_engine = build_data_engine(config, **engine_kwargs)
-        try:
-            yield data_engine
-        finally:
-            data_engine.dispose()
+        yield
 
 
 # Trino catalogs whose connector genuinely stores Iceberg tables. Trino is the
@@ -657,7 +682,7 @@ def data_db(
 ICEBERG_CONNECTORS = frozenset({"iceberg"})
 
 
-def verify_iceberg_catalog(config: ConnectorConfig, data_engine: Engine) -> str | None:
+def verify_iceberg_catalog(config: ConnectorConfig, warehouse_engine: Engine) -> str | None:
     """Check the warehouse really stores Iceberg; return a problem string, or None.
 
     [ADDITION, 2026-09-22, E2-69] `sql_actions._is_iceberg_backed` decides from
@@ -677,7 +702,7 @@ def verify_iceberg_catalog(config: ConnectorConfig, data_engine: Engine) -> str 
     Returns None when there is nothing to check -- a warehouse whose format is
     fixed by the connection rather than a catalog.
     """
-    if data_engine.dialect.name != "trino":
+    if warehouse_engine.dialect.name != "trino":
         return None
     # [DEVIATION, 2026-09-22, E2-72] Deliberately does NOT consult
     # config.warehouse_table_format. This answers one question -- is this
@@ -693,7 +718,7 @@ def verify_iceberg_catalog(config: ConnectorConfig, data_engine: Engine) -> str 
     if not catalog:
         return None
     try:
-        with data_engine.connect() as conn:
+        with warehouse_engine.connect() as conn:
             row = conn.execute(
                 text(
                     "SELECT connector_name FROM system.metadata.catalogs "

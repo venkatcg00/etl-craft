@@ -1,7 +1,7 @@
 """HANDLER=BUSINESS_RULES execution — drives CFG_BUSINESS_RULES rows for one task.
 
 Per explicit instruction, the check itself is an EXISTS-shaped query against
-the rule's own TARGET_TABLE (in the Data DB), scoped to the current run:
+the rule's own TARGET_TABLE (in the warehouse), scoped to the current run:
 
     SELECT DISTINCT t.<key_column>
     FROM <target_table> t
@@ -37,11 +37,11 @@ full refresh re-stamps PIPELINE_RUN_ID onto every row it (re)writes.
 classifies what's found, copied verbatim onto AUD_BUSINESS_RULES_RESULTS.STATUS
 — execution is identical for all three; this module never branches on it.
 
-Cross-database mechanics: the target data lives in the Data DB, but
+Cross-database mechanics: the target data lives in the warehouse, but
 AUD_BUSINESS_RULES_RUN_LOG/AUD_BUSINESS_RULES_RESULTS live in the Engine DB
 — two separate connections/engines, so there is no single SQL statement that
 can join them. Flagged/passing keys are therefore always pulled into Python
-first (the EXISTS/NOT EXISTS query, run once against the Data DB), then
+first (the EXISTS/NOT EXISTS query, run once against the warehouse), then
 written to the Engine DB as a second, deliberate step — the same shape
 crosspipe.py already uses for its own cross-connection comparisons.
 
@@ -50,7 +50,7 @@ independently-committed Engine DB transaction (`engine.begin()`, opened
 fresh per rule — this module takes an Engine, not a shared Connection),
 rather than sharing handlers.py's one outer transaction across every rule
 and both databases. A first version passed a single `cfg_conn` through:
-when a later rule's Data DB query raised, the whole enclosing
+when a later rule's warehouse query raised, the whole enclosing
 `engine.begin()` block in handlers.py rolled back on the way out —
 including the "FAILED" status this module had just written for the *broken*
 rule, and any earlier rules' genuinely-succeeded results in the same task.
@@ -66,8 +66,8 @@ wave fully completes — every rule in it, success or failure — before the
 next wave starts, and a same-wave rule genuinely runs concurrently with its
 wave-mates via a thread pool (these are I/O-bound DB round trips, not CPU
 work, so threads — not the fork-based approach runner.py's own crash
-detection uses for a different reason). Each thread opens its own Data DB
-connection from `data_engine` (never shares one — SQLAlchemy Connections
+detection uses for a different reason). Each thread opens its own warehouse
+connection from `warehouse_engine` (never shares one — SQLAlchemy Connections
 aren't safe for concurrent use across threads) and, thanks to the
 independently-committed-per-rule transaction above, its own Engine DB
 transaction too. If any rule in a wave fails, every other rule in that same
@@ -138,8 +138,8 @@ def _mark_run_log(conn: Connection, business_rule_run_id: int, status: str) -> N
     )
 
 
-def _fetch_keys(data_conn: Connection, sql: str) -> list[str]:
-    return [str(row[0]) for row in data_conn.execute(text(sql)).all()]
+def _fetch_keys(warehouse_conn: Connection, sql: str) -> list[str]:
+    return [str(row[0]) for row in warehouse_conn.execute(text(sql)).all()]
 
 
 def _fetch_already_active_keys(
@@ -158,7 +158,7 @@ def _fetch_already_active_keys(
 
 
 def _run_one_rule(
-    data_engine: Engine,
+    warehouse_engine: Engine,
     engine: Engine,
     database: str,
     scope: str,
@@ -182,14 +182,14 @@ def _run_one_rule(
         return 0, 0
     qualified_target = qualify(rule.target_table, database)
     try:
-        with data_engine.connect() as data_conn:
+        with warehouse_engine.connect() as warehouse_conn:
             failing_keys = _fetch_keys(
-                data_conn,
+                warehouse_conn,
                 f"SELECT DISTINCT t.{rule.business_rule_key_column} FROM {qualified_target} AS t "
                 f"WHERE {scope} AND EXISTS ({rule.business_rule_sql})",
             )
             passing_keys = _fetch_keys(
-                data_conn,
+                warehouse_conn,
                 f"SELECT DISTINCT t.{rule.business_rule_key_column} FROM {qualified_target} AS t "
                 f"WHERE {scope} AND NOT EXISTS ({rule.business_rule_sql})",
             )
@@ -252,7 +252,7 @@ def _run_one_rule(
 
 
 def _run_wave(
-    data_engine: Engine,
+    warehouse_engine: Engine,
     engine: Engine,
     database: str,
     scope: str,
@@ -263,21 +263,23 @@ def _run_wave(
 
     [DEVIATION, 2026-09-20, E2-19] Capped at `[Execution] Max_parallel_tasks`.
     This used to be `max_workers=len(wave)`, so a wave of thirty rules opened
-    thirty Data DB connections at once — a connection budget set by how many
+    thirty warehouse connections at once — a connection budget set by how many
     rules someone happened to give the same SEQUENCE_NUMBER.
     """
     max_workers = max(ctx.config.limits.max_parallel_tasks, 1)
     if len(wave) == 1:
         # Not worth a thread pool for the overwhelmingly common case of one
         # rule per SEQUENCE_NUMBER.
-        return _run_one_rule(data_engine, engine, database, scope, ctx, wave[0])
+        return _run_one_rule(warehouse_engine, engine, database, scope, ctx, wave[0])
 
     total_flagged = 0
     total_deactivated = 0
     first_error: HandlerError | None = None
     with ThreadPoolExecutor(max_workers=min(len(wave), max_workers)) as executor:
         futures = {
-            executor.submit(_run_one_rule, data_engine, engine, database, scope, ctx, rule): rule
+            executor.submit(
+                _run_one_rule, warehouse_engine, engine, database, scope, ctx, rule
+            ): rule
             for rule in wave
         }
         for future in as_completed(futures):
@@ -294,10 +296,10 @@ def _run_wave(
     return total_flagged, total_deactivated
 
 
-def execute(data_engine: Engine, engine: Engine, ctx: TaskExecutionContext) -> HandlerResult:
+def execute(warehouse_engine: Engine, engine: Engine, ctx: TaskExecutionContext) -> HandlerResult:
     """Run every active CFG_BUSINESS_RULES row for this task, wave by wave; return counts.
 
-    `data_engine`/`engine` are both Engines, not shared Connections — each
+    `warehouse_engine`/`engine` are both Engines, not shared Connections — each
     rule opens its own connection to each database, required for genuine
     thread-safe concurrency within a wave (see this module's own "Sequencing"
     note above) and for the independently-committed-per-rule transaction
@@ -311,7 +313,9 @@ def execute(data_engine: Engine, engine: Engine, ctx: TaskExecutionContext) -> H
     total_flagged = 0
     total_deactivated = 0
     for _sequence_number, wave_iter in itertools.groupby(rules, key=lambda r: r.sequence_number):
-        flagged, deactivated = _run_wave(data_engine, engine, database, scope, ctx, list(wave_iter))
+        flagged, deactivated = _run_wave(
+            warehouse_engine, engine, database, scope, ctx, list(wave_iter)
+        )
         total_flagged += flagged
         total_deactivated += deactivated
 
