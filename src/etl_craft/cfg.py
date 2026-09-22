@@ -730,6 +730,8 @@ KNOWN_PARAMETERS = frozenset(
         # these name it. See sql_actions.ICEBERG_CREATE_PREFIX.
         "EXTERNAL_VOLUME",
         "BASE_LOCATION",
+        # iceberg | native. Overrides [Warehouse].Table_format for one target.
+        "TABLE_FORMAT",
         # HANDLER=PYTHON
         "SCRIPT_NAME",
         "RETURN_VALUES",

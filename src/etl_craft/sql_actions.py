@@ -208,7 +208,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from etl_craft.cfg import fetch_sibling_target_writer
-from etl_craft.config import ConnectorConfig
+from etl_craft.config import DEFAULT_TABLE_FORMAT, VALID_TABLE_FORMATS, ConnectorConfig
 from etl_craft.execution import HandlerError, HandlerResult, TaskExecutionContext
 from etl_craft.runlog import fetch_task_run_status
 from etl_craft.warehouse import translate_jdbc_url
@@ -297,6 +297,21 @@ AUDIT_COLUMN_TYPES: dict[str, str] = {
 # pointed at an Iceberg catalog writes Iceberg without being told to.
 ICEBERG_TABLE_CLAUSE: dict[str, str] = {"databricks": "USING ICEBERG"}
 
+# [ADDITION, 2026-09-22] The same, for a warehouse's own native format, per
+# explicit decision to "support non iceberg as well, on the snowflake and
+# databricks setups".
+#
+# Databricks names Delta explicitly rather than relying on the workspace
+# default: the whole point of declaring a format is that it is declared.
+# Snowflake's native form is an ordinary CREATE TABLE, so it needs no clause
+# and no EXTERNAL_VOLUME -- which is why the Iceberg refusal must not fire
+# when native is what was asked for.
+NATIVE_TABLE_CLAUSE: dict[str, str] = {"databricks": "USING DELTA"}
+
+# Where the resolved format for the current task is stashed, alongside the task
+# parameters, so create_table_as can reach it through the same seam.
+TABLE_FORMAT_INFO_KEY = "etl_craft_table_format"
+
 # Snowflake is the one that cannot be expressed as a clause: its Iceberg
 # tables use a different statement (`CREATE ICEBERG TABLE`) and require an
 # EXTERNAL_VOLUME plus a BASE_LOCATION that are deployment-specific and have
@@ -323,6 +338,34 @@ def iceberg_clause(dialect_name: str) -> str:
     if dialect_name.split("+", 1)[0] in NATIVE_STORAGE_DIALECTS:
         return ""
     return ICEBERG_TABLE_CLAUSE.get(dialect_name, "")
+
+
+def table_format_clause(dialect_name: str, table_format: str) -> str:
+    """Return the CREATE TABLE clause for `table_format` on this dialect."""
+    if dialect_name.split("+", 1)[0] in NATIVE_STORAGE_DIALECTS:
+        return ""
+    if table_format == "native":
+        return NATIVE_TABLE_CLAUSE.get(dialect_name, "")
+    return ICEBERG_TABLE_CLAUSE.get(dialect_name, "")
+
+
+def resolve_table_format(ctx: TaskExecutionContext) -> str:
+    """Resolve this task's storage format: task parameter, then [Warehouse], then iceberg.
+
+    [ADDITION, 2026-09-22] Two tiers, the same shape generate-yml already uses
+    for its own settings. A team standardising on one format sets it once in
+    craft-connector.yml; a single table that has to differ says so on its own
+    task, which is where every other per-target decision already lives.
+    """
+    declared = (ctx.task_params.get("TABLE_FORMAT") or "").strip().lower()
+    if declared:
+        if declared not in VALID_TABLE_FORMATS:
+            raise HandlerError(
+                f"CFG_TASK_PARAMETERS.TABLE_FORMAT={declared!r} is not one of "
+                f"{sorted(VALID_TABLE_FORMATS)}"
+            )
+        return declared
+    return ctx.config.warehouse_table_format
 
 
 # The key `execute()` stashes this task's CFG_TASK_PARAMETERS under, on the
@@ -357,13 +400,14 @@ def create_table_as(
     CFG_TASK_PARAMETERS via `conn.info`; see TASK_PARAMS_INFO_KEY.
     """
     dialect_name = conn.dialect.name
+    table_format = conn.info.get(TABLE_FORMAT_INFO_KEY) or DEFAULT_TABLE_FORMAT
     prefix_kind = ICEBERG_CREATE_PREFIX.get(dialect_name)
-    if prefix_kind:
+    if prefix_kind and table_format == "iceberg":
         params: dict[str, str] = conn.info.get(TASK_PARAMS_INFO_KEY) or {}
         return _create_iceberg_table_with_storage(
             conn, dialect_name, prefix_kind, qualified_name, select_sql, params
         )
-    clause = iceberg_clause(dialect_name)
+    clause = table_format_clause(dialect_name, table_format)
     prefix = f"CREATE TABLE {qualified_name}"
     statement = f"{prefix} {clause} AS {select_sql}" if clause else f"{prefix} AS {select_sql}"
     conn.execute(text(statement))
@@ -1196,6 +1240,7 @@ def _execute(
     # create_table_as calls nested inside the rebuild helpers. See
     # TASK_PARAMS_INFO_KEY for why this is not an argument.
     data_conn.info[TASK_PARAMS_INFO_KEY] = params
+    data_conn.info[TABLE_FORMAT_INFO_KEY] = resolve_table_format(ctx)
     action = params.get("SQL_ACTION")
     if action not in SQL_ACTIONS:
         raise HandlerError(f"CFG_TASK_PARAMETERS.SQL_ACTION missing or unrecognized: {action!r}")

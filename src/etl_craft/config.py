@@ -100,6 +100,19 @@ VALID_AUTH_MODES = frozenset({"none", "password", "token", "sso", "key_file"})
 # creator, which is the single place that can actually tell.
 AUTH_MODES_WITHOUT_USER = frozenset({"none", "token"})
 VALID_CLONING_SCOPES = frozenset({"cfg", "aud", "all"})
+
+# [ADDITION, 2026-09-22] What storage format the engine creates tables in on a
+# non-Postgres warehouse.
+#
+#   iceberg — an Iceberg table, readable by everything else in the lakehouse.
+#   native  — the warehouse's own format: Delta on Databricks, a standard
+#             table on Snowflake.
+#
+# [CHOICE] `iceberg` stays the default. "Support non-Iceberg as well" is a
+# widening, not a reversal of the default, and flipping it would silently
+# change the format of every table an existing pipeline creates.
+VALID_TABLE_FORMATS = frozenset({"iceberg", "native"})
+DEFAULT_TABLE_FORMAT = "iceberg"
 # [ADDITION] EMAIL_ALERT's own, smaller auth vocabulary — per explicit
 # instruction, the transport is SMTP. Many internal relays accept anonymous
 # submission (no auth_mode concept needed at all); "password" covers the
@@ -271,6 +284,9 @@ class ConnectorConfig:
     postgres: ConnectionSection
     cloning: CloningConfig
     warehouse: ConnectionSection | None = None
+    # The default storage format for tables the engine creates on this
+    # warehouse; a task may override it with CFG_TASK_PARAMETERS.TABLE_FORMAT.
+    warehouse_table_format: str = DEFAULT_TABLE_FORMAT
     orchestrator: OrchestratorConfig = field(default_factory=OrchestratorConfig)
     email: EmailConfig | None = None
     limits: ExecutionLimits = field(default_factory=ExecutionLimits)
@@ -331,6 +347,7 @@ def _parse_config(raw: dict[str, Any], path: Path) -> ConnectorConfig:
     postgres = _parse_connection_section("POSTGRES", postgres_raw, path)
 
     warehouse_raw = raw.get("Warehouse")
+    table_format = DEFAULT_TABLE_FORMAT
     if warehouse_raw is None:
         warehouse = None
     elif not isinstance(warehouse_raw, dict):
@@ -355,6 +372,7 @@ def _parse_config(raw: dict[str, Any], path: Path) -> ConnectorConfig:
         postgres=postgres,
         cloning=cloning,
         warehouse=warehouse,
+        warehouse_table_format=table_format,
         orchestrator=orchestrator,
         limits=limits,
         email=email,

@@ -679,6 +679,11 @@ def verify_iceberg_catalog(config: ConnectorConfig, data_engine: Engine) -> str 
     """
     if data_engine.dialect.name != "trino":
         return None
+    # [DEVIATION, 2026-09-22] Only when Iceberg is what this deployment asked
+    # for. A team running native tables on a Hive catalog is not misconfigured,
+    # and failing doctor for it would be the check inventing a requirement.
+    if config.warehouse_table_format != "iceberg":
+        return None
     _, parts = (
         translate_jdbc_url(config.warehouse.active.jdbc_url) if config.warehouse else ("", {})
     )

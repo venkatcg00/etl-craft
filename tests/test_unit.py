@@ -99,12 +99,15 @@ from etl_craft.runlog import (
 from etl_craft.scripts import _parse_trailing_json
 from etl_craft.scripts import execute as execute_python_script
 from etl_craft.sql_actions import (
+    TABLE_FORMAT_INFO_KEY,
     TASK_PARAMS_INFO_KEY,
     active_database,
     create_table_as,
     iceberg_clause,
     qualify,
+    resolve_table_format,
     substitute_pipeline_id,
+    table_format_clause,
 )
 from etl_craft.validate import validate_business_rule_keys
 from etl_craft.warehouse import (
@@ -692,13 +695,96 @@ class _FakeDialectConn:
         return None
 
 
+def _format_ctx(task_params, warehouse_format="iceberg"):
+    cfg = ConnectorConfig(
+        mode="local",
+        source=SourceConfig(type="environment"),
+        postgres=ConnectionSection(
+            active_profile="dev",
+            profiles={
+                "dev": ConnectionProfile(
+                    section="ENGINE",
+                    name="dev",
+                    jdbc_url="jdbc:postgresql://h:5432/db",
+                    user="u",
+                    auth_mode="password",
+                )
+            },
+        ),
+        cloning=CloningConfig(),
+        warehouse_table_format=warehouse_format,
+    )
+    return TaskExecutionContext(
+        config=cfg,
+        task_run_id=1,
+        pipeline_run_id=1,
+        handler="SQL",
+        task_params=task_params,
+        pipeline_code="P",
+        task_code="T",
+        refresh_type="FULL",
+        force=False,
+        task_id=1,
+        pipeline_id=1,
+    )
+
+
+def test_table_format_resolves_task_parameter_then_warehouse_then_iceberg():
+    # Two tiers, the shape generate-yml already uses: a team standardising on
+    # one format sets it once; a single table that has to differ says so on
+    # its own task.
+    assert resolve_table_format(_format_ctx({})) == "iceberg"
+    assert resolve_table_format(_format_ctx({}, warehouse_format="native")) == "native"
+    assert resolve_table_format(_format_ctx({"TABLE_FORMAT": "native"})) == "native"
+    # The task parameter wins over a warehouse default, in both directions.
+    assert (
+        resolve_table_format(_format_ctx({"TABLE_FORMAT": "iceberg"}, warehouse_format="native"))
+        == "iceberg"
+    )
+
+
+def test_an_unrecognized_table_format_is_rejected_rather_than_assumed():
+    with pytest.raises(HandlerError, match="TABLE_FORMAT"):
+        resolve_table_format(_format_ctx({"TABLE_FORMAT": "delta"}))
+
+
+@pytest.mark.parametrize(
+    "dialect_name, table_format, expected",
+    [
+        ("databricks", "iceberg", "USING ICEBERG"),
+        ("databricks", "native", "USING DELTA"),
+        # Trino's format comes from the catalog either way, and a clause would
+        # be a syntax error.
+        ("trino", "iceberg", ""),
+        ("trino", "native", ""),
+        # Postgres stores its own tables; neither format means anything.
+        ("postgresql+psycopg", "iceberg", ""),
+        ("postgresql+psycopg", "native", ""),
+    ],
+)
+def test_table_format_clause_per_dialect(dialect_name, table_format, expected):
+    # "support non iceberg as well, on the snowflake and databricks setups" --
+    # Databricks names Delta explicitly rather than relying on the workspace
+    # default, because the point of declaring a format is that it is declared.
+    assert table_format_clause(dialect_name, table_format) == expected
+
+
+def test_create_table_as_makes_a_native_snowflake_table_without_storage():
+    # The Iceberg refusal must not fire when native is what was asked for:
+    # a standard Snowflake table needs no EXTERNAL_VOLUME, and refusing would
+    # be the guard inventing a requirement.
+    conn = _FakeDialectConn("snowflake", info={TABLE_FORMAT_INFO_KEY: "native"})
+    create_table_as(conn, "db.sch.t", "SELECT 1")
+    assert conn.statements == ["CREATE TABLE db.sch.t AS SELECT 1"]
+
+
 def test_create_table_as_refuses_snowflake_without_iceberg_storage():
     # Snowflake's Iceberg tables need a different statement (CREATE ICEBERG
     # TABLE) plus an EXTERNAL_VOLUME and BASE_LOCATION. With neither declared,
     # refusing beats silently creating an ordinary Snowflake table that looks
     # fine and is not Iceberg -- producing the wrong thing successfully is
     # worse than failing.
-    conn = _FakeDialectConn("snowflake")
+    conn = _FakeDialectConn("snowflake", info={TABLE_FORMAT_INFO_KEY: "iceberg"})
     with pytest.raises(HandlerError, match="EXTERNAL_VOLUME"):
         create_table_as(conn, "db.sch.t", "SELECT 1")
     assert conn.statements == []
@@ -708,10 +794,11 @@ def test_create_table_as_builds_a_snowflake_iceberg_table_when_storage_is_declar
     conn = _FakeDialectConn(
         "snowflake",
         info={
+            TABLE_FORMAT_INFO_KEY: "iceberg",
             TASK_PARAMS_INFO_KEY: {
                 "EXTERNAL_VOLUME": "my_vol",
                 "BASE_LOCATION": "analytics/customers",
-            }
+            },
         },
     )
     create_table_as(conn, "db.sch.t", "SELECT 1")
@@ -725,7 +812,10 @@ def test_create_table_as_builds_a_snowflake_iceberg_table_when_storage_is_declar
 def test_create_table_as_rejects_a_quote_in_snowflake_storage_values():
     conn = _FakeDialectConn(
         "snowflake",
-        info={TASK_PARAMS_INFO_KEY: {"EXTERNAL_VOLUME": "v'; DROP", "BASE_LOCATION": "b"}},
+        info={
+            TABLE_FORMAT_INFO_KEY: "iceberg",
+            TASK_PARAMS_INFO_KEY: {"EXTERNAL_VOLUME": "v'; DROP", "BASE_LOCATION": "b"},
+        },
     )
     with pytest.raises(HandlerError, match="must not contain a quote"):
         create_table_as(conn, "db.sch.t", "SELECT 1")

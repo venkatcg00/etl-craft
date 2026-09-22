@@ -65,7 +65,7 @@ from sqlalchemy.sql.sqltypes import Text as GenericText
 from sqlalchemy.types import TypeEngine
 
 from etl_craft.config import CloningConfig, ConnectorConfig
-from etl_craft.sql_actions import ICEBERG_CREATE_PREFIX, iceberg_clause
+from etl_craft.sql_actions import ICEBERG_CREATE_PREFIX, table_format_clause
 from etl_craft.warehouse import data_db, translate_jdbc_url
 
 # [ADDITION] CLAUDE.md names these table groups ("Scope: cfg | aud | all —
@@ -165,7 +165,9 @@ def run_cloning_if_enabled(engine: Engine, config: ConnectorConfig) -> None:
     # in orchestrator.py), so waiting costs nothing a failure would not.
     with data_db(config, engine) as data_engine:
         for table_name in tables_for_scope(config.cloning.scope):
-            _clone_table(engine, data_engine, table_name, config.cloning)
+            _clone_table(
+                engine, data_engine, table_name, config.cloning, config.warehouse_table_format
+            )
 
 
 def _generic_type(source_type: TypeEngine) -> TypeEngine:
@@ -194,7 +196,9 @@ def _reflect(engine: Engine, table_name: str) -> Table:
     return Table(table_name.lower(), MetaData(), autoload_with=engine)
 
 
-def _ensure_target_table(data_engine: Engine, source_table: Table, cloning: CloningConfig) -> Table:
+def _ensure_target_table(
+    data_engine: Engine, source_table: Table, cloning: CloningConfig, table_format: str
+) -> Table:
     target_name = source_table.name
     if inspect(data_engine).has_table(target_name):
         return Table(target_name, MetaData(), autoload_with=data_engine)
@@ -209,8 +213,9 @@ def _ensure_target_table(data_engine: Engine, source_table: Table, cloning: Clon
     # to prevent. One invariant had two implementations, and only one of them
     # was careful.
     dialect_name = data_engine.dialect.name
-    if dialect_name in ICEBERG_CREATE_PREFIX or iceberg_clause(dialect_name):
-        _create_iceberg_mirror(data_engine, target_name, columns, dialect_name, cloning)
+    needs_iceberg = table_format == "iceberg" and dialect_name in ICEBERG_CREATE_PREFIX
+    if needs_iceberg or table_format_clause(dialect_name, table_format):
+        _create_mirror(data_engine, target_name, columns, dialect_name, cloning, table_format)
     else:
         target_metadata = MetaData()
         Table(target_name, target_metadata, *columns)
@@ -218,17 +223,18 @@ def _ensure_target_table(data_engine: Engine, source_table: Table, cloning: Clon
     return Table(target_name, MetaData(), autoload_with=data_engine)
 
 
-def _create_iceberg_mirror(
+def _create_mirror(
     data_engine: Engine,
     target_name: str,
     columns: list[Column],
     dialect_name: str,
     cloning: CloningConfig,
+    table_format: str,
 ) -> None:
-    """Create one mirrored table as an Iceberg table, the way sql_actions does."""
+    """Create one mirrored table in the warehouse's configured format, as sql_actions does."""
     type_compiler = data_engine.dialect.type_compiler_instance
     column_ddl = ", ".join(f"{c.name} {type_compiler.process(c.type)}" for c in columns)
-    prefix_kind = ICEBERG_CREATE_PREFIX.get(dialect_name)
+    prefix_kind = ICEBERG_CREATE_PREFIX.get(dialect_name) if table_format == "iceberg" else None
     if prefix_kind:
         if not cloning.external_volume or not cloning.base_location:
             raise ValueError(
@@ -243,7 +249,8 @@ def _create_iceberg_mirror(
             f"BASE_LOCATION = '{cloning.base_location}/{target_name}'"
         )
     else:
-        statement = f"CREATE TABLE {target_name} ({column_ddl}) {iceberg_clause(dialect_name)}"
+        clause = table_format_clause(dialect_name, table_format)
+        statement = f"CREATE TABLE {target_name} ({column_ddl}) {clause}".rstrip()
     with data_engine.begin() as conn:
         conn.execute(text(statement))
 
@@ -260,7 +267,11 @@ def _serialize_row(row: dict) -> dict:
 
 
 def _clone_table(
-    engine: Engine, data_engine: Engine, table_name: str, cloning: CloningConfig
+    engine: Engine,
+    data_engine: Engine,
+    table_name: str,
+    cloning: CloningConfig,
+    table_format: str,
 ) -> None:
     """Mirror one Engine DB table into the Data DB, streaming rather than materializing.
 
@@ -273,7 +284,7 @@ def _clone_table(
     size.
     """
     source_table = _reflect(engine, table_name)
-    target_table = _ensure_target_table(data_engine, source_table, cloning)
+    target_table = _ensure_target_table(data_engine, source_table, cloning, table_format)
     qualified_name = (
         f"{target_table.schema}.{target_table.name}" if target_table.schema else target_table.name
     )

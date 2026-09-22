@@ -4487,6 +4487,38 @@ def test_every_sql_action_runs_on_real_trino_iceberg(
     assert not [t for t in tables if t.startswith("etl_stage_")]
 
 
+def test_table_format_native_still_runs_end_to_end(
+    postgres_engine, trino_engine, committed_pipeline
+):
+    # "support non iceberg as well" -- on Trino the catalog decides the format
+    # either way, so what this actually proves is that asking for `native`
+    # does not break the action path: no clause is emitted, nothing refuses,
+    # and the table is still built and populated. The Databricks and Snowflake
+    # clauses are unit-tested, since neither is reachable from here.
+    config = replace(_trino_config(), warehouse_table_format="native")
+    seed_active_run(postgres_engine, committed_pipeline)
+    with trino_engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS iceberg.etltest.native_tgt"))
+
+    _, outcome = _run_trino_task(
+        postgres_engine,
+        committed_pipeline,
+        "ice_native",
+        {
+            "SQL_ACTION": "CREATE_TABLE",
+            "TARGET_OBJECT": "etltest.native_tgt",
+            "SOURCE_SQL": "SELECT id FROM (VALUES (1),(2)) AS v(id) WHERE 1=1",
+            "TABLE_FORMAT": "native",
+        },
+        config,
+    )
+    assert outcome.status == "SUCCESS", outcome.message
+    with trino_engine.connect() as conn:
+        assert conn.execute(
+            text("SELECT id FROM iceberg.etltest.native_tgt ORDER BY id")
+        ).scalars().all() == [1, 2]
+
+
 def test_sql_actions_assign_row_ids_on_an_iceberg_backed_warehouse(
     postgres_engine, committed_pipeline, data_db_tables, monkeypatch
 ):
