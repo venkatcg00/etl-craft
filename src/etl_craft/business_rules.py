@@ -200,53 +200,72 @@ def _run_one_rule(
             f"business rule {rule.business_rule_name!r} failed to execute: {exc}"
         ) from exc
 
-    with engine.begin() as conn:
-        already_active = _fetch_already_active_keys(conn, rule.business_rule_id, failing_keys)
-        new_keys = [key for key in failing_keys if key not in already_active]
-        now = datetime.now(UTC)
-        if new_keys:
-            conn.execute(
-                text(
-                    "INSERT INTO AUD_BUSINESS_RULES_RESULTS "
-                    "(BUSINESS_RULE_RUN_ID, BUSINESS_RULE_ID, BUSINESS_RULE_KEY, TARGET_TABLE, "
-                    "STATUS, ACTIVE_FLAG, START_DATE) "
-                    "VALUES (:run_id, :business_rule_id, :key, :target_table, :status, "
-                    "'Y', :now)"
-                ),
-                [
+    # [ADDITION, 2026-09-23, E3-05] This block used to have no exception
+    # handling of its own — only the warehouse SELECT step above (the try/
+    # except right above this comment) marked the row FAILED on failure. A
+    # constraint violation, deadlock, or transient connectivity blip while
+    # committing results here propagated straight out of _run_one_rule
+    # uncaught. The task itself still correctly failed (handlers.dispatch's
+    # own ConfigError/SQLAlchemyError catch), but this rule's own
+    # AUD_BUSINESS_RULES_RUN_LOG row — created IN-PROGRESS in the earlier,
+    # already-committed _find_or_create_run_log transaction — was never
+    # updated, and stayed IN-PROGRESS forever. A retry is still safe (the
+    # whole mechanism is idempotent), but the audit trail misrepresented
+    # what happened until then.
+    try:
+        with engine.begin() as conn:
+            already_active = _fetch_already_active_keys(conn, rule.business_rule_id, failing_keys)
+            new_keys = [key for key in failing_keys if key not in already_active]
+            now = datetime.now(UTC)
+            if new_keys:
+                conn.execute(
+                    text(
+                        "INSERT INTO AUD_BUSINESS_RULES_RESULTS "
+                        "(BUSINESS_RULE_RUN_ID, BUSINESS_RULE_ID, BUSINESS_RULE_KEY, "
+                        "TARGET_TABLE, STATUS, ACTIVE_FLAG, START_DATE) "
+                        "VALUES (:run_id, :business_rule_id, :key, :target_table, :status, "
+                        "'Y', :now)"
+                    ),
+                    [
+                        {
+                            "run_id": business_rule_run_id,
+                            "business_rule_id": rule.business_rule_id,
+                            "key": key,
+                            "target_table": rule.target_table,
+                            "status": rule.business_rule_type,
+                            "now": now,
+                        }
+                        for key in new_keys
+                    ],
+                )
+
+            # Same "never trust the driver's own rowcount" discipline as
+            # sql_actions.py: figure out exactly which passing keys are
+            # currently active *before* deactivating them, rather than
+            # reading back how many the UPDATE claims to have touched.
+            to_deactivate = _fetch_already_active_keys(conn, rule.business_rule_id, passing_keys)
+            if to_deactivate:
+                stmt = text(
+                    "UPDATE AUD_BUSINESS_RULES_RESULTS SET ACTIVE_FLAG = 'N', END_DATE = :now "
+                    "WHERE BUSINESS_RULE_ID = :business_rule_id AND ACTIVE_FLAG = 'Y' "
+                    "AND BUSINESS_RULE_KEY IN :keys"
+                ).bindparams(bindparam("keys", expanding=True))
+                conn.execute(
+                    stmt,
                     {
-                        "run_id": business_rule_run_id,
                         "business_rule_id": rule.business_rule_id,
-                        "key": key,
-                        "target_table": rule.target_table,
-                        "status": rule.business_rule_type,
+                        "keys": list(to_deactivate),
                         "now": now,
-                    }
-                    for key in new_keys
-                ],
-            )
+                    },
+                )
 
-        # Same "never trust the driver's own rowcount" discipline as
-        # sql_actions.py: figure out exactly which passing keys are
-        # currently active *before* deactivating them, rather than
-        # reading back how many the UPDATE claims to have touched.
-        to_deactivate = _fetch_already_active_keys(conn, rule.business_rule_id, passing_keys)
-        if to_deactivate:
-            stmt = text(
-                "UPDATE AUD_BUSINESS_RULES_RESULTS SET ACTIVE_FLAG = 'N', END_DATE = :now "
-                "WHERE BUSINESS_RULE_ID = :business_rule_id AND ACTIVE_FLAG = 'Y' "
-                "AND BUSINESS_RULE_KEY IN :keys"
-            ).bindparams(bindparam("keys", expanding=True))
-            conn.execute(
-                stmt,
-                {
-                    "business_rule_id": rule.business_rule_id,
-                    "keys": list(to_deactivate),
-                    "now": now,
-                },
-            )
-
-        _mark_run_log(conn, business_rule_run_id, "SUCCESS")
+            _mark_run_log(conn, business_rule_run_id, "SUCCESS")
+    except Exception as exc:
+        with engine.begin() as conn:
+            _mark_run_log(conn, business_rule_run_id, "FAILED")
+        raise HandlerError(
+            f"business rule {rule.business_rule_name!r} failed to commit its results: {exc}"
+        ) from exc
 
     return len(new_keys), len(to_deactivate)
 

@@ -49,6 +49,8 @@ from sqlalchemy.exc import NoSuchTableError
 
 from etl_craft.cfg import (
     KNOWN_PARAMETERS,
+    DependencyEdgeDetail,
+    TaskWithParameters,
     fetch_all_pipelines,
     fetch_business_rule_targets,
     fetch_dependency_edge_detail,
@@ -638,6 +640,10 @@ def validate_dependency_edges(conn: Connection) -> list[ValidationIssue]:
       already assumes.
     """
     issues: list[ValidationIssue] = []
+    # [ADDITION, 2026-09-23, E3-04] The task list _alert_ordering_issues
+    # judges completeness against — see that function's own comment for why
+    # edges alone (the old source) undercounted it.
+    all_tasks = fetch_tasks_with_parameters(conn)
     for pipeline in fetch_all_pipelines(conn):
         pipeline_id = resolve_pipeline_id(conn, pipeline.pipeline_code)
         edges = fetch_dependency_edge_detail(conn, pipeline_id)
@@ -658,16 +664,34 @@ def validate_dependency_edges(conn: Connection) -> list[ValidationIssue]:
                         ),
                     )
                 )
-        issues.extend(_alert_ordering_issues(pipeline.pipeline_code, edges))
+        pipeline_tasks = [t for t in all_tasks if t.pipeline_code == pipeline.pipeline_code]
+        issues.extend(_alert_ordering_issues(pipeline.pipeline_code, edges, pipeline_tasks))
     return issues
 
 
-def _alert_ordering_issues(pipeline_code: str, edges: list) -> list[ValidationIssue]:
-    """Require each EMAIL_ALERT task to wait on every non-alert leaf in its pipeline."""
-    alerts = {e.task_code for e in edges if e.handler == "EMAIL_ALERT"}
+def _alert_ordering_issues(
+    pipeline_code: str, edges: list[DependencyEdgeDetail], tasks: list[TaskWithParameters]
+) -> list[ValidationIssue]:
+    """Require each EMAIL_ALERT task to wait on every non-alert leaf in its pipeline.
+
+    [DEVIATION, 2026-09-23, E3-04] `tasks` — every active task in the
+    pipeline, edges or not — is now what both `alerts` and `all_tasks` (and
+    so `leaves`) are built from, not the edge endpoints. An ordinary
+    standalone task with no dependency edges of its own (nothing depends on
+    it, it depends on nothing — a single ingestion step feeding nothing
+    downstream is a completely normal shape) never appeared as either
+    e.task_code or e.depends_on_task_code, so it was invisible to `all_tasks`
+    and this check reported the pipeline clean even when its EMAIL_ALERT task
+    had no dependency on it at all. The same edges-only source also meant an
+    EMAIL_ALERT task with *no* edges of its own — arguably the worse
+    misconfiguration, since E2-60's whole rule is that it must depend on
+    every leaf — was invisible to `alerts` too, so it was never even
+    considered by this check in the first place.
+    """
+    alerts = {t.task_code for t in tasks if t.handler == "EMAIL_ALERT"}
     if not alerts:
         return []
-    all_tasks = {e.task_code for e in edges} | {e.depends_on_task_code for e in edges}
+    all_tasks = {t.task_code for t in tasks}
     depended_on = {e.depends_on_task_code for e in edges}
     leaves = {t for t in all_tasks - depended_on if t not in alerts}
     issues: list[ValidationIssue] = []

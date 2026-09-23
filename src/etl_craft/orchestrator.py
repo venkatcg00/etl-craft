@@ -184,11 +184,21 @@ def _finalize_from_task_states(
     pipeline_id: int,
     pipeline_run_id: int,
     all_task_ids: list[int],
+    *,
+    record_consumption: bool = True,
+    consumed_edges: dict[int, int] | None = None,
 ) -> tuple[str, list[int]]:
     """Compute SUCCESS/FAILED from every task's own settled status, finalize, consume trackers.
 
     Returns (final_status, unsettled_task_ids) — the caller decides how
     much detail about `unsettled` to put in its own outcome message.
+
+    [DEVIATION, 2026-09-23, E3-02] `record_consumption=False` lets a caller
+    skip the tracker update entirely — see finalize_active_run's own comment
+    for why. `consumed_edges`, when given, is threaded straight into
+    consume_pipeline_dependency_edges the same way runner.py:323 already
+    does for the task-level tracker — see that call for the full E2-12
+    reasoning this mirrors.
     """
     # Settle anything permanently gated off *before* counting, or it reads as
     # unsettled and drags the whole run to FAILED — see E2-01.
@@ -203,10 +213,11 @@ def _finalize_from_task_states(
     final_status = "FAILED" if unsettled else "SUCCESS"
     with engine.begin() as conn:
         finalize_pipeline_run(conn, pipeline_run_id, final_status)
-    # Per CLAUDE.md: tracker updates only after the gated pipeline
-    # completes — this pipeline's own outgoing cross-pipeline edges (if
-    # any) are advanced now, regardless of whether it succeeded or failed.
-    consume_pipeline_dependency_edges(engine, pipeline_id)
+    if record_consumption:
+        # Per CLAUDE.md: tracker updates only after the gated pipeline
+        # completes — this pipeline's own outgoing cross-pipeline edges (if
+        # any) are advanced now, regardless of whether it succeeded or failed.
+        consume_pipeline_dependency_edges(engine, pipeline_id, consumed_edges)
     # "Runs after each pipeline run, only when enabled" — best-effort: a
     # cloning failure (warehouse unreachable, ...) must never turn an
     # otherwise-settled pipeline run into a reported failure, per Cloning's
@@ -240,6 +251,22 @@ def finalize_active_run(
     Also where Cloning fires under Mode=orchestrator, per _finalize_from_
     task_states — run_pipeline() is refused there, so this is the only
     finalize path Mode=orchestrator ever actually reaches.
+
+    [DEVIATION, 2026-09-23, E3-02] Does *not* record cross-pipeline
+    dependency-tracker consumption. Under Mode=orchestrator this call is
+    necessarily a *separate* CLI invocation from init_pipeline_run (the
+    generated DAG's __init__ and __finalize__ steps run as two different
+    subprocesses, possibly hours apart) — the gate's resolved run ids
+    (PipelineGateResult.consumed) live only in that earlier process's memory
+    and cannot survive to be threaded in here the way runner.py:323 does for
+    a task. init_pipeline_run now records consumption itself, immediately
+    once the gate resolves and the run is minted, which is the only point at
+    which this pipeline's own gate is ever evaluated under this mode.
+    Re-deriving it again here (the pre-fix behaviour) would silently jump
+    the watermark past any newer upstream run that completed while this
+    pipeline's tasks were executing — exactly the bug E2-12 already fixed
+    once for the re-derive-at-a-later-moment case; this is that same bug
+    showing up across a process boundary rather than within one call.
     """
     with engine.connect() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
@@ -262,7 +289,13 @@ def finalize_active_run(
     graph = build_graph(graph_data.tasks, graph_data.same_pipeline_edges)
 
     final_status, _ = _finalize_from_task_states(
-        engine, config, graph, pipeline_id, pipeline_run_id, all_task_ids
+        engine,
+        config,
+        graph,
+        pipeline_id,
+        pipeline_run_id,
+        all_task_ids,
+        record_consumption=False,
     )
     return FinalizeOutcome(
         status=final_status,
@@ -304,6 +337,20 @@ def init_pipeline_run(
         pipeline_run_id = find_or_create_active_run(conn, pipeline_id)
         if skip_reason is not None:
             finalize_pipeline_run(conn, pipeline_run_id, "SKIPPED")
+    # [DEVIATION, 2026-09-23, E3-02] Recorded immediately, right here, rather
+    # than deferred to whatever eventually finalizes this run. Under
+    # Mode=orchestrator that finalize is finalize_active_run(), a wholly
+    # separate CLI invocation with no way to see this gate's own in-memory
+    # result — so deferring meant the tracker was never advanced by this
+    # (structurally the normal, not rare) code path at all, and
+    # finalize_active_run's old re-derive-at-completion-time call re-derived
+    # "whatever qualifies now" instead, which is exactly the watermark-
+    # jumping bug E2-12 already fixed once for the same-invocation case. This
+    # is the one point at which this pipeline's gate is evaluated at all, so
+    # it is also the only correct place to record what it resolved —
+    # gate.consumed is `{}` when unsatisfied, so a SKIPPED run correctly
+    # consumes nothing.
+    consume_pipeline_dependency_edges(engine, pipeline_id, gate.consumed)
     if skip_reason is not None:
         return InitOutcome(
             pipeline_run_id=pipeline_run_id,
@@ -335,6 +382,17 @@ def run_pipeline(
     with engine.connect() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
 
+    # [DEVIATION, 2026-09-23, E3-02] Tracks the one gate this call itself
+    # evaluates, if any, so its own finalize step below can consume exactly
+    # what it resolved rather than re-deriving "whatever qualifies now" —
+    # the same runner.py:323 pattern for the task-level tracker, and the
+    # same E2-12 reasoning: re-deriving at finalize time can silently jump
+    # the watermark past a newer upstream run that completed while this
+    # pipeline's own wave loop was still running. Stays None (old re-derive
+    # behaviour, per CLAUDE.md "as do callers finalizing a run they didn't
+    # gate themselves") for --force, and for a call that finds this run
+    # already active — a gate it didn't itself evaluate.
+    gate_consumed: dict[int, int] | None = None
     if not force:
         # Same "only gate when actually minting a new run" rule as
         # init_pipeline_run — --force bypasses this gate entirely too, per
@@ -344,11 +402,12 @@ def run_pipeline(
         if existing is None:
             gate = check_pipeline_dependencies(engine, pipeline_id, sleep=sleep, now=now)
             skip_reason = gate.reason
+            gate_consumed = gate.consumed
             if skip_reason is not None:
                 with engine.begin() as conn:
                     pipeline_run_id = find_or_create_active_run(conn, pipeline_id)
                     finalize_pipeline_run(conn, pipeline_run_id, "SKIPPED")
-                consume_pipeline_dependency_edges(engine, pipeline_id)
+                consume_pipeline_dependency_edges(engine, pipeline_id, gate_consumed)
                 return PipelineOutcome(
                     status="SKIPPED",
                     message=(
@@ -372,7 +431,7 @@ def run_pipeline(
         # and this is the one finalize path outside that shared function.
         with engine.begin() as conn:
             finalize_pipeline_run(conn, pipeline_run_id, "SUCCESS")
-        consume_pipeline_dependency_edges(engine, pipeline_id)
+        consume_pipeline_dependency_edges(engine, pipeline_id, gate_consumed)
         return PipelineOutcome(status="SUCCESS", message=f"{pipeline_code}: no active tasks")
 
     if force:
@@ -403,7 +462,13 @@ def run_pipeline(
         )
 
     final_status, unsettled = _finalize_from_task_states(
-        engine, config, graph, pipeline_id, pipeline_run_id, all_task_ids
+        engine,
+        config,
+        graph,
+        pipeline_id,
+        pipeline_run_id,
+        all_task_ids,
+        consumed_edges=gate_consumed,
     )
 
     if never_ready:

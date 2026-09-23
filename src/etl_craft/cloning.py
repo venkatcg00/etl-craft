@@ -243,6 +243,18 @@ def _create_mirror(
                 "craft-connector.yml. Refusing rather than mirroring into a non-Iceberg table "
                 "nothing else in the lakehouse could read."
             )
+        # [ADDITION, 2026-09-23, E3-07] Same guard as sql_actions.py's own
+        # _create_iceberg_table_with_explicit_storage, for the same reason:
+        # both values are interpolated directly into DDL, unescaped, and
+        # sql_actions.py was already hardened for exactly this class of site
+        # (E2-84/E2-85). A stray quote here broke the statement instead of
+        # cleanly refusing with a name.
+        for value, name in (
+            (cloning.external_volume, "Cloning.External_volume"),
+            (cloning.base_location, "Cloning.Base_location"),
+        ):
+            if "'" in value:
+                raise ValueError(f"{name} must not contain a quote: {value!r}")
         statement = (
             f"CREATE {prefix_kind} {target_name} ({column_ddl}) "
             f"EXTERNAL_VOLUME = '{cloning.external_volume}' CATALOG = 'SNOWFLAKE' "

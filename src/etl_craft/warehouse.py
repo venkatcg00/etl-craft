@@ -31,11 +31,11 @@ ever importing a specific driver.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qsl, urlencode
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, Engine
@@ -43,6 +43,45 @@ from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from etl_craft.config import ConnectionProfile, ConnectorConfig, resolve_secret
 from etl_craft.db import ConnectionError_
+
+PREFERRED_CONNECTION_FIELDS = {
+    "databricks": ("jdbc_url", "catalog", "schema", "token"),
+    "snowflake": ("user", "account", "database", "schema", "warehouse", "role", "token"),
+}
+
+
+def preferred_connection_url(name: str, fields: Mapping[str, str]) -> str:
+    """Translate separate cloud connection fields into a credential-free JDBC URL."""
+    name = name.lower()
+    if name not in PREFERRED_CONNECTION_FIELDS:
+        raise ConnectionError_("Separate token connection fields require Databricks or Snowflake")
+    for key in PREFERRED_CONNECTION_FIELDS[name]:
+        if key != "token" and not fields.get(key):
+            raise ConnectionError_(f"{name} connection requires {key}")
+    if name == "databricks":
+        for key in ("catalog", "schema"):
+            if not _SAFE_CATALOG.fullmatch(fields[key]):
+                raise ConnectionError_(f"Databricks {key} must be an unquoted SQL identifier")
+        if not fields["jdbc_url"].startswith("jdbc:databricks://"):
+            raise ConnectionError_("Databricks jdbc_url must start with jdbc:databricks://")
+        # The separate fields take precedence over defaults in the copied URL.
+        return (
+            fields["jdbc_url"].rstrip(";")
+            + f";ConnCatalog={fields['catalog']};ConnSchema={fields['schema']}"
+        )
+    account = fields["account"]
+    if not re.fullmatch(r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*", account):
+        raise ConnectionError_("Snowflake account must be an account identifier, not a URL")
+    if account.endswith(".snowflakecomputing.com"):
+        account = account.removesuffix(".snowflakecomputing.com")
+    query = {
+        "db": fields["database"],
+        "schema": fields["schema"],
+        "warehouse": fields["warehouse"],
+        "role": fields["role"],
+    }
+    return f"jdbc:snowflake://{account}.snowflakecomputing.com/?{urlencode(query)}"
+
 
 # DuckDB is embedded, so its URL names a file rather than a server.
 # `jdbc:duckdb:` alone means an in-memory database.
@@ -220,6 +259,9 @@ def _parse_snowflake(jdbc_url: str) -> tuple[str, dict[str, Any]]:
     query = dict(parse_qsl(match["query"] or ""))
     database = query.pop("db", "") or query.pop("database", "")
     schema = query.pop("schema", "")
+    # With a fully qualified host the Snowflake dialect does not derive the
+    # required account argument. Preserve the endpoint and supply it explicitly.
+    query.setdefault("account", match["host"].split(".", 1)[0])
     if not database:
         raise ConnectionError_(
             f"Snowflake JDBC URL {jdbc_url!r} has no db= parameter — it names the database "

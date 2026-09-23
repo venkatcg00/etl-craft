@@ -61,10 +61,11 @@ def _environment_values() -> dict[str, str]:
         "ENGINE_SECRET": "engine-secret",
         "WAREHOUSE_JDBC_URL": (
             "jdbc:databricks://workspace.cloud.databricks.com:443/default;"
-            "httpPath=/sql/1.0/warehouses/warehouse-id;ConnCatalog=analytics"
+            "httpPath=/sql/1.0/warehouses/warehouse-id"
         ),
-        "WAREHOUSE_AUTH_MODE": "token",
-        "WAREHOUSE_SECRET": "databricks-token",
+        "WAREHOUSE_CATALOG": "analytics",
+        "WAREHOUSE_SCHEMA": "default",
+        "WAREHOUSE_TOKEN": "databricks-token",
         "EMAIL_HOST": "mail.internal",
         "EMAIL_PORT": "2525",
         "EMAIL_FROM": "etl-craft@example.com",
@@ -218,31 +219,64 @@ Warehouse:
     assert config.warehouse_table_format == "native"
 
 
-@pytest.mark.parametrize(
-    ("section", "variable", "value"),
-    [
-        ("Engine", "ENGINE_AUTH_MODE", "token"),
-        ("Warehouse", "WAREHOUSE_AUTH_MODE", "sso"),
-    ],
-)
-def test_manifest_rejects_auth_modes_without_an_implemented_connector(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    section: str,
-    variable: str,
-    value: str,
+def test_manifest_rejects_engine_auth_mode_without_an_implemented_connector(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _set_environment(monkeypatch, _environment_values())
-    monkeypatch.setenv(variable, value)
+    monkeypatch.setenv("ENGINE_AUTH_MODE", "token")
     config_path = _write_example(tmp_path, "craft-connector.env-secrets.example.yml")
-    if section == "Engine":
-        # The shipped environment example already has a Warehouse. Its valid
-        # token configuration lets this assertion isolate the Engine policy.
-        expected = "Engine.Variables.auth_mode"
-    else:
-        expected = "Warehouse.Variables.auth_mode"
 
-    with pytest.raises(ConfigError, match=expected):
+    with pytest.raises(ConfigError, match="Engine.Variables.auth_mode"):
+        load_config(config_path)
+
+
+# [DEVIATION, 2026-09-23] The shipped env-secrets example now leads with the
+# Databricks *preferred* connection shape (catalog/schema/token as separate
+# Variables, see docs/craft-connector.env-secrets.example.yml), which has no
+# `auth_mode`/`jdbc_url`-vs-`Name` validation of its own -- Name itself
+# selects which fields to read, so it can't disagree with a URL it builds.
+# The two tests below exercise that validation on the older, still-fully-
+# supported plain jdbc_url/user/auth_mode/secret shape directly, rather than
+# through a shipped example whose lead shape no longer takes that path.
+_LEGACY_WAREHOUSE_MANIFEST = """\
+Orchestration:
+  Mode: local
+Secrets:
+  Source_type: environment
+Engine:
+  Profile: dev
+  Variables:
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE
+    secret: ENGINE_SECRET
+Warehouse:
+  Name: {name}
+  Profile: dev
+  Variables:
+    jdbc_url: WAREHOUSE_JDBC_URL
+    user: WAREHOUSE_USER
+    auth_mode: WAREHOUSE_AUTH_MODE
+    secret: WAREHOUSE_SECRET
+"""
+
+
+def test_manifest_rejects_warehouse_auth_mode_without_an_implemented_connector(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _set_environment(monkeypatch, _environment_values())
+    monkeypatch.setenv(
+        "WAREHOUSE_JDBC_URL",
+        "jdbc:databricks://workspace.cloud.databricks.com:443/default;"
+        "httpPath=/sql/1.0/warehouses/warehouse-id;ConnCatalog=analytics",
+    )
+    monkeypatch.setenv("WAREHOUSE_USER", "token")
+    monkeypatch.setenv("WAREHOUSE_AUTH_MODE", "sso")
+    monkeypatch.setenv("WAREHOUSE_SECRET", "unused")
+    config_path = tmp_path / "craft-connector.yml"
+    config_path.write_text(_LEGACY_WAREHOUSE_MANIFEST.format(name="Databricks"), encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="Warehouse.Variables.auth_mode"):
         load_config(config_path)
 
 
@@ -250,11 +284,17 @@ def test_manifest_rejects_a_warehouse_name_that_disagrees_with_its_jdbc_url(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _set_environment(monkeypatch, _environment_values())
-    config_path = _write_example(tmp_path, "craft-connector.env-secrets.example.yml")
-    config_path.write_text(
-        config_path.read_text(encoding="utf-8").replace("Name: Databricks", "Name: Snowflake"),
-        encoding="utf-8",
+    monkeypatch.setenv(
+        "WAREHOUSE_JDBC_URL",
+        "jdbc:databricks://workspace.cloud.databricks.com:443/default;"
+        "httpPath=/sql/1.0/warehouses/warehouse-id;ConnCatalog=analytics",
     )
+    monkeypatch.setenv("WAREHOUSE_USER", "token")
+    monkeypatch.setenv("WAREHOUSE_AUTH_MODE", "token")
+    monkeypatch.setenv("WAREHOUSE_SECRET", "databricks-token")
+    config_path = tmp_path / "craft-connector.yml"
+    # Name says Snowflake; the jdbc_url is actually Databricks.
+    config_path.write_text(_LEGACY_WAREHOUSE_MANIFEST.format(name="Snowflake"), encoding="utf-8")
 
     with pytest.raises(ConfigError, match="Warehouse.Name is 'Snowflake'"):
         load_config(config_path)

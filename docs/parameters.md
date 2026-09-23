@@ -33,7 +33,7 @@ needs. Your `SELECT` must never project an engine-managed column itself.
 | `SCHEMA_EVOLUTION` | no | `"true"` lets a new column in the source be added to the target. Never repairs missing audit columns. |
 | `HARD_DELETE` | no | `DELETE_ROWS` only. `"true"` issues a real `DELETE`; anything else soft-deletes via `DELETE_FLAG='Y'`. |
 | `TABLE_FORMAT` | no | `iceberg` or `native`. Overrides `Warehouse.Table_format` for this target. |
-| `EXTERNAL_VOLUME` / `BASE_LOCATION` | conditional | Required for a Snowflake task that creates an Iceberg table. They identify the configured external volume and table storage location. |
+| `EXTERNAL_VOLUME` / `BASE_LOCATION` | no | Snowflake Iceberg tables only. Without them, the engine uses `EXTERNAL_VOLUME = 'SNOWFLAKE_MANAGED'` — Snowflake's own internal storage, no customer bucket needed. Declare both together to place a table's data in a specific customer-owned external volume instead. |
 
 ### Actions
 

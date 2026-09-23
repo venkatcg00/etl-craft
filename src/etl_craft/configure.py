@@ -112,21 +112,34 @@ def configure_from_env(env_path: Path | str | None, path: Path | str | None = No
             f"{origin}: ETL_CRAFT_SOURCE_PATH is required when ETL_CRAFT_SOURCE_TYPE=file"
         )
 
-    profile_name = require("ETL_CRAFT_POSTGRES_PROFILE")
-    jdbc_url = require("ETL_CRAFT_POSTGRES_JDBC_URL")
-    user = require("ETL_CRAFT_POSTGRES_USER")
-    auth_mode = require("ETL_CRAFT_POSTGRES_AUTH_MODE")
+    # [DEVIATION, 2026-09-23, E3-01] These bootstrap names, and the ones read
+    # for [Warehouse] below, are deliberately the *same* names this function
+    # then writes into the canonical manifest's own Variables mapping (see
+    # _write_canonical_manifest) -- which are in turn exactly what
+    # docs/craft-connector.variables.env and both shipped worked examples
+    # teach a team to hand-author. Before this, the bootstrap reads were
+    # ETL_CRAFT_POSTGRES_*/ETL_CRAFT_WAREHOUSE_*, a second, undocumented
+    # convention -- so `setup` re-run against a hand-authored manifest that
+    # followed the docs silently discarded its Variables mapping and pointed
+    # the manifest at bootstrap-only names nothing had ever set. One name per
+    # value, used for the bootstrap read, the written pointer, and the
+    # runtime lookup alike, closes that gap by construction rather than by
+    # convention. ETL_CRAFT_ENGINE_PROFILE also now matches the runtime tier
+    # override config.py already reads ($ETL_CRAFT_ENGINE_PROFILE) -- the old
+    # ETL_CRAFT_POSTGRES_PROFILE name didn't, and it kept the pre-rename
+    # "POSTGRES" token after the section itself became `Engine:`.
+    profile_name = require("ETL_CRAFT_ENGINE_PROFILE")
+    jdbc_url = require("ENGINE_JDBC_URL")
+    user = require("ENGINE_USER")
+    auth_mode = require("ENGINE_AUTH_MODE")
     if auth_mode not in VALID_ENGINE_AUTH_MODES:
         raise ConfigError(
-            f"{origin}: ETL_CRAFT_POSTGRES_AUTH_MODE must be one of "
+            f"{origin}: ENGINE_AUTH_MODE must be one of "
             f"{sorted(VALID_ENGINE_AUTH_MODES)}, got {auth_mode!r}"
         )
-    engine_key_file = values.get("ETL_CRAFT_POSTGRES_KEY_FILE", "")
+    engine_key_file = values.get("ENGINE_KEY_FILE", "")
     if auth_mode == "key_file" and not engine_key_file:
-        raise ConfigError(
-            f"{origin}: ETL_CRAFT_POSTGRES_KEY_FILE is required when "
-            "ETL_CRAFT_POSTGRES_AUTH_MODE=key_file"
-        )
+        raise ConfigError(f"{origin}: ENGINE_KEY_FILE is required when ENGINE_AUTH_MODE=key_file")
 
     # [ADDITION, 2026-09-21] The [Warehouse] section, which this command never
     # wrote — so `etl-craft setup`, the one command that is supposed to take a
@@ -137,37 +150,57 @@ def configure_from_env(env_path: Path | str | None, path: Path | str | None = No
     #
     # Optional, so an Engine-DB-only setup (a team running PYTHON and
     # EMAIL_ALERT tasks) is unchanged and no existing .env file breaks.
-    # ETL_CRAFT_WAREHOUSE_JDBC_URL is what turns it on.
-    warehouse_url = values.get("ETL_CRAFT_WAREHOUSE_JDBC_URL")
+    # WAREHOUSE_JDBC_URL is what turns it on. ETL_CRAFT_WAREHOUSE_PROFILE
+    # keeps its own name -- it already matched config.py's runtime override.
+    warehouse_url = values.get("WAREHOUSE_JDBC_URL")
     warehouse_profile = values.get("ETL_CRAFT_WAREHOUSE_PROFILE", profile_name)
-    warehouse_user = values.get("ETL_CRAFT_WAREHOUSE_USER", "")
+    warehouse_user = values.get("WAREHOUSE_USER", "")
     # A canonical manifest may contain variable *names* only. Unlike the
     # former literal-profile format, there is nowhere safe to encode an
     # implicit password value, so a configured warehouse must name its mode.
-    warehouse_auth_mode = values.get("ETL_CRAFT_WAREHOUSE_AUTH_MODE", "")
+    warehouse_auth_mode = values.get("WAREHOUSE_AUTH_MODE", "")
     # The private key's path, for auth_mode=key_file (Snowflake key-pair). The
     # key itself is never written here -- only where to find it.
-    warehouse_key_file = values.get("ETL_CRAFT_WAREHOUSE_KEY_FILE", "")
+    warehouse_key_file = values.get("WAREHOUSE_KEY_FILE", "")
+    warehouse_variables = None
+    if values.get("WAREHOUSE_TOKEN"):
+        from etl_craft.warehouse import PREFERRED_CONNECTION_FIELDS, preferred_connection_url
+
+        name = values.get("WAREHOUSE_NAME", "").lower()
+        if name not in PREFERRED_CONNECTION_FIELDS:
+            raise ConfigError(
+                f"{origin}: WAREHOUSE_NAME must be Databricks or Snowflake with WAREHOUSE_TOKEN"
+            )
+        fields = {
+            key: require(f"WAREHOUSE_{key.upper()}")
+            for key in PREFERRED_CONNECTION_FIELDS[name]
+            if key != "token"
+        }
+        warehouse_url = preferred_connection_url(name, fields)
+        warehouse_auth_mode = "token"
+        warehouse_key_file = ""
+        warehouse_variables = {
+            key: f"WAREHOUSE_{key.upper()}" for key in PREFERRED_CONNECTION_FIELDS[name]
+        }
     if warehouse_url:
         if not warehouse_auth_mode:
             raise ConfigError(
-                f"{origin}: ETL_CRAFT_WAREHOUSE_AUTH_MODE is required when "
-                "ETL_CRAFT_WAREHOUSE_JDBC_URL is set"
+                f"{origin}: WAREHOUSE_AUTH_MODE is required when WAREHOUSE_JDBC_URL is set"
             )
         if warehouse_auth_mode not in VALID_WAREHOUSE_AUTH_MODES:
             raise ConfigError(
-                f"{origin}: ETL_CRAFT_WAREHOUSE_AUTH_MODE must be one of "
+                f"{origin}: WAREHOUSE_AUTH_MODE must be one of "
                 f"{sorted(VALID_WAREHOUSE_AUTH_MODES)}, got {warehouse_auth_mode!r}"
             )
         if warehouse_auth_mode not in AUTH_MODES_WITHOUT_USER and not warehouse_user:
             raise ConfigError(
-                f"{origin}: ETL_CRAFT_WAREHOUSE_USER is required when "
-                f"ETL_CRAFT_WAREHOUSE_AUTH_MODE={warehouse_auth_mode}"
+                f"{origin}: WAREHOUSE_USER is required when "
+                f"WAREHOUSE_AUTH_MODE={warehouse_auth_mode}"
             )
         if warehouse_auth_mode == "key_file" and not warehouse_key_file:
             raise ConfigError(
-                f"{origin}: ETL_CRAFT_WAREHOUSE_KEY_FILE is required when "
-                "ETL_CRAFT_WAREHOUSE_AUTH_MODE=key_file — it is the path to the private key, "
+                f"{origin}: WAREHOUSE_KEY_FILE is required when "
+                "WAREHOUSE_AUTH_MODE=key_file — it is the path to the private key, "
                 "which is never stored in craft-connector.yml itself"
             )
 
@@ -178,6 +211,16 @@ def configure_from_env(env_path: Path | str | None, path: Path | str | None = No
             f"{sorted(VALID_CLONING_SCOPES)}, got {cloning_scope!r}"
         )
     cloning_enabled = values.get("ETL_CRAFT_CLONING_ENABLED", "false").strip().lower() == "true"
+    # [ADDITION, 2026-09-23, E3-06] Snowflake-Iceberg cloning targets
+    # (cloning.py's own create-table path) need EXTERNAL_VOLUME/BASE_LOCATION
+    # — config.py has read them from Cloning.External_volume/Base_location
+    # since E2-68, but nothing ever wrote them, and every write path here
+    # replaced the whole Cloning block unconditionally, so even a team that
+    # hand-added them to the manifest had them silently discarded on the next
+    # `setup` run. Optional and empty by default: most clonings target
+    # Postgres/Databricks, which never read these two fields at all.
+    cloning_external_volume = values.get("ETL_CRAFT_CLONING_EXTERNAL_VOLUME", "")
+    cloning_base_location = values.get("ETL_CRAFT_CLONING_BASE_LOCATION", "")
 
     raw = _read_raw_yaml(path) if path.is_file() else {}
     settings = _BootstrapSettings(
@@ -191,8 +234,11 @@ def configure_from_env(env_path: Path | str | None, path: Path | str | None = No
         warehouse_profile=warehouse_profile,
         warehouse_auth_mode=warehouse_auth_mode,
         warehouse_key_file=warehouse_key_file,
+        warehouse_variables=warehouse_variables,
         cloning_enabled=cloning_enabled,
         cloning_scope=cloning_scope,
+        cloning_external_volume=cloning_external_volume,
+        cloning_base_location=cloning_base_location,
         orchestrator_name=values.get("ETL_CRAFT_ORCHESTRATOR_NAME"),
         warehouse_table_format=values.get("ETL_CRAFT_WAREHOUSE_TABLE_FORMAT", "iceberg"),
     )
@@ -225,8 +271,11 @@ class _BootstrapSettings:
     warehouse_key_file: str
     cloning_enabled: bool
     cloning_scope: str
+    cloning_external_volume: str
+    cloning_base_location: str
     orchestrator_name: str | None
     warehouse_table_format: str
+    warehouse_variables: dict[str, str] | None = None
 
 
 def _is_legacy_manifest(raw: dict) -> bool:
@@ -278,12 +327,14 @@ def _write_legacy_manifest(
             warehouse_profile["user"] = warehouse_user
         if settings.warehouse_key_file:
             warehouse_profile["key_file"] = settings.warehouse_key_file
+        if settings.warehouse_variables:
+            warehouse_profile["secret_var"] = settings.warehouse_variables["token"]
         warehouse["Active_profile"] = settings.warehouse_profile
         warehouse["Profiles"][settings.warehouse_profile] = warehouse_profile
         warehouse["Table_format"] = settings.warehouse_table_format
         raw["Warehouse"] = warehouse
 
-    raw["Cloning"] = {"Enabled": settings.cloning_enabled, "Scope": settings.cloning_scope}
+    raw["Cloning"] = _build_cloning_block(raw.get("Cloning"), settings)
 
 
 def _write_canonical_manifest(raw: dict, settings: _BootstrapSettings) -> None:
@@ -301,28 +352,42 @@ def _write_canonical_manifest(raw: dict, settings: _BootstrapSettings) -> None:
         secrets["Source_path"] = settings.source_path
     raw["Secrets"] = secrets
 
+    # [DEVIATION, 2026-09-23, E3-01] These are the exact names
+    # docs/craft-connector.variables.env and both shipped worked examples
+    # teach -- flat, tier-invariant names, not ETL_CRAFT_POSTGRES_*/
+    # ETL_CRAFT_WAREHOUSE_*. config.py's own _VariableResolver.selected_name
+    # already tries a tier-scoped variant first (ENGINE_DEV_SECRET before
+    # falling back to ENGINE_SECRET), so a flat "secret" name here is not a
+    # loss of precision -- multi-tier deployments still get a distinct
+    # variable per tier, automatically, without the base name having to carry
+    # it. Baking the profile into the base name here (as before) actively
+    # broke that fallback for any profile other than the one setup last ran
+    # with. See the note above these values' bootstrap reads for why the
+    # bootstrap name and the written name are now the same string.
     engine_variables = {
-        "jdbc_url": "ETL_CRAFT_POSTGRES_JDBC_URL",
-        "user": "ETL_CRAFT_POSTGRES_USER",
-        "auth_mode": "ETL_CRAFT_POSTGRES_AUTH_MODE",
-        "secret": f"ETL_CRAFT_POSTGRES_{settings.engine_profile.upper()}_SECRET",
+        "jdbc_url": "ENGINE_JDBC_URL",
+        "user": "ENGINE_USER",
+        "auth_mode": "ENGINE_AUTH_MODE",
+        "secret": "ENGINE_SECRET",
     }
     if settings.engine_key_file:
-        engine_variables["key_file"] = "ETL_CRAFT_POSTGRES_KEY_FILE"
+        engine_variables["key_file"] = "ENGINE_KEY_FILE"
     raw["Engine"] = {"Profile": settings.engine_profile, "Variables": engine_variables}
 
     if settings.warehouse_url:
         warehouse_variables = {
-            "jdbc_url": "ETL_CRAFT_WAREHOUSE_JDBC_URL",
-            "auth_mode": "ETL_CRAFT_WAREHOUSE_AUTH_MODE",
-            "secret": f"ETL_CRAFT_WAREHOUSE_{settings.warehouse_profile.upper()}_SECRET",
+            "jdbc_url": "WAREHOUSE_JDBC_URL",
+            "auth_mode": "WAREHOUSE_AUTH_MODE",
+            "secret": "WAREHOUSE_SECRET",
         }
         # A token carries Databricks' username convention, and a `none`
         # profile needs no username. Every other supported warehouse needs it.
         if settings.warehouse_auth_mode not in AUTH_MODES_WITHOUT_USER:
-            warehouse_variables["user"] = "ETL_CRAFT_WAREHOUSE_USER"
+            warehouse_variables["user"] = "WAREHOUSE_USER"
         if settings.warehouse_key_file:
-            warehouse_variables["key_file"] = "ETL_CRAFT_WAREHOUSE_KEY_FILE"
+            warehouse_variables["key_file"] = "WAREHOUSE_KEY_FILE"
+        if settings.warehouse_variables:
+            warehouse_variables = settings.warehouse_variables
         warehouse: dict[str, object] = {
             "Table_format": settings.warehouse_table_format,
             "Profile": settings.warehouse_profile,
@@ -333,7 +398,32 @@ def _write_canonical_manifest(raw: dict, settings: _BootstrapSettings) -> None:
             warehouse["Name"] = name
         raw["Warehouse"] = warehouse
 
-    raw["Cloning"] = {"Enabled": settings.cloning_enabled, "Scope": settings.cloning_scope}
+    raw["Cloning"] = _build_cloning_block(raw.get("Cloning"), settings)
+
+
+def _build_cloning_block(existing: object, settings: _BootstrapSettings) -> dict[str, object]:
+    """Build the Cloning block, keeping External_volume/Base_location a bootstrap run doesn't set.
+
+    [ADDITION, 2026-09-23, E3-06] Both write paths used to replace the whole
+    Cloning block with a fresh two-key {Enabled, Scope} dict on every run,
+    silently dropping External_volume/Base_location -- the fields
+    cloning.py's own Snowflake-Iceberg path needs (E2-68) -- even when a team
+    had hand-added them, since there was no bootstrap variable to set them
+    through in the first place either. An explicit bootstrap value always
+    wins; otherwise whatever was already on disk survives the rewrite.
+    """
+    block: dict[str, object] = {
+        "Enabled": settings.cloning_enabled,
+        "Scope": settings.cloning_scope,
+    }
+    previous = existing if isinstance(existing, dict) else {}
+    external_volume = settings.cloning_external_volume or previous.get("External_volume")
+    base_location = settings.cloning_base_location or previous.get("Base_location")
+    if external_volume:
+        block["External_volume"] = external_volume
+    if base_location:
+        block["Base_location"] = base_location
+    return block
 
 
 def _warehouse_name(jdbc_url: str) -> str | None:
@@ -366,7 +456,11 @@ def _required_secret_vars(raw: dict) -> list[tuple[str, str]]:
                 continue
             profile = block.get("Profile")
             variables = block.get("Variables")
-            secret_var = variables.get("secret") if isinstance(variables, dict) else None
+            secret_var = (
+                (variables.get("token") or variables.get("secret"))
+                if isinstance(variables, dict)
+                else None
+            )
             if isinstance(profile, str) and isinstance(secret_var, str) and secret_var:
                 required.append((f"{section}.{profile}", secret_var))
         return required

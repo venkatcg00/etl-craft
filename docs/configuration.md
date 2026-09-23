@@ -66,10 +66,15 @@ referenced variable and use `Source_type: environment`.
 environment with `--from-environment`. It writes the canonical manifest, then creates or upgrades
 the Engine DB when it can connect.
 
-The bootstrap input contains `ETL_CRAFT_*` names such as
-`ETL_CRAFT_POSTGRES_JDBC_URL`, `ETL_CRAFT_WAREHOUSE_JDBC_URL`,
-`ETL_CRAFT_WAREHOUSE_TABLE_FORMAT`, and their secret variables. For a file-backed local setup,
-set both:
+The bootstrap input is a mix of a few `ETL_CRAFT_*` settings (`ETL_CRAFT_MODE`,
+`ETL_CRAFT_SOURCE_TYPE`, `ETL_CRAFT_ENGINE_PROFILE`, `ETL_CRAFT_WAREHOUSE_PROFILE`,
+`ETL_CRAFT_WAREHOUSE_TABLE_FORMAT`, ...) plus the *same* variable names the canonical manifest's
+own `Variables` blocks use — `ENGINE_JDBC_URL`, `ENGINE_USER`, `ENGINE_AUTH_MODE`, `ENGINE_SECRET`,
+`WAREHOUSE_JDBC_URL`, and so on. `setup` reads a connection value under the same name it then
+writes into the manifest as a pointer, so the variable that bootstraps a deployment is the same one
+`etl-craft run` resolves afterwards — nothing to keep in sync by hand. See
+[craft-connector.variables.env](craft-connector.variables.env) for the full list. For a file-backed
+local setup, set both:
 
 ```dotenv
 ETL_CRAFT_SOURCE_TYPE=file
@@ -119,8 +124,8 @@ The Engine DB is always PostgreSQL. A warehouse is optional until a deployment r
 | PostgreSQL warehouse | reference launch path | `password` | native PostgreSQL tables |
 | DuckDB | local development | `none` | file-backed and single-writer; tasks queue for warehouse access |
 | Trino over Iceberg | integration-tested against the included local stack | `none` or `password` | use an Iceberg catalog when a task requests Iceberg |
-| Databricks | cloud acceptance test is credential-gated | static `token` | `native` creates Delta; validate in the target workspace |
-| Snowflake | cloud acceptance test is credential-gated | `key_file` or `password` | `native` uses ordinary Snowflake tables; Iceberg needs storage parameters |
+| Databricks | **verified live 2026-09-23**: `native` (managed Delta) and `iceberg` (managed Delta with UniForm) both pass `CREATE_TABLE`/`OVERWRITE_TABLE`/`SCD1_MERGE` | static `token`, preferred connection (below) | `native` creates Delta; `iceberg` creates Delta with UniForm enabled — Databricks itself always reads/writes Delta, and UniForm additionally generates Iceberg metadata for external engines |
+| Snowflake | **verified live 2026-09-23**: `native` and `iceberg` (Snowflake-managed) both pass `CREATE_TABLE`/`OVERWRITE_TABLE`/`SCD1_MERGE` via the preferred connection | static `token`, preferred connection (below), `key_file`, or `password` | `native` uses ordinary Snowflake tables; `iceberg` defaults to Snowflake's own internal storage — no cloud bucket to provision |
 
 From this source checkout, install the dialect for the warehouse being used:
 
@@ -131,9 +136,15 @@ uv sync --extra databricks  # or: --extra snowflake, --extra trino
 `Warehouse.Table_format` accepts `iceberg` (the default) or `native`; a task can override it with
 `CFG_TASK_PARAMETERS.TABLE_FORMAT`. PostgreSQL and DuckDB use their native storage either way.
 Trino's catalog determines the actual table format, so `validate` checks an Iceberg request against
-the selected catalog. For Snowflake Iceberg tasks, add both `EXTERNAL_VOLUME` and `BASE_LOCATION`
-task parameters. Do not describe an arbitrary SQLAlchemy dialect as supported: the SQL actions are
-tested only against the targets in this table.
+the selected catalog. Do not describe an arbitrary SQLAlchemy dialect as supported: the SQL actions
+are tested only against the targets in this table.
+
+**Snowflake Iceberg tables are zero-config by default.** With no `EXTERNAL_VOLUME`/`BASE_LOCATION`
+task parameters declared, the engine creates them with `EXTERNAL_VOLUME = 'SNOWFLAKE_MANAGED'` —
+Snowflake's own internal storage, not a customer-owned bucket, verified live to support the full
+`CREATE_TABLE`/`OVERWRITE_TABLE`/`SCD1_MERGE`/`SCD2_MERGE` vocabulary. A task can still name its own
+`EXTERNAL_VOLUME` (paired with `BASE_LOCATION`) to place a table's data in a specific customer-owned
+volume instead — useful when another engine needs to read the same physical files.
 
 Authentication is deliberately narrow:
 
@@ -144,6 +155,28 @@ Authentication is deliberately narrow:
 `sso` is rejected. A warehouse token is a stored bearer token; the engine does not mint or refresh
 OAuth or cloud-session credentials. For Snowflake, `key_file` refers to a mounted private-key path
 and the secret variable supplies its passphrase. Keep the key outside the manifest.
+
+### Preferred connection: Databricks and Snowflake (`auth_mode: token`)
+
+For Databricks and Snowflake specifically, `Warehouse.Variables` can name separate connection
+fields instead of one JDBC URL carrying everything — **the tested and recommended shape for both**
+(see `warehouse.PREFERRED_CONNECTION_FIELDS`, and `docs/craft-connector.env-secrets.example.yml`/
+`docs/craft-connector.file-secrets.example.yml` for full worked examples):
+
+- **Databricks**: `jdbc_url` (host, port and `httpPath` only — no `ConnCatalog`/`ConnSchema`),
+  `catalog`, `schema`, `token`. No `user`: the username is the literal `"token"`, supplied by the
+  engine.
+- **Snowflake**: `user`, `account` (the `<org>-<account>` identifier, not a hostname), `database`,
+  `schema`, `warehouse`, `role`, `token` — a Programmatic Access Token (PAT), presented like a
+  password. A PAT requires a network policy assigned to the account or the user
+  (Snowsight → Admin → Security → Network Policies) before any connection using it will succeed;
+  without one every attempt fails with `Network policy is required`, regardless of credentials.
+
+Both resolve to `auth_mode: token` automatically — there is no separate `auth_mode` variable to set
+for either shape, and specifying one alongside `token` is rejected as a conflicting configuration.
+The engine assembles a full connection from the named fields at connect time
+(`warehouse.preferred_connection_url`); nothing here is a JDBC URL a human has to hand-build with
+an embedded query string.
 
 ## Schema lifecycle
 

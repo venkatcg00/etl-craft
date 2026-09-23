@@ -670,6 +670,34 @@ def _parse_manifest_connection_section(
             return ""
         return resolver.manifest_value(variable_name, profile_name, key, f"{where}.{key}")
 
+    if section_name == "WAREHOUSE" and "token" in variables:
+        from etl_craft.warehouse import PREFERRED_CONNECTION_FIELDS, preferred_connection_url
+
+        name = str(raw.get("Name", "")).lower()
+        if name not in PREFERRED_CONNECTION_FIELDS:
+            raise ConfigError(
+                f"{path}: token fields require Warehouse.Name Databricks or Snowflake"
+            )
+        if "secret" in variables or ("auth_mode" in variables and resolve("auth_mode") != "token"):
+            raise ConfigError(f"{path}: token connection must not specify another secret/auth mode")
+        fields = {
+            key: resolve(key, required=True)
+            for key in PREFERRED_CONNECTION_FIELDS[name]
+            if key != "token"
+        }
+        token_name = _manifest_variable_name(variables, "token", where, required=True)
+        assert token_name is not None
+        token_name = resolver.selected_name(token_name, profile_name, "token")
+        profile = ConnectionProfile(
+            section=section_name,
+            name=profile_name,
+            jdbc_url=preferred_connection_url(name, fields),
+            user=fields.get("user", ""),
+            auth_mode="token",
+            extra={"secret_var": token_name},
+        )
+        return ConnectionSection(active_profile=profile_name, profiles={profile_name: profile})
+
     jdbc_url = resolve("jdbc_url", required=True)
     auth_mode = resolve("auth_mode", required=True)
     valid_auth_modes = _auth_modes_for_section(section_name)

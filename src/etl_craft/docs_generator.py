@@ -92,7 +92,10 @@ PipelineDoc = tuple[PipelineSummary, PipelineDocData]
 
 
 def _collect_pipeline_doc_data(
-    conn: Connection, pipeline_code: str, lineage: list[TaskLineage]
+    conn: Connection,
+    pipeline_code: str,
+    lineage: list[TaskLineage],
+    recorded_versions: dict[tuple[str, str], int],
 ) -> PipelineDocData:
     """Gather one pipeline's waves/steps/dependencies -- the same reads `graph`/`steps` use."""
     pipeline_id = resolve_pipeline_id(conn, pipeline_code)
@@ -104,8 +107,8 @@ def _collect_pipeline_doc_data(
     # always shows what is configured right now. The *version* comes from
     # AUD_TASK_DOCUMENTATION and is simply absent until `docs-version` has
     # recorded one — which keeps this build read-only without ever showing
-    # stale text.
-    recorded_versions = fetch_recorded_versions(conn)
+    # stale text. recorded_versions itself is fetched once for the whole
+    # site by collect_docs, below -- it's a global read, same as lineage.
     steps = fetch_pipeline_steps(conn, pipeline_id)
     return PipelineDocData(
         waves=waves,
@@ -113,7 +116,10 @@ def _collect_pipeline_doc_data(
         pipeline_dependencies=fetch_pipeline_dependencies(conn, pipeline_id),
         cross_task_dependencies=fetch_cross_pipeline_task_edges(conn, pipeline_id),
         documentation={
-            step.task_code: (prose, recorded_versions.get(step.task_code, 0))
+            step.task_code: (
+                prose,
+                recorded_versions.get((pipeline_code, step.task_code), 0),
+            )
             for step in steps
             if (prose := step.parameters.get("DOCUMENTATION"))
         },
@@ -140,8 +146,12 @@ def collect_docs(conn: Connection) -> list[PipelineDoc]:
     # outright. `docs-version` and `lineage --column` are the verbs that
     # write; a documentation build reads.
     lineage = lineage_for_tasks(conn, cache=False)
+    recorded_versions = fetch_recorded_versions(conn)
     return [
-        (summary, _collect_pipeline_doc_data(conn, summary.pipeline_code, lineage))
+        (
+            summary,
+            _collect_pipeline_doc_data(conn, summary.pipeline_code, lineage, recorded_versions),
+        )
         for summary in fetch_all_pipelines(conn)
     ]
 

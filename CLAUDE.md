@@ -8,6 +8,52 @@ The whole pipeline/task/step/dependency structure is modeled as **rows in Postgr
 
 ## Where things stand / where to start
 
+**Preferred cloud connection shape adopted, Databricks UniForm decision, and Snowflake retested — done (2026-09-23).** Continues the entry immediately below on the same day, per explicit instruction to move Databricks and Snowflake onto a specific connection shape and test both against real cloud endpoints, including Iceberg.
+- **Preferred connection: separate fields instead of one packed JDBC URL, tested and made the recommended shape for both.** Per explicit instruction: Databricks connects via `jdbc_url` (host/port/httpPath only) + `catalog` + `schema` + `token`; Snowflake connects via `user` + `account` + `database` + `schema` + `warehouse` + `role` + `token`. `warehouse.PREFERRED_CONNECTION_FIELDS`/`preferred_connection_url` and `config.py`'s `token`-in-`Variables` branch already existed from the prior session's work; this round is what actually proved them against both real endpoints and updated every doc that still taught the older packed-URL shape as primary (`docs/craft-connector.env-secrets.example.yml`, `docs/craft-connector.file-secrets.example.yml`, `docs/craft-connector.variables.env`, `docs/warehouse-test.env.example`, `docs/configuration.md`, `tests/conftest.py`'s own fixture docstring). The older single-JDBC-URL shape (key_file/password for Snowflake) stays documented as a supported alternative for a team standardising on RSA key-pair auth instead of PATs — nothing is removed, only reordered.
+- **Databricks: both `native` and `iceberg` verified live, end-to-end through `CREATE_TABLE`/`OVERWRITE_TABLE`/`SCD1_MERGE` (insert + matched-row update), via the preferred connection shape and via a genuine `etl-craft setup` bootstrap round-trip (`WAREHOUSE_NAME=Databricks` + the four fields above → a real manifest → a real connection → `SELECT 1`).**
+- **[DEVIATION] Databricks' `iceberg` format changed from a literal `USING ICEBERG` clause to a managed Delta table with UniForm enabled, per explicit instruction ("it should be uniform tables in databricks").** Probed both live before deciding: `CREATE TABLE ... USING ICEBERG` produces `DESCRIBE DETAIL` → `format: 'iceberg'`, a genuinely Iceberg-native Unity-Catalog-managed table with no Delta log at all; `CREATE TABLE ... USING DELTA TBLPROPERTIES ('delta.enableIcebergCompatV2' = 'true', 'delta.universalFormat.enabledFormats' = 'iceberg')` produces `format: 'delta'` plus the UniForm properties — a normal Delta table that also emits Iceberg metadata for external readers. `sql_actions.ICEBERG_TABLE_CLAUSE["databricks"]` now emits the UniForm clause; `CFG_TASK_PARAMETERS.TABLE_FORMAT` vocabulary is unchanged (`native`/`iceberg`), only what "iceberg" physically means on this one dialect changed. Low-risk by construction: Databricks always reads/writes the Delta representation regardless, so every existing `UPDATE`/`MERGE` statement this module issues for Databricks needed no change and was re-verified live against the new clause (both the native and iceberg/UniForm smoke tests re-run and passed after the switch).
+- **Snowflake: connection, native tables, and Iceberg tables all verified live via the preferred (PAT) shape — the full SQL action vocabulary passes both table formats.** Sequence, in order:
+  1. First attempt failed with `390432 (08001): Network policy is required` — a PAT cannot authenticate at all without a network policy assigned to the account or the user (Snowsight → Admin → Security → Network Policies), independent of credential correctness. This resolved partway through this session (the account gained a network policy); retried and the connection succeeded.
+  2. `CREATE_TABLE`/`OVERWRITE_TABLE`/`SCD1_MERGE` (insert + matched-row update) passed against real Snowflake using `Table_format: native`, through both the test-suite fixture and a genuine `etl-craft setup` bootstrap round-trip (`WAREHOUSE_NAME=Snowflake` + the seven fields above → a real manifest → a real connection → a live session query). The live session's `CURRENT_ROLE()` initially reported `ACCOUNTADMIN` while the test `.env`'s `ROLE` field said `SYSADMIN` — a stale value in that file, not an engine or PAT limitation; corrected to `ACCOUNTADMIN`.
+  3. **Iceberg tables were blocked, then unblocked by a genuinely different mechanism than the one first tried — `EXTERNAL_VOLUME = 'SNOWFLAKE_MANAGED'`, per a fix supplied by the user.** The account's own external volume (`ICEBERG`, GCS-backed) sits on a different cloud than the Snowflake account itself (AWS, `AWS_US_WEST_2` — found via `CURRENT_REGION()`/`SYSTEM$ALLOWLIST()`), and every attempt to write actual data through it failed with `100089 (42501): Failed to access remote file: access denied`, even after a correct GCS IAM grant (`SYSTEM$VERIFY_EXTERNAL_VOLUME` reported write/read/list/delete all `PASSED`; only a real data write — CTAS or INSERT — still failed, isolated precisely by testing DDL-only creation, which always succeeded, against CTAS/INSERT, which never did). **`EXTERNAL_VOLUME = 'SNOWFLAKE_MANAGED'` is a reserved value meaning "Snowflake's own internal storage, no customer bucket at all"** — it sidesteps the cross-cloud mismatch entirely, since the data never leaves Snowflake's own (AWS-hosted) storage. Verified live end to end: DDL, `INSERT`, and CTAS all succeed, `SHOW TABLES` reports `is_iceberg: 'Y'` / `is_external: 'N'`.
+  4. **`sql_actions._create_iceberg_table_with_storage` now defaults to `SNOWFLAKE_MANAGED` when a task declares neither `EXTERNAL_VOLUME` nor `BASE_LOCATION`** — a real behavior change, not just a test fixture change: Snowflake Iceberg support is zero-config by default now, with no customer cloud storage to provision first. A task that names a real customer volume still must pair it with `BASE_LOCATION` (unchanged for that case). `ICEBERG_VERSION = 2` is now always specified explicitly too, per the original instruction to target Iceberg format v2 (verified as accepted syntax).
+  5. **Two more Snowflake-Iceberg-specific fixes, both found by running the full vocabulary, not the DDL alone.** `ALTER TABLE ... RENAME TO` — used by both the schema-evolution rebuild and the computed-`ROW_ID` rebuild — is rejected by Snowflake against a table it created as `CREATE ICEBERG TABLE` ("Iceberg tables should use ALTER ICEBERG TABLE commands"); `_alter_table_keyword()` now selects `ALTER ICEBERG TABLE` there, keyed off the same per-connection `TABLE_FORMAT_INFO_KEY` `create_table_as` already reads. And Snowflake's own `TIMESTAMP WITH TIME ZONE` (`TIMESTAMP_TZ(9)` by default) is rejected on an Iceberg table's own column for its scale, and `TIMESTAMP_TZ` at *any* scale is then rejected outright ("Unsupported data type ... for iceberg tables") — Snowflake's managed Iceberg tables support no timezone-aware timestamp type at all. `_audit_column_type()` now returns `TIMESTAMP_NTZ(6)` for `CREATE_DATE`/`UPDATE_DATE` on Snowflake Iceberg specifically (matching the type Snowflake's own worked Iceberg-table example uses); the engine only ever writes UTC instants, so this loses no information.
+- **584 tests passed, 3 skipped (the cloud tests, without credentials in the plain run), `black`/`ruff`/`pydocstyle`/`mypy` all clean.** Two of the eight `test_config_manifest.py` tests had to be rewritten rather than merely updated: they asserted validation behaviour (an unimplemented `auth_mode`, a `Warehouse.Name`/`jdbc_url` dialect mismatch) that lives on the older packed-URL shape, which the shipped Databricks example no longer demonstrates as its lead shape — moved to a small inline manifest fixture so that validation stays covered independent of which shape the docs choose to lead with. `test_sql_actions_run_against_real_snowflake` split into `..._native`/`..._iceberg`, matching the Databricks pattern, so both formats are exercised on every credentialed run rather than one or the other depending on which env vars happen to be set.
+- **Test-matrix result: all four cells pass.** Databricks managed (`native`, Delta) and managed-UniForm (`iceberg`, Delta+UniForm); Snowflake native tables and Snowflake-managed Iceberg tables (`CATALOG = 'SNOWFLAKE'`, `EXTERNAL_VOLUME = 'SNOWFLAKE_MANAGED'`, format v2) — all fully verified live. Per this file's own practice, the shipped docs (`docs/configuration.md`, `docs/craft-connector.*.example.yml`) describe exactly this, and nothing that didn't pass.
+
+**Live cloud verification continued by Codex (2026-09-23).** Databricks passed
+both native Delta and Iceberg smoke tests against `practice_catalog`: CREATE_TABLE,
+OVERWRITE_TABLE, SCD1 initial insert, and SCD1 matched-row update. The two tests
+passed in 215.79 seconds, including verification of business values and stable
+`ROW_ID` after update. This does not claim full SQL-action acceptance coverage.
+Live failures exposed additional compatibility fixes: audit timestamp casts use
+Databricks `TIMESTAMP`, hash inputs use `STRING`, qualified stage names are split
+into catalog/schema/table for information-schema lookup, and SCD1 scalar update
+subqueries use `FIRST` after source-key deduplication to satisfy Spark's scalar
+cardinality rule. Cloud fixtures now reference each backend's own secret variable
+instead of accidentally retaining the Postgres fixture's password. Smoke tests
+use per-pipeline table names, verify resulting business values and `ROW_ID`, clean
+up their targets, and allow 300 seconds for cloud execution.
+
+Snowflake's fully qualified JDBC hostname now supplies the account argument that
+the installed SQLAlchemy dialect otherwise omits. **Snowflake native smoke test
+now passes (106.98 seconds)** after the user replaced browser SSO with password
+authentication: SELECT 1, CREATE_TABLE, OVERWRITE_TABLE, SCD1 insert and matched-row
+update, verified values/stable ROW_ID, and target cleanup. Iceberg remains untested
+on Snowflake because no external volume/base location was configured. The earlier
+browser-SSO attempt returned 390190 before opening a browser.
+
+The cloud fixture accepts JDBC query credentials, removes them from the profile's
+URL, and gives an explicit URL password precedence over the old key-file placeholder.
+Literal `#` in JDBC query passwords is preserved. The standalone Snowflake schema
+variable in `.env` still contains example text, so this live run set it in the
+process environment from the URL's `schema` parameter. No private key was used;
+`.env` was not changed. After this fixture change: **265 unit tests passed**, plus
+the live Snowflake test; Black, Ruff, pydocstyle, mypy and diff checks passed.
+Local regression verification: **573 passed, 3 cloud tests skipped**, 94.39%
+coverage; Black, Ruff, pydocstyle, mypy, and `git diff --check` passed. The two
+Databricks tests were run separately with credentials as described above.
+
 **Iteration 1 is feature-complete; the iteration-2 backlog is `ITERATION_2.md` — read it before starting new work (2026-09-20).** Every scope item this file describes is built (24 modules, 368 tests passing, CI green). A full code review of the finished result is written up in `ITERATION_2.md` as a numbered, prioritized backlog (`E2-01`…`E2-40`), with four P0 correctness bugs each **reproduced against real Docker Postgres** during the review — a `FAILURE`-gated task making a successful pipeline report `FAILED`, a duplicate invocation clobbering a still-running task's log row, engine-created tables that can never pass `validate`'s own primary-key check, and SCD merges permanently breaking on duplicate `MERGE_KEY` source rows. It also records the packaging finding that the built wheel ships no `sql/` at all (so there's no way to create the schema, and `etl-craft migrate` silently no-ops), plus a "deliberately not on this list" section so settled decisions don't get re-litigated. Anything in that file marked "from code" needs a confirming test written first; several items name a design question to raise rather than guess at.
 
 **Iteration-2 scope set (2026-09-20).** A planning session walked the backlog against the live code, confirmed every claim it spot-checked, and set scope to **all 40 items** — plus three genuinely new ones that came out of the design decisions made there, recorded in `ITERATION_2.md`'s own "Added during iteration-2 planning" section along with the phase order and the decisions that are now settled: **E2-41** conditional dependency cardinality (`CFG_TASKS.RUN_CONDITION` = `ALL`/`ANY`/`N`, resolved into Airflow trigger rules at DAG-generation time), **E2-42** every SQL action except `DROP_TABLE`/`DELETE_ROWS` creating its target if absent, and **E2-43** a redesigned pipeline-level, three-flavour (`SUCCESS`/`COMPLETED_WITH_ERRORS`/`FAILED`) `EMAIL_ALERT` that supersedes the task-level design described under "Handlers" below. That section is the current map of what iteration 2 is doing and why; this file's own sections are updated as each phase lands.
@@ -213,6 +259,22 @@ The whole pipeline/task/step/dependency structure is modeled as **rows in Postgr
 - **Dated history entries above and in `ITERATION_2.md` are deliberately left as written**, per this file's own practice of recording what happened rather than editing it away — so they still name `build_data_engine`/`data_db`. This note is the map from those names to the current ones. The living-spec sections below (Non-goals, Architecture, Business rules, craft-connector.yml, Open questions) are updated.
 - No behaviour changed; 538 tests, `make check` clean.
 
+**Round 7, the business-rule-key correction, and the config-manifest pivot (2026-09-22/23) — done, but not previously recorded here; this entry closes that gap.** Three pieces of real work landed after the "Vocabulary" entry above and before this file was next touched, and none of them got a "Where things stand" entry at the time — the exact lapse `ITERATION_3.md`'s review (D-1/D-2, below) caught. Recorded now rather than edited into the entries above, per this file's own practice of leaving dated history as written:
+- **Round 7 — `E2-74`…`E2-89`, all sixteen fixed.** `ITERATION_2.md`'s own "Round 7" section has the per-finding detail; the headline is `SCD2_MERGE` not converging on retry (E2-74, real data loss on Iceberg — its new-row leg wasn't scoped to active rows) and the E2-04 dedupe guard being unreachable on Iceberg (E2-75, the last `CREATE TEMPORARY TABLE` site). 546 tests.
+- **`BUSINESS_RULE_KEY_COLUMN` forced onto `ROW_ID` was itself wrong (2026-09-22).** E2-54 (below) had made every engine-created table's primary key a regenerated `ROW_ID`, and a later validate check required `BUSINESS_RULE_KEY_COLUMN` to equal it — but `ROW_ID` is regenerated by every full-replace action, so a flag recorded against it silently re-attributes to a different row after the next run. `validate` no longer requires the two to match (only that the named column exists on the target); a new check flags a rule keyed on `ROW_ID` specifically for a `CREATE_TABLE`/`OVERWRITE_TABLE` target, where it's wrong, and stays quiet for `SCD1_MERGE`, where rows persist and it's legitimate.
+- **The config-manifest pivot (commits `578ab74`..`8e0f96f`).** `craft-connector.yml`'s format was rewritten — see the "craft-connector.yml" section below for the current shape in full, since this is the change that section now documents. In outline: `[Execution]`/`[Source]`/`[Postgres]`/`[Warehouse]`/`[Orchestrator]` became `Orchestration:`/`Secrets:`/`Engine:`/`Warehouse:`/`Cloning:`/`Dag_defaults:`/`Email:`, with `Engine`/`Warehouse`/`Email` each carrying a `Profile` plus a `Variables` mapping (field name → the *name* of the env/`.env` variable holding the value, never the value itself) rather than literal connection values. `config.py` reads both the legacy and canonical shapes losslessly. Migration tooling was rewritten alongside it: `migrate.py` now separates packaged `ENGINE` migration history from an optional deployment `PROJECT` stream and keeps a SHA-256 checksum ledger (`SCHEMA_MIGRATIONS.SOURCE`/`CHECKSUM`, `sql/migrations/0004_migration_streams_and_checksums.sql`). New docs not previously cross-referenced from this file: `SECURITY.md`, `docs/operations.md`, `docs/release-checklist.md`, `CHANGELOG.md` — see "craft-connector.yml"'s own closing paragraph for the current documentation-surface list.
+
+**Iteration 3 — `E3-01`…`E3-07`, all fixed (2026-09-23).** A fresh review (not requested as part of building anything — a standalone "check shippability and bugs" pass, written up as `ITERATION_3.md`) found the config-manifest pivot above had shipped without this file being updated to match (the gap the previous entry now closes), plus one real shippability blocker and four further confirmed correctness bugs, all in untested scenario space — the same pattern every prior review round found. All seven are fixed; `ITERATION_3.md` has the full per-item detail and is left in place as the historical record, same as `ITERATION_2.md`.
+- **E3-01, major: `setup` wrote a different secret-variable naming convention than the one the shipped docs teach, and silently discarded a hand-authored canonical manifest's own `Variables` mapping on every re-run.** `configure.py`'s canonical-manifest writer hardcoded `ETL_CRAFT_POSTGRES_*`/`ETL_CRAFT_WAREHOUSE_*` pointers — a second, undocumented convention, distinct from the `ENGINE_*`/`WAREHOUSE_*`/`EMAIL_*` names `docs/craft-connector.variables.env` and both shipped worked examples teach. A team that hand-authored a manifest per the docs and later re-ran `etl-craft setup` (the tool's own advertised "run it again to update" contract) had its `Variables` mapping silently overwritten with names nothing in its environment had ever set — the next `etl-craft run` then failed to resolve its connection. **Fixed by making the bootstrap-input name and the written pointer name the same string**: `setup` now reads `ENGINE_JDBC_URL`/`WAREHOUSE_JDBC_URL`/etc. directly (previously `ETL_CRAFT_POSTGRES_JDBC_URL`/`ETL_CRAFT_WAREHOUSE_JDBC_URL`) and writes those same names into `Variables`, so the one variable a team sets serves both `setup`'s own bootstrap and every later `etl-craft run` — no second convention to drift out of sync with the first. The secret pointer is also now written flat (`ENGINE_SECRET`, not the profile-embedded `ETL_CRAFT_POSTGRES_{PROFILE}_SECRET` it was before), which lets `config.py`'s existing tier-scoped fallback (`ENGINE_DEV_SECRET` tried before `ENGINE_SECRET`) do the multi-tier job instead of baking one tier into the base name permanently. `ETL_CRAFT_POSTGRES_PROFILE` also became `ETL_CRAFT_ENGINE_PROFILE`, matching the runtime tier-override name `config.py` already read and fixing the last place the pre-rename "POSTGRES" token survived. `docs/warehouse-test.env.example` (the cloud-warehouse test harness .env), `docs/configuration.md`, and `scripts/wheel-smoke.sh` updated to match; verified end-to-end via `scripts/wheel-smoke.sh` against real Docker Postgres, which prints `Engine.dev ENGINE_SECRET` / `Warehouse.dev WAREHOUSE_SECRET` from a genuinely fresh install.
+- **E3-02, major: the pipeline-level cross-pipeline dependency tracker never received the gate-resolved run id — half of E2-12 was dead code for pipelines.** `orchestrator.py`'s `init_pipeline_run`/`run_pipeline` both computed `PipelineGateResult.consumed` (what the gate actually resolved) but every `consume_pipeline_dependency_edges` call site passed only `pipeline_id`, so `consumed` always defaulted to `None` and re-derived "whatever qualifies now" — precisely the watermark-jumping bug E2-12 already fixed once for the same-invocation case, now showing up because under `Mode=orchestrator` the gate (`--init-only`) and the eventual finalize (`--finalize-only`) are two separate CLI invocations with no way for an in-memory value to survive between them. **Fixed by recording consumption immediately, at the one point the gate is actually evaluated**, rather than deferring it to whatever eventually finalizes the run: `init_pipeline_run` now calls `consume_pipeline_dependency_edges(engine, pipeline_id, gate.consumed)` right after minting, and `finalize_active_run` (Mode=orchestrator's only finalize path) no longer consumes at all — `_finalize_from_task_states` gained a `record_consumption` flag for exactly this. `run_pipeline` (local mode) threads its own freshly-computed `gate.consumed` through to its own finalize call the same way `runner.py:323` already does for the task-level tracker; `--force` and a call that reuses an already-active run it didn't itself gate keep the old re-derive behaviour, per CLAUDE.md's existing "as do callers finalizing a run they didn't gate themselves." Regression test spans a real `init_pipeline_run` call followed by a separate `finalize_active_run` call with a second qualifying upstream run appearing in between — verified to fail against the pre-fix code (no tracker row at all after `init_pipeline_run`) before being kept.
+- **E3-03, major: `fetch_recorded_versions()` collided across pipelines sharing a `TASK_CODE`.** Keyed its result by bare `TASK_CODE`, but `ux_tasks_code_active` scopes that uniqueness *per pipeline*, not globally — two independently-authored pipelines with an ordinary shared task name (`LOAD`, `VALIDATE`, ...) silently overwrote each other's documentation-version badge on the generated docs site. Now keyed by `(pipeline_code, task_code)`; also hoisted to run once for the whole site in `collect_docs` rather than once per pipeline, which its own docstring had already (incorrectly) claimed it did.
+- **E3-04, major: `validate`'s `EMAIL_ALERT`-ordering check (E2-60) was blind to a task with zero dependency edges.** `all_tasks`/`leaves` were built purely from `CFG_TASK_DEPENDENCY` edge endpoints, so a completely ordinary standalone task — nothing depends on it, it depends on nothing, e.g. a single ingestion step feeding nothing downstream — never appeared in any edge and was invisible to the check; `validate` reported a pipeline clean even when its `EMAIL_ALERT` task had no dependency on that task at all. The same edges-only source also meant an `EMAIL_ALERT` task with *no* edges of its own was invisible to the `alerts` set and never checked in the first place. Both now built from every active task in the pipeline (`cfg.fetch_tasks_with_parameters`), not edge endpoints.
+- **E3-05, minor/moderate: a failure while committing business-rule results left that rule's run-log row stuck `IN-PROGRESS` forever.** `business_rules.py`'s per-rule commit block (the `INSERT`/`UPDATE` into `AUD_BUSINESS_RULES_RESULTS` plus the final `_mark_run_log(..., "SUCCESS")`) had no exception handling of its own — only the earlier warehouse-fetch step did. The task itself still correctly failed (`handlers.dispatch`'s own catch), but the audit trail misrepresented what happened until a retry. Now wrapped the same way the fetch step already was.
+- **E3-06, minor/moderate: `setup` silently dropped `Cloning.External_volume`/`Base_location` on every write, with no bootstrap variable to set them.** Both write paths replaced the whole `Cloning` block unconditionally. New `ETL_CRAFT_CLONING_EXTERNAL_VOLUME`/`ETL_CRAFT_CLONING_BASE_LOCATION` bootstrap inputs, and an explicit bootstrap value now wins over whatever was already on disk rather than always replacing it — so a hand-added value a team set because there was no other way to set it survives a later `setup` run.
+- **E3-07, minor: `cloning.py` interpolated `Cloning.External_volume`/`Base_location` unescaped into `CREATE ICEBERG TABLE` DDL.** The same class of site `sql_actions.py`'s own Snowflake-Iceberg path was already hardened for (E2-84/E2-85); `cloning.py`'s own copy of the same DDL shape had not been. Now rejects a value containing a quote before building the statement, matching `sql_actions.py`'s own guard exactly.
+- **569 tests (up from 546 after round 7), 94%+ coverage, `make check`, `make db-schema-test`, and `scripts/wheel-smoke.sh` all clean.** Every regression test above was verified to fail against the pre-fix code before being kept, plus one of `ITERATION_3.md`'s own noted test-coverage gaps closed alongside them (`config.py`'s mixed-legacy-and-canonical-manifest rejection, previously untested entirely). `ITERATION_2.md` was also found deleted, uncommitted, with no explanation — restored (it is still referenced by name from this file and `CHANGELOG.md`) rather than guessed at.
+- **What this round did not attempt, stated plainly**: the Databricks and Snowflake execution paths remain unverified against any real endpoint in this environment — no credentials are available here. `docs/operations.md`'s framing (see "Architecture at a glance" above) — PostgreSQL is the controlled, supported launch path; DuckDB is local-dev only; Trino-over-Iceberg is integration-tested against the repo's own local stack; Databricks/Snowflake need their own acceptance test before a customer workload — is the accurate current statement of what "works without runtime failures" actually means per warehouse, and nothing in this round changed that picture for the two cloud dialects.
+
 **Schema is signed off (2026-09-19).** `sql/schema.sql` is reconciled against two pasted schema snapshots plus every verbal correction made after them. It makes a real number of judgment calls translating ambiguous or conflicting source material into concrete SQL — every one of them is flagged inline with `[DEVIATION]`, `[ADDITION]`, or `[CHOICE]` tags (explained in the file's header) and summarized in a block at the end of the file. Every flag was walked through individually and confirmed as written — none required a change. **Read that summary anyway before touching the schema further** — it's the map of every non-obvious decision baked into it.
 
 Build order, per the natural sequencing agreed once schema was confirmed — resolver → CLI (`run` first) → `generate-yml` → connector/auth layer:
@@ -414,6 +476,7 @@ Do not reintroduce these without a real reason; each was deliberately ruled out 
 - **Engine DB** — always Postgres, no exceptions. Holds every `CFG_`/`AUD_` table. Required specifically for Postgres's constraint guarantees — most importantly, a partial unique index is what makes run-id creation race-safe (see below). Every engine action checks for a valid Engine DB connection first, before anything else.
 - **Atomicity on an Iceberg warehouse (2026-09-22, E2-67)**: there is none. Trino does not roll back, DML included — verified, not inferred. An action that fails partway leaves the target half-written, so **idempotency is what makes a retry safe, not atomicity**: every action re-derives its whole effect from current state, and converges. Plan recovery around that rather than around a rollback that will not happen. Postgres keeps the full transactional guarantee. `sql_actions.py`'s own module docstring carries the detail.
 - **Warehouse** — exactly one per deployment. **PostgreSQL, or a SQL engine over Iceberg** (or, since 2026-09-22, that engine's own native format — `[Warehouse].Table_format`/`CFG_TASK_PARAMETERS.TABLE_FORMAT`, `iceberg` by default) (settled 2026-09-22: `engine: always postgres` / `warehouse: postgres (pg analytics), databricks with iceberg unity catalog, snowflake with iceberg, maybe trino with iceberg or any sql tool over plain iceberg`). Postgres stores its own tables natively and is the one with no caveats. On **every other warehouse, every table the engine creates is an Iceberg table** — per explicit instruction, "if the warehouse is not postgres, every table we create or operate should be iceberg compatible". Dialects are optional extras (`etl-craft[databricks|snowflake|trino]`), never imported by engine code. DuckDB remains supported for local development, and is the one warehouse that admits a single *writing process* at a time, so the engine serializes warehouse access for it through an Engine DB advisory lock (`warehouse.open_warehouse`, E2-61); no other supported warehouse needs that. Any other SQLAlchemy-supported relational engine will likely work and is an optional dialect a team installs itself, but nothing here tests it. Because there's only one, `TARGET_OBJECT`/`SOURCE_SQL` in `CFG_TASK_PARAMETERS` always resolve against that same database — there is no cross-connection staging path to build for ordinary tasks. `TARGET_OBJECT` is stored as bare `schema.table`, deliberately environment-agnostic — the database/catalog name is always supplied at runtime from the active `[Warehouse]` profile (`sql_actions.qualify()`), so the same CFG_ row means a different real object in dev/uat/prod.
+  - **What's actually verified versus what's supported in principle, stated plainly (`docs/operations.md`, added 2026-09-22/23; updated 2026-09-23 — see "Where things stand" for the full detail):** the *controlled, supported* launch path for a real deployment is a PostgreSQL Engine DB with a PostgreSQL warehouse — "the one with no caveats" above is not a rhetorical flourish, it is the operational recommendation. DuckDB is verified for real (E2-61's queueing, a genuine multi-task-wave regression test) and is the local-development target, not a production one — it admits one writing process at a time. Trino-over-Iceberg is integration-tested against the repo's own local stack (real MinIO + Iceberg REST + Trino via `docker-compose.yml`), including a real two-run `SCD1_MERGE`. **Databricks is now verified live**, both `native` (managed Delta) and `iceberg` (managed Delta with UniForm enabled, not a literal `USING ICEBERG` clause — see "Where things stand"), through `CREATE_TABLE`/`OVERWRITE_TABLE`/`SCD1_MERGE`. **Snowflake is now verified live too, both `native` and Snowflake-managed Iceberg tables**, via the preferred (PAT) connection shape — Iceberg defaults to `EXTERNAL_VOLUME = 'SNOWFLAKE_MANAGED'` (Snowflake's own internal storage, not a customer bucket) when a task declares no external volume of its own, which is what makes it zero-config and what let it pass despite this particular account's one customer-owned external volume being on a different cloud than the account itself (see "Where things stand" for the full sequence). `docs/operations.md` says to treat each cloud warehouse as its own acceptance target before enabling it for a customer workload; treat that as a hard requirement, not caution for its own sake.
 
 **Connections & auth** — all resolved through `craft-connector.yml` (below), never hardcoded, never sourced from an orchestrator. JDBC URL is the preferred storage format for a connection string wherever one is persisted; a small internal translator converts it to the right SQLAlchemy dialect URL at connection time. Auth is a small registry of functions keyed by each profile's `auth_mode` (`password`, `token`, `sso`, `key_file`), handed to `create_engine(creator=...)` — the `sso`/`token` modes mint or refresh short-lived credentials per connection. For those two specifically, `pool_recycle` should sit comfortably under the credential's real lifetime so a checked-out connection always has meaningful life left — that's a safety margin, not a guarantee; a connection dying mid-operation is just another failure the idempotent-retry design already absorbs. `pool_pre_ping` is a worthwhile optimization on top but not load-bearing.
 
@@ -485,7 +548,8 @@ Four, closed: `PYTHON` (ingestion scripts, `scripts.py`), `SQL` (engine-executed
 | `set-execution-mode local\|orchestrator` | One-time-per-environment mode lock; persists in `craft-connector.yml` until rebuild/reconfigure |
 | `graph --name <pipeline>` | Print dependency chain / lineage. Bare `graph` with no name errors. |
 | `validate` | Config integrity check — including the cross-database checks (e.g. single-column PK on a `TARGET_TABLE`) that no Engine DB constraint can enforce, plus (added 2026-09-20) every active task declaring `SOURCE_OBJECT`/`TARGET_OBJECT` |
-| `generate-yml` | Emit YAML (replaces the earlier working name `generate-dag`) — hand-rolled, Airflow-YAML-inspired shape, consumable by Airflow, another orchestrator, or a custom script |
+| `generate-yml --pipeline_code X [--output <path>]` | Emit YAML (replaces the earlier working name `generate-dag`) — hand-rolled, Airflow-YAML-inspired shape, consumable by Airflow, another orchestrator, or a custom script |
+| `generate-yml --global` | (added 2026-09-19) Emit the optional cross-pipeline trigger DAG (`TriggerDagRunOperator`-shaped nodes) — refused unless `[Orchestrator].Global_dag`/`Dag_defaults.Global_dag: true`; mutually exclusive with `--pipeline_code` |
 | `lineage --table <schema.table>` | (added 2026-09-20) List every active task that declares `<schema.table>` as a `SOURCE_OBJECT` or `TARGET_OBJECT`, across all pipelines — closes the "table-level lineage" read-only verb this section used to list as conceptually agreed but unbuilt |
 | `lineage --column <schema.table.column>` | (added 2026-09-20) Column-level lineage, parsed from each SQL task's own `SOURCE_SQL` with sqlglot and cached in `AUD_COLUMN_LINEAGE` |
 | `migrate` | (added 2026-09-20) Apply any pending `sql/migrations/*.sql` file to an already-deployed Engine DB — see `src/etl_craft/migrate.py` and `sql/migrations/README.md` |
@@ -501,59 +565,103 @@ The documentation generator (`generate-docs`, above) is also now built: the same
 
 ## craft-connector.yml
 
-Versioned, no secrets stored directly in it — analogous to a dbt `profiles.yml`. Structure so far:
+**This section rewritten 2026-09-23 to match the config-manifest pivot of 2026-09-22/23 (commits
+`578ab74`..`8e0f96f`), which had shipped without a matching update here — see "Where things stand"'s
+dated 2026-09-23 entry for the full story of that gap and E3-01, the shippability bug found in it.**
+
+Versioned, no secrets stored directly in it — analogous to a dbt `profiles.yml`. `config.py` reads
+**two** shapes losslessly into one `ConnectorConfig`, and every downstream reader is
+format-agnostic:
+
+- **Legacy** (`[Execution]`/`[Source]`/`[Postgres]`/`[Warehouse]`/`[Orchestrator]`/`[Email]`,
+  `Active_profile`/`Profiles: {dev: {jdbc_url, user, auth_mode, ...}}`) — connection *values* live
+  directly in the profile. Still fully supported for files already in this shape; `setup` updates
+  one such file in place rather than rewriting it into the canonical shape.
+- **Canonical** (current, what `setup` writes for a new file, and what both shipped worked
+  examples — `docs/craft-connector.env-secrets.example.yml`,
+  `docs/craft-connector.file-secrets.example.yml` — teach) — connection *values* never appear in
+  the file at all; `Engine`/`Warehouse`/`Email` each carry a `Profile` label plus a `Variables`
+  mapping from field name to the *name* of whatever env var or `.env` key holds the real value.
 
 ```yaml
-[Execution]
-Mode: local | orchestrator       # set via `set-execution-mode` at setup time only, persists until rebuild
-Orchestrator name: <optional>    # informational only, engine doesn't act on it
+Orchestration:
+  Mode: local | remote             # remote = Mode=orchestrator internally; set via `set-execution-mode` or `setup`
+  Orchestrator_name: <optional>    # informational only, engine doesn't act on it
+  Task_timeout_seconds: 21600      # default; a task parameter can override, 0 disables
+  Max_parallel_tasks: 8            # default; local wave size
+  Enforce_sla: false               # opt in to engine-side comparison with CFG_PIPELINES.SLA_IN_HOURS
 
-[Source]
-Type: file | environment         # where actual secret values live
-Path: <path>                     # required when Type = file (a .env-style file)
+Secrets:
+  Source_type: file | environment  # where the names below resolve against
+  Source_path: <path>              # required when Source_type = file (a .env-style file)
 
-[Postgres]                       # Engine DB — required, always Postgres
-Active_profile: <name>
-Profiles:
-  dev:  { host, port, user, auth_mode, ... }
-  sit:  { ... }
-  uat:  { ... }
-  prod: { ... }
+Engine:                            # Engine DB — required, always Postgres
+  Profile: dev                     # $ETL_CRAFT_ENGINE_PROFILE overrides at runtime
+  Variables:
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE    # password | key_file
+    secret: ENGINE_SECRET          # a tier-scoped variant (ENGINE_DEV_SECRET) wins if it's set
 
-[Warehouse]                      # The warehouse — optional (see "Warehouse connector layer" above); resolved open question #1
-Active_profile: <name>
-Profiles:
-  dev:  { host, port, user, auth_mode, ... }
-  sit:  { ... }
-  uat:  { ... }
-  prod: { ... }
+Warehouse:                         # optional — see "Warehouse connector layer" above; resolved open question #1
+  Name: Postgres | DuckDB | Databricks | Snowflake | Trino   # checked against what jdbc_url resolves to
+  Table_format: iceberg | native   # default iceberg; a task can override with CFG_TASK_PARAMETERS.TABLE_FORMAT
+  Profile: dev                     # $ETL_CRAFT_WAREHOUSE_PROFILE overrides at runtime
+  Variables:
+    jdbc_url: WAREHOUSE_JDBC_URL
+    user: WAREHOUSE_USER           # omitted for auth_mode none/token (Databricks' user is the literal "token")
+    auth_mode: WAREHOUSE_AUTH_MODE # none | password | key_file | token
+    secret: WAREHOUSE_SECRET
+    key_file: WAREHOUSE_KEY_FILE   # only for auth_mode=key_file (Snowflake key-pair)
 
-[Cloning]
-Enabled: true | false            # opt-in, off by default — nothing is copied unless explicitly turned on
-Scope: cfg | aud | all           # which table groups mirror into the warehouse, merge-style
+Cloning:
+  Enabled: true | false            # opt-in, off by default — nothing is copied unless explicitly turned on
+  Scope: cfg | aud | all           # which table groups mirror into the warehouse, merge-style
+  External_volume: <name>          # Snowflake Iceberg mirrors only — see cloning.py
+  Base_location: <path>            # Snowflake Iceberg mirrors only
 
-[Orchestrator]                   # optional — global defaults/fallbacks for generate-yml's Airflow-facing fields
-Global_dag: true | false         # emit the optional cross-pipeline trigger DAG — defaults to false
-Catchup: true | false
-Tags: [tag1, tag2]
-Retries: <int>
-Retry_delay_minutes: <int>
-Depends_on_past: true | false
-Email_on_failure: true | false
-Email_recipients: [addr1, addr2]
+Dag_defaults:                      # optional — global defaults/fallbacks for generate-yml's Airflow-facing fields
+  Global_dag: true | false         # emit the optional cross-pipeline trigger DAG — defaults to false
+  Catchup: true | false
+  Tags: [tag1, tag2]
+  Retries: <int>
+  Retry_delay_minutes: <int>
+  Depends_on_past: true | false
+  Email_on_failure: true | false
+  Email_recipients: [addr1, addr2]
 
-[Email]                          # optional — required only if any active task uses HANDLER=EMAIL_ALERT; added 2026-09-20
-Active_profile: <name>
-Profiles:
-  dev:  { host, port, from_address, auth_mode, user, use_tls, ... }
-  sit:  { ... }
-  uat:  { ... }
-  prod: { ... }
+Email:                             # optional — required only if any active task uses HANDLER=EMAIL_ALERT
+  Profile: dev
+  Variables:
+    host: EMAIL_HOST
+    port: EMAIL_PORT
+    from_address: EMAIL_FROM
+    auth_mode: EMAIL_AUTH_MODE     # none | password only
+    user: EMAIL_USER
+    use_tls: EMAIL_USE_TLS
+    secret: EMAIL_SECRET
 ```
 
-`auth_mode` per profile selects one of a small registry of connection-creator functions (`password`, `token`, `sso`, `key_file`) — see Architecture above. `[Email]` profiles use their own, smaller `auth_mode` vocabulary (`none`, `password`) — see `email_alert.py`'s own module docstring for why `token`/`sso` aren't included there.
+`auth_mode` per profile selects one of a small registry of connection-creator functions (`password`,
+`token`, `sso` — Engine DB only, unimplemented, `key_file`, and `none` for a warehouse/email target
+with nothing to authenticate) — see Architecture above. `[Email]`/`Email:` profiles use their own,
+smaller `auth_mode` vocabulary (`none`, `password`) — see `email_alert.py`'s own module docstring
+for why `token`/`sso` aren't included there.
 
-**Cloning**, specifically: a merge-style copy of selected Engine DB tables into the warehouse, so a team can query engine config/audit from inside their own warehouse without a separate Postgres connection. Runs after each pipeline run, only when enabled. This is special-cased engine-internal machinery — it does not reopen the "one warehouse, no general cross-connection support" rule that applies to ordinary tasks. **Done (2026-09-20)** — `src/etl_craft/cloning.py`; see "Where things stand" for the full mechanism (truncate-then-reinsert per table, generic cross-dialect column types, and a same-database safety refusal). The ClickHouse-specific fixes it once carried were deleted on 2026-09-21 along with ClickHouse support itself.
+**The `Variables` name-indirection rule, and its one deliberate exception.** Every value under a
+canonical `Variables:` block is a variable *name*, never the value itself — that is what makes the
+file safe to commit. `setup`'s bootstrap-input reads and the names it writes into `Variables` are
+now, per E3-01, the *same* string (`ENGINE_JDBC_URL`, `WAREHOUSE_JDBC_URL`, ...) — a team that sets
+`ENGINE_JDBC_URL` once has it serve both `setup`'s own bootstrap and every later `etl-craft run`.
+Before that fix, `setup` wrote `ETL_CRAFT_POSTGRES_*`/`ETL_CRAFT_WAREHOUSE_*` pointers into the
+manifest regardless of what a hand-authored file already had — re-running `setup` against a
+manifest written by hand per the docs silently discarded its `Variables` mapping and pointed it at
+names nothing in the environment had ever set. `docs/craft-connector.variables.env` is the full,
+current list of every variable name the two shipped examples use.
+
+**Cloning**, specifically: a merge-style copy of selected Engine DB tables into the warehouse, so a team can query engine config/audit from inside their own warehouse without a separate Postgres connection. Runs after each pipeline run, only when enabled. This is special-cased engine-internal machinery — it does not reopen the "one warehouse, no general cross-connection support" rule that applies to ordinary tasks. **Done (2026-09-20)** — `src/etl_craft/cloning.py`; see "Where things stand" for the full mechanism (truncate-then-reinsert per table, generic cross-dialect column types, and a same-database safety refusal). The ClickHouse-specific fixes it once carried were deleted on 2026-09-21 along with ClickHouse support itself. `External_volume`/`Base_location` are needed only when cloning onto a Snowflake Iceberg warehouse; `setup` writes them from `ETL_CRAFT_CLONING_EXTERNAL_VOLUME`/`ETL_CRAFT_CLONING_BASE_LOCATION` and preserves a hand-added value it wasn't given a bootstrap input for (E3-06).
+
+**Documentation surface, for anyone new to this repo**: `README.md` (quickstart), `docs/configuration.md` (the canonical manifest, in full), `docs/craft-connector.*.example.yml` and `docs/craft-connector.variables.env` (worked examples), `docs/parameters.md` (`CFG_TASK_PARAMETERS` reference per handler), `docs/first-pipeline.md` (a runnable walkthrough), `docs/operations.md` (backup/upgrade sequence, and — see "Architecture at a glance" above — which warehouse targets are the controlled/supported launch path versus which need a team's own acceptance test), `docs/release-checklist.md`, `SECURITY.md`, and `CHANGELOG.md` (a pointer to this file plus `ITERATION_2.md`/`ITERATION_3.md` for full history).
 
 ## Database schema
 

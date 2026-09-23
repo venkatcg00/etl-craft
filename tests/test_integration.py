@@ -15,9 +15,10 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import yaml
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import BigInteger, Column, create_engine, inspect, text
 from sqlalchemy.exc import OperationalError
 
+import etl_craft.business_rules as business_rules_module
 import etl_craft.orchestrator as orchestrator_module
 import etl_craft.sql_actions as sql_actions_module
 from conftest import (
@@ -51,7 +52,7 @@ from etl_craft.cfg import (
     resolve_task_id,
 )
 from etl_craft.cli import main as cli_main
-from etl_craft.cloning import run_cloning_if_enabled
+from etl_craft.cloning import _create_mirror, run_cloning_if_enabled
 from etl_craft.column_lineage import lineage_for_tasks
 from etl_craft.config import (
     CloningConfig,
@@ -492,6 +493,27 @@ def _duckdb_warehouse_config(tmp_path, *, cloning: CloningConfig) -> ConnectorCo
             },
         ),
     )
+
+
+def test_create_mirror_rejects_a_quote_in_snowflake_storage_values(postgres_engine):
+    # E3-07. Cloning.External_volume/Base_location are interpolated straight
+    # into CREATE ICEBERG TABLE DDL, unescaped -- the same site class
+    # sql_actions.py's own _create_iceberg_table_with_explicit_storage was
+    # already hardened for (E2-84/E2-85). dialect_name is a plain string
+    # parameter here, independent of what warehouse_engine actually is, so
+    # this exercises the Snowflake DDL path's guard without a Snowflake
+    # connection -- the guard must raise before any SQL is ever sent, which
+    # is exactly what lets a real (non-Snowflake) engine stand in safely.
+    cloning = CloningConfig(external_volume="v'; DROP TABLE t; --", base_location="b")
+    with pytest.raises(ValueError, match="must not contain a quote"):
+        _create_mirror(
+            postgres_engine,
+            "cfg_pipelines",
+            [Column("pipeline_id", BigInteger)],
+            "snowflake",
+            cloning,
+            "iceberg",
+        )
 
 
 def test_run_cloning_if_enabled_noop_when_disabled(postgres_engine):
@@ -2378,6 +2400,33 @@ def test_validate_requires_an_email_alert_to_wait_on_every_leaf(
     assert "leaf_two" in out
 
 
+def test_validate_requires_an_email_alert_to_wait_on_an_edge_free_leaf(
+    postgres_engine, committed_pipeline, craft_connector_on_disk, capsys
+):
+    # E3-04. all_tasks/leaves used to be built purely from CFG_TASK_DEPENDENCY
+    # edge endpoints -- so a completely ordinary standalone task with no
+    # dependency edges at all (nothing depends on it, it depends on nothing;
+    # a single ingestion step feeding nothing downstream) never appeared in
+    # any edge and was therefore invisible to this check. validate reported
+    # the pipeline clean even though its EMAIL_ALERT task had no dependency
+    # on that task whatsoever.
+    insert_committed_task(postgres_engine, committed_pipeline, "isolated")
+    alert = insert_committed_task(
+        postgres_engine, committed_pipeline, "iso_alert", handler="EMAIL_ALERT"
+    )
+    other = insert_committed_task(postgres_engine, committed_pipeline, "iso_other")
+    # The alert depends on *something*, just not the edge-free task.
+    insert_committed_dependency(
+        postgres_engine, committed_pipeline, alert, other, dependency_type="ALWAYS"
+    )
+
+    assert cli_main(["validate"]) == 1
+
+    out = capsys.readouterr().out
+    assert "[alert_ordering]" in out
+    assert "isolated" in out
+
+
 def test_validate_flags_an_incomplete_sql_task(
     postgres_engine, committed_pipeline, craft_connector_on_disk, capsys
 ):
@@ -3391,6 +3440,64 @@ def test_run_pipeline_finalizes_skipped_when_dependency_unmet(
     outcome = run_pipeline(postgres_engine, make_config(), "TEST_XPIPE_DOWN")
 
     assert outcome.status == "SKIPPED"
+
+
+def test_init_then_finalize_consumes_the_gate_resolved_run_not_a_newer_one(
+    postgres_engine, two_committed_pipelines
+):
+    # E3-02. Under Mode=orchestrator, init_pipeline_run (--init-only) and
+    # finalize_active_run (--finalize-only) are two separate CLI invocations
+    # -- structurally the normal case, not a rare race, since that split is
+    # exactly what the generated DAG's synthetic first/last steps are for.
+    # Before the fix, nothing ever recorded what init_pipeline_run's own
+    # gate resolved: consume_pipeline_dependency_edges was only ever called
+    # from _finalize_from_task_states, with consumed=None, so it re-derived
+    # "whichever upstream run qualifies right now" at finalize time -- a
+    # completely different moment, in a completely different process, from
+    # when the gate actually ran. If the upstream produced a second
+    # qualifying run in between, the watermark silently jumped past the run
+    # this pipeline never actually gated against.
+    downstream_id, upstream_id = two_committed_pipelines
+    edge_id = insert_committed_pipeline_dependency(
+        postgres_engine, downstream_id, upstream_id, "SUCCESS"
+    )
+    task_a = insert_committed_task(postgres_engine, downstream_id, "task_a")
+    first_run = insert_committed_pipeline_run(
+        postgres_engine, upstream_id, "SUCCESS", end_date=datetime.now(UTC)
+    )
+
+    init_outcome = init_pipeline_run(postgres_engine, make_config(), "TEST_XPIPE_DOWN")
+    assert "SKIPPED" not in init_outcome.message
+
+    def _tracked_run_id() -> int:
+        with postgres_engine.connect() as conn:
+            return conn.execute(
+                text(
+                    "SELECT LAST_CONSUMED_PIPELINE_RUN_ID FROM AUD_PIPELINE_DEPENDENCY_TRACKER "
+                    "WHERE PIPELINE_DEPENDENCY_ID = :id"
+                ),
+                {"id": edge_id},
+            ).scalar_one()
+
+    # init_pipeline_run's own gate already recorded consumption -- before
+    # this pipeline's tasks have even run, let alone finalized.
+    assert _tracked_run_id() == first_run
+
+    # While this pipeline's tasks execute (in reality, a separately
+    # dispatched Airflow task running task_a), the upstream completes
+    # another qualifying run.
+    second_run = insert_committed_pipeline_run(
+        postgres_engine, upstream_id, "SUCCESS", end_date=datetime.now(UTC)
+    )
+    assert second_run > first_run
+
+    insert_committed_task_run(postgres_engine, task_a, init_outcome.pipeline_run_id, "SUCCESS")
+    finalize_outcome = finalize_active_run(postgres_engine, make_config(), "TEST_XPIPE_DOWN")
+
+    assert finalize_outcome.status == "SUCCESS"
+    # Still the run the gate actually used -- finalize_active_run must not
+    # have re-derived and overwritten it with the newer run nobody read.
+    assert _tracked_run_id() == first_run
 
 
 # ==============================================================================
@@ -4929,63 +5036,170 @@ def _cloud_config(profile, table_format: str) -> ConnectorConfig:
     )
 
 
-def _run_cloud_vocabulary(postgres_engine, pipeline_id, config, schema, extra_params):
+def test_fetch_columns_accepts_catalog_qualified_stage(pg_conn):
+    from etl_craft.sql_actions import _fetch_columns
+
+    pg_conn.execute(text("CREATE TEMPORARY TABLE qualified_stage_probe (id INTEGER, name TEXT)"))
+    catalog = pg_conn.execute(text("SELECT current_database()")).scalar_one()
+    schema = pg_conn.execute(
+        text("SELECT nspname FROM pg_namespace WHERE oid = pg_my_temp_schema()")
+    ).scalar_one()
+    assert _fetch_columns(pg_conn, f"{catalog}.{schema}.qualified_stage_probe") == [
+        ("id", "integer"),
+        ("name", "text"),
+    ]
+
+
+def _run_cloud_vocabulary(postgres_engine, pipeline_id, config, schema, extra_params, *, suffix=""):
     """Walk the SQL action vocabulary against a real cloud warehouse."""
+    suffix = f"{suffix}_{pipeline_id}"
     seed_active_run(postgres_engine, pipeline_id)
     src = "SELECT 1 AS id, 'a' AS name"
     results = {}
-    for code, params in (
-        ("cw_create", {"SQL_ACTION": "CREATE_TABLE", "TARGET_OBJECT": f"{schema}.cw_create"}),
-        ("cw_over", {"SQL_ACTION": "OVERWRITE_TABLE", "TARGET_OBJECT": f"{schema}.cw_over"}),
+    cases = (
         (
-            "cw_scd1",
+            f"cw_create{suffix}",
+            {"SQL_ACTION": "CREATE_TABLE", "TARGET_OBJECT": f"{schema}.cw_create{suffix}"},
+        ),
+        (
+            f"cw_over{suffix}",
+            {"SQL_ACTION": "OVERWRITE_TABLE", "TARGET_OBJECT": f"{schema}.cw_over{suffix}"},
+        ),
+        (
+            f"cw_scd1{suffix}",
             {
                 "SQL_ACTION": "SCD1_MERGE",
-                "TARGET_OBJECT": f"{schema}.cw_scd1",
+                "TARGET_OBJECT": f"{schema}.cw_scd1{suffix}",
                 "MERGE_KEY": "id",
                 "MERGE_COMPARE_COLUMNS": "name",
             },
         ),
-    ):
+    )
+    try:
+        for code, params in cases:
+            task_id = insert_committed_task(postgres_engine, pipeline_id, code)
+            insert_committed_task_parameters(
+                postgres_engine, task_id, {**params, "SOURCE_SQL": src, **extra_params}
+            )
+            results[params["SQL_ACTION"]] = run_task(
+                postgres_engine, config, "TEST_CONCURRENT_PL", code
+            )
+            outcome = results[params["SQL_ACTION"]]
+            assert outcome.status == "SUCCESS", f"{params['SQL_ACTION']}: {outcome.message}"
+        # Exercise an actual matched-row update as well as the empty-target
+        # insert path: a syntactically valid UPDATE can still write bad values.
+        code = f"cw_scd1_update{suffix}"
         task_id = insert_committed_task(postgres_engine, pipeline_id, code)
         insert_committed_task_parameters(
-            postgres_engine, task_id, {**params, "SOURCE_SQL": src, **extra_params}
+            postgres_engine,
+            task_id,
+            {**cases[-1][1], "SOURCE_SQL": "SELECT 1 AS id, 'b' AS name", **extra_params},
         )
-        results[params["SQL_ACTION"]] = run_task(
-            postgres_engine, config, "TEST_CONCURRENT_PL", code
-        )
-    return results
+        updated = run_task(postgres_engine, config, "TEST_CONCURRENT_PL", code)
+        assert updated.status == "SUCCESS", updated.message
+        warehouse = build_warehouse_engine(config)
+        try:
+            from etl_craft.sql_actions import active_database
+
+            database = active_database(config)
+            with warehouse.connect() as conn:
+                for _, params in cases:
+                    outcome = results[params["SQL_ACTION"]]
+                    assert outcome.status == "SUCCESS", f"{params['SQL_ACTION']}: {outcome.message}"
+                    target = f"{database}.{params['TARGET_OBJECT']}"
+                    expected_name = "b" if params["SQL_ACTION"] == "SCD1_MERGE" else "a"
+                    assert conn.execute(text(f"SELECT id, name, ROW_ID FROM {target}")).all() == [
+                        (1, expected_name, 1)
+                    ]
+        finally:
+            warehouse.dispose()
+        return results
+    finally:
+        warehouse = build_warehouse_engine(config)
+        try:
+            from etl_craft.sql_actions import active_database
+
+            database = active_database(config)
+            with warehouse.begin() as conn:
+                for _, params in cases:
+                    conn.execute(text(f"DROP TABLE IF EXISTS {database}.{params['TARGET_OBJECT']}"))
+        finally:
+            warehouse.dispose()
 
 
-def test_sql_actions_run_against_real_databricks(
+@pytest.mark.timeout(300)
+def test_sql_actions_run_against_real_databricks_native(
     postgres_engine, databricks_profile, committed_pipeline
 ):
     # Skips unless ETL_CRAFT_TEST_DATABRICKS_* are set. This is the test that
-    # turns "the Databricks path is unverified" into a one-command answer:
-    # export the credentials (or put them in CI secrets) and run the suite.
+    # turns "the Databricks native/Delta path is unverified" into a
+    # one-command answer: export the credentials (or put them in CI secrets)
+    # and run the suite. Split from the Iceberg test below (E3 follow-up) --
+    # a single test hardcoded table_format="iceberg" and never exercised
+    # `USING DELTA` against a real workspace at all, even when credentials
+    # were supplied.
     schema = os.environ.get("ETL_CRAFT_TEST_DATABRICKS_SCHEMA", "default")
-    config = _cloud_config(databricks_profile, "iceberg")
-    results = _run_cloud_vocabulary(postgres_engine, committed_pipeline, config, schema, {})
+    config = _cloud_config(databricks_profile, "native")
+    results = _run_cloud_vocabulary(
+        postgres_engine, committed_pipeline, config, schema, {}, suffix="_native"
+    )
     for action, outcome in results.items():
         assert outcome.status == "SUCCESS", f"{action}: {outcome.message}"
 
 
-def test_sql_actions_run_against_real_snowflake(
+@pytest.mark.timeout(300)
+def test_sql_actions_run_against_real_databricks_iceberg(
+    postgres_engine, databricks_profile, committed_pipeline
+):
+    # TABLE_FORMAT=iceberg on Databricks means a managed Delta table with
+    # UniForm enabled (see sql_actions.ICEBERG_TABLE_CLAUSE's own comment,
+    # 2026-09-23), not literal `USING ICEBERG` -- needs no external storage
+    # parameters either way (unlike Snowflake's EXTERNAL VOLUME below), so
+    # this needs nothing extra beyond the same token the native test above
+    # uses.
+    schema = os.environ.get("ETL_CRAFT_TEST_DATABRICKS_SCHEMA", "default")
+    config = _cloud_config(databricks_profile, "iceberg")
+    results = _run_cloud_vocabulary(
+        postgres_engine, committed_pipeline, config, schema, {}, suffix="_iceberg"
+    )
+    for action, outcome in results.items():
+        assert outcome.status == "SUCCESS", f"{action}: {outcome.message}"
+
+
+@pytest.mark.timeout(300)
+def test_sql_actions_run_against_real_snowflake_native(
     postgres_engine, snowflake_profile, committed_pipeline
 ):
-    # Snowflake Iceberg tables need an EXTERNAL VOLUME over real cloud storage,
-    # which a trial account does not include -- so without it this runs the
-    # `native` path instead of skipping outright. Connection, auth and the
-    # whole action vocabulary are still exercised either way.
+    schema = os.environ.get("ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA", "PUBLIC")
+    config = _cloud_config(snowflake_profile, "native")
+    results = _run_cloud_vocabulary(
+        postgres_engine, committed_pipeline, config, schema, {}, suffix="_native"
+    )
+    for action, outcome in results.items():
+        assert outcome.status == "SUCCESS", f"{action}: {outcome.message}"
+
+
+@pytest.mark.timeout(300)
+def test_sql_actions_run_against_real_snowflake_iceberg(
+    postgres_engine, snowflake_profile, committed_pipeline
+):
+    # Zero-config by default: with neither CFG_TASK_PARAMETERS.EXTERNAL_VOLUME
+    # nor .BASE_LOCATION declared, sql_actions._create_iceberg_table_with_
+    # storage falls back to EXTERNAL_VOLUME = 'SNOWFLAKE_MANAGED' -- a
+    # reserved value meaning "Snowflake's own storage, not a customer
+    # bucket" -- which needs no cloud storage setup at all and is verified
+    # live 2026-09-23 (DDL/INSERT/CTAS all succeed, SHOW TABLES reports
+    # is_iceberg='Y'). A team with its own external volume can still opt in
+    # via those two task parameters, which this test also exercises if both
+    # ETL_CRAFT_TEST_SNOWFLAKE_EXTERNAL_VOLUME/_BASE_LOCATION are set.
     schema = os.environ.get("ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA", "PUBLIC")
     volume = os.environ.get("ETL_CRAFT_TEST_SNOWFLAKE_EXTERNAL_VOLUME", "")
     base = os.environ.get("ETL_CRAFT_TEST_SNOWFLAKE_BASE_LOCATION", "")
-    if volume and base:
-        table_format, extra = "iceberg", {"EXTERNAL_VOLUME": volume, "BASE_LOCATION": base}
-    else:
-        table_format, extra = "native", {}
-    config = _cloud_config(snowflake_profile, table_format)
-    results = _run_cloud_vocabulary(postgres_engine, committed_pipeline, config, schema, extra)
+    extra = {"EXTERNAL_VOLUME": volume, "BASE_LOCATION": base} if (volume and base) else {}
+    config = _cloud_config(snowflake_profile, "iceberg")
+    results = _run_cloud_vocabulary(
+        postgres_engine, committed_pipeline, config, schema, extra, suffix="_iceberg"
+    )
     for action, outcome in results.items():
         assert outcome.status == "SUCCESS", f"{action}: {outcome.message}"
 
@@ -6518,6 +6732,57 @@ def test_business_rules_bad_rule_sql_fails_and_marks_run_log_failed(
     assert status == "FAILED"
 
 
+def test_business_rules_commit_failure_marks_run_log_failed_not_stuck_in_progress(
+    postgres_engine, committed_pipeline, warehouse_tables, monkeypatch
+):
+    # E3-05. _run_one_rule's warehouse-fetch step (exercised above by
+    # test_business_rules_bad_rule_sql_fails_and_marks_run_log_failed) was
+    # the only part wrapped in a try/except that marked the run log FAILED.
+    # The block that commits results -- INSERT/UPDATE AUD_BUSINESS_RULES_
+    # RESULTS, then _mark_run_log(..., "SUCCESS") -- had none of its own: a
+    # failure there propagated straight out of _run_one_rule uncaught. The
+    # task still failed overall (handlers.dispatch's own catch), but this
+    # rule's AUD_BUSINESS_RULES_RUN_LOG row -- created IN-PROGRESS in an
+    # earlier, already-committed transaction -- was never updated, and
+    # stayed IN-PROGRESS forever.
+    target = f"public.brx_commit_fail_{committed_pipeline}"
+    bare_table = target.split(".", 1)[1]
+    warehouse_tables.append(target)
+    with postgres_engine.begin() as conn:
+        conn.execute(text(f"CREATE TABLE {bare_table} (id int, pipeline_run_id bigint)"))
+
+    task_id = insert_committed_task(postgres_engine, committed_pipeline, "check", "BUSINESS_RULES")
+    business_rule_id = insert_committed_business_rule(
+        postgres_engine,
+        committed_pipeline,
+        task_id,
+        "commit_fail",
+        target,
+        "id",
+        business_rule_sql="SELECT 1 WHERE t.id IS NOT NULL",
+    )
+    seed_active_run(postgres_engine, committed_pipeline)
+
+    real_mark_run_log = business_rules_module._mark_run_log
+
+    def _fail_on_success(conn, business_rule_run_id, status):
+        if status == "SUCCESS":
+            raise RuntimeError("simulated commit failure")
+        real_mark_run_log(conn, business_rule_run_id, status)
+
+    monkeypatch.setattr(business_rules_module, "_mark_run_log", _fail_on_success)
+
+    outcome = run_task(postgres_engine, make_config(warehouse=True), "TEST_CONCURRENT_PL", "check")
+
+    assert outcome.status == "FAILED"
+    with postgres_engine.connect() as conn:
+        status = conn.execute(
+            text("SELECT STATUS FROM AUD_BUSINESS_RULES_RUN_LOG WHERE BUSINESS_RULE_ID = :id"),
+            {"id": business_rule_id},
+        ).scalar_one()
+    assert status == "FAILED"
+
+
 # ------------------------------------------------------------------------------
 # scripts.py — HANDLER=PYTHON
 # ------------------------------------------------------------------------------
@@ -7306,6 +7571,37 @@ def test_collect_docs_includes_pipeline_with_waves_and_steps(postgres_engine, co
     assert data.steps[0].task_code == "t"
 
 
+def test_collect_docs_does_not_collide_task_codes_across_pipelines(
+    postgres_engine, two_committed_pipelines
+):
+    # E3-03. fetch_recorded_versions used to key its result by bare TASK_CODE
+    # -- but ux_tasks_code_active scopes TASK_CODE uniqueness *per pipeline*,
+    # not globally, so two independently-authored pipelines sharing an
+    # ordinary task name (here, deliberately, the same name on both sides of
+    # a real cross-pipeline dependency) silently overwrote each other's
+    # version badge, with whichever pipeline's page collect_docs built last
+    # winning on both.
+    downstream_id, upstream_id = two_committed_pipelines
+    down_task = _documented_sql_task(
+        postgres_engine, downstream_id, "shared_task", "SELECT 1 AS x", doc="Downstream doc."
+    )
+    up_task = _documented_sql_task(
+        postgres_engine, upstream_id, "shared_task", "SELECT 1 AS x", doc="Upstream doc."
+    )
+    with postgres_engine.begin() as conn:
+        assert refresh_task_documentation(conn, down_task, "Downstream doc.") == 1
+        assert refresh_task_documentation(conn, down_task, "Downstream doc., v2") == 2
+        assert refresh_task_documentation(conn, up_task, "Upstream doc.") == 1
+
+    with postgres_engine.connect() as conn:
+        docs = collect_docs(conn)
+
+    down_data = next(d for d in docs if d[0].pipeline_code == "TEST_XPIPE_DOWN")[1]
+    up_data = next(d for d in docs if d[0].pipeline_code == "TEST_XPIPE_UP")[1]
+    assert down_data.documentation["shared_task"] == ("Downstream doc.", 2)
+    assert up_data.documentation["shared_task"] == ("Upstream doc.", 1)
+
+
 def test_generate_docs_writes_expected_files(postgres_engine, committed_pipeline, tmp_path):
     output_dir = tmp_path / "docs-site"
     with postgres_engine.connect() as conn:
@@ -7505,11 +7801,11 @@ def test_setup_brings_a_real_database_up_then_keeps_it_current(
             "ETL_CRAFT_MODE=local\n"
             "ETL_CRAFT_SOURCE_TYPE=file\n"
             "ETL_CRAFT_SOURCE_PATH=.env\n"
-            "ETL_CRAFT_POSTGRES_PROFILE=dev\n"
-            f"ETL_CRAFT_POSTGRES_JDBC_URL=jdbc:postgresql://{url.host}:{url.port}/{db_name}\n"
-            f"ETL_CRAFT_POSTGRES_USER={url.username}\n"
-            "ETL_CRAFT_POSTGRES_AUTH_MODE=password\n"
-            f"ETL_CRAFT_POSTGRES_DEV_SECRET={url.password}\n"
+            "ETL_CRAFT_ENGINE_PROFILE=dev\n"
+            f"ENGINE_JDBC_URL=jdbc:postgresql://{url.host}:{url.port}/{db_name}\n"
+            f"ENGINE_USER={url.username}\n"
+            "ENGINE_AUTH_MODE=password\n"
+            f"ENGINE_SECRET={url.password}\n"
         )
 
         first = run_setup(

@@ -683,12 +683,70 @@ def test_translate_jdbc_url_parses_snowflakes_account_host_form():
     assert parts["database"] == "ANALYTICS/PUBLIC"
     # ...but qualify() needs the catalog half alone.
     assert parts["catalog"] == "ANALYTICS"
-    assert parts["query"] == {"warehouse": "COMPUTE_WH", "role": "SYSADMIN"}
+    assert parts["query"] == {"warehouse": "COMPUTE_WH", "role": "SYSADMIN", "account": "myacct"}
 
 
 def test_translate_jdbc_url_snowflake_without_a_database_is_rejected():
     with pytest.raises(ConnectionError_, match="no db="):
         translate_jdbc_url("jdbc:snowflake://myacct.snowflakecomputing.com/?warehouse=WH")
+
+
+def test_snowflake_full_host_provides_account_to_installed_driver():
+    pytest.importorskip("snowflake.sqlalchemy")
+    from sqlalchemy.engine import URL
+
+    dialect_name, parts = translate_jdbc_url(
+        "jdbc:snowflake://myorg-myacct.snowflakecomputing.com/?db=ANALYTICS"
+    )
+    url = URL.create(
+        dialect_name, host=parts["host"], database=parts["database"], query=parts["query"]
+    )
+    _, args = url.get_dialect()().create_connect_args(url)
+    assert args["account"] == "myorg-myacct"
+    assert args["host"] == "myorg-myacct.snowflakecomputing.com"
+
+
+def test_cloud_profiles_do_not_reuse_local_warehouse_password(monkeypatch):
+    from conftest import _cloud_warehouse_profile
+
+    monkeypatch.setenv("ETL_CRAFT_WAREHOUSE_DEV_SECRET", "local-password")
+    monkeypatch.setenv(
+        "ETL_CRAFT_TEST_DATABRICKS_JDBC_URL", "jdbc:databricks://host/default;httpPath=/sql"
+    )
+    monkeypatch.setenv("ETL_CRAFT_TEST_DATABRICKS_TOKEN", "cloud-token")
+    profile = _cloud_warehouse_profile("DATABRICKS")
+    config = SimpleNamespace(source=SourceConfig(type="environment"))
+    assert resolve_secret(config, profile) == "cloud-token"
+
+
+def test_cloud_snowflake_browser_profile_needs_no_secret(monkeypatch):
+    from conftest import _cloud_warehouse_profile
+
+    monkeypatch.setenv(
+        "ETL_CRAFT_TEST_SNOWFLAKE_JDBC_URL",
+        "jdbc:snowflake://org-acct.snowflakecomputing.com/?db=DB&authenticator=externalbrowser",
+    )
+    monkeypatch.setenv("ETL_CRAFT_TEST_SNOWFLAKE_KEY_FILE", "/placeholder/key.p8")
+    monkeypatch.delenv("ETL_CRAFT_TEST_SNOWFLAKE_SECRET", raising=False)
+    assert _cloud_warehouse_profile("SNOWFLAKE").auth_mode == "none"
+
+
+def test_cloud_snowflake_url_password_is_preserved_and_removed_from_profile_url(monkeypatch):
+    from conftest import _cloud_warehouse_profile
+
+    monkeypatch.setenv(
+        "ETL_CRAFT_TEST_SNOWFLAKE_JDBC_URL",
+        "jdbc:snowflake://org-acct.snowflakecomputing.com/?db=DB&user=tester&password=test#value",
+    )
+    monkeypatch.setenv("ETL_CRAFT_TEST_SNOWFLAKE_KEY_FILE", "/placeholder/key.p8")
+    monkeypatch.setenv("ETL_CRAFT_TEST_SNOWFLAKE_SECRET", "placeholder")
+    profile = _cloud_warehouse_profile("SNOWFLAKE")
+    assert profile.auth_mode == "password"
+    assert profile.user == "tester"
+    assert "password" not in profile.jdbc_url
+    assert "test#value" not in profile.jdbc_url
+    config = SimpleNamespace(source=SourceConfig(type="environment"))
+    assert resolve_secret(config, profile) == "test#value"
 
 
 def test_translate_jdbc_url_trino_takes_the_generic_parser():
@@ -701,12 +759,25 @@ def test_translate_jdbc_url_trino_takes_the_generic_parser():
     assert parts["catalog"] == "iceberg"
 
 
+# [DEVIATION, 2026-09-23] Databricks' Iceberg-format clause is a managed
+# Delta table with UniForm enabled, not `USING ICEBERG` -- see
+# sql_actions.ICEBERG_TABLE_CLAUSE's own comment for why (verified live:
+# `USING ICEBERG` produces `format: 'iceberg'` with no Delta log at all,
+# where UniForm reports `format: 'delta'` plus
+# `delta.universalFormat.enabledFormats: iceberg`).
+_DATABRICKS_ICEBERG_CLAUSE = (
+    "USING DELTA TBLPROPERTIES "
+    "('delta.enableIcebergCompatV2' = 'true', "
+    "'delta.universalFormat.enabledFormats' = 'iceberg')"
+)
+
+
 @pytest.mark.parametrize(
     "dialect_name, expected",
     [
         ("postgresql+psycopg", ""),
         ("duckdb", ""),
-        ("databricks", "USING ICEBERG"),
+        ("databricks", _DATABRICKS_ICEBERG_CLAUSE),
         # An engine pointed at an Iceberg catalog writes Iceberg without being
         # told to, and a clause would be a syntax error.
         ("trino", ""),
@@ -789,7 +860,7 @@ def test_an_unrecognized_table_format_is_rejected_rather_than_assumed():
 @pytest.mark.parametrize(
     "dialect_name, table_format, expected",
     [
-        ("databricks", "iceberg", "USING ICEBERG"),
+        ("databricks", "iceberg", _DATABRICKS_ICEBERG_CLAUSE),
         ("databricks", "native", "USING DELTA"),
         # Trino's format comes from the catalog either way, and a clause would
         # be a syntax error.
@@ -816,14 +887,36 @@ def test_create_table_as_makes_a_native_snowflake_table_without_storage():
     assert conn.statements == ["CREATE TABLE db.sch.t AS SELECT 1"]
 
 
-def test_create_table_as_refuses_snowflake_without_iceberg_storage():
-    # Snowflake's Iceberg tables need a different statement (CREATE ICEBERG
-    # TABLE) plus an EXTERNAL_VOLUME and BASE_LOCATION. With neither declared,
-    # refusing beats silently creating an ordinary Snowflake table that looks
-    # fine and is not Iceberg -- producing the wrong thing successfully is
-    # worse than failing.
+def test_create_table_as_defaults_to_snowflake_managed_storage():
+    # [DEVIATION, 2026-09-23] With neither EXTERNAL_VOLUME nor BASE_LOCATION
+    # declared, this used to refuse rather than risk silently creating an
+    # ordinary (non-Iceberg) Snowflake table. It no longer needs to:
+    # EXTERNAL_VOLUME = 'SNOWFLAKE_MANAGED' is a reserved value that produces
+    # a genuine Iceberg table backed by Snowflake's own storage, verified
+    # live (DDL/INSERT/CTAS all succeed, SHOW TABLES reports is_iceberg='Y').
+    # No BASE_LOCATION is emitted for it -- there is no customer bucket to
+    # place a path within.
     conn = _FakeDialectConn("snowflake", info={TABLE_FORMAT_INFO_KEY: "iceberg"})
-    with pytest.raises(HandlerError, match="EXTERNAL_VOLUME"):
+    create_table_as(conn, "db.sch.t", "SELECT 1")
+    statement = conn.statements[0]
+    assert statement.startswith("CREATE ICEBERG TABLE db.sch.t")
+    assert "EXTERNAL_VOLUME = 'SNOWFLAKE_MANAGED'" in statement
+    assert "ICEBERG_VERSION = 2" in statement
+    assert "BASE_LOCATION" not in statement
+    assert statement.endswith("AS SELECT 1")
+
+
+def test_create_table_as_requires_base_location_for_a_real_customer_volume():
+    # A real, customer-owned EXTERNAL_VOLUME still needs BASE_LOCATION --
+    # only SNOWFLAKE_MANAGED (no customer bucket at all) can omit it.
+    conn = _FakeDialectConn(
+        "snowflake",
+        info={
+            TABLE_FORMAT_INFO_KEY: "iceberg",
+            TASK_PARAMS_INFO_KEY: {"EXTERNAL_VOLUME": "my_vol"},
+        },
+    )
+    with pytest.raises(HandlerError, match="BASE_LOCATION"):
         create_table_as(conn, "db.sch.t", "SELECT 1")
     assert conn.statements == []
 
@@ -843,6 +936,7 @@ def test_create_table_as_builds_a_snowflake_iceberg_table_when_storage_is_declar
     statement = conn.statements[0]
     assert statement.startswith("CREATE ICEBERG TABLE db.sch.t")
     assert "EXTERNAL_VOLUME = 'my_vol'" in statement
+    assert "ICEBERG_VERSION = 2" in statement
     assert "BASE_LOCATION = 'analytics/customers'" in statement
     assert statement.endswith("AS SELECT 1")
 
@@ -1149,6 +1243,15 @@ def test_missing_section_rejected(tmp_path):
     no_postgres = VALID_YAML.replace("Postgres:", "NotPostgres:")
     with pytest.raises(ConfigError):
         load_config(write_config(tmp_path, no_postgres))
+
+
+def test_mixed_legacy_and_manifest_sections_rejected(tmp_path):
+    # A half-migrated file must not silently pick one format's credentials
+    # over the other's — _parse_config's own guard for exactly that, and (per
+    # ITERATION_3.md's test-coverage-gap list) previously untested entirely.
+    mixed = VALID_YAML + "\nOrchestration:\n  Mode: local\n"
+    with pytest.raises(ConfigError, match="mixes the manifest sections"):
+        load_config(write_config(tmp_path, mixed))
 
 
 def test_invalid_mode_rejected(tmp_path):
@@ -2609,18 +2712,18 @@ def test_cli_setup_creates_config_and_reports_what_it_did(tmp_path, monkeypatch,
         "ETL_CRAFT_MODE=local\n"
         "ETL_CRAFT_SOURCE_TYPE=file\n"
         "ETL_CRAFT_SOURCE_PATH=.env\n"
-        "ETL_CRAFT_POSTGRES_PROFILE=dev\n"
-        "ETL_CRAFT_POSTGRES_JDBC_URL=jdbc:postgresql://127.0.0.1:1/nope\n"
-        "ETL_CRAFT_POSTGRES_USER=u\n"
-        "ETL_CRAFT_POSTGRES_AUTH_MODE=password\n"
-        "ETL_CRAFT_POSTGRES_DEV_SECRET=s\n"
+        "ETL_CRAFT_ENGINE_PROFILE=dev\n"
+        "ENGINE_JDBC_URL=jdbc:postgresql://127.0.0.1:1/nope\n"
+        "ENGINE_USER=u\n"
+        "ENGINE_AUTH_MODE=password\n"
+        "ENGINE_SECRET=s\n"
     )
 
     exit_code = cli_main(["setup"])
 
     out = capsys.readouterr()
     assert "created" in out.out
-    assert "ETL_CRAFT_POSTGRES_DEV_SECRET" in out.out
+    assert "ENGINE_SECRET" in out.out
     assert (tmp_path / "craft-connector.yml").is_file()
     # Unreachable database -> reported as a problem, exit 1, config still written.
     assert exit_code == 1
@@ -2633,11 +2736,11 @@ def test_cli_setup_is_idempotent(tmp_path, monkeypatch, capsys):
         "ETL_CRAFT_MODE=local\n"
         "ETL_CRAFT_SOURCE_TYPE=file\n"
         "ETL_CRAFT_SOURCE_PATH=.env\n"
-        "ETL_CRAFT_POSTGRES_PROFILE=dev\n"
-        "ETL_CRAFT_POSTGRES_JDBC_URL=jdbc:postgresql://127.0.0.1:1/nope\n"
-        "ETL_CRAFT_POSTGRES_USER=u\n"
-        "ETL_CRAFT_POSTGRES_AUTH_MODE=password\n"
-        "ETL_CRAFT_POSTGRES_DEV_SECRET=s\n"
+        "ETL_CRAFT_ENGINE_PROFILE=dev\n"
+        "ENGINE_JDBC_URL=jdbc:postgresql://127.0.0.1:1/nope\n"
+        "ENGINE_USER=u\n"
+        "ENGINE_AUTH_MODE=password\n"
+        "ENGINE_SECRET=s\n"
     )
     cli_main(["setup"])
     capsys.readouterr()
@@ -2656,10 +2759,10 @@ def test_cli_setup_reads_the_environment_when_asked(tmp_path, monkeypatch, capsy
     for key, value in {
         "ETL_CRAFT_MODE": "local",
         "ETL_CRAFT_SOURCE_TYPE": "environment",
-        "ETL_CRAFT_POSTGRES_PROFILE": "prod",
-        "ETL_CRAFT_POSTGRES_JDBC_URL": "jdbc:postgresql://127.0.0.1:1/nope",
-        "ETL_CRAFT_POSTGRES_USER": "u",
-        "ETL_CRAFT_POSTGRES_AUTH_MODE": "password",
+        "ETL_CRAFT_ENGINE_PROFILE": "prod",
+        "ENGINE_JDBC_URL": "jdbc:postgresql://127.0.0.1:1/nope",
+        "ENGINE_USER": "u",
+        "ENGINE_AUTH_MODE": "password",
     }.items():
         monkeypatch.setenv(key, value)
 
@@ -2667,7 +2770,7 @@ def test_cli_setup_reads_the_environment_when_asked(tmp_path, monkeypatch, capsy
 
     written = yaml.safe_load((tmp_path / "craft-connector.yml").read_text())
     assert written["Engine"]["Profile"] == "prod"
-    assert "ETL_CRAFT_POSTGRES_PROD_SECRET" in capsys.readouterr().out
+    assert "ENGINE_SECRET" in capsys.readouterr().out
 
 
 def test_cli_setup_without_any_settings_source_says_so(tmp_path, monkeypatch, capsys):
@@ -2765,10 +2868,10 @@ VALID_ENV = """
 ETL_CRAFT_MODE=local
 ETL_CRAFT_SOURCE_TYPE=file
 ETL_CRAFT_SOURCE_PATH=__SELF__
-ETL_CRAFT_POSTGRES_PROFILE=dev
-ETL_CRAFT_POSTGRES_JDBC_URL=jdbc:postgresql://localhost:5432/etl_craft
-ETL_CRAFT_POSTGRES_USER=etl_engine
-ETL_CRAFT_POSTGRES_AUTH_MODE=password
+ETL_CRAFT_ENGINE_PROFILE=dev
+ENGINE_JDBC_URL=jdbc:postgresql://localhost:5432/etl_craft
+ENGINE_USER=etl_engine
+ENGINE_AUTH_MODE=password
 """
 
 
@@ -2789,6 +2892,74 @@ def test_configure_from_env_creates_valid_config(tmp_path):
     assert config.cloning.scope == "cfg"
 
 
+@pytest.mark.parametrize(
+    "name,fields",
+    [
+        (
+            "Databricks",
+            {
+                "jdbc_url": "jdbc:databricks://host/default;httpPath=/sql/x;ConnCatalog=old",
+                "catalog": "practice_catalog",
+                "schema": "practice_schema",
+            },
+        ),
+        (
+            "Snowflake",
+            {
+                "user": "tester",
+                "account": "org-account",
+                "database": "DB",
+                "schema": "SCHEMA",
+                "warehouse": "WH",
+                "role": "ROLE",
+            },
+        ),
+    ],
+)
+def test_preferred_cloud_connection_bootstrap_round_trip(tmp_path, name, fields):
+    fields = {**fields, "token": "base-token"}
+    contents = VALID_ENV + f"WAREHOUSE_NAME={name}\n"
+    contents += "\n".join(f"WAREHOUSE_{key.upper()}={value}" for key, value in fields.items())
+    contents += "\nWAREHOUSE_DEV_TOKEN=tier-token\n"
+    env_path = _write_env(tmp_path, contents)
+    path = tmp_path / "craft-connector.yml"
+    configure_from_env(env_path, path)
+    config = load_config(path)
+    profile = config.warehouse.active
+    assert profile.auth_mode == "token"
+    assert resolve_secret(config, profile) == "tier-token"
+    assert "base-token" not in path.read_text()
+    assert "tier-token" not in profile.jdbc_url
+    raw = yaml.safe_load(path.read_text())
+    assert set(raw["Warehouse"]["Variables"]) == set(fields)
+    assert ("Warehouse.dev", "WAREHOUSE_TOKEN") in _required_secret_vars(raw)
+    dialect, parts = translate_jdbc_url(profile.jdbc_url)
+    assert dialect == name.lower()
+    if name == "Databricks":
+        assert parts["query"]["catalog"] == "practice_catalog"
+        assert parts["query"]["schema"] == "practice_schema"
+    else:
+        assert parts["database"] == "DB/SCHEMA"
+        assert parts["query"]["role"] == "ROLE"
+        assert profile.user == "tester"
+
+
+def test_snowflake_pat_uses_driver_password_without_logging_token(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(warehouse_module, "_dbapi_connect", lambda url: captured.update(url=url))
+    profile = ConnectionProfile(
+        section="WAREHOUSE",
+        name="dev",
+        user="tester",
+        auth_mode="token",
+        jdbc_url="jdbc:snowflake://org-account.snowflakecomputing.com/?db=DB&schema=SCHEMA&warehouse=WH&role=ROLE",
+    )
+    WAREHOUSE_AUTH_REGISTRY["token"](profile, "fake-pat")()
+    assert captured["url"].password == "fake-pat"
+    assert captured["url"].username == "tester"
+    assert "fake-pat" not in str(captured["url"])
+
+
 def test_configure_from_env_writes_a_warehouse_section(tmp_path):
     # `setup` never wrote [Warehouse] at all, so the one command that is meant
     # to take a team from nothing to a working deployment produced a config in
@@ -2796,9 +2967,9 @@ def test_configure_from_env_writes_a_warehouse_section(tmp_path):
     # section configured". Same class of gap as E2-13.
     env_path = _write_env(
         tmp_path,
-        VALID_ENV + "ETL_CRAFT_WAREHOUSE_JDBC_URL=jdbc:postgresql://localhost:5432/analytics\n"
-        "ETL_CRAFT_WAREHOUSE_USER=warehouse_user\n"
-        "ETL_CRAFT_WAREHOUSE_AUTH_MODE=password\n"
+        VALID_ENV + "WAREHOUSE_JDBC_URL=jdbc:postgresql://localhost:5432/analytics\n"
+        "WAREHOUSE_USER=warehouse_user\n"
+        "WAREHOUSE_AUTH_MODE=password\n"
         "ETL_CRAFT_WAREHOUSE_TABLE_FORMAT=native\n",
     )
     output_path = tmp_path / "craft-connector.yml"
@@ -2826,8 +2997,8 @@ def test_configure_from_env_warehouse_is_optional(tmp_path):
 def test_configure_from_env_duckdb_warehouse_needs_no_user(tmp_path):
     env_path = _write_env(
         tmp_path,
-        VALID_ENV + "ETL_CRAFT_WAREHOUSE_JDBC_URL=jdbc:duckdb:/data/warehouse.duckdb\n"
-        "ETL_CRAFT_WAREHOUSE_AUTH_MODE=none\n",
+        VALID_ENV + "WAREHOUSE_JDBC_URL=jdbc:duckdb:/data/warehouse.duckdb\n"
+        "WAREHOUSE_AUTH_MODE=none\n",
     )
     output_path = tmp_path / "craft-connector.yml"
 
@@ -2844,11 +3015,10 @@ def test_configure_from_env_writes_a_snowflake_key_pair_profile(tmp_path):
     # stays a secret, and the key itself is in neither.
     env_path = _write_env(
         tmp_path,
-        VALID_ENV
-        + "ETL_CRAFT_WAREHOUSE_JDBC_URL=jdbc:snowflake://acct.snowflakecomputing.com/?db=AN\n"
-        "ETL_CRAFT_WAREHOUSE_USER=SVC_ETL\n"
-        "ETL_CRAFT_WAREHOUSE_AUTH_MODE=key_file\n"
-        "ETL_CRAFT_WAREHOUSE_KEY_FILE=/keys/rsa_key.p8\n",
+        VALID_ENV + "WAREHOUSE_JDBC_URL=jdbc:snowflake://acct.snowflakecomputing.com/?db=AN\n"
+        "WAREHOUSE_USER=SVC_ETL\n"
+        "WAREHOUSE_AUTH_MODE=key_file\n"
+        "WAREHOUSE_KEY_FILE=/keys/rsa_key.p8\n",
     )
     output_path = tmp_path / "craft-connector.yml"
 
@@ -2862,12 +3032,11 @@ def test_configure_from_env_writes_a_snowflake_key_pair_profile(tmp_path):
 def test_configure_from_env_key_file_auth_requires_a_key_path(tmp_path):
     env_path = _write_env(
         tmp_path,
-        VALID_ENV
-        + "ETL_CRAFT_WAREHOUSE_JDBC_URL=jdbc:snowflake://acct.snowflakecomputing.com/?db=AN\n"
-        "ETL_CRAFT_WAREHOUSE_USER=SVC_ETL\n"
-        "ETL_CRAFT_WAREHOUSE_AUTH_MODE=key_file\n",
+        VALID_ENV + "WAREHOUSE_JDBC_URL=jdbc:snowflake://acct.snowflakecomputing.com/?db=AN\n"
+        "WAREHOUSE_USER=SVC_ETL\n"
+        "WAREHOUSE_AUTH_MODE=key_file\n",
     )
-    with pytest.raises(ConfigError, match="ETL_CRAFT_WAREHOUSE_KEY_FILE is required"):
+    with pytest.raises(ConfigError, match="WAREHOUSE_KEY_FILE is required"):
         configure_from_env(env_path, tmp_path / "craft-connector.yml")
 
 
@@ -2877,8 +3046,8 @@ def test_configure_from_env_token_auth_needs_no_user(tmp_path):
     # the shipped .env template end to end rather than only reading it.
     env_path = _write_env(
         tmp_path,
-        VALID_ENV + "ETL_CRAFT_WAREHOUSE_JDBC_URL=jdbc:databricks://h:443/default;httpPath=/sql/x\n"
-        "ETL_CRAFT_WAREHOUSE_AUTH_MODE=token\n",
+        VALID_ENV + "WAREHOUSE_JDBC_URL=jdbc:databricks://h:443/default;httpPath=/sql/x\n"
+        "WAREHOUSE_AUTH_MODE=token\n",
     )
     output_path = tmp_path / "craft-connector.yml"
 
@@ -2890,10 +3059,10 @@ def test_configure_from_env_token_auth_needs_no_user(tmp_path):
 def test_configure_from_env_warehouse_requires_a_user_when_authenticating(tmp_path):
     env_path = _write_env(
         tmp_path,
-        VALID_ENV + "ETL_CRAFT_WAREHOUSE_JDBC_URL=jdbc:postgresql://localhost:5432/analytics\n"
-        "ETL_CRAFT_WAREHOUSE_AUTH_MODE=password\n",
+        VALID_ENV + "WAREHOUSE_JDBC_URL=jdbc:postgresql://localhost:5432/analytics\n"
+        "WAREHOUSE_AUTH_MODE=password\n",
     )
-    with pytest.raises(ConfigError, match="ETL_CRAFT_WAREHOUSE_USER is required"):
+    with pytest.raises(ConfigError, match="WAREHOUSE_USER is required"):
         configure_from_env(env_path, tmp_path / "craft-connector.yml")
 
 
@@ -2907,10 +3076,10 @@ def test_configure_from_env_missing_env_file_raises(tmp_path):
     [
         "ETL_CRAFT_MODE",
         "ETL_CRAFT_SOURCE_TYPE",
-        "ETL_CRAFT_POSTGRES_PROFILE",
-        "ETL_CRAFT_POSTGRES_JDBC_URL",
-        "ETL_CRAFT_POSTGRES_USER",
-        "ETL_CRAFT_POSTGRES_AUTH_MODE",
+        "ETL_CRAFT_ENGINE_PROFILE",
+        "ENGINE_JDBC_URL",
+        "ENGINE_USER",
+        "ENGINE_AUTH_MODE",
     ],
 )
 def test_configure_from_env_requires_each_field(tmp_path, key):
@@ -2965,9 +3134,7 @@ def test_configure_from_env_file_source_with_path(tmp_path):
 def test_configure_from_env_rejects_invalid_auth_mode(tmp_path):
     env_path = _write_env(
         tmp_path,
-        VALID_ENV.replace(
-            "ETL_CRAFT_POSTGRES_AUTH_MODE=password", "ETL_CRAFT_POSTGRES_AUTH_MODE=bogus"
-        ),
+        VALID_ENV.replace("ENGINE_AUTH_MODE=password", "ENGINE_AUTH_MODE=bogus"),
     )
     with pytest.raises(ConfigError):
         configure_from_env(env_path, tmp_path / "craft-connector.yml")
@@ -2988,6 +3155,45 @@ def test_configure_from_env_enables_cloning(tmp_path):
     assert load_config(output_path).cloning.enabled is True
 
 
+def test_configure_from_env_writes_cloning_storage_parameters(tmp_path):
+    # E3-06. Nothing previously let `setup` write these at all -- the only
+    # way to get them into the manifest was hand-editing it, and the next
+    # `setup` run then silently discarded them (see the test below).
+    env_path = _write_env(
+        tmp_path,
+        VALID_ENV + "ETL_CRAFT_CLONING_ENABLED=true\n"
+        "ETL_CRAFT_CLONING_EXTERNAL_VOLUME=my_volume\n"
+        "ETL_CRAFT_CLONING_BASE_LOCATION=analytics/cfg\n",
+    )
+    output_path = tmp_path / "craft-connector.yml"
+
+    configure_from_env(env_path, output_path)
+
+    cloning = load_config(output_path).cloning
+    assert cloning.external_volume == "my_volume"
+    assert cloning.base_location == "analytics/cfg"
+
+
+def test_setup_preserves_hand_added_cloning_storage_parameters(tmp_path):
+    # E3-06. Both write paths used to replace the whole Cloning block
+    # unconditionally on every run -- so a team that hand-added
+    # External_volume/Base_location to an already-written manifest (there was
+    # no bootstrap variable to set them through) had them silently dropped
+    # the next time `setup` ran, with no error and no warning.
+    output_path = tmp_path / "craft-connector.yml"
+    configure_from_env(_write_env(tmp_path, VALID_ENV, "first.env"), output_path)
+    raw = yaml.safe_load(output_path.read_text())
+    raw["Cloning"]["External_volume"] = "hand_added_volume"
+    raw["Cloning"]["Base_location"] = "hand/added/location"
+    output_path.write_text(yaml.safe_dump(raw, sort_keys=False))
+
+    configure_from_env(_write_env(tmp_path, VALID_ENV, "second.env"), output_path)
+
+    cloning = load_config(output_path).cloning
+    assert cloning.external_volume == "hand_added_volume"
+    assert cloning.base_location == "hand/added/location"
+
+
 def test_configure_from_env_includes_orchestrator_name(tmp_path):
     env_path = _write_env(tmp_path, VALID_ENV + "ETL_CRAFT_ORCHESTRATOR_NAME=Airflow\n")
     output_path = tmp_path / "craft-connector.yml"
@@ -3003,7 +3209,7 @@ def test_configure_from_env_replaces_the_selected_canonical_profile(tmp_path):
     configure_from_env(_write_env(tmp_path, VALID_ENV, "dev.env"), output_path)
 
     uat_env = VALID_ENV.replace(
-        "ETL_CRAFT_POSTGRES_PROFILE=dev", "ETL_CRAFT_POSTGRES_PROFILE=uat"
+        "ETL_CRAFT_ENGINE_PROFILE=dev", "ETL_CRAFT_ENGINE_PROFILE=uat"
     ).replace(
         "jdbc:postgresql://localhost:5432/etl_craft", "jdbc:postgresql://uat-host:5432/etl_craft"
     )
@@ -3011,8 +3217,86 @@ def test_configure_from_env_replaces_the_selected_canonical_profile(tmp_path):
 
     raw = yaml.safe_load(output_path.read_text())
     assert raw["Engine"]["Profile"] == "uat"
-    assert raw["Engine"]["Variables"]["jdbc_url"] == "ETL_CRAFT_POSTGRES_JDBC_URL"
+    assert raw["Engine"]["Variables"]["jdbc_url"] == "ENGINE_JDBC_URL"
     assert "jdbc:postgresql://uat-host:5432/etl_craft" not in output_path.read_text()
+
+
+def test_configure_from_env_writes_the_documented_variable_names(tmp_path):
+    # E3-01. `setup` used to hardcode ETL_CRAFT_POSTGRES_*/ETL_CRAFT_WAREHOUSE_*
+    # into the manifest's own Variables mapping -- a second, undocumented
+    # convention that didn't match what docs/craft-connector.variables.env and
+    # both shipped worked examples teach a team to hand-author
+    # (ENGINE_JDBC_URL, WAREHOUSE_JDBC_URL, ...). A team following the docs
+    # who then re-ran `setup` had its own Variables mapping silently replaced
+    # with names nothing in its environment had ever set, breaking every
+    # subsequent `etl-craft run`. Pin the exact names here so they cannot
+    # drift from the docs again without this test failing.
+    env_path = _write_env(
+        tmp_path,
+        VALID_ENV + "WAREHOUSE_JDBC_URL=jdbc:postgresql://localhost:5432/analytics\n"
+        "WAREHOUSE_USER=warehouse_user\n"
+        "WAREHOUSE_AUTH_MODE=password\n",
+    )
+    output_path = tmp_path / "craft-connector.yml"
+
+    configure_from_env(env_path, output_path)
+
+    raw = yaml.safe_load(output_path.read_text())
+    assert raw["Engine"]["Variables"] == {
+        "jdbc_url": "ENGINE_JDBC_URL",
+        "user": "ENGINE_USER",
+        "auth_mode": "ENGINE_AUTH_MODE",
+        "secret": "ENGINE_SECRET",
+    }
+    assert raw["Warehouse"]["Variables"] == {
+        "jdbc_url": "WAREHOUSE_JDBC_URL",
+        "auth_mode": "WAREHOUSE_AUTH_MODE",
+        "secret": "WAREHOUSE_SECRET",
+        "user": "WAREHOUSE_USER",
+    }
+    # Also the whole point: neither secret name embeds the profile, so it
+    # cannot go stale for a profile other than the one setup last ran with --
+    # config.py's own tier-scoped fallback (ENGINE_DEV_SECRET before
+    # ENGINE_SECRET) is what covers the multi-tier case instead.
+    assert "DEV" not in raw["Engine"]["Variables"]["secret"]
+
+
+def test_setup_does_not_discard_a_hand_authored_manifest_following_the_docs(tmp_path, monkeypatch):
+    # The concrete E3-01 failure scenario: a team hand-authors
+    # craft-connector.yml exactly as docs/configuration.md and the shipped
+    # worked examples teach (ENGINE_JDBC_URL etc.), sets those variables, and
+    # later runs `setup --from-environment` again to pick up a change. Before
+    # the fix, this silently overwrote Engine/Warehouse with
+    # ETL_CRAFT_POSTGRES_*/ETL_CRAFT_WAREHOUSE_* pointers that nothing in the
+    # environment had set, so the very next `etl-craft run` failed to resolve
+    # its connection. The bootstrap read and the written pointer are now the
+    # same name, so the re-run reproduces the hand-authored mapping exactly
+    # rather than discarding it.
+    hand_authored = (
+        "Orchestration:\n  Mode: local\n"
+        "Secrets:\n  Source_type: environment\n"
+        "Engine:\n  Profile: dev\n  Variables:\n"
+        "    jdbc_url: ENGINE_JDBC_URL\n    user: ENGINE_USER\n"
+        "    auth_mode: ENGINE_AUTH_MODE\n    secret: ENGINE_SECRET\n"
+    )
+    output_path = tmp_path / "craft-connector.yml"
+    output_path.write_text(hand_authored, encoding="utf-8")
+    for key, value in {
+        "ETL_CRAFT_MODE": "local",
+        "ETL_CRAFT_SOURCE_TYPE": "environment",
+        "ETL_CRAFT_ENGINE_PROFILE": "dev",
+        "ENGINE_JDBC_URL": "jdbc:postgresql://localhost:5432/etl_craft",
+        "ENGINE_USER": "etl_engine",
+        "ENGINE_AUTH_MODE": "password",
+        "ENGINE_SECRET": "s3cr3t",
+    }.items():
+        monkeypatch.setenv(key, value)
+
+    configure_from_env(None, output_path)
+
+    config = load_config(output_path)
+    assert config.postgres.active.jdbc_url == "jdbc:postgresql://localhost:5432/etl_craft"
+    assert resolve_secret(config, config.postgres.active) == "s3cr3t"
 
 
 # ==============================================================================

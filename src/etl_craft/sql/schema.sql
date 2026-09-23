@@ -805,3 +805,26 @@ COMMIT;
 --     row rather than adding rows. Carried by
 --     sql/migrations/0003_task_attempt_count.sql.
 -- ============================================================================
+--
+-- [ADDITION, 2026-09-22/23, the config-manifest pivot] SCHEMA_MIGRATIONS'
+-- own shape changed: SOURCE VARCHAR (ENGINE/PROJECT/LEGACY) and CHECKSUM
+-- VARCHAR(64) were added, the primary key moved from VERSION alone to
+-- (SOURCE, VERSION), and ck_schema_migrations_source/_checksum were added.
+-- migrate.py had kept one flat, unscoped ledger of applied filenames; this
+-- separates the packaged ENGINE migration stream from an optional
+-- deployment-specific PROJECT stream (so a team's own ./sql/migrations/
+-- cannot hide a packaged one under a colliding filename) and records each
+-- newly-applied file's SHA-256, so an already-applied migration that is
+-- later edited or removed stops the command rather than silently drifting
+-- from what was actually run. The table definition above (search
+-- SCHEMA_MIGRATIONS) already reflects this current shape directly — a
+-- fresh install gets it with no migration needed — but this trailer had no
+-- entry naming the change or the file that carries it forward, which
+-- sql/migrations/README.md's own stated convention requires ("a note in
+-- schema.sql's own 'POST-SIGNOFF CHANGES' block"). Carried to an
+-- already-deployed database by
+-- sql/migrations/0004_migration_streams_and_checksums.sql, which also
+-- backfills every pre-existing row to SOURCE='LEGACY' so migrate.py's own
+-- legacy-ledger-adoption logic has something well-defined to reconcile
+-- against rather than a NULL.
+-- ============================================================================

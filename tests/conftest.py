@@ -11,6 +11,7 @@ bring one up.
 """
 
 import os
+from urllib.parse import parse_qsl, urlencode
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -18,6 +19,11 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectionProfile
 from etl_craft.runlog import find_or_create_active_run
+from etl_craft.warehouse import (
+    PREFERRED_CONNECTION_FIELDS,
+    preferred_connection_url,
+    translate_jdbc_url,
+)
 
 TEST_DATABASE_URL_VAR = "ETL_CRAFT_TEST_DATABASE_URL"
 DEFAULT_TEST_DATABASE_URL = "postgresql+psycopg://etl_craft:etl_craft@localhost:55432/etl_craft"
@@ -76,41 +82,96 @@ def postgres_engine() -> Engine:
 # "export these variables and run the suite", locally or from CI secrets,
 # rather than "someone writes the tests first".
 #
+# [DEVIATION, 2026-09-23] TESTED AND RECOMMENDED: the preferred-connection
+# shape (warehouse.PREFERRED_CONNECTION_FIELDS), separate fields rather than
+# one JDBC URL with everything packed into its query string. This is the
+# branch _cloud_warehouse_profile takes when ETL_CRAFT_TEST_DATABRICKS_CATALOG
+# / ETL_CRAFT_TEST_SNOWFLAKE_ACCOUNT is set. Verified live 2026-09-23 for both:
+# Databricks (native and iceberg/UniForm both pass the full SQL action
+# vocabulary) and Snowflake (native and iceberg both pass the full
+# vocabulary too — Iceberg tables default to Snowflake's own internal
+# storage, EXTERNAL_VOLUME = 'SNOWFLAKE_MANAGED', so no cloud bucket has to
+# exist first; see sql_actions.SNOWFLAKE_MANAGED_VOLUME). A Programmatic
+# Access Token additionally needs a network policy assigned to the account
+# or user first — see docs/craft-connector.variables.env.
+#
 # Set, for Databricks:
 #   ETL_CRAFT_TEST_DATABRICKS_JDBC_URL   jdbc:databricks://<host>:443/default;
-#                                        httpPath=<path>;ConnCatalog=<catalog>
-#   ETL_CRAFT_TEST_DATABRICKS_TOKEN      a personal access token
+#                                        httpPath=<path>   (no ConnCatalog here
+#                                        — that is the CATALOG field below)
+#   ETL_CRAFT_TEST_DATABRICKS_CATALOG    the catalog half of catalog.schema.table
 #   ETL_CRAFT_TEST_DATABRICKS_SCHEMA     a schema the token may create in
+#   ETL_CRAFT_TEST_DATABRICKS_TOKEN      a personal access token
 #
 # ...and for Snowflake:
-#   ETL_CRAFT_TEST_SNOWFLAKE_JDBC_URL    jdbc:snowflake://<account>.snowflakecomputing.com/
-#                                        ?db=<db>&schema=<schema>&warehouse=<wh>
 #   ETL_CRAFT_TEST_SNOWFLAKE_USER
-#   ETL_CRAFT_TEST_SNOWFLAKE_SECRET      password, or the key passphrase
-#   ETL_CRAFT_TEST_SNOWFLAKE_KEY_FILE    optional; set it to use key-pair auth
+#   ETL_CRAFT_TEST_SNOWFLAKE_ACCOUNT     <org>-<account>, not a hostname
+#   ETL_CRAFT_TEST_SNOWFLAKE_DATABASE
 #   ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA      a schema the user may create in
+#   ETL_CRAFT_TEST_SNOWFLAKE_WAREHOUSE
+#   ETL_CRAFT_TEST_SNOWFLAKE_ROLE
+#   ETL_CRAFT_TEST_SNOWFLAKE_TOKEN       a Programmatic Access Token (PAT)
 #   ETL_CRAFT_TEST_SNOWFLAKE_EXTERNAL_VOLUME / _BASE_LOCATION
-#                                        optional; without them the Iceberg
-#                                        tests skip and the native ones run
+#                                        optional; opts the Iceberg test into
+#                                        a real customer-owned volume instead
+#                                        of Snowflake's own managed storage
+#
+# The older single-JDBC-URL shape (ETL_CRAFT_TEST_SNOWFLAKE_JDBC_URL / _USER /
+# _SECRET / _KEY_FILE, key-pair or password auth) is still supported as a
+# fallback — see _cloud_warehouse_profile's second branch below — for a team
+# standardising on RSA key-pair auth instead of PATs.
 def _cloud_warehouse_profile(prefix: str) -> ConnectionProfile | None:
     """Build a [Warehouse] profile from ETL_CRAFT_TEST_<PREFIX>_* , or None if unset."""
+    preferred = (
+        os.environ.get(f"ETL_CRAFT_TEST_{prefix}_ACCOUNT")
+        if prefix == "SNOWFLAKE"
+        else os.environ.get(f"ETL_CRAFT_TEST_{prefix}_CATALOG")
+    )
+    if preferred:
+        fields = {
+            key: os.environ.get(f"ETL_CRAFT_TEST_{prefix}_{key.upper()}", "")
+            for key in PREFERRED_CONNECTION_FIELDS[prefix.lower()]
+            if key != "token"
+        }
+        return ConnectionProfile(
+            section="WAREHOUSE",
+            name="dev",
+            jdbc_url=preferred_connection_url(prefix.lower(), fields),
+            user=fields.get("user", ""),
+            auth_mode="token",
+            extra={"secret_var": f"ETL_CRAFT_TEST_{prefix}_TOKEN"},
+        )
     jdbc_url = os.environ.get(f"ETL_CRAFT_TEST_{prefix}_JDBC_URL")
     if not jdbc_url:
         return None
     secret_env = f"ETL_CRAFT_TEST_{prefix}_SECRET"
+    url_password = None
+    url_user = None
+    if prefix == "SNOWFLAKE":
+        # JDBC query values can contain a literal '#'; do not parse them as
+        # a web URL fragment. Move credentials out of the logged engine URL.
+        base, _, query = jdbc_url.partition("?")
+        params = dict(parse_qsl(query))
+        url_password = params.pop("password", None)
+        url_user = params.pop("user", None)
+        jdbc_url = base + "?" + urlencode(params)
+        if url_password is not None:
+            os.environ[secret_env] = url_password
+    user = url_user or os.environ.get(f"ETL_CRAFT_TEST_{prefix}_USER", "")
     if prefix == "DATABRICKS":
         secret_env = f"ETL_CRAFT_TEST_{prefix}_TOKEN"
         auth_mode, user = "token", ""
+    elif translate_jdbc_url(jdbc_url)[1]["query"].get("authenticator") == "externalbrowser":
+        auth_mode = "none"
+    elif url_password is not None:
+        auth_mode = "password"
     elif os.environ.get(f"ETL_CRAFT_TEST_{prefix}_KEY_FILE"):
         auth_mode = "key_file"
-        user = os.environ.get(f"ETL_CRAFT_TEST_{prefix}_USER", "")
     else:
         auth_mode = "password"
-        user = os.environ.get(f"ETL_CRAFT_TEST_{prefix}_USER", "")
-    # The engine reads the secret by the variable name the profile implies, so
-    # mirror the test variable onto it rather than inventing a second path.
-    os.environ.setdefault("ETL_CRAFT_WAREHOUSE_DEV_SECRET", os.environ.get(secret_env, ""))
-    extra = {}
+    # Keep cloud credentials independent of the local Postgres fixture and
+    # of each other, using the profile's existing variable-name indirection.
+    extra = {"secret_var": secret_env}
     key_file = os.environ.get(f"ETL_CRAFT_TEST_{prefix}_KEY_FILE")
     if key_file:
         extra["key_file"] = key_file
@@ -496,11 +557,61 @@ def two_committed_pipelines(postgres_engine: Engine):
             ),
             ids,
         )
+        # [ADDITION, 2026-09-23, E3-03] Everything else that FKs onto
+        # CFG_TASKS/CFG_BUSINESS_RULES — the same tables committed_pipeline's
+        # own teardown already covers, and the same reason: leaving one out
+        # makes the CFG_TASKS delete below fail, and the *next* test then
+        # collides on PIPELINE_CODE instead of surfacing this cleanly.
+        conn.execute(
+            text(
+                "DELETE FROM AUD_BUSINESS_RULES_RESULTS WHERE BUSINESS_RULE_ID IN "
+                "(SELECT BUSINESS_RULE_ID FROM CFG_BUSINESS_RULES "
+                "WHERE PIPELINE_ID IN (:down, :up))"
+            ),
+            ids,
+        )
+        conn.execute(
+            text(
+                "DELETE FROM AUD_BUSINESS_RULES_RUN_LOG WHERE BUSINESS_RULE_ID IN "
+                "(SELECT BUSINESS_RULE_ID FROM CFG_BUSINESS_RULES "
+                "WHERE PIPELINE_ID IN (:down, :up))"
+            ),
+            ids,
+        )
+        conn.execute(
+            text(
+                "DELETE FROM AUD_COLUMN_LINEAGE WHERE TASK_ID IN "
+                "(SELECT TASK_ID FROM CFG_TASKS WHERE PIPELINE_ID IN (:down, :up))"
+            ),
+            ids,
+        )
+        conn.execute(
+            text(
+                "DELETE FROM AUD_TASK_DOCUMENTATION WHERE TASK_ID IN "
+                "(SELECT TASK_ID FROM CFG_TASKS WHERE PIPELINE_ID IN (:down, :up))"
+            ),
+            ids,
+        )
+        conn.execute(
+            text(
+                "DELETE FROM AUD_TASK_OFFSET_TRACKER WHERE TASK_ID IN "
+                "(SELECT TASK_ID FROM CFG_TASKS WHERE PIPELINE_ID IN (:down, :up))"
+            ),
+            ids,
+        )
         conn.execute(
             text(
                 "DELETE FROM AUD_TASK_RUN_LOG WHERE PIPELINE_RUN_ID IN "
                 "(SELECT PIPELINE_RUN_ID FROM AUD_PIPELINES_RUN_LOG "
                 "WHERE PIPELINE_ID IN (:down, :up))"
+            ),
+            ids,
+        )
+        conn.execute(text("DELETE FROM CFG_BUSINESS_RULES WHERE PIPELINE_ID IN (:down, :up)"), ids)
+        conn.execute(
+            text(
+                "DELETE FROM CFG_TASK_PARAMETERS WHERE TASK_ID IN "
+                "(SELECT TASK_ID FROM CFG_TASKS WHERE PIPELINE_ID IN (:down, :up))"
             ),
             ids,
         )

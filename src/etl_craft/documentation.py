@@ -143,8 +143,8 @@ def fetch_history(conn: Connection, task_id: int) -> list[tuple[int, str, object
     return [(int(r.version), r.documentation, r.recorded_at) for r in rows]
 
 
-def fetch_recorded_versions(conn: Connection) -> dict[str, int]:
-    """Map task_code -> its latest recorded documentation version.
+def fetch_recorded_versions(conn: Connection) -> dict[tuple[str, str], int]:
+    """Map (pipeline_code, task_code) -> its latest recorded documentation version.
 
     [DEVIATION, 2026-09-20, E2-56] Replaces `fetch_current_documentation`,
     which returned the recorded *text* as well. A documentation page should
@@ -152,12 +152,25 @@ def fetch_recorded_versions(conn: Connection) -> dict[str, int]:
     recorded — otherwise an edit is invisible until someone runs
     `docs-version`. Only the version number needs the audit table, and it is
     simply absent until a version has been recorded.
+
+    [DEVIATION, 2026-09-23, E3-03] Keyed by (pipeline_code, task_code), not
+    bare task_code. TASK_CODE is only unique *per pipeline*
+    (`ux_tasks_code_active` is a (PIPELINE_ID, TASK_CODE) index — schema.sql's
+    own comment calls it out as "scoped per-pipeline, not global"). The SQL
+    below already computes each version per TASK_ID correctly; collapsing
+    that into a dict keyed by the bare code let two independently-authored
+    pipelines that happen to share an ordinary task name (LOAD, VALIDATE, ...)
+    silently overwrite each other's version badge, with whichever pipeline's
+    page rendered last winning on both.
     """
     rows = conn.execute(
         text(
-            "SELECT DISTINCT ON (d.TASK_ID) t.TASK_CODE AS task_code, d.VERSION AS version "
-            "FROM AUD_TASK_DOCUMENTATION d JOIN CFG_TASKS t ON t.TASK_ID = d.TASK_ID "
+            "SELECT DISTINCT ON (d.TASK_ID) p.PIPELINE_CODE AS pipeline_code, "
+            "t.TASK_CODE AS task_code, d.VERSION AS version "
+            "FROM AUD_TASK_DOCUMENTATION d "
+            "JOIN CFG_TASKS t ON t.TASK_ID = d.TASK_ID "
+            "JOIN CFG_PIPELINES p ON p.PIPELINE_ID = t.PIPELINE_ID "
             "ORDER BY d.TASK_ID, d.VERSION DESC"
         )
     ).all()
-    return {r.task_code: int(r.version) for r in rows}
+    return {(r.pipeline_code, r.task_code): int(r.version) for r in rows}
