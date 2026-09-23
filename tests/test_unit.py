@@ -1433,6 +1433,27 @@ def test_resolve_secret_from_file_source(tmp_path):
     assert resolve_secret(config, config.postgres.active) == "filesecret"
 
 
+def test_file_source_path_is_relative_to_the_connector_file(tmp_path, monkeypatch):
+    secrets = tmp_path / "secrets.env"
+    secrets.write_text("ETL_CRAFT_POSTGRES_DEV_SECRET=filesecret\n", encoding="utf-8")
+    connector_dir = tmp_path / "project"
+    connector_dir.mkdir()
+    connector = connector_dir / "craft-connector.yml"
+    connector.write_text(
+        VALID_YAML.replace(
+            "Source:\n  Type: environment\n",
+            "Source:\n  Type: file\n  Path: ../secrets.env\n",
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    config = load_config(connector)
+
+    assert config.source.path == str(secrets)
+    assert resolve_secret(config, config.postgres.active) == "filesecret"
+
+
 def test_load_dotenv_file_keeps_a_quote_that_is_part_of_the_secret(tmp_path):
     # E2-86. `value.strip("'\"")` removes *every* leading and trailing quote
     # character, repeatedly -- so a secret that legitimately ends in one (not
@@ -2586,13 +2607,14 @@ def test_cli_setup_creates_config_and_reports_what_it_did(tmp_path, monkeypatch,
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text(
         "ETL_CRAFT_MODE=local\n"
-        "ETL_CRAFT_SOURCE_TYPE=environment\n"
+        "ETL_CRAFT_SOURCE_TYPE=file\n"
+        "ETL_CRAFT_SOURCE_PATH=.env\n"
         "ETL_CRAFT_POSTGRES_PROFILE=dev\n"
         "ETL_CRAFT_POSTGRES_JDBC_URL=jdbc:postgresql://127.0.0.1:1/nope\n"
         "ETL_CRAFT_POSTGRES_USER=u\n"
         "ETL_CRAFT_POSTGRES_AUTH_MODE=password\n"
+        "ETL_CRAFT_POSTGRES_DEV_SECRET=s\n"
     )
-    monkeypatch.setenv("ETL_CRAFT_POSTGRES_DEV_SECRET", "s")
 
     exit_code = cli_main(["setup"])
 
@@ -2609,11 +2631,13 @@ def test_cli_setup_is_idempotent(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text(
         "ETL_CRAFT_MODE=local\n"
-        "ETL_CRAFT_SOURCE_TYPE=environment\n"
+        "ETL_CRAFT_SOURCE_TYPE=file\n"
+        "ETL_CRAFT_SOURCE_PATH=.env\n"
         "ETL_CRAFT_POSTGRES_PROFILE=dev\n"
         "ETL_CRAFT_POSTGRES_JDBC_URL=jdbc:postgresql://127.0.0.1:1/nope\n"
         "ETL_CRAFT_POSTGRES_USER=u\n"
         "ETL_CRAFT_POSTGRES_AUTH_MODE=password\n"
+        "ETL_CRAFT_POSTGRES_DEV_SECRET=s\n"
     )
     cli_main(["setup"])
     capsys.readouterr()
@@ -2642,7 +2666,7 @@ def test_cli_setup_reads_the_environment_when_asked(tmp_path, monkeypatch, capsy
     cli_main(["setup", "--from-environment"])
 
     written = yaml.safe_load((tmp_path / "craft-connector.yml").read_text())
-    assert written["Postgres"]["Active_profile"] == "prod"
+    assert written["Engine"]["Profile"] == "prod"
     assert "ETL_CRAFT_POSTGRES_PROD_SECRET" in capsys.readouterr().out
 
 
@@ -2733,13 +2757,14 @@ def test_set_execution_mode_rejects_malformed_yaml(tmp_path):
 
 def _write_env(tmp_path, contents: str, name: str = "config.env"):
     path = tmp_path / name
-    path.write_text(contents)
+    path.write_text(contents.replace("__SELF__", str(path)))
     return path
 
 
 VALID_ENV = """
 ETL_CRAFT_MODE=local
-ETL_CRAFT_SOURCE_TYPE=environment
+ETL_CRAFT_SOURCE_TYPE=file
+ETL_CRAFT_SOURCE_PATH=__SELF__
 ETL_CRAFT_POSTGRES_PROFILE=dev
 ETL_CRAFT_POSTGRES_JDBC_URL=jdbc:postgresql://localhost:5432/etl_craft
 ETL_CRAFT_POSTGRES_USER=etl_engine
@@ -2755,7 +2780,7 @@ def test_configure_from_env_creates_valid_config(tmp_path):
 
     config = load_config(output_path)
     assert config.mode == "local"
-    assert config.source.type == "environment"
+    assert config.source.type == "file"
     assert config.postgres.active_profile == "dev"
     assert config.postgres.active.jdbc_url == "jdbc:postgresql://localhost:5432/etl_craft"
     assert config.postgres.active.user == "etl_engine"
@@ -2772,7 +2797,9 @@ def test_configure_from_env_writes_a_warehouse_section(tmp_path):
     env_path = _write_env(
         tmp_path,
         VALID_ENV + "ETL_CRAFT_WAREHOUSE_JDBC_URL=jdbc:postgresql://localhost:5432/analytics\n"
-        "ETL_CRAFT_WAREHOUSE_USER=warehouse_user\n",
+        "ETL_CRAFT_WAREHOUSE_USER=warehouse_user\n"
+        "ETL_CRAFT_WAREHOUSE_AUTH_MODE=password\n"
+        "ETL_CRAFT_WAREHOUSE_TABLE_FORMAT=native\n",
     )
     output_path = tmp_path / "craft-connector.yml"
 
@@ -2785,6 +2812,7 @@ def test_configure_from_env_writes_a_warehouse_section(tmp_path):
     # Defaults to the Postgres profile name, so a single-environment setup
     # needs one fewer variable.
     assert config.warehouse.active_profile == "dev"
+    assert config.warehouse_table_format == "native"
 
 
 def test_configure_from_env_warehouse_is_optional(tmp_path):
@@ -2862,7 +2890,8 @@ def test_configure_from_env_token_auth_needs_no_user(tmp_path):
 def test_configure_from_env_warehouse_requires_a_user_when_authenticating(tmp_path):
     env_path = _write_env(
         tmp_path,
-        VALID_ENV + "ETL_CRAFT_WAREHOUSE_JDBC_URL=jdbc:postgresql://localhost:5432/analytics\n",
+        VALID_ENV + "ETL_CRAFT_WAREHOUSE_JDBC_URL=jdbc:postgresql://localhost:5432/analytics\n"
+        "ETL_CRAFT_WAREHOUSE_AUTH_MODE=password\n",
     )
     with pytest.raises(ConfigError, match="ETL_CRAFT_WAREHOUSE_USER is required"):
         configure_from_env(env_path, tmp_path / "craft-connector.yml")
@@ -2902,7 +2931,7 @@ def test_configure_from_env_rejects_invalid_mode(tmp_path):
 def test_configure_from_env_rejects_invalid_source_type(tmp_path):
     env_path = _write_env(
         tmp_path,
-        VALID_ENV.replace("ETL_CRAFT_SOURCE_TYPE=environment", "ETL_CRAFT_SOURCE_TYPE=bogus"),
+        VALID_ENV.replace("ETL_CRAFT_SOURCE_TYPE=file", "ETL_CRAFT_SOURCE_TYPE=bogus"),
     )
     with pytest.raises(ConfigError):
         configure_from_env(env_path, tmp_path / "craft-connector.yml")
@@ -2911,7 +2940,7 @@ def test_configure_from_env_rejects_invalid_source_type(tmp_path):
 def test_configure_from_env_file_source_requires_path(tmp_path):
     env_path = _write_env(
         tmp_path,
-        VALID_ENV.replace("ETL_CRAFT_SOURCE_TYPE=environment", "ETL_CRAFT_SOURCE_TYPE=file"),
+        VALID_ENV.replace("ETL_CRAFT_SOURCE_PATH=__SELF__\n", ""),
     )
     with pytest.raises(ConfigError):
         configure_from_env(env_path, tmp_path / "craft-connector.yml")
@@ -2920,9 +2949,9 @@ def test_configure_from_env_file_source_requires_path(tmp_path):
 def test_configure_from_env_file_source_with_path(tmp_path):
     secrets_path = tmp_path / "secrets.env"
     env = VALID_ENV.replace(
-        "ETL_CRAFT_SOURCE_TYPE=environment",
-        f"ETL_CRAFT_SOURCE_TYPE=file\nETL_CRAFT_SOURCE_PATH={secrets_path}",
+        "ETL_CRAFT_SOURCE_PATH=__SELF__", f"ETL_CRAFT_SOURCE_PATH={secrets_path}"
     )
+    secrets_path.write_text(env, encoding="utf-8")
     env_path = _write_env(tmp_path, env)
     output_path = tmp_path / "craft-connector.yml"
 
@@ -2966,10 +2995,10 @@ def test_configure_from_env_includes_orchestrator_name(tmp_path):
     configure_from_env(env_path, output_path)
 
     raw = yaml.safe_load(output_path.read_text())
-    assert raw["Execution"]["Orchestrator name"] == "Airflow"
+    assert raw["Orchestration"]["Orchestrator_name"] == "Airflow"
 
 
-def test_configure_from_env_merges_a_second_profile_without_losing_the_first(tmp_path):
+def test_configure_from_env_replaces_the_selected_canonical_profile(tmp_path):
     output_path = tmp_path / "craft-connector.yml"
     configure_from_env(_write_env(tmp_path, VALID_ENV, "dev.env"), output_path)
 
@@ -2980,10 +3009,10 @@ def test_configure_from_env_merges_a_second_profile_without_losing_the_first(tmp
     )
     configure_from_env(_write_env(tmp_path, uat_env, "uat.env"), output_path)
 
-    config = load_config(output_path)
-    assert set(config.postgres.profiles) == {"dev", "uat"}
-    assert config.postgres.active_profile == "uat"
-    assert config.postgres.profiles["dev"].jdbc_url == "jdbc:postgresql://localhost:5432/etl_craft"
+    raw = yaml.safe_load(output_path.read_text())
+    assert raw["Engine"]["Profile"] == "uat"
+    assert raw["Engine"]["Variables"]["jdbc_url"] == "ETL_CRAFT_POSTGRES_JDBC_URL"
+    assert "jdbc:postgresql://uat-host:5432/etl_craft" not in output_path.read_text()
 
 
 # ==============================================================================

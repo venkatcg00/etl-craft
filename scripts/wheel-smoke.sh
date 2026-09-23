@@ -72,17 +72,18 @@ psql_admin -q -c "DROP DATABASE IF EXISTS $DB_NAME" -c "CREATE DATABASE $DB_NAME
 mkdir -p "$WORK/adopter"
 cat > "$WORK/adopter/.env" <<ENV
 ETL_CRAFT_MODE=local
-ETL_CRAFT_SOURCE_TYPE=environment
+ETL_CRAFT_SOURCE_TYPE=file
+ETL_CRAFT_SOURCE_PATH=$WORK/adopter/.env
 ETL_CRAFT_POSTGRES_PROFILE=dev
 ETL_CRAFT_POSTGRES_JDBC_URL=jdbc:postgresql://$PGHOST:$PGPORT/$DB_NAME
 ETL_CRAFT_POSTGRES_USER=$PGUSER
 ETL_CRAFT_POSTGRES_AUTH_MODE=password
+ETL_CRAFT_POSTGRES_DEV_SECRET=$PGPASSWORD
 ETL_CRAFT_WAREHOUSE_JDBC_URL=jdbc:postgresql://$PGHOST:$PGPORT/$DB_NAME
 ETL_CRAFT_WAREHOUSE_USER=$PGUSER
 ETL_CRAFT_WAREHOUSE_AUTH_MODE=password
+ETL_CRAFT_WAREHOUSE_DEV_SECRET=$PGPASSWORD
 ENV
-export ETL_CRAFT_POSTGRES_DEV_SECRET="$PGPASSWORD"
-export ETL_CRAFT_WAREHOUSE_DEV_SECRET="$PGPASSWORD"
 cd "$WORK/adopter"
 
 echo "==> --help"
@@ -91,14 +92,16 @@ echo "==> --help"
 echo "==> setup: from nothing to a working deployment in one command"
 "$EC" setup
 
-echo "==> the config setup wrote must carry both sections"
+echo "==> setup writes a commit-safe manifest with both connections"
 "$WORK/venv/bin/python" - "$WORK/adopter/craft-connector.yml" <<'PYEOF'
 import sys, pathlib, re
 text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-for section in ("Postgres:", "Warehouse:"):
+for section in ("Orchestration:", "Secrets:", "Engine:", "Warehouse:"):
     if not re.search(rf"^{re.escape(section)}", text, re.MULTILINE):
         sys.exit(f"setup wrote no {section} section:\n{text}")
-print("    Postgres and Warehouse both written")
+if "jdbc:" in text:
+    sys.exit(f"setup wrote a connection value into the manifest:\n{text}")
+print("    canonical manifest contains Engine and Warehouse names only")
 PYEOF
 
 echo "==> setup again must be idempotent"

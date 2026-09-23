@@ -1,16 +1,24 @@
 # sql/migrations/
 
-Incremental schema changes for an **already-deployed** Engine DB, applied via
-`etl-craft migrate` (see `src/etl_craft/migrate.py`). `sql/schema.sql` stays
-the single authoritative *full* definition for a brand-new install — that
-role doesn't change. This directory is for carrying an existing database
-forward from one version of `schema.sql` to the next, one file at a time.
+Incremental packaged **ENGINE** schema changes for an already-deployed Engine
+DB, applied via `etl-craft migrate` (see `src/etl_craft/migrate.py`).
+`schema.sql` stays the single authoritative full definition for a brand-new
+install. This directory carries an existing database forward from one version
+of that schema to the next, one file at a time.
+
+The runner always reads this packaged ENGINE stream first. A deployment may
+also supply a separate PROJECT stream through `--migrations-dir`,
+`ETL_CRAFT_MIGRATIONS_DIR`, or `./sql/migrations`. The streams have separate
+identities, so a project filename cannot hide a packaged migration. Keep a
+project migration directory available for every later migration run: the
+runner verifies the checksum of each previously applied file before applying
+new work.
 
 ## Convention
 
 - One file per change: `NNNN_short_description.sql`, `NNNN` a zero-padded,
-  strictly increasing integer (`0001`, `0002`, ...). Applied in filename
-  order.
+  strictly increasing integer (`0001`, `0002`, ...). Files are applied in
+  filename order within their own stream.
 - Each file must also be reflected directly in `sql/schema.sql` itself
   (with its own `[ADDITION]`/`[DEVIATION]`/`[CHOICE]` flag and a note in
   schema.sql's own "POST-SIGNOFF CHANGES" block) — the two are kept in sync
@@ -23,8 +31,9 @@ forward from one version of `schema.sql` to the next, one file at a time.
   migrate` applies whatever `SCHEMA_MIGRATIONS` doesn't yet list, in order,
   and stops at the first failure rather than guessing.
 - Each file runs inside its own transaction (`migrate.py`'s own job, not
-  something a migration file needs to open/close itself) and is recorded
-  into `SCHEMA_MIGRATIONS` only once it succeeds.
+  something a migration file needs to open/close itself) and is recorded with
+  its source and SHA-256 checksum only once it succeeds. Never edit or delete
+  an applied file; add a new migration instead.
 - No down-migrations / rollback files. Given `schema.sql` predates this
   mechanism (`CLAUDE.md` open question #7 — "no migration tooling... has
   been discussed" — resolved 2026-09-20), this is deliberately a small,

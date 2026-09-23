@@ -16,8 +16,8 @@ What it does, in order:
   1. Reads settings from a .env-style file (`--env FILE`, default `./.env`),
      or from the process environment (`--from-environment`) — per explicit
      instruction that either source is legitimate.
-  2. Writes or updates `craft-connector.yml`, merging one Postgres profile in
-     alongside any already there (configure_from_env's existing semantics).
+  2. Writes or updates `craft-connector.yml`. New files use the canonical
+     manifest with variable names; legacy files retain their existing shape.
   3. Brings the Engine DB to current: applies the packaged schema if the
      database is empty, otherwise applies pending migrations.
   4. Names the secret variables the resulting configuration expects.

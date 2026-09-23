@@ -1,105 +1,66 @@
-# craft-connector.yml — etl-craft's connection and execution configuration.
-#
-# Analogous to a dbt profiles.yml: versioned and committed, with NO secret
-# values in it. Secrets are looked up by name at runtime through [Source].
-#
-# `etl-craft configure` writes this file for you and prints the exact secret
-# variable names it will expect. `etl-craft doctor` then verifies the whole
-# thing before you run anything real.
+# Canonical craft-connector.yml, with values read from the process environment.
+# Every value in a Variables block is a VARIABLE NAME, not its value. Keep this
+# file in source control only after replacing the illustrative names as needed;
+# keep the values those names resolve to out of source control.
 
-Execution:
-  # Set once per environment via `etl-craft set-execution-mode`, not per run.
-  #   local        — `run --pipeline_code X` acts as its own wave scheduler.
-  #   orchestrator — that form is refused; Airflow drives each task instead.
+Orchestration:
+  # local: etl-craft schedules waves. remote: an external scheduler invokes
+  # one task at a time. `generate-yml` emits a descriptor; it does not deploy
+  # an Airflow DAG.
   Mode: local
-  # Informational only. The engine never acts on this.
-  Orchestrator name: airflow
-  # Operational limits. Both have real defaults (6 hours, 8) rather than being
-  # unset -- a limit nobody sets is a limit nobody benefits from. A per-task
-  # TASK_TIMEOUT_SECONDS parameter overrides the timeout; 0 disables it.
+  Orchestrator_name: airflow
   Task_timeout_seconds: 21600
   Max_parallel_tasks: 8
-  # Opt-in: compare each run against CFG_PIPELINES.SLA_IN_HOURS. Off by
-  # default, because for many teams SLA really is pass-through metadata for
-  # the orchestrator rather than something the engine should act on.
   Enforce_sla: false
 
-Source:
-  # Where secret values actually live.
-  #   environment — read from the process environment
-  #   file        — read from a .env-style file named by Path
-  Type: environment
-  # Path: /etc/etl-craft/secrets.env      # required when Type is `file`
+Secrets:
+  Source_type: environment
 
-Postgres:
-  # The Engine DB. Required, and always Postgres — its partial unique index is
-  # what makes concurrent run-id creation race-safe.
-  Active_profile: dev
-  Profiles:
-    dev:
-      # JDBC form is the storage convention; the engine translates it.
-      jdbc_url: jdbc:postgresql://localhost:55432/etl_craft
-      user: etl_craft
-      # password | key_file are implemented; token | sso raise NotImplementedError,
-      # since which provider mints the credential is necessarily team-specific.
-      auth_mode: password
-      # The secret is read from ETL_CRAFT_POSTGRES_DEV_SECRET unless overridden:
-      # secret_var: MY_OWN_VAR_NAME
-    prod:
-      jdbc_url: jdbc:postgresql://pg.internal:5432/etl_craft
-      user: etl_craft_svc
-      auth_mode: password
+Engine:
+  # ETL_CRAFT_ENGINE_PROFILE can select another tier at runtime.
+  Profile: dev
+  Variables:
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    # Engine DB supports password or key_file.
+    auth_mode: ENGINE_AUTH_MODE
+    secret: ENGINE_SECRET
 
 Warehouse:
-  # The warehouse — where your actual tables live. Optional: only SQL and
-  # BUSINESS_RULES tasks need it. Exactly one warehouse per deployment.
-  #
-  # Postgres and DuckDB are the two supported warehouses. Both profiles below
-  # are real and working; pick one as Active_profile.
-  Active_profile: dev
-  Profiles:
-    dev:
-      jdbc_url: jdbc:postgresql://localhost:55432/analytics
-      user: etl_craft
-      auth_mode: password
-    # DuckDB is embedded: the URL names a file, not a server, so there is
-    # nothing to authenticate to and no `user`. `jdbc:duckdb:` on its own
-    # means an in-memory database. The catalog name qualify()'s three-part
-    # database.schema.table form uses comes from the file stem — here,
-    # `warehouse`.
-    duck:
-      jdbc_url: jdbc:duckdb:/var/lib/etl-craft/warehouse.duckdb
-      auth_mode: none
-
-Email:
-  # Optional. Only needed if any active task uses HANDLER=EMAIL_ALERT.
-  Active_profile: dev
-  Profiles:
-    dev:
-      host: localhost
-      port: 1025
-      from_address: etl-craft@example.com
-      # `none` or `password` only — an OAuth2 SMTP flow is as provider-specific
-      # as the token/sso database auth modes, so it is left out rather than stubbed.
-      auth_mode: none
-      use_tls: false
+  # PostgreSQL is the reference launch warehouse. The same shape supports
+  # DuckDB (auth_mode none), Databricks (static token), Snowflake (key_file or
+  # password), and Trino. See configuration.md for their exact requirements.
+  Name: Postgres
+  Table_format: native
+  Profile: dev
+  Variables:
+    jdbc_url: WAREHOUSE_JDBC_URL
+    user: WAREHOUSE_USER
+    auth_mode: WAREHOUSE_AUTH_MODE
+    secret: WAREHOUSE_SECRET
 
 Cloning:
-  # Mirror the engine's own CFG_/AUD_ tables into the warehouse, so a team can
-  # query engine config and audit history without a second connection.
-  # Off by default; runs after each pipeline run when enabled.
   Enabled: false
-  Scope: cfg        # cfg | aud | all
+  Scope: cfg
 
-Orchestrator:
-  # Optional deployment-wide defaults for the Airflow-facing fields
-  # `generate-yml` emits. A pipeline's own PIPELINE_PARAMETERS override these,
-  # and a built-in default applies when neither is set.
+Dag_defaults:
   Global_dag: false
   Catchup: false
-  Tags: [nightly]
+  Tags: [analytics]
   Retries: 1
   Retry_delay_minutes: 5
   Depends_on_past: false
   Email_on_failure: false
   Email_recipients: [data-alerts@example.com]
+
+# Optional. Required only when a pipeline has an EMAIL_ALERT task.
+Email:
+  Profile: dev
+  Variables:
+    host: EMAIL_HOST
+    port: EMAIL_PORT
+    from_address: EMAIL_FROM
+    auth_mode: EMAIL_AUTH_MODE
+    user: EMAIL_USER
+    use_tls: EMAIL_USE_TLS
+    secret: EMAIL_SECRET

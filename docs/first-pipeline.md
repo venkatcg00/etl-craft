@@ -5,13 +5,14 @@ reviewed like any other change: a new external connection, a new action type, or
 destructive schema change should be harder to make than editing a row.
 
 This walkthrough builds a two-task pipeline that creates a table and then merges into it.
-It assumes you have completed the [README](../README.md) quickstart: `etl-craft setup` has
-run and `etl-craft doctor` passes.
+It assumes you have completed the [README](../README.md) quickstart: `uv run etl-craft setup` has
+run and `uv run etl-craft doctor` passes.
 
 ## 1. A warehouse to write to
 
-The warehouse is where your actual tables live. For this walkthrough, point `[Warehouse]` at
-a second database on the same Postgres and create a source table:
+The warehouse is where your actual tables live. The README quickstart creates the `analytics`
+database and points the canonical `Warehouse` section at it. Connect to that warehouse and create
+a source table:
 
 ```sql
 CREATE SCHEMA IF NOT EXISTS staging;
@@ -50,8 +51,7 @@ FROM CFG_TASKS t, (VALUES
     ('SQL_ACTION',    'CREATE_TABLE'),
     ('TARGET_OBJECT', 'public.customers'),
     ('SOURCE_OBJECT', 'staging.customers_raw'),
-    ('PRIMARY_KEY',   'id'),
-    ('SOURCE_SQL',    'SELECT id, name FROM staging.customers_raw WHERE $$pipeline_id')
+    ('SOURCE_SQL',    'SELECT id, name FROM staging.customers_raw')
 ) AS p(name, value)
 WHERE t.TASK_CODE = 'build_customers';
 
@@ -65,7 +65,7 @@ FROM CFG_TASKS t, (VALUES
     ('MERGE_KEY',             'id'),
     ('MERGE_COMPARE_COLUMNS', 'name'),
     ('MERGE_DEDUPE_ORDER',    'updated_at DESC'),
-    ('SOURCE_SQL',            'SELECT id, name FROM staging.customers_raw WHERE $$pipeline_id')
+    ('SOURCE_SQL',            'SELECT id, name FROM staging.customers_raw')
 ) AS p(name, value)
 WHERE t.TASK_CODE = 'merge_customers';
 ```
@@ -90,34 +90,34 @@ That row *is* the DAG. Nothing enumerates order in code.
 ## 5. Check it before running it
 
 ```bash
-etl-craft validate
-etl-craft graph --name CUSTOMERS
-etl-craft steps --pipeline_code CUSTOMERS
+uv run etl-craft validate
+uv run etl-craft graph --name CUSTOMERS
+uv run etl-craft steps --pipeline_code CUSTOMERS
 ```
 
-`validate` catches what no database constraint can: dependency cycles, missing lineage
-declarations, a `TARGET_TABLE` without the single-column primary key business rules rely on.
+`validate` catches dependency cycles, missing lineage declarations, invalid task parameters, and
+warehouse constraints that cannot be represented in the Engine DB.
 
 ## 6. Run it
 
 ```bash
-etl-craft run --pipeline_code CUSTOMERS
-etl-craft history --pipeline_code CUSTOMERS
+uv run etl-craft run --pipeline_code CUSTOMERS
+uv run etl-craft history --pipeline_code CUSTOMERS
 ```
 
 Run it a second time. `build_customers` and `merge_customers` both re-derive their effect
 from current state, so the result is identical — that is the idempotence guarantee, not a
 coincidence.
 
-## 7. Hand it to Airflow, if you want to
+## 7. Generate an Airflow descriptor, if you use Airflow
 
 ```bash
-etl-craft generate-yml --pipeline_code CUSTOMERS
+uv run etl-craft generate-yml --pipeline_code CUSTOMERS
 ```
 
-The emitted description gives each task its `bash_command` and one Airflow `trigger_rule`,
-derived from the dependency rows you wrote above. Feed it to your own loader, or ignore it
-entirely and keep using `etl-craft run`.
+The emitted descriptor gives each task its `bash_command` and one Airflow `trigger_rule`, derived
+from the dependency rows you wrote above. It does not install or load a DAG. Feed it to the loader
+your Airflow deployment owns, or keep using `etl-craft run` locally.
 
 ## Documenting it
 
@@ -133,20 +133,20 @@ FROM CFG_TASKS WHERE TASK_CODE = 'build_customers';
 ```
 
 ```bash
-etl-craft docs-version     # records v1
-etl-craft generate-docs
+uv run etl-craft docs-version     # records v1
+uv run etl-craft generate-docs
 ```
 
 The version comes from the text itself. Re-run `docs-version` after editing the wording
 and it becomes v2; run it twice with no change and nothing moves. That is deliberate — a
 version somebody has to remember to bump is a version that quietly lies. See the full
 history for one task with
-`etl-craft docs-version --pipeline_code CUSTOMERS --task_code build_customers`.
+`uv run etl-craft docs-version --pipeline_code CUSTOMERS --task_code build_customers`.
 
 ## Tracing a column
 
 ```bash
-etl-craft lineage --column public.customers.name
+uv run etl-craft lineage --column public.customers.name
 ```
 
 ```

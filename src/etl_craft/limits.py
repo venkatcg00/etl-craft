@@ -11,7 +11,7 @@ from etl_craft.execution import HandlerError, TaskExecutionContext
 
 
 def task_timeout_seconds(ctx: TaskExecutionContext) -> int:
-    """Resolve this task's wall-clock limit: task parameter, then [Execution], then default.
+    """Resolve this task's wall-clock limit: task parameter, config, then default.
 
     [ADDITION, 2026-09-20, E2-17] `0` disables it, for a task that genuinely
     runs longer than any sensible global bound.

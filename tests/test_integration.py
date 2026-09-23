@@ -7503,13 +7503,14 @@ def test_setup_brings_a_real_database_up_then_keeps_it_current(
         monkeypatch.chdir(tmp_path)
         (tmp_path / ".env").write_text(
             "ETL_CRAFT_MODE=local\n"
-            "ETL_CRAFT_SOURCE_TYPE=environment\n"
+            "ETL_CRAFT_SOURCE_TYPE=file\n"
+            "ETL_CRAFT_SOURCE_PATH=.env\n"
             "ETL_CRAFT_POSTGRES_PROFILE=dev\n"
             f"ETL_CRAFT_POSTGRES_JDBC_URL=jdbc:postgresql://{url.host}:{url.port}/{db_name}\n"
             f"ETL_CRAFT_POSTGRES_USER={url.username}\n"
             "ETL_CRAFT_POSTGRES_AUTH_MODE=password\n"
+            f"ETL_CRAFT_POSTGRES_DEV_SECRET={url.password}\n"
         )
-        monkeypatch.setenv("ETL_CRAFT_POSTGRES_DEV_SECRET", url.password)
 
         first = run_setup(
             config_path=tmp_path / "craft-connector.yml",
@@ -8056,7 +8057,16 @@ def test_migrate_creates_schema_migrations_when_the_table_is_absent(
 
     applied = apply_pending_migrations(postgres_engine, tmp_path)
 
-    assert applied == ["0001_bootstrap_probe.sql"]
+    # With no ledger, no package migration has a recorded checksum or source.
+    # The runner therefore applies its ENGINE stream before the explicitly
+    # supplied PROJECT file. The packaged migrations are written to tolerate a
+    # schema that already has their changes, which is the realistic recovery
+    # path after an operator has deleted only the bookkeeping table.
+    expected = [
+        *(path.name for path in sorted(packaged_migrations_dir().glob("*.sql"))),
+        "0001_bootstrap_probe.sql",
+    ]
+    assert applied == expected
 
 
 def test_cli_migrate_applies_the_real_migrations_directory_and_is_idempotent(

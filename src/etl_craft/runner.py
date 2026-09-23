@@ -405,7 +405,7 @@ def _dispatch_with_crash_detection(engine: Engine, ctx: TaskExecutionContext) ->
                     error_message=(
                         f"task exceeded its {limit}s timeout and was terminated "
                         "(set CFG_TASK_PARAMETERS.TASK_TIMEOUT_SECONDS, or "
-                        "[Execution] Task_timeout_seconds, to change this)"
+                        "Orchestration.Task_timeout_seconds, to change this)"
                     ),
                 )
         return

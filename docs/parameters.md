@@ -14,7 +14,7 @@ pipe-separated (`a|b|c`). This is project-wide, with no exceptions.
 |---|---|---|
 | `SOURCE_OBJECT` | yes | `schema.table` (pipe-separated for several) this task reads. Declarative — used by `lineage`, checked by `validate`, not verified against the SQL. |
 | `TARGET_OBJECT` | yes | `schema.table` this task writes. For `HANDLER='SQL'` this is also functional and must name exactly one table. |
-| `TASK_TIMEOUT_SECONDS` | no | Wall-clock limit for this task, in seconds. Falls back to `[Execution] Task_timeout_seconds` (6 hours by default). `0` disables it. |
+| `TASK_TIMEOUT_SECONDS` | no | Wall-clock limit for this task, in seconds. Falls back to `Orchestration.Task_timeout_seconds` (6 hours by default). `0` disables it. |
 | `DOCUMENTATION` | no | Prose describing what this task does. Rendered on the generated documentation site and searchable there. Its **version is derived from the text**: `etl-craft docs-version` records a new version only when the wording genuinely changes, so a version can never silently disagree with what it describes. `etl-craft docs-version --pipeline_code X --task_code Y` shows the full history. |
 
 ## `HANDLER = 'SQL'`
@@ -32,6 +32,8 @@ needs. Your `SELECT` must never project an engine-managed column itself.
 | `MERGE_DEDUPE_ORDER` | no | An `ORDER BY` fragment (`updated_at DESC`) deciding which row wins when the source has duplicate `MERGE_KEY`s. Without it, duplicates are a clean failure *before* the target is touched — the engine will not invent an ordering you did not declare. |
 | `SCHEMA_EVOLUTION` | no | `"true"` lets a new column in the source be added to the target. Never repairs missing audit columns. |
 | `HARD_DELETE` | no | `DELETE_ROWS` only. `"true"` issues a real `DELETE`; anything else soft-deletes via `DELETE_FLAG='Y'`. |
+| `TABLE_FORMAT` | no | `iceberg` or `native`. Overrides `Warehouse.Table_format` for this target. |
+| `EXTERNAL_VOLUME` / `BASE_LOCATION` | conditional | Required for a Snowflake task that creates an Iceberg table. They identify the configured external volume and table storage location. |
 
 ### Actions
 

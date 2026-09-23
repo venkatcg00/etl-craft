@@ -38,6 +38,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -79,13 +80,22 @@ def resolve_config_path(explicit: Path | str | None = None) -> Path:
     return DEFAULT_CONFIG_PATH
 
 
-VALID_MODES = frozenset({"local", "orchestrator"})
+# `remote` is the commit-safe connector format's name for orchestration-driven
+# execution. The rest of the engine already compares against `orchestrator`,
+# so normalise it while reading the config and keep existing deployments valid.
+MODE_ALIASES = {"remote": "orchestrator"}
+VALID_MODES = frozenset({"local", "orchestrator", "remote"})
 VALID_SOURCE_TYPES = frozenset({"file", "environment"})
 # [ADDITION, 2026-09-20] "none" joins the list for embedded warehouses like
 # DuckDB, which is a file rather than a server: there is no user to be and
 # no password to present. [Email] already uses the same value for the same
 # reason, so this is an existing vocabulary rather than a new one.
+# Keep this union public for callers that need the complete vocabulary. Config
+# validation uses the narrower section-specific sets below, so it cannot accept
+# a mode whose connector has no implementation.
 VALID_AUTH_MODES = frozenset({"none", "password", "token", "sso", "key_file"})
+VALID_ENGINE_AUTH_MODES = frozenset({"password", "key_file"})
+VALID_WAREHOUSE_AUTH_MODES = frozenset({"none", "password", "key_file", "token"})
 # Modes where a `user` is not required in the profile.
 #
 # `none`: an embedded warehouse is a file — there is nobody to be.
@@ -330,29 +340,41 @@ def _positive_int(section: dict[str, Any], key: str, default: int, path: Path) -
     return value
 
 
-def _parse_config(raw: dict[str, Any], path: Path) -> ConnectorConfig:
-    execution = _require_section(raw, "Execution", path)
-    mode = execution.get("Mode")
-    if mode not in VALID_MODES:
+def _parse_config(raw: Any, path: Path) -> ConnectorConfig:
+    """Parse either supported connector format without guessing between them.
+
+    The commit-safe manifest format is the public contract. Its sections are
+    ``Orchestration``, ``Secrets``, and ``Engine``. Earlier releases wrote
+    ``Execution``, ``Source``, and ``Postgres`` with literal connection values.
+    Both remain loadable, but mixing their top-level markers is rejected: a
+    partial migration must not silently select one set of credentials over the
+    other.
+    """
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{path}: craft-connector.yml must contain a top-level mapping")
+
+    manifest_markers = {"Orchestration", "Secrets", "Engine"}
+    legacy_markers = {"Execution", "Source", "Postgres"}
+    has_manifest = bool(manifest_markers.intersection(raw))
+    has_legacy = bool(legacy_markers.intersection(raw))
+    if has_manifest and has_legacy:
         raise ConfigError(
-            f"{path}: Execution.Mode must be one of {sorted(VALID_MODES)}, got {mode!r}"
+            f"{path}: mixes the manifest sections {sorted(manifest_markers)} with the legacy "
+            f"sections {sorted(legacy_markers)}. Keep one complete format in a file."
         )
+    if has_manifest:
+        return _parse_manifest_config(raw, path)
+    return _parse_legacy_config(raw, path)
 
-    limits = ExecutionLimits(
-        task_timeout_seconds=_positive_int(
-            execution, "Task_timeout_seconds", DEFAULT_TASK_TIMEOUT_SECONDS, path
-        ),
-        max_parallel_tasks=_positive_int(
-            execution, "Max_parallel_tasks", DEFAULT_MAX_PARALLEL_TASKS, path
-        ),
-        enforce_sla=bool(execution.get("Enforce_sla", False)),
-    )
 
-    source_raw = _require_section(raw, "Source", path)
-    source = _parse_source(source_raw, path)
+def _parse_legacy_config(raw: dict[str, Any], path: Path) -> ConnectorConfig:
+    """Parse the pre-manifest format retained for existing deployments."""
+    execution = _require_section(raw, "Execution", path)
+    mode = _parse_mode(execution, "Execution", path)
 
-    postgres_raw = _require_section(raw, "Postgres", path)
-    postgres = _parse_connection_section("POSTGRES", postgres_raw, path)
+    limits = _parse_limits(execution, path)
+    source = _parse_legacy_source(_require_section(raw, "Source", path), path)
+    postgres = _parse_connection_section("POSTGRES", _require_section(raw, "Postgres", path), path)
 
     warehouse_raw = raw.get("Warehouse")
     table_format = DEFAULT_TABLE_FORMAT
@@ -362,18 +384,12 @@ def _parse_config(raw: dict[str, Any], path: Path) -> ConnectorConfig:
         raise ConfigError(f"{path}: Warehouse section must be a mapping if present")
     else:
         warehouse = _parse_connection_section("WAREHOUSE", warehouse_raw, path)
+        table_format = _parse_table_format(warehouse_raw, path)
+        _check_warehouse_name(warehouse_raw.get("Name"), warehouse, path)
 
     cloning = _parse_cloning(raw.get("Cloning") or {}, path)
     orchestrator = _parse_orchestrator(raw.get("Orchestrator") or {}, path)
-
-    email_raw = raw.get("Email")
-    if email_raw is None:
-        email = None
-    elif not isinstance(email_raw, dict):
-        raise ConfigError(f"{path}: Email section must be a mapping if present")
-    else:
-        email = _parse_email_section(email_raw, path)
-
+    email = _parse_optional_legacy_email(raw.get("Email"), path)
     return ConnectorConfig(
         mode=mode,
         source=source,
@@ -388,6 +404,67 @@ def _parse_config(raw: dict[str, Any], path: Path) -> ConnectorConfig:
     )
 
 
+def _parse_manifest_config(raw: dict[str, Any], path: Path) -> ConnectorConfig:
+    """Parse the commit-safe connector manifest used by the shipped examples."""
+    orchestration = _require_section(raw, "Orchestration", path)
+    mode = _parse_mode(orchestration, "Orchestration", path)
+    limits = _parse_limits(orchestration, path)
+
+    source = _parse_manifest_source(_require_section(raw, "Secrets", path), path)
+    resolver = _VariableResolver.from_source(source, path)
+    postgres = _parse_manifest_connection_section(
+        "ENGINE", _require_section(raw, "Engine", path), path, resolver
+    )
+
+    warehouse_raw = raw.get("Warehouse")
+    table_format = DEFAULT_TABLE_FORMAT
+    if warehouse_raw is None:
+        warehouse = None
+    elif not isinstance(warehouse_raw, dict):
+        raise ConfigError(f"{path}: Warehouse section must be a mapping if present")
+    else:
+        warehouse = _parse_manifest_connection_section("WAREHOUSE", warehouse_raw, path, resolver)
+        table_format = _parse_table_format(warehouse_raw, path)
+        _check_warehouse_name(warehouse_raw.get("Name"), warehouse, path)
+
+    cloning = _parse_cloning(raw.get("Cloning") or {}, path)
+    orchestrator = _parse_orchestrator(raw.get("Dag_defaults") or {}, path)
+    email = _parse_optional_manifest_email(raw.get("Email"), path, resolver)
+    return ConnectorConfig(
+        mode=mode,
+        source=source,
+        postgres=postgres,
+        cloning=cloning,
+        warehouse=warehouse,
+        warehouse_table_format=table_format,
+        orchestrator=orchestrator,
+        limits=limits,
+        email=email,
+        config_path=path,
+    )
+
+
+def _parse_mode(section: dict[str, Any], section_name: str, path: Path) -> str:
+    mode = section.get("Mode")
+    if not isinstance(mode, str) or mode not in VALID_MODES:
+        raise ConfigError(
+            f"{path}: {section_name}.Mode must be one of {sorted(VALID_MODES)}, got {mode!r}"
+        )
+    return MODE_ALIASES.get(mode, mode)
+
+
+def _parse_limits(section: dict[str, Any], path: Path) -> ExecutionLimits:
+    return ExecutionLimits(
+        task_timeout_seconds=_positive_int(
+            section, "Task_timeout_seconds", DEFAULT_TASK_TIMEOUT_SECONDS, path
+        ),
+        max_parallel_tasks=_positive_int(
+            section, "Max_parallel_tasks", DEFAULT_MAX_PARALLEL_TASKS, path
+        ),
+        enforce_sla=bool(section.get("Enforce_sla", False)),
+    )
+
+
 def _require_section(raw: dict[str, Any], name: str, path: Path) -> dict[str, Any]:
     section = raw.get(name)
     if not isinstance(section, dict):
@@ -395,16 +472,142 @@ def _require_section(raw: dict[str, Any], name: str, path: Path) -> dict[str, An
     return section
 
 
-def _parse_source(raw: dict[str, Any], path: Path) -> SourceConfig:
+def _parse_legacy_source(raw: dict[str, Any], path: Path) -> SourceConfig:
     source_type = raw.get("Type")
     if source_type not in VALID_SOURCE_TYPES:
         raise ConfigError(
             f"{path}: Source.Type must be one of {sorted(VALID_SOURCE_TYPES)}, got {source_type!r}"
         )
-    source_path = raw.get("Path")
-    if source_type == "file" and not source_path:
-        raise ConfigError(f"{path}: Source.Path is required when Source.Type == 'file'")
+    source_path = _source_path(raw.get("Path"), source_type, "Source.Path", path)
     return SourceConfig(type=source_type, path=source_path)
+
+
+def _parse_manifest_source(raw: dict[str, Any], path: Path) -> SourceConfig:
+    source_type = raw.get("Source_type")
+    if source_type not in VALID_SOURCE_TYPES:
+        raise ConfigError(
+            f"{path}: Secrets.Source_type must be one of {sorted(VALID_SOURCE_TYPES)}, "
+            f"got {source_type!r}"
+        )
+    source_path = _source_path(raw.get("Source_path"), source_type, "Secrets.Source_path", path)
+    return SourceConfig(type=source_type, path=source_path)
+
+
+def _source_path(raw_path: Any, source_type: str, field_name: str, config_path: Path) -> str | None:
+    """Validate a secret-file path and anchor relative paths at the manifest."""
+    if raw_path is None:
+        if source_type == "file":
+            raise ConfigError(
+                f"{config_path}: {field_name} is required when the source type is 'file'"
+            )
+        return None
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise ConfigError(f"{config_path}: {field_name} must be a non-empty string when present")
+    source_path = Path(raw_path).expanduser()
+    if source_type == "file" and not source_path.is_absolute():
+        source_path = config_path.resolve().parent / source_path
+    return str(source_path.resolve()) if source_type == "file" else str(source_path)
+
+
+@dataclass(frozen=True)
+class _VariableResolver:
+    """Read named manifest values from the one configured secret source."""
+
+    values: Mapping[str, str]
+    origin: str
+    path: Path
+
+    @classmethod
+    def from_source(cls, source: SourceConfig, path: Path) -> _VariableResolver:
+        if source.type == "file":
+            return cls(
+                values=_load_dotenv_file(source.path),
+                origin=f"{source.path} (Secrets.Source_type=file)",
+                path=path,
+            )
+        return cls(
+            values=os.environ,
+            origin="the process environment (Secrets.Source_type=environment)",
+            path=path,
+        )
+
+    def value(self, var_name: str, what: str) -> str:
+        value = self.values.get(var_name)
+        if value is None:
+            raise ConfigError(
+                f"{self.path}: {what} names the variable {var_name!r}, which is not set in "
+                f"{self.origin}"
+            )
+        return value
+
+    def selected_name(self, var_name: str, profile: str, field_name: str) -> str:
+        """Use a tier-specific variable when present, then fall back to the named one."""
+        tiered_name = _tiered_variable_name(var_name, profile, field_name)
+        if tiered_name and tiered_name in self.values:
+            return tiered_name
+        return var_name
+
+    def manifest_value(self, var_name: str, profile: str, field_name: str, what: str) -> str:
+        selected_name = self.selected_name(var_name, profile, field_name)
+        return self.value(selected_name, what)
+
+
+def _tiered_variable_name(var_name: str, profile: str, field_name: str) -> str | None:
+    """Insert ``profile`` before a recognised field suffix in a variable name.
+
+    ``ENGINE_JDBC_URL`` therefore falls back to ``ENGINE_DEV_JDBC_URL`` for a
+    ``dev`` profile. The same derivation works for custom prefixes such as
+    ``MY_ENGINE_JDBC_URL``. If a name has no recognisable field suffix there is
+    no safe way to invent a tiered variant, so the configured name remains the
+    only lookup target.
+    """
+    suffixes = [field_name.upper()]
+    if field_name == "from_address":
+        # The shipped template calls this variable EMAIL_FROM, while the data
+        # field itself is from_address.
+        suffixes.append("FROM")
+    upper_name = var_name.upper()
+    upper_profile = profile.upper()
+    for suffix in suffixes:
+        plain_suffix = f"_{suffix}"
+        tiered_suffix = f"_{upper_profile}{plain_suffix}"
+        if upper_name.endswith(tiered_suffix):
+            return var_name
+        if upper_name.endswith(plain_suffix):
+            return f"{var_name[:-len(plain_suffix)]}_{upper_profile}{var_name[-len(plain_suffix):]}"
+    return None
+
+
+def _manifest_profile_name(section_name: str, raw: dict[str, Any], path: Path) -> str:
+    """Select a manifest profile label, with the documented environment override."""
+    profile = os.environ.get(f"ETL_CRAFT_{section_name}_PROFILE") or raw.get("Profile")
+    if not isinstance(profile, str) or not profile.strip():
+        raise ConfigError(
+            f"{path}: {section_name.title()} needs a non-empty Profile or "
+            f"$ETL_CRAFT_{section_name}_PROFILE"
+        )
+    return profile.strip()
+
+
+def _manifest_variable_name(
+    variables: dict[str, Any], key: str, where: str, *, required: bool
+) -> str | None:
+    value = variables.get(key)
+    if value is None:
+        if required:
+            raise ConfigError(f"{where} needs {key}, the name of a variable")
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"{where}.{key} must be a non-empty variable name")
+    return value.strip()
+
+
+def _auth_modes_for_section(section_name: str) -> frozenset[str]:
+    if section_name in {"POSTGRES", "ENGINE"}:
+        return VALID_ENGINE_AUTH_MODES
+    if section_name == "WAREHOUSE":
+        return VALID_WAREHOUSE_AUTH_MODES
+    raise AssertionError(f"unknown connection section {section_name!r}")
 
 
 def _parse_connection_section(
@@ -433,11 +636,12 @@ def _parse_profile(
     jdbc_url = raw.get("jdbc_url")
     user = raw.get("user")
     auth_mode = raw.get("auth_mode")
+    valid_auth_modes = _auth_modes_for_section(section_name)
     needs_user = auth_mode not in AUTH_MODES_WITHOUT_USER
-    if not jdbc_url or (needs_user and not user) or auth_mode not in VALID_AUTH_MODES:
+    if not jdbc_url or (needs_user and not user) or auth_mode not in valid_auth_modes:
         raise ConfigError(
             f"{path}: {section_name}.Profiles.{profile_name} needs jdbc_url, "
-            f"auth_mode in {sorted(VALID_AUTH_MODES)}" + (", and user" if needs_user else "")
+            f"auth_mode in {sorted(valid_auth_modes)}" + (", and user" if needs_user else "")
         )
     extra = {k: v for k, v in raw.items() if k not in {"jdbc_url", "user", "auth_mode"}}
     return ConnectionProfile(
@@ -448,6 +652,124 @@ def _parse_profile(
         auth_mode=auth_mode,
         extra=extra,
     )
+
+
+def _parse_manifest_connection_section(
+    section_name: str, raw: dict[str, Any], path: Path, resolver: _VariableResolver
+) -> ConnectionSection:
+    """Resolve one manifest ``Variables`` mapping into the runtime profile."""
+    profile_name = _manifest_profile_name(section_name, raw, path)
+    variables = raw.get("Variables")
+    where = f"{section_name.title()}.Variables"
+    if not isinstance(variables, dict):
+        raise ConfigError(f"{path}: {section_name.title()} needs a Variables mapping")
+
+    def resolve(key: str, *, required: bool = False) -> str:
+        variable_name = _manifest_variable_name(variables, key, where, required=required)
+        if variable_name is None:
+            return ""
+        return resolver.manifest_value(variable_name, profile_name, key, f"{where}.{key}")
+
+    jdbc_url = resolve("jdbc_url", required=True)
+    auth_mode = resolve("auth_mode", required=True)
+    valid_auth_modes = _auth_modes_for_section(section_name)
+    if auth_mode not in valid_auth_modes:
+        raise ConfigError(
+            f"{path}: {where}.auth_mode resolved to {auth_mode!r}, which is not one of "
+            f"{sorted(valid_auth_modes)}"
+        )
+    user = resolve("user")
+    if auth_mode not in AUTH_MODES_WITHOUT_USER and not user:
+        raise ConfigError(f"{path}: {where} needs user for auth_mode={auth_mode!r}")
+
+    secret_name = _manifest_variable_name(variables, "secret", where, required=False)
+    if secret_name:
+        secret_name = resolver.selected_name(secret_name, profile_name, "secret")
+    elif auth_mode != "none":
+        raise ConfigError(f"{path}: {where} needs secret for auth_mode={auth_mode!r}")
+
+    handled = {"jdbc_url", "user", "auth_mode", "secret"}
+    extra: dict[str, str] = {}
+    for key in variables:
+        if key in handled:
+            continue
+        variable_name = _manifest_variable_name(variables, key, where, required=True)
+        if variable_name is not None:
+            extra[key] = resolver.manifest_value(
+                variable_name,
+                profile_name,
+                key,
+                f"{where}.{key}",
+            )
+    if auth_mode == "key_file" and not extra.get("key_file"):
+        raise ConfigError(f"{path}: {where} needs key_file for auth_mode='key_file'")
+    return ConnectionSection(
+        active_profile=profile_name,
+        profiles={
+            profile_name: ConnectionProfile(
+                section=section_name,
+                name=profile_name,
+                jdbc_url=jdbc_url,
+                user=user,
+                auth_mode=auth_mode,
+                extra={"secret_var": secret_name, **extra} if secret_name else extra,
+            )
+        },
+    )
+
+
+def _parse_table_format(raw: dict[str, Any], path: Path) -> str:
+    """Read the warehouse default rather than silently discarding it."""
+    table_format = raw.get("Table_format", DEFAULT_TABLE_FORMAT)
+    if not isinstance(table_format, str) or table_format not in VALID_TABLE_FORMATS:
+        raise ConfigError(
+            f"{path}: Warehouse.Table_format must be one of {sorted(VALID_TABLE_FORMATS)}, "
+            f"got {table_format!r}"
+        )
+    return table_format
+
+
+WAREHOUSE_NAME_DIALECTS = {
+    "postgres": "postgresql",
+    "postgresql": "postgresql",
+    "databricks": "databricks",
+    "snowflake": "snowflake",
+    "trino": "trino",
+    "duckdb": "duckdb",
+}
+
+
+def _check_warehouse_name(name: Any, warehouse: ConnectionSection, path: Path) -> None:
+    """Ensure an optional Warehouse.Name matches its active JDBC URL's dialect."""
+    if name is None:
+        return
+    if not isinstance(name, str):
+        raise ConfigError(f"{path}: Warehouse.Name must be a string when present")
+    expected = WAREHOUSE_NAME_DIALECTS.get(name.strip().lower())
+    if expected is None:
+        supported = sorted({value.title() for value in WAREHOUSE_NAME_DIALECTS})
+        raise ConfigError(f"{path}: Warehouse.Name {name!r} must be one of {supported}")
+
+    # Imported lazily because warehouse.py imports this module for its profile
+    # types. A malformed JDBC URL is a config error at this boundary too: the
+    # documented Name check would otherwise claim validation and defer it until
+    # the first production task.
+    from etl_craft.db import ConnectionError_
+    from etl_craft.warehouse import translate_jdbc_url
+
+    try:
+        dialect_name, _ = translate_jdbc_url(warehouse.active.jdbc_url)
+    except ConnectionError_ as exc:
+        raise ConfigError(
+            f"{path}: Warehouse.Name cannot be checked because the active JDBC URL is invalid: "
+            f"{exc}"
+        ) from exc
+    actual = dialect_name.split("+", 1)[0]
+    if actual != expected:
+        raise ConfigError(
+            f"{path}: Warehouse.Name is {name!r}, but its active JDBC URL resolves to "
+            f"{actual!r}"
+        )
 
 
 def _parse_cloning(raw: dict[str, Any], path: Path) -> CloningConfig:
@@ -484,13 +806,21 @@ def _parse_orchestrator(raw: dict[str, Any], path: Path) -> OrchestratorConfig:
     )
 
 
-def _parse_email_section(raw: dict[str, Any], path: Path) -> EmailConfig:
+def _parse_optional_legacy_email(raw: Any, path: Path) -> EmailConfig | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{path}: Email section must be a mapping if present")
+    return _parse_legacy_email_section(raw, path)
+
+
+def _parse_legacy_email_section(raw: dict[str, Any], path: Path) -> EmailConfig:
     active_profile = raw.get("Active_profile")
     profiles_raw = raw.get("Profiles")
     if not active_profile or not isinstance(profiles_raw, dict):
         raise ConfigError(f"{path}: Email needs Active_profile and a Profiles mapping")
     profiles = {
-        name: _parse_email_profile(name, profile_raw or {}, path)
+        name: _parse_legacy_email_profile(name, profile_raw or {}, path)
         for name, profile_raw in profiles_raw.items()
     }
     if active_profile not in profiles:
@@ -500,7 +830,7 @@ def _parse_email_section(raw: dict[str, Any], path: Path) -> EmailConfig:
     return EmailConfig(active_profile=active_profile, profiles=profiles)
 
 
-def _parse_email_profile(name: str, raw: dict[str, Any], path: Path) -> EmailProfile:
+def _parse_legacy_email_profile(name: str, raw: dict[str, Any], path: Path) -> EmailProfile:
     host = raw.get("host")
     port = raw.get("port")
     from_address = raw.get("from_address")
@@ -520,17 +850,94 @@ def _parse_email_profile(name: str, raw: dict[str, Any], path: Path) -> EmailPro
         for k, v in raw.items()
         if k not in {"host", "port", "from_address", "auth_mode", "user", "use_tls"}
     }
+    try:
+        parsed_port = int(port)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(
+            f"{path}: Email.Profiles.{name}.port must be a number, got {port!r}"
+        ) from exc
     return EmailProfile(
         section="EMAIL",
         name=name,
         host=host,
-        port=int(port),
+        port=parsed_port,
         from_address=from_address,
         auth_mode=auth_mode,
         user=user,
         use_tls=bool(raw.get("use_tls", True)),
         extra=extra,
     )
+
+
+def _parse_optional_manifest_email(
+    raw: Any, path: Path, resolver: _VariableResolver
+) -> EmailConfig | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{path}: Email section must be a mapping if present")
+    profile_name = _manifest_profile_name("EMAIL", raw, path)
+    variables = raw.get("Variables")
+    where = "Email.Variables"
+    if not isinstance(variables, dict):
+        raise ConfigError(f"{path}: Email needs a Variables mapping")
+
+    def resolve(key: str, *, required: bool = False) -> str:
+        variable_name = _manifest_variable_name(variables, key, where, required=required)
+        if variable_name is None:
+            return ""
+        return resolver.manifest_value(variable_name, profile_name, key, f"{where}.{key}")
+
+    host = resolve("host", required=True)
+    from_address = resolve("from_address", required=True)
+    port_raw = resolve("port", required=True)
+    try:
+        port = int(port_raw)
+    except ValueError as exc:
+        raise ConfigError(f"{path}: {where}.port resolved to {port_raw!r}, not a number") from exc
+    auth_mode = resolve("auth_mode", required=True)
+    if auth_mode not in VALID_EMAIL_AUTH_MODES:
+        raise ConfigError(
+            f"{path}: {where}.auth_mode resolved to {auth_mode!r}, which is not one of "
+            f"{sorted(VALID_EMAIL_AUTH_MODES)}"
+        )
+    user = resolve("user") or None
+    if auth_mode == "password" and not user:
+        raise ConfigError(f"{path}: {where} needs user for auth_mode='password'")
+    use_tls_raw = resolve("use_tls")
+    use_tls = _parse_bool(use_tls_raw, f"{where}.use_tls", path, default=True)
+    secret_name = _manifest_variable_name(variables, "secret", where, required=False)
+    if secret_name:
+        secret_name = resolver.selected_name(secret_name, profile_name, "secret")
+    elif auth_mode == "password":
+        raise ConfigError(f"{path}: {where} needs secret for auth_mode='password'")
+    profile = EmailProfile(
+        section="EMAIL",
+        name=profile_name,
+        host=host,
+        port=port,
+        from_address=from_address,
+        auth_mode=auth_mode,
+        user=user,
+        use_tls=use_tls,
+        extra={"secret_var": secret_name} if secret_name else {},
+    )
+    return EmailConfig(active_profile=profile_name, profiles={profile_name: profile})
+
+
+def _parse_bool(value: Any, name: str, path: Path, *, default: bool) -> bool:
+    """Accept YAML booleans and the standard environment spellings."""
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes"}:
+            return True
+        if normalized in {"false", "0", "no"}:
+            return False
+    raise ConfigError(f"{path}: {name} must be true or false, got {value!r}")
 
 
 def _require_list_if_present(raw: dict[str, Any], key: str, path: Path) -> list[str] | None:
@@ -564,8 +971,12 @@ def _load_dotenv_file(path: str | None) -> dict[str, str]:
     """
     if not path:
         raise ConfigError("Source.Path is required when Source.Type == 'file'")
+    try:
+        contents = Path(path).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ConfigError(f"could not read secrets file {path!r}: {exc}") from exc
     values: dict[str, str] = {}
-    for line in Path(path).read_text(encoding="utf-8").splitlines():
+    for line in contents.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue

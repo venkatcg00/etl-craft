@@ -176,7 +176,7 @@ def build_parser() -> argparse.ArgumentParser:
     graph_target.add_argument("--pipeline_code", dest="name")
 
     mode_parser = subparsers.add_parser(
-        "set-execution-mode", help="Lock Execution.Mode in craft-connector.yml"
+        "set-execution-mode", help="Set the execution mode in craft-connector.yml"
     )
     mode_parser.add_argument("mode", choices=sorted(VALID_MODES))
 
@@ -210,7 +210,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="global_dag",
         help=(
             "Emit the optional cross-pipeline trigger DAG instead of one pipeline's own "
-            "(requires [Orchestrator].Global_dag: true in craft-connector.yml)"
+            "(requires Dag_defaults.Global_dag: true in a canonical connector file)"
         ),
     )
     generate_yml_parser.add_argument("--output", help="Write to this path instead of stdout")
@@ -249,13 +249,13 @@ def build_parser() -> argparse.ArgumentParser:
     # [ADDITION] Closes CLAUDE.md open question #7 — see migrate.py's own
     # module docstring for scope/reasoning.
     migrate_parser = subparsers.add_parser(
-        "migrate", help="Apply pending sql/migrations/*.sql files"
+        "migrate", help="Apply packaged migrations and an optional project migration stream"
     )
     migrate_parser.add_argument(
         "--migrations-dir",
         help=(
-            "Directory of *.sql migration files. Defaults to $ETL_CRAFT_MIGRATIONS_DIR, "
-            "then ./sql/migrations, then the copy packaged with etl-craft."
+            "Directory of project *.sql migration files. Defaults to "
+            "$ETL_CRAFT_MIGRATIONS_DIR, then ./sql/migrations."
         ),
     )
 
@@ -504,7 +504,7 @@ def _generate_yml_command(args: argparse.Namespace, engine: Engine, config: Conn
     if args.global_dag:
         if not config.orchestrator.global_dag:
             print(
-                "error: the global DAG is disabled — set [Orchestrator].Global_dag: true "
+                "error: the global DAG is disabled — set Dag_defaults.Global_dag: true "
                 "in craft-connector.yml to enable it",
                 file=sys.stderr,
             )

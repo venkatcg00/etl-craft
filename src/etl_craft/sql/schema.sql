@@ -628,23 +628,24 @@ COMMENT ON TABLE AUD_TASK_DEPENDENCY_TRACKER IS
 -- #7 ("No migration tooling... has been discussed"), per explicit permission
 -- ("you may implement the migration mechanism as well").
 -- ----------------------------------------------------------------------------
--- [CHOICE] This file (schema.sql) stays the single authoritative *full*
--- definition for a brand-new install — that role is unchanged. Migration
--- files under sql/migrations/ are for carrying an *already-deployed*
--- database forward incrementally from here on; nothing already baked into
--- schema.sql above gets a retroactive migration file (that would misstate
--- history — every one of those changes already happened as a direct edit
--- to this file, flagged in its own POST-SIGNOFF CHANGES block). Zero
--- migration files exist yet as of this table's own creation, so a fresh
--- install (via this file) and this table starting empty are consistent by
--- construction — nothing here is "pending" that a fresh database is
--- missing. See migrate.py for the runner this table backs.
+-- This file remains the full definition for a brand-new install. `init-db`
+-- and `setup` record the packaged ENGINE migration files after applying it,
+-- without executing those already-reflected changes again. Project migration
+-- files are not part of this schema and remain pending. See migrate.py for
+-- the runner and the source-scoped checksum ledger below.
 CREATE TABLE SCHEMA_MIGRATIONS (
-    VERSION      VARCHAR PRIMARY KEY,   -- migration filename, e.g. '0001_add_thing.sql'
-    APPLIED_AT   TIMESTAMPTZ NOT NULL DEFAULT now()
+    SOURCE       VARCHAR NOT NULL DEFAULT 'LEGACY',
+    VERSION      VARCHAR NOT NULL,       -- migration filename, e.g. '0001_add_thing.sql'
+    CHECKSUM     VARCHAR(64),            -- SHA-256 of the exact applied file
+    APPLIED_AT   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT pk_schema_migrations PRIMARY KEY (SOURCE, VERSION),
+    CONSTRAINT ck_schema_migrations_source
+        CHECK (SOURCE IN ('ENGINE', 'PROJECT', 'LEGACY')),
+    CONSTRAINT ck_schema_migrations_checksum
+        CHECK (CHECKSUM IS NULL OR CHECKSUM ~ '^[0-9a-f]{64}$')
 );
 
-COMMENT ON TABLE SCHEMA_MIGRATIONS IS 'Bookkeeping for migrate.py: one row per sql/migrations/*.sql file already applied to this database. schema.sql itself is never re-run against an existing database — this table is only ever consulted/written by `etl-craft migrate`.';
+COMMENT ON TABLE SCHEMA_MIGRATIONS IS 'Bookkeeping for migrate.py: one row per ENGINE or PROJECT migration file already applied to this database, keyed by source and filename. CHECKSUM is the immutable SHA-256 content hash. schema.sql itself is never re-run against an existing database — this table is only ever consulted/written by `etl-craft migrate`.';
 
 COMMIT;
 
