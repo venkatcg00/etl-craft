@@ -23,7 +23,10 @@ version, commit, date, owner, and the evidence for each applicable item.
 - [ ] If Databricks is in scope, its credential-gated acceptance test passed against the target
       workspace and catalog.
 - [ ] If Snowflake is in scope, its credential-gated acceptance test passed against the target
-      account. Iceberg deployments include a tested external volume and base location.
+      account. Iceberg acceptance exercises the selected storage mode: Snowflake-managed storage
+      (the default, requiring neither storage parameter), or a customer `EXTERNAL_VOLUME` paired
+      with `BASE_LOCATION`. Iceberg cloning has separate explicit storage requirements; verify
+      its configured external volume and base location when cloning is enabled.
 - [ ] DuckDB is used only where its single-writer behavior is acceptable.
 
 ## Customer rollout
