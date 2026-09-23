@@ -737,10 +737,15 @@ def _hash_expression(columns: list[str], alias: str, dialect_name: str = "") -> 
     to NULL, which would make every NULL-containing row hash identically
     regardless of its other values.
     """
+    return _hash_value_expression([f"{alias}.{c}" for c in columns], dialect_name)
+
+
+def _hash_value_expression(values: list[str], dialect_name: str) -> str:
+    """Hash SQL value expressions using the same normalization as staged columns."""
     # ANSI CAST, not Postgres's `::text` shorthand — this module avoids the
     # shorthand everywhere.
     string_type = "STRING" if dialect_name == "databricks" else "VARCHAR"
-    parts = " || '|' || ".join(f"COALESCE(CAST({alias}.{c} AS {string_type}), '')" for c in columns)
+    parts = " || '|' || ".join(f"COALESCE(CAST({value} AS {string_type}), '')" for value in values)
     # [DEVIATION, 2026-09-22] The return shape genuinely varies, as the
     # docstring above always warned. Postgres and DuckDB return 32 hex
     # characters directly; Trino's md5() takes and returns varbinary, so a
@@ -1494,6 +1499,11 @@ def _execute(
     warehouse_conn.info[TASK_PARAMS_INFO_KEY] = params
     warehouse_conn.info[TABLE_FORMAT_INFO_KEY] = resolve_table_format(ctx)
     action = params.get("SQL_ACTION")
+    if "PRESERVE_TARGET" in params:
+        if action != "SCD1_MERGE":
+            raise HandlerError("PRESERVE_TARGET is supported only for SCD1_MERGE")
+        if params["PRESERVE_TARGET"].strip().lower() not in {"true", "false"}:
+            raise HandlerError("PRESERVE_TARGET must be true or false")
     if action not in SQL_ACTIONS:
         raise HandlerError(f"CFG_TASK_PARAMETERS.SQL_ACTION missing or unrecognized: {action!r}")
     target_object = params.get("TARGET_OBJECT")
@@ -1679,7 +1689,16 @@ def _scd1_merge(
     # A single HASH_KEY comparison, not an OR-chain over every compare
     # column — "scd tables should also have hashkey created by
     # merge_compare columns," per explicit instruction.
-    changed = "t.HASH_KEY IS DISTINCT FROM s.HASH_KEY"
+    preserve_target = (ctx.task_params.get("PRESERVE_TARGET") or "false").strip().lower() == "true"
+
+    def effective_hash(target_alias: str) -> str:
+        return _hash_value_expression(
+            [f"COALESCE(s.{c}, {target_alias}.{c})" for c in merge_compare_columns],
+            conn.dialect.name,
+        )
+
+    comparison_hash = effective_hash("t") if preserve_target else "s.HASH_KEY"
+    changed = f"t.HASH_KEY IS DISTINCT FROM {comparison_hash}"
 
     update_count = _count(
         conn,
@@ -1694,15 +1713,31 @@ def _scd1_merge(
     # correlated UPDATE.
     update_target, uq = _mutation_target(conn, qualified_target)
     upd_key_match = " AND ".join(f"{uq}.{k} = s.{k}" for k in merge_key)
-    upd_changed = f"{uq}.HASH_KEY IS DISTINCT FROM s.HASH_KEY"
+    comparison_hash = effective_hash(uq) if preserve_target else "s.HASH_KEY"
+    upd_changed = f"{uq}.HASH_KEY IS DISTINCT FROM {comparison_hash}"
+
     # Databricks requires an aggregate to prove scalar cardinality. The
     # stage has already passed _dedupe_stage, so FIRST sees at most one row
     # per key and preserves its value (including NULL) without choosing a
     # winner or imposing an ordering requirement on the column's data type.
+    def source_value(c: str) -> str:
+        value = f"FIRST(s.{c})" if conn.dialect.name == "databricks" else f"s.{c}"
+        return f"(SELECT {value} FROM {stage} s WHERE {upd_key_match})"
+
     set_pieces = []
     for c in non_key_columns:
-        value = f"FIRST(s.{c})" if conn.dialect.name == "databricks" else f"s.{c}"
-        set_pieces.append(f"{c} = (SELECT {value} FROM {stage} s WHERE {upd_key_match})")
+        value = source_value(c)
+        if preserve_target:
+            if c.lower() == "hash_key":
+                # Hash the values actually stored, not the nullable source
+                # row: otherwise a repeated load would report false changes.
+                value = _hash_value_expression(
+                    [f"COALESCE({source_value(col)}, {uq}.{col})" for col in merge_compare_columns],
+                    conn.dialect.name,
+                )
+            else:
+                value = f"COALESCE({value}, {uq}.{c})"
+        set_pieces.append(f"{c} = {value}")
     set_pieces.append("PIPELINE_RUN_ID = :pipeline_run_id")
     set_pieces.append("UPDATE_DATE = :now")
     set_pieces.append("UPDATED_BY = :updated_by")

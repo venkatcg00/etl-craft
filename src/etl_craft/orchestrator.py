@@ -388,11 +388,27 @@ def run_pipeline(
     # the same runner.py:323 pattern for the task-level tracker, and the
     # same E2-12 reasoning: re-deriving at finalize time can silently jump
     # the watermark past a newer upstream run that completed while this
-    # pipeline's own wave loop was still running. Stays None (old re-derive
-    # behaviour, per CLAUDE.md "as do callers finalizing a run they didn't
-    # gate themselves") for --force, and for a call that finds this run
-    # already active — a gate it didn't itself evaluate.
+    # pipeline's own wave loop was still running.
+    #
+    # [DEVIATION, 2026-09-23, E3-09] `record_consumption` tracks whether
+    # *this call* is the one that should record consumption at all — not
+    # just what to record. A call that finds the run already active (minted
+    # by an earlier call — its own prior `run_pipeline` invocation,
+    # `init_pipeline_run`, or a retry) did not itself evaluate the gate, so
+    # it has nothing of its own to record; the run's watermark was already
+    # correctly set the moment it was minted. The pre-fix code defaulted
+    # `gate_consumed` to None in that case, which `_finalize_from_task_states`
+    # read as "re-derive" (the --force meaning) rather than "already
+    # recorded, leave it alone" — silently overwriting an already-correct
+    # value with "whatever qualifies now" the same way E3-02 fixed once for
+    # the init_pipeline_run/finalize_active_run pairing. `finalize_active_run`
+    # already makes this same choice (`record_consumption=False`) for the
+    # structurally identical situation; this mirrors it. `--force` keeps the
+    # old re-derive behaviour, per CLAUDE.md ("as do callers finalizing a run
+    # they didn't gate themselves") — it bypasses the gate entirely, so there
+    # genuinely is nothing of its own to record either.
     gate_consumed: dict[int, int] | None = None
+    record_consumption = True
     if not force:
         # Same "only gate when actually minting a new run" rule as
         # init_pipeline_run — --force bypasses this gate entirely too, per
@@ -415,6 +431,8 @@ def run_pipeline(
                         f"{skip_reason}"
                     ),
                 )
+        else:
+            record_consumption = False
 
     with engine.begin() as conn:
         pipeline_run_id = find_or_create_active_run(conn, pipeline_id)
@@ -431,7 +449,8 @@ def run_pipeline(
         # and this is the one finalize path outside that shared function.
         with engine.begin() as conn:
             finalize_pipeline_run(conn, pipeline_run_id, "SUCCESS")
-        consume_pipeline_dependency_edges(engine, pipeline_id, gate_consumed)
+        if record_consumption:
+            consume_pipeline_dependency_edges(engine, pipeline_id, gate_consumed)
         return PipelineOutcome(status="SUCCESS", message=f"{pipeline_code}: no active tasks")
 
     if force:
@@ -468,6 +487,7 @@ def run_pipeline(
         pipeline_id,
         pipeline_run_id,
         all_task_ids,
+        record_consumption=record_consumption,
         consumed_edges=gate_consumed,
     )
 

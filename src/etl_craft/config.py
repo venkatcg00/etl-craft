@@ -680,6 +680,11 @@ def _parse_manifest_connection_section(
             )
         if "secret" in variables or ("auth_mode" in variables and resolve("auth_mode") != "token"):
             raise ConfigError(f"{path}: token connection must not specify another secret/auth mode")
+        unused = set(variables) - set(PREFERRED_CONNECTION_FIELDS[name]) - {"auth_mode"}
+        if unused:
+            raise ConfigError(
+                f"{path}: unused {name} token connection field(s): {', '.join(sorted(unused))}"
+            )
         fields = {
             key: resolve(key, required=True)
             for key in PREFERRED_CONNECTION_FIELDS[name]

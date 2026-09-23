@@ -721,6 +721,7 @@ KNOWN_PARAMETERS = frozenset(
         "MERGE_KEY",
         "MERGE_COMPARE_COLUMNS",
         "MERGE_DEDUPE_ORDER",
+        "PRESERVE_TARGET",
         "SCHEMA_EVOLUTION",
         "HARD_DELETE",
         # HANDLER=SQL, Snowflake Iceberg targets only. Snowflake cannot

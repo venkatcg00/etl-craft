@@ -62,7 +62,7 @@ from etl_craft.cfg import (
 )
 from etl_craft.config import VALID_TABLE_FORMATS, ConnectorConfig
 from etl_craft.resolver import ResolverError, build_graph
-from etl_craft.sql_actions import ICEBERG_CREATE_PREFIX, ROW_ID_COLUMN
+from etl_craft.sql_actions import ICEBERG_CREATE_PREFIX, ROW_ID_COLUMN, SNOWFLAKE_MANAGED_VOLUME
 from etl_craft.warehouse import verify_iceberg_catalog
 
 
@@ -431,10 +431,9 @@ def validate_warehouse_storage(
       * On Trino the storage format is a property of the *catalog*, so a task
         asking for Iceberg against a Hive catalog gets Hive tables while
         everything reports success.
-      * On Snowflake an Iceberg table needs EXTERNAL_VOLUME and BASE_LOCATION,
-        a static cross-parameter requirement of the same kind already checked
-        for the SCD merges -- but only Snowflake needs it, so the dialect has
-        to be known.
+      * On Snowflake a customer external volume requires BASE_LOCATION;
+        Snowflake-managed Iceberg tables need neither storage parameter.
+        Cloning retains its own explicit external-storage requirements.
     """
     if warehouse_engine is None or config.warehouse is None:
         return []
@@ -453,21 +452,19 @@ def validate_warehouse_storage(
             effective = declared or config.warehouse_table_format
             if effective != "iceberg" or not params.get("SQL_ACTION"):
                 continue
-            missing = [
-                name
-                for name in ("EXTERNAL_VOLUME", "BASE_LOCATION")
-                if not (params.get(name) or "").strip()
-            ]
-            if missing:
+            volume = (params.get("EXTERNAL_VOLUME") or "").strip() or SNOWFLAKE_MANAGED_VOLUME
+            if (
+                volume != SNOWFLAKE_MANAGED_VOLUME
+                and not (params.get("BASE_LOCATION") or "").strip()
+            ):
                 issues.append(
                     ValidationIssue(
                         category="warehouse_storage",
                         message=(
                             f"{task.pipeline_code}.{task.task_code}: an Iceberg table on "
-                            f"{warehouse_engine.dialect.name} needs {', '.join(missing)} — "
-                            "the task "
-                            "would be refused at execution rather than silently creating a "
-                            "non-Iceberg table"
+                            f"{warehouse_engine.dialect.name} with a customer EXTERNAL_VOLUME "
+                            "needs BASE_LOCATION — use Snowflake-managed storage or specify "
+                            "the path within that volume"
                         ),
                     )
                 )
@@ -506,6 +503,11 @@ def validate_task_parameters(conn: Connection) -> list[ValidationIssue]:
             )
 
         declared_format = (params.get("TABLE_FORMAT") or "").strip().lower()
+        if "PRESERVE_TARGET" in params:
+            if task.handler != "SQL" or params.get("SQL_ACTION") != "SCD1_MERGE":
+                add("PRESERVE_TARGET is supported only for SCD1_MERGE")
+            if params["PRESERVE_TARGET"].strip().lower() not in {"true", "false"}:
+                add("PRESERVE_TARGET must be true or false")
         if declared_format and declared_format not in VALID_TABLE_FORMATS:
             # [ADDITION, 2026-09-22, E2-73] Enforced in sql_actions at
             # execution, which means `TABLE_FORMAT: icberg` passed validate and

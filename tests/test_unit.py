@@ -21,6 +21,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
 import etl_craft
+import etl_craft.migrate as migrate_module
 import etl_craft.sql_actions as sql_actions
 import etl_craft.warehouse as warehouse_module
 from etl_craft.cfg import (
@@ -2944,6 +2945,54 @@ def test_preferred_cloud_connection_bootstrap_round_trip(tmp_path, name, fields)
         assert profile.user == "tester"
 
 
+def test_setup_strips_credentials_from_a_databricks_url_written_into_a_legacy_manifest(tmp_path):
+    # E3-08. Databricks' own "Connection Details" JDBC tab hands out a URL
+    # that already contains AuthMech/UID/PWD -- a real personal access token
+    # in cleartext -- as *the* string to copy, not the trimmed host+httpPath
+    # value the docs instruct extracting. preferred_connection_url's own
+    # docstring calls its return value "credential-free", but before this fix
+    # that claim only held after _parse_databricks stripped those params at
+    # *connect* time -- not here, where the value is about to be written to
+    # disk. For an existing legacy-shaped manifest (an explicitly supported
+    # upgrade path), _write_legacy_manifest persists settings.warehouse_url
+    # verbatim into Warehouse.Profiles.<profile>.jdbc_url -- the exact file
+    # this whole config-manifest pivot exists to keep secret-free and safely
+    # git-committable. This test hand-authors that legacy file first (since
+    # _is_legacy_manifest reads the file already on disk, not the new
+    # settings) and drives the real leak scenario end to end.
+    secret_token = "dapiSUPERSECRETTOKEN0000000000"
+    output_path = tmp_path / "craft-connector.yml"
+    output_path.write_text(
+        "Execution:\n  Mode: local\n"
+        "Source:\n  Type: environment\n"
+        "Postgres:\n  Active_profile: dev\n  Profiles:\n"
+        "    dev:\n      jdbc_url: jdbc:postgresql://localhost:5432/etl_craft\n"
+        "      user: etl_engine\n      auth_mode: password\n",
+        encoding="utf-8",
+    )
+    contents = (
+        VALID_ENV
+        + "WAREHOUSE_NAME=Databricks\n"
+        + "WAREHOUSE_JDBC_URL=jdbc:databricks://host:443/default;transportMode=http;ssl=1;"
+        f"AuthMech=3;UID=token;PWD={secret_token};httpPath=/sql/1.0/warehouses/abc\n"
+        + "WAREHOUSE_CATALOG=practice_catalog\n"
+        + "WAREHOUSE_SCHEMA=practice_schema\n"
+        + f"WAREHOUSE_TOKEN={secret_token}\n"
+    )
+    env_path = _write_env(tmp_path, contents)
+
+    configure_from_env(env_path, output_path)
+
+    written = output_path.read_text(encoding="utf-8")
+    assert secret_token not in written
+    assert "PWD" not in written
+    assert "UID" not in written
+    assert "AuthMech" not in written
+    raw = yaml.safe_load(written)
+    assert "ConnCatalog=practice_catalog" in raw["Warehouse"]["Profiles"]["dev"]["jdbc_url"]
+    assert "httpPath=/sql/1.0/warehouses/abc" in raw["Warehouse"]["Profiles"]["dev"]["jdbc_url"]
+
+
 def test_snowflake_pat_uses_driver_password_without_logging_token(monkeypatch):
     captured = {}
     monkeypatch.setattr(warehouse_module, "_dbapi_connect", lambda url: captured.update(url=url))
@@ -2958,6 +3007,180 @@ def test_snowflake_pat_uses_driver_password_without_logging_token(monkeypatch):
     assert captured["url"].password == "fake-pat"
     assert captured["url"].username == "tester"
     assert "fake-pat" not in str(captured["url"])
+
+
+@pytest.mark.parametrize(
+    "name,extra,message",
+    [
+        ("Postgres", {}, "require Warehouse.Name"),
+        ("Snowflake", {"secret": "EXTRA_SECRET"}, "another secret/auth mode"),
+        ("Snowflake", {"auth_mode": "EXTRA_MODE"}, "another secret/auth mode"),
+        ("Snowflake", {"jdbc_url": "UNUSED_URL"}, "unused snowflake token connection field"),
+    ],
+)
+def test_token_manifest_rejects_mixed_or_unused_fields(tmp_path, monkeypatch, name, extra, message):
+    monkeypatch.setenv("EXTRA_MODE", "password")
+    raw = {"Name": name, "Profile": "dev", "Variables": {"token": "TOKEN", **extra}}
+    from etl_craft.config import _parse_manifest_connection_section, _VariableResolver
+
+    with pytest.raises(ConfigError, match=message):
+        _parse_manifest_connection_section(
+            "WAREHOUSE",
+            raw,
+            tmp_path / "config.yml",
+            _VariableResolver.from_source(
+                SourceConfig(type="environment"), tmp_path / "config.yml"
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    "credential", ["PWD", "password", "Auth_AccessToken", "OAuth2ClientSecret"]
+)
+def test_preferred_databricks_url_retains_only_public_parameters(credential):
+    url = warehouse_module.preferred_connection_url(
+        "databricks",
+        {
+            "jdbc_url": f"jdbc:databricks://host/default;httpPath=/sql/x;{credential}=fake-secret",
+            "catalog": "main",
+            "schema": "public",
+        },
+    )
+    assert "fake-secret" not in url
+    assert "httpPath=/sql/x" in url
+
+
+@pytest.mark.parametrize(
+    "dialect,fmt,timestamp,alter",
+    [
+        ("snowflake", "iceberg", "TIMESTAMP_NTZ(6)", "ALTER ICEBERG TABLE"),
+        ("snowflake", "native", "TIMESTAMP WITH TIME ZONE", "ALTER TABLE"),
+        ("databricks", "iceberg", "TIMESTAMP", "ALTER TABLE"),
+        ("postgresql", "native", "TIMESTAMP WITH TIME ZONE", "ALTER TABLE"),
+    ],
+)
+def test_cloud_audit_types_and_alter_commands(dialect, fmt, timestamp, alter):
+    conn = _FakeDialectConn(dialect, info={TABLE_FORMAT_INFO_KEY: fmt})
+    assert sql_actions._audit_column_type(conn, "CREATE_DATE") == timestamp
+    assert sql_actions._audit_column_type(conn, "UPDATE_DATE") == timestamp
+    assert sql_actions._audit_column_type(conn, "HASH_KEY") == "VARCHAR(32)"
+    assert sql_actions._alter_table_keyword(conn) == alter
+
+
+@pytest.mark.parametrize(
+    "dialect,qualified",
+    [("databricks", True), ("trino", True), ("snowflake", False), ("postgresql", False)],
+)
+def test_rename_and_scratch_names_are_resolvable(dialect, qualified):
+    assert sql_actions._rename_to_target(dialect, "target", "db.sch.target") == (
+        "db.sch.target" if qualified else "target"
+    )
+    assert sql_actions._scratch_name(dialect, "stage", "sch.target", "db") == (
+        "db.sch.stage" if dialect == "databricks" else "stage"
+    )
+
+
+def test_databricks_hash_uses_unbounded_string_type():
+    assert (
+        sql_actions._hash_expression(["name"], "s", "databricks")
+        == "MD5(COALESCE(CAST(s.name AS STRING), ''))"
+    )
+
+
+@pytest.mark.parametrize(
+    "fmt,create_prefix,alter_prefix",
+    [
+        ("iceberg", "CREATE ICEBERG TABLE", "ALTER ICEBERG TABLE"),
+        ("native", "CREATE TABLE", "ALTER TABLE"),
+    ],
+)
+def test_snowflake_rebuild_renames_the_table_it_just_created(fmt, create_prefix, alter_prefix):
+    # E3-14: the ALTER operates on the new rebuild, not the old target.
+    # Thus it must match this task's CREATE even if the old format differed.
+    conn = _FakeDialectConn("snowflake", info={TABLE_FORMAT_INFO_KEY: fmt})
+    sql_actions._add_computed_surrogate_key(conn, "db.sch.target")
+    assert conn.statements[1].startswith(f"{create_prefix} db.sch.target__etl_rowid ")
+    assert conn.statements[-1] == f"{alter_prefix} db.sch.target__etl_rowid RENAME TO target"
+
+
+@pytest.mark.parametrize("preserve", ["false", "true"])
+def test_databricks_scd1_scalar_updates_follow_deduplication(monkeypatch, preserve):
+    conn = _FakeDialectConn("databricks")
+    stage = "db.sch.stage"
+
+    def dedupe(*args, **kwargs):
+        conn.statements.append("DEDUPLICATED")
+        return stage
+
+    monkeypatch.setattr(sql_actions, "_build_stage", lambda *a, **k: stage)
+    monkeypatch.setattr(sql_actions, "_dedupe_stage", dedupe)
+    monkeypatch.setattr(sql_actions, "_check_or_evolve_schema", lambda *a, **k: None)
+    monkeypatch.setattr(sql_actions, "_add_hash_key", lambda *a, **k: None)
+    monkeypatch.setattr(
+        sql_actions,
+        "_fetch_columns",
+        lambda *a, **k: [("id", "INT"), ("name", "STRING"), ("HASH_KEY", "STRING")],
+    )
+    monkeypatch.setattr(sql_actions, "_count", lambda *a, **k: 0)
+    monkeypatch.setattr(sql_actions, "_row_id_insert_parts", lambda *a, **k: ("", ""))
+    sql_actions._scd1_merge(
+        conn,
+        _format_ctx({"PRESERVE_TARGET": preserve}),
+        "SELECT id, name FROM source",
+        "sch.target",
+        "db",
+        ["id"],
+        ["name"],
+        "test",
+        datetime.now(UTC),
+    )
+    update = next(stmt for stmt in conn.statements if stmt.startswith("UPDATE "))
+    assert conn.statements.index("DEDUPLICATED") < conn.statements.index(update)
+    assert "SELECT FIRST(s.name) FROM db.sch.stage s WHERE" in update
+    if preserve == "true":
+        assert "name = COALESCE((SELECT FIRST(s.name)" in update
+        assert "HASH_KEY = MD5(" in update
+    else:
+        assert "name = (SELECT FIRST(s.name)" in update
+        assert "HASH_KEY = (SELECT FIRST(s.HASH_KEY)" in update
+
+
+@pytest.mark.parametrize(
+    "case,message",
+    [
+        ("ambiguous", "both ENGINE and PROJECT"),
+        ("unclassifiable", "cannot be safely classified"),
+        ("duplicate", "both a legacy record"),
+        ("unknown", "unknown migration source"),
+        ("unverifiable", "no project migrations directory"),
+    ],
+)
+def test_migration_ledger_rejects_unsafe_adoption(tmp_path, case, message):
+    version = "0010_team.sql"
+    project = migrate_module.MigrationFile(
+        source="PROJECT", path=tmp_path / version, sql="SELECT 1", checksum="abc"
+    )
+    engine = migrate_module.MigrationFile(
+        source="ENGINE", path=tmp_path / version, sql="SELECT 1", checksum="abc"
+    )
+    streams = {"PROJECT": {version: project}}
+    ledger = {("LEGACY", version): None}
+    if case in {"ambiguous", "unclassifiable"}:
+        streams["ENGINE"] = {version: engine}
+        if case == "unclassifiable":
+            del streams["PROJECT"]
+    elif case == "duplicate":
+        ledger[("PROJECT", version)] = "abc"
+    elif case == "unknown":
+        ledger = {("OTHER", version): "abc"}
+    elif case == "unverifiable":
+        ledger = {("PROJECT", version): "abc"}
+        streams = {}
+    with pytest.raises(migrate_module.MigrationError, match=message):
+        if case in {"unknown", "unverifiable"}:
+            migrate_module._validate_recorded_migrations(ledger, streams, {})
+        else:
+            migrate_module._legacy_adoption_plan(ledger, streams)
 
 
 def test_configure_from_env_writes_a_warehouse_section(tmp_path):

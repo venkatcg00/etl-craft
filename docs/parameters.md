@@ -30,6 +30,7 @@ needs. Your `SELECT` must never project an engine-managed column itself.
 | `MERGE_KEY` | SCD merges | Columns the merge matches on. |
 | `MERGE_COMPARE_COLUMNS` | SCD merges | Columns hashed into `HASH_KEY` for change detection. |
 | `MERGE_DEDUPE_ORDER` | no | An `ORDER BY` fragment (`updated_at DESC`) deciding which row wins when the source has duplicate `MERGE_KEY`s. Without it, duplicates are a clean failure *before* the target is touched — the engine will not invent an ordering you did not declare. |
+| `PRESERVE_TARGET` | no; SCD1 only | Defaults to `false`. Set `true` to update business columns with `COALESCE(source_value, target_value)`: non-null source values replace existing values, while source nulls retain them. Inserts are unchanged. Change detection and `HASH_KEY` use the resulting values of `MERGE_COMPARE_COLUMNS`; a load with no effective change is skipped. Empty strings, zero and false are non-null values and replace the target. |
 | `SCHEMA_EVOLUTION` | no | `"true"` lets a new column in the source be added to the target. Never repairs missing audit columns. |
 | `HARD_DELETE` | no | `DELETE_ROWS` only. `"true"` issues a real `DELETE`; anything else soft-deletes via `DELETE_FLAG='Y'`. |
 | `TABLE_FORMAT` | no | `iceberg` or `native`. Overrides `Warehouse.Table_format` for this target. |

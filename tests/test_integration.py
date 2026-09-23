@@ -2427,6 +2427,30 @@ def test_validate_requires_an_email_alert_to_wait_on_an_edge_free_leaf(
     assert "isolated" in out
 
 
+def test_validate_flags_an_email_alert_with_no_edges_of_its_own(
+    postgres_engine, committed_pipeline, craft_connector_on_disk, capsys
+):
+    # E3-10, the second sub-case E3-04's fix covers but that had no dedicated
+    # regression test: an EMAIL_ALERT task with *no* CFG_TASK_DEPENDENCY
+    # edges of its own -- neither depending on anything nor depended upon.
+    # The old `alerts = {e.task_code for e in edges if e.handler ==
+    # "EMAIL_ALERT"}` only ever found an alert task that appeared as an edge
+    # endpoint, so a zero-edge alert task was invisible to `alerts` and never
+    # checked at all -- arguably worse than the isolated-leaf sub-case above,
+    # since E2-60's whole rule is that an alert must depend on every leaf.
+    insert_committed_task(postgres_engine, committed_pipeline, "leaf_one")
+    insert_committed_task(
+        postgres_engine, committed_pipeline, "detached_alert", handler="EMAIL_ALERT"
+    )
+
+    assert cli_main(["validate"]) == 1
+
+    out = capsys.readouterr().out
+    assert "[alert_ordering]" in out
+    assert "detached_alert" in out
+    assert "leaf_one" in out
+
+
 def test_validate_flags_an_incomplete_sql_task(
     postgres_engine, committed_pipeline, craft_connector_on_disk, capsys
 ):
@@ -3497,6 +3521,63 @@ def test_init_then_finalize_consumes_the_gate_resolved_run_not_a_newer_one(
     assert finalize_outcome.status == "SUCCESS"
     # Still the run the gate actually used -- finalize_active_run must not
     # have re-derived and overwritten it with the newer run nobody read.
+    assert _tracked_run_id() == first_run
+
+
+@pytest.mark.parametrize("with_task", [True, False])
+def test_run_pipeline_joining_an_already_gated_run_does_not_reconsume(
+    craft_connector_on_disk, postgres_engine, two_committed_pipelines, with_task
+):
+    # E3-09. E3-02 fixed the init_pipeline_run/finalize_active_run pairing
+    # (Mode=orchestrator) but left the structurally identical local-mode gap
+    # open: --init-only is documented as "legal under both modes", so under
+    # Mode=local someone can run it, then separately run a bare
+    # `run --pipeline_code X` (run_pipeline) to actually execute it. Before
+    # this fix, run_pipeline's own gate_consumed stayed None whenever it
+    # found the run already active (a gate it did not itself evaluate), and
+    # None took the default record_consumption=True re-derive path at
+    # finalize -- silently overwriting the watermark init_pipeline_run had
+    # already correctly recorded, with "whatever qualifies now".
+    downstream_id, upstream_id = two_committed_pipelines
+    edge_id = insert_committed_pipeline_dependency(
+        postgres_engine, downstream_id, upstream_id, "SUCCESS"
+    )
+    if with_task:
+        insert_committed_task(postgres_engine, downstream_id, "task_a")
+    first_run = insert_committed_pipeline_run(
+        postgres_engine, upstream_id, "SUCCESS", end_date=datetime.now(UTC)
+    )
+
+    init_outcome = init_pipeline_run(postgres_engine, make_config(), "TEST_XPIPE_DOWN")
+    assert "SKIPPED" not in init_outcome.message
+
+    def _tracked_run_id() -> int:
+        with postgres_engine.connect() as conn:
+            return conn.execute(
+                text(
+                    "SELECT LAST_CONSUMED_PIPELINE_RUN_ID FROM AUD_PIPELINE_DEPENDENCY_TRACKER "
+                    "WHERE PIPELINE_DEPENDENCY_ID = :id"
+                ),
+                {"id": edge_id},
+            ).scalar_one()
+
+    assert _tracked_run_id() == first_run
+
+    # While this pipeline's own task(s) actually run, the upstream completes
+    # another qualifying run.
+    second_run = insert_committed_pipeline_run(
+        postgres_engine, upstream_id, "SUCCESS", end_date=datetime.now(UTC)
+    )
+    assert second_run > first_run
+
+    # A bare run --pipeline_code X finds init_pipeline_run's run already
+    # active and joins it -- task_a's own outcome doesn't matter here, only
+    # that run_pipeline reaches its own finalize step.
+    run_pipeline(postgres_engine, make_config(), "TEST_XPIPE_DOWN")
+
+    # Still the run the gate actually used when it minted -- run_pipeline's
+    # own finalize must not have re-derived and overwritten it with the
+    # newer run nobody read.
     assert _tracked_run_id() == first_run
 
 
@@ -5791,6 +5872,146 @@ def test_sql_scd1_merge_inserts_updates_and_skips_unchanged(
     row = _task_run_row(postgres_engine, merge_id)
     assert row.insert_count == 1
     assert row.update_count == 1
+
+
+@pytest.mark.parametrize("preserve", [None, "false", "true"])
+def test_sql_scd1_preserve_target_nulls_and_hashes(
+    postgres_engine, committed_pipeline, warehouse_tables, preserve
+):
+    target = f"public.sqlx_preserve_{committed_pipeline}"
+    source = f"sqlx_preserve_src_{committed_pipeline}"
+    warehouse_tables.extend([target, source])
+    with postgres_engine.begin() as conn:
+        conn.execute(
+            text(
+                f"CREATE TABLE {source} "
+                "(id int, name varchar, link varchar, detail varchar, score int)"
+            )
+        )
+        conn.execute(
+            text(
+                f"INSERT INTO {source} VALUES "
+                "(1, 'old', 'linked', NULL, 7), (2, 'keep', 'stable', NULL, 5)"
+            )
+        )
+    tid = insert_committed_task(postgres_engine, committed_pipeline, "preserve_merge")
+    params = {
+        "SQL_ACTION": "SCD1_MERGE",
+        "TARGET_OBJECT": target,
+        "SOURCE_SQL": f"SELECT * FROM {source}",
+        "MERGE_KEY": "id",
+        "MERGE_COMPARE_COLUMNS": "name|link|detail|score",
+    }
+    if preserve is not None:
+        params["PRESERVE_TARGET"] = preserve
+    insert_committed_task_parameters(postgres_engine, tid, params)
+    config = make_config(warehouse=True)
+
+    def run_merge():
+        run_id = seed_active_run(postgres_engine, committed_pipeline)
+        result = run_task(postgres_engine, config, "TEST_CONCURRENT_PL", "preserve_merge")
+        assert result.status == "SUCCESS", result.message
+        with postgres_engine.begin() as conn:
+            finalize_pipeline_run_stub(conn, run_id)
+        return _task_run_row(postgres_engine, tid)
+
+    assert run_merge().insert_count == 2
+    with postgres_engine.begin() as conn:
+        original_ids = dict(conn.execute(text(f"SELECT id, ROW_ID FROM {target}")).all())
+        conn.execute(text(f"TRUNCATE {source}"))
+        conn.execute(
+            text(
+                f"INSERT INTO {source} VALUES (1, 'new', NULL, '', 0), "
+                "(2, NULL, NULL, NULL, NULL), (3, 'added', NULL, NULL, 9)"
+            )
+        )
+    outcome = run_merge()
+    assert outcome.insert_count == 1
+    assert outcome.update_count == (1 if preserve == "true" else 2)
+    with postgres_engine.connect() as conn:
+        assert conn.execute(
+            text(f"SELECT id, name, link, detail, score FROM {target} ORDER BY id")
+        ).all() == [
+            (1, "new", "linked" if preserve == "true" else None, "", 0),
+            (2, "keep", "stable", None, 5) if preserve == "true" else (2, None, None, None, None),
+            (3, "added", None, None, 9),
+        ]
+        current_ids = dict(conn.execute(text(f"SELECT id, ROW_ID FROM {target}")).all())
+        assert all(current_ids[key] == value for key, value in original_ids.items())
+        expected_hash = sql_actions_module._hash_expression(
+            ["name", "link", "detail", "score"], "t", "postgresql"
+        )
+        assert (
+            conn.execute(
+                text(
+                    f"SELECT COUNT(*) FROM {target} t "
+                    f"WHERE HASH_KEY IS DISTINCT FROM {expected_hash}"
+                )
+            ).scalar_one()
+            == 0
+        )
+        update_dates = conn.execute(text(f"SELECT id, UPDATE_DATE FROM {target} ORDER BY id")).all()
+    repeated = run_merge()
+    assert repeated.update_count == 0
+    assert repeated.insert_count == 0
+    with postgres_engine.connect() as conn:
+        assert (
+            conn.execute(text(f"SELECT id, UPDATE_DATE FROM {target} ORDER BY id")).all()
+            == update_dates
+        )
+
+
+@pytest.mark.parametrize(
+    "action,value,error",
+    [
+        ("SCD1_MERGE", "true", None),
+        ("SCD1_MERGE", "false", None),
+        ("SCD1_MERGE", "yes", "must be true or false"),
+        ("SCD2_MERGE", "true", "only for SCD1_MERGE"),
+    ],
+)
+def test_validate_preserve_target_parameter(pg_conn, cfg_task, action, value, error):
+    _insert_task_parameters(
+        pg_conn,
+        cfg_task,
+        {
+            "SQL_ACTION": action,
+            "SOURCE_SQL": "SELECT 1 AS id",
+            "TARGET_OBJECT": "public.target",
+            "MERGE_KEY": "id",
+            "MERGE_COMPARE_COLUMNS": "id",
+            "PRESERVE_TARGET": value,
+        },
+    )
+    issues = [
+        issue.message
+        for issue in validate_task_parameters(pg_conn)
+        if "PRESERVE_TARGET" in issue.message
+    ]
+    if error:
+        assert any(error in issue for issue in issues)
+    else:
+        assert not issues
+
+
+@pytest.mark.parametrize(
+    "params,expected_issue",
+    [
+        ({}, False),
+        ({"EXTERNAL_VOLUME": "SNOWFLAKE_MANAGED"}, False),
+        ({"EXTERNAL_VOLUME": "CUSTOM", "BASE_LOCATION": "test/table"}, False),
+        ({"EXTERNAL_VOLUME": "CUSTOM"}, True),
+    ],
+)
+def test_validate_snowflake_storage_matches_managed_table_creation(
+    pg_conn, cfg_task, params, expected_issue
+):
+    from types import SimpleNamespace
+
+    _insert_task_parameters(pg_conn, cfg_task, {"SQL_ACTION": "CREATE_TABLE", **params})
+    engine = SimpleNamespace(dialect=SimpleNamespace(name="snowflake"))
+    issues = validate_warehouse_storage(pg_conn, make_config(warehouse=True), engine)
+    assert bool(issues) == expected_issue
 
 
 def test_sql_scd2_merge_deactivates_and_inserts_new_version(

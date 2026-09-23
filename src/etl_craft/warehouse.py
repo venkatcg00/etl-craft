@@ -49,6 +49,32 @@ PREFERRED_CONNECTION_FIELDS = {
     "snowflake": ("user", "account", "database", "schema", "warehouse", "role", "token"),
 }
 
+# Only connection-location and transport settings may be persisted. An
+# allowlist also excludes OAuth secrets and credentials added by JDBC drivers
+# under names other than PWD; authentication comes from the separate token.
+_DATABRICKS_PUBLIC_PARAMS = frozenset(
+    {"httppath", "transportmode", "ssl", "conncatalog", "connschema", "catalog", "schema"}
+)
+
+
+def _strip_databricks_credentials(jdbc_url: str) -> str:
+    """Remove credential-bearing JDBC parameters from a Databricks connection string.
+
+    Databricks' own "Connection Details" UI presents a JDBC URL that already
+    includes `AuthMech`/`UID`/`PWD` — a real personal access token in
+    cleartext — as *the* string to copy. This makes any URL built from one
+    of those genuinely safe to persist, regardless of what a caller pasted.
+    """
+    prefix, sep, params_blob = jdbc_url.partition(";")
+    if not sep:
+        return jdbc_url
+    kept = [
+        chunk
+        for chunk in params_blob.split(";")
+        if chunk.partition("=")[0].strip().lower() in _DATABRICKS_PUBLIC_PARAMS
+    ]
+    return prefix + (";" + ";".join(kept) if kept else "")
+
 
 def preferred_connection_url(name: str, fields: Mapping[str, str]) -> str:
     """Translate separate cloud connection fields into a credential-free JDBC URL."""
@@ -64,9 +90,24 @@ def preferred_connection_url(name: str, fields: Mapping[str, str]) -> str:
                 raise ConnectionError_(f"Databricks {key} must be an unquoted SQL identifier")
         if not fields["jdbc_url"].startswith("jdbc:databricks://"):
             raise ConnectionError_("Databricks jdbc_url must start with jdbc:databricks://")
+        # [ADDITION, 2026-09-23, E3-08] Databricks' own "Connection Details"
+        # JDBC tab hands out a URL that already contains AuthMech/UID/PWD --
+        # a real personal access token, in cleartext. This function's own
+        # docstring calls its return value "credential-free"; before this fix
+        # that was true only after _parse_databricks stripped those params at
+        # *connect* time, not here at *build* time -- so a caller pasting
+        # that full string had it written verbatim into whatever persists
+        # this value, which for an existing legacy-shaped manifest is
+        # craft-connector.yml itself (_write_legacy_manifest). Stripped here
+        # instead, so the claim holds regardless of what the caller passed in
+        # and regardless of which write path the result flows through. The
+        # real token still reaches the connection correctly, via the
+        # separate `token` field/secret mechanism this function already
+        # requires -- nothing here is what supplies it.
+        sanitized_url = _strip_databricks_credentials(fields["jdbc_url"])
         # The separate fields take precedence over defaults in the copied URL.
         return (
-            fields["jdbc_url"].rstrip(";")
+            sanitized_url.rstrip(";")
             + f";ConnCatalog={fields['catalog']};ConnSchema={fields['schema']}"
         )
     account = fields["account"]

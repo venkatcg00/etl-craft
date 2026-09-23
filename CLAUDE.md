@@ -8,6 +8,27 @@ The whole pipeline/task/step/dependency structure is modeled as **rows in Postgr
 
 ## Where things stand / where to start
 
+**Iteration 3 round-2 remediation complete (2026-09-23, Codex).** E3-08–E3-13
+and E3-15 are fixed; E3-14's claimed rename failure was not reproduced because the
+renamed replacement uses the current CREATE format. E3-16 fixes validation of
+Snowflake-managed Iceberg storage. Databricks JDBC credentials are stripped before
+persistence, existing pipeline runs retain their original dependency watermark,
+and token profiles reject unused fields. Credential-free SQL and migration-ledger
+regression coverage is expanded. `make check`: **619 passed, 4 skipped, 95.36% coverage**; schema checks, mypy, Black, Ruff, and pydocstyle passed. `make wheel-smoke` also passed.
+Cloud tests were not re-run; the prior live results below remain historical evidence.
+E2-18 and E2-20 remain deferred. See ITERATION_3.md for per-finding resolutions.
+
+**SCD1 null preservation (2026-09-23, user-requested).** Optional task parameter
+`PRESERVE_TARGET` defaults to `false`. For `SCD1_MERGE`, `true` updates business
+columns with `COALESCE(source_value, target_value)`: source nulls retain existing
+values, while non-null source values replace them. Inserts and SCD2 are unchanged.
+Both change detection and the stored `HASH_KEY` use the effective values of
+`MERGE_COMPARE_COLUMNS`, so repeating a partially populated source does not cause
+false updates. Validation and execution reject invalid boolean values or use on
+another action. Regression coverage includes default/false/true behavior, inserts,
+stable ROW_ID, stored hashes, and repeat-load idempotence; the current full-suite
+result is recorded above.
+
 **Preferred cloud connection shape adopted, Databricks UniForm decision, and Snowflake retested — done (2026-09-23).** Continues the entry immediately below on the same day, per explicit instruction to move Databricks and Snowflake onto a specific connection shape and test both against real cloud endpoints, including Iceberg.
 - **Preferred connection: separate fields instead of one packed JDBC URL, tested and made the recommended shape for both.** Per explicit instruction: Databricks connects via `jdbc_url` (host/port/httpPath only) + `catalog` + `schema` + `token`; Snowflake connects via `user` + `account` + `database` + `schema` + `warehouse` + `role` + `token`. `warehouse.PREFERRED_CONNECTION_FIELDS`/`preferred_connection_url` and `config.py`'s `token`-in-`Variables` branch already existed from the prior session's work; this round is what actually proved them against both real endpoints and updated every doc that still taught the older packed-URL shape as primary (`docs/craft-connector.env-secrets.example.yml`, `docs/craft-connector.file-secrets.example.yml`, `docs/craft-connector.variables.env`, `docs/warehouse-test.env.example`, `docs/configuration.md`, `tests/conftest.py`'s own fixture docstring). The older single-JDBC-URL shape (key_file/password for Snowflake) stays documented as a supported alternative for a team standardising on RSA key-pair auth instead of PATs — nothing is removed, only reordered.
 - **Databricks: both `native` and `iceberg` verified live, end-to-end through `CREATE_TABLE`/`OVERWRITE_TABLE`/`SCD1_MERGE` (insert + matched-row update), via the preferred connection shape and via a genuine `etl-craft setup` bootstrap round-trip (`WAREHOUSE_NAME=Databricks` + the four fields above → a real manifest → a real connection → `SELECT 1`).**
@@ -18,7 +39,7 @@ The whole pipeline/task/step/dependency structure is modeled as **rows in Postgr
   3. **Iceberg tables were blocked, then unblocked by a genuinely different mechanism than the one first tried — `EXTERNAL_VOLUME = 'SNOWFLAKE_MANAGED'`, per a fix supplied by the user.** The account's own external volume (`ICEBERG`, GCS-backed) sits on a different cloud than the Snowflake account itself (AWS, `AWS_US_WEST_2` — found via `CURRENT_REGION()`/`SYSTEM$ALLOWLIST()`), and every attempt to write actual data through it failed with `100089 (42501): Failed to access remote file: access denied`, even after a correct GCS IAM grant (`SYSTEM$VERIFY_EXTERNAL_VOLUME` reported write/read/list/delete all `PASSED`; only a real data write — CTAS or INSERT — still failed, isolated precisely by testing DDL-only creation, which always succeeded, against CTAS/INSERT, which never did). **`EXTERNAL_VOLUME = 'SNOWFLAKE_MANAGED'` is a reserved value meaning "Snowflake's own internal storage, no customer bucket at all"** — it sidesteps the cross-cloud mismatch entirely, since the data never leaves Snowflake's own (AWS-hosted) storage. Verified live end to end: DDL, `INSERT`, and CTAS all succeed, `SHOW TABLES` reports `is_iceberg: 'Y'` / `is_external: 'N'`.
   4. **`sql_actions._create_iceberg_table_with_storage` now defaults to `SNOWFLAKE_MANAGED` when a task declares neither `EXTERNAL_VOLUME` nor `BASE_LOCATION`** — a real behavior change, not just a test fixture change: Snowflake Iceberg support is zero-config by default now, with no customer cloud storage to provision first. A task that names a real customer volume still must pair it with `BASE_LOCATION` (unchanged for that case). `ICEBERG_VERSION = 2` is now always specified explicitly too, per the original instruction to target Iceberg format v2 (verified as accepted syntax).
   5. **Two more Snowflake-Iceberg-specific fixes, both found by running the full vocabulary, not the DDL alone.** `ALTER TABLE ... RENAME TO` — used by both the schema-evolution rebuild and the computed-`ROW_ID` rebuild — is rejected by Snowflake against a table it created as `CREATE ICEBERG TABLE` ("Iceberg tables should use ALTER ICEBERG TABLE commands"); `_alter_table_keyword()` now selects `ALTER ICEBERG TABLE` there, keyed off the same per-connection `TABLE_FORMAT_INFO_KEY` `create_table_as` already reads. And Snowflake's own `TIMESTAMP WITH TIME ZONE` (`TIMESTAMP_TZ(9)` by default) is rejected on an Iceberg table's own column for its scale, and `TIMESTAMP_TZ` at *any* scale is then rejected outright ("Unsupported data type ... for iceberg tables") — Snowflake's managed Iceberg tables support no timezone-aware timestamp type at all. `_audit_column_type()` now returns `TIMESTAMP_NTZ(6)` for `CREATE_DATE`/`UPDATE_DATE` on Snowflake Iceberg specifically (matching the type Snowflake's own worked Iceberg-table example uses); the engine only ever writes UTC instants, so this loses no information.
-- **584 tests passed, 3 skipped (the cloud tests, without credentials in the plain run), `black`/`ruff`/`pydocstyle`/`mypy` all clean.** Two of the eight `test_config_manifest.py` tests had to be rewritten rather than merely updated: they asserted validation behaviour (an unimplemented `auth_mode`, a `Warehouse.Name`/`jdbc_url` dialect mismatch) that lives on the older packed-URL shape, which the shipped Databricks example no longer demonstrates as its lead shape — moved to a small inline manifest fixture so that validation stays covered independent of which shape the docs choose to lead with. `test_sql_actions_run_against_real_snowflake` split into `..._native`/`..._iceberg`, matching the Databricks pattern, so both formats are exercised on every credentialed run rather than one or the other depending on which env vars happen to be set.
+- **Historical verification at `3915fd8`: 578 passed, 4 skipped (2 Databricks + 2 Snowflake, without credentials in the plain run), 94.17% coverage, `black`/`ruff`/`pydocstyle`/`mypy` all clean — the number independently re-measured and confirmed for this exact commit by `ITERATION_3.md`'s own round-2 review (see E3-11: an earlier version of this line, and two more numbers elsewhere in this same narrative, disagreed with each other and with the actual repo state).** Two of the eight `test_config_manifest.py` tests had to be rewritten rather than merely updated: they asserted validation behaviour (an unimplemented `auth_mode`, a `Warehouse.Name`/`jdbc_url` dialect mismatch) that lives on the older packed-URL shape, which the shipped Databricks example no longer demonstrates as its lead shape — moved to a small inline manifest fixture so that validation stays covered independent of which shape the docs choose to lead with. `test_sql_actions_run_against_real_snowflake` split into `..._native`/`..._iceberg`, matching the Databricks pattern, so both formats are exercised on every credentialed run rather than one or the other depending on which env vars happen to be set.
 - **Test-matrix result: all four cells pass.** Databricks managed (`native`, Delta) and managed-UniForm (`iceberg`, Delta+UniForm); Snowflake native tables and Snowflake-managed Iceberg tables (`CATALOG = 'SNOWFLAKE'`, `EXTERNAL_VOLUME = 'SNOWFLAKE_MANAGED'`, format v2) — all fully verified live. Per this file's own practice, the shipped docs (`docs/configuration.md`, `docs/craft-connector.*.example.yml`) describe exactly this, and nothing that didn't pass.
 
 **Live cloud verification continued by Codex (2026-09-23).** Databricks passed
@@ -48,9 +69,14 @@ URL, and gives an explicit URL password precedence over the old key-file placeho
 Literal `#` in JDBC query passwords is preserved. The standalone Snowflake schema
 variable in `.env` still contains example text, so this live run set it in the
 process environment from the URL's `schema` parameter. No private key was used;
-`.env` was not changed. After this fixture change: **265 unit tests passed**, plus
+`.env` was not changed. **Test counts below are this checkpoint's own snapshot at
+the time, mid-session — an intermediate `test_unit.py`-only figure and one fuller
+run, both since superseded by later work in the entries above.** [E3-11: flagged
+as historical, not current, after CLAUDE.md's own count was found internally
+inconsistent — see ITERATION_3.md's D-7/E3-11 for the current, single, re-verified
+number.] After this fixture change: 265 unit tests passed, plus
 the live Snowflake test; Black, Ruff, pydocstyle, mypy and diff checks passed.
-Local regression verification: **573 passed, 3 cloud tests skipped**, 94.39%
+Local regression verification: 573 passed, 3 cloud tests skipped, 94.39%
 coverage; Black, Ruff, pydocstyle, mypy, and `git diff --check` passed. The two
 Databricks tests were run separately with credentials as described above.
 
@@ -567,7 +593,10 @@ The documentation generator (`generate-docs`, above) is also now built: the same
 
 **This section rewritten 2026-09-23 to match the config-manifest pivot of 2026-09-22/23 (commits
 `578ab74`..`8e0f96f`), which had shipped without a matching update here — see "Where things stand"'s
-dated 2026-09-23 entry for the full story of that gap and E3-01, the shippability bug found in it.**
+dated 2026-09-23 entry for the full story of that gap and E3-01, the shippability bug found in it.
+Updated again the same day (E3-12) to add the preferred-connection-shape fields commit `3915fd8`
+added for Databricks/Snowflake — the same class of gap (a config-format change shipping without a
+matching update here) recurring at smaller scale inside the very commit that fixed the first one.**
 
 Versioned, no secrets stored directly in it — analogous to a dbt `profiles.yml`. `config.py` reads
 **two** shapes losslessly into one `ConnectorConfig`, and every downstream reader is
@@ -613,6 +642,39 @@ Warehouse:                         # optional — see "Warehouse connector layer
     auth_mode: WAREHOUSE_AUTH_MODE # none | password | key_file | token
     secret: WAREHOUSE_SECRET
     key_file: WAREHOUSE_KEY_FILE   # only for auth_mode=key_file (Snowflake key-pair)
+
+# [ADDITION, 2026-09-23] The tested and recommended shape for Databricks/Snowflake specifically
+# (warehouse.PREFERRED_CONNECTION_FIELDS) — separate connection fields instead of one packed JDBC
+# URL. Both resolve to auth_mode: token automatically; there is no separate auth_mode variable to
+# set for either; an explicit token mode is accepted, other modes are rejected. The engine
+# assembles the full connection at connect time (warehouse.preferred_connection_url) — nothing here
+# is a JDBC URL a human hand-builds with an embedded query string or, for Databricks, transport/
+# auth parameters (AuthMech/UID/PWD) copied verbatim from the JDBC tab a workspace's own connection
+# details page shows — preferred_connection_url strips those before this value is ever used or
+# persisted (E3-08; a real, reproduced leak path into an existing legacy-shaped manifest before
+# that fix, not a hypothetical one).
+Warehouse:                         # Databricks, via the preferred shape
+  Name: Databricks
+  Table_format: iceberg | native   # iceberg = Delta with UniForm enabled; Databricks always reads/writes Delta either way
+  Profile: dev
+  Variables:
+    jdbc_url: WAREHOUSE_JDBC_URL   # host, port, httpPath only — no ConnCatalog/ConnSchema, no UID/PWD
+    catalog: WAREHOUSE_CATALOG     # Unity Catalog catalog
+    schema: WAREHOUSE_SCHEMA
+    token: WAREHOUSE_TOKEN         # a personal access token; no `user` — the username is the literal "token"
+
+Warehouse:                         # Snowflake, via the preferred shape
+  Name: Snowflake
+  Table_format: iceberg | native   # iceberg defaults to EXTERNAL_VOLUME = 'SNOWFLAKE_MANAGED' (no bucket to provision)
+  Profile: dev
+  Variables:
+    user: WAREHOUSE_USER
+    account: WAREHOUSE_ACCOUNT     # the <org>-<account> identifier, not a hostname
+    database: WAREHOUSE_DATABASE
+    schema: WAREHOUSE_SCHEMA
+    warehouse: WAREHOUSE_WAREHOUSE
+    role: WAREHOUSE_ROLE
+    token: WAREHOUSE_TOKEN         # a Programmatic Access Token (PAT) — needs a network policy on the account/user first
 
 Cloning:
   Enabled: true | false            # opt-in, off by default — nothing is copied unless explicitly turned on
