@@ -1,0 +1,60 @@
+# Engine DB on SQLite — the default.
+#
+# One file per environment, nothing to install and nothing to authenticate
+# (auth_mode is `none` whether written or not). Relative paths resolve
+# against this file. SQLite serves one machine: a remote orchestrator's
+# workers elsewhere cannot open the file, so production uses PostgreSQL.
+#
+# Each setting is marked `# variable` or `# value`. A variable is looked up in
+# the secrets source (here: the process environment); when it is not set, the
+# text itself is used, so `Profile: dev` is simply dev. A secret must always
+# be a variable that is set. `etl-craft doctor` lists every value used as
+# written that looks like a variable name.
+#
+# Complete and loadable as written: tests/unit/test_config_examples.py loads every
+# file in this directory, for every profile it declares.
+
+Secrets:
+  Source_type: environment             # value — variables below are read from the process environment
+  Profile: ETL_CRAFT_PROFILE           # variable — dev | sit | uat | prod, set in each environment
+
+Orchestration:
+  Mode: local                          # value
+  Task_timeout_seconds: 21600          # value
+  Max_parallel_tasks: 8                # value
+  Enforce_sla: false                   # value
+
+Engine:
+  Name: SQLite                         # value
+  dev:
+    jdbc_url: jdbc:sqlite:etl-craft-engine-dev.db  # value
+  sit:
+    jdbc_url: jdbc:sqlite:etl-craft-engine-sit.db  # value
+  uat:
+    jdbc_url: jdbc:sqlite:etl-craft-engine-uat.db  # value
+  prod:
+    jdbc_url: jdbc:sqlite:etl-craft-engine-prod.db  # value
+
+Warehouse:
+  Name: Postgres                       # value
+  Table_format: native                 # value
+  dev:
+    jdbc_url: WAREHOUSE_JDBC_URL       # variable
+    user: WAREHOUSE_USER               # variable
+    auth_mode: WAREHOUSE_AUTH_MODE     # variable
+    secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
+  sit:
+    jdbc_url: WAREHOUSE_JDBC_URL       # variable
+    user: WAREHOUSE_USER               # variable
+    auth_mode: WAREHOUSE_AUTH_MODE     # variable
+    secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
+  uat:
+    jdbc_url: WAREHOUSE_JDBC_URL       # variable
+    user: WAREHOUSE_USER               # variable
+    auth_mode: WAREHOUSE_AUTH_MODE     # variable
+    secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
+  prod:
+    jdbc_url: WAREHOUSE_JDBC_URL       # variable
+    user: WAREHOUSE_USER               # variable
+    auth_mode: WAREHOUSE_AUTH_MODE     # variable
+    secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written

@@ -19,7 +19,9 @@ classifiers = [
     "Topic :: Database",
     "Typing :: Typed",
 ]
-dependencies = []
+dependencies = [
+    "pyyaml>=6.0.3",
+]
 
 [project.scripts]
 etl-craft = "etl_craft.cli:main"
@@ -46,6 +48,7 @@ dev = [
     "pytest-cov>=6",
     "pytest-timeout>=2.3",
     "ruff>=0.16.8",
+    "types-pyyaml>=6.0.12",
 ]
 docs = [
     "mike>=2.2",

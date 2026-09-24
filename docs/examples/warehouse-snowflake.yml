@@ -1,0 +1,144 @@
+# Warehouse: Snowflake, native tables.
+#
+# The tested connection shape: separate fields plus a Programmatic Access Token.
+# warehouse-snowflake-key-pair.yml shows RSA key-pair auth instead.
+#
+# Each setting is marked `# variable` or `# value`. A variable is looked up in
+# the secrets source (here: the process environment); when it is not set, the
+# text itself is used, so `Profile: dev` is simply dev. A secret must always
+# be a variable that is set. `etl-craft doctor` lists every value used as
+# written that looks like a variable name.
+#
+# Complete and loadable as written: tests/unit/test_config_examples.py loads every
+# file in this directory, for every profile it declares.
+
+Secrets:
+  Source_type: environment             # value — variables below are read from the process environment
+  Profile: ETL_CRAFT_PROFILE           # variable — dev | sit | uat | prod, set in each environment
+
+Orchestration:
+  Mode: remote                         # value — an orchestrator runs each task from generate-yml's DAGs
+  Name: Airflow                        # value — informational: the YAML DAG is the same; convert it with your own scripts
+  Task_timeout_seconds: 21600          # value
+  Max_parallel_tasks: 8                # value
+  Enforce_sla: false                   # value — true: judge each finished run MET/BREACHED vs SLA_IN_HOURS
+  dev:
+    Global_dag: false                  # value
+    Catchup: false                     # value
+    Tags: [analytics]                  # value
+    Retries: 1                         # value
+    Retry_delay_minutes: 5             # value
+    Depends_on_past: false             # value
+    Email_on_failure: false            # value
+    Allow_schedule: false              # value
+  sit:
+    Global_dag: false                  # value
+    Catchup: false                     # value
+    Tags: [analytics]                  # value
+    Retries: 1                         # value
+    Retry_delay_minutes: 5             # value
+    Depends_on_past: false             # value
+    Email_on_failure: false            # value
+    Allow_schedule: false              # value
+    Email:
+      host: EMAIL_HOST                 # variable
+      port: EMAIL_PORT                 # variable
+      from_address: EMAIL_FROM         # variable
+      auth_mode: EMAIL_AUTH_MODE       # variable
+      user: EMAIL_USER                 # variable
+      use_tls: EMAIL_USE_TLS           # variable
+      secret: EMAIL_SECRET             # variable, required: a secret is never used as written
+  uat:
+    Global_dag: false                  # value
+    Catchup: false                     # value
+    Tags: [analytics]                  # value
+    Retries: 1                         # value
+    Retry_delay_minutes: 5             # value
+    Depends_on_past: false             # value
+    Email_on_failure: false            # value
+    Allow_schedule: false              # value
+    Email:
+      host: EMAIL_HOST                 # variable
+      port: EMAIL_PORT                 # variable
+      from_address: EMAIL_FROM         # variable
+      auth_mode: EMAIL_AUTH_MODE       # variable
+      user: EMAIL_USER                 # variable
+      use_tls: EMAIL_USE_TLS           # variable
+      secret: EMAIL_SECRET             # variable, required: a secret is never used as written
+  prod:
+    Global_dag: true                   # value
+    Catchup: false                     # value
+    Tags: [analytics]                  # value
+    Retries: 1                         # value
+    Retry_delay_minutes: 5             # value
+    Depends_on_past: false             # value
+    Email_on_failure: true             # value
+    Allow_schedule: true               # value
+    Email_recipients: [data-alerts@example.com]  # value
+    Email:
+      host: EMAIL_HOST                 # variable
+      port: EMAIL_PORT                 # variable
+      from_address: EMAIL_FROM         # variable
+      auth_mode: EMAIL_AUTH_MODE       # variable
+      user: EMAIL_USER                 # variable
+      use_tls: EMAIL_USE_TLS           # variable
+      secret: EMAIL_SECRET             # variable, required: a secret is never used as written
+
+Engine:
+  Name: Postgres                       # value
+  dev:
+    jdbc_url: ENGINE_JDBC_URL          # variable
+    user: ENGINE_USER                  # variable
+    auth_mode: ENGINE_AUTH_MODE        # variable
+    secret: ENGINE_SECRET              # variable, required: a secret is never used as written
+  sit:
+    jdbc_url: ENGINE_JDBC_URL          # variable
+    user: ENGINE_USER                  # variable
+    auth_mode: ENGINE_AUTH_MODE        # variable
+    secret: ENGINE_SECRET              # variable, required: a secret is never used as written
+  uat:
+    jdbc_url: ENGINE_JDBC_URL          # variable
+    user: ENGINE_USER                  # variable
+    auth_mode: ENGINE_AUTH_MODE        # variable
+    secret: ENGINE_SECRET              # variable, required: a secret is never used as written
+  prod:
+    jdbc_url: ENGINE_JDBC_URL          # variable
+    user: ENGINE_USER                  # variable
+    auth_mode: ENGINE_AUTH_MODE        # variable
+    secret: ENGINE_SECRET              # variable, required: a secret is never used as written
+
+Warehouse:
+  Name: Snowflake                      # value
+  Table_format: native                 # value
+  dev:
+    user: WAREHOUSE_USER               # variable
+    account: WAREHOUSE_ACCOUNT         # variable — <org>-<account>, not a hostname
+    database: WAREHOUSE_DATABASE       # variable
+    schema: WAREHOUSE_SCHEMA           # variable
+    warehouse: WAREHOUSE_WAREHOUSE     # variable
+    role: WAREHOUSE_ROLE               # variable
+    token: WAREHOUSE_TOKEN             # variable, required: a secret is never used as written — a Programmatic Access Token (needs a network policy)
+  sit:
+    user: WAREHOUSE_USER               # variable
+    account: WAREHOUSE_ACCOUNT         # variable — <org>-<account>, not a hostname
+    database: WAREHOUSE_DATABASE       # variable
+    schema: WAREHOUSE_SCHEMA           # variable
+    warehouse: WAREHOUSE_WAREHOUSE     # variable
+    role: WAREHOUSE_ROLE               # variable
+    token: WAREHOUSE_TOKEN             # variable, required: a secret is never used as written — a Programmatic Access Token (needs a network policy)
+  uat:
+    user: WAREHOUSE_USER               # variable
+    account: WAREHOUSE_ACCOUNT         # variable — <org>-<account>, not a hostname
+    database: WAREHOUSE_DATABASE       # variable
+    schema: WAREHOUSE_SCHEMA           # variable
+    warehouse: WAREHOUSE_WAREHOUSE     # variable
+    role: WAREHOUSE_ROLE               # variable
+    token: WAREHOUSE_TOKEN             # variable, required: a secret is never used as written — a Programmatic Access Token (needs a network policy)
+  prod:
+    user: WAREHOUSE_USER               # variable
+    account: WAREHOUSE_ACCOUNT         # variable — <org>-<account>, not a hostname
+    database: WAREHOUSE_DATABASE       # variable
+    schema: WAREHOUSE_SCHEMA           # variable
+    warehouse: WAREHOUSE_WAREHOUSE     # variable
+    role: WAREHOUSE_ROLE               # variable
+    token: WAREHOUSE_TOKEN             # variable, required: a secret is never used as written — a Programmatic Access Token (needs a network policy)
