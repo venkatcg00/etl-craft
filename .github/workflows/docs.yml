@@ -3,6 +3,7 @@ name: Docs
 on:
   push:
     branches: [main]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
   pull_request:
     branches: [main]
 
@@ -18,8 +19,8 @@ jobs:
     name: documentation site (strict build)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
       - name: Install dependencies
@@ -31,3 +32,29 @@ jobs:
         with:
           name: site
           path: site/
+
+  publish:
+    name: publish to GitHub Pages
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # One publisher at a time: each run commits to gh-pages.
+    concurrency:
+      group: docs-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked --group docs --python 3.11
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin gh-pages --depth=1 || true
+      - name: Publish
+        run: scripts/publish_docs.sh "$GITHUB_REF" --push

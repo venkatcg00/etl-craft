@@ -18,3 +18,5 @@ All notable changes are recorded here. The format follows
   the current commit is releasable.
 - Documentation site built with MkDocs Material: overview, section skeleton, exit codes, and a
   Python API reference generated from the code. `make docs` builds it with `--strict`.
+- The documentation site is published to GitHub Pages with mike: `main` as the `dev` version,
+  and each release tag as its `X.Y` version with the alias `latest`.
