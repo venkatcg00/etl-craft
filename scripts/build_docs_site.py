@@ -119,6 +119,7 @@ def build(repo: Path, out: Path, mike: str) -> list[str]:
     env = {**os.environ, **COMMITTER}
     # Each release is built in its own worktree environment, not the one running this script.
     env.pop("VIRTUAL_ENV", None)
+    env.pop("UV_PROJECT_ENVIRONMENT", None)
     try:
         for index, (version, tag) in enumerate(lines):
             _build_release(repo, version, tag, latest=index == len(lines) - 1, env=env)

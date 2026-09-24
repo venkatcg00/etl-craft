@@ -41,6 +41,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         python-version: ["3.11", "3.12", "3.13"]
+    env:
+      # Overrides .python-version so `uv run` keeps the matrix interpreter.
+      UV_PYTHON: ${{ matrix.python-version }}
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
