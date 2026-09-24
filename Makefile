@@ -1,5 +1,6 @@
 .PHONY: help sync lint format typecheck imports history test coverage check build verify-package clean \
-	certs services-up services-down services-reset test-harness suite release-gate
+	certs services-up services-down services-reset test-harness suite release-gate \
+	docs docs-serve
 
 UV ?= uv
 
@@ -60,5 +61,11 @@ suite: ## Run one release suite and record its evidence: make suite SUITE=unit [
 release-gate: ## Check the release evidence of every required suite
 	$(UV) run python scripts/release_gate.py
 
+docs: ## Build the documentation site into site/ (strict: any warning fails)
+	$(UV) run mkdocs build --strict --site-dir site
+
+docs-serve: ## Serve the documentation site with live reload
+	$(UV) run mkdocs serve
+
 clean: ## Remove build output and tool caches
-	rm -rf dist build htmlcov .coverage .coverage.* .pytest_cache .mypy_cache .ruff_cache
+	rm -rf dist build site htmlcov .coverage .coverage.* .pytest_cache .mypy_cache .ruff_cache

@@ -26,6 +26,7 @@ etl-craft --version
 make sync     # create .venv with every dependency group
 make check    # lint, format check, mypy --strict, layer contracts, history gate, tests
 make verify-package   # build, then install with pip and uv into clean environments
+make docs     # build the documentation site into site/
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the branch workflow and conventions.

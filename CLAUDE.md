@@ -19,6 +19,7 @@ make verify-package  # build wheel + sdist, install each with pip and uv in clea
 make services-up     # local PostgreSQL (password and TLS), MinIO, Iceberg REST, Trino, Mailpit
 make suite SUITE=unit   # run one release suite and record its evidence
 make release-gate    # is HEAD releasable? (release/README.md)
+make docs            # documentation site, strict build into site/ (make docs-serve to preview)
 ```
 
 ## Layers

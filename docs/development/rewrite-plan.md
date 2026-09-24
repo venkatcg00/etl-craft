@@ -104,7 +104,7 @@ squash-merged by pull request (see `CONTRIBUTING.md` for the definition of done)
 |---|---|---|---|---|---|
 | A1 | `chore/bootstrap` | Package skeleton, tooling, CI, history gate, package verification | — | — | done |
 | A2 | `chore/test-release-harness` | Test tree and markers; docker-compose (postgres, postgres with TLS client certificates, minio, iceberg-rest, trino, mailpit); evidence plugin; `release/required-suites.toml`; `scripts/release_gate.py`; release-gate CI job | `tests/conftest.py`, `docker-compose.yml` | A1 | done |
-| A3 | `docs/site-scaffold` | MkDocs Material, mike, mkdocstrings, gen-files; navigation skeleton; strict build in CI | — | A1 | |
+| A3 | `docs/site-scaffold` | MkDocs Material, mike, mkdocstrings, gen-files; navigation skeleton; strict build in CI | — | A1 | done |
 | B1 | `feat/core-domain` | Errors, enums, logging, exit codes | scattered | A1 | |
 | B2 | `feat/cli-framework` | Parser, output layer, exit-code mapping, `--config`, `--log-*` | `cli.py` | B1 | |
 | B3 | `feat/core-graph` | Dependency graph: validation, waves, ready, unsatisfiable, run conditions | `resolver.py` | B1 | |
@@ -126,7 +126,7 @@ squash-merged by pull request (see `CONTRIBUTING.md` for the definition of done)
 | H2 | `test/e2e-demo` | Demo project run from the installed package, via pip and via uv | — | G1, G2, F2–F4 | |
 | H3 | `test/cloud-acceptance` | Databricks and Snowflake suites, `make acceptance-cloud`, evidence | cloud tests | G2 | |
 | I1 | `docs/guides` | Quick Start, guides, deployment, connectors | `docs/`, `README.md` | G1, G2 | |
-| I2 | `docs/reference-generated` | Generated CLI, configuration, parameter and schema references; Python API | — | G1, G2 | |
+| I2 | `docs/reference-generated` | Generated CLI, configuration, parameter and schema references; the `docs` evidence suite (a test around the strict build) | — | G1, G2 | |
 | J1 | `release/0.1.0` | Version, changelog, release notes, wheel and sdist, install matrix, checksums, evidence, gate, tag | — | all | |
 
 In parallel: A2 with A3; B2–B5; C2 with C3; F1–F4 (F2 after F1); G1 with G2; H1–H3 with I1–I2.

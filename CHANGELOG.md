@@ -16,3 +16,5 @@ All notable changes are recorded here. The format follows
 - Release evidence: every test belongs to a suite in `release/required-suites.toml`;
   `scripts/run_suite.py` records a suite's results, and `scripts/release_gate.py` reports whether
   the current commit is releasable.
+- Documentation site built with MkDocs Material: overview, section skeleton, exit codes, and a
+  Python API reference generated from the code. `make docs` builds it with `--strict`.
