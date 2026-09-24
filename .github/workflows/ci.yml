@@ -66,3 +66,26 @@ jobs:
           python-version: "3.11"
       - name: Build and verify the package
         run: make verify-package
+
+  services:
+    name: local services (harness)
+    runs-on: ubuntu-latest
+    env:
+      ETL_CRAFT_REQUIRE_SERVICES: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked --all-groups --python 3.11
+      - name: Start the local services
+        run: make services-up
+      - name: Harness tests
+        run: make test-harness
+      - name: Service logs
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Stop the local services
+        if: always()
+        run: make services-down

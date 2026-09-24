@@ -1,0 +1,24 @@
+name: Release gate
+
+on:
+  push:
+    branches: ["release/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: every required suite has passing evidence
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The gate compares each evidence commit with HEAD, so it needs the history.
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+      - name: Install dependencies
+        run: uv sync --locked --all-groups --python 3.11
+      - name: Release gate
+        run: make release-gate

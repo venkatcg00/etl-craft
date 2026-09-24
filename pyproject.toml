@@ -41,6 +41,7 @@ dev = [
     "import-linter>=2.1",
     "mypy>=1.11",
     "pre-commit>=4",
+    "psycopg[binary]>=3.2",
     "pytest>=8.3",
     "pytest-cov>=6",
     "pytest-timeout>=2.3",
@@ -89,6 +90,20 @@ addopts = ["--strict-markers", "--strict-config"]
 timeout = 120
 markers = [
     "unit: pure Python, no services",
+    "engine_sqlite: Engine DB on SQLite",
+    "engine_postgres: Engine DB on PostgreSQL",
+    "warehouse_postgres: PostgreSQL warehouse",
+    "warehouse_duckdb: DuckDB warehouse",
+    "warehouse_duckdb_iceberg: DuckDB over the local Iceberg REST catalog",
+    "warehouse_trino_iceberg: Trino over the local Iceberg REST catalog",
+    "connections: every resource with every locally verifiable authentication mode",
+    "e2e_pip: the demo project, run from the wheel installed with pip",
+    "e2e_uv: the demo project, run from the wheel installed with uv pip",
+    "package: the built wheel and sdist",
+    "docs: the documentation site",
+    "cloud_databricks: Databricks, run locally with credentials",
+    "cloud_snowflake: Snowflake, run locally with credentials",
+    "harness: the local test services themselves",
 ]
 
 [tool.coverage.run]
