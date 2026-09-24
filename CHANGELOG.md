@@ -30,3 +30,6 @@ All notable changes are recorded here. The format follows
 - Task dependency graph (`etl_craft.core.graph`): validation, static waves, the tasks ready
   to start under `ALL`, `ANY` and `N` run conditions, and the never-run tasks that can no
   longer start. A guide describes dependency types and run conditions.
+- Text helpers (`etl_craft.core.text`): the generic JDBC URL parser, `.env` parsing, a
+  quote- and dollar-quote-aware SQL statement splitter, `$$pipeline_id` substitution, the
+  read-only SELECT lint, identifier and `schema.table` checks, and checksums.
