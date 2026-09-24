@@ -33,3 +33,8 @@ All notable changes are recorded here. The format follows
 - Text helpers (`etl_craft.core.text`): the generic JDBC URL parser, `.env` parsing, a
   quote- and dollar-quote-aware SQL statement splitter, `$$pipeline_id` substitution, the
   read-only SELECT lint, identifier and `schema.table` checks, and checksums.
+- Process supervisor (`etl_craft.execution.supervisor`): runs each child as a freshly
+  started interpreter in its own session, appends its output to a log file and keeps the
+  tail, stops the whole process group on timeout, and runs children with bounded
+  parallelism, starting the next as soon as one ends. `etl_craft.core.filelock` provides the
+  cross-process file lock.
