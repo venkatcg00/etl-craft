@@ -44,14 +44,15 @@ query catalogs; warehouse statement fragments).
 src/etl_craft/
   core/        errors.py enums.py graph.py text.py log.py filelock.py
   config/      model.py discovery.py loader.py resolve.py auth.py targets.py
-  dialects/engine/{base.py, postgres/, sqlite/}   each: schema.sql migrations/ queries/
+  dialects/engine/{base.py, queries/, postgres/, sqlite/}   each: schema.sql migrations/ queries/
+  dialects/credentials.py
   dialects/warehouse/{base.py, registry.py, postgres.py, duckdb.py, duckdb_iceberg.py,
                trino_iceberg.py, databricks.py, databricks_iceberg.py, snowflake.py,
                snowflake_iceberg.py}
   engine/      connection.py queries.py runlog.py schema.py migrations.py locks.py
                repository/{pipelines,tasks,dependencies,runs,business_rules,offsets,trackers,
                            lineage,docs,history}.py
-  warehouse/   connection.py credentials.py
+  warehouse/   connection.py
   handlers/    registry.py sql/{stage,schema_evolution,audit,row_id,dedupe,actions}.py
                business_rules.py python_script.py email_alert/{flavour,render,send}.py scripting.py
   execution/   context.py runner.py child.py supervisor.py scheduler.py lifecycle.py gates.py
@@ -71,7 +72,8 @@ examples/demo/   docs/   scripts/   release/{required-suites.toml, evidence/}
 | text helpers in `warehouse.py`, `config.py`, dialects, `sql_actions.py`, `validate.py` | `core/text.py` |
 | `config.py` | `config/*` (`ConnectorConfig.postgres` becomes `engine`; mode values are `local` and `remote` everywhere) |
 | `db.py`, `runlog.py`, `cfg.py`, `init_db.py`, `migrate.py`, `documentation.py` | `engine/*`, with SQL moved to `queries/*.sql` |
-| `warehouse.py`, `credentials.py` | `warehouse/*` |
+| `warehouse.py` | `warehouse/*` |
+| `credentials.py` | `dialects/credentials.py` |
 | `runner.py`, `orchestrator.py`, `crosspipe.py`, `limits.py`, `connections.py`, `execution.py` | `execution/*` |
 | `sql_actions.py`, `business_rules.py`, `scripts.py`, `email_alert.py` | `handlers/*` |
 | `doctor.py`, `setup_command.py`, `validate.py`, `cloning.py`, `generate_yml.py`, `docs_generator.py`, `column_lineage.py` | `services/*` |
@@ -112,7 +114,7 @@ squash-merged by pull request (see `CONTRIBUTING.md` for the definition of done)
 | B4 | `feat/core-text` | JDBC parsers, `.env`, statement splitters, `$$pipeline_id` substitution, read-only lint, identifier checks, checksums | several | B1 | done |
 | B5 | `feat/process-supervisor` | Spawned child interpreter, timeouts, process-group kill, output capture, bounded parallel batches, file locks | `runner.py`, `orchestrator.py` | B1 | done |
 | C1 | `feat/config` | Sections and order, profiles, variable-or-value, secrets must be set, auth validation | `config.py` | B4 | done |
-| C2 | `feat/engine-dialects` | PostgreSQL and SQLite dialects, baseline schemas, query catalog, locks, schema tests | `dialects/engine_dialects/` | C1, B5 | |
+| C2 | `feat/engine-dialects` | PostgreSQL and SQLite dialects, baseline schemas, query catalog, locks, schema tests | `dialects/engine_dialects/` | C1, B5 | done |
 | C3 | `feat/warehouse-dialects` | Eight warehouse dialects, registry, credentials, `open_warehouse`, single-writer queue | `dialects/warehouse_dialects/`, `warehouse.py`, `credentials.py` | C1 | |
 | D1 | `feat/engine-repository` | Repositories, run log, `init-db`, `migrate` | `db.py`, `cfg.py`, `runlog.py`, `init_db.py`, `migrate.py` | C2 | |
 | E1 | `feat/execution-runner` | Task context, handler registry, `run --task_code`, child entry point, crash detection, timeouts | `runner.py`, `handlers.py`, `limits.py`, `execution.py` | D1, B3, B5 | |

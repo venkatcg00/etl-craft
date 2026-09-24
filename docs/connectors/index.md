@@ -7,8 +7,9 @@ reads. Start from the [examples](../examples/README.md): one complete file per E
 warehouse, secrets source, orchestration mode and authentication type. The
 [annotated reference](../craft-connector.example.yml) explains every key.
 
+- [Engine DB](engine-db.md): SQLite or PostgreSQL, and how each authenticates.
+
 !!! note "Planned"
-    - **Engine DB**: SQLite and PostgreSQL.
     - **Warehouses**: PostgreSQL, DuckDB, DuckDB over an Iceberg REST catalog, Trino over
       Iceberg, Databricks and Snowflake, each in their native or Iceberg table format.
     - **Authentication**: the modes each connection accepts (`none`, `password`, `token`,

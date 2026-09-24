@@ -44,3 +44,8 @@ All notable changes are recorded here. The format follows
   warehouse or mail relay accepts. Warehouse JDBC URLs, including the DuckDB, Databricks and
   Snowflake forms, are parsed at load. The annotated example and one example file per
   connection choice are published with the documentation.
+- Engine DB dialects for SQLite and PostgreSQL (`etl_craft.dialects.engine`): the packaged
+  schema for each, the query catalog, connections with every PostgreSQL auth mode (tokens
+  minted per connection for `oauth` and `sts`), cross-process locks, and schema tests that run
+  the same rules against both databases. A task can no longer set `RUN_CONDITION_COUNT`
+  without `RUN_CONDITION = 'N'`.

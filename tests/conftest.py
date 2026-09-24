@@ -1,3 +1,3 @@
-"""Suite-wide pytest configuration: evidence recording and the suite-marker rule."""
+"""Suite-wide pytest configuration: evidence, the suite-marker rule, Engine DB fixtures."""
 
-pytest_plugins = ["pytester", "plugins.evidence", "plugins.suites"]
+pytest_plugins = ["pytester", "plugins.evidence", "plugins.suites", "fixtures.engine_db"]
