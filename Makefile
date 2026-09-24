@@ -1,4 +1,5 @@
-.PHONY: help sync lint format typecheck imports history test coverage check build verify-package clean
+.PHONY: help sync lint format typecheck imports history test coverage check build verify-package clean \
+	docs docs-serve
 
 UV ?= uv
 
@@ -39,5 +40,11 @@ build: ## Build the wheel and sdist into dist/
 verify-package: ## Build, then install with pip and uv into clean environments
 	./scripts/verify_package.sh
 
+docs: ## Build the documentation site into site/ (strict: any warning fails)
+	$(UV) run mkdocs build --strict --site-dir site
+
+docs-serve: ## Serve the documentation site with live reload
+	$(UV) run mkdocs serve
+
 clean: ## Remove build output and tool caches
-	rm -rf dist build htmlcov .coverage .coverage.* .pytest_cache .mypy_cache .ruff_cache
+	rm -rf dist build site htmlcov .coverage .coverage.* .pytest_cache .mypy_cache .ruff_cache

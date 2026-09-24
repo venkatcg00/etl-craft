@@ -46,6 +46,15 @@ dev = [
     "pytest-timeout>=2.3",
     "ruff>=0.16.8",
 ]
+docs = [
+    "mike>=2.2",
+    "mkdocs>=1.6.1,<2",
+    "mkdocs-gen-files>=0.6",
+    "mkdocs-literate-nav>=0.6.3",
+    "mkdocs-material>=9.7",
+    "mkdocs-section-index>=0.3.12",
+    "mkdocstrings[python]>=1.0",
+]
 
 [tool.ruff]
 line-length = 100

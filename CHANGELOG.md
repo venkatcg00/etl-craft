@@ -10,3 +10,5 @@ All notable changes are recorded here. The format follows
 
 - Package skeleton for the rewrite: layered packages, `etl-craft --version`, tooling, CI and
   package verification with pip and uv.
+- Documentation site built with MkDocs Material: overview, section skeleton, exit codes, and a
+  Python API reference generated from the code. `make docs` builds it with `--strict`.

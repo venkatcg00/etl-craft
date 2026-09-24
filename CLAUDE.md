@@ -16,6 +16,7 @@ make sync            # .venv with every dependency group
 make check           # ruff lint + format check, mypy --strict, lint-imports, history gate, tests + coverage
 make test            # tests only
 make verify-package  # build wheel + sdist, install each with pip and uv in clean environments
+make docs            # documentation site, strict build into site/ (make docs-serve to preview)
 ```
 
 ## Layers

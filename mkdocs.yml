@@ -1,0 +1,105 @@
+site_name: etl-craft
+site_description: Metadata-driven ETL orchestration engine
+repo_url: https://github.com/venkatcg00/etl-craft
+repo_name: venkatcg00/etl-craft
+edit_uri: edit/main/docs/
+copyright: Apache License 2.0
+
+theme:
+  name: material
+  features:
+    - content.code.copy
+    - navigation.indexes
+    - navigation.sections
+    - navigation.tabs
+    - navigation.top
+    - search.highlight
+    - search.suggest
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+# The API reference generator runs at build time; it is not a page.
+exclude_docs: |
+  gen_ref_pages.py
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search
+  - gen-files:
+      scripts:
+        - docs/gen_ref_pages.py
+  - literate-nav:
+      nav_file: SUMMARY.md
+  - section-index
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            members_order: source
+            separate_signature: true
+            show_root_heading: true
+            show_signature_annotations: true
+            show_source: false
+
+extra:
+  version:
+    provider: mike
+
+# With `mkdocs build --strict`, each of these warnings fails the build.
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+    absolute_links: warn
+  links:
+    not_found: warn
+    anchors: warn
+    absolute_links: warn
+    unrecognized_links: warn
+
+nav:
+  - Home: index.md
+  - Quick Start: quick-start.md
+  - Guides: guides/index.md
+  - Deploying: deploying/index.md
+  - Connectors: connectors/index.md
+  - Reference:
+      - reference/index.md
+      - Exit codes: reference/exit-codes.md
+      - Python API: api/
+  - Release notes: release-notes.md
+  - Contributing:
+      - contributing.md
+      - Rewrite plan: development/rewrite-plan.md
