@@ -4,7 +4,7 @@ etl-craft is a metadata-driven ETL orchestration engine, written in Python with 
 database dialects. Pipelines, tasks and dependencies are rows in an Engine DB (SQLite by default,
 PostgreSQL in production); the engine reads them and runs the work against one warehouse.
 
-The `next` branch is a rewrite of the implementation archived at the `archive/iteration-2` tag.
+`main` is a rewrite of the implementation archived at the `archive/iteration-2` tag.
 The design is unchanged; the structure, tests and documentation are new. The plan, its branch
 list and the release checkpoints are in `docs/development/rewrite-plan.md`. Read it before
 starting a branch.
@@ -16,6 +16,9 @@ make sync            # .venv with every dependency group
 make check           # ruff lint + format check, mypy --strict, lint-imports, history gate, tests + coverage
 make test            # tests only
 make verify-package  # build wheel + sdist, install each with pip and uv in clean environments
+make services-up     # local PostgreSQL (password and TLS), MinIO, Iceberg REST, Trino, Mailpit
+make suite SUITE=unit   # run one release suite and record its evidence
+make release-gate    # is HEAD releasable? (release/README.md)
 make docs            # documentation site, strict build into site/ (make docs-serve to preview)
 ```
 
@@ -59,8 +62,9 @@ Each package imports only the packages below it. `lint-imports` enforces this.
 - Log through `logging` (`etl_craft.<module>` loggers). Only the `cli` package prints.
 - Raw SQL aliases every selected column in lowercase; SQLite and PostgreSQL disagree on the case
   of unquoted identifiers.
-- Tests carry a marker (`unit`, and the service markers added with the test harness). Unit tests
-  need no services; integration tests skip cleanly when their service is not running.
+- Every test carries its suite's marker from `release/required-suites.toml` (or `harness`);
+  collection fails otherwise. Unit tests need no services; others call
+  `fixtures.services.require(...)`, which skips when the service is down.
 
 ## Porting a slice from the archive
 

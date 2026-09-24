@@ -1,15 +1,10 @@
-import importlib.util
-from pathlib import Path
-
 import pytest
+
+from fixtures.scripts import load
 
 pytestmark = pytest.mark.unit
 
-SCRIPT = Path(__file__).parents[2] / "scripts" / "check_no_history.py"
-spec = importlib.util.spec_from_file_location("check_no_history", SCRIPT)
-assert spec is not None and spec.loader is not None
-gate = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(gate)
+gate = load("check_no_history")
 
 # Built by concatenation so this file does not trip the gate it tests.
 TAG = "# [" + "DEVIATION] moved from the old module"

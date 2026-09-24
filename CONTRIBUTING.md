@@ -2,8 +2,8 @@
 
 ## Branches
 
-- `next` is the trunk of the rewrite. Every change reaches it through a pull request with green CI.
-- Cut each branch from `next` and keep it to one item of the
+- `main` is the trunk. Every change reaches it through a pull request with green CI.
+- Cut each branch from `main` and keep it to one item of the
   [rewrite plan](docs/development/rewrite-plan.md). Name it `<type>/<area>-<topic>`, for example
   `feat/core-graph` or `test/e2e-demo`.
 - Squash-merge. The squash commit message follows
@@ -36,6 +36,17 @@ A branch is ready to merge when:
 - New or ported behaviour has tests at the right level (unit, integration or end-to-end).
 - The documentation page for the feature exists or is updated, and `make docs` builds it
   without warnings.
+
+## Tests
+
+- Every test carries the marker of the suite it belongs to, from
+  `release/required-suites.toml` (`unit`, `engine_postgres`, `warehouse_trino_iceberg`, ...), or
+  `harness` for tests of the local services themselves. Collection fails on an unmarked test.
+- `make services-up` starts the local services in `docker-compose.yml` (PostgreSQL with password
+  and with client-certificate login, MinIO, an Iceberg REST catalog, Trino and Mailpit), and
+  `make services-down` removes them. A test that needs a service skips when it is down;
+  `ETL_CRAFT_REQUIRE_SERVICES=1` turns those skips into failures.
+- Release evidence and the release gate are described in `release/README.md`.
 
 ## Local setup
 
