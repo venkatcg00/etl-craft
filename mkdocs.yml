@@ -94,7 +94,9 @@ validation:
 nav:
   - Home: index.md
   - Quick Start: quick-start.md
-  - Guides: guides/index.md
+  - Guides:
+      - guides/index.md
+      - Dependencies and run conditions: guides/dependencies.md
   - Deploying: deploying/index.md
   - Connectors: connectors/index.md
   - Reference:
