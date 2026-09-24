@@ -101,6 +101,7 @@ nav:
   - Connectors:
       - connectors/index.md
       - Engine DB: connectors/engine-db.md
+      - Warehouses: connectors/warehouses.md
       - craft-connector.yml examples: examples/README.md
   - Reference:
       - reference/index.md

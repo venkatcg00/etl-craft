@@ -115,7 +115,7 @@ squash-merged by pull request (see `CONTRIBUTING.md` for the definition of done)
 | B5 | `feat/process-supervisor` | Spawned child interpreter, timeouts, process-group kill, output capture, bounded parallel batches, file locks | `runner.py`, `orchestrator.py` | B1 | done |
 | C1 | `feat/config` | Sections and order, profiles, variable-or-value, secrets must be set, auth validation | `config.py` | B4 | done |
 | C2 | `feat/engine-dialects` | PostgreSQL and SQLite dialects, baseline schemas, query catalog, locks, schema tests | `dialects/engine_dialects/` | C1, B5 | done |
-| C3 | `feat/warehouse-dialects` | Eight warehouse dialects, registry, credentials, `open_warehouse`, single-writer queue | `dialects/warehouse_dialects/`, `warehouse.py`, `credentials.py` | C1 | |
+| C3 | `feat/warehouse-dialects` | Eight warehouse dialects, registry, credentials, `open_warehouse`, single-writer queue | `dialects/warehouse_dialects/`, `warehouse.py`, `credentials.py` | C1 | done |
 | D1 | `feat/engine-repository` | Repositories, run log, `init-db`, `migrate` | `db.py`, `cfg.py`, `runlog.py`, `init_db.py`, `migrate.py` | C2 | |
 | E1 | `feat/execution-runner` | Task context, handler registry, `run --task_code`, child entry point, crash detection, timeouts | `runner.py`, `handlers.py`, `limits.py`, `execution.py` | D1, B3, B5 | |
 | E2 | `feat/execution-pipeline` | Wave scheduler, init/finalize, cross-pipeline gates and trackers, SLA, connection tests at start, cloning hook | `orchestrator.py`, `crosspipe.py`, `connections.py` | E1, C3 | |

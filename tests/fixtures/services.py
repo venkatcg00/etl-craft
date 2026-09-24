@@ -35,6 +35,8 @@ POSTGRES_USER = "etl_craft"
 POSTGRES_PASSWORD = "etl_craft"
 POSTGRES_DB = "etl_craft"
 MINIO_BUCKET = "warehouse"
+MINIO_USER = "minioadmin"
+MINIO_PASSWORD = "minioadmin"
 
 
 @dataclass(frozen=True)
