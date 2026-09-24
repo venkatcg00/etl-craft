@@ -2,12 +2,13 @@
 
 How to model and run pipelines with etl-craft.
 
+- [Dependencies and run conditions](dependencies.md): dependency types, `ALL`, `ANY` and `N`
+  conditions, waves, and which tasks run, wait or are skipped.
+
 !!! note "Planned"
     These guides are written as each feature reaches the new code base:
 
     - **Pipelines and tasks**: the configuration rows, task handlers and parameters.
-    - **Dependencies and run conditions**: dependency types, `ALL`, `ANY` and `N` conditions,
-      and dependencies between pipelines.
     - **Run lifecycle and retries**: how runs are created, resumed and finished.
     - **SQL actions**: the seven actions, audit columns, schema evolution and deduplication.
     - **Business rules**: rule waves, and how rows are flagged and cleared.
