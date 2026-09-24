@@ -21,3 +21,6 @@ All notable changes are recorded here. The format follows
 - The documentation site is deployed to GitHub Pages by the Docs workflow on every push to
   `main`, with a version selector: `dev` from `main`, and `X.Y` from each release line's
   newest tag, the newest aliased `latest`. `make docs-site` builds the same site locally.
+- Core domain: the `EtlCraftError` hierarchy with the exit code each family maps to, the
+  Engine DB and configuration value sets as `StrEnum`s with the run-status groups, and
+  `etl_craft.core.log`, which writes the `etl_craft` loggers as text or JSON lines.

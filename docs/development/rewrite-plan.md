@@ -106,7 +106,7 @@ squash-merged by pull request (see `CONTRIBUTING.md` for the definition of done)
 | A2 | `chore/test-release-harness` | Test tree and markers; docker-compose (postgres, postgres with TLS client certificates, minio, iceberg-rest, trino, mailpit); evidence plugin; `release/required-suites.toml`; `scripts/release_gate.py`; release-gate CI job | `tests/conftest.py`, `docker-compose.yml` | A1 | done |
 | A3 | `docs/site-scaffold` | MkDocs Material, mike, mkdocstrings, gen-files; navigation skeleton; strict build in CI | — | A1 | done |
 | A4 | `docs/github-pages` | Deploy the site to GitHub Pages from CI, rebuilt on every push to `main`: `dev` from `main`, `X.Y` from each release line's newest tag, `latest` for the newest | — | A3 | done |
-| B1 | `feat/core-domain` | Errors, enums, logging, exit codes | scattered | A1 | |
+| B1 | `feat/core-domain` | Errors, enums, logging, exit codes | scattered | A1 | done |
 | B2 | `feat/cli-framework` | Parser, output layer, exit-code mapping, `--config`, `--log-*` | `cli.py` | B1 | |
 | B3 | `feat/core-graph` | Dependency graph: validation, waves, ready, unsatisfiable, run conditions | `resolver.py` | B1 | |
 | B4 | `feat/core-text` | JDBC parsers, `.env`, statement splitters, `$$pipeline_id` substitution, read-only lint, identifier checks, checksums | several | B1 | |
