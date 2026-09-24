@@ -1,0 +1,44 @@
+# Contributing
+
+## Branches
+
+- `next` is the trunk of the rewrite. Every change reaches it through a pull request with green CI.
+- Cut each branch from `next` and keep it to one item of the
+  [rewrite plan](docs/development/rewrite-plan.md). Name it `<type>/<area>-<topic>`, for example
+  `feat/core-graph` or `test/e2e-demo`.
+- Squash-merge. The squash commit message follows
+  [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `refactor:`,
+  `test:`, `docs:`, `chore:`, `build:`, `ci:`).
+
+## Porting from the previous implementation
+
+Most branches port code from the `archive/iteration-2` tag (`git show archive/iteration-2:<path>`).
+Porting a slice means:
+
+1. Move the code into its layer (see [CLAUDE.md](CLAUDE.md) for the layers).
+2. Keep its behaviour. A branch that changes behaviour says so in its pull request.
+3. Rewrite comments and docstrings so they describe what the code does now.
+4. Port the tests that cover the slice, into `tests/unit/` or `tests/integration/<area>/`.
+
+## Comments and documentation
+
+Comments explain why the code is the way it is when that is not obvious from the code itself.
+They never record history: no decision tags, dates, review item ids or "changed because" notes.
+That context belongs in the pull request and the commit message. `make history` enforces this,
+and CI runs it on every pull request.
+
+## Definition of done
+
+A branch is ready to merge when:
+
+- `make check` passes: ruff lint and format, `mypy --strict`, the layer contracts
+  (`lint-imports`), the history gate, and the tests with coverage of at least 90%.
+- New or ported behaviour has tests at the right level (unit, integration or end-to-end).
+- The documentation page for the feature exists or is updated.
+
+## Local setup
+
+```bash
+make sync
+uv run pre-commit install    # optional: run the same checks on every commit
+```

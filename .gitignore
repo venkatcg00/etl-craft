@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+
+# Tooling caches and reports
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.import_linter_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Documentation build
+/site/
+
+# Local secrets and scratch databases
+.env
+.env.*
+!.env.*.example
+*.db
+*.duckdb
+*.db.*.lock
+
+# Editors
+.idea/
+.vscode/

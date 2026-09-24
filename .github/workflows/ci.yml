@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [next, main]
+  pull_request:
+    branches: [next, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    name: lint / types / layers / history
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked --all-groups --python 3.11
+      - name: Lint and format check
+        run: make lint
+      - name: mypy --strict
+        run: make typecheck
+      - name: Layer contracts
+        run: make imports
+      - name: History gate
+        run: make history
+
+  test:
+    name: tests (py${{ matrix.python-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked --all-groups --python ${{ matrix.python-version }}
+      - name: Tests with coverage
+        run: make coverage
+
+  package:
+    name: package (build, install with pip and uv, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build and verify the package
+        run: make verify-package

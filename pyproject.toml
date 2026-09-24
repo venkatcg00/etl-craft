@@ -1,0 +1,118 @@
+[project]
+name = "etl-craft"
+version = "0.1.0.dev0"
+description = "Metadata-driven ETL orchestration engine"
+readme = "README.md"
+authors = [{ name = "venkatcg00", email = "venkatcg0@gmail.com" }]
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+keywords = ["etl", "orchestration", "metadata-driven", "data-engineering"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Typing :: Typed",
+]
+dependencies = []
+
+[project.scripts]
+etl-craft = "etl_craft.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/venkatcg00/etl-craft"
+Repository = "https://github.com/venkatcg00/etl-craft"
+Issues = "https://github.com/venkatcg00/etl-craft/issues"
+
+[build-system]
+requires = ["uv_build>=0.12.17,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+source-include = ["src/etl_craft/py.typed"]
+
+[dependency-groups]
+dev = [
+    "import-linter>=2.1",
+    "mypy>=1.11",
+    "pre-commit>=4",
+    "pytest>=8.3",
+    "pytest-cov>=6",
+    "pytest-timeout>=2.3",
+    "ruff>=0.16.8",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+preview = true
+explicit-preview-rules = true
+select = [
+    "B",       # bugbear
+    "C4",      # comprehensions
+    "D",       # docstrings
+    "E",       # pycodestyle errors
+    "F",       # pyflakes
+    "I",       # import order
+    "N",       # naming
+    "PLW1514", # open() without an explicit encoding
+    "RUF",     # ruff-specific
+    "SIM",     # simplifications
+    "UP",      # pyupgrade
+    "W",       # pycodestyle warnings
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D"]
+"scripts/**" = ["D100", "D103"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src/etl_craft", "scripts"]
+strict = true
+warn_unreachable = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--strict-markers", "--strict-config"]
+timeout = 120
+markers = [
+    "unit: pure Python, no services",
+]
+
+[tool.coverage.run]
+source = ["etl_craft"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = true
+
+[tool.importlinter]
+root_package = "etl_craft"
+
+[[tool.importlinter.contracts]]
+name = "Layers: each layer imports only the layers below it"
+type = "layers"
+layers = [
+    "etl_craft.cli",
+    "etl_craft.services",
+    "etl_craft.execution",
+    "etl_craft.handlers",
+    "etl_craft.engine | etl_craft.warehouse",
+    "etl_craft.dialects",
+    "etl_craft.config",
+    "etl_craft.core",
+]
