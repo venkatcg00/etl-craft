@@ -4,7 +4,7 @@ etl-craft is a metadata-driven ETL orchestration engine, written in Python with 
 database dialects. Pipelines, tasks and dependencies are rows in an Engine DB (SQLite by default,
 PostgreSQL in production); the engine reads them and runs the work against one warehouse.
 
-The `next` branch is a rewrite of the implementation archived at the `archive/iteration-2` tag.
+`main` is a rewrite of the implementation archived at the `archive/iteration-2` tag.
 The design is unchanged; the structure, tests and documentation are new. The plan, its branch
 list and the release checkpoints are in `docs/development/rewrite-plan.md`. Read it before
 starting a branch.

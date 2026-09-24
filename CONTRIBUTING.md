@@ -2,8 +2,8 @@
 
 ## Branches
 
-- `next` is the trunk of the rewrite. Every change reaches it through a pull request with green CI.
-- Cut each branch from `next` and keep it to one item of the
+- `main` is the trunk. Every change reaches it through a pull request with green CI.
+- Cut each branch from `main` and keep it to one item of the
   [rewrite plan](docs/development/rewrite-plan.md). Name it `<type>/<area>-<topic>`, for example
   `feat/core-graph` or `test/e2e-demo`.
 - Squash-merge. The squash commit message follows
