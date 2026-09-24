@@ -20,7 +20,9 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "psycopg[binary]>=3.3.6",
     "pyyaml>=6.0.3",
+    "sqlalchemy>=2.0.54",
 ]
 
 [project.scripts]
@@ -31,6 +33,11 @@ Homepage = "https://github.com/venkatcg00/etl-craft"
 Repository = "https://github.com/venkatcg00/etl-craft"
 Issues = "https://github.com/venkatcg00/etl-craft/issues"
 
+[project.optional-dependencies]
+aws = [
+    "boto3>=1.28",
+]
+
 [build-system]
 requires = ["uv_build>=0.12.17,<0.13.0"]
 build-backend = "uv_build"
@@ -40,6 +47,7 @@ source-include = ["src/etl_craft/py.typed"]
 
 [dependency-groups]
 dev = [
+    "boto3>=1.28",
     "import-linter>=2.1",
     "mypy>=1.11",
     "pre-commit>=4",
@@ -95,6 +103,11 @@ python_version = "3.11"
 files = ["src/etl_craft", "scripts"]
 strict = true
 warn_unreachable = true
+
+# boto3 is the one optional import (auth_mode sts) and ships no type information.
+[[tool.mypy.overrides]]
+module = ["boto3"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -100,6 +100,7 @@ nav:
   - Deploying: deploying/index.md
   - Connectors:
       - connectors/index.md
+      - Engine DB: connectors/engine-db.md
       - craft-connector.yml examples: examples/README.md
   - Reference:
       - reference/index.md

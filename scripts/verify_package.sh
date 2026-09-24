@@ -30,7 +30,14 @@ import sys
 import zipfile
 
 names = zipfile.ZipFile(sys.argv[1]).namelist()
-required = ["etl_craft/__init__.py", "etl_craft/py.typed", "etl_craft/cli/__init__.py"]
+required = [
+    "etl_craft/__init__.py",
+    "etl_craft/py.typed",
+    "etl_craft/cli/__init__.py",
+    "etl_craft/dialects/engine/postgres/schema.sql",
+    "etl_craft/dialects/engine/sqlite/schema.sql",
+    "etl_craft/dialects/engine/queries/applied_migrations.sql",
+]
 missing = [name for name in required if name not in names]
 if not any(name.endswith("licenses/LICENSE") for name in names):
     missing.append("LICENSE")
@@ -48,6 +55,13 @@ check_install() {
             || { echo "FAIL ($label): python -m etl_craft --version" >&2; exit 1; }
         "$venv/bin/python" -c "import etl_craft, sys; assert etl_craft.__version__ == sys.argv[1]" \
             "$expected"
+        # The Engine DB schemas and query catalog ship inside the package.
+        "$venv/bin/python" -c "
+from etl_craft.dialects.engine import all_dialects
+for dialect in all_dialects():
+    assert 'CREATE TABLE CFG_PIPELINES' in dialect.schema_path().read_text(encoding='utf-8')
+    assert dialect.query('existing_tables')
+" || { echo "FAIL ($label): Engine DB SQL files" >&2; exit 1; }
     )
     echo "    ok: $label"
 }
