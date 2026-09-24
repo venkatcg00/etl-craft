@@ -29,4 +29,10 @@ class Command:
     run: Callable[[argparse.Namespace, Output], int]
 
 
-COMMANDS: tuple[Command, ...] = ()
+def _commands() -> tuple[Command, ...]:
+    from etl_craft.cli.commands import init_db, migrate
+
+    return (init_db.COMMAND, migrate.COMMAND)
+
+
+COMMANDS: tuple[Command, ...] = _commands()
