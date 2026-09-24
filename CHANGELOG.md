@@ -24,3 +24,6 @@ All notable changes are recorded here. The format follows
 - Core domain: the `EtlCraftError` hierarchy with the exit code each family maps to, the
   Engine DB and configuration value sets as `StrEnum`s with the run-status groups, and
   `etl_craft.core.log`, which writes the `etl_craft` loggers as text or JSON lines.
+- Command line framework: a command registry, the output layer, `--config`, `--log-level`
+  and `--log-format` before or after the command name, and `error:` lines with the exit code
+  of each `EtlCraftError`. The Command line reference page is generated from the parser.

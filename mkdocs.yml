@@ -60,6 +60,7 @@ plugins:
   - gen-files:
       scripts:
         - docs/gen_ref_pages.py
+        - docs/gen_cli_page.py
   - literate-nav:
       nav_file: SUMMARY.md
   - section-index
@@ -98,6 +99,7 @@ nav:
   - Connectors: connectors/index.md
   - Reference:
       - reference/index.md
+      - Command line: reference/cli.md
       - Exit codes: reference/exit-codes.md
       - Python API: api/
   - Release notes: release-notes.md
