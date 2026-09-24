@@ -57,44 +57,68 @@ A ready-to-paste prompt for a new Claude Code session is at the end of this file
 
 ## In flight: `docs/github-pages` (A4)
 
-The user asked for the documentation to be hosted on GitHub Pages. The branch is pushed as
-commit `3234228`. **No pull request is open yet.**
+The user asked for the documentation to be hosted on GitHub Pages, **deployed by a CI workflow
+and not tied to a branch**. The branch is pushed at commit `0d2cdf6`. The earlier commit
+`3234228` pushed to a `gh-pages` branch instead; `0d2cdf6` replaces that approach, and a squash
+merge folds the two together. **No pull request is open yet.**
 
 **What the branch does:**
 
-- `mkdocs.yml` sets `site_url: https://venkatcg00.github.io/etl-craft/`.
-- `.github/workflows/docs.yml`:
-  - adds a `publish` job that runs only on push events, with `contents: write` and a
-    `docs-publish` concurrency group;
-  - triggers on tags `v[0-9]+.[0-9]+.[0-9]+` as well;
-  - bumps its actions to v7.
-- `scripts/publish_docs.sh REF [--push]` maps the ref to a version and runs mike:
-  - `refs/heads/main` publishes `dev`, which is the default version until a `latest` exists;
-  - `refs/tags/vX.Y.Z` publishes `X.Y` with the alias `latest` and sets `latest` as the default;
-  - any other ref exits 2.
+- **`mkdocs.yml`** sets `site_url: https://venkatcg00.github.io/etl-craft/`. mike adds the
+  version directory to it at build time.
+- **`scripts/build_docs_site.py OUT_DIR [--repo PATH]`** rebuilds the whole site on every run:
+  - `dev` is built from the working tree;
+  - each release line `X.Y` is built from its newest `vX.Y.Z` tag, in a temporary `git worktree`
+    that runs `uv run --locked --no-default-groups --group docs mike`, so each tag uses its own
+    docs dependencies;
+  - the newest line gets the alias `latest` and becomes the default; before any release the
+    default is `dev`.
+- **How the build works:**
+  - mike assembles the versions on the local branch `docs-site-build`, which is deleted in a
+    `finally`. The branch never exists on the remote.
+  - Aliases are copies, not symlinks.
+  - The result is exported with `git archive` into OUT_DIR, which must not exist yet.
+  - A leftover `docs-site-build` branch is reported, not deleted.
+  - Exit codes: 0 ok, 1 build step failed, 2 usage.
+- **`.github/workflows/docs.yml`**, jobs `build` → `site` → `deploy`:
+  - `build`: the strict build, as before;
+  - `site`: `fetch-depth: 0` so tags are present, runs the script into `_site`, then
+    `actions/upload-pages-artifact@v4`. It runs on pull requests too, so it is tested before
+    merge;
+  - `deploy`: `actions/deploy-pages@v4`, only on pushes to `main` and manual runs from `main`.
+    It has `pages: write` and `id-token: write`, environment `github-pages`, and concurrency
+    group `pages` with no cancellation.
+  - The workflow also gains `workflow_dispatch`, and all actions are on v7.
+  - No tag trigger. The `github-pages` environment only allows the default branch, so a release
+    tag appears at the next push to `main` or a manual run from `main`.
+- **`make docs-site`** builds `_site/` locally (gitignored); preview it with
+  `python -m http.server --directory _site`.
+- **Tests:**
+  - `tests/unit/test_build_docs_site.py` (unit) covers tag selection, the mike arguments and the
+    usage errors;
+  - `tests/integration/docs/test_docs_site.py` (the `docs` suite) builds the real site from a
+    tagless `git clone --shared` of HEAD, once dev-only and once with tags `v0.1.0` and `v0.1.1`.
+    It checks `versions.json`, the root redirect, the canonical URLs, and that no branch or
+    worktree is left behind.
+- **Removed:** `scripts/publish_docs.sh`.
 - **Documentation updates:**
-  - `docs/contributing.md` has a new "Published versions" section;
-  - README links the site;
-  - CONTRIBUTING's definition of done mentions publishing;
-  - the rewrite plan gains an A4 row (done), CP0 becomes A1–A4, the documentation section is
-    updated, and a checklist line is added;
-  - CHANGELOG has an entry.
+  - the "Published versions" section in `docs/contributing.md`;
+  - the plan's A4 row, documentation section and checklist line;
+  - CHANGELOG, a README link, and a CONTRIBUTING line.
 - **Already verified:**
-  - `make check`, `make docs` and `shellcheck` are clean;
-  - a dry run against a local bare remote gave `dev/`, then `0.1/` with a `latest` symlink, a
-    root `index.html` that redirects to the default version, and `.nojekyll`;
-  - canonical URLs and the 404 page's asset paths include the version directory.
+  - `make check`: 73 passed, `mypy --strict` clean;
+  - `make docs` and `make docs-site`;
+  - the docs tests in a shallow, detached clone like CI's checkout: 2 passed.
 
 **Next steps:**
 
-1. **Open the pull request.** Use the template in `.github/pull_request_template.md`
+1. **Ask the user to set the Pages source.** Settings → Pages → Build and deployment → Source:
+   **GitHub Actions**. Without it, `deploy-pages` fails on its first run.
+2. **Open the pull request.** Use the template in `.github/pull_request_template.md`
    (Summary / Plan item "A4 docs/github-pages" / Ported from "new" / Testing / Checklist).
-2. **Wait for green CI** (CI and Docs), then squash-merge.
-3. **Watch the first run of the Docs workflow's `publish` job on `main`.** It should create the
-   `gh-pages` branch.
-4. **Ask the user to enable Pages** (this session cannot do it): Settings → Pages → Build and
-   deployment → Source "Deploy from a branch", branch `gh-pages`, folder `/ (root)`.
-   Pages may enable itself when `gh-pages` first appears, so check first.
+   Describe only the final approach.
+3. **Wait for green CI** (CI, and Docs `build` and `site`), then squash-merge.
+4. **Watch the Docs run on `main`.** The `deploy` job should succeed and report the page URL.
 5. **Verify the site.** <https://venkatcg00.github.io/etl-craft/> should redirect to `dev/`, and
    the version selector should list `dev`.
 
@@ -218,7 +242,7 @@ This session cannot do these; each needs the user or repository settings:
   `chore/test-release-harness`, `chore/trunk-main`, `docs/site-scaffold`, and
   `docs/github-pages` once merged. Branch deletes from the session get HTTP 403. The
   `archive/iteration-2` tag keeps the archived code.
-- **Enable GitHub Pages** after the first publish (see A4 above).
+- **Set the GitHub Pages source to "GitHub Actions"** before A4 merges (see A4 above).
 - **Decide on MkDocs 2.0.** MkDocs is pinned `<2`, because 2.0 breaks plugins and themes.
   ProperDocs 1.6.7 was verified as a drop-in continuation with identical output. Switching is
   the user's call.
@@ -305,10 +329,10 @@ You are continuing the etl-craft rewrite (metadata-driven ETL engine, Python + S
    docs/development/rewrite-plan.md.
 2. Run `bash /tmp/handoff/continue.sh` and confirm it ends with "Ready.".
 3. Finish A4 docs/github-pages exactly as HANDOFF.md describes:
+   - confirm with me that Settings → Pages → Source is "GitHub Actions";
    - open the PR with the repo template and wait for green CI;
    - squash-merge (the user has allowed merging after green CI);
-   - confirm the Docs publish job on main created gh-pages;
-   - tell me whether Pages needs enabling in Settings → Pages.
+   - confirm the Docs deploy job on main succeeded and the site serves dev/.
 4. Start B1 feat/core-domain from main using the research and proposed design in
    HANDOFF.md (errors with exit codes, StrEnum domain enums, core/log.py).
    Add unit tests, keep `make check` green, update the plan row and CHANGELOG, open the PR,
