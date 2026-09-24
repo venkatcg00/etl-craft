@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qsl, urlencode
 
 from etl_craft.db import ConnectionError_
-from etl_craft.dialects.warehouse_dialects.base import WarehouseDialect
+from etl_craft.dialects.warehouse_dialects.base import Presented, WarehouseDialect
+
+if TYPE_CHECKING:
+    from etl_craft.config import ConnectionProfile
 
 _SNOWFLAKE_URL_RE = re.compile(
     r"^jdbc:snowflake://(?P<host>[^:/?]+)(:(?P<port>\d+))?/?(\?(?P<query>.*))?$"
@@ -29,6 +32,20 @@ class SnowflakeWarehouse(WarehouseDialect):
     surrogate_key = "computed"
     enforces_primary_keys = False
     key_file_connect_args = ("private_key_file", "private_key_file_pwd")
+    # [ADDITION, 2026-09-24] oauth, sso and sts are the connector's own flows:
+    # OAUTH_CLIENT_CREDENTIALS (it calls token_url itself), EXTERNALBROWSER
+    # (interactive only -- a headless run fails before a browser opens), and
+    # WORKLOAD_IDENTITY with the AWS provider (the ambient AWS/STS identity,
+    # no stored secret at all).
+    auth_fields: Mapping[str, tuple[str, ...]] = {
+        "password": ("user", "secret"),
+        "token": ("user", "secret"),
+        "key_file": ("user", "key_file", "secret"),
+        "oauth": ("client_id", "secret", "token_url"),
+        "sso": ("user",),
+        "sts": (),
+    }
+    verified_auth_modes = frozenset({"password", "token"})
     #: Separate connection fields -- the tested and recommended connection shape.
     preferred_fields = ("user", "account", "database", "schema", "warehouse", "role", "token")
 
@@ -52,6 +69,34 @@ class SnowflakeWarehouse(WarehouseDialect):
     def parse_jdbc(self, jdbc_url: str) -> tuple[str, dict[str, Any]]:
         """Parse Snowflake's account-host JDBC form."""
         return _parse_snowflake(jdbc_url)
+
+    def present(
+        self, profile: ConnectionProfile, secret: str, parts: Mapping[str, Any]
+    ) -> Presented:
+        """Name the connector's own authenticator for oauth, sso and sts."""
+        user = profile.user or None
+        mode = profile.auth_mode
+        if mode == "oauth":
+            connect_args: dict[str, Any] = {
+                "authenticator": "OAUTH_CLIENT_CREDENTIALS",
+                "oauth_client_id": str(profile.extra["client_id"]),
+                "oauth_client_secret": secret,
+                "oauth_token_request_url": str(profile.extra["token_url"]),
+            }
+            if profile.extra.get("scope"):
+                connect_args["oauth_scope"] = str(profile.extra["scope"])
+            return Presented(username=user, connect_args=connect_args)
+        if mode == "sso":
+            return Presented(username=user, connect_args={"authenticator": "externalbrowser"})
+        if mode == "sts":
+            return Presented(
+                username=user,
+                connect_args={
+                    "authenticator": "WORKLOAD_IDENTITY",
+                    "workload_identity_provider": "AWS",
+                },
+            )
+        return super().present(profile, secret, parts)
 
 
 def _parse_snowflake(jdbc_url: str) -> tuple[str, dict[str, Any]]:

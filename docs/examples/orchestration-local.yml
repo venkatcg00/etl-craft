@@ -5,73 +5,79 @@
 # Max_parallel_tasks at a time. The DAG defaults still shape `generate-yml`
 # output, so a local environment can preview the DAGs it would ship.
 #
+# Each setting is marked `# variable` or `# value`. A variable is looked up in
+# the secrets source (here: the process environment); when it is not set, the
+# text itself is used, so `Profile: dev` is simply dev. A secret must always
+# be a variable that is set. `etl-craft doctor` lists every value used as
+# written that looks like a variable name.
+#
 # Complete and loadable as written: tests/test_config_examples.py loads every
 # file in this directory, for every profile it declares.
 
 Secrets:
-  Source_type: environment        # names below are read from the process environment
-  Profile: dev                    # the default profile; ETL_CRAFT_PROFILE=prod switches all
+  Source_type: environment             # value — variables below are read from the process environment
+  Profile: ETL_CRAFT_PROFILE           # variable — dev | sit | uat | prod, set in each environment
 
 Orchestration:
-  Mode: local
-  Task_timeout_seconds: 21600     # 0 disables; a task's TASK_TIMEOUT_SECONDS overrides
-  Max_parallel_tasks: 8
-  Enforce_sla: false              # parsed but not yet enforced (docs/configuration.md)
+  Mode: local                          # value
+  Task_timeout_seconds: 21600          # value — 0 disables; a task's TASK_TIMEOUT_SECONDS overrides
+  Max_parallel_tasks: 8                # value
+  Enforce_sla: false                   # value — true: judge each finished run MET/BREACHED vs SLA_IN_HOURS
   dev:
-    Global_dag: false
-    Catchup: false
-    Tags: [analytics]
-    Retries: 1
-    Retry_delay_minutes: 5
-    Depends_on_past: false
-    Email_on_failure: false
-    Allow_schedule: false
+    Global_dag: false                  # value
+    Catchup: false                     # value
+    Tags: [analytics]                  # value
+    Retries: 1                         # value
+    Retry_delay_minutes: 5             # value
+    Depends_on_past: false             # value
+    Email_on_failure: false            # value
+    Allow_schedule: false              # value
   sit:
-    Global_dag: false
-    Catchup: false
-    Tags: [analytics]
-    Retries: 1
-    Retry_delay_minutes: 5
-    Depends_on_past: false
-    Email_on_failure: false
-    Allow_schedule: false
+    Global_dag: false                  # value
+    Catchup: false                     # value
+    Tags: [analytics]                  # value
+    Retries: 1                         # value
+    Retry_delay_minutes: 5             # value
+    Depends_on_past: false             # value
+    Email_on_failure: false            # value
+    Allow_schedule: false              # value
   uat:
-    Global_dag: false
-    Catchup: false
-    Tags: [analytics]
-    Retries: 1
-    Retry_delay_minutes: 5
-    Depends_on_past: false
-    Email_on_failure: false
-    Allow_schedule: false
+    Global_dag: false                  # value
+    Catchup: false                     # value
+    Tags: [analytics]                  # value
+    Retries: 1                         # value
+    Retry_delay_minutes: 5             # value
+    Depends_on_past: false             # value
+    Email_on_failure: false            # value
+    Allow_schedule: false              # value
   prod:
-    Global_dag: false
-    Catchup: false
-    Tags: [analytics]
-    Retries: 1
-    Retry_delay_minutes: 5
-    Depends_on_past: false
-    Email_on_failure: false
-    Allow_schedule: false
+    Global_dag: false                  # value
+    Catchup: false                     # value
+    Tags: [analytics]                  # value
+    Retries: 1                         # value
+    Retry_delay_minutes: 5             # value
+    Depends_on_past: false             # value
+    Email_on_failure: false            # value
+    Allow_schedule: false              # value
 
 Engine:
-  Name: SQLite
+  Name: SQLite                         # value
   dev:
-    jdbc_url: jdbc:sqlite:etl-craft-engine-dev.db
+    jdbc_url: jdbc:sqlite:etl-craft-engine-dev.db  # value
   sit:
-    jdbc_url: jdbc:sqlite:etl-craft-engine-sit.db
+    jdbc_url: jdbc:sqlite:etl-craft-engine-sit.db  # value
   uat:
-    jdbc_url: jdbc:sqlite:etl-craft-engine-uat.db
+    jdbc_url: jdbc:sqlite:etl-craft-engine-uat.db  # value
   prod:
-    jdbc_url: jdbc:sqlite:etl-craft-engine-prod.db
+    jdbc_url: jdbc:sqlite:etl-craft-engine-prod.db  # value
 
 Warehouse:
-  Name: DuckDB
+  Name: DuckDB                         # value
   dev:
-    jdbc_url: jdbc:duckdb:warehouse_dev.duckdb
+    jdbc_url: jdbc:duckdb:warehouse_dev.duckdb  # value
   sit:
-    jdbc_url: jdbc:duckdb:warehouse_sit.duckdb
+    jdbc_url: jdbc:duckdb:warehouse_sit.duckdb  # value
   uat:
-    jdbc_url: jdbc:duckdb:warehouse_uat.duckdb
+    jdbc_url: jdbc:duckdb:warehouse_uat.duckdb  # value
   prod:
-    jdbc_url: jdbc:duckdb:warehouse_prod.duckdb
+    jdbc_url: jdbc:duckdb:warehouse_prod.duckdb  # value

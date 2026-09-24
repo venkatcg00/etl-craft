@@ -33,8 +33,18 @@ class EngineDialect:
     directory: Path = Path()
     #: The JDBC URL prefix that selects this dialect.
     jdbc_prefix: str = ""
-    #: The auth_mode values a profile for this Engine DB may use.
-    auth_modes: frozenset[str] = frozenset()
+    #: auth_mode -> the profile fields it needs (beyond jdbc_url). Its keys are
+    #: the auth modes this Engine DB accepts.
+    auth_fields: dict[str, tuple[str, ...]] = {}
+    #: The auth modes run against a real server in this project. The others are
+    #: built from the vendor's documentation and untested: they can be used,
+    #: but success is not guaranteed (`doctor` says so).
+    verified_auth_modes: frozenset[str] = frozenset()
+
+    @property
+    def auth_modes(self) -> frozenset[str]:
+        """Return the auth modes this Engine DB accepts."""
+        return frozenset(self.auth_fields)
 
     def build_engine(
         self, config: ConnectorConfig, profile: ConnectionProfile, **engine_kwargs: Any

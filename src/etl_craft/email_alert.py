@@ -124,21 +124,27 @@ from __future__ import annotations
 import html as html_lib
 import smtplib
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from email.mime.text import MIMEText
 
+from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
+from etl_craft import credentials
 from etl_craft.cfg import (
     CfgError,
     TaskStatusEntry,
     fetch_all_pipelines,
     fetch_failure_watch_messages,
+    fetch_pipeline_detail,
     fetch_pipeline_run_history,
     fetch_task_statuses_for_run,
     resolve_pipeline_id,
 )
 from etl_craft.config import ConfigError, resolve_secret
+from etl_craft.db import ConnectionError_
 from etl_craft.execution import HandlerError, HandlerResult, TaskExecutionContext
+from etl_craft.runlog import SLA_BREACHED, SlaResult, elapsed_hours
 
 # [ADDITION, 2026-09-20, E2-43] The three flavours a completed run resolves
 # to, per explicit interview decision. Ordered worst-first — _run_flavour
@@ -363,19 +369,44 @@ def _send(ctx: TaskExecutionContext, recipients: list[str], subject: str, body_h
         with smtplib.SMTP(profile.host, profile.port, timeout=SMTP_TIMEOUT_SECONDS) as server:
             if profile.use_tls:
                 server.starttls()
+            if profile.auth_mode in {"password", "oauth"} and not profile.user:
+                raise HandlerError(
+                    f"[Email] profile {profile.name!r} has auth_mode={profile.auth_mode} but no "
+                    "user to log in as"
+                )
             if profile.auth_mode == "password":
-                if not profile.user:
-                    raise HandlerError(
-                        f"[Email] profile {profile.name!r} has auth_mode=password but no "
-                        "user to log in as"
-                    )
                 secret = resolve_secret(ctx.config, profile)
-                server.login(profile.user, secret)
+                server.login(profile.user or "", secret)
+            elif profile.auth_mode == "oauth":
+                _login_xoauth2(server, ctx, profile.user or "")
             server.sendmail(profile.from_address, recipients, message.as_string())
-    except (smtplib.SMTPException, OSError, ConfigError) as exc:
+    except (smtplib.SMTPException, OSError, ConfigError, ConnectionError_) as exc:
         raise HandlerError(
             f"EMAIL_ALERT: failed to send via {profile.host}:{profile.port}: {exc}"
         ) from exc
+
+
+def _login_xoauth2(server: smtplib.SMTP, ctx: TaskExecutionContext, user: str) -> None:
+    """Authenticate with SMTP XOAUTH2, using a client-credentials access token.
+
+    [ADDITION, 2026-09-24] auth_mode oauth, for relays that no longer accept
+    passwords (Microsoft 365, Google Workspace). Untested against a live relay:
+    it follows the documented XOAUTH2 exchange, and success is not guaranteed.
+    """
+    assert ctx.config.email is not None
+    profile = ctx.config.email.active
+    token = credentials.client_credentials_token(
+        str(profile.extra["token_url"]),
+        str(profile.extra["client_id"]),
+        resolve_secret(ctx.config, profile),
+        profile.extra.get("scope"),
+    )
+    server.ehlo_or_helo_if_needed()
+    server.auth(
+        "XOAUTH2",
+        lambda challenge=None: f"user={user}\x01auth=Bearer {token}\x01\x01",
+        initial_response_ok=True,
+    )
 
 
 def execute(cfg_conn: Connection, ctx: TaskExecutionContext) -> HandlerResult:
@@ -387,6 +418,13 @@ def execute(cfg_conn: Connection, ctx: TaskExecutionContext) -> HandlerResult:
 
     statuses = fetch_task_statuses_for_run(cfg_conn, ctx.pipeline_id, ctx.pipeline_run_id)
     flavour = run_flavour(statuses, exclude_task_id=ctx.task_id)
+    # [ADDITION, 2026-09-24] Orchestration.Enforce_sla: a run already past its
+    # SLA_IN_HOURS is not a clean run, whatever its tasks did. Checked here,
+    # before EMAIL_ON_STATUS, so an alert can be configured to fire on exactly
+    # this. The run is not finalized yet, so the clock is read now.
+    sla_note = _sla_breach_so_far(cfg_conn, ctx)
+    if sla_note and flavour == "SUCCESS":
+        flavour = "COMPLETED_WITH_ERRORS"
 
     # [ADDITION, 2026-09-20, E2-43] EMAIL_ON_STATUS, per explicit instruction:
     # "if there are parameters saying which status to send, send only on that
@@ -445,18 +483,37 @@ def execute(cfg_conn: Connection, ctx: TaskExecutionContext) -> HandlerResult:
         f'<p style="color:{_FLAVOUR_COLORS[flavour]};font-weight:600">'
         f"{html_lib.escape(ctx.pipeline_code)}: {html_lib.escape(flavour)}</p>"
     )
+    sla_html = f"<p><strong>{html_lib.escape(sla_note)}</strong></p>" if sla_note else ""
     body_html = (
         f"<html><head><style>{_STYLE}</style></head><body>"
-        f"{banner}{intro_html}{digest_html}</body></html>"
+        f"{banner}{sla_html}{intro_html}{digest_html}</body></html>"
     )
     _send(ctx, recipients, subject, body_html)
 
-    return HandlerResult(
-        variables={
-            "RUN_STATUS": flavour,
-            "EMAIL_SENT": "true",
-            "EMAIL_TO": to_raw,
-            "EMAIL_SUBJECT": subject,
-            "RECIPIENT_COUNT": len(recipients),
-        }
-    )
+    variables: dict[str, object] = {
+        "RUN_STATUS": flavour,
+        "EMAIL_SENT": "true",
+        "EMAIL_TO": to_raw,
+        "EMAIL_SUBJECT": subject,
+        "RECIPIENT_COUNT": len(recipients),
+    }
+    if sla_note:
+        variables["SLA"] = sla_note
+    return HandlerResult(variables=variables)
+
+
+def _sla_breach_so_far(cfg_conn: Connection, ctx: TaskExecutionContext) -> str | None:
+    """Describe the SLA this run has already overrun, when Enforce_sla is on; else None."""
+    if not ctx.config.limits.enforce_sla:
+        return None
+    sla_hours = fetch_pipeline_detail(cfg_conn, ctx.pipeline_id).sla_in_hours
+    if sla_hours is None:
+        return None
+    start = cfg_conn.execute(
+        text("SELECT START_DATE FROM AUD_PIPELINES_RUN_LOG WHERE PIPELINE_RUN_ID = :id"),
+        {"id": ctx.pipeline_run_id},
+    ).scalar_one()
+    hours = elapsed_hours(start, datetime.now(UTC))
+    if hours <= sla_hours:
+        return None
+    return SlaResult(status=SLA_BREACHED, sla_hours=sla_hours, elapsed_hours=hours).describe()

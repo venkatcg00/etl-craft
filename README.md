@@ -81,23 +81,29 @@ prompts, so the same command works in CI.
 
 **3. Going to production: PostgreSQL for the Engine DB.** SQLite is one file on one machine:
 every Engine DB write is serialized, and an orchestrator worker on another host cannot open it.
-Give the file a `prod` profile whose values are variable *names*, and set those variables in each
-environment, in the process environment or in a `.env`-style file that `Secrets` points at:
+Give the file a `prod` profile. Each setting is either a variable, looked up in the process
+environment or in a `.env`-style file that `Secrets` points at, or a value used as written. A
+secret is always a variable:
 
 ```yaml
+Secrets:
+  Source_type: environment
+  Profile: ETL_CRAFT_PROFILE      # a variable: each environment sets dev or prod
+
 Engine:
   dev:
-    jdbc_url: jdbc:sqlite:etl-craft-engine.db
+    jdbc_url: jdbc:sqlite:etl-craft-engine.db   # a value
   prod:
     jdbc_url: ENGINE_JDBC_URL     # e.g. jdbc:postgresql://db:5432/etl_craft
     user: ENGINE_USER
-    auth_mode: ENGINE_AUTH_MODE   # password | key_file
+    auth_mode: password           # or key_file, token, oauth, sso, sts
     secret: ENGINE_SECRET
 ```
 
-`ETL_CRAFT_PROFILE=prod` selects that profile in every section, so `Warehouse` needs a `prod`
-block too ([docs/examples/warehouse-postgres.yml](docs/examples/warehouse-postgres.yml) shows
-both). The file holds no secrets, so it is safe to commit. See [docs/configuration.md](docs/configuration.md) for every setting.
+`Secrets.Profile` selects the profile in every section, so `Warehouse` needs a `prod` block too
+([docs/examples/warehouse-postgres.yml](docs/examples/warehouse-postgres.yml) shows both). The
+file holds no secrets, so it is safe to commit. `etl-craft doctor` lists any value it used as
+written that looks like a missing variable. See [docs/configuration.md](docs/configuration.md) for every setting.
 
 **4. Register a pipeline.** Pipeline creation is deliberately *not* a CLI verb — it is
 git-managed SQL, reviewed like any other change. See

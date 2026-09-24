@@ -13,9 +13,14 @@ development history remains available in the Git log and `ITERATION_2.md`.
 - **One configuration layout**, sections in a fixed order: `Secrets`, `Orchestration`, `Engine`,
   `Warehouse`, then the optional `Cloning`. The DAG defaults and the Email relay now live inside
   `Orchestration`. Every section can hold `dev`/`sit`/`uat`/`prod` (or any) profile blocks,
-  selected by `$ETL_CRAFT_<SECTION>_PROFILE`, `$ETL_CRAFT_PROFILE`, `<Section>.Profile`, then
-  `Secrets.Profile`. The earlier layouts (`Execution`/`Source`/`Postgres`, and `Variables` blocks)
-  are refused with a pointer to the example.
+  selected by `<Section>.Profile`, then `Secrets.Profile`. The earlier layouts
+  (`Execution`/`Source`/`Postgres`, and `Variables` blocks) are refused with a pointer to the
+  example.
+- **Every setting is a variable or a value.** Text that names a variable set in the secrets source
+  (the environment or the `.env` file) takes its value; anything else is used as written, so
+  `Profile: ETL_CRAFT_PROFILE` selects per environment and `Profile: dev` is simply `dev`. Secrets
+  must be variables. `doctor` warns about values used as written that look like variable names.
+  The hidden `ETL_CRAFT_PROFILE` / `ETL_CRAFT_<SECTION>_PROFILE` overrides are gone.
 - **`Orchestration.Allow_schedule`** (default `true`): `false` makes `generate-yml` emit
   `schedule: null` even when a pipeline has a `RUN_SCHEDULE`, so non-production environments hold
   every pipeline without running it on a timetable.
@@ -40,6 +45,14 @@ development history remains available in the Git log and `ITERATION_2.md`.
 
 ### Added
 
+- **Authentication types** `token`, `key_file`, `oauth`, `sso` and `sts` alongside `none` and
+  `password`, per target: PostgreSQL (Engine DB and warehouse), Trino, Databricks, Snowflake,
+  DuckDB's Iceberg catalog and the SMTP relay. Only the verified ones (see `docs/configuration.md`)
+  have run against a live service; the rest can be used, but success is not guaranteed, and
+  `doctor` warns about them. `sts` on PostgreSQL needs the new `aws` extra.
+- **`Orchestration.Enforce_sla`** now works: each finished run records `SLA_STATUS` `MET` or
+  `BREACHED` against `SLA_IN_HOURS` (migration `0005`, both Engine DBs), a breach is reported in
+  the run outcome and `history`, and an `EMAIL_ALERT` after the SLA has passed is amber.
 - DuckDB over an Iceberg REST catalog as a warehouse (`Name: DuckDB`, `Table_format: iceberg`).
 - `docs/examples/`: a complete, tested `craft-connector.yml` for every Engine DB, warehouse
   dialect, secrets source and orchestration mode.

@@ -7796,7 +7796,14 @@ def test_cli_generate_docs_writes_site_and_reports_output_dir(
 
 @pytest.fixture
 def migrations_cleanup(postgres_engine):
-    """Delete any SCHEMA_MIGRATIONS rows this test's own migration files added."""
+    """Delete any SCHEMA_MIGRATIONS rows this test's own migration files added.
+
+    Also records the packaged migrations as applied first -- exactly what
+    init-db does, since the database was created from schema.sql, which already
+    contains them. Without it these tests depended on order: run first against
+    a freshly created database, they saw the packaged migrations as pending too.
+    """
+    mark_packaged_migrations_applied(postgres_engine)
     versions: list[str] = []
     yield versions
     if versions:

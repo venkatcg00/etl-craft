@@ -23,13 +23,21 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
-from etl_craft.config import ConfigError, ConnectorConfig, resolve_secret
-from etl_craft.db import build_engine, is_sqlite_url, resolve_sqlite_path
+from etl_craft.config import (
+    EMAIL_VERIFIED_AUTH_MODES,
+    ConfigError,
+    ConnectorConfig,
+    profile_needs_secret,
+    resolve_secret,
+)
+from etl_craft.db import ConnectionError_, build_engine, is_sqlite_url, resolve_sqlite_path
+from etl_craft.dialects.engine_dialects import for_jdbc_url
 from etl_craft.warehouse import (
     READ_ONLY_WAIT_SECONDS,
     is_in_memory,
     is_single_writer,
     open_warehouse,
+    warehouse_dialect,
 )
 
 SMTP_PROBE_TIMEOUT_SECONDS = 10.0
@@ -42,11 +50,15 @@ class CheckResult:
     name: str
     ok: bool
     detail: str
+    # [ADDITION, 2026-09-24] Worth reading, not a failure: doctor still exits 0.
+    warning: bool = False
 
     @property
     def marker(self) -> str:
-        """Return the single-character status marker this result renders with."""
-        return "OK  " if self.ok else "FAIL"
+        """Return the status marker this result renders with."""
+        if not self.ok:
+            return "FAIL"
+        return "WARN" if self.warning else "OK  "
 
 
 def _secret_check(config: ConnectorConfig, label: str, profile: object) -> CheckResult:
@@ -56,6 +68,58 @@ def _secret_check(config: ConnectorConfig, label: str, profile: object) -> Check
     except ConfigError as exc:
         return CheckResult(f"{label} secret", False, f"{exc} (expected in {var_name})")
     return CheckResult(f"{label} secret", True, f"resolved from {var_name}")
+
+
+def _settings_check(config: ConnectorConfig) -> list[CheckResult]:
+    """Name every value used as written that reads like a variable name.
+
+    [ADDITION, 2026-09-24] A setting is a variable's value when the secrets
+    source defines that variable, and the text as written otherwise. That makes
+    a missing or misspelled variable invisible -- `user: ENGINE_USER` quietly
+    becomes the user "ENGINE_USER" -- so each such value is reported here.
+    """
+    from_variables = sum(1 for source in config.settings if source.variable)
+    results = [
+        CheckResult(
+            "Settings",
+            True,
+            f"{from_variables} from variables, "
+            f"{len(config.settings) - from_variables} used as written",
+        )
+    ]
+    for source in config.settings:
+        if source.looks_like_a_missing_variable:
+            results.append(
+                CheckResult(
+                    "Setting used as written",
+                    True,
+                    f"{source.where} is {source.written!r}: no variable by that name is set in "
+                    f"the {config.source.type} source, so the text itself is the value",
+                    warning=True,
+                )
+            )
+    return results
+
+
+def _auth_check(
+    label: str, auth_mode: str, verified: frozenset[str], target: str
+) -> list[CheckResult]:
+    """Say so when an auth mode is implemented but has never run against a live service.
+
+    [ADDITION, 2026-09-24] Per explicit instruction: "say these can be used but
+    success is not guaranteed".
+    """
+    if auth_mode in verified:
+        return []
+    return [
+        CheckResult(
+            f"{label} auth",
+            True,
+            f"auth_mode {auth_mode} on {target} follows the vendor's documentation but is "
+            "untested against a live service here: it can be used, success is not guaranteed",
+            warning=True,
+        )
+    ]
 
 
 def _engine_db_check(config: ConnectorConfig) -> CheckResult:
@@ -109,7 +173,17 @@ def _warehouse_check(config: ConnectorConfig) -> list[CheckResult]:
             )
         ]
     profile = config.warehouse.active
-    results = [] if profile.auth_mode == "none" else [_secret_check(config, "Warehouse", profile)]
+    results = [_secret_check(config, "Warehouse", profile)] if profile_needs_secret(profile) else []
+    try:
+        dialect = warehouse_dialect(config)
+    except (ConfigError, ConnectionError_) as exc:
+        results.append(CheckResult("Warehouse", False, str(exc)))
+        return results
+    results.extend(
+        _auth_check(
+            "Warehouse", profile.auth_mode, dialect.verified_auth_modes, dialect.display_name
+        )
+    )
 
     # [ADDITION, 2026-09-21, E2-63] Refuse an in-memory warehouse here, where
     # it is cheap to notice. Every task runs in its own process and builds its
@@ -192,8 +266,11 @@ def _email_check(config: ConnectorConfig) -> list[CheckResult]:
         ]
     profile = config.email.active
     results: list[CheckResult] = []
-    if profile.auth_mode == "password":
+    if profile_needs_secret(profile):
         results.append(_secret_check(config, "Email", profile))
+    results.extend(
+        _auth_check("Email", profile.auth_mode, EMAIL_VERIFIED_AUTH_MODES, "the SMTP relay")
+    )
     try:
         with smtplib.SMTP(profile.host, profile.port, timeout=SMTP_PROBE_TIMEOUT_SECONDS) as server:
             server.noop()
@@ -216,8 +293,19 @@ def run_checks(config: ConnectorConfig) -> list[CheckResult]:
             f"{config.source.type}" + (f" ({config.source.path})" if config.source.path else ""),
         ),
     ]
-    if config.postgres.active.auth_mode != "none":
-        results.append(_secret_check(config, "Engine DB", config.postgres.active))
+    results.extend(_settings_check(config))
+    engine_profile = config.postgres.active
+    if profile_needs_secret(engine_profile):
+        results.append(_secret_check(config, "Engine DB", engine_profile))
+    engine_dialect = for_jdbc_url(engine_profile.jdbc_url)
+    results.extend(
+        _auth_check(
+            "Engine DB",
+            engine_profile.auth_mode,
+            engine_dialect.verified_auth_modes,
+            f"a {engine_dialect.name} Engine DB",
+        )
+    )
     results.append(_engine_db_check(config))
     results.extend(_engine_db_kind_check(config))
     results.extend(_warehouse_check(config))

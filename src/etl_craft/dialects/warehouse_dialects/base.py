@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import parse_qsl
 
@@ -18,7 +19,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 if TYPE_CHECKING:
-    from etl_craft.config import CloningConfig
+    from etl_craft.config import CloningConfig, ConnectionProfile
 
 SurrogateKey = Literal["identity", "sequence", "computed"]
 
@@ -47,6 +48,28 @@ _JDBC_URL_RE = re.compile(
     r"/(?P<database>[^?]*)(\?(?P<query>.*))?$"
 )
 SAFE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+#: Every authentication type a craft-connector.yml profile can choose, in the
+#: order the docs list them. Which ones a warehouse accepts is its own
+#: `auth_fields`.
+AUTH_MODES = ("none", "password", "token", "key_file", "oauth", "sso", "sts")
+
+
+@dataclass(frozen=True)
+class Presented:
+    """How one new connection presents its credential to the driver.
+
+    `username`/`password` go into the SQLAlchemy URL built inside the
+    connection creator (never the Engine's own, logged URL); `query` joins that
+    URL's query string, for drivers that read auth settings there (Trino);
+    `connect_args` are handed to the DBAPI connect call after the dialect's own
+    create_connect_args, for settings that must never travel in a URL.
+    """
+
+    username: str | None = None
+    password: str | None = None
+    query: Mapping[str, str] = field(default_factory=dict)
+    connect_args: Mapping[str, Any] = field(default_factory=dict)
 
 
 class WarehouseDialect:
@@ -95,6 +118,112 @@ class WarehouseDialect:
     key_file_connect_args: tuple[str, str] | None = None
     #: The username a static bearer token authenticates as, where fixed.
     token_username: str | None = None
+    #: auth_mode -> the profile fields it needs (beyond the connection itself).
+    #: Its keys are the auth modes this warehouse accepts; the loader refuses
+    #: any other, and a missing field, before anything connects.
+    auth_fields: Mapping[str, tuple[str, ...]] = {
+        "none": (),
+        "password": ("user", "secret"),
+        "token": ("user", "secret"),
+    }
+    #: The auth modes run against a live service in this project. The others
+    #: follow the vendor's documentation and are untested: they can be used,
+    #: but success is not guaranteed (`doctor` says so).
+    verified_auth_modes: frozenset[str] = frozenset()
+
+    #: Whether a bearer token (token, oauth) is sent under a username, which
+    #: must then come from the profile or `token_username`.
+    bearer_needs_user: bool = True
+
+    @property
+    def auth_modes(self) -> frozenset[str]:
+        """Return the auth modes this warehouse accepts."""
+        return frozenset(self.auth_fields)
+
+    def check_profile(self, profile: ConnectionProfile) -> None:
+        """Raise unless `profile` can authenticate here, before anything connects."""
+        from etl_craft.db import ConnectionError_
+
+        mode = profile.auth_mode
+        if mode not in self.auth_fields:
+            raise ConnectionError_(
+                f"auth_mode {mode!r} is not available for a {self.display_name or self.key} "
+                f"warehouse -- use one of {sorted(self.auth_modes)}"
+            )
+        for name in self.auth_fields[mode]:
+            if name in {"user", "secret"} or profile.extra.get(name):
+                continue
+            noun = "path" if name.endswith("_file") else "value"
+            raise ConnectionError_(
+                f"profile {profile.name!r}: auth_mode={mode} requires a `{name}:` {noun} in the "
+                "profile — a private key or credential itself is never stored in "
+                "craft-connector.yml"
+            )
+        if (
+            mode in {"token", "oauth"}
+            and self.bearer_needs_user
+            and not (profile.user or self.token_username)
+        ):
+            raise ConnectionError_(
+                f"auth_mode='{mode}' needs a `user` for dialect {self.key!r} — it is sent in "
+                "the username position alongside the token. Databricks uses the literal 'token'."
+            )
+
+    def present(
+        self, profile: ConnectionProfile, secret: str, parts: Mapping[str, Any]
+    ) -> Presented:
+        """Return how one new connection authenticates, for `profile.auth_mode`.
+
+        Called once per connection, so a credential minted here (oauth) is
+        fresh. The ANSI defaults: a user and password, and a bearer token in
+        the password position under the dialect's fixed token username.
+        """
+        from etl_craft.db import ConnectionError_
+
+        mode = profile.auth_mode
+        user = profile.user or None
+        if mode == "none":
+            return Presented(username=user)
+        if mode == "password":
+            return Presented(username=user, password=secret)
+        if mode == "token":
+            return self.present_bearer(secret, user)
+        if mode == "oauth":
+            return self.present_bearer(self.oauth_token(profile, secret, parts), user)
+        if mode == "key_file" and self.key_file_connect_args is not None:
+            path_arg, passphrase_arg = self.key_file_connect_args
+            connect_args: dict[str, Any] = {path_arg: str(profile.extra["key_file"])}
+            if secret:
+                connect_args[passphrase_arg] = secret
+            return Presented(username=user, connect_args=connect_args)
+        raise ConnectionError_(
+            f"auth_mode {mode!r} is not available for a {self.display_name or self.key} "
+            f"warehouse -- use one of {sorted(self.auth_modes)}"
+        )
+
+    def present_bearer(self, token: str, user: str | None) -> Presented:
+        """Present a bearer token in the password position."""
+        from etl_craft.db import ConnectionError_
+
+        username = user or self.token_username
+        if not username:
+            raise ConnectionError_(
+                f"auth_mode='token' needs a `user` for dialect {self.key!r} — it is sent in "
+                "the username position alongside the token. Databricks uses the literal 'token'."
+            )
+        return Presented(username=username, password=token)
+
+    def oauth_token(self, profile: ConnectionProfile, secret: str, parts: Mapping[str, Any]) -> str:
+        """Mint an access token by the profile's client-credentials grant."""
+        from etl_craft.credentials import client_credentials_token
+
+        return client_credentials_token(
+            str(profile.extra["token_url"]),
+            str(profile.extra["client_id"]),
+            secret,
+            profile.extra.get("scope"),
+        )
+
     #: The separate connection fields this warehouse accepts in place of one
     #: packed JDBC URL (the tested shape for Databricks and Snowflake).
     preferred_fields: tuple[str, ...] = ()
@@ -120,7 +249,7 @@ class WarehouseDialect:
         """Return the catalog for catalog.schema.table where the URL does not name it."""
         return None
 
-    def on_connect(self, dbapi_connection: Any, profile_extra: dict[str, str]) -> None:
+    def on_connect(self, dbapi_connection: Any, profile: ConnectionProfile, secret: str) -> None:
         """Run per-connection setup a dialect needs before any statement (none by default)."""
         return None
 

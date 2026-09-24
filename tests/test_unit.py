@@ -1519,10 +1519,12 @@ def test_warehouse_token_creator_builds_a_databricks_url(monkeypatch):
 
 
 def test_warehouse_token_creator_needs_a_user_on_an_unknown_dialect():
+    # (Trino, the example this test used to take, now sends a token as a JWT
+    # with no username at all -- see tests/test_auth.py.)
     profile = ConnectionProfile(
         section="WAREHOUSE",
         name="dev",
-        jdbc_url="jdbc:trino://trino.internal:8080/iceberg/analytics",
+        jdbc_url="jdbc:mysql://mysql.internal:3306/analytics",
         user="",
         auth_mode="token",
     )
@@ -1530,14 +1532,12 @@ def test_warehouse_token_creator_needs_a_user_on_an_unknown_dialect():
         WAREHOUSE_AUTH_REGISTRY["token"](profile, "secret")
 
 
-def test_warehouse_sso_creator_is_not_implemented():
-    # `token` and `key_file` both left this list on 2026-09-22 -- the engine
-    # cannot reach Databricks without the first or authenticate a Snowflake
-    # service account the corporate way without the second. A *minted* token
-    # (OAuth2 client-credentials, STS AssumeRole) and browser SSO remain
-    # unimplemented, and are genuinely different mechanisms.
-    with pytest.raises(NotImplementedError):
-        WAREHOUSE_AUTH_REGISTRY["sso"](warehouse_profile("sso"), "unused")
+def test_warehouse_sso_is_refused_where_the_warehouse_has_none():
+    # sso is implemented where a driver has a flow for it (tests/test_auth.py);
+    # an ANSI warehouse with no such flow still refuses it, before connecting.
+    profile = warehouse_profile("sso", "jdbc:mysql://myhost:3306/mydb")
+    with pytest.raises(ConnectionError_, match="auth_mode 'sso' is not available"):
+        WAREHOUSE_AUTH_REGISTRY["sso"](profile, "unused")
 
 
 def test_warehouse_key_file_creator_passes_snowflake_key_pair_via_connect_args(monkeypatch):
@@ -1603,19 +1603,18 @@ def test_warehouse_key_file_creator_requires_a_key_path():
         WAREHOUSE_AUTH_REGISTRY["key_file"](profile, "secret")
 
 
-def test_warehouse_key_file_creator_still_unimplemented_for_other_dialects():
-    # The original reasoning holds for everything else: Postgres SSL client
-    # certs and Snowflake key-pair auth share nothing, so there is no generic
-    # mapping to write -- only a per-vendor one.
+def test_warehouse_key_file_is_refused_where_there_is_nothing_to_present_a_key_to():
+    # Postgres (client certificates) and Trino (cert + key) joined Snowflake on
+    # 2026-09-24 -- tests/test_auth.py. A DuckDB file has no login at all.
     profile = ConnectionProfile(
         section="WAREHOUSE",
         name="dev",
-        jdbc_url="jdbc:trino://trino.internal:8080/iceberg/analytics",
+        jdbc_url="jdbc:duckdb:/data/warehouse.duckdb",
         user="u",
         auth_mode="key_file",
         extra={"key_file": "/keys/k.p8"},
     )
-    with pytest.raises(NotImplementedError, match="trino"):
+    with pytest.raises(ConnectionError_, match="not available for a DuckDB warehouse"):
         WAREHOUSE_AUTH_REGISTRY["key_file"](profile, "secret")
 
 

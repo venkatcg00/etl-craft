@@ -5,154 +5,160 @@
 # CFG_TASK_PARAMETERS. Cloning mirrors have no task, so their volume and base
 # location are set in Cloning; both are required when cloning is enabled.
 #
+# Each setting is marked `# variable` or `# value`. A variable is looked up in
+# the secrets source (here: the process environment); when it is not set, the
+# text itself is used, so `Profile: dev` is simply dev. A secret must always
+# be a variable that is set. `etl-craft doctor` lists every value used as
+# written that looks like a variable name.
+#
 # Complete and loadable as written: tests/test_config_examples.py loads every
 # file in this directory, for every profile it declares.
 
 Secrets:
-  Source_type: environment        # names below are read from the process environment
-  Profile: dev                    # the default profile; ETL_CRAFT_PROFILE=prod switches all
+  Source_type: environment             # value — variables below are read from the process environment
+  Profile: ETL_CRAFT_PROFILE           # variable — dev | sit | uat | prod, set in each environment
 
 Orchestration:
-  Mode: remote                    # an orchestrator runs each task from generate-yml's DAGs
-  Name: Airflow                   # informational only
-  Task_timeout_seconds: 21600
-  Max_parallel_tasks: 8
-  Enforce_sla: false              # parsed but not yet enforced (docs/configuration.md)
+  Mode: remote                         # value — an orchestrator runs each task from generate-yml's DAGs
+  Name: Airflow                        # value — informational: the YAML DAG is the same; convert it with your own scripts
+  Task_timeout_seconds: 21600          # value
+  Max_parallel_tasks: 8                # value
+  Enforce_sla: false                   # value — true: judge each finished run MET/BREACHED vs SLA_IN_HOURS
   dev:
-    Global_dag: false
-    Catchup: false
-    Tags: [analytics]
-    Retries: 1
-    Retry_delay_minutes: 5
-    Depends_on_past: false
-    Email_on_failure: false
-    Allow_schedule: false
+    Global_dag: false                  # value
+    Catchup: false                     # value
+    Tags: [analytics]                  # value
+    Retries: 1                         # value
+    Retry_delay_minutes: 5             # value
+    Depends_on_past: false             # value
+    Email_on_failure: false            # value
+    Allow_schedule: false              # value
   sit:
-    Global_dag: false
-    Catchup: false
-    Tags: [analytics]
-    Retries: 1
-    Retry_delay_minutes: 5
-    Depends_on_past: false
-    Email_on_failure: false
-    Allow_schedule: false
+    Global_dag: false                  # value
+    Catchup: false                     # value
+    Tags: [analytics]                  # value
+    Retries: 1                         # value
+    Retry_delay_minutes: 5             # value
+    Depends_on_past: false             # value
+    Email_on_failure: false            # value
+    Allow_schedule: false              # value
     Email:
-      host: EMAIL_HOST
-      port: EMAIL_PORT
-      from_address: EMAIL_FROM
-      auth_mode: EMAIL_AUTH_MODE
-      user: EMAIL_USER
-      use_tls: EMAIL_USE_TLS
-      secret: EMAIL_SECRET
+      host: EMAIL_HOST                 # variable
+      port: EMAIL_PORT                 # variable
+      from_address: EMAIL_FROM         # variable
+      auth_mode: EMAIL_AUTH_MODE       # variable
+      user: EMAIL_USER                 # variable
+      use_tls: EMAIL_USE_TLS           # variable
+      secret: EMAIL_SECRET             # variable, required: a secret is never used as written
   uat:
-    Global_dag: false
-    Catchup: false
-    Tags: [analytics]
-    Retries: 1
-    Retry_delay_minutes: 5
-    Depends_on_past: false
-    Email_on_failure: false
-    Allow_schedule: false
+    Global_dag: false                  # value
+    Catchup: false                     # value
+    Tags: [analytics]                  # value
+    Retries: 1                         # value
+    Retry_delay_minutes: 5             # value
+    Depends_on_past: false             # value
+    Email_on_failure: false            # value
+    Allow_schedule: false              # value
     Email:
-      host: EMAIL_HOST
-      port: EMAIL_PORT
-      from_address: EMAIL_FROM
-      auth_mode: EMAIL_AUTH_MODE
-      user: EMAIL_USER
-      use_tls: EMAIL_USE_TLS
-      secret: EMAIL_SECRET
+      host: EMAIL_HOST                 # variable
+      port: EMAIL_PORT                 # variable
+      from_address: EMAIL_FROM         # variable
+      auth_mode: EMAIL_AUTH_MODE       # variable
+      user: EMAIL_USER                 # variable
+      use_tls: EMAIL_USE_TLS           # variable
+      secret: EMAIL_SECRET             # variable, required: a secret is never used as written
   prod:
-    Global_dag: true
-    Catchup: false
-    Tags: [analytics]
-    Retries: 1
-    Retry_delay_minutes: 5
-    Depends_on_past: false
-    Email_on_failure: true
-    Allow_schedule: true
-    Email_recipients: [data-alerts@example.com]
+    Global_dag: true                   # value
+    Catchup: false                     # value
+    Tags: [analytics]                  # value
+    Retries: 1                         # value
+    Retry_delay_minutes: 5             # value
+    Depends_on_past: false             # value
+    Email_on_failure: true             # value
+    Allow_schedule: true               # value
+    Email_recipients: [data-alerts@example.com]  # value
     Email:
-      host: EMAIL_HOST
-      port: EMAIL_PORT
-      from_address: EMAIL_FROM
-      auth_mode: EMAIL_AUTH_MODE
-      user: EMAIL_USER
-      use_tls: EMAIL_USE_TLS
-      secret: EMAIL_SECRET
+      host: EMAIL_HOST                 # variable
+      port: EMAIL_PORT                 # variable
+      from_address: EMAIL_FROM         # variable
+      auth_mode: EMAIL_AUTH_MODE       # variable
+      user: EMAIL_USER                 # variable
+      use_tls: EMAIL_USE_TLS           # variable
+      secret: EMAIL_SECRET             # variable, required: a secret is never used as written
 
 Engine:
-  Name: Postgres
+  Name: Postgres                       # value
   dev:
-    jdbc_url: ENGINE_JDBC_URL
-    user: ENGINE_USER
-    auth_mode: ENGINE_AUTH_MODE
-    secret: ENGINE_SECRET
+    jdbc_url: ENGINE_JDBC_URL          # variable
+    user: ENGINE_USER                  # variable
+    auth_mode: ENGINE_AUTH_MODE        # variable
+    secret: ENGINE_SECRET              # variable, required: a secret is never used as written
   sit:
-    jdbc_url: ENGINE_JDBC_URL
-    user: ENGINE_USER
-    auth_mode: ENGINE_AUTH_MODE
-    secret: ENGINE_SECRET
+    jdbc_url: ENGINE_JDBC_URL          # variable
+    user: ENGINE_USER                  # variable
+    auth_mode: ENGINE_AUTH_MODE        # variable
+    secret: ENGINE_SECRET              # variable, required: a secret is never used as written
   uat:
-    jdbc_url: ENGINE_JDBC_URL
-    user: ENGINE_USER
-    auth_mode: ENGINE_AUTH_MODE
-    secret: ENGINE_SECRET
+    jdbc_url: ENGINE_JDBC_URL          # variable
+    user: ENGINE_USER                  # variable
+    auth_mode: ENGINE_AUTH_MODE        # variable
+    secret: ENGINE_SECRET              # variable, required: a secret is never used as written
   prod:
-    jdbc_url: ENGINE_JDBC_URL
-    user: ENGINE_USER
-    auth_mode: ENGINE_AUTH_MODE
-    secret: ENGINE_SECRET
+    jdbc_url: ENGINE_JDBC_URL          # variable
+    user: ENGINE_USER                  # variable
+    auth_mode: ENGINE_AUTH_MODE        # variable
+    secret: ENGINE_SECRET              # variable, required: a secret is never used as written
 
 Warehouse:
-  Name: Snowflake
-  Table_format: iceberg
+  Name: Snowflake                      # value
+  Table_format: iceberg                # value
   dev:
-    user: WAREHOUSE_USER
-    account: WAREHOUSE_ACCOUNT      # <org>-<account>, not a hostname
-    database: WAREHOUSE_DATABASE
-    schema: WAREHOUSE_SCHEMA
-    warehouse: WAREHOUSE_WAREHOUSE
-    role: WAREHOUSE_ROLE
-    token: WAREHOUSE_TOKEN          # a Programmatic Access Token (needs a network policy)
+    user: WAREHOUSE_USER               # variable
+    account: WAREHOUSE_ACCOUNT         # variable — <org>-<account>, not a hostname
+    database: WAREHOUSE_DATABASE       # variable
+    schema: WAREHOUSE_SCHEMA           # variable
+    warehouse: WAREHOUSE_WAREHOUSE     # variable
+    role: WAREHOUSE_ROLE               # variable
+    token: WAREHOUSE_TOKEN             # variable, required: a secret is never used as written — a Programmatic Access Token (needs a network policy)
   sit:
-    user: WAREHOUSE_USER
-    account: WAREHOUSE_ACCOUNT      # <org>-<account>, not a hostname
-    database: WAREHOUSE_DATABASE
-    schema: WAREHOUSE_SCHEMA
-    warehouse: WAREHOUSE_WAREHOUSE
-    role: WAREHOUSE_ROLE
-    token: WAREHOUSE_TOKEN          # a Programmatic Access Token (needs a network policy)
+    user: WAREHOUSE_USER               # variable
+    account: WAREHOUSE_ACCOUNT         # variable — <org>-<account>, not a hostname
+    database: WAREHOUSE_DATABASE       # variable
+    schema: WAREHOUSE_SCHEMA           # variable
+    warehouse: WAREHOUSE_WAREHOUSE     # variable
+    role: WAREHOUSE_ROLE               # variable
+    token: WAREHOUSE_TOKEN             # variable, required: a secret is never used as written — a Programmatic Access Token (needs a network policy)
   uat:
-    user: WAREHOUSE_USER
-    account: WAREHOUSE_ACCOUNT      # <org>-<account>, not a hostname
-    database: WAREHOUSE_DATABASE
-    schema: WAREHOUSE_SCHEMA
-    warehouse: WAREHOUSE_WAREHOUSE
-    role: WAREHOUSE_ROLE
-    token: WAREHOUSE_TOKEN          # a Programmatic Access Token (needs a network policy)
+    user: WAREHOUSE_USER               # variable
+    account: WAREHOUSE_ACCOUNT         # variable — <org>-<account>, not a hostname
+    database: WAREHOUSE_DATABASE       # variable
+    schema: WAREHOUSE_SCHEMA           # variable
+    warehouse: WAREHOUSE_WAREHOUSE     # variable
+    role: WAREHOUSE_ROLE               # variable
+    token: WAREHOUSE_TOKEN             # variable, required: a secret is never used as written — a Programmatic Access Token (needs a network policy)
   prod:
-    user: WAREHOUSE_USER
-    account: WAREHOUSE_ACCOUNT      # <org>-<account>, not a hostname
-    database: WAREHOUSE_DATABASE
-    schema: WAREHOUSE_SCHEMA
-    warehouse: WAREHOUSE_WAREHOUSE
-    role: WAREHOUSE_ROLE
-    token: WAREHOUSE_TOKEN          # a Programmatic Access Token (needs a network policy)
+    user: WAREHOUSE_USER               # variable
+    account: WAREHOUSE_ACCOUNT         # variable — <org>-<account>, not a hostname
+    database: WAREHOUSE_DATABASE       # variable
+    schema: WAREHOUSE_SCHEMA           # variable
+    warehouse: WAREHOUSE_WAREHOUSE     # variable
+    role: WAREHOUSE_ROLE               # variable
+    token: WAREHOUSE_TOKEN             # variable, required: a secret is never used as written — a Programmatic Access Token (needs a network policy)
 
 Cloning:
   dev:
-    Enabled: false
-    Scope: none
+    Enabled: false                     # value
+    Scope: none                        # value
   sit:
-    Enabled: false
-    Scope: none
+    Enabled: false                     # value
+    Scope: none                        # value
   uat:
-    Enabled: true
-    Scope: cfg
-    External_volume: ETL_CRAFT_VOLUME     # a literal Snowflake volume name, not a variable
-    Base_location: etl_craft_uat         # the path mirrors are written under
+    Enabled: true                      # value
+    Scope: cfg                         # value
+    External_volume: ETL_CRAFT_VOLUME  # variable — a literal Snowflake volume name, not a variable
+    Base_location: etl_craft_uat       # value — the path mirrors are written under
   prod:
-    Enabled: true
-    Scope: all
-    External_volume: ETL_CRAFT_VOLUME
-    Base_location: etl_craft_prod
+    Enabled: true                      # value
+    Scope: all                         # value
+    External_volume: ETL_CRAFT_VOLUME  # variable
+    Base_location: etl_craft_prod      # value

@@ -708,9 +708,10 @@ def _history_command(args: argparse.Namespace, engine: Engine) -> int:
         print("(no logged runs)")
         return 0
     for pipeline_entry in pipeline_entries:
+        sla = f"\tSLA {pipeline_entry.sla_status}" if pipeline_entry.sla_status else ""
         print(
             f"pipeline_run_id={pipeline_entry.pipeline_run_id}\t{pipeline_entry.status}\t"
-            f"{pipeline_entry.start_date}\t{pipeline_entry.end_date or ''}"
+            f"{pipeline_entry.start_date}\t{pipeline_entry.end_date or ''}{sla}"
         )
     return 0
 

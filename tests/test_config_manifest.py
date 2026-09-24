@@ -7,12 +7,13 @@ parsing tests: no database is touched.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
 import yaml
 
-from etl_craft.config import ConfigError, load_config
+from etl_craft.config import ConfigError, SettingSource, load_config
 
 EXAMPLE = Path(__file__).parents[1] / "docs" / "craft-connector.example.yml"
 
@@ -60,7 +61,13 @@ def test_the_shipped_example_loads_for_dev_with_nothing_set():
     assert config.cloning.enabled is False
 
 
-def test_the_shipped_example_prod_profile_overrides_and_resolves(monkeypatch):
+def test_the_shipped_example_prod_profile_overrides_and_resolves(tmp_path, monkeypatch):
+    # The shipped file selects `dev` as a value; naming a variable instead
+    # (Profile: ETL_CRAFT_PROFILE) is how each environment picks its own.
+    text = EXAMPLE.read_text(encoding="utf-8")
+    text = re.sub(r"^  Profile: dev\b", "  Profile: ETL_CRAFT_PROFILE", text, count=1, flags=re.M)
+    example = tmp_path / "craft-connector.yml"
+    example.write_text(text, encoding="utf-8")
     monkeypatch.setenv("ETL_CRAFT_PROFILE", "prod")
     for name, value in {
         "ENGINE_JDBC_URL": "jdbc:postgresql://db/etl",
@@ -77,7 +84,7 @@ def test_the_shipped_example_prod_profile_overrides_and_resolves(monkeypatch):
         "EMAIL_USE_TLS": "true",
     }.items():
         monkeypatch.setenv(name, value)
-    config = load_config(EXAMPLE)
+    config = load_config(example)
     # A profile block overrides the section's own settings, Mode included.
     assert config.mode == "orchestrator"
     assert config.postgres.active.secret_var == "ENGINE_SECRET"
@@ -101,14 +108,36 @@ def test_profile_selection_order(tmp_path, monkeypatch):
         },
     )
     path = _write(tmp_path, raw)
-    # The section's own Profile beats Secrets.Profile...
+    # The section's own Profile beats Secrets.Profile.
     assert load_config(path).postgres.active.jdbc_url == "jdbc:sqlite:uat.db"
-    # ...the global environment switch beats the file...
+    # Nothing outside the file switches it: the old ETL_CRAFT_PROFILE override
+    # is gone (2026-09-24) -- a Profile names a variable when that is wanted.
     monkeypatch.setenv("ETL_CRAFT_PROFILE", "prod")
-    assert load_config(path).postgres.active.jdbc_url == "jdbc:sqlite:prod.db"
-    # ...and the section's own environment switch beats everything.
-    monkeypatch.setenv("ETL_CRAFT_ENGINE_PROFILE", "sit")
-    assert load_config(path).postgres.active.jdbc_url == "jdbc:sqlite:sit.db"
+    monkeypatch.setenv("ETL_CRAFT_ENGINE_PROFILE", "prod")
+    assert load_config(path).postgres.active.jdbc_url == "jdbc:sqlite:uat.db"
+    # Without its own Profile, a section takes Secrets.Profile.
+    del raw["Engine"]["Profile"]
+    assert load_config(_write(tmp_path, raw)).postgres.active.jdbc_url == "jdbc:sqlite:sit.db"
+
+
+def test_a_profile_can_name_a_variable(tmp_path, monkeypatch):
+    raw = _minimal(
+        Secrets={"Source_type": "environment", "Profile": "ACTIVE_PROFILE"},
+        Engine={
+            "dev": {"jdbc_url": "jdbc:sqlite:dev.db"},
+            "prod": {"jdbc_url": "jdbc:sqlite:prod.db"},
+        },
+    )
+    path = _write(tmp_path, raw)
+    monkeypatch.setenv("ACTIVE_PROFILE", "prod")
+    config = load_config(path)
+    assert config.postgres.active.jdbc_url == "jdbc:sqlite:prod.db"
+    assert SettingSource("Secrets.Profile", "ACTIVE_PROFILE", "ACTIVE_PROFILE") in config.settings
+    # Unset, the text itself is the profile -- which does not exist, and the
+    # error says the variable was missing rather than leaving it to guesswork.
+    monkeypatch.delenv("ACTIVE_PROFILE")
+    with pytest.raises(ConfigError, match="no variable named ACTIVE_PROFILE is set"):
+        load_config(path)
 
 
 def test_an_unselected_multi_profile_section_is_refused(tmp_path):
@@ -119,10 +148,77 @@ def test_an_unselected_multi_profile_section_is_refused(tmp_path):
         load_config(_write(tmp_path, raw))
 
 
-def test_a_missing_profile_names_the_ones_that_exist(tmp_path, monkeypatch):
-    monkeypatch.setenv("ETL_CRAFT_PROFILE", "qa")
+def test_a_missing_profile_names_the_ones_that_exist(tmp_path):
+    raw = _minimal(Secrets={"Source_type": "environment", "Profile": "qa"})
     with pytest.raises(ConfigError, match=r"no profile 'qa' \(it has \['dev'\]\)"):
-        load_config(_write(tmp_path, _minimal()))
+        load_config(_write(tmp_path, raw))
+
+
+def test_every_value_is_a_variable_when_one_is_set_and_the_text_otherwise(tmp_path, monkeypatch):
+    raw = _minimal(
+        Orchestration={
+            "Mode": "RUN_MODE",
+            "Task_timeout_seconds": "TASK_TIMEOUT",
+            "Max_parallel_tasks": 4,
+            "dev": {"Tags": "DAG_TAGS", "Allow_schedule": "ALLOW_SCHEDULE", "Retries": "2"},
+        }
+    )
+    path = _write(tmp_path, raw)
+    for name, value in {
+        "RUN_MODE": "remote",
+        "TASK_TIMEOUT": "3600",
+        "DAG_TAGS": "finance, daily",
+        "ALLOW_SCHEDULE": "false",
+    }.items():
+        monkeypatch.setenv(name, value)
+    config = load_config(path)
+    # Variables' values, typed as their setting needs.
+    assert config.mode == "orchestrator"
+    assert config.limits.task_timeout_seconds == 3600
+    assert config.orchestrator.tags == ["finance", "daily"]
+    assert config.orchestrator.allow_schedule is False
+    # Values as written, whether YAML typed them or not.
+    assert config.limits.max_parallel_tasks == 4
+    assert config.orchestrator.retries == 2
+    sources = {source.where: source for source in config.settings}
+    assert sources["Orchestration.dev.Mode"].variable == "RUN_MODE"
+    assert sources["Orchestration.dev.Retries"].variable is None
+
+    # A variable that is not set leaves its name as the value -- here an
+    # invalid Mode, and the error names the missing variable.
+    monkeypatch.delenv("RUN_MODE")
+    with pytest.raises(ConfigError, match="no variable named RUN_MODE is set"):
+        load_config(path)
+
+
+def test_the_source_itself_can_come_from_the_environment(tmp_path, monkeypatch):
+    (tmp_path / "deploy.env").write_text("ENGINE_URL=jdbc:sqlite:from-file.db\n", "utf-8")
+    raw = _minimal(
+        Secrets={"Source_type": "SECRETS_SOURCE", "Path": "SECRETS_FILE"},
+        Engine={"dev": {"jdbc_url": "ENGINE_URL"}},
+    )
+    monkeypatch.setenv("SECRETS_SOURCE", "file")
+    monkeypatch.setenv("SECRETS_FILE", "deploy.env")
+    # Everything past Secrets resolves against the file, not the environment.
+    monkeypatch.setenv("ENGINE_URL", "jdbc:sqlite:from-environment.db")
+    config = load_config(_write(tmp_path, raw))
+    assert config.source.type == "file"
+    assert config.postgres.active.jdbc_url == "jdbc:sqlite:from-file.db"
+
+
+def test_a_secret_is_never_taken_as_written(tmp_path):
+    raw = _minimal(
+        Engine={
+            "dev": {
+                "jdbc_url": "jdbc:postgresql://db/etl",
+                "user": "etl",
+                "auth_mode": "password",
+                "secret": "hunter2!",
+            }
+        }
+    )
+    with pytest.raises(ConfigError, match="must be the name of a variable holding the secret"):
+        load_config(_write(tmp_path, raw))
 
 
 def test_tier_scoped_variables_win_over_the_plain_name(tmp_path, monkeypatch):
@@ -261,22 +357,77 @@ def test_warehouse_name_must_match_its_jdbc_url(tmp_path):
         load_config(_write(tmp_path, raw))
 
 
-def test_warehouse_key_file_is_refused_where_it_is_not_implemented(tmp_path, monkeypatch):
-    # Only Snowflake's key-pair auth is built; anywhere else key_file used to
-    # load cleanly and fail at the first connection with NotImplementedError.
-    monkeypatch.setenv("WAREHOUSE_JDBC_URL", "jdbc:postgresql://db/wh")
-    monkeypatch.setenv("WAREHOUSE_USER", "wh")
+def test_an_auth_mode_a_warehouse_does_not_offer_is_refused_at_load(tmp_path, monkeypatch):
+    # Refused while loading, not at the first connection: a DuckDB file has
+    # nothing to present a key to, and Trino has no AWS IAM login.
     monkeypatch.setenv("WAREHOUSE_AUTH_MODE", "key_file")
-    block = {
-        "jdbc_url": "WAREHOUSE_JDBC_URL",
-        "user": "WAREHOUSE_USER",
-        "auth_mode": "WAREHOUSE_AUTH_MODE",
-        "secret": "WAREHOUSE_SECRET",
-        "key_file": "WAREHOUSE_KEY_FILE",
-    }
-    raw = _minimal(Warehouse={"dev": block})
-    with pytest.raises(ConfigError, match="implemented only for a Snowflake warehouse"):
+    duckdb = _minimal(
+        Warehouse={"dev": {"jdbc_url": "jdbc:duckdb:w.duckdb", "auth_mode": "WAREHOUSE_AUTH_MODE"}}
+    )
+    with pytest.raises(ConfigError, match=r"DuckDB warehouse takes \['none'\]"):
+        load_config(_write(tmp_path, duckdb))
+    trino = _minimal(
+        Warehouse={
+            "Name": "Trino",
+            "dev": {"jdbc_url": "jdbc:trino://t:8080/iceberg/a", "auth_mode": "sts"},
+        }
+    )
+    with pytest.raises(ConfigError, match="Trino warehouse takes"):
+        load_config(_write(tmp_path, trino))
+
+
+@pytest.mark.parametrize(
+    ("warehouse", "missing"),
+    [
+        # Each auth mode names the fields it needs; a missing one is reported.
+        (
+            {
+                "jdbc_url": "jdbc:postgresql://db/wh",
+                "user": "u",
+                "auth_mode": "oauth",
+                "secret": "S",
+            },
+            "client_id",
+        ),
+        (
+            {"jdbc_url": "jdbc:postgresql://db/wh", "user": "u", "auth_mode": "sts"},
+            "region",
+        ),
+        (
+            {"jdbc_url": "jdbc:trino://t:8080/iceberg/a", "auth_mode": "key_file", "key_file": "k"},
+            "cert_file",
+        ),
+    ],
+)
+def test_an_auth_mode_needs_its_own_fields(tmp_path, warehouse, missing):
+    raw = _minimal(Warehouse={"dev": warehouse})
+    with pytest.raises(ConfigError, match=f"needs {missing}"):
         load_config(_write(tmp_path, raw))
+
+
+def test_every_auth_mode_loads_with_its_fields(tmp_path):
+    # One profile per (warehouse, auth mode) the dialects accept, built from
+    # the fields each declares: the loader and the dialects agree.
+    from etl_craft.dialects import warehouse_dialects
+
+    urls = {
+        "postgres": ("Postgres", "jdbc:postgresql://db/wh"),
+        "trino_iceberg": ("Trino", "jdbc:trino://t:8080/iceberg/a"),
+        "snowflake": ("Snowflake", "jdbc:snowflake://acct.snowflakecomputing.com/?db=DB"),
+    }
+    loaded = 0
+    for key, (name, url) in urls.items():
+        dialect = warehouse_dialects.for_key(key)
+        for mode, needed in dialect.auth_fields.items():
+            block = {"jdbc_url": url, "auth_mode": mode}
+            for field_name in needed:
+                block[field_name] = "S" if field_name == "secret" else "value"
+            raw = _minimal(Warehouse={"Name": name, "dev": block})
+            config = load_config(_write(tmp_path, raw))
+            assert config.warehouse is not None
+            assert config.warehouse.active.auth_mode == mode
+            loaded += 1
+    assert loaded == 18
 
 
 def test_databricks_token_fields_build_a_credential_free_url(tmp_path, monkeypatch):
@@ -371,5 +522,5 @@ def test_email_needs_user_and_secret_for_password_auth(tmp_path, monkeypatch):
             "dev": {"Email": {"host": "H", "port": "P", "from_address": "F", "auth_mode": "A"}},
         }
     )
-    with pytest.raises(ConfigError, match="needs user and secret"):
+    with pytest.raises(ConfigError, match="needs user for auth_mode password"):
         load_config(_write(tmp_path, raw))

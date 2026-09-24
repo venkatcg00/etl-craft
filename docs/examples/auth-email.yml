@@ -1,0 +1,60 @@
+# Authentication types for the SMTP relay EMAIL_ALERT tasks send through.
+#
+# One profile per type: set ETL_CRAFT_AUTH to the one you use.
+#   none      verified: an internal relay that accepts mail unauthenticated
+#   password  verified
+#   oauth     SMTP XOAUTH2 with a client-credentials access token, for relays
+#             that no longer take passwords (Microsoft 365, Google Workspace)
+#
+# Types marked verified have run against a live service in this project. The
+# others follow the vendor's documentation and are untested here: they can be
+# used, but success is not guaranteed, and `etl-craft doctor` says so.
+#
+# Each setting is marked `# variable` or `# value`. A variable is looked up in
+# the secrets source (here: the process environment); when it is not set, the
+# text itself is used, so `Profile: dev` is simply dev. A secret must always
+# be a variable that is set. `etl-craft doctor` lists every value used as
+# written that looks like a variable name.
+#
+# Complete and loadable as written: tests/test_config_examples.py loads every
+# file in this directory, for every profile it declares.
+
+Secrets:
+  Source_type: environment             # value
+  Profile: ETL_CRAFT_AUTH              # variable — the profile names the authentication type to use
+
+Orchestration:
+  Mode: local                          # value
+  none:
+    Email:
+      host: EMAIL_HOST                 # variable
+      port: EMAIL_PORT                 # variable
+      from_address: EMAIL_FROM         # variable
+      use_tls: EMAIL_USE_TLS           # variable
+      auth_mode: none                  # value
+  password:
+    Email:
+      host: EMAIL_HOST                 # variable
+      port: EMAIL_PORT                 # variable
+      from_address: EMAIL_FROM         # variable
+      use_tls: EMAIL_USE_TLS           # variable
+      auth_mode: password              # value
+      user: EMAIL_USER                 # variable
+      secret: EMAIL_SECRET             # variable, required: a secret is never used as written
+  oauth:
+    Email:
+      host: EMAIL_HOST                 # variable
+      port: EMAIL_PORT                 # variable
+      from_address: EMAIL_FROM         # variable
+      use_tls: EMAIL_USE_TLS           # variable
+      auth_mode: oauth                 # value
+      user: EMAIL_USER                 # variable
+      client_id: EMAIL_CLIENT_ID       # variable
+      secret: EMAIL_SECRET             # variable, required: a secret is never used as written — the client secret
+      token_url: EMAIL_TOKEN_URL       # variable
+      scope: https://outlook.office365.com/.default  # value
+
+Engine:
+  Profile: dev                         # value — this file varies only the login, not the Engine DB
+  dev:
+    jdbc_url: jdbc:sqlite:etl-craft-engine.db  # value

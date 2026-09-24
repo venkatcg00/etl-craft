@@ -412,7 +412,9 @@ CREATE TABLE AUD_PIPELINES_RUN_LOG (
     START_DATE       TIMESTAMPTZ NOT NULL DEFAULT now(),
     END_DATE         TIMESTAMPTZ,
     STATUS           VARCHAR NOT NULL,
-    CONSTRAINT ck_pipeline_run_status CHECK (STATUS IN ('IN-PROGRESS','SUCCESS','FAILED','SKIPPED'))  -- [CHOICE]
+    SLA_STATUS       VARCHAR(8),                                     -- [ADDITION, 2026-09-24] see POST-SIGNOFF CHANGES
+    CONSTRAINT ck_pipeline_run_status CHECK (STATUS IN ('IN-PROGRESS','SUCCESS','FAILED','SKIPPED')),  -- [CHOICE]
+    CONSTRAINT ck_pipeline_run_sla_status CHECK (SLA_STATUS IN ('MET','BREACHED'))
 );
 
 -- THE single most load-bearing constraint in this entire schema. Every task
@@ -827,4 +829,14 @@ COMMIT;
 -- backfills every pre-existing row to SOURCE='LEGACY' so migrate.py's own
 -- legacy-ledger-adoption logic has something well-defined to reconcile
 -- against rather than a NULL.
+-- ============================================================================
+--
+-- [ADDITION, 2026-09-24] AUD_PIPELINES_RUN_LOG.SLA_STATUS (MET/BREACHED,
+-- ck_pipeline_run_sla_status). Orchestration.Enforce_sla existed in
+-- craft-connector.yml since E2-17/E2-23 and nothing ever read it; turned on, a
+-- finishing run is now judged against CFG_PIPELINES.SLA_IN_HOURS, START_DATE to
+-- END_DATE, and the verdict recorded here. STATUS is deliberately untouched --
+-- a late run still did its work, and marking it FAILED would make every retry
+-- fail again. NULL means not judged. Carried to an already-deployed database by
+-- migrations/0005_pipeline_run_sla_status.sql (and its SQLite twin).
 -- ============================================================================

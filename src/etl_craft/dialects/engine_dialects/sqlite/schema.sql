@@ -235,7 +235,10 @@ CREATE TABLE AUD_PIPELINES_RUN_LOG (
     START_DATE       TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
     END_DATE         TIMESTAMP,
     STATUS           VARCHAR NOT NULL,
-    CONSTRAINT ck_pipeline_run_status CHECK (STATUS IN ('IN-PROGRESS','SUCCESS','FAILED','SKIPPED'))
+    -- MET/BREACHED against SLA_IN_HOURS when Enforce_sla is on (migration 0005).
+    SLA_STATUS       VARCHAR(8),
+    CONSTRAINT ck_pipeline_run_status CHECK (STATUS IN ('IN-PROGRESS','SUCCESS','FAILED','SKIPPED')),
+    CONSTRAINT ck_pipeline_run_sla_status CHECK (SLA_STATUS IN ('MET','BREACHED'))
 );
 
 -- The one that matters most: at most one IN-PROGRESS run per pipeline.

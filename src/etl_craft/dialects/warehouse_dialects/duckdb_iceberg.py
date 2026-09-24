@@ -21,8 +21,8 @@ evolution do exactly that. So the connection never opens a transaction and
 this warehouse gets the Iceberg guarantee sql_actions.py already states:
 idempotency makes a retry safe, not atomicity.
 
-Profile fields (each a variable name in craft-connector.yml, like every other
-connection value):
+Profile fields (each a variable name or a value, like every other setting in
+craft-connector.yml; s3_secret and secret must be variable names):
 
     jdbc_url             jdbc:duckdb:              (in memory -- the data is in Iceberg)
     catalog              the name the catalog is attached as; the `catalog` in
@@ -31,8 +31,11 @@ connection value):
     iceberg_warehouse    the catalog's warehouse location, e.g. s3://warehouse/
     s3_endpoint, s3_region, s3_url_style, s3_use_ssl   object-storage settings
     s3_key_id, s3_secret the object-storage credentials; omit both to use the
-                         ambient credential chain. auth_mode is `none`: the
-                         catalog itself is not authenticated by this engine.
+                         ambient credential chain (instance roles, STS)
+    auth_mode            how the *catalog* is authenticated: none, token
+                         (secret is a bearer token) or oauth (client_id,
+                         secret, token_url and optional scope -- DuckDB runs
+                         the client-credentials grant itself)
 
 The ``iceberg`` and ``httpfs`` extensions are installed on first connection,
 which needs network access once per machine.
@@ -40,13 +43,17 @@ which needs network access once per machine.
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from etl_craft.dialects.warehouse_dialects.base import SAFE_IDENTIFIER
+from etl_craft.dialects.warehouse_dialects.base import SAFE_IDENTIFIER, Presented
 from etl_craft.dialects.warehouse_dialects.duckdb import DuckDBWarehouse
+
+if TYPE_CHECKING:
+    from etl_craft.config import ConnectionProfile
 
 #: Profile fields this dialect reads beyond jdbc_url/user/secret.
 PROFILE_FIELDS = (
@@ -70,6 +77,24 @@ class DuckDBIcebergWarehouse(DuckDBWarehouse):
     single_writer = False
     surrogate_key = "computed"
     enforces_primary_keys = False
+    # [ADDITION, 2026-09-24] How DuckDB authenticates to the REST *catalog*
+    # (object storage has its own s3_* fields): not at all, a stored bearer
+    # token, or an OAuth2 client-credentials grant DuckDB runs itself against
+    # token_url. oauth is verified against the repo's own Iceberg REST fixture,
+    # which implements the grant.
+    auth_fields: Mapping[str, tuple[str, ...]] = {
+        "none": (),
+        "token": ("secret",),
+        "oauth": ("client_id", "secret", "token_url"),
+    }
+    verified_auth_modes = frozenset({"none", "oauth"})
+    bearer_needs_user = False
+
+    def present(
+        self, profile: ConnectionProfile, secret: str, parts: Mapping[str, Any]
+    ) -> Presented:
+        """Nothing to present to DuckDB itself: the catalog login happens in on_connect."""
+        return Presented()
 
     def catalog_name(self, profile_extra: dict[str, str]) -> str | None:
         """Return the name the Iceberg catalog is attached as."""
@@ -83,10 +108,11 @@ class DuckDBIcebergWarehouse(DuckDBWarehouse):
             )
         return catalog
 
-    def on_connect(self, dbapi_connection: Any, profile_extra: dict[str, str]) -> None:
-        """Load the extensions, register object-storage credentials, attach the catalog."""
+    def on_connect(self, dbapi_connection: Any, profile: ConnectionProfile, secret: str) -> None:
+        """Load the extensions, register the storage and catalog credentials, attach."""
         from etl_craft.db import ConnectionError_
 
+        profile_extra = profile.extra
         catalog = self.catalog_name(profile_extra)
         uri = (profile_extra.get("catalog_uri") or "").strip()
         warehouse = (profile_extra.get("iceberg_warehouse") or "").strip()
@@ -96,9 +122,9 @@ class DuckDBIcebergWarehouse(DuckDBWarehouse):
                 "iceberg_warehouse (e.g. s3://warehouse/)"
             )
         values = {k: v for k, v in profile_extra.items() if isinstance(v, str)}
-        for name, value in values.items():
-            # Interpolated into DuckDB's own SET/ATTACH statements, which take
-            # literals rather than bind parameters -- so refuse, never escape.
+        for name, value in [*values.items(), ("secret", secret)]:
+            # Interpolated into DuckDB's own SECRET/ATTACH statements, which
+            # take literals rather than bind parameters -- so refuse, never escape.
             if "'" in value:
                 raise ConnectionError_(f"DuckDB Iceberg setting {name} must not contain a quote")
 
@@ -107,9 +133,9 @@ class DuckDBIcebergWarehouse(DuckDBWarehouse):
             cursor.execute(statement)
 
         secret_options = ["TYPE S3"]
-        key_id, secret = values.get("s3_key_id"), values.get("s3_secret")
-        if key_id and secret:
-            secret_options += [f"KEY_ID '{key_id}'", f"SECRET '{secret}'"]
+        key_id, s3_secret = values.get("s3_key_id"), values.get("s3_secret")
+        if key_id and s3_secret:
+            secret_options += [f"KEY_ID '{key_id}'", f"SECRET '{s3_secret}'"]
         else:
             secret_options.append("PROVIDER credential_chain")
         for option, field in (("ENDPOINT", "s3_endpoint"), ("REGION", "s3_region")):
@@ -121,9 +147,27 @@ class DuckDBIcebergWarehouse(DuckDBWarehouse):
             use_ssl = values["s3_use_ssl"].strip().lower() in {"true", "1", "yes"}
             secret_options.append(f"USE_SSL {'true' if use_ssl else 'false'}")
         cursor.execute(f"CREATE OR REPLACE SECRET etl_craft_s3 ({', '.join(secret_options)})")
+
+        attach_auth = "AUTHORIZATION_TYPE 'none'"
+        if profile.auth_mode in {"token", "oauth"}:
+            if profile.auth_mode == "token":
+                catalog_secret = [f"TOKEN '{secret}'"]
+            else:
+                catalog_secret = [
+                    f"CLIENT_ID '{values['client_id']}'",
+                    f"CLIENT_SECRET '{secret}'",
+                    f"OAUTH2_SERVER_URI '{values['token_url']}'",
+                ]
+                if values.get("scope"):
+                    catalog_secret.append(f"OAUTH2_SCOPE '{values['scope']}'")
+            cursor.execute(
+                "CREATE OR REPLACE SECRET etl_craft_iceberg "
+                f"(TYPE ICEBERG, {', '.join(catalog_secret)})"
+            )
+            attach_auth = "SECRET etl_craft_iceberg"
         cursor.execute(
             f"ATTACH IF NOT EXISTS '{warehouse}' AS {catalog} (TYPE ICEBERG, ENDPOINT '{uri}', "
-            "AUTHORIZATION_TYPE 'none', ACCESS_DELEGATION_MODE 'none', READ_ONLY false)"
+            f"{attach_auth}, ACCESS_DELEGATION_MODE 'none', READ_ONLY false)"
         )
         cursor.close()
         # SQLAlchemy begins every transaction through the DBAPI connection's

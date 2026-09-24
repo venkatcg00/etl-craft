@@ -11,10 +11,13 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from etl_craft.db import ConnectionError_
-from etl_craft.dialects.warehouse_dialects.base import SAFE_IDENTIFIER, WarehouseDialect
+from etl_craft.dialects.warehouse_dialects.base import SAFE_IDENTIFIER, Presented, WarehouseDialect
+
+if TYPE_CHECKING:
+    from etl_craft.config import ConnectionProfile
 
 _DATABRICKS_URL_RE = re.compile(
     r"^jdbc:databricks://(?P<host>[^:/;]+)(:(?P<port>\d+))?"
@@ -36,6 +39,18 @@ class DatabricksWarehouse(WarehouseDialect):
     enforces_primary_keys = False
     string_type = "STRING"
     token_username = "token"
+    # [ADDITION, 2026-09-24] oauth is machine-to-machine: a service principal's
+    # client id and secret exchanged at the workspace's own token endpoint
+    # (token_url defaults to https://<host>/oidc/v1/token, scope to all-apis),
+    # the access token then used exactly like a personal access token. sso is
+    # the connector's browser login (auth_type databricks-oauth): interactive
+    # only.
+    auth_fields: Mapping[str, tuple[str, ...]] = {
+        "token": ("secret",),
+        "oauth": ("client_id", "secret"),
+        "sso": (),
+    }
+    verified_auth_modes = frozenset({"token"})
     #: Separate connection fields -- the tested and recommended connection shape.
     preferred_fields = ("jdbc_url", "catalog", "schema", "token")
 
@@ -65,6 +80,29 @@ class DatabricksWarehouse(WarehouseDialect):
     def parse_jdbc(self, jdbc_url: str) -> tuple[str, dict[str, Any]]:
         """Parse Databricks' semicolon-parameter JDBC form."""
         return _parse_databricks(jdbc_url)
+
+    def oauth_token(self, profile: ConnectionProfile, secret: str, parts: Mapping[str, Any]) -> str:
+        """Mint a workspace access token for a service principal (OAuth M2M)."""
+        from etl_craft.credentials import client_credentials_token
+
+        token_url = profile.extra.get("token_url") or f"https://{parts['host']}/oidc/v1/token"
+        return client_credentials_token(
+            str(token_url),
+            str(profile.extra["client_id"]),
+            secret,
+            profile.extra.get("scope") or "all-apis",
+        )
+
+    def present(
+        self, profile: ConnectionProfile, secret: str, parts: Mapping[str, Any]
+    ) -> Presented:
+        """Browser SSO is the connector's own flow; the rest is a bearer token."""
+        if profile.auth_mode == "sso":
+            connect_args: dict[str, Any] = {"auth_type": "databricks-oauth"}
+            if profile.extra.get("client_id"):
+                connect_args["oauth_client_id"] = str(profile.extra["client_id"])
+            return Presented(connect_args=connect_args)
+        return super().present(profile, secret, parts)
 
     def create_table_clause(self) -> str:
         """Name Delta explicitly rather than relying on the workspace default."""

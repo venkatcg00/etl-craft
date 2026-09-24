@@ -63,7 +63,12 @@ from pathlib import Path
 
 from sqlalchemy.engine import Engine
 
-from etl_craft.cfg import fetch_pipeline_graph, fetch_task_codes, resolve_pipeline_id
+from etl_craft.cfg import (
+    fetch_pipeline_detail,
+    fetch_pipeline_graph,
+    fetch_task_codes,
+    resolve_pipeline_id,
+)
 from etl_craft.cloning import run_cloning_if_enabled
 from etl_craft.config import ConnectorConfig, ExecutionLimits
 from etl_craft.crosspipe import (
@@ -80,7 +85,9 @@ from etl_craft.resolver import (
     build_graph,
 )
 from etl_craft.runlog import (
+    SLA_BREACHED,
     RunLogError,
+    SlaResult,
     fetch_active_pipeline_run_id,
     fetch_run_state,
     finalize_pipeline_run,
@@ -187,11 +194,13 @@ def _finalize_from_task_states(
     *,
     record_consumption: bool = True,
     consumed_edges: dict[int, int] | None = None,
-) -> tuple[str, list[int]]:
+) -> tuple[str, list[int], SlaResult | None]:
     """Compute SUCCESS/FAILED from every task's own settled status, finalize, consume trackers.
 
-    Returns (final_status, unsettled_task_ids) — the caller decides how
-    much detail about `unsettled` to put in its own outcome message.
+    Returns (final_status, unsettled_task_ids, sla) — the caller decides how
+    much detail about `unsettled` to put in its own outcome message. `sla` is
+    None unless Orchestration.Enforce_sla is on and the pipeline has an
+    SLA_IN_HOURS.
 
     [DEVIATION, 2026-09-23, E3-02] `record_consumption=False` lets a caller
     skip the tracker update entirely — see finalize_active_run's own comment
@@ -211,8 +220,9 @@ def _finalize_from_task_states(
         if final_state.get(task_id, TaskRunState()).status not in SETTLED_STATUSES
     ]
     final_status = "FAILED" if unsettled else "SUCCESS"
+    sla_hours = _enforced_sla_hours(engine, config, pipeline_id)
     with engine.begin() as conn:
-        finalize_pipeline_run(conn, pipeline_run_id, final_status)
+        sla = finalize_pipeline_run(conn, pipeline_run_id, final_status, sla_in_hours=sla_hours)
     if record_consumption:
         # Per CLAUDE.md: tracker updates only after the gated pipeline
         # completes — this pipeline's own outgoing cross-pipeline edges (if
@@ -223,7 +233,22 @@ def _finalize_from_task_states(
     # otherwise-settled pipeline run into a reported failure, per Cloning's
     # own "special-cased engine-internal machinery" status in CLAUDE.md.
     _run_cloning_best_effort(engine, config)
-    return final_status, unsettled
+    return final_status, unsettled, sla
+
+
+def _enforced_sla_hours(engine: Engine, config: ConnectorConfig, pipeline_id: int) -> float | None:
+    """Return the pipeline's SLA_IN_HOURS when Enforce_sla is on, else None."""
+    if not config.limits.enforce_sla:
+        return None
+    with engine.connect() as conn:
+        return fetch_pipeline_detail(conn, pipeline_id).sla_in_hours
+
+
+def _with_sla(message: str, sla: SlaResult | None) -> str:
+    """Append a breach to an outcome message; a met SLA is not news."""
+    if sla is not None and sla.status == SLA_BREACHED:
+        return f"{message} — {sla.describe()}"
+    return message
 
 
 def _run_cloning_best_effort(engine: Engine, config: ConnectorConfig) -> None:
@@ -288,7 +313,7 @@ def finalize_active_run(
     # writing FAILED for a run that genuinely succeeded.
     graph = build_graph(graph_data.tasks, graph_data.same_pipeline_edges)
 
-    final_status, _ = _finalize_from_task_states(
+    final_status, _, sla = _finalize_from_task_states(
         engine,
         config,
         graph,
@@ -299,7 +324,9 @@ def finalize_active_run(
     )
     return FinalizeOutcome(
         status=final_status,
-        message=f"{pipeline_code}: pipeline_run_id={pipeline_run_id} {final_status}",
+        message=_with_sla(
+            f"{pipeline_code}: pipeline_run_id={pipeline_run_id} {final_status}", sla
+        ),
     )
 
 
@@ -480,7 +507,7 @@ def run_pipeline(
             config_path=config.config_path,
         )
 
-    final_status, unsettled = _finalize_from_task_states(
+    final_status, unsettled, sla = _finalize_from_task_states(
         engine,
         config,
         graph,
@@ -501,7 +528,7 @@ def run_pipeline(
         message = f"{pipeline_code}: FAILED — {len(unsettled)} task(s) did not succeed"
     else:
         message = f"{pipeline_code}: SUCCESS"
-    return PipelineOutcome(status=final_status, message=message)
+    return PipelineOutcome(status=final_status, message=_with_sla(message, sla))
 
 
 def _run_until_settled(

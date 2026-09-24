@@ -99,6 +99,10 @@ etl-craft history --pipeline_code MY_PIPELINE
 etl-craft history --pipeline_code MY_PIPELINE --task_code MY_TASK
 ```
 
+With `Orchestration.Enforce_sla: true`, each finished run of a pipeline that has an `SLA_IN_HOURS`
+records `SLA_STATUS` (`MET` or `BREACHED`) in `AUD_PIPELINES_RUN_LOG`, and `history` prints a breach
+beside the run.
+
 For an operational view across pipelines, query the Engine DB audit tables. For example, this lists
 recent failed or still-running pipeline runs:
 
@@ -125,10 +129,13 @@ deployment.
   schema records the active PostgreSQL role in its configuration audit fields.
 - Grant only the Engine DB and warehouse privileges required by the configured tasks. Review
   `CFG_` changes and project migrations like executable code.
-- Keep `craft-connector.yml` free of values; protect the environment, secret file, and any mounted
-  private-key file. Restrict local secret files, for example with `chmod 600`.
-- Rotate passwords, static tokens, and key passphrases in the secret source, then run `doctor`
-  before resuming work. The engine does not mint or refresh cloud credentials.
+- Keep secrets out of `craft-connector.yml` (the loader refuses a secret that isn't a variable);
+  protect the environment, secret file, and any mounted private-key file. Restrict local secret
+  files, for example with `chmod 600`.
+- Rotate passwords, static tokens, client secrets and key passphrases in the secret source, then
+  run `doctor` before resuming work. `oauth` and `sts` credentials are obtained per connection, so
+  they need no rotation of their own; `doctor` warns for every authentication type not yet
+  verified against a live service.
 - `validate` performs useful SQL safety checks, but it is not a security boundary. Treat authors
   who can modify pipeline metadata as trusted code contributors.
 

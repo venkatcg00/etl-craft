@@ -17,6 +17,22 @@ Every file follows the same layout, in this order (the loader refuses any other)
 `docs/craft-connector.example.yml` is the annotated reference that explains every key.
 `docs/configuration.md` describes the format in full.
 
+## Variables and values
+
+Every setting is either a **variable** or a **value**, and each line in these files is marked
+with a `# variable` or `# value` comment:
+
+- A setting whose text names a variable that the secrets source defines takes that variable's
+  value. The source is the process environment, or the `.env`-style file `Secrets` points at.
+- Anything else is used exactly as written. `Profile: dev` is the profile `dev`.
+  `Profile: ETL_CRAFT_PROFILE` is whatever `ETL_CRAFT_PROFILE` holds, and if that variable is
+  not set, the text itself.
+- A secret (`secret`, `token`, `s3_secret`) must always name a variable that is set. A secret
+  is never taken as written.
+
+`etl-craft doctor` lists every value that was used as written but looks like a variable name,
+which is how a missing variable shows up.
+
 ## Start here
 
 | File | Engine | Warehouse | Mode | Shows |
@@ -64,6 +80,25 @@ There is no `postgres_iceberg`. PostgreSQL has no Iceberg tables without a third
 extension that this project neither ships nor tests, so `Table_format: iceberg` on a Postgres
 warehouse is refused rather than silently ignored.
 
+## Authentication
+
+One file per target, with one profile per authentication type. Set `ETL_CRAFT_AUTH` to the
+profile you want. Types marked *verified* have run against a live service in this project. The
+others follow the vendor's documentation and are untested here: they can be used, but success
+is not guaranteed, and `etl-craft doctor` warns about them.
+
+| File | Types (verified in bold) |
+|---|---|
+| `auth-postgres.yml` | **password**, key_file, token, oauth (e.g. Entra ID), sso (libpq 18 OAuth), sts (AWS RDS IAM), for the Engine DB and a Postgres warehouse |
+| `auth-snowflake.yml` | **password**, **token** (PAT), key_file, oauth (client credentials), sso (external browser), sts (AWS workload identity) |
+| `auth-databricks.yml` | **token** (PAT), oauth (service principal, M2M), sso (browser U2M) |
+| `auth-trino.yml` | **none**, password, token (JWT), oauth, sso (OAuth 2.0 redirect), key_file (client certificate) |
+| `auth-duckdb-iceberg.yml` | **none**, token, **oauth**: the Iceberg REST catalog's login |
+| `auth-email.yml` | **none**, **password**, oauth (SMTP XOAUTH2) |
+
+`sso` is interactive: someone completes a browser or device login. It suits a person running
+etl-craft, not an unattended scheduler. `sts` needs `pip install etl-craft[aws]` on PostgreSQL.
+
 ## Cloning
 
 | File | Shows |
@@ -72,15 +107,10 @@ warehouse is refused rather than silently ignored.
 
 ## Profiles
 
-Every example declares `dev`, `sit`, `uat` and `prod` (except `minimal-local.yml`). The active
-profile is chosen per section, most specific first:
-
-```text
-$ETL_CRAFT_<SECTION>_PROFILE   e.g. ETL_CRAFT_WAREHOUSE_PROFILE=prod
-$ETL_CRAFT_PROFILE             one switch for every section
-<Section>.Profile              in the file
-Secrets.Profile                the file-wide default
-```
+The environment examples declare `dev`, `sit`, `uat` and `prod`, and select one with
+`Secrets.Profile: ETL_CRAFT_PROFILE`, a variable each environment sets (`minimal-local.yml` has
+only `dev`). A section's own `Profile` overrides `Secrets.Profile` for that section; either
+can be a value or a variable.
 
 Every profile names the same variables (`ENGINE_JDBC_URL`, `WAREHOUSE_SECRET`, ...). Each
 environment sets those names to its own values. When one shell or `.env` file has to hold

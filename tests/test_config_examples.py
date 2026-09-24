@@ -20,13 +20,8 @@ from etl_craft.warehouse import active_catalog, warehouse_dialect
 
 EXAMPLES = Path(__file__).parents[1] / "docs" / "examples"
 
-PROFILE_VARS = (
-    "ETL_CRAFT_PROFILE",
-    "ETL_CRAFT_ENGINE_PROFILE",
-    "ETL_CRAFT_WAREHOUSE_PROFILE",
-    "ETL_CRAFT_ORCHESTRATION_PROFILE",
-    "ETL_CRAFT_CLONING_PROFILE",
-)
+# The variables the examples' Profile settings name.
+PROFILE_VARS = ("ETL_CRAFT_PROFILE", "ETL_CRAFT_AUTH")
 
 # Values for the variable names the examples use. Only the warehouse URL
 # differs by example; it is supplied per file below.
@@ -62,6 +57,20 @@ VALUES = {
     "EMAIL_USER": "etl",
     "EMAIL_USE_TLS": "true",
     "EMAIL_SECRET": "s",
+    # Authentication fields (docs/examples/auth-*.yml).
+    "ENGINE_CERT_FILE": "/keys/engine.crt",
+    "ENGINE_CLIENT_ID": "etl-craft",
+    "ENGINE_TOKEN_URL": "https://login.example.com/oauth2/token",
+    "ENGINE_ISSUER": "https://login.example.com",
+    "ENGINE_ROLE_ARN": "arn:aws:iam::123456789012:role/etl",
+    "WAREHOUSE_CERT_FILE": "/keys/client.crt",
+    "WAREHOUSE_CLIENT_ID": "etl-craft",
+    "WAREHOUSE_TOKEN_URL": "https://login.example.com/oauth2/token",
+    "WAREHOUSE_SCOPE": "session:role:TRANSFORMER",
+    "WAREHOUSE_ISSUER": "https://login.example.com",
+    "WAREHOUSE_ROLE_ARN": "arn:aws:iam::123456789012:role/etl",
+    "EMAIL_CLIENT_ID": "etl-craft",
+    "EMAIL_TOKEN_URL": "https://login.example.com/oauth2/token",
 }
 
 POSTGRES_WAREHOUSE_URL = "jdbc:postgresql://warehouse-db:5432/analytics"
@@ -76,6 +85,9 @@ class Expected:
     mode: str
     warehouse_url: str | None = None
     table_format: str = "native"
+    # auth-*.yml: one profile per authentication type, selected by ETL_CRAFT_AUTH,
+    # in this section; the Engine DB stays on its own fixed profile.
+    auth_section: str | None = None
 
 
 EXPECTED = {
@@ -129,6 +141,29 @@ EXPECTED = {
         "jdbc:snowflake://myorg-myaccount.snowflakecomputing.com/?db=ANALYTICS&schema=PUBLIC",
     ),
     "cloning.yml": Expected("postgresql", "postgres", "local", POSTGRES_WAREHOUSE_URL),
+    "auth-postgres.yml": Expected(
+        "postgresql", "postgres", "local", POSTGRES_WAREHOUSE_URL, auth_section="Warehouse"
+    ),
+    "auth-snowflake.yml": Expected("sqlite", "snowflake", "local", auth_section="Warehouse"),
+    "auth-databricks.yml": Expected(
+        "sqlite",
+        "databricks",
+        "local",
+        "jdbc:databricks://adb-1.azuredatabricks.net:443/default;httpPath=/sql/1.0/warehouses/a",
+        auth_section="Warehouse",
+    ),
+    "auth-trino.yml": Expected(
+        "sqlite",
+        "trino_iceberg",
+        "local",
+        "jdbc:trino://trino:8443/iceberg/analytics",
+        table_format="iceberg",
+        auth_section="Warehouse",
+    ),
+    "auth-duckdb-iceberg.yml": Expected(
+        "sqlite", "duckdb_iceberg", "local", table_format="iceberg", auth_section="Warehouse"
+    ),
+    "auth-email.yml": Expected("sqlite", "", "local", auth_section="Orchestration"),
 }
 
 
@@ -136,7 +171,11 @@ def _cases() -> list[tuple[str, str]]:
     cases = []
     for path in sorted(EXAMPLES.glob("*.yml")):
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-        profiles = [key for key, value in raw["Engine"].items() if isinstance(value, dict)]
+        section = EXPECTED[path.name].auth_section if path.name in EXPECTED else None
+        blocks = raw[section or "Engine"]
+        profiles = [
+            key for key, value in blocks.items() if isinstance(value, dict) and key != "Email"
+        ]
         cases.extend((path.name, profile) for profile in profiles)
     return cases
 
@@ -155,28 +194,57 @@ def test_every_example_is_listed_here_and_in_the_index():
     assert [name for name in sorted(shipped) if f"`{name}`" not in index] == []
 
 
+def test_every_setting_line_says_whether_it_is_a_variable_or_a_value():
+    # The distinction is made on the page, per explicit instruction ("make the
+    # distinction clear"), and the comment matches what the loader will do.
+    for path in EXAMPLES.glob("*.yml"):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.lstrip().startswith("#") or ": " not in line or line.rstrip().endswith(":"):
+                continue
+            assert "# variable" in line or "# value" in line, f"{path.name}: {line}"
+
+
 @pytest.mark.parametrize(("name", "profile"), _cases())
-def test_every_example_loads_for_every_profile(clean_environment, name, profile):
+def test_every_example_loads_for_every_profile(clean_environment, tmp_path, name, profile):
     expected = EXPECTED[name]
-    clean_environment.setenv("ETL_CRAFT_PROFILE", profile)
-    if name != "secrets-file.yml":
+    path = EXAMPLES / name
+    if name == "secrets-file.yml":
+        # Its profile, like every other value, comes from its own file.
+        for sibling in ("secrets-file.yml", "secrets-file.env"):
+            text = (EXAMPLES / sibling).read_text(encoding="utf-8")
+            text = text.replace("ETL_CRAFT_PROFILE=dev", f"ETL_CRAFT_PROFILE={profile}")
+            (tmp_path / sibling).write_text(text, encoding="utf-8")
+        path = tmp_path / name
+    else:
         for variable, value in VALUES.items():
             clean_environment.setenv(variable, value)
+        clean_environment.setenv(
+            "ETL_CRAFT_AUTH" if expected.auth_section else "ETL_CRAFT_PROFILE", profile
+        )
         if name == "warehouse-snowflake-key-pair.yml":
             clean_environment.setenv("WAREHOUSE_AUTH_MODE", "key_file")
         if expected.warehouse_url:
             clean_environment.setenv("WAREHOUSE_JDBC_URL", expected.warehouse_url)
 
-    config = load_config(EXAMPLES / name)
+    config = load_config(path)
 
-    assert config.postgres.active.name == profile
     assert for_jdbc_url(config.postgres.active.jdbc_url).name == expected.engine
     assert config.mode == expected.mode
+    if expected.auth_section == "Orchestration":
+        assert config.email is not None and config.email.active.auth_mode == profile
+        return
+    if expected.auth_section == "Warehouse":
+        assert config.warehouse is not None and config.warehouse.active.auth_mode == profile
+    else:
+        assert config.postgres.active.name == profile
     assert config.warehouse is not None and config.warehouse.active.name == profile
     assert warehouse_dialect(config).key == expected.warehouse
     assert config.warehouse_table_format == expected.table_format
     # Every example names a catalog qualify() can build three-part names with.
     assert active_catalog(config)
+    # The Postgres auth example sets the Engine DB's login the same way.
+    if name == "auth-postgres.yml":
+        assert config.postgres.active.auth_mode == profile
 
 
 def test_allow_schedule_and_email_follow_the_profile(clean_environment):
@@ -201,13 +269,13 @@ def test_allow_schedule_and_email_follow_the_profile(clean_environment):
 
 
 def test_the_secrets_file_example_reads_only_its_file(clean_environment):
+    # Nothing is set in the environment: every value, the profile included,
+    # comes from secrets-file.env.
     config = load_config(EXAMPLES / "secrets-file.yml")
     assert config.source.type == "file"
+    assert config.postgres.active.name == "dev"
     assert config.postgres.active.user == "etl_craft"
-    # A profile-specific name in the file wins for that profile.
-    clean_environment.setenv("ETL_CRAFT_PROFILE", "prod")
-    prod = load_config(EXAMPLES / "secrets-file.yml")
-    assert prod.postgres.active.secret_var == "ENGINE_PROD_SECRET"
+    assert config.postgres.active.secret_var == "ENGINE_SECRET"
 
 
 def test_cloning_example_follows_the_profile(clean_environment):

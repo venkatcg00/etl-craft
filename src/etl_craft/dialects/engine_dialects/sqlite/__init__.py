@@ -47,7 +47,8 @@ class SqliteEngineDialect(EngineDialect):
     name = "sqlite"
     directory = Path(__file__).parent
     jdbc_prefix = JDBC_PREFIX
-    auth_modes = frozenset({"none"})
+    auth_fields: dict[str, tuple[str, ...]] = {"none": ()}
+    verified_auth_modes = frozenset({"none"})
 
     def build_engine(
         self, config: ConnectorConfig, profile: ConnectionProfile, **engine_kwargs: Any

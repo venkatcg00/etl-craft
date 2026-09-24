@@ -63,6 +63,8 @@ dependencies = [
 databricks = ["databricks-sqlalchemy>=2"]
 snowflake = ["snowflake-sqlalchemy>=1.7"]
 trino = ["trino[sqlalchemy]>=0.330"]
+# auth_mode sts (AWS RDS/Aurora IAM database authentication).
+aws = ["boto3>=1.28"]
 
 [project.scripts]
 etl-craft = "etl_craft:main"
@@ -158,8 +160,12 @@ check_untyped_defs = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 
-# No per-module overrides: third-party dialects are never imported directly
-# (CLAUDE.md's Non-goals), so there is nothing to ignore.
+# Third-party dialects are never imported directly (CLAUDE.md's Non-goals).
+# boto3 is the one optional import (credentials.py, auth_mode sts), and ships
+# no type information.
+[[tool.mypy.overrides]]
+module = ["boto3"]
+ignore_missing_imports = true
 
 [tool.pydocstyle]
 select = "D"

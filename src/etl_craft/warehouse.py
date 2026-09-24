@@ -18,12 +18,14 @@ points, never imported here. That constraint is what rules out db.py's
 approach of hand-writing a `psycopg.connect` call per auth_mode: there is no
 single driver to import.
 
-Instead, `_password_creator` below builds a real `sqlalchemy.engine.URL`
-from the profile (never handed to `create_engine` directly, so a checked-out
-connection's password is never rendered into a logged/echoed engine URL —
-same spirit as db.py's empty-URL-plus-creator approach) and, at each
-pool-checkout, asks that URL's own resolved dialect to turn itself into raw
-a live connection through its own `create_connect_args` + `connect` pair.
+Instead, the connection creator below (`_creator_for`) builds a real
+`sqlalchemy.engine.URL` from the profile (never handed to `create_engine`
+directly, so a checked-out connection's credential is never rendered into a
+logged/echoed engine URL) and, at each pool checkout, asks that URL's own
+resolved dialect to turn itself into a live connection through its own
+`create_connect_args` + `connect` pair. How the credential is presented --
+URL username/password, URL query, or driver connect args -- is each warehouse
+dialect's own `present()` (2026-09-24).
 This works for whatever dialect is actually installed, without this module
 ever importing a specific driver.
 """
@@ -33,17 +35,23 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import replace
 from typing import Any
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
-from etl_craft.config import ConnectionProfile, ConnectorConfig, resolve_secret
+from etl_craft.config import ConnectionProfile, ConnectorConfig, profile_secret
+from etl_craft.credentials import MINTED_AUTH_MODES, MINTED_CREDENTIAL_POOL_RECYCLE_SECONDS
 from etl_craft.db import ConnectionError_
 from etl_craft.dialects import warehouse_dialects
 from etl_craft.dialects.engine_dialects import LockTimeout, for_engine
-from etl_craft.dialects.warehouse_dialects.base import WarehouseDialect, parse_generic_jdbc
+from etl_craft.dialects.warehouse_dialects.base import (
+    AUTH_MODES,
+    WarehouseDialect,
+    parse_generic_jdbc,
+)
 
 _JDBC_SCHEME_RE = re.compile(r"^jdbc:(?P<scheme>[a-zA-Z0-9_+-]+):")
 
@@ -156,174 +164,62 @@ def _dbapi_connect(url: URL, extra: dict[str, Any] | None = None) -> Any:
     return dialect.connect(*cargs, **cparams)
 
 
-def _password_creator(profile: ConnectionProfile, secret: str) -> Callable[[], Any]:
-    dialect_name, parts = translate_jdbc_url(profile.jdbc_url)
-    url = URL.create(
-        drivername=dialect_name,
-        username=profile.user,
-        password=secret,
-        host=parts["host"],
-        port=parts["port"],
-        database=parts["database"],
-        query=parts["query"],
-    )
+def _creator_for(auth_mode: str) -> Callable[..., Callable[[], Any]]:
+    """Build the connection-creator factory for one auth mode.
 
-    def _connect() -> Any:
-        return _dbapi_connect(url)
+    [DEVIATION, 2026-09-24] One creator for every mode. How a credential is
+    presented -- URL username/password, URL query (Trino), or driver connect
+    args (Snowflake's key pair and authenticators, psycopg's SSL and OAuth
+    settings) -- is each warehouse dialect's own `present()`, so a new mode or
+    vendor is a change to that vendor's file. The profile is checked when the
+    engine is built, so a missing field fails before the first connection;
+    `present()` runs once per new connection, which keeps a minted credential
+    (oauth) fresh.
 
-    return _connect
-
-
-def _none_creator(profile: ConnectionProfile, secret: str) -> Callable[[], Any]:
-    """Connect with no credentials — an embedded warehouse, or an unauthenticated server.
-
-    [ADDITION, 2026-09-20] DuckDB is a file, not a server: there is no user to
-    be and no password to present, so requiring one would mean inventing a
-    secret that authenticates nothing. `auth_mode: none` says that plainly.
-    `[Email]` already uses the same value for the same reason, so this is an
-    existing vocabulary rather than a new one.
-
-    [DEVIATION, 2026-09-22] It is no longer only about embedded warehouses.
-    The first version built a URL from the file path alone, dropping host and
-    port — correct for DuckDB and silently wrong for anything else, which
-    surfaced the moment a Trino cluster with authentication disabled (an
-    ordinary local/dev setup) tried to connect and the driver resolved the
-    literal hostname "none". A server profile keeps its host, port, user and
-    query; only a pathless one falls back to the file form.
-
-    `secret` is accepted and ignored to keep one registry signature.
+    What the history of this function established still holds: the URL built
+    here carries the credential and is never the Engine's own (logged) URL;
+    an embedded warehouse (a DuckDB file) keeps the file form, and a server
+    keeps its host, port and query even with auth_mode none (a local Trino
+    once resolved the literal hostname "none" when they were dropped).
     """
-    del secret
-    dialect_name, parts = translate_jdbc_url(profile.jdbc_url)
-    if parts.get("path"):
-        # Embedded: the path *is* the database, and there is no server.
-        url = URL.create(drivername=dialect_name, database=parts["path"])
-    else:
-        url = URL.create(
-            drivername=dialect_name,
-            username=profile.user or None,
-            host=parts["host"],
-            port=parts["port"],
-            database=parts["database"],
-            query=parts["query"],
-        )
 
-    def _connect() -> Any:
-        return _dbapi_connect(url)
+    def factory(
+        profile: ConnectionProfile, secret: str, dialect: WarehouseDialect | None = None
+    ) -> Callable[[], Any]:
+        if profile.auth_mode != auth_mode:
+            profile = replace(profile, auth_mode=auth_mode)
+        dialect_name, parts = translate_jdbc_url(profile.jdbc_url)
+        if dialect is None:
+            dialect = warehouse_dialects.resolve(dialect_name, "native")
+        dialect.check_profile(profile)
+        chosen = dialect
 
-    return _connect
+        def _connect() -> Any:
+            presented = chosen.present(profile, secret, parts)
+            if parts.get("path"):
+                # Embedded: the path *is* the database, and there is no server.
+                url = URL.create(drivername=dialect_name, database=parts["path"])
+            else:
+                url = URL.create(
+                    drivername=dialect_name,
+                    username=presented.username,
+                    password=presented.password,
+                    host=parts["host"],
+                    port=parts["port"],
+                    database=parts["database"],
+                    query={**parts["query"], **presented.query},
+                )
+            if presented.connect_args:
+                return _dbapi_connect(url, dict(presented.connect_args))
+            return _dbapi_connect(url)
 
+        return _connect
 
-def _key_file_creator(profile: ConnectionProfile, secret: str) -> Callable[[], Any]:
-    """Connect with a private key — Snowflake's key-pair (RSA) authentication.
-
-    [DEVIATION, 2026-09-22] Implemented for Snowflake. **This is the
-    corporate-standard way to authenticate a Snowflake service account**:
-    Snowflake has been moving service accounts off single-factor passwords,
-    and key-pair is what automation is expected to use. `password` still works
-    and is fine for a human exploring an account.
-
-    The profile names the key file (`key_file:` in its `extra`, the same
-    convention db.py's Postgres key_file mode already uses) and the secret is
-    the key's passphrase — empty if the key is unencrypted. The key itself
-    never goes in craft-connector.yml, and neither value is ever rendered into
-    a URL: they are injected after `create_connect_args`, which is exactly
-    what Snowflake's own dialect insists on.
-
-    For CI, write the key from a secret store to a file in a setup step and
-    point `key_file` at it -- there is deliberately no inline-PEM mode, which
-    would mean parsing the key here and taking a crypto dependency the engine
-    does not otherwise need.
-    """
-    dialect_name, parts = translate_jdbc_url(profile.jdbc_url)
-    base_dialect = dialect_name.split("+", 1)[0]
-    arg_names = warehouse_dialects.resolve(base_dialect, "native").key_file_connect_args
-    if arg_names is None:
-        raise NotImplementedError(
-            f"auth_mode='key_file' has no implementation for dialect {base_dialect!r} — how a "
-            "private-key credential maps to DBAPI connect args is genuinely vendor-specific "
-            "(Postgres SSL client certs and Snowflake key-pair auth share nothing). "
-            "Implemented so far: snowflake."
-        )
-    key_file = profile.extra.get("key_file")
-    if not key_file:
-        raise ConnectionError_(
-            f"profile {profile.name!r}: auth_mode=key_file requires a `key_file:` path in the "
-            "profile — the private key itself is never stored in craft-connector.yml"
-        )
-    path_arg, passphrase_arg = arg_names
-    extra: dict[str, Any] = {path_arg: str(key_file)}
-    if secret:
-        extra[passphrase_arg] = secret
-
-    url = URL.create(
-        drivername=dialect_name,
-        username=profile.user,
-        host=parts["host"],
-        port=parts["port"],
-        database=parts["database"],
-        query=parts["query"],
-    )
-
-    def _connect() -> Any:
-        return _dbapi_connect(url, extra)
-
-    return _connect
+    return factory
 
 
-def _token_creator(profile: ConnectionProfile, secret: str) -> Callable[[], Any]:
-    """Connect with a bearer token.
-
-    [DEVIATION, 2026-09-22] Implemented, where it previously raised
-    NotImplementedError on the grounds that "the credential-minting provider
-    is team-specific". That reasoning still holds for tokens a provider mints
-    per connection (an OAuth2 client-credentials exchange, an STS
-    AssumeRole) -- none of which is specified -- but it conflated those with
-    the far commoner case: a long-lived token the team already has, presented
-    like a password. Databricks personal access tokens are exactly that, and
-    the engine cannot reach Databricks at all without it.
-
-    So this handles the static case and nothing more. A minted/refreshed token
-    remains unimplemented and is a genuinely different mechanism, which is why
-    `pool_recycle` guidance exists for it in CLAUDE.md.
-    """
-    dialect_name, parts = translate_jdbc_url(profile.jdbc_url)
-    base_dialect = dialect_name.split("+", 1)[0]
-    username = profile.user or warehouse_dialects.resolve(base_dialect, "native").token_username
-    if not username:
-        raise ConnectionError_(
-            f"auth_mode='token' needs a `user` for dialect {base_dialect!r} — it is sent in "
-            "the username position alongside the token. Databricks uses the literal 'token'."
-        )
-    url = URL.create(
-        drivername=dialect_name,
-        username=username,
-        password=secret,
-        host=parts["host"],
-        port=parts["port"],
-        database=parts["database"],
-        query=parts["query"],
-    )
-
-    def _connect() -> Any:
-        return _dbapi_connect(url)
-
-    return _connect
-
-
-def _sso_creator(profile: ConnectionProfile, secret: str) -> Callable[[], Any]:
-    raise NotImplementedError(
-        "auth_mode='sso' has no concrete implementation yet — the credential-minting "
-        "provider is team-specific and unspecified in CLAUDE.md."
-    )
-
-
-WAREHOUSE_AUTH_REGISTRY: dict[str, Callable[[ConnectionProfile, str], Callable[[], Any]]] = {
-    "none": _none_creator,
-    "password": _password_creator,
-    "key_file": _key_file_creator,
-    "token": _token_creator,
-    "sso": _sso_creator,
+WAREHOUSE_AUTH_REGISTRY: dict[str, Callable[..., Callable[[], Any]]] = {
+    auth_mode: _creator_for(auth_mode) for auth_mode in AUTH_MODES
 }
 
 
@@ -340,21 +236,23 @@ def build_warehouse_engine(
     creator_factory = WAREHOUSE_AUTH_REGISTRY.get(profile.auth_mode)
     if creator_factory is None:
         raise ConnectionError_(f"unknown auth_mode: {profile.auth_mode!r}")
-    # auth_mode='none' has no secret to resolve — asking for one would mean
-    # inventing a variable that authenticates nothing.
-    secret = "" if profile.auth_mode == "none" else resolve_secret(config, profile)
-    base_creator = creator_factory(profile, secret)
+    # A mode with nothing to present (none, sts, a secret-less sso) resolves
+    # no secret — asking for one would mean inventing a variable.
+    secret = profile_secret(config, profile)
     dialect = warehouse_dialect(config)
+    base_creator = creator_factory(profile, secret, dialect)
 
     def creator() -> Any:
         # Per-connection setup a dialect needs before any statement -- DuckDB
         # over Iceberg attaches its catalog here. A no-op everywhere else.
         dbapi_connection = base_creator()
-        dialect.on_connect(dbapi_connection, profile.extra)
+        dialect.on_connect(dbapi_connection, profile, secret)
         return dbapi_connection
 
     dialect_name, parts = translate_jdbc_url(profile.jdbc_url)
     engine_kwargs.setdefault("pool_pre_ping", True)
+    if profile.auth_mode in MINTED_AUTH_MODES:
+        engine_kwargs.setdefault("pool_recycle", MINTED_CREDENTIAL_POOL_RECYCLE_SECONDS)
     # [DEVIATION, 2026-09-20, E2-24] A real URL, minus the password. The blank
     # "dialect://" this replaced kept secrets out of a logged engine URL — a
     # good goal — but left engine.url empty, which broke cloning's

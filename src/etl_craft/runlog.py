@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import bindparam, text
 from sqlalchemy.engine import Connection
@@ -364,12 +365,73 @@ def fetch_run_state(
     }
 
 
-def finalize_pipeline_run(conn: Connection, pipeline_run_id: int, status: str) -> None:
-    """Mark `pipeline_run_id` terminal (SUCCESS/FAILED), stamping END_DATE."""
+SLA_MET = "MET"
+SLA_BREACHED = "BREACHED"
+
+
+@dataclass(frozen=True)
+class SlaResult:
+    """How a finished run measured against its pipeline's SLA_IN_HOURS."""
+
+    status: str
+    sla_hours: float
+    elapsed_hours: float
+
+    def describe(self) -> str:
+        """Return one line for an outcome message or an alert."""
+        return f"SLA of {self.sla_hours:g} h {self.status} (ran {self.elapsed_hours:.2f} h)"
+
+
+def elapsed_hours(start: datetime, now: datetime) -> float:
+    """Return the hours from `start` to `now`, reading a naive `start` as UTC."""
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=UTC)
+    return (now - start).total_seconds() / 3600
+
+
+def finalize_pipeline_run(
+    conn: Connection,
+    pipeline_run_id: int,
+    status: str,
+    *,
+    sla_in_hours: float | None = None,
+) -> SlaResult | None:
+    """Mark `pipeline_run_id` terminal (SUCCESS/FAILED), stamping END_DATE.
+
+    [ADDITION, 2026-09-24] With `sla_in_hours` (Orchestration.Enforce_sla on,
+    and the pipeline has an SLA_IN_HOURS), the run is also judged against it:
+    SLA_STATUS becomes MET or BREACHED, measured START_DATE to this END_DATE.
+    STATUS is left alone -- a late run did its work, and a FAILED it would
+    carry into every retry would be a lie. Without it, SLA_STATUS is not
+    written at all, so an Engine DB that predates the column is unaffected
+    until enforcement is turned on.
+    """
+    now = datetime.now(UTC)
+    params: dict[str, Any] = {"pipeline_run_id": pipeline_run_id, "status": status, "now": now}
+    if sla_in_hours is None:
+        conn.execute(
+            text(
+                "UPDATE AUD_PIPELINES_RUN_LOG SET STATUS = :status, END_DATE = :now "
+                "WHERE PIPELINE_RUN_ID = :pipeline_run_id"
+            ),
+            params,
+        )
+        return None
+    start = conn.execute(
+        text("SELECT START_DATE FROM AUD_PIPELINES_RUN_LOG WHERE PIPELINE_RUN_ID = :id"),
+        {"id": pipeline_run_id},
+    ).scalar_one()
+    hours = elapsed_hours(start, now)
+    sla = SlaResult(
+        status=SLA_BREACHED if hours > sla_in_hours else SLA_MET,
+        sla_hours=float(sla_in_hours),
+        elapsed_hours=hours,
+    )
     conn.execute(
         text(
-            "UPDATE AUD_PIPELINES_RUN_LOG SET STATUS = :status, END_DATE = :now "
-            "WHERE PIPELINE_RUN_ID = :pipeline_run_id"
+            "UPDATE AUD_PIPELINES_RUN_LOG SET STATUS = :status, END_DATE = :now, "
+            "SLA_STATUS = :sla_status WHERE PIPELINE_RUN_ID = :pipeline_run_id"
         ),
-        {"pipeline_run_id": pipeline_run_id, "status": status, "now": datetime.now(UTC)},
+        {**params, "sla_status": sla.status},
     )
+    return sla

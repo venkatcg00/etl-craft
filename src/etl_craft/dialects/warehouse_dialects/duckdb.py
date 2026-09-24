@@ -10,6 +10,7 @@ sequence default here instead.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,9 @@ class DuckDBWarehouse(WarehouseDialect):
     surrogate_key: SurrogateKey = "sequence"
     single_writer = True
     per_task_format = False
+    # A file has nobody to authenticate.
+    auth_fields: Mapping[str, tuple[str, ...]] = {"none": ()}
+    verified_auth_modes = frozenset({"none"})
 
     def parse_jdbc(self, jdbc_url: str) -> tuple[str, dict[str, Any]]:
         """Parse `jdbc:duckdb:<path>` -- a file, not a server."""

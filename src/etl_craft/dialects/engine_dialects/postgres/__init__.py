@@ -35,10 +35,33 @@ _JDBC_POSTGRES_RE = re.compile(
 
 DEFAULT_PORT = 5432
 
-# Comfortably under a typical short-lived credential's lifetime, per
-# CLAUDE.md's guidance for token/sso profiles; unused until those modes are
-# implemented, but declared here so the setting has one obvious home.
-TOKEN_POOL_RECYCLE_SECONDS = 15 * 60
+#: How a PostgreSQL connection -- the Engine DB or a Postgres warehouse -- can
+#: authenticate: auth_mode -> the profile fields it needs beyond jdbc_url.
+#: [ADDITION, 2026-09-24] token, oauth, sso and sts joined password and
+#: key_file, per explicit instruction ("sso, oauth, sts, key files should be
+#: supported but we cannot test them ... say these can be used but success is
+#: not guaranteed").
+POSTGRES_AUTH_FIELDS: dict[str, tuple[str, ...]] = {
+    # A password.
+    "password": ("user", "secret"),
+    # A client certificate: key_file (and cert_file) paths; secret is the
+    # key's passphrase, empty for an unencrypted key.
+    "key_file": ("user", "key_file", "secret"),
+    # A stored bearer token presented as the password (a pre-issued Entra ID
+    # or IAM token, a pooler's token).
+    "token": ("user", "secret"),
+    # An access token minted per connection by a client-credentials grant and
+    # presented as the password -- Azure Database for PostgreSQL with Entra ID.
+    "oauth": ("user", "client_id", "secret", "token_url"),
+    # libpq 18's own OAuth device flow (oauth_issuer/oauth_client_id): the
+    # server must have an OAuth validator, and someone must complete the
+    # device login, so it suits interactive use, not unattended runs.
+    "sso": ("user", "issuer", "client_id"),
+    # An AWS RDS/Aurora IAM auth token, optionally as an assumed role.
+    "sts": ("user", "region"),
+}
+#: Run against a real server in this project.
+POSTGRES_VERIFIED_AUTH_MODES = frozenset({"password"})
 
 
 class PostgresEngineDialect(EngineDialect):
@@ -47,13 +70,18 @@ class PostgresEngineDialect(EngineDialect):
     name = "postgresql"
     directory = Path(__file__).parent
     jdbc_prefix = "jdbc:postgresql:"
-    auth_modes = frozenset({"password", "key_file"})
+    auth_fields = POSTGRES_AUTH_FIELDS
+    verified_auth_modes = POSTGRES_VERIFIED_AUTH_MODES
 
     def build_engine(
         self, config: ConnectorConfig, profile: ConnectionProfile, **engine_kwargs: Any
     ) -> Engine:
         """Build the Engine through psycopg, with the password never rendered into its URL."""
-        from etl_craft.config import resolve_secret
+        from etl_craft.config import profile_secret
+        from etl_craft.credentials import (
+            MINTED_AUTH_MODES,
+            MINTED_CREDENTIAL_POOL_RECYCLE_SECONDS,
+        )
         from etl_craft.db import ConnectionError_
 
         creator_factory = _AUTH_REGISTRY.get(profile.auth_mode)
@@ -62,8 +90,12 @@ class PostgresEngineDialect(EngineDialect):
                 f"auth_mode {profile.auth_mode!r} is not valid for a PostgreSQL Engine DB -- "
                 f"use one of {sorted(self.auth_modes)}"
             )
-        creator = creator_factory(profile, resolve_secret(config, profile))
+        creator = creator_factory(profile, profile_secret(config, profile))
         engine_kwargs.setdefault("pool_pre_ping", True)
+        if profile.auth_mode in MINTED_AUTH_MODES:
+            # A pooled connection outliving its credential is just another
+            # failure retry absorbs, but recycling first avoids most of them.
+            engine_kwargs.setdefault("pool_recycle", MINTED_CREDENTIAL_POOL_RECYCLE_SECONDS)
         # [DEVIATION, 2026-09-20, E2-24] A real URL, minus the password.
         # SQLAlchemy never logs a password it was not given, so omitting just
         # the password keeps secrets out of logs while making engine.url true.
@@ -298,56 +330,108 @@ def parse_jdbc_postgres(jdbc_url: str) -> dict[str, Any]:
     }
 
 
-def _password_creator(profile: ConnectionProfile, secret: str) -> Callable[[], Any]:
-    parts = parse_jdbc_postgres(profile.jdbc_url)
+def psycopg_auth_kwargs(
+    auth_mode: str,
+    *,
+    user: str,
+    secret: str,
+    extra: dict[str, Any],
+    host: str,
+    port: int,
+) -> dict[str, Any]:
+    """Return the psycopg connect arguments that authenticate `user` by `auth_mode`.
 
-    def _connect() -> Any:
-        import psycopg
-
-        return psycopg.connect(
-            host=parts["host"],
-            port=parts["port"],
-            dbname=parts["database"],
-            user=profile.user,
-            password=secret,
-            # Forwarded, not dropped: sslmode and friends are part of the URL
-            # a team wrote down, and silently ignoring sslmode=require is
-            # worse than failing on it (E2-10).
-            **parts["query"],
-        )
-
-    return _connect
-
-
-def _key_file_creator(profile: ConnectionProfile, secret: str) -> Callable[[], Any]:
+    Shared by the Engine DB and the Postgres warehouse dialect, so PostgreSQL
+    authentication lives in one place. Called once per new connection, which
+    is what keeps a minted (oauth, sts) credential fresh.
+    """
+    from etl_craft.credentials import aws_rds_auth_token, client_credentials_token
     from etl_craft.db import ConnectionError_
 
-    parts = parse_jdbc_postgres(profile.jdbc_url)
-    key_file = profile.extra.get("key_file")
-    if not key_file:
-        raise ConnectionError_(
-            f"profile {profile.name!r}: auth_mode=key_file requires a key_file path"
+    if auth_mode in {"password", "token"}:
+        return {"password": secret}
+    if auth_mode == "key_file":
+        # str, not bytes: psycopg's own signature is str | int | None
+        # (caught by mypy, E2-29).
+        kwargs: dict[str, Any] = {
+            "sslkey": str(extra["key_file"]),
+            "sslpassword": secret if secret else None,
+        }
+        if extra.get("cert_file"):
+            kwargs["sslcert"] = str(extra["cert_file"])
+        return kwargs
+    if auth_mode == "oauth":
+        token = client_credentials_token(
+            str(extra["token_url"]), str(extra["client_id"]), secret, extra.get("scope")
         )
+        return {"password": token}
+    if auth_mode == "sts":
+        token = aws_rds_auth_token(host, port, user, str(extra["region"]), extra.get("role_arn"))
+        # RDS refuses an IAM token over an unencrypted connection; a URL that
+        # names its own sslmode still wins.
+        return {"password": token, "sslmode": "require"}
+    if auth_mode == "sso":
+        kwargs = {"oauth_issuer": str(extra["issuer"]), "oauth_client_id": str(extra["client_id"])}
+        if secret:
+            kwargs["oauth_client_secret"] = secret
+        if extra.get("scope"):
+            kwargs["oauth_scope"] = str(extra["scope"])
+        return kwargs
+    raise ConnectionError_(
+        f"auth_mode {auth_mode!r} is not available for PostgreSQL -- use one of "
+        f"{sorted(POSTGRES_AUTH_FIELDS)}"
+    )
 
-    def _connect() -> Any:
-        import psycopg
 
-        return psycopg.connect(
-            host=parts["host"],
-            port=parts["port"],
-            dbname=parts["database"],
-            user=profile.user,
-            sslkey=key_file,
-            # str, not bytes: psycopg's own signature is str | int | None
-            # (caught by mypy, E2-29).
-            sslpassword=secret if secret else None,
-            **parts["query"],
-        )
+def require_auth_fields(profile: ConnectionProfile, fields: tuple[str, ...]) -> None:
+    """Raise unless `profile` carries every non-credential field its auth mode needs."""
+    from etl_craft.db import ConnectionError_
 
-    return _connect
+    for name in fields:
+        if name in {"user", "secret"}:
+            continue
+        if not profile.extra.get(name):
+            raise ConnectionError_(
+                f"profile {profile.name!r}: auth_mode={profile.auth_mode} requires a "
+                f"`{name}:` value in the profile"
+            )
+
+
+def _creator_for(auth_mode: str) -> Callable[[ConnectionProfile, str], Callable[[], Any]]:
+    def factory(profile: ConnectionProfile, secret: str) -> Callable[[], Any]:
+        require_auth_fields(profile, POSTGRES_AUTH_FIELDS[auth_mode])
+        parts = parse_jdbc_postgres(profile.jdbc_url)
+
+        def _connect() -> Any:
+            import psycopg
+
+            auth = psycopg_auth_kwargs(
+                auth_mode,
+                user=profile.user,
+                secret=secret,
+                extra=profile.extra,
+                host=parts["host"],
+                port=parts["port"],
+            )
+            return psycopg.connect(
+                **{
+                    "host": parts["host"],
+                    "port": parts["port"],
+                    "dbname": parts["database"],
+                    "user": profile.user,
+                    **auth,
+                    # Forwarded, not dropped: sslmode and friends are part of
+                    # the URL a team wrote down, and silently ignoring
+                    # sslmode=require is worse than failing on it (E2-10).
+                    **parts["query"],
+                }
+            )
+
+        return _connect
+
+    return factory
 
 
 _AUTH_REGISTRY: dict[str, Callable[[ConnectionProfile, str], Callable[[], Any]]] = {
-    "password": _password_creator,
-    "key_file": _key_file_creator,
+    auth_mode: _creator_for(auth_mode) for auth_mode in POSTGRES_AUTH_FIELDS
 }

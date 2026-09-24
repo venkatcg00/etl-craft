@@ -934,6 +934,8 @@ class PipelineRunHistoryEntry:
     status: str
     start_date: datetime
     end_date: datetime | None
+    # MET/BREACHED against SLA_IN_HOURS, when Enforce_sla judged the run.
+    sla_status: str | None = None
 
 
 def fetch_pipeline_run_history(
@@ -946,7 +948,7 @@ def fetch_pipeline_run_history(
     rows = conn.execute(
         text(
             "SELECT PIPELINE_RUN_ID AS pipeline_run_id, STATUS AS status, "
-            "START_DATE AS start_date, END_DATE AS end_date "
+            "START_DATE AS start_date, END_DATE AS end_date, SLA_STATUS AS sla_status "
             "FROM AUD_PIPELINES_RUN_LOG WHERE PIPELINE_ID = :pipeline_id "
             "ORDER BY START_DATE DESC LIMIT :limit"
         ),
@@ -958,6 +960,7 @@ def fetch_pipeline_run_history(
             status=row.status,
             start_date=row.start_date,
             end_date=row.end_date,
+            sla_status=row.sla_status,
         )
         for row in rows
     ]

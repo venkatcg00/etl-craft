@@ -193,6 +193,17 @@ DO $do$ BEGIN
 EXCEPTION WHEN check_violation THEN RAISE NOTICE 'ok (expected check_violation)';
 END $do$;
 
+\echo '=== TEST: AUD_PIPELINES_RUN_LOG.SLA_STATUS records MET/BREACHED (Enforce_sla) ==='
+\echo '--- EXPECT SUCCEED: a finished run judged BREACHED ---'
+UPDATE AUD_PIPELINES_RUN_LOG SET SLA_STATUS = 'BREACHED' WHERE STATUS = 'SUCCESS' RETURNING PIPELINE_RUN_ID, SLA_STATUS;
+
+\echo '=== EXPECT FAIL (check_violation): SLA_STATUS outside MET/BREACHED ==='
+DO $do$ BEGIN
+    UPDATE AUD_PIPELINES_RUN_LOG SET SLA_STATUS = 'LATE' WHERE STATUS = 'SUCCESS';
+    RAISE EXCEPTION 'EXPECT FAIL did not fail: SLA_STATUS outside MET/BREACHED';
+EXCEPTION WHEN check_violation THEN RAISE NOTICE 'ok (expected check_violation)';
+END $do$;
+
 \echo '=== FINAL ROW COUNTS (sanity check, not a strict assertion) ==='
 SELECT 'CFG_PIPELINES' t, count(*) FROM CFG_PIPELINES
 UNION ALL SELECT 'CFG_TASKS', count(*) FROM CFG_TASKS
