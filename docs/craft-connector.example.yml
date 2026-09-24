@@ -1,0 +1,198 @@
+# craft-connector.yml — written by you, read by etl-craft, never written by it.
+#
+# Sections, in this order (the loader refuses any other): Secrets, Orchestration
+# (the DAG defaults and the Email relay live inside it), Engine, Warehouse, and
+# the optional Cloning.
+#
+# Each section that differs by environment holds one block per profile — dev,
+# sit, uat, prod here, but any names work. The active one is the section's own
+# Profile, else Secrets.Profile. A setting written beside the profile blocks
+# applies to every profile; the same setting inside a block overrides it there.
+#
+# Every setting is a VARIABLE or a VALUE, and each line below says which:
+#
+#   * text that names a variable set in the secrets source (the environment, or
+#     the file Secrets points at) takes that variable's value;
+#   * anything else is used exactly as written: `Profile: dev` is the profile
+#     dev, `Profile: ETL_CRAFT_PROFILE` is whatever that variable holds;
+#   * a secret (secret, token, s3_secret) must be a variable that is set —
+#     never written into this file. Every command checks this when it loads the
+#     file, for the selected profile, and stops with a "not set" error otherwise.
+#
+# So the same variable names can serve every environment, each setting its own
+# values, and the file stays safe to commit. A profile-specific variable
+# (ENGINE_PROD_SECRET) wins over the plain one (ENGINE_SECRET) for that profile.
+# `etl-craft doctor` lists every value used as written that looks like a
+# variable name — the way a missing variable shows up.
+#
+# As written, this file works for local development with nothing set: a SQLite
+# Engine DB and a DuckDB warehouse, both files beside this one. Run
+# `etl-craft setup`, then `etl-craft doctor`. docs/examples/ has a complete file
+# for every Engine DB, warehouse, secrets source, orchestration mode and
+# authentication type.
+
+Secrets:
+  Source_type: environment             # value — environment | file
+  # Path: .env                    # Source_type: file only — relative to this file
+  Profile: dev                         # value — the default profile for every section below;
+                                       # write ETL_CRAFT_PROFILE to set it per environment
+
+Orchestration:
+  # Profile: prod                 # overrides Secrets.Profile for this section only
+  Mode: local                          # value — local: etl-craft runs the waves itself.
+                                       # remote: an orchestrator runs one task at a time
+                                       #   from the YAML `etl-craft generate-yml` emits.
+  # Name: Airflow                 # informational: generate-yml emits one YAML DAG shape;
+  #                               # teams convert it for their scheduler with their own scripts
+  Task_timeout_seconds: 21600          # value — 0 disables; a task's TASK_TIMEOUT_SECONDS overrides
+  Max_parallel_tasks: 8                # value
+  Enforce_sla: false                   # value — true: mark each finished run MET or BREACHED
+                                       # against its pipeline's SLA_IN_HOURS
+
+  # DAG defaults for `generate-yml`, per environment. A pipeline's own
+  # CFG_PIPELINES.PIPELINE_PARAMETERS values (CATCHUP, TAGS, RETRIES, ...)
+  # override these; anything unset falls back to a built-in default.
+  dev:
+    Global_dag: false                  # value
+    Catchup: false                     # value
+    Tags: [analytics]                  # value
+    Retries: 1                         # value
+    Retry_delay_minutes: 5             # value
+    Depends_on_past: false             # value
+    Email_on_failure: false            # value
+    Allow_schedule: false              # value — default true; false emits `schedule: null` even
+                                       # when the pipeline has a RUN_SCHEDULE
+  sit:
+    Mode: remote                       # value — any setting above can be overridden per profile
+    Name: Airflow                      # value
+    Global_dag: false                  # value
+    Catchup: false                     # value
+    Tags: [analytics]                  # value
+    Retries: 1                         # value
+    Retry_delay_minutes: 5             # value
+    Depends_on_past: false             # value
+    Email_on_failure: false            # value
+    Allow_schedule: false              # value
+    Email:                        # the SMTP relay EMAIL_ALERT tasks send through —
+      host: EMAIL_HOST                 # variable —   needed only when a pipeline has an EMAIL_ALERT task
+      port: EMAIL_PORT                 # variable
+      from_address: EMAIL_FROM         # variable
+      auth_mode: EMAIL_AUTH_MODE       # variable — none | password
+      user: EMAIL_USER                 # variable
+      use_tls: EMAIL_USE_TLS           # variable
+      secret: EMAIL_SECRET             # variable, required: a secret is never used as written
+  uat:
+    Mode: remote                       # value
+    Name: Airflow                      # value
+    Global_dag: false                  # value
+    Catchup: false                     # value
+    Tags: [analytics]                  # value
+    Retries: 1                         # value
+    Retry_delay_minutes: 5             # value
+    Depends_on_past: false             # value
+    Email_on_failure: false            # value
+    Allow_schedule: false              # value
+    Email:
+      host: EMAIL_HOST                 # variable
+      port: EMAIL_PORT                 # variable
+      from_address: EMAIL_FROM         # variable
+      auth_mode: EMAIL_AUTH_MODE       # variable
+      user: EMAIL_USER                 # variable
+      use_tls: EMAIL_USE_TLS           # variable
+      secret: EMAIL_SECRET             # variable, required: a secret is never used as written
+  prod:
+    Mode: remote                       # value
+    Name: Airflow                      # value
+    Global_dag: true                   # value
+    Catchup: false                     # value
+    Tags: [analytics]                  # value
+    Retries: 1                         # value
+    Retry_delay_minutes: 5             # value
+    Depends_on_past: false             # value
+    Email_on_failure: true             # value
+    Allow_schedule: true               # value
+    Email_recipients: [data-alerts@example.com]  # value
+    Email:
+      host: EMAIL_HOST                 # variable
+      port: EMAIL_PORT                 # variable
+      from_address: EMAIL_FROM         # variable
+      auth_mode: EMAIL_AUTH_MODE       # variable
+      user: EMAIL_USER                 # variable
+      use_tls: EMAIL_USE_TLS           # variable
+      secret: EMAIL_SECRET             # variable, required: a secret is never used as written
+
+Engine:
+  # SQLite (one file, nothing to install) or PostgreSQL (recommended for
+  # production). Name is optional — Postgres | SQLite — and checked against
+  # jdbc_url.
+  # Profile: prod
+  dev:
+    jdbc_url: jdbc:sqlite:etl-craft-engine.db  # value — relative to this file
+  sit:
+    Name: Postgres                     # value
+    jdbc_url: ENGINE_JDBC_URL          # variable — jdbc:postgresql://host:5432/etl_craft
+    user: ENGINE_USER                  # variable
+    auth_mode: ENGINE_AUTH_MODE        # variable — password | key_file | token | oauth | sso | sts
+    secret: ENGINE_SECRET              # variable, required: a secret is never used as written — the password, or the key's passphrase
+    key_file: ENGINE_KEY_FILE          # variable — auth_mode key_file only: the client key's path
+  uat:
+    Name: Postgres                     # value
+    jdbc_url: ENGINE_JDBC_URL          # variable
+    user: ENGINE_USER                  # variable
+    auth_mode: ENGINE_AUTH_MODE        # variable
+    secret: ENGINE_SECRET              # variable, required: a secret is never used as written
+    key_file: ENGINE_KEY_FILE          # variable
+  prod:
+    Name: Postgres                     # value
+    jdbc_url: ENGINE_JDBC_URL          # variable
+    user: ENGINE_USER                  # variable
+    auth_mode: ENGINE_AUTH_MODE        # variable
+    secret: ENGINE_SECRET              # variable, required: a secret is never used as written
+    key_file: ENGINE_KEY_FILE          # variable
+
+Warehouse:
+  # Name: Postgres | DuckDB | Trino | Databricks | Snowflake — checked against
+  # the connection. Table_format: native (the default) | iceberg; a task's
+  # TABLE_FORMAT parameter overrides it. Both may sit here, for every profile,
+  # or inside a profile, as below.
+  # Profile: prod
+  dev:
+    Name: DuckDB                       # value
+    jdbc_url: jdbc:duckdb:warehouse.duckdb  # value — relative to the working directory
+  sit:
+    Name: Postgres                     # value
+    Table_format: native               # value — always native: Postgres has no Iceberg tables
+    jdbc_url: WAREHOUSE_JDBC_URL       # variable — jdbc:postgresql://host:5432/analytics
+    user: WAREHOUSE_USER               # variable
+    auth_mode: WAREHOUSE_AUTH_MODE     # variable
+    secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
+  uat:
+    Name: Postgres                     # value
+    Table_format: native               # value
+    jdbc_url: WAREHOUSE_JDBC_URL       # variable
+    user: WAREHOUSE_USER               # variable
+    auth_mode: WAREHOUSE_AUTH_MODE     # variable
+    secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
+  prod:
+    Name: Postgres                     # value
+    Table_format: native               # value
+    jdbc_url: WAREHOUSE_JDBC_URL       # variable
+    user: WAREHOUSE_USER               # variable
+    auth_mode: WAREHOUSE_AUTH_MODE     # variable
+    secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
+
+# Optional. Mirrors Engine DB tables into the warehouse after each pipeline run.
+Cloning:
+  # Profile: prod
+  dev:
+    Enabled: false                     # value — default false
+    Scope: cfg                         # value — cfg | aud | all | none
+  sit:
+    Enabled: false                     # value
+    Scope: none                        # value
+  uat:
+    Enabled: true                      # value
+    Scope: cfg                         # value
+  prod:
+    Enabled: true                      # value
+    Scope: all                         # value

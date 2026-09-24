@@ -38,3 +38,9 @@ All notable changes are recorded here. The format follows
   tail, stops the whole process group on timeout, and runs children with bounded
   parallelism, starting the next as soon as one ends. `etl_craft.core.filelock` provides the
   cross-process file lock.
+- `craft-connector.yml` loader (`etl_craft.config`): sections in their fixed order, one
+  block per profile, every setting a variable or a value, secrets that must name a variable
+  that is set, and each connection's auth mode and fields checked against what its Engine DB,
+  warehouse or mail relay accepts. Warehouse JDBC URLs, including the DuckDB, Databricks and
+  Snowflake forms, are parsed at load. The annotated example and one example file per
+  connection choice are published with the documentation.

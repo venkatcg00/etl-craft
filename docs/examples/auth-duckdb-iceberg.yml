@@ -1,0 +1,73 @@
+# Authentication types for DuckDB over an Iceberg REST catalog.
+#
+# One profile per type: set ETL_CRAFT_AUTH to the one you use. This is the
+# catalog's login; object storage uses the s3_* fields (or, without keys, the
+# ambient credential chain, which covers instance roles and STS).
+#   none   verified: an open catalog
+#   token  a stored bearer token
+#   oauth  verified: a client-credentials grant DuckDB runs itself against
+#          token_url (tested against the repo's own Iceberg REST catalog)
+#
+# Types marked verified have run against a live service in this project. The
+# others follow the vendor's documentation and are untested here: they can be
+# used, but success is not guaranteed, and `etl-craft doctor` says so.
+#
+# Each setting is marked `# variable` or `# value`. A variable is looked up in
+# the secrets source (here: the process environment); when it is not set, the
+# text itself is used, so `Profile: dev` is simply dev. A secret must always
+# be a variable that is set. `etl-craft doctor` lists every value used as
+# written that looks like a variable name.
+#
+# Complete and loadable as written: tests/unit/test_config_examples.py loads every
+# file in this directory, for every profile it declares.
+
+Secrets:
+  Source_type: environment             # value
+  Profile: ETL_CRAFT_AUTH              # variable — the profile names the authentication type to use
+
+Orchestration:
+  Mode: local                          # value
+  Task_timeout_seconds: 21600          # value
+  Max_parallel_tasks: 8                # value
+  Enforce_sla: false                   # value
+
+Engine:
+  Profile: dev                         # value — this file varies only the login, not the Engine DB
+  dev:
+    jdbc_url: jdbc:sqlite:etl-craft-engine.db  # value
+
+Warehouse:
+  Name: DuckDB                         # value
+  Table_format: iceberg                # value
+  none:
+    jdbc_url: "jdbc:duckdb:"           # value
+    catalog: WAREHOUSE_CATALOG         # variable
+    catalog_uri: WAREHOUSE_CATALOG_URI  # variable
+    iceberg_warehouse: WAREHOUSE_ICEBERG_WAREHOUSE  # variable
+    s3_endpoint: WAREHOUSE_S3_ENDPOINT  # variable
+    s3_key_id: WAREHOUSE_S3_KEY_ID     # variable
+    s3_secret: WAREHOUSE_S3_SECRET     # variable, required: a secret is never used as written
+    auth_mode: none                    # value
+  token:
+    jdbc_url: "jdbc:duckdb:"           # value
+    catalog: WAREHOUSE_CATALOG         # variable
+    catalog_uri: WAREHOUSE_CATALOG_URI  # variable
+    iceberg_warehouse: WAREHOUSE_ICEBERG_WAREHOUSE  # variable
+    s3_endpoint: WAREHOUSE_S3_ENDPOINT  # variable
+    s3_key_id: WAREHOUSE_S3_KEY_ID     # variable
+    s3_secret: WAREHOUSE_S3_SECRET     # variable, required: a secret is never used as written
+    auth_mode: token                   # value
+    secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
+  oauth:
+    jdbc_url: "jdbc:duckdb:"           # value
+    catalog: WAREHOUSE_CATALOG         # variable
+    catalog_uri: WAREHOUSE_CATALOG_URI  # variable
+    iceberg_warehouse: WAREHOUSE_ICEBERG_WAREHOUSE  # variable
+    s3_endpoint: WAREHOUSE_S3_ENDPOINT  # variable
+    s3_key_id: WAREHOUSE_S3_KEY_ID     # variable
+    s3_secret: WAREHOUSE_S3_SECRET     # variable, required: a secret is never used as written
+    auth_mode: oauth                   # value
+    client_id: WAREHOUSE_CLIENT_ID     # variable
+    secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
+    token_url: WAREHOUSE_TOKEN_URL     # variable — e.g. http://iceberg-rest:8181/v1/oauth/tokens
+    scope: catalog                     # value

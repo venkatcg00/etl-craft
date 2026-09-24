@@ -43,7 +43,7 @@ query catalogs; warehouse statement fragments).
 ```
 src/etl_craft/
   core/        errors.py enums.py graph.py text.py log.py filelock.py
-  config/      model.py discovery.py loader.py resolve.py auth.py
+  config/      model.py discovery.py loader.py resolve.py auth.py targets.py
   dialects/engine/{base.py, postgres/, sqlite/}   each: schema.sql migrations/ queries/
   dialects/warehouse/{base.py, registry.py, postgres.py, duckdb.py, duckdb_iceberg.py,
                trino_iceberg.py, databricks.py, databricks_iceberg.py, snowflake.py,
@@ -111,7 +111,7 @@ squash-merged by pull request (see `CONTRIBUTING.md` for the definition of done)
 | B3 | `feat/core-graph` | Dependency graph: validation, waves, ready, unsatisfiable, run conditions | `resolver.py` | B1 | done |
 | B4 | `feat/core-text` | JDBC parsers, `.env`, statement splitters, `$$pipeline_id` substitution, read-only lint, identifier checks, checksums | several | B1 | done |
 | B5 | `feat/process-supervisor` | Spawned child interpreter, timeouts, process-group kill, output capture, bounded parallel batches, file locks | `runner.py`, `orchestrator.py` | B1 | done |
-| C1 | `feat/config` | Sections and order, profiles, variable-or-value, secrets must be set, auth validation | `config.py` | B4 | |
+| C1 | `feat/config` | Sections and order, profiles, variable-or-value, secrets must be set, auth validation | `config.py` | B4 | done |
 | C2 | `feat/engine-dialects` | PostgreSQL and SQLite dialects, baseline schemas, query catalog, locks, schema tests | `dialects/engine_dialects/` | C1, B5 | |
 | C3 | `feat/warehouse-dialects` | Eight warehouse dialects, registry, credentials, `open_warehouse`, single-writer queue | `dialects/warehouse_dialects/`, `warehouse.py`, `credentials.py` | C1 | |
 | D1 | `feat/engine-repository` | Repositories, run log, `init-db`, `migrate` | `db.py`, `cfg.py`, `runlog.py`, `init_db.py`, `migrate.py` | C2 | |
