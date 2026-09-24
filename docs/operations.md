@@ -8,7 +8,9 @@ cloud warehouse as a separate acceptance target before enabling it for a custome
 
 1. Create a dedicated PostgreSQL database for the Engine DB. It stores pipeline definitions,
    audit history, migration state, dependency trackers, and documentation/lineage caches. Do not
-   share it with application tables.
+   share it with application tables. The SQLite Engine DB that `setup` creates by default is for
+   local development and single-machine use only: it serializes Engine DB writes, and
+   orchestrator workers on other hosts cannot reach it.
 2. Create a separate warehouse database or namespace for pipeline targets. The reference launch
    path is PostgreSQL. DuckDB is for local development and permits one writer at a time.
 3. Build or install one pinned package artifact for every process that will run tasks. Do not mix
@@ -50,6 +52,10 @@ Use a libpq connection URI or the `PGHOST` / `PGPORT` / `PGUSER` / `PGDATABASE` 
 PostgreSQL tools. `ENGINE_JDBC_URL` is a JDBC value for etl-craft and cannot be passed directly
 to `pg_dump`. Keep the password in a protected `PGPASSFILE` or use your platform's equivalent
 credential mechanism.
+
+For a SQLite Engine DB, copy the file with SQLite's online backup rather than `cp`, which can
+catch a write half-done: `sqlite3 etl-craft-engine.db ".backup engine-$(date +%F).db"`, or from
+Python, `sqlite3.connect(src).backup(sqlite3.connect(dst))`.
 
 Keep the backup encrypted and separate from the credentials that can restore it. Test restoration
 into a new, empty PostgreSQL database before relying on a backup. The warehouse has its own data

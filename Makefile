@@ -1,4 +1,4 @@
-.PHONY: db-up db-down db-reset db-schema-test test coverage typecheck wheel-smoke check
+.PHONY: db-up db-down db-reset db-schema-test test test-sqlite-engine coverage typecheck wheel-smoke check
 
 # Brings up everything the test suite can use:
 #   * Postgres 16 (the Engine DB) with src/etl_craft/sql/schema.sql applied
@@ -53,6 +53,13 @@ db-schema-test: db-up
 test: db-up
 	uv run pytest -q
 
+# [ADDITION, 2026-09-24] The same suite with a SQLite Engine DB -- the default
+# one -- instead of Postgres (tests/conftest.py's ETL_CRAFT_TEST_ENGINE). The
+# warehouses tests configure are unchanged. Tests built on a Postgres-only
+# premise are skipped with their reason (conftest.POSTGRES_ENGINE_ONLY).
+test-sqlite-engine: db-up
+	ETL_CRAFT_TEST_ENGINE=sqlite uv run pytest -q
+
 # Coverage is only meaningful against the full suite (unit + integration) —
 # most of the source is exercised through the Postgres-backed tests, so
 # without db-up this reports large, misleading gaps rather than the real
@@ -80,3 +87,4 @@ check: db-up db-schema-test typecheck
 	uv run ruff check .
 	uv run pydocstyle .
 	uv run pytest -q --cov=etl_craft --cov-report=term-missing
+	ETL_CRAFT_TEST_ENGINE=sqlite uv run pytest -q

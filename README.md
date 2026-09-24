@@ -2,16 +2,19 @@
 
 A metadata-driven engine for SQL pipelines.
 
-Your pipelines, tasks, dependencies and transformations are **rows in Postgres**, not
-Python DAG files. `etl-craft` reads that metadata and executes it. It never writes logic
-it wasn't explicitly given.
+Your pipelines, tasks, dependencies and transformations are **rows in a database** — the
+Engine DB — not Python DAG files. `etl-craft` reads that metadata and executes it. It never
+writes logic it wasn't explicitly given.
 
-**Release status: 0.1.0 Alpha.** The supported launch path is a PostgreSQL Engine DB and a
-PostgreSQL warehouse, operated by a named team. Local execution is built in. For Airflow,
-`generate-yml` produces an Airflow-shaped descriptor; your deployment supplies the DAG loader
-and Airflow runtime. Other schedulers can invoke
-`etl-craft run --pipeline_code PIPELINE --task_code TASK` themselves, but no native adapter is
-shipped for them.
+The Engine DB is **SQLite by default** (one file, nothing to install) and **PostgreSQL for
+production**.
+
+**Release status: 0.1.0 Alpha.** The supported production path is a PostgreSQL Engine DB and a
+PostgreSQL warehouse, operated by a named team. A SQLite Engine DB is for local development
+and single-machine deployments. Local execution is built in. For Airflow, `generate-yml`
+produces an Airflow-shaped descriptor; your deployment supplies the DAG loader and Airflow
+runtime. Other schedulers can invoke `etl-craft run --pipeline_code PIPELINE --task_code TASK`
+themselves, but no native adapter is shipped for them.
 
 From this source checkout:
 
@@ -20,8 +23,7 @@ uv sync
 ```
 
 The package is not published to a registry yet. For an artifact build, install the produced wheel
-with `pip install dist/*.whl` after `uv build`. Continue with the quickstart below to create the
-bootstrap file before running `setup`.
+with `pip install dist/*.whl` after `uv build`.
 
 ## Why you might want it
 
@@ -37,65 +39,49 @@ bootstrap file before running `setup`.
 
 ## Five-minute quickstart
 
-You need Docker and [uv](https://docs.astral.sh/uv/).
+You need [uv](https://docs.astral.sh/uv/). Nothing else — no Docker, no database server.
 
-**1. Start Postgres, then create the separate warehouse database used below.**
-
-```bash
-docker run -d --name etl-craft-pg -p 55432:5432 \
-  -e POSTGRES_USER=etl_craft -e POSTGRES_PASSWORD=etl_craft -e POSTGRES_DB=etl_craft \
-  postgres:16
-
-until docker exec etl-craft-pg pg_isready -U etl_craft -d etl_craft >/dev/null 2>&1; do sleep 1; done
-docker exec etl-craft-pg psql -v ON_ERROR_STOP=1 -U etl_craft -d postgres \
-  -c 'CREATE DATABASE analytics;'
-```
-
-**2. Describe your environment in a `.env` file.**
-
-```bash
-cat > .env <<'EOF'
-ETL_CRAFT_MODE=local
-ETL_CRAFT_SOURCE_TYPE=file
-ETL_CRAFT_SOURCE_PATH=./.env
-ETL_CRAFT_POSTGRES_PROFILE=dev
-ETL_CRAFT_POSTGRES_JDBC_URL=jdbc:postgresql://localhost:55432/etl_craft
-ETL_CRAFT_POSTGRES_USER=etl_craft
-ETL_CRAFT_POSTGRES_AUTH_MODE=password
-ETL_CRAFT_POSTGRES_DEV_SECRET=etl_craft
-
-# The warehouse your tables live in. Optional — needed only for SQL and
-# BUSINESS_RULES tasks. Postgres:
-ETL_CRAFT_WAREHOUSE_JDBC_URL=jdbc:postgresql://localhost:55432/analytics
-ETL_CRAFT_WAREHOUSE_USER=etl_craft
-ETL_CRAFT_WAREHOUSE_AUTH_MODE=password
-ETL_CRAFT_WAREHOUSE_DEV_SECRET=etl_craft
-ETL_CRAFT_WAREHOUSE_TABLE_FORMAT=native
-# ...or DuckDB, which is a file and has nothing to authenticate to:
-# ETL_CRAFT_WAREHOUSE_JDBC_URL=jdbc:duckdb:/data/warehouse.duckdb
-# ETL_CRAFT_WAREHOUSE_AUTH_MODE=none
-EOF
-chmod 600 .env
-```
-
-This is a local development secrets file. Keep it out of version control. In CI, export the
-same variables and use `uv run etl-craft setup --from-environment` instead.
-
-**3. Install the checkout and run `setup`. Once, and then whenever anything changes.**
+**1. Run `setup`. Once, and then whenever anything changes.**
 
 ```bash
 uv sync
-uv run etl-craft setup      # writes craft-connector.yml, then creates or migrates the schema
-uv run etl-craft doctor     # verifies every secret and connection
+uv run etl-craft setup      # writes craft-connector.yml and creates the SQLite Engine DB
+uv run etl-craft doctor     # verifies every connection
 ```
 
-`setup` is idempotent: the first run creates the canonical `craft-connector.yml`, and later
-runs update it and bring the Engine DB forward. There are no prompts, so the same input works in
-CI. Already have the settings exported in your environment? `uv run etl-craft setup
---from-environment` uses them directly.
+With nothing configured, `setup` creates `craft-connector.yml` and a SQLite Engine DB,
+`etl-craft-engine.db`, next to it. It is idempotent: later runs update the config and bring the
+Engine DB forward. There are no prompts, so the same command works in CI.
 
-It also prints the exact secret variable each profile expects, so you never discover the
-name from a later command failing.
+**2. Add a warehouse** (needed only for SQL and BUSINESS_RULES tasks). The simplest is DuckDB,
+which is also a file:
+
+```bash
+export WAREHOUSE_JDBC_URL=jdbc:duckdb:./warehouse.duckdb
+export WAREHOUSE_AUTH_MODE=none
+export ETL_CRAFT_WAREHOUSE_TABLE_FORMAT=native
+uv run etl-craft setup
+```
+
+**3. Going to production: use PostgreSQL for the Engine DB.** SQLite is one file on one
+machine: every Engine DB write is serialized, and an orchestrator worker on another host
+cannot open it at all. Point `setup` at Postgres instead, through a `.env` file (read
+automatically when it exists) or the environment:
+
+```bash
+ETL_CRAFT_SOURCE_TYPE=file
+ETL_CRAFT_SOURCE_PATH=./.env
+ENGINE_JDBC_URL=jdbc:postgresql://localhost:5432/etl_craft
+ENGINE_USER=etl_craft
+ENGINE_AUTH_MODE=password
+ENGINE_SECRET=change-me
+```
+
+Keep `.env` out of version control (`chmod 600` it). In CI, export the same variables and use
+`uv run etl-craft setup --from-environment`. `setup` prints the exact secret variable each
+profile expects. It never replaces an existing Postgres Engine DB with the SQLite default:
+re-running it without `ENGINE_JDBC_URL` against a Postgres deployment is an error, not a
+silent switch. See [docs/configuration.md](docs/configuration.md) for every setting.
 
 **4. Register a pipeline.** Pipeline creation is deliberately *not* a CLI verb — it is
 git-managed SQL, reviewed like any other change. See

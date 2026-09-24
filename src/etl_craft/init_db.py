@@ -17,10 +17,10 @@ carrying an *existing* database forward.
 
 from __future__ import annotations
 
-from sqlalchemy import bindparam, text
+from sqlalchemy import bindparam, inspect, text
 from sqlalchemy.engine import Engine
 
-from etl_craft.migrate import _split_statements
+from etl_craft.migrate import begin_ddl_transaction, statements_for
 from etl_craft.packaged_sql import packaged_schema_path, read_packaged_schema
 
 # Enough of the schema to tell "empty" from "already set up". Checking one
@@ -35,6 +35,11 @@ class InitDbError(Exception):
 
 def existing_engine_tables(engine: Engine) -> list[str]:
     """Return whichever engine tables already exist in this database."""
+    if engine.dialect.name == "sqlite":
+        # SQLite has no INFORMATION_SCHEMA; its own catalog is sqlite_master,
+        # which the inspector reads.
+        names = {name.lower(): name for name in inspect(engine).get_table_names()}
+        return sorted(names[t] for t in _SENTINEL_TABLES if t in names)
     with engine.connect() as conn:
         rows = conn.execute(
             text(
@@ -63,9 +68,11 @@ def init_db(engine: Engine, *, force: bool = False) -> int:
                 "--force if you are certain this one should be re-initialized."
             )
 
-    statements = _split_statements(read_packaged_schema())
+    dialect = engine.dialect.name
+    statements = statements_for(engine, read_packaged_schema(dialect))
     try:
         with engine.begin() as conn:
+            begin_ddl_transaction(conn)
             for statement in statements:
                 # exec_driver_sql, not execute(text(...)) — see the same
                 # change in migrate.apply_pending_migrations (E2-79). schema.sql
@@ -74,5 +81,5 @@ def init_db(engine: Engine, *, force: bool = False) -> int:
                 # none of _split_statements' quote awareness.
                 conn.exec_driver_sql(statement)
     except Exception as exc:
-        raise InitDbError(f"failed applying {packaged_schema_path().name}: {exc}") from exc
+        raise InitDbError(f"failed applying {packaged_schema_path(dialect).name}: {exc}") from exc
     return len(statements)

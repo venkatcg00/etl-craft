@@ -165,12 +165,15 @@ def fetch_recorded_versions(conn: Connection) -> dict[tuple[str, str], int]:
     """
     rows = conn.execute(
         text(
-            "SELECT DISTINCT ON (d.TASK_ID) p.PIPELINE_CODE AS pipeline_code, "
+            # The latest version per task. A correlated MAX rather than
+            # Postgres's DISTINCT ON, which SQLite does not have (2026-09-24).
+            "SELECT p.PIPELINE_CODE AS pipeline_code, "
             "t.TASK_CODE AS task_code, d.VERSION AS version "
             "FROM AUD_TASK_DOCUMENTATION d "
             "JOIN CFG_TASKS t ON t.TASK_ID = d.TASK_ID "
             "JOIN CFG_PIPELINES p ON p.PIPELINE_ID = t.PIPELINE_ID "
-            "ORDER BY d.TASK_ID, d.VERSION DESC"
+            "WHERE d.VERSION = (SELECT MAX(d2.VERSION) FROM AUD_TASK_DOCUMENTATION d2 "
+            "WHERE d2.TASK_ID = d.TASK_ID)"
         )
     ).all()
     return {(r.pipeline_code, r.task_code): int(r.version) for r in rows}

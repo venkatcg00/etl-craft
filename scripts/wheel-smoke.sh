@@ -41,7 +41,11 @@ python - "$WORK/dist" <<'PY'
 import sys, zipfile, pathlib
 wheel = next(pathlib.Path(sys.argv[1]).glob("*.whl"))
 names = zipfile.ZipFile(wheel).namelist()
-required = ["etl_craft/sql/schema.sql", "etl_craft/py.typed"]
+required = [
+    "etl_craft/sql/schema.sql",
+    "etl_craft/sql/schema_sqlite.sql",
+    "etl_craft/py.typed",
+]
 missing = [r for r in required if r not in names]
 if missing:
     sys.exit(f"wheel is missing {missing}")
@@ -56,6 +60,18 @@ echo "==> installing into a clean venv outside the checkout"
 uv venv "$WORK/venv" -q
 uv pip install -q --python "$WORK/venv/bin/python" "$WORK"/dist/*.whl
 EC="$WORK/venv/bin/etl-craft"
+
+echo "==> zero-config setup: the default SQLite Engine DB, with nothing set"
+mkdir -p "$WORK/zero-config"
+(
+    cd "$WORK/zero-config"
+    env -u ENGINE_JDBC_URL -u WAREHOUSE_JDBC_URL "$EC" setup >/dev/null
+    test -f etl-craft-engine.db || { echo "setup created no SQLite Engine DB"; exit 1; }
+    "$EC" setup | grep -qi "already current"
+    "$EC" doctor | grep -q "SQLite Engine DB"
+    "$EC" list >/dev/null
+    "$EC" validate >/dev/null
+)
 
 echo "==> preparing a disposable database"
 psql_admin -q -c "DROP DATABASE IF EXISTS $DB_NAME" -c "CREATE DATABASE $DB_NAME"

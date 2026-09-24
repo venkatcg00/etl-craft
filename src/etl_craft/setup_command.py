@@ -81,6 +81,12 @@ def run_setup(
     before = _read_raw_yaml(config_path) if existed else {}
 
     source = None if from_environment else (Path(env_path) if env_path else DEFAULT_ENV_FILE)
+    if source == DEFAULT_ENV_FILE and env_path is None and not source.is_file():
+        # [DEVIATION, 2026-09-24] No settings file and none asked for: read the
+        # environment, where nothing needs to be set at all -- every value has
+        # a default, down to a SQLite Engine DB. A file that was named
+        # explicitly and is missing is still an error below.
+        source = None
     if source is not None and not source.is_file():
         raise ConfigError(
             f"no settings file at {source} — create one (see "

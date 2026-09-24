@@ -24,7 +24,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConfigError, ConnectorConfig, resolve_secret
-from etl_craft.db import build_engine
+from etl_craft.db import build_engine, is_sqlite_url, resolve_sqlite_path
 from etl_craft.warehouse import (
     READ_ONLY_WAIT_SECONDS,
     is_in_memory,
@@ -71,7 +71,32 @@ def _engine_db_check(config: ConnectorConfig) -> CheckResult:
         # connections open blocks anything trying to drop the database.
         if engine is not None:
             engine.dispose()
+    if is_sqlite_url(config.postgres.active.jdbc_url):
+        path = resolve_sqlite_path(config.postgres.active.jdbc_url, config.config_path)
+        return CheckResult("Engine DB connection", True, f"SQLite file {path}")
     return CheckResult("Engine DB connection", True, f"connected as {config.postgres.active.user}")
+
+
+def _engine_db_kind_check(config: ConnectorConfig) -> list[CheckResult]:
+    """Say plainly what a SQLite Engine DB can and cannot do.
+
+    [ADDITION, 2026-09-24] SQLite is the default Engine DB and PostgreSQL the
+    recommended production one. The difference matters most in one case:
+    remote orchestration, where tasks may run on other machines that cannot
+    open this file at all.
+    """
+    if not is_sqlite_url(config.postgres.active.jdbc_url):
+        return []
+    detail = (
+        "SQLite Engine DB: good for local development and single-machine deployments. "
+        "Engine DB writes are serialized; use PostgreSQL for production."
+    )
+    if config.mode == "orchestrator":
+        detail += (
+            " Mode is remote: every orchestrator worker must run on this machine, because "
+            "a worker elsewhere cannot open this file -- use PostgreSQL otherwise."
+        )
+    return [CheckResult("Engine DB kind", True, detail)]
 
 
 def _warehouse_check(config: ConnectorConfig) -> list[CheckResult]:
@@ -183,16 +208,18 @@ def _email_check(config: ConnectorConfig) -> list[CheckResult]:
 
 def run_checks(config: ConnectorConfig) -> list[CheckResult]:
     """Run every configuration check and return all results, failures included."""
-    results = [
+    results: list[CheckResult] = [
         CheckResult("Execution mode", True, config.mode),
         CheckResult(
             "Secret source",
             True,
             f"{config.source.type}" + (f" ({config.source.path})" if config.source.path else ""),
         ),
-        _secret_check(config, "Engine DB", config.postgres.active),
-        _engine_db_check(config),
     ]
+    if config.postgres.active.auth_mode != "none":
+        results.append(_secret_check(config, "Engine DB", config.postgres.active))
+    results.append(_engine_db_check(config))
+    results.extend(_engine_db_kind_check(config))
     results.extend(_warehouse_check(config))
     results.extend(_email_check(config))
     return results

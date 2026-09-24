@@ -39,10 +39,11 @@ from urllib.parse import parse_qsl, urlencode
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, Engine
-from sqlalchemy.exc import OperationalError, SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectionProfile, ConnectorConfig, resolve_secret
 from etl_craft.db import ConnectionError_
+from etl_craft.locks import LockTimeout, engine_lock
 
 PREFERRED_CONNECTION_FIELDS = {
     "databricks": ("jdbc_url", "catalog", "schema", "token"),
@@ -739,23 +740,20 @@ def single_writer_lock(
         yield
         return
 
-    with engine_db.begin() as lock_conn:
-        if wait_seconds:
-            # No bind parameter: SET takes a literal. wait_seconds is an int
-            # from config/limits, never user text.
-            lock_conn.execute(text(f"SET LOCAL lock_timeout = '{int(wait_seconds)}s'"))
-        try:
-            lock_conn.execute(
-                text("SELECT pg_advisory_xact_lock(:key)"),
-                {"key": _WAREHOUSE_ADVISORY_LOCK_KEY},
-            )
-        except OperationalError as exc:
-            raise ConnectionError_(
-                f"timed out after {wait_seconds}s waiting for the warehouse: the configured "
-                "warehouse allows only one writing process at a time, and another task is "
-                "still using it"
-            ) from exc
-        yield
+    # [DEVIATION, 2026-09-24] Through locks.engine_lock rather than a literal
+    # pg_advisory_xact_lock, so a SQLite Engine DB queues the same way (with a
+    # file lock beside the database, since SQLite has no advisory locks).
+    try:
+        with engine_lock(
+            engine_db, _WAREHOUSE_ADVISORY_LOCK_KEY, "warehouse", wait_seconds=wait_seconds
+        ):
+            yield
+    except LockTimeout as exc:
+        raise ConnectionError_(
+            f"timed out after {wait_seconds}s waiting for the warehouse: the configured "
+            "warehouse allows only one writing process at a time, and another task is "
+            "still using it"
+        ) from exc
 
 
 # Trino catalogs whose connector genuinely stores Iceberg tables. Trino is the

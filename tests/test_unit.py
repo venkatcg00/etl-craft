@@ -2774,10 +2774,15 @@ def test_cli_setup_reads_the_environment_when_asked(tmp_path, monkeypatch, capsy
     assert "ENGINE_SECRET" in capsys.readouterr().out
 
 
-def test_cli_setup_without_any_settings_source_says_so(tmp_path, monkeypatch, capsys):
+def test_cli_setup_with_a_named_settings_file_that_is_missing_says_so(
+    tmp_path, monkeypatch, capsys
+):
+    # [2026-09-24] A bare `setup` with no .env now reads the environment (and
+    # defaults to a SQLite Engine DB -- see test_sqlite_engine.py); a file that
+    # was asked for by name and is not there is still an error.
     monkeypatch.chdir(tmp_path)
 
-    exit_code = cli_main(["setup"])
+    exit_code = cli_main(["setup", "--env", "missing.env"])
 
     assert exit_code == 2
     err = capsys.readouterr().err
@@ -3295,21 +3300,36 @@ def test_configure_from_env_missing_env_file_raises(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "key",
+    ("key", "message"),
     [
-        "ETL_CRAFT_MODE",
-        "ETL_CRAFT_SOURCE_TYPE",
-        "ETL_CRAFT_ENGINE_PROFILE",
-        "ENGINE_JDBC_URL",
-        "ENGINE_USER",
-        "ENGINE_AUTH_MODE",
+        # Credentials without a URL: a PostgreSQL Engine DB whose URL was
+        # forgotten, never silently the SQLite default.
+        ("ENGINE_JDBC_URL", "ENGINE_JDBC_URL is required"),
+        ("ENGINE_USER", "ENGINE_USER is required"),
+        ("ENGINE_AUTH_MODE", "ENGINE_AUTH_MODE is required"),
     ],
 )
-def test_configure_from_env_requires_each_field(tmp_path, key):
+def test_configure_from_env_requires_each_postgres_engine_field(tmp_path, key, message):
     lines = [line for line in VALID_ENV.strip().splitlines() if not line.startswith(key)]
     env_path = _write_env(tmp_path, "\n".join(lines))
-    with pytest.raises(ConfigError):
+    with pytest.raises(ConfigError, match=message):
         configure_from_env(env_path, tmp_path / "craft-connector.yml")
+
+
+@pytest.mark.parametrize(
+    ("key", "section", "field", "default"),
+    [
+        ("ETL_CRAFT_MODE", "Orchestration", "Mode", "local"),
+        ("ETL_CRAFT_SOURCE_TYPE", "Secrets", "Source_type", "environment"),
+        ("ETL_CRAFT_ENGINE_PROFILE", "Engine", "Profile", "dev"),
+    ],
+)
+def test_configure_from_env_defaults_the_general_settings(tmp_path, key, section, field, default):
+    lines = [line for line in VALID_ENV.strip().splitlines() if not line.startswith(key)]
+    env_path = _write_env(tmp_path, "\n".join(lines))
+    configure_from_env(env_path, tmp_path / "craft-connector.yml")
+    raw = yaml.safe_load((tmp_path / "craft-connector.yml").read_text(encoding="utf-8"))
+    assert raw[section][field] == default
 
 
 def test_configure_from_env_rejects_invalid_mode(tmp_path):

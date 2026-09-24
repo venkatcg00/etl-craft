@@ -20,7 +20,7 @@ The canonical top-level sections are:
 |---|---|
 | `Orchestration` | execution mode, time limit, and local parallelism |
 | `Secrets` | where named values are read from |
-| `Engine` | the required PostgreSQL Engine DB connection |
+| `Engine` | the required Engine DB connection: SQLite (default) or PostgreSQL (production) |
 | `Warehouse` | the optional data warehouse connection and table format |
 | `Cloning` | optional Engine DB mirroring into the warehouse |
 | `Dag_defaults` | defaults written into the Airflow-shaped descriptor |
@@ -50,6 +50,36 @@ They are selectors, so they are read from the process environment even when `Sec
 is `file`. When a tier-specific variable is present, it takes precedence over the plain name for
 that tier.
 
+### A SQLite Engine DB
+
+The default Engine DB is a SQLite file. It has no user and no secret, so its URL is written into
+the manifest directly instead of through `Variables`:
+
+```yaml
+Engine:
+  Profile: dev
+  Jdbc_url: jdbc:sqlite:etl-craft-engine.db
+```
+
+A relative path is resolved from the directory holding `craft-connector.yml`, never the current
+directory, so every command and every spawned task opens the same file. `jdbc:sqlite::memory:` is
+refused: each task runs in its own process and would see an empty database. A literal `Jdbc_url`
+is accepted for SQLite only. Any other Engine DB goes through `Variables`, and an Engine DB
+profile must use `auth_mode: none` exactly when its URL is `jdbc:sqlite:`.
+
+SQLite is meant for local development and single-machine deployments. Use PostgreSQL in
+production:
+
+- SQLite serializes every write to the Engine DB. Tasks wait for each other's short audit
+  writes; the engine sets a 60-second busy timeout, so they queue instead of failing.
+- The file must be on the machine that runs every task. An orchestrator whose workers run on other
+  hosts cannot use it, and `doctor` says so under `Mode: remote`.
+- SQLite has no database users, so `CREATED_BY`/`UPDATED_BY` in the `CFG_` tables default to
+  `etl-craft` unless your insert scripts supply a value. PostgreSQL records the connected role.
+
+Migration and warehouse-queue locks, which are Postgres advisory locks on a PostgreSQL Engine DB,
+become OS file locks beside the SQLite file (`<file>.migrate.lock`, `<file>.warehouse.lock`).
+
 `Secrets.Source_type` is either `environment` or `file`. For `file`,
 `Secrets.Source_path` is required. The file reader accepts `KEY=VALUE` lines, ignores blank lines
 and whole-line `#` comments, and removes one matching pair of surrounding single or double
@@ -63,8 +93,17 @@ referenced variable and use `Source_type: environment`.
 ## Bootstrap with `setup`
 
 `etl-craft setup` takes bootstrap variables from `./.env`, `--env FILE`, or the process
-environment with `--from-environment`. It writes the canonical manifest, then creates or upgrades
-the Engine DB when it can connect.
+environment with `--from-environment`; with no `--env` and no `./.env`, it reads the process
+environment. It writes the canonical manifest, then creates or upgrades the Engine DB when it can
+connect.
+
+Every bootstrap value has a default: `ETL_CRAFT_MODE=local`, `ETL_CRAFT_SOURCE_TYPE=environment`,
+`ETL_CRAFT_ENGINE_PROFILE=dev`, and, with no `ENGINE_JDBC_URL`, the SQLite Engine DB
+`jdbc:sqlite:etl-craft-engine.db`. So `etl-craft setup` with nothing set produces a working local
+deployment. The SQLite default applies only to a manifest with no Engine DB yet, or one already on
+SQLite. Against a manifest whose Engine DB is PostgreSQL, a missing `ENGINE_JDBC_URL` is an error:
+`setup` never swaps a production Engine DB for an empty file. For PostgreSQL, set
+`ENGINE_JDBC_URL`, `ENGINE_USER`, `ENGINE_AUTH_MODE` and the secret.
 
 The bootstrap input is a mix of a few `ETL_CRAFT_*` settings (`ETL_CRAFT_MODE`,
 `ETL_CRAFT_SOURCE_TYPE`, `ETL_CRAFT_ENGINE_PROFILE`, `ETL_CRAFT_WAREHOUSE_PROFILE`,
@@ -116,7 +155,8 @@ single-task command, but this repository does not ship an adapter for them.
 
 ## Connections, warehouses, and formats
 
-The Engine DB is always PostgreSQL. A warehouse is optional until a deployment runs `SQL` or
+The Engine DB is SQLite (the default, for local and single-machine use) or PostgreSQL (the
+recommended production Engine DB). A warehouse is optional until a deployment runs `SQL` or
 `BUSINESS_RULES` tasks.
 
 | Target | Status | Supported authentication | Storage notes |
@@ -148,7 +188,7 @@ volume instead — useful when another engine needs to read the same physical fi
 
 Authentication is deliberately narrow:
 
-- Engine DB: `password` or `key_file`.
+- Engine DB: `password` or `key_file` for PostgreSQL; `none` for SQLite, and only for SQLite.
 - Warehouse: `none`, `password`, `key_file`, or a static `token`.
 - Email: `none` or `password`.
 

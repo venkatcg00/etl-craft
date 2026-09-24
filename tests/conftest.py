@@ -10,7 +10,13 @@ orchestration run. See docker-compose.yml / Makefile (`make test`) to
 bring one up.
 """
 
+import atexit
 import os
+import shutil
+import tempfile
+import time
+from datetime import UTC, datetime
+from pathlib import Path
 from urllib.parse import parse_qsl, urlencode
 
 import pytest
@@ -27,6 +33,136 @@ from etl_craft.warehouse import (
 
 TEST_DATABASE_URL_VAR = "ETL_CRAFT_TEST_DATABASE_URL"
 DEFAULT_TEST_DATABASE_URL = "postgresql+psycopg://etl_craft:etl_craft@localhost:55432/etl_craft"
+
+# [ADDITION, 2026-09-24] Which Engine DB the suite's own fixtures use. SQLite
+# became the default Engine DB, so the same suite runs against it with
+# ETL_CRAFT_TEST_ENGINE=sqlite (`make test-sqlite-engine`): the Engine DB
+# becomes a throwaway SQLite file, while every [Warehouse] a test configures
+# stays exactly where that test put it.
+ENGINE_KIND = os.environ.get("ETL_CRAFT_TEST_ENGINE", "postgres").lower()
+SQLITE_ENGINE = ENGINE_KIND == "sqlite"
+if SQLITE_ENGINE:
+    import etl_craft.db as _engine_db_module
+
+    # In-process only: a test that holds an uncommitted pg_conn write while the
+    # code under test writes on another connection is a harness shape SQLite
+    # can only answer by waiting. Fail it in seconds rather than a minute.
+    # Spawned task subprocesses keep the real 60s, where waiting is correct.
+    _engine_db_module.SQLITE_BUSY_TIMEOUT_MS = 3_000
+    _sqlite_engine_dir = tempfile.mkdtemp(prefix="etl-craft-engine-")
+    atexit.register(shutil.rmtree, _sqlite_engine_dir, ignore_errors=True)
+    SQLITE_ENGINE_PATH = Path(_sqlite_engine_dir) / "engine.db"
+    ENGINE_JDBC_URL = f"jdbc:sqlite:{SQLITE_ENGINE_PATH}"
+    ENGINE_USER = ""
+    ENGINE_AUTH_MODE = "none"
+else:
+    ENGINE_JDBC_URL = "jdbc:postgresql://localhost:55432/etl_craft"
+    ENGINE_USER = "etl_craft"
+    ENGINE_AUTH_MODE = "password"
+
+# [ADDITION, 2026-09-24] Tests that exercise the *Postgres* Engine DB specifically,
+# skipped under ETL_CRAFT_TEST_ENGINE=sqlite. Each was checked by hand: none is an engine
+# behaviour SQLite gets wrong, each is a test built on a Postgres-only premise.
+_WAREHOUSE = (
+    "uses the Engine DB fixture as its Postgres warehouse "
+    "(creates or reads warehouse tables through it)"
+)
+_MIGRATIONS = "drives Postgres migration files, Postgres DDL, or a disposable Postgres database"
+_ROLE = "asserts CREATED_BY is the connected Postgres role; SQLite has no users"
+_SECRET = "asserts the Engine DB secret check, which a SQLite Engine DB has no secret for"
+_CLONING = "clones between two Postgres databases; the engine-is-warehouse guard is Postgres-shaped"
+_TRINO_FORK = (
+    "Trino-warehouse tests fork from the pytest process, which deadlocks intermittently here; "
+    "covered by the Postgres-engine run"
+)
+POSTGRES_ENGINE_ONLY: dict[str, str] = {
+    "test_apply_pending_migrations_applies_in_order_and_records_them": _MIGRATIONS,
+    "test_apply_pending_migrations_handles_a_colon_in_a_string_literal": _MIGRATIONS,
+    "test_apply_pending_migrations_stops_and_does_not_record_a_failed_file": _MIGRATIONS,
+    "test_changed_applied_file_fails_before_later_project_migrations_run": _MIGRATIONS,
+    "test_cli_migrate_applies_the_real_migrations_directory_and_is_idempotent": _MIGRATIONS,
+    "test_init_db_creates_the_schema_and_then_refuses": _MIGRATIONS,
+    "test_legacy_engine_records_are_adopted_without_reapplying_them": _MIGRATIONS,
+    "test_mark_packaged_migrations_applied_leaves_a_teams_own_migration_pending": _MIGRATIONS,
+    "test_migrate_creates_schema_migrations_when_the_table_is_absent": _MIGRATIONS,
+    "test_project_stream_does_not_mask_packaged_stream_or_same_filename": _MIGRATIONS,
+    "test_setup_brings_a_real_database_up_then_keeps_it_current": _MIGRATIONS,
+    "test_business_rules_flags_deactivates_and_skips_rerun": _WAREHOUSE,
+    "test_business_rules_force_scans_all_data": _WAREHOUSE,
+    "test_business_rules_one_bad_rule_in_a_wave_does_not_block_its_wave_mate": _WAREHOUSE,
+    "test_business_rules_same_sequence_number_rules_run_as_one_wave": _WAREHOUSE,
+    "test_cli_validate_ok_with_warehouse_configured_and_matching_pk": _WAREHOUSE,
+    "test_fetch_columns_accepts_catalog_qualified_stage": _WAREHOUSE,
+    "test_hash_expression_yields_the_same_32_hex_chars_on_both_warehouses": _WAREHOUSE,
+    "test_sql_actions_assign_row_ids_on_an_iceberg_backed_warehouse": _WAREHOUSE,
+    "test_sql_create_table_stamps_pipeline_run_id_and_counts": _WAREHOUSE,
+    "test_sql_create_table_target_passes_validates_own_primary_key_check": _WAREHOUSE,
+    "test_sql_delete_rows_hard_and_soft": _WAREHOUSE,
+    "test_sql_delete_rows_hard_delete_ignores_missing_delete_flag": _WAREHOUSE,
+    "test_sql_delete_rows_soft_delete_missing_delete_flag_fails_clearly": _WAREHOUSE,
+    "test_sql_drop_table_refused_without_create_table_sibling": _WAREHOUSE,
+    "test_sql_drop_table_succeeds_with_create_table_sibling": _WAREHOUSE,
+    "test_sql_overwrite_table_creates_a_missing_target": _WAREHOUSE,
+    "test_sql_overwrite_table_missing_audit_column_fails_clearly": _WAREHOUSE,
+    "test_sql_overwrite_table_truncates_and_reinserts": _WAREHOUSE,
+    "test_sql_scd1_merge_dedupes_by_declared_order_across_two_runs": _WAREHOUSE,
+    "test_sql_scd1_merge_inserts_updates_and_skips_unchanged": _WAREHOUSE,
+    "test_sql_scd1_merge_missing_audit_column_fails_even_with_schema_evolution": _WAREHOUSE,
+    "test_sql_scd1_merge_rejects_duplicate_merge_keys_before_touching_the_target": _WAREHOUSE,
+    "test_sql_scd1_preserve_target_nulls_and_hashes": _WAREHOUSE,
+    "test_sql_scd2_merge_converges_for_a_key_left_with_no_active_row": _WAREHOUSE,
+    "test_sql_scd2_merge_deactivates_and_inserts_new_version": _WAREHOUSE,
+    "test_sql_scd2_merge_keeps_history_with_a_surrogate_primary_key": _WAREHOUSE,
+    "test_sql_schema_evolution_enabled_adds_column_at_right_position": _WAREHOUSE,
+    "test_sql_setup_table_infers_audit_columns_from_scd2_sibling": _WAREHOUSE,
+    "test_sql_setup_table_no_sibling_falls_back_to_no_audit_columns": _WAREHOUSE,
+    "test_validate_business_rule_key_must_exist_on_the_target": _WAREHOUSE,
+    "test_validate_business_rule_key_need_not_be_the_primary_key": _WAREHOUSE,
+    "test_validate_business_rule_keys_composite_pk_reported": _WAREHOUSE,
+    "test_validate_business_rule_keys_matching_single_column_pk_is_ok": _WAREHOUSE,
+    "test_validate_business_rule_keys_no_pk_reported": _WAREHOUSE,
+    "test_validate_business_rule_keys_table_does_not_exist": _WAREHOUSE,
+    "test_cli_doctor_reports_failures_with_exit_1": _SECRET,
+    "test_doctor_reports_every_check_and_names_a_missing_secret": _SECRET,
+    "test_fetch_pipeline_detail": _ROLE,
+    "test_fetch_pipeline_detail_nullable_fields_default_none": _ROLE,
+    "test_generate_pipeline_dag_falls_back_to_global_orchestrator_config": _ROLE,
+    "test_generate_pipeline_dag_linear_chain": _ROLE,
+    "test_generate_pipeline_dag_pipeline_level_override_wins": _ROLE,
+    "test_run_cloning_creates_generic_target_table_on_a_different_postgres_database": _CLONING,
+    "test_run_cloning_refuses_when_warehouse_is_the_same_database_as_engine": _CLONING,
+}
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip the Postgres-premised tests when the Engine DB fixture is SQLite."""
+    if not SQLITE_ENGINE:
+        return
+    for item in items:
+        if "trino_engine" in getattr(item, "fixturenames", ()):
+            # Open item, not a verdict: forking a task child from this long-
+            # lived, heavily threaded pytest process intermittently deadlocks
+            # the child inside the Trino HTTP client under this run, and the
+            # orphaned child then blocks interpreter exit. The CLI forks from a
+            # fresh single-threaded process, and these tests pass alone on both
+            # Engine DBs and in the Postgres-engine run, which covers them.
+            item.add_marker(pytest.mark.skip(reason=f"SQLite Engine DB run: {_TRINO_FORK}"))
+            continue
+        reason = POSTGRES_ENGINE_ONLY.get(item.originalname)
+        if reason:
+            item.add_marker(pytest.mark.skip(reason=f"SQLite Engine DB run: {reason}"))
+
+
+def engine_profile() -> ConnectionProfile:
+    """Return the Engine DB profile every test config should use."""
+    return ConnectionProfile(
+        section="POSTGRES",
+        name="dev",
+        jdbc_url=ENGINE_JDBC_URL,
+        user=ENGINE_USER,
+        auth_mode=ENGINE_AUTH_MODE,
+    )
+
 
 # [DEVIATION, 2026-09-20] Replaces the ClickHouse fixture. DuckDB is the
 # second supported warehouse now, and being embedded it needs no container at
@@ -47,7 +183,16 @@ def _reachable(url: str) -> bool:
 
 @pytest.fixture(scope="session")
 def postgres_engine() -> Engine:
-    """Build a real Postgres engine with sql/schema.sql applied — skips if unreachable."""
+    """Build a real Postgres engine with sql/schema.sql applied — skips if unreachable.
+
+    Under ETL_CRAFT_TEST_ENGINE=sqlite this is the SQLite Engine DB instead,
+    built the way `etl-craft init-db` builds one.
+    """
+    os.environ.setdefault("ETL_CRAFT_POSTGRES_DEV_SECRET", "etl_craft")
+    os.environ.setdefault("ETL_CRAFT_WAREHOUSE_DEV_SECRET", "etl_craft")
+    if SQLITE_ENGINE:
+        yield _sqlite_engine_db()
+        return
     url = os.environ.get(TEST_DATABASE_URL_VAR, DEFAULT_TEST_DATABASE_URL)
     if not _reachable(url):
         pytest.skip(
@@ -70,6 +215,37 @@ def postgres_engine() -> Engine:
     engine = create_engine(url)
     yield engine
     engine.dispose()
+
+
+def _sqlite_engine_db() -> Engine:
+    from etl_craft.config import (
+        CloningConfig,
+        ConnectionSection,
+        ConnectorConfig,
+        SourceConfig,
+    )
+    from etl_craft.db import build_engine
+    from etl_craft.init_db import existing_engine_tables, init_db
+
+    config = ConnectorConfig(
+        mode="local",
+        source=SourceConfig(type="environment", path=None),
+        postgres=ConnectionSection(active_profile="dev", profiles={"dev": engine_profile()}),
+        cloning=CloningConfig(enabled=False, scope="cfg"),
+    )
+    engine = build_engine(config)
+    if not existing_engine_tables(engine):
+        init_db(engine)
+        # A fresh file restarts every id at 1 each run, while the persistent
+        # warehouses keep tables named after task_run_ids (etl_stage_<id>).
+        # Start from the clock so ids only grow across runs, as they do in the
+        # long-lived Postgres test database.
+        with engine.begin() as conn:
+            conn.execute(
+                text("INSERT INTO sqlite_sequence (name, seq) VALUES ('AUD_TASK_RUN_LOG', :seq)"),
+                {"seq": int(time.time() * 1000)},
+            )
+    return engine
 
 
 # [ADDITION, 2026-09-22] Databricks and Snowflake, gated on credentials being
@@ -639,13 +815,14 @@ def insert_committed_pipeline_run(
         return conn.execute(
             text(
                 "INSERT INTO AUD_PIPELINES_RUN_LOG (PIPELINE_ID, STATUS, START_DATE, END_DATE) "
-                "VALUES (:pipeline_id, :status, COALESCE(:start_date, now()), :end_date) "
+                "VALUES (:pipeline_id, :status, :start_date, :end_date) "
                 "RETURNING PIPELINE_RUN_ID"
             ),
             {
                 "pipeline_id": pipeline_id,
                 "status": status,
-                "start_date": start_date,
+                # Bound, not SQL now(): portable to a SQLite Engine DB.
+                "start_date": start_date or datetime.now(UTC),
                 "end_date": end_date,
             },
         ).scalar_one()
@@ -666,13 +843,13 @@ def insert_committed_task_run(
             text(
                 "INSERT INTO AUD_TASK_RUN_LOG (TASK_ID, PIPELINE_RUN_ID, STATUS, START_DATE, "
                 "TARGET_COUNT) VALUES (:task_id, :pipeline_run_id, :status, "
-                "COALESCE(:start_date, now()), :target_count) RETURNING TASK_RUN_ID"
+                ":start_date, :target_count) RETURNING TASK_RUN_ID"
             ),
             {
                 "task_id": task_id,
                 "pipeline_run_id": pipeline_run_id,
                 "status": status,
-                "start_date": start_date,
+                "start_date": start_date or datetime.now(UTC),
                 "target_count": target_count,
             },
         ).scalar_one()
@@ -724,7 +901,7 @@ def insert_committed_cross_pipeline_task_dependency(
         ).scalar_one()
 
 
-CRAFT_CONNECTOR_YAML = """
+CRAFT_CONNECTOR_YAML = f"""
 Execution:
   Mode: local
 
@@ -735,9 +912,9 @@ Postgres:
   Active_profile: dev
   Profiles:
     dev:
-      jdbc_url: jdbc:postgresql://localhost:55432/etl_craft
-      user: etl_craft
-      auth_mode: password
+      jdbc_url: {ENGINE_JDBC_URL}
+      user: {ENGINE_USER}
+      auth_mode: {ENGINE_AUTH_MODE}
 
 Cloning:
   Enabled: false

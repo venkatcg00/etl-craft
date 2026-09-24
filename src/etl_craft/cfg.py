@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import difflib
+import json
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -514,6 +515,9 @@ def fetch_pipeline_detail(conn: Connection, pipeline_id: int) -> PipelineDetail:
         {"pipeline_id": pipeline_id},
     ).one()
     params = row.pipeline_parameters or {}
+    if isinstance(params, str):
+        # A SQLite Engine DB stores the JSONB column as JSON text (2026-09-24).
+        params = json.loads(params)
     return PipelineDetail(
         pipeline_code=row.pipeline_code,
         pipeline_name=row.pipeline_name,
@@ -674,15 +678,18 @@ def fetch_tasks_missing_source_or_target(conn: Connection) -> list[TaskLineageGa
     rows = conn.execute(
         text(
             "SELECT p.PIPELINE_CODE AS pipeline_code, t.TASK_CODE AS task_code, "
-            "COALESCE(bool_or(tp.PARAMETER_NAME = 'SOURCE_OBJECT'), FALSE) AS has_source, "
-            "COALESCE(bool_or(tp.PARAMETER_NAME = 'TARGET_OBJECT'), FALSE) AS has_target "
+            # MAX(CASE ...) rather than Postgres's bool_or (2026-09-24): the
+            # same answer on both Engine DBs, and it sidesteps the NULL
+            # trap described above by construction -- an all-NULL group is 0.
+            "MAX(CASE WHEN tp.PARAMETER_NAME = 'SOURCE_OBJECT' THEN 1 ELSE 0 END) AS has_source, "
+            "MAX(CASE WHEN tp.PARAMETER_NAME = 'TARGET_OBJECT' THEN 1 ELSE 0 END) AS has_target "
             "FROM CFG_TASKS t "
             "JOIN CFG_PIPELINES p ON p.PIPELINE_ID = t.PIPELINE_ID "
             "LEFT JOIN CFG_TASK_PARAMETERS tp ON tp.TASK_ID = t.TASK_ID AND tp.ACTIVE_FLAG = 'Y' "
             "WHERE t.ACTIVE_FLAG = 'Y' AND p.ACTIVE_FLAG = 'Y' "
             "GROUP BY t.TASK_ID, p.PIPELINE_CODE, t.TASK_CODE "
-            "HAVING NOT COALESCE(bool_or(tp.PARAMETER_NAME = 'SOURCE_OBJECT'), FALSE) "
-            "OR NOT COALESCE(bool_or(tp.PARAMETER_NAME = 'TARGET_OBJECT'), FALSE) "
+            "HAVING MAX(CASE WHEN tp.PARAMETER_NAME = 'SOURCE_OBJECT' THEN 1 ELSE 0 END) = 0 "
+            "OR MAX(CASE WHEN tp.PARAMETER_NAME = 'TARGET_OBJECT' THEN 1 ELSE 0 END) = 0 "
             "ORDER BY p.PIPELINE_CODE, t.TASK_CODE"
         )
     ).all()

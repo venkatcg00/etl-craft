@@ -381,6 +381,16 @@ def _dispatch_with_crash_detection(engine: Engine, ctx: TaskExecutionContext) ->
     """Fork the handler dispatch into a child process; write FAILED if it dies unannounced."""
     mp_ctx = multiprocessing.get_context("fork")
     process = mp_ctx.Process(target=_dispatch_and_record, args=(ctx,))
+    if engine.dialect.name == "sqlite":
+        # [ADDITION, 2026-09-24] SQLite forbids carrying an open connection
+        # across fork(): its per-process lock and mutex state is copied into
+        # the child, which then opens the same file and can deadlock on it.
+        # Found as an intermittent hang of a forked task child, never seen on
+        # Postgres. Nothing is checked out here -- every `with` above has
+        # closed -- so disposing only closes idle pooled connections, and the
+        # parent reopens one lazily after the child exits. The child already
+        # builds its own engine (_dispatch_and_record).
+        engine.dispose()
     process.start()
 
     # [ADDITION, 2026-09-20, E2-17] Bounded. An unbounded join() on a hung

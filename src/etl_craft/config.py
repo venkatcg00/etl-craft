@@ -94,7 +94,12 @@ VALID_SOURCE_TYPES = frozenset({"file", "environment"})
 # validation uses the narrower section-specific sets below, so it cannot accept
 # a mode whose connector has no implementation.
 VALID_AUTH_MODES = frozenset({"none", "password", "token", "sso", "key_file"})
-VALID_ENGINE_AUTH_MODES = frozenset({"password", "key_file"})
+# [DEVIATION, 2026-09-24] `none` joined the Engine DB's vocabulary, for a
+# SQLite Engine DB -- the default one -- which is a file with nobody to
+# authenticate as. It is accepted only together with a jdbc:sqlite: URL, and a
+# SQLite URL only with it (_check_engine_profile), so a Postgres Engine DB can
+# never end up with no credentials by accident.
+VALID_ENGINE_AUTH_MODES = frozenset({"none", "password", "key_file"})
 VALID_WAREHOUSE_AUTH_MODES = frozenset({"none", "password", "key_file", "token"})
 # Modes where a `user` is not required in the profile.
 #
@@ -644,7 +649,7 @@ def _parse_profile(
             f"auth_mode in {sorted(valid_auth_modes)}" + (", and user" if needs_user else "")
         )
     extra = {k: v for k, v in raw.items() if k not in {"jdbc_url", "user", "auth_mode"}}
-    return ConnectionProfile(
+    profile = ConnectionProfile(
         section=section_name,
         name=profile_name,
         jdbc_url=jdbc_url,
@@ -652,6 +657,28 @@ def _parse_profile(
         auth_mode=auth_mode,
         extra=extra,
     )
+    _check_engine_profile(profile, path)
+    return profile
+
+
+SQLITE_ENGINE_URL_PREFIX = "jdbc:sqlite:"
+
+
+def _check_engine_profile(profile: ConnectionProfile, path: Path) -> None:
+    """Reject an Engine DB profile whose URL and auth_mode disagree about SQLite."""
+    if profile.section not in {"POSTGRES", "ENGINE"}:
+        return
+    is_sqlite = profile.jdbc_url.strip().lower().startswith(SQLITE_ENGINE_URL_PREFIX)
+    if is_sqlite and profile.auth_mode != "none":
+        raise ConfigError(
+            f"{path}: the Engine DB is SQLite ({profile.jdbc_url}), which has nothing to "
+            f"authenticate -- auth_mode must be 'none', got {profile.auth_mode!r}"
+        )
+    if not is_sqlite and profile.auth_mode == "none":
+        raise ConfigError(
+            f"{path}: auth_mode 'none' is only valid for a SQLite Engine DB "
+            f"(jdbc:sqlite:<path>); {profile.jdbc_url} needs password or key_file"
+        )
 
 
 def _parse_manifest_connection_section(
@@ -659,6 +686,8 @@ def _parse_manifest_connection_section(
 ) -> ConnectionSection:
     """Resolve one manifest ``Variables`` mapping into the runtime profile."""
     profile_name = _manifest_profile_name(section_name, raw, path)
+    if section_name == "ENGINE" and "Variables" not in raw and "Jdbc_url" in raw:
+        return _parse_literal_sqlite_engine(raw, profile_name, path)
     variables = raw.get("Variables")
     where = f"{section_name.title()}.Variables"
     if not isinstance(variables, dict):
@@ -736,19 +765,48 @@ def _parse_manifest_connection_section(
             )
     if auth_mode == "key_file" and not extra.get("key_file"):
         raise ConfigError(f"{path}: {where} needs key_file for auth_mode='key_file'")
-    return ConnectionSection(
-        active_profile=profile_name,
-        profiles={
-            profile_name: ConnectionProfile(
-                section=section_name,
-                name=profile_name,
-                jdbc_url=jdbc_url,
-                user=user,
-                auth_mode=auth_mode,
-                extra={"secret_var": secret_name, **extra} if secret_name else extra,
-            )
-        },
+    profile = ConnectionProfile(
+        section=section_name,
+        name=profile_name,
+        jdbc_url=jdbc_url,
+        user=user,
+        auth_mode=auth_mode,
+        extra={"secret_var": secret_name, **extra} if secret_name else extra,
     )
+    _check_engine_profile(profile, path)
+    return ConnectionSection(active_profile=profile_name, profiles={profile_name: profile})
+
+
+def _parse_literal_sqlite_engine(
+    raw: dict[str, Any], profile_name: str, path: Path
+) -> ConnectionSection:
+    """Read `Engine: {Profile, Jdbc_url}` -- the SQLite default `setup` writes.
+
+    [ADDITION, 2026-09-24] The canonical format keeps connection *values* out of
+    the file, which is right for a Postgres Engine DB (its URL sits beside a
+    user and a secret, and differs per tier). A SQLite Engine DB's URL is only a
+    file path, with no credentials, so writing it literally costs nothing and
+    means the default deployment needs no environment variables at all. It is
+    accepted for SQLite only; every other Engine DB still goes through
+    Variables.
+    """
+    jdbc_url = raw.get("Jdbc_url")
+    if not isinstance(jdbc_url, str) or not jdbc_url.strip().lower().startswith(
+        SQLITE_ENGINE_URL_PREFIX
+    ):
+        raise ConfigError(
+            f"{path}: Engine.Jdbc_url may only name a SQLite Engine DB (jdbc:sqlite:<path>); "
+            "any other Engine DB needs a Variables mapping, so its connection values stay "
+            "out of this file"
+        )
+    profile = ConnectionProfile(
+        section="ENGINE",
+        name=profile_name,
+        jdbc_url=jdbc_url.strip(),
+        user="",
+        auth_mode="none",
+    )
+    return ConnectionSection(active_profile=profile_name, profiles={profile_name: profile})
 
 
 def _parse_table_format(raw: dict[str, Any], path: Path) -> str:

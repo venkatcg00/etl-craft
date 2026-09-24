@@ -23,6 +23,7 @@ import etl_craft.orchestrator as orchestrator_module
 import etl_craft.sql_actions as sql_actions_module
 from conftest import (
     CRAFT_CONNECTOR_YAML,
+    engine_profile,
     insert_committed_business_rule,
     insert_committed_cross_pipeline_task_dependency,
     insert_committed_dependency,
@@ -369,15 +370,7 @@ def test_build_warehouse_engine_connects_for_real(monkeypatch, postgres_engine):
         source=SourceConfig(type="environment"),
         postgres=ConnectionSection(
             active_profile="dev",
-            profiles={
-                "dev": ConnectionProfile(
-                    section="POSTGRES",
-                    name="dev",
-                    jdbc_url="jdbc:postgresql://localhost:55432/etl_craft",
-                    user="etl_craft",
-                    auth_mode="password",
-                )
-            },
+            profiles={"dev": engine_profile()},
         ),
         cloning=CloningConfig(),
         warehouse=ConnectionSection(active_profile="dev", profiles={"dev": profile}),
@@ -469,15 +462,7 @@ def _duckdb_warehouse_config(tmp_path, *, cloning: CloningConfig) -> ConnectorCo
         source=SourceConfig(type="environment"),
         postgres=ConnectionSection(
             active_profile="dev",
-            profiles={
-                "dev": ConnectionProfile(
-                    section="POSTGRES",
-                    name="dev",
-                    jdbc_url="jdbc:postgresql://localhost:55432/etl_craft",
-                    user="etl_craft",
-                    auth_mode="password",
-                )
-            },
+            profiles={"dev": engine_profile()},
         ),
         cloning=cloning,
         warehouse=ConnectionSection(
@@ -522,15 +507,7 @@ def test_run_cloning_if_enabled_noop_when_disabled(postgres_engine):
         source=SourceConfig(type="environment"),
         postgres=ConnectionSection(
             active_profile="dev",
-            profiles={
-                "dev": ConnectionProfile(
-                    section="POSTGRES",
-                    name="dev",
-                    jdbc_url="jdbc:postgresql://localhost:55432/etl_craft",
-                    user="etl_craft",
-                    auth_mode="password",
-                )
-            },
+            profiles={"dev": engine_profile()},
         ),
         cloning=CloningConfig(enabled=False),
     )
@@ -543,15 +520,7 @@ def test_run_cloning_if_enabled_raises_when_no_warehouse_configured(postgres_eng
         source=SourceConfig(type="environment"),
         postgres=ConnectionSection(
             active_profile="dev",
-            profiles={
-                "dev": ConnectionProfile(
-                    section="POSTGRES",
-                    name="dev",
-                    jdbc_url="jdbc:postgresql://localhost:55432/etl_craft",
-                    user="etl_craft",
-                    auth_mode="password",
-                )
-            },
+            profiles={"dev": engine_profile()},
         ),
         cloning=CloningConfig(enabled=True, scope="cfg"),
     )
@@ -666,15 +635,7 @@ def test_run_cloning_creates_generic_target_table_on_a_different_postgres_databa
         source=SourceConfig(type="environment"),
         postgres=ConnectionSection(
             active_profile="dev",
-            profiles={
-                "dev": ConnectionProfile(
-                    section="POSTGRES",
-                    name="dev",
-                    jdbc_url="jdbc:postgresql://localhost:55432/etl_craft",
-                    user="etl_craft",
-                    auth_mode="password",
-                )
-            },
+            profiles={"dev": engine_profile()},
         ),
         cloning=CloningConfig(enabled=True, scope="cfg"),
         warehouse=ConnectionSection(
@@ -1933,10 +1894,10 @@ def test_wait_for_pipeline_dependency_polls_then_settles(postgres_engine, two_co
             with postgres_engine.begin() as conn:
                 conn.execute(
                     text(
-                        "UPDATE AUD_PIPELINES_RUN_LOG SET STATUS = 'SUCCESS', END_DATE = now() "
+                        "UPDATE AUD_PIPELINES_RUN_LOG SET STATUS = 'SUCCESS', END_DATE = :now "
                         "WHERE PIPELINE_ID = :pid"
                     ),
-                    {"pid": upstream_id},
+                    {"pid": upstream_id, "now": datetime.now(UTC)},
                 )
 
     _wait_for_pipeline_dependency_to_settle(
@@ -2162,13 +2123,7 @@ def make_config(
     email_auth_mode: str = "none",
     cloning: CloningConfig | None = None,
 ) -> ConnectorConfig:
-    profile = ConnectionProfile(
-        section="POSTGRES",
-        name="dev",
-        jdbc_url="jdbc:postgresql://localhost:55432/etl_craft",
-        user="etl_craft",
-        auth_mode="password",
-    )
+    profile = engine_profile()
     warehouse_section = None
     if duckdb_warehouse:
         # [DEVIATION, 2026-09-20] Was `clickhouse_warehouse`. The gap this
@@ -4633,15 +4588,7 @@ def _trino_config() -> ConnectorConfig:
         source=SourceConfig(type="environment"),
         postgres=ConnectionSection(
             active_profile="dev",
-            profiles={
-                "dev": ConnectionProfile(
-                    section="POSTGRES",
-                    name="dev",
-                    jdbc_url="jdbc:postgresql://localhost:55432/etl_craft",
-                    user="etl_craft",
-                    auth_mode="password",
-                )
-            },
+            profiles={"dev": engine_profile()},
         ),
         cloning=CloningConfig(),
         warehouse=ConnectionSection(
@@ -5101,15 +5048,7 @@ def _cloud_config(profile, table_format: str) -> ConnectorConfig:
         source=SourceConfig(type="environment"),
         postgres=ConnectionSection(
             active_profile="dev",
-            profiles={
-                "dev": ConnectionProfile(
-                    section="POSTGRES",
-                    name="dev",
-                    jdbc_url="jdbc:postgresql://localhost:55432/etl_craft",
-                    user="etl_craft",
-                    auth_mode="password",
-                )
-            },
+            profiles={"dev": engine_profile()},
         ),
         cloning=CloningConfig(),
         warehouse=ConnectionSection(active_profile="dev", profiles={"dev": profile}),
@@ -8215,9 +8154,10 @@ def test_cli_init_db_refuses_an_already_initialized_database(craft_connector_on_
 
 def test_init_db_wraps_a_failure_with_the_file_it_was_applying(postgres_engine, monkeypatch):
     monkeypatch.setattr(
-        "etl_craft.init_db.read_packaged_schema", lambda: "SELECT this_is_not_valid_sql("
+        "etl_craft.init_db.read_packaged_schema",
+        lambda dialect="postgresql": "SELECT this_is_not_valid_sql(",
     )
-    with pytest.raises(InitDbError, match="failed applying schema.sql"):
+    with pytest.raises(InitDbError, match=r"failed applying schema(_sqlite)?\.sql"):
         init_db(postgres_engine, force=True)
 
 

@@ -65,6 +65,7 @@ from sqlalchemy.sql.sqltypes import Text as GenericText
 from sqlalchemy.types import TypeEngine
 
 from etl_craft.config import CloningConfig, ConnectorConfig
+from etl_craft.db import is_sqlite_url
 from etl_craft.sql_actions import ICEBERG_CREATE_PREFIX, table_format_clause
 from etl_craft.warehouse import open_warehouse, translate_jdbc_url
 
@@ -117,6 +118,10 @@ def _same_database(config: ConnectorConfig) -> bool:
     data that exists regardless of how either Engine object gets built.
     """
     if config.warehouse is None:  # pragma: no cover - callers check first
+        return False
+    if is_sqlite_url(config.postgres.active.jdbc_url):
+        # [2026-09-24] A SQLite Engine DB cannot be the warehouse too: SQLite is
+        # not a supported warehouse, and translate_jdbc_url rejects its URL.
         return False
     postgres_dialect, postgres_parts = translate_jdbc_url(config.postgres.active.jdbc_url)
     warehouse_dialect, warehouse_parts = translate_jdbc_url(config.warehouse.active.jdbc_url)

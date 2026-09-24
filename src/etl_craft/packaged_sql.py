@@ -25,6 +25,11 @@ from pathlib import Path
 
 SCHEMA_FILENAME = "schema.sql"
 MIGRATIONS_DIRNAME = "migrations"
+# [ADDITION, 2026-09-24] The SQLite Engine DB's own full schema and migration
+# stream. Keyed by SQLAlchemy dialect name; anything not listed is Postgres.
+SQLITE_DIALECT = "sqlite"
+_SCHEMA_FILENAMES = {SQLITE_DIALECT: "schema_sqlite.sql"}
+_MIGRATIONS_SUBDIRS = {SQLITE_DIALECT: "sqlite"}
 
 
 def packaged_sql_dir() -> Path:
@@ -32,19 +37,21 @@ def packaged_sql_dir() -> Path:
     return Path(str(resources.files("etl_craft") / "sql"))
 
 
-def packaged_schema_path() -> Path:
-    """Return the packaged `schema.sql` — the full definition for a fresh install."""
-    return packaged_sql_dir() / SCHEMA_FILENAME
+def packaged_schema_path(dialect: str = "postgresql") -> Path:
+    """Return the packaged full schema for a fresh install on `dialect`."""
+    return packaged_sql_dir() / _SCHEMA_FILENAMES.get(dialect, SCHEMA_FILENAME)
 
 
-def packaged_migrations_dir() -> Path:
-    """Return the packaged `migrations/` directory."""
-    return packaged_sql_dir() / MIGRATIONS_DIRNAME
+def packaged_migrations_dir(dialect: str = "postgresql") -> Path:
+    """Return the packaged ENGINE migrations directory for `dialect`."""
+    base = packaged_sql_dir() / MIGRATIONS_DIRNAME
+    subdir = _MIGRATIONS_SUBDIRS.get(dialect)
+    return base / subdir if subdir else base
 
 
-def read_packaged_schema() -> str:
-    """Read the packaged `schema.sql`'s contents."""
-    path = packaged_schema_path()
+def read_packaged_schema(dialect: str = "postgresql") -> str:
+    """Read the packaged full schema for `dialect`."""
+    path = packaged_schema_path(dialect)
     if not path.is_file():
         raise FileNotFoundError(
             f"packaged schema not found at {str(path)!r} — the installed package is "

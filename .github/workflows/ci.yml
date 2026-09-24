@@ -109,6 +109,12 @@ jobs:
       - name: pytest with coverage (fails under 80%)
         run: uv run pytest -q --cov=etl_craft --cov-report=term-missing
 
+      # SQLite is the default Engine DB; the same suite runs against it too.
+      - name: pytest with a SQLite Engine DB
+        run: uv run pytest -q
+        env:
+          ETL_CRAFT_TEST_ENGINE: sqlite
+
       - name: Stop the Iceberg warehouse
         if: always()
         run: docker compose down -v

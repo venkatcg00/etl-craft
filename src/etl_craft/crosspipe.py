@@ -129,10 +129,18 @@ def _latest_pipeline_run(conn: Connection, pipeline_id: int) -> _LatestRun | Non
     return None if row is None else _LatestRun(row.run_id, row.status, row.start_date)
 
 
+def _duration_seconds_sql(conn: Connection) -> str:
+    """Return the SQL for END_DATE - START_DATE in seconds, on either Engine DB."""
+    if conn.dialect.name == "sqlite":
+        # julianday() reads the stored '...+00:00' text and returns days.
+        return "(julianday(END_DATE) - julianday(START_DATE)) * 86400.0"
+    return "EXTRACT(EPOCH FROM (END_DATE - START_DATE))"
+
+
 def _average_pipeline_duration_seconds(conn: Connection, pipeline_id: int) -> float | None:
     result = conn.execute(
         text(
-            "SELECT AVG(EXTRACT(EPOCH FROM (END_DATE - START_DATE))) FROM AUD_PIPELINES_RUN_LOG "
+            f"SELECT AVG({_duration_seconds_sql(conn)}) FROM AUD_PIPELINES_RUN_LOG "
             "WHERE PIPELINE_ID = :pipeline_id AND STATUS IN ('SUCCESS','FAILED','SKIPPED') "
             "AND END_DATE IS NOT NULL"
         ),
@@ -344,7 +352,7 @@ def consume_pipeline_dependency_edges(
                         "LAST_CONSUMED_END_DATE, LAST_UPDATED_TIMESTAMP) "
                         "SELECT :edge_id, :pipeline_id, :depends_on_pipeline_id, :run_id, "
                         "(SELECT END_DATE FROM AUD_PIPELINES_RUN_LOG "
-                        "WHERE PIPELINE_RUN_ID = :run_id), now() "
+                        "WHERE PIPELINE_RUN_ID = :run_id), :now "
                         "ON CONFLICT (PIPELINE_DEPENDENCY_ID) DO UPDATE SET "
                         "LAST_CONSUMED_PIPELINE_RUN_ID = EXCLUDED.LAST_CONSUMED_PIPELINE_RUN_ID, "
                         "LAST_CONSUMED_END_DATE = EXCLUDED.LAST_CONSUMED_END_DATE, "
@@ -355,6 +363,9 @@ def consume_pipeline_dependency_edges(
                         "pipeline_id": pipeline_id,
                         "depends_on_pipeline_id": edge.depends_on_pipeline_id,
                         "run_id": candidate,
+                        # Bound rather than SQL now(): one portable value for
+                        # both Engine DBs, in the format each stores.
+                        "now": datetime.now(UTC),
                     },
                 )
 
@@ -385,7 +396,7 @@ def _latest_task_run(conn: Connection, task_id: int) -> _LatestRun | None:
 def _average_task_duration_seconds(conn: Connection, task_id: int) -> float | None:
     result = conn.execute(
         text(
-            "SELECT AVG(EXTRACT(EPOCH FROM (END_DATE - START_DATE))) FROM AUD_TASK_RUN_LOG "
+            f"SELECT AVG({_duration_seconds_sql(conn)}) FROM AUD_TASK_RUN_LOG "
             "WHERE TASK_ID = :task_id AND STATUS IN ('SUCCESS','FAILED','SKIPPED') "
             "AND END_DATE IS NOT NULL"
         ),
@@ -562,7 +573,7 @@ def consume_task_dependency_edges(
                         "SELECT :edge_id, :task_id, :pipeline_id, :depends_on_task_id, "
                         ":depends_on_pipeline_id, :run_id, "
                         "(SELECT END_DATE FROM AUD_TASK_RUN_LOG WHERE TASK_RUN_ID = :run_id), "
-                        "now() "
+                        ":now "
                         "ON CONFLICT (TASK_DEPENDENCY_ID) DO UPDATE SET "
                         "LAST_CONSUMED_TASK_RUN_ID = EXCLUDED.LAST_CONSUMED_TASK_RUN_ID, "
                         "LAST_CONSUMED_END_DATE = EXCLUDED.LAST_CONSUMED_END_DATE, "
@@ -575,5 +586,8 @@ def consume_task_dependency_edges(
                         "depends_on_task_id": edge.depends_on_task_id,
                         "depends_on_pipeline_id": edge.depends_on_pipeline_id,
                         "run_id": candidate,
+                        # Bound rather than SQL now(): one portable value for
+                        # both Engine DBs, in the format each stores.
+                        "now": datetime.now(UTC),
                     },
                 )

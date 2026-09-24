@@ -48,6 +48,7 @@ from etl_craft.config import (
     ConfigError,
     _load_dotenv_file,
 )
+from etl_craft.db import DEFAULT_SQLITE_JDBC_URL, is_sqlite_url
 
 
 def set_execution_mode(mode: str, path: Path | str | None = None) -> None:
@@ -94,13 +95,19 @@ def configure_from_env(env_path: Path | str | None, path: Path | str | None = No
             raise ConfigError(f"{origin}: {key} is required")
         return value
 
-    mode = require("ETL_CRAFT_MODE")
+    # [DEVIATION, 2026-09-24] Mode, secrets source and profile default rather
+    # than being required, and so does the Engine DB (to SQLite, below), per
+    # explicit instruction to "make things easier": `etl-craft setup` with
+    # nothing configured now produces a working local deployment. Every value
+    # can still be set, and a value that is set is validated exactly as before.
+    raw = _read_raw_yaml(path) if path.is_file() else {}
+    mode = values.get("ETL_CRAFT_MODE") or "local"
     if mode not in VALID_MODES:
         raise ConfigError(
             f"{origin}: ETL_CRAFT_MODE must be one of {sorted(VALID_MODES)}, got {mode!r}"
         )
 
-    source_type = require("ETL_CRAFT_SOURCE_TYPE")
+    source_type = values.get("ETL_CRAFT_SOURCE_TYPE") or "environment"
     if source_type not in VALID_SOURCE_TYPES:
         raise ConfigError(
             f"{origin}: ETL_CRAFT_SOURCE_TYPE must be one of "
@@ -128,10 +135,35 @@ def configure_from_env(env_path: Path | str | None, path: Path | str | None = No
     # override config.py already reads ($ETL_CRAFT_ENGINE_PROFILE) -- the old
     # ETL_CRAFT_POSTGRES_PROFILE name didn't, and it kept the pre-rename
     # "POSTGRES" token after the section itself became `Engine:`.
-    profile_name = require("ETL_CRAFT_ENGINE_PROFILE")
-    jdbc_url = require("ENGINE_JDBC_URL")
-    user = require("ENGINE_USER")
-    auth_mode = require("ENGINE_AUTH_MODE")
+    profile_name = values.get("ETL_CRAFT_ENGINE_PROFILE") or "dev"
+    if not values.get("ENGINE_JDBC_URL"):
+        postgres_hints = [
+            k for k in ("ENGINE_USER", "ENGINE_AUTH_MODE", "ENGINE_SECRET") if values.get(k)
+        ]
+        if postgres_hints:
+            # Credentials with no URL mean a PostgreSQL Engine DB whose URL was
+            # forgotten, not a request for the SQLite default.
+            raise ConfigError(
+                f"{origin}: ENGINE_JDBC_URL is required -- {', '.join(postgres_hints)} "
+                "configure a PostgreSQL Engine DB. Unset them to use the SQLite default."
+            )
+    jdbc_url = values.get("ENGINE_JDBC_URL") or _default_engine_url(raw, origin)
+    if is_sqlite_url(jdbc_url):
+        # Nothing to authenticate; ENGINE_AUTH_MODE, if given, must agree.
+        user = ""
+        auth_mode = values.get("ENGINE_AUTH_MODE") or "none"
+        if auth_mode != "none":
+            raise ConfigError(
+                f"{origin}: ENGINE_JDBC_URL is SQLite, so ENGINE_AUTH_MODE must be 'none' "
+                f"(or unset), got {auth_mode!r}"
+            )
+    else:
+        user = require("ENGINE_USER")
+        auth_mode = require("ENGINE_AUTH_MODE")
+        if auth_mode == "none":
+            raise ConfigError(
+                f"{origin}: ENGINE_AUTH_MODE 'none' is only valid for a SQLite Engine DB"
+            )
     if auth_mode not in VALID_ENGINE_AUTH_MODES:
         raise ConfigError(
             f"{origin}: ENGINE_AUTH_MODE must be one of "
@@ -222,13 +254,13 @@ def configure_from_env(env_path: Path | str | None, path: Path | str | None = No
     cloning_external_volume = values.get("ETL_CRAFT_CLONING_EXTERNAL_VOLUME", "")
     cloning_base_location = values.get("ETL_CRAFT_CLONING_BASE_LOCATION", "")
 
-    raw = _read_raw_yaml(path) if path.is_file() else {}
     settings = _BootstrapSettings(
         mode=MODE_ALIASES.get(mode, mode),
         source_type=source_type,
         source_path=source_path,
         engine_profile=profile_name,
         engine_auth_mode=auth_mode,
+        engine_sqlite_url=jdbc_url if is_sqlite_url(jdbc_url) else None,
         engine_key_file=engine_key_file,
         warehouse_url=warehouse_url,
         warehouse_profile=warehouse_profile,
@@ -264,6 +296,7 @@ class _BootstrapSettings:
     source_path: str | None
     engine_profile: str
     engine_auth_mode: str
+    engine_sqlite_url: str | None
     engine_key_file: str
     warehouse_url: str | None
     warehouse_profile: str
@@ -364,6 +397,13 @@ def _write_canonical_manifest(raw: dict, settings: _BootstrapSettings) -> None:
     # broke that fallback for any profile other than the one setup last ran
     # with. See the note above these values' bootstrap reads for why the
     # bootstrap name and the written name are now the same string.
+    if settings.engine_sqlite_url:
+        # A SQLite Engine DB is a file path with no credentials, so it is
+        # written literally (config._parse_literal_sqlite_engine): the default
+        # deployment then needs no environment variables at all.
+        raw["Engine"] = {"Profile": settings.engine_profile, "Jdbc_url": settings.engine_sqlite_url}
+        _write_warehouse_and_cloning(raw, settings)
+        return
     engine_variables = {
         "jdbc_url": "ENGINE_JDBC_URL",
         "user": "ENGINE_USER",
@@ -373,7 +413,11 @@ def _write_canonical_manifest(raw: dict, settings: _BootstrapSettings) -> None:
     if settings.engine_key_file:
         engine_variables["key_file"] = "ENGINE_KEY_FILE"
     raw["Engine"] = {"Profile": settings.engine_profile, "Variables": engine_variables}
+    _write_warehouse_and_cloning(raw, settings)
 
+
+def _write_warehouse_and_cloning(raw: dict, settings: _BootstrapSettings) -> None:
+    """Write the canonical Warehouse and Cloning blocks."""
     if settings.warehouse_url:
         warehouse_variables = {
             "jdbc_url": "WAREHOUSE_JDBC_URL",
@@ -399,6 +443,31 @@ def _write_canonical_manifest(raw: dict, settings: _BootstrapSettings) -> None:
         raw["Warehouse"] = warehouse
 
     raw["Cloning"] = _build_cloning_block(raw.get("Cloning"), settings)
+
+
+def _default_engine_url(raw: dict, origin: str) -> str:
+    """Pick the Engine DB when ENGINE_JDBC_URL is not given: SQLite, unless that would switch.
+
+    [ADDITION, 2026-09-24] SQLite is the default Engine DB, but only for a
+    manifest that has no Engine DB yet or already uses SQLite. Re-running
+    `setup` against a Postgres deployment without ENGINE_JDBC_URL in scope must
+    not quietly point it at a new, empty SQLite file -- every run history and
+    pipeline definition would seem to vanish, with nothing erroring.
+    """
+    engine = raw.get("Engine")
+    if isinstance(engine, dict) and isinstance(engine.get("Jdbc_url"), str):
+        return engine["Jdbc_url"]
+    postgres = raw.get("Postgres")
+    if isinstance(postgres, dict) and isinstance(postgres.get("Profiles"), dict):
+        active = postgres["Profiles"].get(postgres.get("Active_profile"))
+        if isinstance(active, dict) and is_sqlite_url(str(active.get("jdbc_url", ""))):
+            return str(active["jdbc_url"])
+    if engine is not None or postgres is not None:
+        raise ConfigError(
+            f"{origin}: ENGINE_JDBC_URL is required -- craft-connector.yml already names an "
+            "Engine DB that is not SQLite, and setup will not replace it with the SQLite default"
+        )
+    return DEFAULT_SQLITE_JDBC_URL
 
 
 def _build_cloning_block(existing: object, settings: _BootstrapSettings) -> dict[str, object]:

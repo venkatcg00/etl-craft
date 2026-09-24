@@ -7,6 +7,12 @@ development history remains available in the Git log and `ITERATION_2.md`.
 
 ### Changed
 
+- **SQLite is the default Engine DB; PostgreSQL is the recommended production Engine DB.**
+  `etl-craft setup` with nothing configured creates `craft-connector.yml` and a SQLite Engine DB,
+  `etl-craft-engine.db`, beside it — no database server needed. Every setup input now has a
+  default. `setup` never replaces an existing PostgreSQL Engine DB with the SQLite default.
+  `doctor` states SQLite's limits (serialized writes, one machine).
+
 - Recommended cloud connections use separate fields: Databricks uses JDBC URL, catalog, schema,
   and token; Snowflake uses user, account, database, schema, warehouse, role, and token.
 - Databricks `iceberg` targets use Delta with UniForm enabled. Snowflake Iceberg targets default
@@ -20,6 +26,10 @@ development history remains available in the Git log and `ITERATION_2.md`.
 
 ### Added
 
+- `jdbc:sqlite:<path>` Engine DB profiles (`auth_mode: none`), a packaged `schema_sqlite.sql`,
+  and a SQLite ENGINE migration stream. Migration and single-writer-warehouse locks use a file lock
+  beside the SQLite database where PostgreSQL uses an advisory lock.
+
 - SCD1 `PRESERVE_TARGET`, defaulting to `false`. When enabled, updates use
   `COALESCE(source_value, target_value)` so source nulls retain existing values. Change detection
   and stored hashes use the resulting values; inserts are unchanged.
@@ -27,6 +37,11 @@ development history remains available in the Git log and `ITERATION_2.md`.
 - A release checklist for package publishing and customer environments.
 
 ### Fixed
+
+- `docs/first-pipeline.md` built its target with `CREATE_TABLE` and then ran `SCD1_MERGE` into
+  it, which the merge's audit-column check refuses. It now uses `SETUP_TABLE`, portable
+  `WITH ... VALUES` inserts that run on SQLite and PostgreSQL, and creates the target schema.
+- The README quickstart used pre-release `ETL_CRAFT_POSTGRES_*` setup variable names.
 
 - Removed credential-bearing parameters from preferred Databricks JDBC URLs before setup can
   persist them in a legacy manifest.

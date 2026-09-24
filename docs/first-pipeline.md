@@ -4,38 +4,54 @@ Creating a pipeline is deliberately **not** a CLI verb. Pipelines are git-manage
 reviewed like any other change: a new external connection, a new action type, or a
 destructive schema change should be harder to make than editing a row.
 
-This walkthrough builds a two-task pipeline that creates a table and then merges into it.
+This walkthrough builds a two-task pipeline that refreshes a staging copy and then merges it
+into a dimension table.
 It assumes you have completed the [README](../README.md) quickstart: `uv run etl-craft setup` has
 run and `uv run etl-craft doctor` passes.
 
 ## 1. A warehouse to write to
 
-The warehouse is where your actual tables live. The README quickstart creates the `analytics`
-database and points the canonical `Warehouse` section at it. Connect to that warehouse and create
-a source table:
+The warehouse is where your actual tables live. The README quickstart points the `Warehouse`
+section at a DuckDB file, `./warehouse.duckdb`. Create a source table in it (the same SQL works
+on a Postgres warehouse, through any client):
 
 ```sql
 CREATE SCHEMA IF NOT EXISTS staging;
+CREATE SCHEMA IF NOT EXISTS marts;   -- where the pipeline's target will live
 CREATE TABLE staging.customers_raw (id INT, name TEXT, updated_at TIMESTAMPTZ);
 INSERT INTO staging.customers_raw VALUES
   (1, 'Ada',  now()),
   (2, 'Grace', now());
 ```
 
+Without a DuckDB client installed, save that as `warehouse.sql` and run:
+
+```bash
+uv run python -c "import duckdb, sys; duckdb.connect('warehouse.duckdb').execute(sys.stdin.read())" < warehouse.sql
+```
+
 ## 2. Register the pipeline and its tasks
 
-Run this against your **Engine DB**:
+Run this against your **Engine DB**. Every statement below works on both SQLite and
+PostgreSQL. With the default SQLite Engine DB, save steps 2–4 as `pipeline.sql` and run it with
+the `sqlite3` shell, or without one:
+
+```bash
+uv run python -c "import sqlite3, sys; sqlite3.connect('etl-craft-engine.db').executescript(sys.stdin.read())" < pipeline.sql
+```
+
+On PostgreSQL, use `psql -f pipeline.sql`.
 
 ```sql
 INSERT INTO CFG_PIPELINES (PIPELINE_CODE, PIPELINE_NAME, REFRESH_TYPE)
 VALUES ('CUSTOMERS', 'Customer dimension', 'FULL');
 
--- Task 1: build the target.
+-- Task 1: refresh a staging copy of the raw data.
 INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER)
 SELECT 'build_customers', 'ETL', PIPELINE_ID, 'SQL'
 FROM CFG_PIPELINES WHERE PIPELINE_CODE = 'CUSTOMERS';
 
--- Task 2: keep it current.
+-- Task 2: merge it into the dimension, keeping each row's identity.
 INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER)
 SELECT 'merge_customers', 'ETL', PIPELINE_ID, 'SQL'
 FROM CFG_PIPELINES WHERE PIPELINE_CODE = 'CUSTOMERS';
@@ -44,31 +60,38 @@ FROM CFG_PIPELINES WHERE PIPELINE_CODE = 'CUSTOMERS';
 ## 3. Give each task its parameters
 
 ```sql
--- build_customers: CREATE_TABLE
+-- build_customers: OVERWRITE_TABLE
+WITH p(name, value) AS (VALUES
+    ('SQL_ACTION',    'OVERWRITE_TABLE'),
+    ('TARGET_OBJECT', 'staging.customers'),
+    ('SOURCE_OBJECT', 'staging.customers_raw'),
+    ('SOURCE_SQL',    'SELECT id, name, updated_at FROM staging.customers_raw')
+)
 INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE)
 SELECT t.TASK_ID, p.name, p.value
-FROM CFG_TASKS t, (VALUES
-    ('SQL_ACTION',    'CREATE_TABLE'),
-    ('TARGET_OBJECT', 'public.customers'),
-    ('SOURCE_OBJECT', 'staging.customers_raw'),
-    ('SOURCE_SQL',    'SELECT id, name FROM staging.customers_raw')
-) AS p(name, value)
+FROM CFG_TASKS t CROSS JOIN p
 WHERE t.TASK_CODE = 'build_customers';
 
 -- merge_customers: SCD1_MERGE
-INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE)
-SELECT t.TASK_ID, p.name, p.value
-FROM CFG_TASKS t, (VALUES
+WITH p(name, value) AS (VALUES
     ('SQL_ACTION',            'SCD1_MERGE'),
-    ('TARGET_OBJECT',         'public.customers'),
-    ('SOURCE_OBJECT',         'staging.customers_raw'),
+    ('TARGET_OBJECT',         'marts.customers'),
+    ('SOURCE_OBJECT',         'staging.customers'),
     ('MERGE_KEY',             'id'),
     ('MERGE_COMPARE_COLUMNS', 'name'),
     ('MERGE_DEDUPE_ORDER',    'updated_at DESC'),
-    ('SOURCE_SQL',            'SELECT id, name FROM staging.customers_raw')
-) AS p(name, value)
+    ('SOURCE_SQL',            'SELECT id, name, updated_at FROM staging.customers')
+)
+INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE)
+SELECT t.TASK_ID, p.name, p.value
+FROM CFG_TASKS t CROSS JOIN p
 WHERE t.TASK_CODE = 'merge_customers';
 ```
+
+Neither target has to exist first: `OVERWRITE_TABLE` and `SCD1_MERGE` each create theirs on
+the first run, with the audit columns that action needs. The staging copy is replaced every run;
+the dimension is merged into, so a changed `name` updates its row in place and an unchanged one is
+left alone.
 
 Note what the `SELECT`s do **not** contain: no `pipeline_run_id`, no `CREATE_DATE`, no
 `HASH_KEY`. The engine appends whichever audit columns the declared action needs. A step
@@ -128,7 +151,7 @@ documentation site, searchable alongside everything else:
 INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE)
 SELECT TASK_ID, 'DOCUMENTATION',
        'Builds the customer dimension from the raw layer. Full refresh: the whole '
-       'table is rebuilt each run.'
+       || 'table is rebuilt each run.'
 FROM CFG_TASKS WHERE TASK_CODE = 'build_customers';
 ```
 
@@ -146,12 +169,12 @@ history for one task with
 ## Tracing a column
 
 ```bash
-uv run etl-craft lineage --column public.customers.name
+uv run etl-craft lineage --column marts.customers.name
 ```
 
 ```
-public.customers.name is produced by:
-  CUSTOMERS.build_customers  <- staging.customers_raw.name
+marts.customers.name is produced by:
+  CUSTOMERS.merge_customers  <- staging.customers.name
 ```
 
 This is parsed from the task's own `SOURCE_SQL`, so it follows aliases, joins and CTEs to
