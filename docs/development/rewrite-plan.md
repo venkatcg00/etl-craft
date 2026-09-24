@@ -1,6 +1,6 @@
 # Rewrite plan: etl-craft 0.1.0
 
-The `next` branch rebuilds etl-craft from the implementation archived at `archive/iteration-2`.
+`main` rebuilds etl-craft from the implementation archived at `archive/iteration-2`.
 The design stays as it is; the rewrite changes the structure, the tests and the documentation:
 
 - the design: run-id resolution, one `run` verb, the closed SQL action vocabulary, the Engine DB
@@ -97,7 +97,7 @@ examples/demo/   docs/   scripts/   release/{required-suites.toml, evidence/}
 
 ## Branches
 
-Each branch is cut from `next`, ports one slice from `archive/iteration-2` with its tests, and is
+Each branch is cut from `main`, ports one slice from `archive/iteration-2` with its tests, and is
 squash-merged by pull request (see `CONTRIBUTING.md` for the definition of done).
 
 | # | Branch | Scope | Archived source | After | Status |
