@@ -107,7 +107,7 @@ squash-merged by pull request (see `CONTRIBUTING.md` for the definition of done)
 | A3 | `docs/site-scaffold` | MkDocs Material, mike, mkdocstrings, gen-files; navigation skeleton; strict build in CI | — | A1 | done |
 | A4 | `docs/github-pages` | Deploy the site to GitHub Pages from CI, rebuilt on every push to `main`: `dev` from `main`, `X.Y` from each release line's newest tag, `latest` for the newest | — | A3 | done |
 | B1 | `feat/core-domain` | Errors, enums, logging, exit codes | scattered | A1 | done |
-| B2 | `feat/cli-framework` | Parser, output layer, exit-code mapping, `--config`, `--log-*` | `cli.py` | B1 | |
+| B2 | `feat/cli-framework` | Parser, output layer, exit-code mapping, `--config`, `--log-*` | `cli.py` | B1 | done |
 | B3 | `feat/core-graph` | Dependency graph: validation, waves, ready, unsatisfiable, run conditions | `resolver.py` | B1 | |
 | B4 | `feat/core-text` | JDBC parsers, `.env`, statement splitters, `$$pipeline_id` substitution, read-only lint, identifier checks, checksums | several | B1 | |
 | B5 | `feat/process-supervisor` | Spawned child interpreter, timeouts, process-group kill, output capture, bounded parallel batches, file locks | `runner.py`, `orchestrator.py` | B1 | |
