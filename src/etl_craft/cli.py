@@ -46,6 +46,7 @@ from etl_craft.config import (
     load_config,
     resolve_config_path,
 )
+from etl_craft.connections import ConnectionTestError
 from etl_craft.db import build_engine
 from etl_craft.docs_generator import generate_docs
 from etl_craft.doctor import run_checks
@@ -106,6 +107,7 @@ RUN_ERRORS = (
     ForceNotAllowedError,
     OrchestratorModeRefusedError,
     ResolverError,
+    ConnectionTestError,
 )
 
 
@@ -172,7 +174,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     setup_parser = subparsers.add_parser(
         "setup",
-        help="Create or migrate the Engine DB described by craft-connector.yml",
+        help="Test every connection, then create or migrate the Engine DB",
     )
     setup_parser.add_argument(
         "--migrations-dir",
@@ -351,6 +353,8 @@ def _setup_command(args: argparse.Namespace, config_path: Path) -> int:
         return 2
 
     print(f"  config   : {report.config_path}")
+    for check in report.checks:
+        print(f"  [{check.marker}] {check.name}: {check.detail}")
     print(f"  database : {report.database_action}")
     for applied in report.applied_migrations:
         print(f"             applied {applied}")
@@ -358,7 +362,7 @@ def _setup_command(args: argparse.Namespace, config_path: Path) -> int:
         print(f"error: {problem}", file=sys.stderr)
     if not report.ok:
         return 1
-    print("\nsetup: ready — run `etl-craft doctor` to verify every connection")
+    print("\nsetup: ready — every connection tested")
     return 0
 
 

@@ -141,9 +141,9 @@ def test_setup_raises_on_an_invalid_config_instead_of_blaming_the_database(clean
     assert main(["--config", str(config_path), "setup"]) == 2
 
 
-def test_setup_reports_an_engine_db_it_cannot_reach(clean_env, monkeypatch):
-    # Reported, not raised: the file is valid, the database is the problem --
-    # first an unresolvable secret, then a server that is not there.
+def test_setup_fails_on_an_engine_db_it_cannot_reach(clean_env, monkeypatch, capsys):
+    # An unset secret is a configuration error (exit 2), caught while loading;
+    # a server that is not there fails the connection test (exit 1).
     postgres = SQLITE_CONFIG.replace(
         "jdbc_url: jdbc:sqlite:etl-craft-engine.db",
         "jdbc_url: jdbc:postgresql://127.0.0.1:9/none\n    user: ENGINE_USER\n"
@@ -155,14 +155,99 @@ def test_setup_reports_an_engine_db_it_cannot_reach(clean_env, monkeypatch):
     monkeypatch.setenv("ENGINE_AUTH_MODE", "password")
     monkeypatch.delenv("ENGINE_SECRET", raising=False)
     monkeypatch.delenv("ENGINE_DEV_SECRET", raising=False)
-    no_secret = run_setup(config_path=config_path)
-    assert not no_secret.ok and no_secret.database_action == "not reachable"
-    assert "ENGINE_SECRET" in no_secret.problems[0]
+    with pytest.raises(
+        ConfigError, match="'ENGINE_DEV_SECRET' or 'ENGINE_SECRET', which is not set"
+    ):
+        run_setup(config_path=config_path)
+    assert main(["--config", str(config_path), "setup"]) == 2
 
     monkeypatch.setenv("ENGINE_SECRET", "s")
     no_server = run_setup(config_path=config_path)
-    assert not no_server.ok and no_server.database_action == "not reachable"
+    assert not no_server.ok
+    assert no_server.database_action == "not attempted — a connection test failed"
+    assert no_server.problems[0].startswith("Engine DB connection: ")
+    capsys.readouterr()
     assert main(["--config", str(config_path), "setup"]) == 1
+    assert "[FAIL] Engine DB connection" in capsys.readouterr().out
+
+
+# A warehouse and an email relay nothing listens on: port 9 refuses at once.
+UNREACHABLE = """Secrets:
+  Source_type: environment
+
+Orchestration:
+  Mode: local
+  Email:
+    host: 127.0.0.1
+    port: 9
+    from_address: etl@example.com
+
+Engine:
+  dev:
+    jdbc_url: jdbc:sqlite:etl-craft-engine.db
+
+Warehouse:
+  dev:
+    jdbc_url: jdbc:postgresql://127.0.0.1:9/analytics
+    user: etl
+    auth_mode: password
+    secret: WAREHOUSE_SECRET
+"""
+
+
+def test_setup_tests_every_connection_before_it_creates_anything(clean_env, monkeypatch):
+    # Per explicit instruction: "the connection tests should happen at
+    # initialize time and fail if connections fail".
+    monkeypatch.setenv("WAREHOUSE_SECRET", "s")
+    config_path = clean_env / "craft-connector.yml"
+    config_path.write_text(UNREACHABLE, encoding="utf-8")
+    report = run_setup(config_path=config_path)
+    assert not report.ok
+    failed = sorted(problem.split(":")[0] for problem in report.problems)
+    assert failed == ["Email relay", "Warehouse connection"]
+    # Nothing was created: the schema waits for every connection.
+    engine = build_engine(load_config(config_path))
+    try:
+        with engine.connect() as conn:
+            tables = conn.execute(text("SELECT name FROM sqlite_master")).all()
+        assert tables == []
+    finally:
+        engine.dispose()
+
+
+def test_a_run_is_not_started_when_a_connection_it_needs_fails(sqlite_deployment, monkeypatch):
+    from etl_craft.cli import main as cli_main
+    from etl_craft.connections import ConnectionTestError
+    from etl_craft.orchestrator import init_pipeline_run
+
+    config, engine = sqlite_deployment
+    monkeypatch.setenv("WAREHOUSE_SECRET", "s")
+    config.config_path.write_text(UNREACHABLE, encoding="utf-8")
+    broken = load_config(config.config_path)
+
+    sql = _pipeline(engine, "PL_SQL")
+    _task(engine, sql, "LOAD", "SQL", {})
+    for start in (init_pipeline_run, run_pipeline):
+        with pytest.raises(ConnectionTestError, match="PL_SQL: connection test failed.*warehouse"):
+            start(engine, broken, "PL_SQL")
+    alert = _pipeline(engine, "PL_ALERT")
+    _task(engine, alert, "NOTIFY", "EMAIL_ALERT", {})
+    with pytest.raises(ConnectionTestError, match="email relay: 127.0.0.1:9"):
+        init_pipeline_run(engine, broken, "PL_ALERT")
+    # No run was minted for either: the failure came before a pipeline_run_id.
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT COUNT(*) FROM AUD_PIPELINES_RUN_LOG")).scalar_one() == 0
+    assert (
+        cli_main(
+            ["--config", str(config.config_path), "run", "--pipeline_code", "PL_SQL", "--init-only"]
+        )
+        == 1
+    )
+
+    # A pipeline that uses neither connection is not held up by them.
+    ingest = _pipeline(engine, "PL_INGEST")
+    _task(engine, ingest, "INGEST", "PYTHON", {})
+    assert init_pipeline_run(engine, broken, "PL_INGEST").pipeline_run_id > 0
 
 
 def test_an_in_memory_sqlite_engine_db_is_refused():

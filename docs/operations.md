@@ -18,7 +18,10 @@ cloud warehouse as a separate acceptance target before enabling it for a custome
 4. Write `craft-connector.yml` with variable names only (start from `docs/examples/`). Put their
    values in a protected environment or a file readable only by the service account. etl-craft
    never writes this file, so review changes to it like any other deployment config.
-5. Run `etl-craft setup` to create the Engine DB for a new environment, then run both checks:
+5. Run `etl-craft setup` to create the Engine DB for a new environment. It tests every
+   connection first and fails, creating nothing, if one fails. Every secret variable the file
+   names for the selected profile must be set, for `setup` and for every later command. Then run
+   both checks:
 
    ```bash
    etl-craft doctor

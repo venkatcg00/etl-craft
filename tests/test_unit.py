@@ -1188,14 +1188,20 @@ def write_config(tmp_path, contents: str):
 
 
 def test_resolve_secret_from_environment(tmp_path, monkeypatch):
-    config = load_config(write_config(tmp_path, VALID_YAML))
     monkeypatch.setenv("ETL_CRAFT_POSTGRES_DEV_SECRET", "s3cr3t")
+    config = load_config(write_config(tmp_path, VALID_YAML))
     assert resolve_secret(config, config.postgres.active) == "s3cr3t"
 
 
 def test_resolve_secret_missing_raises(tmp_path, monkeypatch):
-    config = load_config(write_config(tmp_path, VALID_YAML))
+    # Loading refuses an unset secret; resolving it again at connect time
+    # still does, for a variable that went away in between.
     monkeypatch.delenv("ETL_CRAFT_POSTGRES_DEV_SECRET", raising=False)
+    with pytest.raises(ConfigError, match="not set"):
+        load_config(write_config(tmp_path, VALID_YAML))
+    monkeypatch.setenv("ETL_CRAFT_POSTGRES_DEV_SECRET", "s3cr3t")
+    config = load_config(write_config(tmp_path, VALID_YAML))
+    monkeypatch.delenv("ETL_CRAFT_POSTGRES_DEV_SECRET")
     with pytest.raises(ConfigError):
         resolve_secret(config, config.postgres.active)
 
@@ -1204,8 +1210,8 @@ def test_resolve_secret_explicit_var_override(tmp_path, monkeypatch):
     overridden = VALID_YAML.replace(
         "secret: ETL_CRAFT_POSTGRES_DEV_SECRET", "secret: MY_CUSTOM_SECRET"
     )
-    config = load_config(write_config(tmp_path, overridden))
     monkeypatch.setenv("MY_CUSTOM_SECRET", "hunter2")
+    config = load_config(write_config(tmp_path, overridden))
     assert resolve_secret(config, config.postgres.active) == "hunter2"
 
 

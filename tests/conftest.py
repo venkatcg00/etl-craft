@@ -905,6 +905,10 @@ def insert_committed_cross_pipeline_task_dependency(
 # these are the values the test environment gives them.
 os.environ.setdefault("TEST_ENGINE_USER", "etl_craft")
 os.environ.setdefault("TEST_ENGINE_AUTH_MODE", "password")
+# A named secret must be set when the file loads (2026-09-24), so the test
+# environment always holds these -- not only once the Postgres fixture ran.
+os.environ.setdefault("ETL_CRAFT_POSTGRES_DEV_SECRET", "etl_craft")
+os.environ.setdefault("ETL_CRAFT_WAREHOUSE_DEV_SECRET", "etl_craft")
 if SQLITE_ENGINE:
     _ENGINE_BLOCK = f"    jdbc_url: {ENGINE_JDBC_URL}\n"
 else:

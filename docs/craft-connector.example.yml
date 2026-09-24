@@ -16,7 +16,8 @@
 #   * anything else is used exactly as written: `Profile: dev` is the profile
 #     dev, `Profile: ETL_CRAFT_PROFILE` is whatever that variable holds;
 #   * a secret (secret, token, s3_secret) must be a variable that is set —
-#     never written into this file.
+#     never written into this file. Every command checks this when it loads the
+#     file, for the selected profile, and stops with a "not set" error otherwise.
 #
 # So the same variable names can serve every environment, each setting its own
 # values, and the file stays safe to commit. A profile-specific variable

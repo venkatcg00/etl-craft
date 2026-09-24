@@ -7,10 +7,18 @@ versioned artefact -- like a dbt profiles.yml -- and a tool that rewrites it
 also rewrites its comments, its ordering and its intent. So `setup` reads the
 file and never touches it.
 
-What it does: validates the configuration, then brings the Engine DB to
-current -- the packaged schema for its dialect if the database is empty,
-pending migrations if not. Run it again after any upgrade; there is no
-separate first-run path.
+What it does: validates the configuration, tests every connection, then
+brings the Engine DB to current -- the packaged schema for its dialect if the
+database is empty, pending migrations if not. Run it again after any upgrade;
+there is no separate first-run path.
+
+[DEVIATION, 2026-09-24] Connections are tested first, and a failure fails
+`setup` -- per explicit instruction, "the connection tests should happen at
+initialize time and fail if connections fail". The tests are `doctor`'s own
+checks (the Engine DB, the warehouse and the email relay of the selected
+profiles), so the two commands never disagree about a connection; nothing is
+created or migrated until every one passes. It used to test the Engine DB
+only, by using it, and leave the rest to `doctor`.
 
 [CHOICE] `init-db` and `migrate` stay as separate verbs: a DBA applying a
 schema by hand, or a CI job running only a migration, uses exactly the one it
@@ -26,6 +34,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConfigError, ConnectorConfig, load_config
 from etl_craft.db import build_engine
+from etl_craft.doctor import CheckResult, run_checks
 from etl_craft.init_db import InitDbError, existing_engine_tables, init_db
 from etl_craft.migrate import (
     MigrationError,
@@ -42,6 +51,8 @@ class SetupReport:
     database_action: str = "skipped"
     applied_migrations: list[str] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
+    # Every connection check, passed or failed, in doctor's own order.
+    checks: list[CheckResult] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -60,6 +71,12 @@ def run_setup(*, config_path: Path, migrations_dir: Path | str | None = None) ->
     # error (exit 2) like everywhere else, never "Engine DB not reachable".
     config = load_config(config_path)
     report = SetupReport(config_path=config_path)
+    report.checks = run_checks(config)
+    failed = [check for check in report.checks if not check.ok]
+    if failed:
+        report.database_action = "not attempted — a connection test failed"
+        report.problems.extend(f"{check.name}: {check.detail}" for check in failed)
+        return report
     _bring_database_current(report, config, migrations_dir)
     return report
 
@@ -70,11 +87,10 @@ def _bring_database_current(
     try:
         engine = build_engine(config)
     except ConfigError as exc:
-        # Reported, not raised: an unresolvable secret is often exactly what
-        # the operator is in the middle of fixing, and `doctor` is the verb
-        # that diagnoses a connection in detail.
+        # The connection tests passed a moment ago; reported rather than
+        # raised all the same, since the operator may be changing it now.
         report.database_action = "not reachable"
-        report.problems.append(f"Engine DB not reachable yet: {exc}")
+        report.problems.append(f"Engine DB not reachable: {exc}")
         return
 
     # Disposed on every path. A short-lived command that leaves pooled
@@ -86,7 +102,7 @@ def _bring_database_current(
             tables = existing_engine_tables(engine)
         except SQLAlchemyError as exc:
             report.database_action = "not reachable"
-            report.problems.append(f"Engine DB not reachable yet: {exc}")
+            report.problems.append(f"Engine DB not reachable: {exc}")
             return
 
         try:

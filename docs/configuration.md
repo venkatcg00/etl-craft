@@ -73,9 +73,20 @@ So `Profile: dev` is the profile `dev`. `Profile: ETL_CRAFT_PROFILE` is whatever
 a flag or a list can come from a variable too: `Task_timeout_seconds: TASK_TIMEOUT` reads
 `"3600"` and uses 3600, and a list setting reads a comma-separated value.
 
-**Secrets are the one exception.** `secret`, `token` and `s3_secret` must name a variable that is
-set; a secret is never taken as written. The file is meant to be committed, and falling back would
-send a mistyped variable name to the server as a password.
+**Secrets are the one exception.** `secret`, `token` and `s3_secret` must name a variable, and
+that variable must be set. A secret is never taken as written: the file is meant to be committed,
+and falling back would send a mistyped variable name to the server as a password. Whether it is set
+is checked when the file is loaded, by every command, for the selected profile of each section:
+
+```text
+craft-connector.yml: Engine.prod.secret names the secret variable 'ENGINE_PROD_SECRET' or
+'ENGINE_SECRET', which is not set in the process environment (Secrets.Source_type: environment)
+```
+
+Other profiles' secrets need not be present. A profile that names a secret reads it, whatever its
+`auth_mode`; if the mode needs none, leave the line out rather than set a variable for it. Every
+process that loads the file needs these variables, including one that only runs `generate-yml`,
+`list` or a `PYTHON` task.
 
 The fallback can hide a missing variable: `user: ENGINE_USER` quietly becomes the user
 `ENGINE_USER` when the variable isn't set. `etl-craft doctor` therefore lists every value used as
@@ -454,16 +465,41 @@ a fix to an action reaches every warehouse.
 ## `setup`, `doctor` and the schema lifecycle
 
 ```bash
-etl-craft setup     # validate craft-connector.yml, then create or migrate the Engine DB
+etl-craft setup     # validate craft-connector.yml, test every connection, then create or migrate the Engine DB
 etl-craft doctor    # resolve every active profile and test every connection
 etl-craft init-db   # an empty Engine DB only
 etl-craft migrate   # an existing Engine DB
 ```
 
-`setup` refuses to run without a `craft-connector.yml` and never writes one. It applies the
-Engine DB dialect's packaged schema to an empty database, or its pending migrations to an existing
-one, and is safe to repeat after any upgrade. An unreachable Engine DB is reported, not raised;
-run `doctor` to see why.
+`setup` refuses to run without a `craft-connector.yml` and never writes one. It then runs every
+`doctor` check: the Engine DB, the warehouse and the email relay of the selected profiles. If any
+check fails, `setup` exits 1, naming each failure, and creates or migrates nothing. Otherwise it
+applies the Engine DB dialect's packaged schema to an empty database, or its pending migrations to
+an existing one. It is safe to repeat after any upgrade.
+
+### Connection tests when a run starts
+
+A pipeline run also tests its connections before it starts. This covers `run --pipeline_code X
+--init-only`, which is a generated DAG's first step, and a local `run --pipeline_code X`. Only the
+connections that run will use are tested:
+
+- **Warehouse:** tested when the pipeline has a `SQL` or `BUSINESS_RULES` task, or cloning is on.
+- **Email relay:** tested with an SMTP `NOOP` when the pipeline has an `EMAIL_ALERT` task.
+- **Engine DB:** already in use to look the pipeline up, so it needs no separate test.
+
+A failure exits 1 before a `pipeline_run_id` is minted or resumed:
+
+```text
+error: PL_SALES: connection test failed, so no run was started — warehouse: (psycopg.OperationalError) ...
+```
+
+Nothing is written to the audit log, no cross-pipeline dependency is consumed, and under an
+orchestrator no task starts, because each root task waits on `__init__` with `all_success`.
+
+`PYTHON` scripts open their own connections, so the engine has nothing of theirs to test. A
+single-writer DuckDB file is also not tested when a run starts. It has no server to be
+unreachable, and a pipeline running at the same moment holds its one writer's lock, so a test
+queued behind it would fail this run for a busy file. `setup` and `doctor` still open the file.
 
 `init-db` refuses an Engine DB that already has engine tables. `migrate` always applies the
 dialect's packaged migrations first, then an optional project stream from `--migrations-dir`,

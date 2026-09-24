@@ -478,6 +478,7 @@ def test_doctor_names_a_value_used_as_written_that_looks_like_a_variable(tmp_pat
         encoding="utf-8",
     )
     monkeypatch.delenv("WAREHOUSE_USER", raising=False)
+    monkeypatch.setenv("WAREHOUSE_SECRET", "x")
     results = _settings_check(load_config(path))
     warnings = [r for r in results if r.warning]
     assert len(warnings) == 1

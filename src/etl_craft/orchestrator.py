@@ -44,6 +44,14 @@
 # into generate_yml.py as a __finalize__ task depending (ALWAYS) on every
 # leaf task.
 #
+# [ADDITION, 2026-09-24] Both entry points test the connections the run will
+# use before minting or resuming it (connections.check_run_connections), per
+# explicit instruction: "the connection tests should happen at initialize
+# time and fail if connections fail". A failure raises ConnectionTestError
+# before a pipeline_run_id exists, so nothing reaches AUD_PIPELINES_RUN_LOG,
+# no cross-pipeline edge is consumed, and under an orchestrator the failed
+# __init__ step keeps every task from starting (its edge is all_success).
+#
 # Deliberately NOT included yet:
 #   * Orchestrator-level crash detection for a subprocess that dies without
 #     writing its own terminal status. CLAUDE.md's crash detection is
@@ -66,11 +74,13 @@ from sqlalchemy.engine import Engine
 from etl_craft.cfg import (
     fetch_pipeline_detail,
     fetch_pipeline_graph,
+    fetch_pipeline_handlers,
     fetch_task_codes,
     resolve_pipeline_id,
 )
 from etl_craft.cloning import run_cloning_if_enabled
 from etl_craft.config import ConnectorConfig, ExecutionLimits
+from etl_craft.connections import check_run_connections
 from etl_craft.crosspipe import (
     NowFn,
     SleepFn,
@@ -330,6 +340,15 @@ def finalize_active_run(
     )
 
 
+def _test_run_connections(
+    engine: Engine, config: ConnectorConfig, pipeline_code: str, pipeline_id: int
+) -> None:
+    """Test the connections this pipeline's tasks use, before a run is minted or resumed."""
+    with engine.connect() as conn:
+        handlers = fetch_pipeline_handlers(conn, pipeline_id)
+    check_run_connections(engine, config, pipeline_code, handlers)
+
+
 def init_pipeline_run(
     engine: Engine,
     config: ConnectorConfig,
@@ -339,9 +358,9 @@ def init_pipeline_run(
     now: NowFn = _default_now,
 ) -> InitOutcome:
     """Mint/reuse `pipeline_code`'s active run — the generated DAG's synthetic first step."""
-    del config  # not needed for the cross-pipeline gate itself
     with engine.connect() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+    _test_run_connections(engine, config, pipeline_code, pipeline_id)
 
     with engine.connect() as conn:
         existing = fetch_active_pipeline_run_id(conn, pipeline_id)
@@ -408,6 +427,9 @@ def run_pipeline(
 
     with engine.connect() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+    # Under --force too: it bypasses dependency and state checks, and a run
+    # against a warehouse that cannot be reached fails either way.
+    _test_run_connections(engine, config, pipeline_code, pipeline_id)
 
     # [DEVIATION, 2026-09-23, E3-02] Tracks the one gate this call itself
     # evaluates, if any, so its own finalize step below can consume exactly

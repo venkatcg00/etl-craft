@@ -72,12 +72,14 @@ both secrets sources and both orchestration modes.
 
 ```bash
 uv sync
-uv run etl-craft setup      # creates (or migrates) the Engine DB craft-connector.yml describes
+uv run etl-craft setup      # tests every connection, then creates (or migrates) the Engine DB
 uv run etl-craft doctor     # verifies every connection
 ```
 
-`setup` is idempotent: run it again after any upgrade to bring the Engine DB forward. There are no
-prompts, so the same command works in CI.
+`setup` fails, and creates nothing, if any connection in the selected profiles fails its test. It is
+idempotent: run it again after any upgrade to bring the Engine DB forward. There are no prompts, so
+the same command works in CI. A pipeline run tests the connections it will use before it starts,
+too.
 
 **3. Going to production: PostgreSQL for the Engine DB.** SQLite is one file on one machine:
 every Engine DB write is serialized, and an orchestrator worker on another host cannot open it.
@@ -122,7 +124,7 @@ uv run etl-craft history --pipeline_code MY_PIPELINE
 
 | Command | Purpose |
 |---|---|
-| `setup` | **Start here.** Validate `craft-connector.yml`, then create or migrate its Engine DB. Idempotent; run it again after any upgrade |
+| `setup` | **Start here.** Validate `craft-connector.yml` and test every connection (failing if one fails), then create or migrate its Engine DB. Idempotent; run it again after any upgrade |
 | `init-db` | Apply the packaged schema to an empty Engine DB |
 | `migrate` | Apply pending packaged migrations, then an optional project migration stream |
 | `doctor` | Check config, every secret, and every configured connection |

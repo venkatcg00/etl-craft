@@ -21,6 +21,14 @@ development history remains available in the Git log and `ITERATION_2.md`.
   `Profile: ETL_CRAFT_PROFILE` selects per environment and `Profile: dev` is simply `dev`. Secrets
   must be variables. `doctor` warns about values used as written that look like variable names.
   The hidden `ETL_CRAFT_PROFILE` / `ETL_CRAFT_<SECTION>_PROFILE` overrides are gone.
+- **A secret variable that is not set is a load-time error.** A `secret`, `token` or `s3_secret`
+  field in the selected profile must name a variable the secrets source holds, and every command
+  refuses the file otherwise, naming the variable. Previously this was found at the first
+  connection.
+- **Connections are tested at initialize time, and a failure fails.** `setup` runs every `doctor`
+  check before creating or migrating anything and exits 1 if one fails. A pipeline run
+  (`run --init-only`, or a local `run --pipeline_code`) tests the warehouse and email relay its
+  tasks use before it mints a run, and exits 1 without starting one if a test fails.
 - **`Orchestration.Allow_schedule`** (default `true`): `false` makes `generate-yml` emit
   `schedule: null` even when a pipeline has a `RUN_SCHEDULE`, so non-production environments hold
   every pipeline without running it on a timetable.

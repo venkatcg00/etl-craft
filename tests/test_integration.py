@@ -8120,10 +8120,12 @@ def test_cli_doctor_reports_failures_with_exit_1(craft_connector_on_disk, monkey
 
     exit_code = cli_main(["doctor"])
 
+    # An unset secret is refused while loading (2026-09-24), which doctor
+    # reports as its Configuration check.
     assert exit_code == 1
-    out = capsys.readouterr()
-    assert "ETL_CRAFT_POSTGRES_DEV_SECRET" in out.out
-    assert "check(s) failed" in out.err
+    err = capsys.readouterr().err
+    assert "[FAIL] Configuration:" in err
+    assert "'ETL_CRAFT_POSTGRES_DEV_SECRET', which is not set" in err
 
 
 def test_cli_doctor_reports_a_missing_config_file_as_a_check(tmp_path, monkeypatch, capsys):

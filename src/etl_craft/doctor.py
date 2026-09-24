@@ -16,10 +16,8 @@ does: one broken profile shouldn't hide the rest of the picture.
 
 from __future__ import annotations
 
-import smtplib
 from dataclasses import dataclass
 
-from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -30,17 +28,10 @@ from etl_craft.config import (
     profile_needs_secret,
     resolve_secret,
 )
+from etl_craft.connections import probe_email, probe_engine_db, probe_warehouse
 from etl_craft.db import ConnectionError_, build_engine, is_sqlite_url, resolve_sqlite_path
 from etl_craft.dialects.engine_dialects import for_jdbc_url
-from etl_craft.warehouse import (
-    READ_ONLY_WAIT_SECONDS,
-    is_in_memory,
-    is_single_writer,
-    open_warehouse,
-    warehouse_dialect,
-)
-
-SMTP_PROBE_TIMEOUT_SECONDS = 10.0
+from etl_craft.warehouse import is_in_memory, is_single_writer, warehouse_dialect
 
 
 @dataclass(frozen=True)
@@ -123,18 +114,9 @@ def _auth_check(
 
 
 def _engine_db_check(config: ConnectorConfig) -> CheckResult:
-    engine = None
-    try:
-        engine = build_engine(config)
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-    except (ConfigError, SQLAlchemyError) as exc:
-        return CheckResult("Engine DB connection", False, str(exc))
-    finally:
-        # Same reason setup disposes its engine: a probe that leaves pooled
-        # connections open blocks anything trying to drop the database.
-        if engine is not None:
-            engine.dispose()
+    problem = probe_engine_db(config)
+    if problem is not None:
+        return CheckResult("Engine DB connection", False, problem)
     if is_sqlite_url(config.postgres.active.jdbc_url):
         path = resolve_sqlite_path(config.postgres.active.jdbc_url, config.config_path)
         return CheckResult("Engine DB connection", True, f"SQLite file {path}")
@@ -230,19 +212,13 @@ def _warehouse_check(config: ConnectorConfig) -> list[CheckResult]:
     except (ConfigError, SQLAlchemyError):
         engine_db = None
     try:
-        with (
-            open_warehouse(
-                config, engine_db, wait_seconds=READ_ONLY_WAIT_SECONDS
-            ) as warehouse_engine,
-            warehouse_engine.connect() as conn,
-        ):
-            conn.execute(text("SELECT 1"))
-    except (ConfigError, SQLAlchemyError, NotImplementedError) as exc:
-        results.append(CheckResult("Warehouse connection", False, str(exc)))
-        return results
+        problem = probe_warehouse(config, engine_db)
     finally:
         if engine_db is not None:
             engine_db.dispose()
+    if problem is not None:
+        results.append(CheckResult("Warehouse connection", False, problem))
+        return results
     results.append(CheckResult("Warehouse connection", True, "connected"))
     # [DEVIATION, 2026-09-22, E2-72] The Iceberg-catalog check lived here and
     # moved to `validate`. It has to know every active task's TABLE_FORMAT
@@ -271,14 +247,10 @@ def _email_check(config: ConnectorConfig) -> list[CheckResult]:
     results.extend(
         _auth_check("Email", profile.auth_mode, EMAIL_VERIFIED_AUTH_MODES, "the SMTP relay")
     )
-    try:
-        with smtplib.SMTP(profile.host, profile.port, timeout=SMTP_PROBE_TIMEOUT_SECONDS) as server:
-            server.noop()
-    except (smtplib.SMTPException, OSError) as exc:
-        results.append(CheckResult("Email relay", False, f"{profile.host}:{profile.port}: {exc}"))
+    problem = probe_email(config)
+    if problem is not None:
+        results.append(CheckResult("Email relay", False, problem))
         return results
-    # Deliberately no login attempt: a NOOP proves reachability without
-    # burning an auth attempt against a relay that may rate-limit or lock out.
     results.append(CheckResult("Email relay", True, f"reachable at {profile.host}:{profile.port}"))
     return results
 

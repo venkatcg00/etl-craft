@@ -82,6 +82,11 @@ def test_the_shipped_example_prod_profile_overrides_and_resolves(tmp_path, monke
         "EMAIL_AUTH_MODE": "password",
         "EMAIL_USER": "etl",
         "EMAIL_USE_TLS": "true",
+        # Secrets must be set for the selected profile; their values are
+        # never read back into the config object.
+        "ENGINE_SECRET": "x",
+        "WAREHOUSE_SECRET": "x",
+        "EMAIL_SECRET": "x",
     }.items():
         monkeypatch.setenv(name, value)
     config = load_config(example)
@@ -244,7 +249,8 @@ def test_tier_scoped_variables_win_over_the_plain_name(tmp_path, monkeypatch):
 
 def test_values_come_from_a_secrets_file_relative_to_the_config(tmp_path):
     (tmp_path / "secrets.env").write_text(
-        "WH_URL=jdbc:postgresql://wh/analytics\nWH_USER=analyst\nWH_AUTH=password\n",
+        "WH_URL=jdbc:postgresql://wh/analytics\nWH_USER=analyst\nWH_AUTH=password\n"
+        "WH_SECRET=hunter2\n",
         encoding="utf-8",
     )
     raw = _minimal(
@@ -280,6 +286,70 @@ def test_a_literal_jdbc_url_is_accepted_but_a_literal_secret_is_not(tmp_path, mo
     )
     with pytest.raises(ConfigError, match="must be the name of a variable"):
         load_config(_write(tmp_path, raw))
+
+
+def test_a_secret_variable_that_is_not_set_is_a_load_time_error(tmp_path, monkeypatch):
+    # Per explicit instruction: "they should be checked if set. if they are not
+    # set, send a not set error" -- at load, not at the first connection.
+    monkeypatch.delenv("ENGINE_SECRET", raising=False)
+    monkeypatch.delenv("ENGINE_PROD_SECRET", raising=False)
+    monkeypatch.setenv("ENGINE_USER", "etl")
+    raw = _minimal(
+        Secrets={"Source_type": "environment", "Profile": "prod"},
+        Engine={
+            "dev": {"jdbc_url": "jdbc:sqlite:engine.db"},
+            "prod": {
+                "jdbc_url": "jdbc:postgresql://db/etl",
+                "user": "ENGINE_USER",
+                "auth_mode": "password",
+                "secret": "ENGINE_SECRET",
+            },
+        },
+    )
+    path = _write(tmp_path, raw)
+    # Both names it would accept are given: the profile's own and the plain one.
+    with pytest.raises(
+        ConfigError,
+        match=r"Engine\.prod\.secret names the secret variable 'ENGINE_PROD_SECRET' or "
+        r"'ENGINE_SECRET', which is not set in the process environment",
+    ):
+        load_config(path)
+    monkeypatch.setenv("ENGINE_SECRET", "x")
+    assert load_config(path).postgres.active.secret_var == "ENGINE_SECRET"
+
+    # Only the selected profile's secrets are checked: dev needs none of them.
+    monkeypatch.delenv("ENGINE_SECRET")
+    raw["Secrets"]["Profile"] = "dev"
+    assert load_config(_write(tmp_path, raw)).postgres.active.auth_mode == "none"
+
+    # The same rule for a secrets file, and for token and s3_secret fields.
+    (tmp_path / "s.env").write_text("DBX_URL=jdbc:databricks://h:443/default\n", encoding="utf-8")
+    dbx = _minimal(
+        Secrets={"Source_type": "file", "Path": "s.env"},
+        Warehouse={
+            "Name": "Databricks",
+            "dev": {"jdbc_url": "DBX_URL", "catalog": "main", "schema": "a", "token": "DBX_TOKEN"},
+        },
+    )
+    with pytest.raises(ConfigError, match=r"'DBX_DEV_TOKEN' or 'DBX_TOKEN', which is not set in "):
+        load_config(_write(tmp_path, dbx))
+    iceberg = _minimal(
+        Warehouse={
+            "Name": "DuckDB",
+            "Table_format": "iceberg",
+            "dev": {
+                "jdbc_url": "jdbc:duckdb:",
+                "catalog": "lake",
+                "catalog_uri": "http://localhost:8181",
+                "iceberg_warehouse": "s3://lake",
+                "s3_key_id": "minio",
+                "s3_secret": "LAKE_S3_SECRET",
+            },
+        }
+    )
+    monkeypatch.delenv("LAKE_S3_SECRET", raising=False)
+    with pytest.raises(ConfigError, match="'LAKE_S3_SECRET', which is not set"):
+        load_config(_write(tmp_path, iceberg))
 
 
 def test_the_earlier_layouts_are_refused_with_a_pointer(tmp_path):
@@ -399,16 +469,19 @@ def test_an_auth_mode_a_warehouse_does_not_offer_is_refused_at_load(tmp_path, mo
         ),
     ],
 )
-def test_an_auth_mode_needs_its_own_fields(tmp_path, warehouse, missing):
+def test_an_auth_mode_needs_its_own_fields(tmp_path, monkeypatch, warehouse, missing):
+    monkeypatch.setenv("S", "x")
     raw = _minimal(Warehouse={"dev": warehouse})
     with pytest.raises(ConfigError, match=f"needs {missing}"):
         load_config(_write(tmp_path, raw))
 
 
-def test_every_auth_mode_loads_with_its_fields(tmp_path):
+def test_every_auth_mode_loads_with_its_fields(tmp_path, monkeypatch):
     # One profile per (warehouse, auth mode) the dialects accept, built from
     # the fields each declares: the loader and the dialects agree.
     from etl_craft.dialects import warehouse_dialects
+
+    monkeypatch.setenv("S", "x")
 
     urls = {
         "postgres": ("Postgres", "jdbc:postgresql://db/wh"),
@@ -438,6 +511,7 @@ def test_databricks_token_fields_build_a_credential_free_url(tmp_path, monkeypat
     )
     monkeypatch.setenv("DBX_CATALOG", "main")
     monkeypatch.setenv("DBX_SCHEMA", "analytics")
+    monkeypatch.setenv("DBX_TOKEN", "dapi-real")
     raw = _minimal(
         Warehouse={
             "Name": "Databricks",

@@ -906,6 +906,18 @@ class PipelineStep:
     parameters: dict[str, str]
 
 
+def fetch_pipeline_handlers(conn: Connection, pipeline_id: int) -> set[str]:
+    """Fetch the HANDLER of every active task in `pipeline_id` -- what a run will connect to."""
+    rows = conn.execute(
+        text(
+            "SELECT DISTINCT HANDLER AS handler FROM CFG_TASKS "
+            "WHERE PIPELINE_ID = :pipeline_id AND ACTIVE_FLAG = 'Y'"
+        ),
+        {"pipeline_id": pipeline_id},
+    ).all()
+    return {row.handler for row in rows}
+
+
 def fetch_pipeline_steps(conn: Connection, pipeline_id: int) -> list[PipelineStep]:
     """Fetch every active task in `pipeline_id`, each with its own active CFG_TASK_PARAMETERS."""
     task_rows = conn.execute(

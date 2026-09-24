@@ -25,9 +25,10 @@ used as written but looks like a variable name -- the one way this rule can
 hide a mistake.
 
 **[CHOICE] One exception: secrets.** ``secret``, ``token`` and ``s3_secret``
-must name a variable that is set; written text is never used as a secret. The
-file is meant to be committed, and falling back would send a mistyped
-variable name to the server as a password.
+must name a variable, and that variable must be set -- a load-time "not set"
+error otherwise, for the selected profile, whatever the command. Written text
+is never used as a secret: the file is meant to be committed, and falling back
+would send a mistyped variable name to the server as a password.
 
 Every section that varies by environment holds one block per profile
 (``dev``/``sit``/``uat``/``prod``, or any names). The active one is
@@ -457,9 +458,11 @@ class _Resolver:
     ) -> str | None:
         """Return the variable a secret field names, or None when absent.
 
-        A secret is never taken as written: the field must be a variable name.
-        Whether that variable is set is checked when the secret is needed
-        (`resolve_secret`), and by `doctor`.
+        A secret is never taken as written: the field must be a variable name,
+        and that variable must be set -- checked here, when the file is loaded,
+        per explicit instruction ("they should be checked if set. if they are
+        not set, send a not set error"). Only the selected profile is parsed,
+        so another environment's secrets need not be present.
         """
         if raw is None:
             return None
@@ -468,8 +471,18 @@ class _Resolver:
                 f"{self.path}: {where} must be the name of a variable holding the secret — "
                 "a secret is never written into craft-connector.yml"
             )
-        name = self.selected_name(raw.strip(), profile, field_name)
-        self.sources.append(SettingSource(where, raw.strip(), name))
+        written = raw.strip()
+        name = self.selected_name(written, profile, field_name)
+        if name not in self.values:
+            tiered = _tiered_variable_name(written, profile, field_name) if profile else None
+            names = f"{name!r}"
+            if tiered and tiered != name:
+                names = f"{tiered!r} or {name!r}"
+            raise ConfigError(
+                f"{self.path}: {where} names the secret variable {names}, which is not set "
+                f"in {self.origin}"
+            )
+        self.sources.append(SettingSource(where, written, name))
         return name
 
     def hint(self, where: str) -> str:
@@ -1015,15 +1028,8 @@ def _parse_warehouse(
         for key in PROFILE_FIELDS:
             if key == "s3_secret":
                 name = fields.secret_var(key)
-                if name is None:
-                    continue
-                value = resolver.values.get(name)
-                if value is None:
-                    raise ConfigError(
-                        f"{path}: {where}.s3_secret names the variable {name!r}, which is not "
-                        f"set in {resolver.origin}"
-                    )
-                extra[key] = value
+                if name is not None:
+                    extra[key] = resolver.values[name]
                 continue
             value = fields.value(key)
             if value is not None:

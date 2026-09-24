@@ -28,7 +28,8 @@ with a `# variable` or `# value` comment:
   `Profile: ETL_CRAFT_PROFILE` is whatever `ETL_CRAFT_PROFILE` holds, and if that variable is
   not set, the text itself.
 - A secret (`secret`, `token`, `s3_secret`) must always name a variable that is set. A secret
-  is never taken as written.
+  is never taken as written. Every command checks this when it loads the file, for the selected
+  profile only, and stops with a "not set" error naming the variable.
 
 `etl-craft doctor` lists every value that was used as written but looks like a variable name,
 which is how a missing variable shows up.
