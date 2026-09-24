@@ -78,7 +78,9 @@ def catalog_files():
 def test_every_selected_column_is_aliased_in_lower_case(path):
     sql = path.read_text(encoding="utf-8")
     aliases = re.findall(r"\bAS\s+([A-Za-z_][A-Za-z0-9_]*)", sql)
-    assert aliases, "a catalog query names its columns with AS"
+    body = "\n".join(line for line in sql.splitlines() if not line.startswith("--"))
+    if body.lstrip().upper().startswith("SELECT"):
+        assert aliases, "a catalog query names its columns with AS"
     assert [alias for alias in aliases if alias != alias.lower()] == []
 
 

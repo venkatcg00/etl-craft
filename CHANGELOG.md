@@ -55,3 +55,6 @@ All notable changes are recorded here. The format follows
   mode, writers of a DuckDB file queued behind an Engine DB lock, and a check that a Trino
   catalog is Iceberg. Databricks tables can be external (`EXTERNAL_LOCATION`), and Snowflake
   Iceberg tables can name an external catalog (`CATALOG`).
+- `etl-craft init-db` creates the Engine DB schema in an empty database, and `etl-craft
+  migrate` applies the packaged and project migration streams, checking every applied file's
+  SHA-256 first. Migration SQL runs exactly as written, including `%` on PostgreSQL.

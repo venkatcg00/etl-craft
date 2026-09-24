@@ -97,7 +97,9 @@ nav:
   - Guides:
       - guides/index.md
       - Dependencies and run conditions: guides/dependencies.md
-  - Deploying: deploying/index.md
+  - Deploying:
+      - deploying/index.md
+      - Engine DB setup and upgrades: deploying/engine-db.md
   - Connectors:
       - connectors/index.md
       - Engine DB: connectors/engine-db.md
