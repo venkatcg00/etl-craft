@@ -10,3 +10,9 @@ All notable changes are recorded here. The format follows
 
 - Package skeleton for the rewrite: layered packages, `etl-craft --version`, tooling, CI and
   package verification with pip and uv.
+- Local test services in `docker-compose.yml`: PostgreSQL with password and with
+  client-certificate login, MinIO, an Iceberg REST catalog, Trino and Mailpit, with tests that
+  prove each one works.
+- Release evidence: every test belongs to a suite in `release/required-suites.toml`;
+  `scripts/run_suite.py` records a suite's results, and `scripts/release_gate.py` reports whether
+  the current commit is releasable.

@@ -103,7 +103,7 @@ squash-merged by pull request (see `CONTRIBUTING.md` for the definition of done)
 | # | Branch | Scope | Archived source | After | Status |
 |---|---|---|---|---|---|
 | A1 | `chore/bootstrap` | Package skeleton, tooling, CI, history gate, package verification | — | — | done |
-| A2 | `chore/test-release-harness` | Test tree and markers; docker-compose (postgres, postgres with TLS client certificates, minio, iceberg-rest, trino, mailpit); evidence plugin; `release/required-suites.toml`; `scripts/release_gate.py`; release-gate CI job | `tests/conftest.py`, `docker-compose.yml` | A1 | |
+| A2 | `chore/test-release-harness` | Test tree and markers; docker-compose (postgres, postgres with TLS client certificates, minio, iceberg-rest, trino, mailpit); evidence plugin; `release/required-suites.toml`; `scripts/release_gate.py`; release-gate CI job | `tests/conftest.py`, `docker-compose.yml` | A1 | done |
 | A3 | `docs/site-scaffold` | MkDocs Material, mike, mkdocstrings, gen-files; navigation skeleton; strict build in CI | — | A1 | |
 | B1 | `feat/core-domain` | Errors, enums, logging, exit codes | scattered | A1 | |
 | B2 | `feat/cli-framework` | Parser, output layer, exit-code mapping, `--config`, `--log-*` | `cli.py` | B1 | |

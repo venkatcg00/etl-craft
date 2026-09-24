@@ -19,7 +19,8 @@ htmlcov/
 # Documentation build
 /site/
 
-# Local secrets and scratch databases
+# Local secrets, test certificates and scratch databases
+.certs/
 .env
 .env.*
 !.env.*.example

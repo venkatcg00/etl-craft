@@ -1,0 +1,72 @@
+# The test suites a release requires, and the pytest marker that selects each one.
+#
+#   python scripts/run_suite.py SUITE     runs a suite and records its evidence in
+#                                         release/evidence/<version>/SUITE.json
+#   python scripts/release_gate.py        checks the evidence of every suite below
+#
+# wheel = true    the suite tests the built wheel; run it with --wheel, and its evidence
+#                 records the wheel's sha256
+# where = "local" the suite needs credentials and runs in a local session, not in CI
+
+[suites.unit]
+marker = "unit"
+description = "Pure Python tests that need no services."
+
+[suites.engine-sqlite]
+marker = "engine_sqlite"
+description = "The Engine DB on SQLite."
+
+[suites.engine-postgres]
+marker = "engine_postgres"
+description = "The Engine DB on PostgreSQL."
+
+[suites.warehouse-postgres]
+marker = "warehouse_postgres"
+description = "Every SQL action on a PostgreSQL warehouse."
+
+[suites.warehouse-duckdb]
+marker = "warehouse_duckdb"
+description = "Every SQL action on a DuckDB warehouse."
+
+[suites.warehouse-duckdb-iceberg]
+marker = "warehouse_duckdb_iceberg"
+description = "Every SQL action on DuckDB over the local Iceberg REST catalog."
+
+[suites.warehouse-trino-iceberg]
+marker = "warehouse_trino_iceberg"
+description = "Every SQL action on Trino over the local Iceberg REST catalog."
+
+[suites.connections]
+marker = "connections"
+description = "Every resource with every locally verifiable authentication mode."
+
+[suites.e2e-pip]
+marker = "e2e_pip"
+description = "The demo project, run from the wheel installed with pip."
+wheel = true
+
+[suites.e2e-uv]
+marker = "e2e_uv"
+description = "The demo project, run from the wheel installed with uv pip."
+wheel = true
+
+[suites.package]
+marker = "package"
+description = "The wheel and sdist build and install with pip and uv."
+wheel = true
+
+[suites.docs]
+marker = "docs"
+description = "The documentation site builds with --strict."
+
+[suites.cloud-databricks]
+marker = "cloud_databricks"
+description = "Connections and the demo subset on Databricks, native and Iceberg."
+wheel = true
+where = "local"
+
+[suites.cloud-snowflake]
+marker = "cloud_snowflake"
+description = "Connections and the demo subset on Snowflake, native and Iceberg."
+wheel = true
+where = "local"

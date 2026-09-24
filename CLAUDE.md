@@ -16,6 +16,9 @@ make sync            # .venv with every dependency group
 make check           # ruff lint + format check, mypy --strict, lint-imports, history gate, tests + coverage
 make test            # tests only
 make verify-package  # build wheel + sdist, install each with pip and uv in clean environments
+make services-up     # local PostgreSQL (password and TLS), MinIO, Iceberg REST, Trino, Mailpit
+make suite SUITE=unit   # run one release suite and record its evidence
+make release-gate    # is HEAD releasable? (release/README.md)
 ```
 
 ## Layers
@@ -58,8 +61,9 @@ Each package imports only the packages below it. `lint-imports` enforces this.
 - Log through `logging` (`etl_craft.<module>` loggers). Only the `cli` package prints.
 - Raw SQL aliases every selected column in lowercase; SQLite and PostgreSQL disagree on the case
   of unquoted identifiers.
-- Tests carry a marker (`unit`, and the service markers added with the test harness). Unit tests
-  need no services; integration tests skip cleanly when their service is not running.
+- Every test carries its suite's marker from `release/required-suites.toml` (or `harness`);
+  collection fails otherwise. Unit tests need no services; others call
+  `fixtures.services.require(...)`, which skips when the service is down.
 
 ## Porting a slice from the archive
 
