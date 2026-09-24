@@ -2,8 +2,7 @@
 
 Each test creates a table in each table format the warehouse offers, reads it back and drops it.
 The credentials come from ``ETL_CRAFT_TEST_<VENDOR>_*`` variables; a test skips when they are
-not set, and fails instead with ``ETL_CRAFT_REQUIRE_SERVICES=1``. When the Databricks JDBC URL
-names no ``httpPath``, ``ETL_CRAFT_TEST_DATABRICKS_HTTP_PATH`` supplies it.
+not set, and fails instead with ``ETL_CRAFT_REQUIRE_SERVICES=1``.
 """
 
 import os
@@ -70,11 +69,6 @@ def create_read_drop(config, schema, params=None):
 def test_databricks(tmp_path, table_format, key):
     require_variables("DATABRICKS", DATABRICKS_VARS)
     fields = {name.lower(): f"ETL_CRAFT_TEST_DATABRICKS_{name}" for name in DATABRICKS_VARS}
-    # The SQL warehouse's path may be kept apart from the URL; it is not a secret.
-    http_path = os.environ.get("ETL_CRAFT_TEST_DATABRICKS_HTTP_PATH")
-    url = os.environ["ETL_CRAFT_TEST_DATABRICKS_JDBC_URL"]
-    if http_path and "httppath=" not in url.lower():
-        fields["jdbc_url"] = f"{url.rstrip(';')};httpPath={http_path}"
     config = write_config(tmp_path, "Databricks", fields, table_format)
     assert config.warehouse.active.auth_mode == "token"
     schema = os.environ["ETL_CRAFT_TEST_DATABRICKS_SCHEMA"]
