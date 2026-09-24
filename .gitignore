@@ -18,6 +18,7 @@ htmlcov/
 
 # Documentation build
 /site/
+/_site/
 
 # Local secrets, test certificates and scratch databases
 .certs/

@@ -105,7 +105,7 @@ squash-merged by pull request (see `CONTRIBUTING.md` for the definition of done)
 | A1 | `chore/bootstrap` | Package skeleton, tooling, CI, history gate, package verification | — | — | done |
 | A2 | `chore/test-release-harness` | Test tree and markers; docker-compose (postgres, postgres with TLS client certificates, minio, iceberg-rest, trino, mailpit); evidence plugin; `release/required-suites.toml`; `scripts/release_gate.py`; release-gate CI job | `tests/conftest.py`, `docker-compose.yml` | A1 | done |
 | A3 | `docs/site-scaffold` | MkDocs Material, mike, mkdocstrings, gen-files; navigation skeleton; strict build in CI | — | A1 | done |
-| A4 | `docs/github-pages` | Publish the site to GitHub Pages with mike: `main` as `dev`, release tags as `X.Y` aliased `latest` | — | A3 | done |
+| A4 | `docs/github-pages` | Deploy the site to GitHub Pages from CI, rebuilt on every push to `main`: `dev` from `main`, `X.Y` from each release line's newest tag, `latest` for the newest | — | A3 | done |
 | B1 | `feat/core-domain` | Errors, enums, logging, exit codes | scattered | A1 | |
 | B2 | `feat/cli-framework` | Parser, output layer, exit-code mapping, `--config`, `--log-*` | `cli.py` | B1 | |
 | B3 | `feat/core-graph` | Dependency graph: validation, waves, ready, unsatisfiable, run conditions | `resolver.py` | B1 | |
@@ -248,10 +248,11 @@ MkDocs Material, laid out like Spark's documentation:
   - exit codes.
 - **Python API** (mkdocstrings), release notes, contributing.
 
-Published at <https://venkatcg00.github.io/etl-craft/> and versioned with mike: every push to
-`main` publishes `dev`, and each release tag `vX.Y.Z` publishes `X.Y` with the alias `latest`,
-which becomes the default. CI builds the site with `--strict`, checks links and tests the
-snippets.
+Published at <https://venkatcg00.github.io/etl-craft/>. The Docs workflow deploys it to
+GitHub Pages on every push to `main`, rebuilding every version each time, with no branch
+storing the pages: `dev` from `main`, `X.Y` from each release line's newest `vX.Y.Z` tag, and
+`latest` for the newest line, which becomes the default. mike assembles the versions and the
+version selector. CI builds the site with `--strict`, checks links and tests the snippets.
 
 ## Packaging
 
@@ -290,7 +291,7 @@ snippets.
       checksums recorded.
 - [ ] The documentation site builds strict, the generated references are current, the Quick
       Start runs in the end-to-end suite, and the supported matrix and known limits are
-      published; the `v0.1.0` tag publishes the `0.1` documentation as `latest`.
+      published; after the `v0.1.0` tag, the site is redeployed with `0.1` as `latest`.
 - [ ] Every required suite has evidence for the release commit with no failures or skips;
       `scripts/release_gate.py --version 0.1.0` exits 0; the tag is created only by the release
       script.

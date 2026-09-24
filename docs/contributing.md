@@ -14,14 +14,22 @@ make docs-serve    # live preview at http://127.0.0.1:8000
 
 ## Published versions
 
-The site is published to GitHub Pages from the `gh-pages` branch by the Docs workflow, with
-[mike](https://github.com/jimporter/mike) keeping one directory per version:
+The Docs workflow deploys the site to GitHub Pages on every push to `main`. Each deployment
+rebuilds the whole site with `scripts/build_docs_site.py`, so no branch stores the published
+pages:
 
-| Version | Published from | Notes |
+| Version | Built from | Notes |
 |---|---|---|
-| `dev` | every push to `main` | the default version until the first release |
-| `X.Y`, alias `latest` | each release tag `vX.Y.Z` | `latest` becomes the default version |
+| `dev` | `main` | the default version until the first release |
+| `X.Y` | the newest `vX.Y.Z` tag | one version per release line |
+| `latest` | the newest release line | the default version once a release exists |
 
-To preview the versioned site, `scripts/publish_docs.sh refs/heads/main` commits a build to the
-local `gh-pages` branch without pushing it, and `uv run mike serve` serves that branch with its
-version selector.
+A release tag appears on the site at the next deployment. Push to `main`, or run the Docs
+workflow from `main` (Actions → Docs → Run workflow) right after tagging.
+
+To preview the site as it is deployed, with its version selector:
+
+```bash
+make docs-site                          # builds every version into _site/
+python -m http.server --directory _site # then open http://127.0.0.1:8000
+```
