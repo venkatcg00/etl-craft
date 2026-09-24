@@ -258,18 +258,26 @@ def active_catalog(config: ConnectorConfig) -> str:
     assert config.warehouse is not None
     profile = config.warehouse.active
     if spec.key == "duckdb_iceberg":
-        catalog = str(profile.extra.get("catalog") or "").strip()
-        if not is_safe_identifier(catalog):
-            raise ConfigurationError(
-                "a DuckDB Iceberg warehouse needs `catalog` — the name the Iceberg catalog is "
-                f"attached as, a plain SQL identifier — got {catalog!r}"
-            )
-        return catalog
+        return attached_catalog_name(profile.extra)
     catalog = parse_warehouse_url(profile.jdbc_url).catalog
     if not catalog:
         raise ConfigurationError(
             "the active warehouse profile's jdbc_url names no catalog/database, so "
             "TARGET_OBJECT's schema.table cannot be resolved to a full name — add one "
             "(e.g. ConnCatalog=<catalog> for Databricks, db=<database> for Snowflake)"
+        )
+    return catalog
+
+
+def attached_catalog_name(profile_extra: Mapping[str, object]) -> str:
+    """Return the name DuckDB attaches an Iceberg catalog as: the profile's ``catalog``.
+
+    It is written unquoted into ``catalog.schema.table``, so it must be a plain identifier.
+    """
+    catalog = str(profile_extra.get("catalog") or "").strip()
+    if not is_safe_identifier(catalog):
+        raise ConfigurationError(
+            "a DuckDB Iceberg warehouse needs `catalog` — the name the Iceberg catalog is "
+            f"attached as, a plain SQL identifier — got {catalog!r}"
         )
     return catalog

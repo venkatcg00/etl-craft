@@ -49,3 +49,9 @@ All notable changes are recorded here. The format follows
   minted per connection for `oauth` and `sts`), cross-process locks, and schema tests that run
   the same rules against both databases. A task can no longer set `RUN_CONDITION_COUNT`
   without `RUN_CONDITION = 'N'`.
+- Warehouse dialects (`etl_craft.dialects.warehouse`) for PostgreSQL, DuckDB, DuckDB over an
+  Iceberg REST catalog, Trino over Iceberg, Databricks (Delta and UniForm) and Snowflake
+  (native and Iceberg), and `etl_craft.warehouse.connection`: warehouse engines with every auth
+  mode, writers of a DuckDB file queued behind an Engine DB lock, and a check that a Trino
+  catalog is Iceberg. Databricks tables can be external (`EXTERNAL_LOCATION`), and Snowflake
+  Iceberg tables can name an external catalog (`CATALOG`).

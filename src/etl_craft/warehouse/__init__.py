@@ -1,1 +1,1 @@
-"""The warehouse: connections, credentials, and serialized access for single-writer files."""
+"""The warehouse: connections, and queued access for single-writer warehouses."""
