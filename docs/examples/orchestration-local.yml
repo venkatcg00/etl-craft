@@ -1,0 +1,77 @@
+# Local orchestration: etl-craft runs the waves itself.
+#
+# `etl-craft run --pipeline_code X` resolves each ready wave from
+# CFG_TASK_DEPENDENCY and runs one subprocess per task, at most
+# Max_parallel_tasks at a time. The DAG defaults still shape `generate-yml`
+# output, so a local environment can preview the DAGs it would ship.
+#
+# Complete and loadable as written: tests/test_config_examples.py loads every
+# file in this directory, for every profile it declares.
+
+Secrets:
+  Source_type: environment        # names below are read from the process environment
+  Profile: dev                    # the default profile; ETL_CRAFT_PROFILE=prod switches all
+
+Orchestration:
+  Mode: local
+  Task_timeout_seconds: 21600     # 0 disables; a task's TASK_TIMEOUT_SECONDS overrides
+  Max_parallel_tasks: 8
+  Enforce_sla: false              # parsed but not yet enforced (docs/configuration.md)
+  dev:
+    Global_dag: false
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: false
+    Allow_schedule: false
+  sit:
+    Global_dag: false
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: false
+    Allow_schedule: false
+  uat:
+    Global_dag: false
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: false
+    Allow_schedule: false
+  prod:
+    Global_dag: false
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: false
+    Allow_schedule: false
+
+Engine:
+  Name: SQLite
+  dev:
+    jdbc_url: jdbc:sqlite:etl-craft-engine-dev.db
+  sit:
+    jdbc_url: jdbc:sqlite:etl-craft-engine-sit.db
+  uat:
+    jdbc_url: jdbc:sqlite:etl-craft-engine-uat.db
+  prod:
+    jdbc_url: jdbc:sqlite:etl-craft-engine-prod.db
+
+Warehouse:
+  Name: DuckDB
+  dev:
+    jdbc_url: jdbc:duckdb:warehouse_dev.duckdb
+  sit:
+    jdbc_url: jdbc:duckdb:warehouse_sit.duckdb
+  uat:
+    jdbc_url: jdbc:duckdb:warehouse_uat.duckdb
+  prod:
+    jdbc_url: jdbc:duckdb:warehouse_prod.duckdb

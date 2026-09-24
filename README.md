@@ -41,47 +41,63 @@ with `pip install dist/*.whl` after `uv build`.
 
 You need [uv](https://docs.astral.sh/uv/). Nothing else — no Docker, no database server.
 
-**1. Run `setup`. Once, and then whenever anything changes.**
+**1. Write `craft-connector.yml`.** It is yours: etl-craft reads it and never writes it. The
+smallest one needs nothing installed and nothing set: a SQLite Engine DB and a DuckDB warehouse,
+both files beside it.
+
+```yaml
+Secrets:
+  Source_type: environment
+  Profile: dev
+
+Orchestration:
+  Mode: local
+
+Engine:
+  dev:
+    jdbc_url: jdbc:sqlite:etl-craft-engine.db
+
+Warehouse:
+  Name: DuckDB
+  dev:
+    jdbc_url: jdbc:duckdb:warehouse.duckdb
+```
+
+That is [docs/examples/minimal-local.yml](docs/examples/minimal-local.yml).
+[docs/examples/](docs/examples/README.md) has a complete file for every Engine DB, every warehouse
+(PostgreSQL, DuckDB, DuckDB or Trino over Iceberg, Databricks, Snowflake, each native or Iceberg),
+both secrets sources and both orchestration modes.
+
+**2. Run `setup`, then `doctor`.**
 
 ```bash
 uv sync
-uv run etl-craft setup      # writes craft-connector.yml and creates the SQLite Engine DB
+uv run etl-craft setup      # creates (or migrates) the Engine DB craft-connector.yml describes
 uv run etl-craft doctor     # verifies every connection
 ```
 
-With nothing configured, `setup` creates `craft-connector.yml` and a SQLite Engine DB,
-`etl-craft-engine.db`, next to it. It is idempotent: later runs update the config and bring the
-Engine DB forward. There are no prompts, so the same command works in CI.
+`setup` is idempotent: run it again after any upgrade to bring the Engine DB forward. There are no
+prompts, so the same command works in CI.
 
-**2. Add a warehouse** (needed only for SQL and BUSINESS_RULES tasks). The simplest is DuckDB,
-which is also a file:
+**3. Going to production: PostgreSQL for the Engine DB.** SQLite is one file on one machine:
+every Engine DB write is serialized, and an orchestrator worker on another host cannot open it.
+Give the file a `prod` profile whose values are variable *names*, and set those variables in each
+environment, in the process environment or in a `.env`-style file that `Secrets` points at:
 
-```bash
-export WAREHOUSE_JDBC_URL=jdbc:duckdb:./warehouse.duckdb
-export WAREHOUSE_AUTH_MODE=none
-export ETL_CRAFT_WAREHOUSE_TABLE_FORMAT=native
-uv run etl-craft setup
+```yaml
+Engine:
+  dev:
+    jdbc_url: jdbc:sqlite:etl-craft-engine.db
+  prod:
+    jdbc_url: ENGINE_JDBC_URL     # e.g. jdbc:postgresql://db:5432/etl_craft
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE   # password | key_file
+    secret: ENGINE_SECRET
 ```
 
-**3. Going to production: use PostgreSQL for the Engine DB.** SQLite is one file on one
-machine: every Engine DB write is serialized, and an orchestrator worker on another host
-cannot open it at all. Point `setup` at Postgres instead, through a `.env` file (read
-automatically when it exists) or the environment:
-
-```bash
-ETL_CRAFT_SOURCE_TYPE=file
-ETL_CRAFT_SOURCE_PATH=./.env
-ENGINE_JDBC_URL=jdbc:postgresql://localhost:5432/etl_craft
-ENGINE_USER=etl_craft
-ENGINE_AUTH_MODE=password
-ENGINE_SECRET=change-me
-```
-
-Keep `.env` out of version control (`chmod 600` it). In CI, export the same variables and use
-`uv run etl-craft setup --from-environment`. `setup` prints the exact secret variable each
-profile expects. It never replaces an existing Postgres Engine DB with the SQLite default:
-re-running it without `ENGINE_JDBC_URL` against a Postgres deployment is an error, not a
-silent switch. See [docs/configuration.md](docs/configuration.md) for every setting.
+`ETL_CRAFT_PROFILE=prod` selects that profile in every section, so `Warehouse` needs a `prod`
+block too ([docs/examples/warehouse-postgres.yml](docs/examples/warehouse-postgres.yml) shows
+both). The file holds no secrets, so it is safe to commit. See [docs/configuration.md](docs/configuration.md) for every setting.
 
 **4. Register a pipeline.** Pipeline creation is deliberately *not* a CLI verb — it is
 git-managed SQL, reviewed like any other change. See
@@ -100,10 +116,9 @@ uv run etl-craft history --pipeline_code MY_PIPELINE
 
 | Command | Purpose |
 |---|---|
-| `setup` | **Start here.** Set up or update this deployment: config, then schema/migrations. Idempotent — run it again after any change |
+| `setup` | **Start here.** Validate `craft-connector.yml`, then create or migrate its Engine DB. Idempotent; run it again after any upgrade |
 | `init-db` | Apply the packaged schema to an empty Engine DB |
 | `migrate` | Apply pending packaged migrations, then an optional project migration stream |
-| `set-execution-mode local\|remote` | One-time-per-environment mode lock |
 | `doctor` | Check config, every secret, and every configured connection |
 | `validate` | Config integrity checks no database constraint can enforce |
 | `run --pipeline_code X [--task_code Y] [--force]` | The one execution verb |
@@ -133,8 +148,8 @@ searches upward from the current directory for `craft-connector.yml`.
 - [docs/configuration.md](docs/configuration.md) — every `craft-connector.yml` section
 - [docs/parameters.md](docs/parameters.md) — the `CFG_TASK_PARAMETERS` reference, per handler
 - [docs/first-pipeline.md](docs/first-pipeline.md) — register and run your first pipeline
-- [docs/craft-connector.env-secrets.example.yml](docs/craft-connector.env-secrets.example.yml) — environment-backed canonical config
-- [docs/craft-connector.file-secrets.example.yml](docs/craft-connector.file-secrets.example.yml) — file-backed canonical config
+- [docs/craft-connector.example.yml](docs/craft-connector.example.yml) — the annotated reference config
+- [docs/examples/](docs/examples/README.md) — a complete config for every engine, warehouse, secrets source and mode
 - [docs/operations.md](docs/operations.md) — deployment, backup, upgrade and monitoring guidance
 - [docs/release-checklist.md](docs/release-checklist.md) — release and rollout verification
 - [SECURITY.md](SECURITY.md) — private vulnerability reporting and deployment basics
@@ -158,8 +173,8 @@ editing a query invalidates them automatically.
 ## Requirements
 
 - Python 3.11+
-- PostgreSQL 14+ for the Engine DB. Its partial unique index makes concurrent run-id creation
-  safe.
+- For production, PostgreSQL 14+ as the Engine DB (SQLite, the default, needs nothing). Its
+  partial unique index makes concurrent run-id creation safe.
 - PostgreSQL as the reference warehouse for a launch. DuckDB is useful for local development
   and serializes writers. The repository exercises Trino against a local Iceberg stack. The
   Databricks and Snowflake integrations require a real account and must pass their gated

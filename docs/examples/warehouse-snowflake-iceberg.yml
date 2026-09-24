@@ -1,0 +1,158 @@
+# Warehouse: Snowflake Iceberg tables.
+#
+# CREATE ICEBERG TABLE on Snowflake-managed storage by default — no bucket to
+# provision. A task can name its own EXTERNAL_VOLUME (with BASE_LOCATION) in
+# CFG_TASK_PARAMETERS. Cloning mirrors have no task, so their volume and base
+# location are set in Cloning; both are required when cloning is enabled.
+#
+# Complete and loadable as written: tests/test_config_examples.py loads every
+# file in this directory, for every profile it declares.
+
+Secrets:
+  Source_type: environment        # names below are read from the process environment
+  Profile: dev                    # the default profile; ETL_CRAFT_PROFILE=prod switches all
+
+Orchestration:
+  Mode: remote                    # an orchestrator runs each task from generate-yml's DAGs
+  Name: Airflow                   # informational only
+  Task_timeout_seconds: 21600
+  Max_parallel_tasks: 8
+  Enforce_sla: false              # parsed but not yet enforced (docs/configuration.md)
+  dev:
+    Global_dag: false
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: false
+    Allow_schedule: false
+  sit:
+    Global_dag: false
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: false
+    Allow_schedule: false
+    Email:
+      host: EMAIL_HOST
+      port: EMAIL_PORT
+      from_address: EMAIL_FROM
+      auth_mode: EMAIL_AUTH_MODE
+      user: EMAIL_USER
+      use_tls: EMAIL_USE_TLS
+      secret: EMAIL_SECRET
+  uat:
+    Global_dag: false
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: false
+    Allow_schedule: false
+    Email:
+      host: EMAIL_HOST
+      port: EMAIL_PORT
+      from_address: EMAIL_FROM
+      auth_mode: EMAIL_AUTH_MODE
+      user: EMAIL_USER
+      use_tls: EMAIL_USE_TLS
+      secret: EMAIL_SECRET
+  prod:
+    Global_dag: true
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: true
+    Allow_schedule: true
+    Email_recipients: [data-alerts@example.com]
+    Email:
+      host: EMAIL_HOST
+      port: EMAIL_PORT
+      from_address: EMAIL_FROM
+      auth_mode: EMAIL_AUTH_MODE
+      user: EMAIL_USER
+      use_tls: EMAIL_USE_TLS
+      secret: EMAIL_SECRET
+
+Engine:
+  Name: Postgres
+  dev:
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE
+    secret: ENGINE_SECRET
+  sit:
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE
+    secret: ENGINE_SECRET
+  uat:
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE
+    secret: ENGINE_SECRET
+  prod:
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE
+    secret: ENGINE_SECRET
+
+Warehouse:
+  Name: Snowflake
+  Table_format: iceberg
+  dev:
+    user: WAREHOUSE_USER
+    account: WAREHOUSE_ACCOUNT      # <org>-<account>, not a hostname
+    database: WAREHOUSE_DATABASE
+    schema: WAREHOUSE_SCHEMA
+    warehouse: WAREHOUSE_WAREHOUSE
+    role: WAREHOUSE_ROLE
+    token: WAREHOUSE_TOKEN          # a Programmatic Access Token (needs a network policy)
+  sit:
+    user: WAREHOUSE_USER
+    account: WAREHOUSE_ACCOUNT      # <org>-<account>, not a hostname
+    database: WAREHOUSE_DATABASE
+    schema: WAREHOUSE_SCHEMA
+    warehouse: WAREHOUSE_WAREHOUSE
+    role: WAREHOUSE_ROLE
+    token: WAREHOUSE_TOKEN          # a Programmatic Access Token (needs a network policy)
+  uat:
+    user: WAREHOUSE_USER
+    account: WAREHOUSE_ACCOUNT      # <org>-<account>, not a hostname
+    database: WAREHOUSE_DATABASE
+    schema: WAREHOUSE_SCHEMA
+    warehouse: WAREHOUSE_WAREHOUSE
+    role: WAREHOUSE_ROLE
+    token: WAREHOUSE_TOKEN          # a Programmatic Access Token (needs a network policy)
+  prod:
+    user: WAREHOUSE_USER
+    account: WAREHOUSE_ACCOUNT      # <org>-<account>, not a hostname
+    database: WAREHOUSE_DATABASE
+    schema: WAREHOUSE_SCHEMA
+    warehouse: WAREHOUSE_WAREHOUSE
+    role: WAREHOUSE_ROLE
+    token: WAREHOUSE_TOKEN          # a Programmatic Access Token (needs a network policy)
+
+Cloning:
+  dev:
+    Enabled: false
+    Scope: none
+  sit:
+    Enabled: false
+    Scope: none
+  uat:
+    Enabled: true
+    Scope: cfg
+    External_volume: ETL_CRAFT_VOLUME     # a literal Snowflake volume name, not a variable
+    Base_location: etl_craft_uat         # the path mirrors are written under
+  prod:
+    Enabled: true
+    Scope: all
+    External_volume: ETL_CRAFT_VOLUME
+    Base_location: etl_craft_prod

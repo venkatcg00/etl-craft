@@ -36,14 +36,16 @@ fi
 echo "==> building the wheel"
 uv build --out-dir "$WORK/dist" >/dev/null
 
-echo "==> the wheel must ship its SQL, type marker and license"
+echo "==> the wheel must ship each Engine DB dialect's SQL, a type marker and a license"
 python - "$WORK/dist" <<'PY'
 import sys, zipfile, pathlib
 wheel = next(pathlib.Path(sys.argv[1]).glob("*.whl"))
 names = zipfile.ZipFile(wheel).namelist()
+engine = "etl_craft/dialects/engine_dialects"
 required = [
-    "etl_craft/sql/schema.sql",
-    "etl_craft/sql/schema_sqlite.sql",
+    f"{engine}/postgres/schema.sql",
+    f"{engine}/sqlite/schema.sql",
+    "etl_craft/dialects/warehouse_dialects/base.py",
     "etl_craft/py.typed",
 ]
 missing = [r for r in required if r not in names]
@@ -51,9 +53,9 @@ if missing:
     sys.exit(f"wheel is missing {missing}")
 if not any(n.endswith("LICENSE") for n in names):
     sys.exit("wheel ships no LICENSE")
-if not any(n.startswith("etl_craft/sql/migrations/") and n.endswith(".sql") for n in names):
-    sys.exit("wheel ships no migrations")
-print(f"    {wheel.name}: sql/, py.typed and LICENSE all present")
+if not any(n.startswith(f"{engine}/postgres/migrations/") and n.endswith(".sql") for n in names):
+    sys.exit("wheel ships no PostgreSQL migrations")
+print(f"    {wheel.name}: dialect SQL, py.typed and LICENSE all present")
 PY
 
 echo "==> installing into a clean venv outside the checkout"
@@ -61,13 +63,41 @@ uv venv "$WORK/venv" -q
 uv pip install -q --python "$WORK/venv/bin/python" "$WORK"/dist/*.whl
 EC="$WORK/venv/bin/etl-craft"
 
-echo "==> zero-config setup: the default SQLite Engine DB, with nothing set"
+echo "==> setup refuses to run without a craft-connector.yml, and never writes one"
+mkdir -p "$WORK/no-config"
+(
+    cd "$WORK/no-config"
+    if "$EC" setup >/dev/null 2>&1; then
+        echo "FAIL: setup succeeded with no craft-connector.yml" >&2
+        exit 1
+    fi
+    test ! -e craft-connector.yml || { echo "FAIL: setup wrote craft-connector.yml" >&2; exit 1; }
+)
+
+echo "==> the smallest user-written config: SQLite Engine DB and DuckDB, nothing set"
 mkdir -p "$WORK/zero-config"
 (
     cd "$WORK/zero-config"
-    env -u ENGINE_JDBC_URL -u WAREHOUSE_JDBC_URL "$EC" setup >/dev/null
+    cat > craft-connector.yml <<'YML'
+Secrets:
+  Source_type: environment
+  Profile: dev
+
+Orchestration:
+  Mode: local
+
+Engine:
+  dev:
+    jdbc_url: jdbc:sqlite:etl-craft-engine.db
+
+Warehouse:
+  Name: DuckDB
+  dev:
+    jdbc_url: jdbc:duckdb:warehouse.duckdb
+YML
+    env -u ETL_CRAFT_PROFILE "$EC" setup >/dev/null
     test -f etl-craft-engine.db || { echo "setup created no SQLite Engine DB"; exit 1; }
-    "$EC" setup | grep -qi "already current"
+    "$EC" setup | grep -qi "already up to date"
     "$EC" doctor | grep -q "SQLite Engine DB"
     "$EC" list >/dev/null
     "$EC" validate >/dev/null
@@ -76,21 +106,11 @@ mkdir -p "$WORK/zero-config"
 echo "==> preparing a disposable database"
 psql_admin -q -c "DROP DATABASE IF EXISTS $DB_NAME" -c "CREATE DATABASE $DB_NAME"
 
-# [ADDITION, 2026-09-22, E2-88] The config is written by `setup`, not by a
-# heredoc here. CLAUDE.md's CLI table names `setup` as the one command that
-# takes a team from nothing to a working deployment, and it was the only verb
-# in that table this install-path test did not exercise -- while writing the
-# config by hand is exactly the step `setup` exists to replace. Not
-# speculative: `setup` shipped without writing a [Warehouse] section at all, so
-# every SQL/BUSINESS_RULES task on a setup-produced deployment failed with "no
-# [Warehouse] section configured". That bug lived in the one command this test
-# skipped, and was found by hand months later.
+# [DEVIATION, 2026-09-24] The team writes craft-connector.yml; etl-craft only
+# reads it. So this writes one the way an adopter would -- secrets in a
+# .env-style file beside it -- and checks `setup` leaves it byte-for-byte alone.
 mkdir -p "$WORK/adopter"
-cat > "$WORK/adopter/.env" <<ENV
-ETL_CRAFT_MODE=local
-ETL_CRAFT_SOURCE_TYPE=file
-ETL_CRAFT_SOURCE_PATH=$WORK/adopter/.env
-ETL_CRAFT_ENGINE_PROFILE=dev
+cat > "$WORK/adopter/secrets.env" <<ENV
 ENGINE_JDBC_URL=jdbc:postgresql://$PGHOST:$PGPORT/$DB_NAME
 ENGINE_USER=$PGUSER
 ENGINE_AUTH_MODE=password
@@ -100,30 +120,47 @@ WAREHOUSE_USER=$PGUSER
 WAREHOUSE_AUTH_MODE=password
 WAREHOUSE_DEV_SECRET=$PGPASSWORD
 ENV
+cat > "$WORK/adopter/craft-connector.yml" <<'YML'
+Secrets:
+  Source_type: file
+  Path: secrets.env
+  Profile: dev
+
+Orchestration:
+  Mode: local
+
+Engine:
+  dev:
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE
+    secret: ENGINE_SECRET
+
+Warehouse:
+  Name: Postgres
+  dev:
+    jdbc_url: WAREHOUSE_JDBC_URL
+    user: WAREHOUSE_USER
+    auth_mode: WAREHOUSE_AUTH_MODE
+    secret: WAREHOUSE_SECRET
+YML
 cd "$WORK/adopter"
+BEFORE="$(sha256sum craft-connector.yml)"
 
 echo "==> --help"
 "$EC" --help >/dev/null
 
-echo "==> setup: from nothing to a working deployment in one command"
-"$EC" setup
+echo "==> setup: an empty database to a working Engine DB in one command"
+env -u ETL_CRAFT_PROFILE "$EC" setup
 
-echo "==> setup writes a commit-safe manifest with both connections"
-"$WORK/venv/bin/python" - "$WORK/adopter/craft-connector.yml" <<'PYEOF'
-import sys, pathlib, re
-text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-for section in ("Orchestration:", "Secrets:", "Engine:", "Warehouse:"):
-    if not re.search(rf"^{re.escape(section)}", text, re.MULTILINE):
-        sys.exit(f"setup wrote no {section} section:\n{text}")
-if "jdbc:" in text:
-    sys.exit(f"setup wrote a connection value into the manifest:\n{text}")
-print("    canonical manifest contains Engine and Warehouse names only")
-PYEOF
+echo "==> setup left the user's craft-connector.yml untouched"
+test "$BEFORE" = "$(sha256sum craft-connector.yml)" \
+    || { echo "FAIL: setup modified craft-connector.yml" >&2; exit 1; }
 
 echo "==> setup again must be idempotent"
-"$EC" setup | grep -qi "already current"
+"$EC" setup | grep -qi "already up to date"
 
-echo "==> the read verbs work against a setup-produced deployment"
+echo "==> the read verbs work against the set-up deployment"
 "$EC" list >/dev/null
 "$EC" doctor >/dev/null
 

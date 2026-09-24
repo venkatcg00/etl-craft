@@ -56,16 +56,13 @@ from __future__ import annotations
 
 import hashlib
 import os
-import re
-import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
-from etl_craft.locks import engine_lock
-from etl_craft.packaged_sql import packaged_migrations_dir
+from etl_craft.dialects.engine_dialects import for_engine, for_name
 
 MIGRATIONS_DIR_ENV_VAR = "ETL_CRAFT_MIGRATIONS_DIR"
 ENGINE_MIGRATION_SOURCE = "ENGINE"
@@ -111,30 +108,10 @@ _PRE_STREAM_ENGINE_VERSIONS = frozenset(
 )
 
 
-def resolve_migrations_dir(explicit: Path | str | None = None) -> Path:
-    """Resolve which migrations directory to read, most-specific first.
-
-    [DEVIATION, 2026-09-20, E2-05] See this module's own docstring: the old
-    package-relative default silently resolved to a nonexistent path once
-    installed, and `migrate` then reported success having applied nothing.
-    """
-    if explicit is not None:
-        return Path(explicit)
-    from_env = os.environ.get(MIGRATIONS_DIR_ENV_VAR)
-    if from_env:
-        return Path(from_env)
-    local = Path.cwd() / "sql" / "migrations"
-    if local.is_dir():
-        return local
-    return packaged_migrations_dir()
-
-
 def resolve_project_migrations_dir(explicit: Path | str | None = None) -> Path | None:
     """Return the optional project migration directory, without the package fallback.
 
-    `resolve_migrations_dir` remains for callers that need the historical
-    single-directory answer.  Application needs a different answer now:
-    packaged engine migrations are always one stream, while an explicit,
+    Packaged engine migrations are always one stream, while an explicit,
     environment-selected, or local directory is a second project stream.
     Returning ``None`` means there is no project stream to apply.
     """
@@ -147,241 +124,12 @@ def resolve_project_migrations_dir(explicit: Path | str | None = None) -> Path |
     return local if local.is_dir() else None
 
 
-def split_statements(sql_text: str) -> list[str]:
-    """Split a SQL file into statements on `;`, respecting quotes and comments.
-
-    [DEVIATION, 2026-09-20, E2-05] This used to be `sql_text.split(";")`, a
-    documented limitation that turned out to be the *first* thing anyone would
-    hit: `schema.sql`'s own trigger functions are `CREATE FUNCTION ... $$ ...
-    ; ... $$` bodies, so any migration touching them — and `init-db` applying
-    the schema at all — would be shredded mid-body. A literal semicolon inside
-    an ordinary string literal broke it too.
-
-    Deliberately a small scanner, not a SQL parser (Non-goals rules one out):
-    it tracks single-quoted strings with their `''` escape, dollar-quoted
-    bodies including tagged `$tag$` ones, `--` line comments and `/* */` block
-    comments, and splits on any `;` outside all of them. That is the whole
-    grammar a statement splitter needs, and nothing here tries to understand
-    the statements themselves.
-    """
-    statements: list[str] = []
-    current: list[str] = []
-    i = 0
-    length = len(sql_text)
-    while i < length:
-        ch = sql_text[i]
-        rest = sql_text[i:]
-
-        if rest.startswith("--"):
-            end = sql_text.find("\n", i)
-            end = length if end == -1 else end
-            current.append(sql_text[i:end])
-            i = end
-            continue
-
-        if rest.startswith("/*"):
-            end = sql_text.find("*/", i + 2)
-            end = length if end == -1 else end + 2
-            current.append(sql_text[i:end])
-            i = end
-            continue
-
-        if ch == "'":
-            end = i + 1
-            while end < length:
-                if sql_text[end] == "'":
-                    if end + 1 < length and sql_text[end + 1] == "'":
-                        end += 2
-                        continue
-                    end += 1
-                    break
-                end += 1
-            current.append(sql_text[i:end])
-            i = end
-            continue
-
-        if ch == "$":
-            tag = _dollar_tag_at(sql_text, i)
-            if tag is not None:
-                close = sql_text.find(tag, i + len(tag))
-                end = length if close == -1 else close + len(tag)
-                current.append(sql_text[i:end])
-                i = end
-                continue
-
-        if ch == ";":
-            statements.append("".join(current))
-            current = []
-            i += 1
-            continue
-
-        current.append(ch)
-        i += 1
-
-    statements.append("".join(current))
-    return [stmt.strip() for stmt in statements if stmt.strip() and not _is_only_comments(stmt)]
-
-
-def _dollar_tag_at(sql_text: str, index: int) -> str | None:
-    """Return the dollar-quote tag starting at `index` (e.g. "$$", "$fn$"), or None."""
-    end = sql_text.find("$", index + 1)
-    if end == -1:
-        return None
-    body = sql_text[index + 1 : end]
-    if body and not (body[0].isalpha() or body[0] == "_"):
-        return None
-    if not all(c.isalnum() or c == "_" for c in body):
-        return None
-    return sql_text[index : end + 1]
-
-
-def _is_only_comments(statement: str) -> bool:
-    """Report whether `statement` holds nothing but comments and whitespace."""
-    stripped = re.sub(r"/\*.*?\*/", "", statement, flags=re.DOTALL)
-    stripped = re.sub(r"--[^\n]*", "", stripped)
-    return not stripped.strip()
-
-
-# Kept as the private name the rest of this package already imports.
-_split_statements = split_statements
-
-
-def split_sqlite_statements(sql_text: str) -> list[str]:
-    """Split a SQLite script into statements, keeping trigger bodies whole.
-
-    [ADDITION, 2026-09-24] `split_statements` knows Postgres's quoting, not
-    SQLite's `CREATE TRIGGER ... BEGIN ...; ...; END;`, whose inner semicolons
-    it would cut at. SQLite ships the answer itself: `complete_statement`
-    reports whether text so far forms whole statements, so a `;` only ends a
-    statement once SQLite agrees it does.
-    """
-    statements: list[str] = []
-    current: list[str] = []
-    for ch in sql_text:
-        current.append(ch)
-        if ch == ";" and sqlite3.complete_statement("".join(current)):
-            statements.append("".join(current))
-            current = []
-    statements.append("".join(current))
-    return [
-        stmt.strip().rstrip(";").strip()
-        for stmt in statements
-        if stmt.strip() and not _is_only_comments(stmt)
-    ]
-
-
-def statements_for(engine: Engine, sql_text: str) -> list[str]:
-    """Split `sql_text` with the splitter that understands `engine`'s dialect."""
-    if engine.dialect.name == "sqlite":
-        return split_sqlite_statements(sql_text)
-    return split_statements(sql_text)
-
-
-def begin_ddl_transaction(conn: Connection) -> None:
-    """Make DDL on `conn` transactional, which it is not by default on SQLite.
-
-    Python's sqlite3 module opens a transaction implicitly only before
-    INSERT/UPDATE/DELETE, so DDL would otherwise autocommit statement by
-    statement and a failed migration would leave half its changes behind.
-    Postgres needs nothing: DDL is transactional there already.
-    """
-    if conn.dialect.name == "sqlite":
-        conn.exec_driver_sql("BEGIN IMMEDIATE")
-
-
 def _ensure_bookkeeping_table(engine: Engine) -> None:
-    """Create or upgrade the migration ledger before reading it.
-
-    The original ledger had ``VERSION`` as its sole primary key.  That made a
-    project migration named ``0004_add_thing.sql`` indistinguishable from a
-    future engine migration with the same filename, and selecting a project
-    directory hid every packaged migration altogether.  The ledger now keeps
-    the source and SHA-256 checksum alongside a filename, with ``(SOURCE,
-    VERSION)`` as the key.
-
-    This bootstrap lives here as well as in the packaged ledger migration:
-    the runner must be able to read and classify the old table *before* it can
-    decide whether that migration is pending.  It is deliberately limited to
-    this tool-owned bookkeeping table.  Existing records become ``LEGACY`` and
-    are adopted only when their ownership can be proved safely.
-    """
-    if engine.dialect.name == "sqlite":
-        # A SQLite Engine DB is never older than the (SOURCE, VERSION,
-        # CHECKSUM) ledger -- schema_sqlite.sql was written after it -- so
-        # there is no legacy shape to upgrade, only a missing table to create.
-        with engine.begin() as conn:
-            conn.exec_driver_sql(
-                "CREATE TABLE IF NOT EXISTS SCHEMA_MIGRATIONS ("
-                "SOURCE VARCHAR NOT NULL DEFAULT 'LEGACY', "
-                "VERSION VARCHAR NOT NULL, "
-                "CHECKSUM VARCHAR(64), "
-                "APPLIED_AT TIMESTAMP NOT NULL "
-                "DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'), "
-                "PRIMARY KEY (SOURCE, VERSION))"
-            )
-        return
+    """Create or upgrade the migration ledger before reading it (the Engine DB dialect's job)."""
     try:
-        with engine.begin() as conn:
-            conn.exec_driver_sql(
-                "CREATE TABLE IF NOT EXISTS SCHEMA_MIGRATIONS ("
-                "SOURCE VARCHAR NOT NULL DEFAULT 'LEGACY', "
-                "VERSION VARCHAR NOT NULL, "
-                "CHECKSUM VARCHAR(64), "
-                "APPLIED_AT TIMESTAMPTZ NOT NULL DEFAULT now(), "
-                "PRIMARY KEY (SOURCE, VERSION))"
-            )
-            # `IF NOT EXISTS` makes this safe for both the original, one-key
-            # ledger and a database initialized from the current schema.
-            conn.exec_driver_sql(
-                "ALTER TABLE SCHEMA_MIGRATIONS ADD COLUMN IF NOT EXISTS SOURCE VARCHAR"
-            )
-            conn.exec_driver_sql(
-                "ALTER TABLE SCHEMA_MIGRATIONS ADD COLUMN IF NOT EXISTS CHECKSUM VARCHAR(64)"
-            )
-            conn.exec_driver_sql(
-                "UPDATE SCHEMA_MIGRATIONS SET SOURCE = 'LEGACY' WHERE SOURCE IS NULL"
-            )
-            conn.exec_driver_sql(
-                "ALTER TABLE SCHEMA_MIGRATIONS ALTER COLUMN SOURCE SET DEFAULT 'LEGACY'"
-            )
-            conn.exec_driver_sql("ALTER TABLE SCHEMA_MIGRATIONS ALTER COLUMN SOURCE SET NOT NULL")
-            _ensure_composite_primary_key(conn)
+        for_engine(engine).ensure_migration_ledger(engine)
     except Exception as exc:
         raise MigrationError(f"failed preparing SCHEMA_MIGRATIONS: {exc}") from exc
-
-
-def _ensure_composite_primary_key(conn: Connection) -> None:
-    """Replace the legacy VERSION-only primary key when it is still present."""
-    rows = conn.execute(
-        text(
-            "SELECT kcu.constraint_name, kcu.column_name "
-            "FROM information_schema.table_constraints AS tc "
-            "JOIN information_schema.key_column_usage AS kcu "
-            "ON tc.constraint_name = kcu.constraint_name "
-            "AND tc.table_schema = kcu.table_schema "
-            "WHERE tc.table_schema = current_schema() "
-            "AND tc.table_name = 'schema_migrations' "
-            "AND tc.constraint_type = 'PRIMARY KEY' "
-            "ORDER BY kcu.ordinal_position"
-        )
-    ).all()
-    columns = tuple(row[1].lower() for row in rows)
-    if columns == ("source", "version"):
-        return
-    if rows:
-        constraint_name = str(rows[0][0])
-        conn.exec_driver_sql(
-            "ALTER TABLE SCHEMA_MIGRATIONS DROP CONSTRAINT " f"{_quote_identifier(constraint_name)}"
-        )
-    conn.exec_driver_sql(
-        "ALTER TABLE SCHEMA_MIGRATIONS "
-        "ADD CONSTRAINT schema_migrations_pkey PRIMARY KEY (SOURCE, VERSION)"
-    )
-
-
-def _quote_identifier(identifier: str) -> str:
-    """Quote a database identifier obtained from PostgreSQL's own catalog."""
-    return '"' + identifier.replace('"', '""') + '"'
 
 
 def _read_migration_files(source: str, directory: Path) -> list[MigrationFile]:
@@ -409,7 +157,7 @@ def _migration_streams(
     dialect: str = "postgresql",
 ) -> list[tuple[str, Path, list[MigrationFile]]]:
     """Return packaged engine migrations followed by the optional project stream."""
-    package_dir = packaged_migrations_dir(dialect)
+    package_dir = for_name(dialect).migrations_dir()
     if not package_dir.is_dir():
         raise MigrationError(
             f"packaged migrations directory {str(package_dir)!r} does not exist — "
@@ -591,9 +339,10 @@ def _record_migration(conn: Connection, migration: MigrationFile) -> None:
 def _apply_migration(engine: Engine, migration: MigrationFile) -> None:
     """Execute a single frozen payload and record it in one transaction."""
     try:
+        dialect = for_engine(engine)
         with engine.begin() as conn:
-            begin_ddl_transaction(conn)
-            for statement in statements_for(engine, migration.sql):
+            dialect.begin_ddl_transaction(conn)
+            for statement in dialect.split_statements(migration.sql):
                 # These are complete, trusted DDL statements from the frozen
                 # payload above, with no bind parameters.  `text()` would
                 # re-parse ordinary literals such as ':name' as parameters.
@@ -611,7 +360,7 @@ def mark_packaged_migrations_applied(engine: Engine) -> list[str]:
     after a fresh install.  Existing engine records are checksum-verified;
     changed package files never get silently accepted by ``ON CONFLICT``.
     """
-    package_dir = packaged_migrations_dir(engine.dialect.name)
+    package_dir = for_engine(engine).migrations_dir()
     if not package_dir.is_dir():
         return []
     migrations = _read_migration_files(ENGINE_MIGRATION_SOURCE, package_dir)
@@ -621,7 +370,7 @@ def mark_packaged_migrations_applied(engine: Engine) -> list[str]:
     # the ledger's: a ledger SELECT on the lock's connection would retain an
     # ACCESS SHARE lock until the end of its transaction and make 0004's
     # ALTER TABLE block behind itself. On SQLite it is a file lock instead.
-    with engine_lock(engine, _ADVISORY_LOCK_KEY, "migrate"):
+    with for_engine(engine).lock(engine, _ADVISORY_LOCK_KEY, "migrate"):
         _ensure_bookkeeping_table(engine)
         migration_map = {ENGINE_MIGRATION_SOURCE: {m.version: m for m in migrations}}
         directories = {ENGINE_MIGRATION_SOURCE: package_dir}
@@ -653,7 +402,7 @@ def apply_pending_migrations(engine: Engine, migrations_dir: Path | str | None =
     # Per-file transactions still ensure a failed file rolls back its own DDL
     # and ledger record without preventing earlier successful files from being
     # durably recorded.
-    with engine_lock(engine, _ADVISORY_LOCK_KEY, "migrate"):
+    with for_engine(engine).lock(engine, _ADVISORY_LOCK_KEY, "migrate"):
         _ensure_bookkeeping_table(engine)
         with engine.begin() as ledger_conn:
             ledger = _load_ledger(ledger_conn)

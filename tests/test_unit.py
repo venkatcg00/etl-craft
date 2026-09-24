@@ -15,7 +15,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-import yaml
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
@@ -31,7 +30,6 @@ from etl_craft.cfg import (
     PipelineSummary,
     TaskStatusEntry,
 )
-from etl_craft.cli import main as cli_main
 from etl_craft.cloning import AUD_TABLES, CFG_TABLES, tables_for_scope
 from etl_craft.cloning import _same_database as same_database
 from etl_craft.config import (
@@ -47,14 +45,12 @@ from etl_craft.config import (
     resolve_config_path,
     resolve_secret,
 )
-from etl_craft.configure import (
-    _report_required_secrets,
-    _required_secret_vars,
-    configure_from_env,
-    set_execution_mode,
-)
 from etl_craft.crosspipe import MIN_POLL_INTERVAL_SECONDS, _default_now, _next_poll_delay
-from etl_craft.db import AUTH_REGISTRY, ConnectionError_, build_engine, parse_jdbc_postgres
+from etl_craft.db import ConnectionError_, build_engine
+from etl_craft.dialects import warehouse_dialects
+from etl_craft.dialects.engine_dialects import for_name as engine_dialect
+from etl_craft.dialects.engine_dialects.postgres import _AUTH_REGISTRY as AUTH_REGISTRY
+from etl_craft.dialects.engine_dialects.postgres import parse_jdbc_postgres, split_statements
 from etl_craft.docs_generator import (
     PipelineDocData,
     build_search_index,
@@ -66,17 +62,6 @@ from etl_craft.email_alert import _render_digest_html as render_email_digest_htm
 from etl_craft.email_alert import _resolve_target_pipeline_codes as resolve_email_pipeline_codes
 from etl_craft.email_alert import _substitute as substitute_email_tokens
 from etl_craft.handlers import HandlerError, TaskExecutionContext, dispatch
-from etl_craft.migrate import (
-    MIGRATIONS_DIR_ENV_VAR,
-    _split_statements,
-    resolve_migrations_dir,
-    split_statements,
-)
-from etl_craft.packaged_sql import (
-    packaged_migrations_dir,
-    packaged_schema_path,
-    read_packaged_schema,
-)
 from etl_craft.resolver import (
     CycleError,
     DependencyGraph,
@@ -100,15 +85,14 @@ from etl_craft.runlog import (
 from etl_craft.scripts import _parse_trailing_json
 from etl_craft.scripts import execute as execute_python_script
 from etl_craft.sql_actions import (
-    TABLE_FORMAT_INFO_KEY,
+    DIALECT_INFO_KEY,
     TASK_PARAMS_INFO_KEY,
     active_database,
     create_table_as,
-    iceberg_clause,
     qualify,
     resolve_table_format,
     substitute_pipeline_id,
-    table_format_clause,
+    task_dialect,
 )
 from etl_craft.validate import validate_business_rule_keys
 from etl_craft.warehouse import (
@@ -536,7 +520,9 @@ def test_hash_expression_uses_ansi_cast_not_postgres_shorthand():
     # everywhere and explains each exception it makes. Both supported
     # warehouses return MD5 as 32 hex characters, which is what
     # HASH_KEY VARCHAR(32) expects.
-    expr = sql_actions._hash_expression(["a", "b"], "s")
+    expr = sql_actions._hash_expression(
+        ["a", "b"], "s", warehouse_dialects.resolve("postgresql", "native")
+    )
     assert "::text" not in expr
     assert "COALESCE(CAST(s.a AS VARCHAR), '')" in expr
     assert expr.startswith("MD5(")
@@ -762,7 +748,7 @@ def test_translate_jdbc_url_trino_takes_the_generic_parser():
 
 # [DEVIATION, 2026-09-23] Databricks' Iceberg-format clause is a managed
 # Delta table with UniForm enabled, not `USING ICEBERG` -- see
-# sql_actions.ICEBERG_TABLE_CLAUSE's own comment for why (verified live:
+# dialects/warehouse_dialects/databricks_iceberg.py's own docstring for why (verified live:
 # `USING ICEBERG` produces `format: 'iceberg'` with no Delta log at all,
 # where UniForm reports `format: 'delta'` plus
 # `delta.universalFormat.enabledFormats: iceberg`).
@@ -773,31 +759,26 @@ _DATABRICKS_ICEBERG_CLAUSE = (
 )
 
 
-@pytest.mark.parametrize(
-    "dialect_name, expected",
-    [
-        ("postgresql+psycopg", ""),
-        ("duckdb", ""),
-        ("databricks", _DATABRICKS_ICEBERG_CLAUSE),
-        # An engine pointed at an Iceberg catalog writes Iceberg without being
-        # told to, and a clause would be a syntax error.
-        ("trino", ""),
-    ],
-)
-def test_iceberg_clause_per_dialect(dialect_name, expected):
-    # "if the warehouse is not postgres, every table we create or operate
-    # should be iceberg compatible" -- getting this wrong is silent: the table
-    # is created, the pipeline succeeds, and nothing else in the lakehouse can
-    # read it.
-    assert iceberg_clause(dialect_name) == expected
+def test_postgres_has_no_iceberg_dialect():
+    # There is no postgres_iceberg: asking a Postgres warehouse for Iceberg is
+    # a configuration error, not a setting silently ignored.
+    with pytest.raises(warehouse_dialects.UnsupportedWarehouse, match="always native"):
+        warehouse_dialects.resolve("postgresql", "iceberg")
+
+
+# Test-only shorthand: the table format a _FakeDialectConn's dialect is resolved
+# for, the way sql_actions.execute resolves it for a real task.
+TABLE_FORMAT_INFO_KEY = "test_table_format"
 
 
 class _FakeDialectConn:
-    """Just enough Connection for the dialect-name branches, which is all they read."""
+    """Just enough Connection for the dialect primitives, which is all they read."""
 
     def __init__(self, name: str, info: dict | None = None) -> None:
         self.dialect = SimpleNamespace(name=name)
         self.info = info if info is not None else {}
+        table_format = self.info.pop(TABLE_FORMAT_INFO_KEY, "native")
+        self.info[DIALECT_INFO_KEY] = warehouse_dialects.resolve(name, table_format)
         self.statements: list[str] = []
 
     def execute(self, clause, *_args, **_kwargs):
@@ -805,7 +786,7 @@ class _FakeDialectConn:
         return None
 
 
-def _format_ctx(task_params, warehouse_format="iceberg"):
+def _format_ctx(task_params, warehouse_format="native"):
     cfg = ConnectorConfig(
         mode="local",
         source=SourceConfig(type="environment"),
@@ -843,14 +824,67 @@ def test_table_format_resolves_task_parameter_then_warehouse_then_iceberg():
     # Two tiers, the shape generate-yml already uses: a team standardising on
     # one format sets it once; a single table that has to differ says so on
     # its own task.
-    assert resolve_table_format(_format_ctx({})) == "iceberg"
-    assert resolve_table_format(_format_ctx({}, warehouse_format="native")) == "native"
-    assert resolve_table_format(_format_ctx({"TABLE_FORMAT": "native"})) == "native"
+    assert resolve_table_format(_format_ctx({})) == "native"
+    assert resolve_table_format(_format_ctx({}, warehouse_format="iceberg")) == "iceberg"
+    assert (
+        resolve_table_format(_format_ctx({"TABLE_FORMAT": "native"}, warehouse_format="iceberg"))
+        == "native"
+    )
     # The task parameter wins over a warehouse default, in both directions.
     assert (
         resolve_table_format(_format_ctx({"TABLE_FORMAT": "iceberg"}, warehouse_format="native"))
         == "iceberg"
     )
+
+
+@pytest.mark.parametrize(
+    ("sqlalchemy_name", "table_format", "key"),
+    [
+        ("postgresql", "native", "postgres"),
+        ("duckdb", "native", "duckdb"),
+        ("duckdb", "iceberg", "duckdb_iceberg"),
+        ("trino", "native", "trino_iceberg"),
+        ("trino", "iceberg", "trino_iceberg"),
+        ("databricks", "native", "databricks"),
+        ("databricks", "iceberg", "databricks_iceberg"),
+        ("snowflake", "native", "snowflake"),
+        ("snowflake", "iceberg", "snowflake_iceberg"),
+    ],
+)
+def test_each_warehouse_and_format_selects_its_own_dialect_module(
+    sqlalchemy_name, table_format, key
+):
+    # One module per database and table format (2026-09-24). Trino is Iceberg
+    # whatever is asked for: its catalog decides.
+    assert warehouse_dialects.resolve(sqlalchemy_name, table_format).key == key
+
+
+def test_an_unknown_sqlalchemy_dialect_gets_the_plain_ansi_dialect():
+    # "Any SQL tool over plain Iceberg": no module, the ANSI defaults, and a
+    # computed ROW_ID since nothing says the engine has identity columns.
+    generic = warehouse_dialects.resolve("mysql+pymysql", "native")
+    assert generic.key == "mysql"
+    assert generic.surrogate_key == "computed"
+    assert generic.enforces_primary_keys is False
+    assert generic.create_table_clause() == ""
+
+
+class _NamedConn:
+    def __init__(self, name: str) -> None:
+        self.dialect = SimpleNamespace(name=name)
+
+
+def test_task_dialect_refuses_what_the_warehouse_cannot_do():
+    # Iceberg on Postgres does not exist...
+    with pytest.raises(HandlerError, match="always native"):
+        task_dialect(_NamedConn("postgresql"), _format_ctx({"TABLE_FORMAT": "iceberg"}))
+    # ...and on DuckDB the connection fixes the format, so a task cannot differ.
+    with pytest.raises(HandlerError, match="fixed by the warehouse connection"):
+        task_dialect(_NamedConn("duckdb"), _format_ctx({"TABLE_FORMAT": "iceberg"}))
+    # A task repeating the warehouse's own format is fine.
+    ctx = _format_ctx({"TABLE_FORMAT": "native"})
+    assert task_dialect(_NamedConn("duckdb"), ctx).key == "duckdb"
+    assert task_dialect(_NamedConn("databricks"), _format_ctx({})).key == "databricks"
 
 
 def test_an_unrecognized_table_format_is_rejected_rather_than_assumed():
@@ -867,16 +901,17 @@ def test_an_unrecognized_table_format_is_rejected_rather_than_assumed():
         # be a syntax error.
         ("trino", "iceberg", ""),
         ("trino", "native", ""),
-        # Postgres stores its own tables; neither format means anything.
-        ("postgresql+psycopg", "iceberg", ""),
         ("postgresql+psycopg", "native", ""),
+        ("duckdb", "native", ""),
+        ("duckdb", "iceberg", ""),
     ],
 )
 def test_table_format_clause_per_dialect(dialect_name, table_format, expected):
     # "support non iceberg as well, on the snowflake and databricks setups" --
     # Databricks names Delta explicitly rather than relying on the workspace
     # default, because the point of declaring a format is that it is declared.
-    assert table_format_clause(dialect_name, table_format) == expected
+    dialect = warehouse_dialects.resolve(dialect_name, table_format)
+    assert dialect.create_table_clause() == expected
 
 
 def test_create_table_as_makes_a_native_snowflake_table_without_storage():
@@ -1015,7 +1050,8 @@ def test_split_statements_handles_tagged_dollar_quotes():
 
 def test_the_real_packaged_schema_splits_into_whole_statements():
     # The case init-db actually depends on, against the file that really ships.
-    statements = split_statements(read_packaged_schema())
+    postgres = engine_dialect("postgresql")
+    statements = split_statements(postgres.schema_path().read_text(encoding="utf-8"))
     functions = [s for s in statements if "CREATE OR REPLACE FUNCTION" in s]
     assert functions, "schema.sql should define trigger functions"
     assert all(s.rstrip().endswith("plpgsql") for s in functions)
@@ -1024,29 +1060,11 @@ def test_the_real_packaged_schema_splits_into_whole_statements():
 def test_packaged_sql_files_are_readable_from_the_installed_package():
     # E2-13. The wheel used to ship 24 .py files and nothing else, so there was
     # no way to create the Engine DB from an installed package at all.
-    assert packaged_schema_path().is_file()
-    assert packaged_migrations_dir().is_dir()
-    assert "CREATE TABLE CFG_PIPELINES" in read_packaged_schema()
-
-
-def test_resolve_migrations_dir_precedence(tmp_path, monkeypatch):
-    explicit = tmp_path / "explicit"
-    from_env = tmp_path / "from_env"
-    local = tmp_path / "project" / "sql" / "migrations"
-    local.mkdir(parents=True)
-
-    monkeypatch.setenv(MIGRATIONS_DIR_ENV_VAR, str(from_env))
-    assert resolve_migrations_dir(explicit) == explicit
-    assert resolve_migrations_dir() == from_env
-
-    monkeypatch.delenv(MIGRATIONS_DIR_ENV_VAR)
-    monkeypatch.chdir(tmp_path / "project")
-    assert resolve_migrations_dir() == local
-
-    # Nothing local either: fall back to the copy inside the package, which is
-    # what makes `migrate` work from an installed wheel at all.
-    monkeypatch.chdir(tmp_path)
-    assert resolve_migrations_dir() == packaged_migrations_dir()
+    for name in ("postgresql", "sqlite"):
+        dialect = engine_dialect(name)
+        assert dialect.schema_path().is_file()
+        assert dialect.migrations_dir().is_dir()
+        assert "CREATE TABLE CFG_PIPELINES" in dialect.schema_path().read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
@@ -1059,48 +1077,6 @@ def test_resolve_migrations_dir_precedence(tmp_path, monkeypatch):
 )
 def test_split_statements_does_not_mistake_other_dollars_for_quotes(sql, expected):
     assert len(split_statements(sql)) == expected
-
-
-def test_required_secret_vars_names_each_profiles_variable():
-    # E2-16. The whole point: the name is derivable from what the user just
-    # entered, so there is no reason to make them discover it from a failure.
-    raw = {
-        "Postgres": {"Active_profile": "dev", "Profiles": {"dev": {"auth_mode": "password"}}},
-        "Warehouse": {
-            "Active_profile": "prod",
-            "Profiles": {"prod": {"auth_mode": "password", "secret_var": "MY_OWN_VAR"}},
-        },
-        # auth_mode none needs no secret, so it must not be listed.
-        "Email": {"Active_profile": "dev", "Profiles": {"dev": {"auth_mode": "none"}}},
-    }
-    assert _required_secret_vars(raw) == [
-        ("Postgres.dev", "ETL_CRAFT_POSTGRES_DEV_SECRET"),
-        ("Warehouse.prod", "MY_OWN_VAR"),
-    ]
-
-
-def test_required_secret_vars_ignores_malformed_sections():
-    assert _required_secret_vars({"Postgres": "not-a-dict"}) == []
-    assert _required_secret_vars({"Postgres": {"Active_profile": "dev", "Profiles": {}}}) == []
-
-
-def test_report_required_secrets_points_at_the_env_file_when_source_is_a_file():
-    printed: list[str] = []
-    raw = {
-        "Source": {"Type": "file", "Path": "/etc/secrets.env"},
-        "Postgres": {"Active_profile": "dev", "Profiles": {"dev": {"auth_mode": "password"}}},
-    }
-    _report_required_secrets(raw, printed.append)
-    out = "\n".join(printed)
-    assert "ETL_CRAFT_POSTGRES_DEV_SECRET" in out
-    assert "/etc/secrets.env" in out
-    assert "doctor" in out
-
-
-def test_report_required_secrets_says_nothing_when_nothing_is_needed():
-    printed: list[str] = []
-    _report_required_secrets({"Source": {"Type": "environment"}}, printed.append)
-    assert printed == []
 
 
 def test_resolve_config_path_precedence(tmp_path, monkeypatch):
@@ -1186,29 +1162,22 @@ def test_default_now_returns_a_timezone_aware_datetime():
 # config.py — craft-connector.yml loading, no DB at all
 # ==============================================================================
 
+# Values for the variables VALID_YAML names; conftest.py sets them too.
+ENGINE_VARS = "TEST_ENGINE_USER=etl_engine\nTEST_ENGINE_AUTH_MODE=password\n"
+
 VALID_YAML = """
-Execution:
+Secrets:
+  Source_type: environment
+
+Orchestration:
   Mode: local
 
-Source:
-  Type: environment
-
-Postgres:
-  Active_profile: dev
-  Profiles:
-    dev:
-      jdbc_url: jdbc:postgresql://localhost:5432/etl_craft
-      user: etl_engine
-      auth_mode: password
-    prod:
-      jdbc_url: jdbc:postgresql://prod-host:5432/etl_craft
-      user: etl_engine
-      auth_mode: key_file
-      key_file: /etc/etl-craft/prod.key
-
-Cloning:
-  Enabled: true
-  Scope: cfg
+Engine:
+  dev:
+    jdbc_url: jdbc:postgresql://localhost:5432/etl_craft
+    user: TEST_ENGINE_USER
+    auth_mode: TEST_ENGINE_AUTH_MODE
+    secret: ETL_CRAFT_POSTGRES_DEV_SECRET
 """
 
 
@@ -1216,292 +1185,6 @@ def write_config(tmp_path, contents: str):
     path = tmp_path / "craft-connector.yml"
     path.write_text(contents)
     return path
-
-
-def test_load_valid_config(tmp_path):
-    config = load_config(write_config(tmp_path, VALID_YAML))
-    assert config.mode == "local"
-    assert config.source.type == "environment"
-    assert config.postgres.active_profile == "dev"
-    assert config.postgres.active.jdbc_url == "jdbc:postgresql://localhost:5432/etl_craft"
-    assert config.postgres.active.auth_mode == "password"
-    assert config.postgres.profiles["prod"].extra["key_file"] == "/etc/etl-craft/prod.key"
-    assert config.cloning.enabled is True
-    assert config.cloning.scope == "cfg"
-
-
-def test_missing_file_raises(tmp_path):
-    with pytest.raises(ConfigError):
-        load_config(tmp_path / "does-not-exist.yml")
-
-
-def test_malformed_yaml_rejected(tmp_path):
-    with pytest.raises(ConfigError):
-        load_config(write_config(tmp_path, "Execution: [unterminated"))
-
-
-def test_missing_section_rejected(tmp_path):
-    no_postgres = VALID_YAML.replace("Postgres:", "NotPostgres:")
-    with pytest.raises(ConfigError):
-        load_config(write_config(tmp_path, no_postgres))
-
-
-def test_mixed_legacy_and_manifest_sections_rejected(tmp_path):
-    # A half-migrated file must not silently pick one format's credentials
-    # over the other's — _parse_config's own guard for exactly that, and (per
-    # ITERATION_3.md's test-coverage-gap list) previously untested entirely.
-    mixed = VALID_YAML + "\nOrchestration:\n  Mode: local\n"
-    with pytest.raises(ConfigError, match="mixes the manifest sections"):
-        load_config(write_config(tmp_path, mixed))
-
-
-def test_invalid_mode_rejected(tmp_path):
-    bad = VALID_YAML.replace("Mode: local", "Mode: bogus")
-    with pytest.raises(ConfigError):
-        load_config(write_config(tmp_path, bad))
-
-
-def test_active_profile_must_exist_in_profiles(tmp_path):
-    bad = VALID_YAML.replace("Active_profile: dev", "Active_profile: staging")
-    with pytest.raises(ConfigError):
-        load_config(write_config(tmp_path, bad))
-
-
-def test_invalid_auth_mode_rejected(tmp_path):
-    bad = VALID_YAML.replace("auth_mode: password", "auth_mode: bogus")
-    with pytest.raises(ConfigError):
-        load_config(write_config(tmp_path, bad))
-
-
-def test_file_source_requires_path(tmp_path):
-    bad = VALID_YAML.replace("Type: environment", "Type: file")
-    with pytest.raises(ConfigError):
-        load_config(write_config(tmp_path, bad))
-
-
-def test_invalid_source_type_rejected(tmp_path):
-    bad = VALID_YAML.replace("Type: environment", "Type: bogus")
-    with pytest.raises(ConfigError):
-        load_config(write_config(tmp_path, bad))
-
-
-def test_connection_section_requires_active_profile_and_profiles(tmp_path):
-    # Distinct from test_active_profile_must_exist_in_profiles: that one has
-    # a well-formed section whose Active_profile just doesn't match any
-    # entry; this is the section itself missing Active_profile outright.
-    bad = VALID_YAML.replace("  Active_profile: dev\n", "")
-    with pytest.raises(ConfigError):
-        load_config(write_config(tmp_path, bad))
-
-
-def test_invalid_cloning_scope_rejected(tmp_path):
-    bad = VALID_YAML.replace("Scope: cfg", "Scope: bogus")
-    with pytest.raises(ConfigError):
-        load_config(write_config(tmp_path, bad))
-
-
-def test_cloning_defaults_when_section_absent(tmp_path):
-    no_cloning = VALID_YAML.replace("Cloning:\n  Enabled: true\n  Scope: cfg\n", "")
-    config = load_config(write_config(tmp_path, no_cloning))
-    assert config.cloning.enabled is False
-    assert config.cloning.scope == "cfg"
-
-
-def test_warehouse_is_none_when_section_absent(tmp_path):
-    config = load_config(write_config(tmp_path, VALID_YAML))
-    assert config.warehouse is None
-
-
-def test_warehouse_parsed_when_present(tmp_path):
-    with_warehouse = VALID_YAML + (
-        "\nWarehouse:\n"
-        "  Active_profile: dev\n"
-        "  Profiles:\n"
-        "    dev:\n"
-        "      jdbc_url: jdbc:postgresql://warehouse-host:5432/analytics\n"
-        "      user: etl_engine\n"
-        "      auth_mode: password\n"
-    )
-    config = load_config(write_config(tmp_path, with_warehouse))
-    assert config.warehouse.active_profile == "dev"
-    assert config.warehouse.active.jdbc_url == "jdbc:postgresql://warehouse-host:5432/analytics"
-    assert config.warehouse.active.secret_var == "ETL_CRAFT_WAREHOUSE_DEV_SECRET"
-
-
-def test_warehouse_section_must_be_a_mapping_if_present(tmp_path):
-    bad = VALID_YAML + "\nWarehouse: not-a-mapping\n"
-    with pytest.raises(ConfigError):
-        load_config(write_config(tmp_path, bad))
-
-
-def test_email_is_none_when_section_absent(tmp_path):
-    config = load_config(write_config(tmp_path, VALID_YAML))
-    assert config.email is None
-
-
-def test_email_parsed_when_present(tmp_path):
-    with_email = VALID_YAML + (
-        "\nEmail:\n"
-        "  Active_profile: dev\n"
-        "  Profiles:\n"
-        "    dev:\n"
-        "      host: smtp.example.com\n"
-        "      port: 587\n"
-        "      from_address: etl-craft@example.com\n"
-        "      auth_mode: password\n"
-        "      user: alerts@example.com\n"
-    )
-    config = load_config(write_config(tmp_path, with_email))
-    assert config.email.active_profile == "dev"
-    assert config.email.active.host == "smtp.example.com"
-    assert config.email.active.port == 587
-    assert config.email.active.use_tls is True
-    assert config.email.active.secret_var == "ETL_CRAFT_EMAIL_DEV_SECRET"
-
-
-def test_email_defaults_auth_mode_to_none_and_needs_no_user(tmp_path):
-    with_email = VALID_YAML + (
-        "\nEmail:\n"
-        "  Active_profile: dev\n"
-        "  Profiles:\n"
-        "    dev:\n"
-        "      host: smtp.example.com\n"
-        "      port: 25\n"
-        "      from_address: etl-craft@example.com\n"
-    )
-    config = load_config(write_config(tmp_path, with_email))
-    assert config.email.active.auth_mode == "none"
-    assert config.email.active.user is None
-
-
-def test_email_password_auth_mode_requires_user(tmp_path):
-    with_email = VALID_YAML + (
-        "\nEmail:\n"
-        "  Active_profile: dev\n"
-        "  Profiles:\n"
-        "    dev:\n"
-        "      host: smtp.example.com\n"
-        "      port: 587\n"
-        "      from_address: etl-craft@example.com\n"
-        "      auth_mode: password\n"
-    )
-    with pytest.raises(ConfigError, match="needs user"):
-        load_config(write_config(tmp_path, with_email))
-
-
-def test_email_invalid_auth_mode_rejected(tmp_path):
-    with_email = VALID_YAML + (
-        "\nEmail:\n"
-        "  Active_profile: dev\n"
-        "  Profiles:\n"
-        "    dev:\n"
-        "      host: smtp.example.com\n"
-        "      port: 587\n"
-        "      from_address: etl-craft@example.com\n"
-        "      auth_mode: bogus\n"
-    )
-    with pytest.raises(ConfigError):
-        load_config(write_config(tmp_path, with_email))
-
-
-def test_email_section_must_be_a_mapping_if_present(tmp_path):
-    bad = VALID_YAML + "\nEmail: not-a-mapping\n"
-    with pytest.raises(ConfigError):
-        load_config(write_config(tmp_path, bad))
-
-
-def test_email_requires_active_profile_and_profiles(tmp_path):
-    bad = VALID_YAML + "\nEmail:\n  Profiles:\n    dev:\n      host: h\n"
-    with pytest.raises(ConfigError, match="needs Active_profile"):
-        load_config(write_config(tmp_path, bad))
-
-
-def test_email_active_profile_must_exist_in_profiles(tmp_path):
-    bad = VALID_YAML + (
-        "\nEmail:\n"
-        "  Active_profile: staging\n"
-        "  Profiles:\n"
-        "    dev:\n"
-        "      host: smtp.example.com\n"
-        "      port: 587\n"
-        "      from_address: etl-craft@example.com\n"
-    )
-    with pytest.raises(ConfigError, match="has no matching entry"):
-        load_config(write_config(tmp_path, bad))
-
-
-def test_email_profile_requires_host_port_and_from_address(tmp_path):
-    bad = VALID_YAML + (
-        "\nEmail:\n  Active_profile: dev\n  Profiles:\n    dev:\n      host: smtp.example.com\n"
-    )
-    with pytest.raises(ConfigError, match="needs host, port, and from_address"):
-        load_config(write_config(tmp_path, bad))
-
-
-def test_email_secret_var_override(tmp_path):
-    with_email = VALID_YAML + (
-        "\nEmail:\n"
-        "  Active_profile: dev\n"
-        "  Profiles:\n"
-        "    dev:\n"
-        "      host: smtp.example.com\n"
-        "      port: 587\n"
-        "      from_address: etl-craft@example.com\n"
-        "      auth_mode: password\n"
-        "      user: alerts@example.com\n"
-        "      secret_var: MY_CUSTOM_SMTP_SECRET\n"
-    )
-    config = load_config(write_config(tmp_path, with_email))
-    assert config.email.active.secret_var == "MY_CUSTOM_SMTP_SECRET"
-
-
-def test_orchestrator_defaults_when_section_absent(tmp_path):
-    config = load_config(write_config(tmp_path, VALID_YAML))
-    orch = config.orchestrator
-    assert orch.global_dag is False
-    assert orch.catchup is None
-    assert orch.tags is None
-    assert orch.retries is None
-    assert orch.retry_delay_minutes is None
-    assert orch.depends_on_past is None
-    assert orch.email_on_failure is None
-    assert orch.email_recipients is None
-
-
-def test_orchestrator_parsed_when_present(tmp_path):
-    with_orchestrator = VALID_YAML + (
-        "\nOrchestrator:\n"
-        "  Global_dag: true\n"
-        "  Catchup: true\n"
-        "  Tags: [team-a, nightly]\n"
-        "  Retries: 3\n"
-        "  Retry_delay_minutes: 15\n"
-        "  Depends_on_past: true\n"
-        "  Email_on_failure: true\n"
-        "  Email_recipients: [oncall@example.com]\n"
-    )
-    config = load_config(write_config(tmp_path, with_orchestrator))
-    orch = config.orchestrator
-    assert orch.global_dag is True
-    assert orch.catchup is True
-    assert orch.tags == ["team-a", "nightly"]
-    assert orch.retries == 3
-    assert orch.retry_delay_minutes == 15
-    assert orch.depends_on_past is True
-    assert orch.email_on_failure is True
-    assert orch.email_recipients == ["oncall@example.com"]
-
-
-def test_orchestrator_tags_must_be_a_list_if_present(tmp_path):
-    bad = VALID_YAML + "\nOrchestrator:\n  Tags: not-a-list\n"
-    with pytest.raises(ConfigError):
-        load_config(write_config(tmp_path, bad))
-
-
-def test_orchestrator_email_recipients_must_be_a_list_if_present(tmp_path):
-    bad = VALID_YAML + "\nOrchestrator:\n  Email_recipients: not-a-list\n"
-    with pytest.raises(ConfigError):
-        load_config(write_config(tmp_path, bad))
 
 
 def test_resolve_secret_from_environment(tmp_path, monkeypatch):
@@ -1519,7 +1202,7 @@ def test_resolve_secret_missing_raises(tmp_path, monkeypatch):
 
 def test_resolve_secret_explicit_var_override(tmp_path, monkeypatch):
     overridden = VALID_YAML.replace(
-        "auth_mode: password\n", "auth_mode: password\n      secret_var: MY_CUSTOM_SECRET\n"
+        "secret: ETL_CRAFT_POSTGRES_DEV_SECRET", "secret: MY_CUSTOM_SECRET"
     )
     config = load_config(write_config(tmp_path, overridden))
     monkeypatch.setenv("MY_CUSTOM_SECRET", "hunter2")
@@ -1528,10 +1211,12 @@ def test_resolve_secret_explicit_var_override(tmp_path, monkeypatch):
 
 def test_resolve_secret_from_file_source(tmp_path):
     env_file = tmp_path / "secrets.env"
-    env_file.write_text("ETL_CRAFT_POSTGRES_DEV_SECRET=filesecret\n# comment\n\nOTHER=1\n")
+    env_file.write_text(
+        ENGINE_VARS + "ETL_CRAFT_POSTGRES_DEV_SECRET=filesecret\n# comment\n\nOTHER=1\n"
+    )
     file_source_yaml = VALID_YAML.replace(
-        "Source:\n  Type: environment\n",
-        f"Source:\n  Type: file\n  Path: {env_file}\n",
+        "Secrets:\n  Source_type: environment\n",
+        f"Secrets:\n  Source_type: file\n  Path: {env_file}\n",
     )
     config = load_config(write_config(tmp_path, file_source_yaml))
     assert resolve_secret(config, config.postgres.active) == "filesecret"
@@ -1539,14 +1224,14 @@ def test_resolve_secret_from_file_source(tmp_path):
 
 def test_file_source_path_is_relative_to_the_connector_file(tmp_path, monkeypatch):
     secrets = tmp_path / "secrets.env"
-    secrets.write_text("ETL_CRAFT_POSTGRES_DEV_SECRET=filesecret\n", encoding="utf-8")
+    secrets.write_text(ENGINE_VARS + "ETL_CRAFT_POSTGRES_DEV_SECRET=filesecret\n", encoding="utf-8")
     connector_dir = tmp_path / "project"
     connector_dir.mkdir()
     connector = connector_dir / "craft-connector.yml"
     connector.write_text(
         VALID_YAML.replace(
-            "Source:\n  Type: environment\n",
-            "Source:\n  Type: file\n  Path: ../secrets.env\n",
+            "Secrets:\n  Source_type: environment\n",
+            "Secrets:\n  Source_type: file\n  Path: ../secrets.env\n",
         ),
         encoding="utf-8",
     )
@@ -1713,16 +1398,9 @@ def test_key_file_creator_returns_callable_using_sslkey(monkeypatch):
     assert calls["sslpassword"] == "passphrase"
 
 
-def test_token_and_sso_creators_are_not_implemented():
-    with pytest.raises(NotImplementedError):
-        AUTH_REGISTRY["token"](profile("token"), "unused")
-    with pytest.raises(NotImplementedError):
-        AUTH_REGISTRY["sso"](profile("sso"), "unused")
-
-
 def test_build_engine_rejects_unknown_auth_mode():
-    # config.py's own validation already rejects an auth_mode outside
-    # VALID_AUTH_MODES at load time, so this is unreachable via a normally-
+    # config.py already rejects an auth_mode outside the Engine DB dialect's
+    # own auth_modes at load time, so this is unreachable via a normally-
     # loaded config — exercised by constructing a ConnectionProfile directly
     # instead. build_engine checks auth_mode before ever touching `config`
     # when `profile` is passed explicitly, so `config=None` is fine here.
@@ -2329,7 +2007,7 @@ def test_active_database_requires_a_warehouse_section():
         ),
         cloning=CloningConfig(),
     )
-    with pytest.raises(HandlerError, match=r"\[Warehouse\]"):
+    with pytest.raises(HandlerError, match="no Warehouse section"):
         active_database(config)
 
 
@@ -2668,134 +2346,6 @@ def test_find_or_create_task_run_raises_if_winner_vanishes_after_losing_race():
 
 
 # ==============================================================================
-# cli.py — set-execution-mode / configure, the two commands that never need
-# a live Postgres connection (both are handled before load_config/
-# build_engine in main() — see cli.py's own module comment)
-# ==============================================================================
-
-
-def test_cli_set_execution_mode(tmp_path, monkeypatch, capsys):
-    write_config(tmp_path, VALID_YAML)
-    monkeypatch.chdir(tmp_path)
-
-    exit_code = cli_main(["set-execution-mode", "orchestrator"])
-
-    assert exit_code == 0
-    assert "orchestrator" in capsys.readouterr().out
-    assert load_config().mode == "orchestrator"
-
-
-def test_cli_set_execution_mode_invalid_choice_is_an_argparse_error(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    with pytest.raises(SystemExit) as exc_info:
-        cli_main(["set-execution-mode", "bogus"])
-    assert exc_info.value.code == 2
-
-
-def test_cli_set_execution_mode_missing_file_reports_clean_error(tmp_path, monkeypatch, capsys):
-    monkeypatch.chdir(tmp_path)
-
-    exit_code = cli_main(["set-execution-mode", "local"])
-
-    assert exit_code == 2
-    assert "error:" in capsys.readouterr().err
-
-
-def test_cli_setup_creates_config_and_reports_what_it_did(tmp_path, monkeypatch, capsys):
-    # [DEVIATION, 2026-09-20] `configure` is gone. Per explicit instruction
-    # ("remove the ineractive setup, lets go in dbt route. one single command
-    # with required files and it should itself up"), `setup` is idempotent:
-    # first run sets up, later runs update. The Engine DB is unreachable here,
-    # which must be *reported*, not raised -- writing the config is useful on
-    # its own, and is often the step that fixes the connection.
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / ".env").write_text(
-        "ETL_CRAFT_MODE=local\n"
-        "ETL_CRAFT_SOURCE_TYPE=file\n"
-        "ETL_CRAFT_SOURCE_PATH=.env\n"
-        "ETL_CRAFT_ENGINE_PROFILE=dev\n"
-        "ENGINE_JDBC_URL=jdbc:postgresql://127.0.0.1:1/nope\n"
-        "ENGINE_USER=u\n"
-        "ENGINE_AUTH_MODE=password\n"
-        "ENGINE_SECRET=s\n"
-    )
-
-    exit_code = cli_main(["setup"])
-
-    out = capsys.readouterr()
-    assert "created" in out.out
-    assert "ENGINE_SECRET" in out.out
-    assert (tmp_path / "craft-connector.yml").is_file()
-    # Unreachable database -> reported as a problem, exit 1, config still written.
-    assert exit_code == 1
-    assert "not reachable" in out.out
-
-
-def test_cli_setup_is_idempotent(tmp_path, monkeypatch, capsys):
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / ".env").write_text(
-        "ETL_CRAFT_MODE=local\n"
-        "ETL_CRAFT_SOURCE_TYPE=file\n"
-        "ETL_CRAFT_SOURCE_PATH=.env\n"
-        "ETL_CRAFT_ENGINE_PROFILE=dev\n"
-        "ENGINE_JDBC_URL=jdbc:postgresql://127.0.0.1:1/nope\n"
-        "ENGINE_USER=u\n"
-        "ENGINE_AUTH_MODE=password\n"
-        "ENGINE_SECRET=s\n"
-    )
-    cli_main(["setup"])
-    capsys.readouterr()
-
-    cli_main(["setup"])
-
-    assert "already current" in capsys.readouterr().out
-
-
-def test_cli_setup_reads_the_environment_when_asked(tmp_path, monkeypatch, capsys):
-    # Per explicit instruction: "the craft connector can take values from .env
-    # or the environment itself based on the options". A container or CI
-    # runner already has these exported; writing a file first would be a step
-    # backwards.
-    monkeypatch.chdir(tmp_path)
-    for key, value in {
-        "ETL_CRAFT_MODE": "local",
-        "ETL_CRAFT_SOURCE_TYPE": "environment",
-        "ETL_CRAFT_ENGINE_PROFILE": "prod",
-        "ENGINE_JDBC_URL": "jdbc:postgresql://127.0.0.1:1/nope",
-        "ENGINE_USER": "u",
-        "ENGINE_AUTH_MODE": "password",
-    }.items():
-        monkeypatch.setenv(key, value)
-
-    cli_main(["setup", "--from-environment"])
-
-    written = yaml.safe_load((tmp_path / "craft-connector.yml").read_text())
-    assert written["Engine"]["Profile"] == "prod"
-    assert "ENGINE_SECRET" in capsys.readouterr().out
-
-
-def test_cli_setup_with_a_named_settings_file_that_is_missing_says_so(
-    tmp_path, monkeypatch, capsys
-):
-    # [2026-09-24] A bare `setup` with no .env now reads the environment (and
-    # defaults to a SQLite Engine DB -- see test_sqlite_engine.py); a file that
-    # was asked for by name and is not there is still an error.
-    monkeypatch.chdir(tmp_path)
-
-    exit_code = cli_main(["setup", "--env", "missing.env"])
-
-    assert exit_code == 2
-    err = capsys.readouterr().err
-    assert "no settings file" in err
-    assert "--from-environment" in err
-
-
-def test_configure_from_env_reports_a_missing_file(tmp_path):
-    with pytest.raises(ConfigError, match="env file not found"):
-        configure_from_env(tmp_path / "absent.env", tmp_path / "craft-connector.yml")
-
-
-# ==============================================================================
 # __init__.py / __main__.py — the two console-script entry points
 # ==============================================================================
 #
@@ -2820,184 +2370,6 @@ def test_dunder_main_runs_cli_when_invoked_as_a_module(monkeypatch):
 
 
 # ==============================================================================
-# configure.py — set_execution_mode / configure_from_env, no DB at all
-# ==============================================================================
-#
-# Both write craft-connector.yml directly (no engine, no secret resolution),
-# so these — and the CLI paths that dispatch to them — never need a live
-# Postgres connection, unlike every other command.
-
-
-def test_set_execution_mode_updates_only_mode(tmp_path):
-    path = write_config(tmp_path, VALID_YAML)
-
-    set_execution_mode("orchestrator", path)
-
-    reloaded = load_config(path)
-    assert reloaded.mode == "orchestrator"
-    assert reloaded.postgres.active.jdbc_url == "jdbc:postgresql://localhost:5432/etl_craft"
-    assert reloaded.cloning.enabled is True
-
-
-def test_set_execution_mode_rejects_invalid_mode(tmp_path):
-    path = write_config(tmp_path, VALID_YAML)
-    with pytest.raises(ConfigError):
-        set_execution_mode("bogus", path)
-
-
-def test_set_execution_mode_requires_existing_file(tmp_path):
-    with pytest.raises(ConfigError):
-        set_execution_mode("local", tmp_path / "does-not-exist.yml")
-
-
-def test_set_execution_mode_requires_execution_section(tmp_path):
-    path = tmp_path / "craft-connector.yml"
-    path.write_text("Postgres:\n  Active_profile: dev\n  Profiles: {}\n")
-    with pytest.raises(ConfigError):
-        set_execution_mode("local", path)
-
-
-def test_set_execution_mode_rejects_malformed_yaml(tmp_path):
-    path = tmp_path / "craft-connector.yml"
-    path.write_text("Execution: [unterminated")
-    with pytest.raises(ConfigError):
-        set_execution_mode("local", path)
-
-
-def _write_env(tmp_path, contents: str, name: str = "config.env"):
-    path = tmp_path / name
-    path.write_text(contents.replace("__SELF__", str(path)))
-    return path
-
-
-VALID_ENV = """
-ETL_CRAFT_MODE=local
-ETL_CRAFT_SOURCE_TYPE=file
-ETL_CRAFT_SOURCE_PATH=__SELF__
-ETL_CRAFT_ENGINE_PROFILE=dev
-ENGINE_JDBC_URL=jdbc:postgresql://localhost:5432/etl_craft
-ENGINE_USER=etl_engine
-ENGINE_AUTH_MODE=password
-"""
-
-
-def test_configure_from_env_creates_valid_config(tmp_path):
-    env_path = _write_env(tmp_path, VALID_ENV)
-    output_path = tmp_path / "craft-connector.yml"
-
-    configure_from_env(env_path, output_path)
-
-    config = load_config(output_path)
-    assert config.mode == "local"
-    assert config.source.type == "file"
-    assert config.postgres.active_profile == "dev"
-    assert config.postgres.active.jdbc_url == "jdbc:postgresql://localhost:5432/etl_craft"
-    assert config.postgres.active.user == "etl_engine"
-    assert config.postgres.active.auth_mode == "password"
-    assert config.cloning.enabled is False
-    assert config.cloning.scope == "cfg"
-
-
-@pytest.mark.parametrize(
-    "name,fields",
-    [
-        (
-            "Databricks",
-            {
-                "jdbc_url": "jdbc:databricks://host/default;httpPath=/sql/x;ConnCatalog=old",
-                "catalog": "practice_catalog",
-                "schema": "practice_schema",
-            },
-        ),
-        (
-            "Snowflake",
-            {
-                "user": "tester",
-                "account": "org-account",
-                "database": "DB",
-                "schema": "SCHEMA",
-                "warehouse": "WH",
-                "role": "ROLE",
-            },
-        ),
-    ],
-)
-def test_preferred_cloud_connection_bootstrap_round_trip(tmp_path, name, fields):
-    fields = {**fields, "token": "base-token"}
-    contents = VALID_ENV + f"WAREHOUSE_NAME={name}\n"
-    contents += "\n".join(f"WAREHOUSE_{key.upper()}={value}" for key, value in fields.items())
-    contents += "\nWAREHOUSE_DEV_TOKEN=tier-token\n"
-    env_path = _write_env(tmp_path, contents)
-    path = tmp_path / "craft-connector.yml"
-    configure_from_env(env_path, path)
-    config = load_config(path)
-    profile = config.warehouse.active
-    assert profile.auth_mode == "token"
-    assert resolve_secret(config, profile) == "tier-token"
-    assert "base-token" not in path.read_text()
-    assert "tier-token" not in profile.jdbc_url
-    raw = yaml.safe_load(path.read_text())
-    assert set(raw["Warehouse"]["Variables"]) == set(fields)
-    assert ("Warehouse.dev", "WAREHOUSE_TOKEN") in _required_secret_vars(raw)
-    dialect, parts = translate_jdbc_url(profile.jdbc_url)
-    assert dialect == name.lower()
-    if name == "Databricks":
-        assert parts["query"]["catalog"] == "practice_catalog"
-        assert parts["query"]["schema"] == "practice_schema"
-    else:
-        assert parts["database"] == "DB/SCHEMA"
-        assert parts["query"]["role"] == "ROLE"
-        assert profile.user == "tester"
-
-
-def test_setup_strips_credentials_from_a_databricks_url_written_into_a_legacy_manifest(tmp_path):
-    # E3-08. Databricks' own "Connection Details" JDBC tab hands out a URL
-    # that already contains AuthMech/UID/PWD -- a real personal access token
-    # in cleartext -- as *the* string to copy, not the trimmed host+httpPath
-    # value the docs instruct extracting. preferred_connection_url's own
-    # docstring calls its return value "credential-free", but before this fix
-    # that claim only held after _parse_databricks stripped those params at
-    # *connect* time -- not here, where the value is about to be written to
-    # disk. For an existing legacy-shaped manifest (an explicitly supported
-    # upgrade path), _write_legacy_manifest persists settings.warehouse_url
-    # verbatim into Warehouse.Profiles.<profile>.jdbc_url -- the exact file
-    # this whole config-manifest pivot exists to keep secret-free and safely
-    # git-committable. This test hand-authors that legacy file first (since
-    # _is_legacy_manifest reads the file already on disk, not the new
-    # settings) and drives the real leak scenario end to end.
-    secret_token = "dapiSUPERSECRETTOKEN0000000000"
-    output_path = tmp_path / "craft-connector.yml"
-    output_path.write_text(
-        "Execution:\n  Mode: local\n"
-        "Source:\n  Type: environment\n"
-        "Postgres:\n  Active_profile: dev\n  Profiles:\n"
-        "    dev:\n      jdbc_url: jdbc:postgresql://localhost:5432/etl_craft\n"
-        "      user: etl_engine\n      auth_mode: password\n",
-        encoding="utf-8",
-    )
-    contents = (
-        VALID_ENV
-        + "WAREHOUSE_NAME=Databricks\n"
-        + "WAREHOUSE_JDBC_URL=jdbc:databricks://host:443/default;transportMode=http;ssl=1;"
-        f"AuthMech=3;UID=token;PWD={secret_token};httpPath=/sql/1.0/warehouses/abc\n"
-        + "WAREHOUSE_CATALOG=practice_catalog\n"
-        + "WAREHOUSE_SCHEMA=practice_schema\n"
-        + f"WAREHOUSE_TOKEN={secret_token}\n"
-    )
-    env_path = _write_env(tmp_path, contents)
-
-    configure_from_env(env_path, output_path)
-
-    written = output_path.read_text(encoding="utf-8")
-    assert secret_token not in written
-    assert "PWD" not in written
-    assert "UID" not in written
-    assert "AuthMech" not in written
-    raw = yaml.safe_load(written)
-    assert "ConnCatalog=practice_catalog" in raw["Warehouse"]["Profiles"]["dev"]["jdbc_url"]
-    assert "httpPath=/sql/1.0/warehouses/abc" in raw["Warehouse"]["Profiles"]["dev"]["jdbc_url"]
-
-
 def test_snowflake_pat_uses_driver_password_without_logging_token(monkeypatch):
     captured = {}
     monkeypatch.setattr(warehouse_module, "_dbapi_connect", lambda url: captured.update(url=url))
@@ -3012,31 +2384,6 @@ def test_snowflake_pat_uses_driver_password_without_logging_token(monkeypatch):
     assert captured["url"].password == "fake-pat"
     assert captured["url"].username == "tester"
     assert "fake-pat" not in str(captured["url"])
-
-
-@pytest.mark.parametrize(
-    "name,extra,message",
-    [
-        ("Postgres", {}, "require Warehouse.Name"),
-        ("Snowflake", {"secret": "EXTRA_SECRET"}, "another secret/auth mode"),
-        ("Snowflake", {"auth_mode": "EXTRA_MODE"}, "another secret/auth mode"),
-        ("Snowflake", {"jdbc_url": "UNUSED_URL"}, "unused snowflake token connection field"),
-    ],
-)
-def test_token_manifest_rejects_mixed_or_unused_fields(tmp_path, monkeypatch, name, extra, message):
-    monkeypatch.setenv("EXTRA_MODE", "password")
-    raw = {"Name": name, "Profile": "dev", "Variables": {"token": "TOKEN", **extra}}
-    from etl_craft.config import _parse_manifest_connection_section, _VariableResolver
-
-    with pytest.raises(ConfigError, match=message):
-        _parse_manifest_connection_section(
-            "WAREHOUSE",
-            raw,
-            tmp_path / "config.yml",
-            _VariableResolver.from_source(
-                SourceConfig(type="environment"), tmp_path / "config.yml"
-            ),
-        )
 
 
 @pytest.mark.parametrize(
@@ -3065,11 +2412,11 @@ def test_preferred_databricks_url_retains_only_public_parameters(credential):
     ],
 )
 def test_cloud_audit_types_and_alter_commands(dialect, fmt, timestamp, alter):
-    conn = _FakeDialectConn(dialect, info={TABLE_FORMAT_INFO_KEY: fmt})
-    assert sql_actions._audit_column_type(conn, "CREATE_DATE") == timestamp
-    assert sql_actions._audit_column_type(conn, "UPDATE_DATE") == timestamp
-    assert sql_actions._audit_column_type(conn, "HASH_KEY") == "VARCHAR(32)"
-    assert sql_actions._alter_table_keyword(conn) == alter
+    resolved = warehouse_dialects.resolve(dialect, fmt)
+    assert resolved.audit_column_type("CREATE_DATE") == timestamp
+    assert resolved.audit_column_type("UPDATE_DATE") == timestamp
+    assert resolved.audit_column_type("HASH_KEY") == "VARCHAR(32)"
+    assert resolved.alter_table_keyword() == alter
 
 
 @pytest.mark.parametrize(
@@ -3077,17 +2424,22 @@ def test_cloud_audit_types_and_alter_commands(dialect, fmt, timestamp, alter):
     [("databricks", True), ("trino", True), ("snowflake", False), ("postgresql", False)],
 )
 def test_rename_and_scratch_names_are_resolvable(dialect, qualified):
-    assert sql_actions._rename_to_target(dialect, "target", "db.sch.target") == (
-        "db.sch.target" if qualified else "target"
-    )
-    assert sql_actions._scratch_name(dialect, "stage", "sch.target", "db") == (
+    conn = _FakeDialectConn(dialect)
+    sql_actions._rename(conn, "db.sch.target__x", "target", "db.sch.target")
+    assert conn.statements == [
+        f"ALTER TABLE db.sch.target__x RENAME TO {'db.sch.target' if qualified else 'target'}"
+    ]
+    resolved = warehouse_dialects.resolve(dialect, "native")
+    assert sql_actions._scratch_name(resolved, "stage", "sch.target", "db") == (
         "db.sch.stage" if dialect == "databricks" else "stage"
     )
 
 
 def test_databricks_hash_uses_unbounded_string_type():
     assert (
-        sql_actions._hash_expression(["name"], "s", "databricks")
+        sql_actions._hash_expression(
+            ["name"], "s", warehouse_dialects.resolve("databricks", "native")
+        )
         == "MD5(COALESCE(CAST(s.name AS STRING), ''))"
     )
 
@@ -3188,360 +2540,6 @@ def test_migration_ledger_rejects_unsafe_adoption(tmp_path, case, message):
             migrate_module._legacy_adoption_plan(ledger, streams)
 
 
-def test_configure_from_env_writes_a_warehouse_section(tmp_path):
-    # `setup` never wrote [Warehouse] at all, so the one command that is meant
-    # to take a team from nothing to a working deployment produced a config in
-    # which every SQL and BUSINESS_RULES task failed with "no [Warehouse]
-    # section configured". Same class of gap as E2-13.
-    env_path = _write_env(
-        tmp_path,
-        VALID_ENV + "WAREHOUSE_JDBC_URL=jdbc:postgresql://localhost:5432/analytics\n"
-        "WAREHOUSE_USER=warehouse_user\n"
-        "WAREHOUSE_AUTH_MODE=password\n"
-        "ETL_CRAFT_WAREHOUSE_TABLE_FORMAT=native\n",
-    )
-    output_path = tmp_path / "craft-connector.yml"
-
-    configure_from_env(env_path, output_path)
-
-    config = load_config(output_path)
-    assert config.warehouse is not None
-    assert config.warehouse.active.jdbc_url == "jdbc:postgresql://localhost:5432/analytics"
-    assert config.warehouse.active.user == "warehouse_user"
-    # Defaults to the Postgres profile name, so a single-environment setup
-    # needs one fewer variable.
-    assert config.warehouse.active_profile == "dev"
-    assert config.warehouse_table_format == "native"
-
-
-def test_configure_from_env_warehouse_is_optional(tmp_path):
-    # An Engine-DB-only setup (PYTHON/EMAIL_ALERT tasks only) is unchanged,
-    # and no existing .env file breaks.
-    output_path = tmp_path / "craft-connector.yml"
-    configure_from_env(_write_env(tmp_path, VALID_ENV), output_path)
-    assert load_config(output_path).warehouse is None
-
-
-def test_configure_from_env_duckdb_warehouse_needs_no_user(tmp_path):
-    env_path = _write_env(
-        tmp_path,
-        VALID_ENV + "WAREHOUSE_JDBC_URL=jdbc:duckdb:/data/warehouse.duckdb\n"
-        "WAREHOUSE_AUTH_MODE=none\n",
-    )
-    output_path = tmp_path / "craft-connector.yml"
-
-    configure_from_env(env_path, output_path)
-
-    config = load_config(output_path)
-    assert config.warehouse is not None
-    assert config.warehouse.active.auth_mode == "none"
-
-
-def test_configure_from_env_writes_a_snowflake_key_pair_profile(tmp_path):
-    # Key-pair is the corporate-standard Snowflake auth, so `setup` has to be
-    # able to write it: the key *path* goes in the profile, the passphrase
-    # stays a secret, and the key itself is in neither.
-    env_path = _write_env(
-        tmp_path,
-        VALID_ENV + "WAREHOUSE_JDBC_URL=jdbc:snowflake://acct.snowflakecomputing.com/?db=AN\n"
-        "WAREHOUSE_USER=SVC_ETL\n"
-        "WAREHOUSE_AUTH_MODE=key_file\n"
-        "WAREHOUSE_KEY_FILE=/keys/rsa_key.p8\n",
-    )
-    output_path = tmp_path / "craft-connector.yml"
-
-    configure_from_env(env_path, output_path)
-
-    profile = load_config(output_path).warehouse.active
-    assert profile.auth_mode == "key_file"
-    assert profile.extra["key_file"] == "/keys/rsa_key.p8"
-
-
-def test_configure_from_env_key_file_auth_requires_a_key_path(tmp_path):
-    env_path = _write_env(
-        tmp_path,
-        VALID_ENV + "WAREHOUSE_JDBC_URL=jdbc:snowflake://acct.snowflakecomputing.com/?db=AN\n"
-        "WAREHOUSE_USER=SVC_ETL\n"
-        "WAREHOUSE_AUTH_MODE=key_file\n",
-    )
-    with pytest.raises(ConfigError, match="WAREHOUSE_KEY_FILE is required"):
-        configure_from_env(env_path, tmp_path / "craft-connector.yml")
-
-
-def test_configure_from_env_token_auth_needs_no_user(tmp_path):
-    # Databricks' username is the literal "token" and the creator supplies it.
-    # Requiring one here rejected a valid profile at setup — caught by testing
-    # the shipped .env template end to end rather than only reading it.
-    env_path = _write_env(
-        tmp_path,
-        VALID_ENV + "WAREHOUSE_JDBC_URL=jdbc:databricks://h:443/default;httpPath=/sql/x\n"
-        "WAREHOUSE_AUTH_MODE=token\n",
-    )
-    output_path = tmp_path / "craft-connector.yml"
-
-    configure_from_env(env_path, output_path)
-
-    assert load_config(output_path).warehouse.active.auth_mode == "token"
-
-
-def test_configure_from_env_warehouse_requires_a_user_when_authenticating(tmp_path):
-    env_path = _write_env(
-        tmp_path,
-        VALID_ENV + "WAREHOUSE_JDBC_URL=jdbc:postgresql://localhost:5432/analytics\n"
-        "WAREHOUSE_AUTH_MODE=password\n",
-    )
-    with pytest.raises(ConfigError, match="WAREHOUSE_USER is required"):
-        configure_from_env(env_path, tmp_path / "craft-connector.yml")
-
-
-def test_configure_from_env_missing_env_file_raises(tmp_path):
-    with pytest.raises(ConfigError):
-        configure_from_env(tmp_path / "no-such.env", tmp_path / "craft-connector.yml")
-
-
-@pytest.mark.parametrize(
-    ("key", "message"),
-    [
-        # Credentials without a URL: a PostgreSQL Engine DB whose URL was
-        # forgotten, never silently the SQLite default.
-        ("ENGINE_JDBC_URL", "ENGINE_JDBC_URL is required"),
-        ("ENGINE_USER", "ENGINE_USER is required"),
-        ("ENGINE_AUTH_MODE", "ENGINE_AUTH_MODE is required"),
-    ],
-)
-def test_configure_from_env_requires_each_postgres_engine_field(tmp_path, key, message):
-    lines = [line for line in VALID_ENV.strip().splitlines() if not line.startswith(key)]
-    env_path = _write_env(tmp_path, "\n".join(lines))
-    with pytest.raises(ConfigError, match=message):
-        configure_from_env(env_path, tmp_path / "craft-connector.yml")
-
-
-@pytest.mark.parametrize(
-    ("key", "section", "field", "default"),
-    [
-        ("ETL_CRAFT_MODE", "Orchestration", "Mode", "local"),
-        ("ETL_CRAFT_SOURCE_TYPE", "Secrets", "Source_type", "environment"),
-        ("ETL_CRAFT_ENGINE_PROFILE", "Engine", "Profile", "dev"),
-    ],
-)
-def test_configure_from_env_defaults_the_general_settings(tmp_path, key, section, field, default):
-    lines = [line for line in VALID_ENV.strip().splitlines() if not line.startswith(key)]
-    env_path = _write_env(tmp_path, "\n".join(lines))
-    configure_from_env(env_path, tmp_path / "craft-connector.yml")
-    raw = yaml.safe_load((tmp_path / "craft-connector.yml").read_text(encoding="utf-8"))
-    assert raw[section][field] == default
-
-
-def test_configure_from_env_rejects_invalid_mode(tmp_path):
-    env_path = _write_env(
-        tmp_path, VALID_ENV.replace("ETL_CRAFT_MODE=local", "ETL_CRAFT_MODE=bogus")
-    )
-    with pytest.raises(ConfigError):
-        configure_from_env(env_path, tmp_path / "craft-connector.yml")
-
-
-def test_configure_from_env_rejects_invalid_source_type(tmp_path):
-    env_path = _write_env(
-        tmp_path,
-        VALID_ENV.replace("ETL_CRAFT_SOURCE_TYPE=file", "ETL_CRAFT_SOURCE_TYPE=bogus"),
-    )
-    with pytest.raises(ConfigError):
-        configure_from_env(env_path, tmp_path / "craft-connector.yml")
-
-
-def test_configure_from_env_file_source_requires_path(tmp_path):
-    env_path = _write_env(
-        tmp_path,
-        VALID_ENV.replace("ETL_CRAFT_SOURCE_PATH=__SELF__\n", ""),
-    )
-    with pytest.raises(ConfigError):
-        configure_from_env(env_path, tmp_path / "craft-connector.yml")
-
-
-def test_configure_from_env_file_source_with_path(tmp_path):
-    secrets_path = tmp_path / "secrets.env"
-    env = VALID_ENV.replace(
-        "ETL_CRAFT_SOURCE_PATH=__SELF__", f"ETL_CRAFT_SOURCE_PATH={secrets_path}"
-    )
-    secrets_path.write_text(env, encoding="utf-8")
-    env_path = _write_env(tmp_path, env)
-    output_path = tmp_path / "craft-connector.yml"
-
-    configure_from_env(env_path, output_path)
-
-    config = load_config(output_path)
-    assert config.source.type == "file"
-    assert config.source.path == str(secrets_path)
-
-
-def test_configure_from_env_rejects_invalid_auth_mode(tmp_path):
-    env_path = _write_env(
-        tmp_path,
-        VALID_ENV.replace("ENGINE_AUTH_MODE=password", "ENGINE_AUTH_MODE=bogus"),
-    )
-    with pytest.raises(ConfigError):
-        configure_from_env(env_path, tmp_path / "craft-connector.yml")
-
-
-def test_configure_from_env_rejects_invalid_cloning_scope(tmp_path):
-    env_path = _write_env(tmp_path, VALID_ENV + "ETL_CRAFT_CLONING_SCOPE=bogus\n")
-    with pytest.raises(ConfigError):
-        configure_from_env(env_path, tmp_path / "craft-connector.yml")
-
-
-def test_configure_from_env_enables_cloning(tmp_path):
-    env_path = _write_env(tmp_path, VALID_ENV + "ETL_CRAFT_CLONING_ENABLED=true\n")
-    output_path = tmp_path / "craft-connector.yml"
-
-    configure_from_env(env_path, output_path)
-
-    assert load_config(output_path).cloning.enabled is True
-
-
-def test_configure_from_env_writes_cloning_storage_parameters(tmp_path):
-    # E3-06. Nothing previously let `setup` write these at all -- the only
-    # way to get them into the manifest was hand-editing it, and the next
-    # `setup` run then silently discarded them (see the test below).
-    env_path = _write_env(
-        tmp_path,
-        VALID_ENV + "ETL_CRAFT_CLONING_ENABLED=true\n"
-        "ETL_CRAFT_CLONING_EXTERNAL_VOLUME=my_volume\n"
-        "ETL_CRAFT_CLONING_BASE_LOCATION=analytics/cfg\n",
-    )
-    output_path = tmp_path / "craft-connector.yml"
-
-    configure_from_env(env_path, output_path)
-
-    cloning = load_config(output_path).cloning
-    assert cloning.external_volume == "my_volume"
-    assert cloning.base_location == "analytics/cfg"
-
-
-def test_setup_preserves_hand_added_cloning_storage_parameters(tmp_path):
-    # E3-06. Both write paths used to replace the whole Cloning block
-    # unconditionally on every run -- so a team that hand-added
-    # External_volume/Base_location to an already-written manifest (there was
-    # no bootstrap variable to set them through) had them silently dropped
-    # the next time `setup` ran, with no error and no warning.
-    output_path = tmp_path / "craft-connector.yml"
-    configure_from_env(_write_env(tmp_path, VALID_ENV, "first.env"), output_path)
-    raw = yaml.safe_load(output_path.read_text())
-    raw["Cloning"]["External_volume"] = "hand_added_volume"
-    raw["Cloning"]["Base_location"] = "hand/added/location"
-    output_path.write_text(yaml.safe_dump(raw, sort_keys=False))
-
-    configure_from_env(_write_env(tmp_path, VALID_ENV, "second.env"), output_path)
-
-    cloning = load_config(output_path).cloning
-    assert cloning.external_volume == "hand_added_volume"
-    assert cloning.base_location == "hand/added/location"
-
-
-def test_configure_from_env_includes_orchestrator_name(tmp_path):
-    env_path = _write_env(tmp_path, VALID_ENV + "ETL_CRAFT_ORCHESTRATOR_NAME=Airflow\n")
-    output_path = tmp_path / "craft-connector.yml"
-
-    configure_from_env(env_path, output_path)
-
-    raw = yaml.safe_load(output_path.read_text())
-    assert raw["Orchestration"]["Orchestrator_name"] == "Airflow"
-
-
-def test_configure_from_env_replaces_the_selected_canonical_profile(tmp_path):
-    output_path = tmp_path / "craft-connector.yml"
-    configure_from_env(_write_env(tmp_path, VALID_ENV, "dev.env"), output_path)
-
-    uat_env = VALID_ENV.replace(
-        "ETL_CRAFT_ENGINE_PROFILE=dev", "ETL_CRAFT_ENGINE_PROFILE=uat"
-    ).replace(
-        "jdbc:postgresql://localhost:5432/etl_craft", "jdbc:postgresql://uat-host:5432/etl_craft"
-    )
-    configure_from_env(_write_env(tmp_path, uat_env, "uat.env"), output_path)
-
-    raw = yaml.safe_load(output_path.read_text())
-    assert raw["Engine"]["Profile"] == "uat"
-    assert raw["Engine"]["Variables"]["jdbc_url"] == "ENGINE_JDBC_URL"
-    assert "jdbc:postgresql://uat-host:5432/etl_craft" not in output_path.read_text()
-
-
-def test_configure_from_env_writes_the_documented_variable_names(tmp_path):
-    # E3-01. `setup` used to hardcode ETL_CRAFT_POSTGRES_*/ETL_CRAFT_WAREHOUSE_*
-    # into the manifest's own Variables mapping -- a second, undocumented
-    # convention that didn't match what docs/craft-connector.variables.env and
-    # both shipped worked examples teach a team to hand-author
-    # (ENGINE_JDBC_URL, WAREHOUSE_JDBC_URL, ...). A team following the docs
-    # who then re-ran `setup` had its own Variables mapping silently replaced
-    # with names nothing in its environment had ever set, breaking every
-    # subsequent `etl-craft run`. Pin the exact names here so they cannot
-    # drift from the docs again without this test failing.
-    env_path = _write_env(
-        tmp_path,
-        VALID_ENV + "WAREHOUSE_JDBC_URL=jdbc:postgresql://localhost:5432/analytics\n"
-        "WAREHOUSE_USER=warehouse_user\n"
-        "WAREHOUSE_AUTH_MODE=password\n",
-    )
-    output_path = tmp_path / "craft-connector.yml"
-
-    configure_from_env(env_path, output_path)
-
-    raw = yaml.safe_load(output_path.read_text())
-    assert raw["Engine"]["Variables"] == {
-        "jdbc_url": "ENGINE_JDBC_URL",
-        "user": "ENGINE_USER",
-        "auth_mode": "ENGINE_AUTH_MODE",
-        "secret": "ENGINE_SECRET",
-    }
-    assert raw["Warehouse"]["Variables"] == {
-        "jdbc_url": "WAREHOUSE_JDBC_URL",
-        "auth_mode": "WAREHOUSE_AUTH_MODE",
-        "secret": "WAREHOUSE_SECRET",
-        "user": "WAREHOUSE_USER",
-    }
-    # Also the whole point: neither secret name embeds the profile, so it
-    # cannot go stale for a profile other than the one setup last ran with --
-    # config.py's own tier-scoped fallback (ENGINE_DEV_SECRET before
-    # ENGINE_SECRET) is what covers the multi-tier case instead.
-    assert "DEV" not in raw["Engine"]["Variables"]["secret"]
-
-
-def test_setup_does_not_discard_a_hand_authored_manifest_following_the_docs(tmp_path, monkeypatch):
-    # The concrete E3-01 failure scenario: a team hand-authors
-    # craft-connector.yml exactly as docs/configuration.md and the shipped
-    # worked examples teach (ENGINE_JDBC_URL etc.), sets those variables, and
-    # later runs `setup --from-environment` again to pick up a change. Before
-    # the fix, this silently overwrote Engine/Warehouse with
-    # ETL_CRAFT_POSTGRES_*/ETL_CRAFT_WAREHOUSE_* pointers that nothing in the
-    # environment had set, so the very next `etl-craft run` failed to resolve
-    # its connection. The bootstrap read and the written pointer are now the
-    # same name, so the re-run reproduces the hand-authored mapping exactly
-    # rather than discarding it.
-    hand_authored = (
-        "Orchestration:\n  Mode: local\n"
-        "Secrets:\n  Source_type: environment\n"
-        "Engine:\n  Profile: dev\n  Variables:\n"
-        "    jdbc_url: ENGINE_JDBC_URL\n    user: ENGINE_USER\n"
-        "    auth_mode: ENGINE_AUTH_MODE\n    secret: ENGINE_SECRET\n"
-    )
-    output_path = tmp_path / "craft-connector.yml"
-    output_path.write_text(hand_authored, encoding="utf-8")
-    for key, value in {
-        "ETL_CRAFT_MODE": "local",
-        "ETL_CRAFT_SOURCE_TYPE": "environment",
-        "ETL_CRAFT_ENGINE_PROFILE": "dev",
-        "ENGINE_JDBC_URL": "jdbc:postgresql://localhost:5432/etl_craft",
-        "ENGINE_USER": "etl_engine",
-        "ENGINE_AUTH_MODE": "password",
-        "ENGINE_SECRET": "s3cr3t",
-    }.items():
-        monkeypatch.setenv(key, value)
-
-    configure_from_env(None, output_path)
-
-    config = load_config(output_path)
-    assert config.postgres.active.jdbc_url == "jdbc:postgresql://localhost:5432/etl_craft"
-    assert resolve_secret(config, config.postgres.active) == "s3cr3t"
-
-
 # ==============================================================================
 # migrate.py — the pure statement-splitting piece; apply_pending_migrations
 # itself needs a real Postgres (SCHEMA_MIGRATIONS table) — see
@@ -3551,9 +2549,9 @@ def test_setup_does_not_discard_a_hand_authored_manifest_following_the_docs(tmp_
 
 def test_split_statements_ignores_blank_and_whitespace_only_segments():
     sql_text = "ALTER TABLE t ADD COLUMN c int;  \n\n  UPDATE t SET c = 1; \n ;"
-    assert _split_statements(sql_text) == ["ALTER TABLE t ADD COLUMN c int", "UPDATE t SET c = 1"]
+    assert split_statements(sql_text) == ["ALTER TABLE t ADD COLUMN c int", "UPDATE t SET c = 1"]
 
 
 def test_split_statements_empty_input_returns_empty_list():
-    assert _split_statements("") == []
-    assert _split_statements("   \n  ") == []
+    assert split_statements("") == []
+    assert split_statements("   \n  ") == []

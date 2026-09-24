@@ -67,8 +67,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-groups --python ${{ matrix.python-version }}
 
-      - name: Apply src/etl_craft/sql/schema.sql
-        run: psql -v ON_ERROR_STOP=1 -f src/etl_craft/sql/schema.sql
+      - name: Apply the PostgreSQL Engine DB schema
+        run: psql -v ON_ERROR_STOP=1 -f src/etl_craft/dialects/engine_dialects/postgres/schema.sql
 
       # [DEVIATION, 2026-09-20, E2-26/E2-27] Two fixes. ON_ERROR_STOP=1, because
       # schema_test.sql is now self-asserting and its exit code is the result —
@@ -81,8 +81,8 @@ jobs:
         run: |
           psql -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS etl_craft_schema_test"
           psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE etl_craft_schema_test"
-          psql -v ON_ERROR_STOP=1 -d etl_craft_schema_test -f src/etl_craft/sql/schema.sql
-          psql -v ON_ERROR_STOP=1 -d etl_craft_schema_test -f src/etl_craft/sql/schema_test.sql
+          psql -v ON_ERROR_STOP=1 -d etl_craft_schema_test -f src/etl_craft/dialects/engine_dialects/postgres/schema.sql
+          psql -v ON_ERROR_STOP=1 -d etl_craft_schema_test -f src/etl_craft/dialects/engine_dialects/postgres/schema_test.sql
           psql -v ON_ERROR_STOP=1 -c "DROP DATABASE etl_craft_schema_test"
 
       - name: black --check

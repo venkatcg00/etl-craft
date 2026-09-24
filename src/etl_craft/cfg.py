@@ -483,7 +483,7 @@ class PipelineDetail:
     created_by: str | None
     # Per-pipeline overrides for generate-yml's Airflow-facing fields — all
     # None when not set at this pipeline, in which case generate-yml falls
-    # back to craft-connector.yml's [Orchestrator] section, then a final
+    # back to the active Orchestration profile in craft-connector.yml, then a final
     # hardcoded default. See config.OrchestratorConfig's own docstring.
     catchup: bool | None
     tags: list[str] | None
@@ -734,7 +734,7 @@ KNOWN_PARAMETERS = frozenset(
         # HANDLER=SQL, Snowflake Iceberg targets only. Snowflake cannot
         # express Iceberg as a clause the way Databricks can -- it needs
         # CREATE ICEBERG TABLE plus storage that is deployment-specific, so
-        # these name it. See sql_actions.ICEBERG_CREATE_PREFIX.
+        # these name it. See dialects/warehouse_dialects/snowflake_iceberg.py.
         "EXTERNAL_VOLUME",
         "BASE_LOCATION",
         # iceberg | native. Overrides [Warehouse].Table_format for one target.

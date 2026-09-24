@@ -1,0 +1,153 @@
+# Warehouse: DuckDB compute over an Iceberg REST catalog.
+#
+# DuckDB runs in memory (jdbc:duckdb: with no path); the tables live in the
+# catalog, attached under WAREHOUSE_CATALOG. Iceberg has no sequences or keys,
+# so ROW_ID is computed per insert, and each statement commits on its own.
+# Omit s3_key_id/s3_secret to use the ambient credential chain. The iceberg and
+# httpfs extensions are installed on first connection.
+#
+# Complete and loadable as written: tests/test_config_examples.py loads every
+# file in this directory, for every profile it declares.
+
+Secrets:
+  Source_type: environment        # names below are read from the process environment
+  Profile: dev                    # the default profile; ETL_CRAFT_PROFILE=prod switches all
+
+Orchestration:
+  Mode: remote                    # an orchestrator runs each task from generate-yml's DAGs
+  Name: Airflow                   # informational only
+  Task_timeout_seconds: 21600
+  Max_parallel_tasks: 8
+  Enforce_sla: false              # parsed but not yet enforced (docs/configuration.md)
+  dev:
+    Global_dag: false
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: false
+    Allow_schedule: false
+  sit:
+    Global_dag: false
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: false
+    Allow_schedule: false
+    Email:
+      host: EMAIL_HOST
+      port: EMAIL_PORT
+      from_address: EMAIL_FROM
+      auth_mode: EMAIL_AUTH_MODE
+      user: EMAIL_USER
+      use_tls: EMAIL_USE_TLS
+      secret: EMAIL_SECRET
+  uat:
+    Global_dag: false
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: false
+    Allow_schedule: false
+    Email:
+      host: EMAIL_HOST
+      port: EMAIL_PORT
+      from_address: EMAIL_FROM
+      auth_mode: EMAIL_AUTH_MODE
+      user: EMAIL_USER
+      use_tls: EMAIL_USE_TLS
+      secret: EMAIL_SECRET
+  prod:
+    Global_dag: true
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: true
+    Allow_schedule: true
+    Email_recipients: [data-alerts@example.com]
+    Email:
+      host: EMAIL_HOST
+      port: EMAIL_PORT
+      from_address: EMAIL_FROM
+      auth_mode: EMAIL_AUTH_MODE
+      user: EMAIL_USER
+      use_tls: EMAIL_USE_TLS
+      secret: EMAIL_SECRET
+
+Engine:
+  Name: Postgres
+  dev:
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE
+    secret: ENGINE_SECRET
+  sit:
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE
+    secret: ENGINE_SECRET
+  uat:
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE
+    secret: ENGINE_SECRET
+  prod:
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE
+    secret: ENGINE_SECRET
+
+Warehouse:
+  Name: DuckDB
+  Table_format: iceberg
+  dev:
+    jdbc_url: "jdbc:duckdb:"            # in memory — the data lives in Iceberg (quoted: it ends in a colon)
+    catalog: WAREHOUSE_CATALOG            # the name it is attached as, e.g. lake
+    catalog_uri: WAREHOUSE_CATALOG_URI    # the REST catalog endpoint
+    iceberg_warehouse: WAREHOUSE_ICEBERG_WAREHOUSE   # e.g. s3://warehouse/
+    s3_endpoint: WAREHOUSE_S3_ENDPOINT
+    s3_region: WAREHOUSE_S3_REGION
+    s3_url_style: WAREHOUSE_S3_URL_STYLE  # path | vhost
+    s3_use_ssl: WAREHOUSE_S3_USE_SSL
+    s3_key_id: WAREHOUSE_S3_KEY_ID
+    s3_secret: WAREHOUSE_S3_SECRET
+  sit:
+    jdbc_url: "jdbc:duckdb:"            # in memory — the data lives in Iceberg (quoted: it ends in a colon)
+    catalog: WAREHOUSE_CATALOG            # the name it is attached as, e.g. lake
+    catalog_uri: WAREHOUSE_CATALOG_URI    # the REST catalog endpoint
+    iceberg_warehouse: WAREHOUSE_ICEBERG_WAREHOUSE   # e.g. s3://warehouse/
+    s3_endpoint: WAREHOUSE_S3_ENDPOINT
+    s3_region: WAREHOUSE_S3_REGION
+    s3_url_style: WAREHOUSE_S3_URL_STYLE  # path | vhost
+    s3_use_ssl: WAREHOUSE_S3_USE_SSL
+    s3_key_id: WAREHOUSE_S3_KEY_ID
+    s3_secret: WAREHOUSE_S3_SECRET
+  uat:
+    jdbc_url: "jdbc:duckdb:"            # in memory — the data lives in Iceberg (quoted: it ends in a colon)
+    catalog: WAREHOUSE_CATALOG            # the name it is attached as, e.g. lake
+    catalog_uri: WAREHOUSE_CATALOG_URI    # the REST catalog endpoint
+    iceberg_warehouse: WAREHOUSE_ICEBERG_WAREHOUSE   # e.g. s3://warehouse/
+    s3_endpoint: WAREHOUSE_S3_ENDPOINT
+    s3_region: WAREHOUSE_S3_REGION
+    s3_url_style: WAREHOUSE_S3_URL_STYLE  # path | vhost
+    s3_use_ssl: WAREHOUSE_S3_USE_SSL
+    s3_key_id: WAREHOUSE_S3_KEY_ID
+    s3_secret: WAREHOUSE_S3_SECRET
+  prod:
+    jdbc_url: "jdbc:duckdb:"            # in memory — the data lives in Iceberg (quoted: it ends in a colon)
+    catalog: WAREHOUSE_CATALOG            # the name it is attached as, e.g. lake
+    catalog_uri: WAREHOUSE_CATALOG_URI    # the REST catalog endpoint
+    iceberg_warehouse: WAREHOUSE_ICEBERG_WAREHOUSE   # e.g. s3://warehouse/
+    s3_endpoint: WAREHOUSE_S3_ENDPOINT
+    s3_region: WAREHOUSE_S3_REGION
+    s3_url_style: WAREHOUSE_S3_URL_STYLE  # path | vhost
+    s3_use_ssl: WAREHOUSE_S3_USE_SSL
+    s3_key_id: WAREHOUSE_S3_KEY_ID
+    s3_secret: WAREHOUSE_S3_SECRET

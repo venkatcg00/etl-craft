@@ -1,0 +1,131 @@
+# Engine DB on PostgreSQL — recommended for production.
+#
+# ENGINE_AUTH_MODE is password or key_file. With key_file, ENGINE_KEY_FILE is
+# the client key's path and ENGINE_SECRET its passphrase. A `?sslmode=require`
+# on the URL is forwarded to the driver.
+#
+# Complete and loadable as written: tests/test_config_examples.py loads every
+# file in this directory, for every profile it declares.
+
+Secrets:
+  Source_type: environment        # names below are read from the process environment
+  Profile: dev                    # the default profile; ETL_CRAFT_PROFILE=prod switches all
+
+Orchestration:
+  Mode: remote                    # an orchestrator runs each task from generate-yml's DAGs
+  Name: Airflow                   # informational only
+  Task_timeout_seconds: 21600
+  Max_parallel_tasks: 8
+  Enforce_sla: false              # parsed but not yet enforced (docs/configuration.md)
+  dev:
+    Global_dag: false
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: false
+    Allow_schedule: false
+  sit:
+    Global_dag: false
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: false
+    Allow_schedule: false
+    Email:
+      host: EMAIL_HOST
+      port: EMAIL_PORT
+      from_address: EMAIL_FROM
+      auth_mode: EMAIL_AUTH_MODE
+      user: EMAIL_USER
+      use_tls: EMAIL_USE_TLS
+      secret: EMAIL_SECRET
+  uat:
+    Global_dag: false
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: false
+    Allow_schedule: false
+    Email:
+      host: EMAIL_HOST
+      port: EMAIL_PORT
+      from_address: EMAIL_FROM
+      auth_mode: EMAIL_AUTH_MODE
+      user: EMAIL_USER
+      use_tls: EMAIL_USE_TLS
+      secret: EMAIL_SECRET
+  prod:
+    Global_dag: true
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: true
+    Allow_schedule: true
+    Email_recipients: [data-alerts@example.com]
+    Email:
+      host: EMAIL_HOST
+      port: EMAIL_PORT
+      from_address: EMAIL_FROM
+      auth_mode: EMAIL_AUTH_MODE
+      user: EMAIL_USER
+      use_tls: EMAIL_USE_TLS
+      secret: EMAIL_SECRET
+
+Engine:
+  Name: Postgres
+  dev:
+    jdbc_url: ENGINE_JDBC_URL       # jdbc:postgresql://host:5432/etl_craft
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE     # password | key_file
+    secret: ENGINE_SECRET
+    key_file: ENGINE_KEY_FILE       # auth_mode key_file only
+  sit:
+    jdbc_url: ENGINE_JDBC_URL       # jdbc:postgresql://host:5432/etl_craft
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE     # password | key_file
+    secret: ENGINE_SECRET
+    key_file: ENGINE_KEY_FILE       # auth_mode key_file only
+  uat:
+    jdbc_url: ENGINE_JDBC_URL       # jdbc:postgresql://host:5432/etl_craft
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE     # password | key_file
+    secret: ENGINE_SECRET
+    key_file: ENGINE_KEY_FILE       # auth_mode key_file only
+  prod:
+    jdbc_url: ENGINE_JDBC_URL       # jdbc:postgresql://host:5432/etl_craft
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE     # password | key_file
+    secret: ENGINE_SECRET
+    key_file: ENGINE_KEY_FILE       # auth_mode key_file only
+
+Warehouse:
+  Name: Postgres
+  Table_format: native
+  dev:
+    jdbc_url: WAREHOUSE_JDBC_URL
+    user: WAREHOUSE_USER
+    auth_mode: WAREHOUSE_AUTH_MODE
+    secret: WAREHOUSE_SECRET
+  sit:
+    jdbc_url: WAREHOUSE_JDBC_URL
+    user: WAREHOUSE_USER
+    auth_mode: WAREHOUSE_AUTH_MODE
+    secret: WAREHOUSE_SECRET
+  uat:
+    jdbc_url: WAREHOUSE_JDBC_URL
+    user: WAREHOUSE_USER
+    auth_mode: WAREHOUSE_AUTH_MODE
+    secret: WAREHOUSE_SECRET
+  prod:
+    jdbc_url: WAREHOUSE_JDBC_URL
+    user: WAREHOUSE_USER
+    auth_mode: WAREHOUSE_AUTH_MODE
+    secret: WAREHOUSE_SECRET

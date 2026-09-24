@@ -1,10 +1,11 @@
 """`etl-craft init-db` — apply the packaged schema to an empty Engine DB.
 
 [ADDITION, 2026-09-20, E2-13] There was previously no way to create the
-Engine DB from an installed package at all. `sql/schema.sql` is the single
+Engine DB from an installed package at all. `schema.sql` is the single
 authoritative full definition for a fresh install, and it lived only in the
 git checkout — a team running `uv add etl-craft` could not get to a working
-database by any documented route.
+database by any documented route. Each Engine DB dialect now ships its own,
+in dialects/engine_dialects/<dialect>/ (2026-09-24).
 
 Deliberately separate from `migrate`, and deliberately refusing to run
 against a database that already has engine tables. `schema.sql` is plain
@@ -17,11 +18,9 @@ carrying an *existing* database forward.
 
 from __future__ import annotations
 
-from sqlalchemy import bindparam, inspect, text
 from sqlalchemy.engine import Engine
 
-from etl_craft.migrate import begin_ddl_transaction, statements_for
-from etl_craft.packaged_sql import packaged_schema_path, read_packaged_schema
+from etl_craft.dialects.engine_dialects import for_engine
 
 # Enough of the schema to tell "empty" from "already set up". Checking one
 # table rather than all of them keeps the message honest: a half-applied
@@ -35,20 +34,7 @@ class InitDbError(Exception):
 
 def existing_engine_tables(engine: Engine) -> list[str]:
     """Return whichever engine tables already exist in this database."""
-    if engine.dialect.name == "sqlite":
-        # SQLite has no INFORMATION_SCHEMA; its own catalog is sqlite_master,
-        # which the inspector reads.
-        names = {name.lower(): name for name in inspect(engine).get_table_names()}
-        return sorted(names[t] for t in _SENTINEL_TABLES if t in names)
-    with engine.connect() as conn:
-        rows = conn.execute(
-            text(
-                "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
-                "WHERE TABLE_SCHEMA = CURRENT_SCHEMA() AND LOWER(TABLE_NAME) IN :names"
-            ).bindparams(bindparam("names", expanding=True)),
-            {"names": list(_SENTINEL_TABLES)},
-        ).all()
-    return sorted(row[0] for row in rows)
+    return for_engine(engine).existing_tables(engine, _SENTINEL_TABLES)
 
 
 def init_db(engine: Engine, *, force: bool = False) -> int:
@@ -68,18 +54,24 @@ def init_db(engine: Engine, *, force: bool = False) -> int:
                 "--force if you are certain this one should be re-initialized."
             )
 
-    dialect = engine.dialect.name
-    statements = statements_for(engine, read_packaged_schema(dialect))
+    dialect = for_engine(engine)
+    schema_path = dialect.schema_path()
+    if not schema_path.is_file():
+        raise InitDbError(
+            f"packaged schema not found at {str(schema_path)!r} — the installed package is "
+            "missing its dialect SQL files"
+        )
+    statements = dialect.split_statements(schema_path.read_text(encoding="utf-8"))
     try:
         with engine.begin() as conn:
-            begin_ddl_transaction(conn)
+            dialect.begin_ddl_transaction(conn)
             for statement in statements:
                 # exec_driver_sql, not execute(text(...)) — see the same
                 # change in migrate.apply_pending_migrations (E2-79). schema.sql
                 # is a trusted file of whole DDL statements with nothing to
                 # bind, and text() would re-scan it for :name parameters with
-                # none of _split_statements' quote awareness.
+                # none of the dialect splitter's quote awareness.
                 conn.exec_driver_sql(statement)
     except Exception as exc:
-        raise InitDbError(f"failed applying {packaged_schema_path(dialect).name}: {exc}") from exc
+        raise InitDbError(f"failed applying {dialect.name} {schema_path.name}: {exc}") from exc
     return len(statements)

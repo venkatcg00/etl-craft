@@ -1,0 +1,79 @@
+# Cloning: mirror Engine DB tables into the warehouse after each pipeline run.
+#
+# So a team can query run history and config from inside its own warehouse.
+# Off by default. Scope cfg copies the CFG_ tables, aud the AUD_ tables, all
+# both, and none nothing (a profile can turn it off without deleting it).
+#
+# Complete and loadable as written: tests/test_config_examples.py loads every
+# file in this directory, for every profile it declares.
+
+Secrets:
+  Source_type: environment        # names below are read from the process environment
+  Profile: dev                    # the default profile; ETL_CRAFT_PROFILE=prod switches all
+
+Orchestration:
+  Mode: local
+  Task_timeout_seconds: 21600
+  Max_parallel_tasks: 8
+  Enforce_sla: false
+
+Engine:
+  Name: Postgres
+  dev:
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE
+    secret: ENGINE_SECRET
+  sit:
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE
+    secret: ENGINE_SECRET
+  uat:
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE
+    secret: ENGINE_SECRET
+  prod:
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE
+    secret: ENGINE_SECRET
+
+Warehouse:
+  Name: Postgres
+  Table_format: native
+  dev:
+    jdbc_url: WAREHOUSE_JDBC_URL
+    user: WAREHOUSE_USER
+    auth_mode: WAREHOUSE_AUTH_MODE
+    secret: WAREHOUSE_SECRET
+  sit:
+    jdbc_url: WAREHOUSE_JDBC_URL
+    user: WAREHOUSE_USER
+    auth_mode: WAREHOUSE_AUTH_MODE
+    secret: WAREHOUSE_SECRET
+  uat:
+    jdbc_url: WAREHOUSE_JDBC_URL
+    user: WAREHOUSE_USER
+    auth_mode: WAREHOUSE_AUTH_MODE
+    secret: WAREHOUSE_SECRET
+  prod:
+    jdbc_url: WAREHOUSE_JDBC_URL
+    user: WAREHOUSE_USER
+    auth_mode: WAREHOUSE_AUTH_MODE
+    secret: WAREHOUSE_SECRET
+
+Cloning:
+  dev:
+    Enabled: false                # default false
+    Scope: cfg                    # cfg | aud | all | none
+  sit:
+    Enabled: true
+    Scope: none
+  uat:
+    Enabled: true
+    Scope: cfg
+  prod:
+    Enabled: true
+    Scope: all

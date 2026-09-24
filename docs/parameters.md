@@ -33,7 +33,7 @@ needs. Your `SELECT` must never project an engine-managed column itself.
 | `PRESERVE_TARGET` | no; SCD1 only | Defaults to `false`. Set `true` to update business columns with `COALESCE(source_value, target_value)`: non-null source values replace existing values, while source nulls retain them. Inserts are unchanged. Change detection and `HASH_KEY` use the resulting values of `MERGE_COMPARE_COLUMNS`; a load with no effective change is skipped. Empty strings, zero and false are non-null values and replace the target. |
 | `SCHEMA_EVOLUTION` | no | `"true"` lets a new column in the source be added to the target. Never repairs missing audit columns. |
 | `HARD_DELETE` | no | `DELETE_ROWS` only. `"true"` issues a real `DELETE`; anything else soft-deletes via `DELETE_FLAG='Y'`. |
-| `TABLE_FORMAT` | no | `iceberg` or `native`. Overrides `Warehouse.Table_format` for this target. |
+| `TABLE_FORMAT` | no | `iceberg` or `native`. Overrides `Warehouse.Table_format` (default `native`) for this target, selecting the warehouse dialect that creates it (e.g. `databricks_iceberg`). `iceberg` is refused on a Postgres warehouse (no Iceberg tables), and on DuckDB a value differing from `Warehouse.Table_format` is refused (the connection fixes the format). |
 | `EXTERNAL_VOLUME` / `BASE_LOCATION` | no | Snowflake Iceberg tables only. Without them, the engine uses `EXTERNAL_VOLUME = 'SNOWFLAKE_MANAGED'` — Snowflake's own internal storage, no customer bucket needed. Declare both together to place a table's data in a specific customer-owned external volume instead. |
 
 ### Actions

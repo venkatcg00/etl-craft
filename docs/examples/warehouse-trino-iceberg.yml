@@ -1,0 +1,128 @@
+# Warehouse: Trino over an Iceberg catalog.
+#
+# The catalog in the URL decides the format, so every table is Iceberg whatever
+# a task asks for; `validate` checks the catalog really is Iceberg. Trino has no
+# temporary tables and no rollback: stages are ordinary tables swept on every
+# path, and idempotency is what makes a retry safe.
+#
+# Complete and loadable as written: tests/test_config_examples.py loads every
+# file in this directory, for every profile it declares.
+
+Secrets:
+  Source_type: environment        # names below are read from the process environment
+  Profile: dev                    # the default profile; ETL_CRAFT_PROFILE=prod switches all
+
+Orchestration:
+  Mode: remote                    # an orchestrator runs each task from generate-yml's DAGs
+  Name: Airflow                   # informational only
+  Task_timeout_seconds: 21600
+  Max_parallel_tasks: 8
+  Enforce_sla: false              # parsed but not yet enforced (docs/configuration.md)
+  dev:
+    Global_dag: false
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: false
+    Allow_schedule: false
+  sit:
+    Global_dag: false
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: false
+    Allow_schedule: false
+    Email:
+      host: EMAIL_HOST
+      port: EMAIL_PORT
+      from_address: EMAIL_FROM
+      auth_mode: EMAIL_AUTH_MODE
+      user: EMAIL_USER
+      use_tls: EMAIL_USE_TLS
+      secret: EMAIL_SECRET
+  uat:
+    Global_dag: false
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: false
+    Allow_schedule: false
+    Email:
+      host: EMAIL_HOST
+      port: EMAIL_PORT
+      from_address: EMAIL_FROM
+      auth_mode: EMAIL_AUTH_MODE
+      user: EMAIL_USER
+      use_tls: EMAIL_USE_TLS
+      secret: EMAIL_SECRET
+  prod:
+    Global_dag: true
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: true
+    Allow_schedule: true
+    Email_recipients: [data-alerts@example.com]
+    Email:
+      host: EMAIL_HOST
+      port: EMAIL_PORT
+      from_address: EMAIL_FROM
+      auth_mode: EMAIL_AUTH_MODE
+      user: EMAIL_USER
+      use_tls: EMAIL_USE_TLS
+      secret: EMAIL_SECRET
+
+Engine:
+  Name: Postgres
+  dev:
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE
+    secret: ENGINE_SECRET
+  sit:
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE
+    secret: ENGINE_SECRET
+  uat:
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE
+    secret: ENGINE_SECRET
+  prod:
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE
+    secret: ENGINE_SECRET
+
+Warehouse:
+  Name: Trino
+  Table_format: iceberg
+  dev:
+    jdbc_url: WAREHOUSE_JDBC_URL    # jdbc:trino://host:8080/<catalog>/<schema>
+    user: WAREHOUSE_USER
+    auth_mode: WAREHOUSE_AUTH_MODE  # none | password
+    secret: WAREHOUSE_SECRET        # auth_mode password only
+  sit:
+    jdbc_url: WAREHOUSE_JDBC_URL    # jdbc:trino://host:8080/<catalog>/<schema>
+    user: WAREHOUSE_USER
+    auth_mode: WAREHOUSE_AUTH_MODE  # none | password
+    secret: WAREHOUSE_SECRET        # auth_mode password only
+  uat:
+    jdbc_url: WAREHOUSE_JDBC_URL    # jdbc:trino://host:8080/<catalog>/<schema>
+    user: WAREHOUSE_USER
+    auth_mode: WAREHOUSE_AUTH_MODE  # none | password
+    secret: WAREHOUSE_SECRET        # auth_mode password only
+  prod:
+    jdbc_url: WAREHOUSE_JDBC_URL    # jdbc:trino://host:8080/<catalog>/<schema>
+    user: WAREHOUSE_USER
+    auth_mode: WAREHOUSE_AUTH_MODE  # none | password
+    secret: WAREHOUSE_SECRET        # auth_mode password only

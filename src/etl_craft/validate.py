@@ -61,8 +61,9 @@ from etl_craft.cfg import (
     resolve_pipeline_id,
 )
 from etl_craft.config import VALID_TABLE_FORMATS, ConnectorConfig
+from etl_craft.dialects import warehouse_dialects
 from etl_craft.resolver import ResolverError, build_graph
-from etl_craft.sql_actions import ICEBERG_CREATE_PREFIX, ROW_ID_COLUMN, SNOWFLAKE_MANAGED_VOLUME
+from etl_craft.sql_actions import ROW_ID_COLUMN
 from etl_craft.warehouse import verify_iceberg_catalog
 
 
@@ -95,7 +96,6 @@ def validate_graphs(conn: Connection) -> list[ValidationIssue]:
 # for one. Everything else in the supported set is a SQL engine over Iceberg,
 # which has no constraint concept -- Databricks accepts primary keys only as
 # unenforced informational metadata, and Trino/Iceberg rejects them outright.
-ENFORCED_PRIMARY_KEY_DIALECTS = frozenset({"postgresql", "duckdb"})
 
 
 def _primary_key_columns(
@@ -170,7 +170,8 @@ def validate_business_rule_keys(
     # (sql_actions._add_computed_surrogate_key), so the convention holds; what
     # does not hold is database *enforcement* of it. Say that, once, rather
     # than repeating a failure per rule.
-    if warehouse_engine.dialect.name not in ENFORCED_PRIMARY_KEY_DIALECTS:
+    dialect = warehouse_dialects.resolve(warehouse_engine.dialect.name, "native")
+    if not dialect.enforces_primary_keys:
         return [
             ValidationIssue(
                 category="business_rule_pk",
@@ -445,48 +446,43 @@ def validate_warehouse_storage(
         if problem:
             issues.append(ValidationIssue(category="warehouse_storage", message=problem))
 
-    if warehouse_engine.dialect.name in ICEBERG_CREATE_PREFIX:
-        for task in fetch_tasks_with_parameters(conn):
-            params = task.parameters
-            declared = (params.get("TABLE_FORMAT") or "").strip().lower()
-            effective = declared or config.warehouse_table_format
-            if effective != "iceberg" or not params.get("SQL_ACTION"):
-                continue
-            volume = (params.get("EXTERNAL_VOLUME") or "").strip() or SNOWFLAKE_MANAGED_VOLUME
-            if (
-                volume != SNOWFLAKE_MANAGED_VOLUME
-                and not (params.get("BASE_LOCATION") or "").strip()
-            ):
-                issues.append(
-                    ValidationIssue(
-                        category="warehouse_storage",
-                        message=(
-                            f"{task.pipeline_code}.{task.task_code}: an Iceberg table on "
-                            f"{warehouse_engine.dialect.name} with a customer EXTERNAL_VOLUME "
-                            "needs BASE_LOCATION — use Snowflake-managed storage or specify "
-                            "the path within that volume"
-                        ),
-                    )
+    # Storage rules a particular dialect imposes (Snowflake Iceberg: a
+    # customer EXTERNAL_VOLUME needs BASE_LOCATION), asked of each task's own
+    # resolved dialect rather than hard-coded here.
+    for task in fetch_tasks_with_parameters(conn):
+        params = task.parameters
+        if not params.get("SQL_ACTION"):
+            continue
+        declared = (params.get("TABLE_FORMAT") or "").strip().lower()
+        effective = declared or config.warehouse_table_format
+        try:
+            dialect = warehouse_dialects.resolve(warehouse_engine.dialect.name, effective)
+        except warehouse_dialects.UnsupportedWarehouse as exc:
+            issues.append(
+                ValidationIssue(
+                    category="warehouse_storage",
+                    message=f"{task.pipeline_code}.{task.task_code}: {exc}",
                 )
-        if config.cloning.enabled and "iceberg" in formats:
-            missing_clone = [
-                label
-                for label, value in (
-                    ("Cloning.External_volume", config.cloning.external_volume),
-                    ("Cloning.Base_location", config.cloning.base_location),
+            )
+            continue
+        problem = dialect.task_storage_problem(params)
+        if problem:
+            issues.append(
+                ValidationIssue(
+                    category="warehouse_storage",
+                    message=f"{task.pipeline_code}.{task.task_code}: {problem}",
                 )
-                if not value
-            ]
-            if missing_clone:
-                issues.append(
-                    ValidationIssue(
-                        category="warehouse_storage",
-                        message=(
-                            "Cloning is enabled and mirrors would be Iceberg tables, but "
-                            f"{', '.join(missing_clone)} is not set"
-                        ),
-                    )
-                )
+            )
+    if config.cloning.enabled:
+        try:
+            clone_dialect = warehouse_dialects.resolve(
+                warehouse_engine.dialect.name, config.warehouse_table_format
+            )
+            problem = clone_dialect.cloning_storage_problem(config.cloning)
+        except warehouse_dialects.UnsupportedWarehouse:
+            problem = None
+        if problem:
+            issues.append(ValidationIssue(category="warehouse_storage", message=problem))
     return issues
 
 

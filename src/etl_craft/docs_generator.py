@@ -41,8 +41,7 @@ leave the search box silently dead. 15 KB buys a site that works everywhere.
 [CHOICE] Every generated page is genuinely static HTML (fetch()-based search
 excepted) -- no build step beyond running `etl-craft generate-docs` again.
 Re-running it wholesale-overwrites the previous output directory's files
-(never a merge), same "full parse + re-serialize, simple and robust" spirit
-already established for craft-connector.yml writes in configure.py.
+(never a merge) -- simple and robust, and the output is disposable by design.
 """
 
 from __future__ import annotations

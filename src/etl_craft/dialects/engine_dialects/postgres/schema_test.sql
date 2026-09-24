@@ -1,10 +1,11 @@
--- Behavioral smoke test for sql/schema.sql — exercises the mechanisms
--- CLAUDE.md describes as load-bearing, not just DDL syntax. Run against a
--- disposable database (never against a real Engine DB):
+-- Behavioral smoke test for the PostgreSQL Engine DB's schema.sql (beside
+-- this file) — exercises the mechanisms CLAUDE.md describes as load-bearing,
+-- not just DDL syntax. Run against a disposable database (never against a
+-- real Engine DB), from this directory:
 --
 --   createdb etl_craft_test
---   psql -d etl_craft_test -f sql/schema.sql
---   psql -d etl_craft_test -f sql/schema_test.sql
+--   psql -d etl_craft_test -f schema.sql
+--   psql -d etl_craft_test -f schema_test.sql
 --   dropdb etl_craft_test
 --
 -- [DEVIATION, 2026-09-20, E2-26] This file is now SELF-ASSERTING and must be

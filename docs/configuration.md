@@ -1,238 +1,415 @@
 # Configuring etl-craft
 
-`craft-connector.yml` describes how the engine runs and where it finds connection values. The
-canonical manifest contains variable names, never passwords, tokens, private keys, or connection
-URLs.
+`craft-connector.yml` tells etl-craft how to run and where to find every connection. **You write
+it; etl-craft only reads it.** No command creates or rewrites it: `setup` reads it and brings the
+Engine DB up to date. It holds variable *names*, never passwords, tokens, keys or credentials, so
+it is safe to commit.
 
 Commands below use an installed `etl-craft` executable. From this source checkout, prefix them
 with `uv run`, for example `uv run etl-craft setup`.
 
-Start from one of the canonical examples:
+Start from an example:
 
-- [environment-backed config](craft-connector.env-secrets.example.yml) for CI and containers
-- [file-backed config](craft-connector.file-secrets.example.yml) for a local development machine
+- [craft-connector.example.yml](craft-connector.example.yml): the annotated reference, working
+  as-is for local development.
+- [examples/](examples/README.md): a complete file for each Engine DB, each warehouse dialect,
+  each secrets source and each orchestration mode.
 
-## Canonical manifest
+## Layout
 
-The canonical top-level sections are:
+Five sections. They must appear in this order, and the loader refuses any other:
 
-| Section | Purpose |
+| Section | Required | Holds |
+|---|---|---|
+| `Secrets` | yes | where variable names are looked up, and the default profile |
+| `Orchestration` | yes | execution mode and limits, the `generate-yml` DAG defaults, and the Email relay |
+| `Engine` | yes | the Engine DB connection, per profile |
+| `Warehouse` | no (needed by `SQL`/`BUSINESS_RULES` tasks) | the one warehouse connection, per profile |
+| `Cloning` | no | mirroring Engine DB tables into the warehouse |
+
+Unknown sections and unknown keys are refused, so a typo such as `Retires:` fails loudly instead
+of being ignored.
+
+### Profiles
+
+Any section can hold one block per environment (a *profile*): `dev`, `sit`, `uat`, `prod`, or
+any names you like. A key beside the profile blocks applies to every profile; the same key inside
+a block overrides it for that profile. `Engine` and `Warehouse` need at least one profile block.
+
+```yaml
+Orchestration:
+  Mode: local                 # every profile...
+  Max_parallel_tasks: 8
+  prod:
+    Mode: remote              # ...except prod
+    Allow_schedule: true
+```
+
+Each section uses its own active profile, chosen most-specific first:
+
+| Source | Example |
 |---|---|
-| `Orchestration` | execution mode, time limit, and local parallelism |
-| `Secrets` | where named values are read from |
-| `Engine` | the required Engine DB connection: SQLite (default) or PostgreSQL (production) |
-| `Warehouse` | the optional data warehouse connection and table format |
-| `Cloning` | optional Engine DB mirroring into the warehouse |
-| `Dag_defaults` | defaults written into the Airflow-shaped descriptor |
-| `Email` | optional SMTP profile for `EMAIL_ALERT` tasks |
+| `$ETL_CRAFT_<SECTION>_PROFILE` | `ETL_CRAFT_WAREHOUSE_PROFILE=prod` |
+| `$ETL_CRAFT_PROFILE` | one switch for every section |
+| `<Section>.Profile` | `Engine: {Profile: uat, ...}` |
+| `Secrets.Profile` | the file-wide default |
 
-`Engine`, `Warehouse`, and `Email` each have a `Profile` and `Variables` block. Every value in a
-`Variables` block is the name of a variable in the configured secret source. For example:
+A section with a single profile block needs no selection. The selectors are read from the
+process environment even when `Secrets.Source_type` is `file`. A selected profile the section
+does not declare is an error that names the profiles it does declare.
+
+### Values are variable names
+
+In `Engine`, `Warehouse` and `Orchestration`'s `Email` block, every value is the **name** of a
+variable in the secrets source:
+
+```yaml
+Engine:
+  prod:
+    jdbc_url: ENGINE_JDBC_URL       # the environment holds jdbc:postgresql://...
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE     # ...password
+    secret: ENGINE_SECRET           # ...the password itself
+```
+
+Every profile can use the same names; each environment (a laptop, CI, the prod servers) sets them
+to its own values. When one shell or `.env` file must hold several tiers at once, a
+profile-specific name wins for that profile: `ENGINE_PROD_SECRET` is used over `ENGINE_SECRET`
+for `prod`. The profile name goes before the field's own suffix (`ENGINE_SECRET` becomes
+`ENGINE_PROD_SECRET`, `EMAIL_FROM` becomes `EMAIL_PROD_FROM`).
+
+One exception keeps the local default free of variables: a `jdbc_url` written literally as
+`jdbc:...` is used as-is. A URL carries no credentials; secrets always go through variables. A
+literal URL that ends in a colon (`"jdbc:duckdb:"`) needs quotes in YAML.
+
+## Secrets
 
 ```yaml
 Secrets:
-  Source_type: environment
-
-Engine:
-  Profile: prod
-  Variables:
-    jdbc_url: ENGINE_JDBC_URL
-    user: ENGINE_USER
-    auth_mode: ENGINE_AUTH_MODE
-    secret: ENGINE_SECRET
+  Source_type: environment    # or: file
+  Path: .env                  # Source_type: file only
+  Profile: dev                # the default profile for every section
 ```
 
-With that configuration, `ENGINE_JDBC_URL` contains the actual URL and `ENGINE_SECRET` contains
-the password or token. Neither value belongs in the manifest. `Profile` is the default tier;
-The process-environment variables `ETL_CRAFT_ENGINE_PROFILE`,
-`ETL_CRAFT_WAREHOUSE_PROFILE`, and `ETL_CRAFT_EMAIL_PROFILE` can select another tier at runtime.
-They are selectors, so they are read from the process environment even when `Secrets.Source_type`
-is `file`. When a tier-specific variable is present, it takes precedence over the plain name for
-that tier.
+- `environment` reads names from the process environment. Use it for CI and containers.
+- `file` reads a `.env`-style file at `Path`, resolved relative to `craft-connector.yml` (never
+  the working directory) so every spawned task reads the same file. The file name can be
+  anything. The reader accepts `KEY=VALUE` lines, ignores blank lines and whole-line `#`
+  comments, and removes one matching pair of surrounding quotes. It supports no escape sequences
+  and no multi-line values. Keep the file out of version control and `chmod 600` it.
 
-### A SQLite Engine DB
+## Orchestration
 
-The default Engine DB is a SQLite file. It has no user and no secret, so its URL is written into
-the manifest directly instead of through `Variables`:
+Execution settings, the DAG defaults `generate-yml` writes into its output, and the Email relay,
+all in one section and all overridable per profile.
+
+| Setting | Default | Effect |
+|---|---:|---|
+| `Mode` | (required) | `local`: `etl-craft run --pipeline_code X` runs the task waves itself. `remote`: an orchestrator runs each task with `etl-craft run --pipeline_code X --task_code Y`. |
+| `Name` | none | informational only; see [Not yet implemented](#not-yet-implemented) |
+| `Task_timeout_seconds` | 21,600 | a task's wall-clock limit; a task's `TASK_TIMEOUT_SECONDS` overrides it; `0` disables |
+| `Max_parallel_tasks` | 8 | the most task subprocesses a local wave runs at once, and the cap on parallel business rules |
+| `Enforce_sla` | `false` | parsed but not yet enforced; see [Not yet implemented](#not-yet-implemented) |
+| `Global_dag` | `false` | allows `generate-yml --global` (the cross-pipeline trigger DAG) |
+| `Catchup` | `false` | Airflow `catchup` |
+| `Tags` | `[<refresh type>]` | Airflow `tags` |
+| `Retries` | 1 | `default_args.retries` |
+| `Retry_delay_minutes` | 5 | `default_args.retry_delay_minutes` |
+| `Depends_on_past` | `false` | `default_args.depends_on_past` |
+| `Email_on_failure` | `false` | `default_args.email_on_failure` |
+| `Email_recipients` | none | `default_args.email`, emitted only when `Email_on_failure` is true |
+| `Allow_schedule` | `true` | `false` emits `schedule: null` even when the pipeline has a `RUN_SCHEDULE` |
+| `Email` | none | the SMTP relay for `EMAIL_ALERT` tasks (below) |
+
+For the Airflow-facing settings, a pipeline's own `CFG_PIPELINES.PIPELINE_PARAMETERS` value
+(`CATCHUP`, `TAGS`, `RETRIES`, ...) wins over the active profile's, which wins over the default.
+
+`Allow_schedule` is how environments stay separate: every environment holds every pipeline, and
+`generate-yml` gives the pipelines a timetable only where it is `true`, typically `prod`.
+Elsewhere their DAGs run only when triggered.
+
+`generate-yml` emits a YAML descriptor with task commands and Airflow trigger rules. It does not
+create, load, deploy or operate an Airflow DAG: a deployment needs its own loader, packaging,
+worker image and scheduler policy. `--force` bypasses dependency and state checks and is refused
+under `remote`.
+
+### Email
+
+Needed only when a pipeline has an `EMAIL_ALERT` task. It lives in `Orchestration`, usually per
+profile:
+
+```yaml
+Orchestration:
+  Mode: remote
+  prod:
+    Email:
+      host: EMAIL_HOST
+      port: EMAIL_PORT
+      from_address: EMAIL_FROM
+      auth_mode: EMAIL_AUTH_MODE    # none | password
+      user: EMAIL_USER              # password only
+      use_tls: EMAIL_USE_TLS        # default true
+      secret: EMAIL_SECRET          # password only
+```
+
+## Engine
+
+The Engine DB holds every `CFG_`/`AUD_` table. `Name` is optional (`SQLite` or `Postgres`) and is
+checked against `jdbc_url`.
+
+### SQLite, the default
 
 ```yaml
 Engine:
-  Profile: dev
-  Jdbc_url: jdbc:sqlite:etl-craft-engine.db
+  dev:
+    jdbc_url: jdbc:sqlite:etl-craft-engine.db
 ```
 
-A relative path is resolved from the directory holding `craft-connector.yml`, never the current
-directory, so every command and every spawned task opens the same file. `jdbc:sqlite::memory:` is
-refused: each task runs in its own process and would see an empty database. A literal `Jdbc_url`
-is accepted for SQLite only. Any other Engine DB goes through `Variables`, and an Engine DB
-profile must use `auth_mode: none` exactly when its URL is `jdbc:sqlite:`.
+A relative path resolves against the directory holding `craft-connector.yml`, so every command and
+every spawned task opens the same file. `jdbc:sqlite::memory:` is refused: each task runs in its own
+process and would see an empty database. SQLite has nothing to authenticate, so `auth_mode` is
+`none`, whether or not you write it.
 
-SQLite is meant for local development and single-machine deployments. Use PostgreSQL in
-production:
+SQLite is for local development and single-machine deployments. Use PostgreSQL in production:
 
-- SQLite serializes every write to the Engine DB. Tasks wait for each other's short audit
-  writes; the engine sets a 60-second busy timeout, so they queue instead of failing.
-- The file must be on the machine that runs every task. An orchestrator whose workers run on other
-  hosts cannot use it, and `doctor` says so under `Mode: remote`.
+- SQLite serializes every Engine DB write. Tasks queue behind each other's short audit writes
+  (the busy timeout is 60 seconds).
+- The file must be on the machine that runs every task. An orchestrator whose workers run on
+  other hosts cannot use it, and `doctor` says so under `Mode: remote`.
 - SQLite has no database users, so `CREATED_BY`/`UPDATED_BY` in the `CFG_` tables default to
-  `etl-craft` unless your insert scripts supply a value. PostgreSQL records the connected role.
+  `etl-craft` unless your insert scripts supply a value.
 
-Migration and warehouse-queue locks, which are Postgres advisory locks on a PostgreSQL Engine DB,
-become OS file locks beside the SQLite file (`<file>.migrate.lock`, `<file>.warehouse.lock`).
+The migration lock and the single-writer-warehouse queue are OS file locks beside the SQLite file
+(`<file>.migrate.lock`, `<file>.warehouse.lock`) instead of Postgres advisory locks.
 
-`Secrets.Source_type` is either `environment` or `file`. For `file`,
-`Secrets.Source_path` is required. The file reader accepts `KEY=VALUE` lines, ignores blank lines
-and whole-line `#` comments, and removes one matching pair of surrounding single or double
-quotes. Relative paths are resolved from the directory holding `craft-connector.yml`. It does not
-support escape sequences or multi-line values.
+### PostgreSQL, for production
 
-For a local setup file, use `Source_type: file` and point `Source_path` at that file. A passed
-`.env` is not automatically exported to later processes. For CI or a container, export every
-referenced variable and use `Source_type: environment`.
-
-## Bootstrap with `setup`
-
-`etl-craft setup` takes bootstrap variables from `./.env`, `--env FILE`, or the process
-environment with `--from-environment`; with no `--env` and no `./.env`, it reads the process
-environment. It writes the canonical manifest, then creates or upgrades the Engine DB when it can
-connect.
-
-Every bootstrap value has a default: `ETL_CRAFT_MODE=local`, `ETL_CRAFT_SOURCE_TYPE=environment`,
-`ETL_CRAFT_ENGINE_PROFILE=dev`, and, with no `ENGINE_JDBC_URL`, the SQLite Engine DB
-`jdbc:sqlite:etl-craft-engine.db`. So `etl-craft setup` with nothing set produces a working local
-deployment. The SQLite default applies only to a manifest with no Engine DB yet, or one already on
-SQLite. Against a manifest whose Engine DB is PostgreSQL, a missing `ENGINE_JDBC_URL` is an error:
-`setup` never swaps a production Engine DB for an empty file. For PostgreSQL, set
-`ENGINE_JDBC_URL`, `ENGINE_USER`, `ENGINE_AUTH_MODE` and the secret.
-
-The bootstrap input is a mix of a few `ETL_CRAFT_*` settings (`ETL_CRAFT_MODE`,
-`ETL_CRAFT_SOURCE_TYPE`, `ETL_CRAFT_ENGINE_PROFILE`, `ETL_CRAFT_WAREHOUSE_PROFILE`,
-`ETL_CRAFT_WAREHOUSE_TABLE_FORMAT`, ...) plus the *same* variable names the canonical manifest's
-own `Variables` blocks use — `ENGINE_JDBC_URL`, `ENGINE_USER`, `ENGINE_AUTH_MODE`, `ENGINE_SECRET`,
-`WAREHOUSE_JDBC_URL`, and so on. `setup` reads a connection value under the same name it then
-writes into the manifest as a pointer, so the variable that bootstraps a deployment is the same one
-`etl-craft run` resolves afterwards — nothing to keep in sync by hand. See
-[craft-connector.variables.env](craft-connector.variables.env) for the full list. For a file-backed
-local setup, set both:
-
-```dotenv
-ETL_CRAFT_SOURCE_TYPE=file
-ETL_CRAFT_SOURCE_PATH=./.env
+```yaml
+Engine:
+  Name: Postgres
+  prod:
+    jdbc_url: ENGINE_JDBC_URL       # jdbc:postgresql://host:5432/etl_craft[?sslmode=require]
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE     # password | key_file
+    secret: ENGINE_SECRET           # the password, or the key's passphrase
+    key_file: ENGINE_KEY_FILE       # key_file only: the client key's path
 ```
 
-For environment-backed deployment, export the bootstrap variables and run:
+Query parameters on the URL (`sslmode=require`, ...) are forwarded to the driver.
 
-```bash
-etl-craft setup --from-environment
-```
+## Warehouse
 
-Run `etl-craft doctor` after setup. It resolves every active profile and tests each configured
-connection. `setup` reports an unreachable Engine DB after writing the manifest; that report does
-not prove the deployment is ready.
+Exactly one per deployment. `Name` (`Postgres`, `DuckDB`, `Trino`, `Databricks`, `Snowflake`) is
+checked against the connection. `Table_format` is `native` (the default) or `iceberg`; a task's
+`CFG_TASK_PARAMETERS.TABLE_FORMAT` overrides it for that task's table. Both settings may sit on the
+section or inside a profile (for example a DuckDB `dev` beside a Postgres `prod`).
 
-Older `Execution` / `Source` / `Postgres` / `Profiles` / `Orchestrator` manifests remain readable
-for migration. Use the canonical shape for new files. Do not mix the two shapes in one manifest.
+The connection and the table format together select one **warehouse dialect**:
 
-## Execution and orchestration
-
-`Orchestration.Mode` is one of:
-
-- `local`: `etl-craft run --pipeline_code X` schedules ready task waves itself.
-- `remote`: a scheduler invokes individual tasks with `etl-craft run --pipeline_code X --task_code Y`.
-
-`generate-yml` emits a YAML descriptor containing task commands and Airflow trigger rules. It does
-not create, load, deploy, or operate an Airflow DAG. A deployment using Airflow needs its own
-loader, DAG packaging, worker image, and scheduler policy. Other schedulers can call the same
-single-task command, but this repository does not ship an adapter for them.
-
-`--force` bypasses dependency and state checks and is available only in `local` mode.
-
-| `Orchestration` setting | Default | Effect |
-|---|---:|---|
-| `Task_timeout_seconds` | 21,600 | task wall-clock limit; a task parameter can override it and `0` disables it |
-| `Max_parallel_tasks` | 8 | maximum subprocesses in a local task wave |
-| `Enforce_sla` | `false` | opt in to engine-side comparison with `CFG_PIPELINES.SLA_IN_HOURS` |
-
-## Connections, warehouses, and formats
-
-The Engine DB is SQLite (the default, for local and single-machine use) or PostgreSQL (the
-recommended production Engine DB). A warehouse is optional until a deployment runs `SQL` or
-`BUSINESS_RULES` tasks.
-
-| Target | Status | Supported authentication | Storage notes |
+| Dialect | Name + Table_format | Status | Authentication |
 |---|---|---|---|
-| PostgreSQL warehouse | reference launch path | `password` | native PostgreSQL tables |
-| DuckDB | local development | `none` | file-backed and single-writer; tasks queue for warehouse access |
-| Trino over Iceberg | integration-tested against the included local stack | `none` or `password` | use an Iceberg catalog when a task requests Iceberg |
-| Databricks | **verified live 2026-09-23**: `native` (managed Delta) and `iceberg` (managed Delta with UniForm) both pass `CREATE_TABLE`/`OVERWRITE_TABLE`/`SCD1_MERGE` | static `token`, preferred connection (below) | `native` creates Delta; `iceberg` creates Delta with UniForm enabled — Databricks itself always reads/writes Delta, and UniForm additionally generates Iceberg metadata for external engines |
-| Snowflake | **verified live 2026-09-23**: `native` and `iceberg` (Snowflake-managed) both pass `CREATE_TABLE`/`OVERWRITE_TABLE`/`SCD1_MERGE` via the preferred connection | static `token`, preferred connection (below), `key_file`, or `password` | `native` uses ordinary Snowflake tables; `iceberg` defaults to Snowflake's own internal storage — no cloud bucket to provision |
+| `postgres` | Postgres, native | the reference launch path | `password` |
+| `duckdb` | DuckDB, native | local development | `none` |
+| `duckdb_iceberg` | DuckDB, iceberg | integration-tested against the included local Iceberg stack | `none` (object storage keys in the profile) |
+| `trino_iceberg` | Trino, either (the catalog decides) | integration-tested against the included local stack | `none` or `password` |
+| `databricks` | Databricks, native (Delta) | verified live 2026-09-23 | token fields |
+| `databricks_iceberg` | Databricks, iceberg (Delta + UniForm) | verified live 2026-09-23 | token fields |
+| `snowflake` | Snowflake, native | verified live 2026-09-23 | token fields, `key_file`, or `password` |
+| `snowflake_iceberg` | Snowflake, iceberg | verified live 2026-09-23 (Snowflake-managed storage) | token fields, `key_file`, or `password` |
 
-From this source checkout, install the dialect for the warehouse being used:
+There is no `postgres_iceberg`. PostgreSQL has no Iceberg tables without a third-party extension
+that this project neither ships nor tests, so `Table_format: iceberg` on a Postgres warehouse is
+refused rather than silently ignored. On DuckDB the format is fixed by the connection (a file, or
+an Iceberg catalog), so a task cannot override it there.
+
+From this source checkout, install the dialect for a cloud warehouse:
 
 ```bash
 uv sync --extra databricks  # or: --extra snowflake, --extra trino
 ```
 
-`Warehouse.Table_format` accepts `iceberg` (the default) or `native`; a task can override it with
-`CFG_TASK_PARAMETERS.TABLE_FORMAT`. PostgreSQL and DuckDB use their native storage either way.
-Trino's catalog determines the actual table format, so `validate` checks an Iceberg request against
-the selected catalog. Do not describe an arbitrary SQLAlchemy dialect as supported: the SQL actions
-are tested only against the targets in this table.
+### PostgreSQL
 
-**Snowflake Iceberg tables are zero-config by default.** With no `EXTERNAL_VOLUME`/`BASE_LOCATION`
-task parameters declared, the engine creates them with `EXTERNAL_VOLUME = 'SNOWFLAKE_MANAGED'` —
-Snowflake's own internal storage, not a customer-owned bucket, verified live to support the full
-`CREATE_TABLE`/`OVERWRITE_TABLE`/`SCD1_MERGE`/`SCD2_MERGE` vocabulary. A task can still name its own
-`EXTERNAL_VOLUME` (paired with `BASE_LOCATION`) to place a table's data in a specific customer-owned
-volume instead — useful when another engine needs to read the same physical files.
+```yaml
+Warehouse:
+  Name: Postgres
+  prod:
+    jdbc_url: WAREHOUSE_JDBC_URL    # jdbc:postgresql://host:5432/analytics
+    user: WAREHOUSE_USER
+    auth_mode: WAREHOUSE_AUTH_MODE  # password
+    secret: WAREHOUSE_SECRET
+```
 
-Authentication is deliberately narrow:
+### DuckDB
 
-- Engine DB: `password` or `key_file` for PostgreSQL; `none` for SQLite, and only for SQLite.
-- Warehouse: `none`, `password`, `key_file`, or a static `token`.
-- Email: `none` or `password`.
+A file (`jdbc:duckdb:warehouse.duckdb`) with `auth_mode: none`. DuckDB admits one writing process
+at a time, so tasks queue for the warehouse behind an Engine DB lock. The file stem is the
+catalog name in `catalog.schema.table`, so keep it a plain identifier. An in-memory file warehouse
+is refused by `doctor`: every task is its own process.
 
-`sso` is rejected. A warehouse token is a stored bearer token; the engine does not mint or refresh
-OAuth or cloud-session credentials. For Snowflake, `key_file` refers to a mounted private-key path
-and the secret variable supplies its passphrase. Keep the key outside the manifest.
+**Over Iceberg.** DuckDB runs in memory and attaches an Iceberg REST catalog:
 
-### Preferred connection: Databricks and Snowflake (`auth_mode: token`)
+```yaml
+Warehouse:
+  Name: DuckDB
+  Table_format: iceberg
+  prod:
+    jdbc_url: "jdbc:duckdb:"
+    catalog: WAREHOUSE_CATALOG                       # the attach name, e.g. lake
+    catalog_uri: WAREHOUSE_CATALOG_URI               # the REST endpoint
+    iceberg_warehouse: WAREHOUSE_ICEBERG_WAREHOUSE   # e.g. s3://warehouse/
+    s3_endpoint: WAREHOUSE_S3_ENDPOINT
+    s3_region: WAREHOUSE_S3_REGION
+    s3_url_style: WAREHOUSE_S3_URL_STYLE
+    s3_use_ssl: WAREHOUSE_S3_USE_SSL
+    s3_key_id: WAREHOUSE_S3_KEY_ID                   # omit both keys for the
+    s3_secret: WAREHOUSE_S3_SECRET                   #   ambient credential chain
+```
 
-For Databricks and Snowflake specifically, `Warehouse.Variables` can name separate connection
-fields instead of one JDBC URL carrying everything — **the tested and recommended shape for both**
-(see `warehouse.PREFERRED_CONNECTION_FIELDS`, and `docs/craft-connector.env-secrets.example.yml`/
-`docs/craft-connector.file-secrets.example.yml` for full worked examples):
+The `iceberg` and `httpfs` extensions install on first connection, which needs network access
+once per machine. Each statement commits on its own: inside one transaction the catalog cannot
+drop or rename a table the same transaction created. As on Trino, an action that fails partway
+is made safe by idempotent retries, not by a rollback.
 
-- **Databricks**: `jdbc_url` (host, port and `httpPath` only — no `ConnCatalog`/`ConnSchema`),
-  `catalog`, `schema`, `token`. No `user`: the username is the literal `"token"`, supplied by the
-  engine.
-- **Snowflake**: `user`, `account` (the `<org>-<account>` identifier, not a hostname), `database`,
-  `schema`, `warehouse`, `role`, `token` — a Programmatic Access Token (PAT), presented like a
-  password. A PAT requires a network policy assigned to the account or the user
-  (Snowsight → Admin → Security → Network Policies) before any connection using it will succeed;
-  without one every attempt fails with `Network policy is required`, regardless of credentials.
+### Trino
 
-Both resolve to `auth_mode: token` automatically — there is no separate `auth_mode` variable to set
-for either shape, and specifying one alongside `token` is rejected as a conflicting configuration.
-The engine assembles a full connection from the named fields at connect time
-(`warehouse.preferred_connection_url`); nothing here is a JDBC URL a human has to hand-build with
-an embedded query string.
+```yaml
+Warehouse:
+  Name: Trino
+  Table_format: iceberg
+  prod:
+    jdbc_url: WAREHOUSE_JDBC_URL    # jdbc:trino://host:8080/<catalog>/<schema>
+    user: WAREHOUSE_USER
+    auth_mode: WAREHOUSE_AUTH_MODE  # none | password
+    secret: WAREHOUSE_SECRET
+```
 
-## Schema lifecycle
+The catalog decides the table format; `validate` checks that it really is an Iceberg catalog.
+
+### Databricks and Snowflake: token fields (recommended)
+
+Separate connection fields and a stored token, the tested shape for both. The engine assembles
+a credential-free URL at connect time, and `auth_mode` is `token` implicitly.
+
+```yaml
+Warehouse:
+  Name: Databricks
+  Table_format: native              # iceberg = managed Delta with UniForm enabled
+  prod:
+    jdbc_url: WAREHOUSE_JDBC_URL    # host, port and httpPath only
+    catalog: WAREHOUSE_CATALOG
+    schema: WAREHOUSE_SCHEMA
+    token: WAREHOUSE_TOKEN          # a personal access token
+```
+
+Any `AuthMech`/`UID`/`PWD` pasted in from the workspace's JDBC tab is stripped before use. There is
+no `user`: the username is the literal `token`.
+
+```yaml
+Warehouse:
+  Name: Snowflake
+  Table_format: native              # iceberg = CREATE ICEBERG TABLE
+  prod:
+    user: WAREHOUSE_USER
+    account: WAREHOUSE_ACCOUNT      # <org>-<account>, not a hostname
+    database: WAREHOUSE_DATABASE
+    schema: WAREHOUSE_SCHEMA
+    warehouse: WAREHOUSE_WAREHOUSE
+    role: WAREHOUSE_ROLE
+    token: WAREHOUSE_TOKEN          # a Programmatic Access Token
+```
+
+A Snowflake PAT needs a network policy on the account or user (Snowsight → Admin → Security →
+Network Policies); without one, every connection fails with `Network policy is required`.
+Snowflake Iceberg tables default to `EXTERNAL_VOLUME = 'SNOWFLAKE_MANAGED'`, Snowflake's own
+storage, so there is no bucket to provision. A task can name its own `EXTERNAL_VOLUME` (with
+`BASE_LOCATION`) in `CFG_TASK_PARAMETERS`.
+
+**Snowflake key pair.** The alternative to a token is a JDBC URL
+(`jdbc:snowflake://<account>.snowflakecomputing.com/?db=<db>&schema=<schema>&...`) with
+`auth_mode` `key_file`: `key_file` names the private key's path and `secret` its passphrase.
+`password` also works on this shape. `key_file` is implemented only for Snowflake, and the loader
+refuses it for any other warehouse.
+
+A warehouse token is a stored bearer token: etl-craft does not mint or refresh OAuth or cloud
+session credentials, and `sso` is not a supported mode.
+
+## Cloning
+
+```yaml
+Cloning:
+  prod:
+    Enabled: true                   # default false
+    Scope: all                      # cfg | aud | all | none
+    # External_volume: MY_VOLUME    # Snowflake Iceberg warehouse only: literal names
+    # Base_location: etl_craft      #   (the mirrors have no task to carry them)
+```
+
+After each pipeline run, the selected Engine DB tables are copied into the warehouse, so a team can
+query its run history and config from inside the warehouse. `Scope: none` turns cloning off for a
+profile without deleting the settings.
+
+## How the dialect is chosen
+
+Everything that differs between databases lives in `src/etl_craft/dialects/`, one file per
+database:
+
+```text
+dialects/
+  engine_dialects/
+    postgres/   __init__.py  schema.sql  schema_test.sql  migrations/
+    sqlite/     __init__.py  schema.sql  migrations/
+  warehouse_dialects/
+    base.py  postgres.py  duckdb.py  duckdb_iceberg.py  trino_iceberg.py
+    databricks.py  databricks_iceberg.py  snowflake.py  snowflake_iceberg.py
+```
+
+- The **Engine DB dialect** comes from `Engine`'s `jdbc_url`. It owns the connection, the full
+  schema `init-db` applies, the migration stream `migrate` applies, statement splitting, and
+  locks.
+- The **warehouse dialect** comes from `Warehouse`'s connection plus the task's resolved table
+  format: its own `TABLE_FORMAT`, else `Warehouse.Table_format`. It supplies only what differs:
+  the `CREATE TABLE` clause, audit column types, the hash expression, temporary-table support,
+  `UPDATE` aliasing, `RENAME` syntax, and how `ROW_ID` is generated (identity, sequence, or
+  computed per insert on Iceberg).
+
+The seven SQL actions are written once in `sql_actions.py` and ask the dialect for those pieces, so
+a fix to an action reaches every warehouse.
+
+## `setup`, `doctor` and the schema lifecycle
 
 ```bash
+etl-craft setup     # validate craft-connector.yml, then create or migrate the Engine DB
+etl-craft doctor    # resolve every active profile and test every connection
 etl-craft init-db   # an empty Engine DB only
 etl-craft migrate   # an existing Engine DB
 ```
 
-`init-db` refuses an Engine DB that already has engine tables. `migrate` always applies packaged
-engine migrations first, then an optional project migration stream from `--migrations-dir`,
-`ETL_CRAFT_MIGRATIONS_DIR`, or `./sql/migrations`. The two streams have separate migration
-identities, so a project directory cannot hide packaged migrations.
+`setup` refuses to run without a `craft-connector.yml` and never writes one. It applies the
+Engine DB dialect's packaged schema to an empty database, or its pending migrations to an existing
+one, and is safe to repeat after any upgrade. An unreachable Engine DB is reported, not raised;
+run `doctor` to see why.
 
-Migration hashes are recorded. Changing or removing an applied migration stops the command before
-new work is applied. Add a new migration instead of editing history. On a fresh Engine DB, the
-packaged schema is already current; packaged migrations are recorded and project migrations still
-run. An advisory lock prevents concurrent migration runs.
+`init-db` refuses an Engine DB that already has engine tables. `migrate` always applies the
+dialect's packaged migrations first, then an optional project stream from `--migrations-dir`,
+`ETL_CRAFT_MIGRATIONS_DIR`, or `./sql/migrations`. The two streams have separate identities, so a
+project directory cannot hide a packaged migration. Migration hashes are recorded: changing or
+removing an applied migration stops the command before any new work, so add a new migration
+instead of editing history. A lock prevents concurrent runs.
 
 See [operations.md](operations.md) for a safe backup and upgrade sequence.
+
+## Not yet implemented
+
+These are accepted in `craft-connector.yml` or in scope, but do nothing yet:
+
+- **`Orchestration.Enforce_sla`** is parsed and validated, but nothing compares a run against
+  `CFG_PIPELINES.SLA_IN_HOURS`. `SLA_IN_HOURS` is emitted into `generate-yml` output as
+  `sla_hours` for the orchestrator to use.
+- **`Orchestration.Name`** is informational. `generate-yml` emits the same Airflow-shaped
+  descriptor whatever it says; there is no Databricks Workflows or other scheduler output.
+- **Minted credentials.** `sso`, and tokens a provider mints per connection (OAuth
+  client-credentials, cloud STS), are not supported anywhere; a warehouse `token` is a stored
+  secret.
+- **`key_file` outside Snowflake.** A warehouse `key_file` works only for Snowflake (refused
+  elsewhere); the Engine DB's `key_file` is PostgreSQL client-certificate auth.

@@ -8,13 +8,13 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
+from etl_craft.dialects.engine_dialects import for_name as engine_dialect
 from etl_craft.migrate import (
     ENGINE_MIGRATION_SOURCE,
     PROJECT_MIGRATION_SOURCE,
     MigrationError,
     apply_pending_migrations,
 )
-from etl_craft.packaged_sql import packaged_migrations_dir
 
 
 @pytest.fixture
@@ -68,7 +68,7 @@ def test_project_stream_does_not_mask_packaged_stream_or_same_filename(
         version,
         "CREATE TABLE migration_stream_project_probe (id int);",
     )
-    monkeypatch.setattr("etl_craft.migrate.packaged_migrations_dir", lambda *_: package_dir)
+    monkeypatch.setattr(engine_dialect("postgresql"), "migrations_dir", lambda: package_dir)
 
     applied = apply_pending_migrations(migration_engine, project_dir)
 
@@ -100,7 +100,7 @@ def test_changed_applied_file_fails_before_later_project_migrations_run(
         first,
         "CREATE TABLE migration_checksum_baseline (id int);",
     )
-    monkeypatch.setattr("etl_craft.migrate.packaged_migrations_dir", lambda *_: package_dir)
+    monkeypatch.setattr(engine_dialect("postgresql"), "migrations_dir", lambda: package_dir)
 
     assert apply_pending_migrations(migration_engine, project_dir) == [first]
     _write_migration(
@@ -143,9 +143,11 @@ def test_legacy_engine_records_are_adopted_without_reapplying_them(
     _write_migration(
         package_dir,
         ledger_migration,
-        (packaged_migrations_dir() / ledger_migration).read_text(encoding="utf-8"),
+        (engine_dialect("postgresql").migrations_dir() / ledger_migration).read_text(
+            encoding="utf-8"
+        ),
     )
-    monkeypatch.setattr("etl_craft.migrate.packaged_migrations_dir", lambda *_: package_dir)
+    monkeypatch.setattr(engine_dialect("postgresql"), "migrations_dir", lambda: package_dir)
     with migration_engine.begin() as conn:
         conn.execute(
             text(

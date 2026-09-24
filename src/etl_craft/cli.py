@@ -1,20 +1,17 @@
 """The `etl-craft` command-line entry point."""
 
-# Per CLAUDE.md's CLI surface: `run`, `list`, `graph`, `set-execution-mode`,
-# `configure --env`, `generate-yml`, and `validate` are wired up here so far
-# (interactive `configure` with no --env is still unbuilt). Within
-# `run`, `--task_code` dispatches to runner.run_task (a single task);
-# `--init-only` dispatches to orchestrator.init_pipeline_run (mint/reuse the
-# active run, no task execution — what a generated Airflow DAG's synthetic
-# first step invokes); the bare form (neither given) dispatches to
-# orchestrator.run_pipeline (the local wave-spawning scheduler, refused
-# outright under Mode=orchestrator — see orchestrator.py's own comment).
+# Every command reads craft-connector.yml and none writes it (2026-09-24: the
+# file is the user's own). Within `run`, `--task_code` dispatches to
+# runner.run_task (a single task); `--init-only` to
+# orchestrator.init_pipeline_run (mint/reuse the active run -- a generated DAG's
+# synthetic first step); `--finalize-only` to orchestrator.finalize_active_run;
+# the bare form to orchestrator.run_pipeline (the local wave-spawning
+# scheduler, refused under a remote orchestrator).
 #
-# `set-execution-mode` and `configure` are handled *before* this module's
-# usual load_config()/build_engine() setup, since both operate on a
-# craft-connector.yml that may not exist yet or may not have a resolvable
-# secret — unlike every other command, they don't need a working Engine DB
-# connection at all, just the ability to read/write the YAML file itself.
+# `setup` and `doctor` are handled before the shared load_config()/
+# build_engine() step: `setup` may be creating the Engine DB that step would
+# connect to, and `doctor` exists to diagnose a configuration that does not
+# work yet.
 
 from __future__ import annotations
 
@@ -44,13 +41,11 @@ from etl_craft.cfg import (
 )
 from etl_craft.column_lineage import column_lineage_for
 from etl_craft.config import (
-    VALID_MODES,
     ConfigError,
     ConnectorConfig,
     load_config,
     resolve_config_path,
 )
-from etl_craft.configure import set_execution_mode
 from etl_craft.db import build_engine
 from etl_craft.docs_generator import generate_docs
 from etl_craft.doctor import run_checks
@@ -175,24 +170,9 @@ def build_parser() -> argparse.ArgumentParser:
     graph_target.add_argument("--name", dest="name")
     graph_target.add_argument("--pipeline_code", dest="name")
 
-    mode_parser = subparsers.add_parser(
-        "set-execution-mode", help="Set the execution mode in craft-connector.yml"
-    )
-    mode_parser.add_argument("mode", choices=sorted(VALID_MODES))
-
     setup_parser = subparsers.add_parser(
         "setup",
-        help="Set up or update this deployment: config, then schema/migrations",
-    )
-    setup_source = setup_parser.add_mutually_exclusive_group()
-    setup_source.add_argument(
-        "--env",
-        help="Settings file to read (default: ./.env)",
-    )
-    setup_source.add_argument(
-        "--from-environment",
-        action="store_true",
-        help="Read settings from the process environment instead of a file",
+        help="Create or migrate the Engine DB described by craft-connector.yml",
     )
     setup_parser.add_argument(
         "--migrations-dir",
@@ -210,7 +190,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="global_dag",
         help=(
             "Emit the optional cross-pipeline trigger DAG instead of one pipeline's own "
-            "(requires Dag_defaults.Global_dag: true in a canonical connector file)"
+            "(requires Global_dag: true in craft-connector.yml's Orchestration section)"
         ),
     )
     generate_yml_parser.add_argument("--output", help="Write to this path instead of stdout")
@@ -304,12 +284,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Parse `argv` (default: sys.argv[1:]) and dispatch to the matching command."""
     args = build_parser().parse_args(argv)
     # [ADDITION, 2026-09-20, E2-06] Resolved once, here, and threaded into
-    # every command — including the two that *write* the file, so
-    # `--config` means the same thing whichever verb is used.
+    # every command, so `--config` means the same thing whichever verb is used.
     config_path = resolve_config_path(args.config)
 
-    if args.command == "set-execution-mode":
-        return _set_execution_mode_command(args, config_path)
     if args.command == "setup":
         return _setup_command(args, config_path)
     # doctor deliberately runs before build_engine: its entire job is to
@@ -366,36 +343,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 2  # pragma: no cover
 
 
-def _set_execution_mode_command(args: argparse.Namespace, config_path: Path) -> int:
-    try:
-        set_execution_mode(args.mode, config_path)
-    except ConfigError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
-    print(f"Execution.Mode set to {args.mode!r}")
-    return 0
-
-
 def _setup_command(args: argparse.Namespace, config_path: Path) -> int:
     try:
-        report = run_setup(
-            config_path=config_path,
-            env_path=args.env,
-            from_environment=args.from_environment,
-            migrations_dir=args.migrations_dir,
-        )
+        report = run_setup(config_path=config_path, migrations_dir=args.migrations_dir)
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    print(f"  config   : {report.config_action}")
+    print(f"  config   : {report.config_path}")
     print(f"  database : {report.database_action}")
     for applied in report.applied_migrations:
         print(f"             applied {applied}")
-    if report.required_secrets:
-        print("  secrets  : this configuration expects")
-        for label, var in report.required_secrets:
-            print(f"             {label:<22} {var}")
     for problem in report.problems:
         print(f"error: {problem}", file=sys.stderr)
     if not report.ok:
@@ -504,8 +462,8 @@ def _generate_yml_command(args: argparse.Namespace, engine: Engine, config: Conn
     if args.global_dag:
         if not config.orchestrator.global_dag:
             print(
-                "error: the global DAG is disabled — set Dag_defaults.Global_dag: true "
-                "in craft-connector.yml to enable it",
+                "error: the global DAG is disabled — set Global_dag: true in the "
+                "Orchestration section of craft-connector.yml to enable it",
                 file=sys.stderr,
             )
             return 2

@@ -1,66 +1,192 @@
-# Canonical craft-connector.yml, with values read from the process environment.
-# Every value in a Variables block is a VARIABLE NAME, not its value. Keep this
-# file in source control only after replacing the illustrative names as needed;
-# keep the values those names resolve to out of source control.
-
-Orchestration:
-  # local: etl-craft schedules waves. remote: an external scheduler invokes
-  # one task at a time. `generate-yml` emits a descriptor; it does not deploy
-  # an Airflow DAG.
-  Mode: local
-  Orchestrator_name: airflow
-  Task_timeout_seconds: 21600
-  Max_parallel_tasks: 8
-  Enforce_sla: false
+# craft-connector.yml — written by you, read by etl-craft, never written by it.
+#
+# Sections, in this order (the loader refuses any other): Secrets, Orchestration
+# (the DAG defaults and the Email relay live inside it), Engine, Warehouse, and
+# the optional Cloning.
+#
+# Each section that differs by environment holds one block per profile — dev,
+# sit, uat, prod here, but any names work — and uses the active one. The active
+# profile is chosen per section, most specific first:
+#
+#     $ETL_CRAFT_<SECTION>_PROFILE   e.g. ETL_CRAFT_ENGINE_PROFILE=prod
+#     $ETL_CRAFT_PROFILE             one switch for every section
+#     <Section>.Profile              in this file
+#     Secrets.Profile                the file-wide default
+#
+# A setting written beside the profile blocks applies to every profile; the
+# same setting inside a profile block overrides it for that profile.
+#
+# In Engine, Warehouse and Email every value is the NAME of a variable in the
+# secrets source, never the value itself — so this file is safe to commit. The
+# same names serve every environment: each environment sets its own values. The
+# one exception: a jdbc_url written literally as `jdbc:...` is used as-is (a URL
+# carries no credentials). A profile-specific variable (ENGINE_PROD_SECRET) wins
+# over the plain one (ENGINE_SECRET) when both are set.
+#
+# As written, this file works for local development with nothing set: a SQLite
+# Engine DB and a DuckDB warehouse, both files beside this one. Run
+# `etl-craft setup`, then `etl-craft doctor`. docs/examples/ has a complete file
+# for every supported engine, warehouse, secrets source and orchestration mode.
 
 Secrets:
-  Source_type: environment
+  Source_type: environment        # environment | file
+  # Path: .env                    # Source_type: file only — relative to this file
+  Profile: dev                    # the default profile for every section below
+
+Orchestration:
+  # Profile: prod                 # overrides Secrets.Profile for this section only
+  Mode: local                     # local: etl-craft runs the waves itself.
+                                  # remote: an orchestrator runs one task at a time
+                                  #   from the YAML `etl-craft generate-yml` emits.
+  # Name: Airflow                 # informational only (see docs/configuration.md)
+  Task_timeout_seconds: 21600     # 0 disables; a task's TASK_TIMEOUT_SECONDS overrides
+  Max_parallel_tasks: 8
+  Enforce_sla: false              # parsed but not yet enforced (docs/configuration.md)
+
+  # DAG defaults for `generate-yml`, per environment. A pipeline's own
+  # CFG_PIPELINES.PIPELINE_PARAMETERS values (CATCHUP, TAGS, RETRIES, ...)
+  # override these; anything unset falls back to a built-in default.
+  dev:
+    Global_dag: false
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: false
+    Allow_schedule: false         # default true; false emits `schedule: null` even
+                                  # when the pipeline has a RUN_SCHEDULE
+  sit:
+    Mode: remote                  # any setting above can be overridden per profile
+    Name: Airflow
+    Global_dag: false
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: false
+    Allow_schedule: false
+    Email:                        # the SMTP relay EMAIL_ALERT tasks send through —
+      host: EMAIL_HOST            #   needed only when a pipeline has an EMAIL_ALERT task
+      port: EMAIL_PORT
+      from_address: EMAIL_FROM
+      auth_mode: EMAIL_AUTH_MODE  # none | password
+      user: EMAIL_USER
+      use_tls: EMAIL_USE_TLS
+      secret: EMAIL_SECRET
+  uat:
+    Mode: remote
+    Name: Airflow
+    Global_dag: false
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: false
+    Allow_schedule: false
+    Email:
+      host: EMAIL_HOST
+      port: EMAIL_PORT
+      from_address: EMAIL_FROM
+      auth_mode: EMAIL_AUTH_MODE
+      user: EMAIL_USER
+      use_tls: EMAIL_USE_TLS
+      secret: EMAIL_SECRET
+  prod:
+    Mode: remote
+    Name: Airflow
+    Global_dag: true
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: true
+    Allow_schedule: true
+    Email_recipients: [data-alerts@example.com]
+    Email:
+      host: EMAIL_HOST
+      port: EMAIL_PORT
+      from_address: EMAIL_FROM
+      auth_mode: EMAIL_AUTH_MODE
+      user: EMAIL_USER
+      use_tls: EMAIL_USE_TLS
+      secret: EMAIL_SECRET
 
 Engine:
-  # ETL_CRAFT_ENGINE_PROFILE can select another tier at runtime.
-  Profile: dev
-  Variables:
+  # SQLite (one file, nothing to install) or PostgreSQL (recommended for
+  # production). Name is optional — Postgres | SQLite — and checked against
+  # jdbc_url.
+  # Profile: prod
+  dev:
+    jdbc_url: jdbc:sqlite:etl-craft-engine.db    # relative to this file
+  sit:
+    Name: Postgres
+    jdbc_url: ENGINE_JDBC_URL     # jdbc:postgresql://host:5432/etl_craft
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE   # password | key_file
+    secret: ENGINE_SECRET         # the password, or the key's passphrase
+    key_file: ENGINE_KEY_FILE     # auth_mode key_file only: the client key's path
+  uat:
+    Name: Postgres
     jdbc_url: ENGINE_JDBC_URL
     user: ENGINE_USER
-    # Engine DB supports password or key_file.
     auth_mode: ENGINE_AUTH_MODE
     secret: ENGINE_SECRET
+    key_file: ENGINE_KEY_FILE
+  prod:
+    Name: Postgres
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE
+    secret: ENGINE_SECRET
+    key_file: ENGINE_KEY_FILE
 
 Warehouse:
-  # PostgreSQL is the reference launch warehouse. The same shape supports
-  # DuckDB (auth_mode none), Databricks (static token), Snowflake (key_file or
-  # password), and Trino. See configuration.md for their exact requirements.
-  Name: Postgres
-  Table_format: native
-  Profile: dev
-  Variables:
+  # Name: Postgres | DuckDB | Trino | Databricks | Snowflake — checked against
+  # the connection. Table_format: native (the default) | iceberg; a task's
+  # TABLE_FORMAT parameter overrides it. Both may sit here, for every profile,
+  # or inside a profile, as below.
+  # Profile: prod
+  dev:
+    Name: DuckDB
+    jdbc_url: jdbc:duckdb:warehouse.duckdb       # relative to the working directory
+  sit:
+    Name: Postgres
+    Table_format: native          # always native: Postgres has no Iceberg tables
+    jdbc_url: WAREHOUSE_JDBC_URL  # jdbc:postgresql://host:5432/analytics
+    user: WAREHOUSE_USER
+    auth_mode: WAREHOUSE_AUTH_MODE
+    secret: WAREHOUSE_SECRET
+  uat:
+    Name: Postgres
+    Table_format: native
+    jdbc_url: WAREHOUSE_JDBC_URL
+    user: WAREHOUSE_USER
+    auth_mode: WAREHOUSE_AUTH_MODE
+    secret: WAREHOUSE_SECRET
+  prod:
+    Name: Postgres
+    Table_format: native
     jdbc_url: WAREHOUSE_JDBC_URL
     user: WAREHOUSE_USER
     auth_mode: WAREHOUSE_AUTH_MODE
     secret: WAREHOUSE_SECRET
 
+# Optional. Mirrors Engine DB tables into the warehouse after each pipeline run.
 Cloning:
-  Enabled: false
-  Scope: cfg
-
-Dag_defaults:
-  Global_dag: false
-  Catchup: false
-  Tags: [analytics]
-  Retries: 1
-  Retry_delay_minutes: 5
-  Depends_on_past: false
-  Email_on_failure: false
-  Email_recipients: [data-alerts@example.com]
-
-# Optional. Required only when a pipeline has an EMAIL_ALERT task.
-Email:
-  Profile: dev
-  Variables:
-    host: EMAIL_HOST
-    port: EMAIL_PORT
-    from_address: EMAIL_FROM
-    auth_mode: EMAIL_AUTH_MODE
-    user: EMAIL_USER
-    use_tls: EMAIL_USE_TLS
-    secret: EMAIL_SECRET
+  # Profile: prod
+  dev:
+    Enabled: false                # default false
+    Scope: cfg                    # cfg | aud | all | none
+  sit:
+    Enabled: false
+    Scope: none
+  uat:
+    Enabled: true
+    Scope: cfg
+  prod:
+    Enabled: true
+    Scope: all

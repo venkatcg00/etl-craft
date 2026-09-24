@@ -42,7 +42,7 @@ DEFAULT_TEST_DATABASE_URL = "postgresql+psycopg://etl_craft:etl_craft@localhost:
 ENGINE_KIND = os.environ.get("ETL_CRAFT_TEST_ENGINE", "postgres").lower()
 SQLITE_ENGINE = ENGINE_KIND == "sqlite"
 if SQLITE_ENGINE:
-    import etl_craft.db as _engine_db_module
+    import etl_craft.dialects.engine_dialects.sqlite as _engine_db_module
 
     # In-process only: a test that holds an uncommitted pg_conn write while the
     # code under test writes on another connection is a harness shape SQLite
@@ -267,9 +267,9 @@ def _sqlite_engine_db() -> Engine:
 # vocabulary) and Snowflake (native and iceberg both pass the full
 # vocabulary too — Iceberg tables default to Snowflake's own internal
 # storage, EXTERNAL_VOLUME = 'SNOWFLAKE_MANAGED', so no cloud bucket has to
-# exist first; see sql_actions.SNOWFLAKE_MANAGED_VOLUME). A Programmatic
-# Access Token additionally needs a network policy assigned to the account
-# or user first — see docs/craft-connector.variables.env.
+# exist first; see dialects/warehouse_dialects/snowflake_iceberg.py). A
+# Programmatic Access Token additionally needs a network policy assigned to
+# the account or user first — see docs/configuration.md.
 #
 # Set, for Databricks:
 #   ETL_CRAFT_TEST_DATABRICKS_JDBC_URL   jdbc:databricks://<host>:443/default;
@@ -901,23 +901,39 @@ def insert_committed_cross_pipeline_task_dependency(
         ).scalar_one()
 
 
+# The Engine profile's variables. craft-connector.yml holds variable *names*;
+# these are the values the test environment gives them.
+os.environ.setdefault("TEST_ENGINE_USER", "etl_craft")
+os.environ.setdefault("TEST_ENGINE_AUTH_MODE", "password")
+if SQLITE_ENGINE:
+    _ENGINE_BLOCK = f"    jdbc_url: {ENGINE_JDBC_URL}\n"
+else:
+    _ENGINE_BLOCK = (
+        f"    jdbc_url: {ENGINE_JDBC_URL}\n"
+        "    user: TEST_ENGINE_USER\n"
+        "    auth_mode: TEST_ENGINE_AUTH_MODE\n"
+        "    secret: ETL_CRAFT_POSTGRES_DEV_SECRET\n"
+    )
+
 CRAFT_CONNECTOR_YAML = f"""
-Execution:
+Secrets:
+  Source_type: environment
+
+Orchestration:
   Mode: local
 
-Source:
-  Type: environment
+Engine:
+  dev:
+{_ENGINE_BLOCK}
+"""
 
-Postgres:
-  Active_profile: dev
-  Profiles:
-    dev:
-      jdbc_url: {ENGINE_JDBC_URL}
-      user: {ENGINE_USER}
-      auth_mode: {ENGINE_AUTH_MODE}
 
-Cloning:
-  Enabled: false
+def with_warehouse(yaml_text: str, jdbc_url: str) -> str:
+    """Append a single-profile Warehouse section (no credentials) to a test config."""
+    return yaml_text + f"""
+Warehouse:
+  dev:
+    jdbc_url: {jdbc_url}
 """
 
 
@@ -933,14 +949,9 @@ def duckdb_craft_connector_on_disk(tmp_path, monkeypatch, postgres_engine):
     level up.
     """
     warehouse = tmp_path / "warehouse.duckdb"
-    (tmp_path / "craft-connector.yml").write_text(CRAFT_CONNECTOR_YAML + f"""
-Warehouse:
-  Active_profile: dev
-  Profiles:
-    dev:
-      jdbc_url: jdbc:duckdb:{warehouse}
-      auth_mode: none
-""")
+    (tmp_path / "craft-connector.yml").write_text(
+        with_warehouse(CRAFT_CONNECTOR_YAML, f"jdbc:duckdb:{warehouse}")
+    )
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ETL_CRAFT_POSTGRES_DEV_SECRET", "etl_craft")
     return warehouse

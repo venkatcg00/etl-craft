@@ -33,9 +33,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl, urlencode
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, Engine
@@ -43,327 +41,87 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectionProfile, ConnectorConfig, resolve_secret
 from etl_craft.db import ConnectionError_
-from etl_craft.locks import LockTimeout, engine_lock
+from etl_craft.dialects import warehouse_dialects
+from etl_craft.dialects.engine_dialects import LockTimeout, for_engine
+from etl_craft.dialects.warehouse_dialects.base import WarehouseDialect, parse_generic_jdbc
 
-PREFERRED_CONNECTION_FIELDS = {
-    "databricks": ("jdbc_url", "catalog", "schema", "token"),
-    "snowflake": ("user", "account", "database", "schema", "warehouse", "role", "token"),
-}
-
-# Only connection-location and transport settings may be persisted. An
-# allowlist also excludes OAuth secrets and credentials added by JDBC drivers
-# under names other than PWD; authentication comes from the separate token.
-_DATABRICKS_PUBLIC_PARAMS = frozenset(
-    {"httppath", "transportmode", "ssl", "conncatalog", "connschema", "catalog", "schema"}
-)
+_JDBC_SCHEME_RE = re.compile(r"^jdbc:(?P<scheme>[a-zA-Z0-9_+-]+):")
 
 
-def _strip_databricks_credentials(jdbc_url: str) -> str:
-    """Remove credential-bearing JDBC parameters from a Databricks connection string.
+def _scheme(jdbc_url: str) -> str:
+    match = _JDBC_SCHEME_RE.match(jdbc_url)
+    if not match:
+        raise ConnectionError_(
+            f"not a recognized JDBC URL: {jdbc_url!r} — expected jdbc:<vendor>:..."
+        )
+    return match["scheme"].lower()
 
-    Databricks' own "Connection Details" UI presents a JDBC URL that already
-    includes `AuthMech`/`UID`/`PWD` — a real personal access token in
-    cleartext — as *the* string to copy. This makes any URL built from one
-    of those genuinely safe to persist, regardless of what a caller pasted.
+
+def translate_jdbc_url(jdbc_url: str) -> tuple[str, dict[str, Any]]:
+    """Split a JDBC URL into (SQLAlchemy dialect name, parts), via that vendor's dialect.
+
+    [DEVIATION, 2026-09-24] The per-vendor parsers live in each warehouse
+    dialect's own module now. A scheme no dialect claims takes the generic
+    `scheme://host[:port]/database[?query]` parser -- which is what makes "any
+    sql tool over plain iceberg" need no code at all, only a dialect on the path.
     """
-    prefix, sep, params_blob = jdbc_url.partition(";")
-    if not sep:
-        return jdbc_url
-    kept = [
-        chunk
-        for chunk in params_blob.split(";")
-        if chunk.partition("=")[0].strip().lower() in _DATABRICKS_PUBLIC_PARAMS
-    ]
-    return prefix + (";" + ";".join(kept) if kept else "")
+    dialect = warehouse_dialects.for_scheme(_scheme(jdbc_url))
+    if dialect is None:
+        return parse_generic_jdbc(jdbc_url)
+    return dialect.parse_jdbc(jdbc_url)
+
+
+def warehouse_dialect(config: ConnectorConfig) -> WarehouseDialect:
+    """Return the dialect the configured warehouse connection and default format select."""
+    if config.warehouse is None:
+        raise ConnectionError_("no Warehouse section configured in craft-connector.yml")
+    dialect_name, _ = translate_jdbc_url(config.warehouse.active.jdbc_url)
+    try:
+        return warehouse_dialects.resolve(dialect_name, config.warehouse_table_format)
+    except warehouse_dialects.UnsupportedWarehouse as exc:
+        raise ConnectionError_(str(exc)) from exc
+
+
+def active_catalog(config: ConnectorConfig) -> str:
+    """Return the catalog/database the active warehouse profile writes into.
+
+    It is the first part of every `catalog.schema.table` name the engine builds;
+    the schema comes from CFG_TASK_PARAMETERS.TARGET_OBJECT, never the profile.
+    """
+    if config.warehouse is None:
+        raise ValueError("no Warehouse section configured in craft-connector.yml")
+    profile = config.warehouse.active
+    named = warehouse_dialect(config).catalog_name(profile.extra)
+    if named:
+        return named
+    _, parts = translate_jdbc_url(profile.jdbc_url)
+    # `catalog` where the two differ: Snowflake and Trino carry database and
+    # schema in one `database/schema` segment, and only the catalog half is
+    # wanted here.
+    database = parts.get("catalog") or parts["database"]
+    if not database:
+        raise ValueError(
+            "the active warehouse profile's jdbc_url names no catalog/database, so "
+            "TARGET_OBJECT's schema.table cannot be resolved to a full name — add one "
+            "(e.g. ConnCatalog=<catalog> for Databricks, db=<database> for Snowflake)"
+        )
+    return str(database)
+
+
+#: Warehouse.Name -> the separate token connection fields it accepts.
+PREFERRED_CONNECTION_FIELDS: dict[str, tuple[str, ...]] = {
+    dialect.display_name.lower(): dialect.preferred_fields
+    for dialect in warehouse_dialects.ALL
+    if dialect.preferred_fields and dialect.table_format == "native"
+}
 
 
 def preferred_connection_url(name: str, fields: Mapping[str, str]) -> str:
     """Translate separate cloud connection fields into a credential-free JDBC URL."""
-    name = name.lower()
-    if name not in PREFERRED_CONNECTION_FIELDS:
+    dialect_name = warehouse_dialects.NAMES.get(name.lower())
+    if dialect_name is None or name.lower() not in PREFERRED_CONNECTION_FIELDS:
         raise ConnectionError_("Separate token connection fields require Databricks or Snowflake")
-    for key in PREFERRED_CONNECTION_FIELDS[name]:
-        if key != "token" and not fields.get(key):
-            raise ConnectionError_(f"{name} connection requires {key}")
-    if name == "databricks":
-        for key in ("catalog", "schema"):
-            if not _SAFE_CATALOG.fullmatch(fields[key]):
-                raise ConnectionError_(f"Databricks {key} must be an unquoted SQL identifier")
-        if not fields["jdbc_url"].startswith("jdbc:databricks://"):
-            raise ConnectionError_("Databricks jdbc_url must start with jdbc:databricks://")
-        # [ADDITION, 2026-09-23, E3-08] Databricks' own "Connection Details"
-        # JDBC tab hands out a URL that already contains AuthMech/UID/PWD --
-        # a real personal access token, in cleartext. This function's own
-        # docstring calls its return value "credential-free"; before this fix
-        # that was true only after _parse_databricks stripped those params at
-        # *connect* time, not here at *build* time -- so a caller pasting
-        # that full string had it written verbatim into whatever persists
-        # this value, which for an existing legacy-shaped manifest is
-        # craft-connector.yml itself (_write_legacy_manifest). Stripped here
-        # instead, so the claim holds regardless of what the caller passed in
-        # and regardless of which write path the result flows through. The
-        # real token still reaches the connection correctly, via the
-        # separate `token` field/secret mechanism this function already
-        # requires -- nothing here is what supplies it.
-        sanitized_url = _strip_databricks_credentials(fields["jdbc_url"])
-        # The separate fields take precedence over defaults in the copied URL.
-        return (
-            sanitized_url.rstrip(";")
-            + f";ConnCatalog={fields['catalog']};ConnSchema={fields['schema']}"
-        )
-    account = fields["account"]
-    if not re.fullmatch(r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*", account):
-        raise ConnectionError_("Snowflake account must be an account identifier, not a URL")
-    if account.endswith(".snowflakecomputing.com"):
-        account = account.removesuffix(".snowflakecomputing.com")
-    query = {
-        "db": fields["database"],
-        "schema": fields["schema"],
-        "warehouse": fields["warehouse"],
-        "role": fields["role"],
-    }
-    return f"jdbc:snowflake://{account}.snowflakecomputing.com/?{urlencode(query)}"
-
-
-# DuckDB is embedded, so its URL names a file rather than a server.
-# `jdbc:duckdb:` alone means an in-memory database.
-_DUCKDB_URL_RE = re.compile(r"^jdbc:duckdb:(?P<path>.*)$")
-
-# The catalog name qualify() interpolates unquoted into database.schema.table.
-_SAFE_CATALOG = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-
-_JDBC_SCHEME_RE = re.compile(r"^jdbc:(?P<scheme>[a-zA-Z0-9_+-]+):")
-
-_DATABRICKS_URL_RE = re.compile(
-    r"^jdbc:databricks://(?P<host>[^:/;]+)(:(?P<port>\d+))?"
-    r"(/(?P<schema>[^;]*))?(;(?P<params>.*))?$"
-)
-
-_SNOWFLAKE_URL_RE = re.compile(
-    r"^jdbc:snowflake://(?P<host>[^:/?]+)(:(?P<port>\d+))?/?(\?(?P<query>.*))?$"
-)
-
-_JDBC_URL_RE = re.compile(
-    r"^jdbc:(?P<scheme>[a-zA-Z0-9_+-]+)://(?P<host>[^:/?]+)(:(?P<port>\d+))?/(?P<database>[^?]+)"
-    r"(\?(?P<query>.*))?$"
-)
-
-# [ADDITION] Deliberately small and non-exhaustive, not a full JDBC-vendor
-# catalog: per CLAUDE.md's Non-goals, this module never imports a
-# third-party dialect directly, so there's nothing to gain from hardcoding
-# entries for warehouses no one has confirmed using yet. A JDBC scheme
-# absent from this map is passed through unchanged as the SQLAlchemy
-# dialect name — correct whenever the two names already match (e.g.
-# "oracle", "mssql"), and the two entries below cover the common case where
-# they don't (JDBC's bare "postgresql"/"mysql" vs. SQLAlchemy's
-# driver-qualified dialect string). A vendor whose JDBC URL shape isn't
-# `scheme://host[:port]/database[?query]` at all (e.g. Snowflake's
-# account-identifier host, Oracle's `thin:@` form) isn't handled by this
-# translator and would need its own parsing added when that vendor is
-# actually chosen — not guessed at now.
-JDBC_SCHEME_TO_SQLALCHEMY_DIALECT: dict[str, str] = {
-    "postgresql": "postgresql+psycopg",
-    "mysql": "mysql+pymysql",
-}
-
-
-def _parse_duckdb(jdbc_url: str) -> tuple[str, dict[str, Any]]:
-    """Parse `jdbc:duckdb:<path>` — a file, not a server."""
-    duckdb = _DUCKDB_URL_RE.match(jdbc_url)
-    if duckdb:
-        # [ADDITION, 2026-09-20] DuckDB is embedded: its JDBC URL is
-        # `jdbc:duckdb:<path>` (or bare `jdbc:duckdb:` for in-memory) with no
-        # host, port or query string — exactly the "vendor whose JDBC URL
-        # shape isn't scheme://host[:port]/database at all" case this
-        # translator's own comment flagged as needing its own parsing once
-        # such a vendor was actually chosen. It has been.
-        #
-        # `database` is the catalog name DuckDB derives from the file stem
-        # (`/data/warehouse.duckdb` -> `warehouse`), which is what
-        # qualify()'s three-part `catalog.schema.table` form needs. An
-        # in-memory database's catalog is `memory`.
-        path = duckdb["path"] or ""
-        if not path:
-            # [DEVIATION, 2026-09-21, E2-63] The bare form is in-memory, and
-            # now genuinely is. This used to fall through with path="" so the
-            # creator below reached for `database` instead -- the literal
-            # string "memory" -- and built `duckdb:///memory`, which DuckDB
-            # reads as *a file named `memory` in the current working
-            # directory*. Reproduced: two task subprocesses against
-            # `jdbc:duckdb:` left a 274 KB file called `memory` in the repo
-            # root and the second saw the first's data, which a real
-            # in-memory database could not have shared. Each process also
-            # starts wherever it happened to start, so cwd differences
-            # between the orchestrator, a task subprocess and an Airflow
-            # worker could produce several unrelated "warehouses".
-            return "duckdb", {
-                "host": None,
-                "port": None,
-                "path": ":memory:",
-                "database": "memory",
-                "query": {},
-            }
-        stem = Path(path).stem
-        # [ADDITION, 2026-09-21, E2-62] The catalog name is the file stem, and
-        # qualify() interpolates it unquoted into `catalog.schema.table`. A
-        # hyphen is not an exotic filename, but `my-warehouse.public.t` is a
-        # parser error that never mentions the file -- so check it here, where
-        # it is derived, rather than letting every SQL action fail obscurely.
-        # validate's own identifier check cannot catch this: it checks CFG_
-        # values, and this one comes from craft-connector.yml.
-        #
-        # [CHOICE] Reject rather than quote. Quoting would make the catalog
-        # case-sensitive and diverge from how the Postgres path builds the
-        # same name.
-        if not _SAFE_CATALOG.match(stem):
-            raise ConnectionError_(
-                f"DuckDB warehouse file {path!r} gives the catalog name {stem!r}, which is not "
-                "a usable SQL identifier — it is interpolated unquoted into "
-                "database.schema.table. Rename the file to use only letters, digits and "
-                "underscores, starting with a letter or underscore."
-            )
-        return "duckdb", {
-            "host": None,
-            "port": None,
-            "path": path,
-            "database": stem,
-            "query": {},
-        }
-    raise ConnectionError_(f"not a recognized DuckDB JDBC URL: {jdbc_url!r}")
-
-
-def _parse_databricks(jdbc_url: str) -> tuple[str, dict[str, Any]]:
-    """Parse Databricks' semicolon-parameter JDBC form.
-
-    [ADDITION, 2026-09-22] `jdbc:databricks://<host>:443/<schema>;httpPath=...;
-    ConnCatalog=...` — semicolon-separated parameters after the path, not a
-    query string, so the generic parser cannot read it.
-
-    Only the parameters the SQLAlchemy dialect actually consumes are carried
-    over (`http_path`, `catalog`, `schema`, verified against
-    `create_connect_args`). Transport/auth parameters a JDBC driver needs and
-    this one does not — `AuthMech`, `transportMode`, `ssl`, `UID`, `PWD` — are
-    dropped rather than passed through, since `PWD` in particular would put
-    the token in the URL, which this module goes out of its way to avoid.
-    """
-    match = _DATABRICKS_URL_RE.match(jdbc_url)
-    if not match:
-        raise ConnectionError_(
-            f"not a recognized Databricks JDBC URL: {jdbc_url!r} — expected "
-            "jdbc:databricks://<host>:443/<schema>;httpPath=/sql/1.0/warehouses/<id>"
-        )
-    params: dict[str, str] = {}
-    for chunk in (match["params"] or "").split(";"):
-        if "=" in chunk:
-            key, _, value = chunk.partition("=")
-            params[key.strip().lower()] = value.strip()
-
-    http_path = params.get("httppath")
-    if not http_path:
-        raise ConnectionError_(
-            f"Databricks JDBC URL {jdbc_url!r} has no httpPath — it names the SQL warehouse "
-            "or cluster to run against (e.g. httpPath=/sql/1.0/warehouses/<id>)"
-        )
-    query = {"http_path": http_path}
-    catalog = params.get("conncatalog") or params.get("catalog")
-    schema = params.get("connschema") or params.get("schema") or match["schema"]
-    if catalog:
-        query["catalog"] = catalog
-    if schema and schema != "default":
-        query["schema"] = schema
-    return "databricks", {
-        "host": match["host"],
-        "port": int(match["port"]) if match["port"] else None,
-        # qualify()'s three-part name needs the Unity Catalog catalog here.
-        "database": catalog or "",
-        "query": query,
-    }
-
-
-def _parse_snowflake(jdbc_url: str) -> tuple[str, dict[str, Any]]:
-    """Parse Snowflake's account-host JDBC form.
-
-    [ADDITION, 2026-09-22] `jdbc:snowflake://<account>.snowflakecomputing.com/
-    ?db=<db>&schema=<schema>&warehouse=<wh>&role=<role>` — the path is empty
-    and the database lives in the query string, which the generic parser (it
-    requires a non-empty path segment) cannot read.
-
-    The SQLAlchemy dialect takes database and schema as a two-segment
-    `database/schema` path and splits them itself — verified against
-    `create_connect_args`, which produced `database='MYDB', schema='PUBLIC'`.
-    """
-    match = _SNOWFLAKE_URL_RE.match(jdbc_url)
-    if not match:
-        raise ConnectionError_(
-            f"not a recognized Snowflake JDBC URL: {jdbc_url!r} — expected "
-            "jdbc:snowflake://<account>.snowflakecomputing.com/?db=<db>&schema=<schema>"
-        )
-    query = dict(parse_qsl(match["query"] or ""))
-    database = query.pop("db", "") or query.pop("database", "")
-    schema = query.pop("schema", "")
-    # With a fully qualified host the Snowflake dialect does not derive the
-    # required account argument. Preserve the endpoint and supply it explicitly.
-    query.setdefault("account", match["host"].split(".", 1)[0])
-    if not database:
-        raise ConnectionError_(
-            f"Snowflake JDBC URL {jdbc_url!r} has no db= parameter — it names the database "
-            "qualify() resolves schema.table against"
-        )
-    return "snowflake", {
-        "host": match["host"],
-        "port": int(match["port"]) if match["port"] else None,
-        "database": f"{database}/{schema}" if schema else database,
-        # The catalog half of qualify()'s three-part name.
-        "catalog": database,
-        "query": query,
-    }
-
-
-def _parse_generic(jdbc_url: str) -> tuple[str, dict[str, Any]]:
-    """Parse the ordinary `jdbc:<scheme>://host[:port]/database[?query]` form."""
-    match = _JDBC_URL_RE.match(jdbc_url)
-    if not match:
-        raise ConnectionError_(
-            f"not a recognized JDBC URL: {jdbc_url!r} — expected "
-            "jdbc:<dialect>://host[:port]/database or jdbc:duckdb:<path>"
-        )
-    dialect = JDBC_SCHEME_TO_SQLALCHEMY_DIALECT.get(match["scheme"], match["scheme"])
-    port = int(match["port"]) if match["port"] else None
-    query = dict(parse_qsl(match["query"])) if match["query"] else {}
-    database = match["database"]
-    return dialect, {
-        "host": match["host"],
-        "port": port,
-        "database": database,
-        # Trino (and any other engine whose path is `catalog/schema`) names
-        # the catalog first; qualify() wants that half alone.
-        "catalog": database.split("/", 1)[0],
-        "query": query,
-    }
-
-
-# [ADDITION, 2026-09-22] A parser per vendor whose JDBC URL is not the ordinary
-# `scheme://host[:port]/database[?query]` shape, which this module's own
-# comment always said would be needed "when that vendor is actually chosen".
-# Three now are. A scheme absent from this map takes the generic parser, which
-# is what makes "any sql tool over plain iceberg" need no code here at all —
-# only a dialect on the path.
-JDBC_PARSERS: dict[str, Callable[[str], tuple[str, dict[str, Any]]]] = {
-    "duckdb": _parse_duckdb,
-    "databricks": _parse_databricks,
-    "snowflake": _parse_snowflake,
-}
-
-
-def translate_jdbc_url(jdbc_url: str) -> tuple[str, dict[str, Any]]:
-    """Split a JDBC URL into (dialect name, parts), via that vendor's own parser."""
-    scheme_match = _JDBC_SCHEME_RE.match(jdbc_url)
-    if not scheme_match:
-        raise ConnectionError_(
-            f"not a recognized JDBC URL: {jdbc_url!r} — expected jdbc:<vendor>:..."
-        )
-    parser = JDBC_PARSERS.get(scheme_match["scheme"].lower(), _parse_generic)
-    return parser(jdbc_url)
+    return warehouse_dialects.resolve(dialect_name, "native").preferred_connection_url(fields)
 
 
 def _dbapi_connect(url: URL, extra: dict[str, Any] | None = None) -> Any:
@@ -456,17 +214,6 @@ def _none_creator(profile: ConnectionProfile, secret: str) -> Callable[[], Any]:
     return _connect
 
 
-# How each dialect names a private-key credential in its own connect args.
-# Deliberately per-dialect: this was left unimplemented for years precisely
-# because "Postgres SSL client certs and Snowflake private-key auth share
-# nothing", which is still true -- there is no generic mapping, only a
-# per-vendor one, and now there is a vendor to write.
-KEY_FILE_CONNECT_ARGS: dict[str, tuple[str, str]] = {
-    # (path argument, passphrase argument)
-    "snowflake": ("private_key_file", "private_key_file_pwd"),
-}
-
-
 def _key_file_creator(profile: ConnectionProfile, secret: str) -> Callable[[], Any]:
     """Connect with a private key — Snowflake's key-pair (RSA) authentication.
 
@@ -490,13 +237,13 @@ def _key_file_creator(profile: ConnectionProfile, secret: str) -> Callable[[], A
     """
     dialect_name, parts = translate_jdbc_url(profile.jdbc_url)
     base_dialect = dialect_name.split("+", 1)[0]
-    arg_names = KEY_FILE_CONNECT_ARGS.get(base_dialect)
+    arg_names = warehouse_dialects.resolve(base_dialect, "native").key_file_connect_args
     if arg_names is None:
         raise NotImplementedError(
             f"auth_mode='key_file' has no implementation for dialect {base_dialect!r} — how a "
             "private-key credential maps to DBAPI connect args is genuinely vendor-specific "
             "(Postgres SSL client certs and Snowflake key-pair auth share nothing). "
-            f"Implemented so far: {sorted(KEY_FILE_CONNECT_ARGS)}."
+            "Implemented so far: snowflake."
         )
     key_file = profile.extra.get("key_file")
     if not key_file:
@@ -524,14 +271,6 @@ def _key_file_creator(profile: ConnectionProfile, secret: str) -> Callable[[], A
     return _connect
 
 
-# Warehouses whose "token" is a long-lived bearer credential presented in the
-# password position, rather than something minted per connection. Databricks
-# personal access tokens work exactly this way -- the dialect's own
-# create_connect_args maps username/password onto server_hostname/access_token
-# (verified directly).
-_STATIC_TOKEN_USERNAMES: dict[str, str] = {"databricks": "token"}
-
-
 def _token_creator(profile: ConnectionProfile, secret: str) -> Callable[[], Any]:
     """Connect with a bearer token.
 
@@ -550,7 +289,7 @@ def _token_creator(profile: ConnectionProfile, secret: str) -> Callable[[], Any]
     """
     dialect_name, parts = translate_jdbc_url(profile.jdbc_url)
     base_dialect = dialect_name.split("+", 1)[0]
-    username = profile.user or _STATIC_TOKEN_USERNAMES.get(base_dialect)
+    username = profile.user or warehouse_dialects.resolve(base_dialect, "native").token_username
     if not username:
         raise ConnectionError_(
             f"auth_mode='token' needs a `user` for dialect {base_dialect!r} — it is sent in "
@@ -604,7 +343,16 @@ def build_warehouse_engine(
     # auth_mode='none' has no secret to resolve — asking for one would mean
     # inventing a variable that authenticates nothing.
     secret = "" if profile.auth_mode == "none" else resolve_secret(config, profile)
-    creator = creator_factory(profile, secret)
+    base_creator = creator_factory(profile, secret)
+    dialect = warehouse_dialect(config)
+
+    def creator() -> Any:
+        # Per-connection setup a dialect needs before any statement -- DuckDB
+        # over Iceberg attaches its catalog here. A no-op everywhere else.
+        dbapi_connection = base_creator()
+        dialect.on_connect(dbapi_connection, profile.extra)
+        return dbapi_connection
+
     dialect_name, parts = translate_jdbc_url(profile.jdbc_url)
     engine_kwargs.setdefault("pool_pre_ping", True)
     # [DEVIATION, 2026-09-20, E2-24] A real URL, minus the password. The blank
@@ -624,18 +372,6 @@ def build_warehouse_engine(
     return create_engine(url, creator=creator, **engine_kwargs)
 
 
-# [ADDITION, 2026-09-21, E2-61] Warehouses that permit exactly one writing OS
-# process at a time. DuckDB is embedded: its state is a file plus the writing
-# process's buffers, and it takes an exclusive lock -- a second process is
-# refused outright ("IO Error: Could not set lock on file"), and so is a
-# *read-only* connection while a writer holds it. Verified directly.
-#
-# That collides with the engine's core execution model, which is one
-# subprocess per ready task: with Max_parallel_tasks defaulting to 8, any wave
-# holding two SQL/BUSINESS_RULES tasks would fail all but one, and the same
-# applies under Airflow, whose parallel tasks are separate processes too.
-SINGLE_WRITER_DIALECTS = frozenset({"duckdb"})
-
 # Arbitrary but fixed, and deliberately distinct from migrate.py's own key:
 # every process coordinating warehouse access has to agree on it.
 _WAREHOUSE_ADVISORY_LOCK_KEY = 0x657463_7761
@@ -652,10 +388,12 @@ def is_in_memory(config: ConnectorConfig) -> bool:
     if config.warehouse is None:
         return False
     try:
-        dialect_name, parts = translate_jdbc_url(config.warehouse.active.jdbc_url)
+        dialect = warehouse_dialect(config)
+        _, parts = translate_jdbc_url(config.warehouse.active.jdbc_url)
     except ConnectionError_:
         return False
-    return dialect_name == "duckdb" and parts.get("path") == ":memory:"
+    # DuckDB over Iceberg runs in memory by design: its data lives in the catalog.
+    return dialect.key == "duckdb" and parts.get("path") == ":memory:"
 
 
 def is_single_writer(config: ConnectorConfig) -> bool:
@@ -663,10 +401,9 @@ def is_single_writer(config: ConnectorConfig) -> bool:
     if config.warehouse is None:
         return False
     try:
-        dialect_name, _ = translate_jdbc_url(config.warehouse.active.jdbc_url)
+        return warehouse_dialect(config).single_writer
     except ConnectionError_:
         return False
-    return dialect_name.split("+", 1)[0] in SINGLE_WRITER_DIALECTS
 
 
 @contextmanager
@@ -740,11 +477,11 @@ def single_writer_lock(
         yield
         return
 
-    # [DEVIATION, 2026-09-24] Through locks.engine_lock rather than a literal
-    # pg_advisory_xact_lock, so a SQLite Engine DB queues the same way (with a
-    # file lock beside the database, since SQLite has no advisory locks).
+    # [DEVIATION, 2026-09-24] Through the Engine DB dialect's own lock rather
+    # than a literal pg_advisory_xact_lock, so a SQLite Engine DB queues the
+    # same way (a file lock beside the database; SQLite has no advisory locks).
     try:
-        with engine_lock(
+        with for_engine(engine_db).lock(
             engine_db, _WAREHOUSE_ADVISORY_LOCK_KEY, "warehouse", wait_seconds=wait_seconds
         ):
             yield

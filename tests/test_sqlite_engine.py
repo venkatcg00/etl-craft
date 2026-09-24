@@ -21,30 +21,34 @@ from sqlalchemy.exc import IntegrityError
 
 from etl_craft.cli import main
 from etl_craft.config import ConfigError, load_config
-from etl_craft.configure import configure_from_env
 from etl_craft.db import ConnectionError_, build_engine, resolve_sqlite_path
+from etl_craft.dialects.engine_dialects import LockTimeout, for_engine
+from etl_craft.dialects.engine_dialects import for_name as engine_dialect
 from etl_craft.doctor import run_checks
-from etl_craft.locks import LockTimeout, engine_lock
-from etl_craft.migrate import split_sqlite_statements
 from etl_craft.orchestrator import run_pipeline
 from etl_craft.runlog import find_or_create_active_run
 from etl_craft.setup_command import run_setup
 
-ENGINE_ENV_VARS = (
-    "ENGINE_JDBC_URL",
-    "ENGINE_USER",
-    "ENGINE_AUTH_MODE",
-    "ETL_CRAFT_MODE",
-    "ETL_CRAFT_SOURCE_TYPE",
-    "ETL_CRAFT_ENGINE_PROFILE",
-    "WAREHOUSE_JDBC_URL",
-)
+PROFILE_VARS = ("ETL_CRAFT_PROFILE", "ETL_CRAFT_ENGINE_PROFILE", "ETL_CRAFT_WAREHOUSE_PROFILE")
+
+# What a team writes for a local deployment: no variables needed at all.
+SQLITE_CONFIG = """\
+Secrets:
+  Source_type: environment
+
+Orchestration:
+  Mode: local
+
+Engine:
+  dev:
+    jdbc_url: jdbc:sqlite:etl-craft-engine.db
+"""
 
 
 @pytest.fixture
 def clean_env(monkeypatch, tmp_path):
-    """An environment with none of setup's inputs set, and cwd in tmp_path."""
-    for name in ENGINE_ENV_VARS:
+    """No profile overrides in the environment, and cwd in tmp_path."""
+    for name in PROFILE_VARS:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.chdir(tmp_path)
     return tmp_path
@@ -52,9 +56,10 @@ def clean_env(monkeypatch, tmp_path):
 
 @pytest.fixture
 def sqlite_deployment(clean_env):
-    """A deployment built by `setup` with nothing configured: the SQLite default."""
+    """A SQLite deployment: the team's craft-connector.yml, then `setup`."""
     config_path = clean_env / "craft-connector.yml"
-    report = run_setup(config_path=config_path, env_path=None, from_environment=False)
+    config_path.write_text(SQLITE_CONFIG, encoding="utf-8")
+    report = run_setup(config_path=config_path)
     assert report.ok, report.problems
     config = load_config(config_path)
     engine = build_engine(config)
@@ -96,11 +101,12 @@ def _task(engine, pipeline_id: int, code: str, handler: str, params: dict[str, s
 # --- setup and config -------------------------------------------------------
 
 
-def test_setup_with_nothing_configured_creates_a_working_sqlite_deployment(sqlite_deployment):
+def test_setup_creates_a_working_sqlite_deployment_and_never_writes_the_config(
+    sqlite_deployment,
+):
     config, engine = sqlite_deployment
-    raw = yaml.safe_load(Path(config.config_path).read_text(encoding="utf-8"))
-    assert raw["Engine"] == {"Profile": "dev", "Jdbc_url": "jdbc:sqlite:etl-craft-engine.db"}
-    assert raw["Orchestration"]["Mode"] == "local"
+    # The team's file, untouched.
+    assert config.config_path.read_text(encoding="utf-8") == SQLITE_CONFIG
     # Resolved next to the config, not the cwd.
     assert Path(engine.url.database) == config.config_path.parent / "etl-craft-engine.db"
     with engine.connect() as conn:
@@ -113,92 +119,50 @@ def test_setup_with_nothing_configured_creates_a_working_sqlite_deployment(sqlit
 
 def test_setup_is_idempotent_on_sqlite(sqlite_deployment):
     config, _ = sqlite_deployment
-    report = run_setup(config_path=config.config_path, env_path=None, from_environment=False)
+    report = run_setup(config_path=config.config_path)
     assert report.ok, report.problems
     assert report.database_action == "already up to date"
-    assert report.config_action.endswith("already current")
 
 
-def test_setup_never_swaps_an_existing_postgres_engine_for_the_sqlite_default(clean_env):
+def test_setup_refuses_without_a_config_and_does_not_write_one(clean_env):
     config_path = clean_env / "craft-connector.yml"
-    config_path.write_text(
-        yaml.safe_dump(
-            {
-                "Orchestration": {"Mode": "local"},
-                "Secrets": {"Source_type": "environment"},
-                "Engine": {"Profile": "dev", "Variables": {"jdbc_url": "ENGINE_JDBC_URL"}},
-            }
-        ),
-        encoding="utf-8",
+    with pytest.raises(ConfigError, match="never writes it"):
+        run_setup(config_path=config_path)
+    assert not config_path.exists()
+
+
+def test_setup_raises_on_an_invalid_config_instead_of_blaming_the_database(clean_env):
+    # A file that does not parse is a configuration error -- exit 2 from the
+    # CLI, like every other command -- never "Engine DB not reachable yet".
+    config_path = clean_env / "craft-connector.yml"
+    config_path.write_text(SQLITE_CONFIG.replace("Mode: local", "Mode: sideways"), "utf-8")
+    with pytest.raises(ConfigError, match="Orchestration.Mode"):
+        run_setup(config_path=config_path)
+    assert main(["--config", str(config_path), "setup"]) == 2
+
+
+def test_setup_reports_an_engine_db_it_cannot_reach(clean_env, monkeypatch):
+    # Reported, not raised: the file is valid, the database is the problem --
+    # first an unresolvable secret, then a server that is not there.
+    postgres = SQLITE_CONFIG.replace(
+        "jdbc_url: jdbc:sqlite:etl-craft-engine.db",
+        "jdbc_url: jdbc:postgresql://127.0.0.1:9/none\n    user: ENGINE_USER\n"
+        "    auth_mode: ENGINE_AUTH_MODE\n    secret: ENGINE_SECRET",
     )
-    with pytest.raises(ConfigError, match="ENGINE_JDBC_URL is required"):
-        configure_from_env(None, config_path)
-
-
-def test_setup_accepts_an_explicit_sqlite_url_and_rejects_credentials_for_it(
-    clean_env, monkeypatch
-):
     config_path = clean_env / "craft-connector.yml"
-    monkeypatch.setenv("ENGINE_JDBC_URL", "jdbc:sqlite:state/engine.db")
-    configure_from_env(None, config_path)
-    assert load_config(config_path).postgres.active.jdbc_url == "jdbc:sqlite:state/engine.db"
-
+    config_path.write_text(postgres, encoding="utf-8")
+    monkeypatch.setenv("ENGINE_USER", "etl")
     monkeypatch.setenv("ENGINE_AUTH_MODE", "password")
-    with pytest.raises(ConfigError, match="must be 'none'"):
-        configure_from_env(None, config_path)
+    monkeypatch.delenv("ENGINE_SECRET", raising=False)
+    monkeypatch.delenv("ENGINE_DEV_SECRET", raising=False)
+    no_secret = run_setup(config_path=config_path)
+    assert not no_secret.ok and no_secret.database_action == "not reachable"
+    assert "ENGINE_SECRET" in no_secret.problems[0]
 
-
-@pytest.mark.parametrize(
-    ("engine_block", "message"),
-    [
-        (
-            {"Profile": "dev", "Jdbc_url": "jdbc:postgresql://db/etl"},
-            "may only name a SQLite Engine DB",
-        ),
-    ],
-)
-def test_a_literal_engine_url_is_only_accepted_for_sqlite(tmp_path, engine_block, message):
-    path = tmp_path / "craft-connector.yml"
-    path.write_text(
-        yaml.safe_dump(
-            {
-                "Orchestration": {"Mode": "local"},
-                "Secrets": {"Source_type": "environment"},
-                "Engine": engine_block,
-            }
-        ),
-        encoding="utf-8",
-    )
-    with pytest.raises(ConfigError, match=message):
-        load_config(path)
-
-
-@pytest.mark.parametrize(
-    ("jdbc_url", "auth_mode", "message"),
-    [
-        ("jdbc:sqlite:engine.db", "password", "auth_mode must be 'none'"),
-        ("jdbc:postgresql://db/etl", "none", "only valid for a SQLite Engine DB"),
-    ],
-)
-def test_engine_url_and_auth_mode_must_agree_about_sqlite(tmp_path, jdbc_url, auth_mode, message):
-    path = tmp_path / "craft-connector.yml"
-    path.write_text(
-        yaml.safe_dump(
-            {
-                "Execution": {"Mode": "local"},
-                "Source": {"Type": "environment"},
-                "Postgres": {
-                    "Active_profile": "dev",
-                    "Profiles": {
-                        "dev": {"jdbc_url": jdbc_url, "user": "u", "auth_mode": auth_mode}
-                    },
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-    with pytest.raises(ConfigError, match=message):
-        load_config(path)
+    monkeypatch.setenv("ENGINE_SECRET", "s")
+    no_server = run_setup(config_path=config_path)
+    assert not no_server.ok and no_server.database_action == "not reachable"
+    assert main(["--config", str(config_path), "setup"]) == 1
 
 
 def test_an_in_memory_sqlite_engine_db_is_refused():
@@ -291,7 +255,7 @@ def test_sqlite_audit_columns_are_stamped_and_creation_is_immutable(sqlite_deplo
 
 
 def test_sqlite_statement_splitter_keeps_trigger_bodies_whole():
-    statements = split_sqlite_statements(
+    statements = engine_dialect("sqlite").split_statements(
         "CREATE TABLE t (a INT); -- a; comment\n"
         "CREATE TRIGGER tr AFTER INSERT ON t BEGIN UPDATE t SET a = 1; DELETE FROM t; END;\n"
         "INSERT INTO t VALUES (';');"
@@ -309,7 +273,7 @@ def test_file_lock_serializes_and_times_out(sqlite_deployment):
     release = threading.Event()
 
     def hold() -> None:
-        with engine_lock(engine, 1, "unit"):
+        with for_engine(engine).lock(engine, 1, "unit"):
             holding.set()
             release.wait(5)
 
@@ -317,12 +281,12 @@ def test_file_lock_serializes_and_times_out(sqlite_deployment):
     holder.start()
     assert holding.wait(5)
     try:
-        with pytest.raises(LockTimeout), engine_lock(engine, 1, "unit", wait_seconds=1):
+        with pytest.raises(LockTimeout), for_engine(engine).lock(engine, 1, "unit", wait_seconds=1):
             pass
     finally:
         release.set()
         holder.join()
-    with engine_lock(engine, 1, "unit", wait_seconds=1):
+    with for_engine(engine).lock(engine, 1, "unit", wait_seconds=1):
         pass
 
 
@@ -336,17 +300,12 @@ def test_a_parallel_pipeline_runs_end_to_end_on_a_sqlite_engine_db(sqlite_deploy
     config, engine = sqlite_deployment
     warehouse = config.config_path.parent / "warehouse.duckdb"
     raw = yaml.safe_load(config.config_path.read_text(encoding="utf-8"))
-    raw["Warehouse"] = {
-        "Profile": "dev",
-        "Table_format": "native",
-        "Variables": {"jdbc_url": "WAREHOUSE_JDBC_URL", "auth_mode": "WAREHOUSE_AUTH_MODE"},
-    }
+    raw["Warehouse"] = {"Name": "DuckDB", "dev": {"jdbc_url": "WAREHOUSE_JDBC_URL"}}
     # Cloning reads every engine table out of SQLite at finalize time -- and
     # its same-database guard used to crash on a jdbc:sqlite: URL.
-    raw["Cloning"] = {"Enabled": True, "Scope": "all"}
-    config.config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    raw["Cloning"] = {"dev": {"Enabled": True, "Scope": "all"}}
+    config.config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     monkeypatch.setenv("WAREHOUSE_JDBC_URL", f"jdbc:duckdb:{warehouse}")
-    monkeypatch.setenv("WAREHOUSE_AUTH_MODE", "none")
 
     seed = create_engine(f"duckdb:///{warehouse}")
     with seed.begin() as conn:
@@ -421,14 +380,9 @@ def test_first_pipeline_walkthrough_runs_twice_on_a_sqlite_engine_db(
     config, engine = sqlite_deployment
     warehouse = config.config_path.parent / "warehouse.duckdb"
     raw = yaml.safe_load(config.config_path.read_text(encoding="utf-8"))
-    raw["Warehouse"] = {
-        "Profile": "dev",
-        "Table_format": "native",
-        "Variables": {"jdbc_url": "WAREHOUSE_JDBC_URL", "auth_mode": "WAREHOUSE_AUTH_MODE"},
-    }
-    config.config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    raw["Warehouse"] = {"Name": "DuckDB", "dev": {"jdbc_url": "WAREHOUSE_JDBC_URL"}}
+    config.config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     monkeypatch.setenv("WAREHOUSE_JDBC_URL", f"jdbc:duckdb:{warehouse}")
-    monkeypatch.setenv("WAREHOUSE_AUTH_MODE", "none")
 
     doc = (Path(__file__).parents[1] / "docs" / "first-pipeline.md").read_text(encoding="utf-8")
     blocks = re.findall(r"```sql\n(.*?)```", doc, re.S)

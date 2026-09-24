@@ -8,16 +8,17 @@ cloud warehouse as a separate acceptance target before enabling it for a custome
 
 1. Create a dedicated PostgreSQL database for the Engine DB. It stores pipeline definitions,
    audit history, migration state, dependency trackers, and documentation/lineage caches. Do not
-   share it with application tables. The SQLite Engine DB that `setup` creates by default is for
+   share it with application tables. A SQLite Engine DB, the default, is for
    local development and single-machine use only: it serializes Engine DB writes, and
    orchestrator workers on other hosts cannot reach it.
 2. Create a separate warehouse database or namespace for pipeline targets. The reference launch
    path is PostgreSQL. DuckDB is for local development and permits one writer at a time.
 3. Build or install one pinned package artifact for every process that will run tasks. Do not mix
    package versions within a running environment.
-4. Write a canonical `craft-connector.yml` with variable names only. Put their values in a
-   protected environment or a file readable only by the service account.
-5. Run `etl-craft setup` for a new environment, then run both checks:
+4. Write `craft-connector.yml` with variable names only (start from `docs/examples/`). Put their
+   values in a protected environment or a file readable only by the service account. etl-craft
+   never writes this file, so review changes to it like any other deployment config.
+5. Run `etl-craft setup` to create the Engine DB for a new environment, then run both checks:
 
    ```bash
    etl-craft doctor

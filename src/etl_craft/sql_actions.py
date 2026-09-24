@@ -208,10 +208,12 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.cfg import fetch_sibling_target_writer
-from etl_craft.config import DEFAULT_TABLE_FORMAT, VALID_TABLE_FORMATS, ConnectorConfig
+from etl_craft.config import VALID_TABLE_FORMATS, ConnectorConfig
+from etl_craft.dialects import warehouse_dialects
+from etl_craft.dialects.warehouse_dialects.base import WarehouseDialect
 from etl_craft.execution import HandlerError, HandlerResult, TaskExecutionContext
 from etl_craft.runlog import fetch_task_run_status
-from etl_craft.warehouse import translate_jdbc_url
+from etl_craft.warehouse import active_catalog
 
 SQL_ACTIONS = frozenset(
     {
@@ -251,160 +253,39 @@ AUDIT_COLUMNS: dict[str, tuple[str, ...]] = {
     ),
 }
 
-# CAST target type for each engine-managed audit column, when a column needs
-# to exist with zero rows (SETUP_TABLE's empty-shape creation) — an untyped
-# NULL literal would otherwise default to whatever the dialect's "unknown"
-# type is, which some engines reject outright in a persisted CREATE TABLE AS
-# SELECT.
-# [DEVIATION, 2026-09-20, E2-31/E2-33] Two corrections here. CREATE_DATE and
-# UPDATE_DATE were plain TIMESTAMP while schema.sql uses TIMESTAMPTZ
-# throughout and the engine writes datetime.now(UTC) — every warehouse-side
-# audit timestamp silently lost its offset. And bare VARCHAR with no length is
-# rejected in DDL by several dialects (Oracle, MySQL in strict mode), so
-# CREATED_BY/UPDATED_BY carry one.
-AUDIT_COLUMN_TYPES: dict[str, str] = {
-    "HASH_KEY": "VARCHAR(32)",
-    "CREATE_DATE": "TIMESTAMP WITH TIME ZONE",
-    "UPDATE_DATE": "TIMESTAMP WITH TIME ZONE",
-    "CREATED_BY": "VARCHAR(255)",
-    "UPDATED_BY": "VARCHAR(255)",
-    "DELETE_FLAG": "VARCHAR(1)",
-    "ACTIVE_FLAG": "VARCHAR(1)",
-}
+# [DEVIATION, 2026-09-24] Everything that differs between warehouses -- the
+# CREATE TABLE clause for a table format, audit column types, how a hash is
+# computed, temporary tables, UPDATE aliases, RENAME syntax, how ROW_ID is
+# generated -- lives in dialects/warehouse_dialects/, one module per database
+# and table format. This module states each action once and asks the dialect
+# for the pieces that differ. See dialects/__init__.py for why primitives,
+# not whole per-dialect actions.
 
-
-def _audit_column_type(conn: Connection, column: str) -> str:
-    """Use each dialect's own required timestamp syntax for audit instants."""
-    if conn.dialect.name == "databricks" and column in {"CREATE_DATE", "UPDATE_DATE"}:
-        return "TIMESTAMP"
-    if (
-        conn.dialect.name == "snowflake"
-        and conn.info.get(TABLE_FORMAT_INFO_KEY) == "iceberg"
-        and column in {"CREATE_DATE", "UPDATE_DATE"}
-    ):
-        # [ADDITION, 2026-09-23] Two Snowflake-Iceberg-specific restrictions,
-        # both found live: `TIMESTAMP WITH TIME ZONE` (TIMESTAMP_TZ(9) by
-        # default) is rejected for its scale ("consult ... supported scales
-        # of TIME and TIMESTAMP types in Iceberg tables"), and TIMESTAMP_TZ
-        # at *any* scale is then rejected outright ("Unsupported data type
-        # 'TIMESTAMP_TZ(6)' for iceberg tables") -- Snowflake's managed
-        # Iceberg tables don't support a timezone-aware timestamp type at
-        # all. TIMESTAMP_NTZ(6) is what Snowflake's own worked example for
-        # an Iceberg table column uses. The engine only ever writes UTC
-        # instants (`datetime.now(UTC)`), so storing them tz-naive at
-        # microsecond precision loses no information here.
-        return "TIMESTAMP_NTZ(6)"
-    return AUDIT_COLUMN_TYPES[column]
-
-
-# [ADDITION, 2026-09-22] Per explicit instruction: "if the warehouse is not
-# postgres, every table we create or operate should be iceberg compatible."
+# Where execute() stashes this task's resolved warehouse dialect and its
+# CFG_TASK_PARAMETERS, on the Connection's own per-connection `info` dict.
 #
-# Postgres is the one warehouse that stores its own tables natively; every
-# other supported warehouse is a SQL engine *over Iceberg*, so every table
-# this module creates there has to be an Iceberg table rather than that
-# engine's own default format. Getting this wrong is silent: the table is
-# created, the pipeline succeeds, and it is simply not readable by anything
-# else in the lakehouse — which is the entire reason for choosing Iceberg.
-#
-# Expressed as the clause each dialect needs between `CREATE TABLE <name>` and
-# `AS <select>`, because that is the only part that differs:
-#
-#   * Databricks — a managed Delta table with UniForm enabled, not
-#     `USING ICEBERG`. See the [DEVIATION, 2026-09-23] note below.
-#   * Trino — tables in an Iceberg catalog are Iceberg by construction; the
-#     catalog in the URL is what decides it, so no clause is needed and
-#     adding one would be a syntax error.
-#   * Snowflake — deliberately absent, see ICEBERG_CREATE_PREFIX below.
-#
-# A dialect not listed here gets no clause. That is the right default for
-# "any sql tool over plain iceberg" (Trino's case, generalized): an engine
-# pointed at an Iceberg catalog writes Iceberg without being told to.
-#
-# [DEVIATION, 2026-09-23] `USING ICEBERG` was the original implementation and
-# is verified to work (CREATE_TABLE/OVERWRITE_TABLE/SCD1_MERGE all pass
-# against a real Databricks SQL warehouse), but produces a genuinely
-# different table than this clause: DESCRIBE DETAIL reports
-# `format: 'iceberg'` with Unity-Catalog-managed Iceberg metadata, no Delta
-# log at all. Per explicit instruction ("it should be uniform tables in
-# databricks"), a managed Delta table with UniForm enabled is what this
-# module now creates for `TABLE_FORMAT=iceberg` on Databricks instead --
-# `DESCRIBE DETAIL` on a table created this way reports `format: 'delta'`
-# plus `delta.universalFormat.enabledFormats: iceberg` and
-# `delta.enableIcebergCompatV2: true` (both verified live). UniForm keeps
-# Delta as the format Databricks itself reads and writes -- the same
-# CREATE_TABLE/OVERWRITE_TABLE/SCD1_MERGE/SCD2_MERGE statements this module
-# already issues for Databricks work identically, since nothing about how
-# Databricks mutates the table changes -- while generating Iceberg metadata
-# alongside it for external engines (Trino, Snowflake, ...) to read. The
-# vocabulary CFG_TASK_PARAMETERS.TABLE_FORMAT exposes is unchanged
-# (`native`/`iceberg`); only what "iceberg" means physically on this one
-# dialect changed.
-ICEBERG_TABLE_CLAUSE: dict[str, str] = {
-    "databricks": (
-        "USING DELTA TBLPROPERTIES "
-        "('delta.enableIcebergCompatV2' = 'true', "
-        "'delta.universalFormat.enabledFormats' = 'iceberg')"
-    )
-}
-
-# [ADDITION, 2026-09-22] The same, for a warehouse's own native format, per
-# explicit decision to "support non iceberg as well, on the snowflake and
-# databricks setups".
-#
-# Databricks names Delta explicitly rather than relying on the workspace
-# default: the whole point of declaring a format is that it is declared.
-# Snowflake's native form is an ordinary CREATE TABLE, so it needs no clause
-# and no EXTERNAL_VOLUME -- which is why the Iceberg refusal must not fire
-# when native is what was asked for.
-NATIVE_TABLE_CLAUSE: dict[str, str] = {"databricks": "USING DELTA"}
-
-# Where the resolved format for the current task is stashed, alongside the task
-# parameters, so create_table_as can reach it through the same seam.
-TABLE_FORMAT_INFO_KEY = "etl_craft_table_format"
-
-# Snowflake is the one that cannot be expressed as a clause: its Iceberg
-# tables use a different statement (`CREATE ICEBERG TABLE`) and require an
-# EXTERNAL_VOLUME plus a BASE_LOCATION that are deployment-specific and have
-# no home in CFG_ metadata today.
-#
-# [CHOICE] Refused up front with a clear reason rather than silently creating
-# an ordinary Snowflake table that looks fine and is not Iceberg. Same
-# reasoning as refusing SCD merges on ClickHouse: producing the wrong thing
-# successfully is worse than failing.
-#
-# Worth stating plainly, because the instruction named them together:
-# Snowflake **hybrid tables and Iceberg tables are different features** — the
-# first is a row-store with enforced primary keys, the second is external
-# Iceberg format — and a table cannot be both. "Iceberg-compatible" is the
-# binding requirement, so Iceberg tables are the target here.
-ICEBERG_CREATE_PREFIX: dict[str, str] = {"snowflake": "ICEBERG TABLE"}
-
-# The warehouse that stores its own tables, and so needs no Iceberg handling.
-NATIVE_STORAGE_DIALECTS = frozenset({"postgresql", "duckdb"})
+# [CHOICE, 2026-09-22] Via conn.info rather than an extra argument threaded
+# through every helper: the connection here is scoped to exactly one task
+# (handlers.py opens it per dispatch), and several dialect-dependent helpers
+# sit several calls deep (_evolve_schema -> _restore_surrogate_key ->
+# _add_computed_surrogate_key).
+DIALECT_INFO_KEY = "etl_craft_warehouse_dialect"
+TASK_PARAMS_INFO_KEY = "etl_craft_task_params"
 
 
-def iceberg_clause(dialect_name: str) -> str:
-    """Return the clause that makes a CREATE TABLE produce an Iceberg table here."""
-    if dialect_name.split("+", 1)[0] in NATIVE_STORAGE_DIALECTS:
-        return ""
-    return ICEBERG_TABLE_CLAUSE.get(dialect_name, "")
-
-
-def table_format_clause(dialect_name: str, table_format: str) -> str:
-    """Return the CREATE TABLE clause for `table_format` on this dialect."""
-    if dialect_name.split("+", 1)[0] in NATIVE_STORAGE_DIALECTS:
-        return ""
-    if table_format == "native":
-        return NATIVE_TABLE_CLAUSE.get(dialect_name, "")
-    return ICEBERG_TABLE_CLAUSE.get(dialect_name, "")
+def _dialect(conn: Connection) -> WarehouseDialect:
+    """Return the warehouse dialect this task resolved (native, if none was stashed)."""
+    dialect = conn.info.get(DIALECT_INFO_KEY)
+    if dialect is None:
+        dialect = warehouse_dialects.resolve(conn.dialect.name, "native")
+    return dialect
 
 
 def resolve_table_format(ctx: TaskExecutionContext) -> str:
-    """Resolve this task's storage format: task parameter, then [Warehouse], then iceberg.
+    """Resolve this task's storage format: task parameter, then the warehouse default.
 
-    [ADDITION, 2026-09-22] Two tiers, the same shape generate-yml already uses
-    for its own settings. A team standardising on one format sets it once in
+    [ADDITION, 2026-09-22] Two tiers, the same shape generate-yml uses for its
+    own settings. A team standardising on one format sets it once in
     craft-connector.yml; a single table that has to differ says so on its own
     task, which is where every other per-target decision already lives.
     """
@@ -419,130 +300,26 @@ def resolve_table_format(ctx: TaskExecutionContext) -> str:
     return ctx.config.warehouse_table_format
 
 
-# The key `execute()` stashes this task's CFG_TASK_PARAMETERS under, on the
-# Connection's own per-connection `info` dict.
-#
-# [CHOICE, 2026-09-22] Via conn.info rather than an extra argument threaded
-# through every caller. Only Snowflake needs these values, and the five
-# create_table_as call sites sit behind two private helpers
-# (_evolve_schema -> _restore_surrogate_key -> _add_computed_surrogate_key),
-# so an argument would mean churning signatures on paths that have no
-# business knowing about storage. `info` is SQLAlchemy's own slot for
-# connection-scoped state, and the connection here is scoped to exactly one
-# task (handlers.py opens it per dispatch).
-TASK_PARAMS_INFO_KEY = "etl_craft_task_params"
-
-
-def create_table_as(
-    conn: Connection,
-    qualified_name: str,
-    select_sql: str,
-) -> None:
-    """Issue CREATE TABLE ... AS SELECT, as an Iceberg table where that is not the default.
-
-    [DEVIATION, 2026-09-20] This briefly carried a ClickHouse branch (a literal
-    `ENGINE = MergeTree() ORDER BY tuple()`, mandatory there and rejected
-    everywhere else). ClickHouse is no longer a supported warehouse. Kept as a
-    named helper, which is what made adding Iceberg support a change here
-    rather than at five call sites.
-
-    Dialects whose Iceberg tables cannot be expressed as a clause — Snowflake,
-    which names its storage explicitly — read that storage from the task's own
-    CFG_TASK_PARAMETERS via `conn.info`; see TASK_PARAMS_INFO_KEY.
-    """
-    dialect_name = conn.dialect.name
-    table_format = conn.info.get(TABLE_FORMAT_INFO_KEY) or DEFAULT_TABLE_FORMAT
-    prefix_kind = ICEBERG_CREATE_PREFIX.get(dialect_name)
-    if prefix_kind and table_format == "iceberg":
-        params: dict[str, str] = conn.info.get(TASK_PARAMS_INFO_KEY) or {}
-        return _create_iceberg_table_with_storage(
-            conn, dialect_name, prefix_kind, qualified_name, select_sql, params
-        )
-    clause = table_format_clause(dialect_name, table_format)
-    prefix = f"CREATE TABLE {qualified_name}"
-    statement = f"{prefix} {clause} AS {select_sql}" if clause else f"{prefix} AS {select_sql}"
-    conn.execute(text(statement))
-    return None
-
-
-#: Snowflake's reserved EXTERNAL_VOLUME value meaning "store this table's
-#: Iceberg data in Snowflake's own internal storage" -- not a customer bucket
-#: at all, so it needs no BASE_LOCATION and no cloud IAM setup of any kind.
-#: Verified live 2026-09-23: DDL, INSERT and CTAS all succeed against it, and
-#: `SHOW TABLES` reports `is_iceberg: 'Y'`, `is_external: 'N'` -- a real
-#: Iceberg-format table (readable by any Iceberg-compatible engine), just not
-#: backed by a customer-supplied volume. This is what makes Snowflake Iceberg
-#: support zero-config: no external cloud storage has to exist first.
-SNOWFLAKE_MANAGED_VOLUME = "SNOWFLAKE_MANAGED"
-
-
-def _create_iceberg_table_with_storage(
-    conn: Connection,
-    dialect_name: str,
-    prefix_kind: str,
-    qualified_name: str,
-    select_sql: str,
-    params: dict[str, str],
-) -> None:
-    """Create an Iceberg table on a dialect that names its storage explicitly (Snowflake).
-
-    [ADDITION, 2026-09-22] Snowflake's Iceberg tables are a different statement
-    (`CREATE ICEBERG TABLE`). `EXTERNAL_VOLUME`/`BASE_LOCATION` are ordinary
-    CFG_TASK_PARAMETERS, which is where every other deployment-specific value
-    already lives -- not craft-connector.yml, because a team can legitimately
-    point different targets at different volumes.
-
-    [DEVIATION, 2026-09-23] No longer refuses when they are absent. It used
-    to, on the reasoning that falling back to an ordinary Snowflake table
-    would look like success while silently producing something no other
-    engine in the lakehouse could read. That reasoning assumed the only
-    alternative to a customer volume was a non-Iceberg table -- which turned
-    out to be wrong: `EXTERNAL_VOLUME = 'SNOWFLAKE_MANAGED'` (see that
-    constant's own comment) produces a genuine Iceberg table with no customer
-    storage at all, verified live. A task that declares neither parameter now
-    gets that -- still a real, correctly-formatted Iceberg table, just backed
-    by Snowflake's own storage rather than a bucket a team has to provision
-    and grant first. A task that declares `EXTERNAL_VOLUME` to a real,
-    customer-owned volume still must pair it with `BASE_LOCATION`, since that
-    combination genuinely needs both.
-
-    [ADDITION, 2026-09-23] `ICEBERG_VERSION = 2` is explicit, not left to
-    Snowflake's own default, per the original instruction to target Iceberg
-    format v2 specifically. Verified live: `CREATE ICEBERG TABLE ...
-    ICEBERG_VERSION = 2 CATALOG = 'SNOWFLAKE' ...` is accepted syntax and the
-    table is created successfully. Only Snowflake reaches this function
-    (`ICEBERG_CREATE_PREFIX` has no other entry), so the clause is
-    unconditional here rather than dialect-checked.
-    """
-    external_volume = (params.get("EXTERNAL_VOLUME") or "").strip() or SNOWFLAKE_MANAGED_VOLUME
-    base_location = (params.get("BASE_LOCATION") or "").strip()
-    if external_volume != SNOWFLAKE_MANAGED_VOLUME and not base_location:
+def task_dialect(conn: Connection, ctx: TaskExecutionContext) -> WarehouseDialect:
+    """Choose the warehouse dialect for this task: its connection plus its table format."""
+    table_format = resolve_table_format(ctx)
+    try:
+        dialect = warehouse_dialects.resolve(conn.dialect.name, table_format)
+    except warehouse_dialects.UnsupportedWarehouse as exc:
+        raise HandlerError(str(exc)) from exc
+    if not dialect.per_task_format and table_format != ctx.config.warehouse_table_format:
         raise HandlerError(
-            f"{dialect_name} needs CREATE {prefix_kind} with BASE_LOCATION alongside a "
-            f"customer EXTERNAL_VOLUME ({external_volume!r}) — add it as a CFG_TASK_PARAMETERS "
-            f"value, or drop EXTERNAL_VOLUME entirely to use Snowflake's own managed storage "
-            f"({SNOWFLAKE_MANAGED_VOLUME!r}) instead."
+            f"on {dialect.display_name} the table format is fixed by the warehouse connection "
+            f"(Warehouse.Table_format={ctx.config.warehouse_table_format!r}); a task cannot "
+            f"override it to {table_format!r}"
         )
-    for value, name in ((external_volume, "EXTERNAL_VOLUME"), (base_location, "BASE_LOCATION")):
-        if "'" in value:
-            raise HandlerError(f"CFG_TASK_PARAMETERS.{name} must not contain a quote: {value!r}")
-    # SNOWFLAKE_MANAGED needs no BASE_LOCATION -- there is no customer bucket
-    # to place a path within. Verified live: omitting it entirely (even when
-    # a caller mistakenly supplied one alongside SNOWFLAKE_MANAGED) is what
-    # succeeded; the clause is only ever built for a real customer volume.
-    location_clause = ""
-    if external_volume != SNOWFLAKE_MANAGED_VOLUME:
-        location_clause = f"BASE_LOCATION = '{base_location}' "
-    conn.execute(
-        text(
-            f"CREATE {prefix_kind} {qualified_name} "
-            f"EXTERNAL_VOLUME = '{external_volume}' "
-            "ICEBERG_VERSION = 2 "
-            "CATALOG = 'SNOWFLAKE' "
-            f"{location_clause}"
-            f"AS {select_sql}"
-        )
-    )
+    return dialect
+
+
+def create_table_as(conn: Connection, qualified_name: str, select_sql: str) -> None:
+    """Issue CREATE TABLE ... AS SELECT in this task's dialect and table format."""
+    params: dict[str, str] = conn.info.get(TASK_PARAMS_INFO_KEY) or {}
+    _dialect(conn).create_table_as(conn, qualified_name, select_sql, params)
 
 
 PIPELINE_ID_TOKEN = "$$pipeline_id"
@@ -624,23 +401,13 @@ def qualify(object_ref: str, database: str) -> str:
 
 
 def active_database(config: ConnectorConfig) -> str:
-    """Resolve the active [Warehouse] profile's database name."""
+    """Resolve the active warehouse profile's catalog/database name."""
     if config.warehouse is None:
-        raise HandlerError("no [Warehouse] section configured in craft-connector.yml")
-    _, parts = translate_jdbc_url(config.warehouse.active.jdbc_url)
-    # [ADDITION, 2026-09-22] `catalog` where the two differ. Snowflake and
-    # Trino carry database and schema in one `database/schema` URL segment,
-    # because that is what their dialects split themselves — but qualify()'s
-    # three-part `catalog.schema.table` needs the catalog half alone, and the
-    # schema comes from CFG_TASK_PARAMETERS.TARGET_OBJECT, not the profile.
-    database = parts.get("catalog") or parts["database"]
-    if not database:
-        raise HandlerError(
-            "the active [Warehouse] profile's jdbc_url names no catalog/database, so "
-            "TARGET_OBJECT's schema.table cannot be resolved to a full name — add one "
-            "(e.g. ConnCatalog=<catalog> for Databricks, db=<database> for Snowflake)"
-        )
-    return database
+        raise HandlerError("no Warehouse section configured in craft-connector.yml")
+    try:
+        return active_catalog(config)
+    except ValueError as exc:
+        raise HandlerError(str(exc)) from exc
 
 
 def _split_pipe_list(value: str | None, *, param_name: str) -> list[str]:
@@ -686,6 +453,7 @@ def _fetch_columns(
             catalog = parts[0]
     catalog_filter = " AND lower(table_catalog) = lower(:catalog)" if catalog else ""
     if schema is not None:
+        _dialect(conn).load_table_metadata(conn, schema, table_name)
         rows = conn.execute(
             text(
                 "SELECT column_name, data_type FROM information_schema.columns "
@@ -718,75 +486,24 @@ def _dedupe_table_name(stage: str) -> str:
     return f"{stage}_dedup"
 
 
-# Engines whose md5() takes and returns binary rather than hex text.
-_BINARY_MD5_DIALECTS = frozenset({"trino"})
-
-
-def _hash_expression(columns: list[str], alias: str, dialect_name: str = "") -> str:
-    """Build an MD5 hash expression over `columns`, NULL-safe, for change detection.
+def _hash_expression(columns: list[str], alias: str, dialect: WarehouseDialect) -> str:
+    """Build the dialect's NULL-safe MD5 over `columns` of `alias`, for change detection.
 
     [ADDITION] "scd tables should also have hashkey created by merge_compare
-    columns" — per explicit instruction. MD5 isn't ANSI SQL (no hash
-    function is), but it's the one near-universally available exception
-    already accepted elsewhere in this module for the same reason TRUNCATE
-    is: every mainstream engine has *some* MD5, even though the exact
-    function/return shape varies (Postgres returns hex text directly;
-    others may differ) — flagged, not solved further, same spirit as
-    translate_jdbc_url's own documented dialect limits. COALESCE to empty
-    string per column stops one NULL from collapsing the whole concatenation
-    to NULL, which would make every NULL-containing row hash identically
-    regardless of its other values.
+    columns" -- per explicit instruction.
     """
-    return _hash_value_expression([f"{alias}.{c}" for c in columns], dialect_name)
+    return dialect.hash_expression([f"{alias}.{c}" for c in columns])
 
 
-def _hash_value_expression(values: list[str], dialect_name: str) -> str:
-    """Hash SQL value expressions using the same normalization as staged columns."""
-    # ANSI CAST, not Postgres's `::text` shorthand — this module avoids the
-    # shorthand everywhere.
-    string_type = "STRING" if dialect_name == "databricks" else "VARCHAR"
-    parts = " || '|' || ".join(f"COALESCE(CAST({value} AS {string_type}), '')" for value in values)
-    # [DEVIATION, 2026-09-22] The return shape genuinely varies, as the
-    # docstring above always warned. Postgres and DuckDB return 32 hex
-    # characters directly; Trino's md5() takes and returns varbinary, so a
-    # plain MD5(varchar) is a type error and the result needs hex-encoding to
-    # be the VARCHAR(32) HASH_KEY expects. Verified against a real
-    # Trino/Iceberg warehouse, not inferred.
-    if dialect_name in _BINARY_MD5_DIALECTS:
-        return f"lower(to_hex(md5(to_utf8({parts}))))"
-    return f"MD5({parts})"
+def _scratch_name(
+    dialect: WarehouseDialect, bare_name: str, target_object: str, database: str
+) -> str:
+    """Qualify `bare_name` where the dialect's session has no usable default schema.
 
-
-# Engines with no temporary tables of any kind. Trino has none at all
-# ("mismatched input" on CREATE TEMPORARY TABLE); Databricks/Spark SQL has
-# them, but DROP TABLE on an unqualified name it shares with a temp table is
-# refused as ambiguous (TEMP_TABLE_DROP_PERMANENT_NAME_CONFLICT, verified
-# against a real Databricks SQL warehouse) -- the exact bare DROP TABLE
-# _drop_stage always issues. Both are safe as ordinary tables because the
-# stage name is already unique per task run and _drop_stage removes it on
-# every path.
-NO_TEMPORARY_TABLE_DIALECTS = frozenset({"trino", "databricks"})
-
-# [ADDITION, 2026-09-23] Dialects whose session has no usable default schema
-# at all -- an unqualified object reference fails outright rather than
-# falling back to some sensible default (Postgres: search_path defaults to
-# public; DuckDB: main; Trino: set via the JDBC URL's own /catalog/schema
-# path). Verified against a real Databricks SQL warehouse: this module's
-# connect() passes schema=None -- there is no single CFG_-level "default
-# schema" concept to set it to, since one deployment's tasks legitimately
-# write to many schemas -- so a bare, unqualified CREATE/DROP/ALTER TABLE
-# fails with SCHEMA_NOT_FOUND against <catalog>.default. Every scratch table
-# this module creates exists to serve one specific target, so qualifying it
-# with that target's own schema is both correct and sufficient; no separate
-# "default schema" concept is needed. Deliberately not applied to
-# Postgres/DuckDB/Trino, where it would be redundant rather than wrong, to
-# keep their already-verified bare-name behaviour completely unchanged.
-NO_DEFAULT_SCHEMA_DIALECTS = frozenset({"databricks"})
-
-
-def _scratch_name(dialect_name: str, bare_name: str, target_object: str, database: str) -> str:
-    """Qualify `bare_name` for dialects with no usable session-default schema."""
-    if dialect_name not in NO_DEFAULT_SCHEMA_DIALECTS:
+    Every scratch table exists to serve one target, so qualifying it with that
+    target's own schema is both correct and sufficient.
+    """
+    if dialect.default_schema:
         return bare_name
     schema_name, _ = split_object_ref(target_object)
     return qualify(f"{schema_name}.{bare_name}", database)
@@ -802,13 +519,13 @@ def _build_stage(
     empty: bool = False,
 ) -> str:
     """Materialize `select_sql` into a uniquely-named temporary table; return its name."""
-    stage = _scratch_name(conn.dialect.name, _stage_name(task_run_id), target_object, database)
+    stage = _scratch_name(_dialect(conn), _stage_name(task_run_id), target_object, database)
     conn.execute(text(f"DROP TABLE IF EXISTS {stage}"))
     # ANSI-portable "no rows, same shape" trick for `empty` — used by
     # SETUP_TABLE, which only ever wants the column shape, never real data.
     body = f"SELECT * FROM ({select_sql}) AS etl_src WHERE 1=0" if empty else select_sql
-    # [DEVIATION, 2026-09-22] Not every engine has temporary tables -- see
-    # NO_TEMPORARY_TABLE_DIALECTS. The stage is already given a unique,
+    # [DEVIATION, 2026-09-22] Not every engine has temporary tables (the
+    # dialect's temporary_tables flag). The stage is already given a unique,
     # task-run-scoped name and dropped explicitly by _drop_stage on every
     # path, so an ordinary table behaves the same; TEMPORARY only ever added
     # automatic cleanup on top of cleanup this module already does itself.
@@ -826,8 +543,7 @@ def _create_scratch_table(conn: Connection, name: str, body: str) -> None:
     across the whole action vocabulary, which is exactly the gap that had let
     the hard-delete bug through.
     """
-    keyword = "TABLE" if conn.dialect.name in NO_TEMPORARY_TABLE_DIALECTS else "TEMPORARY TABLE"
-    conn.execute(text(f"CREATE {keyword} {name} AS {body}"))
+    conn.execute(text(f"CREATE {_dialect(conn).scratch_table_keyword()} {name} AS {body}"))
 
 
 def _drop_stage(conn: Connection, stage: str) -> None:
@@ -962,9 +678,7 @@ def _evolve_schema(
         f"SELECT {', '.join(select_parts)} FROM {qualified_target} AS t",
     )
     conn.execute(text(f"DROP TABLE {qualified_target}"))
-    rename_to = _rename_to_target(conn.dialect.name, table_name, qualified_target)
-    alter_keyword = _alter_table_keyword(conn)
-    conn.execute(text(f"{alter_keyword} {qualified_evolve} RENAME TO {rename_to}"))
+    _rename(conn, qualified_evolve, table_name, qualified_target)
     # [DEVIATION, 2026-09-20, E2-54] The drop-and-rename destroys the primary
     # key along with the old table. The surrogate key's *values* were carried
     # across above (ROW_ID is in engine_managed, so it rides along as a plain
@@ -996,7 +710,7 @@ def _add_hash_key(conn: Connection, stage: str, merge_compare_columns: list[str]
     conn.execute(
         text(
             f"UPDATE {stage} SET HASH_KEY = "
-            f"{_hash_expression(merge_compare_columns, stage, conn.dialect.name)}"
+            f"{_hash_expression(merge_compare_columns, stage, _dialect(conn))}"
         )
     )
 
@@ -1101,26 +815,16 @@ def _sequence_name(target_object: str, database: str) -> str:
     )
 
 
-# Engines whose UPDATE takes no table alias. Trino is one: `UPDATE tbl t SET`
-# is a syntax error there, and the target's columns are qualified by the
-# table's own name instead. Verified against a real Trino/Iceberg warehouse.
-NO_MUTATION_ALIAS_DIALECTS = frozenset({"trino"})
-
-
 def _mutation_target(conn: Connection, qualified_target: str) -> tuple[str, str]:
     """Return (target clause, column qualifier) for any correlated UPDATE or DELETE.
 
     [ADDITION, 2026-09-22] Every correlated mutation here qualifies the target
     row so the subquery over the stage can be told apart from it. Most engines
-    take an alias; Trino rejects one outright -- on DELETE as well as UPDATE --
-    and qualifies by table name instead.
-
-    [DEVIATION, E2-65] Named _update_target until its docstring's own claim
-    ("only the UPDATE statements need this") turned out to be wrong and left
-    HARD_DELETE broken on Trino. Only *mutating* statements need it: a plain
-    SELECT aliases freely everywhere, so the count queries are untouched.
+    take an alias; Trino rejects one outright -- on DELETE as well as UPDATE
+    (E2-65) -- and qualifies by table name instead. Only *mutating* statements
+    need this: a plain SELECT aliases freely everywhere.
     """
-    if conn.dialect.name in NO_MUTATION_ALIAS_DIALECTS:
+    if not _dialect(conn).mutation_alias:
         return qualified_target, qualified_target.rsplit(".", 1)[-1]
     return f"{qualified_target} t", "t"
 
@@ -1128,28 +832,18 @@ def _mutation_target(conn: Connection, qualified_target: str) -> tuple[str, str]
 def _row_id_insert_parts(conn: Connection, qualified_target: str) -> tuple[str, str]:
     """Extra (columns, values) an INSERT needs where ROW_ID cannot auto-fill itself.
 
-    [ADDITION, 2026-09-22] Postgres fills ROW_ID from its identity and DuckDB
-    from a sequence default, so their INSERTs never mention it. Iceberg has
-    neither, so every insert has to supply the value.
+    [ADDITION, 2026-09-22] An identity column or a sequence default fills ROW_ID
+    by itself. Iceberg has neither, so there every insert supplies the value:
+    the largest already present plus a row number. The base is read with its
+    own query *before* the mutating statement, rather than as a subquery over
+    the target inside the INSERT -- engines disagree about referencing the
+    table a statement is writing to.
 
-    The base is read with its own query *before* the mutating statement runs,
-    rather than as a subquery over the target inside the INSERT itself: this
-    module's own rule for counts, and here it also avoids referencing a table
-    in the same statement that is writing to it -- which engines disagree
-    about.
-
-    [DEVIATION, 2026-09-23] `ROW_NUMBER() OVER (ORDER BY NULL)`, not
-    `OVER ()`. Trino accepts an empty window `OVER ()`, but Databricks/Spark
-    SQL rejects it outright: `[WINDOW_FUNCTION_FRAME_NOT_ORDERED] Window
-    function row_number requires the window to be ordered.` Found by running
-    CREATE_TABLE against a real Databricks SQL warehouse, not from reading
-    docs -- the wrapping HandlerError from the crash-detection fork reported
-    only a misleading "credential" message, which is what made this look
-    like an auth problem until reproduced in-process with SQL echo on.
-    `ORDER BY NULL` is a no-op ordering (every row ties), verified to still
-    work on Trino, so one query serves both dialects rather than branching.
+    [DEVIATION, 2026-09-23] `ROW_NUMBER() OVER (ORDER BY NULL)`, not `OVER ()`:
+    Databricks rejects an unordered window (WINDOW_FUNCTION_FRAME_NOT_ORDERED),
+    found against a real warehouse; `ORDER BY NULL` still works on Trino.
     """
-    if not _is_iceberg_backed(conn.dialect.name):
+    if _dialect(conn).surrogate_key != "computed":
         return "", ""
     base = int(
         conn.execute(
@@ -1162,54 +856,16 @@ def _row_id_insert_parts(conn: Connection, qualified_target: str) -> tuple[str, 
     )
 
 
-def _is_iceberg_backed(dialect_name: str) -> bool:
-    """Whether this warehouse stores its tables as Iceberg rather than natively."""
-    return dialect_name.split("+", 1)[0] not in NATIVE_STORAGE_DIALECTS
+def _rename(conn: Connection, qualified_from: str, bare_to: str, qualified_to: str) -> None:
+    """Rename a table in the dialect's own RENAME syntax and ALTER keyword.
 
-
-# [ADDITION, 2026-09-23] Dialects whose ALTER TABLE ... RENAME TO accepts,
-# or for Databricks specifically requires, a fully-qualified new name.
-# Postgres and DuckDB reject one outright -- RENAME TO only ever renames
-# within the current schema there, a literal syntax error otherwise
-# (verified against both). This is a genuinely different axis from
-# _is_iceberg_backed (which governs ROW_ID strategy -- whether the dialect
-# has identity columns -- not RENAME TO syntax) and must not be derived
-# from it: a test that forces the Iceberg ROW_ID path onto a real Postgres
-# connection (by excluding "postgresql" from NATIVE_STORAGE_DIALECTS) is
-# still really Postgres for RENAME TO purposes, and deriving this from
-# _is_iceberg_backed broke exactly that test the first time around.
-QUALIFIED_RENAME_DIALECTS = frozenset({"trino", "databricks"})
-
-
-def _rename_to_target(dialect_name: str, bare_name: str, qualified_name: str) -> str:
-    """Choose the dialect's right-hand side of `ALTER TABLE ... RENAME TO`.
-
-    Databricks never gets a session default schema (this module's connect()
-    passes `schema=None`), so a bare new name resolves against
-    `<catalog>.default` and fails with SCHEMA_NOT_FOUND for any table that
-    isn't there -- which is anywhere a real deployment actually puts one.
-    Both forms verified against real Postgres, DuckDB, Trino and Databricks.
-    [ADDITION, 2026-09-23] Snowflake verified too: a bare name is correct
-    there (the qualified form was an untested assumption; not needed).
+    Postgres and DuckDB reject a qualified new name; Trino accepts one and
+    Databricks requires one (its session has no default schema). Snowflake
+    refuses plain ALTER TABLE on an Iceberg table. All verified live.
     """
-    return qualified_name if dialect_name in QUALIFIED_RENAME_DIALECTS else bare_name
-
-
-def _alter_table_keyword(conn: Connection) -> str:
-    """Choose `ALTER TABLE` or `ALTER ICEBERG TABLE` for a rename/other ALTER.
-
-    [ADDITION, 2026-09-23] Snowflake rejects a plain `ALTER TABLE ... RENAME
-    TO` against a table it created via `CREATE ICEBERG TABLE`: "Iceberg
-    tables should use ALTER ICEBERG TABLE commands" (SQLSTATE 42601),
-    verified live. Keyed off the same `TABLE_FORMAT_INFO_KEY` `create_table_
-    as` already reads, not off `_is_iceberg_backed` -- that governs the
-    ROW_ID strategy across every non-Postgres/DuckDB dialect regardless of
-    format, where this is Snowflake-specific and only applies when the table
-    actually being altered was created Iceberg-formatted.
-    """
-    if conn.dialect.name == "snowflake" and conn.info.get(TABLE_FORMAT_INFO_KEY) == "iceberg":
-        return "ALTER ICEBERG TABLE"
-    return "ALTER TABLE"
+    dialect = _dialect(conn)
+    rename_to = qualified_to if dialect.qualified_rename else bare_to
+    conn.execute(text(f"{dialect.alter_table_keyword()} {qualified_from} RENAME TO {rename_to}"))
 
 
 def _add_computed_surrogate_key(conn: Connection, qualified: str) -> None:
@@ -1256,9 +912,7 @@ def _add_computed_surrogate_key(conn: Connection, qualified: str) -> None:
         f"FROM {qualified}",
     )
     conn.execute(text(f"DROP TABLE {qualified}"))
-    rename_to = _rename_to_target(conn.dialect.name, qualified.rsplit(".", 1)[-1], qualified)
-    alter_keyword = _alter_table_keyword(conn)
-    conn.execute(text(f"{alter_keyword} {rebuild} RENAME TO {rename_to}"))
+    _rename(conn, rebuild, qualified.rsplit(".", 1)[-1], qualified)
 
 
 def _add_surrogate_key(conn: Connection, target_object: str, database: str) -> None:
@@ -1292,10 +946,11 @@ def _add_surrogate_key(conn: Connection, target_object: str, database: str) -> N
     every later insert.
     """
     qualified = qualify(target_object, database)
-    if _is_iceberg_backed(conn.dialect.name):
+    strategy = _dialect(conn).surrogate_key
+    if strategy == "computed":
         _add_computed_surrogate_key(conn, qualified)
         return
-    if conn.dialect.name == "duckdb":
+    if strategy == "sequence":
         sequence = _sequence_name(target_object, database)
         conn.execute(text(f"DROP SEQUENCE IF EXISTS {sequence}"))
         conn.execute(text(f"CREATE SEQUENCE {sequence} START 1"))
@@ -1333,12 +988,13 @@ def _restore_surrogate_key(conn: Connection, target_object: str, database: str) 
             text(f"SELECT COALESCE(MAX({ROW_ID_COLUMN}), 0) + 1 FROM {qualified}")
         ).scalar_one()
     )
-    if _is_iceberg_backed(conn.dialect.name):
-        # Nothing to restore: an Iceberg ROW_ID is a plain BIGINT with no
+    strategy = _dialect(conn).surrogate_key
+    if strategy == "computed":
+        # Nothing to restore: a computed ROW_ID is a plain BIGINT with no
         # sequence or identity behind it, and the rebuild carried its values
         # across like any other column.
         return
-    if conn.dialect.name == "duckdb":
+    if strategy == "sequence":
         # The sequence survived the table rebuild (it is a separate object),
         # but its position has to skip whatever the carried-across values
         # already occupy.
@@ -1394,7 +1050,7 @@ def _create_target_shape(
     select_parts = [f"s.{name}" for name, _ in _fetch_columns(conn, stage)]
     select_parts.append("CAST(NULL AS BIGINT) AS PIPELINE_RUN_ID")
     select_parts.extend(
-        f"CAST(NULL AS {_audit_column_type(conn, col)}) AS {col}" for col in audit_columns
+        f"CAST(NULL AS {_dialect(conn).audit_column_type(col)}) AS {col}" for col in audit_columns
     )
     create_table_as(
         conn,
@@ -1461,7 +1117,7 @@ def _sweep_stage(conn: Connection, ctx: TaskExecutionContext) -> None:
     #
     # [ADDITION, 2026-09-23] Qualifies each name the same way _build_stage
     # did, so the DROP actually finds what was created -- on a
-    # NO_DEFAULT_SCHEMA_DIALECTS warehouse (Databricks) an unqualified name
+    # warehouse with no default schema (Databricks) an unqualified name
     # never resolves at all (SCHEMA_NOT_FOUND), so an unqualified sweep was
     # not just missing the odd name, it was a guaranteed no-op there. Derived
     # from ctx rather than threaded from _execute, since this runs from
@@ -1476,7 +1132,7 @@ def _sweep_stage(conn: Connection, ctx: TaskExecutionContext) -> None:
 
     def scratch(bare_name: str) -> str:
         if target_object and database:
-            return _scratch_name(conn.dialect.name, bare_name, target_object, database)
+            return _scratch_name(_dialect(conn), bare_name, target_object, database)
         return bare_name
 
     stage = scratch(_stage_name(ctx.task_run_id))
@@ -1493,11 +1149,9 @@ def _execute(
     warehouse_conn: Connection, cfg_engine: Engine, ctx: TaskExecutionContext
 ) -> HandlerResult:
     params = ctx.task_params
-    # Storage parameters a Snowflake Iceberg CREATE needs, reachable from the
-    # create_table_as calls nested inside the rebuild helpers. See
-    # TASK_PARAMS_INFO_KEY for why this is not an argument.
+    # See DIALECT_INFO_KEY for why these ride on the connection.
     warehouse_conn.info[TASK_PARAMS_INFO_KEY] = params
-    warehouse_conn.info[TABLE_FORMAT_INFO_KEY] = resolve_table_format(ctx)
+    warehouse_conn.info[DIALECT_INFO_KEY] = task_dialect(warehouse_conn, ctx)
     action = params.get("SQL_ACTION")
     if "PRESERVE_TARGET" in params:
         if action != "SCD1_MERGE":
@@ -1602,7 +1256,7 @@ def _setup_table(
     select_parts = [f"s.{name}" for name, _ in stage_columns]
     select_parts.append("CAST(NULL AS BIGINT) AS PIPELINE_RUN_ID")
     for col in audit_columns:
-        select_parts.append(f"CAST(NULL AS {_audit_column_type(conn, col)}) AS {col}")
+        select_parts.append(f"CAST(NULL AS {_dialect(conn).audit_column_type(col)}) AS {col}")
 
     qualified_target = qualify(target_object, database)
     conn.execute(text(f"DROP TABLE IF EXISTS {qualified_target}"))
@@ -1690,11 +1344,11 @@ def _scd1_merge(
     # column — "scd tables should also have hashkey created by
     # merge_compare columns," per explicit instruction.
     preserve_target = (ctx.task_params.get("PRESERVE_TARGET") or "false").strip().lower() == "true"
+    dialect = _dialect(conn)
 
     def effective_hash(target_alias: str) -> str:
-        return _hash_value_expression(
-            [f"COALESCE(s.{c}, {target_alias}.{c})" for c in merge_compare_columns],
-            conn.dialect.name,
+        return dialect.hash_expression(
+            [f"COALESCE(s.{c}, {target_alias}.{c})" for c in merge_compare_columns]
         )
 
     comparison_hash = effective_hash("t") if preserve_target else "s.HASH_KEY"
@@ -1716,12 +1370,11 @@ def _scd1_merge(
     comparison_hash = effective_hash(uq) if preserve_target else "s.HASH_KEY"
     upd_changed = f"{uq}.HASH_KEY IS DISTINCT FROM {comparison_hash}"
 
-    # Databricks requires an aggregate to prove scalar cardinality. The
-    # stage has already passed _dedupe_stage, so FIRST sees at most one row
-    # per key and preserves its value (including NULL) without choosing a
-    # winner or imposing an ordering requirement on the column's data type.
+    # Some dialects (Databricks) need an aggregate to prove scalar
+    # cardinality. The stage has already passed _dedupe_stage, so it sees at
+    # most one row per key and preserves its value, NULL included.
     def source_value(c: str) -> str:
-        value = f"FIRST(s.{c})" if conn.dialect.name == "databricks" else f"s.{c}"
+        value = dialect.scalar_source_value(f"s.{c}")
         return f"(SELECT {value} FROM {stage} s WHERE {upd_key_match})"
 
     set_pieces = []
@@ -1731,9 +1384,8 @@ def _scd1_merge(
             if c.lower() == "hash_key":
                 # Hash the values actually stored, not the nullable source
                 # row: otherwise a repeated load would report false changes.
-                value = _hash_value_expression(
-                    [f"COALESCE({source_value(col)}, {uq}.{col})" for col in merge_compare_columns],
-                    conn.dialect.name,
+                value = dialect.hash_expression(
+                    [f"COALESCE({source_value(col)}, {uq}.{col})" for col in merge_compare_columns]
                 )
             else:
                 value = f"COALESCE({value}, {uq}.{c})"
@@ -1825,7 +1477,7 @@ def _scd2_merge(
     # alone, which could also match historically-inactive rows from earlier
     # SCD2 runs of the same target.
     changed_keys = _scratch_name(
-        conn.dialect.name, f"etl_changed_keys_{ctx.task_run_id}", target_object, database
+        _dialect(conn), f"etl_changed_keys_{ctx.task_run_id}", target_object, database
     )
     conn.execute(text(f"DROP TABLE IF EXISTS {changed_keys}"))
     key_columns_sql = ", ".join(merge_key)

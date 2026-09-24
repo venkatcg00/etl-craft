@@ -1,0 +1,54 @@
+# Engine DB on SQLite — the default.
+#
+# One file per environment, nothing to install and nothing to authenticate
+# (auth_mode is `none` whether written or not). Relative paths resolve
+# against this file. SQLite serves one machine: a remote orchestrator's
+# workers elsewhere cannot open the file, so production uses PostgreSQL.
+#
+# Complete and loadable as written: tests/test_config_examples.py loads every
+# file in this directory, for every profile it declares.
+
+Secrets:
+  Source_type: environment        # names below are read from the process environment
+  Profile: dev                    # the default profile; ETL_CRAFT_PROFILE=prod switches all
+
+Orchestration:
+  Mode: local
+  Task_timeout_seconds: 21600
+  Max_parallel_tasks: 8
+  Enforce_sla: false
+
+Engine:
+  Name: SQLite
+  dev:
+    jdbc_url: jdbc:sqlite:etl-craft-engine-dev.db
+  sit:
+    jdbc_url: jdbc:sqlite:etl-craft-engine-sit.db
+  uat:
+    jdbc_url: jdbc:sqlite:etl-craft-engine-uat.db
+  prod:
+    jdbc_url: jdbc:sqlite:etl-craft-engine-prod.db
+
+Warehouse:
+  Name: Postgres
+  Table_format: native
+  dev:
+    jdbc_url: WAREHOUSE_JDBC_URL
+    user: WAREHOUSE_USER
+    auth_mode: WAREHOUSE_AUTH_MODE
+    secret: WAREHOUSE_SECRET
+  sit:
+    jdbc_url: WAREHOUSE_JDBC_URL
+    user: WAREHOUSE_USER
+    auth_mode: WAREHOUSE_AUTH_MODE
+    secret: WAREHOUSE_SECRET
+  uat:
+    jdbc_url: WAREHOUSE_JDBC_URL
+    user: WAREHOUSE_USER
+    auth_mode: WAREHOUSE_AUTH_MODE
+    secret: WAREHOUSE_SECRET
+  prod:
+    jdbc_url: WAREHOUSE_JDBC_URL
+    user: WAREHOUSE_USER
+    auth_mode: WAREHOUSE_AUTH_MODE
+    secret: WAREHOUSE_SECRET

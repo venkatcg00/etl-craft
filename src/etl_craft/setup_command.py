@@ -1,35 +1,20 @@
-"""`etl-craft setup` — one idempotent command that brings a deployment up to date.
+"""`etl-craft setup` — one idempotent command that brings the Engine DB up to date.
 
-[DEVIATION, 2026-09-20] Replaces interactive `configure` entirely, per explicit
-instruction: "remove the ineractive setup, lets go in dbt route. one single
-command with required files and it should itself up. so, everytime the command
-is ran, it either set itself up, or updates the setup with newest data."
+[DEVIATION, 2026-09-24] `setup` no longer writes `craft-connector.yml`. Per
+explicit instruction, "the craft connector yaml should not be something that
+the engine builds. it should be provided by user." The file is the team's own,
+versioned artefact -- like a dbt profiles.yml -- and a tool that rewrites it
+also rewrites its comments, its ordering and its intent. So `setup` reads the
+file and never touches it.
 
-So this is the dbt shape: you keep your settings in files (or in the
-environment), and one command reconciles reality with them. Run it on a fresh
-machine and it writes the config and creates the schema. Run it again after
-any change and it updates the config and applies whatever migrations are
-pending. There is no separate first-run path to get wrong, and no prompt
-sequence to sit through in CI.
+What it does: validates the configuration, then brings the Engine DB to
+current -- the packaged schema for its dialect if the database is empty,
+pending migrations if not. Run it again after any upgrade; there is no
+separate first-run path.
 
-What it does, in order:
-  1. Reads settings from a .env-style file (`--env FILE`, default `./.env`),
-     or from the process environment (`--from-environment`) — per explicit
-     instruction that either source is legitimate.
-  2. Writes or updates `craft-connector.yml`. New files use the canonical
-     manifest with variable names; legacy files retain their existing shape.
-  3. Brings the Engine DB to current: applies the packaged schema if the
-     database is empty, otherwise applies pending migrations.
-  4. Names the secret variables the resulting configuration expects.
-
-[CHOICE] `init-db` and `migrate` stay as separate verbs. `setup` calls the
-same code, but a DBA applying a schema by hand, or a CI job running only a
-migration, should not have to rewrite craft-connector.yml to do it.
-
-[CHOICE] Step 3 is skipped when the Engine DB is unreachable, reported rather
-than raised. Writing the config is still useful on its own — that is often
-exactly the step that fixes the connection — and failing the whole command
-would leave nothing done.
+[CHOICE] `init-db` and `migrate` stay as separate verbs: a DBA applying a
+schema by hand, or a CI job running only a migration, uses exactly the one it
+needs.
 """
 
 from __future__ import annotations
@@ -39,8 +24,7 @@ from pathlib import Path
 
 from sqlalchemy.exc import SQLAlchemyError
 
-from etl_craft.config import ConfigError, load_config
-from etl_craft.configure import _read_raw_yaml, _required_secret_vars, configure_from_env
+from etl_craft.config import ConfigError, ConnectorConfig, load_config
 from etl_craft.db import build_engine
 from etl_craft.init_db import InitDbError, existing_engine_tables, init_db
 from etl_craft.migrate import (
@@ -49,18 +33,14 @@ from etl_craft.migrate import (
     mark_packaged_migrations_applied,
 )
 
-DEFAULT_ENV_FILE = Path(".env")
-
 
 @dataclass
 class SetupReport:
-    """What one `setup` run actually did, step by step."""
+    """What one `setup` run actually did."""
 
     config_path: Path
-    config_action: str
-    database_action: str
+    database_action: str = "skipped"
     applied_migrations: list[str] = field(default_factory=list)
-    required_secrets: list[tuple[str, str]] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
 
     @property
@@ -69,59 +49,30 @@ class SetupReport:
         return not self.problems
 
 
-def run_setup(
-    *,
-    config_path: Path,
-    env_path: Path | str | None,
-    from_environment: bool,
-    migrations_dir: Path | str | None = None,
-) -> SetupReport:
-    """Reconcile config and schema with the supplied settings. Safe to run repeatedly."""
-    existed = config_path.is_file()
-    before = _read_raw_yaml(config_path) if existed else {}
-
-    source = None if from_environment else (Path(env_path) if env_path else DEFAULT_ENV_FILE)
-    if source == DEFAULT_ENV_FILE and env_path is None and not source.is_file():
-        # [DEVIATION, 2026-09-24] No settings file and none asked for: read the
-        # environment, where nothing needs to be set at all -- every value has
-        # a default, down to a SQLite Engine DB. A file that was named
-        # explicitly and is missing is still an error below.
-        source = None
-    if source is not None and not source.is_file():
+def run_setup(*, config_path: Path, migrations_dir: Path | str | None = None) -> SetupReport:
+    """Validate the user's configuration and bring the Engine DB current. Safe to repeat."""
+    if not config_path.is_file():
         raise ConfigError(
-            f"no settings file at {source} — create one (see "
-            "docs/craft-connector.example.yml), pass --env FILE, or use "
-            "--from-environment to read the settings already exported here"
+            f"no craft-connector.yml at {config_path} — write one first (see "
+            "docs/craft-connector.example.yml); etl-craft reads it and never writes it"
         )
-
-    configure_from_env(source, config_path)
-    after = _read_raw_yaml(config_path)
-    if not existed:
-        config_action = f"created {config_path}"
-    elif after != before:
-        config_action = f"updated {config_path}"
-    else:
-        config_action = f"{config_path} already current"
-
-    report = SetupReport(
-        config_path=config_path,
-        config_action=config_action,
-        database_action="skipped",
-        required_secrets=_required_secret_vars(after),
-    )
-    _bring_database_current(report, config_path, migrations_dir)
+    # Raised, not reported: a file that does not parse is a configuration
+    # error (exit 2) like everywhere else, never "Engine DB not reachable".
+    config = load_config(config_path)
+    report = SetupReport(config_path=config_path)
+    _bring_database_current(report, config, migrations_dir)
     return report
 
 
 def _bring_database_current(
-    report: SetupReport, config_path: Path, migrations_dir: Path | str | None
+    report: SetupReport, config: ConnectorConfig, migrations_dir: Path | str | None
 ) -> None:
     try:
-        config = load_config(config_path)
         engine = build_engine(config)
     except ConfigError as exc:
-        # Reported, not raised: writing the config is useful on its own, and
-        # is often the step that fixes the connection in the first place.
+        # Reported, not raised: an unresolvable secret is often exactly what
+        # the operator is in the middle of fixing, and `doctor` is the verb
+        # that diagnoses a connection in detail.
         report.database_action = "not reachable"
         report.problems.append(f"Engine DB not reachable yet: {exc}")
         return

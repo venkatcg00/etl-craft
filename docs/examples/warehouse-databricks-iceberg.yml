@@ -1,0 +1,127 @@
+# Warehouse: Databricks SQL, Iceberg-readable tables (Delta with UniForm).
+#
+# Table_format: iceberg creates managed Delta tables with UniForm enabled:
+# Databricks reads and writes Delta, external engines read the Iceberg metadata
+# written beside it. A task may still ask for TABLE_FORMAT native.
+#
+# Complete and loadable as written: tests/test_config_examples.py loads every
+# file in this directory, for every profile it declares.
+
+Secrets:
+  Source_type: environment        # names below are read from the process environment
+  Profile: dev                    # the default profile; ETL_CRAFT_PROFILE=prod switches all
+
+Orchestration:
+  Mode: remote                    # an orchestrator runs each task from generate-yml's DAGs
+  Name: Airflow                   # informational only
+  Task_timeout_seconds: 21600
+  Max_parallel_tasks: 8
+  Enforce_sla: false              # parsed but not yet enforced (docs/configuration.md)
+  dev:
+    Global_dag: false
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: false
+    Allow_schedule: false
+  sit:
+    Global_dag: false
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: false
+    Allow_schedule: false
+    Email:
+      host: EMAIL_HOST
+      port: EMAIL_PORT
+      from_address: EMAIL_FROM
+      auth_mode: EMAIL_AUTH_MODE
+      user: EMAIL_USER
+      use_tls: EMAIL_USE_TLS
+      secret: EMAIL_SECRET
+  uat:
+    Global_dag: false
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: false
+    Allow_schedule: false
+    Email:
+      host: EMAIL_HOST
+      port: EMAIL_PORT
+      from_address: EMAIL_FROM
+      auth_mode: EMAIL_AUTH_MODE
+      user: EMAIL_USER
+      use_tls: EMAIL_USE_TLS
+      secret: EMAIL_SECRET
+  prod:
+    Global_dag: true
+    Catchup: false
+    Tags: [analytics]
+    Retries: 1
+    Retry_delay_minutes: 5
+    Depends_on_past: false
+    Email_on_failure: true
+    Allow_schedule: true
+    Email_recipients: [data-alerts@example.com]
+    Email:
+      host: EMAIL_HOST
+      port: EMAIL_PORT
+      from_address: EMAIL_FROM
+      auth_mode: EMAIL_AUTH_MODE
+      user: EMAIL_USER
+      use_tls: EMAIL_USE_TLS
+      secret: EMAIL_SECRET
+
+Engine:
+  Name: Postgres
+  dev:
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE
+    secret: ENGINE_SECRET
+  sit:
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE
+    secret: ENGINE_SECRET
+  uat:
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE
+    secret: ENGINE_SECRET
+  prod:
+    jdbc_url: ENGINE_JDBC_URL
+    user: ENGINE_USER
+    auth_mode: ENGINE_AUTH_MODE
+    secret: ENGINE_SECRET
+
+Warehouse:
+  Name: Databricks
+  Table_format: iceberg
+  dev:
+    jdbc_url: WAREHOUSE_JDBC_URL    # jdbc:databricks://<host>:443/default;httpPath=/sql/1.0/warehouses/<id>
+    catalog: WAREHOUSE_CATALOG      # Unity Catalog catalog
+    schema: WAREHOUSE_SCHEMA
+    token: WAREHOUSE_TOKEN          # a personal access token
+  sit:
+    jdbc_url: WAREHOUSE_JDBC_URL    # jdbc:databricks://<host>:443/default;httpPath=/sql/1.0/warehouses/<id>
+    catalog: WAREHOUSE_CATALOG      # Unity Catalog catalog
+    schema: WAREHOUSE_SCHEMA
+    token: WAREHOUSE_TOKEN          # a personal access token
+  uat:
+    jdbc_url: WAREHOUSE_JDBC_URL    # jdbc:databricks://<host>:443/default;httpPath=/sql/1.0/warehouses/<id>
+    catalog: WAREHOUSE_CATALOG      # Unity Catalog catalog
+    schema: WAREHOUSE_SCHEMA
+    token: WAREHOUSE_TOKEN          # a personal access token
+  prod:
+    jdbc_url: WAREHOUSE_JDBC_URL    # jdbc:databricks://<host>:443/default;httpPath=/sql/1.0/warehouses/<id>
+    catalog: WAREHOUSE_CATALOG      # Unity Catalog catalog
+    schema: WAREHOUSE_SCHEMA
+    token: WAREHOUSE_TOKEN          # a personal access token

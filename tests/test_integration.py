@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import yaml
-from sqlalchemy import BigInteger, Column, create_engine, inspect, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import OperationalError
 
 import etl_craft.business_rules as business_rules_module
@@ -53,7 +53,7 @@ from etl_craft.cfg import (
     resolve_task_id,
 )
 from etl_craft.cli import main as cli_main
-from etl_craft.cloning import _create_mirror, run_cloning_if_enabled
+from etl_craft.cloning import run_cloning_if_enabled
 from etl_craft.column_lineage import lineage_for_tasks
 from etl_craft.config import (
     CloningConfig,
@@ -76,6 +76,8 @@ from etl_craft.crosspipe import (
     consume_task_dependency_edges,
 )
 from etl_craft.db import ConnectionError_
+from etl_craft.dialects import warehouse_dialects
+from etl_craft.dialects.engine_dialects import for_name as engine_dialect
 from etl_craft.docs_generator import collect_docs, generate_docs
 from etl_craft.doctor import run_checks
 from etl_craft.documentation import fetch_history, refresh_all, refresh_task_documentation
@@ -94,7 +96,6 @@ from etl_craft.orchestrator import (
     run_pipeline,
     settle_unsatisfiable_tasks,
 )
-from etl_craft.packaged_sql import packaged_migrations_dir
 from etl_craft.resolver import ResolverError, build_graph
 from etl_craft.runlog import (
     RunLogError,
@@ -114,6 +115,12 @@ from etl_craft.validate import (
     validate_warehouse_storage,
 )
 from etl_craft.warehouse import build_warehouse_engine, open_warehouse, verify_iceberg_catalog
+
+
+def packaged_migrations_dir():
+    """The PostgreSQL Engine DB's packaged migration stream (these tests' Engine DB)."""
+    return engine_dialect("postgresql").migrations_dir()
+
 
 # ==============================================================================
 # runlog.py — against real Postgres
@@ -392,7 +399,9 @@ def test_hash_expression_yields_the_same_32_hex_chars_on_both_warehouses(
     # stronger one -- Postgres and DuckDB produce the *identical* HASH_KEY for
     # the same row, so an SCD target is portable between them and
     # VARCHAR(32) is right for both.
-    expr = sql_actions_module._hash_expression(["a", "b"], "s")
+    expr = sql_actions_module._hash_expression(
+        ["a", "b"], "s", warehouse_dialects.resolve("postgresql", "native")
+    )
     sql = f"SELECT {expr} FROM (SELECT 'x' AS a, CAST(NULL AS VARCHAR) AS b) AS s"
 
     with postgres_engine.connect() as conn:
@@ -491,13 +500,8 @@ def test_create_mirror_rejects_a_quote_in_snowflake_storage_values(postgres_engi
     # is exactly what lets a real (non-Snowflake) engine stand in safely.
     cloning = CloningConfig(external_volume="v'; DROP TABLE t; --", base_location="b")
     with pytest.raises(ValueError, match="must not contain a quote"):
-        _create_mirror(
-            postgres_engine,
-            "cfg_pipelines",
-            [Column("pipeline_id", BigInteger)],
-            "snowflake",
-            cloning,
-            "iceberg",
+        warehouse_dialects.resolve("snowflake", "iceberg").mirror_table_ddl(
+            "cfg_pipelines", "pipeline_id BIGINT", cloning
         )
 
 
@@ -3891,7 +3895,7 @@ def test_cli_generate_yml_global_enabled(
     tmp_path, monkeypatch, postgres_engine, committed_pipeline, capsys
 ):
     (tmp_path / "craft-connector.yml").write_text(
-        CRAFT_CONNECTOR_YAML + "\nOrchestrator:\n  Global_dag: true\n"
+        CRAFT_CONNECTOR_YAML.replace("Mode: local", "Mode: local\n  Global_dag: true")
     )
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ETL_CRAFT_POSTGRES_DEV_SECRET", "etl_craft")
@@ -4014,23 +4018,14 @@ def test_cli_validate_reports_missing_warehouse_for_active_business_rule(
 
 WAREHOUSE_YAML_SUFFIX = """
 Warehouse:
-  Active_profile: dev
-  Profiles:
-    dev:
-      jdbc_url: jdbc:postgresql://localhost:55432/etl_craft
-      user: etl_craft
-      auth_mode: password
+  dev:
+    jdbc_url: jdbc:postgresql://localhost:55432/etl_craft
+    user: TEST_ENGINE_USER
+    auth_mode: TEST_ENGINE_AUTH_MODE
+    secret: ETL_CRAFT_WAREHOUSE_DEV_SECRET
 """
 
-UNREACHABLE_WAREHOUSE_YAML_SUFFIX = """
-Warehouse:
-  Active_profile: dev
-  Profiles:
-    dev:
-      jdbc_url: jdbc:postgresql://localhost:1/etl_craft
-      user: etl_craft
-      auth_mode: password
-"""
+UNREACHABLE_WAREHOUSE_YAML_SUFFIX = WAREHOUSE_YAML_SUFFIX.replace(":55432/", ":1/")
 
 
 def test_cli_validate_ok_with_warehouse_configured_and_matching_pk(
@@ -5172,7 +5167,7 @@ def test_sql_actions_run_against_real_databricks_iceberg(
     postgres_engine, databricks_profile, committed_pipeline
 ):
     # TABLE_FORMAT=iceberg on Databricks means a managed Delta table with
-    # UniForm enabled (see sql_actions.ICEBERG_TABLE_CLAUSE's own comment,
+    # UniForm enabled (see dialects/warehouse_dialects/databricks_iceberg.py's own docstring,
     # 2026-09-23), not literal `USING ICEBERG` -- needs no external storage
     # parameters either way (unlike Snowflake's EXTERNAL VOLUME below), so
     # this needs nothing extra beyond the same token the native test above
@@ -5265,13 +5260,13 @@ def test_sql_actions_assign_row_ids_on_an_iceberg_backed_warehouse(
     # where Postgres and DuckDB let the column fill itself.
     #
     # There is no Iceberg warehouse reachable from the test suite, so this
-    # forces that code path on against real Postgres by taking Postgres out of
-    # NATIVE_STORAGE_DIALECTS. What it proves is what most of the risk
+    # forces that code path on against real Postgres by switching the Postgres
+    # dialect's surrogate_key to "computed". What it proves is what most of the risk
     # actually is: the generated SQL is well-formed and the ROW_ID arithmetic
     # is right across runs. What it does NOT prove is that Databricks,
     # Snowflake or Trino accept these statements -- that needs a real
     # endpoint, and is stated as unverified rather than implied.
-    monkeypatch.setattr(sql_actions_module, "NATIVE_STORAGE_DIALECTS", frozenset({"duckdb"}))
+    monkeypatch.setattr(warehouse_dialects.for_key("postgres"), "surrogate_key", "computed")
     target = f"public.iceberg_rows_{committed_pipeline}"
     warehouse_tables.append(target)
 
@@ -5878,7 +5873,9 @@ def test_sql_scd1_preserve_target_nulls_and_hashes(
         current_ids = dict(conn.execute(text(f"SELECT id, ROW_ID FROM {target}")).all())
         assert all(current_ids[key] == value for key, value in original_ids.items())
         expected_hash = sql_actions_module._hash_expression(
-            ["name", "link", "detail", "score"], "t", "postgresql"
+            ["name", "link", "detail", "score"],
+            "t",
+            warehouse_dialects.resolve("postgresql", "native"),
         )
         assert (
             conn.execute(
@@ -5947,7 +5944,9 @@ def test_validate_snowflake_storage_matches_managed_table_creation(
 ):
     from types import SimpleNamespace
 
-    _insert_task_parameters(pg_conn, cfg_task, {"SQL_ACTION": "CREATE_TABLE", **params})
+    _insert_task_parameters(
+        pg_conn, cfg_task, {"SQL_ACTION": "CREATE_TABLE", "TABLE_FORMAT": "iceberg", **params}
+    )
     engine = SimpleNamespace(dialect=SimpleNamespace(name="snowflake"))
     issues = validate_warehouse_storage(pg_conn, make_config(warehouse=True), engine)
     assert bool(issues) == expected_issue
@@ -7958,23 +7957,23 @@ def test_setup_brings_a_real_database_up_then_keeps_it_current(
 
         monkeypatch.chdir(tmp_path)
         (tmp_path / ".env").write_text(
-            "ETL_CRAFT_MODE=local\n"
-            "ETL_CRAFT_SOURCE_TYPE=file\n"
-            "ETL_CRAFT_SOURCE_PATH=.env\n"
-            "ETL_CRAFT_ENGINE_PROFILE=dev\n"
             f"ENGINE_JDBC_URL=jdbc:postgresql://{url.host}:{url.port}/{db_name}\n"
             f"ENGINE_USER={url.username}\n"
             "ENGINE_AUTH_MODE=password\n"
             f"ENGINE_SECRET={url.password}\n"
         )
-
-        first = run_setup(
-            config_path=tmp_path / "craft-connector.yml",
-            env_path=None,
-            from_environment=False,
+        config_path = tmp_path / "craft-connector.yml"
+        config_text = (
+            "# written by the team\n"
+            "Secrets:\n  Source_type: file\n  Path: .env\n\n"
+            "Orchestration:\n  Mode: local\n\n"
+            "Engine:\n  dev:\n    jdbc_url: ENGINE_JDBC_URL\n    user: ENGINE_USER\n"
+            "    auth_mode: ENGINE_AUTH_MODE\n    secret: ENGINE_SECRET\n"
         )
+        config_path.write_text(config_text, encoding="utf-8")
+
+        first = run_setup(config_path=config_path)
         assert first.ok, first.problems
-        assert "created" in first.config_action
         assert "schema created" in first.database_action
         # E2-83. Nothing was *executed*. schema.sql already contains
         # everything the packaged migrations add, and running all of them on
@@ -7985,14 +7984,11 @@ def test_setup_brings_a_real_database_up_then_keeps_it_current(
         # carrying a data backfill would have applied it twice.
         assert first.applied_migrations == []
 
-        second = run_setup(
-            config_path=tmp_path / "craft-connector.yml",
-            env_path=None,
-            from_environment=False,
-        )
+        second = run_setup(config_path=config_path)
         assert second.ok, second.problems
-        assert "already current" in second.config_action
         assert second.database_action == "already up to date"
+        # setup reads craft-connector.yml and never writes it, comments included.
+        assert config_path.read_text(encoding="utf-8") == config_text
 
         target = create_engine(url.set(database=db_name).render_as_string(hide_password=False))
         try:
@@ -8152,12 +8148,14 @@ def test_cli_init_db_refuses_an_already_initialized_database(craft_connector_on_
     assert "already has engine table" in capsys.readouterr().err
 
 
-def test_init_db_wraps_a_failure_with_the_file_it_was_applying(postgres_engine, monkeypatch):
-    monkeypatch.setattr(
-        "etl_craft.init_db.read_packaged_schema",
-        lambda dialect="postgresql": "SELECT this_is_not_valid_sql(",
-    )
-    with pytest.raises(InitDbError, match=r"failed applying schema(_sqlite)?\.sql"):
+def test_init_db_wraps_a_failure_with_the_file_it_was_applying(
+    postgres_engine, monkeypatch, tmp_path
+):
+    broken = tmp_path / "schema.sql"
+    broken.write_text("SELECT this_is_not_valid_sql(", encoding="utf-8")
+    dialect = engine_dialect(postgres_engine.dialect.name)
+    monkeypatch.setattr(dialect, "schema_path", lambda: broken)
+    with pytest.raises(InitDbError, match=r"failed applying \w+ schema\.sql"):
         init_db(postgres_engine, force=True)
 
 
@@ -8760,3 +8758,143 @@ def test_cli_history_task_level_no_logged_runs_prints_placeholder(
 
     assert exit_code == 0
     assert "(no logged runs)" in capsys.readouterr().out
+
+
+# ==============================================================================
+# duckdb_iceberg — DuckDB as compute over the local Iceberg REST catalog + MinIO
+# ==============================================================================
+
+ICEBERG_REST_URL = os.environ.get("ETL_CRAFT_TEST_ICEBERG_REST_URL", "http://localhost:58181")
+
+
+def _duckdb_iceberg_config() -> ConnectorConfig:
+    """Engine DB as usual; warehouse is DuckDB attached to the local Iceberg catalog."""
+    return ConnectorConfig(
+        mode="local",
+        source=SourceConfig(type="environment"),
+        postgres=ConnectionSection(active_profile="dev", profiles={"dev": engine_profile()}),
+        cloning=CloningConfig(),
+        warehouse=ConnectionSection(
+            active_profile="dev",
+            profiles={
+                "dev": ConnectionProfile(
+                    section="WAREHOUSE",
+                    name="dev",
+                    jdbc_url="jdbc:duckdb:",
+                    user="",
+                    auth_mode="none",
+                    extra={
+                        "catalog": "lake",
+                        "catalog_uri": ICEBERG_REST_URL,
+                        "iceberg_warehouse": "s3://warehouse/",
+                        "s3_endpoint": "localhost:59000",
+                        "s3_region": "us-east-1",
+                        "s3_url_style": "path",
+                        "s3_use_ssl": "false",
+                        "s3_key_id": "minioadmin",
+                        "s3_secret": "minioadmin",
+                    },
+                )
+            },
+        ),
+        warehouse_table_format="iceberg",
+    )
+
+
+@pytest.fixture
+def duckdb_iceberg_warehouse(postgres_engine):
+    """A DuckDB engine attached to the local Iceberg REST catalog, or skip."""
+    import urllib.request
+
+    try:
+        urllib.request.urlopen(f"{ICEBERG_REST_URL}/v1/config?warehouse=s3://warehouse/", timeout=3)
+    except OSError:
+        pytest.skip(f"Iceberg REST catalog not reachable at {ICEBERG_REST_URL} — run `make db-up`")
+    config = _duckdb_iceberg_config()
+    engine = build_warehouse_engine(config)
+    with engine.begin() as conn:
+        conn.execute(text("CREATE SCHEMA IF NOT EXISTS lake.ducktest"))
+    yield config, engine
+    engine.dispose()
+
+
+def test_sql_actions_run_end_to_end_on_duckdb_over_iceberg(
+    duckdb_iceberg_warehouse, postgres_engine, committed_pipeline
+):
+    # [ADDITION, 2026-09-24] The duckdb_iceberg dialect, through the real
+    # task path: CREATE_TABLE, a two-run SCD1_MERGE (insert, then a matched-row
+    # update), then OVERWRITE_TABLE -- against real Iceberg tables in the
+    # repo's own REST catalog, not a stand-in.
+    config, warehouse = duckdb_iceberg_warehouse
+    suffix = committed_pipeline
+    tables = [f"lake.ducktest.{name}_{suffix}" for name in ("src", "created", "merged", "over")]
+    with warehouse.begin() as conn:
+        for table in tables:
+            conn.execute(text(f"DROP TABLE IF EXISTS {table}"))
+        conn.execute(
+            text(f"CREATE TABLE {tables[0]} AS SELECT 1 AS id, 'a' AS name UNION ALL SELECT 2, 'b'")
+        )
+    warehouse.dispose()
+    seed_active_run(postgres_engine, committed_pipeline)
+    source = f"SELECT id, name FROM {tables[0]} WHERE 1=1"
+
+    def run(code: str, params: dict[str, str]) -> None:
+        task_id = insert_committed_task(postgres_engine, committed_pipeline, code)
+        insert_committed_task_parameters(postgres_engine, task_id, params)
+        outcome = run_task(postgres_engine, config, "TEST_CONCURRENT_PL", code)
+        assert outcome.status == "SUCCESS", outcome.message
+
+    run(
+        "d_create",
+        {
+            "SQL_ACTION": "CREATE_TABLE",
+            "TARGET_OBJECT": f"ducktest.created_{suffix}",
+            "SOURCE_SQL": source,
+        },
+    )
+    merge = {
+        "SQL_ACTION": "SCD1_MERGE",
+        "TARGET_OBJECT": f"ducktest.merged_{suffix}",
+        "SOURCE_SQL": source,
+        "MERGE_KEY": "id",
+        "MERGE_COMPARE_COLUMNS": "name",
+    }
+    run("d_merge", merge)
+    with warehouse.begin() as conn:
+        first_ids = dict(conn.execute(text(f"SELECT id, ROW_ID FROM {tables[2]}")).all())
+        conn.execute(text(f"UPDATE {tables[0]} SET name = 'a2' WHERE id = 1"))
+        conn.execute(text(f"INSERT INTO {tables[0]} VALUES (3, 'c')"))
+    warehouse.dispose()
+    run("d_merge2", merge)
+    run(
+        "d_over",
+        {
+            "SQL_ACTION": "OVERWRITE_TABLE",
+            "TARGET_OBJECT": f"ducktest.over_{suffix}",
+            "SOURCE_SQL": source,
+        },
+    )
+
+    with warehouse.connect() as conn:
+        created = conn.execute(text(f"SELECT id, name FROM {tables[1]} ORDER BY id")).all()
+        merged = conn.execute(text(f"SELECT id, name, ROW_ID FROM {tables[2]} ORDER BY id")).all()
+        over = conn.execute(text(f"SELECT COUNT(*) FROM {tables[3]}")).scalar_one()
+        # Really Iceberg tables in the attached catalog, not DuckDB-local ones.
+        in_catalog = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_catalog = 'lake' AND table_schema = 'ducktest' "
+                "AND table_name IN (:a, :b, :c)"
+            ),
+            {"a": f"created_{suffix}", "b": f"merged_{suffix}", "c": f"over_{suffix}"},
+        ).scalar_one()
+        for table in tables:
+            conn.execute(text(f"DROP TABLE IF EXISTS {table}"))
+        conn.commit()
+    assert [tuple(r) for r in created] == [(1, "a"), (2, "b")]
+    assert [(r.id, r.name) for r in merged] == [(1, "a2"), (2, "b"), (3, "c")]
+    # Computed ROW_ID: an updated row keeps its own, a new one takes the next.
+    assert {r.id: r.ROW_ID for r in merged if r.id in first_ids} == first_ids
+    assert next(r.ROW_ID for r in merged if r.id == 3) == max(first_ids.values()) + 1
+    assert over == 3
+    assert in_catalog == 3

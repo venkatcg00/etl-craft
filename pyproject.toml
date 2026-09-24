@@ -83,9 +83,11 @@ build-backend = "uv_build"
 # a directory that does not exist. uv_build packages src/<module>/ only, which
 # is why sql/ moved under src/etl_craft/ rather than being included from the
 # repo root.
+# [DEVIATION, 2026-09-24] Each Engine DB dialect now owns its schema.sql and
+# migrations/ under dialects/engine_dialects/<dialect>/, so that tree ships.
 [tool.uv.build-backend]
 source-include = [
-    "src/etl_craft/sql/**",
+    "src/etl_craft/dialects/**",
     "src/etl_craft/vendor/**",
     "src/etl_craft/py.typed",
 ]

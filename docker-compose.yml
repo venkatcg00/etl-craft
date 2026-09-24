@@ -13,11 +13,11 @@ services:
       # postgres's own entrypoint runs every .sql file here, in name order,
       # but only against a freshly initialized (empty) data directory — so
       # schema.sql applies once, on first `up`, not on every restart.
-      - ./src/etl_craft/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./src/etl_craft/dialects/engine_dialects/postgres/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
       # Mounted separately (not under initdb.d) since schema_test.sql is a
       # standalone smoke test meant to be run on demand against a disposable
       # database (see its own header) — not part of container startup.
-      - ./src/etl_craft/sql:/sql:ro
+      - ./src/etl_craft/dialects/engine_dialects/postgres:/sql:ro
       - etl_craft_pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U etl_craft -d etl_craft"]

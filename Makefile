@@ -1,7 +1,8 @@
 .PHONY: db-up db-down db-reset db-schema-test test test-sqlite-engine coverage typecheck wheel-smoke check
 
 # Brings up everything the test suite can use:
-#   * Postgres 16 (the Engine DB) with src/etl_craft/sql/schema.sql applied
+#   * Postgres 16 (the Engine DB) with its dialect's schema.sql applied
+#     (src/etl_craft/dialects/engine_dialects/postgres/schema.sql)
 #     — docker-entrypoint-initdb.d only runs on a fresh volume, so this is a
 #     no-op on an already-initialized one; use db-reset to force a clean slate.
 #   * A complete local Iceberg warehouse — MinIO, an Iceberg REST catalog and
@@ -24,7 +25,8 @@ db-reset:
 	docker compose down -v
 	$(MAKE) db-up
 
-# Runs src/etl_craft/sql/schema_test.sql's own EXPECT-FAIL/EXPECT-SUCCEED smoke test.
+# Runs the PostgreSQL Engine DB's schema_test.sql (EXPECT-FAIL/EXPECT-SUCCEED smoke test);
+# docker-compose.yml mounts that dialect's directory at /sql.
 # [DEVIATION, 2026-09-20, E2-26] Now under -v ON_ERROR_STOP=1: the file is
 # self-asserting, so psql's exit code is the result. It previously ran
 # without it here and in CI, so the step always exited 0 and nobody was

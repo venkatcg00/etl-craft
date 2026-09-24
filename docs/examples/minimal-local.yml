@@ -1,0 +1,27 @@
+# Minimal: nothing to install, nothing to set.
+#
+# A SQLite Engine DB and a DuckDB warehouse, both files, one `dev` profile,
+# and etl-craft running the waves itself. `etl-craft setup` next to this file
+# creates the Engine DB; `etl-craft doctor` checks everything.
+#
+# Complete and loadable as written: tests/test_config_examples.py loads every
+# file in this directory, for every profile it declares.
+
+Secrets:
+  Source_type: environment        # names below are read from the process environment
+  Profile: dev                    # the default profile; ETL_CRAFT_PROFILE=prod switches all
+
+Orchestration:
+  Mode: local
+  Task_timeout_seconds: 21600
+  Max_parallel_tasks: 8
+  Enforce_sla: false
+
+Engine:
+  dev:
+    jdbc_url: jdbc:sqlite:etl-craft-engine.db   # relative to this file
+
+Warehouse:
+  Name: DuckDB
+  dev:
+    jdbc_url: jdbc:duckdb:warehouse.duckdb       # relative to the working directory

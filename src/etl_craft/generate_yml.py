@@ -58,8 +58,8 @@
 #   1. The pipeline's own CFG_PIPELINES override column (CATCHUP, TAGS,
 #      RETRIES, RETRY_DELAY_MINUTES, DEPENDS_ON_PAST, EMAIL_ON_FAILURE,
 #      EMAIL_RECIPIENTS), if not NULL.
-#   2. craft-connector.yml's [Orchestrator] section (the same field names,
-#      title-cased), if set — a deployment-wide default.
+#   2. The active Orchestration profile in craft-connector.yml (the same
+#      field names, title-cased), if set — a per-environment default.
 #   3. A final hardcoded default in `_DEFAULT_*` below, used only if
 #      neither of the above set it. Reasoning for each (unchanged from
 #      before these became configurable): `depends_on_past: false` because
@@ -294,7 +294,10 @@ def generate_pipeline_dag(
     dag: dict[str, Any] = {
         "dag_id": detail.pipeline_code,
         "description": detail.description,
-        "schedule": detail.run_schedule,
+        # Allow_schedule: false keeps the pipeline's definition but emits no
+        # schedule, so an environment can hold every pipeline and run each one
+        # only when triggered (2026-09-24).
+        "schedule": detail.run_schedule if config.orchestrator.allow_schedule else None,
         "sla_hours": detail.sla_in_hours,
         "refresh_type": detail.refresh_type,
         "catchup": _resolve(detail.catchup, orch.catchup, False),
@@ -334,7 +337,7 @@ def generate_pipeline_dag(
 def generate_global_dag(conn: Connection) -> dict[str, Any]:
     """Build the optional cross-pipeline trigger DAG — every pipeline touched by a real edge.
 
-    [Orchestrator].Global_dag must be enabled (checked by the caller, not
+    Orchestration's Global_dag must be enabled (checked by the caller, not
     here — this function only needs `conn`, since resolving what to emit
     is purely CFG_PIPELINE_DEPENDENCY data, not config).
 

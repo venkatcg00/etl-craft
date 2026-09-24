@@ -66,7 +66,7 @@ from sqlalchemy.types import TypeEngine
 
 from etl_craft.config import CloningConfig, ConnectorConfig
 from etl_craft.db import is_sqlite_url
-from etl_craft.sql_actions import ICEBERG_CREATE_PREFIX, table_format_clause
+from etl_craft.dialects import warehouse_dialects
 from etl_craft.warehouse import open_warehouse, translate_jdbc_url
 
 # [ADDITION] CLAUDE.md names these table groups ("Scope: cfg | aud | all —
@@ -102,7 +102,7 @@ def tables_for_scope(scope: str) -> tuple[str, ...]:
 
 
 def _same_database(config: ConnectorConfig) -> bool:
-    """Check whether [Postgres] and [Warehouse]'s active profiles resolve to the same database.
+    """Check whether the Engine and Warehouse active profiles resolve to the same database.
 
     [Bug caught and fixed before shipping, not after] The first version of
     this check compared the *built* Engine objects' own `.url` attributes —
@@ -217,59 +217,18 @@ def _ensure_target_table(
     # was exactly the silently-unreadable artifact the Snowflake guard exists
     # to prevent. One invariant had two implementations, and only one of them
     # was careful.
-    dialect_name = warehouse_engine.dialect.name
-    needs_iceberg = table_format == "iceberg" and dialect_name in ICEBERG_CREATE_PREFIX
-    if needs_iceberg or table_format_clause(dialect_name, table_format):
-        _create_mirror(warehouse_engine, target_name, columns, dialect_name, cloning, table_format)
-    else:
+    dialect = warehouse_dialects.resolve(warehouse_engine.dialect.name, table_format)
+    type_compiler = warehouse_engine.dialect.type_compiler_instance
+    column_ddl = ", ".join(f"{c.name} {type_compiler.process(c.type)}" for c in columns)
+    statement = dialect.mirror_table_ddl(target_name, column_ddl, cloning)
+    if statement is None:
         target_metadata = MetaData()
         Table(target_name, target_metadata, *columns)
         target_metadata.create_all(warehouse_engine)
-    return Table(target_name, MetaData(), autoload_with=warehouse_engine)
-
-
-def _create_mirror(
-    warehouse_engine: Engine,
-    target_name: str,
-    columns: list[Column],
-    dialect_name: str,
-    cloning: CloningConfig,
-    table_format: str,
-) -> None:
-    """Create one mirrored table in the warehouse's configured format, as sql_actions does."""
-    type_compiler = warehouse_engine.dialect.type_compiler_instance
-    column_ddl = ", ".join(f"{c.name} {type_compiler.process(c.type)}" for c in columns)
-    prefix_kind = ICEBERG_CREATE_PREFIX.get(dialect_name) if table_format == "iceberg" else None
-    if prefix_kind:
-        if not cloning.external_volume or not cloning.base_location:
-            raise ValueError(
-                f"Cloning to {dialect_name} needs CREATE {prefix_kind} with an EXTERNAL_VOLUME "
-                "and BASE_LOCATION — set Cloning.External_volume and Cloning.Base_location in "
-                "craft-connector.yml. Refusing rather than mirroring into a non-Iceberg table "
-                "nothing else in the lakehouse could read."
-            )
-        # [ADDITION, 2026-09-23, E3-07] Same guard as sql_actions.py's own
-        # _create_iceberg_table_with_explicit_storage, for the same reason:
-        # both values are interpolated directly into DDL, unescaped, and
-        # sql_actions.py was already hardened for exactly this class of site
-        # (E2-84/E2-85). A stray quote here broke the statement instead of
-        # cleanly refusing with a name.
-        for value, name in (
-            (cloning.external_volume, "Cloning.External_volume"),
-            (cloning.base_location, "Cloning.Base_location"),
-        ):
-            if "'" in value:
-                raise ValueError(f"{name} must not contain a quote: {value!r}")
-        statement = (
-            f"CREATE {prefix_kind} {target_name} ({column_ddl}) "
-            f"EXTERNAL_VOLUME = '{cloning.external_volume}' CATALOG = 'SNOWFLAKE' "
-            f"BASE_LOCATION = '{cloning.base_location}/{target_name}'"
-        )
     else:
-        clause = table_format_clause(dialect_name, table_format)
-        statement = f"CREATE TABLE {target_name} ({column_ddl}) {clause}".rstrip()
-    with warehouse_engine.begin() as conn:
-        conn.execute(text(statement))
+        with warehouse_engine.begin() as conn:
+            conn.execute(text(statement))
+    return Table(target_name, MetaData(), autoload_with=warehouse_engine)
 
 
 # [ADDITION, 2026-09-20, E2-22] How many rows are held in memory at once
