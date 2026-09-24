@@ -1,6 +1,6 @@
 .PHONY: help sync lint format typecheck imports history test coverage check build verify-package clean \
 	certs services-up services-down services-reset test-harness suite release-gate \
-	docs docs-serve
+	docs docs-serve docs-site
 
 UV ?= uv
 
@@ -67,5 +67,9 @@ docs: ## Build the documentation site into site/ (strict: any warning fails)
 docs-serve: ## Serve the documentation site with live reload
 	$(UV) run mkdocs serve
 
+docs-site: ## Build the versioned site as GitHub Pages serves it into _site/
+	rm -rf _site
+	$(UV) run python scripts/build_docs_site.py _site
+
 clean: ## Remove build output and tool caches
-	rm -rf dist build site htmlcov .coverage .coverage.* .pytest_cache .mypy_cache .ruff_cache
+	rm -rf dist build site _site htmlcov .coverage .coverage.* .pytest_cache .mypy_cache .ruff_cache

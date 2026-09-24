@@ -35,7 +35,8 @@ A branch is ready to merge when:
   (`lint-imports`), the history gate, and the tests with coverage of at least 90%.
 - New or ported behaviour has tests at the right level (unit, integration or end-to-end).
 - The documentation page for the feature exists or is updated, and `make docs` builds it
-  without warnings.
+  without warnings. Merging into `main` publishes the site as the `dev` version on
+  GitHub Pages.
 
 ## Tests
 
