@@ -5,12 +5,12 @@ defines ``run(task)``, or ``run()`` when it needs nothing from the task (see
 ``etl_craft.scripting``). It runs in the task's own process, so what it prints and logs goes to
 the attempt's log, and the task's time limit applies to it.
 
-Its ``INPUT_PARAMS`` task parameter, when set, must be a JSON array; the script gets it as a
-list. The script gets the offset its last successful run stored, and returns the rows it wrote,
-recorded as the source, target and insert counts, and optionally a new offset, stored once it
-has succeeded. A stored offset keeps its type:
-a script that returns another type fails. Everything that can be wrong with the script or what
-it returns fails the task with a message naming the script and the problem.
+Its ``INPUT_PARAMS`` task parameter, when set, must be a JSON object; the script gets it as a
+dictionary. The script gets the offset its last successful run stored, and returns the rows it
+wrote, recorded as the source, target and insert counts, and optionally a new offset, stored once
+it has succeeded. A stored offset keeps its type: a script that returns another type fails.
+Everything that can be wrong with the script or what it returns fails the task with a message
+naming the script and the problem.
 """
 
 from __future__ import annotations
@@ -72,10 +72,10 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
         logger=logging.getLogger(f"{SCRIPT_LOGGER}.{context.task_code}"),
     )
     logger.info(
-        "running %s from offset %s with %d input param(s)",
+        "running %s from offset %s with input params %s",
         name,
         "none (first run)" if offset is None else f"{offset.stored()} ({offset.datatype})",
-        len(input_params),
+        ", ".join(sorted(input_params)) or "none",
     )
     started = time.monotonic()
     with capture_all_loggers():
@@ -107,17 +107,21 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
     )
 
 
-def parse_input_params(value: str | None) -> list[Any]:
-    """Return ``INPUT_PARAMS`` as a list; it must be a JSON array. Absent means empty."""
+_JSON_KINDS = {list: "array", str: "string", int: "number", float: "number", bool: "boolean"}
+
+
+def parse_input_params(value: str | None) -> dict[str, Any]:
+    """Return ``INPUT_PARAMS`` as a dictionary; it must be a JSON object. Absent means empty."""
     if value is None or not value.strip():
-        return []
+        return {}
     try:
         parsed = json.loads(value)
     except json.JSONDecodeError as error:
         raise HandlerError(f"INPUT_PARAMS is not valid JSON ({error}): {value!r}") from error
-    if not isinstance(parsed, list):
+    if not isinstance(parsed, dict):
         raise HandlerError(
-            f'INPUT_PARAMS must be a JSON array, such as ["eu", 30]; got {type(parsed).__name__}'
+            'INPUT_PARAMS must be a JSON object, such as {"region": "eu", "days": 30}; '
+            f"got a JSON {_JSON_KINDS.get(type(parsed), type(parsed).__name__)}: {value!r}"
         )
     return parsed
 

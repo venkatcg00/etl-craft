@@ -146,8 +146,8 @@ class ScriptTask:
     """What a script is given to run.
 
     ``offset`` is where the last successful run left off, ``None`` on the first run.
-    ``input_params`` is the task's ``INPUT_PARAMS``, a JSON array, as a list. ``force`` is true
-    when the task was run with ``--force``.
+    ``input_params`` is the task's ``INPUT_PARAMS``, a JSON object, as a dictionary. ``force`` is
+    true when the task was run with ``--force``.
     """
 
     pipeline_code: str
@@ -155,7 +155,7 @@ class ScriptTask:
     pipeline_run_id: int
     refresh_type: str
     offset: Offset | None
-    input_params: list[Any]
+    input_params: Mapping[str, Any]
     task_params: Mapping[str, str]
     force: bool
     config: ConnectorConfig
