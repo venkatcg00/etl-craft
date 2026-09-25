@@ -100,6 +100,7 @@ nav:
       - SQL tasks: guides/sql-tasks.md
       - Business rules: guides/business-rules.md
       - Ingestion scripts: guides/ingestion-scripts.md
+      - Email alerts: guides/email-alerts.md
       - Running a pipeline: guides/running-pipelines.md
       - Running a task and reading its logs: guides/running-tasks.md
   - Deploying:

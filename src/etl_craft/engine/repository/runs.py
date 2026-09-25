@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy.engine import Connection
 
@@ -43,3 +44,23 @@ def fetch_task_statuses_for_run(
         )
         for row in rows
     ]
+
+
+@dataclass(frozen=True)
+class LatestPipelineRun:
+    """A pipeline's most recently started run."""
+
+    pipeline_run_id: int
+    status: str
+    start_date: datetime | None
+    end_date: datetime | None
+
+
+def fetch_latest_pipeline_run(conn: Connection, pipeline_id: int) -> LatestPipelineRun | None:
+    """Return the most recently started run of ``pipeline_id``, or ``None`` if it never ran."""
+    row = conn.execute(
+        statement(conn, "latest_pipeline_run"), {"pipeline_id": pipeline_id}
+    ).one_or_none()
+    if row is None:
+        return None
+    return LatestPipelineRun(row.pipeline_run_id, row.status, row.start_date, row.end_date)

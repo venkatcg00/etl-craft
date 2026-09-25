@@ -141,7 +141,7 @@ def test_an_unknown_task_run(bound):
     assert child.main(args(config_path, 999999)) == ExitCode.RUN_STATE
 
 
-def test_the_command_line_runs_a_task_with_no_handler_installed(bound, capsys, monkeypatch):
+def test_the_command_line_records_a_handler_failure(bound, capsys, monkeypatch):
     engine, config_path, task_run_id, _ = bound
     monkeypatch.chdir(config_path.parent)
     # An earlier attempt failed, so this run is a retry of the same row.
@@ -150,7 +150,7 @@ def test_the_command_line_runs_a_task_with_no_handler_installed(bound, capsys, m
         conn.execute(text("UPDATE CFG_TASKS SET HANDLER = 'EMAIL_ALERT'"))
     code = cli_main(["run", "--pipeline_code", "P", "--task_code", "T"])
     assert code == ExitCode.FAILURE
-    message = "no handler is installed for HANDLER 'EMAIL_ALERT'"
+    message = "EMAIL_TO is required: one or more addresses separated by '|'"
     assert capsys.readouterr().out == f"T: FAILED — {message}\n"
     assert status(engine, task_run_id).error_message == message
     # A settled task is skipped and exits 0.

@@ -72,6 +72,7 @@ HANDLERS: dict[str, str] = {
     "SQL": "etl_craft.handlers.sql:run",
     "BUSINESS_RULES": "etl_craft.handlers.business_rules:run",
     "PYTHON": "etl_craft.handlers.python_scripts:run",
+    "EMAIL_ALERT": "etl_craft.handlers.email_alert:run",
 }
 """Each ``HANDLER`` value and the ``module:function`` that runs it."""
 
