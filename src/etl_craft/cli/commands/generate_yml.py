@@ -1,4 +1,4 @@
-"""``etl-craft generate-yml``: a pipeline's DAG, or the global trigger DAG, as YAML."""
+"""``etl-craft generate-yml``: a pipeline's DAG, the global trigger DAG or the docs DAG, as YAML."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from etl_craft.cli.commands import Command
 from etl_craft.cli.commands.common import connect_engine_db, load_command_config
 from etl_craft.cli.output import Output
 from etl_craft.core.errors import ExitCode
-from etl_craft.services.generate_yml import global_dag, pipeline_dag, to_yaml
+from etl_craft.services.generate_yml import docs_dag, global_dag, pipeline_dag, to_yaml
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -21,21 +21,29 @@ def _configure(parser: argparse.ArgumentParser) -> None:
         dest="global_dag",
         help="write the DAG that triggers pipelines in dependency order (needs Global_dag: true)",
     )
+    target.add_argument(
+        "--docs",
+        action="store_true",
+        help="write the DAG that writes the catalog site again on Docs_site.Schedule",
+    )
     parser.add_argument("--output", type=Path, metavar="PATH", help="write here, not to stdout")
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
     config = load_command_config(args)
-    engine = connect_engine_db(config)
-    try:
-        with engine.connect() as conn:
-            dag = (
-                global_dag(conn, config)
-                if args.global_dag
-                else pipeline_dag(conn, config, args.pipeline_code)
-            )
-    finally:
-        engine.dispose()
+    if args.docs:
+        dag = docs_dag(config)
+    else:
+        engine = connect_engine_db(config)
+        try:
+            with engine.connect() as conn:
+                dag = (
+                    global_dag(conn, config)
+                    if args.global_dag
+                    else pipeline_dag(conn, config, args.pipeline_code)
+                )
+        finally:
+            engine.dispose()
     text = to_yaml(dag)
     if args.output is None:
         out.stdout.write(text)
@@ -48,7 +56,7 @@ def _run(args: argparse.Namespace, out: Output) -> int:
 
 COMMAND = Command(
     name="generate-yml",
-    help="Write a pipeline's DAG, or the global trigger DAG, as YAML for an orchestrator.",
+    help="Write a pipeline's DAG, the global trigger DAG or the docs DAG, as YAML.",
     configure=_configure,
     run=_run,
 )

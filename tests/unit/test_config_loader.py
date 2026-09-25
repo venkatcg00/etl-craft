@@ -390,7 +390,7 @@ def test_sections_must_appear_in_the_documented_order(tmp_path):
     ):
         load_config(_write(tmp_path, reordered))
     cloning_first = {"Cloning": {"Enabled": False}, **_minimal()}
-    with pytest.raises(ConfigurationError, match="then Cloning"):
+    with pytest.raises(ConfigurationError, match="Cloning, then Docs_site"):
         load_config(_write(tmp_path, cloning_first))
     with_cloning = _minimal(Cloning={"Enabled": False})
     assert load_config(_write(tmp_path, with_cloning)).cloning.enabled is False
@@ -778,3 +778,18 @@ def test_email_through_sendmail(tmp_path):
     raw["Orchestration"]["Email"] = {"transport": "pigeon", "from_address": "a@b.c"}
     with pytest.raises(ConfigurationError, match="transport resolved to 'pigeon'"):
         load_config(_write(tmp_path, raw))
+
+
+def test_docs_site_schedule_and_output(tmp_path):
+    assert load_config(_write(tmp_path, _minimal())).docs_site.schedule is None
+    config = load_config(
+        _write(tmp_path, _minimal(Docs_site={"Schedule": "0 2 * * *", "Output": "site"}))
+    )
+    assert config.docs_site.schedule == "0 2 * * *"
+    assert config.docs_site.output == tmp_path / "site"
+    daily = load_config(_write(tmp_path, _minimal(Docs_site={"Schedule": "@daily"})))
+    assert daily.docs_site.schedule == "@daily" and daily.docs_site.output is None
+    with pytest.raises(ConfigurationError, match="must be a cron expression of five fields"):
+        load_config(_write(tmp_path, _minimal(Docs_site={"Schedule": "nightly"})))
+    with pytest.raises(ConfigurationError, match="unknown key"):
+        load_config(_write(tmp_path, _minimal(Docs_site={"When": "0 2 * * *"})))

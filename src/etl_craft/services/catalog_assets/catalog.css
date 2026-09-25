@@ -87,6 +87,8 @@ pre { background: var(--panel); border: 1px solid var(--border); border-radius: 
 .badge { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 10px; border: 1px solid var(--border); color: var(--muted); }
 .badge.warn { color: var(--warn); border-color: var(--warn); }
 .note { color: var(--muted); }
+.stale { border: 1px solid var(--warn); color: var(--warn); border-radius: 6px; padding: 6px 10px; }
+footer.foot { color: var(--muted); font-size: 12px; padding: 16px; border-top: 1px solid var(--border); max-width: 1400px; margin: 24px auto 0; }
 .doc { white-space: pre-wrap; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .chips button {

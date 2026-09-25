@@ -94,6 +94,7 @@ class Expected:
 
 EXPECTED = {
     "minimal-local.yml": Expected("sqlite", "duckdb", "local"),
+    "docs-site.yml": Expected("sqlite", "duckdb", "remote"),
     "secrets-environment.yml": Expected("postgresql", "postgres", "local", POSTGRES_WAREHOUSE_URL),
     # Its values come from secrets-file.env, not from anything set here.
     "secrets-file.yml": Expected("postgresql", "postgres", "local"),

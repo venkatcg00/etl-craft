@@ -13,7 +13,8 @@ from etl_craft.services.catalog import build_catalog
 from etl_craft.services.catalog_site import write_site
 
 DEFAULT_FOLDER = "catalog"
-"""Where the site goes, in the project directory, unless ``--output`` names another folder."""
+"""Where the site goes, in the project directory, unless ``--output`` or ``Docs_site.Output``
+names another folder."""
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -21,7 +22,8 @@ def _configure(parser: argparse.ArgumentParser) -> None:
         "--output",
         type=Path,
         metavar="DIR",
-        help=f"the folder to write (default: {DEFAULT_FOLDER}/ in the project directory)",
+        help=f"the folder to write (default: Docs_site.Output, else {DEFAULT_FOLDER}/ in the "
+        "project directory)",
     )
     parser.add_argument(
         "--strict",
@@ -47,7 +49,7 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     if args.strict and catalog.untraced:
         out.line(f"generate-docs: nothing written; {len(catalog.untraced)} task(s) not traced")
         return ExitCode.FAILURE
-    folder = args.output or config.project_dir / DEFAULT_FOLDER
+    folder = args.output or config.docs_site.output or config.project_dir / DEFAULT_FOLDER
     site = write_site(catalog, config, folder)
     out.line(f"generate-docs: wrote {site.pages} page(s) to {site.folder}")
     return ExitCode.SUCCESS

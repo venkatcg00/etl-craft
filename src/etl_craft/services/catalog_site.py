@@ -7,7 +7,10 @@ anything from elsewhere, so it can be opened from disk, served from any web serv
 published with ``publish-docs``.
 
 The site is written to a folder of its own, marked with ``.etl-craft-catalog``: a folder that
-holds other files is refused, and a folder written before is emptied and written again.
+holds other files is refused, and a folder written before is replaced. The new site is written
+beside it first and swapped in once complete, so a server publishing the folder never serves a
+site half written. Every page says when it was generated, and warns once its run details are
+more than a day old.
 """
 
 from __future__ import annotations
@@ -49,32 +52,50 @@ class Site:
 
 
 def write_site(catalog: Catalog, config: ConnectorConfig, folder: Path) -> Site:
-    """Write the catalog site into ``folder``; ``UsageError`` if it holds anything else."""
-    _prepare(folder)
-    writer = _Writer(catalog, config, folder)
-    writer.write_all()
+    """Write the catalog site into ``folder``; ``UsageError`` if it holds anything else.
+
+    The site is written into a hidden folder beside ``folder``, then swapped in.
+    """
+    _check(folder)
+    building = folder.with_name(f".{folder.name}.building")
+    if building.exists():
+        shutil.rmtree(building)
+    building.mkdir(parents=True)
+    (building / MARKER).write_text(
+        "Written by `etl-craft generate-docs`, which replaces this folder each time.\n",
+        encoding="utf-8",
+    )
+    writer = _Writer(catalog, config, building)
+    try:
+        writer.write_all()
+    except BaseException:
+        shutil.rmtree(building, ignore_errors=True)
+        raise
+    _swap(building, folder)
     return Site(folder, writer.pages)
 
 
-def _prepare(folder: Path) -> None:
+def _check(folder: Path) -> None:
     if folder.exists() and not folder.is_dir():
         raise UsageError(f"{folder} is a file; name a folder for the catalog site")
-    if folder.is_dir() and any(folder.iterdir()):
-        if not (folder / MARKER).is_file():
-            raise UsageError(
-                f"{folder} already holds files that generate-docs did not write; name an empty "
-                "or new folder, or the folder of an earlier catalog site"
-            )
-        for child in folder.iterdir():
-            if child.is_dir() and not child.is_symlink():
-                shutil.rmtree(child)
-            else:
-                child.unlink()
-    folder.mkdir(parents=True, exist_ok=True)
-    (folder / MARKER).write_text(
-        "Written by `etl-craft generate-docs`, which empties and rewrites this folder.\n",
-        encoding="utf-8",
-    )
+    if folder.is_dir() and any(folder.iterdir()) and not (folder / MARKER).is_file():
+        raise UsageError(
+            f"{folder} already holds files that generate-docs did not write; name an empty "
+            "or new folder, or the folder of an earlier catalog site"
+        )
+
+
+def _swap(building: Path, folder: Path) -> None:
+    """Put the new site in place of the old one, then remove the old one."""
+    if not folder.exists():
+        building.rename(folder)
+        return
+    old = folder.with_name(f".{folder.name}.old")
+    if old.exists():
+        shutil.rmtree(old)
+    folder.rename(old)
+    building.rename(folder)
+    shutil.rmtree(old, ignore_errors=True)
 
 
 def slug(key: str) -> str:
@@ -190,18 +211,22 @@ class _Writer:
             )
         )
         kind_label = f'<div class="kind-label">{_e(kind)}</div>' if kind else ""
+        generated = _e(self.catalog.generated_at.isoformat())
         document = (
             '<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
             '<meta name="robots" content="noindex, nofollow">'
             f"<title>{_e(title)} · etl-craft catalog</title>"
             f'<link rel="stylesheet" href="{root}catalog.css"></head>'
-            f'<body data-root="{root}"><header class="top">'
+            f'<body data-root="{root}" data-generated="{generated}"><header class="top">'
             f'<a class="brand" href="{root}index.html">etl-craft catalog</a><nav>{nav}</nav>'
             '<div class="search"><input type="search" placeholder="Search pipelines, tasks, '
             'tables, columns, rules…" aria-label="Search the catalog" autocomplete="off">'
             '<div class="results"></div></div></header>'
             f"<main>{kind_label}<h1>{_e(title)}</h1>{body}</main>"
+            f'<footer class="foot">Generated {_e(_when(self.catalog.generated_at))}; run '
+            "details are as of then. <code>etl-craft generate-docs</code> writes the site "
+            "again.</footer>"
             f'<script src="{root}search-index.js"></script>'
             f'<script src="{root}catalog.js"></script></body></html>'
         )
