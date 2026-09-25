@@ -142,6 +142,49 @@ schtasks /Create /SC DAILY /ST 02:00 /TN etl-craft-docs /TR "cmd /c cd /d C:\etl
 Writing the site again never leaves it half written: the new site is built beside the old one
 and swapped in once it is complete, so a server publishing the folder keeps serving whole pages.
 
+## Publishing the site
+
+`etl-craft publish-docs` serves the site until it is stopped (Ctrl-C, or SIGTERM from a service
+manager), so it can run as a long-lived service beside the nightly rebuild. It serves the folder
+as it is at each request, so a rebuilt site is served as soon as it is swapped in.
+
+**At a link, through ngrok.** Install the SDK on the machine that publishes
+(`pip install 'etl-craft[publish]'`), put your ngrok authtoken in a variable, and name it:
+
+```yaml
+Docs_site:
+  prod:
+    Authtoken: NGROK_AUTHTOKEN         # the variable holding the token, never the token itself
+    Domain: etl-docs.example.com       # optional: a domain reserved in your ngrok account
+    Allowed_ips: [203.0.113.0/24]      # optional: only these ranges get through
+```
+
+```text
+$ etl-craft publish-docs
+publish-docs: serving /srv/etl-craft/catalog at https://etl-docs.example.com (Ctrl-C to stop)
+```
+
+- **Who can see it.** There is no login: anyone with the link can read the site, so share it
+  like a document. The site is never listed or indexed: every response carries
+  `X-Robots-Tag: noindex`, `robots.txt` disallows everything, pages send no referrer and cannot be
+  framed, and folders are never listed. `Allowed_ips` limits it to your offices or VPN; teams
+  behind a firewall allow the site's domain (the one `publish-docs` prints) through it.
+- **A link that stays the same.** Without `Domain`, ngrok gives the account's own free domain.
+  The URL is recorded in the Engine DB; if a later publish gets another one, links already
+  shared would break, so `publish-docs` stops and names both. Set `Domain` to keep the first,
+  or pass `--accept-new-url` to use the new one from then on.
+- On ngrok's free plan, a browser first shows ngrok's own warning page once per visitor;
+  a paid plan's domain does not.
+- The variable only needs to be set on the machine that publishes; `doctor` says when it is
+  missing there, and when the SDK is not installed.
+
+**On this machine or network only**, without ngrok:
+
+```bash
+etl-craft publish-docs --local-only                         # http://127.0.0.1:<port>/
+etl-craft publish-docs --local-only --host 0.0.0.0 --port 8080   # to the local network
+```
+
 ## The output folder
 
 `generate-docs` writes `--output`, else `Docs_site.Output`, else `catalog/` in the project

@@ -793,3 +793,24 @@ def test_docs_site_schedule_and_output(tmp_path):
         load_config(_write(tmp_path, _minimal(Docs_site={"Schedule": "nightly"})))
     with pytest.raises(ConfigurationError, match="unknown key"):
         load_config(_write(tmp_path, _minimal(Docs_site={"When": "0 2 * * *"})))
+
+
+def test_docs_site_publishing_settings(tmp_path):
+    site = {
+        "Authtoken": "NGROK_AUTHTOKEN",
+        "Domain": "Docs.Example.com",
+        "Allowed_ips": ["203.0.113.7", "10.0.0.0/8"],
+    }
+    config = load_config(_write(tmp_path, _minimal(Docs_site=site)))
+    assert config.docs_site.authtoken_var == "NGROK_AUTHTOKEN"
+    assert config.docs_site.domain == "docs.example.com"
+    assert config.docs_site.allowed_ips == ("203.0.113.7/32", "10.0.0.0/8")
+    listed = load_config(_write(tmp_path, _minimal(Docs_site={"Allowed_ips": "10.0.0.0/8, ::1"})))
+    assert listed.docs_site.allowed_ips == ("10.0.0.0/8", "::1/128")
+    for bad, message in (
+        ({"Authtoken": "2abc-def not a name"}, "must be the name of a variable"),
+        ({"Domain": "https://docs.example.com/"}, "must be a host name"),
+        ({"Allowed_ips": ["the office"]}, "must list CIDR ranges"),
+    ):
+        with pytest.raises(ConfigurationError, match=message):
+            load_config(_write(tmp_path, _minimal(Docs_site=bad)))

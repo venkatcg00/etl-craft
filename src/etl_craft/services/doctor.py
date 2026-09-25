@@ -10,6 +10,7 @@ write where it is set to, and the project folders.
 
 from __future__ import annotations
 
+import importlib.util
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -19,6 +20,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from etl_craft.config import ConnectorConfig, profile_needs_secret, resolve_secret
 from etl_craft.config.auth import EMAIL_VERIFIED_AUTH_MODES, engine_for_jdbc_url
 from etl_craft.config.model import ConnectionProfile, EmailProfile
+from etl_craft.config.resolve import source_values
 from etl_craft.core.enums import CloningScope, Mode
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.engine.connection import check_reachable, engine_db
@@ -88,6 +90,7 @@ def run_checks(config: ConnectorConfig, *, engine_state: bool = True) -> list[Ch
         *_warehouse(config, queue_on_engine_db=engine_reachable),
         *_email(config),
         *_cloning(config),
+        *_docs_site(config),
         *_project(config),
     ]
 
@@ -287,6 +290,32 @@ def _cloning(config: ConnectorConfig) -> list[Check]:
             f"scope {cloning.scope}: after each run, into schema {config.warehouse.active.schema}",
         )
     ]
+
+
+def _docs_site(config: ConnectorConfig) -> list[Check]:
+    """Check what publishing the catalog through ngrok needs, on the machine that does it."""
+    name = config.docs_site.authtoken_var
+    if name is None:
+        return []
+    checks = []
+    if source_values(config.source).get(name):
+        checks.append(ok("Docs site authtoken", f"resolved from {name}"))
+    else:
+        checks.append(
+            warn(
+                "Docs site authtoken",
+                f"{name} is not set here: only the machine that runs publish-docs needs it",
+            )
+        )
+    if importlib.util.find_spec("ngrok") is None:
+        checks.append(
+            warn(
+                "Docs site publishing",
+                "the ngrok SDK is not installed here: pip install 'etl-craft[publish]' on the "
+                "machine that runs publish-docs",
+            )
+        )
+    return checks
 
 
 def _project(config: ConnectorConfig) -> list[Check]:

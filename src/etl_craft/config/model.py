@@ -106,15 +106,20 @@ class CloningConfig:
 
 @dataclass(frozen=True)
 class DocsSiteConfig:
-    """The catalog site ``generate-docs`` writes.
+    """The catalog site ``generate-docs`` writes and ``publish-docs`` serves.
 
     ``schedule`` is when it is written again, as a cron expression, for the DAG
     ``generate-yml --docs`` writes; ``output`` is its folder, ``catalog/`` in the project
-    directory when not set.
+    directory when not set. ``authtoken_var`` names the variable holding the ngrok authtoken,
+    read only when the site is published; ``domain`` is the team's reserved ngrok domain, and
+    ``allowed_ips`` the CIDR ranges ngrok lets through, every address when empty.
     """
 
     schedule: str | None = None
     output: Path | None = None
+    authtoken_var: str | None = None
+    domain: str | None = None
+    allowed_ips: tuple[str, ...] = ()
 
 
 EMAIL_TRANSPORTS = ("smtp", "sendmail")

@@ -190,3 +190,18 @@ def test_the_commands(tmp_path, monkeypatch, capsys):
     assert main(["setup"]) == ExitCode.FAILURE
     out = capsys.readouterr().out.splitlines()
     assert out[-1] == "setup: nothing changed; fix the failed check(s) and run setup again"
+
+
+def test_docs_site_publishing_is_only_warned_about(config, monkeypatch):
+    from etl_craft.config import DocsSiteConfig
+
+    site = replace(config, docs_site=DocsSiteConfig(authtoken_var="ETL_CRAFT_TEST_NGROK"))
+    monkeypatch.delenv("ETL_CRAFT_TEST_NGROK", raising=False)
+    checks = found(run_checks(site))
+    assert checks["Docs site authtoken"][0] is Status.WARN
+    assert checks["Docs site publishing"][0] is Status.WARN
+    monkeypatch.setenv("ETL_CRAFT_TEST_NGROK", "secret-value")
+    assert found(run_checks(site))["Docs site authtoken"] == (
+        Status.OK,
+        "resolved from ETL_CRAFT_TEST_NGROK",
+    )

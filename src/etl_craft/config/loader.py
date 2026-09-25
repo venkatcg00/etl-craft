@@ -13,7 +13,9 @@ Every problem is a ``ConfigurationError`` naming the file and the setting.
 
 from __future__ import annotations
 
+import ipaddress
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -55,7 +57,7 @@ from etl_craft.config.targets import (
 )
 from etl_craft.core.enums import AuthMode, CloningScope, Mode, TableFormat
 from etl_craft.core.errors import ConfigurationError
-from etl_craft.core.text import is_safe_identifier
+from etl_craft.core.text import is_env_name, is_safe_identifier
 
 SECTIONS = ("Secrets", "Orchestration", "Engine", "Warehouse", "Cloning", "Docs_site")
 """The top-level sections, in the order the file must present them."""
@@ -829,7 +831,12 @@ def _parse_docs_site(
     )
     if not profiled.settings:
         return DocsSiteConfig()
-    _reject_unknown(profiled.settings, {"Schedule", "Output"}, "Docs_site", path)
+    _reject_unknown(
+        profiled.settings,
+        {"Schedule", "Output", "Authtoken", "Domain", "Allowed_ips"},
+        "Docs_site",
+        path,
+    )
     schedule = (profiled.text("Schedule") or "").strip() or None
     if schedule is not None and schedule not in _CRON_MACROS and len(schedule.split()) != 5:
         raise ConfigurationError(
@@ -838,9 +845,47 @@ def _parse_docs_site(
             f"got {schedule!r}"
         )
     output = profiled.text("Output")
+    authtoken = profiled.settings.get("Authtoken")
+    if authtoken is not None and not (
+        isinstance(authtoken, str) and is_env_name(authtoken.strip())
+    ):
+        raise ConfigurationError(
+            f"{path}: {profiled.where('Authtoken')} must be the name of a variable holding the "
+            "ngrok authtoken — a secret is never written into craft-connector.yml"
+        )
+    domain = (profiled.text("Domain") or "").strip().lower() or None
+    if domain is not None and not re.fullmatch(r"[a-z0-9]([a-z0-9.-]*[a-z0-9])?", domain):
+        raise ConfigurationError(
+            f"{path}: {profiled.where('Domain')} must be a host name, such as "
+            f"docs.example.com, without a scheme or path; got {domain!r}"
+        )
     return DocsSiteConfig(
-        schedule=schedule, output=_relative_to_config(output, path) if output else None
+        schedule=schedule,
+        output=_relative_to_config(output, path) if output else None,
+        authtoken_var=authtoken.strip() if isinstance(authtoken, str) else None,
+        domain=domain,
+        allowed_ips=_cidr_ranges(
+            profiled.value("Allowed_ips"), profiled.where("Allowed_ips"), path
+        ),
     )
+
+
+def _cidr_ranges(value: Any, where: str, path: Path) -> tuple[str, ...]:
+    """Read a list of CIDR ranges, as a YAML list or a comma-separated string."""
+    if value is None or value == "":
+        return ()
+    items = value if isinstance(value, list) else str(value).split(",")
+    ranges = []
+    for item in items:
+        text = str(item).strip()
+        try:
+            ranges.append(str(ipaddress.ip_network(text, strict=False)))
+        except ValueError as error:
+            raise ConfigurationError(
+                f"{path}: {where} must list CIDR ranges such as 203.0.113.0/24; {text!r} is not "
+                f"one ({error})"
+            ) from error
+    return tuple(ranges)
 
 
 def _parse_bool(value: Any, name: str, path: Path, *, default: bool) -> bool:

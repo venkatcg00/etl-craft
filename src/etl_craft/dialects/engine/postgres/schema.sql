@@ -286,6 +286,15 @@ CREATE INDEX ix_column_lineage_target ON AUD_COLUMN_LINEAGE (TARGET_OBJECT, TARG
 CREATE INDEX ix_column_lineage_source ON AUD_COLUMN_LINEAGE (SOURCE_OBJECT, SOURCE_COLUMN);
 COMMENT ON TABLE AUD_COLUMN_LINEAGE IS 'Column lineage parsed from each SQL task''s SOURCE_SQL, keyed by a hash of what it was parsed from. A row whose hash no longer matches is replaced, never read.';
 
+-- The URL the catalog site is published at, one row per URL: the latest is current. A publish
+-- that is given another URL fails unless told to accept it, so shared links keep working.
+CREATE TABLE AUD_DOCS_PUBLICATION (
+    DOCS_PUBLICATION_ID  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    PUBLISHED_URL        VARCHAR NOT NULL,
+    FIRST_PUBLISHED      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    LAST_PUBLISHED       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE AUD_TASK_DOCUMENTATION (
     TASK_DOCUMENTATION_ID  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     TASK_ID                BIGINT NOT NULL REFERENCES CFG_TASKS(TASK_ID),
