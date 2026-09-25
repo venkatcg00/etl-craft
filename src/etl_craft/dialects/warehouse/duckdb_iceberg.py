@@ -75,6 +75,23 @@ class DuckDBIcebergWarehouse(DuckDBWarehouse):
             f"ATTACH IF NOT EXISTS '{warehouse}' AS {catalog} (TYPE ICEBERG, ENDPOINT '{uri}', "
             f"{attach_auth}, ACCESS_DELEGATION_MODE 'none', READ_ONLY false)"
         )
+        # The catalog is the session's database, so a query's schema.table names resolve in
+        # it, as on every other warehouse. DuckDB switches to a schema of it, and an Iceberg
+        # catalog has no default one: the profile's schema, which must exist. It is checked
+        # first, because USE accepts a missing Iceberg namespace and then lists it.
+        if profile.schema:
+            cursor.execute(
+                "SELECT count(*) FROM information_schema.schemata "
+                "WHERE catalog_name = ? AND lower(schema_name) = lower(?)",
+                [catalog, profile.schema],
+            )
+            if not cursor.fetchone()[0]:
+                cursor.close()
+                raise ConfigurationError(
+                    f"the Warehouse schema {catalog}.{profile.schema} does not exist; create it "
+                    "first — etl-craft does not create warehouse schemas"
+                )
+            cursor.execute(f"USE {catalog}.{profile.schema}")
         cursor.close()
         # An attached Iceberg catalog does not take part in DuckDB transactions; each
         # statement commits on its own.

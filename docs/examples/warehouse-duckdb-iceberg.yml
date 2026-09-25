@@ -91,21 +91,25 @@ Engine:
   Name: Postgres                       # value
   dev:
     jdbc_url: ENGINE_JDBC_URL          # variable
+    schema: etl_craft                  # value — must already exist; the engine never creates it
     user: ENGINE_USER                  # variable
     auth_mode: ENGINE_AUTH_MODE        # variable
     secret: ENGINE_SECRET              # variable, required: a secret is never used as written
   sit:
     jdbc_url: ENGINE_JDBC_URL          # variable
+    schema: etl_craft                  # value — must already exist; the engine never creates it
     user: ENGINE_USER                  # variable
     auth_mode: ENGINE_AUTH_MODE        # variable
     secret: ENGINE_SECRET              # variable, required: a secret is never used as written
   uat:
     jdbc_url: ENGINE_JDBC_URL          # variable
+    schema: etl_craft                  # value — must already exist; the engine never creates it
     user: ENGINE_USER                  # variable
     auth_mode: ENGINE_AUTH_MODE        # variable
     secret: ENGINE_SECRET              # variable, required: a secret is never used as written
   prod:
     jdbc_url: ENGINE_JDBC_URL          # variable
+    schema: etl_craft                  # value — must already exist; the engine never creates it
     user: ENGINE_USER                  # variable
     auth_mode: ENGINE_AUTH_MODE        # variable
     secret: ENGINE_SECRET              # variable, required: a secret is never used as written
@@ -115,6 +119,7 @@ Warehouse:
   Table_format: iceberg                # value
   dev:
     jdbc_url: "jdbc:duckdb:"           # value — in memory — the data lives in Iceberg (quoted: it ends in a colon)
+    schema: etl_craft                  # value — must already exist; cloning writes here
     catalog: WAREHOUSE_CATALOG         # variable — the name it is attached as, e.g. lake
     catalog_uri: WAREHOUSE_CATALOG_URI  # variable — the REST catalog endpoint
     iceberg_warehouse: WAREHOUSE_ICEBERG_WAREHOUSE  # variable — e.g. s3://warehouse/
@@ -126,6 +131,7 @@ Warehouse:
     s3_secret: WAREHOUSE_S3_SECRET     # variable, required: a secret is never used as written
   sit:
     jdbc_url: "jdbc:duckdb:"           # value — in memory — the data lives in Iceberg (quoted: it ends in a colon)
+    schema: etl_craft                  # value — must already exist; cloning writes here
     catalog: WAREHOUSE_CATALOG         # variable — the name it is attached as, e.g. lake
     catalog_uri: WAREHOUSE_CATALOG_URI  # variable — the REST catalog endpoint
     iceberg_warehouse: WAREHOUSE_ICEBERG_WAREHOUSE  # variable — e.g. s3://warehouse/
@@ -137,6 +143,7 @@ Warehouse:
     s3_secret: WAREHOUSE_S3_SECRET     # variable, required: a secret is never used as written
   uat:
     jdbc_url: "jdbc:duckdb:"           # value — in memory — the data lives in Iceberg (quoted: it ends in a colon)
+    schema: etl_craft                  # value — must already exist; cloning writes here
     catalog: WAREHOUSE_CATALOG         # variable — the name it is attached as, e.g. lake
     catalog_uri: WAREHOUSE_CATALOG_URI  # variable — the REST catalog endpoint
     iceberg_warehouse: WAREHOUSE_ICEBERG_WAREHOUSE  # variable — e.g. s3://warehouse/
@@ -148,6 +155,7 @@ Warehouse:
     s3_secret: WAREHOUSE_S3_SECRET     # variable, required: a secret is never used as written
   prod:
     jdbc_url: "jdbc:duckdb:"           # value — in memory — the data lives in Iceberg (quoted: it ends in a colon)
+    schema: etl_craft                  # value — must already exist; cloning writes here
     catalog: WAREHOUSE_CATALOG         # variable — the name it is attached as, e.g. lake
     catalog_uri: WAREHOUSE_CATALOG_URI  # variable — the REST catalog endpoint
     iceberg_warehouse: WAREHOUSE_ICEBERG_WAREHOUSE  # variable — e.g. s3://warehouse/

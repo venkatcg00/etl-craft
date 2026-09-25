@@ -19,7 +19,7 @@ from sqlalchemy.engine import URL, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectionProfile, ConnectorConfig, profile_secret
-from etl_craft.config.targets import WarehouseUrl, parse_warehouse_url
+from etl_craft.config.targets import WarehouseUrl, active_catalog, parse_warehouse_url
 from etl_craft.core.errors import ConfigurationError, LockTimeoutError
 from etl_craft.dialects import credentials
 from etl_craft.dialects.engine import for_engine
@@ -235,5 +235,30 @@ def verify_iceberg_catalog(config: ConnectorConfig, warehouse_engine: Engine) ->
             f"catalog {catalog!r} is a {connector!r} catalog, not an Iceberg catalog — the "
             "engine would create tables there while treating them as Iceberg. Point the "
             "Warehouse at an Iceberg catalog."
+        )
+    return None
+
+
+def warehouse_schema_problem(config: ConnectorConfig, warehouse_engine: Engine) -> str | None:
+    """Return why the warehouse profile's ``schema`` cannot be used, or ``None``.
+
+    It must already exist in the profile's catalog: the engine never creates warehouse schemas.
+    """
+    profile = _active_profile(config)
+    if not profile.schema:
+        return "the Warehouse profile names no schema"
+    catalog = active_catalog(config)
+    with warehouse_engine.connect() as conn:
+        found = conn.execute(
+            text(
+                "SELECT 1 FROM information_schema.schemata WHERE lower(catalog_name) = "
+                "lower(:catalog) AND lower(schema_name) = lower(:schema)"
+            ),
+            {"catalog": catalog, "schema": profile.schema},
+        ).first()
+    if found is None:
+        return (
+            f"the Warehouse schema {catalog}.{profile.schema} does not exist; create it first — "
+            "etl-craft does not create warehouse schemas"
         )
     return None

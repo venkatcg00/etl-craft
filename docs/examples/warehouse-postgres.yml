@@ -88,21 +88,25 @@ Engine:
   Name: Postgres                       # value
   dev:
     jdbc_url: ENGINE_JDBC_URL          # variable
+    schema: etl_craft                  # value — must already exist; the engine never creates it
     user: ENGINE_USER                  # variable
     auth_mode: ENGINE_AUTH_MODE        # variable
     secret: ENGINE_SECRET              # variable, required: a secret is never used as written
   sit:
     jdbc_url: ENGINE_JDBC_URL          # variable
+    schema: etl_craft                  # value — must already exist; the engine never creates it
     user: ENGINE_USER                  # variable
     auth_mode: ENGINE_AUTH_MODE        # variable
     secret: ENGINE_SECRET              # variable, required: a secret is never used as written
   uat:
     jdbc_url: ENGINE_JDBC_URL          # variable
+    schema: etl_craft                  # value — must already exist; the engine never creates it
     user: ENGINE_USER                  # variable
     auth_mode: ENGINE_AUTH_MODE        # variable
     secret: ENGINE_SECRET              # variable, required: a secret is never used as written
   prod:
     jdbc_url: ENGINE_JDBC_URL          # variable
+    schema: etl_craft                  # value — must already exist; the engine never creates it
     user: ENGINE_USER                  # variable
     auth_mode: ENGINE_AUTH_MODE        # variable
     secret: ENGINE_SECRET              # variable, required: a secret is never used as written
@@ -112,21 +116,25 @@ Warehouse:
   Table_format: native                 # value
   dev:
     jdbc_url: WAREHOUSE_JDBC_URL       # variable — jdbc:postgresql://host:5432/analytics
+    schema: etl_craft                  # value — must already exist; cloning writes here
     user: WAREHOUSE_USER               # variable
     auth_mode: WAREHOUSE_AUTH_MODE     # variable — password
     secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
   sit:
     jdbc_url: WAREHOUSE_JDBC_URL       # variable — jdbc:postgresql://host:5432/analytics
+    schema: etl_craft                  # value — must already exist; cloning writes here
     user: WAREHOUSE_USER               # variable
     auth_mode: WAREHOUSE_AUTH_MODE     # variable — password
     secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
   uat:
     jdbc_url: WAREHOUSE_JDBC_URL       # variable — jdbc:postgresql://host:5432/analytics
+    schema: etl_craft                  # value — must already exist; cloning writes here
     user: WAREHOUSE_USER               # variable
     auth_mode: WAREHOUSE_AUTH_MODE     # variable — password
     secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
   prod:
     jdbc_url: WAREHOUSE_JDBC_URL       # variable — jdbc:postgresql://host:5432/analytics
+    schema: etl_craft                  # value — must already exist; cloning writes here
     user: WAREHOUSE_USER               # variable
     auth_mode: WAREHOUSE_AUTH_MODE     # variable — password
     secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written

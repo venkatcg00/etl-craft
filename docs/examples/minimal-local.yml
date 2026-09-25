@@ -26,8 +26,10 @@ Orchestration:
 Engine:
   dev:
     jdbc_url: jdbc:sqlite:etl-craft-engine.db  # value — relative to this file
+    schema: main                       # value — SQLite: the database file is the schema
 
 Warehouse:
   Name: DuckDB                         # value
   dev:
     jdbc_url: jdbc:duckdb:warehouse.duckdb  # value — relative to the working directory
+    schema: main                       # value — must already exist; cloning writes here

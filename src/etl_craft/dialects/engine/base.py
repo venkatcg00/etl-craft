@@ -63,6 +63,13 @@ class EngineDialect(ABC):
         otherwise it raises ``LockTimeoutError`` once that time has passed.
         """
 
+    def schema_problem(self, conn: Connection, schema: str) -> str | None:
+        """Return why the Engine schema cannot be used, or ``None``.
+
+        SQLite has one schema per file, and the file is created on first connect.
+        """
+        return None
+
     @abstractmethod
     def duration_seconds_sql(self) -> str:
         """Return the SQL expression for ``END_DATE - START_DATE`` in seconds."""

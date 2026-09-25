@@ -11,7 +11,7 @@ pytestmark = pytest.mark.unit
 
 SECRETS = {"Source_type": "environment"}
 ORCHESTRATION = {"Mode": "local"}
-ENGINE = {"dev": {"jdbc_url": "jdbc:sqlite:e.db"}}
+ENGINE = {"dev": {"jdbc_url": "jdbc:sqlite:e.db", "schema": "main"}}
 
 
 def config(**sections):
@@ -21,7 +21,7 @@ def config(**sections):
 
 
 def postgres_warehouse(**fields):
-    return {"dev": {"jdbc_url": "jdbc:postgresql://h/wh", **fields}}
+    return {"dev": {"jdbc_url": "jdbc:postgresql://h/wh", "schema": "main", **fields}}
 
 
 @pytest.mark.parametrize(
@@ -109,7 +109,9 @@ def postgres_warehouse(**fields):
             r"Warehouse\.dev: Snowflake account must be an account identifier",
         ),
         (
-            config(Warehouse={"dev": {"jdbc_url": "jdbc:duckdb:/d/my-wh.duckdb"}}),
+            config(
+                Warehouse={"dev": {"jdbc_url": "jdbc:duckdb:/d/my-wh.duckdb", "schema": "main"}}
+            ),
             r"Warehouse\.dev: DuckDB warehouse file",
         ),
         (config(Cloning={"Scope": "everything"}), "Cloning.Scope must be one of"),

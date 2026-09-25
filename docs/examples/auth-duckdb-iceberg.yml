@@ -35,12 +35,14 @@ Engine:
   Profile: dev                         # value — this file varies only the login, not the Engine DB
   dev:
     jdbc_url: jdbc:sqlite:etl-craft-engine.db  # value
+    schema: main                       # value — SQLite: the database file is the schema
 
 Warehouse:
   Name: DuckDB                         # value
   Table_format: iceberg                # value
   none:
     jdbc_url: "jdbc:duckdb:"           # value
+    schema: etl_craft                  # value — must already exist; cloning writes here
     catalog: WAREHOUSE_CATALOG         # variable
     catalog_uri: WAREHOUSE_CATALOG_URI  # variable
     iceberg_warehouse: WAREHOUSE_ICEBERG_WAREHOUSE  # variable
@@ -50,6 +52,7 @@ Warehouse:
     auth_mode: none                    # value
   token:
     jdbc_url: "jdbc:duckdb:"           # value
+    schema: etl_craft                  # value — must already exist; cloning writes here
     catalog: WAREHOUSE_CATALOG         # variable
     catalog_uri: WAREHOUSE_CATALOG_URI  # variable
     iceberg_warehouse: WAREHOUSE_ICEBERG_WAREHOUSE  # variable
@@ -60,6 +63,7 @@ Warehouse:
     secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
   oauth:
     jdbc_url: "jdbc:duckdb:"           # value
+    schema: etl_craft                  # value — must already exist; cloning writes here
     catalog: WAREHOUSE_CATALOG         # variable
     catalog_uri: WAREHOUSE_CATALOG_URI  # variable
     iceberg_warehouse: WAREHOUSE_ICEBERG_WAREHOUSE  # variable

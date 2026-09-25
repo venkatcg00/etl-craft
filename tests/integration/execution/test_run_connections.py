@@ -57,8 +57,8 @@ def probes(monkeypatch):
     """Replace both probes with fakes that fail, and record which ran."""
     ran = []
 
-    def warehouse(config, engine_db=None):
-        ran.append("warehouse")
+    def warehouse(config, engine_db=None, *, schema=False):
+        ran.append("warehouse and schema" if schema else "warehouse")
         return "refused"
 
     def relay(config):
@@ -96,11 +96,13 @@ def test_cloning_needs_the_warehouse_and_a_duckdb_file_is_not_tested(probes, tmp
     cloning = replace(config("jdbc:postgresql://127.0.0.1:1/x"), cloning=CloningConfig(True))
     with pytest.raises(ConnectionTestError, match="warehouse: refused"):
         check_run_connections(None, cloning, "P", set())
+    assert probes == ["warehouse and schema"]
+    probes.clear()
     duckdb = config(f"jdbc:duckdb:{tmp_path / 'w.duckdb'}")
     check_run_connections(None, duckdb, "P", {"SQL"})
     # Nothing configured, nothing to test.
     check_run_connections(None, config(), "P", {"SQL", "EMAIL_ALERT"})
-    assert probes == ["warehouse"]
+    assert probes == []
 
 
 @pytest.mark.unit

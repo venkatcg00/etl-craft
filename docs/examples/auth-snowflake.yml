@@ -37,6 +37,7 @@ Engine:
   Profile: dev                         # value — this file varies only the login, not the Engine DB
   dev:
     jdbc_url: jdbc:sqlite:etl-craft-engine.db  # value
+    schema: main                       # value — SQLite: the database file is the schema
 
 Warehouse:
   Name: Snowflake                      # value

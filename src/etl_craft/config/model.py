@@ -50,7 +50,9 @@ class ConnectionProfile:
     """The active Engine or Warehouse connection.
 
     ``extra`` holds the auth mode's own fields (``key_file``, ``client_id``, ...), the dialect's
-    profile fields, and ``secret_var`` when the profile names a secret.
+    profile fields, and ``secret_var`` when the profile names a secret. ``schema`` is where the
+    profile's tables live: the Engine DB's own tables, or the warehouse schema cloning writes to.
+    An empty ``schema`` leaves the database's default.
     """
 
     section: str
@@ -59,6 +61,7 @@ class ConnectionProfile:
     user: str
     auth_mode: str
     extra: dict[str, Any] = field(default_factory=dict)
+    schema: str = ""
 
     @property
     def secret_var(self) -> str:

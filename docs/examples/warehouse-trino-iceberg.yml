@@ -90,21 +90,25 @@ Engine:
   Name: Postgres                       # value
   dev:
     jdbc_url: ENGINE_JDBC_URL          # variable
+    schema: etl_craft                  # value — must already exist; the engine never creates it
     user: ENGINE_USER                  # variable
     auth_mode: ENGINE_AUTH_MODE        # variable
     secret: ENGINE_SECRET              # variable, required: a secret is never used as written
   sit:
     jdbc_url: ENGINE_JDBC_URL          # variable
+    schema: etl_craft                  # value — must already exist; the engine never creates it
     user: ENGINE_USER                  # variable
     auth_mode: ENGINE_AUTH_MODE        # variable
     secret: ENGINE_SECRET              # variable, required: a secret is never used as written
   uat:
     jdbc_url: ENGINE_JDBC_URL          # variable
+    schema: etl_craft                  # value — must already exist; the engine never creates it
     user: ENGINE_USER                  # variable
     auth_mode: ENGINE_AUTH_MODE        # variable
     secret: ENGINE_SECRET              # variable, required: a secret is never used as written
   prod:
     jdbc_url: ENGINE_JDBC_URL          # variable
+    schema: etl_craft                  # value — must already exist; the engine never creates it
     user: ENGINE_USER                  # variable
     auth_mode: ENGINE_AUTH_MODE        # variable
     secret: ENGINE_SECRET              # variable, required: a secret is never used as written
@@ -114,21 +118,25 @@ Warehouse:
   Table_format: iceberg                # value
   dev:
     jdbc_url: WAREHOUSE_JDBC_URL       # variable — jdbc:trino://host:8080/<catalog>/<schema>
+    schema: analytics                  # value — the schema the jdbc_url names; cloning writes here
     user: WAREHOUSE_USER               # variable
     auth_mode: WAREHOUSE_AUTH_MODE     # variable — none | password
     secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written — auth_mode password only
   sit:
     jdbc_url: WAREHOUSE_JDBC_URL       # variable — jdbc:trino://host:8080/<catalog>/<schema>
+    schema: analytics                  # value — the schema the jdbc_url names; cloning writes here
     user: WAREHOUSE_USER               # variable
     auth_mode: WAREHOUSE_AUTH_MODE     # variable — none | password
     secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written — auth_mode password only
   uat:
     jdbc_url: WAREHOUSE_JDBC_URL       # variable — jdbc:trino://host:8080/<catalog>/<schema>
+    schema: analytics                  # value — the schema the jdbc_url names; cloning writes here
     user: WAREHOUSE_USER               # variable
     auth_mode: WAREHOUSE_AUTH_MODE     # variable — none | password
     secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written — auth_mode password only
   prod:
     jdbc_url: WAREHOUSE_JDBC_URL       # variable — jdbc:trino://host:8080/<catalog>/<schema>
+    schema: analytics                  # value — the schema the jdbc_url names; cloning writes here
     user: WAREHOUSE_USER               # variable
     auth_mode: WAREHOUSE_AUTH_MODE     # variable — none | password
     secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written — auth_mode password only

@@ -130,9 +130,11 @@ Engine:
   # Profile: prod
   dev:
     jdbc_url: jdbc:sqlite:etl-craft-engine.db  # value — relative to this file
+    schema: main                       # value — SQLite: the database file is the schema
   sit:
     Name: Postgres                     # value
     jdbc_url: ENGINE_JDBC_URL          # variable — jdbc:postgresql://host:5432/etl_craft
+    schema: etl_craft                  # value — must already exist; the engine never creates it
     user: ENGINE_USER                  # variable
     auth_mode: ENGINE_AUTH_MODE        # variable — password | key_file | token | oauth | sso | sts
     secret: ENGINE_SECRET              # variable, required: a secret is never used as written — the password, or the key's passphrase
@@ -140,6 +142,7 @@ Engine:
   uat:
     Name: Postgres                     # value
     jdbc_url: ENGINE_JDBC_URL          # variable
+    schema: etl_craft                  # value — must already exist; the engine never creates it
     user: ENGINE_USER                  # variable
     auth_mode: ENGINE_AUTH_MODE        # variable
     secret: ENGINE_SECRET              # variable, required: a secret is never used as written
@@ -147,6 +150,7 @@ Engine:
   prod:
     Name: Postgres                     # value
     jdbc_url: ENGINE_JDBC_URL          # variable
+    schema: etl_craft                  # value — must already exist; the engine never creates it
     user: ENGINE_USER                  # variable
     auth_mode: ENGINE_AUTH_MODE        # variable
     secret: ENGINE_SECRET              # variable, required: a secret is never used as written
@@ -161,10 +165,12 @@ Warehouse:
   dev:
     Name: DuckDB                       # value
     jdbc_url: jdbc:duckdb:warehouse.duckdb  # value — relative to the working directory
+    schema: main                       # value — must already exist; cloning writes here
   sit:
     Name: Postgres                     # value
     Table_format: native               # value — always native: Postgres has no Iceberg tables
     jdbc_url: WAREHOUSE_JDBC_URL       # variable — jdbc:postgresql://host:5432/analytics
+    schema: etl_craft                  # value — must already exist; cloning writes here
     user: WAREHOUSE_USER               # variable
     auth_mode: WAREHOUSE_AUTH_MODE     # variable
     secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
@@ -172,6 +178,7 @@ Warehouse:
     Name: Postgres                     # value
     Table_format: native               # value
     jdbc_url: WAREHOUSE_JDBC_URL       # variable
+    schema: etl_craft                  # value — must already exist; cloning writes here
     user: WAREHOUSE_USER               # variable
     auth_mode: WAREHOUSE_AUTH_MODE     # variable
     secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
@@ -179,6 +186,7 @@ Warehouse:
     Name: Postgres                     # value
     Table_format: native               # value
     jdbc_url: WAREHOUSE_JDBC_URL       # variable
+    schema: etl_craft                  # value — must already exist; cloning writes here
     user: WAREHOUSE_USER               # variable
     auth_mode: WAREHOUSE_AUTH_MODE     # variable
     secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written

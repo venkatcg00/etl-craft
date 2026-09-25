@@ -15,6 +15,7 @@ Orchestration:
 Engine:
   dev:
     jdbc_url: {jdbc_url}
+    schema: main
 """
 
 
