@@ -14,6 +14,10 @@ from typing import Any
 from etl_craft.core.enums import AuthMode, CloningScope, Mode, TableFormat
 
 CONFIG_FILENAME = "craft-connector.yml"
+PROJECT_DIRNAME = "etl-craft"
+SQL_FILES_DIRNAME = "sql_files"
+INGESTION_SCRIPTS_DIRNAME = "ingestion_scripts"
+MIGRATIONS_DIRNAME = "migrations"
 EXAMPLE_PATH = "docs/craft-connector.example.yml"
 DEFAULT_TASK_TIMEOUT_SECONDS = 6 * 60 * 60
 DEFAULT_MAX_PARALLEL_TASKS = 8
@@ -173,6 +177,9 @@ class ConnectorConfig:
     log file is written. ``config_path`` is where the file was
     read, so every task process reads the same one. ``settings`` records where each value
     came from, in file order, for ``doctor``.
+
+    The directory holding the file is the project directory (conventionally ``etl-craft/``).
+    It holds the project's ``sql_files/``, ``ingestion_scripts/`` and ``migrations/``.
     """
 
     mode: Mode
@@ -188,6 +195,28 @@ class ConnectorConfig:
     orchestrator_name: str | None = None
     settings: tuple[SettingSource, ...] = ()
     log_dir: Path = Path(DEFAULT_LOG_DIR)
+
+    @property
+    def project_dir(self) -> Path:
+        """The directory holding ``craft-connector.yml``, or the current one without a file."""
+        if self.config_path is None:
+            return Path.cwd()
+        return self.config_path.absolute().parent
+
+    @property
+    def sql_files_dir(self) -> Path:
+        """Where ``SOURCE_SQL_FILE`` names are found: ``sql_files/`` in the project."""
+        return self.project_dir / SQL_FILES_DIRNAME
+
+    @property
+    def ingestion_scripts_dir(self) -> Path:
+        """Where Python ingestion scripts are found: ``ingestion_scripts/`` in the project."""
+        return self.project_dir / INGESTION_SCRIPTS_DIRNAME
+
+    @property
+    def migrations_dir(self) -> Path:
+        """The project's own Engine DB migrations: ``migrations/`` in the project."""
+        return self.project_dir / MIGRATIONS_DIRNAME
 
 
 def _secret_var(section: str, name: str, extra: dict[str, Any]) -> str:

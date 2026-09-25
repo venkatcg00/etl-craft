@@ -51,7 +51,12 @@ Each package imports only the packages below it. `lint-imports` enforces this.
 - One warehouse per deployment. Third-party SQLAlchemy dialects are optional extras and never
   imported by engine code.
 - `craft-connector.yml` is written by the team and only read by the engine. Secrets are always
-  variable names, never values.
+  variable names, never values. Its directory is the project directory (`etl-craft/`), holding
+  `sql_files/`, `ingestion_scripts/`, `migrations/` and `logs/`; relative paths start there.
+- A failure is not always bad. When metadata, files, connections or data are not what the
+  engine expects, fail rather than guess or work around it, and make the failure easy to debug:
+  name the exact object, the value found, what was expected and the remedy, and record it in the
+  audit tables and the attempt's log.
 
 ## Conventions
 

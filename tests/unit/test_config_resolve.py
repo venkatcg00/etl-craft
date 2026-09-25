@@ -191,7 +191,30 @@ def test_resolve_config_path_without_a_file_names_where_it_was_expected(tmp_path
     empty = tmp_path / "empty"
     empty.mkdir()
     found = resolve_config_path(start=empty)
-    if found != empty.resolve() / "craft-connector.yml":  # pragma: no cover - a stray parent file
+    if found != empty.resolve() / "etl-craft" / "craft-connector.yml":  # pragma: no cover
         pytest.skip(f"a craft-connector.yml above the temporary directory: {found}")
     with pytest.raises(ConfigurationError, match=r"craft-connector\.yml not found at"):
         load_config(found)
+
+
+def test_the_search_finds_a_project_directory_in_each_parent(tmp_path, monkeypatch):
+    monkeypatch.delenv("ETL_CRAFT_CONFIG", raising=False)
+    repo = tmp_path / "repo"
+    project = repo / "etl-craft"
+    (project / "sql_files").mkdir(parents=True)
+    (project / "craft-connector.yml").write_text("{}", encoding="utf-8")
+    elsewhere = repo / "docs" / "notes"
+    elsewhere.mkdir(parents=True)
+    # From the repository, from anywhere below it, and from inside the project itself.
+    assert resolve_config_path(start=repo) == project / "craft-connector.yml"
+    assert resolve_config_path(start=elsewhere) == project / "craft-connector.yml"
+    assert resolve_config_path(start=project / "sql_files") == project / "craft-connector.yml"
+
+
+def test_two_candidates_in_one_directory_are_refused(tmp_path, monkeypatch):
+    monkeypatch.delenv("ETL_CRAFT_CONFIG", raising=False)
+    (tmp_path / "etl-craft").mkdir()
+    (tmp_path / "etl-craft" / "craft-connector.yml").write_text("{}", encoding="utf-8")
+    (tmp_path / "craft-connector.yml").write_text("{}", encoding="utf-8")
+    with pytest.raises(ConfigurationError, match=r"found both .* keep one, or pass --config"):
+        resolve_config_path(start=tmp_path)

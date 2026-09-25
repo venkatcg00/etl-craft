@@ -31,12 +31,15 @@ def packaged(monkeypatch, tmp_path):
 def test_project_directory_lookup_order(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv(migrations.MIGRATIONS_DIR_ENV_VAR, raising=False)
+    project = tmp_path / "etl-craft" / "migrations"
     assert migrations.resolve_project_migrations_dir() is None
-    (tmp_path / "sql" / "migrations").mkdir(parents=True)
-    assert migrations.resolve_project_migrations_dir() == tmp_path / "sql" / "migrations"
+    # The project's migrations/ counts only once it exists.
+    assert migrations.resolve_project_migrations_dir(None, project) is None
+    project.mkdir(parents=True)
+    assert migrations.resolve_project_migrations_dir(None, project) == project
     monkeypatch.setenv(migrations.MIGRATIONS_DIR_ENV_VAR, "/from/env")
-    assert migrations.resolve_project_migrations_dir() == Path("/from/env")
-    assert migrations.resolve_project_migrations_dir("explicit") == Path("explicit")
+    assert migrations.resolve_project_migrations_dir(None, project) == Path("/from/env")
+    assert migrations.resolve_project_migrations_dir("explicit", project) == Path("explicit")
 
 
 def test_a_stream_reads_sql_files_in_order_with_their_checksums(tmp_path):

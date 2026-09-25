@@ -17,14 +17,17 @@ def _configure(parser: argparse.ArgumentParser) -> None:
         type=Path,
         metavar="PATH",
         help="the project's own *.sql migrations (default: $ETL_CRAFT_MIGRATIONS_DIR, then "
-        "./sql/migrations if it exists)",
+        "migrations/ in the project directory if it exists)",
     )
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    engine = connect_engine_db(load_command_config(args))
+    config = load_command_config(args)
+    engine = connect_engine_db(config)
     try:
-        applied = apply_pending_migrations(engine, args.migrations_dir)
+        applied = apply_pending_migrations(
+            engine, args.migrations_dir, project_default=config.migrations_dir
+        )
     finally:
         engine.dispose()
     if not applied:

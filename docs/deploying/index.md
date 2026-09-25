@@ -2,6 +2,8 @@
 
 Running etl-craft on a machine or under an orchestrator.
 
+- [The project directory](project-layout.md): `etl-craft/`, with the config, SQL files,
+  ingestion scripts, migrations and logs, and how commands find it.
 - [Engine DB setup and upgrades](engine-db.md): `init-db`, `migrate`, and your own migrations.
 
 !!! note "Planned"
