@@ -76,6 +76,9 @@ HANDLERS: dict[str, str] = {
 }
 """Each ``HANDLER`` value and the ``module:function`` that runs it."""
 
+COMMON_PARAMETERS = frozenset({"TASK_TIMEOUT_SECONDS", "DOCUMENTATION"})
+"""The task parameters every handler's tasks may set."""
+
 
 def resolve_handler(name: str) -> Handler:
     """Import and return the handler for ``name``; ``HandlerError`` when none is installed."""

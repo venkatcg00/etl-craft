@@ -50,5 +50,7 @@ it is safe to run on every deployment.
 schema, and the email relay must already exist; the failed check names what is missing. A SQLite
 Engine DB is the exception: etl-craft creates its file, and the folder holding it.
 
+To check the pipelines themselves, run [`validate`](../guides/validating.md).
+
 `init-db` and `migrate` remain for doing either step alone; see
 [Engine DB setup and upgrades](engine-db.md).

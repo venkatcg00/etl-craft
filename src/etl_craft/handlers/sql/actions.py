@@ -117,7 +117,7 @@ def setup_table(session: Session, action: ActionContext) -> HandlerResult:
         others = fetch_target_tasks(
             conn, action.context.pipeline_id, action.context.task_id, action.task.target_object
         )
-    writer = _writer_action(action.task.setup_for, others, action.task.target_object)
+    writer = writer_action(action.task.setup_for, others, action.task.target_object)
     stage = build_stage(session, action.select_sql, empty=True)
     create_target_shape(session, stage, AUDIT_COLUMNS[writer])
     session.drop(stage)
@@ -125,8 +125,11 @@ def setup_table(session: Session, action: ActionContext) -> HandlerResult:
     return HandlerResult(source_count=0, target_count=0, insert_count=0)
 
 
-def _writer_action(setup_for: str | None, others: list[TargetTask], target: str) -> str:
-    """Return the action whose audit columns a SETUP_TABLE target gets."""
+def writer_action(setup_for: str | None, others: list[TargetTask], target: str) -> str:
+    """Return the action whose audit columns a SETUP_TABLE target gets; ``HandlerError`` if unclear.
+
+    ``others`` are the pipeline's other tasks on the target.
+    """
     writers = [task for task in others if task.sql_action in AUDIT_COLUMNS]
     found = sorted({task.sql_action for task in writers})
     listed = ", ".join(f"{task.task_code} ({task.sql_action})" for task in writers)
