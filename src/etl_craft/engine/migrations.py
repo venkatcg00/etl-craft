@@ -164,6 +164,29 @@ def _apply(engine: Engine, migration: MigrationFile) -> None:
         raise MigrationError(f"{migration.version} failed to apply: {error}") from error
 
 
+def pending_migrations(
+    engine: Engine,
+    project_dir: Path | str | None = None,
+    *,
+    project_default: Path | None = None,
+) -> list[str]:
+    """Return the migrations ``migrate`` would apply, without applying any.
+
+    Raises ``MigrationError`` as ``migrate`` would, for an applied file that is missing or was
+    edited.
+    """
+    streams = migration_streams(engine, project_dir, project_default)
+    with engine.connect() as conn:
+        ledger = _load_ledger(conn)
+    verify_ledger(ledger, streams)
+    return [
+        f"{migration.source.lower()}/{migration.version}"
+        for stream in streams
+        for migration in stream.files
+        if (migration.source, migration.version) not in ledger
+    ]
+
+
 def apply_pending_migrations(
     engine: Engine,
     project_dir: Path | str | None = None,

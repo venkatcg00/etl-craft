@@ -6,6 +6,8 @@ Running etl-craft on a machine or under an orchestrator.
   ingestion scripts, migrations and logs, and how commands find it.
 - [Running under an orchestrator](orchestrator.md): `generate-yml`, the DAG it writes, and the
   global DAG.
+- [Checking a deployment: `doctor` and `setup`](doctor-and-setup.md): every check, and setting up
+  or upgrading in one command.
 - [Engine DB setup and upgrades](engine-db.md): `init-db`, `migrate`, and your own migrations.
 
 !!! note "Planned"
