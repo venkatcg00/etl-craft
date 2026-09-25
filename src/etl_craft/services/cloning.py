@@ -9,8 +9,9 @@ Each mirror has the Engine DB table's name and columns, with portable types: who
 ``BIGINT``, other numbers ``DECIMAL(38, 10)``, timestamps the warehouse's timestamp with time
 zone, and everything else text; JSON values are copied as their text. A mirror is created when
 it is missing, and its rows replaced on every clone, one transaction per table where the
-warehouse has them. A mirror whose columns no longer match the Engine DB table, after an
-upgrade adds one, is dropped and created again: every row is rewritten anyway.
+warehouse has them. A mirror is never dropped, so views built on it keep working: a column an
+upgrade adds to the Engine DB table is added to the mirror, and a column the mirror has that the
+Engine DB table no longer does is left in place, NULL in every row.
 
 Cloning writes only the mirrors, and only in the warehouse profile's schema, which must already
 exist. It refuses a warehouse schema that is the Engine DB's own, where it would empty the
@@ -63,12 +64,13 @@ PREFIXES: Mapping[CloningScope, tuple[str, ...]] = {
 
 @dataclass(frozen=True)
 class ClonedTable:
-    """One mirror written: its name, the rows copied, and whether it was (re)created."""
+    """One mirror written: its name, the rows copied, whether it was created, columns added."""
 
     table: str
     mirror: str
     rows: int
     created: bool
+    added: tuple[str, ...] = ()
 
 
 def cloning_problem(config: ConnectorConfig) -> str | None:
@@ -194,7 +196,8 @@ def _clone_table(
 ) -> ClonedTable:
     started = time.monotonic()
     names = [name for name, _ in columns]
-    column_ddl = ", ".join(f"{name} {mirror_type(kind, dialect)}" for name, kind in columns)
+    types = {name: mirror_type(kind, dialect) for name, kind in columns}
+    column_ddl = ", ".join(f"{name} {types[name]}" for name in names)
     insert = text(
         f"INSERT INTO {mirror} ({', '.join(names)}) "
         f"VALUES ({', '.join(f':p{i}' for i in range(len(names)))})"
@@ -203,14 +206,15 @@ def _clone_table(
     try:
         with warehouse.begin() as conn:
             existing = {name.upper() for name, _ in _mirror_columns(conn, dialect, mirror)}
-            created = existing != set(names)
-            if existing and created:
-                logger.info("%s has columns %s; creating it again", mirror, sorted(existing))
-                conn.execute(text(f"DROP TABLE {mirror}"))
+            created = not existing
+            added = () if created else tuple(n for n in names if n not in existing)
             if created:
                 ddl = dialect.mirror_table_ddl(mirror, column_ddl, config.cloning)
                 conn.execute(text(ddl or f"CREATE TABLE {mirror} ({column_ddl})"))
             else:
+                alter = f"{dialect.alter_table_keyword()} {mirror} ADD COLUMN"
+                for name in added:
+                    conn.execute(text(f"{alter} {name} {types[name]}"))
                 conn.execute(text(f"TRUNCATE TABLE {mirror}"))
             for batch in _batches(engine, table, names):
                 conn.execute(insert, [{f"p{i}": v for i, v in enumerate(row)} for row in batch])
@@ -223,9 +227,9 @@ def _clone_table(
         mirror,
         rows,
         time.monotonic() - started,
-        " (created)" if created else "",
+        " (created)" if created else (f" (added {', '.join(added)})" if added else ""),
     )
-    return ClonedTable(table, mirror, rows, created)
+    return ClonedTable(table, mirror, rows, created, added)
 
 
 def _batches(engine: Engine, table: str, names: list[str]) -> Iterator[list[tuple[object, ...]]]:

@@ -36,8 +36,10 @@ database: it would empty the tables it copies. `doctor` reports that as a failed
   with time zone, and everything else text. JSON, such as `PIPELINE_PARAMETERS`, is copied as its
   text.
 - Every clone replaces every row, one transaction per table where the warehouse has them.
-- A copy whose columns no longer match, after an upgrade adds a column, is dropped and created
-  again. Cloning writes nothing else: only these copies, only in that schema.
+- A copy is never dropped, so views built on it keep working. When an upgrade adds a column to
+  an Engine DB table, the column is added to its copy (`ALTER TABLE ... ADD COLUMN`); a column the
+  copy has that the Engine DB table no longer does stays, `NULL` in every row. Cloning writes
+  nothing else: only these copies, only in that schema.
 - Two runs that end together never clone at once: the second waits, then copies the newer state.
   On a DuckDB warehouse, cloning waits for any task writing to it.
 
@@ -54,4 +56,4 @@ CFG_TASKS	analytics.etl_craft.CFG_TASKS	87
 ```
 
 Each line is the Engine DB table, its copy, the rows copied, and `created` when the copy was
-created. A failure exits with status `17` (`CloningError`), naming the table.
+created, or `added` and the columns added to it. A failure exits with status `17` (`CloningError`), naming the table.
