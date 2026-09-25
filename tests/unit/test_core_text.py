@@ -193,7 +193,18 @@ def test_is_only_comments():
     assert not text.is_only_comments("/* a */ SELECT 1")
 
 
-# $$pipeline_id
+# $$pipeline_id and $$pipeline_id_filter
+
+
+def substitute(sql, *, substitution=False, filter_enabled=False, **kwargs):
+    kwargs.setdefault("refresh_type", "INCREMENTAL")
+    return text.substitute_pipeline_id(
+        sql,
+        pipeline_run_id=42,
+        substitution=substitution,
+        filter_enabled=filter_enabled,
+        **kwargs,
+    )
 
 
 @pytest.mark.parametrize(
@@ -206,29 +217,52 @@ def test_is_only_comments():
         ("INCREMENTAL", True, "1=1"),
     ],
 )
-def test_substitute_pipeline_id(refresh_type, force_all, expected):
-    result = text.substitute_pipeline_id(
-        "SELECT 1 WHERE $$pipeline_id",
-        refresh_type=refresh_type,
-        pipeline_run_id=42,
-        force_all=force_all,
+def test_the_filter_token_follows_the_refresh_type(refresh_type, force_all, expected):
+    sql = "SELECT 1 FROM t WHERE $$pipeline_id_filter"
+    result = substitute(sql, filter_enabled=True, refresh_type=refresh_type, force_all=force_all)
+    assert result == f"SELECT 1 FROM t WHERE {expected}"
+
+
+def test_the_value_token_is_the_run_id_and_every_occurrence_is_replaced():
+    sql = (
+        "SELECT $$pipeline_id AS run FROM a WHERE $$pipeline_id_filter "
+        "UNION ALL SELECT $$pipeline_id FROM b WHERE $$pipeline_id_filter"
     )
-    assert result == f"SELECT 1 WHERE {expected}"
+    result = substitute(sql, substitution=True, filter_enabled=True, refresh_type="FULL")
+    assert result == ("SELECT 42 AS run FROM a WHERE 1=1 UNION ALL SELECT 42 FROM b WHERE 1=1")
 
 
-def test_substitute_pipeline_id_replaces_every_token():
-    sql = "SELECT * FROM a WHERE $$pipeline_id UNION ALL SELECT * FROM b WHERE $$pipeline_id"
-    result = text.substitute_pipeline_id(sql, refresh_type="INCREMENTAL", pipeline_run_id=7)
-    assert result.count("pipeline_run_id = 7") == 2
+def test_sql_without_tokens_or_switches_is_untouched():
+    sql = "SELECT * FROM reference_table WHERE price > 0"
+    assert substitute(sql) == sql
 
 
 @pytest.mark.parametrize(
-    "sql",
-    ["SELECT * FROM some_table", "SELECT * FROM reference_table WHERE active = true"],
+    ("sql", "switches", "message"),
+    [
+        (
+            "SELECT 1 WHERE $$pipeline_id_filter",
+            {},
+            "uses $$pipeline_id_filter, but PIPELINE_ID_FILTER is not true",
+        ),
+        ("SELECT $$pipeline_id", {}, "uses $$pipeline_id, but PIPELINE_ID_SUBSTITUTION is not"),
+        (
+            "SELECT 1",
+            {"filter_enabled": True},
+            "PIPELINE_ID_FILTER is true, but SOURCE_SQL has no $$pipeline_id_filter",
+        ),
+        (
+            "SELECT 1",
+            {"substitution": True},
+            "PIPELINE_ID_SUBSTITUTION is true, but SOURCE_SQL has no $$pipeline_id to",
+        ),
+        ("SELECT $$pipeline WHERE $$run_date", {}, "unknown token(s) $$pipeline, $$run_date"),
+    ],
 )
-def test_substitute_pipeline_id_leaves_sql_without_the_token_untouched(sql):
-    # Nothing is appended: a missing token is a definition mistake for review to catch.
-    assert text.substitute_pipeline_id(sql, refresh_type="INCREMENTAL", pipeline_run_id=42) == sql
+def test_token_mistakes_fail_with_the_remedy(sql, switches, message):
+    with pytest.raises(HandlerError) as error:
+        substitute(sql, **switches)
+    assert message in str(error.value)
 
 
 # Read-only lint

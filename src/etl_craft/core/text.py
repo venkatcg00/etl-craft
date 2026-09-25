@@ -196,21 +196,63 @@ def is_only_comments(statement: str) -> bool:
 # SQL task text
 
 PIPELINE_ID_TOKEN = "$$pipeline_id"
+PIPELINE_ID_FILTER_TOKEN = "$$pipeline_id_filter"
+_TOKEN = re.compile(r"\$\$([A-Za-z_][A-Za-z0-9_]*)")
 
 
 def substitute_pipeline_id(
-    sql: str, *, refresh_type: str, pipeline_run_id: int, force_all: bool = False
+    sql: str,
+    *,
+    pipeline_run_id: int,
+    refresh_type: str,
+    substitution: bool,
+    filter_enabled: bool,
+    source: str = "SOURCE_SQL",
+    force_all: bool = False,
 ) -> str:
-    """Replace every ``$$pipeline_id`` in ``sql`` with the run's scope condition.
+    """Replace the pipeline-id tokens in ``sql``, each only when its switch is on.
 
-    The token becomes ``pipeline_run_id = <id>`` for an ``INCREMENTAL`` pipeline, and ``1=1``
-    for a ``FULL`` one or when ``force_all`` asks for every row. The author writes the
-    surrounding ``WHERE``; SQL without the token is returned unchanged. ``pipeline_run_id`` is
-    an integer the engine resolved, so it is written into the text directly.
+    - ``$$pipeline_id`` becomes the run's ``pipeline_run_id``, when ``substitution`` is on
+      (the task's ``PIPELINE_ID_SUBSTITUTION``).
+    - ``$$pipeline_id_filter`` becomes ``pipeline_run_id = <id>``, or ``1=1`` for a ``FULL``
+      refresh or when ``force_all`` asks for every row, when ``filter_enabled`` is on (the
+      task's ``PIPELINE_ID_FILTER``).
+
+    Raises ``HandlerError``, naming ``source``, for any other ``$$`` token, for a token whose
+    switch is off, and for a switch that is on with its token absent: each is a mistake in the
+    task's definition, and running the SQL anyway would read the wrong rows. The id is an
+    integer the engine resolved, so it is written into the text directly.
     """
+    found = {match.group(1) for match in _TOKEN.finditer(sql)}
+    known = {PIPELINE_ID_TOKEN[2:]: substitution, PIPELINE_ID_FILTER_TOKEN[2:]: filter_enabled}
+    switch = {
+        PIPELINE_ID_TOKEN[2:]: "PIPELINE_ID_SUBSTITUTION",
+        PIPELINE_ID_FILTER_TOKEN[2:]: "PIPELINE_ID_FILTER",
+    }
+    unknown = sorted(found - known.keys())
+    if unknown:
+        raise HandlerError(
+            f"{source} uses unknown token(s) {', '.join('$$' + t for t in unknown)}; the known "
+            f"tokens are {PIPELINE_ID_TOKEN} and {PIPELINE_ID_FILTER_TOKEN}"
+        )
+    for name, enabled in known.items():
+        if name in found and not enabled:
+            raise HandlerError(
+                f"{source} uses $${name}, but {switch[name]} is not true for this task; set "
+                f"{switch[name]}=true to have it replaced"
+            )
+        if enabled and name not in found:
+            raise HandlerError(
+                f"{switch[name]} is true, but {source} has no $${name} to replace; remove the "
+                "parameter or add the token"
+            )
+    run_id = int(pipeline_run_id)
     full = force_all or refresh_type == RefreshType.FULL
-    replacement = "1=1" if full else f"pipeline_run_id = {int(pipeline_run_id)}"
-    return sql.replace(PIPELINE_ID_TOKEN, replacement)
+    replacements = {
+        PIPELINE_ID_TOKEN[2:]: str(run_id),
+        PIPELINE_ID_FILTER_TOKEN[2:]: "1=1" if full else f"pipeline_run_id = {run_id}",
+    }
+    return _TOKEN.sub(lambda match: replacements[match.group(1)], sql)
 
 
 WRITE_KEYWORDS = (

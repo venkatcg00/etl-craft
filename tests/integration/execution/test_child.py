@@ -146,10 +146,12 @@ def test_the_command_line_runs_a_task_with_no_handler_installed(bound, capsys, m
     # An earlier attempt failed, so this run is a retry of the same row.
     with engine.begin() as conn:
         runlog.finish_task_run(conn, task_run_id, status=RunStatus.FAILED)
+        conn.execute(text("UPDATE CFG_TASKS SET HANDLER = 'EMAIL_ALERT'"))
     code = cli_main(["run", "--pipeline_code", "P", "--task_code", "T"])
     assert code == ExitCode.FAILURE
-    assert capsys.readouterr().out == ("T: FAILED — no handler is installed for HANDLER 'SQL'\n")
-    assert status(engine, task_run_id).error_message == "no handler is installed for HANDLER 'SQL'"
+    message = "no handler is installed for HANDLER 'EMAIL_ALERT'"
+    assert capsys.readouterr().out == f"T: FAILED — {message}\n"
+    assert status(engine, task_run_id).error_message == message
     # A settled task is skipped and exits 0.
     with engine.begin() as conn:
         runlog.finish_task_run(conn, task_run_id, status=RunStatus.SUCCESS)

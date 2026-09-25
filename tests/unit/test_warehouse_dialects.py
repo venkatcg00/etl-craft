@@ -170,6 +170,7 @@ def test_alter_keywords_and_scalar_values():
     assert for_key("snowflake").alter_table_keyword() == "ALTER TABLE"
     assert for_key("databricks").scalar_source_value("x") == "FIRST(x)"
     assert for_key("postgres").scalar_source_value("x") == "x"
+    assert for_key("snowflake_iceberg").scalar_source_value("x") == "ANY_VALUE(x)"
 
 
 class RecordingConnection:
