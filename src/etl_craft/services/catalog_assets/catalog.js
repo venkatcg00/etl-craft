@@ -144,14 +144,105 @@
     }
   }
 
-  // The lineage graph: filter by direction and depth, and trace a column through every path.
+  // The lineage graph. Tables open collapsed, the page's own table expanded; clicking a
+  // table's header shows or hides its columns, and the boxes are stacked again to fit. The
+  // drawing can be filtered by direction and depth, and a column traced through every path.
   document.querySelectorAll(".graph-panel").forEach(function (panel) {
     var svg = panel.querySelector("svg.lineage");
     if (!svg) return;
+    var number = function (name) { return parseFloat(svg.getAttribute(name)); };
+    var WIDTH = number("data-node-width");
+    var HEADER = number("data-header");
+    var ROW = number("data-row");
+    var GAP = number("data-gap");
+    var MARGIN = number("data-margin");
     var depth = panel.querySelector("select.depth");
     var direction = panel.querySelector("select.direction");
-    var nodes = svg.querySelectorAll(".node");
-    var edges = svg.querySelectorAll(".edge");
+    var nodes = Array.prototype.slice.call(svg.querySelectorAll(".node"));
+    var edges = Array.prototype.slice.call(svg.querySelectorAll(".edge"));
+    var frame = panel.querySelector(".graph");
+    var at = {};
+
+    function expanded(node) { return !node.classList.contains("collapsed"); }
+
+    function rows(node) {
+      return node.querySelectorAll(".col").length + (node.querySelector(".more") ? 1 : 0);
+    }
+
+    function height(node) {
+      var count = expanded(node) ? rows(node) : 0;
+      return HEADER + ROW * count + (count ? 6 : 0);
+    }
+
+    function expand(node, open) {
+      node.classList.toggle("collapsed", !open);
+      var chevron = node.querySelector(".chevron");
+      if (chevron) chevron.textContent = open ? "▾" : "▸";
+      node.querySelector(".box").setAttribute("height", height(node));
+    }
+
+    function anchor(place, column) {
+      if (column && expanded(place.node)) {
+        var cols = place.node.querySelectorAll(".col");
+        for (var i = 0; i < cols.length; i++) {
+          if (cols[i].getAttribute("data-col") === column) {
+            return place.y + HEADER + ROW * i + ROW / 2;
+          }
+        }
+      }
+      return place.y + HEADER / 2;
+    }
+
+    function curve(x1, y1, x2, y2) {
+      var bend = Math.max(40, Math.abs(x2 - x1) / 2);
+      return "M" + x1 + "," + y1 + " C" + (x1 + bend) + "," + y1 + " " + (x2 - bend) + "," +
+        y2 + " " + x2 + "," + y2;
+    }
+
+    // Stack the shown boxes of each level in their drawn order, centred on the tallest level,
+    // then run every edge from its column's row, or its table's header when it is collapsed.
+    function layout() {
+      var levels = {};
+      nodes.forEach(function (node) {
+        if (node.classList.contains("hidden")) return;
+        var level = node.getAttribute("data-level");
+        (levels[level] = levels[level] || []).push(node);
+      });
+      var tallest = 0;
+      var heights = {};
+      Object.keys(levels).forEach(function (level) {
+        levels[level].sort(function (a, b) {
+          return parseFloat(a.getAttribute("data-y")) - parseFloat(b.getAttribute("data-y"));
+        });
+        var total = GAP * (levels[level].length - 1);
+        levels[level].forEach(function (node) { total += height(node); });
+        heights[level] = total;
+        tallest = Math.max(tallest, total);
+      });
+      at = {};
+      Object.keys(levels).forEach(function (level) {
+        var y = MARGIN + (tallest - heights[level]) / 2;
+        levels[level].forEach(function (node) {
+          var x = parseFloat(node.getAttribute("data-x"));
+          node.setAttribute("transform", "translate(" + x + "," + y + ")");
+          at[node.getAttribute("data-table")] = { node: node, x: x, y: y };
+          y += height(node) + GAP;
+        });
+      });
+      var full = svg.getAttribute("viewBox").split(" ");
+      var tall = tallest + 2 * MARGIN;
+      svg.setAttribute("viewBox", "0 0 " + full[2] + " " + tall);
+      svg.setAttribute("height", tall);
+      edges.forEach(function (edge) {
+        var source = at[edge.getAttribute("data-source")];
+        var target = at[edge.getAttribute("data-target")];
+        if (!source || !target) return;
+        edge.setAttribute("d", curve(
+          source.x + WIDTH, anchor(source, edge.getAttribute("data-from")),
+          target.x, anchor(target, edge.getAttribute("data-to"))
+        ));
+      });
+    }
 
     function filter() {
       var limit = depth.value === "all" ? Infinity : parseInt(depth.value, 10);
@@ -168,6 +259,7 @@
         var both = shown[edge.getAttribute("data-source")] && shown[edge.getAttribute("data-target")];
         edge.classList.toggle("hidden", !both);
       });
+      layout();
     }
 
     var into = {};
@@ -195,9 +287,16 @@
       }
     }
 
+    function light(edge, on) {
+      edge.classList.toggle("on", on);
+      edge.setAttribute("marker-end", on ? "url(#arrow-on)" : "url(#arrow)");
+    }
+
+    // Trace a column: every path into it and out of it, with each table on the way expanded.
     var traced = null;
     function trace(column) {
-      svg.querySelectorAll(".on").forEach(function (el) { el.classList.remove("on"); });
+      edges.forEach(function (edge) { light(edge, false); });
+      svg.querySelectorAll(".col.on").forEach(function (el) { el.classList.remove("on"); });
       if (!column || column === traced) {
         traced = null;
         svg.classList.remove("tracing");
@@ -209,38 +308,60 @@
       var lit = [];
       walk(column, into, "data-from", reached, lit);
       walk(column, outOf, "data-to", reached, lit);
-      lit.forEach(function (edge) { edge.classList.add("on"); });
+      Object.keys(reached).forEach(function (col) {
+        var place = at[col.split("|")[0]];
+        if (place && !expanded(place.node)) expand(place.node, true);
+      });
+      layout();
+      lit.forEach(function (edge) { light(edge, true); });
       svg.querySelectorAll(".col").forEach(function (col) {
         if (reached[col.getAttribute("data-col")]) col.classList.add("on");
       });
       svg.classList.add("tracing");
     }
 
+    function toggle(head) {
+      var node = head.closest(".node");
+      expand(node, !expanded(node));
+      layout();
+    }
+
     svg.addEventListener("click", function (event) {
       var col = event.target.closest(".col");
-      if (col) trace(col.getAttribute("data-col"));
+      if (col) return trace(col.getAttribute("data-col"));
+      var head = event.target.closest(".head");
+      if (head) toggle(head);
     });
     svg.addEventListener("keydown", function (event) {
+      if (event.key !== "Enter" && event.key !== " ") return;
       var col = event.target.closest(".col");
-      if (col && (event.key === "Enter" || event.key === " ")) {
-        event.preventDefault();
-        trace(col.getAttribute("data-col"));
-      }
+      var head = event.target.closest(".head");
+      if (!col && !head) return;
+      event.preventDefault();
+      if (col) trace(col.getAttribute("data-col")); else toggle(head);
     });
     depth.addEventListener("change", filter);
     direction.addEventListener("change", filter);
-    var reset = panel.querySelector("button.reset");
-    if (reset) reset.addEventListener("click", function () { trace(null); });
+    var buttons = {
+      reset: function () { trace(null); },
+      "expand-all": function () { nodes.forEach(function (n) { expand(n, true); }); layout(); },
+      "collapse-all": function () {
+        nodes.forEach(function (n) { expand(n, n.classList.contains("focus")); });
+        layout();
+      }
+    };
+    Object.keys(buttons).forEach(function (name) {
+      var button = panel.querySelector("button." + name);
+      if (button) button.addEventListener("click", buttons[name]);
+    });
+
+    nodes.forEach(function (node) { expand(node, node.classList.contains("focus")); });
     filter();
 
     // Open with the page's own table in view.
-    var focus = svg.querySelector(".node.focus");
-    var frame = panel.querySelector(".graph");
+    var focus = at[panel.getAttribute("data-focus")];
     if (focus && frame) {
-      var box = focus.getBBox();
-      var matrix = focus.transform.baseVal.consolidate();
-      var x = matrix ? matrix.matrix.e : 0;
-      frame.scrollLeft = Math.max(0, x + box.width / 2 - frame.clientWidth / 2);
+      frame.scrollLeft = Math.max(0, focus.x + WIDTH / 2 - frame.clientWidth / 2);
     }
 
     function fromHash() {

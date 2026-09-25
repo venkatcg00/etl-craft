@@ -11,8 +11,11 @@ solid for a copy, dashed for a derived value, whose expression is the edge's too
 made from no source column, such as ``COUNT(*)`` or a constant, is marked. A task whose columns
 cannot be traced still links its tables, header to header, dotted.
 
-The drawing carries what the page script needs to filter it: each table's level, and each
-edge's two columns, so clicking a column can highlight every path through it.
+Every edge ends in an arrow at the table made from its source. Each box has a header that shows
+or hides its columns and a button that opens the table's page. The drawing carries what the
+page script needs: each table's level and position, and each edge's two tables and columns, so
+the script can collapse tables and stack the boxes again, filter by direction and depth, and
+highlight every path through a column.
 """
 
 from __future__ import annotations
@@ -35,7 +38,8 @@ MAX_ROWS = 30
 MAX_TABLES = 200
 """Tables drawn at most; the farthest levels are left out beyond it, and the page says so."""
 SWEEPS = 4
-LABEL_CHARS = 34
+LABEL_CHARS = 30
+ARROW = 'marker-end="url(#arrow)"'
 
 
 @dataclass
@@ -226,7 +230,16 @@ def render_svg(drawing: LineageDrawing, link: Callable[[str], str]) -> str:
         f'<svg class="lineage" xmlns="http://www.w3.org/2000/svg" '
         f'viewBox="0 0 {drawing.width:.0f} {drawing.height:.0f}" '
         f'width="{drawing.width:.0f}" height="{drawing.height:.0f}" role="img" '
-        f'aria-label="Lineage of {_e(drawing.focus)}">',
+        f'aria-label="Lineage of {_e(drawing.focus)}" data-node-width="{NODE_WIDTH}" '
+        f'data-header="{HEADER}" data-row="{ROW}" data-gap="{NODE_GAP}" data-margin="{MARGIN}">',
+        "<defs>",
+        *(
+            f'<marker id="{name}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" '
+            f'markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse">'
+            f'<path class="{css}" d="M0,0 L10,5 L0,10 z"/></marker>'
+            for name, css in (("arrow", "arrowhead"), ("arrow-on", "arrowhead on"))
+        ),
+        "</defs>",
         '<g class="edges">',
     ]
     nodes = drawing.nodes
@@ -244,7 +257,7 @@ def render_svg(drawing: LineageDrawing, link: Callable[[str], str]) -> str:
         tip += f"\n{e.transformation}" if kind == "derived" else " (copy)"
         tip += f"\nby {e.task}" if e.task else ""
         parts.append(
-            f'<path class="edge {kind}" d="{path}" '
+            f'<path class="edge {kind}" d="{path}" {ARROW} '
             f'data-from="{_e(_col(e.source_object, e.source_column))}" '
             f'data-to="{_e(_col(e.target_object, e.target_column))}" '
             f'data-source="{_e(e.source_object)}" data-target="{_e(e.target_object)}">'
@@ -254,7 +267,7 @@ def render_svg(drawing: LineageDrawing, link: Callable[[str], str]) -> str:
         source, target = nodes[source_name], nodes[target_name]
         path = _curve(source.x + NODE_WIDTH, source.y + HEADER / 2, target.x, target.y + HEADER / 2)
         parts.append(
-            f'<path class="edge table" d="{path}" '
+            f'<path class="edge table" d="{path}" {ARROW} '
             f'data-source="{_e(source_name)}" data-target="{_e(target_name)}">'
             f"<title>{_e(f'{source.label} → {target.label}, by {task} (table level)')}</title>"
             "</path>"
@@ -271,15 +284,30 @@ def _node_svg(node: Node, *, focus: bool, link: Callable[[str], str]) -> str:
         c for c in ("node", "focus" if focus else "", "external" if node.external else "") if c
     )
     label = node.label if len(node.label) <= LABEL_CHARS else node.label[: LABEL_CHARS - 1] + "…"
-    title = f'<text class="title" x="10" y="20">{_e(label)}<title>{_e(node.label)}</title></text>'
+    has_columns = bool(node.columns or node.hidden_columns)
+    toggle = ": click to show or hide its columns" if has_columns else ""
+    head = (
+        f'<g class="head" tabindex="0">'
+        f'<rect class="header" width="{NODE_WIDTH}" height="{HEADER}" rx="6"/>'
+        + ('<text class="chevron" x="10" y="20">▾</text>' if has_columns else "")
+        + f'<text class="title" x="{26 if has_columns else 10}" y="20">{_e(label)}</text>'
+        f"<title>{_e(node.label)}{toggle}</title></g>"
+    )
+    opener = ""
     if not node.external:
-        title = f'<a href="{_e(link(node.name))}">{title}</a>'
+        opener = (
+            f'<a class="open" href="{_e(link(node.name))}">'
+            f'<rect x="{NODE_WIDTH - 28}" y="4" width="22" height="22" rx="4"/>'
+            f'<text x="{NODE_WIDTH - 17}" y="20" text-anchor="middle">↗</text>'
+            f"<title>Open {_e(node.label)}</title></a>"
+        )
     parts = [
         f'<g class="{classes}" data-table="{_e(node.name)}" data-level="{node.level}" '
+        f'data-x="{node.x:.0f}" data-y="{node.y:.0f}" '
         f'transform="translate({node.x:.0f},{node.y:.0f})">',
         f'<rect class="box" width="{NODE_WIDTH}" height="{node.height:.0f}" rx="6"/>',
-        f'<rect class="header" width="{NODE_WIDTH}" height="{HEADER}" rx="6"/>',
-        title,
+        head,
+        opener,
     ]
     for index, column in enumerate(node.columns):
         top = HEADER + ROW * index

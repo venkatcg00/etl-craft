@@ -491,6 +491,8 @@ class _Writer:
             '<option value="downstream">downstream</option></select></label>'
             f'<label>Depth <select class="depth">{options}'
             f'<option value="all"{all_selected}>all</option></select></label>'
+            '<button type="button" class="expand-all">Expand all</button>'
+            '<button type="button" class="collapse-all">Collapse all</button>'
             '<button type="button" class="reset">Clear trace</button></div>'
             '<div class="legend">'
             '<span><svg width="30" height="8"><path d="M0,4 H30" stroke="currentColor"/></svg> '
@@ -500,7 +502,8 @@ class _Writer:
             '<span><svg width="30" height="8"><path d="M0,4 H30" stroke="currentColor" '
             'stroke-width="2" stroke-dasharray="2 4"/></svg> table level only</span>'
             "<span>ƒ made from no source column</span>"
-            "<span>Click a column to trace it upstream and downstream.</span></div>"
+            "<span>Click a table to show its columns, ↗ to open it, and a column to trace "
+            "it upstream and downstream.</span></div>"
             f'{truncated}<div class="graph">{svg}</div></div>'
         )
 

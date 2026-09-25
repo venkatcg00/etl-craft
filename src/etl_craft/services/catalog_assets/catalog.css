@@ -106,7 +106,16 @@ svg.lineage .header { fill: var(--node-header); stroke: var(--border); }
 svg.lineage .focus .header { fill: var(--focus); }
 svg.lineage .external .header { fill: var(--external); }
 svg.lineage .title { fill: var(--text); font-weight: 600; }
-svg.lineage a .title { fill: var(--accent); }
+svg.lineage .head { cursor: pointer; }
+svg.lineage .head:focus { outline: none; }
+svg.lineage .head:focus .header { stroke: var(--accent); }
+svg.lineage .chevron { fill: var(--muted); }
+svg.lineage .open rect { fill: transparent; }
+svg.lineage .open:hover rect, svg.lineage .open:focus rect { fill: var(--accent-soft); }
+svg.lineage .open text { fill: var(--accent); font-size: 14px; font-weight: 700; }
+svg.lineage .collapsed .col, svg.lineage .collapsed .more { display: none; }
+svg.lineage .arrowhead { fill: var(--edge); }
+svg.lineage .arrowhead.on { fill: var(--highlight); }
 svg.lineage .col { cursor: pointer; }
 svg.lineage .col .row { fill: transparent; }
 svg.lineage .col:hover .row, svg.lineage .col:focus .row { fill: var(--accent-soft); }

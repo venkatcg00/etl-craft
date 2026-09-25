@@ -231,6 +231,9 @@ def test_the_site_has_a_page_per_asset_and_a_search_index(project, tmp_path):
     table = (folder / table_url("sales.orders")).read_text("utf-8")
     assert '<svg class="lineage"' in table and 'data-col="sales.orders|amount_usd"' in table
     assert 'data-from="staging.orders|amount"' in table
+    # Every table's box has a header to show its columns and a button to open its page.
+    assert '<a class="open" href="../tables/staging.orders.html">' in table
+    assert table.count('class="head"') == 7 and 'marker-end="url(#arrow)"' in table
     assert "negative usd" in table and "../tasks/SALES.convert.html" in table
     task = (folder / "tasks/SALES.convert.html").read_text("utf-8")
     assert "o.amount * r.rate" in task and "JOIN ref.rates" in task

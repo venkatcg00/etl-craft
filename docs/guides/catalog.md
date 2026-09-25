@@ -34,8 +34,11 @@ database.
 ## Lineage graphs
 
 Each table page draws its lineage: the tables it is made from to the left, as far as they go, and
-the tables made from it to the right. Each box lists the columns lineage connects, every column
-for the page's own table.
+the tables made from it to the right. Arrows point from each source to what is made from it.
+
+Tables open collapsed, showing their names; the page's own table opens with its columns. Click a
+table's name to show or hide its columns (the columns lineage connects), or ↗ to open its page.
+*Expand all* and *Collapse all* do every table at once.
 
 | Line | Means |
 |---|---|
@@ -46,7 +49,7 @@ for the page's own table.
 A column marked `ƒ` is made from no source column, such as `COUNT(*)` or a constant.
 
 - **Click a column** to trace it: every path into it and out of it lights up, across every
-  table shown. Click it again, or *Clear trace*, to stop. A column's name in the table above the
+  table shown, and each table on the way opens. Click it again, or *Clear trace*, to stop. A column's name in the table above the
   graph traces it too, and the link can be shared: `…/sales.orders.html#col=amount_usd`.
 - **Direction** shows only what is upstream or downstream.
 - **Depth** shows fewer levels. A deep graph opens three levels each way.
