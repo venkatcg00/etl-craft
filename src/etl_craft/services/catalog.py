@@ -48,7 +48,10 @@ from etl_craft.engine.repository.catalog import (
     fetch_documentation_versions,
 )
 from etl_craft.engine.repository.tasks import fetch_task_parameters
-from etl_craft.engine.repository.validation import fetch_pipeline_edges
+from etl_craft.engine.repository.validation import (
+    fetch_pipeline_edges,
+    fetch_task_dependency_edges,
+)
 from etl_craft.services.lineage import Edge, TaskLineage, collect, table_name
 from etl_craft.warehouse.connection import open_warehouse, warehouse_dialect
 
@@ -104,7 +107,11 @@ class TableEdge:
 
 @dataclass
 class TaskAsset:
-    """An active task: its definition, lineage and latest run."""
+    """An active task: its definition, lineage, dependencies and latest run.
+
+    ``upstream`` and ``downstream`` are the tasks it waits for and that wait for it, each with
+    the dependency type, as ``PIPELINE_CODE.TASK_CODE``; ``rules`` are its business rules.
+    """
 
     row: TaskRow
     params: dict[str, str]
@@ -114,6 +121,9 @@ class TaskAsset:
     sources: tuple[str, ...] = ()
     lineage_error: str | None = None
     column_edges: list[Edge] = field(default_factory=list)
+    upstream: list[tuple[str, str]] = field(default_factory=list)
+    downstream: list[tuple[str, str]] = field(default_factory=list)
+    rules: list[int] = field(default_factory=list)
 
     @property
     def label(self) -> str:
@@ -172,6 +182,16 @@ class Catalog:
     scripts: dict[str, ScriptAsset]
     column_edges: list[Edge]
     table_edges: list[TableEdge]
+    database: str | None = None
+
+    def where(self, table: str) -> tuple[str, str, str]:
+        """Return a table's ``(database, schema, table)``; the active database when unnamed."""
+        parts = table.split(".")
+        if len(parts) == 3:
+            return parts[0], parts[1], parts[2]
+        if len(parts) == 2:
+            return self.database or "", parts[0], parts[1]
+        return self.database or "", "", table
 
     @property
     def untraced(self) -> list[TaskAsset]:
@@ -184,6 +204,7 @@ def build_catalog(
 ) -> Catalog:
     """Read the Engine DB and return the catalog; lineage is stored as ``lineage`` stores it."""
     catalog_name = active_catalog(config) if config.warehouse is not None else None
+    database = catalog_name
     with engine.connect() as conn:
         pipeline_rows = fetch_catalog_pipelines(conn)
         task_rows = fetch_catalog_tasks(conn)
@@ -191,6 +212,7 @@ def build_catalog(
         versions = fetch_documentation_versions(conn)
         params = {row.task_id: fetch_task_parameters(conn, row.task_id) for row in task_rows}
         pipeline_edges = fetch_pipeline_edges(conn)
+        task_edges = fetch_task_dependency_edges(conn)
     lineages = {lineage.task: lineage for lineage in collect(engine, config)}
 
     def name_of(object_ref: str) -> str:
@@ -205,6 +227,7 @@ def build_catalog(
         scripts={},
         column_edges=[],
         table_edges=[],
+        database=database,
     )
     for row in task_rows:
         task_params = params[row.task_id]
@@ -227,9 +250,20 @@ def build_catalog(
             catalog.pipelines[edge.depends_on_pipeline_code].depended_on_by.append(
                 edge.pipeline_code
             )
+    for dependency in task_edges:
+        if not (dependency.depends_on_task_active and dependency.depends_on_pipeline_active):
+            continue
+        waiting = catalog.tasks.get(dependency.label)
+        upstream = catalog.tasks.get(dependency.depends_on_label)
+        if waiting is None or upstream is None:
+            continue
+        waiting.upstream.append((upstream.label, dependency.dependency_type))
+        upstream.downstream.append((waiting.label, dependency.dependency_type))
     for rule_row in rule_rows:
         rule = RuleAsset(rule_row, name_of(rule_row.target_table))
         catalog.rules[rule_row.business_rule_id] = rule
+        if rule.task in catalog.tasks:
+            catalog.tasks[rule.task].rules.append(rule_row.business_rule_id)
         _table(catalog, rule.table).rules.append(rule_row.business_rule_id)
         _table(catalog, rule.table).add_column(rule_row.key_column.lower())
     if with_warehouse and config.warehouse is not None:

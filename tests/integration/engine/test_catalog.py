@@ -14,7 +14,7 @@ from etl_craft.engine import runlog
 from etl_craft.services.catalog import build_catalog
 from etl_craft.services.catalog_graph import lineage_drawing
 from etl_craft.services.catalog_site import MARKER, table_url, write_site
-from fixtures.metadata import add_pipeline, add_pipeline_dependency, add_task
+from fixtures.metadata import add_dependency, add_pipeline, add_pipeline_dependency, add_task
 from fixtures.metadata import insert as insert_row
 
 
@@ -59,7 +59,7 @@ def project(engine_db, tmp_path, monkeypatch):
     engine = engine_db.engine
     with engine.begin() as conn:
         ingest = add_pipeline(conn, "INGEST")
-        add_task(
+        pull = add_task(
             conn,
             ingest,
             "pull",
@@ -78,7 +78,7 @@ def project(engine_db, tmp_path, monkeypatch):
             DOCUMENTATION="Stages positive orders.",
         )
         sales = add_pipeline(conn, "SALES")
-        add_task(
+        convert = add_task(
             conn,
             sales,
             "convert",
@@ -115,6 +115,9 @@ def project(engine_db, tmp_path, monkeypatch):
             SOURCE_SQL="SELECT * FROM sales.orders",
         )
         add_pipeline_dependency(conn, mart, sales)
+        add_dependency(conn, ingest, stage, pull)
+        add_dependency(conn, sales, convert, stage, upstream_pipeline=ingest)
+        add_dependency(conn, sales, rules, convert, "HAS_DATA")
         run_id = runlog.find_or_create_active_run(conn, ingest)
         insert_row(
             conn,
@@ -207,6 +210,8 @@ def test_the_site_has_a_page_per_asset_and_a_search_index(project, tmp_path):
     pages = sorted(str(p.relative_to(folder)) for p in folder.rglob("*.html"))
     assert [p for p in pages if not p.startswith("scripts/")] == sorted(
         [
+            "dags.html",
+            "warehouse.html",
             "index.html",
             "pipelines/INGEST.html",
             "pipelines/MART.html",
@@ -282,7 +287,7 @@ def test_the_command(project, capsys):
     assert not (root / "catalog").exists()
     assert main(["generate-docs", "--with-warehouse"]) == ExitCode.SUCCESS
     assert capsys.readouterr().out.splitlines()[-1] == (
-        f"generate-docs: wrote 18 page(s) to {root / 'catalog'}"
+        f"generate-docs: wrote 20 page(s) to {root / 'catalog'}"
     )
     assert (root / "catalog" / "index.html").is_file()
 
@@ -304,3 +309,46 @@ def test_warehouse_columns_add_types(project, tmp_path):
     assert columns["note"].comment == "free text"
     assert catalog.tables["sales.orders"].in_warehouse
     assert not catalog.tables["mart.daily"].in_warehouse
+
+
+def test_every_page_chains_to_what_it_mentions(project, tmp_path):
+    engine, config, _ = project
+    catalog = build_catalog(engine, config)
+    assert catalog.tasks["SALES.convert"].upstream == [("INGEST.stage", "SUCCESS")]
+    assert catalog.tasks["INGEST.stage"].downstream == [("SALES.convert", "SUCCESS")]
+    folder = write_site(catalog, config, tmp_path / "site").folder
+
+    def page(path):
+        return (folder / path).read_text("utf-8")
+
+    # DAGs tab → pipeline → its DAG, with tasks, the tables they touch, and other pipelines' tasks.
+    assert '<a href="pipelines/SALES.html">SALES</a>' in page("dags.html")
+    sales = page("pipelines/SALES.html")
+    assert '<nav class="crumbs"><a href="../dags.html">DAGs</a> &rsaquo; SALES</nav>' in sales
+    assert '<svg class="dag"' in sales
+    for link in (
+        "../tasks/SALES.convert.html",
+        "../tasks/SALES.rules.html",
+        "../tasks/INGEST.stage.html",
+        "../tables/sales.orders.html",
+        "../tables/ref.rates.html",
+    ):
+        assert f'href="{link}"' in sales, link
+    assert "SALES.convert waits for INGEST.stage: SUCCESS" in sales
+    assert 'class="edge dep has-data"' in sales and "✓ sales.orders" in sales
+    # Task → its pipeline, the tasks around it, and what it reads and writes.
+    convert = page("tasks/SALES.convert.html")
+    assert (
+        '<nav class="crumbs"><a href="../dags.html">DAGs</a> &rsaquo; '
+        '<a href="../pipelines/SALES.html">SALES</a> &rsaquo; convert</nav>'
+    ) in convert
+    assert '<a href="../tasks/INGEST.stage.html">INGEST.stage</a> (SUCCESS)' in convert
+    assert '<a href="../tasks/SALES.rules.html">SALES.rules</a> (HAS_DATA)' in convert
+    assert 'Checks</dt><dd><a href="../tables/sales.orders.html">' in page("tasks/SALES.rules.html")
+    # Warehouse tab → database → schema → table, and back up again.
+    warehouse = page("warehouse.html")
+    assert 'id="w-analytics.sales"' in warehouse
+    assert '<a href="tables/sales.orders.html">orders</a>' in warehouse
+    table = page("tables/sales.orders.html")
+    assert '<a href="../warehouse.html#w-analytics.sales">sales</a>' in table
+    assert 'Pipelines</dt><dd><a href="../pipelines/MART.html">MART</a>' in table

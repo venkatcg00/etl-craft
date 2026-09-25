@@ -344,3 +344,122 @@ def _col(table: str, column: str) -> str:
 
 def _e(value: str) -> str:
     return html.escape(value, quote=True)
+
+
+ROW_MARKS = {"writes": "→", "reads": "←", "checks": "✓"}
+"""How a DAG box marks the tables its task writes, reads and checks with business rules."""
+
+DEPENDENCY_STYLES = {"SUCCESS": "success", "FAILURE": "failure", "ALWAYS": "always"}
+"""The line each dependency type is drawn with; ``HAS_DATA`` is ``has-data``."""
+
+
+@dataclass
+class DagDrawing:
+    """A pipeline's tasks laid out by dependency, with the tables each one reads and writes."""
+
+    pipeline: str
+    nodes: dict[str, Node]
+    rows: dict[str, list[tuple[str, str]]]
+    edges: list[tuple[str, str, str]]
+    width: float
+    height: float
+
+
+def dag_drawing(catalog: Catalog, pipeline: str) -> DagDrawing:
+    """Lay out the tasks of ``pipeline``: each after the tasks it waits for, left to right.
+
+    A task is placed one column after the furthest task of its pipeline it depends on; the
+    tasks of other pipelines it waits for sit in a column of their own on the left. Each box
+    lists the table its task writes, then the tables it reads, then the tables its business
+    rules check.
+    """
+    labels = catalog.pipelines[pipeline].tasks
+    same = {label: [u for u, _ in catalog.tasks[label].upstream if u in labels] for label in labels}
+    levels: dict[str, int] = {}
+
+    def level(label: str, seen: frozenset[str] = frozenset()) -> int:
+        if label not in levels:
+            ups = [u for u in same[label] if u not in seen]
+            levels[label] = 1 + max((level(u, seen | {label}) for u in ups), default=-1)
+        return levels[label]
+
+    for label in labels:
+        level(label)
+    nodes: dict[str, Node] = {}
+    rows: dict[str, list[tuple[str, str]]] = {}
+    edges: list[tuple[str, str, str]] = []
+    for label in labels:
+        task = catalog.tasks[label]
+        node = Node(label, task.row.task_code, levels[label], False)
+        found = [("writes", task.target)] if task.target else []
+        found += [("reads", source) for source in task.sources]
+        checked = sorted({catalog.rules[r].table for r in task.rules})
+        found += [("checks", table) for table in checked if table != task.target]
+        rows[label] = found
+        node.columns = [f"{kind} {name}" for kind, name in found]
+        nodes[label] = node
+        for upstream, kind in task.upstream:
+            if upstream not in nodes and upstream not in labels:
+                nodes[upstream] = Node(upstream, upstream, -1, True)
+                rows[upstream] = []
+            edges.append((upstream, label, kind))
+    width, height = _place(nodes, [], [(u, d, "") for u, d, _ in edges])
+    return DagDrawing(pipeline, nodes, rows, edges, width, height)
+
+
+def render_dag_svg(
+    drawing: DagDrawing,
+    catalog: Catalog,
+    task_link: Callable[[str], str],
+    table_link: Callable[[str], str],
+) -> str:
+    """Return the DAG as SVG, every task and table a link to its page."""
+    parts = [
+        f'<svg class="dag" xmlns="http://www.w3.org/2000/svg" '
+        f'viewBox="0 0 {drawing.width:.0f} {drawing.height:.0f}" '
+        f'width="{drawing.width:.0f}" height="{drawing.height:.0f}" role="img" '
+        f'aria-label="Tasks of {_e(drawing.pipeline)}">',
+        '<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" '
+        'markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse">'
+        '<path class="arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>',
+        '<g class="edges">',
+    ]
+    nodes = drawing.nodes
+    for upstream, downstream, kind in drawing.edges:
+        a, b = nodes[upstream], nodes[downstream]
+        style = DEPENDENCY_STYLES.get(kind, "has-data")
+        path = _curve(a.x + NODE_WIDTH, a.y + HEADER / 2, b.x, b.y + HEADER / 2)
+        parts.append(
+            f'<path class="edge dep {style}" d="{path}" {ARROW}>'
+            f"<title>{_e(f'{downstream} waits for {upstream}: {kind}')}</title></path>"
+        )
+    parts.append("</g>")
+    for node in sorted(nodes.values(), key=lambda n: (n.level, n.y)):
+        task = catalog.tasks.get(node.name)
+        classes = "node external" if node.external else "node"
+        parts.append(
+            f'<g class="{classes}" transform="translate({node.x:.0f},{node.y:.0f})">'
+            f'<rect class="box" width="{NODE_WIDTH}" height="{node.height:.0f}" rx="6"/>'
+            f'<a href="{_e(task_link(node.name))}"><rect class="header" width="{NODE_WIDTH}" '
+            f'height="{HEADER}" rx="6"/><text class="title" x="10" y="20">{_e(node.label)}</text>'
+            f"<title>{_e(node.name)}</title></a>"
+        )
+        if task is not None:
+            parts.append(
+                f'<text class="handler" x="{NODE_WIDTH - 10}" y="20" text-anchor="end">'
+                f"{_e(task.row.handler)}</text>"
+            )
+        for index, (kind, table) in enumerate(drawing.rows[node.name]):
+            top = HEADER + ROW * index
+            shown = table.removeprefix("external:")
+            label = f"{ROW_MARKS[kind]} {shown}"
+            label = label if len(label) <= LABEL_CHARS + 4 else label[: LABEL_CHARS + 3] + "…"
+            text = f'<text class="{kind}" x="12" y="{top + 15}">{_e(label)}</text>'
+            tip = f"<title>{_e(f'{kind} {shown}')}</title>"
+            if table.startswith("external:"):
+                parts.append(f"<g>{text}{tip}</g>")
+            else:
+                parts.append(f'<a href="{_e(table_link(table))}">{text}{tip}</a>')
+        parts.append("</g>")
+    parts.append("</svg>")
+    return "".join(parts)
