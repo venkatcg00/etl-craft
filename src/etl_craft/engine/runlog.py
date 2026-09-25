@@ -268,3 +268,30 @@ def finalize_pipeline_run(
         },
     )
     return sla
+
+
+@dataclass(frozen=True)
+class RunSla:
+    """When a run started, and the SLA status recorded for it so far."""
+
+    start_date: datetime
+    sla_status: str | None
+
+
+def fetch_run_sla(conn: Connection, pipeline_run_id: int) -> RunSla:
+    """Return when ``pipeline_run_id`` started and its SLA status so far."""
+    row = conn.execute(
+        statement(conn, "pipeline_run_sla"), {"pipeline_run_id": pipeline_run_id}
+    ).one()
+    return RunSla(row.start_date, row.sla_status)
+
+
+def mark_sla_breached(conn: Connection, pipeline_run_id: int) -> bool:
+    """Mark a still running ``pipeline_run_id`` ``BREACHED``; return whether this call did.
+
+    ``False`` when the run already finished or was already marked.
+    """
+    result = conn.execute(
+        statement(conn, "mark_sla_breached"), {"pipeline_run_id": pipeline_run_id}
+    )
+    return bool(result.rowcount)

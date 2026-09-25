@@ -228,15 +228,37 @@ def test_the_pipeline_graph(seeded):
     assert graph.waves()[0] == sorted([ids["extract"], ids["setup"]])
 
 
+def test_inactive_tasks_in_the_pipeline_graph(seeded):
+    engine, ids = seeded
+    with engine.begin() as conn:
+        # A dependency of an inactive task is left out: that task does not run.
+        add_dependency(conn, ids["alpha"], ids["retired"], ids["load"])
+        assert len(dependencies.fetch_pipeline_graph(conn, ids["alpha"]).same_pipeline_edges) == 4
+        # An active task that waits on an inactive one could never run.
+        add_dependency(conn, ids["alpha"], ids["alert"], ids["retired"], "ALWAYS")
+        with pytest.raises(
+            MetadataError,
+            match=r"active tasks depend on inactive ones \(alert depends on old_task\)",
+        ):
+            dependencies.fetch_pipeline_graph(conn, ids["alpha"])
+
+
 def test_dependency_edges_for_the_gates(seeded):
     engine, ids = seeded
     with engine.connect() as conn:
         assert dependencies.fetch_pipeline_dependency_edges(conn, ids["alpha"]) == [
-            dependencies.PipelineDependencyEdge(ids["pipeline_dependency"], ids["beta"], "SUCCESS")
+            dependencies.PipelineDependencyEdge(
+                ids["pipeline_dependency"], ids["beta"], "SUCCESS", "PL_BETA"
+            )
         ]
         assert dependencies.fetch_cross_pipeline_task_edges(conn, ids["load"]) == [
             dependencies.CrossPipelineTaskEdge(
-                ids["cross"], ids["alpha"], ids["beta"], ids["upstream"], "HAS_DATA"
+                ids["cross"],
+                ids["alpha"],
+                ids["beta"],
+                ids["upstream"],
+                "HAS_DATA",
+                "PL_BETA.publish",
             )
         ]
         assert dependencies.fetch_cross_pipeline_task_edges(conn, ids["rules"]) == []

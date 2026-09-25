@@ -11,7 +11,8 @@ from etl_craft.config import load_config
 from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import MetadataError, RunRefusedError, RunStateError
 from etl_craft.engine import runlog
-from etl_craft.execution.runner import ChildOptions, CrossPipelineCheck, run_task
+from etl_craft.execution.gates import CrossPipelineCheck, UncheckedGate
+from etl_craft.execution.runner import ChildOptions, run_task
 
 TESTS_DIR = Path(__file__).parents[2]
 CHILD = ChildOptions(module="fixtures.task_child", log_level="DEBUG", kill_grace_seconds=2)
@@ -312,7 +313,7 @@ def test_the_cross_pipeline_gate_decides_a_task_with_dependencies_elsewhere(proj
             {"p": ids["pipeline"], "t": ids["values"], "q": other, "u": upstream},
         )
     # Not really checked: nothing is recorded, so the task can run later.
-    unchecked = run(project, "values")
+    unchecked = run(project, "values", gate=UncheckedGate())
     assert unchecked.status == RunStatus.SKIPPED and unchecked.task_run_id is None
     assert "not checked" in unchecked.message
     # Checked and unsatisfied, with no same-pipeline upstream pending: recorded SKIPPED.

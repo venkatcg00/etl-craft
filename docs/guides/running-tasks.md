@@ -8,7 +8,8 @@ etl-craft run --pipeline_code SALES_DAILY --task_code load_orders
 
 The task runs under its pipeline's active run: the one `IN-PROGRESS` run in `AUD_PIPELINES_RUN_LOG`.
 Nothing passes it a run id. If the pipeline has no active run, the command stops with exit status
-`9` (`RUN_STATE`); start a run first.
+`9` (`RUN_STATE`); start one with `run --pipeline_code <code> --init-only`, or
+[run the whole pipeline](running-pipelines.md).
 
 The task does not run, and the command exits `0`, when:
 
@@ -17,7 +18,9 @@ The task does not run, and the command exits `0`, when:
 - its dependencies are not met yet: nothing is recorded, so run it again once they are.
 
 A task whose dependencies can never be met under this run, such as a `FAILURE` dependency on a task
-that succeeded, is recorded `SKIPPED`. See [Dependencies and run conditions](dependencies.md).
+that succeeded, is recorded `SKIPPED`, as is one whose
+[dependencies on other pipelines](dependencies.md#dependencies-on-other-pipelines) are not
+satisfied. See [Dependencies and run conditions](dependencies.md).
 
 The task then runs in a process of its own. The command exits `0` when it ends `SUCCESS` and `1`
 when it ends `FAILED`; every other status is listed under [Exit codes](../reference/exit-codes.md).

@@ -31,7 +31,10 @@ number of dependencies, since the task could then never start.
 ## Waves
 
 The engine checks the graph before a run: a task that depends on itself, a dependency on a task
-that does not exist, and a cycle are all errors (exit status `1`). `etl-craft graph` shows the
+that does not exist, and a cycle are all errors, each with its own
+[exit status](../reference/exit-codes.md). The dependencies of an inactive task are ignored; an
+active task that depends on an inactive one in the same pipeline is an error, since it could
+never run. `etl-craft graph` shows the
 pipeline as waves, where each wave depends only on earlier ones. Waves are the guaranteed-safe
 order: an `ANY` or `N` task appears after all its upstreams, even though it may start sooner
 during a run.
@@ -55,3 +58,26 @@ to start.
 
 Dependencies on tasks in other pipelines are checked when the task itself starts, so they never
 cause a task to be skipped before it runs.
+
+## Dependencies on other pipelines
+
+A pipeline can depend on another pipeline (`CFG_PIPELINE_DEPENDENCY`), and a task on a task in
+another pipeline (a `CFG_TASK_DEPENDENCY` row whose `DEPENDS_ON_PIPELINE_ID` is another
+pipeline). A pipeline's dependencies are checked before a new run of it starts; a task's, before
+the task runs.
+
+1. **Wait for a running upstream.** While the upstream's latest run is `IN-PROGRESS`, the check
+   waits for it. It looks again at 70% of the upstream's average run length, then 80%, 90% and so
+   on; one check waits at most an hour and looks at most 30 times, across all its dependencies.
+2. **The last run decides.** The upstream's latest finished run must satisfy the dependency
+   type, just as within a pipeline. An older run that would have satisfied it does not count: if
+   the upstream succeeded yesterday and failed today, a `SUCCESS` dependency is not satisfied.
+3. **Each upstream run is consumed once.** The run must also be newer than the one the dependency
+   last consumed, recorded in `AUD_PIPELINE_DEPENDENCY_TRACKER` or
+   `AUD_TASK_DEPENDENCY_TRACKER`. The tracker moves forward only when the downstream run or task
+   succeeds, so a downstream that failed is retried against the same upstream run.
+
+A pipeline whose dependencies are not satisfied has its run recorded `SKIPPED`. A task whose
+dependencies on other pipelines are not satisfied is recorded `SKIPPED` too, unless an upstream in
+its own pipeline has not finished yet. `SKIPPED` is final for that run: the task does not run
+until a new run finds its dependencies satisfied.
