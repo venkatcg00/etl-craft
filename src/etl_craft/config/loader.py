@@ -161,6 +161,14 @@ def parse_config(raw: Any, path: Path) -> ConnectorConfig:
     return config
 
 
+def _duckdb_url_beside_config(jdbc_url: str, path: Path) -> str:
+    """Return a DuckDB URL whose relative file path is taken from the config's directory."""
+    file = parse_warehouse_url(jdbc_url).path
+    if not file or file == ":memory:" or Path(file).is_absolute():
+        return jdbc_url
+    return f"jdbc:duckdb:{_relative_to_config(file, path)}"
+
+
 def _relative_to_config(written: str, path: Path) -> Path:
     """Return ``written`` as an absolute path, a relative one taken from the config's directory.
 
@@ -689,6 +697,8 @@ def _jdbc_url_profile(
         raise ConfigurationError(
             f"{path}: Warehouse.Name is {declared!r}, but its jdbc_url resolves to {actual!r}"
         )
+    if actual == "duckdb":
+        jdbc_url = _duckdb_url_beside_config(jdbc_url, path)
     # A DuckDB file has nothing to authenticate; over Iceberg, the catalog may still ask.
     default_auth = AuthMode.NONE if actual == "duckdb" else ""
     auth_mode = fields.value("auth_mode") or default_auth

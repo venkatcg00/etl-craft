@@ -167,7 +167,9 @@ def test_a_task_succeeds_and_records_its_counts_and_output(project):
 def test_reported_values_are_listed_in_the_task_log(project):
     engine, _, _ = project
     outcome = run(project, "values")
-    assert row(engine, outcome.task_run_id).task_log.startswith("INGESTION_COUNT = 5\nOFFSET = 42")
+    assert row(engine, outcome.task_run_id).task_log.startswith(
+        "TARGET_COUNT = 5\nINGESTION_COUNT = 5\nOFFSET = 42"
+    )
 
 
 def test_a_handler_error_fails_the_task_with_its_message(project):

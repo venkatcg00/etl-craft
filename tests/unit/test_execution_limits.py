@@ -46,11 +46,14 @@ def test_format_task_log():
     assert format_task_log(HandlerResult(source_count=2, delete_count=0)) == (
         "SOURCE_COUNT = 2\nDELETE_COUNT = 0"
     )
-    assert format_task_log(HandlerResult(target_count=1, variables={"A": 1, "B": None})) == "A = 1"
+    # The counts first, then the handler's own values.
+    assert format_task_log(HandlerResult(target_count=1, variables={"A": 1, "B": None})) == (
+        "TARGET_COUNT = 1\nA = 1"
+    )
 
 
 def test_resolve_handler(monkeypatch):
     monkeypatch.setitem(registry.HANDLERS, "SQL", "etl_craft.handlers.registry:format_task_log")
     assert registry.resolve_handler("SQL") is format_task_log
-    with pytest.raises(HandlerError, match="no handler is installed for HANDLER 'PYTHON'"):
-        registry.resolve_handler("PYTHON")
+    with pytest.raises(HandlerError, match="no handler is installed for HANDLER 'EMAIL_ALERT'"):
+        registry.resolve_handler("EMAIL_ALERT")

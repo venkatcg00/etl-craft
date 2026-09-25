@@ -53,13 +53,14 @@ class HandlerResult:
 
 
 def format_task_log(result: HandlerResult) -> str | None:
-    """Render ``result`` as ``NAME = value`` lines: its variables, else its counts."""
-    values: Mapping[str, object | None] = result.variables or {
+    """Render ``result`` as ``NAME = value`` lines: its counts, then its variables."""
+    values: Mapping[str, object | None] = {
         "SOURCE_COUNT": result.source_count,
         "TARGET_COUNT": result.target_count,
         "INSERT_COUNT": result.insert_count,
         "UPDATE_COUNT": result.update_count,
         "DELETE_COUNT": result.delete_count,
+        **result.variables,
     }
     lines = [f"{name} = {value}" for name, value in values.items() if value is not None]
     return "\n".join(lines) or None
@@ -70,6 +71,7 @@ Handler = Callable[[TaskContext, Engine], HandlerResult]
 HANDLERS: dict[str, str] = {
     "SQL": "etl_craft.handlers.sql:run",
     "BUSINESS_RULES": "etl_craft.handlers.business_rules:run",
+    "PYTHON": "etl_craft.handlers.python_scripts:run",
 }
 """Each ``HANDLER`` value and the ``module:function`` that runs it."""
 
