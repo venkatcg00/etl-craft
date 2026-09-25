@@ -38,7 +38,25 @@ password is never part of the connection URL the engine logs.
 `secret` always names a variable; it is never written into the file. Modes not verified here
 follow the vendor's documentation and can be used, but success is not guaranteed.
 
-## The schema
+## Where the tables live
+
+Every Engine profile names a `schema`, the schema that holds the Engine DB's tables:
+
+```yaml
+Engine:
+  prod:
+    jdbc_url: jdbc:postgresql://db:5432/etl_craft
+    schema: etl_craft                  # must already exist
+```
+
+- **PostgreSQL:** the schema must already exist; etl-craft never creates PostgreSQL schemas. Every
+  connection uses it as its search path, so `init-db` creates the tables there and every command
+  reads them from there. Each command checks it on connecting and stops with exit status `3`
+  (`CONFIGURATION`) when it is missing, naming it and the `CREATE SCHEMA` to run.
+- **SQLite:** there are no schemas; the database file itself plays that part and is created on
+  first use. Name any schema, conventionally `main`.
+
+## The tables
 
 Each Engine DB ships its own `schema.sql` with the same tables and columns, and the same rules:
 one active row per code, one `IN-PROGRESS` run per pipeline, one task-run row per task per run,

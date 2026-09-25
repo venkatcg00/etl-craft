@@ -13,6 +13,10 @@ Write the SELECT inline, or keep it in a file under the project's `sql_files/` f
 | `SOURCE_SQL` | the SELECT itself |
 | `SOURCE_SQL_FILE` | a path inside `sql_files/`, such as `sales/orders.sql` |
 
+Name every table in the SELECT as `schema.table`, never with a database or catalog in front: the
+connection is already in the database of the active `Warehouse` profile, which changes per
+environment, so the same SQL runs unchanged in development, test and production.
+
 Set exactly one of them. The SELECT must be a single read-only statement (`SELECT`, `WITH`,
 `TABLE` or `VALUES`); comments and a trailing `;` are fine. A task holds exactly one query: do
 lookups and aggregations inside it, with CTEs or subqueries, not as statements of their own. It must not return the columns the

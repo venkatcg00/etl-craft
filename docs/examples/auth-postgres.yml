@@ -38,11 +38,13 @@ Engine:
   Name: Postgres                       # value
   password:
     jdbc_url: ENGINE_JDBC_URL          # variable
+    schema: etl_craft                  # value — must already exist; the engine never creates it
     user: ENGINE_USER                  # variable
     auth_mode: password                # value
     secret: ENGINE_SECRET              # variable, required: a secret is never used as written
   key_file:
     jdbc_url: ENGINE_JDBC_URL          # variable
+    schema: etl_craft                  # value — must already exist; the engine never creates it
     user: ENGINE_USER                  # variable
     auth_mode: key_file                # value
     key_file: ENGINE_KEY_FILE          # variable
@@ -50,11 +52,13 @@ Engine:
     secret: ENGINE_SECRET              # variable, required: a secret is never used as written — the key's passphrase; set it empty if none
   token:
     jdbc_url: ENGINE_JDBC_URL          # variable
+    schema: etl_craft                  # value — must already exist; the engine never creates it
     user: ENGINE_USER                  # variable
     auth_mode: token                   # value
     secret: ENGINE_SECRET              # variable, required: a secret is never used as written — a stored bearer token
   oauth:
     jdbc_url: ENGINE_JDBC_URL          # variable
+    schema: etl_craft                  # value — must already exist; the engine never creates it
     user: ENGINE_USER                  # variable
     auth_mode: oauth                   # value
     client_id: ENGINE_CLIENT_ID        # variable
@@ -63,12 +67,14 @@ Engine:
     scope: https://ossrdbms-aad.database.windows.net/.default  # value
   sso:
     jdbc_url: ENGINE_JDBC_URL          # variable
+    schema: etl_craft                  # value — must already exist; the engine never creates it
     user: ENGINE_USER                  # variable
     auth_mode: sso                     # value
     issuer: ENGINE_ISSUER              # variable
     client_id: ENGINE_CLIENT_ID        # variable
   sts:
     jdbc_url: ENGINE_JDBC_URL          # variable
+    schema: etl_craft                  # value — must already exist; the engine never creates it
     user: ENGINE_USER                  # variable
     auth_mode: sts                     # value
     region: us-east-1                  # value
@@ -78,11 +84,13 @@ Warehouse:
   Name: Postgres                       # value
   password:
     jdbc_url: WAREHOUSE_JDBC_URL       # variable
+    schema: etl_craft                  # value — must already exist; cloning writes here
     user: WAREHOUSE_USER               # variable
     auth_mode: password                # value
     secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
   key_file:
     jdbc_url: WAREHOUSE_JDBC_URL       # variable
+    schema: etl_craft                  # value — must already exist; cloning writes here
     user: WAREHOUSE_USER               # variable
     auth_mode: key_file                # value
     key_file: WAREHOUSE_KEY_FILE       # variable
@@ -90,11 +98,13 @@ Warehouse:
     secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written — the key's passphrase; set it empty if none
   token:
     jdbc_url: WAREHOUSE_JDBC_URL       # variable
+    schema: etl_craft                  # value — must already exist; cloning writes here
     user: WAREHOUSE_USER               # variable
     auth_mode: token                   # value
     secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written — a stored bearer token
   oauth:
     jdbc_url: WAREHOUSE_JDBC_URL       # variable
+    schema: etl_craft                  # value — must already exist; cloning writes here
     user: WAREHOUSE_USER               # variable
     auth_mode: oauth                   # value
     client_id: WAREHOUSE_CLIENT_ID     # variable
@@ -103,12 +113,14 @@ Warehouse:
     scope: https://ossrdbms-aad.database.windows.net/.default  # value
   sso:
     jdbc_url: WAREHOUSE_JDBC_URL       # variable
+    schema: etl_craft                  # value — must already exist; cloning writes here
     user: WAREHOUSE_USER               # variable
     auth_mode: sso                     # value
     issuer: WAREHOUSE_ISSUER           # variable
     client_id: WAREHOUSE_CLIENT_ID     # variable
   sts:
     jdbc_url: WAREHOUSE_JDBC_URL       # variable
+    schema: etl_craft                  # value — must already exist; cloning writes here
     user: WAREHOUSE_USER               # variable
     auth_mode: sts                     # value
     region: us-east-1                  # value

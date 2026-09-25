@@ -48,6 +48,7 @@ from etl_craft.config.resolve import Resolver
 from etl_craft.config.targets import parse_warehouse_url, preferred_connection_url
 from etl_craft.core.enums import AuthMode, CloningScope, Mode, TableFormat
 from etl_craft.core.errors import ConfigurationError
+from etl_craft.core.text import is_safe_identifier
 
 SECTIONS = ("Secrets", "Orchestration", "Engine", "Warehouse", "Cloning")
 """The top-level sections, in the order the file must present them."""
@@ -81,7 +82,9 @@ _EMAIL_KEYS = frozenset(
     {"host", "port", "from_address", "auth_mode", "user", "use_tls", "secret", "scope"}
     | {"client_id", "token_url"}
 )
-_CONNECTION_FIELDS = frozenset({"jdbc_url", "user", "auth_mode", "secret", *AUTH_EXTRA_FIELDS})
+_CONNECTION_FIELDS = frozenset(
+    {"jdbc_url", "user", "auth_mode", "secret", "schema", *AUTH_EXTRA_FIELDS}
+)
 # The field whose presence selects the separate-fields connection shape.
 _PREFERRED_SHAPE_MARKER = {"databricks": "catalog", "snowflake": "account"}
 
@@ -545,6 +548,7 @@ def _parse_engine(
         user=user,
         auth_mode=auth_mode,
         extra=extra,
+        schema=_schema(fields),
     )
     return ConnectionSection(active_profile=profile.name, profiles={profile.name: profile})
 
@@ -643,6 +647,7 @@ def _preferred_shape_profile(
         user=user,
         auth_mode=auth_mode,
         extra=extra,
+        schema=_schema(fields),
     )
 
 
@@ -686,6 +691,13 @@ def _jdbc_url_profile(
         value = fields.value(key)
         if value is not None:
             extra[key] = value
+    schema = _schema(fields)
+    url_schema = _url_schema(jdbc_url)
+    if url_schema and url_schema.lower() != schema.lower():
+        raise ConfigurationError(
+            f"{path}: {where}.schema is {schema!r}, but its jdbc_url names schema "
+            f"{url_schema!r}; make them the same"
+        )
     return ConnectionProfile(
         section="WAREHOUSE",
         name=profiled.profile or "",
@@ -693,7 +705,27 @@ def _jdbc_url_profile(
         user=user,
         auth_mode=auth_mode,
         extra=extra,
+        schema=schema,
     )
+
+
+def _schema(fields: _Fields) -> str:
+    """Return the profile's required ``schema``: a plain identifier."""
+    schema = fields.value("schema", required=True) or ""
+    if not is_safe_identifier(schema):
+        raise ConfigurationError(
+            f"{fields.path}: {fields.where}.schema must be a plain identifier (letters, digits "
+            f"and underscores), got {schema!r}{fields.hint('schema')}"
+        )
+    return schema
+
+
+def _url_schema(jdbc_url: str) -> str | None:
+    """Return the schema a Trino URL names after its catalog, if any."""
+    url = parse_warehouse_url(jdbc_url)
+    if url.dialect.startswith("trino") and "/" in url.database:
+        return url.database.split("/", 1)[1] or None
+    return None
 
 
 # Cloning

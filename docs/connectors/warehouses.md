@@ -17,6 +17,19 @@ A DuckDB file admits one writing process at a time, so tasks writing to it queue
 other; every other warehouse runs tasks in parallel. On DuckDB, the table format is fixed by the
 connection and a task cannot override it.
 
+## The warehouse schema
+
+Every Warehouse profile names a `schema`. It is where cloning copies the Engine DB's tables, and
+the session's default schema on Databricks, Snowflake and DuckDB over Iceberg; DuckDB over Iceberg
+cannot connect at all while it is missing. It must already exist: etl-craft never
+creates warehouse schemas. A run with cloning on checks it before starting, and stops naming it
+when it is missing. On Trino, whose `jdbc_url` ends in `/<catalog>/<schema>`, the two must name the
+same schema.
+
+Tasks write wherever their own `TARGET_OBJECT` (`schema.table`) says, whatever this setting is.
+SQL and `TARGET_OBJECT` name tables as `schema.table`; the database or catalog in front comes
+from the profile, so it can differ per environment.
+
 ## Connecting and authenticating
 
 Each warehouse accepts the auth modes below. `secret` and `token` always name a variable, never a

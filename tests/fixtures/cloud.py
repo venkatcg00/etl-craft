@@ -31,7 +31,7 @@ def write_config(directory, name, fields, table_format):
     raw = {
         "Secrets": {"Source_type": "environment"},
         "Orchestration": {"Mode": "local"},
-        "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:engine.db"}},
+        "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "main"}},
         "Warehouse": {"Name": name, "Table_format": str(table_format), "dev": fields},
     }
     path = directory / "craft-connector.yml"

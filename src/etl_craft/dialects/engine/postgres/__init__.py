@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import URL, Engine
+from sqlalchemy.engine import URL, Connection, Engine
 from sqlalchemy.exc import OperationalError
 
 from etl_craft.config.auth import POSTGRES_AUTH_FIELDS, engine_for_jdbc_url
@@ -62,6 +62,21 @@ class PostgresEngineDialect(EngineDialect):
             query=url.query,
         )
         return create_engine(sqlalchemy_url, creator=creator, **engine_kwargs)
+
+    def schema_problem(self, conn: Connection, schema: str) -> str | None:
+        """Return why the Engine schema cannot be used: it must already exist."""
+        found = conn.execute(
+            text("SELECT 1 FROM information_schema.schemata WHERE schema_name = :schema"),
+            {"schema": schema.lower()},
+        ).first()
+        if found is None:
+            database = conn.execute(text("SELECT current_database()")).scalar_one()
+            return (
+                f"the Engine schema {schema!r} does not exist in database {database!r}; create it "
+                f"first (CREATE SCHEMA {schema.lower()}) — etl-craft does not create PostgreSQL "
+                "schemas"
+            )
+        return None
 
     def duration_seconds_sql(self) -> str:
         """Return ``END_DATE - START_DATE`` in seconds."""
@@ -190,6 +205,10 @@ def postgres_creator(profile: ConnectionProfile, secret: str, url: JdbcUrl) -> C
             **auth,
             **url.query,
         }
+        if profile.schema:
+            # Every Engine DB table is created and read in the profile's schema.
+            options = f"{settings.get('options', '')} -c search_path={profile.schema}"
+            settings["options"] = options.strip()
         return psycopg.connect(**settings)
 
     return connect

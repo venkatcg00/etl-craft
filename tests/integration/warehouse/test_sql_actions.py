@@ -335,6 +335,20 @@ def test_a_sql_file_with_the_pipeline_id_filter_reads_this_runs_rows(sql_world):
     assert full.source_count == 2
 
 
+def test_a_select_names_its_tables_as_schema_table(sql_world):
+    # The environment's database comes from the Warehouse profile; SQL never names it.
+    w = sql_world
+    w.execute(f"CREATE TABLE {w.name('source')} AS SELECT 7 AS id")
+    result = w.run(
+        "two_part",
+        SQL_ACTION="CREATE_TABLE",
+        TARGET_OBJECT="copied",
+        SOURCE_SQL=f"SELECT id FROM {w.schema}.source",
+    )
+    assert result.insert_count == 1
+    assert w.rows(f"SELECT id FROM {w.schema}.copied") == [(7,)]
+
+
 def test_a_failing_statement_names_its_step_and_leaves_no_scratch_tables(sql_world, caplog):
     w = sql_world
     with pytest.raises(HandlerError) as error:

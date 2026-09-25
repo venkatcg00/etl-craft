@@ -3,7 +3,8 @@
 ``run --pipeline_code`` and ``run --init-only`` test the connections the run will use before they
 start or resume it, and stop when one fails, so no run is recorded and no task starts:
 
-- the warehouse, when a task's handler is ``SQL`` or ``BUSINESS_RULES`` or cloning is on;
+- the warehouse, when a task's handler is ``SQL`` or ``BUSINESS_RULES`` or cloning is on, and
+  with cloning on, that the warehouse profile's ``schema``, where cloning writes, exists;
 - the email relay, when a task's handler is ``EMAIL_ALERT``, or SLA emails are on and the
   pipeline has an SLA.
 
@@ -28,6 +29,7 @@ from etl_craft.warehouse.connection import (
     READ_ONLY_WAIT_SECONDS,
     is_single_writer,
     open_warehouse,
+    warehouse_schema_problem,
 )
 
 logger = logging.getLogger(__name__)
@@ -39,17 +41,20 @@ WAREHOUSE_HANDLERS = frozenset({Handler.SQL, Handler.BUSINESS_RULES})
 """The handlers whose tasks the engine runs against the warehouse."""
 
 
-def probe_warehouse(config: ConnectorConfig, engine_db: Engine | None = None) -> str | None:
-    """Open the warehouse as a task does and run ``SELECT 1``; return the problem, or ``None``."""
+def probe_warehouse(
+    config: ConnectorConfig, engine_db: Engine | None = None, *, schema: bool = False
+) -> str | None:
+    """Open the warehouse as a task does and run ``SELECT 1``; return the problem, or ``None``.
+
+    With ``schema``, the profile's schema must exist too.
+    """
     try:
-        with (
-            open_warehouse(config, engine_db, wait_seconds=READ_ONLY_WAIT_SECONDS) as warehouse,
-            warehouse.connect() as conn,
-        ):
-            conn.execute(text("SELECT 1"))
+        with open_warehouse(config, engine_db, wait_seconds=READ_ONLY_WAIT_SECONDS) as warehouse:
+            with warehouse.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            return warehouse_schema_problem(config, warehouse) if schema else None
     except (EtlCraftError, SQLAlchemyError, OSError) as error:
         return str(error)
-    return None
 
 
 def probe_email_relay(config: ConnectorConfig) -> str | None:
@@ -81,7 +86,7 @@ def check_run_connections(
     failures: list[str] = []
     uses_warehouse = bool(handlers & WAREHOUSE_HANDLERS) or config.cloning.enabled
     if config.warehouse is not None and uses_warehouse and not is_single_writer(config):
-        problem = probe_warehouse(config, engine)
+        problem = probe_warehouse(config, engine, schema=config.cloning.enabled)
         if problem is not None:
             failures.append(f"warehouse: {problem}")
     uses_email = Handler.EMAIL_ALERT in handlers or sends_sla_email

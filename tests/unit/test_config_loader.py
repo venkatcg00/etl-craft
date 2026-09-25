@@ -46,7 +46,7 @@ def _minimal(**sections) -> dict:
     raw = {
         "Secrets": {"Source_type": "environment"},
         "Orchestration": {"Mode": "local"},
-        "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:engine.db"}},
+        "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "main"}},
     }
     raw.update(sections)
     return raw
@@ -111,9 +111,9 @@ def test_profile_selection_order(tmp_path, monkeypatch):
         Secrets={"Source_type": "environment", "Profile": "sit"},
         Engine={
             "Profile": "uat",
-            "sit": {"jdbc_url": "jdbc:sqlite:sit.db"},
-            "uat": {"jdbc_url": "jdbc:sqlite:uat.db"},
-            "prod": {"jdbc_url": "jdbc:sqlite:prod.db"},
+            "sit": {"jdbc_url": "jdbc:sqlite:sit.db", "schema": "main"},
+            "uat": {"jdbc_url": "jdbc:sqlite:uat.db", "schema": "main"},
+            "prod": {"jdbc_url": "jdbc:sqlite:prod.db", "schema": "main"},
         },
     )
     path = _write(tmp_path, raw)
@@ -132,8 +132,8 @@ def test_a_profile_can_name_a_variable(tmp_path, monkeypatch):
     raw = _minimal(
         Secrets={"Source_type": "environment", "Profile": "ACTIVE_PROFILE"},
         Engine={
-            "dev": {"jdbc_url": "jdbc:sqlite:dev.db"},
-            "prod": {"jdbc_url": "jdbc:sqlite:prod.db"},
+            "dev": {"jdbc_url": "jdbc:sqlite:dev.db", "schema": "main"},
+            "prod": {"jdbc_url": "jdbc:sqlite:prod.db", "schema": "main"},
         },
     )
     path = _write(tmp_path, raw)
@@ -150,7 +150,10 @@ def test_a_profile_can_name_a_variable(tmp_path, monkeypatch):
 
 def test_an_unselected_multi_profile_section_is_refused(tmp_path):
     raw = _minimal(
-        Engine={"dev": {"jdbc_url": "jdbc:sqlite:a.db"}, "prod": {"jdbc_url": "jdbc:sqlite:b.db"}}
+        Engine={
+            "dev": {"jdbc_url": "jdbc:sqlite:a.db", "schema": "main"},
+            "prod": {"jdbc_url": "jdbc:sqlite:b.db", "schema": "main"},
+        }
     )
     with pytest.raises(ConfigurationError, match="none is selected"):
         load_config(_write(tmp_path, raw))
@@ -203,7 +206,7 @@ def test_the_source_itself_can_come_from_the_environment(tmp_path, monkeypatch):
     (tmp_path / "deploy.env").write_text("ENGINE_URL=jdbc:sqlite:from-file.db\n", "utf-8")
     raw = _minimal(
         Secrets={"Source_type": "SECRETS_SOURCE", "Path": "SECRETS_FILE"},
-        Engine={"dev": {"jdbc_url": "ENGINE_URL"}},
+        Engine={"dev": {"jdbc_url": "ENGINE_URL", "schema": "main"}},
     )
     monkeypatch.setenv("SECRETS_SOURCE", "file")
     monkeypatch.setenv("SECRETS_FILE", "deploy.env")
@@ -219,6 +222,7 @@ def test_a_secret_is_never_taken_as_written(tmp_path):
         Engine={
             "dev": {
                 "jdbc_url": "jdbc:postgresql://db/etl",
+                "schema": "main",
                 "user": "etl",
                 "auth_mode": "password",
                 "secret": "hunter2!",
@@ -236,6 +240,7 @@ def test_tier_scoped_variables_win_over_the_plain_name(tmp_path, monkeypatch):
         Engine={
             "prod": {
                 "jdbc_url": "ENGINE_JDBC_URL",
+                "schema": "main",
                 "user": "ENGINE_USER",
                 "auth_mode": "ENGINE_AUTH_MODE",
                 "secret": "ENGINE_SECRET",
@@ -264,6 +269,7 @@ def test_values_come_from_a_secrets_file_relative_to_the_config(tmp_path):
             "Name": "Postgres",
             "dev": {
                 "jdbc_url": "WH_URL",
+                "schema": "main",
                 "user": "WH_USER",
                 "auth_mode": "WH_AUTH",
                 "secret": "WH_SECRET",
@@ -283,6 +289,7 @@ def test_a_literal_jdbc_url_is_accepted_but_a_literal_secret_is_not(tmp_path, mo
         Engine={
             "dev": {
                 "jdbc_url": "jdbc:postgresql://db/etl",
+                "schema": "main",
                 "user": "ENGINE_USER",
                 "auth_mode": "ENGINE_AUTH_MODE",
                 "secret": "hunter2!",
@@ -301,9 +308,10 @@ def test_a_secret_variable_that_is_not_set_is_a_load_time_error(tmp_path, monkey
     raw = _minimal(
         Secrets={"Source_type": "environment", "Profile": "prod"},
         Engine={
-            "dev": {"jdbc_url": "jdbc:sqlite:engine.db"},
+            "dev": {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "main"},
             "prod": {
                 "jdbc_url": "jdbc:postgresql://db/etl",
+                "schema": "main",
                 "user": "ENGINE_USER",
                 "auth_mode": "password",
                 "secret": "ENGINE_SECRET",
@@ -345,6 +353,7 @@ def test_a_secret_variable_that_is_not_set_is_a_load_time_error(tmp_path, monkey
             "Table_format": "iceberg",
             "dev": {
                 "jdbc_url": "jdbc:duckdb:",
+                "schema": "main",
                 "catalog": "lake",
                 "catalog_uri": "http://localhost:8181",
                 "iceberg_warehouse": "s3://lake",
@@ -362,7 +371,9 @@ def test_the_earlier_layouts_are_refused_with_a_pointer(tmp_path):
     legacy = {"Execution": {"Mode": "local"}, "Source": {"Type": "environment"}}
     with pytest.raises(ConfigurationError, match=r"earlier craft-connector\.yml layout"):
         load_config(_write(tmp_path, legacy))
-    variables = _minimal(Engine={"Profile": "dev", "Variables": {"jdbc_url": "X"}})
+    variables = _minimal(
+        Engine={"Profile": "dev", "Variables": {"jdbc_url": "X", "schema": "main"}}
+    )
     with pytest.raises(ConfigurationError, match="Variables blocks"):
         load_config(_write(tmp_path, variables))
 
@@ -389,7 +400,7 @@ def test_unknown_sections_and_keys_are_refused(tmp_path):
         load_config(_write(tmp_path, _minimal(Warehosue={})))
     with pytest.raises(ConfigurationError, match=r"unknown key\(s\) \['Retires'\]"):
         load_config(_write(tmp_path, _minimal(Orchestration={"Mode": "local", "Retires": 1})))
-    typo = _minimal(Engine={"dev": {"jdbc_url": "jdbc:sqlite:e.db", "usr": "X"}})
+    typo = _minimal(Engine={"dev": {"jdbc_url": "jdbc:sqlite:e.db", "schema": "main", "usr": "X"}})
     with pytest.raises(ConfigurationError, match=r"unknown key\(s\) \['usr'\] in Engine.dev"):
         load_config(_write(tmp_path, typo))
 
@@ -397,10 +408,22 @@ def test_unknown_sections_and_keys_are_refused(tmp_path):
 @pytest.mark.parametrize(
     ("engine", "message"),
     [
-        ({"Name": "Postgres", "dev": {"jdbc_url": "jdbc:sqlite:e.db"}}, "is a sqlite URL"),
-        ({"dev": {"jdbc_url": "jdbc:mysql://h/db"}}, "not a supported Engine DB URL"),
         (
-            {"dev": {"jdbc_url": "jdbc:sqlite:e.db", "auth_mode": "ENGINE_AUTH_MODE"}},
+            {"Name": "Postgres", "dev": {"jdbc_url": "jdbc:sqlite:e.db", "schema": "main"}},
+            "is a sqlite URL",
+        ),
+        (
+            {"dev": {"jdbc_url": "jdbc:mysql://h/db", "schema": "main"}},
+            "not a supported Engine DB URL",
+        ),
+        (
+            {
+                "dev": {
+                    "jdbc_url": "jdbc:sqlite:e.db",
+                    "schema": "main",
+                    "auth_mode": "ENGINE_AUTH_MODE",
+                }
+            },
             "takes \\['none'\\]",
         ),
     ],
@@ -412,13 +435,14 @@ def test_engine_validation(tmp_path, monkeypatch, engine, message):
 
 
 def test_warehouse_table_format_defaults_to_native_and_postgres_refuses_iceberg(tmp_path):
-    raw = _minimal(Warehouse={"dev": {"jdbc_url": "jdbc:duckdb:wh.duckdb"}})
+    raw = _minimal(Warehouse={"dev": {"jdbc_url": "jdbc:duckdb:wh.duckdb", "schema": "main"}})
     assert load_config(_write(tmp_path, raw)).warehouse_table_format == "native"
     iceberg_postgres = _minimal(
         Warehouse={
             "Table_format": "iceberg",
             "dev": {
                 "jdbc_url": "jdbc:postgresql://h/wh",
+                "schema": "main",
                 "user": "WH_USER",
                 "auth_mode": "WH_AUTH",
                 "secret": "WH_SECRET",
@@ -430,7 +454,12 @@ def test_warehouse_table_format_defaults_to_native_and_postgres_refuses_iceberg(
 
 
 def test_warehouse_name_must_match_its_jdbc_url(tmp_path):
-    raw = _minimal(Warehouse={"Name": "Snowflake", "dev": {"jdbc_url": "jdbc:duckdb:w.duckdb"}})
+    raw = _minimal(
+        Warehouse={
+            "Name": "Snowflake",
+            "dev": {"jdbc_url": "jdbc:duckdb:w.duckdb", "schema": "main"},
+        }
+    )
     with pytest.raises(ConfigurationError, match="resolves to 'duckdb'"):
         load_config(_write(tmp_path, raw))
 
@@ -440,14 +469,20 @@ def test_an_auth_mode_a_warehouse_does_not_offer_is_refused_at_load(tmp_path, mo
     # nothing to present a key to, and Trino has no AWS IAM login.
     monkeypatch.setenv("WAREHOUSE_AUTH_MODE", "key_file")
     duckdb = _minimal(
-        Warehouse={"dev": {"jdbc_url": "jdbc:duckdb:w.duckdb", "auth_mode": "WAREHOUSE_AUTH_MODE"}}
+        Warehouse={
+            "dev": {
+                "jdbc_url": "jdbc:duckdb:w.duckdb",
+                "schema": "main",
+                "auth_mode": "WAREHOUSE_AUTH_MODE",
+            }
+        }
     )
     with pytest.raises(ConfigurationError, match=r"DuckDB warehouse takes \['none'\]"):
         load_config(_write(tmp_path, duckdb))
     trino = _minimal(
         Warehouse={
             "Name": "Trino",
-            "dev": {"jdbc_url": "jdbc:trino://t:8080/iceberg/a", "auth_mode": "sts"},
+            "dev": {"jdbc_url": "jdbc:trino://t:8080/iceberg/a", "schema": "a", "auth_mode": "sts"},
         }
     )
     with pytest.raises(ConfigurationError, match="Trino warehouse takes"):
@@ -461,6 +496,7 @@ def test_an_auth_mode_a_warehouse_does_not_offer_is_refused_at_load(tmp_path, mo
         (
             {
                 "jdbc_url": "jdbc:postgresql://db/wh",
+                "schema": "main",
                 "user": "u",
                 "auth_mode": "oauth",
                 "secret": "S",
@@ -468,11 +504,21 @@ def test_an_auth_mode_a_warehouse_does_not_offer_is_refused_at_load(tmp_path, mo
             "client_id",
         ),
         (
-            {"jdbc_url": "jdbc:postgresql://db/wh", "user": "u", "auth_mode": "sts"},
+            {
+                "jdbc_url": "jdbc:postgresql://db/wh",
+                "schema": "main",
+                "user": "u",
+                "auth_mode": "sts",
+            },
             "region",
         ),
         (
-            {"jdbc_url": "jdbc:trino://t:8080/iceberg/a", "auth_mode": "key_file", "key_file": "k"},
+            {
+                "jdbc_url": "jdbc:trino://t:8080/iceberg/a",
+                "schema": "a",
+                "auth_mode": "key_file",
+                "key_file": "k",
+            },
             "cert_file",
         ),
     ],
@@ -498,7 +544,7 @@ def test_every_auth_mode_loads_with_its_fields(tmp_path, monkeypatch):
     for key, (name, url) in urls.items():
         dialect = warehouse_by_key(key)
         for mode, needed in dialect.auth_fields.items():
-            block = {"jdbc_url": url, "auth_mode": mode}
+            block = {"jdbc_url": url, "schema": "a", "auth_mode": mode}
             for field_name in needed:
                 block[field_name] = "S" if field_name == "secret" else "value"
             raw = _minimal(Warehouse={"Name": name, "dev": block})
@@ -541,7 +587,9 @@ def test_databricks_token_fields_build_a_credential_free_url(tmp_path, monkeypat
 
 
 def test_token_fields_are_refused_for_other_warehouses_and_unused_fields(tmp_path, monkeypatch):
-    raw = _minimal(Warehouse={"Name": "Postgres", "dev": {"jdbc_url": "X", "token": "T"}})
+    raw = _minimal(
+        Warehouse={"Name": "Postgres", "dev": {"jdbc_url": "X", "schema": "main", "token": "T"}}
+    )
     with pytest.raises(
         ConfigurationError, match=r"only for Warehouse\.Name Databricks or Snowflake"
     ):
@@ -566,6 +614,7 @@ def test_duckdb_iceberg_profile_carries_its_catalog_fields(tmp_path, monkeypatch
             "Table_format": "iceberg",
             "dev": {
                 "jdbc_url": "jdbc:duckdb:",
+                "schema": "main",
                 "catalog": "LAKE_NAME",
                 "catalog_uri": "LAKE_URI",
                 "iceberg_warehouse": "LAKE_WAREHOUSE",
@@ -614,3 +663,53 @@ def test_log_dir_defaults_beside_the_config_and_can_be_set(tmp_path):
     assert load_config(_write(tmp_path, raw)).log_dir == tmp_path.absolute().parent / "task-logs"
     raw = _minimal(Orchestration={"Mode": "local", "Log_dir": "/var/log/etl"})
     assert load_config(_write(tmp_path, raw)).log_dir == Path("/var/log/etl")
+
+
+def test_engine_and_warehouse_profiles_name_their_schema(tmp_path, monkeypatch):
+    monkeypatch.setenv("ENGINE_SCHEMA", "etl_meta")
+    raw = _minimal(
+        Engine={"dev": {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "ENGINE_SCHEMA"}},
+        Warehouse={
+            "dev": {
+                "jdbc_url": "jdbc:trino://t:8080/iceberg/sales",
+                "schema": "sales",
+                "auth_mode": "none",
+            }
+        },
+    )
+    config = load_config(_write(tmp_path, raw))
+    assert (config.engine.active.schema, config.warehouse.active.schema) == ("etl_meta", "sales")
+
+
+@pytest.mark.parametrize(
+    ("sections", "message"),
+    [
+        (
+            {"Engine": {"dev": {"jdbc_url": "jdbc:sqlite:engine.db"}}},
+            "Engine.dev needs schema",
+        ),
+        (
+            {"Engine": {"dev": {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "etl-meta"}}},
+            "Engine.dev.schema must be a plain identifier .* got 'etl-meta'",
+        ),
+        (
+            {"Warehouse": {"dev": {"jdbc_url": "jdbc:duckdb:w.duckdb"}}},
+            "Warehouse.dev needs schema",
+        ),
+        (
+            {
+                "Warehouse": {
+                    "dev": {
+                        "jdbc_url": "jdbc:trino://t:8080/iceberg/sales",
+                        "schema": "stage",
+                        "auth_mode": "none",
+                    }
+                }
+            },
+            "Warehouse.dev.schema is 'stage', but its jdbc_url names schema 'sales'",
+        ),
+    ],
+)
+def test_schema_mistakes_are_named(tmp_path, sections, message):
+    with pytest.raises(ConfigurationError, match=message):
+        load_config(_write(tmp_path, _minimal(**sections)))

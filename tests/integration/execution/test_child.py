@@ -30,7 +30,8 @@ def restore_logger():
 def bound(engine_db, tmp_path):
     """A config file, a task T with parameter X=1, and its row bound under a run."""
     profile = engine_db.config.engine.active
-    block = {"jdbc_url": profile.jdbc_url}
+    schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
+    block = {"jdbc_url": profile.jdbc_url, "schema": schema}
     if profile.auth_mode != "none":
         block |= {"user": profile.user, "auth_mode": "password", "secret": profile.secret_var}
     config_path = (engine_db.config.config_path or tmp_path / "craft-connector.yml").parent / (

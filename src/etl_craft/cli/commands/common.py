@@ -21,7 +21,11 @@ def load_command_config(args: argparse.Namespace) -> ConnectorConfig:
 
 
 def connect_engine_db(config: ConnectorConfig) -> Engine:
-    """Build the Engine DB engine and check it can be reached."""
+    """Build the Engine DB engine and check it, and its schema, can be used."""
     engine = engine_db(config)
-    check_reachable(engine)
+    try:
+        check_reachable(engine, config.engine.active.schema)
+    except BaseException:
+        engine.dispose()
+        raise
     return engine

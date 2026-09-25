@@ -244,6 +244,11 @@ def sql_world(
                 else f"CREATE SCHEMA {schema}"
             )
         )
+    # From here on the profile names its schema, as a real one does.
+    warehouse.dispose()
+    profile = replace(config.warehouse.active, schema=schema)
+    config = replace(config, warehouse=ConnectionSection("dev", {"dev": profile}))
+    warehouse = build_warehouse_engine(config)
     world = SqlWorld(kind, config, engine_db, warehouse, catalog, schema, pipeline_id, run_id)
     try:
         yield world

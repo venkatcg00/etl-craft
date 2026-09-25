@@ -29,12 +29,13 @@ Orchestration:
 Engine:
   dev:
     jdbc_url: jdbc:postgresql://localhost:5432/etl_craft
+    schema: public
     user: TEST_ENGINE_USER
     auth_mode: TEST_ENGINE_AUTH_MODE
     secret: ETL_CRAFT_POSTGRES_DEV_SECRET
 """
 
-SQLITE_ENGINE = "  dev:\n    jdbc_url: jdbc:sqlite:e.db\n"
+SQLITE_ENGINE = "  dev:\n    jdbc_url: jdbc:sqlite:e.db\n    schema: main\n"
 
 
 @pytest.fixture(autouse=True)

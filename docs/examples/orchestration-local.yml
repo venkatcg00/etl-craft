@@ -64,20 +64,28 @@ Engine:
   Name: SQLite                         # value
   dev:
     jdbc_url: jdbc:sqlite:etl-craft-engine-dev.db  # value
+    schema: main                       # value — SQLite: the database file is the schema
   sit:
     jdbc_url: jdbc:sqlite:etl-craft-engine-sit.db  # value
+    schema: main                       # value — SQLite: the database file is the schema
   uat:
     jdbc_url: jdbc:sqlite:etl-craft-engine-uat.db  # value
+    schema: main                       # value — SQLite: the database file is the schema
   prod:
     jdbc_url: jdbc:sqlite:etl-craft-engine-prod.db  # value
+    schema: main                       # value — SQLite: the database file is the schema
 
 Warehouse:
   Name: DuckDB                         # value
   dev:
     jdbc_url: jdbc:duckdb:warehouse_dev.duckdb  # value
+    schema: main                       # value — must already exist; cloning writes here
   sit:
     jdbc_url: jdbc:duckdb:warehouse_sit.duckdb  # value
+    schema: main                       # value — must already exist; cloning writes here
   uat:
     jdbc_url: jdbc:duckdb:warehouse_uat.duckdb  # value
+    schema: main                       # value — must already exist; cloning writes here
   prod:
     jdbc_url: jdbc:duckdb:warehouse_prod.duckdb  # value
+    schema: main                       # value — must already exist; cloning writes here

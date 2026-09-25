@@ -57,7 +57,8 @@ def restore_logger():
 def config(engine_db, tmp_path):
     """A craft-connector.yml naming the test Engine DB, loaded."""
     profile = engine_db.config.engine.active
-    block = {"jdbc_url": profile.jdbc_url}
+    schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
+    block = {"jdbc_url": profile.jdbc_url, "schema": schema}
     if profile.auth_mode != "none":
         block |= {
             "user": profile.user,
