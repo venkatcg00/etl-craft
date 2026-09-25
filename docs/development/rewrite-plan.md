@@ -137,6 +137,7 @@ squash-merged by pull request (see `CONTRIBUTING.md` for the definition of done)
 | P1 | `feat/project-layout` | The `etl-craft/` project directory holds everything a deployment needs: `craft-connector.yml`, `sql_files/`, `ingestion_scripts/`, `migrations/` and `logs/`. Discovery finds `etl-craft/craft-connector.yml`, and relative paths start from the project directory | `config.py` | C1, E1 | done |
 | P2 | `chore/linux-only` | Dropped: the existing Windows and macOS support stays, and new code keeps working on all three | — | B5 | dropped |
 | F1 | `feat/handler-sql-actions` | `SOURCE_SQL` as an inline query or a file under `sql_files/` (`SOURCE_SQL_FILE`); `PIPELINE_ID_SUBSTITUTION` and `PIPELINE_ID_FILTER` (true/false) enable `$$pipeline_id` (the run's pipeline id) and `$$pipeline_id_filter` (`pipeline_id = <id>`, `1=1` on FULL refresh) in queries and files; stage, schema evolution, audit columns, ROW_ID strategies, dedupe, the seven actions; each statement logged with its row count and duration; source, target, insert, update and delete counts recorded | `sql_actions.py` | E1, C3 | done |
+| F1b | `feat/sql-explicit-targets` | Only `CREATE_TABLE` (drop and create, with the SELECT's rows) and `SETUP_TABLE` (create only when missing, checked through information_schema rather than `IF NOT EXISTS`, with the audit columns of the pipeline's writer of that table) create tables. `OVERWRITE_TABLE`, `SCD1_MERGE`, `SCD2_MERGE`, `DELETE_ROWS` and the new `APPEND_TABLE` fail when their target is missing, naming the remedy (a `SETUP_TABLE` task, or pre-create it). `APPEND_TABLE` inserts the SELECT's rows with `PIPELINE_RUN_ID` and `CREATE_DATE`, without comparing shapes. `DROP_TABLE` drops only if the target exists, still only after this pipeline's `CREATE_TABLE` for it succeeded in the run. A task holds exactly one SELECT; lookups and aggregations live inside it (CTEs, subqueries). `SETUP_TABLE` takes its audit columns only from tasks that write rows to the target, and fails when they disagree | — | F1 | |
 | F2 | `feat/handler-business-rules` | Rule waves, flag and deactivate, forced scope; each rule's statements, flagged and cleared counts logged | `business_rules.py` | F1 | |
 | F3 | `feat/handler-python-scripts` | Script contract (a script reads its source from the stored offset and writes to its table; no pipeline-id tokens), `INPUT_PARAMS` task parameter as a JSON array passed to the script, scripts under `ingestion_scripts/`, offset tracker, capture of the script's stdout, stderr and `logging` output, source/target/insert counts reported by the script recorded in `AUD_TASK_RUN_LOG`, `etl_craft.scripting` helper | `scripts.py` | E1 | |
 | F4 | `feat/handler-email-alert` | Flavours, templates, digest, SMTP password and XOAUTH2; SLA lapse emails through the Email settings, sent only when `Enforce_sla` is on | `email_alert.py` | E1 | |
@@ -151,7 +152,7 @@ squash-merged by pull request (see `CONTRIBUTING.md` for the definition of done)
 | I2 | `docs/reference-generated` | Generated CLI, configuration, parameter and schema references; the `docs` evidence suite (a test around the strict build) | — | G1, G2 | |
 | J1 | `release/0.1.0` | Version, changelog, release notes, wheel and sdist, install matrix, checksums, evidence, gate, tag | — | all | |
 
-In parallel: A2 with A3; C4 after F1; B2–B5; C2 with C3; F1–F4 after P1 (F2 after F1); G1 with G2, then G4, then G3; H1–H3 with I1–I2.
+In parallel: A2 with A3; F1b, then C4, after F1; B2–B5; C2 with C3; F1–F4 after P1 (F2 after F1); G1 with G2, then G4, then G3; H1–H3 with I1–I2.
 Critical path: A1 → B1 → B4 → C1 → C2 → D1 → E1 → E2 → G2 → H2 → J1.
 
 ## Checkpoints
@@ -199,7 +200,7 @@ built wheel installed via `pip`, and separately via `uv pip`.
 - Pipelines:
   - an ingestion pipeline whose Python script writes dummy rows and reports `INGESTION_COUNT` and
     `LATEST_OFFSET_UPDATE`;
-  - a transform pipeline with dummy steps covering the seven SQL actions (incremental
+  - a transform pipeline with dummy steps covering the eight SQL actions (incremental
     `$$pipeline_id`, `PRESERVE_TARGET`, SCD2 history, soft and hard `DELETE_ROWS`);
   - business rules in two waves, with the `INCOMPLETE`, `REJECT` and `REPORT` types;
   - an `EMAIL_ALERT` delivered to Mailpit;
@@ -291,7 +292,7 @@ version selector. CI builds the site with `--strict`, checks links and tests the
 - [ ] Both Engine DBs: `setup`, `init-db`, `migrate`; a second concurrent IN-PROGRESS run is
       rejected.
 - [ ] The connection matrix passes, including the Databricks and Snowflake evidence.
-- [ ] The seven SQL actions pass on every local warehouse and on the cloud subset, native and
+- [ ] The eight SQL actions pass on every local warehouse and on the cloud subset, native and
       Iceberg.
 - [ ] These pass:
   - [ ] business rules;

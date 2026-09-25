@@ -26,7 +26,7 @@ pipeline's active run in `AUD_PIPELINES_RUN_LOG`, and the database guarantees th
 A retry resumes the run: tasks that already succeeded are not run again.
 
 **The engine owns every write.** A SQL task supplies a read-only `SELECT`. The engine wraps it
-in one of seven actions (`CREATE_TABLE`, `SETUP_TABLE`, `OVERWRITE_TABLE`, `SCD1_MERGE`,
+in one of eight actions (`CREATE_TABLE`, `SETUP_TABLE`, `OVERWRITE_TABLE`, `APPEND_TABLE`, `SCD1_MERGE`,
 `SCD2_MERGE`, `DROP_TABLE`, `DELETE_ROWS`) and adds the audit columns the action needs.
 
 **Two databases.** The Engine DB (SQLite for local use, PostgreSQL in production) holds

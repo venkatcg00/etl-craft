@@ -2,10 +2,10 @@
 
 Every table the engine creates carries, after the SELECT's own columns, ``PIPELINE_RUN_ID``,
 the audit columns of its action (``AUDIT_COLUMNS``) and ``ROW_ID``, a generated key that business
-rules reference. A target that does not exist yet is created from the SELECT's shape by every
-action but ``DROP_TABLE`` and ``DELETE_ROWS``.
+rules reference. Only ``CREATE_TABLE`` and ``SETUP_TABLE`` create tables; every other action
+needs its target to exist already, created by a ``SETUP_TABLE`` task or by hand.
 
-An existing target is checked against the SELECT before any row is written:
+Before ``OVERWRITE_TABLE`` and the merges write a row, the target is checked against the SELECT:
 
 - a target missing one of the action's engine-managed columns fails, naming them;
 - a SELECT missing a column the target has fails: columns are never dropped;
@@ -27,6 +27,7 @@ from etl_craft.handlers.sql.session import ROW_ID_COLUMN, Session
 AUDIT_COLUMNS: dict[str, tuple[str, ...]] = {
     SqlAction.CREATE_TABLE: (),
     SqlAction.OVERWRITE_TABLE: ("UPDATE_DATE",),
+    SqlAction.APPEND_TABLE: ("CREATE_DATE",),
     SqlAction.SCD1_MERGE: (
         "HASH_KEY",
         "CREATE_DATE",
@@ -60,23 +61,17 @@ def build_stage(session: Session, select_sql: str, *, empty: bool = False) -> st
     return stage
 
 
-def create_target_shape(
-    session: Session, stage: str, audit_columns: tuple[str, ...], *, with_rows: bool = False
-) -> None:
-    """Create the target from the stage's columns, ``PIPELINE_RUN_ID`` and ``audit_columns``.
-
-    Without ``with_rows`` the target is created empty, for the action's own write to fill.
-    """
+def create_target_shape(session: Session, stage: str, audit_columns: tuple[str, ...]) -> None:
+    """Create the target, empty: the stage's columns, ``PIPELINE_RUN_ID``, ``audit_columns``."""
     parts = [f"s.{name}" for name, _ in session.columns(stage)]
     parts.append("CAST(NULL AS BIGINT) AS PIPELINE_RUN_ID")
     parts.extend(
         f"CAST(NULL AS {session.dialect.audit_column_type(column)}) AS {column}"
         for column in audit_columns
     )
-    where = "" if with_rows else " WHERE 1 = 0"
     session.create_table_as(
         session.target,
-        f"SELECT {', '.join(parts)} FROM {stage} s{where}",
+        f"SELECT {', '.join(parts)} FROM {stage} s WHERE 1 = 0",
         step="create the target",
     )
     add_row_id(session)
@@ -159,13 +154,22 @@ def restore_row_id(session: Session) -> None:
     session.run(f"ALTER TABLE {target} ADD PRIMARY KEY ({ROW_ID_COLUMN})", step="key on ROW_ID")
 
 
+def require_target(session: Session) -> list[tuple[str, str]]:
+    """Return the target's columns; ``HandlerError`` naming the remedy when it does not exist."""
+    columns = session.target_columns()
+    if not columns:
+        raise HandlerError(
+            f"{session.action}: the target {session.target} does not exist. Only CREATE_TABLE "
+            "and SETUP_TABLE create tables: add a SETUP_TABLE task for it that runs first, or "
+            "create it with the columns and audit columns this action writes"
+        )
+    return columns
+
+
 def check_or_evolve(session: Session, stage: str, action: str, *, schema_evolution: bool) -> None:
-    """Create the target when missing, or check it against the stage, evolving if allowed."""
+    """Check the existing target against the stage, adding new columns when allowed."""
     audit = AUDIT_COLUMNS[action]
-    target_columns = session.target_columns()
-    if not target_columns:
-        create_target_shape(session, stage, audit)
-        return
+    target_columns = require_target(session)
     required = ("PIPELINE_RUN_ID", *audit)
     have = {name.lower() for name, _ in target_columns}
     missing_audit = [column for column in required if column.lower() not in have]

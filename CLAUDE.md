@@ -45,9 +45,10 @@ Each package imports only the packages below it. `lint-imports` enforces this.
   `AUD_PIPELINES_RUN_LOG`; a partial unique index keeps one IN-PROGRESS run per pipeline.
 - Retries resume: tasks already `SUCCESS` or `SKIPPED` under the run are not re-run.
 - Order comes from `CFG_TASK_DEPENDENCY` and `CFG_PIPELINE_DEPENDENCY` rows, never from code.
-- SQL tasks supply a read-only SELECT; the engine wraps it in one of seven actions
-  (`CREATE_TABLE`, `SETUP_TABLE`, `OVERWRITE_TABLE`, `SCD1_MERGE`, `SCD2_MERGE`, `DROP_TABLE`,
-  `DELETE_ROWS`) and owns every write.
+- SQL tasks supply exactly one read-only SELECT; the engine wraps it in one of eight actions
+  (`CREATE_TABLE`, `SETUP_TABLE`, `OVERWRITE_TABLE`, `APPEND_TABLE`, `SCD1_MERGE`, `SCD2_MERGE`,
+  `DROP_TABLE`, `DELETE_ROWS`) and owns every write. Only `CREATE_TABLE` and `SETUP_TABLE`
+  create tables; the others fail when their target is missing.
 - One warehouse per deployment. Third-party SQLAlchemy dialects are optional extras and never
   imported by engine code.
 - `craft-connector.yml` is written by the team and only read by the engine. Secrets are always

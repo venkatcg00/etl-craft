@@ -1,15 +1,20 @@
-"""The seven SQL actions. Each wraps the task's SELECT in the writes it stands for.
+"""The eight SQL actions. Each wraps the task's SELECT in the writes it stands for.
 
-- ``CREATE_TABLE`` replaces the target with the SELECT's rows.
-- ``SETUP_TABLE`` replaces the target with an empty table of the SELECT's shape, plus the audit
-  columns of the pipeline's real writer of it.
+- ``CREATE_TABLE`` drops the target and creates it again from the SELECT's rows.
+- ``SETUP_TABLE`` creates the target, empty, from the SELECT's shape plus the audit columns of
+  the action that writes it, when it does not exist yet; an existing target is left alone.
 - ``OVERWRITE_TABLE`` empties the target and inserts the SELECT's rows.
+- ``APPEND_TABLE`` inserts the SELECT's rows, without comparing the shapes.
 - ``SCD1_MERGE`` updates changed rows in place by merge key and inserts new keys.
 - ``SCD2_MERGE`` closes the active version of a changed key (``ACTIVE_FLAG='N'``) and inserts a
   new one.
-- ``DROP_TABLE`` drops a table this pipeline's ``CREATE_TABLE`` task made earlier in the run.
+- ``DROP_TABLE`` drops the target if it exists, once this pipeline's ``CREATE_TABLE`` task for
+  it has succeeded in the run.
 - ``DELETE_ROWS`` deletes, or flags ``DELETE_FLAG='Y'``, the target rows whose merge key the
   SELECT returns.
+
+Only ``CREATE_TABLE`` and ``SETUP_TABLE`` create tables; every other action fails, naming the
+remedy, when its target does not exist.
 
 Each reports the counts it can know: source rows, target rows after the write, and the rows
 inserted, updated or deleted.
@@ -21,6 +26,7 @@ warehouse has.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -29,7 +35,7 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.core.enums import RunStatus, SqlAction
 from etl_craft.core.errors import HandlerError
-from etl_craft.engine.repository.tasks import fetch_sibling_target_writer
+from etl_craft.engine.repository.tasks import TargetTask, fetch_target_tasks
 from etl_craft.engine.runlog import fetch_task_run_status
 from etl_craft.handlers.registry import HandlerResult, TaskContext
 from etl_craft.handlers.sql.session import Session
@@ -42,7 +48,10 @@ from etl_craft.handlers.sql.tables import (
     check_or_evolve,
     create_target_shape,
     dedupe,
+    require_target,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -91,21 +100,54 @@ def create_table(session: Session, action: ActionContext) -> HandlerResult:
 
 
 def setup_table(session: Session, action: ActionContext) -> HandlerResult:
-    """Replace the target with an empty table of the SELECT's shape and its writer's audit columns.
+    """Create the target, empty, when it does not exist; leave an existing one alone.
 
-    The audit columns are those of the other active task in the pipeline that writes the same
-    target; with none, there are none.
+    Its columns are the SELECT's, then ``PIPELINE_RUN_ID``, the audit columns of the action
+    that writes it and ``ROW_ID``. That action is ``SETUP_FOR`` when set, else the one the
+    pipeline's other tasks on the target write with.
     """
+    if session.target_columns():
+        logger.info("%s exists; SETUP_TABLE leaves it as it is", session.target)
+        return HandlerResult(source_count=0, target_count=0, insert_count=0)
     with action.engine_db.connect() as conn:
-        writer = fetch_sibling_target_writer(
+        others = fetch_target_tasks(
             conn, action.context.pipeline_id, action.context.task_id, action.task.target_object
         )
-    audit = AUDIT_COLUMNS.get(writer.sql_action, ()) if writer else ()
+    writer = _writer_action(action.task.setup_for, others, action.task.target_object)
     stage = build_stage(session, action.select_sql, empty=True)
-    session.run(f"DROP TABLE IF EXISTS {session.target}", step="drop the old target")
-    create_target_shape(session, stage, audit)
+    create_target_shape(session, stage, AUDIT_COLUMNS[writer])
     session.drop(stage)
+    logger.info("created %s with the audit columns of %s", session.target, writer)
     return HandlerResult(source_count=0, target_count=0, insert_count=0)
+
+
+def _writer_action(setup_for: str | None, others: list[TargetTask], target: str) -> str:
+    """Return the action whose audit columns a SETUP_TABLE target gets."""
+    writers = [task for task in others if task.sql_action in AUDIT_COLUMNS]
+    found = sorted({task.sql_action for task in writers})
+    listed = ", ".join(f"{task.task_code} ({task.sql_action})" for task in writers)
+    if setup_for is not None:
+        clashing = [a for a in found if AUDIT_COLUMNS[a] != AUDIT_COLUMNS[setup_for]]
+        if clashing:
+            raise HandlerError(
+                f"SETUP_FOR={setup_for}, but tasks in this pipeline write {target} as {listed}, "
+                "which need other audit columns"
+            )
+        return setup_for
+    audit_sets = {AUDIT_COLUMNS[a] for a in found}
+    if len(audit_sets) > 1:
+        raise HandlerError(
+            f"tasks in this pipeline write {target} with actions that need different audit "
+            f"columns ({listed}); a table has one set, so give it one writing action, or set "
+            "SETUP_FOR to the one it is for"
+        )
+    if not found:
+        raise HandlerError(
+            f"no task in this pipeline writes {target}, so SETUP_TABLE cannot tell which audit "
+            "columns it needs; set SETUP_FOR to the action that writes it: "
+            f"{', '.join(AUDIT_COLUMNS)}"
+        )
+    return found[0]
 
 
 def overwrite_table(session: Session, action: ActionContext) -> HandlerResult:
@@ -126,6 +168,28 @@ def overwrite_table(session: Session, action: ActionContext) -> HandlerResult:
     )
     session.drop(stage)
     return HandlerResult(source_count=source, target_count=source, insert_count=source)
+
+
+def append_table(session: Session, action: ActionContext) -> HandlerResult:
+    """Insert the SELECT's rows, stamped with the run and CREATE_DATE, without shape checks.
+
+    Columns are matched by name; a column the target lacks fails the insert, with the database's
+    own message.
+    """
+    stage = build_stage(session, action.select_sql)
+    source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
+    require_target(session)
+    columns = ", ".join(name for name, _ in session.columns(stage))
+    row_id_columns, row_id_values = session.row_id_insert_parts()
+    session.run(
+        f"INSERT INTO {session.target} ({columns}, PIPELINE_RUN_ID, CREATE_DATE{row_id_columns}) "
+        f"SELECT {columns}, :pipeline_run_id, :now{row_id_values} FROM {stage}",
+        action.stamp,
+        step="append the SELECT's rows",
+    )
+    session.drop(stage)
+    target_count = session.count(f"SELECT COUNT(*) FROM {session.target}", step="target rows")
+    return HandlerResult(source_count=source, target_count=target_count, insert_count=source)
 
 
 def _merge_stage(session: Session, action: ActionContext, kind: SqlAction) -> tuple[str, int]:
@@ -305,19 +369,21 @@ def scd2_merge(session: Session, action: ActionContext) -> HandlerResult:
 
 
 def drop_table(session: Session, action: ActionContext) -> HandlerResult:
-    """Drop the target, only once this pipeline's CREATE_TABLE task made it in this run."""
+    """Drop the target if it exists, only once this pipeline's CREATE_TABLE task ran this run.
+
+    A target already gone is not an error: the drop has nothing left to do.
+    """
     context = action.context
     target_object = action.task.target_object
     with action.engine_db.connect() as conn:
-        creator = fetch_sibling_target_writer(
-            conn, context.pipeline_id, context.task_id, target_object
-        )
+        others = fetch_target_tasks(conn, context.pipeline_id, context.task_id, target_object)
+        creator = next((task for task in others if task.sql_action == SqlAction.CREATE_TABLE), None)
         status = (
             fetch_task_run_status(conn, creator.task_id, context.pipeline_run_id)
             if creator is not None
             else None
         )
-    if creator is None or creator.sql_action != SqlAction.CREATE_TABLE:
+    if creator is None:
         raise HandlerError(
             f"DROP_TABLE refused for {target_object}: no other active task in this pipeline "
             "creates it with SQL_ACTION=CREATE_TABLE, and DROP_TABLE removes only tables its "
@@ -326,10 +392,13 @@ def drop_table(session: Session, action: ActionContext) -> HandlerResult:
     if status != RunStatus.SUCCESS:
         raise HandlerError(
             f"DROP_TABLE refused for {target_object}: the task that creates it "
-            f"(task_id={creator.task_id}) is {status or 'not run'} under pipeline_run_id="
+            f"({creator.task_code}) is {status or 'not run'} under pipeline_run_id="
             f"{context.pipeline_run_id}, not SUCCESS; make the drop depend on it"
         )
-    session.run(f"DROP TABLE IF EXISTS {session.target}", step="drop the target")
+    if not session.target_columns():
+        logger.info("%s does not exist; nothing to drop", session.target)
+        return HandlerResult()
+    session.run(f"DROP TABLE {session.target}", step="drop the target")
     return HandlerResult()
 
 
@@ -339,8 +408,7 @@ def delete_rows(session: Session, action: ActionContext) -> HandlerResult:
     stage = build_stage(session, action.select_sql)
     source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
     target = session.target
-    if not session.target_columns():
-        raise HandlerError(f"DELETE_ROWS: the target {target} does not exist")
+    require_target(session)
     key_match = " AND ".join(f"t.{k} = s.{k}" for k in task.merge_key)
     delete_count = session.count(
         f"SELECT COUNT(*) FROM {target} t WHERE EXISTS (SELECT 1 FROM {stage} s WHERE {key_match})",
@@ -375,6 +443,7 @@ ACTIONS: dict[SqlAction, Action] = {
     SqlAction.CREATE_TABLE: create_table,
     SqlAction.SETUP_TABLE: setup_table,
     SqlAction.OVERWRITE_TABLE: overwrite_table,
+    SqlAction.APPEND_TABLE: append_table,
     SqlAction.SCD1_MERGE: scd1_merge,
     SqlAction.SCD2_MERGE: scd2_merge,
     SqlAction.DROP_TABLE: drop_table,

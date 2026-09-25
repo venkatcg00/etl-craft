@@ -22,6 +22,7 @@ EXPECTED = {
         "CREATE_TABLE",
         "SETUP_TABLE",
         "OVERWRITE_TABLE",
+        "APPEND_TABLE",
         "SCD1_MERGE",
         "SCD2_MERGE",
         "DROP_TABLE",
