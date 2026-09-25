@@ -13,9 +13,10 @@ Write the SELECT inline, or keep it in a file under the project's `sql_files/` f
 | `SOURCE_SQL` | the SELECT itself |
 | `SOURCE_SQL_FILE` | a path inside `sql_files/`, such as `sales/orders.sql` |
 
-Name every table in the SELECT as `schema.table`, never with a database or catalog in front: the
+Name every table in the SELECT at least as `schema.table`; a bare table name has no schema. The
 connection is already in the database of the active `Warehouse` profile, which changes per
-environment, so the same SQL runs unchanged in development, test and production.
+environment, so `schema.table` names run unchanged in development, test and production. A
+`database.schema.table` name is used as written.
 
 Set exactly one of them. The SELECT must be a single read-only statement (`SELECT`, `WITH`,
 `TABLE` or `VALUES`); comments and a trailing `;` are fine. A task holds exactly one query: do
@@ -46,8 +47,9 @@ but its token is missing, or when the SELECT holds any other `$$` token.
 
 ## The actions
 
-`SQL_ACTION` names the action and `TARGET_OBJECT` the table, as `schema.table`. The catalog or
-database comes from the active `Warehouse` profile, so the same rows work in every environment.
+`SQL_ACTION` names the action and `TARGET_OBJECT` the table: `schema.table`, written in the
+active `Warehouse` profile's database, so the same rows work in every environment, or
+`database.schema.table`, written exactly there. A bare table name fails the task.
 
 | `SQL_ACTION` | What happens | Also needs |
 |---|---|---|

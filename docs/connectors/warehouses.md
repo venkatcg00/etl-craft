@@ -27,8 +27,11 @@ when it is missing. On Trino, whose `jdbc_url` ends in `/<catalog>/<schema>`, th
 same schema.
 
 Tasks write wherever their own `TARGET_OBJECT` (`schema.table`) says, whatever this setting is.
-SQL and `TARGET_OBJECT` name tables as `schema.table`; the database or catalog in front comes
-from the profile, so it can differ per environment.
+Every profile names its database (or catalog): in the `jdbc_url`, or in `database`/`catalog`
+where the warehouse takes separate fields. The engine connects in it, so SQL and `TARGET_OBJECT`
+can name tables as `schema.table` and move between environments unchanged; a
+`database.schema.table` name is used as written. A profile whose database cannot be told fails
+when the file is loaded.
 
 ## Connecting and authenticating
 

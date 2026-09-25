@@ -49,13 +49,14 @@ class Session:
         """Work on ``target_object`` (``schema.table``) in ``catalog`` over ``conn``."""
         self.conn = conn
         self.dialect = dialect
-        self.catalog = catalog
         self.action = action
         self.target_object = target_object
         self.task_run_id = task_run_id
         self.params = params
-        self.schema, self.table = split_object_ref(target_object)
-        self.target = qualify(target_object, catalog)
+        database, self.schema, self.table = split_object_ref(target_object)
+        # A target that names its database is written there; otherwise in the active one.
+        self.catalog = database or catalog
+        self.target = f"{self.catalog}.{self.schema}.{self.table}"
         self.scratch_tables: list[str] = []
 
     # Statements
@@ -107,7 +108,7 @@ class Session:
     # Names
 
     def qualify(self, object_ref: str) -> str:
-        """Return ``catalog.schema.table`` for ``schema.table``."""
+        """Return ``database.schema.table`` for ``schema.table``, in the target's database."""
         return qualify(object_ref, self.catalog)
 
     def scratch(self, suffix: str) -> str:
