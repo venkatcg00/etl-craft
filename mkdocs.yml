@@ -97,6 +97,7 @@ nav:
   - Guides:
       - guides/index.md
       - Dependencies and run conditions: guides/dependencies.md
+      - Running a task and reading its logs: guides/running-tasks.md
   - Deploying:
       - deploying/index.md
       - Engine DB setup and upgrades: deploying/engine-db.md

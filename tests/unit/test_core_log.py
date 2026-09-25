@@ -131,3 +131,22 @@ def test_an_unknown_level_is_a_usage_error():
 def test_an_unknown_format_is_a_usage_error():
     with pytest.raises(UsageError, match="unknown log format 'xml'; use one of text, json"):
         log.configure("INFO", "xml")
+
+
+def test_log_context_is_added_to_text_and_json_records():
+    text_stream, json_stream = io.StringIO(), io.StringIO()
+    log.configure("INFO", "text", text_stream)
+    logger = logging.getLogger("etl_craft.execution")
+    with log.log_context(pipeline="P1", task="load"), log.log_context(attempt=2):
+        logger.info("started")
+    logger.info("outside")
+    lines = text_stream.getvalue().splitlines()
+    assert lines[0].endswith(" INFO etl_craft.execution [pipeline=P1 task=load attempt=2]: started")
+    assert lines[1].endswith(" INFO etl_craft.execution: outside")
+
+    log.configure("INFO", "json", json_stream)
+    with log.log_context(pipeline="P1", task_run_id=9):
+        logger.info("json", extra={"task_run_id": 10})
+    entry = json.loads(json_stream.getvalue())
+    assert (entry["pipeline"], entry["task_run_id"]) == ("P1", 10)
+    assert "context" not in entry

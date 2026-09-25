@@ -44,6 +44,7 @@ Orchestration:
                                        #   from the YAML `etl-craft generate-yml` emits.
   # Name: Airflow                 # informational: generate-yml emits one YAML DAG shape;
   #                               # teams convert it for their scheduler with their own scripts
+  # Log_dir: logs                 # where each task attempt's log file goes; relative to this file
   Task_timeout_seconds: 21600          # value — 0 disables; a task's TASK_TIMEOUT_SECONDS overrides
   Max_parallel_tasks: 8                # value
   Enforce_sla: false                   # value — true: send an SLA email (Email below) when a

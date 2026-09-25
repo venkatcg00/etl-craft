@@ -30,9 +30,9 @@ class Command:
 
 
 def _commands() -> tuple[Command, ...]:
-    from etl_craft.cli.commands import init_db, migrate
+    from etl_craft.cli.commands import init_db, migrate, run
 
-    return (init_db.COMMAND, migrate.COMMAND)
+    return (run.COMMAND, init_db.COMMAND, migrate.COMMAND)
 
 
 COMMANDS: tuple[Command, ...] = _commands()

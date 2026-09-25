@@ -66,3 +66,7 @@ All notable changes are recorded here. The format follows
   2 usage, 3–15 one per error class, 16 unexpected); an unexpected exception is logged with its
   traceback instead of escaping. A pipeline with `SLA_IN_HOURS` has every run marked MET or
   BREACHED; `Enforce_sla` now decides only whether a lapse sends an SLA email.
+- `etl-craft run --pipeline_code P --task_code T` runs one task in a process of its own under
+  its pipeline's active run, only when it may, and records a crash, kill or timeout as `FAILED`
+  with the reason. Each attempt's output goes to its own log file under `Orchestration.Log_dir`,
+  its tail is kept in `TASK_LOG`, and every log record names the pipeline, task, run and attempt.
