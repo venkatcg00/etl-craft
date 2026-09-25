@@ -99,7 +99,7 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
             "CFG_BUSINESS_RULES"
         )
     catalog = active_catalog(config)
-    checked = [_check(rule, catalog) for rule in rules]
+    checked = [check_rule(rule, catalog) for rule in rules]
     scope = "1=1" if context.force else f"t.PIPELINE_RUN_ID = {int(context.pipeline_run_id)}"
     string_type = warehouse_dialect(config).string_type
     logger.info(
@@ -119,7 +119,7 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
     return HandlerResult(insert_count=flagged, update_count=cleared)
 
 
-def _check(rule: BusinessRule, catalog: str) -> _Rule:
+def check_rule(rule: BusinessRule, catalog: str) -> _Rule:
     """Check a rule's definition before any rule runs; ``HandlerError`` naming what is wrong."""
     name = f"business rule {rule.business_rule_name!r} (BUSINESS_RULE_ID={rule.business_rule_id})"
     if not is_safe_identifier(rule.business_rule_key_column):

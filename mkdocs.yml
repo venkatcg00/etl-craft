@@ -101,6 +101,7 @@ nav:
       - Business rules: guides/business-rules.md
       - Ingestion scripts: guides/ingestion-scripts.md
       - Email alerts: guides/email-alerts.md
+      - Validating pipelines: guides/validating.md
       - Inspecting pipelines: guides/inspecting.md
       - Lineage and documentation versions: guides/lineage.md
       - Running a pipeline: guides/running-pipelines.md

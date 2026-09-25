@@ -41,6 +41,7 @@ from etl_craft.core.text import (
     substitute_pipeline_id,
     suggest,
 )
+from etl_craft.dialects.warehouse.base import STORAGE_PARAMETERS
 from etl_craft.handlers.registry import TaskContext
 
 MERGES = frozenset({SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE})
@@ -62,6 +63,25 @@ FLAGS: dict[str, frozenset[SqlAction]] = {
     "PRESERVE_TARGET": frozenset({SqlAction.SCD1_MERGE}),
     "HARD_DELETE": frozenset({SqlAction.DELETE_ROWS}),
 }
+
+PARAMETERS = frozenset(
+    {
+        "SQL_ACTION",
+        "TARGET_OBJECT",
+        "SOURCE_SQL",
+        "SOURCE_SQL_FILE",
+        "PIPELINE_ID_SUBSTITUTION",
+        "PIPELINE_ID_FILTER",
+        "MERGE_KEY",
+        "MERGE_COMPARE_COLUMNS",
+        "MERGE_DEDUPE_ORDER",
+        "SETUP_FOR",
+        "TABLE_FORMAT",
+        *FLAGS,
+        *STORAGE_PARAMETERS,
+    }
+)
+"""The task parameters a SQL task reads."""
 
 
 @dataclass(frozen=True)

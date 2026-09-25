@@ -15,6 +15,7 @@ naming the script and the problem.
 
 from __future__ import annotations
 
+import ast
 import inspect
 import json
 import logging
@@ -35,6 +36,9 @@ from etl_craft.handlers.registry import HandlerResult, TaskContext
 from etl_craft.scripting import Offset, ScriptResult, ScriptTask
 
 logger = logging.getLogger(__name__)
+
+PARAMETERS = frozenset({"SCRIPT_NAME", "INPUT_PARAMS"})
+"""The task parameters an ingestion-script task reads."""
 
 SCRIPT_LOGGER = "etl_craft_script"
 """The logger a script is given as ``task.logger``, named after its task."""
@@ -150,6 +154,48 @@ def load_script(path: Path, name: str) -> Callable[..., Any]:
             f"SCRIPT_NAME={name!r} defines no run(task) function; see etl_craft.scripting"
         )
     return entry  # type: ignore[no-any-return]
+
+
+def script_definition_problem(path: Path, name: str) -> str | None:
+    """Read the script without running it; return why its ``run`` cannot be called, or ``None``.
+
+    The script is parsed, not imported, so nothing in it runs. A ``run`` that is not a plain
+    top-level function (imported, or assigned) is taken on trust.
+    """
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except SyntaxError as error:
+        return f"SCRIPT_NAME={name!r} has a syntax error at line {error.lineno}: {error.msg}"
+    except (OSError, UnicodeDecodeError) as error:
+        return f"SCRIPT_NAME={name!r} cannot be read: {error}"
+    functions = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == "run"
+    ]
+    if not functions:
+        bound = {
+            target.id
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            for target in node.targets
+            if isinstance(target, ast.Name)
+        } | {
+            alias.asname or alias.name
+            for node in tree.body
+            if isinstance(node, ast.Import | ast.ImportFrom)
+            for alias in node.names
+        }
+        if "run" in bound:
+            return None
+        return f"SCRIPT_NAME={name!r} defines no run(task) function; see etl_craft.scripting"
+    if isinstance(functions[-1], ast.AsyncFunctionDef):
+        return f"{name}: run is async; it must be a plain function that returns a ScriptResult"
+    args = functions[-1].args
+    positional = len(args.posonlyargs) + len(args.args) - len(args.defaults)
+    if positional > 1:
+        return f"{name}: run takes {positional} arguments; it takes the task, or nothing"
+    return None
 
 
 def _takes_the_task(entry: Callable[..., Any], name: str) -> bool:

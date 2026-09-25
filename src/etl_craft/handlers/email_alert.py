@@ -69,6 +69,17 @@ STATUS_COLORS = {
 }
 
 TOKENS = ("status", "pipeline_id", "pipeline_code", "task_code", "error_message")
+PARAMETERS = frozenset(
+    {
+        "EMAIL_TO",
+        "EMAIL_SUBJECT",
+        "EMAIL_BODY",
+        "EMAIL_ON_STATUS",
+        "EMAIL_PIPELINES",
+        *(f"EMAIL_{part}_{outcome}" for part in ("SUBJECT", "BODY") for outcome in OUTCOMES),
+    }
+)
+"""The task parameters an alert task reads."""
 _TOKEN = re.compile(r"\$\$([A-Za-z_][A-Za-z0-9_]*)")
 
 
@@ -129,6 +140,41 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
     if sla is not None:
         variables["SLA"] = sla.describe()
     return HandlerResult(variables=variables)
+
+
+def alert_parameter_problems(params: Mapping[str, str]) -> list[str]:
+    """Return what is wrong with an alert task's parameters, for every outcome it can send on.
+
+    A run sends on one outcome, so it notices a missing subject or body only when that outcome
+    happens; this checks each outcome ``EMAIL_ON_STATUS`` allows.
+    """
+    problems: list[str] = []
+    try:
+        parse_recipients(params.get("EMAIL_TO"), "EMAIL_TO")
+    except HandlerError as error:
+        problems.append(str(error))
+    try:
+        wanted = _wanted_outcomes(params.get("EMAIL_ON_STATUS"))
+    except HandlerError as error:
+        problems.append(str(error))
+        wanted = None
+    outcomes = [outcome for outcome in OUTCOMES if wanted is None or outcome in wanted]
+    parts = ["SUBJECT"] if params.get("EMAIL_PIPELINES") else ["SUBJECT", "BODY"]
+    for part in parts:
+        missing = [outcome for outcome in outcomes if not _template(params, part, outcome)]
+        if missing:
+            problems.append(
+                f"no EMAIL_{part} for outcome(s) {', '.join(missing)}: set EMAIL_{part}, or "
+                f"EMAIL_{part}_<OUTCOME> for each, or leave them out of EMAIL_ON_STATUS"
+            )
+    blank = dict.fromkeys(TOKENS, "")
+    for name in sorted(params):
+        if name in PARAMETERS and name.startswith(("EMAIL_SUBJECT", "EMAIL_BODY")):
+            try:
+                substitute(params[name], blank, name)
+            except HandlerError as error:
+                problems.append(str(error))
+    return problems
 
 
 def run_outcome(statuses: Sequence[TaskStatus], *, exclude_task_id: int, sla_missed: bool) -> str:

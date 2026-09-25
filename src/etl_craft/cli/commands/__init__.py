@@ -43,6 +43,7 @@ def _commands() -> tuple[Command, ...]:
         run,
         setup,
         steps,
+        validate,
     )
 
     return (
@@ -54,6 +55,7 @@ def _commands() -> tuple[Command, ...]:
         lineage.COMMAND,
         docs_version.COMMAND,
         generate_yml.COMMAND,
+        validate.COMMAND,
         doctor.COMMAND,
         setup.COMMAND,
         init_db.COMMAND,

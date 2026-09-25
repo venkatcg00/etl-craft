@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -79,6 +80,51 @@ def fetch_pipeline_detail(conn: Connection, pipeline_id: int) -> PipelineDetail:
         email_on_failure=params.get("EMAIL_ON_FAILURE"),
         email_recipients=params.get("EMAIL_RECIPIENTS"),
     )
+
+
+def _is_count(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _is_strings(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+PIPELINE_PARAMETER_KINDS: dict[str, tuple[str, Callable[[object], bool]]] = {
+    "CATCHUP": ("true or false", lambda value: isinstance(value, bool)),
+    "DEPENDS_ON_PAST": ("true or false", lambda value: isinstance(value, bool)),
+    "EMAIL_ON_FAILURE": ("true or false", lambda value: isinstance(value, bool)),
+    "RETRIES": ("a whole number, 0 or more", _is_count),
+    "RETRY_DELAY_MINUTES": ("a whole number, 0 or more", _is_count),
+    "TAGS": ("a list of strings", _is_strings),
+    "EMAIL_RECIPIENTS": ("a list of strings", _is_strings),
+}
+"""Each ``PIPELINE_PARAMETERS`` key, what its value must be, and the test for it."""
+
+
+def pipeline_parameter_problems(stored: object) -> tuple[list[str], list[str]]:
+    """Check a pipeline's ``PIPELINE_PARAMETERS`` as stored; return ``(problems, unknown keys)``.
+
+    A value of the wrong type is a problem. A key etl-craft does not read is returned apart:
+    it may be a typo, and it is ignored either way.
+    """
+    if stored is None:
+        return [], []
+    try:
+        params = json.loads(stored) if isinstance(stored, str) else stored
+    except json.JSONDecodeError as error:
+        return [f"PIPELINE_PARAMETERS is not valid JSON ({error})"], []
+    if not isinstance(params, dict):
+        return [f"PIPELINE_PARAMETERS must be a JSON object; it is {json.dumps(params)}"], []
+    problems: list[str] = []
+    unknown: list[str] = []
+    for name, value in params.items():
+        kind = PIPELINE_PARAMETER_KINDS.get(name)
+        if kind is None:
+            unknown.append(name)
+        elif not kind[1](value):
+            problems.append(f"PIPELINE_PARAMETERS.{name}={json.dumps(value)} must be {kind[0]}")
+    return problems, unknown
 
 
 def fetch_pipeline_handlers(conn: Connection, pipeline_id: int) -> set[str]:
