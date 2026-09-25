@@ -1,5 +1,8 @@
 # Setting up and upgrading the Engine DB
 
+`etl-craft setup` checks every connection and then does both steps below, as needed; see
+[Checking a deployment](doctor-and-setup.md). This page describes each step on its own.
+
 ## A new Engine DB
 
 Point the `Engine` section of `craft-connector.yml` at an empty database (see

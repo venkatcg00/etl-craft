@@ -159,7 +159,14 @@ def sqlite_creator(database: str) -> Callable[[], Any]:
     sqlite3.register_converter("TIMESTAMP", _convert_timestamp)
 
     def connect() -> Any:
-        Path(database).parent.mkdir(parents=True, exist_ok=True)
+        folder = Path(database).parent
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            raise ConfigurationError(
+                f"the SQLite Engine DB {database} cannot be created: its folder {folder} could "
+                f"not be made ({error.strerror}); point jdbc:sqlite: at a writable path"
+            ) from error
         conn = sqlite3.connect(
             database,
             timeout=BUSY_TIMEOUT_MS / 1000,
