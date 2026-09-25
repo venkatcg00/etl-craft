@@ -74,7 +74,7 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
     logger.info(
         "running %s from offset %s with %d input param(s)",
         name,
-        "none (first run)" if offset is None else f"{offset.stored()} ({offset.type})",
+        "none (first run)" if offset is None else f"{offset.stored()} ({offset.datatype})",
         len(input_params),
     )
     started = time.monotonic()
@@ -88,9 +88,9 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
             save_task_offset(
                 conn,
                 context.task_id,
-                StoredOffset(checked.offset.type, checked.offset.stored()),
+                StoredOffset(checked.offset.datatype, checked.offset.stored()),
             )
-        variables["OFFSET"] = f"{checked.offset.stored()} ({checked.offset.type})"
+        variables["OFFSET"] = f"{checked.offset.stored()} ({checked.offset.datatype})"
     variables.update(checked.variables)
     logger.info(
         "%s wrote %d row(s) (%.2fs); offset %s",
@@ -204,10 +204,10 @@ def check_result(result: Any, name: str, stored: StoredOffset | None) -> ScriptR
     if (
         result.offset is not None
         and stored is not None
-        and result.offset.type != stored.offset_type
+        and result.offset.datatype != stored.offset_type
     ):
         raise HandlerError(
-            f"{name} returned a {result.offset.type} offset, but the stored one is "
-            f"{stored.offset_type}; an offset keeps its type"
+            f"{name} returned a {result.offset.datatype} offset, but the stored one is "
+            f"{stored.offset_type}; an offset keeps its datatype"
         )
     return result
