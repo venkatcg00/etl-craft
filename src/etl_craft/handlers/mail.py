@@ -1,6 +1,7 @@
 """Sending email as the ``Email`` settings of ``craft-connector.yml`` say.
 
-Every email is HTML, sent from the profile's ``from_address``, in one of two ways:
+Every email is HTML, sent from the profile's ``from_address`` under its ``from_name``, when set,
+in one of two ways:
 
 - ``transport: smtp`` (the default): through the SMTP relay at ``host:port``, with STARTTLS when
   ``use_tls`` is on, logged in to by ``auth_mode``: ``none``, ``password``, or ``oauth`` (SMTP
@@ -20,7 +21,7 @@ import smtplib
 import subprocess
 from collections.abc import Sequence
 from email.message import EmailMessage
-from email.utils import parseaddr
+from email.utils import formataddr, parseaddr
 from pathlib import Path
 
 from etl_craft.config import ConnectorConfig, resolve_secret
@@ -76,7 +77,7 @@ def send_email(
     profile = config.email.active
     message = EmailMessage()
     message["Subject"] = subject
-    message["From"] = profile.from_address
+    message["From"] = formataddr((profile.from_name, profile.from_address))
     message["To"] = ", ".join(recipients)
     message.set_content("This email is HTML; open it in a client that shows HTML.")
     message.add_alternative(body_html, subtype="html")
@@ -130,6 +131,8 @@ def _send_with_sendmail(
     if problem is not None:
         raise HandlerError(f"email to {', '.join(recipients)} was not sent: {problem}")
     command = [profile.sendmail_path, "-t", "-oi", "-f", profile.from_address]
+    if profile.from_name:
+        command += ["-F", profile.from_name]
     try:
         finished = subprocess.run(
             command,
