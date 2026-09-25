@@ -88,6 +88,14 @@ differs from the target's.
 | `PRESERVE_TARGET` | `SCD1_MERGE` | `true` keeps the target's value where the SELECT returns NULL |
 | `HARD_DELETE` | `DELETE_ROWS` | `true` deletes rows instead of flagging them |
 | `TABLE_FORMAT` | all | `native` or `iceberg`, for this task's target, where the warehouse lets a task choose |
+| `EXTERNAL_LOCATION` | tables it creates, on Databricks and Trino (Iceberg) | where the table's files live, such as `s3://lake/sales/orders` |
+| `EXTERNAL_VOLUME`, `BASE_LOCATION` | tables it creates, on Snowflake Iceberg | the customer volume and the path in it; set both, or neither for Snowflake-managed storage |
+| `CATALOG` | tables it creates, on Snowflake Iceberg | a catalog integration for an externally managed Iceberg catalog |
+
+A storage parameter a warehouse does not use fails the task rather than being ignored: the table
+would otherwise land somewhere other than intended. A table with an `EXTERNAL_LOCATION` cannot be
+rebuilt by `SCHEMA_EVOLUTION`, which would lose its location; add new columns to it yourself. See
+[Warehouses](../connectors/warehouses.md#storage-outside-the-warehouses-own) for each warehouse.
 
 Yes/no parameters take `true` or `false`; anything else fails the task.
 

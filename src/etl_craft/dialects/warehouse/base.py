@@ -57,10 +57,17 @@ class Presented:
     connect_args: Mapping[str, Any] = field(default_factory=dict)
 
 
+STORAGE_PARAMETERS = ("EXTERNAL_LOCATION", "EXTERNAL_VOLUME", "BASE_LOCATION", "CATALOG")
+"""Task parameters that place a table's data files; each dialect accepts only its own."""
+
+
 class WarehouseDialect:
     """What differs between warehouses; the defaults are the ANSI behaviour PostgreSQL follows."""
 
     spec: WarehouseSpec
+
+    # The STORAGE_PARAMETERS a task may set on this warehouse and table format.
+    storage_parameters: frozenset[str] = frozenset()
 
     # Whether CREATE TEMPORARY TABLE exists and behaves. Trino has none; Databricks refuses
     # DROP on a name it shares with a temporary table.
@@ -239,6 +246,23 @@ class WarehouseDialect:
     def task_storage_problem(self, params: Mapping[str, str]) -> str | None:
         """Return why a task's storage parameters cannot work here, or ``None``."""
         return None
+
+    def unsupported_storage_problem(self, params: Mapping[str, str]) -> str | None:
+        """Return which storage parameters the task sets that do not apply here, or ``None``.
+
+        Such a parameter would be ignored, leaving the table somewhere the author did not
+        intend.
+        """
+        given = [name for name in STORAGE_PARAMETERS if (params.get(name) or "").strip()]
+        extra = [name for name in given if name not in self.storage_parameters]
+        if not extra:
+            return None
+        accepted = ", ".join(sorted(self.storage_parameters)) or "none"
+        return (
+            f"{', '.join(extra)} does not apply to {self.display_name} with the "
+            f"{self.table_format} table format, and would be ignored; storage parameters here: "
+            f"{accepted}"
+        )
 
     def cloning_storage_problem(self, cloning: CloningConfig) -> str | None:
         """Return why cloning cannot create mirrors here as configured, or ``None``."""

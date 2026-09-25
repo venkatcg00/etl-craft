@@ -35,6 +35,7 @@ class SnowflakeIcebergWarehouse(SnowflakeWarehouse):
     """
 
     spec = warehouse_by_key("snowflake_iceberg")
+    storage_parameters = frozenset({"EXTERNAL_VOLUME", "BASE_LOCATION", "CATALOG"})
 
     def create_table_as(
         self, conn: Connection, qualified_name: str, select_sql: str, params: Mapping[str, str]

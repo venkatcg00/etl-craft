@@ -88,13 +88,17 @@ def create_table(session: Session, action: ActionContext) -> HandlerResult:
     stage = build_stage(session, action.select_sql)
     source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
     session.run(f"DROP TABLE IF EXISTS {session.target}", step="drop the old target")
+    computed = session.dialect.surrogate_key == "computed"
+    # Where ROW_ID cannot be added afterwards, the rows are numbered as the table is created.
+    row_id = ", CAST(ROW_NUMBER() OVER (ORDER BY NULL) AS BIGINT) AS ROW_ID" if computed else ""
     session.create_table_as(
         session.target,
-        f"SELECT s.*, CAST({int(action.context.pipeline_run_id)} AS BIGINT) AS PIPELINE_RUN_ID "
-        f"FROM {stage} s",
+        f"SELECT s.*, CAST({int(action.context.pipeline_run_id)} AS BIGINT) AS PIPELINE_RUN_ID"
+        f"{row_id} FROM {stage} s",
         step="create the target from the SELECT",
     )
-    add_row_id(session)
+    if not computed:
+        add_row_id(session)
     session.drop(stage)
     return HandlerResult(source_count=source, target_count=source, insert_count=source)
 
