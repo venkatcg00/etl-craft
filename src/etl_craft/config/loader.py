@@ -146,11 +146,14 @@ def parse_config(raw: Any, path: Path) -> ConnectorConfig:
 
 
 def _relative_to_config(written: str, path: Path) -> Path:
-    """Resolve ``written`` against the config file's directory, never the working directory."""
+    """Return ``written`` as an absolute path, a relative one taken from the config's directory.
+
+    An absolute path is kept as written; symbolic links are never resolved.
+    """
     resolved = Path(written).expanduser()
     if not resolved.is_absolute():
-        resolved = path.resolve().parent / resolved
-    return resolved.resolve()
+        resolved = path.absolute().parent / resolved
+    return Path(os.path.normpath(resolved))
 
 
 def _check_layout(raw: Any, path: Path) -> None:

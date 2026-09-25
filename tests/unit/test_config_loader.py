@@ -609,8 +609,8 @@ def test_email_needs_user_and_secret_for_password_auth(tmp_path, monkeypatch):
 
 
 def test_log_dir_defaults_beside_the_config_and_can_be_set(tmp_path):
-    assert load_config(_write(tmp_path, _minimal())).log_dir == (tmp_path / "logs").resolve()
+    assert load_config(_write(tmp_path, _minimal())).log_dir == tmp_path.absolute() / "logs"
     raw = _minimal(Orchestration={"Mode": "local", "Log_dir": "../task-logs"})
-    assert load_config(_write(tmp_path, raw)).log_dir == (tmp_path.parent / "task-logs").resolve()
+    assert load_config(_write(tmp_path, raw)).log_dir == tmp_path.absolute().parent / "task-logs"
     raw = _minimal(Orchestration={"Mode": "local", "Log_dir": "/var/log/etl"})
     assert load_config(_write(tmp_path, raw)).log_dir == Path("/var/log/etl")
