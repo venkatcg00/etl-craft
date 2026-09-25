@@ -4,7 +4,8 @@ Each check says what it looked at and what it found: ``OK``, ``WARN`` (it works,
 this) or ``FAIL`` (this will stop runs). The checks cover the settings used as written that look
 like variables nobody set, each secret, auth modes not verified against a live service here, the
 Engine DB (its connection, schema, tables and pending migrations), the warehouse (its connection,
-schema and, on Trino, that its catalog is Iceberg), how email is sent, and the project folders.
+schema and, on Trino, that its catalog is Iceberg), how email is sent, whether cloning can
+write where it is set to, and the project folders.
 """
 
 from __future__ import annotations
@@ -18,12 +19,13 @@ from sqlalchemy.exc import SQLAlchemyError
 from etl_craft.config import ConnectorConfig, profile_needs_secret, resolve_secret
 from etl_craft.config.auth import EMAIL_VERIFIED_AUTH_MODES, engine_for_jdbc_url
 from etl_craft.config.model import ConnectionProfile, EmailProfile
-from etl_craft.core.enums import Mode
+from etl_craft.core.enums import CloningScope, Mode
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.engine.connection import check_reachable, engine_db
 from etl_craft.engine.migrations import pending_migrations
 from etl_craft.engine.schema import existing_engine_tables
 from etl_craft.execution.connections import probe_email_relay, probe_warehouse
+from etl_craft.services.cloning import cloning_problem
 from etl_craft.warehouse.connection import (
     build_warehouse_engine,
     is_in_memory,
@@ -85,6 +87,7 @@ def run_checks(config: ConnectorConfig, *, engine_state: bool = True) -> list[Ch
         *engine_checks,
         *_warehouse(config, queue_on_engine_db=engine_reachable),
         *_email(config),
+        *_cloning(config),
         *_project(config),
     ]
 
@@ -268,6 +271,22 @@ def _email(config: ConnectorConfig) -> list[Check]:
         return [*checks, fail("Email relay", problem)]
     checks.append(ok("Email relay", f"{profile.host}:{profile.port} answers"))
     return checks
+
+
+def _cloning(config: ConnectorConfig) -> list[Check]:
+    cloning = config.cloning
+    if not cloning.enabled or cloning.scope == CloningScope.NONE:
+        return []
+    problem = cloning_problem(config)
+    if problem is not None:
+        return [fail("Cloning", problem)]
+    assert config.warehouse is not None
+    return [
+        ok(
+            "Cloning",
+            f"scope {cloning.scope}: after each run, into schema {config.warehouse.active.schema}",
+        )
+    ]
 
 
 def _project(config: ConnectorConfig) -> list[Check]:

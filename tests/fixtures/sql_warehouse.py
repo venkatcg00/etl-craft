@@ -262,8 +262,14 @@ def _drop_schema(world: SqlWorld) -> None:
     if world.kind == "postgres":
         world.execute(f"DROP SCHEMA IF EXISTS {world.schema} CASCADE")
         return
-    for table in world.tables():
-        world.execute(f"DROP TABLE IF EXISTS {world.name(table)}")
+    # Names as stored: an Iceberg catalog matches them case-sensitively.
+    rows = world.rows(
+        "SELECT table_name FROM information_schema.tables WHERE lower(table_schema) = "
+        "lower(:schema)",
+        schema=world.schema,
+    )
+    for (table,) in rows:
+        world.execute(f"DROP TABLE IF EXISTS {world.name(str(table))}")
     if world.kind == "duckdb":
         world.execute(f"DROP SCHEMA IF EXISTS {world.catalog}.{world.schema} CASCADE")
     else:

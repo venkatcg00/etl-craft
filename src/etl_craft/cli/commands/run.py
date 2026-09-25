@@ -16,6 +16,7 @@ from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import ExitCode, UsageError
 from etl_craft.execution.pipeline import finalize_active_run, init_pipeline_run, run_pipeline
 from etl_craft.execution.runner import ChildOptions, run_task
+from etl_craft.services.cloning import run_hooks
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -54,15 +55,24 @@ def _run(args: argparse.Namespace, out: Output) -> int:
             )
             status, message = outcome.status, outcome.message
         elif args.init_only:
-            started = init_pipeline_run(engine, config, args.pipeline_code)
+            started = init_pipeline_run(
+                engine, config, args.pipeline_code, hooks=run_hooks(config, engine)
+            )
             status, message = started.status, started.message
         elif args.finalize_only:
-            ended = finalize_active_run(engine, config, args.pipeline_code)
+            ended = finalize_active_run(
+                engine, config, args.pipeline_code, hooks=run_hooks(config, engine)
+            )
             status, message = ended.status, ended.message
         else:
             with _terminate_as_interrupt():
                 ran = run_pipeline(
-                    engine, config, args.pipeline_code, force=args.force, child=child
+                    engine,
+                    config,
+                    args.pipeline_code,
+                    force=args.force,
+                    child=child,
+                    hooks=run_hooks(config, engine),
                 )
             status, message = ran.status, ran.message
     finally:

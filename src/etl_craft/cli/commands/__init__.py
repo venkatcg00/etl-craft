@@ -31,6 +31,7 @@ class Command:
 
 def _commands() -> tuple[Command, ...]:
     from etl_craft.cli.commands import (
+        clone,
         docs_version,
         doctor,
         generate_yml,
@@ -55,6 +56,7 @@ def _commands() -> tuple[Command, ...]:
         lineage.COMMAND,
         docs_version.COMMAND,
         generate_yml.COMMAND,
+        clone.COMMAND,
         validate.COMMAND,
         doctor.COMMAND,
         setup.COMMAND,

@@ -22,6 +22,7 @@ EXIT_CODES = {
     errors.MigrationError: ExitCode.MIGRATION,
     errors.LockTimeoutError: ExitCode.LOCK_TIMEOUT,
     errors.HandlerError: ExitCode.HANDLER,
+    errors.CloningError: ExitCode.CLONING,
 }
 
 
@@ -51,6 +52,7 @@ def test_the_exit_codes():
         ("LOCK_TIMEOUT", 14),
         ("HANDLER", 15),
         ("UNEXPECTED", 16),
+        ("CLONING", 17),
     ]
 
 
