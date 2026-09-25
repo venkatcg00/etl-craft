@@ -67,7 +67,9 @@ def format_task_log(result: HandlerResult) -> str | None:
 
 Handler = Callable[[TaskContext, Engine], HandlerResult]
 
-HANDLERS: dict[str, str] = {}
+HANDLERS: dict[str, str] = {
+    "SQL": "etl_craft.handlers.sql:run",
+}
 """Each ``HANDLER`` value and the ``module:function`` that runs it."""
 
 

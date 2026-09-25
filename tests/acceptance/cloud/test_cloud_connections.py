@@ -1,47 +1,20 @@
 """Databricks and Snowflake, connected through craft-connector.yml with separate fields.
 
 Each test creates a table in each table format the warehouse offers, reads it back and drops it.
-The credentials come from ``ETL_CRAFT_TEST_<VENDOR>_*`` variables; a test skips when they are
-not set, and fails instead with ``ETL_CRAFT_REQUIRE_SERVICES=1``.
+The credentials come from ``fixtures.cloud``.
 """
 
 import os
 import uuid
 
 import pytest
-import yaml
 from sqlalchemy import text
 
-from etl_craft.config import load_config
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.enums import TableFormat
 from etl_craft.core.text import qualify
 from etl_craft.warehouse.connection import build_warehouse_engine, warehouse_dialect
-
-DATABRICKS_VARS = ("JDBC_URL", "CATALOG", "SCHEMA", "TOKEN")
-SNOWFLAKE_VARS = ("USER", "ACCOUNT", "DATABASE", "SCHEMA", "WAREHOUSE", "ROLE", "TOKEN")
-
-
-def require_variables(vendor, names):
-    missing = [f"ETL_CRAFT_TEST_{vendor}_{name}" for name in names]
-    missing = [name for name in missing if not os.environ.get(name)]
-    if missing:
-        message = f"{vendor.title()} credentials are not set: {', '.join(missing)}"
-        if os.environ.get("ETL_CRAFT_REQUIRE_SERVICES") == "1":
-            pytest.fail(message, pytrace=False)
-        pytest.skip(message)
-
-
-def write_config(tmp_path, name, fields, table_format):
-    raw = {
-        "Secrets": {"Source_type": "environment"},
-        "Orchestration": {"Mode": "local"},
-        "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:engine.db"}},
-        "Warehouse": {"Name": name, "Table_format": str(table_format), "dev": fields},
-    }
-    path = tmp_path / "craft-connector.yml"
-    path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
-    return load_config(path)
+from fixtures.cloud import DATABRICKS_VARS, SNOWFLAKE_VARS, require_variables, write_config
 
 
 def create_read_drop(config, schema, params=None):

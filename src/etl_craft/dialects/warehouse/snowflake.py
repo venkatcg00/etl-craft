@@ -46,3 +46,10 @@ class SnowflakeWarehouse(WarehouseDialect):
                 },
             )
         return super().present(profile, secret, url)
+
+    def scalar_source_value(self, expression: str) -> str:
+        """Aggregate: Snowflake evaluates a correlated scalar subquery only when it is one.
+
+        The stage holds one row per merge key by then, so ANY_VALUE is that row's value.
+        """
+        return f"ANY_VALUE({expression})"
