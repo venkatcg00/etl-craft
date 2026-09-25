@@ -334,7 +334,13 @@ def test_is_safe_identifier(name, safe):
 
 @pytest.mark.parametrize(
     ("ref", "safe"),
-    [("public.t", True), ("t", False), ("db.public.t", False), ("public.my table", False)],
+    [
+        ("public.t", True),
+        ("db.public.t", True),
+        ("t", False),
+        ("a.db.public.t", False),
+        ("public.my table", False),
+    ],
 )
 def test_is_safe_object_ref(ref, safe):
     assert text.is_safe_object_ref(ref) is safe
@@ -357,17 +363,19 @@ def test_is_safe_order_term(term, safe):
 
 
 def test_split_object_ref():
-    assert text.split_object_ref(" public . t ") == ("public", "t")
+    assert text.split_object_ref(" public . t ") == (None, "public", "t")
+    assert text.split_object_ref("prod_db.public.t") == ("prod_db", "public", "t")
 
 
-@pytest.mark.parametrize("ref", ["t", "db.public.t", ".t", "public."])
-def test_split_object_ref_rejects_anything_but_schema_dot_table(ref):
-    with pytest.raises(HandlerError, match=r"CFG_TASK_PARAMETERS.TARGET_TABLE=.* must be exactly"):
+@pytest.mark.parametrize("ref", ["t", "a.db.public.t", ".t", "public.", "db..t"])
+def test_split_object_ref_needs_a_schema(ref):
+    with pytest.raises(HandlerError, match=r"TARGET_TABLE=.* must be 'schema.table' or"):
         text.split_object_ref(ref, param_name="TARGET_TABLE")
 
 
-def test_qualify_prepends_the_catalog():
+def test_qualify_prepends_the_active_database_only_when_none_is_named():
     assert text.qualify("public.some_table", "etl_craft") == "etl_craft.public.some_table"
+    assert text.qualify("other.public.some_table", "etl_craft") == "other.public.some_table"
 
 
 def test_split_pipe_list():

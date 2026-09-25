@@ -713,3 +713,28 @@ def test_engine_and_warehouse_profiles_name_their_schema(tmp_path, monkeypatch):
 def test_schema_mistakes_are_named(tmp_path, sections, message):
     with pytest.raises(ConfigurationError, match=message):
         load_config(_write(tmp_path, _minimal(**sections)))
+
+
+def test_a_warehouse_profile_must_name_its_database(tmp_path):
+    # A URL form without a database is refused as it is parsed.
+    raw = _minimal(
+        Warehouse={"dev": {"jdbc_url": "jdbc:trino://t:8080", "schema": "s", "auth_mode": "none"}}
+    )
+    with pytest.raises(ConfigurationError, match=r"jdbc:<dialect>://host\[:port\]/database"):
+        load_config(_write(tmp_path, raw))
+    # DuckDB over Iceberg names its database in `catalog`, checked once the profile is loaded.
+    raw = _minimal(
+        Warehouse={
+            "Name": "DuckDB",
+            "Table_format": "iceberg",
+            "dev": {
+                "jdbc_url": "jdbc:duckdb:",
+                "schema": "s",
+                "catalog": "lake-house",
+                "catalog_uri": "http://rest:8181",
+                "iceberg_warehouse": "s3://w/",
+            },
+        }
+    )
+    with pytest.raises(ConfigurationError, match=r"Warehouse\.dev: .*got 'lake-house'"):
+        load_config(_write(tmp_path, raw))

@@ -306,7 +306,9 @@ def read_only_problem(sql: str) -> str | None:
 # Identifiers
 
 _SAFE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_SAFE_OBJECT_REF = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$")
+_SAFE_OBJECT_REF = re.compile(
+    r"^([A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$"
+)
 _SAFE_ORDER_TERM = re.compile(
     r"^[A-Za-z_][A-Za-z0-9_]*(\s+(ASC|DESC))?(\s+NULLS\s+(FIRST|LAST))?$",
     re.IGNORECASE,
@@ -323,7 +325,7 @@ def is_safe_identifier(name: str) -> bool:
 
 
 def is_safe_object_ref(object_ref: str) -> bool:
-    """Whether ``object_ref`` is exactly ``schema.table`` with two safe identifiers."""
+    """Whether ``object_ref`` is ``schema.table`` or ``database.schema.table``, safe identifiers."""
     return bool(_SAFE_OBJECT_REF.match(object_ref))
 
 
@@ -335,30 +337,33 @@ def is_safe_order_term(term: str) -> bool:
     return bool(_SAFE_ORDER_TERM.match(term.strip()))
 
 
-def split_object_ref(object_ref: str, *, param_name: str = "TARGET_OBJECT") -> tuple[str, str]:
-    """Split a ``schema.table`` reference into its two names.
+def split_object_ref(
+    object_ref: str, *, param_name: str = "TARGET_OBJECT"
+) -> tuple[str | None, str, str]:
+    """Split ``schema.table`` or ``database.schema.table`` into (database or None, schema, table).
 
-    Raises ``HandlerError`` for anything else: the catalog comes from the active warehouse
-    profile, so a ``CFG_`` row never names one, and a bare table name has no schema.
+    Raises ``HandlerError`` for anything else: a bare table name has no schema.
     """
     parts = [part.strip() for part in object_ref.split(".")]
-    if len(parts) != 2 or not all(parts):
+    if len(parts) not in (2, 3) or not all(parts):
         raise HandlerError(
-            f"CFG_TASK_PARAMETERS.{param_name}={object_ref!r} must be exactly "
-            "'schema.table' — no database/catalog prefix (that comes from the active "
-            "[Warehouse] profile at runtime) and no bare table name"
+            f"{param_name}={object_ref!r} must be 'schema.table' or 'database.schema.table'; a "
+            "bare table name has no schema"
         )
-    return parts[0], parts[1]
+    if len(parts) == 2:
+        return None, parts[0], parts[1]
+    return parts[0], parts[1], parts[2]
 
 
 def qualify(object_ref: str, catalog: str) -> str:
-    """Return ``catalog.schema.table`` for a ``schema.table`` reference.
+    """Return ``database.schema.table`` for a table reference.
 
-    ``CFG_`` rows name only ``schema.table``, so the same row resolves to the development,
-    test or production object depending on the active warehouse profile's catalog.
+    A reference that names its database is kept as written; ``schema.table`` gets ``catalog``,
+    the active warehouse profile's database, so one row resolves to the development, test or
+    production table depending on the environment.
     """
-    schema_name, table_name = split_object_ref(object_ref)
-    return f"{catalog}.{schema_name}.{table_name}"
+    database, schema_name, table_name = split_object_ref(object_ref)
+    return f"{database or catalog}.{schema_name}.{table_name}"
 
 
 def split_pipe_list(value: str | None, *, param_name: str) -> list[str]:

@@ -4,7 +4,8 @@ Every mistake in a task's definition fails the task here with the parameter, its
 remedy, so no action ever starts on a half-valid definition.
 
 - ``SQL_ACTION``: one of the eight actions.
-- ``TARGET_OBJECT``: ``schema.table``; the catalog comes from the warehouse profile.
+- ``TARGET_OBJECT``: ``schema.table``, in the active warehouse profile's database, or
+  ``database.schema.table``.
 - ``SOURCE_SQL`` or ``SOURCE_SQL_FILE`` (every action but ``DROP_TABLE``): the read-only
   SELECT, inline or as a file under ``sql_files/``; exactly one of them.
 - ``PIPELINE_ID_SUBSTITUTION``: ``true`` replaces ``$$pipeline_id`` with the run id.
@@ -92,8 +93,9 @@ def read_sql_task(context: TaskContext) -> SqlTask:
         raise HandlerError(f"TARGET_OBJECT is required for SQL_ACTION={action}")
     if not is_safe_object_ref(target):
         raise HandlerError(
-            f"TARGET_OBJECT={target!r} must be exactly 'schema.table', letters, digits and "
-            "underscores only; the catalog comes from the active Warehouse profile"
+            f"TARGET_OBJECT={target!r} must be 'schema.table' or 'database.schema.table', "
+            "letters, digits and underscores only; without a database, the active Warehouse "
+            "profile's is used"
         )
     flags = {name: _flag(params, name, action, applies) for name, applies in FLAGS.items()}
 

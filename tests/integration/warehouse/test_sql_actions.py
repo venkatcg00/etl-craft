@@ -349,6 +349,29 @@ def test_a_select_names_its_tables_as_schema_table(sql_world):
     assert w.rows(f"SELECT id FROM {w.schema}.copied") == [(7,)]
 
 
+def test_a_target_may_name_its_database(sql_world):
+    w = sql_world
+    target = w.name("named")
+    select = "SELECT 1 AS id, CAST('a' AS VARCHAR(20)) AS name"
+    w.run(
+        "setup_named",
+        SQL_ACTION="SETUP_TABLE",
+        TARGET_OBJECT=target,
+        SOURCE_SQL=select,
+        SETUP_FOR="SCD1_MERGE",
+    )
+    result = w.run(
+        "merge_named",
+        SQL_ACTION="SCD1_MERGE",
+        TARGET_OBJECT=target,
+        SOURCE_SQL=select,
+        MERGE_KEY="id",
+        MERGE_COMPARE_COLUMNS="name",
+    )
+    assert (result.insert_count, result.target_count) == (1, 1)
+    assert w.rows(f"SELECT id, name FROM {target}") == [(1, "a")]
+
+
 def test_a_failing_statement_names_its_step_and_leaves_no_scratch_tables(sql_world, caplog):
     w = sql_world
     with pytest.raises(HandlerError) as error:

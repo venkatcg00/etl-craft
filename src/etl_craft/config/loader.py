@@ -45,7 +45,11 @@ from etl_craft.config.model import (
     SourceConfig,
 )
 from etl_craft.config.resolve import Resolver
-from etl_craft.config.targets import parse_warehouse_url, preferred_connection_url
+from etl_craft.config.targets import (
+    active_catalog,
+    parse_warehouse_url,
+    preferred_connection_url,
+)
 from etl_craft.core.enums import AuthMode, CloningScope, Mode, TableFormat
 from etl_craft.core.errors import ConfigurationError
 from etl_craft.core.text import is_safe_identifier
@@ -131,7 +135,7 @@ def parse_config(raw: Any, path: Path) -> ConnectorConfig:
     warehouse, table_format = _parse_warehouse(raw, global_profile, path, resolver)
     cloning = _parse_cloning(raw, global_profile, path, resolver)
 
-    return ConnectorConfig(
+    config = ConnectorConfig(
         mode=mode,
         source=source,
         engine=engine,
@@ -146,6 +150,15 @@ def parse_config(raw: Any, path: Path) -> ConnectorConfig:
         settings=tuple(resolver.sources),
         log_dir=log_dir,
     )
+    if warehouse is not None:
+        # Every warehouse profile names the database the engine connects to and writes in.
+        try:
+            active_catalog(config)
+        except ConfigurationError as error:
+            raise ConfigurationError(
+                f"{path}: Warehouse.{warehouse.active_profile}: {error}"
+            ) from error
+    return config
 
 
 def _relative_to_config(written: str, path: Path) -> Path:

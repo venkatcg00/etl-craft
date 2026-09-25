@@ -106,8 +106,8 @@ def test_drop_table_takes_no_select(project):
         ),
         ({"SQL_ACTION": "CREATE_TABLE"}, "TARGET_OBJECT is required for SQL_ACTION=CREATE_TABLE"),
         (
-            {"SQL_ACTION": "CREATE_TABLE", "TARGET_OBJECT": "prod.s.t"},
-            "TARGET_OBJECT='prod.s.t' must be exactly 'schema.table'",
+            {"SQL_ACTION": "CREATE_TABLE", "TARGET_OBJECT": "orders"},
+            "TARGET_OBJECT='orders' must be 'schema.table' or 'database.schema.table'",
         ),
         (BASE, "needs a SELECT: set SOURCE_SQL, or SOURCE_SQL_FILE"),
         (

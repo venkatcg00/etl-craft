@@ -90,9 +90,9 @@ class SqlWorld:
     def task(self, code: str, *, run_id: int | None = None, **params: str) -> TaskContext:
         """Add (or reuse) SQL task ``code`` with ``params``; return its task context.
 
-        ``TARGET_OBJECT`` values are written as ``<schema>.<table>``: pass just the table.
+        A bare ``TARGET_OBJECT`` table is written as ``<schema>.<table>``; a qualified one is kept.
         """
-        if "TARGET_OBJECT" in params:
+        if "TARGET_OBJECT" in params and "." not in params["TARGET_OBJECT"]:
             params["TARGET_OBJECT"] = f"{self.schema}.{params['TARGET_OBJECT']}"
         with self.engine_db.begin() as conn:
             if code not in self.tasks:
