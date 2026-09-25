@@ -44,20 +44,15 @@ from etl_craft.warehouse.connection import open_warehouse
 OffsetValue = int | Decimal | str | datetime
 
 
-_OFFSET_PYTHON_TYPES: dict[OffsetType, tuple[type, ...]] = {
-    OffsetType.NUMBER: (int, Decimal),
-    OffsetType.TEXT: (str,),
-    OffsetType.TIMESTAMP: (datetime,),
-}
-
-
 @dataclass(frozen=True)
 class Offset:
     """Where a script left off: a value and its datatype, ``NUMBER``, ``TEXT`` or ``TIMESTAMP``.
 
-    The value must already be of its datatype: an ``int`` or ``Decimal`` for ``NUMBER``, a
-    ``str`` for ``TEXT``, a ``datetime`` for ``TIMESTAMP``. Nothing is converted: ``Offset("7",
-    "NUMBER")`` fails. A script gets its offset back as it returned it, value and datatype.
+    The datatype is always given, never guessed from the value. The value is cast to it, as
+    ``CAST(value AS datatype)`` would in SQL: ``Offset("7", "NUMBER")`` holds ``7``, and
+    ``Offset("abc", "NUMBER")`` fails. A ``NUMBER`` is an ``int`` or a ``Decimal``, a ``TEXT`` a
+    ``str``, a ``TIMESTAMP`` a ``datetime`` (ISO 8601 text is read as one). The offset is
+    stored as text beside its datatype, and a script gets it back cast to that datatype.
     ``Offset.number``, ``Offset.text`` and ``Offset.timestamp`` are shorthands.
     """
 
@@ -65,21 +60,15 @@ class Offset:
     datatype: OffsetType
 
     def __post_init__(self) -> None:
-        """Check the datatype is known and the value is of it."""
+        """Check the datatype and cast the value to it."""
         try:
-            kind = OffsetType(str(self.datatype).upper())
+            kind = OffsetType(str(self.datatype).strip().upper())
         except ValueError:
             raise HandlerError(
                 f"offset datatype {self.datatype!r} is not one of NUMBER, TEXT, TIMESTAMP"
             ) from None
         object.__setattr__(self, "datatype", kind)
-        allowed = _OFFSET_PYTHON_TYPES[kind]
-        if isinstance(self.value, bool) or not isinstance(self.value, allowed):
-            names = " or ".join(t.__name__ for t in allowed)
-            raise HandlerError(
-                f"a {kind} offset needs a {names} value, got {type(self.value).__name__} "
-                f"{self.value!r}; the engine does not convert it"
-            )
+        object.__setattr__(self, "value", _cast(self.value, kind))
 
     @classmethod
     def number(cls, value: int | Decimal) -> Offset:
@@ -104,19 +93,39 @@ class Offset:
 
     @classmethod
     def from_stored(cls, datatype: str, text: str) -> Offset:
-        """Read an offset back from its stored datatype and text, as the script returned it."""
+        """Read an offset back from its stored datatype and text, cast to that datatype."""
+        return cls(text, OffsetType(datatype))
+
+
+def _cast(value: object, kind: OffsetType) -> OffsetValue:
+    """Cast ``value`` to ``kind``; ``HandlerError`` when it cannot be, as a SQL CAST fails."""
+    failure = HandlerError(f"cannot cast {type(value).__name__} {value!r} to a {kind} offset")
+    if isinstance(value, bool) or value is None:
+        raise failure
+    if kind == OffsetType.NUMBER:
+        if isinstance(value, int | Decimal):
+            return value
         try:
-            kind = OffsetType(datatype)
-            if kind == OffsetType.NUMBER:
-                number = Decimal(text)
-                return cls(int(number) if number == number.to_integral_value() else number, kind)
-            if kind == OffsetType.TIMESTAMP:
-                return cls(datetime.fromisoformat(text), kind)
-            return cls(text, kind)
-        except (ValueError, InvalidOperation) as error:
-            raise HandlerError(
-                f"the stored offset {text!r} is not a valid {datatype}: {error}"
-            ) from error
+            number = Decimal(str(value).strip())
+        except InvalidOperation:
+            raise failure from None
+        if not number.is_finite():
+            raise failure
+        return int(number) if number == number.to_integral_value() else number
+    if kind == OffsetType.TIMESTAMP:
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value.strip())
+            except ValueError:
+                raise failure from None
+        raise failure
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, str | int | Decimal):
+        return str(value)
+    raise failure
 
 
 @dataclass(frozen=True)

@@ -52,13 +52,15 @@ to keep the stored one; and `variables`, any values of your own, listed in the t
 A script that needs neither the offset nor `INPUT_PARAMS` can define `run()` without a parameter;
 it still returns a `ScriptResult`.
 
-An offset is a value and its datatype, and the script declares both: `Offset(1042, "NUMBER")`,
-`Offset("cursor-9", "TEXT")` or `Offset(latest, "TIMESTAMP")`, or the shorthands
-`Offset.number(1042)`, `Offset.text("cursor-9")` and `Offset.timestamp(latest)`. The value must
-already be of its datatype: an `int` or `Decimal` for `NUMBER`, a `str` for `TEXT`, a `datetime`
-for `TIMESTAMP`. The engine converts nothing, so `Offset("1042", "NUMBER")` fails. The next run
-gets the offset back the same way, `task.offset.value` and `task.offset.datatype`, exactly as it
-was returned.
+An offset is a value and its datatype, and the datatype is always declared: `Offset(1042,
+"NUMBER")`, `Offset("cursor-9", "TEXT")` or `Offset(latest, "TIMESTAMP")`, or the shorthands
+`Offset.number(1042)`, `Offset.text("cursor-9")` and `Offset.timestamp(latest)`. The value is cast
+to its datatype, as `CAST(value AS type)` would in SQL: `Offset("1042", "NUMBER")` holds the number
+1042, and `Offset("abc", "NUMBER")` fails. The type is never guessed from the value.
+
+The offset is stored as text beside its datatype, so one column holds every kind. The next run
+gets it back cast to that datatype: `task.offset.value` is an `int` or `Decimal` for `NUMBER`, a
+`str` for `TEXT` and a `datetime` for `TIMESTAMP`, and `task.offset.datatype` names it.
 
 The offset is stored in `AUD_TASK_OFFSET_TRACKER` only when the script succeeds, so a failed run
 is retried from the same place, and it keeps its datatype from one run to the next.
