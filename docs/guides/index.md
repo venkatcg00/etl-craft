@@ -12,6 +12,7 @@ How to model and run pipelines with etl-craft.
   where a script's output goes.
 - [Email alerts](email-alerts.md): the alert task, its outcomes and tokens, SLA emails, and
   sending through SMTP or `sendmail`.
+- [Inspecting pipelines](inspecting.md): `list`, `graph`, `steps` and `history`.
 - [Running a pipeline](running-pipelines.md): dependency waves, resuming a run, connection
   tests, orchestrator steps, and the SLA.
 - [Running a task and reading its logs](running-tasks.md): `etl-craft run --task_code`,
