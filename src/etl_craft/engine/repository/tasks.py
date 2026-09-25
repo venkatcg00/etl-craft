@@ -64,28 +64,23 @@ def fetch_task_parameters(conn: Connection, task_id: int) -> dict[str, str]:
 
 
 @dataclass(frozen=True)
-class SiblingTargetWriter:
-    """Another active SQL task in the same pipeline that writes the same target."""
+class TargetTask:
+    """Another active SQL task in the same pipeline with the same ``TARGET_OBJECT``."""
 
     task_id: int
+    task_code: str
     sql_action: str
 
 
-def fetch_sibling_target_writer(
+def fetch_target_tasks(
     conn: Connection, pipeline_id: int, task_id: int, target_object: str
-) -> SiblingTargetWriter | None:
-    """Return another active SQL task in ``pipeline_id`` writing ``target_object``, if any.
-
-    SETUP_TABLE siblings are ignored: they only shape a target ahead of its real writer. With
-    several writers, the lowest task id is returned.
-    """
-    row = conn.execute(
-        statement(conn, "sibling_target_writer"),
+) -> list[TargetTask]:
+    """Return the other active SQL tasks in ``pipeline_id`` writing ``target_object``."""
+    rows = conn.execute(
+        statement(conn, "target_tasks"),
         {"pipeline_id": pipeline_id, "task_id": task_id, "target_object": target_object},
-    ).one_or_none()
-    if row is None:
-        return None
-    return SiblingTargetWriter(task_id=row.task_id, sql_action=row.sql_action)
+    )
+    return [TargetTask(row.task_id, row.task_code, row.sql_action) for row in rows]
 
 
 @dataclass(frozen=True)

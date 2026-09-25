@@ -167,6 +167,30 @@ def test_definition_mistakes_fail_with_the_remedy(project, params, message):
         read_sql_task(context(project, **params))
 
 
+def test_setup_for_names_the_writing_action(project):
+    setup = {"SQL_ACTION": "SETUP_TABLE", "TARGET_OBJECT": "s.t", "SOURCE_SQL": "SELECT 1"}
+    assert read_sql_task(context(project, **setup)).setup_for is None
+    assert read_sql_task(context(project, SETUP_FOR="scd2_merge", **setup)).setup_for == (
+        SqlAction.SCD2_MERGE
+    )
+    with pytest.raises(HandlerError, match="SETUP_FOR='DROP_TABLE' must name the action that"):
+        read_sql_task(context(project, SETUP_FOR="DROP_TABLE", **setup))
+    with pytest.raises(HandlerError, match="SETUP_FOR applies only to SETUP_TABLE"):
+        read_sql_task(context(project, SETUP_FOR="SCD1_MERGE", SOURCE_SQL="SELECT 1", **BASE))
+    with pytest.raises(
+        HandlerError, match=r"SCHEMA_EVOLUTION applies only to .* not SQL_ACTION=APP"
+    ):
+        read_sql_task(
+            context(
+                project,
+                SQL_ACTION="APPEND_TABLE",
+                TARGET_OBJECT="s.t",
+                SOURCE_SQL="SELECT 1",
+                SCHEMA_EVOLUTION="true",
+            )
+        )
+
+
 def test_a_missing_or_unreadable_sql_file_is_metadata(project):
     with pytest.raises(MetadataError, match=r"SOURCE_SQL_FILE='nope\.sql': no such file"):
         read_sql_task(context(project, SOURCE_SQL_FILE="nope.sql", **BASE))

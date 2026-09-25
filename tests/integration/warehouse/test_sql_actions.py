@@ -28,12 +28,15 @@ def test_create_table_stamps_the_run_and_numbers_the_rows(sql_world):
     assert w.tables() == ["orders"]
 
 
-def test_overwrite_table_creates_its_target_then_replaces_the_rows(sql_world):
+def test_overwrite_table_needs_its_target_then_replaces_the_rows(sql_world):
     w = sql_world
     params = {"SQL_ACTION": "OVERWRITE_TABLE", "TARGET_OBJECT": "daily"}
+    with pytest.raises(HandlerError, match=r"does not exist\. Only CREATE_TABLE and SETUP_TABLE"):
+        w.run("overwrite", SOURCE_SQL="SELECT 1 AS id", **params)
+    w.setup("daily", "SELECT 1 AS id", "OVERWRITE_TABLE")
+    assert w.columns("daily") == ["id", "pipeline_run_id", "update_date", "row_id"]
     first = w.run("overwrite", SOURCE_SQL="SELECT 1 AS id UNION ALL SELECT 2", **params)
     assert first.insert_count == 2
-    assert w.columns("daily") == ["id", "pipeline_run_id", "update_date", "row_id"]
     second = w.run("overwrite", SOURCE_SQL="SELECT 3 AS id", **params)
     assert (second.source_count, second.target_count) == (1, 1)
     assert w.rows(f"SELECT id FROM {w.name('daily')}") == [(3,)]
@@ -41,11 +44,42 @@ def test_overwrite_table_creates_its_target_then_replaces_the_rows(sql_world):
     assert row_ids[0][0] is not None and row_ids[0][1] is not None
 
 
-SCD = {"TARGET_OBJECT": "customers", "MERGE_KEY": "id", "MERGE_COMPARE_COLUMNS": "name|city"}
-
-
-def test_scd1_merge_inserts_updates_and_leaves_unchanged_rows(sql_world):
+def test_append_table_adds_rows_on_every_run(sql_world):
     w = sql_world
+    params = {"SQL_ACTION": "APPEND_TABLE", "TARGET_OBJECT": "events"}
+    with pytest.raises(HandlerError, match=r"the target .* does not exist"):
+        w.run("append", SOURCE_SQL="SELECT 1 AS id", **params)
+    w.setup("events", "SELECT 1 AS id", "APPEND_TABLE")
+    assert w.columns("events") == ["id", "pipeline_run_id", "create_date", "row_id"]
+    first = w.run("append", SOURCE_SQL="SELECT 1 AS id UNION ALL SELECT 2", **params)
+    w.new_run()
+    second = w.run("append", SOURCE_SQL="SELECT 3 AS id", **params)
+    assert (first.insert_count, second.insert_count, second.target_count) == (2, 1, 3)
+    rows = sorted_rows(w, f"SELECT id, pipeline_run_id FROM {w.name('events')}")
+    assert rows == [(1, w.pipeline_run_id - 1), (2, w.pipeline_run_id - 1), (3, w.pipeline_run_id)]
+    assert sorted_rows(w, f"SELECT row_id FROM {w.name('events')}") == [(1,), (2,), (3,)]
+    # No shape check: a column the target lacks fails the insert with the database's message.
+    with pytest.raises(HandlerError, match="append the SELECT's rows failed"):
+        w.run("append", SOURCE_SQL="SELECT 4 AS id, 'x' AS extra", **params)
+
+
+SCD = {"TARGET_OBJECT": "customers", "MERGE_KEY": "id", "MERGE_COMPARE_COLUMNS": "name|city"}
+SHAPE = "SELECT 1 AS id, CAST('x' AS VARCHAR(20)) AS name, CAST('x' AS VARCHAR(20)) AS city"
+
+
+@pytest.fixture
+def customers(sql_world):
+    """The customers table, set up for a merge by the action named in the test's parameter."""
+
+    def setup(action):
+        sql_world.setup("customers", SHAPE, action)
+        return sql_world
+
+    return setup
+
+
+def test_scd1_merge_inserts_updates_and_leaves_unchanged_rows(customers):
+    w = customers("SCD1_MERGE")
     first = w.run(
         "scd1",
         SQL_ACTION="SCD1_MERGE",
@@ -78,8 +112,8 @@ def test_scd1_merge_inserts_updates_and_leaves_unchanged_rows(sql_world):
     assert (third.insert_count, third.update_count, third.target_count) == (0, 0, 3)
 
 
-def test_scd1_preserve_target_keeps_values_where_the_source_is_null(sql_world):
-    w = sql_world
+def test_scd1_preserve_target_keeps_values_where_the_source_is_null(customers):
+    w = customers("SCD1_MERGE")
     params = {"SQL_ACTION": "SCD1_MERGE", "PRESERVE_TARGET": "true", **SCD}
     w.run("keep", SOURCE_SQL="SELECT 1 AS id, 'Ann' AS name, 'Oslo' AS city", **params)
     changed = w.run(
@@ -93,8 +127,8 @@ def test_scd1_preserve_target_keeps_values_where_the_source_is_null(sql_world):
     assert again.update_count == 0
 
 
-def test_scd2_merge_keeps_history(sql_world):
-    w = sql_world
+def test_scd2_merge_keeps_history(customers):
+    w = customers("SCD2_MERGE")
     params = {"SQL_ACTION": "SCD2_MERGE", **SCD}
     w.run("scd2", SOURCE_SQL="SELECT 1 AS id, 'Ann' AS name, 'Oslo' AS city", **params)
     changed = w.run(
@@ -121,14 +155,14 @@ def test_scd2_merge_keeps_history(sql_world):
     ) == [(1,)]
 
 
-def test_duplicate_merge_keys_fail_unless_an_order_chooses(sql_world):
-    w = sql_world
-    source = "SELECT 1 AS id, 'old' AS name, 'x' AS city, 1 AS v UNION ALL SELECT 1, 'new', 'y', 2"
+def test_duplicate_merge_keys_fail_unless_an_order_chooses(customers):
+    w = customers("SCD1_MERGE")
+    source = "SELECT 1 AS id, 'old' AS name, 'x' AS city UNION ALL SELECT 1, 'new', 'y'"
     with pytest.raises(HandlerError, match=r"returns 1 MERGE_KEY value\(s\) \(id\) more than once"):
         w.run("dupes", SQL_ACTION="SCD1_MERGE", SOURCE_SQL=source, **SCD)
-    assert "customers" not in w.tables()
+    assert w.rows(f"SELECT COUNT(*) FROM {w.name('customers')}") == [(0,)]
     result = w.run(
-        "dupes", SQL_ACTION="SCD1_MERGE", SOURCE_SQL=source, MERGE_DEDUPE_ORDER="v DESC", **SCD
+        "dupes", SQL_ACTION="SCD1_MERGE", SOURCE_SQL=source, MERGE_DEDUPE_ORDER="city DESC", **SCD
     )
     assert (result.source_count, result.insert_count) == (2, 1)
     assert w.rows(f"SELECT name FROM {w.name('customers')}") == [("new",)]
@@ -137,6 +171,7 @@ def test_duplicate_merge_keys_fail_unless_an_order_chooses(sql_world):
 def test_schema_checks_and_evolution(sql_world):
     w = sql_world
     params = {"SQL_ACTION": "OVERWRITE_TABLE", "TARGET_OBJECT": "wide"}
+    w.setup("wide", "SELECT 1 AS id, CAST('a' AS VARCHAR(10)) AS name", "OVERWRITE_TABLE")
     w.run("evolve", SOURCE_SQL="SELECT 1 AS id, 'a' AS name", **params)
     with pytest.raises(HandlerError, match=r"new column\(s\) score .* set SCHEMA_EVOLUTION=true"):
         w.run("evolve", SOURCE_SQL="SELECT 1 AS id, 7 AS score, 'a' AS name", **params)
@@ -166,8 +201,8 @@ def test_a_target_missing_audit_columns_is_refused(sql_world):
         )
 
 
-def test_delete_rows_soft_and_hard(sql_world):
-    w = sql_world
+def test_delete_rows_soft_and_hard(customers):
+    w = customers("SCD1_MERGE")
     w.run(
         "load",
         SQL_ACTION="SCD1_MERGE",
@@ -211,17 +246,19 @@ def test_drop_table_needs_this_pipelines_create_table_to_have_run(sql_world):
     w.finish("make")
     w.run("drop", SQL_ACTION="DROP_TABLE", TARGET_OBJECT="scratch")
     assert "scratch" not in w.tables()
+    # Dropping it again finds nothing to drop, which is fine.
+    w.run("drop", SQL_ACTION="DROP_TABLE", TARGET_OBJECT="scratch")
 
 
 def test_setup_table_takes_the_audit_columns_of_the_real_writer(sql_world):
     w = sql_world
+    select = "SELECT 1 AS id, 'a' AS name, 'b' AS city"
+    setup = {"SQL_ACTION": "SETUP_TABLE", "TARGET_OBJECT": "customers", "SOURCE_SQL": select}
+    with pytest.raises(HandlerError, match=r"no task in this pipeline writes .* set SETUP_FOR"):
+        w.run("setup", **setup)
     w.task("writer", SQL_ACTION="SCD2_MERGE", SOURCE_SQL="SELECT 1 AS id", **SCD)
-    result = w.run(
-        "setup",
-        SQL_ACTION="SETUP_TABLE",
-        TARGET_OBJECT="customers",
-        SOURCE_SQL="SELECT 1 AS id, 'a' AS name, 'b' AS city",
-    )
+    w.task("remover", SQL_ACTION="DELETE_ROWS", TARGET_OBJECT="customers", MERGE_KEY="id")
+    result = w.run("setup", **setup)
     assert result.insert_count == 0
     assert w.columns("customers") == [
         "id",
@@ -237,7 +274,26 @@ def test_setup_table_takes_the_audit_columns_of_the_real_writer(sql_world):
         "active_flag",
         "row_id",
     ]
-    assert w.rows(f"SELECT COUNT(*) FROM {w.name('customers')}") == [(0,)]
+    # An existing table is left as it is, rows and all.
+    w.run("writer", SQL_ACTION="SCD2_MERGE", SOURCE_SQL=select, **SCD)
+    w.run("setup", **setup)
+    assert w.rows(f"SELECT COUNT(*) FROM {w.name('customers')}") == [(1,)]
+
+
+def test_setup_table_refuses_writers_that_need_different_audit_columns(sql_world):
+    w = sql_world
+    w.task("merge", SQL_ACTION="SCD1_MERGE", SOURCE_SQL="SELECT 1 AS id", **SCD)
+    w.task("append", SQL_ACTION="APPEND_TABLE", TARGET_OBJECT="customers", SOURCE_SQL="SELECT 1")
+    setup = {
+        "SQL_ACTION": "SETUP_TABLE",
+        "TARGET_OBJECT": "customers",
+        "SOURCE_SQL": "SELECT 1 AS id",
+    }
+    with pytest.raises(HandlerError, match=r"merge \(SCD1_MERGE\), append \(APPEND_TABLE\)"):
+        w.run("setup", **setup)
+    with pytest.raises(HandlerError, match="SETUP_FOR=SCD1_MERGE, but tasks in this pipeline"):
+        w.run("setup", SETUP_FOR="SCD1_MERGE", **setup)
+    assert "customers" not in w.tables()
 
 
 def test_a_sql_file_with_the_pipeline_id_filter_reads_this_runs_rows(sql_world):

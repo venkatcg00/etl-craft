@@ -1,4 +1,4 @@
-"""``HANDLER=SQL``: wrap the task's read-only SELECT in one of seven actions on the warehouse.
+"""``HANDLER=SQL``: wrap the task's read-only SELECT in one of eight actions on the warehouse.
 
 The task supplies a SELECT, inline in ``SOURCE_SQL`` or as a file under the project's
 ``sql_files/`` in ``SOURCE_SQL_FILE``, and names its ``SQL_ACTION`` and ``TARGET_OBJECT``; the

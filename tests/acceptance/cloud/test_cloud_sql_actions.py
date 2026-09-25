@@ -49,7 +49,9 @@ def cloud_world(tmp_path, name, fields, table_format, schema):
 
 def walk_every_action(w):
     suffix = uuid.uuid4().hex[:8]
-    names = {base: f"etl_craft_{base}_{suffix}" for base in ("orders", "customers", "history")}
+    names = {
+        base: f"etl_craft_{base}_{suffix}" for base in ("orders", "customers", "history", "events")
+    }
     scd = {"MERGE_KEY": "id", "MERGE_COMPARE_COLUMNS": "name"}
     # Typed like a real source column: Snowflake gives a bare literal its own length, and the
     # target takes the SELECT's types.
@@ -64,6 +66,8 @@ def walk_every_action(w):
         assert created.insert_count == 2
         assert sorted(w.rows(f"SELECT row_id FROM {w.name(names['orders'])}")) == [(1,), (2,)]
 
+        copy = names["orders"] + "_copy"
+        w.setup(copy, f"SELECT id, name FROM {w.name(names['orders'])}", "OVERWRITE_TABLE")
         overwrite = w.run(
             "overwrite",
             SQL_ACTION="OVERWRITE_TABLE",
@@ -72,6 +76,9 @@ def walk_every_action(w):
         )
         assert overwrite.insert_count == 2
 
+        shape = f"SELECT 1 AS id, {ann} AS name"
+        w.setup(names["customers"], shape, "SCD1_MERGE")
+        w.setup(names["history"], shape, "SCD2_MERGE")
         first = w.run(
             "scd1",
             SQL_ACTION="SCD1_MERGE",
@@ -104,6 +111,15 @@ def walk_every_action(w):
             **scd,
         )
         assert (changed.update_count, changed.insert_count, changed.target_count) == (1, 1, 2)
+
+        w.setup(names["events"], "SELECT 1 AS id", "APPEND_TABLE")
+        appended = w.run(
+            "append",
+            SQL_ACTION="APPEND_TABLE",
+            TARGET_OBJECT=names["events"],
+            SOURCE_SQL="SELECT 1 AS id UNION ALL SELECT 2",
+        )
+        assert appended.insert_count == 2
 
         soft = w.run(
             "soft",

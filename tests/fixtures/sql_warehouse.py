@@ -130,6 +130,16 @@ class SqlWorld:
         """Define task ``code`` with ``params`` and run it."""
         return sql.run(self.task(code, **params), self.engine_db)
 
+    def setup(self, table: str, select: str, writer: str) -> HandlerResult:
+        """Create ``table`` from ``select`` with the audit columns ``writer`` needs."""
+        return self.run(
+            f"setup_{table}",
+            SQL_ACTION="SETUP_TABLE",
+            TARGET_OBJECT=table,
+            SOURCE_SQL=select,
+            SETUP_FOR=writer,
+        )
+
     def finish(self, code: str, status: str = "SUCCESS") -> None:
         """Record task ``code`` ended under the current run."""
         with self.engine_db.begin() as conn:

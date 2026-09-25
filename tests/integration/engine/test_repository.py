@@ -178,15 +178,15 @@ def test_task_details_and_parameters(seeded):
         assert tasks.fetch_task_parameters(conn, ids["extract"]) == {"SCRIPT_NAME": "extract_v2.py"}
 
 
-def test_sibling_target_writer_ignores_setup_tasks(seeded):
+def test_the_other_tasks_writing_a_target(seeded):
     engine, ids = seeded
     with engine.connect() as conn:
-        sibling = tasks.fetch_sibling_target_writer(conn, ids["alpha"], ids["setup"], "core.dim")
-        assert sibling == tasks.SiblingTargetWriter(ids["load"], "SCD1_MERGE")
-        assert (
-            tasks.fetch_sibling_target_writer(conn, ids["alpha"], ids["load"], "core.dim") is None
-        )
-        assert tasks.fetch_sibling_target_writer(conn, ids["alpha"], ids["setup"], "x.y") is None
+        others = tasks.fetch_target_tasks(conn, ids["alpha"], ids["setup"], "core.dim")
+        assert others == [tasks.TargetTask(ids["load"], "load_dim", "SCD1_MERGE")]
+        assert tasks.fetch_target_tasks(conn, ids["alpha"], ids["load"], "core.dim") == [
+            tasks.TargetTask(ids["setup"], "setup_dim", "SETUP_TABLE")
+        ]
+        assert tasks.fetch_target_tasks(conn, ids["alpha"], ids["setup"], "x.y") == []
 
 
 def test_pipeline_detail_reads_its_json_parameters(seeded):

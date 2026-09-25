@@ -5,7 +5,7 @@ How to model and run pipelines with etl-craft.
 - [Dependencies and run conditions](dependencies.md): dependency types, `ALL`, `ANY` and `N`
   conditions, waves, and which tasks run, wait or are skipped.
 - [SQL tasks](sql-tasks.md): the SELECT, inline or from `sql_files/`, the pipeline-id tokens,
-  the seven actions, and what the engine checks and logs.
+  the eight actions, and what the engine checks and logs.
 - [Running a pipeline](running-pipelines.md): dependency waves, resuming a run, connection
   tests, orchestrator steps, and the SLA.
 - [Running a task and reading its logs](running-tasks.md): `etl-craft run --task_code`,

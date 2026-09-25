@@ -3,7 +3,7 @@
 Every mistake in a task's definition fails the task here with the parameter, its value and the
 remedy, so no action ever starts on a half-valid definition.
 
-- ``SQL_ACTION``: one of the seven actions.
+- ``SQL_ACTION``: one of the eight actions.
 - ``TARGET_OBJECT``: ``schema.table``; the catalog comes from the warehouse profile.
 - ``SOURCE_SQL`` or ``SOURCE_SQL_FILE`` (every action but ``DROP_TABLE``): the read-only
   SELECT, inline or as a file under ``sql_files/``; exactly one of them.
@@ -18,6 +18,8 @@ remedy, so no action ever starts on a half-valid definition.
 - ``PRESERVE_TARGET`` (``SCD1_MERGE``): ``true`` keeps a target value where the source is NULL.
 - ``HARD_DELETE`` (``DELETE_ROWS``): ``true`` deletes rows; otherwise they get
   ``DELETE_FLAG='Y'``.
+- ``SETUP_FOR`` (``SETUP_TABLE``): the action that writes the table, whose audit columns it
+  gets; needed when no other task in the pipeline writes it.
 """
 
 from __future__ import annotations
@@ -40,6 +42,16 @@ from etl_craft.core.text import (
 from etl_craft.handlers.registry import TaskContext
 
 MERGES = frozenset({SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE})
+WRITERS = frozenset(
+    {
+        SqlAction.CREATE_TABLE,
+        SqlAction.OVERWRITE_TABLE,
+        SqlAction.APPEND_TABLE,
+        SqlAction.SCD1_MERGE,
+        SqlAction.SCD2_MERGE,
+    }
+)
+"""The actions that write rows into their target, and so have audit columns of their own."""
 KEYED = MERGES | {SqlAction.DELETE_ROWS}
 
 # Each yes/no parameter, and the actions it applies to.
@@ -68,6 +80,7 @@ class SqlTask:
     schema_evolution: bool = False
     preserve_target: bool = False
     hard_delete: bool = False
+    setup_for: SqlAction | None = None
 
 
 def read_sql_task(context: TaskContext) -> SqlTask:
@@ -108,6 +121,7 @@ def read_sql_task(context: TaskContext) -> SqlTask:
                 )
     if action not in KEYED and params.get("MERGE_KEY"):
         raise HandlerError(f"MERGE_KEY does not apply to SQL_ACTION={action}")
+    setup_for = _setup_for(params.get("SETUP_FOR"), action)
 
     return SqlTask(
         action=action,
@@ -120,6 +134,7 @@ def read_sql_task(context: TaskContext) -> SqlTask:
         schema_evolution=flags["SCHEMA_EVOLUTION"],
         preserve_target=flags["PRESERVE_TARGET"],
         hard_delete=flags["HARD_DELETE"],
+        setup_for=setup_for,
     )
 
 
@@ -218,6 +233,20 @@ def _columns(params: Mapping[str, str], name: str, action: SqlAction) -> tuple[s
             f"{name}={value!r}: {', '.join(repr(b) for b in bad)} is not a plain column name"
         )
     return columns
+
+
+def _setup_for(value: str | None, action: SqlAction) -> SqlAction | None:
+    if value is None or not value.strip():
+        return None
+    if action != SqlAction.SETUP_TABLE:
+        raise HandlerError(f"SETUP_FOR applies only to SETUP_TABLE, not SQL_ACTION={action}")
+    written = value.strip().upper()
+    if written not in WRITERS:
+        raise HandlerError(
+            f"SETUP_FOR={value!r} must name the action that writes the table: "
+            f"{', '.join(sorted(WRITERS))}"
+        )
+    return SqlAction(written)
 
 
 def _dedupe_order(value: str | None) -> str | None:
