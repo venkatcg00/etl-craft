@@ -41,7 +41,7 @@ not guaranteed.
 
 | Warehouse | `auth_mode` (verified here in bold) |
 |---|---|
-| Postgres | **`password`**, `token`, `key_file`, `oauth`, `sso`, `sts` (as for a [PostgreSQL Engine DB](engine-db.md)) |
+| Postgres | **`password`**, `token`, **`key_file`**, `oauth`, `sso`, `sts` (as for a [PostgreSQL Engine DB](engine-db.md)) |
 | DuckDB file | **`none`** |
 | DuckDB over Iceberg | **`none`**, `token`, **`oauth`**: how DuckDB logs in to the REST catalog |
 | Trino | **`none`**, `password`, `token`, `oauth`, `sso`, `key_file` |

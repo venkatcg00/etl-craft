@@ -2,7 +2,8 @@
 #
 # One profile per type: set ETL_CRAFT_AUTH to the one you use.
 #   password  verified
-#   key_file  a client certificate: key_file, cert_file, and the key's passphrase
+#   key_file  verified: a client certificate: key_file, cert_file, and the key's passphrase
+#             if it has one
 #   token     a stored bearer token presented as the password
 #   oauth     a client-credentials access token minted per connection and
 #             presented as the password (Azure Database for PostgreSQL + Entra ID)
@@ -49,7 +50,7 @@ Engine:
     auth_mode: key_file                # value
     key_file: ENGINE_KEY_FILE          # variable
     cert_file: ENGINE_CERT_FILE        # variable
-    secret: ENGINE_SECRET              # variable, required: a secret is never used as written — the key's passphrase; set it empty if none
+    secret: ENGINE_SECRET              # variable — the key's passphrase; leave the line out for a key without one
   token:
     jdbc_url: ENGINE_JDBC_URL          # variable
     schema: etl_craft                  # value — must already exist; the engine never creates it
@@ -95,7 +96,7 @@ Warehouse:
     auth_mode: key_file                # value
     key_file: WAREHOUSE_KEY_FILE       # variable
     cert_file: WAREHOUSE_CERT_FILE     # variable
-    secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written — the key's passphrase; set it empty if none
+    secret: WAREHOUSE_SECRET           # variable — the key's passphrase; leave the line out for a key without one
   token:
     jdbc_url: WAREHOUSE_JDBC_URL       # variable
     schema: etl_craft                  # value — must already exist; cloning writes here

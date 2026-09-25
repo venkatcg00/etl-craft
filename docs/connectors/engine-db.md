@@ -30,7 +30,7 @@ password is never part of the connection URL the engine logs.
 |---|---|---|
 | `password` | `user`, `secret` | yes |
 | `token` | `user`, `secret`: a stored bearer token, sent as the password | |
-| `key_file` | `user`, `key_file`, optional `cert_file`, `secret`: the key's passphrase | |
+| `key_file` | `user`, `key_file`, optional `cert_file`, and `secret` for the key's passphrase when it has one | yes |
 | `oauth` | `user`, `client_id`, `secret`, `token_url`, optional `scope`: a client-credentials token, fetched for each new connection | |
 | `sso` | `user`, `issuer`, `client_id`: libpq's own OAuth login, for interactive use | |
 | `sts` | `user`, `region`, optional `role_arn`: an AWS RDS IAM token; needs `pip install etl-craft[aws]` | |
