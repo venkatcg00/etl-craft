@@ -92,8 +92,40 @@ warehouse's order, with their types, and their comments where the warehouse's
 `information_schema` has them (DuckDB, Snowflake, Databricks). A table the warehouse cannot
 describe keeps the columns lineage found, and the command logs why.
 
+## Keeping it up to date
+
+The site is plain files, so its run details, statuses, row counts, errors and last runs, are as
+of when it was generated. Write it again on a schedule, nightly say, to keep them fresh; every
+page says when it was generated and warns once its run details are more than a day old.
+
+```yaml
+Docs_site:
+  prod:
+    Schedule: "0 2 * * *"      # 02:00 every day: five cron fields, or @daily, @hourly, ...
+    Output: /srv/etl-craft-docs  # optional: the folder generate-docs writes; default catalog/
+```
+
+**Under an orchestrator**, `etl-craft generate-yml --docs` writes the `etl_craft_docs` DAG,
+which runs `etl-craft generate-docs` on `Schedule` (with no schedule when `Allow_schedule` is
+false, like every other DAG):
+
+```bash
+etl-craft generate-yml --docs --output dags/etl_craft_docs.yml
+```
+
+**Without one**, schedule the command on the machine itself, from the project directory:
+
+```text
+0 2 * * *  cd /srv/etl-craft && etl-craft generate-docs      # crontab on Linux or macOS
+schtasks /Create /SC DAILY /ST 02:00 /TN etl-craft-docs /TR "cmd /c cd /d C:\etl-craft && etl-craft generate-docs"
+```
+
+Writing the site again never leaves it half written: the new site is built beside the old one
+and swapped in once it is complete, so a server publishing the folder keeps serving whole pages.
+
 ## The output folder
 
-`generate-docs` writes only into a folder that is new, empty, or one it wrote before, which it
-marks with a `.etl-craft-catalog` file. It empties that folder and writes it again, so pages for
-removed tasks and tables go too. A folder holding anything else is refused.
+`generate-docs` writes `--output`, else `Docs_site.Output`, else `catalog/` in the project
+directory. It writes only a folder that is new, empty, or one it wrote before, which it marks with
+a `.etl-craft-catalog` file; that folder is replaced whole, so pages for removed tasks and tables
+go too. A folder holding anything else is refused.

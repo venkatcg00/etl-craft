@@ -41,6 +41,7 @@ from etl_craft.config.model import (
     ConnectionSection,
     ConnectorConfig,
     DagDefaults,
+    DocsSiteConfig,
     EmailConfig,
     EmailProfile,
     ExecutionLimits,
@@ -56,7 +57,7 @@ from etl_craft.core.enums import AuthMode, CloningScope, Mode, TableFormat
 from etl_craft.core.errors import ConfigurationError
 from etl_craft.core.text import is_safe_identifier
 
-SECTIONS = ("Secrets", "Orchestration", "Engine", "Warehouse", "Cloning")
+SECTIONS = ("Secrets", "Orchestration", "Engine", "Warehouse", "Cloning", "Docs_site")
 """The top-level sections, in the order the file must present them."""
 
 _EARLIER_LAYOUT_SECTIONS = frozenset(
@@ -139,12 +140,14 @@ def parse_config(raw: Any, path: Path) -> ConnectorConfig:
     engine = _parse_engine(raw, global_profile, path, resolver)
     warehouse, table_format = _parse_warehouse(raw, global_profile, path, resolver)
     cloning = _parse_cloning(raw, global_profile, path, resolver)
+    docs_site = _parse_docs_site(raw, global_profile, path, resolver)
 
     config = ConnectorConfig(
         mode=mode,
         source=source,
         engine=engine,
         cloning=cloning,
+        docs_site=docs_site,
         warehouse=warehouse,
         warehouse_table_format=table_format,
         dag_defaults=dag_defaults,
@@ -210,7 +213,7 @@ def _check_layout(raw: Any, path: Path) -> None:
     if present != expected:
         raise ConfigurationError(
             f"{path}: sections are in the order {present}; write them as {expected} "
-            "(Secrets, Orchestration, Engine, Warehouse, then Cloning)"
+            "(Secrets, Orchestration, Engine, Warehouse, Cloning, then Docs_site)"
         )
 
 
@@ -812,6 +815,31 @@ def _parse_cloning(
         scope=CloningScope(scope),
         external_volume=profiled.text("External_volume") or "",
         base_location=profiled.text("Base_location") or "",
+    )
+
+
+_CRON_MACROS = frozenset({"@yearly", "@annually", "@monthly", "@weekly", "@daily", "@hourly"})
+
+
+def _parse_docs_site(
+    raw: dict[str, Any], global_profile: str | None, path: Path, resolver: Resolver
+) -> DocsSiteConfig:
+    profiled = _profiled_settings(
+        "Docs_site", raw, global_profile, path, resolver, nested=frozenset()
+    )
+    if not profiled.settings:
+        return DocsSiteConfig()
+    _reject_unknown(profiled.settings, {"Schedule", "Output"}, "Docs_site", path)
+    schedule = (profiled.text("Schedule") or "").strip() or None
+    if schedule is not None and schedule not in _CRON_MACROS and len(schedule.split()) != 5:
+        raise ConfigurationError(
+            f"{path}: {profiled.where('Schedule')} must be a cron expression of five fields, "
+            f"such as '0 2 * * *' (02:00 every day), or one of {', '.join(sorted(_CRON_MACROS))}; "
+            f"got {schedule!r}"
+        )
+    output = profiled.text("Output")
+    return DocsSiteConfig(
+        schedule=schedule, output=_relative_to_config(output, path) if output else None
     )
 
 

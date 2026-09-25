@@ -3,6 +3,20 @@
   "use strict";
 
   var root = document.body.getAttribute("data-root") || "";
+
+  // Run details are as of when the site was generated: say so once they are over a day old.
+  var generated = Date.parse(document.body.getAttribute("data-generated") || "");
+  var hours = (Date.now() - generated) / 3600000;
+  if (hours > 26) {
+    var note = document.createElement("p");
+    note.className = "stale";
+    note.textContent = "The run details on this site are " +
+      (hours < 48 ? Math.round(hours) + " hours" : Math.round(hours / 24) + " days") +
+      " old: it was generated " + new Date(generated).toLocaleString() +
+      " and has not been written again since.";
+    var main = document.querySelector("main");
+    if (main) main.insertBefore(note, main.firstChild);
+  }
   var index = window.CATALOG_INDEX || [];
   var KINDS = ["pipeline", "task", "table", "column", "rule", "script"];
 

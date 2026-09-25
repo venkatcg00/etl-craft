@@ -9,9 +9,9 @@ import yaml
 from sqlalchemy import text
 
 from etl_craft.cli import main
-from etl_craft.config import DagDefaults
+from etl_craft.config import DagDefaults, DocsSiteConfig
 from etl_craft.core.errors import ConfigurationError, ExitCode
-from etl_craft.services.generate_yml import GLOBAL_DAG_ID, global_dag, pipeline_dag
+from etl_craft.services.generate_yml import GLOBAL_DAG_ID, docs_dag, global_dag, pipeline_dag
 from fixtures.metadata import add_dependency, add_pipeline, add_pipeline_dependency, add_task
 
 
@@ -163,6 +163,7 @@ def test_the_command_writes_yaml(engine_db, pipelines, tmp_path, monkeypatch, ca
         "Secrets": {"Source_type": "environment"},
         "Orchestration": {"Mode": "remote"},
         "Engine": {"dev": block},
+        "Docs_site": {"Schedule": "30 1 * * *"},
     }
     (root / "craft-connector.yml").write_text(yaml.safe_dump(raw, sort_keys=False), "utf-8")
     monkeypatch.chdir(root)
@@ -174,3 +175,23 @@ def test_the_command_writes_yaml(engine_db, pipelines, tmp_path, monkeypatch, ca
     assert yaml.safe_load(written)["dag_id"] == "SALES"
     assert main(["generate-yml", "--global"]) == ExitCode.CONFIGURATION
     assert "Global_dag" in capsys.readouterr().err
+    assert main(["generate-yml", "--docs"]) == 0
+    docs = yaml.safe_load(capsys.readouterr().out)
+    assert (docs["dag_id"], docs["schedule"]) == ("etl_craft_docs", "30 1 * * *")
+
+
+def test_the_docs_dag_writes_the_catalog_again_on_its_schedule(engine_db):
+    with pytest.raises(ConfigurationError, match=r"Docs_site\.Schedule is not set"):
+        docs_dag(engine_db.config)
+    config = replace(engine_db.config, docs_site=DocsSiteConfig(schedule="0 2 * * *"))
+    dag = docs_dag(config)
+    assert dag["dag_id"] == "etl_craft_docs" and dag["schedule"] == "0 2 * * *"
+    assert dag["tasks"] == {
+        "generate_docs": {
+            "bash_command": "etl-craft generate-docs",
+            "depends_on": [],
+            "trigger_rule": "all_success",
+        }
+    }
+    unscheduled = replace(config, dag_defaults=DagDefaults(allow_schedule=False))
+    assert docs_dag(unscheduled)["schedule"] is None

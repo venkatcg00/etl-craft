@@ -38,6 +38,8 @@ T = TypeVar("T")
 INIT_TASK = "__init__"
 FINALIZE_TASK = "__finalize__"
 GLOBAL_DAG_ID = "etl_craft_global_orchestration"
+DOCS_DAG_ID = "etl_craft_docs"
+DOCS_TASK = "generate_docs"
 DEFAULT_RETRIES = 1
 DEFAULT_RETRY_DELAY_MINUTES = 5
 
@@ -199,6 +201,45 @@ def global_dag(conn: Connection, config: ConnectorConfig) -> dict[str, Any]:
                 "trigger_rule": trigger_rule("ALL", [kind for _, kind in edges[code]]),
             }
             for code in sorted(edges)
+        },
+    }
+
+
+def docs_dag(config: ConnectorConfig) -> dict[str, Any]:
+    """Return the DAG that writes the catalog site again on ``Docs_site.Schedule``.
+
+    ``ConfigurationError`` when no schedule is set.
+    """
+    schedule = config.docs_site.schedule
+    if schedule is None:
+        raise ConfigurationError(
+            "Docs_site.Schedule is not set: name when the catalog site is written again, as a "
+            "cron expression such as '0 2 * * *', in craft-connector.yml's Docs_site section"
+        )
+    defaults = config.dag_defaults
+    email_on_failure = bool(defaults.email_on_failure)
+    default_args: dict[str, Any] = {
+        "owner": "etl-craft",
+        "retries": _first(defaults.retries, DEFAULT_RETRIES),
+        "retry_delay_minutes": _first(defaults.retry_delay_minutes, DEFAULT_RETRY_DELAY_MINUTES),
+        "depends_on_past": False,
+        "email_on_failure": email_on_failure,
+    }
+    if email_on_failure:
+        default_args["email"] = defaults.email_recipients or []
+    return {
+        "dag_id": DOCS_DAG_ID,
+        "description": "Writes the etl-craft catalog site again, with the latest runs.",
+        "schedule": schedule if defaults.allow_schedule else None,
+        "catchup": False,
+        "tags": ["etl-craft", "docs"],
+        "default_args": default_args,
+        "tasks": {
+            DOCS_TASK: {
+                "bash_command": "etl-craft generate-docs",
+                "depends_on": [],
+                "trigger_rule": "all_success",
+            }
         },
     }
 

@@ -42,3 +42,9 @@ recording the task `SKIPPED` when it is not met. `HAS_DATA` is checked the same 
 
 With `Orchestration.Global_dag: true`, `--global` writes one DAG with a node for every pipeline that
 depends on another or is depended on, each triggering that pipeline's own DAG in dependency order.
+
+## The docs DAG
+
+`etl-craft generate-yml --docs` writes the `etl_craft_docs` DAG, which runs
+`etl-craft generate-docs` on the `Docs_site` section's `Schedule`, so the
+[catalog site](../guides/catalog.md) keeps its run details fresh.

@@ -104,6 +104,19 @@ class CloningConfig:
     base_location: str = ""
 
 
+@dataclass(frozen=True)
+class DocsSiteConfig:
+    """The catalog site ``generate-docs`` writes.
+
+    ``schedule`` is when it is written again, as a cron expression, for the DAG
+    ``generate-yml --docs`` writes; ``output`` is its folder, ``catalog/`` in the project
+    directory when not set.
+    """
+
+    schedule: str | None = None
+    output: Path | None = None
+
+
 EMAIL_TRANSPORTS = ("smtp", "sendmail")
 DEFAULT_SENDMAIL_PATH = "/usr/sbin/sendmail"
 
@@ -202,6 +215,7 @@ class ConnectorConfig:
     source: SourceConfig
     engine: ConnectionSection
     cloning: CloningConfig = field(default_factory=CloningConfig)
+    docs_site: DocsSiteConfig = field(default_factory=DocsSiteConfig)
     warehouse: ConnectionSection | None = None
     warehouse_table_format: TableFormat = TableFormat.NATIVE
     dag_defaults: DagDefaults = field(default_factory=DagDefaults)
