@@ -363,3 +363,22 @@ def test_fingerprint_joins_parts_with_nul_so_they_cannot_collide():
     assert text.fingerprint("SELECT 1", "public.t", "") == (
         hashlib.md5(b"SELECT 1\0public.t\0").hexdigest()
     )
+
+
+# Suggestions
+
+
+@pytest.mark.parametrize(
+    ("unknown", "expected"),
+    [
+        ("pl_alpa", ["PL_ALPHA"]),
+        ("LOAD", ["load_dim", "load_fact"]),
+        ("zzz", []),
+    ],
+)
+def test_suggest(unknown, expected):
+    assert text.suggest(unknown, ["PL_ALPHA", "load_dim", "load_fact", "extract"]) == expected
+
+
+def test_suggest_limits_the_list():
+    assert len(text.suggest("t", [f"t{i}" for i in range(10)], limit=3)) == 3

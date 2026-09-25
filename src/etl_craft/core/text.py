@@ -6,8 +6,10 @@ callers.
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from urllib.parse import parse_qsl
 
@@ -343,3 +345,21 @@ def fingerprint(*parts: str) -> str:
     """
     material = "\0".join(parts)
     return hashlib.md5(material.encode(), usedforsecurity=False).hexdigest()
+
+
+# Suggestions
+
+
+def suggest(unknown: str, candidates: Iterable[str], *, limit: int = 3) -> list[str]:
+    """Return the ``candidates`` closest to ``unknown``, for a "did you mean" hint.
+
+    Case-insensitive, since codes are routinely typed in the wrong case; candidates starting
+    with ``unknown`` follow the close matches.
+    """
+    folded = {candidate.lower(): candidate for candidate in candidates}
+    matches = difflib.get_close_matches(unknown.lower(), list(folded), n=limit, cutoff=0.5)
+    ranked = [folded[match] for match in matches]
+    for lowered, candidate in folded.items():
+        if lowered.startswith(unknown.lower()) and candidate not in ranked:
+            ranked.append(candidate)
+    return ranked[:limit]

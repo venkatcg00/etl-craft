@@ -58,3 +58,7 @@ All notable changes are recorded here. The format follows
 - `etl-craft init-db` creates the Engine DB schema in an empty database, and `etl-craft
   migrate` applies the packaged and project migration streams, checking every applied file's
   SHA-256 first. Migration SQL runs exactly as written, including `%` on PostgreSQL.
+- The run log (`etl_craft.engine.runlog`): tasks resolve the pipeline's one active run
+  themselves, bind one row per run and retry it in place, and a finished run is judged against
+  its SLA. Repositories (`etl_craft.engine.repository`) read pipelines, tasks, dependencies,
+  business rules and a run's task statuses, and suggest the closest code for an unknown one.

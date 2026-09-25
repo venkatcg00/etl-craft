@@ -1,0 +1,5 @@
+-- Every active pipeline code.
+SELECT PIPELINE_CODE AS pipeline_code
+FROM CFG_PIPELINES
+WHERE ACTIVE_FLAG = 'Y'
+ORDER BY PIPELINE_CODE
