@@ -242,9 +242,9 @@ def finalize_pipeline_run(
 ) -> SlaResult | None:
     """End ``pipeline_run_id`` with ``status`` and END_DATE now.
 
-    With ``sla_in_hours`` (SLA enforcement on, and the pipeline has one), the run is also marked
-    ``MET`` or ``BREACHED``, measured from START_DATE. STATUS is left alone either way: a late
-    run did its work.
+    With ``sla_in_hours`` (the pipeline's ``SLA_IN_HOURS``, whenever it has one) the run is also
+    marked ``MET`` or ``BREACHED``, measured from START_DATE, whether or not SLA emails are on.
+    STATUS is left alone either way: a late run did its work.
     """
     now = datetime.now(UTC)
     sla = None

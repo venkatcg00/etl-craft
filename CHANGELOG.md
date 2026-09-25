@@ -62,3 +62,7 @@ All notable changes are recorded here. The format follows
   themselves, bind one row per run and retry it in place, and a finished run is judged against
   its SLA. Repositories (`etl_craft.engine.repository`) read pipelines, tasks, dependencies,
   business rules and a run's task statuses, and suggest the closest code for an unknown one.
+- Every error class has its own exit status (`ExitCode`: 0 success, 1 a failed run or check,
+  2 usage, 3–15 one per error class, 16 unexpected); an unexpected exception is logged with its
+  traceback instead of escaping. A pipeline with `SLA_IN_HOURS` has every run marked MET or
+  BREACHED; `Enforce_sla` now decides only whether a lapse sends an SLA email.

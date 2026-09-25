@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -11,6 +12,8 @@ from etl_craft.cli.commands import COMMANDS, Command
 from etl_craft.cli.output import Output
 from etl_craft.core import log
 from etl_craft.core.errors import EtlCraftError, ExitCode
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_LOG_LEVEL = "INFO"
 
@@ -74,8 +77,9 @@ def build_parser(commands: Sequence[Command] = COMMANDS) -> argparse.ArgumentPar
 def main(argv: Sequence[str] | None = None, commands: Sequence[Command] = COMMANDS) -> int:
     """Run the command line and return its exit code.
 
-    Returns 2 with the usage when no command is given, and an ``EtlCraftError``'s own exit code
-    after writing its message as an ``error:`` line.
+    Returns 2 with the usage when no command is given. An ``EtlCraftError`` is written as an
+    ``error:`` line and returns its own exit status; any other exception is a bug, logged with its
+    traceback, and returns ``ExitCode.UNEXPECTED``.
     """
     parser = build_parser(commands)
     args = parser.parse_args(argv)
@@ -89,3 +93,7 @@ def main(argv: Sequence[str] | None = None, commands: Sequence[Command] = COMMAN
     except EtlCraftError as error:
         out.error(str(error))
         return error.exit_code
+    except Exception as error:
+        logger.exception("unexpected error in etl-craft %s", args.command)
+        out.error(f"unexpected {type(error).__name__}: {error}")
+        return ExitCode.UNEXPECTED

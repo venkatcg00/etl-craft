@@ -123,7 +123,7 @@ def test_a_configuration_error_names_the_setting(tmp_path, monkeypatch, raw, mes
     path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     with pytest.raises(ConfigurationError, match=message) as error:
         load_config(path)
-    assert error.value.exit_code is ExitCode.USAGE
+    assert error.value.exit_code is ExitCode.CONFIGURATION
 
 
 def test_invalid_yaml_is_a_configuration_error(tmp_path):

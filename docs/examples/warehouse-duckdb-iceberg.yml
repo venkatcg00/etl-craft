@@ -24,7 +24,7 @@ Orchestration:
   Name: Airflow                        # value — informational: the YAML DAG is the same; convert it with your own scripts
   Task_timeout_seconds: 21600          # value
   Max_parallel_tasks: 8                # value
-  Enforce_sla: false                   # value — true: judge each finished run MET/BREACHED vs SLA_IN_HOURS
+  Enforce_sla: false                   # value — true: email when a run misses its SLA_IN_HOURS
   dev:
     Global_dag: false                  # value
     Catchup: false                     # value

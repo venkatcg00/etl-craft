@@ -84,11 +84,25 @@ examples/demo/   docs/   scripts/   release/{required-suites.toml, evidence/}
 - **Tooling:** ruff (lint, format, docstrings), `mypy --strict`, import-linter, pre-commit,
   Conventional Commits, Dependabot.
 - **History gate:** `scripts/check_no_history.py` rejects change-history commentary in CI.
-- **Errors:** one `EtlCraftError` hierarchy. Exit codes: 0 success, 1 run or validation failure,
-  2 configuration or usage error.
-- **Logging:** `logging` with `etl_craft.<module>` loggers; `--log-level` and
-  `--log-format text|json`. Each task's output is captured to a log file, and its tail is stored
-  in `TASK_LOG`.
+- **Errors:** one `EtlCraftError` hierarchy; every error class has its own exit status
+  (`core.errors.ExitCode`): 0 success, 1 a failed run or check, 2 usage, one code per error
+  class, 16 unexpected.
+- **Logging:** logs are how a failure is debugged, so they say what was being done, to what,
+  and why it failed.
+  - `logging` with `etl_craft.<module>` loggers; `--log-level` and `--log-format text|json`.
+  - Every record written during a task run carries its context: pipeline code, task code,
+    `pipeline_run_id`, `task_run_id` and attempt number (JSON fields, and a text prefix).
+  - A failure logs the step it was in, the object it was working on and the full error, with
+    the traceback at `DEBUG` and the cause in the message.
+  - SQL actions and business rules log only what the engine produces: each statement they run
+    (the SQL at `DEBUG`), its row count and duration, and each step of an action.
+  - A Python script may log however it likes; its stdout, stderr and `logging` output are all
+    captured, never lost.
+  - Each task attempt's output goes to its own log file; the tail is stored in `TASK_LOG`, and
+    `ERROR_MESSAGE` holds the one-line cause.
+  - Counts are recorded in `AUD_TASK_RUN_LOG`: `SOURCE_COUNT`, `TARGET_COUNT`, `INSERT_COUNT`,
+    `UPDATE_COUNT`, `DELETE_COUNT` from SQL actions, and the source, target and insert counts an
+    ingestion script reports.
 - **Process model:** a task runs in a freshly started interpreter (`subprocess` in a new session),
   never a fork. The parent kills the process group on timeout and records FAILED when the child
   dies without reporting.
@@ -117,12 +131,12 @@ squash-merged by pull request (see `CONTRIBUTING.md` for the definition of done)
 | C2 | `feat/engine-dialects` | PostgreSQL and SQLite dialects, baseline schemas, query catalog, locks, schema tests | `dialects/engine_dialects/` | C1, B5 | done |
 | C3 | `feat/warehouse-dialects` | Eight warehouse dialects, registry, credentials, `open_warehouse`, single-writer queue | `dialects/warehouse_dialects/`, `warehouse.py`, `credentials.py` | C1 | done |
 | D1 | `feat/engine-schema`, `feat/engine-repository` | Repositories, run log, `init-db`, `migrate` | `db.py`, `cfg.py`, `runlog.py`, `init_db.py`, `migrate.py` | C2 | done |
-| E1 | `feat/execution-runner` | Task context, handler registry, `run --task_code`, child entry point, crash detection, timeouts | `runner.py`, `handlers.py`, `limits.py`, `execution.py` | D1, B3, B5 | |
-| E2 | `feat/execution-pipeline` | Wave scheduler, init/finalize, cross-pipeline gates and trackers, SLA, connection tests at start, cloning hook | `orchestrator.py`, `crosspipe.py`, `connections.py` | E1, C3 | |
-| F1 | `feat/handler-sql-actions` | Stage, schema evolution, audit columns, ROW_ID strategies, dedupe, the seven actions | `sql_actions.py` | E1, C3 | |
-| F2 | `feat/handler-business-rules` | Rule waves, flag and deactivate, forced scope | `business_rules.py` | F1 | |
-| F3 | `feat/handler-python-scripts` | Script contract, offset tracker, output capture, `etl_craft.scripting` helper | `scripts.py` | E1 | |
-| F4 | `feat/handler-email-alert` | Flavours, templates, digest, SMTP password and XOAUTH2 | `email_alert.py` | E1 | |
+| E1 | `feat/execution-runner` | Task context, handler registry, `run --task_code`, child entry point, crash detection, timeouts, per-attempt log file with the tail in `TASK_LOG`, run context on every log record | `runner.py`, `handlers.py`, `limits.py`, `execution.py` | D1, B3, B5 | |
+| E2 | `feat/execution-pipeline` | Wave scheduler, init/finalize, cross-pipeline gates and trackers, SLA tracked on every run with SLA lapse detected while the run is still going, connection tests at start, cloning hook | `orchestrator.py`, `crosspipe.py`, `connections.py` | E1, C3 | |
+| F1 | `feat/handler-sql-actions` | Stage, schema evolution, audit columns, ROW_ID strategies, dedupe, the seven actions; each statement logged with its row count and duration; source, target, insert, update and delete counts recorded | `sql_actions.py` | E1, C3 | |
+| F2 | `feat/handler-business-rules` | Rule waves, flag and deactivate, forced scope; each rule's statements, flagged and cleared counts logged | `business_rules.py` | F1 | |
+| F3 | `feat/handler-python-scripts` | Script contract, offset tracker, capture of the script's stdout, stderr and `logging` output, source/target/insert counts reported by the script recorded in `AUD_TASK_RUN_LOG`, `etl_craft.scripting` helper | `scripts.py` | E1 | |
+| F4 | `feat/handler-email-alert` | Flavours, templates, digest, SMTP password and XOAUTH2; SLA lapse emails through the Email settings, sent only when `Enforce_sla` is on | `email_alert.py` | E1 | |
 | G1 | `feat/services-inspect-generate` | `list`, `graph`, `steps`, `history`, `lineage`, `generate-yml`, `generate-docs`, `docs-version` | readers in `cfg.py`, `generate_yml.py`, `docs_generator.py`, `column_lineage.py` | E2 | |
 | G2 | `feat/services-ops` | `doctor`, `setup`, `validate`, cloning | `doctor.py`, `setup_command.py`, `validate.py`, `cloning.py` | E2, F1 | |
 | H1 | `test/connection-matrix` | Every resource with every locally verifiable auth mode | `tests/test_auth.py` | G2 | |
