@@ -2,6 +2,9 @@
 
 Modules log through ``logging.getLogger(__name__)``. Importing etl-craft configures nothing; the
 command line calls ``configure`` once to choose the level and the format, text or JSON lines.
+
+``log_context`` attaches fields to every record written inside it, such as the pipeline, task and
+run a task process is working on, so each line of a failure's log says where it came from.
 """
 
 from __future__ import annotations
@@ -9,6 +12,9 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import IO, Any
@@ -17,10 +23,46 @@ from etl_craft.core.errors import UsageError
 
 ROOT_LOGGER = "etl_craft"
 LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
-TEXT_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+TEXT_FORMAT = "%(asctime)s %(levelname)s %(name)s%(context)s: %(message)s"
 
 # Every attribute a plain LogRecord has; anything else on a record came from ``extra=``.
-_RECORD_ATTRIBUTES = frozenset(vars(logging.makeLogRecord({}))) | {"message", "asctime"}
+_RECORD_ATTRIBUTES = frozenset(vars(logging.makeLogRecord({}))) | {
+    "message",
+    "asctime",
+    "context",
+}
+
+_CONTEXT: ContextVar[tuple[tuple[str, object], ...]] = ContextVar(
+    "etl_craft_log_context", default=()
+)
+
+
+@contextmanager
+def log_context(**fields: object) -> Iterator[None]:
+    """Attach ``fields`` to every record logged inside the ``with`` body, nested contexts merged."""
+    token = _CONTEXT.set(tuple({**dict(_CONTEXT.get()), **fields}.items()))
+    try:
+        yield
+    finally:
+        _CONTEXT.reset(token)
+
+
+class ContextFilter(logging.Filter):
+    """Copy the current ``log_context`` fields onto each record.
+
+    Each field becomes a record attribute (a JSON field), and ``context`` holds them as
+    `` [name=value ...]`` for the text format, or an empty string outside any context.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Add the context to ``record``; never drop it."""
+        fields = dict(_CONTEXT.get())
+        for name, value in fields.items():
+            if not hasattr(record, name):
+                setattr(record, name, value)
+        rendered = " ".join(f"{name}={value}" for name, value in fields.items())
+        record.context = f" [{rendered}]" if rendered else ""
+        return True
 
 
 class LogFormat(StrEnum):
@@ -99,6 +141,7 @@ def configure(
         logger.removeHandler(existing)
     handler = _ConfiguredHandler(sys.stderr if stream is None else stream)
     handler.setFormatter(formatter)
+    handler.addFilter(ContextFilter())
     logger.addHandler(handler)
     logger.setLevel(numeric_level)
     return handler

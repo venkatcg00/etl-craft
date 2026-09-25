@@ -17,6 +17,7 @@ CONFIG_FILENAME = "craft-connector.yml"
 EXAMPLE_PATH = "docs/craft-connector.example.yml"
 DEFAULT_TASK_TIMEOUT_SECONDS = 6 * 60 * 60
 DEFAULT_MAX_PARALLEL_TASKS = 8
+DEFAULT_LOG_DIR = "logs"
 
 # What a missing variable usually looks like when it is used as written: upper case with an
 # underscore (ENGINE_USER), unlike an ordinary value (dev, local).
@@ -168,7 +169,8 @@ class ConnectorConfig:
     """Everything ``craft-connector.yml`` configures.
 
     ``warehouse_table_format`` is the default for tables the engine creates; a task may choose
-    another with ``CFG_TASK_PARAMETERS.TABLE_FORMAT``. ``config_path`` is where the file was
+    another with ``CFG_TASK_PARAMETERS.TABLE_FORMAT``. ``log_dir`` is where each task attempt's
+    log file is written. ``config_path`` is where the file was
     read, so every task process reads the same one. ``settings`` records where each value
     came from, in file order, for ``doctor``.
     """
@@ -185,6 +187,7 @@ class ConnectorConfig:
     config_path: Path | None = None
     orchestrator_name: str | None = None
     settings: tuple[SettingSource, ...] = ()
+    log_dir: Path = Path(DEFAULT_LOG_DIR)
 
 
 def _secret_var(section: str, name: str, extra: dict[str, Any]) -> str:

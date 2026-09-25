@@ -32,6 +32,7 @@ from etl_craft.config.auth import (
     warehouse_spec,
 )
 from etl_craft.config.model import (
+    DEFAULT_LOG_DIR,
     EXAMPLE_PATH,
     CloningConfig,
     ConnectionProfile,
@@ -60,6 +61,7 @@ _ORCHESTRATION_KEYS = frozenset(
     {
         "Mode",
         "Name",
+        "Log_dir",
         "Task_timeout_seconds",
         "Max_parallel_tasks",
         "Enforce_sla",
@@ -120,6 +122,7 @@ def parse_config(raw: Any, path: Path) -> ConnectorConfig:
     limits = _parse_limits(orchestration, path)
     dag_defaults = _parse_dag_defaults(orchestration, path)
     orchestrator_name = orchestration.text("Name")
+    log_dir = _relative_to_config(orchestration.text("Log_dir") or DEFAULT_LOG_DIR, path)
     email = _parse_email(orchestration, path, resolver)
     engine = _parse_engine(raw, global_profile, path, resolver)
     warehouse, table_format = _parse_warehouse(raw, global_profile, path, resolver)
@@ -138,7 +141,16 @@ def parse_config(raw: Any, path: Path) -> ConnectorConfig:
         config_path=path,
         orchestrator_name=orchestrator_name,
         settings=tuple(resolver.sources),
+        log_dir=log_dir,
     )
+
+
+def _relative_to_config(written: str, path: Path) -> Path:
+    """Resolve ``written`` against the config file's directory, never the working directory."""
+    resolved = Path(written).expanduser()
+    if not resolved.is_absolute():
+        resolved = path.resolve().parent / resolved
+    return resolved.resolve()
 
 
 def _check_layout(raw: Any, path: Path) -> None:
