@@ -102,6 +102,7 @@ nav:
       - Ingestion scripts: guides/ingestion-scripts.md
       - Email alerts: guides/email-alerts.md
       - Inspecting pipelines: guides/inspecting.md
+      - Lineage and documentation versions: guides/lineage.md
       - Running a pipeline: guides/running-pipelines.md
       - Running a task and reading its logs: guides/running-tasks.md
   - Deploying:

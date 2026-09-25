@@ -1,0 +1,6 @@
+-- Every active SQL task of an active pipeline.
+SELECT t.TASK_ID AS task_id, p.PIPELINE_CODE AS pipeline_code, t.TASK_CODE AS task_code
+FROM CFG_TASKS t
+JOIN CFG_PIPELINES p ON p.PIPELINE_ID = t.PIPELINE_ID
+WHERE t.HANDLER = 'SQL' AND t.ACTIVE_FLAG = 'Y' AND p.ACTIVE_FLAG = 'Y'
+ORDER BY p.PIPELINE_CODE, t.TASK_CODE

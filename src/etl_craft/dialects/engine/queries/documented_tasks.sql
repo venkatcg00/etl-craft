@@ -1,0 +1,9 @@
+-- Every active task of an active pipeline with an active DOCUMENTATION parameter.
+SELECT t.TASK_ID AS task_id, p.PIPELINE_CODE AS pipeline_code, t.TASK_CODE AS task_code,
+       d.PARAMETER_VALUE AS documentation
+FROM CFG_TASK_PARAMETERS d
+JOIN CFG_TASKS t ON t.TASK_ID = d.TASK_ID
+JOIN CFG_PIPELINES p ON p.PIPELINE_ID = t.PIPELINE_ID
+WHERE d.PARAMETER_NAME = 'DOCUMENTATION' AND d.ACTIVE_FLAG = 'Y'
+  AND t.ACTIVE_FLAG = 'Y' AND p.ACTIVE_FLAG = 'Y'
+ORDER BY p.PIPELINE_CODE, t.TASK_CODE
