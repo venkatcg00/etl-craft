@@ -28,7 +28,7 @@ log = logging.getLogger("my_ingestion")
 
 def run(task):
     start = task.offset.value if task.offset else 0
-    region, count = task.input_params
+    region, count = task.input_params["region"], task.input_params["count"]
     print(f"reading {region} after {start}")
     log.info("the source has %d new rows", count)
     task.logger.warning("through the task's logger")
@@ -91,7 +91,7 @@ def project(engine_db, tmp_path):
                 "INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE) "
                 "VALUES (:t, 'INPUT_PARAMS', :v)"
             ),
-            {"t": task, "v": '["eu", 2]'},
+            {"t": task, "v": '{"region": "eu", "count": 2}'},
         )
         start_run(conn, pipeline)
     return engine, config, pipeline, task
@@ -123,7 +123,7 @@ def test_a_script_runs_in_the_task_process_and_resumes_from_its_offset(project):
     assert "reading eu after 0" in log
     assert "INFO my_ingestion [task_run_id=" in log and "the source has 2 new rows" in log
     assert "WARNING etl_craft_script.load [" in log
-    assert "running load.py from offset none (first run) with 2 input param(s)" in log
+    assert "running load.py from offset none (first run) with input params count, region" in log
 
     # The next run starts where this one left off.
     assert "load.py wrote 2 row(s)" in log
@@ -178,7 +178,7 @@ RESULT = "from etl_craft.scripting import Offset, ScriptResult\n"
             "returned row_count=-1",
         ),
         ("def run(a, b):\n    pass\n", {}, "run takes 2 arguments; it takes the task, or nothing"),
-        ("def run(task):\n    pass\n", {"INPUT_PARAMS": '{"a": 1}'}, "must be a JSON array"),
+        ("def run(task):\n    pass\n", {"INPUT_PARAMS": '["eu", 2]'}, "must be a JSON object"),
         ("def run(task):\n    pass\n", {"INPUT_PARAMS": "[1,"}, "INPUT_PARAMS is not valid JSON"),
         ("def run(task):\n    pass\n", {"SCRIPT_NAME": ""}, "SCRIPT_NAME is required"),
     ],

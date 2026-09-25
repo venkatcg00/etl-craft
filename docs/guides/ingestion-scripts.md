@@ -9,7 +9,7 @@ captures everything it prints and logs, records its counts, and keeps its offset
 | Parameter | Value |
 |---|---|
 | `SCRIPT_NAME` | the script, a path inside the project's `ingestion_scripts/` folder, such as `crm/customers.py` |
-| `INPUT_PARAMS` | optional: a JSON array the script receives as a list, such as `["eu", 30]` |
+| `INPUT_PARAMS` | optional: a JSON object the script receives as a dictionary, such as `{"region": "eu", "days": 30}` |
 
 ## The script
 
@@ -20,7 +20,7 @@ from etl_craft.scripting import Offset, ScriptResult, ScriptTask
 
 
 def run(task: ScriptTask) -> ScriptResult:
-    region, days = task.input_params
+    region, days = task.input_params["region"], task.input_params["days"]
     since = task.offset.value if task.offset else 0  # None on the first run
     rows = fetch_orders(region, after_id=since, days=days)  # your own code
     task.logger.info("fetched %d orders for %s", len(rows), region)
@@ -37,7 +37,7 @@ def run(task: ScriptTask) -> ScriptResult:
 | Attribute | Holds |
 |---|---|
 | `offset` | where the last successful run left off, an `Offset` with its `value` and `datatype`, or `None` on the first run |
-| `input_params` | `INPUT_PARAMS` as a list, empty when unset |
+| `input_params` | `INPUT_PARAMS` as a dictionary, empty when unset |
 | `pipeline_run_id` | the run's id; stamp it on every row you write |
 | `refresh_type` | the pipeline's `FULL` or `INCREMENTAL` |
 | `force` | true when the task was run with `--force` |
@@ -92,7 +92,7 @@ OFFSET = 1042 (NUMBER)
 The task fails with a message that names the script and the problem when:
 
 - `SCRIPT_NAME` is missing, points outside `ingestion_scripts/`, or names no `.py` file there;
-- `INPUT_PARAMS` is not a JSON array;
+- `INPUT_PARAMS` is not a JSON object;
 - the script cannot be imported, or defines no `run`, or a `run` that takes more than the task;
 - `run` raises: the message has the exception, and the traceback is in the attempt's log;
 - `run` calls `sys.exit`: raise an exception to fail, return a `ScriptResult` to succeed;
