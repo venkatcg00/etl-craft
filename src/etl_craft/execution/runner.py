@@ -15,9 +15,9 @@ from __future__ import annotations
 
 import logging
 import sys
-from dataclasses import dataclass, field
+import threading
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
 
 from sqlalchemy.engine import Engine
 
@@ -30,6 +30,11 @@ from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.repository.tasks import fetch_task_parameters, resolve_task_id
+from etl_craft.execution.gates import (
+    CrossPipelineCheck,
+    CrossPipelineGate,
+    TrackedGate,
+)
 from etl_craft.execution.limits import task_timeout_seconds
 from etl_craft.execution.supervisor import (
     KILL_GRACE_SECONDS,
@@ -54,52 +59,18 @@ class TaskOutcome:
 
 
 @dataclass(frozen=True)
-class CrossPipelineCheck:
-    """What the cross-pipeline gate found for a task's dependencies on other pipelines.
-
-    ``consumed`` names the upstream runs that satisfied them, for the gate to mark consumed once
-    the task has run. ``definitive`` is false when the gate did not really check, so its
-    reasons never record the task ``SKIPPED``.
-    """
-
-    satisfied_count: int
-    reasons: tuple[str, ...] = ()
-    consumed: dict[int, int] = field(default_factory=dict)
-    definitive: bool = True
-
-
-class CrossPipelineGate(Protocol):
-    """Checks a task's dependencies on tasks in other pipelines."""
-
-    def check(self, engine: Engine, task_id: int, needed: int) -> CrossPipelineCheck:
-        """Return how many of the task's cross-pipeline dependencies are satisfied now."""
-
-    def consume(self, engine: Engine, task_id: int, consumed: dict[int, int] | None) -> None:
-        """Mark the upstream runs a task has now consumed; ``None`` after a forced run."""
-
-
-class UncheckedGate:
-    """A gate that satisfies no cross-pipeline dependency, for use where none is checked."""
-
-    def check(self, engine: Engine, task_id: int, needed: int) -> CrossPipelineCheck:
-        """Report every cross-pipeline dependency as unsatisfied."""
-        return CrossPipelineCheck(
-            0, ("its dependencies on other pipelines are not checked",), definitive=False
-        )
-
-    def consume(self, engine: Engine, task_id: int, consumed: dict[int, int] | None) -> None:
-        """Consume nothing."""
-        return None
-
-
-@dataclass(frozen=True)
 class ChildOptions:
-    """How the task process is started: its module, log settings and kill grace period."""
+    """How the task process is started: its module, log settings and kill grace period.
+
+    Setting ``cancel`` stops a running task process; the pipeline runner sets it when the run is
+    interrupted.
+    """
 
     module: str = CHILD_MODULE
     log_level: str = "INFO"
     log_format: str = "text"
     kill_grace_seconds: float = KILL_GRACE_SECONDS
+    cancel: threading.Event | None = None
 
 
 def run_task(
@@ -123,7 +94,7 @@ def run_task(
         raise RunRefusedError(
             "--force is only allowed in local mode; in remote mode the orchestrator owns the runs"
         )
-    gate = gate or UncheckedGate()
+    gate = gate or TrackedGate()
     with engine.connect() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         task_id = resolve_task_id(conn, pipeline_id, task_code)
@@ -142,7 +113,8 @@ def run_task(
     outcome = _run_attempt(
         engine, config, task_id, task_code, pipeline_code, pipeline_run_id, force, child
     )
-    gate.consume(engine, task_id, consumed)
+    if consumed and outcome.status == RunStatus.SUCCESS:
+        gate.consume(engine, task_id, consumed)
     return outcome
 
 
@@ -290,6 +262,7 @@ def _run_attempt(
     result = run_child(
         ChildSpec(argv=(sys.executable, *argv), timeout_seconds=timeout, log_path=log_path),
         kill_grace_seconds=child.kill_grace_seconds,
+        cancel=child.cancel,
     )
     return _record_attempt(engine, binding.task_run_id, task_code, result, log_path)
 

@@ -3,6 +3,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 
 import pytest
@@ -221,3 +222,30 @@ def test_run_children_starts_the_next_child_when_any_one_ends():
     results = run_children([slow, fast, fast, fast], max_parallel=2)
     slow_end = float(results[0].output_tail)
     assert all(float(r.output_tail) < slow_end for r in results[1:])
+
+
+def test_a_cancelled_child_is_stopped():
+    cancel = threading.Event()
+    timer = threading.Timer(0.3, cancel.set)
+    timer.start()
+    started = time.monotonic()
+    result = run_child(
+        python("import time; time.sleep(30)", timeout_seconds=20),
+        kill_grace_seconds=1,
+        cancel=cancel,
+    )
+    assert result.cancelled and not result.timed_out
+    assert result.describe() == "was stopped because the run was interrupted"
+    assert time.monotonic() - started < 10
+
+
+def test_a_cancellable_child_still_times_out_and_finishes():
+    cancel = threading.Event()
+    slow = run_child(
+        python("import time; time.sleep(30)", timeout_seconds=0.5),
+        kill_grace_seconds=1,
+        cancel=cancel,
+    )
+    assert slow.timed_out and not slow.cancelled
+    quick = run_child(python("print('done')"), cancel=cancel)
+    assert quick.succeeded and quick.output_tail.strip() == "done"

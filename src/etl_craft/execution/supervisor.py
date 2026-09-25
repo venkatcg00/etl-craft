@@ -13,6 +13,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -22,6 +23,9 @@ from pathlib import Path
 from typing import IO
 
 logger = logging.getLogger(__name__)
+
+CANCEL_POLL_SECONDS = 0.5
+"""How often a child that can be cancelled checks whether it has been."""
 
 TAIL_BYTES = 64 * 1024
 """How much of the end of a child's output ``ChildResult.output_tail`` keeps."""
@@ -55,7 +59,8 @@ class ChildResult:
     """How a child process ended.
 
     ``returncode`` is negative when a signal ended the child. ``output_tail`` is the end of
-    what it wrote during this run, decoded as UTF-8 with invalid bytes replaced.
+    what it wrote during this run, decoded as UTF-8 with invalid bytes replaced. ``cancelled``
+    is true when the caller stopped it.
     """
 
     spec: ChildSpec
@@ -63,6 +68,7 @@ class ChildResult:
     timed_out: bool
     elapsed_seconds: float
     output_tail: str
+    cancelled: bool = False
 
     @property
     def succeeded(self) -> bool:
@@ -73,6 +79,8 @@ class ChildResult:
         """Say how the child ended, for example ``exited with code 3``."""
         if self.timed_out:
             return f"timed out after {self.spec.timeout_seconds:g}s and was killed"
+        if self.cancelled:
+            return "was stopped because the run was interrupted"
         if self.returncode < 0:
             return f"was killed by signal {_signal_name(-self.returncode)}"
         return f"exited with code {self.returncode}"
@@ -83,12 +91,13 @@ def run_child(
     *,
     tail_bytes: int = TAIL_BYTES,
     kill_grace_seconds: float = KILL_GRACE_SECONDS,
+    cancel: threading.Event | None = None,
 ) -> ChildResult:
     """Run ``spec`` to completion and return how it ended.
 
-    When the time limit passes, the child's process group gets SIGTERM, then SIGKILL after
-    ``kill_grace_seconds``. If waiting is interrupted, for example by Ctrl-C, the group is
-    stopped the same way before the exception propagates.
+    When the time limit passes, or ``cancel`` is set, the child's process group gets SIGTERM,
+    then SIGKILL after ``kill_grace_seconds``. If waiting is interrupted, for example by Ctrl-C,
+    the group is stopped the same way before the exception propagates.
     """
     with _output_file(spec.log_path) as output:
         start_offset = output.tell()
@@ -104,9 +113,12 @@ def run_child(
             creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
         )
         logger.debug("started pid %s: %s", process.pid, " ".join(spec.argv))
-        timed_out = False
+        timed_out = cancelled = False
         try:
-            process.wait(timeout=spec.timeout_seconds or None)
+            cancelled = _wait(process, spec.timeout_seconds or None, cancel)
+            if cancelled:
+                logger.warning("stopping pid %s: the run was interrupted", process.pid)
+                _stop_group(process, kill_grace_seconds)
         except subprocess.TimeoutExpired:
             timed_out = True
             logger.warning(
@@ -124,6 +136,7 @@ def run_child(
         timed_out=timed_out,
         elapsed_seconds=elapsed,
         output_tail=tail,
+        cancelled=cancelled,
     )
     logger.debug("pid %s %s after %.1fs", process.pid, result.describe(), elapsed)
     return result
@@ -151,6 +164,32 @@ def run_children(
             for spec in specs
         ]
         return [future.result() for future in futures]
+
+
+def _wait(
+    process: subprocess.Popen[bytes], timeout: float | None, cancel: threading.Event | None
+) -> bool:
+    """Wait for ``process``; return true when ``cancel`` was set first.
+
+    Raises ``subprocess.TimeoutExpired`` when ``timeout`` passes first.
+    """
+    if cancel is None:
+        process.wait(timeout=timeout)
+        return False
+    deadline = None if timeout is None else time.monotonic() + timeout
+    while not cancel.is_set():
+        step = CANCEL_POLL_SECONDS
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(process.args, timeout or 0)
+            step = min(step, remaining)
+        try:
+            process.wait(timeout=step)
+            return False
+        except subprocess.TimeoutExpired:
+            continue
+    return process.poll() is None
 
 
 @contextmanager
