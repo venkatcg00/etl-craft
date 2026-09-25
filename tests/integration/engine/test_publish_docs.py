@@ -42,9 +42,10 @@ def publish(*args, **options):
         pass
 
 
-def fetch(url):
+def fetch(url, **headers):
     try:
-        with urllib.request.urlopen(url, timeout=10) as response:
+        request = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(request, timeout=10) as response:
             return response.status, dict(response.headers), response.read().decode()
     except urllib.error.HTTPError as error:
         return error.code, dict(error.headers), ""
@@ -113,11 +114,7 @@ def test_publishing_through_ngrok_keeps_its_link(engine_db, site, ngrok):
         assert served.local_address.startswith("127.0.0.1:")
     ((address, options),) = ngrok.calls
     assert address == served.local_address
-    assert options == {
-        "authtoken": TOKEN,
-        "domain": "etl-docs.ngrok.app",
-        "ip_restriction_allow_cidrs": ["203.0.113.0/24"],
-    }
+    assert options == {"authtoken": TOKEN, "domain": "etl-docs.ngrok.app"}
     assert ngrok.closed == ["https://etl-docs.ngrok.app"]
     publish(engine_db.engine, config, site)
     assert recorded(engine_db) == ["https://etl-docs.ngrok.app"]
@@ -181,3 +178,22 @@ def test_the_command(engine_db, site, tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out.splitlines()
     assert out[0].startswith(f"publish-docs: serving {site} at http://127.0.0.1:")
     assert out[-1] == "publish-docs: stopped"
+
+
+def test_only_allowed_visitors_are_served(engine_db, site, ngrok):
+    # Through ngrok: the visitor is the address ngrok puts last in X-Forwarded-For.
+    config = publishing(engine_db, allowed_ips=("203.0.113.0/24",))
+    with published(engine_db.engine, config, site) as served:
+        local = f"http://{served.local_address}/index.html"
+        assert fetch(local, **{"X-Forwarded-For": "203.0.113.9"})[0] == 200
+        assert fetch(local, **{"X-Forwarded-For": "198.51.100.4"})[0] == 403
+        # A visitor cannot claim an allowed address: ngrok appends the real one last.
+        assert fetch(local, **{"X-Forwarded-For": "203.0.113.9, 198.51.100.4"})[0] == 403
+        assert fetch(local)[0] == 403
+    # Served locally: the connecting address.
+    here = replace(config, docs_site=replace(config.docs_site, allowed_ips=("127.0.0.0/8",)))
+    with published(engine_db.engine, here, site, local_only=True) as served:
+        assert fetch(served.url + "index.html")[0] == 200
+    with published(engine_db.engine, config, site, local_only=True) as served:
+        assert fetch(served.url + "index.html")[0] == 403
+        assert fetch(served.url + "robots.txt")[0] == 403

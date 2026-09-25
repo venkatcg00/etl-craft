@@ -33,4 +33,4 @@ Docs_site:
     Output: docs-site                  # value — relative to this file; default catalog/
     Authtoken: NGROK_AUTHTOKEN         # variable — the ngrok authtoken, for publish-docs only
     Domain: etl-docs.example.com       # value — optional: a domain reserved in ngrok
-    Allowed_ips: 203.0.113.0/24, 198.51.100.0/24  # value — optional: who ngrok lets through
+    Allowed_ips: 203.0.113.0/24, 198.51.100.0/24  # value — optional: the only visitors served

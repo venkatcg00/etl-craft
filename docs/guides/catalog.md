@@ -156,7 +156,7 @@ Docs_site:
   prod:
     Authtoken: NGROK_AUTHTOKEN         # the variable holding the token, never the token itself
     Domain: etl-docs.example.com       # optional: a domain reserved in your ngrok account
-    Allowed_ips: [203.0.113.0/24]      # optional: only these ranges get through
+    Allowed_ips: [203.0.113.0/24]      # optional: only visitors from these ranges are served
 ```
 
 ```text
@@ -167,12 +167,16 @@ publish-docs: serving /srv/etl-craft/catalog at https://etl-docs.example.com (Ct
 - **Who can see it.** There is no login: anyone with the link can read the site, so share it
   like a document. The site is never listed or indexed: every response carries
   `X-Robots-Tag: noindex`, `robots.txt` disallows everything, pages send no referrer and cannot be
-  framed, and folders are never listed. `Allowed_ips` limits it to your offices or VPN; teams
-  behind a firewall allow the site's domain (the one `publish-docs` prints) through it.
+  framed, and folders are never listed. `Allowed_ips` limits it to your offices or VPN: every
+  other visitor gets `403`. `publish-docs` enforces it itself, on any ngrok plan, from the
+  visitor's address ngrok forwards. Teams behind a firewall allow the site's domain (the one
+  `publish-docs` prints) through it.
 - **A link that stays the same.** Without `Domain`, ngrok gives the account's own free domain.
   The URL is recorded in the Engine DB; if a later publish gets another one, links already
   shared would break, so `publish-docs` stops and names both. Set `Domain` to keep the first,
   or pass `--accept-new-url` to use the new one from then on.
+- For the first few seconds after `publish-docs` starts, the link can show ngrok's own
+  "endpoint is offline" page while ngrok routes to it; reload and the site appears.
 - On ngrok's free plan, a browser first shows ngrok's own warning page once per visitor;
   a paid plan's domain does not.
 - The variable only needs to be set on the machine that publishes; `doctor` says when it is
