@@ -37,6 +37,8 @@ required = [
     "etl_craft/dialects/engine/postgres/schema.sql",
     "etl_craft/dialects/engine/sqlite/schema.sql",
     "etl_craft/dialects/engine/queries/applied_migrations.sql",
+    "etl_craft/services/catalog_assets/catalog.css",
+    "etl_craft/services/catalog_assets/catalog.js",
 ]
 missing = [name for name in required if name not in names]
 if not any(name.endswith("licenses/LICENSE") for name in names):

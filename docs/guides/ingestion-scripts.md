@@ -10,6 +10,7 @@ captures everything it prints and logs, records its counts, and keeps its offset
 |---|---|
 | `SCRIPT_NAME` | the script, a path inside the project's `ingestion_scripts/` folder, such as `crm/customers.py` |
 | `INPUT_PARAMS` | optional: a JSON object the script receives as a dictionary, such as `{"region": "eu", "days": 30}` |
+| `TARGET_OBJECT`, `SOURCE_OBJECT` | optional: the table the script writes and where it reads from, for the [catalog](catalog.md)'s lineage graphs |
 
 ## The script
 

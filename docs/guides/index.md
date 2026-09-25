@@ -16,6 +16,7 @@ How to model and run pipelines with etl-craft.
 - [Inspecting pipelines](inspecting.md): `list`, `graph`, `steps` and `history`.
 - [Lineage and documentation versions](lineage.md): column lineage across tasks and pipelines,
   and `docs-version`.
+- [The catalog site](catalog.md): `generate-docs`, the pages, lineage graphs and search.
 - [Running a pipeline](running-pipelines.md): dependency waves, resuming a run, connection
   tests, orchestrator steps, and the SLA.
 - [Running a task and reading its logs](running-tasks.md): `etl-craft run --task_code`,

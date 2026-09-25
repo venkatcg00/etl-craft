@@ -104,6 +104,7 @@ nav:
       - Validating pipelines: guides/validating.md
       - Inspecting pipelines: guides/inspecting.md
       - Lineage and documentation versions: guides/lineage.md
+      - The catalog site: guides/catalog.md
       - Running a pipeline: guides/running-pipelines.md
       - Running a task and reading its logs: guides/running-tasks.md
   - Deploying:
