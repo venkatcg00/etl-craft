@@ -104,9 +104,18 @@ class CloningConfig:
     base_location: str = ""
 
 
+EMAIL_TRANSPORTS = ("smtp", "sendmail")
+DEFAULT_SENDMAIL_PATH = "/usr/sbin/sendmail"
+
+
 @dataclass(frozen=True)
 class EmailProfile:
-    """The SMTP relay email alert tasks send through."""
+    """How email is sent: through an SMTP relay, or the host's own ``sendmail`` program.
+
+    With ``transport`` ``sendmail`` the message is handed to ``sendmail_path`` (the program
+    ``mailx`` and ``mail`` use), which delivers it through the host's mail system; ``host``,
+    ``port`` and the login settings do not apply. ``from_address`` is the sender either way.
+    """
 
     section: str
     name: str
@@ -117,6 +126,8 @@ class EmailProfile:
     user: str | None = None
     use_tls: bool = True
     extra: dict[str, Any] = field(default_factory=dict)
+    transport: str = "smtp"
+    sendmail_path: str = DEFAULT_SENDMAIL_PATH
 
     @property
     def secret_var(self) -> str:

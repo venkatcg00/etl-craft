@@ -57,6 +57,7 @@ from etl_craft.execution.gates import (
     consume_pipeline_dependencies,
 )
 from etl_craft.execution.runner import ChildOptions, TaskOutcome, run_task
+from etl_craft.handlers.mail import send_sla_lapse_email
 
 logger = logging.getLogger(__name__)
 
@@ -92,11 +93,36 @@ class RunHooks:
 
     ``on_sla_lapse`` is called once per run, when it is first seen past its SLA.
     ``on_finalized`` is called after the run has ended. A hook that raises is logged and does
-    not change how the run ended.
+    not change how the run ended. A run given no hooks uses ``default_hooks``.
     """
 
     on_sla_lapse: Callable[[SlaLapse], None] | None = None
     on_finalized: Callable[[PipelineOutcome], None] | None = None
+
+
+def default_hooks(config: ConnectorConfig, engine: Engine) -> RunHooks:
+    """Return the hooks a run gets unless given others: the SLA email, with ``Enforce_sla`` on.
+
+    The email goes to the pipeline's ``EMAIL_RECIPIENTS``, else the DAG default recipients,
+    through the Email settings.
+    """
+    if not config.limits.enforce_sla:
+        return RunHooks()
+
+    def email_the_lapse(lapse: SlaLapse) -> None:
+        with engine.connect() as conn:
+            pipeline_id = resolve_pipeline_id(conn, lapse.pipeline_code)
+            recipients = fetch_pipeline_detail(conn, pipeline_id).email_recipients
+        send_sla_lapse_email(
+            config,
+            recipients,
+            pipeline_code=lapse.pipeline_code,
+            pipeline_run_id=lapse.pipeline_run_id,
+            sla_hours=lapse.sla_hours,
+            elapsed_hours=lapse.elapsed_hours,
+        )
+
+    return RunHooks(on_sla_lapse=email_the_lapse)
 
 
 def run_pipeline(
@@ -122,7 +148,7 @@ def run_pipeline(
             "and run --finalize-only"
         )
     clock = clock or Clock()
-    hooks = hooks or RunHooks()
+    hooks = hooks or default_hooks(config, engine)
     pipeline_id, detail = _prepare(engine, config, pipeline_code)
     pipeline_run_id, skip_reason = _start_run(
         engine, pipeline_code, pipeline_id, clock, check_gate=not force
@@ -181,7 +207,9 @@ def init_pipeline_run(
         engine, pipeline_code, pipeline_id, clock or Clock(), check_gate=True
     )
     if skip_reason is not None:
-        return _skipped_run(pipeline_code, pipeline_run_id, skip_reason, hooks or RunHooks())
+        return _skipped_run(
+            pipeline_code, pipeline_run_id, skip_reason, hooks or default_hooks(config, engine)
+        )
     return PipelineOutcome(
         RunStatus.IN_PROGRESS,
         f"{pipeline_code}: pipeline_run_id={pipeline_run_id} IN-PROGRESS",
@@ -221,7 +249,7 @@ def finalize_active_run(
             graph,
             task_codes,
             detail.sla_in_hours,
-            hooks or RunHooks(),
+            hooks or default_hooks(config, engine),
         )
 
 

@@ -33,6 +33,8 @@ from etl_craft.config.auth import (
 )
 from etl_craft.config.model import (
     DEFAULT_LOG_DIR,
+    DEFAULT_SENDMAIL_PATH,
+    EMAIL_TRANSPORTS,
     EXAMPLE_PATH,
     CloningConfig,
     ConnectionProfile,
@@ -84,8 +86,9 @@ _ORCHESTRATION_KEYS = frozenset(
 )
 _EMAIL_KEYS = frozenset(
     {"host", "port", "from_address", "auth_mode", "user", "use_tls", "secret", "scope"}
-    | {"client_id", "token_url"}
+    | {"client_id", "token_url", "transport", "sendmail_path"}
 )
+_SMTP_ONLY_EMAIL_KEYS = frozenset(_EMAIL_KEYS - {"from_address", "transport", "sendmail_path"})
 _CONNECTION_FIELDS = frozenset(
     {"jdbc_url", "user", "auth_mode", "secret", "schema", *AUTH_EXTRA_FIELDS}
 )
@@ -490,6 +493,34 @@ def _parse_email(orchestration: _Profiled, path: Path, resolver: Resolver) -> Em
         raise ConfigurationError(f"{path}: {where} must be a mapping")
     _reject_unknown(block, _EMAIL_KEYS, where, path)
     fields = _Fields(block, where, orchestration.profile, resolver, path)
+    transport = (fields.value("transport") or "smtp").lower()
+    if transport not in EMAIL_TRANSPORTS:
+        raise ConfigurationError(
+            f"{path}: {where}.transport resolved to {transport!r}, which is not one of "
+            f"{', '.join(EMAIL_TRANSPORTS)}{fields.hint('transport')}"
+        )
+    name = orchestration.profile or "default"
+    if transport == "sendmail":
+        smtp_only = sorted(set(block) & _SMTP_ONLY_EMAIL_KEYS)
+        if smtp_only:
+            raise ConfigurationError(
+                f"{path}: {where} sends through sendmail, so {', '.join(smtp_only)} would be "
+                "ignored; remove them, or set transport: smtp"
+            )
+        sendmail = EmailProfile(
+            section="EMAIL",
+            name=name,
+            host="",
+            port=0,
+            from_address=fields.value("from_address", required=True) or "",
+            transport="sendmail",
+            sendmail_path=fields.value("sendmail_path") or DEFAULT_SENDMAIL_PATH,
+        )
+        return EmailConfig(active_profile=name, profiles={name: sendmail})
+    if "sendmail_path" in block:
+        raise ConfigurationError(
+            f"{path}: {where}.sendmail_path applies only with transport: sendmail"
+        )
     port_raw = fields.value("port", required=True)
     try:
         port = int(port_raw or "")
@@ -505,7 +536,6 @@ def _parse_email(orchestration: _Profiled, path: Path, resolver: Resolver) -> Em
         )
     user = fields.value("user") or ""
     extra = _auth_extra(fields, auth_mode, EMAIL_AUTH_FIELDS[auth_mode], user=user)
-    name = orchestration.profile or "default"
     profile = EmailProfile(
         section="EMAIL",
         name=name,

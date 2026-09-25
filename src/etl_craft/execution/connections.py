@@ -25,6 +25,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.enums import Handler
 from etl_craft.core.errors import ConnectionTestError, EtlCraftError
+from etl_craft.handlers.mail import sendmail_problem
 from etl_craft.warehouse.connection import (
     READ_ONLY_WAIT_SECONDS,
     is_single_writer,
@@ -58,14 +59,16 @@ def probe_warehouse(
 
 
 def probe_email_relay(config: ConnectorConfig) -> str | None:
-    """Reach the email relay and send ``NOOP``; return the problem, or ``None``.
+    """Reach the email relay and send ``NOOP``, or check the sendmail program can run.
 
-    It does not log in, so the test never spends an attempt against a relay that locks
-    accounts out.
+    Returns the problem, or ``None``. It does not log in, so the test never spends an attempt
+    against a relay that locks accounts out.
     """
     if config.email is None:
         return None
     profile = config.email.active
+    if profile.transport == "sendmail":
+        return sendmail_problem(profile)
     try:
         with smtplib.SMTP(profile.host, profile.port, timeout=SMTP_TEST_TIMEOUT_SECONDS) as relay:
             relay.noop()

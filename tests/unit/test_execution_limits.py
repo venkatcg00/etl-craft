@@ -55,5 +55,6 @@ def test_format_task_log():
 def test_resolve_handler(monkeypatch):
     monkeypatch.setitem(registry.HANDLERS, "SQL", "etl_craft.handlers.registry:format_task_log")
     assert registry.resolve_handler("SQL") is format_task_log
+    monkeypatch.delitem(registry.HANDLERS, "EMAIL_ALERT")
     with pytest.raises(HandlerError, match="no handler is installed for HANDLER 'EMAIL_ALERT'"):
         registry.resolve_handler("EMAIL_ALERT")
