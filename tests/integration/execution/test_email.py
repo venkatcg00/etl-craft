@@ -23,7 +23,9 @@ from fixtures.services import require
 
 
 def relay_config(config, host, port):
-    profile = EmailProfile("EMAIL", "dev", host, port, "etl@example.com", use_tls=False)
+    profile = EmailProfile(
+        "EMAIL", "dev", host, port, "etl@example.com", use_tls=False, from_name="ETL Craft"
+    )
     return replace(config, email=EmailConfig("dev", {"dev": profile}))
 
 
@@ -86,6 +88,7 @@ def test_an_alert_reports_the_run_with_a_digest(mailpit, pipeline):
     assert result.variables["EMAIL_SUBJECT"] == subject
     message = read(subject)
     assert [to["Address"] for to in message["To"]] == ["ops@example.com", "lead@example.com"]
+    assert (message["From"]["Name"], message["From"]["Address"]) == ("ETL Craft", "etl@example.com")
     body = message["HTML"]
     assert "P: FAILED" in body and "Failures: 3 rows had no key" in body
     # The digest: P's latest run with its tasks, and a row for the unknown code.
@@ -192,7 +195,14 @@ def sendmail_config(config, tmp_path, code=0):
     program.write_text(FAKE_SENDMAIL.format(python=sys.executable, out=str(out), code=code))
     program.chmod(0o755)
     profile = EmailProfile(
-        "EMAIL", "dev", "", 0, "etl@example.com", transport="sendmail", sendmail_path=str(program)
+        "EMAIL",
+        "dev",
+        "",
+        0,
+        "etl@example.com",
+        transport="sendmail",
+        sendmail_path=str(program),
+        from_name="ETL Craft",
     )
     return replace(config, email=EmailConfig("dev", {"dev": profile})), out
 
@@ -203,7 +213,8 @@ def test_an_alert_through_sendmail(engine_db, pipeline, tmp_path):
     alert(engine, config, ids, EMAIL_TO="ops@example.com", EMAIL_SUBJECT="$$status", EMAIL_BODY="y")
     sent = out.read_text()
     # Recipients come from the headers (-t); the sender is the profile's from_address (-f).
-    assert sent.startswith("-t -oi -f etl@example.com\n")
+    assert sent.startswith("-t -oi -f etl@example.com -F ETL Craft\n")
+    assert "From: ETL Craft <etl@example.com>" in sent
     assert "To: ops@example.com" in sent and "Subject: FAILED" in sent
     assert probe_email_relay(config) is None
 

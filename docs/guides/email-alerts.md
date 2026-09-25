@@ -10,10 +10,11 @@ The `Email` block of the active `Orchestration` profile says how, in one of two 
 
 | `transport` | Sends through | Settings |
 |---|---|---|
-| `smtp` (the default) | an SMTP relay | `host`, `port`, `from_address`, `use_tls` (STARTTLS, on by default) and `auth_mode`: `none`, `password` (`user`, `secret`) or `oauth` (SMTP XOAUTH2: `user`, `client_id`, `secret`, `token_url`) |
-| `sendmail` | the host's own `sendmail` program, the one `mailx` and `mail` use | `from_address`, and `sendmail_path` when it is not `/usr/sbin/sendmail` |
+| `smtp` (the default) | an SMTP relay | `host`, `port`, `from_address`, `from_name`, `use_tls` (STARTTLS, on by default) and `auth_mode`: `none`, `password` (`user`, `secret`) or `oauth` (SMTP XOAUTH2: `user`, `client_id`, `secret`, `token_url`) |
+| `sendmail` | the host's own `sendmail` program, the one `mailx` and `mail` use | `from_address`, `from_name`, and `sendmail_path` when it is not `/usr/sbin/sendmail` |
 
-With `sendmail` the engine hands each message to the program, with the recipients taken from its
+`from_address` is the sender's address and `from_name`, optional, the name shown with it, as in
+`ETL Craft <etl@example.com>`. With `sendmail` the engine hands each message to the program, with the recipients taken from its
 headers and `from_address` as the sender, and the host's mail system delivers it. Host, port and
 login settings are refused there, since they would be ignored. Before a run starts, the engine
 checks the relay answers, or the program exists and can run.

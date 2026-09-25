@@ -86,9 +86,11 @@ _ORCHESTRATION_KEYS = frozenset(
 )
 _EMAIL_KEYS = frozenset(
     {"host", "port", "from_address", "auth_mode", "user", "use_tls", "secret", "scope"}
-    | {"client_id", "token_url", "transport", "sendmail_path"}
+    | {"client_id", "token_url", "transport", "sendmail_path", "from_name"}
 )
-_SMTP_ONLY_EMAIL_KEYS = frozenset(_EMAIL_KEYS - {"from_address", "transport", "sendmail_path"})
+_SMTP_ONLY_EMAIL_KEYS = frozenset(
+    _EMAIL_KEYS - {"from_address", "from_name", "transport", "sendmail_path"}
+)
 _CONNECTION_FIELDS = frozenset(
     {"jdbc_url", "user", "auth_mode", "secret", "schema", *AUTH_EXTRA_FIELDS}
 )
@@ -513,6 +515,7 @@ def _parse_email(orchestration: _Profiled, path: Path, resolver: Resolver) -> Em
             host="",
             port=0,
             from_address=fields.value("from_address", required=True) or "",
+            from_name=fields.value("from_name") or "",
             transport="sendmail",
             sendmail_path=fields.value("sendmail_path") or DEFAULT_SENDMAIL_PATH,
         )
@@ -546,6 +549,7 @@ def _parse_email(orchestration: _Profiled, path: Path, resolver: Resolver) -> Em
         user=user or None,
         use_tls=_parse_bool(fields.value("use_tls"), f"{where}.use_tls", path, default=True),
         extra=extra,
+        from_name=fields.value("from_name") or "",
     )
     return EmailConfig(active_profile=name, profiles={name: profile})
 

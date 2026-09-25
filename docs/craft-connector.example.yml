@@ -82,6 +82,7 @@ Orchestration:
       host: EMAIL_HOST                 # variable —   needed only when a pipeline sends email
       port: EMAIL_PORT                 # variable
       from_address: EMAIL_FROM         # variable
+      from_name: ETL Craft             # value — optional: the name shown with from_address
       auth_mode: EMAIL_AUTH_MODE       # variable — none | password
       user: EMAIL_USER                 # variable
       use_tls: EMAIL_USE_TLS           # variable

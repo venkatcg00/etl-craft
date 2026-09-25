@@ -114,7 +114,8 @@ class EmailProfile:
 
     With ``transport`` ``sendmail`` the message is handed to ``sendmail_path`` (the program
     ``mailx`` and ``mail`` use), which delivers it through the host's mail system; ``host``,
-    ``port`` and the login settings do not apply. ``from_address`` is the sender either way.
+    ``port`` and the login settings do not apply. ``from_address`` is the sender either way, and
+    ``from_name``, when set, the name shown with it.
     """
 
     section: str
@@ -128,6 +129,7 @@ class EmailProfile:
     extra: dict[str, Any] = field(default_factory=dict)
     transport: str = "smtp"
     sendmail_path: str = DEFAULT_SENDMAIL_PATH
+    from_name: str = ""
 
     @property
     def secret_var(self) -> str:

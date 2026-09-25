@@ -758,12 +758,17 @@ def test_a_relative_duckdb_file_is_found_beside_the_config(tmp_path):
 
 def test_email_through_sendmail(tmp_path):
     raw = _minimal()
-    raw["Orchestration"]["Email"] = {"transport": "sendmail", "from_address": "etl@example.com"}
+    raw["Orchestration"]["Email"] = {
+        "transport": "sendmail",
+        "from_address": "etl@example.com",
+        "from_name": "ETL Craft",
+    }
     email = load_config(_write(tmp_path, raw)).email.active
-    assert (email.transport, email.sendmail_path, email.from_address) == (
+    assert (email.transport, email.sendmail_path, email.from_address, email.from_name) == (
         "sendmail",
         "/usr/sbin/sendmail",
         "etl@example.com",
+        "ETL Craft",
     )
     raw["Orchestration"]["Email"]["host"] = "smtp.example.com"
     with pytest.raises(
