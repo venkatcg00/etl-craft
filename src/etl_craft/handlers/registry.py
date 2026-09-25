@@ -69,6 +69,7 @@ Handler = Callable[[TaskContext, Engine], HandlerResult]
 
 HANDLERS: dict[str, str] = {
     "SQL": "etl_craft.handlers.sql:run",
+    "BUSINESS_RULES": "etl_craft.handlers.business_rules:run",
 }
 """Each ``HANDLER`` value and the ``module:function`` that runs it."""
 

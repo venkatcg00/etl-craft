@@ -7,6 +7,7 @@ afterwards. Credentials come from the same variables as ``test_cloud_connections
 
 import os
 import uuid
+from dataclasses import replace
 
 import pytest
 from sqlalchemy import text
@@ -15,10 +16,11 @@ from sqlalchemy.exc import DBAPIError
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.enums import TableFormat
 from etl_craft.engine import runlog
+from etl_craft.handlers import business_rules
 from etl_craft.warehouse.connection import build_warehouse_engine
 from fixtures.cloud import DATABRICKS_VARS, SNOWFLAKE_VARS, require_variables, write_config
 from fixtures.engine_db import apply_schema, sqlite_engine_db
-from fixtures.metadata import add_pipeline
+from fixtures.metadata import add_pipeline, insert
 from fixtures.sql_warehouse import SqlWorld
 
 # Some forty statements against a remote warehouse, one to three seconds each, cold start aside.
@@ -120,6 +122,26 @@ def walk_every_action(w):
             SOURCE_SQL="SELECT 1 AS id UNION ALL SELECT 2",
         )
         assert appended.insert_count == 2
+
+        # A business rule over the merged customers: flag those that have an order.
+        w.task("rules")
+        with w.engine_db.begin() as conn:
+            insert(
+                conn,
+                "INSERT INTO CFG_BUSINESS_RULES (BUSINESS_RULE_NAME, PIPELINE_ID, TASK_ID, "
+                "BUSINESS_RULE_SQL, BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE, "
+                "SEQUENCE_NUMBER) VALUES ('has_order', :p, :t, :rule_sql, 'REPORT', 'id', "
+                ":target, 1)",
+                "BUSINESS_RULE_ID",
+                p=w.pipeline_id,
+                t=w.tasks["rules"],
+                rule_sql=f"SELECT 1 FROM {w.name(names['orders'])} o WHERE o.id = t.id",
+                target=f"{w.schema}.{names['customers']}",
+            )
+        rules = business_rules.run(
+            replace(w.task("rules"), handler="BUSINESS_RULES", force=True), w.engine_db
+        )
+        assert rules.insert_count == 2
 
         soft = w.run(
             "soft",

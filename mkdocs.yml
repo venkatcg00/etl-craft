@@ -98,6 +98,7 @@ nav:
       - guides/index.md
       - Dependencies and run conditions: guides/dependencies.md
       - SQL tasks: guides/sql-tasks.md
+      - Business rules: guides/business-rules.md
       - Running a pipeline: guides/running-pipelines.md
       - Running a task and reading its logs: guides/running-tasks.md
   - Deploying:
