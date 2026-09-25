@@ -399,10 +399,16 @@ def test_edge_satisfied_rejects_unknown_dependency_type():
         DependencyGraph._edge_satisfied(edge(2, 1, dependency_type="BOGUS"), TaskRunState())
 
 
-def test_graph_errors_exit_with_failure():
-    for error in (GraphError, CycleError, SelfDependencyError, UnknownTaskError):
-        assert issubclass(error, GraphError)
-        assert error.exit_code is ExitCode.FAILURE
+def test_each_graph_error_has_its_own_exit_code():
+    codes = {
+        error.exit_code for error in (GraphError, CycleError, SelfDependencyError, UnknownTaskError)
+    }
+    assert codes == {
+        ExitCode.GRAPH,
+        ExitCode.DEPENDENCY_CYCLE,
+        ExitCode.SELF_DEPENDENCY,
+        ExitCode.UNKNOWN_TASK,
+    }
 
 
 def test_a_cycle_error_names_the_cycle():

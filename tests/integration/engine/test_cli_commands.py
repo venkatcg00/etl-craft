@@ -5,6 +5,7 @@ import logging
 import pytest
 
 from etl_craft.cli import main
+from etl_craft.core.errors import ExitCode
 
 CONFIG = """\
 Secrets:
@@ -56,10 +57,10 @@ def test_init_db_then_migrate(project, capsys):
 
 
 @pytest.mark.engine_sqlite
-def test_init_db_twice_is_a_run_failure(project, capsys):
+def test_init_db_twice_is_an_engine_db_error(project, capsys):
     assert main(["init-db"]) == 0
     capsys.readouterr()
-    assert main(["init-db"]) == 1
+    assert main(["init-db"]) == ExitCode.ENGINE_DB
     assert "already has Engine DB table(s)" in capsys.readouterr().err
 
 
@@ -83,7 +84,7 @@ def test_an_explicit_config_and_migrations_dir(tmp_path, capsys, monkeypatch):
 def test_a_missing_config_is_a_configuration_error(tmp_path, capsys, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ETL_CRAFT_CONFIG", raising=False)
-    assert main(["init-db", "--config", str(tmp_path / "nope.yml")]) == 2
+    assert main(["init-db", "--config", str(tmp_path / "nope.yml")]) == ExitCode.CONFIGURATION
     assert "craft-connector.yml not found" in capsys.readouterr().err
 
 
@@ -96,5 +97,5 @@ def test_an_unreachable_engine_db_is_a_configuration_error(tmp_path, capsys, mon
         + "    user: etl\n    auth_mode: password\n    secret: ETL_CRAFT_TEST_UNREACHABLE_SECRET\n",
         encoding="utf-8",
     )
-    assert main(["--config", str(config), "migrate"]) == 2
+    assert main(["--config", str(config), "migrate"]) == ExitCode.CONFIGURATION
     assert "could not connect to the Engine DB" in capsys.readouterr().err

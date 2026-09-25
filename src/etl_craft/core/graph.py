@@ -23,15 +23,19 @@ from etl_craft.core.enums import (
     RunCondition,
     RunStatus,
 )
-from etl_craft.core.errors import GraphError
+from etl_craft.core.errors import ExitCode, GraphError
 
 
 class SelfDependencyError(GraphError):
     """A task depends on itself."""
 
+    exit_code = ExitCode.SELF_DEPENDENCY
+
 
 class CycleError(GraphError):
     """The dependency edges form a cycle, so no order can run them."""
+
+    exit_code = ExitCode.DEPENDENCY_CYCLE
 
     def __init__(self, cycle: tuple[int, ...]) -> None:
         """Keep the cycle's task ids in the order they were followed."""
@@ -41,6 +45,8 @@ class CycleError(GraphError):
 
 class UnknownTaskError(GraphError):
     """An edge names a task id that is not among the graph's tasks."""
+
+    exit_code = ExitCode.UNKNOWN_TASK
 
 
 @dataclass(frozen=True)

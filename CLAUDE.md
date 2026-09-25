@@ -57,8 +57,9 @@ Each package imports only the packages below it. `lint-imports` enforces this.
 
 - Comments and docstrings describe current behaviour. No decision tags, dates, review ids or
   change narratives; `make history` rejects them.
-- Raise errors from the `core` error hierarchy; the CLI maps them to exit codes
-  (0 success, 1 run or validation failure, 2 configuration or usage error).
+- Raise errors from the `core` error hierarchy. Every error class has its own exit status in
+  `core.errors.ExitCode` (0 success, 1 a failed run or check, 2 usage, then one per error class,
+  16 unexpected); a new error class gets a new code, and a test enforces that no two share one.
 - Log through `logging` (`etl_craft.<module>` loggers). Only the `cli` package prints.
 - Raw SQL aliases every selected column in lowercase; SQLite and PostgreSQL disagree on the case
   of unquoted identifiers.

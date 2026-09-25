@@ -151,10 +151,11 @@ class DagDefaults:
 
 @dataclass(frozen=True)
 class ExecutionLimits:
-    """Deployment-wide limits: a task's time limit (0 for none), parallel tasks and SLA checks.
+    """Deployment-wide limits: a task's time limit (0 for none), parallel tasks and SLA alerts.
 
-    With ``enforce_sla`` on, each finished run is marked ``MET`` or ``BREACHED`` against its
-    pipeline's ``SLA_IN_HOURS``.
+    Every run of a pipeline with ``SLA_IN_HOURS`` is marked ``MET`` or ``BREACHED``. With
+    ``enforce_sla`` on, a run that misses its SLA also sends an SLA email, through the Email
+    settings.
     """
 
     task_timeout_seconds: int = DEFAULT_TASK_TIMEOUT_SECONDS

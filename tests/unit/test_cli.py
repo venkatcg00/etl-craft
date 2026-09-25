@@ -143,9 +143,9 @@ def test_the_log_options_configure_logging(capsys):
 @pytest.mark.parametrize(
     ("error", "exit_code"),
     [
-        (ConfigurationError("craft-connector.yml not found"), 2),
+        (ConfigurationError("craft-connector.yml not found"), 3),
         (UsageError("--pipeline_code is required with --task_code"), 2),
-        (MetadataError("no active pipeline 'P9'"), 1),
+        (MetadataError("no active pipeline 'P9'"), 4),
     ],
 )
 def test_an_etl_craft_error_becomes_an_error_line_and_its_exit_code(capsys, error, exit_code):
@@ -156,9 +156,10 @@ def test_an_etl_craft_error_becomes_an_error_line_and_its_exit_code(capsys, erro
 
 
 @pytest.mark.usefixtures("restore_logger")
-def test_any_other_exception_is_a_bug_and_propagates():
-    with pytest.raises(ZeroDivisionError):
-        main(["fail"], commands=[_raising(ZeroDivisionError())])
+def test_any_other_exception_is_logged_and_exits_unexpected(capsys, caplog):
+    assert main(["fail"], commands=[_raising(ZeroDivisionError("oops"))]) == 16
+    assert capsys.readouterr().err.endswith("error: unexpected ZeroDivisionError: oops\n")
+    assert "Traceback" in caplog.text or caplog.records[-1].exc_info is not None
 
 
 def test_no_command_with_commands_registered_prints_usage_and_exits_2(capsys):

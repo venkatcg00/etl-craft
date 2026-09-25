@@ -46,8 +46,9 @@ Orchestration:
   #                               # teams convert it for their scheduler with their own scripts
   Task_timeout_seconds: 21600          # value — 0 disables; a task's TASK_TIMEOUT_SECONDS overrides
   Max_parallel_tasks: 8                # value
-  Enforce_sla: false                   # value — true: mark each finished run MET or BREACHED
-                                       # against its pipeline's SLA_IN_HOURS
+  Enforce_sla: false                   # value — true: send an SLA email (Email below) when a
+                                       # run misses its pipeline's SLA_IN_HOURS. Runs are
+                                       # marked MET or BREACHED either way.
 
   # DAG defaults for `generate-yml`, per environment. A pipeline's own
   # CFG_PIPELINES.PIPELINE_PARAMETERS values (CATCHUP, TAGS, RETRIES, ...)
