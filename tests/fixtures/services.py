@@ -56,10 +56,15 @@ class Service:
         return f"http://{self.address}"
 
     def reachable(self, timeout: float = 1.0) -> bool:
-        """Report whether something accepts TCP connections at the service's address."""
+        """Report whether something accepts TCP connections at the service's address.
+
+        The service ports lie in Linux's ephemeral range, so with nothing listening a connection
+        to one can pick that same port as its source and connect to itself. Such a connection is
+        not a service.
+        """
         try:
-            with socket.create_connection((self.host, self.port), timeout=timeout):
-                return True
+            with socket.create_connection((self.host, self.port), timeout=timeout) as sock:
+                return bool(sock.getsockname() != sock.getpeername())
         except OSError:
             return False
 

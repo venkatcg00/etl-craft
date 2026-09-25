@@ -50,3 +50,21 @@ def test_require_fails_instead_when_services_are_required(monkeypatch):
     monkeypatch.setenv("ETL_CRAFT_REQUIRE_SERVICES", "1")
     with pytest.raises(pytest.fail.Exception, match="postgres is not running"):
         require("postgres")
+
+
+def test_a_connection_to_itself_is_not_a_service(monkeypatch):
+    class SelfConnected:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def getsockname(self):
+            return ("127.0.0.1", 55432)
+
+        def getpeername(self):
+            return ("127.0.0.1", 55432)
+
+    monkeypatch.setattr(socket, "create_connection", lambda address, timeout: SelfConnected())
+    assert not Service("postgres", "127.0.0.1", 55432).reachable()
