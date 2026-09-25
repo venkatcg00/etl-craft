@@ -1,0 +1,8 @@
+-- Start another attempt on :task_run_id: count it and clear the last attempt's results.
+UPDATE AUD_TASK_RUN_LOG
+SET ATTEMPT_COUNT = ATTEMPT_COUNT + 1, START_DATE = :now, END_DATE = NULL,
+    STATUS = 'IN-PROGRESS', ERROR_MESSAGE = NULL, TASK_LOG = NULL,
+    SOURCE_COUNT = NULL, TARGET_COUNT = NULL, INSERT_COUNT = NULL,
+    UPDATE_COUNT = NULL, DELETE_COUNT = NULL
+WHERE TASK_RUN_ID = :task_run_id
+RETURNING ATTEMPT_COUNT AS attempt_count
