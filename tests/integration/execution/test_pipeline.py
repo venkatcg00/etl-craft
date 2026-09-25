@@ -232,7 +232,7 @@ def test_remote_mode_refuses_a_whole_pipeline_run(config, pipeline):
 
 
 def test_an_orchestrator_starts_runs_and_finalizes(config, pipeline):
-    engine, ids = pipeline
+    engine, _ = pipeline
     remote = replace(config, mode=Mode.REMOTE)
     with pytest.raises(RunStateError, match="P has no active run to finalize"):
         finalize_active_run(engine, remote, "P")
