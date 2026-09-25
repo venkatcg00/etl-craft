@@ -1,18 +1,21 @@
 """``HANDLER=PYTHON``: run an ingestion script from the project's ``ingestion_scripts/``.
 
 The task's ``SCRIPT_NAME`` names the script, a path inside ``ingestion_scripts/``; the script
-defines ``run(task)`` (see ``etl_craft.scripting``). It runs in the task's own process, so what
-it prints and logs goes to the attempt's log, and the task's time limit applies to it.
+defines ``run(task)``, or ``run()`` when it needs nothing from the task (see
+``etl_craft.scripting``). It runs in the task's own process, so what it prints and logs goes to
+the attempt's log, and the task's time limit applies to it.
 
 Its ``INPUT_PARAMS`` task parameter, when set, must be a JSON array; the script gets it as a
-list. The script gets the offset its last successful run stored, and returns its counts and,
-optionally, a new offset, which is stored once it has succeeded. A stored offset keeps its type:
+list. The script gets the offset its last successful run stored, and returns the rows it wrote,
+recorded as the source, target and insert counts, and optionally a new offset, stored once it
+has succeeded. A stored offset keeps its type:
 a script that returns another type fails. Everything that can be wrong with the script or what
 it returns fails the task with a message naming the script and the problem.
 """
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import sys
@@ -90,18 +93,16 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
         variables["OFFSET"] = f"{checked.offset.stored()} ({checked.offset.type})"
     variables.update(checked.variables)
     logger.info(
-        "%s read %d, wrote %d, target holds %d (%.2fs); offset %s",
+        "%s wrote %d row(s) (%.2fs); offset %s",
         name,
-        checked.source_count,
-        checked.insert_count,
-        checked.target_count,
+        checked.row_count,
         elapsed,
         "unchanged" if checked.offset is None else f"now {checked.offset.stored()}",
     )
     return HandlerResult(
-        source_count=checked.source_count,
-        target_count=checked.target_count,
-        insert_count=checked.insert_count,
+        source_count=checked.row_count,
+        target_count=checked.row_count,
+        insert_count=checked.row_count,
         variables=variables,
     )
 
@@ -121,7 +122,7 @@ def parse_input_params(value: str | None) -> list[Any]:
     return parsed
 
 
-def load_script(path: Path, name: str) -> Callable[[ScriptTask], Any]:
+def load_script(path: Path, name: str) -> Callable[..., Any]:
     """Import the script and return its ``run``; ``HandlerError`` saying what is wrong."""
     # Scripts may import helper modules kept beside them.
     folder = str(path.parent)
@@ -147,9 +148,28 @@ def load_script(path: Path, name: str) -> Callable[[ScriptTask], Any]:
     return entry  # type: ignore[no-any-return]
 
 
-def _call(entry: Callable[[ScriptTask], Any], task: ScriptTask, name: str) -> Any:
+def _takes_the_task(entry: Callable[..., Any], name: str) -> bool:
+    """Whether ``run`` takes the task: ``run(task)`` does, ``run()`` does not."""
     try:
-        return entry(task)
+        parameters = inspect.signature(entry).parameters.values()
+    except (TypeError, ValueError):
+        return True
+    positional = [
+        p
+        for p in parameters
+        if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD) and p.default is p.empty
+    ]
+    if len(positional) > 1:
+        raise HandlerError(
+            f"{name}: run takes {len(positional)} arguments; it takes the task, or nothing"
+        )
+    return bool(positional) or any(p.kind == p.VAR_POSITIONAL for p in parameters)
+
+
+def _call(entry: Callable[..., Any], task: ScriptTask, name: str) -> Any:
+    with_task = _takes_the_task(entry, name)
+    try:
+        return entry(task) if with_task else entry()
     except HandlerError:
         raise
     except SystemExit as error:
@@ -169,18 +189,12 @@ def check_result(result: Any, name: str, stored: StoredOffset | None) -> ScriptR
     """Check what the script returned; ``HandlerError`` naming each problem."""
     if not isinstance(result, ScriptResult):
         raise HandlerError(
-            f"{name} returned {type(result).__name__}, not a ScriptResult with its counts"
+            f"{name} returned {type(result).__name__}, not a ScriptResult with its row count"
         )
-    problems = [
-        f"{field}={value!r}"
-        for field in ("source_count", "target_count", "insert_count")
-        if isinstance(value := getattr(result, field), bool)
-        or not isinstance(value, int)
-        or value < 0
-    ]
-    if problems:
+    count = result.row_count
+    if isinstance(count, bool) or not isinstance(count, int) or count < 0:
         raise HandlerError(
-            f"{name} returned {', '.join(problems)}; each count must be a whole number, 0 or more"
+            f"{name} returned row_count={count!r}; it must be a whole number, 0 or more"
         )
     if result.offset is not None and not isinstance(result.offset, Offset):
         raise HandlerError(

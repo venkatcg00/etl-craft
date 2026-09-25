@@ -10,18 +10,18 @@ A task with ``HANDLER = 'PYTHON'`` names a script under the project's ``ingestio
         since = task.offset.value if task.offset else 0
         rows = read_source_after(since)            # the script's own code
         with task.warehouse() as engine, engine.begin() as conn:
-            inserted = write(conn, rows, pipeline_run_id=task.pipeline_run_id)
+            written = write(conn, rows, pipeline_run_id=task.pipeline_run_id)
         return ScriptResult(
-            source_count=len(rows),
-            target_count=count_target(),
-            insert_count=inserted,
+            row_count=written,
             offset=Offset.number(max(r.id for r in rows)) if rows else None,
         )
 
 The script reads its source from where the last successful run left off (``task.offset``) and
-writes its table, stamping each row with ``task.pipeline_run_id``. Everything it prints or logs
-goes to the task attempt's log. The engine records the counts in ``AUD_TASK_RUN_LOG`` and, when
-the script returns an offset, stores it for the next run.
+writes its table, stamping each row with ``task.pipeline_run_id``. It reports the rows it wrote,
+which the engine records as the task's source, target and insert counts, and, when it moved on,
+the new offset, which the engine stores for the next run. A script that needs neither the offset
+nor ``INPUT_PARAMS`` may define ``run()`` without a parameter. Everything it prints or logs goes
+to the task attempt's log.
 """
 
 from __future__ import annotations
@@ -100,16 +100,13 @@ class Offset:
 
 @dataclass(frozen=True)
 class ScriptResult:
-    """What a script reports: its counts, where it left off, and any values of its own.
+    """What a script reports: the rows it wrote, where it left off, and any values of its own.
 
-    ``source_count``, ``target_count`` and ``insert_count`` are required: the rows read, the
-    rows in the target afterwards, and the rows written. ``offset`` of ``None`` keeps the stored
-    offset. ``variables`` are listed in the task log as ``NAME = value`` lines.
+    ``row_count`` is required, a whole number of 0 or more. ``offset`` of ``None`` keeps the
+    stored offset. ``variables`` are listed in the task log as ``NAME = value`` lines.
     """
 
-    source_count: int
-    target_count: int
-    insert_count: int
+    row_count: int
     offset: Offset | None = None
     variables: Mapping[str, Any] = field(default_factory=dict)
 
