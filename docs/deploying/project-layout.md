@@ -18,7 +18,7 @@ etl-craft/
 ```
 
 The directory holding `craft-connector.yml` is the project directory. Every relative path in the
-file (`Secrets.Path`, a SQLite `jdbc_url`, `Orchestration.Log_dir`) is resolved from it, so every
+file (`Secrets.Path`, a SQLite or DuckDB file in a `jdbc_url`, `Orchestration.Log_dir`) is resolved from it, so every
 command and task finds the same files wherever it runs from.
 
 ## Finding the project

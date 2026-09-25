@@ -31,5 +31,5 @@ Engine:
 Warehouse:
   Name: DuckDB                         # value
   dev:
-    jdbc_url: jdbc:duckdb:warehouse.duckdb  # value — relative to the working directory
+    jdbc_url: jdbc:duckdb:warehouse.duckdb  # value — relative to this file
     schema: main                       # value — must already exist; cloning writes here

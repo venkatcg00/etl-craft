@@ -8,6 +8,8 @@ How to model and run pipelines with etl-craft.
   the eight actions, and what the engine checks and logs.
 - [Business rules](business-rules.md): writing rules, flagging and clearing rows, waves and
   retries.
+- [Ingestion scripts](ingestion-scripts.md): the script contract, `INPUT_PARAMS`, offsets, and
+  where a script's output goes.
 - [Running a pipeline](running-pipelines.md): dependency waves, resuming a run, connection
   tests, orchestrator steps, and the SLA.
 - [Running a task and reading its logs](running-tasks.md): `etl-craft run --task_code`,
@@ -17,6 +19,5 @@ How to model and run pipelines with etl-craft.
     These guides are written as each feature reaches the new code base:
 
     - **Pipelines and tasks**: the configuration rows, task handlers and parameters.
-    - **Python ingestion scripts**: the script contract and offset tracking.
     - **Email alerts**: completion alerts, their three flavours and templates.
     - **Lineage and documentation**: table and column lineage, and documentation versions.

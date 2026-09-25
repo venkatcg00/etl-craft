@@ -164,6 +164,7 @@ layers = [
     "etl_craft.services",
     "etl_craft.execution",
     "etl_craft.handlers",
+    "etl_craft.scripting",
     "etl_craft.engine | etl_craft.warehouse",
     "etl_craft.dialects",
     "etl_craft.config",

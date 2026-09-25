@@ -58,7 +58,8 @@ def test_the_shipped_example_loads_for_dev_with_nothing_set():
     assert config.engine.active.jdbc_url == "jdbc:sqlite:etl-craft-engine.db"
     assert config.engine.active.auth_mode == "none"
     assert config.warehouse is not None
-    assert config.warehouse.active.jdbc_url == "jdbc:duckdb:warehouse.duckdb"
+    # A relative DuckDB file is found beside the config file.
+    assert config.warehouse.active.jdbc_url == f"jdbc:duckdb:{EXAMPLE.parent / 'warehouse.duckdb'}"
     assert config.warehouse_table_format == "native"
     assert config.dag_defaults.allow_schedule is False
     assert config.email is None
@@ -738,3 +739,18 @@ def test_a_warehouse_profile_must_name_its_database(tmp_path):
     )
     with pytest.raises(ConfigurationError, match=r"Warehouse\.dev: .*got 'lake-house'"):
         load_config(_write(tmp_path, raw))
+
+
+def test_a_relative_duckdb_file_is_found_beside_the_config(tmp_path):
+    project = tmp_path / "etl-craft"
+    project.mkdir()
+    raw = _minimal(Warehouse={"dev": {"jdbc_url": "jdbc:duckdb:data/wh.duckdb", "schema": "main"}})
+    config = load_config(_write(project, raw))
+    assert config.warehouse.active.jdbc_url == f"jdbc:duckdb:{project / 'data' / 'wh.duckdb'}"
+    absolute = _minimal(
+        Warehouse={"dev": {"jdbc_url": "jdbc:duckdb:/srv/wh.duckdb", "schema": "main"}}
+    )
+    assert (
+        load_config(_write(project, absolute)).warehouse.active.jdbc_url
+        == "jdbc:duckdb:/srv/wh.duckdb"
+    )

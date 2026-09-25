@@ -145,3 +145,32 @@ def configure(
     logger.addHandler(handler)
     logger.setLevel(numeric_level)
     return handler
+
+
+@contextmanager
+def capture_all_loggers() -> Iterator[None]:
+    """Write records of loggers outside ``etl_craft`` (a script's own) like ours, in the body.
+
+    They go to the stream ``configure`` set up, with the same format and context fields, at the
+    same level. Without a configured handler this does nothing.
+    """
+    ours = logging.getLogger(ROOT_LOGGER)
+    configured = [h for h in ours.handlers if isinstance(h, _ConfiguredHandler)]
+    if not configured:
+        yield
+        return
+    handler = logging.StreamHandler(configured[0].stream)
+    handler.setFormatter(configured[0].formatter)
+    handler.addFilter(ContextFilter())
+    handler.addFilter(
+        lambda record: record.name != ROOT_LOGGER and not record.name.startswith(f"{ROOT_LOGGER}.")
+    )
+    root = logging.getLogger()
+    previous = root.level
+    root.addHandler(handler)
+    root.setLevel(ours.level)
+    try:
+        yield
+    finally:
+        root.removeHandler(handler)
+        root.setLevel(previous)
