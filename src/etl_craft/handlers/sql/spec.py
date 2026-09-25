@@ -28,6 +28,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from etl_craft.config import ConnectorConfig
 from etl_craft.config.project import sql_file
 from etl_craft.core.enums import SqlAction
 from etl_craft.core.errors import HandlerError, MetadataError
@@ -177,7 +178,26 @@ def _flag(
 
 def _select(context: TaskContext) -> tuple[str, str]:
     """Return the task's SELECT with its tokens replaced, and where it came from."""
-    params = context.task_params
+    return resolve_select(
+        context.config,
+        context.task_params,
+        pipeline_run_id=context.pipeline_run_id,
+        refresh_type=context.refresh_type,
+    )
+
+
+def resolve_select(
+    config: ConnectorConfig,
+    params: Mapping[str, str],
+    *,
+    pipeline_run_id: int,
+    refresh_type: str,
+) -> tuple[str, str]:
+    """Return a SQL task's SELECT, inline or from its file, with the tokens replaced.
+
+    Also returns where it came from, for messages. ``HandlerError`` or ``MetadataError`` when
+    the task has no usable single read-only SELECT.
+    """
     inline = params.get("SOURCE_SQL")
     file_name = params.get("SOURCE_SQL_FILE")
     if inline and file_name:
@@ -185,7 +205,7 @@ def _select(context: TaskContext) -> tuple[str, str]:
             "set SOURCE_SQL or SOURCE_SQL_FILE, not both: the task would have two SELECTs"
         )
     if file_name:
-        path = sql_file(context.config, file_name)
+        path = sql_file(config, file_name)
         try:
             raw = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as error:
@@ -203,8 +223,8 @@ def _select(context: TaskContext) -> tuple[str, str]:
     # Tokens first: a ``$$`` would otherwise read as a dollar-quoted string when splitting.
     substituted = substitute_pipeline_id(
         raw,
-        pipeline_run_id=context.pipeline_run_id,
-        refresh_type=context.refresh_type,
+        pipeline_run_id=pipeline_run_id,
+        refresh_type=refresh_type,
         substitution=parse_flag(params, "PIPELINE_ID_SUBSTITUTION"),
         filter_enabled=parse_flag(params, "PIPELINE_ID_FILTER"),
         source=source,

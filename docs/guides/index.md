@@ -13,6 +13,8 @@ How to model and run pipelines with etl-craft.
 - [Email alerts](email-alerts.md): the alert task, its outcomes and tokens, SLA emails, and
   sending through SMTP or `sendmail`.
 - [Inspecting pipelines](inspecting.md): `list`, `graph`, `steps` and `history`.
+- [Lineage and documentation versions](lineage.md): column lineage across tasks and pipelines,
+  and `docs-version`.
 - [Running a pipeline](running-pipelines.md): dependency waves, resuming a run, connection
   tests, orchestrator steps, and the SLA.
 - [Running a task and reading its logs](running-tasks.md): `etl-craft run --task_code`,
@@ -22,4 +24,3 @@ How to model and run pipelines with etl-craft.
     These guides are written as each feature reaches the new code base:
 
     - **Pipelines and tasks**: the configuration rows, task handlers and parameters.
-    - **Lineage and documentation**: table and column lineage, and documentation versions.

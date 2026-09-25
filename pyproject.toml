@@ -24,6 +24,7 @@ dependencies = [
     "psycopg[binary]>=3.3.6",
     "pyyaml>=6.0.3",
     "sqlalchemy>=2.0.54",
+    "sqlglot>=26",
 ]
 
 [project.scripts]
