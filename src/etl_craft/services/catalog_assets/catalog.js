@@ -162,6 +162,50 @@
     var edges = Array.prototype.slice.call(svg.querySelectorAll(".edge"));
     var frame = panel.querySelector(".graph");
     var at = {};
+    var size = { width: 0, height: 0 };
+    var zoom = 1;
+
+    // Zoom scales the drawing inside its frame; the frame scrolls, and dragging it pans.
+    function zoomTo(scale, pointX, pointY) {
+      var before = zoom;
+      zoom = Math.min(2.5, Math.max(0.2, scale));
+      svg.setAttribute("width", size.width * zoom);
+      svg.setAttribute("height", size.height * zoom);
+      if (frame && pointX !== undefined) {
+        var ratio = zoom / before;
+        frame.scrollLeft = (frame.scrollLeft + pointX) * ratio - pointX;
+        frame.scrollTop = (frame.scrollTop + pointY) * ratio - pointY;
+      }
+    }
+
+    function fit() {
+      if (!frame || !size.width) return;
+      zoomTo(Math.min(1, (frame.clientWidth - 4) / size.width, (frame.clientHeight - 4) / size.height));
+    }
+
+    if (frame) {
+      frame.addEventListener("wheel", function (event) {
+        if (!event.ctrlKey && !event.metaKey) return;
+        event.preventDefault();
+        var box = frame.getBoundingClientRect();
+        zoomTo(zoom * (event.deltaY < 0 ? 1.1 : 1 / 1.1), event.clientX - box.left, event.clientY - box.top);
+      }, { passive: false });
+      var drag = null;
+      frame.addEventListener("pointerdown", function (event) {
+        if (event.button !== 0 || event.target.closest(".col, .head, .open")) return;
+        drag = { x: event.clientX, y: event.clientY, left: frame.scrollLeft, top: frame.scrollTop };
+        frame.classList.add("panning");
+        frame.setPointerCapture(event.pointerId);
+      });
+      frame.addEventListener("pointermove", function (event) {
+        if (!drag) return;
+        frame.scrollLeft = drag.left - (event.clientX - drag.x);
+        frame.scrollTop = drag.top - (event.clientY - drag.y);
+      });
+      var stop = function () { drag = null; frame.classList.remove("panning"); };
+      frame.addEventListener("pointerup", stop);
+      frame.addEventListener("pointercancel", stop);
+    }
 
     function expanded(node) { return !node.classList.contains("collapsed"); }
 
@@ -232,7 +276,9 @@
       var full = svg.getAttribute("viewBox").split(" ");
       var tall = tallest + 2 * MARGIN;
       svg.setAttribute("viewBox", "0 0 " + full[2] + " " + tall);
-      svg.setAttribute("height", tall);
+      size.width = parseFloat(full[2]);
+      size.height = tall;
+      zoomTo(zoom);
       edges.forEach(function (edge) {
         var source = at[edge.getAttribute("data-source")];
         var target = at[edge.getAttribute("data-target")];
@@ -344,6 +390,9 @@
     direction.addEventListener("change", filter);
     var buttons = {
       reset: function () { trace(null); },
+      "zoom-in": function () { zoomTo(zoom * 1.25); },
+      "zoom-out": function () { zoomTo(zoom / 1.25); },
+      "zoom-fit": fit,
       "expand-all": function () { nodes.forEach(function (n) { expand(n, true); }); layout(); },
       "collapse-all": function () {
         nodes.forEach(function (n) { expand(n, n.classList.contains("focus")); });
@@ -361,7 +410,7 @@
     // Open with the page's own table in view.
     var focus = at[panel.getAttribute("data-focus")];
     if (focus && frame) {
-      frame.scrollLeft = Math.max(0, focus.x + WIDTH / 2 - frame.clientWidth / 2);
+      frame.scrollLeft = Math.max(0, (focus.x + WIDTH / 2) * zoom - frame.clientWidth / 2);
     }
 
     function fromHash() {

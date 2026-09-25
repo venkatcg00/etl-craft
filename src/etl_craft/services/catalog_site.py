@@ -491,6 +491,11 @@ class _Writer:
             '<option value="downstream">downstream</option></select></label>'
             f'<label>Depth <select class="depth">{options}'
             f'<option value="all"{all_selected}>all</option></select></label>'
+            '<span class="zoom">'
+            '<button type="button" class="zoom-out" title="Zoom out">&minus;</button>'
+            '<button type="button" class="zoom-in" title="Zoom in">+</button>'
+            '<button type="button" class="zoom-fit" title="Fit the graph in view">Fit</button>'
+            "</span>"
             '<button type="button" class="expand-all">Expand all</button>'
             '<button type="button" class="collapse-all">Collapse all</button>'
             '<button type="button" class="reset">Clear trace</button></div>'
@@ -503,7 +508,7 @@ class _Writer:
             'stroke-width="2" stroke-dasharray="2 4"/></svg> table level only</span>'
             "<span>ƒ made from no source column</span>"
             "<span>Click a table to show its columns, ↗ to open it, and a column to trace "
-            "it upstream and downstream.</span></div>"
+            "it upstream and downstream. Drag to pan; Ctrl or ⌘ with the wheel zooms.</span></div>"
             f'{truncated}<div class="graph">{svg}</div></div>'
         )
 

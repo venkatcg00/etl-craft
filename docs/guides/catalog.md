@@ -51,6 +51,9 @@ A column marked `ƒ` is made from no source column, such as `COUNT(*)` or a cons
 - **Click a column** to trace it: every path into it and out of it lights up, across every
   table shown, and each table on the way opens. Click it again, or *Clear trace*, to stop. A column's name in the table above the
   graph traces it too, and the link can be shared: `…/sales.orders.html#col=amount_usd`.
+- **Pan and zoom:** drag the background to move around, or use the scroll bars. −, + and *Fit*
+  zoom out, in, and to the whole graph; Ctrl or ⌘ with the mouse wheel zooms around the
+  pointer. The frame grows with the graph, up to most of the window's height.
 - **Direction** shows only what is upstream or downstream.
 - **Depth** shows fewer levels. A deep graph opens three levels each way.
 

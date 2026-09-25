@@ -99,7 +99,12 @@ pre { background: var(--panel); border: 1px solid var(--border); border-radius: 
 .controls select, .controls button { font: inherit; }
 .legend { display: flex; flex-wrap: wrap; gap: 16px; color: var(--muted); font-size: 12px; }
 .legend svg { vertical-align: middle; }
-.graph { border: 1px solid var(--border); border-radius: 6px; overflow: auto; max-height: 75vh; background: var(--bg); }
+.graph {
+  border: 1px solid var(--border); border-radius: 6px; overflow: auto; max-height: 80vh;
+  background: var(--bg); cursor: grab; touch-action: pan-x pan-y;
+}
+.graph.panning { cursor: grabbing; user-select: none; }
+.controls .zoom { display: inline-flex; gap: 4px; }
 svg.lineage { display: block; font: 12px system-ui, sans-serif; }
 svg.lineage .box { fill: var(--node); stroke: var(--border); }
 svg.lineage .header { fill: var(--node-header); stroke: var(--border); }
