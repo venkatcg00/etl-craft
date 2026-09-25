@@ -112,7 +112,7 @@ class DocsSiteConfig:
     ``generate-yml --docs`` writes; ``output`` is its folder, ``catalog/`` in the project
     directory when not set. ``authtoken_var`` names the variable holding the ngrok authtoken,
     read only when the site is published; ``domain`` is the team's reserved ngrok domain, and
-    ``allowed_ips`` the CIDR ranges ngrok lets through, every address when empty.
+    ``allowed_ips`` the CIDR ranges ``publish-docs`` serves, every address when empty.
     """
 
     schedule: str | None = None

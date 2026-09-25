@@ -7,8 +7,13 @@ served (``generate-docs`` swaps a new one in whole) is served from then on.
 Published through ngrok, the site is reachable only by its link: there is no login. Every
 response tells search engines and caches to keep out (``X-Robots-Tag: noindex``, a
 ``robots.txt`` that disallows everything, ``Referrer-Policy: no-referrer``), no page may be
-framed, and folders are never listed. ``Docs_site.Allowed_ips`` limits who ngrok lets through,
-and ``Docs_site.Domain`` keeps the link the same from one publish to the next.
+framed, and folders are never listed. ``Docs_site.Domain`` keeps the link the same from one
+publish to the next.
+
+``Docs_site.Allowed_ips`` is enforced by this server, whatever the ngrok plan: a visitor from
+any other address gets 403. Through ngrok the visitor's address is the last entry of
+``X-Forwarded-For``, which ngrok adds; only ngrok reaches the server on ``127.0.0.1``, and a
+request without that header is refused. Served locally, it is the connecting address.
 
 The URL is recorded in the Engine DB. When a later publish gets another one, links already
 shared would break, so it fails naming both, unless told to accept the new one.
@@ -25,6 +30,7 @@ from dataclasses import dataclass
 from functools import partial
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from ipaddress import IPv4Network, IPv6Network, ip_address, ip_network
 from pathlib import Path
 from typing import Any
 
@@ -54,8 +60,38 @@ EXTRA = "publish"
 """The optional extra that installs the ngrok SDK."""
 
 
+class _Server(ThreadingHTTPServer):
+    """The web server, with who may read the site and whether requests come through ngrok."""
+
+    allowed: tuple[IPv4Network | IPv6Network, ...] = ()
+    behind_tunnel: bool = False
+
+
 class _Handler(SimpleHTTPRequestHandler):
-    """Serves the site's files, never a folder listing or a hidden file."""
+    """Serves the site's files, never a folder listing or a hidden file, to allowed visitors."""
+
+    server: _Server
+
+    def _visitor_allowed(self) -> bool:
+        allowed = self.server.allowed
+        if not allowed:
+            return True
+        if self.server.behind_tunnel:
+            forwarded = [p.strip() for p in self.headers.get("X-Forwarded-For", "").split(",")]
+            address = forwarded[-1] if forwarded and forwarded[-1] else ""
+        else:
+            address = str(self.client_address[0])
+        try:
+            visitor = ip_address(address)
+        except ValueError:
+            return False
+        return any(visitor in network for network in allowed)
+
+    def do_HEAD(self) -> None:
+        if not self._visitor_allowed():
+            self.send_error(HTTPStatus.FORBIDDEN)
+            return
+        super().do_HEAD()
 
     def end_headers(self) -> None:
         for name, value in HEADERS.items():
@@ -63,6 +99,9 @@ class _Handler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def do_GET(self) -> None:
+        if not self._visitor_allowed():
+            self.send_error(HTTPStatus.FORBIDDEN)
+            return
         if self.path.split("?", 1)[0] == "/robots.txt":
             body = ROBOTS.encode()
             self.send_response(HTTPStatus.OK)
@@ -91,16 +130,27 @@ class Published:
     local_address: str
 
 
-def serve(folder: Path, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPServer:
+def serve(
+    folder: Path,
+    host: str = "127.0.0.1",
+    port: int = 0,
+    *,
+    allowed: tuple[str, ...] = (),
+    behind_tunnel: bool = False,
+) -> ThreadingHTTPServer:
     """Return a web server for the site in ``folder``, not yet serving.
 
+    ``allowed`` are the CIDR ranges visitors may come from, every address when empty.
     ``ConfigurationError`` when ``folder`` holds no site ``generate-docs`` wrote.
     """
     if not (folder / MARKER).is_file():
         raise ConfigurationError(
             f"there is no catalog site in {folder}: run `etl-craft generate-docs` first"
         )
-    return ThreadingHTTPServer((host, port), partial(_Handler, directory=str(folder)))
+    server = _Server((host, port), partial(_Handler, directory=str(folder)))
+    server.allowed = tuple(ip_network(cidr, strict=False) for cidr in allowed)
+    server.behind_tunnel = behind_tunnel
+    return server
 
 
 @contextmanager
@@ -118,7 +168,13 @@ def published(
 
     Through ngrok the URL is checked against the one recorded before and recorded.
     """
-    server = serve(folder, host if local_only else "127.0.0.1", port)
+    server = serve(
+        folder,
+        host if local_only else "127.0.0.1",
+        port,
+        allowed=config.docs_site.allowed_ips,
+        behind_tunnel=not local_only,
+    )
     local = f"{server.server_address[0]!s}:{server.server_port}"
     thread = threading.Thread(target=server.serve_forever, name="catalog-site", daemon=True)
     thread.start()
@@ -147,8 +203,6 @@ def open_tunnel(address: str, config: ConnectorConfig) -> tuple[str, Callable[[]
     options: dict[str, Any] = {"authtoken": token}
     if site.domain:
         options["domain"] = site.domain
-    if site.allowed_ips:
-        options["ip_restriction_allow_cidrs"] = list(site.allowed_ips)
     try:
         listener = ngrok.forward(address, **options)
     except Exception as error:
