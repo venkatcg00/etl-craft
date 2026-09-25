@@ -8,6 +8,8 @@ Running etl-craft on a machine or under an orchestrator.
   global DAG.
 - [Checking a deployment: `doctor` and `setup`](doctor-and-setup.md): every check, and setting up
   or upgrading in one command.
+- [Cloning into the warehouse](cloning.md): copying the Engine DB tables into the warehouse
+  after every run, and `etl-craft clone`.
 - [Engine DB setup and upgrades](engine-db.md): `init-db`, `migrate`, and your own migrations.
 
 !!! note "Planned"

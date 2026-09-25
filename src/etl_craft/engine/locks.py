@@ -24,3 +24,6 @@ class EngineLock:
 
 MIGRATE = EngineLock("migrate", 8_241_007)
 """Serializes ``init-db`` and ``migrate``, so two runs never apply the same file twice."""
+
+CLONE = EngineLock("clone", 8_241_008)
+"""Serializes cloning, so two runs finishing together never write the same mirror at once."""

@@ -112,6 +112,7 @@ nav:
       - Running under an orchestrator: deploying/orchestrator.md
       - Checking a deployment, doctor and setup: deploying/doctor-and-setup.md
       - Engine DB setup and upgrades: deploying/engine-db.md
+      - Cloning into the warehouse: deploying/cloning.md
   - Connectors:
       - connectors/index.md
       - Engine DB: connectors/engine-db.md

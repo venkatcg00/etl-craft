@@ -24,3 +24,4 @@ error class has its own status; every error etl-craft raises on purpose belongs 
 | `14` | `LOCK_TIMEOUT` | A cross-process lock was not acquired in time, such as a busy single-writer warehouse (`LockTimeoutError`). |
 | `15` | `HANDLER` | A task handler is missing or failed; the task is recorded as `FAILED` (`HandlerError`). |
 | `16` | `UNEXPECTED` | An error with no class of its own, including a bug. Its traceback is written to the log. |
+| `17` | `CLONING` | Copying an Engine DB table into the warehouse failed; the message names the table and the database's error (`CloningError`). |

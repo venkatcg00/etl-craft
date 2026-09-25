@@ -33,6 +33,7 @@ class ExitCode(IntEnum):
     HANDLER = 15
     UNEXPECTED = 16
     """An error with no class of its own, including a bug; its traceback is logged."""
+    CLONING = 17
 
 
 class EtlCraftError(Exception):
@@ -109,3 +110,9 @@ class HandlerError(EtlCraftError):
     """A task handler is missing or failed; the task is recorded as ``FAILED``."""
 
     exit_code = ExitCode.HANDLER
+
+
+class CloningError(EtlCraftError):
+    """Copying an Engine DB table into the warehouse failed; the message names the table."""
+
+    exit_code = ExitCode.CLONING
