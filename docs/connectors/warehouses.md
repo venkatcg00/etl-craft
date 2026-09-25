@@ -65,6 +65,15 @@ Where the data files live can be chosen per task, with task parameters:
   catalog integration for an externally managed Iceberg catalog, which needs a customer volume;
   whether Snowflake accepts writes there depends on the integration. Cloning mirrors need the
   Cloning section's `External_volume` and `Base_location`.
-- **Snowflake, native:** ordinary tables always live in Snowflake's own storage.
+- **Trino, Iceberg:** `EXTERNAL_LOCATION` is the Iceberg table's `location`, which must be empty;
+  without it, the catalog places the table under its schema's location.
+- **Snowflake, native**, **PostgreSQL**, **DuckDB** and **DuckDB over Iceberg** take no storage
+  parameters: ordinary tables live in the database's own storage, and the Iceberg REST catalog
+  places DuckDB's Iceberg tables itself.
 
-These options have not been run against a live account in this project.
+A storage parameter the warehouse does not use fails the task, naming it and the ones that apply,
+instead of being ignored. A table given an `EXTERNAL_LOCATION` cannot be rebuilt by
+`SCHEMA_EVOLUTION`; add its new columns yourself.
+
+The Databricks and Snowflake options have not been run against a live account in this project;
+Trino's is tested against the local services.

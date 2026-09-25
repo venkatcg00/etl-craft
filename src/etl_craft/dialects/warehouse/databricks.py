@@ -23,6 +23,7 @@ class DatabricksWarehouse(WarehouseDialect):
     """Databricks, Delta tables. A session has no default schema, so scratch tables are named."""
 
     spec = warehouse_by_key("databricks")
+    storage_parameters = frozenset({"EXTERNAL_LOCATION"})
     temporary_tables = False
     default_schema = False
     qualified_rename = True

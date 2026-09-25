@@ -563,3 +563,44 @@ def test_verify_iceberg_catalog_without_a_catalog_or_when_the_check_fails():
     assert connection.verify_iceberg_catalog(no_catalog, Trino()) is None
     problem = connection.verify_iceberg_catalog(config_for(profile("none", TRINO)), Trino())
     assert problem.startswith("could not check whether catalog 'iceberg' is an Iceberg catalog")
+
+
+@pytest.mark.parametrize(
+    ("key", "params", "message"),
+    [
+        ("postgres", {"EXTERNAL_LOCATION": "s3://x"}, "EXTERNAL_LOCATION does not apply to"),
+        ("duckdb_iceberg", {"EXTERNAL_LOCATION": "s3://x"}, "storage parameters here: none"),
+        (
+            "snowflake",
+            {"EXTERNAL_VOLUME": "v", "BASE_LOCATION": "b"},
+            "EXTERNAL_VOLUME, BASE_LOCATION",
+        ),
+        (
+            "snowflake_iceberg",
+            {"EXTERNAL_LOCATION": "s3://x"},
+            "here: BASE_LOCATION, CATALOG, EXTERNAL_VOLUME",
+        ),
+        ("databricks", {"EXTERNAL_LOCATION": "s3://x", "CATALOG": "c"}, "CATALOG does not apply"),
+    ],
+)
+def test_storage_parameters_a_warehouse_would_ignore_are_refused(key, params, message):
+    problem = for_key(key).unsupported_storage_problem(params)
+    assert problem is not None and message in problem
+
+
+@pytest.mark.parametrize(
+    ("key", "params"),
+    [
+        ("postgres", {"EXTERNAL_LOCATION": "  "}),
+        ("databricks_iceberg", {"EXTERNAL_LOCATION": "s3://x"}),
+        ("trino_iceberg", {"EXTERNAL_LOCATION": "s3://x"}),
+        ("snowflake_iceberg", {"EXTERNAL_VOLUME": "v", "BASE_LOCATION": "b"}),
+    ],
+)
+def test_storage_parameters_that_apply(key, params):
+    assert for_key(key).unsupported_storage_problem(params) is None
+
+
+def test_a_trino_location_with_a_quote_is_refused():
+    problem = for_key("trino_iceberg").task_storage_problem({"EXTERNAL_LOCATION": "s3://a'b"})
+    assert problem == 'EXTERNAL_LOCATION must not contain a quote: "s3://a\'b"'

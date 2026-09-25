@@ -386,3 +386,41 @@ def test_a_failing_statement_names_its_step_and_leaves_no_scratch_tables(sql_wor
     )
     assert "stage the SELECT failed; the statement was:" in caplog.text
     assert not [t for t in w.tables() if t.startswith("etl_")]
+
+
+def test_a_storage_location_is_used_where_it_applies_and_refused_elsewhere(sql_world):
+    w = sql_world
+    location = f"s3://warehouse/custom/{w.schema}/located"
+    params = {
+        "SQL_ACTION": "CREATE_TABLE",
+        "TARGET_OBJECT": "located",
+        "SOURCE_SQL": "SELECT 1 AS id",
+        "EXTERNAL_LOCATION": location,
+    }
+    if w.kind != "trino_iceberg":
+        with pytest.raises(HandlerError, match=r"EXTERNAL_LOCATION does not apply to .* ignored"):
+            w.run("located", **params)
+        assert "located" not in w.tables()
+        return
+    w.run("located", **params)
+    ddl = w.rows(f"SHOW CREATE TABLE {w.name('located')}")[0][0]
+    assert f"location = '{location}'" in ddl
+    # Schema evolution rebuilds the table, which would lose its location: refused.
+    placed = {"EXTERNAL_LOCATION": f"s3://warehouse/custom/{w.schema}/placed"}
+    w.run(
+        "setup_placed",
+        SQL_ACTION="SETUP_TABLE",
+        TARGET_OBJECT="placed",
+        SOURCE_SQL="SELECT 1 AS id",
+        SETUP_FOR="OVERWRITE_TABLE",
+        **placed,
+    )
+    with pytest.raises(HandlerError, match=r"cannot keep its EXTERNAL_LOCATION .* ADD COLUMN"):
+        w.run(
+            "evolve_placed",
+            SQL_ACTION="OVERWRITE_TABLE",
+            TARGET_OBJECT="placed",
+            SOURCE_SQL="SELECT 1 AS id, 2 AS extra",
+            SCHEMA_EVOLUTION="true",
+            **placed,
+        )

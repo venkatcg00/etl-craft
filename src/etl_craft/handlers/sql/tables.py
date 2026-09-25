@@ -69,12 +69,17 @@ def create_target_shape(session: Session, stage: str, audit_columns: tuple[str, 
         f"CAST(NULL AS {session.dialect.audit_column_type(column)}) AS {column}"
         for column in audit_columns
     )
+    computed = session.dialect.surrogate_key == "computed"
+    if computed:
+        # Each insert fills a computed ROW_ID, so the empty table only needs the column.
+        parts.append(f"CAST(NULL AS BIGINT) AS {ROW_ID_COLUMN}")
     session.create_table_as(
         session.target,
         f"SELECT {', '.join(parts)} FROM {stage} s WHERE 1 = 0",
         step="create the target",
     )
-    add_row_id(session)
+    if not computed:
+        add_row_id(session)
 
 
 def sequence_name(session: Session) -> str:
@@ -220,6 +225,13 @@ def evolve(
     ]
     parts.extend(f"t.{name}" for name, _ in target_columns if name.lower() in managed)
     added = [name for name, _ in stage_columns if name.lower() not in old]
+    location = (session.params.get("EXTERNAL_LOCATION") or "").strip()
+    if location:
+        raise HandlerError(
+            f"the SELECT returns new column(s) {', '.join(added)}, but SCHEMA_EVOLUTION rebuilds "
+            f"the table, which cannot keep its EXTERNAL_LOCATION ({location}); add the "
+            f"column(s) to {session.target} yourself (ALTER TABLE ... ADD COLUMN)"
+        )
     rebuild = session.qualify(f"{session.schema}.{session.table}__etl_evolve")
     session.drop(rebuild)
     session.create_table_as(

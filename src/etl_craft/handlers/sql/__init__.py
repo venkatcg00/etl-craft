@@ -32,7 +32,9 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
     if config.warehouse is None:
         raise ConfigurationError("a SQL task needs a Warehouse section in craft-connector.yml")
     dialect = task_dialect(context)
-    problem = dialect.task_storage_problem(context.task_params)
+    problem = dialect.unsupported_storage_problem(
+        context.task_params
+    ) or dialect.task_storage_problem(context.task_params)
     if problem is not None:
         raise HandlerError(problem)
     catalog = active_catalog(config)
