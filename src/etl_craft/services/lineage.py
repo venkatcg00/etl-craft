@@ -76,13 +76,18 @@ class Edge:
 
 @dataclass(frozen=True)
 class TaskLineage:
-    """One SQL task's lineage, or why it has none; ``cached`` when it was stored already."""
+    """One SQL task's lineage, or why it has none; ``cached`` when it was stored already.
+
+    ``sources`` are the tables its SELECT reads, joins and filters included, known whenever the
+    SELECT parses, even when its columns cannot be traced.
+    """
 
     task: str
     target_object: str | None
     edges: list[Edge]
     error: str | None = None
     cached: bool = False
+    sources: tuple[str, ...] = ()
 
 
 def table_name(parts: Iterable[str], catalog: str | None) -> str:
@@ -136,6 +141,23 @@ def extract(
     return edges
 
 
+def referenced_tables(
+    select_sql: str, *, dialect: str | None, catalog: str | None = None
+) -> tuple[str, ...]:
+    """Return every table ``select_sql`` reads, CTEs left out; empty when it does not parse."""
+    try:
+        tree = sqlglot.parse_one(select_sql, read=dialect)
+    except SqlglotError:
+        return ()
+    ctes = {cte.alias_or_name.lower() for cte in tree.find_all(exp.CTE)}
+    found = {
+        table_name((t.catalog, t.db, t.name), catalog)
+        for t in tree.find_all(exp.Table)
+        if t.name and not (not t.db and t.name.lower() in ctes)
+    }
+    return tuple(sorted(found))
+
+
 def lineage_key(select_sql: str, target_object: str, dialect: str | None) -> str:
     """Hash what a task's lineage is worked out from; any change means working it out again."""
     return sha256_hex("\0".join((select_sql, target_object, dialect or "")).encode())
@@ -157,10 +179,12 @@ def collect(
         if (params.get("SQL_ACTION") or "").upper() == SqlAction.DROP_TABLE:
             continue
         target = (params.get("TARGET_OBJECT") or "").strip()
+        sources: tuple[str, ...] = ()
         try:
             select_sql, _ = resolve_select(
                 config, params, pipeline_run_id=0, refresh_type=RefreshType.FULL
             )
+            sources = referenced_tables(select_sql, dialect=dialect, catalog=catalog)
             if not target:
                 raise MetadataError("the task has no TARGET_OBJECT")
             key = lineage_key(select_sql, target, dialect)
@@ -168,7 +192,7 @@ def collect(
                 stored = [] if refresh else fetch_task_lineage(conn, ref.task_id, key)
             if stored:
                 edges = [_edge(e, name) for e in stored]
-                results.append(TaskLineage(name, target, edges, cached=True))
+                results.append(TaskLineage(name, target, edges, cached=True, sources=sources))
                 continue
             edges = [
                 Edge(
@@ -182,12 +206,12 @@ def collect(
                 for e in extract(select_sql, target, dialect=dialect, catalog=catalog)
             ]
         except EtlCraftError as error:
-            results.append(TaskLineage(name, target or None, [], error=str(error)))
+            results.append(TaskLineage(name, target or None, [], error=str(error), sources=sources))
             continue
         if record:
             with engine.begin() as conn:
                 store_task_lineage(conn, ref.task_id, key, [_stored(e) for e in edges])
-        results.append(TaskLineage(name, target, edges))
+        results.append(TaskLineage(name, target, edges, sources=sources))
     return results
 
 
