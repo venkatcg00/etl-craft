@@ -28,8 +28,10 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     finally:
         engine.dispose()
     for table in tables:
-        created = "\tcreated" if table.created else ""
-        out.line(f"{table.table}\t{table.mirror}\t{table.rows}{created}")
+        change = "\tcreated" if table.created else ""
+        if table.added:
+            change = f"\tadded {', '.join(table.added)}"
+        out.line(f"{table.table}\t{table.mirror}\t{table.rows}{change}")
     return 0
 
 

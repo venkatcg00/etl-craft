@@ -59,12 +59,24 @@ def test_every_table_is_mirrored_and_replaced_on_the_next_clone(sql_world):
     assert count(world, "CFG_PIPELINES") == 2
 
 
-def test_a_mirror_whose_columns_changed_is_created_again(sql_world):
+def test_a_mirror_gains_new_columns_and_keeps_old_ones(sql_world):
     world = sql_world
-    world.execute(f"CREATE TABLE {world.name('CFG_PIPELINES')} (PIPELINE_ID BIGINT)")
+    world.execute(
+        f"CREATE TABLE {world.name('CFG_PIPELINES')} (PIPELINE_ID BIGINT, RETIRED BIGINT)"
+    )
+    world.execute(f"INSERT INTO {world.name('CFG_PIPELINES')} VALUES (99, 1)")
     tables = {t.table: t for t in clone(world.engine_db, cloning(world, CloningScope.CFG))}
-    assert tables["CFG_PIPELINES"].created
-    assert "pipeline_code" in world.columns("CFG_PIPELINES")
+    pipelines = tables["CFG_PIPELINES"]
+    assert not pipelines.created
+    assert pipelines.added[:2] == ("PIPELINE_CODE", "PIPELINE_NAME")
+    assert "PIPELINE_ID" not in pipelines.added
+    columns = world.columns("CFG_PIPELINES")
+    assert columns[:2] == ["pipeline_id", "retired"] and "pipeline_code" in columns
+    assert world.rows(f"SELECT PIPELINE_CODE, RETIRED FROM {world.name('CFG_PIPELINES')}") == [
+        ("P", None)
+    ]
+    again = {t.table: t for t in clone(world.engine_db, cloning(world, CloningScope.CFG))}
+    assert again["CFG_PIPELINES"].added == ()
     assert set(tables) == set(engine_tables(world, ("CFG_",)))
     assert not any(name.startswith("aud_") for name in world.tables())
 
