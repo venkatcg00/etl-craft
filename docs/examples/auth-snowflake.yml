@@ -3,7 +3,7 @@
 # One profile per type: set ETL_CRAFT_AUTH to the one you use.
 #   password  verified
 #   token     verified: a Programmatic Access Token (needs a network policy)
-#   key_file  RSA key pair: the private key's path and its passphrase
+#   key_file  RSA key pair: the private key's path, and its passphrase if it has one
 #   oauth     the connector's OAUTH_CLIENT_CREDENTIALS against your identity
 #             provider's token_url
 #   sso       the connector's external browser login: interactive only
@@ -68,7 +68,7 @@ Warehouse:
     role: WAREHOUSE_ROLE               # variable
     auth_mode: key_file                # value
     key_file: WAREHOUSE_KEY_FILE       # variable
-    secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written — the key's passphrase
+    secret: WAREHOUSE_SECRET           # variable — the key's passphrase; leave the line out for a key without one
   oauth:
     user: WAREHOUSE_USER               # variable
     account: WAREHOUSE_ACCOUNT         # variable

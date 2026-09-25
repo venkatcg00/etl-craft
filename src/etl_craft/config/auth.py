@@ -39,8 +39,9 @@ SECRET_AUTH_MODES = frozenset({AuthMode.PASSWORD, AuthMode.TOKEN, AuthMode.OAUTH
 POSTGRES_AUTH_FIELDS: AuthFields = {
     # A password.
     "password": ("user", "secret"),
-    # A client certificate: key_file (and cert_file); secret is the key's passphrase.
-    "key_file": ("user", "key_file", "secret"),
+    # A client certificate: key_file (and cert_file); secret, when named, is the key's
+    # passphrase, and a key without one is used as it is.
+    "key_file": ("user", "key_file"),
     # A stored bearer token presented as the password, such as a pre-issued Entra ID token.
     "token": ("user", "secret"),
     # A token minted per connection by a client-credentials grant, presented as the password.
@@ -82,7 +83,7 @@ ENGINES: tuple[EngineSpec, ...] = (
         display_name="PostgreSQL",
         jdbc_prefix="jdbc:postgresql:",
         auth_fields=POSTGRES_AUTH_FIELDS,
-        verified_auth_modes=frozenset({"password"}),
+        verified_auth_modes=frozenset({"password", "key_file"}),
     ),
     EngineSpec(
         name="sqlite",
@@ -168,8 +169,8 @@ _SNOWFLAKE_AUTH_FIELDS: AuthFields = {
     "password": ("user", "secret"),
     # A programmatic access token.
     "token": ("user", "secret"),
-    # Key-pair login: key_file is the private key, secret its passphrase.
-    "key_file": ("user", "key_file", "secret"),
+    # Key-pair login: key_file is the private key; secret, when named, its passphrase.
+    "key_file": ("user", "key_file"),
     # The connector's own client-credentials flow.
     "oauth": ("client_id", "secret", "token_url"),
     # The external browser login: interactive only.
@@ -185,7 +186,7 @@ WAREHOUSES: tuple[WarehouseSpec, ...] = (
         sqlalchemy_name="postgresql",
         table_format=TableFormat.NATIVE,
         auth_fields=POSTGRES_AUTH_FIELDS,
-        verified_auth_modes=frozenset({"password"}),
+        verified_auth_modes=frozenset({"password", "key_file"}),
     ),
     WarehouseSpec(
         key="duckdb",
