@@ -306,6 +306,15 @@ CREATE INDEX ix_column_lineage_task ON AUD_COLUMN_LINEAGE (TASK_ID, SOURCE_SQL_H
 CREATE INDEX ix_column_lineage_target ON AUD_COLUMN_LINEAGE (TARGET_OBJECT, TARGET_COLUMN);
 CREATE INDEX ix_column_lineage_source ON AUD_COLUMN_LINEAGE (SOURCE_OBJECT, SOURCE_COLUMN);
 
+-- The URL the catalog site is published at, one row per URL: the latest is current. A publish
+-- that is given another URL fails unless told to accept it, so shared links keep working.
+CREATE TABLE AUD_DOCS_PUBLICATION (
+    DOCS_PUBLICATION_ID  INTEGER PRIMARY KEY AUTOINCREMENT,
+    PUBLISHED_URL        VARCHAR NOT NULL,
+    FIRST_PUBLISHED      TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
+    LAST_PUBLISHED       TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00')
+);
+
 CREATE TABLE AUD_TASK_DOCUMENTATION (
     TASK_DOCUMENTATION_ID  INTEGER PRIMARY KEY AUTOINCREMENT,
     TASK_ID                BIGINT NOT NULL REFERENCES CFG_TASKS(TASK_ID),

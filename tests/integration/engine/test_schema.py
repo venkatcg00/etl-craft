@@ -26,6 +26,7 @@ TABLES = (
     "aud_business_rules_results",
     "aud_task_offset_tracker",
     "aud_column_lineage",
+    "aud_docs_publication",
     "aud_task_documentation",
     "aud_pipeline_dependency_tracker",
     "aud_task_dependency_tracker",

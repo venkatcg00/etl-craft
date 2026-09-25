@@ -104,7 +104,7 @@ etl-craft, not an unattended scheduler. `sts` needs `pip install etl-craft[aws]`
 | File | Shows |
 |---|---|
 | `cloning.yml` | `Enabled`/`Scope` per profile, including `Scope: none` |
-| `docs-site.yml` | `Docs_site`: when the catalog site is written again, and where |
+| `docs-site.yml` | `Docs_site`: when the catalog site is written again, where, and how it is published |
 
 ## Profiles
 

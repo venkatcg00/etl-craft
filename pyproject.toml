@@ -42,6 +42,9 @@ aws = [
 databricks = [
     "databricks-sqlalchemy>=2",
 ]
+publish = [
+    "ngrok>=1.4",
+]
 snowflake = [
     "snowflake-sqlalchemy>=1.7",
 ]

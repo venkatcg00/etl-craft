@@ -1,4 +1,5 @@
-# The catalog site: where generate-docs writes it, and when it is written again.
+# The catalog site: where generate-docs writes it, when it is written again, and how
+# publish-docs publishes it through ngrok.
 #
 # `etl-craft generate-yml --docs` turns Schedule into a DAG that runs `etl-craft generate-docs`;
 # without an orchestrator, run that command from cron or Task Scheduler on the same schedule.
@@ -30,3 +31,6 @@ Docs_site:
   dev:
     Schedule: "0 2 * * *"              # value — 02:00 every day; five cron fields, or @daily
     Output: docs-site                  # value — relative to this file; default catalog/
+    Authtoken: NGROK_AUTHTOKEN         # variable — the ngrok authtoken, for publish-docs only
+    Domain: etl-docs.example.com       # value — optional: a domain reserved in ngrok
+    Allowed_ips: 203.0.113.0/24, 198.51.100.0/24  # value — optional: who ngrok lets through
