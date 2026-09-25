@@ -27,7 +27,7 @@ It applies two streams of `*.sql` files, each in filename order:
 1. **ENGINE**: the migrations packaged with etl-craft, always first. A new Engine DB created by
    `init-db` already includes them.
 2. **PROJECT**: your own migrations, from `--migrations-dir`, else `$ETL_CRAFT_MIGRATIONS_DIR`,
-   else `./sql/migrations` when that directory exists.
+   else `migrations/` in the [project directory](project-layout.md) when that folder exists.
 
 `SCHEMA_MIGRATIONS` records every applied file with the SHA-256 of its content. Each file runs in
 its own transaction together with that record, so a failing file changes nothing and stops the

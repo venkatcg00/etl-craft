@@ -55,19 +55,22 @@ class Stream:
     files: tuple[MigrationFile, ...]
 
 
-def resolve_project_migrations_dir(explicit: Path | str | None = None) -> Path | None:
+def resolve_project_migrations_dir(
+    explicit: Path | str | None = None, project_default: Path | None = None
+) -> Path | None:
     """Return the project migrations directory, or ``None`` when there is no project stream.
 
-    ``--migrations-dir`` first, then ``$ETL_CRAFT_MIGRATIONS_DIR``, then ``./sql/migrations``
-    when that directory exists.
+    ``--migrations-dir`` first, then ``$ETL_CRAFT_MIGRATIONS_DIR``, then ``project_default``
+    (``migrations/`` in the project directory) when that directory exists.
     """
     if explicit is not None:
         return Path(explicit)
     from_env = os.environ.get(MIGRATIONS_DIR_ENV_VAR)
     if from_env:
         return Path(from_env)
-    local = Path.cwd() / "sql" / "migrations"
-    return local if local.is_dir() else None
+    if project_default is not None and project_default.is_dir():
+        return project_default
+    return None
 
 
 def read_stream(source: str, directory: Path) -> Stream:
@@ -83,7 +86,9 @@ def read_stream(source: str, directory: Path) -> Stream:
     return Stream(source, directory, tuple(files))
 
 
-def migration_streams(engine: Engine, project_dir: Path | str | None = None) -> list[Stream]:
+def migration_streams(
+    engine: Engine, project_dir: Path | str | None = None, project_default: Path | None = None
+) -> list[Stream]:
     """Return the packaged ENGINE stream, followed by the PROJECT stream when there is one."""
     package_dir = for_engine(engine).migrations_dir()
     if not package_dir.is_dir():
@@ -92,13 +97,13 @@ def migration_streams(engine: Engine, project_dir: Path | str | None = None) -> 
             "installed etl-craft package is missing its SQL files"
         )
     streams = [read_stream(ENGINE, package_dir)]
-    project = resolve_project_migrations_dir(project_dir)
+    project = resolve_project_migrations_dir(project_dir, project_default)
     if project is None:
         return streams
     if not project.is_dir():
         raise MigrationError(
             f"migrations directory {str(project)!r} does not exist — pass --migrations-dir, "
-            f"set ${MIGRATIONS_DIR_ENV_VAR}, or run from a directory containing sql/migrations/"
+            f"set ${MIGRATIONS_DIR_ENV_VAR}, or keep them in migrations/ in the project directory"
         )
     if project.resolve() != package_dir.resolve():
         streams.append(read_stream(PROJECT, project))
@@ -160,14 +165,21 @@ def _apply(engine: Engine, migration: MigrationFile) -> None:
 
 
 def apply_pending_migrations(
-    engine: Engine, project_dir: Path | str | None = None, *, wait_seconds: float = 0
+    engine: Engine,
+    project_dir: Path | str | None = None,
+    *,
+    project_default: Path | None = None,
+    wait_seconds: float = 0,
 ) -> list[str]:
     """Apply every pending ENGINE, then PROJECT, migration; return the filenames applied.
+
+    ``project_dir`` is ``--migrations-dir``; ``project_default`` is the project's
+    ``migrations/``, used when neither it nor ``$ETL_CRAFT_MIGRATIONS_DIR`` is given.
 
     Concurrent runs are serialized by the ``migrate`` lock, so a second one waits and then finds
     nothing left to do.
     """
-    streams = migration_streams(engine, project_dir)
+    streams = migration_streams(engine, project_dir, project_default)
     applied: list[str] = []
     with locks.MIGRATE.hold(engine, wait_seconds):
         with engine.connect() as conn:

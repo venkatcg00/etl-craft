@@ -29,13 +29,16 @@ def restore_logger():
 
 @pytest.fixture
 def project(tmp_path, monkeypatch):
+    """An etl-craft/ project directory, with commands run from the directory holding it."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ETL_CRAFT_CONFIG", raising=False)
     monkeypatch.delenv("ETL_CRAFT_MIGRATIONS_DIR", raising=False)
-    (tmp_path / "craft-connector.yml").write_text(
+    project = tmp_path / "etl-craft"
+    project.mkdir()
+    (project / "craft-connector.yml").write_text(
         CONFIG.format(jdbc_url="jdbc:sqlite:state/engine.db"), encoding="utf-8"
     )
-    return tmp_path
+    return project
 
 
 @pytest.mark.engine_sqlite
@@ -47,8 +50,8 @@ def test_init_db_then_migrate(project, capsys):
     assert main(["migrate"]) == 0
     assert capsys.readouterr().out == "migrate: already up to date\n"
 
-    migrations = project / "sql" / "migrations"
-    migrations.mkdir(parents=True)
+    migrations = project / "migrations"
+    migrations.mkdir()
     (migrations / "0001_owner.sql").write_text(
         "ALTER TABLE CFG_PIPELINES ADD COLUMN OWNER VARCHAR;", encoding="utf-8"
     )
