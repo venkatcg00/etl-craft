@@ -161,25 +161,14 @@
   // The lineage graph. Tables open collapsed, the page's own table expanded; clicking a
   // table's header shows or hides its columns, and the boxes are stacked again to fit. The
   // drawing can be filtered by direction and depth, and a column traced through every path.
-  document.querySelectorAll(".graph-panel").forEach(function (panel) {
-    var svg = panel.querySelector("svg.lineage");
-    if (!svg) return;
-    var number = function (name) { return parseFloat(svg.getAttribute(name)); };
-    var WIDTH = number("data-node-width");
-    var HEADER = number("data-header");
-    var ROW = number("data-row");
-    var GAP = number("data-gap");
-    var MARGIN = number("data-margin");
-    var depth = panel.querySelector("select.depth");
-    var direction = panel.querySelector("select.direction");
-    var nodes = Array.prototype.slice.call(svg.querySelectorAll(".node"));
-    var edges = Array.prototype.slice.call(svg.querySelectorAll(".edge"));
+  // Zoom scales a graph inside its frame; the frame scrolls, dragging its background pans, and
+  // Ctrl or Cmd with the wheel zooms around the pointer.
+  function panZoom(panel, svg) {
     var frame = panel.querySelector(".graph");
-    var at = {};
-    var size = { width: 0, height: 0 };
+    var box = svg.getAttribute("viewBox").split(" ");
+    var size = { width: parseFloat(box[2]), height: parseFloat(box[3]) };
     var zoom = 1;
 
-    // Zoom scales the drawing inside its frame; the frame scrolls, and dragging it pans.
     function zoomTo(scale, pointX, pointY) {
       var before = zoom;
       zoom = Math.min(2.5, Math.max(0.2, scale));
@@ -194,19 +183,21 @@
 
     function fit() {
       if (!frame || !size.width) return;
-      zoomTo(Math.min(1, (frame.clientWidth - 4) / size.width, (frame.clientHeight - 4) / size.height));
+      zoomTo(Math.min(1, (frame.clientWidth - 4) / size.width,
+        (frame.clientHeight - 4) / size.height));
     }
 
     if (frame) {
       frame.addEventListener("wheel", function (event) {
         if (!event.ctrlKey && !event.metaKey) return;
         event.preventDefault();
-        var box = frame.getBoundingClientRect();
-        zoomTo(zoom * (event.deltaY < 0 ? 1.1 : 1 / 1.1), event.clientX - box.left, event.clientY - box.top);
+        var at = frame.getBoundingClientRect();
+        zoomTo(zoom * (event.deltaY < 0 ? 1.1 : 1 / 1.1),
+          event.clientX - at.left, event.clientY - at.top);
       }, { passive: false });
       var drag = null;
       frame.addEventListener("pointerdown", function (event) {
-        if (event.button !== 0 || event.target.closest(".col, .head, .open")) return;
+        if (event.button !== 0 || event.target.closest(".col, .head, .open, a")) return;
         drag = { x: event.clientX, y: event.clientY, left: frame.scrollLeft, top: frame.scrollTop };
         frame.classList.add("panning");
         frame.setPointerCapture(event.pointerId);
@@ -220,6 +211,46 @@
       frame.addEventListener("pointerup", stop);
       frame.addEventListener("pointercancel", stop);
     }
+    var buttons = {
+      "zoom-in": function () { zoomTo(zoom * 1.25); },
+      "zoom-out": function () { zoomTo(zoom / 1.25); },
+      "zoom-fit": fit
+    };
+    Object.keys(buttons).forEach(function (name) {
+      var button = panel.querySelector("button." + name);
+      if (button) button.addEventListener("click", buttons[name]);
+    });
+    return {
+      zoom: function () { return zoom; },
+      resize: function (width, height) {
+        size.width = width;
+        size.height = height;
+        zoomTo(zoom);
+      }
+    };
+  }
+
+  document.querySelectorAll(".dag-panel").forEach(function (panel) {
+    var svg = panel.querySelector("svg.dag");
+    if (svg) panZoom(panel, svg);
+  });
+
+  document.querySelectorAll(".lineage-panel").forEach(function (panel) {
+    var svg = panel.querySelector("svg.lineage");
+    if (!svg) return;
+    var number = function (name) { return parseFloat(svg.getAttribute(name)); };
+    var WIDTH = number("data-node-width");
+    var HEADER = number("data-header");
+    var ROW = number("data-row");
+    var GAP = number("data-gap");
+    var MARGIN = number("data-margin");
+    var depth = panel.querySelector("select.depth");
+    var direction = panel.querySelector("select.direction");
+    var nodes = Array.prototype.slice.call(svg.querySelectorAll(".node"));
+    var edges = Array.prototype.slice.call(svg.querySelectorAll(".edge"));
+    var frame = panel.querySelector(".graph");
+    var at = {};
+    var view = panZoom(panel, svg);
 
     function expanded(node) { return !node.classList.contains("collapsed"); }
 
@@ -290,9 +321,7 @@
       var full = svg.getAttribute("viewBox").split(" ");
       var tall = tallest + 2 * MARGIN;
       svg.setAttribute("viewBox", "0 0 " + full[2] + " " + tall);
-      size.width = parseFloat(full[2]);
-      size.height = tall;
-      zoomTo(zoom);
+      view.resize(parseFloat(full[2]), tall);
       edges.forEach(function (edge) {
         var source = at[edge.getAttribute("data-source")];
         var target = at[edge.getAttribute("data-target")];
@@ -404,9 +433,6 @@
     direction.addEventListener("change", filter);
     var buttons = {
       reset: function () { trace(null); },
-      "zoom-in": function () { zoomTo(zoom * 1.25); },
-      "zoom-out": function () { zoomTo(zoom / 1.25); },
-      "zoom-fit": fit,
       "expand-all": function () { nodes.forEach(function (n) { expand(n, true); }); layout(); },
       "collapse-all": function () {
         nodes.forEach(function (n) { expand(n, n.classList.contains("focus")); });
@@ -424,7 +450,7 @@
     // Open with the page's own table in view.
     var focus = at[panel.getAttribute("data-focus")];
     if (focus && frame) {
-      frame.scrollLeft = Math.max(0, (focus.x + WIDTH / 2) * zoom - frame.clientWidth / 2);
+      frame.scrollLeft = Math.max(0, (focus.x + WIDTH / 2) * view.zoom() - frame.clientWidth / 2);
     }
 
     function fromHash() {

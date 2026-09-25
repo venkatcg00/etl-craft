@@ -52,7 +52,13 @@ header.top {
   position: sticky; top: 0; z-index: 10;
 }
 header.top .brand { font-weight: 600; color: var(--text); }
-header.top nav { display: flex; flex-wrap: wrap; gap: 12px; }
+header.top nav { display: flex; flex-wrap: wrap; gap: 4px; }
+header.top nav a { padding: 4px 10px; border-radius: 6px; color: var(--text); }
+header.top nav a.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+nav.crumbs { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+ul.contents { padding-left: 20px; }
+h3 { font-size: 14px; margin: 16px 0 6px; }
+#search-page input { width: 100%; padding: 8px 10px; font: inherit; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
 .search { position: relative; margin-left: auto; min-width: min(360px, 100%); flex: 1 1 260px; }
 .search input {
   width: 100%; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
@@ -107,7 +113,20 @@ footer.foot { color: var(--muted); font-size: 12px; padding: 16px; border-top: 1
 }
 .graph.panning { cursor: grabbing; user-select: none; }
 .controls .zoom { display: inline-flex; gap: 4px; }
-svg.lineage { display: block; font: 12px system-ui, sans-serif; }
+svg.lineage, svg.dag { display: block; font: 12px system-ui, sans-serif; }
+svg.dag .box { fill: var(--node); stroke: var(--border); }
+svg.dag .header { fill: var(--node-header); stroke: var(--border); }
+svg.dag .external .header { fill: var(--external); }
+svg.dag .title { fill: var(--accent); font-weight: 600; }
+svg.dag .handler { fill: var(--muted); font-size: 11px; }
+svg.dag text.writes, svg.dag text.reads, svg.dag text.checks { fill: var(--text); }
+svg.dag a text.writes, svg.dag a text.reads, svg.dag a text.checks { fill: var(--accent); }
+svg.dag a:hover text { text-decoration: underline; }
+svg.dag .edge, .legend .dep { fill: none; stroke: var(--edge); stroke-width: 1.6; }
+svg.dag .arrowhead { fill: var(--edge); }
+svg.dag .edge.failure, .legend .dep.failure { stroke: var(--bad); stroke-dasharray: 6 4; }
+svg.dag .edge.always, .legend .dep.always { stroke-dasharray: 2 3; }
+svg.dag .edge.has-data, .legend .dep.has-data { stroke: var(--ok); }
 svg.lineage .box { fill: var(--node); stroke: var(--border); }
 svg.lineage .header { fill: var(--node-header); stroke: var(--border); }
 svg.lineage .focus .header { fill: var(--focus); }

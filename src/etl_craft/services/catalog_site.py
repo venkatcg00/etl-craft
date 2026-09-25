@@ -31,7 +31,12 @@ from etl_craft.config.project import sql_file
 from etl_craft.core.errors import EtlCraftError, UsageError
 from etl_craft.engine.repository.catalog import LastRun
 from etl_craft.services.catalog import Catalog, TableAsset, TaskAsset, latest_run
-from etl_craft.services.catalog_graph import lineage_drawing, render_svg
+from etl_craft.services.catalog_graph import (
+    dag_drawing,
+    lineage_drawing,
+    render_dag_svg,
+    render_svg,
+)
 from etl_craft.services.lineage import COPY
 
 MARKER = ".etl-craft-catalog"
@@ -39,6 +44,20 @@ MARKER = ".etl-craft-catalog"
 
 ASSETS = ("catalog.css", "catalog.js")
 SQL_PARAMETERS = frozenset({"SOURCE_SQL"})
+ZOOM_BUTTONS = (
+    '<span class="zoom">'
+    '<button type="button" class="zoom-out" title="Zoom out">&minus;</button>'
+    '<button type="button" class="zoom-in" title="Zoom in">+</button>'
+    '<button type="button" class="zoom-fit" title="Fit the graph in view">Fit</button>'
+    "</span>"
+)
+TABS = (
+    ("search", "index.html", "Search"),
+    ("dags", "dags.html", "DAGs"),
+    ("warehouse", "warehouse.html", "Warehouse"),
+)
+"""The tabs at the top of every page: key, page, label."""
+ON = ' class="on"'
 DEFAULT_DEPTH = 3
 """Levels shown each way when a page opens, if the graph is deeper; the rest are a click away."""
 
@@ -156,6 +175,11 @@ def _table(headers: Sequence[str], rows: Iterable[Sequence[str]], empty: str) ->
     return f'<div class="scroll"><table class="list"><tr>{head}</tr>{body}</table></div>'
 
 
+def _anchor(*parts: str) -> str:
+    """Return the id of a database's or schema's heading on the warehouse page."""
+    return "w-" + slug(".".join(parts))
+
+
 def _counts(run: LastRun) -> str:
     counts = [
         ("source", run.source_count),
@@ -184,32 +208,90 @@ class _Writer:
             "window.CATALOG_INDEX = " + json.dumps(self._index(), ensure_ascii=True) + ";\n",
             encoding="utf-8",
         )
-        self._page("index.html", "etl-craft catalog", "", self._home())
-        for code in self.catalog.pipelines:
-            self._page(pipeline_url(code), code, "pipeline", self._pipeline(code))
-        for label in self.catalog.tasks:
-            self._page(task_url(label), label, "task", self._task(label))
-        for name, table in self.catalog.tables.items():
+        c = self.catalog
+        self._page("index.html", "etl-craft catalog", "", self._home(), "search", [])
+        self._page("dags.html", "DAGs", "", self._dags(), "dags", [])
+        self._page("warehouse.html", "Warehouse", "", self._warehouse(), "warehouse", [])
+        for code in c.pipelines:
+            crumbs = [("dags.html", "DAGs"), (None, code)]
+            self._page(pipeline_url(code), code, "pipeline", self._pipeline(code), "dags", crumbs)
+        for label, task in c.tasks.items():
+            self._page(
+                task_url(label), label, "task", self._task(label), "dags", self._task_crumbs(task)
+            )
+        for name, table in c.tables.items():
             if not table.external:
-                self._page(table_url(name), name, "table", self._table_page(name))
-        for rule_id, rule in self.catalog.rules.items():
-            self._page(rule_url(rule_id), rule.row.name, "business rule", self._rule(rule_id))
-        for name in self.catalog.scripts:
-            self._page(script_url(name), name, "ingestion script", self._script(name))
+                self._page(
+                    table_url(name),
+                    name,
+                    "table",
+                    self._table_page(name),
+                    "warehouse",
+                    self._table_crumbs(name),
+                )
+        for rule_id, rule in c.rules.items():
+            crumbs = (
+                [
+                    *self._task_crumbs(c.tasks[rule.task])[:-1],
+                    (task_url(rule.task), rule.row.task_code),
+                    (None, rule.row.name),
+                ]
+                if rule.task in c.tasks
+                else [(None, rule.row.name)]
+            )
+            self._page(
+                rule_url(rule_id),
+                rule.row.name,
+                "business rule",
+                self._rule(rule_id),
+                "dags",
+                crumbs,
+            )
+        for name in c.scripts:
+            crumbs = [
+                ("dags.html", "DAGs"),
+                ("dags.html#scripts", "Ingestion scripts"),
+                (None, name),
+            ]
+            self._page(
+                script_url(name), name, "ingestion script", self._script(name), "dags", crumbs
+            )
+
+    def _task_crumbs(self, task: TaskAsset) -> list[tuple[str | None, str]]:
+        code = task.row.pipeline_code
+        return [("dags.html", "DAGs"), (pipeline_url(code), code), (None, task.row.task_code)]
+
+    def _table_crumbs(self, name: str) -> list[tuple[str | None, str]]:
+        database, schema, table = self.catalog.where(name)
+        return [
+            ("warehouse.html", "Warehouse"),
+            (f"warehouse.html#{_anchor(database)}", database),
+            (f"warehouse.html#{_anchor(database, schema)}", schema),
+            (None, table),
+        ]
 
     # Page frame
 
-    def _page(self, path: str, title: str, kind: str, body: str) -> None:
+    def _page(
+        self,
+        path: str,
+        title: str,
+        kind: str,
+        body: str,
+        tab: str,
+        crumbs: Sequence[tuple[str | None, str]],
+    ) -> None:
         depth = path.count("/")
         root = "../" * depth
         nav = "".join(
-            f'<a href="{root}index.html#{anchor}">{label}</a>'
-            for anchor, label in (
-                ("pipelines", "Pipelines"),
-                ("tables", "Tables"),
-                ("untraced", "Lineage gaps"),
-            )
+            f'<a href="{root}{url}"{ON if key == tab else ""}>{label}</a>'
+            for key, url, label in TABS
         )
+        trail = " &rsaquo; ".join(
+            f'<a href="{_e(root + url)}">{_e(text)}</a>' if url is not None else _e(text)
+            for url, text in crumbs
+        )
+        crumb_bar = f'<nav class="crumbs">{trail}</nav>' if crumbs else ""
         kind_label = f'<div class="kind-label">{_e(kind)}</div>' if kind else ""
         generated = _e(self.catalog.generated_at.isoformat())
         document = (
@@ -223,7 +305,7 @@ class _Writer:
             '<div class="search"><input type="search" placeholder="Search pipelines, tasks, '
             'tables, columns, rules…" aria-label="Search the catalog" autocomplete="off">'
             '<div class="results"></div></div></header>'
-            f"<main>{kind_label}<h1>{_e(title)}</h1>{body}</main>"
+            f"<main>{crumb_bar}{kind_label}<h1>{_e(title)}</h1>{body}</main>"
             f'<footer class="foot">Generated {_e(_when(self.catalog.generated_at))}; run '
             "details are as of then. <code>etl-craft generate-docs</code> writes the site "
             "again.</footer>"
@@ -252,49 +334,71 @@ class _Writer:
     def _home(self) -> str:
         c = self.catalog
         search = (
-            '<section id="search-page"><h2>Search</h2>'
-            '<input type="search" class="big" placeholder="Search everything" '
-            'aria-label="Search everything" style="width:100%;padding:8px;font:inherit">'
+            '<section id="search-page">'
+            '<input type="search" class="big" placeholder="Search pipelines, tasks, tables, '
+            'columns, rules, scripts and documentation" aria-label="Search everything">'
             '<div class="chips"></div><p class="note summary"></p>'
             '<div class="all-results"></div></section>'
         )
-        stats = _facts(
+        tables = sum(1 for t in c.tables.values() if not t.external)
+        return search + _facts(
             [
-                ("Pipelines", str(len(c.pipelines))),
+                ("DAGs", self._link("dags.html", f"{len(c.pipelines)} pipeline(s)", "")),
                 ("Tasks", str(len(c.tasks))),
-                ("Tables", str(sum(1 for t in c.tables.values() if not t.external))),
+                ("Warehouse", self._link("warehouse.html", f"{tables} table(s)", "")),
                 ("Business rules", str(len(c.rules))),
-                ("Ingestion scripts", str(len(c.scripts))),
+                ("Ingestion scripts", self._link("dags.html#scripts", str(len(c.scripts)), "")),
+                (
+                    "Lineage gaps",
+                    self._link("dags.html#untraced", f"{len(c.untraced)} task(s)", "")
+                    if c.untraced
+                    else "none",
+                ),
                 ("Generated", _e(_when(c.generated_at))),
             ]
         )
+
+    def _dags(self) -> str:
+        c = self.catalog
         pipelines = _table(
-            ["Pipeline", "Name", "Schedule", "Last run", "Ended"],
+            [
+                "Pipeline",
+                "Name",
+                "Description",
+                "Schedule",
+                "Refresh",
+                "Depends on",
+                "Tasks",
+                "Last run",
+            ],
             (
                 [
                     self._link(pipeline_url(code), code, ""),
                     _e(p.row.pipeline_name),
+                    _e(p.row.description),
                     _e(p.row.run_schedule),
-                    _status(p.row.last_run.status) if p.row.last_run else "never run",
-                    _e(_when(p.row.last_run.end)) if p.row.last_run else "",
+                    _e(p.row.refresh_type),
+                    ", ".join(self._link(pipeline_url(u), u, "") for u, _ in p.depends_on),
+                    str(len(p.tasks)),
+                    f"{_status(p.row.last_run.status)} {_e(_when(p.row.last_run.end))}"
+                    if p.row.last_run
+                    else "never run",
                 ]
                 for code, p in c.pipelines.items()
             ),
             "No active pipelines.",
         )
-        tables = _table(
-            ["Table", "Written by", "Read by", "Columns"],
+        scripts = _table(
+            ["Ingestion script", "Run by", "Found"],
             (
                 [
-                    self._link(table_url(name), name, ""),
-                    ", ".join(self._task_link(t, "") for t in table.writers),
-                    str(len(table.readers)),
-                    str(len(table.columns)),
+                    self._link(script_url(name), name, ""),
+                    ", ".join(self._task_link(t, "") for t in script.tasks),
+                    "yes" if script.exists else '<span class="badge warn">missing</span>',
                 ]
-                for name, table in sorted(c.tables.items())
-                if not table.external
+                for name, script in sorted(c.scripts.items())
             ),
-            "No tables yet.",
+            "No ingestion scripts.",
         )
         untraced = _table(
             ["Task", "Why its columns cannot be traced"],
@@ -302,10 +406,73 @@ class _Writer:
             "Every SQL task's columns are traced.",
         )
         return (
-            f'{stats}{search}<h2 id="pipelines">Pipelines</h2>{pipelines}'
-            f'<h2 id="tables">Tables</h2>{tables}'
+            f'{pipelines}<h2 id="scripts">Ingestion scripts</h2>{scripts}'
             f'<h2 id="untraced">Column lineage unavailable</h2>{untraced}'
         )
+
+    def _warehouse(self) -> str:
+        c = self.catalog
+        grouped: dict[str, dict[str, list[str]]] = {}
+        for name, table in sorted(c.tables.items()):
+            if table.external:
+                continue
+            database, schema, _ = c.where(name)
+            grouped.setdefault(database, {}).setdefault(schema, []).append(name)
+        parts = []
+        contents = []
+        for database, schemas in sorted(grouped.items()):
+            contents.append(
+                f'<li><a href="#{_anchor(database)}">{_e(database)}</a>: '
+                + ", ".join(
+                    f'<a href="#{_anchor(database, schema)}">{_e(schema)}</a>'
+                    for schema in sorted(schemas)
+                )
+                + "</li>"
+            )
+            parts.append(f'<h2 id="{_anchor(database)}">{_e(database)}</h2>')
+            for schema, names in sorted(schemas.items()):
+                parts.append(f'<h3 id="{_anchor(database, schema)}">{_e(schema)}</h3>')
+                parts.append(
+                    _table(
+                        ["Table", "Columns", "Written by", "Read by", "Pipelines", "Rules"],
+                        (
+                            [
+                                self._link(table_url(name), c.where(name)[2], ""),
+                                str(len(table.columns)),
+                                ", ".join(self._task_link(t, "") for t in table.writers),
+                                ", ".join(self._task_link(t, "") for t in table.readers),
+                                ", ".join(
+                                    self._link(pipeline_url(p), p, "")
+                                    for p in self._pipelines_of(table)
+                                ),
+                                str(len(table.rules)) if table.rules else "",
+                            ]
+                            for name in names
+                            for table in [c.tables[name]]
+                        ),
+                        "",
+                    )
+                )
+        external = [t for t in c.tables.values() if t.external]
+        if external:
+            parts.append('<h2 id="external">External sources</h2>')
+            parts.append(
+                _table(
+                    ["Source", "Read by"],
+                    (
+                        [_e(t.label), ", ".join(self._task_link(r, "") for r in t.readers)]
+                        for t in external
+                    ),
+                    "",
+                )
+            )
+        if not contents:
+            return '<p class="note">No tables yet.</p>'
+        return f'<ul class="contents">{"".join(contents)}</ul>' + "".join(parts)
+
+    def _pipelines_of(self, table: TableAsset) -> list[str]:
+        codes = {self.catalog.tasks[t].row.pipeline_code for t in (*table.writers, *table.readers)}
+        return sorted(codes)
 
     # Pipelines and tasks
 
@@ -313,10 +480,15 @@ class _Writer:
         p = self.catalog.pipelines[code]
         row = p.row
         run = row.last_run
+        description = (
+            f'<p class="doc">{_e(row.description)}</p>'
+            if row.description
+            else '<p class="note">No description: set <code>CFG_PIPELINES.DESCRIPTION</code> '
+            "to document this pipeline.</p>"
+        )
         facts = _facts(
             [
                 ("Name", _e(row.pipeline_name)),
-                ("Description", _e(row.description)),
                 ("Schedule", _e(row.run_schedule)),
                 ("Refresh", _e(row.refresh_type)),
                 ("SLA", _e(f"{row.sla_in_hours:g} hours") if row.sla_in_hours else ""),
@@ -340,12 +512,14 @@ class _Writer:
             ]
         )
         tasks = _table(
-            ["Task", "Handler", "Writes", "Last run", "Counts"],
+            ["Task", "Handler", "Waits for", "Writes", "Reads", "Last run", "Counts"],
             (
                 [
                     self._task_link(label),
                     _e(task.row.handler),
+                    self._waits(task.upstream),
                     self._table_link(task.target) if task.target else "",
+                    ", ".join(self._table_link(t) for t in task.sources),
                     _status(task.row.last_run.status) if task.row.last_run else "never run",
                     _e(_counts(task.row.last_run)) if task.row.last_run else "",
                 ]
@@ -354,7 +528,41 @@ class _Writer:
             ),
             "No active tasks.",
         )
-        return f"{facts}<h2>Tasks</h2>{tasks}"
+        return f"{description}{facts}{self._dag(code)}<h2>Tasks</h2>{tasks}"
+
+    def _checked(self, task: TaskAsset) -> list[str]:
+        return sorted({self.catalog.rules[r].table for r in task.rules})
+
+    def _waits(self, dependencies: Sequence[tuple[str, str]]) -> str:
+        return ", ".join(f"{self._task_link(t)} ({_e(kind)})" for t, kind in dependencies)
+
+    def _dag(self, code: str) -> str:
+        if not self.catalog.pipelines[code].tasks:
+            return ""
+        drawing = dag_drawing(self.catalog, code)
+        svg = render_dag_svg(
+            drawing,
+            self.catalog,
+            lambda label: "../" + task_url(label),
+            lambda table: "../" + table_url(table),
+        )
+        legend = "".join(
+            f'<span><svg width="30" height="8"><path class="dep {style}" d="M0,4 H30"/></svg> '
+            f"{kind}</span>"
+            for kind, style in (
+                ("SUCCESS", "success"),
+                ("FAILURE", "failure"),
+                ("ALWAYS", "always"),
+                ("HAS_DATA", "has-data"),
+            )
+        )
+        return (
+            '<h2>DAG</h2><div class="graph-panel dag-panel"><div class="controls">'
+            f"{ZOOM_BUTTONS}</div>"
+            f'<div class="legend">{legend}<span>→ writes, ← reads, ✓ checks. Click a task or '
+            "a table to open it. Drag to pan; Ctrl or ⌘ with the wheel zooms.</span></div>"
+            f'<div class="graph">{svg}</div></div>'
+        )
 
     def _task(self, label: str) -> str:
         task = self.catalog.tasks[label]
@@ -369,12 +577,21 @@ class _Writer:
         facts = _facts(
             [
                 ("Pipeline", self._link(pipeline_url(row.pipeline_code), row.pipeline_code)),
+                ("Waits for", self._waits(task.upstream)),
+                ("Needed by", self._waits(task.downstream)),
                 ("Handler", _e(row.handler)),
                 ("Type", _e(row.task_type)),
                 ("Run condition", _e(row.run_condition or "ALL")),
                 ("Writes", self._table_link(task.target) if task.target else ""),
                 ("Reads", ", ".join(self._table_link(s) for s in task.sources)),
                 ("Script", self._link(script_url(task.script), task.script) if task.script else ""),
+                (
+                    "Business rules",
+                    ", ".join(
+                        self._link(rule_url(r), self.catalog.rules[r].row.name) for r in task.rules
+                    ),
+                ),
+                ("Checks", ", ".join(self._table_link(t) for t in self._checked(task))),
                 (
                     "Last run",
                     f"{_status(run.status)} {_e(_when(run.end))} · {_e(_counts(run))}"
@@ -450,6 +667,10 @@ class _Writer:
                 ("Written by", ", ".join(self._task_link(w) for w in table.writers)),
                 ("Read by", ", ".join(self._task_link(r) for r in table.readers)),
                 (
+                    "Pipelines",
+                    ", ".join(self._link(pipeline_url(p), p) for p in self._pipelines_of(table)),
+                ),
+                (
                     "Business rules",
                     ", ".join(
                         self._link(rule_url(r), self.catalog.rules[r].row.name) for r in table.rules
@@ -510,17 +731,13 @@ class _Writer:
         )
         svg = render_svg(drawing, lambda table: "../" + table_url(table))
         return (
-            f'<h2>Lineage</h2><div class="graph-panel" data-focus="{_e(name)}">'
+            f'<h2>Lineage</h2><div class="graph-panel lineage-panel" data-focus="{_e(name)}">'
             '<div class="controls"><label>Direction <select class="direction">'
             '<option value="both">both</option><option value="upstream">upstream</option>'
             '<option value="downstream">downstream</option></select></label>'
             f'<label>Depth <select class="depth">{options}'
             f'<option value="all"{all_selected}>all</option></select></label>'
-            '<span class="zoom">'
-            '<button type="button" class="zoom-out" title="Zoom out">&minus;</button>'
-            '<button type="button" class="zoom-in" title="Zoom in">+</button>'
-            '<button type="button" class="zoom-fit" title="Fit the graph in view">Fit</button>'
-            "</span>"
+            f"{ZOOM_BUTTONS}"
             '<button type="button" class="expand-all">Expand all</button>'
             '<button type="button" class="collapse-all">Collapse all</button>'
             '<button type="button" class="reset">Clear trace</button></div>'
