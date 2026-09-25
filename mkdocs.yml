@@ -107,6 +107,7 @@ nav:
   - Deploying:
       - deploying/index.md
       - The project directory: deploying/project-layout.md
+      - Running under an orchestrator: deploying/orchestrator.md
       - Engine DB setup and upgrades: deploying/engine-db.md
   - Connectors:
       - connectors/index.md
