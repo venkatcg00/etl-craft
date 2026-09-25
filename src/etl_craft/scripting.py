@@ -10,18 +10,18 @@ A task with ``HANDLER = 'PYTHON'`` names a script under the project's ``ingestio
         since = task.offset.value if task.offset else 0
         rows = read_source_after(since)            # the script's own code
         with task.warehouse() as engine, engine.begin() as conn:
-            inserted = write(conn, rows, pipeline_run_id=task.pipeline_run_id)
+            written = write(conn, rows, pipeline_run_id=task.pipeline_run_id)
         return ScriptResult(
-            source_count=len(rows),
-            target_count=count_target(),
-            insert_count=inserted,
+            row_count=written,
             offset=Offset.number(max(r.id for r in rows)) if rows else None,
         )
 
 The script reads its source from where the last successful run left off (``task.offset``) and
-writes its table, stamping each row with ``task.pipeline_run_id``. Everything it prints or logs
-goes to the task attempt's log. The engine records the counts in ``AUD_TASK_RUN_LOG`` and, when
-the script returns an offset, stores it for the next run.
+writes its table, stamping each row with ``task.pipeline_run_id``. It reports the rows it wrote,
+which the engine records as the task's source, target and insert counts, and, when it moved on,
+the new offset, which the engine stores for the next run. A script that needs neither the offset
+nor ``INPUT_PARAMS`` may define ``run()`` without a parameter. Everything it prints or logs goes
+to the task attempt's log.
 """
 
 from __future__ import annotations
@@ -44,72 +44,90 @@ from etl_craft.warehouse.connection import open_warehouse
 OffsetValue = int | Decimal | str | datetime
 
 
+_OFFSET_PYTHON_TYPES: dict[OffsetType, tuple[type, ...]] = {
+    OffsetType.NUMBER: (int, Decimal),
+    OffsetType.TEXT: (str,),
+    OffsetType.TIMESTAMP: (datetime,),
+}
+
+
 @dataclass(frozen=True)
 class Offset:
-    """Where a script left off: a number, a text, or a timestamp.
+    """Where a script left off: a value and its datatype, ``NUMBER``, ``TEXT`` or ``TIMESTAMP``.
 
-    Build one with ``Offset.number``, ``Offset.text`` or ``Offset.timestamp``.
+    The value must already be of its datatype: an ``int`` or ``Decimal`` for ``NUMBER``, a
+    ``str`` for ``TEXT``, a ``datetime`` for ``TIMESTAMP``. Nothing is converted: ``Offset("7",
+    "NUMBER")`` fails. A script gets its offset back as it returned it, value and datatype.
+    ``Offset.number``, ``Offset.text`` and ``Offset.timestamp`` are shorthands.
     """
 
-    type: OffsetType
     value: OffsetValue
+    datatype: OffsetType
+
+    def __post_init__(self) -> None:
+        """Check the datatype is known and the value is of it."""
+        try:
+            kind = OffsetType(str(self.datatype).upper())
+        except ValueError:
+            raise HandlerError(
+                f"offset datatype {self.datatype!r} is not one of NUMBER, TEXT, TIMESTAMP"
+            ) from None
+        object.__setattr__(self, "datatype", kind)
+        allowed = _OFFSET_PYTHON_TYPES[kind]
+        if isinstance(self.value, bool) or not isinstance(self.value, allowed):
+            names = " or ".join(t.__name__ for t in allowed)
+            raise HandlerError(
+                f"a {kind} offset needs a {names} value, got {type(self.value).__name__} "
+                f"{self.value!r}; the engine does not convert it"
+            )
 
     @classmethod
     def number(cls, value: int | Decimal) -> Offset:
-        """Build an offset that is a number, such as the largest id read."""
-        if isinstance(value, bool) or not isinstance(value, int | Decimal):
-            raise HandlerError(f"Offset.number needs an int or Decimal, got {value!r}")
-        return cls(OffsetType.NUMBER, value)
+        """Build a ``NUMBER`` offset, such as the largest id read."""
+        return cls(value, OffsetType.NUMBER)
 
     @classmethod
     def text(cls, value: str) -> Offset:
-        """Build an offset that is text, such as a cursor or a file name."""
-        if not isinstance(value, str):
-            raise HandlerError(f"Offset.text needs a str, got {value!r}")
-        return cls(OffsetType.TEXT, value)
+        """Build a ``TEXT`` offset, such as a cursor or a file name."""
+        return cls(value, OffsetType.TEXT)
 
     @classmethod
     def timestamp(cls, value: datetime) -> Offset:
-        """Build an offset that is a point in time, such as the latest change read."""
-        if not isinstance(value, datetime):
-            raise HandlerError(f"Offset.timestamp needs a datetime, got {value!r}")
-        return cls(OffsetType.TIMESTAMP, value)
+        """Build a ``TIMESTAMP`` offset, such as the latest change read."""
+        return cls(value, OffsetType.TIMESTAMP)
 
     def stored(self) -> str:
-        """Return the text the offset is stored as."""
+        """Return the text the offset is stored as, beside its datatype."""
         if isinstance(self.value, datetime):
             return self.value.isoformat()
         return str(self.value)
 
     @classmethod
-    def from_stored(cls, offset_type: str, text: str) -> Offset:
-        """Read an offset back from its stored type and text."""
+    def from_stored(cls, datatype: str, text: str) -> Offset:
+        """Read an offset back from its stored datatype and text, as the script returned it."""
         try:
-            kind = OffsetType(offset_type)
+            kind = OffsetType(datatype)
             if kind == OffsetType.NUMBER:
                 number = Decimal(text)
-                return cls(kind, int(number) if number == number.to_integral_value() else number)
+                return cls(int(number) if number == number.to_integral_value() else number, kind)
             if kind == OffsetType.TIMESTAMP:
-                return cls(kind, datetime.fromisoformat(text))
-            return cls(kind, text)
+                return cls(datetime.fromisoformat(text), kind)
+            return cls(text, kind)
         except (ValueError, InvalidOperation) as error:
             raise HandlerError(
-                f"the stored offset {text!r} is not a valid {offset_type}: {error}"
+                f"the stored offset {text!r} is not a valid {datatype}: {error}"
             ) from error
 
 
 @dataclass(frozen=True)
 class ScriptResult:
-    """What a script reports: its counts, where it left off, and any values of its own.
+    """What a script reports: the rows it wrote, where it left off, and any values of its own.
 
-    ``source_count``, ``target_count`` and ``insert_count`` are required: the rows read, the
-    rows in the target afterwards, and the rows written. ``offset`` of ``None`` keeps the stored
-    offset. ``variables`` are listed in the task log as ``NAME = value`` lines.
+    ``row_count`` is required, a whole number of 0 or more. ``offset`` of ``None`` keeps the
+    stored offset. ``variables`` are listed in the task log as ``NAME = value`` lines.
     """
 
-    source_count: int
-    target_count: int
-    insert_count: int
+    row_count: int
     offset: Offset | None = None
     variables: Mapping[str, Any] = field(default_factory=dict)
 

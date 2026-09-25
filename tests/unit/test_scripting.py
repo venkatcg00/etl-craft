@@ -21,18 +21,26 @@ pytestmark = pytest.mark.unit
     ],
 )
 def test_an_offset_is_stored_and_read_back_unchanged(offset):
-    assert Offset.from_stored(offset.type, offset.stored()) == offset
+    assert Offset.from_stored(offset.datatype, offset.stored()) == offset
+
+
+def test_an_offset_is_a_value_and_its_datatype():
+    offset = Offset(7, "number")
+    assert (offset.value, offset.datatype) == (7, "NUMBER")
+    assert offset == Offset.number(7)
 
 
 @pytest.mark.parametrize(
     ("build", "message"),
     [
-        (lambda: Offset.number(True), "Offset.number needs an int or Decimal"),
-        (lambda: Offset.number("7"), "Offset.number needs an int or Decimal"),
-        (lambda: Offset.text(7), "Offset.text needs a str"),
-        (lambda: Offset.timestamp("2026-01-01"), "Offset.timestamp needs a datetime"),
+        # Nothing is converted: the value must already be of its datatype.
+        (lambda: Offset("7", "NUMBER"), "a NUMBER offset needs a int or Decimal value, got str"),
+        (lambda: Offset(7.5, "NUMBER"), "got float 7.5; the engine does not convert it"),
+        (lambda: Offset.number(True), "a NUMBER offset needs a int or Decimal value, got bool"),
+        (lambda: Offset.text(7), "a TEXT offset needs a str value, got int"),
+        (lambda: Offset("2026-01-01", "TIMESTAMP"), "a TIMESTAMP offset needs a datetime value"),
+        (lambda: Offset(1, "DATE"), "offset datatype 'DATE' is not one of NUMBER, TEXT, TIMESTAMP"),
         (lambda: Offset.from_stored("NUMBER", "abc"), "the stored offset 'abc' is not a valid"),
-        (lambda: Offset.from_stored("DATE", "x"), "is not a valid DATE"),
     ],
 )
 def test_a_wrong_offset_says_what_it_needs(build, message):

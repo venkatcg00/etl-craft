@@ -41,11 +41,8 @@ def run(task):
             conn.exec_driver_sql(
                 f"INSERT INTO main.events VALUES ({i}, '{region}', {task.pipeline_run_id})"
             )
-        total = conn.exec_driver_sql("SELECT COUNT(*) FROM main.events").scalar()
     return ScriptResult(
-        source_count=count,
-        target_count=total,
-        insert_count=len(ids),
+        row_count=len(ids),
         offset=Offset.number(ids[-1]),
         variables={"REGION": region},
     )
@@ -129,6 +126,7 @@ def test_a_script_runs_in_the_task_process_and_resumes_from_its_offset(project):
     assert "running load.py from offset none (first run) with 2 input param(s)" in log
 
     # The next run starts where this one left off.
+    assert "load.py wrote 2 row(s)" in log
     with engine.begin() as conn:
         runlog.finalize_pipeline_run(
             conn, runlog.fetch_active_pipeline_run_id(conn, pipeline), "SUCCESS"
@@ -136,7 +134,7 @@ def test_a_script_runs_in_the_task_process_and_resumes_from_its_offset(project):
         start_run(conn, pipeline)
     second = run_task(engine, config, "P", "load")
     assert second.status == RunStatus.SUCCESS, second.message
-    assert task_row(engine, second.task_run_id).target == 4
+    assert task_row(engine, second.task_run_id).inserted == 2
     warehouse = build_warehouse_engine(config)
     try:
         with warehouse.connect() as conn:
@@ -170,10 +168,16 @@ RESULT = "from etl_craft.scripting import Offset, ScriptResult\n"
         ("import sys\ndef run(task):\n    sys.exit(3)\n", {}, r"load.py called sys.exit\(3\)"),
         ("def run(task):\n    return 5\n", {}, "load.py returned int, not a ScriptResult"),
         (
-            RESULT + "def run(task):\n    return ScriptResult(-1, 2, True)\n",
+            RESULT + "def run(task):\n    return ScriptResult(True)\n",
             {},
-            "source_count=-1, insert_count=True; each count must be a whole number",
+            "load.py returned row_count=True; it must be a whole number, 0 or more",
         ),
+        (
+            RESULT + "def run(task):\n    return ScriptResult(-1)\n",
+            {},
+            "returned row_count=-1",
+        ),
+        ("def run(a, b):\n    pass\n", {}, "run takes 2 arguments; it takes the task, or nothing"),
         ("def run(task):\n    pass\n", {"INPUT_PARAMS": '{"a": 1}'}, "must be a JSON array"),
         ("def run(task):\n    pass\n", {"INPUT_PARAMS": "[1,"}, "INPUT_PARAMS is not valid JSON"),
         ("def run(task):\n    pass\n", {"SCRIPT_NAME": ""}, "SCRIPT_NAME is required"),
@@ -190,13 +194,18 @@ def test_a_missing_script_is_named(project):
 
 
 def test_an_offset_keeps_its_type(project):
-    number = RESULT + "def run(task):\n    return ScriptResult(0, 0, 0, Offset.number(7))\n"
+    number = RESULT + "def run(task):\n    return ScriptResult(0, Offset.number(7))\n"
     run_in_process(project, number)
-    textual = RESULT + "def run(task):\n    return ScriptResult(0, 0, 0, Offset.text('x'))\n"
+    textual = RESULT + "def run(task):\n    return ScriptResult(0, Offset.text('x'))\n"
     with pytest.raises(HandlerError, match="returned a TEXT offset, but the stored one is NUMBER"):
         run_in_process(project, textual)
     kept = (
         RESULT + "def run(task):\n    assert task.offset == Offset.number(7)\n"
-        "    return ScriptResult(0, 0, 0)\n"
+        "    return ScriptResult(0)\n"
     )
     assert run_in_process(project, kept).variables == {}
+
+
+def test_a_script_that_needs_nothing_from_the_task(project):
+    result = run_in_process(project, RESULT + "def run():\n    return ScriptResult(3)\n")
+    assert (result.source_count, result.target_count, result.insert_count) == (3, 3, 3)
