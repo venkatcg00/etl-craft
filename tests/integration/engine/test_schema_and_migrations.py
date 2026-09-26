@@ -31,21 +31,21 @@ def table_exists(engine, name):
 
 
 @pytest.fixture
-def initialized(empty_engine_db):
-    init_db(empty_engine_db.engine)
-    return empty_engine_db.engine
-
-
-@pytest.fixture
 def packaged(monkeypatch, tmp_path):
-    """Point the packaged ENGINE stream at a directory the test controls."""
+    """Point the packaged ENGINE stream at a directory the test controls, empty to start with."""
     directory = tmp_path / "packaged"
     directory.mkdir()
     monkeypatch.setattr(EngineDialect, "migrations_dir", lambda self: directory)
     return directory
 
 
-def test_init_db_creates_the_schema(empty_engine_db):
+@pytest.fixture
+def initialized(empty_engine_db, packaged):
+    init_db(empty_engine_db.engine)
+    return empty_engine_db.engine
+
+
+def test_init_db_creates_the_schema(empty_engine_db, packaged):
     engine = empty_engine_db.engine
     assert existing_engine_tables(engine) == []
     result = init_db(engine)

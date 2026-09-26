@@ -160,14 +160,14 @@ squash-merged by pull request (see `CONTRIBUTING.md` for the definition of done)
 | H3 | `test/cloud-acceptance` | Databricks and Snowflake suites, `make acceptance-cloud` (credentials read from `.env.acceptance` with the project parser; missing ones fail), evidence. The suites add the demo's warehouse work from the built wheel on Databricks (Delta, UniForm) and Snowflake (native, Iceberg), in schemas unique to the run that it drops. It found, and this fixes: SQLAlchemy 2.1 breaks the Databricks connector (the `databricks` extra keeps SQLAlchemy below 2.1), and cloning inserted a row per statement, hours on a cloud warehouse (now many rows per INSERT) | cloud tests | G2 | done |
 | I1 | `docs/guides` | Quick Start (the Support Insights demo, run as written by the `e2e-pip` suite from the built wheel, with `examples/demo/prepare.py` for the schemas and metadata), the Pipelines and tasks guide, Local mode, Operations and Security pages, the Authentication page, and the README | `docs/`, `README.md` | G1, G2| done |
 | I2 | `docs/reference-generated` | Generated CLI, configuration, parameter and schema references: the configuration page lists every setting the loader accepts (`settings_by_section`) with where it is explained, the parameter page every name each handler reads, the schema page every Engine DB table and column with its comment, allowed values and unique keys; unit tests check every name is explained, and the `docs` suite that the pages are in the strict build | — | G1, G2 | done |
-| J1 | `release/0.1.0` | Version, changelog, release notes, wheel and sdist, install matrix, checksums, evidence, gate, tag | — | all | |
+| J1 | `release/0.1.0` | Version, changelog, release notes, wheel and sdist, install matrix, checksums, evidence, gate, tag | — | all | done |
 
 In parallel: A2 with A3; F1b, then C4, after F1; B2–B5; C2 with C3; F1–F4 after P1 (F2 after F1); G1 with G2, G1c then G4, then G3; H1–H3 with I1–I2.
 Critical path: A1 → B1 → B4 → C1 → C2 → D1 → E1 → E2 → G2 → H2 → J1.
 
 After 0.1.0:
 
-- **K1 `feat/catalog-runs`**: skipping a run on purpose (`run --skip --reason`), pausing and resuming a pipeline, backfills over dates, and the interventions in each run's history; run history and KPIs in the catalog: each pipeline's and task's
+- **K1**, in four branches. **K1a `feat/pause-and-skip`** (done): skipping a run on purpose (`run --skip --reason`), and pausing and resuming a pipeline, with the Engine DB's first migration and an upgrade test from each released schema. **K1b `feat/backfill`**: backfills over dates. **K1c `feat/consumption-log`**: the consumption log and the gate's wait as a setting (below). **K1d `feat/catalog-runs`**: the interventions in each run's history; run history and KPIs in the catalog: each pipeline's and task's
   runs over time, durations, row counts and failures, SLA misses, and trends, reachable from the
   DAGs and Warehouse tabs like everything else.
   The cross-pipeline trackers become an append-only consumption log (one row per downstream

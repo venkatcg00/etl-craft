@@ -16,6 +16,7 @@ from etl_craft.engine.repository.dependencies import (
     fetch_pipeline_graph,
 )
 from etl_craft.engine.repository.interventions import Intervention, fetch_interventions
+from etl_craft.engine.repository.pauses import Pause, fetch_open_pauses
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.repository.tasks import (
     fetch_task_codes,
@@ -33,10 +34,12 @@ class PipelineSummary:
     refresh_type: str
     run_schedule: str | None
     sla_in_hours: float | None
+    paused: Pause | None = None
 
 
 def list_pipelines(conn: Connection) -> list[PipelineSummary]:
-    """Return every active pipeline, by code."""
+    """Return every active pipeline, by code, with its open pause if it is paused."""
+    paused = fetch_open_pauses(conn)
     return [
         PipelineSummary(
             row.pipeline_code,
@@ -44,6 +47,7 @@ def list_pipelines(conn: Connection) -> list[PipelineSummary]:
             row.refresh_type,
             row.run_schedule,
             None if row.sla_in_hours is None else float(row.sla_in_hours),
+            paused.get(row.pipeline_code),
         )
         for row in conn.execute(statement(conn, "active_pipelines"))
     ]

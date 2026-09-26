@@ -36,6 +36,9 @@ def handler(context, engine):
         os.kill(os.getpid(), signal.SIGKILL)
     if behaviour == "sleep":
         time.sleep(60)
+    if behaviour == "brief":
+        time.sleep(2)
+        return HandlerResult(target_count=1)
     raise AssertionError(behaviour)  # pragma: no cover
 
 

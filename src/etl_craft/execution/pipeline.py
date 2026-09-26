@@ -55,6 +55,7 @@ from etl_craft.core.log import log_context
 from etl_craft.engine import runlog
 from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
 from etl_craft.engine.repository.interventions import fetch_interventions
+from etl_craft.engine.repository.pauses import Pause
 from etl_craft.engine.repository.pipelines import (
     PipelineDetail,
     fetch_pipeline_detail,
@@ -69,7 +70,7 @@ from etl_craft.execution.gates import (
     check_pipeline_dependencies,
     consume_pipeline_dependencies,
 )
-from etl_craft.execution.interventions import check_override, record_gate_bypass
+from etl_craft.execution.interventions import check_override, open_pause, record_gate_bypass
 from etl_craft.execution.remote import require_supported
 from etl_craft.execution.runner import (
     ChildOptions,
@@ -89,12 +90,14 @@ T = TypeVar("T")
 class PipelineOutcome:
     """How a pipeline run, or one step of it, ended.
 
-    ``status`` is ``IN-PROGRESS`` after ``--init-only`` started the run.
+    ``status`` is ``IN-PROGRESS`` after ``--init-only`` started the run, or when the pipeline
+    was paused while it ran. ``pipeline_run_id`` is ``None`` when a paused pipeline started
+    nothing.
     """
 
     status: RunStatus
     message: str
-    pipeline_run_id: int
+    pipeline_run_id: int | None
     sla: runlog.SlaResult | None = None
 
 
@@ -168,6 +171,9 @@ def run_pipeline(
             "mode does; in remote mode the orchestrator runs each task, between run --init-only "
             "and run --finalize-only"
         )
+    paused = open_pause(engine, pipeline_code)
+    if paused is not None:
+        return _paused(pipeline_code, paused)
     clock = clock or Clock()
     hooks = hooks or default_hooks(config, engine)
     pipeline_id, detail = _prepare(engine, config, pipeline_code)
@@ -194,7 +200,7 @@ def run_pipeline(
         with _SlaWatch(engine, pipeline_code, pipeline_run_id, detail.sla_in_hours, hooks):
             if force:
                 for wave in graph.waves():
-                    if run_cancelled(engine, pipeline_run_id):
+                    if run_cancelled(engine, pipeline_run_id) or waves.paused():
                         break
                     waves.run(wave)
                 never_ready: list[int] = []
@@ -205,6 +211,15 @@ def run_pipeline(
                 )
         if run_cancelled(engine, pipeline_run_id):
             return _cancelled_run(engine, pipeline_code, pipeline_run_id, task_codes, hooks)
+        paused = open_pause(engine, pipeline_code)
+        if paused is not None:
+            message = (
+                f"{pipeline_code}: pipeline_run_id={pipeline_run_id} stays IN-PROGRESS, "
+                f"{paused.describe()}; the tasks that were running finished, and "
+                "`etl-craft run` goes on with the rest once it is resumed"
+            )
+            logger.warning("%s", message)
+            return PipelineOutcome(RunStatus.IN_PROGRESS, message, pipeline_run_id)
         return _finalize(
             engine,
             pipeline_code,
@@ -238,6 +253,10 @@ def init_pipeline_run(
     if remote:
         with engine.connect() as conn:
             require_supported(conn, config, pipeline_code)
+    else:
+        paused = open_pause(engine, pipeline_code)
+        if paused is not None:
+            return _paused(pipeline_code, paused)
     pipeline_id, _ = _prepare(engine, config, pipeline_code)
     pipeline_run_id, skip_reason = _start_run(
         engine, config, pipeline_code, pipeline_id, clock or Clock(), check_gate=not remote
@@ -438,6 +457,16 @@ def _skipped_run(
     return outcome
 
 
+def _paused(pipeline_code: str, pause: Pause) -> PipelineOutcome:
+    """Report a pipeline that started nothing because it is paused."""
+    message = (
+        f"{pipeline_code}: {pause.describe()}; nothing started. `etl-craft resume "
+        f"--pipeline_code {pipeline_code}` lets it run again"
+    )
+    logger.warning("%s", message)
+    return PipelineOutcome(RunStatus.SKIPPED, message, None)
+
+
 def _cancelled_run(
     engine: Engine,
     pipeline_code: str,
@@ -515,8 +544,15 @@ class _Waves:
                 )
                 raise
 
+    def paused(self) -> bool:
+        """Whether the pipeline was paused, so no more tasks start."""
+        return open_pause(self.engine, self.pipeline_code) is not None
+
     def _run_one(self, task_code: str) -> TaskOutcome | None:
         if self.cancel.is_set() or run_cancelled(self.engine, self.pipeline_run_id):
+            return None
+        if self.paused():
+            logger.info("%s: not started, the pipeline is paused", task_code)
             return None
         try:
             return run_task(
@@ -552,7 +588,7 @@ def _run_until_settled(
     failures_final = False
     after_failure: list[int] = []
     while True:
-        if run_cancelled(engine, pipeline_run_id):
+        if run_cancelled(engine, pipeline_run_id) or waves.paused():
             return [], after_failure
         skipped = _settle_unsatisfiable(
             engine, graph, pipeline_run_id, task_codes, failures_final=failures_final

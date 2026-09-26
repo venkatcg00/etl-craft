@@ -48,6 +48,7 @@ from etl_craft.engine.repository.catalog import (
     fetch_documentation_versions,
 )
 from etl_craft.engine.repository.interventions import Intervention, fetch_interventions
+from etl_craft.engine.repository.pauses import Pause, fetch_open_pauses
 from etl_craft.engine.repository.tasks import fetch_task_parameters
 from etl_craft.engine.repository.validation import (
     fetch_pipeline_edges,
@@ -143,7 +144,7 @@ class TaskAsset:
 class PipelineAsset:
     """An active pipeline, its tasks, and the pipelines it depends on.
 
-    ``interventions`` are what operators changed in its last run.
+    ``interventions`` are what operators changed in its last run; ``paused`` is its open pause.
     """
 
     row: PipelineRow
@@ -151,6 +152,7 @@ class PipelineAsset:
     depends_on: list[tuple[str, str]] = field(default_factory=list)
     depended_on_by: list[str] = field(default_factory=list)
     interventions: list[Intervention] = field(default_factory=list)
+    paused: Pause | None = None
 
 
 @dataclass
@@ -218,6 +220,7 @@ def build_catalog(
         params = {row.task_id: fetch_task_parameters(conn, row.task_id) for row in task_rows}
         pipeline_edges = fetch_pipeline_edges(conn)
         task_edges = fetch_task_dependency_edges(conn)
+        paused = fetch_open_pauses(conn)
         changes = {
             row.pipeline_code: [
                 change
@@ -235,7 +238,11 @@ def build_catalog(
     catalog = Catalog(
         generated_at=datetime.now(UTC),
         pipelines={
-            row.pipeline_code: PipelineAsset(row, interventions=changes.get(row.pipeline_code, []))
+            row.pipeline_code: PipelineAsset(
+                row,
+                interventions=changes.get(row.pipeline_code, []),
+                paused=paused.get(row.pipeline_code),
+            )
             for row in pipeline_rows
         },
         tasks={},

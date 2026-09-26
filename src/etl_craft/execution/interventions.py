@@ -11,6 +11,11 @@ In local mode etl-craft is the orchestrator, so it is where an operator steps in
   this pipeline passes where it cannot really run (an upstream that only exists elsewhere).
 - ``cancel`` ends the pipeline's run ``CANCELLED``, with its running tasks. The process running
   each task watches for this and stops it; the process running the pipeline starts nothing more.
+- ``run --skip`` records a run ``SKIPPED`` on purpose, as ``mark --new-run`` does, so the
+  pipelines that depend on it see a run that did nothing.
+- ``pause`` stops a pipeline from running until ``resume``: ``run`` starts nothing of it, and a
+  run in progress starts no more tasks and stays ``IN-PROGRESS``, to go on once resumed. Pauses
+  are recorded in ``AUD_PIPELINE_PAUSES``.
 
 Every change is recorded in ``AUD_RUN_INTERVENTIONS`` with what the row held before, who asked
 and why, and no attempt, log or error is erased. In remote mode the orchestrator is the only
@@ -41,6 +46,7 @@ from etl_craft.core.errors import RunRefusedError, RunStateError, UsageError
 from etl_craft.engine import runlog
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import interventions as record
+from etl_craft.engine.repository import pauses
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.repository.tasks import resolve_task_id
 
@@ -245,6 +251,93 @@ def record_stand_in_run(
     return Intervened(message, run_id)
 
 
+def skip_run(
+    engine: Engine,
+    config: ConnectorConfig,
+    pipeline_code: str,
+    reason: str,
+    *,
+    requested_by: str | None = None,
+) -> Intervened:
+    """Record a run of ``pipeline_code`` ``SKIPPED`` on purpose: ``run --skip``.
+
+    Raises ``RunStateError`` while the pipeline has a run in progress.
+    """
+    done = record_stand_in_run(
+        engine, config, pipeline_code, RunStatus.SKIPPED, reason, requested_by=requested_by
+    )
+    return Intervened(
+        f"{pipeline_code}: pipeline_run_id={done.pipeline_run_id} SKIPPED on purpose: {reason}",
+        done.pipeline_run_id,
+    )
+
+
+def pause_pipeline(
+    engine: Engine,
+    config: ConnectorConfig,
+    pipeline_code: str,
+    reason: str,
+    *,
+    requested_by: str | None = None,
+) -> str:
+    """Pause ``pipeline_code`` until it is resumed; return what was done, in one line.
+
+    Raises ``RunStateError`` when it is already paused.
+    """
+    _check(config, "pause", reason, None, None)
+    who = requested_by or current_operator()
+    with engine.begin() as conn:
+        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+        existing = pauses.fetch_open_pause(conn, pipeline_id)
+        if existing is not None:
+            raise RunStateError(f"{pipeline_code} is already {existing.describe()}")
+        pauses.record_pause(conn, pipeline_id, who, reason)
+        active = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
+    message = f"{pipeline_code}: paused; `etl-craft run` starts nothing of it until resumed"
+    if active is not None:
+        message += (
+            f", and pipeline_run_id={active}, in progress, starts no more tasks and stays "
+            "IN-PROGRESS"
+        )
+    logger.warning("%s (by %s: %s)", message, who, reason)
+    return message
+
+
+def resume_pipeline(
+    engine: Engine,
+    config: ConnectorConfig,
+    pipeline_code: str,
+    reason: str,
+    *,
+    requested_by: str | None = None,
+) -> str:
+    """Resume a paused ``pipeline_code``; return what was done, in one line.
+
+    Raises ``RunStateError`` when it is not paused.
+    """
+    _check(config, "resume", reason, None, None)
+    who = requested_by or current_operator()
+    with engine.begin() as conn:
+        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+        if not pauses.close_pause(conn, pipeline_id, who, reason):
+            raise RunStateError(f"{pipeline_code} is not paused")
+        active = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
+    message = f"{pipeline_code}: resumed"
+    if active is not None:
+        message += (
+            f"; `etl-craft run --pipeline_code {pipeline_code}` goes on with "
+            f"pipeline_run_id={active}"
+        )
+    logger.warning("%s (by %s: %s)", message, who, reason)
+    return message
+
+
+def open_pause(engine: Engine, pipeline_code: str) -> pauses.Pause | None:
+    """Return the open pause of ``pipeline_code``, or ``None`` when it is not paused."""
+    with engine.connect() as conn:
+        return pauses.fetch_open_pause(conn, resolve_pipeline_id(conn, pipeline_code))
+
+
 def cancel_run(
     engine: Engine,
     config: ConnectorConfig,
@@ -376,8 +469,8 @@ def _check(
     if config.mode == Mode.REMOTE:
         raise RunRefusedError(
             f"{command} is only available in local mode: in remote mode the orchestrator is the "
-            "only source of truth for runs, so mark, clear or stop the task in the orchestrator "
-            "instead (in Airflow: Mark Success, Mark Failed, Clear)"
+            "only source of truth for runs, so mark, clear, stop or pause it in the orchestrator "
+            "instead (in Airflow: Mark Success, Mark Failed, Clear, pausing the DAG)"
         )
     if not reason.strip():
         raise UsageError(f"{command} needs a --reason: it is recorded with the change")

@@ -14,6 +14,7 @@ from etl_craft.cli.commands.common import connect_engine_db, load_command_config
 from etl_craft.cli.output import Output
 from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import ExitCode, UsageError
+from etl_craft.execution.interventions import skip_run
 from etl_craft.execution.pipeline import (
     finalize_active_run,
     init_pipeline_run,
@@ -62,7 +63,12 @@ def _configure(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="with --rerun: run every task after it again too, in dependency order",
     )
-    parser.add_argument("--reason", help="why, for --ignore-dependencies or --rerun")
+    parser.add_argument(
+        "--skip",
+        action="store_true",
+        help="record a run SKIPPED on purpose, running nothing; local mode only, with --reason",
+    )
+    parser.add_argument("--reason", help="why, for --ignore-dependencies, --rerun or --skip")
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
@@ -74,13 +80,18 @@ def _run(args: argparse.Namespace, out: Output) -> int:
         raise UsageError("--rerun already runs the task without checking its dependencies")
     if args.with_downstream and not args.rerun:
         raise UsageError("--with-downstream goes with --rerun")
-    if args.reason and not (args.ignore_dependencies or args.rerun):
-        raise UsageError("--reason goes with --ignore-dependencies or --rerun")
+    if args.skip and (args.task_code or args.init_only or args.finalize_only or args.force):
+        raise UsageError("--skip records a whole run SKIPPED; it takes only --reason")
+    if args.reason and not (args.ignore_dependencies or args.rerun or args.skip):
+        raise UsageError("--reason goes with --ignore-dependencies, --rerun or --skip")
     config = load_command_config(args)
     engine = connect_engine_db(config)
     child = ChildOptions(log_level=args.log_level, log_format=args.log_format)
     try:
-        if args.rerun:
+        if args.skip:
+            skipped = skip_run(engine, config, args.pipeline_code, args.reason or "")
+            status, message = RunStatus.SKIPPED, skipped.message
+        elif args.rerun:
             rerun = rerun_task(
                 engine,
                 config,

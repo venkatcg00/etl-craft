@@ -85,10 +85,14 @@ def test_list(project, capsys):
     code, out = run(capsys, "list")
     assert code == ExitCode.SUCCESS
     assert out.splitlines() == [
-        "PIPELINE_CODE\tPIPELINE_NAME\tREFRESH_TYPE\tRUN_SCHEDULE\tSLA_IN_HOURS",
-        "SALES\tSALES\tINCREMENTAL\t\t2.0",
-        "UP\tUP\tFULL\t\t",
+        "PIPELINE_CODE\tPIPELINE_NAME\tREFRESH_TYPE\tRUN_SCHEDULE\tSLA_IN_HOURS\tPAUSED",
+        "SALES\tSALES\tINCREMENTAL\t\t2.0\t",
+        "UP\tUP\tFULL\t\t\t",
     ]
+    assert run(capsys, "pause", "--pipeline_code", "UP", "--reason", "source down")[0] == 0
+    code, out = run(capsys, "list")
+    assert out.splitlines()[2].startswith("UP\tUP\tFULL\t\t\tpaused since ")
+    assert out.splitlines()[2].endswith(": source down")
 
 
 def test_graph(project, capsys):

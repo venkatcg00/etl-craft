@@ -24,9 +24,12 @@ from etl_craft.execution.interventions import (
     cancel_run,
     mark_run,
     mark_task,
+    pause_pipeline,
     record_stand_in_run,
+    resume_pipeline,
+    skip_run,
 )
-from etl_craft.execution.pipeline import RunHooks, rerun_task, run_pipeline
+from etl_craft.execution.pipeline import RunHooks, init_pipeline_run, rerun_task, run_pipeline
 from etl_craft.execution.runner import ChildOptions, Override, run_task
 from fixtures.metadata import add_dependency, add_pipeline, add_pipeline_dependency, add_task
 
@@ -536,3 +539,130 @@ def test_the_run_options(config, pipeline, capsys, monkeypatch):
     ):
         assert cli_main(["run", "--pipeline_code", "P", *argv]) == ExitCode.USAGE
         assert message in capsys.readouterr().err
+
+
+def run_count(engine):
+    with engine.connect() as conn:
+        return conn.execute(text("SELECT COUNT(*) FROM AUD_PIPELINES_RUN_LOG")).scalar_one()
+
+
+def test_a_paused_pipeline_starts_nothing_until_resumed(config, pipeline):
+    engine, _ = pipeline
+    message = pause_pipeline(engine, config, "P", "source is down", requested_by=WHO)
+    assert message == "P: paused; `etl-craft run` starts nothing of it until resumed"
+    with pytest.raises(RunStateError, match=r"P is already paused since .* by tester@host"):
+        pause_pipeline(engine, config, "P", "again", requested_by=WHO)
+
+    held = run_pipeline(engine, config, "P", child=CHILD)
+    assert (held.status, held.pipeline_run_id) == (RunStatus.SKIPPED, None)
+    assert "P: paused since" in held.message and "source is down; nothing started" in held.message
+    assert init_pipeline_run(engine, config, "P").pipeline_run_id is None
+    task = run_task(engine, config, "P", "extract", child=CHILD)
+    assert task.status == RunStatus.SKIPPED and "nothing started or recorded" in task.message
+    rerun = run_task(engine, config, "P", "extract", child=CHILD, override=Override("x"))
+    assert "nothing started or recorded" in rerun.message
+    assert run_count(engine) == 0
+
+    assert resume_pipeline(engine, config, "P", "source is back", requested_by=WHO) == (
+        "P: resumed"
+    )
+    with pytest.raises(RunStateError, match="P is not paused"):
+        resume_pipeline(engine, config, "P", "again", requested_by=WHO)
+    assert run_pipeline(engine, config, "P", child=CHILD).pipeline_run_id is not None
+    with engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT PAUSED_BY AS by, REASON AS why, RESUMED_BY AS resumed_by, "
+                "RESUME_REASON AS resume_why, RESUMED_AT AS resumed_at FROM AUD_PIPELINE_PAUSES"
+            )
+        ).one()
+    assert (row.by, row.why, row.resumed_by, row.resume_why) == (
+        WHO,
+        "source is down",
+        WHO,
+        "source is back",
+    )
+    assert row.resumed_at is not None
+    remote = replace(config, mode=Mode.REMOTE)
+    with pytest.raises(RunRefusedError, match="pausing the DAG"):
+        pause_pipeline(engine, remote, "P", "x")
+
+
+def test_a_run_paused_while_it_runs_stops_starting_tasks_and_goes_on_once_resumed(config, pipeline):
+    engine, ids = pipeline
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE = 'brief' WHERE TASK_ID = :t"),
+            {"t": ids["extract"]},
+        )
+        conn.execute(
+            text("UPDATE CFG_TASKS SET ACTIVE_FLAG = 'N' WHERE TASK_ID IN (:b, :a)"),
+            {"b": ids["broken"], "a": ids["after_broken"]},
+        )
+    outcome = {}
+    thread = threading.Thread(
+        target=lambda: outcome.setdefault("run", run_pipeline(engine, config, "P", child=CHILD))
+    )
+    thread.start()
+    started = time.monotonic()
+    while time.monotonic() - started < 30:
+        with engine.connect() as conn:
+            running = conn.execute(
+                text("SELECT COUNT(*) FROM AUD_TASK_RUN_LOG WHERE STATUS = 'IN-PROGRESS'")
+            ).scalar_one()
+        if running:
+            break
+        time.sleep(0.05)
+    message = pause_pipeline(engine, config, "P", "hold on", requested_by=WHO)
+    assert "starts no more tasks and stays IN-PROGRESS" in message
+    thread.join(timeout=60)
+    held = outcome["run"]
+    assert held.status == RunStatus.IN_PROGRESS
+    assert "stays IN-PROGRESS, paused since" in held.message
+    # extract finished; transform, which waits on it, did not start.
+    assert statuses(engine, held.pipeline_run_id) == {"extract": ("SUCCESS", 1)}
+    assert run_status(engine, held.pipeline_run_id) == "IN-PROGRESS"
+
+    assert "goes on with" in resume_pipeline(engine, config, "P", "go", requested_by=WHO)
+    done = run_pipeline(engine, config, "P", child=CHILD)
+    assert (done.status, done.pipeline_run_id) == (RunStatus.SUCCESS, held.pipeline_run_id)
+    assert statuses(engine, held.pipeline_run_id)["transform"] == ("SUCCESS", 9)
+
+
+def test_a_run_skipped_on_purpose_is_recorded_and_seen_downstream(config, pipeline):
+    engine, ids = pipeline
+    with engine.begin() as conn:
+        down = add_pipeline(conn, "DOWN")
+        add_task(conn, down, "load", BEHAVIOUR="succeed")
+        add_pipeline_dependency(conn, down, ids["P"])
+    skipped = skip_run(engine, config, "P", "public holiday", requested_by=WHO)
+    assert skipped.message == (
+        f"P: pipeline_run_id={skipped.pipeline_run_id} SKIPPED on purpose: public holiday"
+    )
+    assert run_status(engine, skipped.pipeline_run_id) == "SKIPPED"
+    assert interventions(engine)[-1][:5] == (
+        skipped.pipeline_run_id,
+        None,
+        "NEW_RUN",
+        None,
+        "SKIPPED",
+    )
+    downstream = run_pipeline(engine, config, "DOWN", child=CHILD, clock=NO_WAIT)
+    assert downstream.status == RunStatus.SKIPPED
+    assert "upstream pipeline P (SUCCESS)" in downstream.message
+
+
+def test_the_pause_and_skip_commands(config, pipeline, capsys, monkeypatch):
+    monkeypatch.chdir(config.project_dir)
+    assert cli_main(["pause", "--pipeline_code", "P", "--reason", "hold"]) == ExitCode.SUCCESS
+    assert capsys.readouterr().out.startswith("P: paused;")
+    assert cli_main(["run", "--pipeline_code", "P"]) == ExitCode.SUCCESS
+    assert "nothing started" in capsys.readouterr().out
+    assert cli_main(["resume", "--pipeline_code", "P", "--reason", "go"]) == ExitCode.SUCCESS
+    assert capsys.readouterr().out == "P: resumed\n"
+    code = cli_main(["run", "--pipeline_code", "P", "--skip", "--reason", "holiday"])
+    assert code == ExitCode.SUCCESS
+    assert "SKIPPED on purpose: holiday" in capsys.readouterr().out
+    assert cli_main(["run", "--pipeline_code", "P", "--skip", "--task_code", "x"]) == (
+        ExitCode.USAGE
+    )
