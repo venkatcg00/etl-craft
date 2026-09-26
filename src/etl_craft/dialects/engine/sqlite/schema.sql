@@ -220,7 +220,8 @@ BEGIN
     WHERE BUSINESS_RULE_ID = NEW.BUSINESS_RULE_ID;
 END;
 
--- One row per pipeline run: its status, when it ran, and whether it met its SLA.
+-- One row per pipeline run: its status, when it ran, whether it met its SLA, the date it ran
+-- as of (RUN_DATE, the SQL tasks' $$run_date), and whether it was part of a backfill.
 CREATE TABLE AUD_PIPELINES_RUN_LOG (
     PIPELINE_RUN_ID  INTEGER PRIMARY KEY AUTOINCREMENT,
     PIPELINE_ID      BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
@@ -228,6 +229,9 @@ CREATE TABLE AUD_PIPELINES_RUN_LOG (
     END_DATE         TIMESTAMP,
     STATUS           VARCHAR NOT NULL,
     SLA_STATUS       VARCHAR(8),
+    RUN_DATE         DATE,
+    BACKFILL         VARCHAR(1) NOT NULL DEFAULT 'N',
+    CONSTRAINT ck_pipeline_run_backfill CHECK (BACKFILL IN ('Y','N')),
     CONSTRAINT ck_pipeline_run_status CHECK (STATUS IN ('IN-PROGRESS','SUCCESS','FAILED','SKIPPED','CANCELLED')),
     CONSTRAINT ck_pipeline_run_sla_status CHECK (SLA_STATUS IN ('MET','BREACHED'))
 );

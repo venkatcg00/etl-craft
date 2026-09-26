@@ -167,7 +167,7 @@ Critical path: A1 → B1 → B4 → C1 → C2 → D1 → E1 → E2 → G2 → H2
 
 After 0.1.0:
 
-- **K1**, in four branches. **K1a `feat/pause-and-skip`** (done): skipping a run on purpose (`run --skip --reason`), and pausing and resuming a pipeline, with the Engine DB's first migration and an upgrade test from each released schema. **K1b `feat/backfill`**: backfills over dates. **K1c `feat/consumption-log`**: the consumption log and the gate's wait as a setting (below). **K1d `feat/catalog-runs`**: the interventions in each run's history; run history and KPIs in the catalog: each pipeline's and task's
+- **K1**, in four branches. **K1a `feat/pause-and-skip`** (done): skipping a run on purpose (`run --skip --reason`), and pausing and resuming a pipeline, with the Engine DB's first migration and an upgrade test from each released schema. **K1b `feat/backfill`** (done): run dates (`$$run_date`, `task.run_date`, `--run-date`, and the orchestrator's date from generated DAGs) and backfills over dates. **K1c `feat/consumption-log`**: the consumption log and the gate's wait as a setting (below). **K1d `feat/catalog-runs`**: the interventions in each run's history; run history and KPIs in the catalog: each pipeline's and task's
   runs over time, durations, row counts and failures, SLA misses, and trends, reachable from the
   DAGs and Warehouse tabs like everything else.
   The cross-pipeline trackers become an append-only consumption log (one row per downstream

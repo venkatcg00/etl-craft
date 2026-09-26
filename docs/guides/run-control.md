@@ -1,4 +1,4 @@
-# Stepping in: mark, cancel, pause, rerun and bypasses
+# Stepping in: mark, cancel, pause, backfill, rerun and bypasses
 
 In local mode etl-craft is the orchestrator, so it is where you step in when a run needs a hand:
 a failure you have fixed by other means, an upstream that cannot run where you are, a task to run
@@ -100,6 +100,24 @@ etl-craft run --pipeline_code SALES_DAILY --skip --reason "public holiday: no sa
 Records a run of the pipeline `SKIPPED`, running nothing, as a stand-in run does (see
 [Record a stand-in run](#record-a-stand-in-run)). The pipelines that depend on it see a run that
 did nothing: a `SUCCESS` dependency on it is not satisfied, an `ALWAYS` one is.
+
+## Backfill over dates
+
+```bash
+etl-craft run --pipeline_code SALES_DAILY --backfill 2026-09-01:2026-09-07 \
+    --reason "the source resent the first week of September"
+```
+
+Runs the pipeline once for each date, oldest first, each a run of its own as of its date: SQL
+tasks read it as [`$$run_date`](sql-tasks.md#the-pipeline-id-tokens), scripts as
+`task.run_date`. Backfill runs leave the scheduled runs as they were: they check no dependency on
+other pipelines and consume no upstream run (each run records that as a `GATE_BYPASS` with the
+reason), and scripts get no offset and store none. The backfill stops at the first run that does
+not end `SUCCESS` or `SKIPPED`, and says how to take up from that date once it is fixed. It runs
+at most 366 dates, and not while the pipeline has a run in progress or is paused.
+
+A single run can be given its date too: `etl-craft run --pipeline_code SALES_DAILY --run-date
+2026-09-01`. `etl-craft history` shows each run's date, and which were backfill runs.
 
 ## Run a task without its dependencies
 

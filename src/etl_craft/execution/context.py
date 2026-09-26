@@ -8,6 +8,7 @@ from etl_craft.config import ConnectorConfig
 from etl_craft.core.errors import RunStateError
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.tasks import fetch_task_execution_detail, fetch_task_parameters
+from etl_craft.engine.runlog import fetch_run_kind
 from etl_craft.handlers.registry import TaskContext
 
 
@@ -32,6 +33,7 @@ def build_task_context(
             raise RunStateError(f"no task run with task_run_id={task_run_id}")
         detail = fetch_task_execution_detail(conn, row.task_id)
         params = fetch_task_parameters(conn, row.task_id)
+        kind = fetch_run_kind(conn, row.pipeline_run_id)
     return TaskContext(
         config=config,
         pipeline_id=detail.pipeline_id,
@@ -46,4 +48,6 @@ def build_task_context(
         task_params=params,
         force=force,
         rerun=rerun,
+        run_date=kind.run_date,
+        backfill=kind.backfill,
     )

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import bindparam
 from sqlalchemy.engine import Connection
@@ -30,22 +30,31 @@ def fetch_active_pipeline_run_id(conn: Connection, pipeline_id: int) -> int | No
     return None if run_id is None else int(run_id)
 
 
-def find_or_create_active_run(conn: Connection, pipeline_id: int) -> int:
+def today() -> date:
+    """Return today's date in UTC: a run's ``RUN_DATE`` unless it is given one."""
+    return datetime.now(UTC).date()
+
+
+def find_or_create_active_run(
+    conn: Connection, pipeline_id: int, *, run_date: date | None = None, backfill: bool = False
+) -> int:
     """Return the ``IN-PROGRESS`` run of ``pipeline_id``, starting one when there is none.
 
-    When several processes start a run at once, the unique index lets one insert win; the
-    others read back its run.
+    A new run runs as of ``run_date`` (today, in UTC, unless given), and ``backfill`` marks it
+    part of a backfill. When several processes start a run at once, the unique index lets one
+    insert win; the others read back its run.
     """
     existing = fetch_active_pipeline_run_id(conn, pipeline_id)
     if existing is not None:
         return existing
+    params = {
+        "pipeline_id": pipeline_id,
+        "run_date": (run_date or today()).isoformat(),
+        "backfill": "Y" if backfill else "N",
+    }
     try:
         with conn.begin_nested():
-            return int(
-                conn.execute(
-                    statement(conn, "insert_pipeline_run"), {"pipeline_id": pipeline_id}
-                ).scalar_one()
-            )
+            return int(conn.execute(statement(conn, "insert_pipeline_run"), params).scalar_one())
     except IntegrityError:
         winner = fetch_active_pipeline_run_id(conn, pipeline_id)
         if winner is None:
@@ -128,6 +137,31 @@ def resolve_run_for_orchestrator(conn: Connection, pipeline_id: int) -> tuple[in
             ) from None
         return winner, None
     return int(latest.pipeline_run_id), str(latest.status)
+
+
+@dataclass(frozen=True)
+class RunKind:
+    """The date a run runs as of, and whether it is part of a backfill."""
+
+    run_date: date
+    backfill: bool
+
+
+def fetch_run_kind(conn: Connection, pipeline_run_id: int) -> RunKind:
+    """Return the run date and backfill flag of ``pipeline_run_id``, which must exist."""
+    row = conn.execute(
+        statement(conn, "pipeline_run_kind"), {"pipeline_run_id": pipeline_run_id}
+    ).one()
+    return RunKind(as_date(row.run_date), row.backfill == "Y")
+
+
+def as_date(value: object) -> date:
+    """Read a ``DATE`` column: a ``date`` from PostgreSQL, ``YYYY-MM-DD`` text from SQLite."""
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value)[:10])
 
 
 @dataclass(frozen=True)

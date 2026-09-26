@@ -30,9 +30,19 @@ def _run(args: argparse.Namespace, out: Output) -> int:
         out.empty("no runs yet")
         return ExitCode.SUCCESS
     if args.task_code is None:
-        out.rows([("PIPELINE_RUN_ID", "STATUS", "START_DATE", "END_DATE", "SLA_STATUS")])
         out.rows(
-            (e.pipeline_run_id, e.status, e.start_date, e.end_date, e.sla_status) for e in entries
+            [("PIPELINE_RUN_ID", "STATUS", "RUN_DATE", "START_DATE", "END_DATE", "SLA_STATUS")]
+        )
+        out.rows(
+            (
+                e.pipeline_run_id,
+                e.status,
+                f"{e.run_date} (backfill)" if e.backfill else e.run_date,
+                e.start_date,
+                e.end_date,
+                e.sla_status,
+            )
+            for e in entries
         )
         _interventions(out, changes)
         return ExitCode.SUCCESS

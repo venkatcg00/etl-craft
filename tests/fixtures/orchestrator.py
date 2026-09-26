@@ -16,7 +16,11 @@ from __future__ import annotations
 import shlex
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
+
+RUN_DATE_TEMPLATE = "{{ data_interval_end | ds }}"
+"""The Airflow template a remote DAG passes the run date with; this orchestrator puts today."""
 
 SUCCESS, FAILED, SKIPPED, UPSTREAM_FAILED = "success", "failed", "skipped", "upstream_failed"
 
@@ -90,7 +94,9 @@ def run_dag(
                 seen = sense(step["sensor"])
                 run.states[name] = SUCCESS if seen in step["sensor"]["allowed_states"] else FAILED
                 continue
-            command = shlex.split(step["bash_command"])
+            command = shlex.split(
+                step["bash_command"].replace(RUN_DATE_TEMPLATE, date.today().isoformat())
+            )
             for attempt in range(1, retries + 2):
                 run.tries[name] = attempt
                 if execute(command) == 0:

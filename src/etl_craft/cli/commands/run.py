@@ -7,6 +7,7 @@ import signal
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import date
 from types import FrameType
 
 from etl_craft.cli.commands import Command
@@ -16,6 +17,7 @@ from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import ExitCode, UsageError
 from etl_craft.execution.interventions import skip_run
 from etl_craft.execution.pipeline import (
+    backfill,
     finalize_active_run,
     init_pipeline_run,
     rerun_task,
@@ -68,7 +70,22 @@ def _configure(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="record a run SKIPPED on purpose, running nothing; local mode only, with --reason",
     )
-    parser.add_argument("--reason", help="why, for --ignore-dependencies, --rerun or --skip")
+    parser.add_argument(
+        "--run-date",
+        type=_date,
+        metavar="YYYY-MM-DD",
+        help="the date a new run runs as of (SQL's $$run_date); today unless given",
+    )
+    parser.add_argument(
+        "--backfill",
+        type=_date_range,
+        metavar="FROM:TO",
+        help="run the pipeline once for each date from FROM to TO (YYYY-MM-DD), as backfill "
+        "runs; local mode only, with --reason",
+    )
+    parser.add_argument(
+        "--reason", help="why, for --ignore-dependencies, --rerun, --skip or --backfill"
+    )
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
@@ -82,13 +99,33 @@ def _run(args: argparse.Namespace, out: Output) -> int:
         raise UsageError("--with-downstream goes with --rerun")
     if args.skip and (args.task_code or args.init_only or args.finalize_only or args.force):
         raise UsageError("--skip records a whole run SKIPPED; it takes only --reason")
-    if args.reason and not (args.ignore_dependencies or args.rerun or args.skip):
-        raise UsageError("--reason goes with --ignore-dependencies, --rerun or --skip")
+    if args.reason and not (args.ignore_dependencies or args.rerun or args.skip or args.backfill):
+        raise UsageError("--reason goes with --ignore-dependencies, --rerun, --skip or --backfill")
+    if args.backfill and (
+        args.task_code or args.init_only or args.finalize_only or args.force or args.skip
+    ):
+        raise UsageError("--backfill runs the whole pipeline once per date; it takes only --reason")
+    if args.run_date and (args.task_code or args.finalize_only or args.skip or args.backfill):
+        raise UsageError("--run-date starts a run: it goes with a whole run or --init-only")
     config = load_command_config(args)
     engine = connect_engine_db(config)
     child = ChildOptions(log_level=args.log_level, log_format=args.log_format)
     try:
-        if args.skip:
+        if args.backfill:
+            first, last = args.backfill
+            with _terminate_as_interrupt():
+                done = backfill(
+                    engine,
+                    config,
+                    args.pipeline_code,
+                    first,
+                    last,
+                    args.reason or "",
+                    child=child,
+                    hooks=run_hooks(config, engine),
+                )
+            status, message = done.status, done.message
+        elif args.skip:
             skipped = skip_run(engine, config, args.pipeline_code, args.reason or "")
             status, message = RunStatus.SKIPPED, skipped.message
         elif args.rerun:
@@ -117,7 +154,11 @@ def _run(args: argparse.Namespace, out: Output) -> int:
             status, message = outcome.status, outcome.message
         elif args.init_only:
             started = init_pipeline_run(
-                engine, config, args.pipeline_code, hooks=run_hooks(config, engine)
+                engine,
+                config,
+                args.pipeline_code,
+                hooks=run_hooks(config, engine),
+                run_date=args.run_date,
             )
             status, message = started.status, started.message
         elif args.finalize_only:
@@ -134,6 +175,7 @@ def _run(args: argparse.Namespace, out: Output) -> int:
                     force=args.force,
                     child=child,
                     hooks=run_hooks(config, engine),
+                    run_date=args.run_date,
                 )
             status, message = ran.status, ran.message
     finally:
@@ -155,6 +197,20 @@ def _terminate_as_interrupt() -> Iterator[None]:
         yield
     finally:
         signal.signal(signal.SIGTERM, previous)
+
+
+def _date(text: str) -> date:
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a date: write YYYY-MM-DD") from None
+
+
+def _date_range(text: str) -> tuple[date, date]:
+    first, separator, last = text.partition(":")
+    if not separator:
+        raise argparse.ArgumentTypeError(f"{text!r} is not FROM:TO, such as 2026-09-01:2026-09-07")
+    return _date(first), _date(last)
 
 
 def _raise_interrupt(signum: int, frame: FrameType | None) -> None:

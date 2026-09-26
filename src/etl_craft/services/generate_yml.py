@@ -58,6 +58,11 @@ FINALIZE_TASK = "__finalize__"
 GLOBAL_DAG_ID = "etl_craft_global_orchestration"
 DOCS_DAG_ID = "etl_craft_docs"
 DOCS_TASK = "generate_docs"
+RUN_DATE_TEMPLATE = "{{ data_interval_end | ds }}"
+"""How a remote DAG's ``__init__`` passes the run's date: Airflow's end of the data interval,
+the day a scheduled run fires, so ``$$run_date`` means the same as in local mode, and a backfill
+by the orchestrator runs each day as of its own date."""
+
 DEFAULT_RETRIES = 1
 DEFAULT_RETRY_DELAY_MINUTES = 5
 
@@ -82,8 +87,10 @@ REMOTE_HEADER = """\
 # Remote mode: this DAG is the only source of truth for scheduling. etl-craft runs
 # each task when told to and checks none of these rules itself.
 #
-# `tasks:` is what the orchestrator runs. Each task has one `trigger_rule`, worked out
-# from its RUN_CONDITION and its dependencies' DEPENDENCY_TYPE. A step with `sensor:`
+# `tasks:` is what the orchestrator runs. `__init__` passes the run's date as
+# `--run-date {{ data_interval_end | ds }}`, an Airflow template: with another
+# orchestrator, pass its own date for the run. Each task has one `trigger_rule`, worked
+# out from its RUN_CONDITION and its dependencies' DEPENDENCY_TYPE. A step with `sensor:`
 # waits for another DAG (`external_task_id: null`) or one of its tasks: it succeeds
 # once the upstream is in one of `allowed_states`, and fails once it is in one of
 # `failed_states`. Point it at the upstream run it should judge (for Airflow's
@@ -241,7 +248,7 @@ def _remote_pipeline_dag(
     run = f"etl-craft run --pipeline_code {pipeline_code}"
     tasks: dict[str, Any] = {
         INIT_TASK: {
-            "bash_command": f"{run} --init-only",
+            "bash_command": f"{run} --init-only --run-date {RUN_DATE_TEMPLATE}",
             "depends_on": [],
             "trigger_rule": "all_success",
         }

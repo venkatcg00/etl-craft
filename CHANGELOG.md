@@ -13,6 +13,13 @@ All notable changes are recorded here. The format follows
   catalog show paused pipelines; `AUD_PIPELINE_PAUSES` keeps every pause.
 - `etl-craft run --skip --reason`: records a run `SKIPPED` on purpose, for the pipelines that
   depend on it to see.
+- Run dates and backfills: every run runs as of a date (`AUD_PIPELINES_RUN_LOG.RUN_DATE`): the
+  day it started, `run --run-date`, or `--init-only --run-date`, which generated DAGs pass the
+  orchestrator's date with. SQL tasks read it as `$$run_date` (with `RUN_DATE_SUBSTITUTION`),
+  scripts as `task.run_date`. `run --backfill FROM:TO --reason` runs the pipeline once per date,
+  as backfill runs that check no cross-pipeline gate, consume nothing, and neither read nor store
+  script offsets; `history` shows each run's date. Migration `0002_run_date.sql` adds the columns
+  and dates the earlier runs by the day they started.
 - The Engine DB's first migration, `0001_pipeline_pauses.sql`: `etl-craft setup` (or `migrate`)
   applies it to an Engine DB made by 0.1.0. A test upgrades each released schema and compares
   it with a new one.

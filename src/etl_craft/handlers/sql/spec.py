@@ -11,6 +11,8 @@ remedy, so no action ever starts on a half-valid definition.
 - ``PIPELINE_ID_SUBSTITUTION``: ``true`` replaces ``$$pipeline_id`` with the run id.
 - ``PIPELINE_ID_FILTER``: ``true`` replaces ``$$pipeline_id_filter`` with
   ``pipeline_run_id = <id>``, or ``1=1`` on a FULL refresh.
+- ``RUN_DATE_SUBSTITUTION``: ``true`` replaces ``$$run_date`` with the date the run runs as of,
+  ``DATE 'YYYY-MM-DD'``: the day it started, or the date of a backfill run.
 - ``MERGE_KEY`` (``SCD1_MERGE``, ``SCD2_MERGE``, ``DELETE_ROWS``): ``|``-separated key columns.
 - ``MERGE_COMPARE_COLUMNS`` (the merges): ``|``-separated columns hashed into ``HASH_KEY``.
 - ``MERGE_DEDUPE_ORDER`` (the merges): ``ORDER BY`` terms choosing the row kept per key.
@@ -27,12 +29,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import date
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.project import sql_file
 from etl_craft.core.enums import SqlAction
 from etl_craft.core.errors import HandlerError, MetadataError
 from etl_craft.core.text import (
+    LINEAGE_RUN_DATE,
     is_safe_identifier,
     is_safe_object_ref,
     is_safe_order_term,
@@ -72,6 +76,7 @@ PARAMETERS = frozenset(
         "SOURCE_SQL_FILE",
         "PIPELINE_ID_SUBSTITUTION",
         "PIPELINE_ID_FILTER",
+        "RUN_DATE_SUBSTITUTION",
         "MERGE_KEY",
         "MERGE_COMPARE_COLUMNS",
         "MERGE_DEDUPE_ORDER",
@@ -203,6 +208,7 @@ def _select(context: TaskContext) -> tuple[str, str]:
         context.task_params,
         pipeline_run_id=context.pipeline_run_id,
         refresh_type=context.refresh_type,
+        run_date=context.run_date,
     )
 
 
@@ -212,6 +218,7 @@ def resolve_select(
     *,
     pipeline_run_id: int,
     refresh_type: str,
+    run_date: date = LINEAGE_RUN_DATE,
 ) -> tuple[str, str]:
     """Return a SQL task's SELECT, inline or from its file, with the tokens replaced.
 
@@ -248,6 +255,8 @@ def resolve_select(
         substitution=parse_flag(params, "PIPELINE_ID_SUBSTITUTION"),
         filter_enabled=parse_flag(params, "PIPELINE_ID_FILTER"),
         source=source,
+        run_date=run_date,
+        run_date_substitution=parse_flag(params, "RUN_DATE_SUBSTITUTION"),
     )
     statements = split_statements(substituted)
     if len(statements) != 1:

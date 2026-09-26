@@ -111,7 +111,7 @@ nav:
       - The catalog site: guides/catalog.md
       - Running a pipeline: guides/running-pipelines.md
       - Running a task and reading its logs: guides/running-tasks.md
-      - "Stepping in: mark, cancel, pause, rerun and bypasses": guides/run-control.md
+      - "Stepping in: mark, cancel, pause, backfill, rerun and bypasses": guides/run-control.md
   - Deploying:
       - deploying/index.md
       - The project directory: deploying/project-layout.md
