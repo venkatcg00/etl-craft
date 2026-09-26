@@ -155,7 +155,9 @@ def run_task(
         )
     if config.mode == Mode.REMOTE:
         return _run_for_orchestrator(engine, config, pipeline_code, task_code, child)
-    gate = gate or TrackedGate(policy=config.dependency_gates)
+    gate = gate or TrackedGate(
+        policy=config.dependency_gates, wait_seconds=config.limits.gate_wait_minutes * 60
+    )
     with engine.connect() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         task_id = resolve_task_id(conn, pipeline_id, task_code)
@@ -183,7 +185,7 @@ def run_task(
         engine, config, task_id, task_code, pipeline_code, pipeline_run_id, force, child
     )
     if consumed and outcome.status == RunStatus.SUCCESS:
-        gate.consume(engine, task_id, consumed)
+        gate.consume(engine, task_id, pipeline_run_id, consumed)
     return outcome
 
 

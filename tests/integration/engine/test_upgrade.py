@@ -45,6 +45,7 @@ def test_an_earlier_engine_db_upgrades_to_the_current_schema(
         run_script(conn, dialect.split_statements(old))
     monkeypatch.delenv("ETL_CRAFT_MIGRATIONS_DIR", raising=False)
     monkeypatch.chdir(tmp_path)
+    carried = release == "0.1.0" and _seed_a_tracker_row(engine)
 
     apply_pending_migrations(engine)
 
@@ -66,11 +67,57 @@ def test_an_earlier_engine_db_upgrades_to_the_current_schema(
         )
     insert = text(
         "INSERT INTO AUD_PIPELINE_PAUSES (PIPELINE_ID, PAUSED_BY, REASON) "
-        "SELECT PIPELINE_ID, 'op', 'why' FROM CFG_PIPELINES"
+        "SELECT PIPELINE_ID, 'op', 'why' FROM CFG_PIPELINES WHERE PIPELINE_CODE = 'P'"
     )
     with engine.begin() as conn:
         conn.execute(insert)
     with pytest.raises(IntegrityError), engine.begin() as conn:
         conn.execute(insert)
+    if carried:
+        # The tracker's last consumed run became the consumption log's first row.
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT PIPELINE_DEPENDENCY_ID AS dependency, PIPELINE_RUN_ID AS run_id, "
+                    "CONSUMED_PIPELINE_RUN_ID AS consumed FROM AUD_DEPENDENCY_CONSUMPTION"
+                )
+            ).all()
+        assert [tuple(row) for row in rows] == [carried]
     # A second migrate has nothing left to do.
     assert apply_pending_migrations(engine) == []
+
+
+def _seed_a_tracker_row(engine):
+    """In a 0.1.0 Engine DB, a pipeline dependency whose tracker consumed an upstream run."""
+    with engine.begin() as conn:
+        for code in ("UP", "DOWN"):
+            conn.execute(
+                text(
+                    "INSERT INTO CFG_PIPELINES (PIPELINE_CODE, PIPELINE_NAME, REFRESH_TYPE) "
+                    "VALUES (:c, :c, 'FULL')"
+                ),
+                {"c": code},
+            )
+        ids = dict(conn.execute(text("SELECT PIPELINE_CODE, PIPELINE_ID FROM CFG_PIPELINES")).all())
+        dependency = conn.execute(
+            text(
+                "INSERT INTO CFG_PIPELINE_DEPENDENCY (PIPELINE_ID, DEPENDS_ON_PIPELINE_ID, "
+                "DEPENDENCY_TYPE) VALUES (:d, :u, 'SUCCESS') RETURNING PIPELINE_DEPENDENCY_ID"
+            ),
+            {"d": ids["DOWN"], "u": ids["UP"]},
+        ).scalar_one()
+        run_id = conn.execute(
+            text(
+                "INSERT INTO AUD_PIPELINES_RUN_LOG (PIPELINE_ID, STATUS) VALUES (:u, 'SUCCESS') "
+                "RETURNING PIPELINE_RUN_ID"
+            ),
+            {"u": ids["UP"]},
+        ).scalar_one()
+        conn.execute(
+            text(
+                "INSERT INTO AUD_PIPELINE_DEPENDENCY_TRACKER (PIPELINE_DEPENDENCY_ID, PIPELINE_ID, "
+                "DEPENDS_ON_PIPELINE_ID, LAST_CONSUMED_PIPELINE_RUN_ID) VALUES (:d, :down, :up, :r)"
+            ),
+            {"d": dependency, "down": ids["DOWN"], "up": ids["UP"], "r": run_id},
+        )
+    return (dependency, None, run_id)

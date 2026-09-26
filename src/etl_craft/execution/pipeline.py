@@ -210,7 +210,7 @@ def run_pipeline(
             pipeline_run_id,
             task_codes,
             force=force,
-            gate=TrackedGate(clock, config.dependency_gates),
+            gate=TrackedGate(clock, config.dependency_gates, config.limits.gate_wait_minutes * 60),
             child=child or ChildOptions(),
         )
         with _SlaWatch(engine, pipeline_code, pipeline_run_id, detail.sla_in_hours, hooks):
@@ -566,7 +566,13 @@ def _start_run(
     reason = None
     bypassed: tuple[str, ...] = ()
     if check_gate:
-        gate = check_pipeline_dependencies(engine, pipeline_id, clock, config.dependency_gates)
+        gate = check_pipeline_dependencies(
+            engine,
+            pipeline_id,
+            clock,
+            config.dependency_gates,
+            config.limits.gate_wait_minutes * 60,
+        )
         bypassed = gate.bypassed
         if not gate.satisfied:
             reason = "; ".join(gate.reasons)

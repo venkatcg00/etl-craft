@@ -75,14 +75,17 @@ the task runs.
 
 1. **Wait for a running upstream.** While the upstream's latest run is `IN-PROGRESS`, the check
    waits for it. It looks again at 70% of the upstream's average run length, then 80%, 90% and so
-   on; one check waits at most an hour and looks at most 30 times, across all its dependencies.
+   on; one check waits at most `Orchestration.Gate_wait_minutes` (an hour unless set; `0` judges
+   at once) and looks at most 30 times, across all its dependencies.
 2. **The last run decides.** The upstream's latest finished run must satisfy the dependency
    type, just as within a pipeline. An older run that would have satisfied it does not count: if
    the upstream succeeded yesterday and failed today, a `SUCCESS` dependency is not satisfied.
 3. **Each upstream run is consumed once.** The run must also be newer than the one the dependency
-   last consumed, recorded in `AUD_PIPELINE_DEPENDENCY_TRACKER` or
-   `AUD_TASK_DEPENDENCY_TRACKER`. The tracker moves forward only when the downstream run or task
-   succeeds, so a downstream that failed is retried against the same upstream run.
+   last consumed. `AUD_DEPENDENCY_CONSUMPTION` logs every upstream run consumed, one row per
+   downstream run (or task), dependency and upstream run, and a dependency's latest row is what it
+   last consumed. A row is added only when the downstream run or task succeeds, so a downstream
+   that failed is retried against the same upstream run; and the log says which upstream runs
+   each run was built from.
 
 `Orchestration.Dependency_gates: warn` or `off` relaxes these checks per profile, recording
 each bypass; see [Relax dependency gates](run-control.md#relax-dependency-gates).

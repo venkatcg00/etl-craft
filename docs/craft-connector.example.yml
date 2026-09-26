@@ -47,6 +47,8 @@ Orchestration:
   # Log_dir: logs                 # where each task attempt's log file goes; relative to this file
   Task_timeout_seconds: 21600          # value — 0 disables; a task's TASK_TIMEOUT_SECONDS overrides
   Max_parallel_tasks: 8                # value
+  Gate_wait_minutes: 60                # value — how long a run waits for a running upstream
+                                       # pipeline or task it depends on; 0: judge at once
   Enforce_sla: false                   # value — true: send an SLA email (Email below) when a
                                        # run misses its pipeline's SLA_IN_HOURS. Runs are
                                        # marked MET or BREACHED either way.

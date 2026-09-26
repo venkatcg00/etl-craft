@@ -278,7 +278,7 @@ def test_ready_releases_an_any_task_once_its_same_pipeline_upstream_has_failed()
 
 
 def test_unsatisfiable_counts_an_unevaluated_cross_pipeline_edge_as_still_possible():
-    # This module cannot see AUD_*_DEPENDENCY_TRACKER, so a cross-pipeline edge
+    # This module cannot see AUD_DEPENDENCY_CONSUMPTION, so a cross-pipeline edge
     # must always count as "could still be satisfied". Under ANY that is enough
     # to keep the task alive even though its one same-pipeline edge is doomed.
     tasks = [

@@ -21,6 +21,7 @@ MIGRATIONS_DIRNAME = "migrations"
 EXAMPLE_PATH = "docs/craft-connector.example.yml"
 DEFAULT_TASK_TIMEOUT_SECONDS = 6 * 60 * 60
 DEFAULT_MAX_PARALLEL_TASKS = 8
+DEFAULT_GATE_WAIT_MINUTES = 60
 DEFAULT_LOG_DIR = "logs"
 
 # What a missing variable usually looks like when it is used as written: upper case with an
@@ -190,7 +191,10 @@ class DagDefaults:
 
 @dataclass(frozen=True)
 class ExecutionLimits:
-    """Deployment-wide limits: a task's time limit (0 for none), parallel tasks and SLA alerts.
+    """Deployment-wide limits: a task's time limit, parallel tasks, SLA alerts and gate waits.
+
+    ``task_timeout_seconds`` of 0 means no limit. ``gate_wait_minutes`` is how long a
+    cross-pipeline gate waits for a running upstream, 0 for not at all.
 
     Every run of a pipeline with ``SLA_IN_HOURS`` is marked ``MET`` or ``BREACHED``. With
     ``enforce_sla`` on, a run that misses its SLA also sends an SLA email, through the Email
@@ -200,6 +204,7 @@ class ExecutionLimits:
     task_timeout_seconds: int = DEFAULT_TASK_TIMEOUT_SECONDS
     max_parallel_tasks: int = DEFAULT_MAX_PARALLEL_TASKS
     enforce_sla: bool = False
+    gate_wait_minutes: int = DEFAULT_GATE_WAIT_MINUTES
 
 
 @dataclass(frozen=True)

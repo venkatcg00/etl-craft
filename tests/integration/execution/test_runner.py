@@ -288,7 +288,7 @@ class CountingGate:
     def check(self, engine, task_id, needed):
         return self.result
 
-    def consume(self, engine, task_id, consumed):
+    def consume(self, engine, task_id, pipeline_run_id, consumed):
         self.consumed.append(consumed)
 
 

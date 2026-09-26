@@ -8,6 +8,15 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- `AUD_DEPENDENCY_CONSUMPTION`, an append-only log of every upstream run consumed through a
+  cross-pipeline dependency: one row per downstream run (or task), dependency and upstream run.
+  A dependency's latest row is what it last consumed, so gates behave as before, and the log
+  says which upstream runs each run was built from. Migration `0003_dependency_consumption.sql`
+  carries each tracker's last consumed run into it and drops `AUD_PIPELINE_DEPENDENCY_TRACKER`
+  and `AUD_TASK_DEPENDENCY_TRACKER`.
+- `Orchestration.Gate_wait_minutes`: how long a cross-pipeline gate waits for a running upstream
+  (60 unless set; `0` judges at once).
+
 - `etl-craft pause` and `resume`: while a pipeline is paused, `run` starts nothing of it and
   exits `0`, and a run in progress starts no more tasks, to go on once resumed. `list` and the
   catalog show paused pipelines; `AUD_PIPELINE_PAUSES` keeps every pause.

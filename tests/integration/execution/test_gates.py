@@ -45,15 +45,18 @@ def depend(engine, ids, kind):
         )
 
 
-def tracked_task_run(engine, edge_id):
+def consumed_task_runs(engine, edge_id):
+    """The log's rows for a task dependency, oldest first: (downstream run, upstream task run)."""
     with engine.connect() as conn:
-        return conn.execute(
+        rows = conn.execute(
             text(
-                "SELECT LAST_CONSUMED_TASK_RUN_ID FROM AUD_TASK_DEPENDENCY_TRACKER "
-                "WHERE TASK_DEPENDENCY_ID = :id"
+                "SELECT PIPELINE_RUN_ID AS run_id, CONSUMED_TASK_RUN_ID AS consumed "
+                "FROM AUD_DEPENDENCY_CONSUMPTION WHERE TASK_DEPENDENCY_ID = :id "
+                "ORDER BY CONSUMPTION_ID"
             ),
             {"id": edge_id},
-        ).scalar_one_or_none()
+        )
+        return [(row.run_id, row.consumed) for row in rows]
 
 
 def test_a_task_dependency_is_judged_on_the_upstreams_last_run_and_consumed_once(world):
@@ -70,8 +73,10 @@ def test_a_task_dependency_is_judged_on_the_upstreams_last_run_and_consumed_once
     first = gate.check(engine, ids["load"], 1)
     assert (first.satisfied_count, first.consumed) == (1, {edge: rows[ids["publish"]]})
 
-    gate.consume(engine, ids["load"], first.consumed)
-    assert tracked_task_run(engine, edge) == rows[ids["publish"]]
+    with engine.begin() as conn:
+        down_run = start_run(conn, ids["down"])
+    gate.consume(engine, ids["load"], down_run, first.consumed)
+    assert consumed_task_runs(engine, edge) == [(down_run, rows[ids["publish"]])]
     again = gate.check(engine, ids["load"], 1)
     assert again.satisfied_count == 0
     assert "which was already consumed" in again.reasons[0]
@@ -126,6 +131,20 @@ def test_a_running_upstream_is_waited_for(world):
     assert (check.satisfied_count, list(check.consumed.values())) == (1, [row])
 
 
+def test_a_gate_told_not_to_wait_judges_a_running_upstream_at_once(world):
+    engine, ids = world
+    depend(engine, ids, "SUCCESS")
+    with engine.begin() as conn:
+        run_id = start_run(conn, ids["up"])
+        task_run(conn, ids["publish"], run_id, "IN-PROGRESS")
+    waits = []
+    gate = TrackedGate(Clock(sleep=waits.append), wait_seconds=0)
+    check = gate.check(engine, ids["load"], 1)
+    assert waits == []
+    assert check.satisfied_count == 0
+    assert check.reasons == ("upstream task UP.publish (SUCCESS) has no finished run",)
+
+
 def test_only_the_needed_dependencies_are_checked(world):
     engine, ids = world
     depend(engine, ids, "SUCCESS")
@@ -169,11 +188,11 @@ def test_a_pipeline_gate_and_what_its_successful_run_consumes(world):
     with engine.connect() as conn:
         consumed = conn.execute(
             text(
-                "SELECT LAST_CONSUMED_PIPELINE_RUN_ID FROM AUD_PIPELINE_DEPENDENCY_TRACKER "
-                "WHERE PIPELINE_DEPENDENCY_ID = :id"
+                "SELECT PIPELINE_RUN_ID AS run_id, CONSUMED_PIPELINE_RUN_ID AS consumed "
+                "FROM AUD_DEPENDENCY_CONSUMPTION WHERE PIPELINE_DEPENDENCY_ID = :id"
             ),
             {"id": edge},
-        ).scalar_one()
-    assert consumed == first
+        ).one()
+    assert (consumed.run_id, consumed.consumed) == (down_run, first)
     # The newer run is left for DOWN's next run.
     assert check_pipeline_dependencies(engine, ids["down"], NO_WAIT).consumed == {edge: second}

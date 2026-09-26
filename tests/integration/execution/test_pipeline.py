@@ -225,7 +225,7 @@ def test_an_unsatisfied_pipeline_dependency_skips_the_run(config, pipeline):
     with engine.connect() as conn:
         consumed = conn.execute(
             text(
-                "SELECT LAST_CONSUMED_PIPELINE_RUN_ID FROM AUD_PIPELINE_DEPENDENCY_TRACKER "
+                "SELECT CONSUMED_PIPELINE_RUN_ID FROM AUD_DEPENDENCY_CONSUMPTION "
                 "WHERE PIPELINE_DEPENDENCY_ID = :id"
             ),
             {"id": edge},
