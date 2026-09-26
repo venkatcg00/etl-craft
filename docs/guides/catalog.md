@@ -22,7 +22,7 @@ Three tabs at the top of every page, and a trail of links back up from wherever 
 | Tab | Leads to |
 |---|---|
 | **Search** | counts, and search across everything |
-| **DAGs** | every pipeline with its name, description, schedule, the pipelines it depends on and its last run; the ingestion scripts; and the SQL tasks whose columns cannot be traced |
+| **DAGs** | every pipeline with its name, description, schedule, the pipelines it depends on, its last run, how many of its recent runs succeeded and how long they took on average; the ingestion scripts; and the SQL tasks whose columns cannot be traced |
 | **Warehouse** | every database, then schema, then table, with the tasks that write and read each table, its pipelines and business rules; and the external sources ingestion scripts read |
 
 Every task, table, pipeline, rule and script a page mentions is a link to its own page, so any
@@ -31,11 +31,34 @@ table › its pipeline, and so on.
 
 | Page | Shows |
 |---|---|
-| Pipeline | its description (`CFG_PIPELINES.DESCRIPTION`), schedule, SLA, refresh type, last run, the pipelines it depends on and that depend on it, its **DAG**, and its tasks with what each waits for, writes and reads |
-| Task | its pipeline, the tasks it waits for and that wait for it (with the dependency type), handler, the tables it reads, writes and checks, its business rules, documentation and documentation version, column mapping, parameters with the SELECT (a `SOURCE_SQL_FILE` is shown too), and its last run with its counts and error |
+| Pipeline | its description (`CFG_PIPELINES.DESCRIPTION`), schedule, SLA, refresh type, last run, whether it is paused, the pipelines it depends on and that depend on it, its **DAG**, its tasks with what each waits for, writes and reads, and its **runs** |
+| Run | one run of a pipeline: its status, run date (and whether it was a backfill), when it ran and how long it took, its SLA, each task's status, attempts, counts and message, what operators changed in it, the upstream runs it was **built from**, and the downstream runs that **used** it |
+| Task | its pipeline, the tasks it waits for and that wait for it (with the dependency type), handler, the tables it reads, writes and checks, its business rules, documentation and documentation version, column mapping, parameters with the SELECT (a `SOURCE_SQL_FILE` is shown too), its last run with its counts and error, and its **runs** |
 | Table | the tasks that write and read it, their pipelines, its business rules, its last write and row counts, its columns with where each is made from, and its lineage graph |
 | Business rule | type, table, key column, wave, task, and its condition |
 | Ingestion script | whether the file is there, the tasks that run it, and what they read and write |
+
+## Runs and KPIs
+
+A pipeline's page ends with its latest 30 runs:
+
+- **KPIs**: how many of the finished runs succeeded, how many failed or were cancelled, SLA
+  misses, and the average and longest run. A `SKIPPED` run did no work and one still
+  `IN-PROGRESS` has not ended, so neither counts either way.
+- **A bar per run**, oldest first: its height is how long the run took, its colour the run's
+  status. Each bar opens that run's page.
+- **A row per run**: its run date, status, start, duration, SLA, the upstream runs it was built
+  from, and how many changes operators made to it.
+
+A task's page does the same for the task: the share of its runs that succeeded, the average run
+and the average rows written, a bar per run of the rows it wrote, and a row per run with its
+attempts, counts and message.
+
+Each run has a page of its own, so runs chain like everything else: a run page lists the
+upstream runs it was built from and the downstream runs that used it, from the
+[consumption log](dependencies.md#dependencies-on-other-pipelines), each a link to that run's
+page. Follow them from any run to the first run of the data it holds, or to everything built
+from it.
 
 ## A pipeline's DAG
 

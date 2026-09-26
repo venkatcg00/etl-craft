@@ -8,6 +8,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Run history and KPIs in the catalog: each pipeline's and task's latest 30 runs, with success
+  rates, failures, SLA misses, average and longest durations, average rows written, and a bar
+  per run coloured by status; a page per run with its tasks, interventions, and the upstream
+  runs it was built from and the downstream runs that used it, from the consumption log. The
+  DAGs tab shows each pipeline's success rate and average run.
+
 - `AUD_DEPENDENCY_CONSUMPTION`, an append-only log of every upstream run consumed through a
   cross-pipeline dependency: one row per downstream run (or task), dependency and upstream run.
   A dependency's latest row is what it last consumed, so gates behave as before, and the log

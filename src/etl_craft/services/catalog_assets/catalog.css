@@ -160,3 +160,12 @@ svg.lineage.tracing .col.on text { font-weight: 700; }
   .facts { grid-template-columns: 1fr; }
   header.top { position: static; }
 }
+
+/* Run history: one bar per run, coloured by its status. */
+.bars { margin: .5rem 0 1rem; }
+.bars svg { display: block; max-width: 100%; }
+.bars figcaption { color: var(--muted, #666); font-size: .85em; }
+.bars .bar { fill: var(--muted, #999); }
+.bars .bar.SUCCESS { fill: var(--ok); }
+.bars .bar.FAILED, .bars .bar.CANCELLED { fill: var(--bad); }
+.bars .bar.SKIPPED, .bars .bar.IN-PROGRESS { fill: var(--warn); }
