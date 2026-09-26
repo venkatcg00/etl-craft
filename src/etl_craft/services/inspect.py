@@ -15,6 +15,7 @@ from etl_craft.engine.repository.dependencies import (
     fetch_pipeline_dependency_edges,
     fetch_pipeline_graph,
 )
+from etl_craft.engine.repository.interventions import Intervention, fetch_interventions
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.repository.tasks import (
     fetch_task_codes,
@@ -167,4 +168,23 @@ def run_history(
             error_message=r.error_message,
         )
         for r in rows
+    ]
+
+
+def run_interventions(
+    conn: Connection, pipeline_code: str, entries: list[RunEntry], task_code: str | None = None
+) -> list[Intervention]:
+    """Return what operators changed in the runs ``entries`` lists, oldest first.
+
+    With ``task_code``, only the changes to that task, and to the runs themselves.
+    """
+    if not entries:
+        return []
+    pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+    listed = {entry.pipeline_run_id for entry in entries}
+    return [
+        change
+        for change in fetch_interventions(conn, pipeline_id, min(listed))
+        if change.pipeline_run_id in listed
+        and (task_code is None or change.task_code in (None, task_code))
     ]

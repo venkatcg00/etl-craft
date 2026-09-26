@@ -38,6 +38,7 @@ class PipelineRow:
     sla_in_hours: float | None
     refresh_type: str
     last_run: LastRun | None
+    last_run_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,7 @@ def fetch_catalog_pipelines(conn: Connection) -> list[PipelineRow]:
             LastRun(r.run_status, r.run_start, r.run_end, sla_status=r.sla_status)
             if r.pipeline_run_id is not None
             else None,
+            None if r.pipeline_run_id is None else int(r.pipeline_run_id),
         )
         for r in conn.execute(statement(conn, "catalog_pipelines"))
     ]

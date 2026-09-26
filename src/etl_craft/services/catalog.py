@@ -47,6 +47,7 @@ from etl_craft.engine.repository.catalog import (
     fetch_catalog_tasks,
     fetch_documentation_versions,
 )
+from etl_craft.engine.repository.interventions import Intervention, fetch_interventions
 from etl_craft.engine.repository.tasks import fetch_task_parameters
 from etl_craft.engine.repository.validation import (
     fetch_pipeline_edges,
@@ -140,12 +141,16 @@ class TaskAsset:
 
 @dataclass
 class PipelineAsset:
-    """An active pipeline, its tasks, and the pipelines it depends on."""
+    """An active pipeline, its tasks, and the pipelines it depends on.
+
+    ``interventions`` are what operators changed in its last run.
+    """
 
     row: PipelineRow
     tasks: list[str] = field(default_factory=list)
     depends_on: list[tuple[str, str]] = field(default_factory=list)
     depended_on_by: list[str] = field(default_factory=list)
+    interventions: list[Intervention] = field(default_factory=list)
 
 
 @dataclass
@@ -213,6 +218,15 @@ def build_catalog(
         params = {row.task_id: fetch_task_parameters(conn, row.task_id) for row in task_rows}
         pipeline_edges = fetch_pipeline_edges(conn)
         task_edges = fetch_task_dependency_edges(conn)
+        changes = {
+            row.pipeline_code: [
+                change
+                for change in fetch_interventions(conn, row.pipeline_id, row.last_run_id)
+                if change.pipeline_run_id == row.last_run_id
+            ]
+            for row in pipeline_rows
+            if row.last_run_id is not None
+        }
     lineages = {lineage.task: lineage for lineage in collect(engine, config)}
 
     def name_of(object_ref: str) -> str:
@@ -220,7 +234,10 @@ def build_catalog(
 
     catalog = Catalog(
         generated_at=datetime.now(UTC),
-        pipelines={row.pipeline_code: PipelineAsset(row) for row in pipeline_rows},
+        pipelines={
+            row.pipeline_code: PipelineAsset(row, interventions=changes.get(row.pipeline_code, []))
+            for row in pipeline_rows
+        },
         tasks={},
         tables={},
         rules={},

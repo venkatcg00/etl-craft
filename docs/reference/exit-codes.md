@@ -8,7 +8,7 @@ error class has its own status; every error etl-craft raises on purpose belongs 
 | Status | Name | Meaning |
 |---|---|---|
 | `0` | `SUCCESS` | The command succeeded. `etl-craft run` exits `0` when the pipeline or task ends `SUCCESS` or `SKIPPED`. |
-| `1` | `FAILURE` | The work ran and did not succeed: a task or pipeline ended `FAILED`, `validate` found problems, or a `doctor` check failed. |
+| `1` | `FAILURE` | The work ran and did not succeed: a task or pipeline ended `FAILED` or `CANCELLED`, `validate` found problems, or a `doctor` check failed. |
 | `2` | `USAGE` | The command line arguments are invalid (`UsageError`, or `argparse` itself). |
 | `3` | `CONFIGURATION` | `craft-connector.yml` is missing or invalid, a secret variable is unset, a connection target has no matching dialect, or the Engine DB cannot be reached (`ConfigurationError`). |
 | `4` | `METADATA` | A pipeline or task code does not resolve to an active `CFG_` row (`MetadataError`). |

@@ -78,7 +78,7 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     finally:
         engine.dispose()
     out.line(message)
-    if status == RunStatus.FAILED:
+    if status in (RunStatus.FAILED, RunStatus.CANCELLED):
         return ExitCode.FAILURE
     return ExitCode.SUCCESS
 

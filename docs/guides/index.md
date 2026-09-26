@@ -21,6 +21,8 @@ How to model and run pipelines with etl-craft.
   tests, orchestrator steps, and the SLA.
 - [Running a task and reading its logs](running-tasks.md): `etl-craft run --task_code`,
   retries, time limits, and where each attempt's log goes.
+- [Stepping in: mark and cancel](run-control.md): marking a task or a run, stand-in runs,
+  cancelling, and the record every change leaves; local mode.
 
 !!! note "Planned"
     These guides are written as each feature reaches the new code base:

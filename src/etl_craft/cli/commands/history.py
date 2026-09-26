@@ -1,4 +1,4 @@
-"""``etl-craft history``: a pipeline's recent runs, or one of its tasks'."""
+"""``etl-craft history``: a pipeline's recent runs, or one of its tasks', and interventions."""
 
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ from etl_craft.cli.commands import Command
 from etl_craft.cli.commands.common import connect_engine_db, load_command_config
 from etl_craft.cli.output import Output
 from etl_craft.core.errors import ExitCode
-from etl_craft.services.inspect import run_history
+from etl_craft.engine.repository.interventions import Intervention
+from etl_craft.services.inspect import run_history, run_interventions
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -22,6 +23,7 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     try:
         with engine.connect() as conn:
             entries = run_history(conn, args.pipeline_code, args.task_code, limit=args.limit)
+            changes = run_interventions(conn, args.pipeline_code, entries, args.task_code)
     finally:
         engine.dispose()
     if not entries:
@@ -32,6 +34,7 @@ def _run(args: argparse.Namespace, out: Output) -> int:
         out.rows(
             (e.pipeline_run_id, e.status, e.start_date, e.end_date, e.sla_status) for e in entries
         )
+        _interventions(out, changes)
         return ExitCode.SUCCESS
     out.rows(
         [
@@ -60,7 +63,30 @@ def _run(args: argparse.Namespace, out: Output) -> int:
         )
         for e in entries
     )
+    _interventions(out, changes)
     return ExitCode.SUCCESS
+
+
+def _interventions(out: Output, changes: list[Intervention]) -> None:
+    """List what operators changed in the runs shown, if anything."""
+    if not changes:
+        return
+    out.line()
+    out.line("Interventions:")
+    out.rows([("PIPELINE_RUN_ID", "TASK", "ACTION", "FROM", "TO", "BY", "AT", "REASON")])
+    out.rows(
+        (
+            c.pipeline_run_id,
+            c.task_code or "(the run)",
+            c.action,
+            c.from_status or "-",
+            c.to_status or "(reset)",
+            c.requested_by,
+            c.requested_at,
+            c.reason,
+        )
+        for c in changes
+    )
 
 
 COMMAND = Command(

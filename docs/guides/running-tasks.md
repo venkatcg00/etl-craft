@@ -69,7 +69,7 @@ fields. `--log-level DEBUG` adds the detail: for example, the SQL each action ru
 
 | Column | Holds |
 |---|---|
-| `STATUS` | `SUCCESS`, `FAILED` or `SKIPPED` |
+| `STATUS` | `SUCCESS`, `FAILED`, `SKIPPED`, or `CANCELLED` when its run was [cancelled](run-control.md#cancel-a-run) |
 | `ERROR_MESSAGE` | the one-line cause of a failure or a skip |
 | `SOURCE_COUNT`, `TARGET_COUNT`, `INSERT_COUNT`, `UPDATE_COUNT`, `DELETE_COUNT` | the counts the task reported |
 | `TASK_LOG` | the values the task reported, one `NAME = value` per line, then the end of its log file |

@@ -19,6 +19,9 @@ orchestrator does not support, tests connections and starts the run, and ``run
 ``SKIPPED``, and the run is ``FAILED`` when a task failed, ``SKIPPED`` when it ran none. No gate
 is checked and no upstream run is consumed; the orchestrator's DAGs hold those rules.
 
+An operator may cancel a local run (``etl-craft cancel``): its running tasks are stopped, no
+other task starts, and the run ends ``CANCELLED``.
+
 Every run of a pipeline with ``SLA_IN_HOURS`` is marked ``MET`` or ``BREACHED``. While a local run
 is going, a watcher marks it ``BREACHED`` as soon as the SLA passes; otherwise the finalize step
 does. ``RunHooks.on_sla_lapse`` is called once per run, the first time the breach is seen.
@@ -60,7 +63,7 @@ from etl_craft.execution.gates import (
     consume_pipeline_dependencies,
 )
 from etl_craft.execution.remote import require_supported
-from etl_craft.execution.runner import ChildOptions, TaskOutcome, run_task
+from etl_craft.execution.runner import ChildOptions, TaskOutcome, run_cancelled, run_task
 from etl_craft.handlers.mail import send_sla_lapse_email
 
 logger = logging.getLogger(__name__)
@@ -168,6 +171,7 @@ def run_pipeline(
             engine,
             config,
             pipeline_code,
+            pipeline_run_id,
             task_codes,
             force=force,
             gate=TrackedGate(clock),
@@ -176,6 +180,8 @@ def run_pipeline(
         with _SlaWatch(engine, pipeline_code, pipeline_run_id, detail.sla_in_hours, hooks):
             if force:
                 for wave in graph.waves():
+                    if run_cancelled(engine, pipeline_run_id):
+                        break
                     waves.run(wave)
                 never_ready: list[int] = []
                 after_failure: list[int] = []
@@ -183,6 +189,8 @@ def run_pipeline(
                 never_ready, after_failure = _run_until_settled(
                     engine, graph, pipeline_run_id, task_codes, waves
                 )
+        if run_cancelled(engine, pipeline_run_id):
+            return _cancelled_run(engine, pipeline_code, pipeline_run_id, task_codes, hooks)
         return _finalize(
             engine,
             pipeline_code,
@@ -318,6 +326,30 @@ def _skipped_run(
     return outcome
 
 
+def _cancelled_run(
+    engine: Engine,
+    pipeline_code: str,
+    pipeline_run_id: int,
+    task_codes: dict[int, str],
+    hooks: RunHooks,
+) -> PipelineOutcome:
+    """Report a run an operator cancelled; it already ended ``CANCELLED``."""
+    with engine.connect() as conn:
+        rows = runlog.fetch_run_state(conn, pipeline_run_id, list(task_codes))
+    stopped = sorted(
+        task_codes[task_id]
+        for task_id, state in rows.items()
+        if state.status == RunStatus.CANCELLED
+    )
+    message = f"{pipeline_code}: pipeline_run_id={pipeline_run_id} CANCELLED"
+    if stopped:
+        message += f"; stopped: {', '.join(stopped)}"
+    outcome = PipelineOutcome(RunStatus.CANCELLED, message, pipeline_run_id)
+    logger.warning("%s", message)
+    _call_hook("on_finalized", hooks.on_finalized, outcome)
+    return outcome
+
+
 class _Waves:
     """Runs one wave of tasks at a time, each through ``run_task``, in parallel."""
 
@@ -326,6 +358,7 @@ class _Waves:
         engine: Engine,
         config: ConnectorConfig,
         pipeline_code: str,
+        pipeline_run_id: int,
         task_codes: dict[int, str],
         *,
         force: bool,
@@ -335,6 +368,7 @@ class _Waves:
         self.engine = engine
         self.config = config
         self.pipeline_code = pipeline_code
+        self.pipeline_run_id = pipeline_run_id
         self.task_codes = task_codes
         self.force = force
         self.gate = gate
@@ -370,7 +404,7 @@ class _Waves:
                 raise
 
     def _run_one(self, task_code: str) -> TaskOutcome | None:
-        if self.cancel.is_set():
+        if self.cancel.is_set() or run_cancelled(self.engine, self.pipeline_run_id):
             return None
         try:
             return run_task(
@@ -406,6 +440,8 @@ def _run_until_settled(
     failures_final = False
     after_failure: list[int] = []
     while True:
+        if run_cancelled(engine, pipeline_run_id):
+            return [], after_failure
         skipped = _settle_unsatisfiable(
             engine, graph, pipeline_run_id, task_codes, failures_final=failures_final
         )

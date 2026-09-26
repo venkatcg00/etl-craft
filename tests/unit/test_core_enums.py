@@ -9,7 +9,7 @@ pytestmark = pytest.mark.unit
 
 EXPECTED = {
     enums.ActiveFlag: {"Y", "N"},
-    enums.RunStatus: {"IN-PROGRESS", "SUCCESS", "FAILED", "SKIPPED"},
+    enums.RunStatus: {"IN-PROGRESS", "SUCCESS", "FAILED", "SKIPPED", "CANCELLED"},
     enums.SlaStatus: {"MET", "BREACHED"},
     enums.RefreshType: {"FULL", "INCREMENTAL"},
     enums.DependencyType: {"SUCCESS", "FAILURE", "ALWAYS", "HAS_DATA"},
@@ -33,6 +33,7 @@ EXPECTED = {
     enums.AuthMode: {"none", "password", "token", "key_file", "oauth", "sso", "sts"},
     enums.TableFormat: {"native", "iceberg"},
     enums.CloningScope: {"cfg", "aud", "all", "none"},
+    enums.InterventionAction: {"MARK", "NEW_RUN", "CANCEL", "REOPEN", "RESET"},
 }
 
 
@@ -58,14 +59,19 @@ def test_members_compare_equal_to_the_raw_strings():
 
 
 def test_status_groups():
-    assert {RunStatus.SUCCESS, RunStatus.FAILED, RunStatus.SKIPPED} == enums.TERMINAL_STATUSES
+    assert {
+        RunStatus.SUCCESS,
+        RunStatus.FAILED,
+        RunStatus.SKIPPED,
+        RunStatus.CANCELLED,
+    } == enums.TERMINAL_STATUSES
     assert {RunStatus.SUCCESS, RunStatus.SKIPPED} == enums.SETTLED_STATUSES
     assert {
         RunStatus.SUCCESS,
         RunStatus.SKIPPED,
         RunStatus.IN_PROGRESS,
     } == enums.NOT_RETRYABLE_STATUSES
-    assert {RunStatus.SUCCESS, RunStatus.FAILED} == enums.FINISHED_RUN_STATUSES
+    assert {RunStatus.SUCCESS, RunStatus.FAILED, RunStatus.CANCELLED} == enums.FINISHED_RUN_STATUSES
 
 
 def test_a_failed_task_stays_retryable():

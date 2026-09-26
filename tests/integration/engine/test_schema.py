@@ -22,6 +22,7 @@ TABLES = (
     "cfg_business_rules",
     "aud_pipelines_run_log",
     "aud_task_run_log",
+    "aud_run_interventions",
     "aud_business_rules_run_log",
     "aud_business_rules_results",
     "aud_task_offset_tracker",

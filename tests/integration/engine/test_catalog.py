@@ -11,6 +11,7 @@ from etl_craft.cli import main
 from etl_craft.config import load_config
 from etl_craft.core.errors import ExitCode, UsageError
 from etl_craft.engine import runlog
+from etl_craft.execution.interventions import mark_task
 from etl_craft.services.catalog import build_catalog
 from etl_craft.services.catalog_graph import lineage_drawing
 from etl_craft.services.catalog_site import MARKER, table_url, write_site
@@ -352,3 +353,20 @@ def test_every_page_chains_to_what_it_mentions(project, tmp_path):
     table = page("tables/sales.orders.html")
     assert '<a href="../warehouse.html#w-analytics.sales">sales</a>' in table
     assert 'Pipelines</dt><dd><a href="../pipelines/MART.html">MART</a>' in table
+
+
+def test_a_pipeline_page_lists_what_operators_changed_in_its_last_run(project, tmp_path):
+    engine, config, _ = project
+    mark_task(engine, config, "INGEST", "pull", "SKIPPED", "no file today", requested_by="op@h")
+    catalog = build_catalog(engine, config)
+    assert [(c.task_code, c.action) for c in catalog.pipelines["INGEST"].interventions] == [
+        ("pull", "MARK"),
+        (None, "REOPEN"),
+    ]
+    assert catalog.pipelines["SALES"].interventions == []
+    folder = write_site(catalog, config, tmp_path / "site").folder
+    page = (folder / "pipelines/INGEST.html").read_text("utf-8")
+    assert "<h2>Interventions on the last run</h2>" in page
+    assert '<a href="../tasks/INGEST.pull.html">INGEST.pull</a>' in page
+    assert "no file today" in page and "op@h" in page
+    assert "Interventions" not in (folder / "pipelines/SALES.html").read_text("utf-8")

@@ -199,7 +199,7 @@ CREATE TABLE AUD_PIPELINES_RUN_LOG (
     END_DATE         TIMESTAMPTZ,
     STATUS           VARCHAR NOT NULL,
     SLA_STATUS       VARCHAR(8),
-    CONSTRAINT ck_pipeline_run_status CHECK (STATUS IN ('IN-PROGRESS','SUCCESS','FAILED','SKIPPED')),
+    CONSTRAINT ck_pipeline_run_status CHECK (STATUS IN ('IN-PROGRESS','SUCCESS','FAILED','SKIPPED','CANCELLED')),
     CONSTRAINT ck_pipeline_run_sla_status CHECK (SLA_STATUS IN ('MET','BREACHED'))
 );
 -- At most one IN-PROGRESS run per pipeline: this index is what makes run-id resolution safe
@@ -224,11 +224,33 @@ CREATE TABLE AUD_TASK_RUN_LOG (
     ERROR_MESSAGE    VARCHAR,
     TASK_LOG         VARCHAR,
     ATTEMPT_COUNT    INT NOT NULL DEFAULT 1,
-    CONSTRAINT ck_task_run_status CHECK (STATUS IN ('IN-PROGRESS','SUCCESS','FAILED','SKIPPED'))
+    CONSTRAINT ck_task_run_status CHECK (STATUS IN ('IN-PROGRESS','SUCCESS','FAILED','SKIPPED','CANCELLED'))
 );
 CREATE UNIQUE INDEX ux_task_run_one_per_pipeline_run
     ON AUD_TASK_RUN_LOG (TASK_ID, PIPELINE_RUN_ID);
 CREATE INDEX ix_task_run_pipeline_run ON AUD_TASK_RUN_LOG (PIPELINE_RUN_ID);
+
+-- Every change an operator made to a run: a task or a run marked, a stand-in run recorded, a run
+-- cancelled or reopened, a task reset to run again. TASK_ID is NULL for a change to the run.
+-- FROM_STATUS and PREVIOUS_MESSAGE keep what the row held before, so nothing is erased;
+-- TO_STATUS is NULL for a task reset to not run yet.
+CREATE TABLE AUD_RUN_INTERVENTIONS (
+    INTERVENTION_ID   BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    PIPELINE_ID       BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
+    PIPELINE_RUN_ID   BIGINT NOT NULL REFERENCES AUD_PIPELINES_RUN_LOG(PIPELINE_RUN_ID),
+    TASK_ID           BIGINT REFERENCES CFG_TASKS(TASK_ID),
+    ACTION            VARCHAR(16) NOT NULL,
+    FROM_STATUS       VARCHAR(16),
+    TO_STATUS         VARCHAR(16),
+    TARGET_COUNT      BIGINT,
+    PREVIOUS_MESSAGE  VARCHAR,
+    REASON            VARCHAR NOT NULL,
+    REQUESTED_BY      VARCHAR NOT NULL,
+    REQUESTED_AT      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_intervention_action CHECK (ACTION IN ('MARK','NEW_RUN','CANCEL','REOPEN','RESET'))
+);
+
+CREATE INDEX ix_run_interventions_run ON AUD_RUN_INTERVENTIONS (PIPELINE_RUN_ID);
 COMMENT ON TABLE AUD_TASK_RUN_LOG IS 'One row per task per pipeline run. A retry updates the row and counts the attempt in ATTEMPT_COUNT; a task already SUCCESS or SKIPPED is not run again.';
 
 CREATE TABLE AUD_BUSINESS_RULES_RUN_LOG (
