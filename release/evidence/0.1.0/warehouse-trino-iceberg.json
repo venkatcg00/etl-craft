@@ -1,0 +1,179 @@
+{
+  "schema": 1,
+  "suite": "warehouse-trino-iceberg",
+  "marker": "warehouse_trino_iceberg",
+  "package_version": "0.1.0",
+  "commit": "355975f532eb6e07121e6748d05e3e9d2100dba2",
+  "dirty": false,
+  "wheel_sha256": null,
+  "python": "3.11.16",
+  "platform": "Linux-7.2.6-1-cachyos-x86_64-with-glibc2.44",
+  "started_at": "2026-09-26T07:30:33+00:00",
+  "finished_at": "2026-09-26T07:31:12+00:00",
+  "exit_status": 0,
+  "counts": {
+    "passed": 31,
+    "skipped": 0,
+    "xfailed": 0,
+    "xpassed": 0,
+    "failed": 0,
+    "error": 0
+  },
+  "tests": [
+    {
+      "nodeid": "tests/integration/warehouse/test_business_rules.py::test_a_bad_rule_stops_the_task_before_any_rule_runs[trino_iceberg-changes0-BUSINESS_RULE_KEY_COLUMN='order id' is not a plain column name]",
+      "outcome": "passed",
+      "duration": 0.664
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_business_rules.py::test_a_bad_rule_stops_the_task_before_any_rule_runs[trino_iceberg-changes1-BUSINESS_RULE_SQL must be a read-only SELECT]",
+      "outcome": "passed",
+      "duration": 0.545
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_business_rules.py::test_a_bad_rule_stops_the_task_before_any_rule_runs[trino_iceberg-changes2-must be one correlated SELECT; it holds 2 statements]",
+      "outcome": "passed",
+      "duration": 0.546
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_business_rules.py::test_a_failing_rule_fails_the_task_after_its_wave_finishes[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 1.089
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_business_rules.py::test_a_task_without_rules_fails[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 0.524
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_business_rules.py::test_rules_flag_breaking_rows_and_a_rerun_or_a_forced_run_clears_fixed_ones[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 2.841
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_cloning.py::test_a_clone_runs_when_a_run_ends[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 1.099
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_cloning.py::test_a_failed_clone_names_the_table_and_leaves_the_run_as_it_ended[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 0.112
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_cloning.py::test_a_mirror_gains_new_columns_and_keeps_old_ones[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 1.771
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_cloning.py::test_every_table_is_mirrored_and_replaced_on_the_next_clone[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 3.934
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_connections.py::test_a_trino_catalog_that_is_not_iceberg_is_reported",
+      "outcome": "passed",
+      "duration": 0.03
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_connections.py::test_trino_writes_and_reads_an_iceberg_table",
+      "outcome": "passed",
+      "duration": 0.172
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_failing_statement_names_its_step_and_leaves_no_scratch_tables[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 0.088
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_select_names_its_tables_as_schema_table[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 0.51
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_sql_file_with_the_pipeline_id_filter_reads_this_runs_rows[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 1.063
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_storage_location_is_used_where_it_applies_and_refused_elsewhere[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 0.728
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_target_may_name_its_database[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 1.151
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_target_missing_audit_columns_is_refused[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 0.423
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_append_table_adds_rows_on_every_run[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 1.585
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_create_table_stamps_the_run_and_numbers_the_rows[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 0.509
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_delete_rows_soft_and_hard[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 2.027
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_drop_table_needs_this_pipelines_create_table_to_have_run[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 0.386
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_duplicate_merge_keys_fail_unless_an_order_chooses[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 1.549
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_overwrite_table_needs_its_target_then_replaces_the_rows[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 1.421
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_scd1_merge_inserts_updates_and_leaves_unchanged_rows[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 3.379
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_scd1_preserve_target_keeps_values_where_the_source_is_null[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 3.319
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_scd2_merge_keeps_history[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 3.935
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_schema_checks_and_evolution[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 1.623
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_setup_table_refuses_writers_that_need_different_audit_columns[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 0.103
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_setup_table_takes_the_audit_columns_of_the_real_writer[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 1.268
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_warehouse_schema.py::test_an_existing_schema_passes_and_a_missing_one_is_named[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 0.12
+    }
+  ]
+}

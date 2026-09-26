@@ -1,0 +1,59 @@
+{
+  "schema": 1,
+  "suite": "cloud-snowflake",
+  "marker": "cloud_snowflake",
+  "package_version": "0.1.0",
+  "commit": "355975f532eb6e07121e6748d05e3e9d2100dba2",
+  "dirty": false,
+  "wheel_sha256": "39c10ed8ed64717114a708838b5f9030bf5c7ca14e2122e093705eeec155d084",
+  "python": "3.11.16",
+  "platform": "Linux-7.2.6-1-cachyos-x86_64-with-glibc2.44",
+  "started_at": "2026-09-26T09:08:52+00:00",
+  "finished_at": "2026-09-26T09:35:18+00:00",
+  "exit_status": 0,
+  "counts": {
+    "passed": 7,
+    "skipped": 0,
+    "xfailed": 0,
+    "xpassed": 0,
+    "failed": 0,
+    "error": 0
+  },
+  "tests": [
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_cloning.py::test_a_mirror_gains_columns_on_snowflake",
+      "outcome": "passed",
+      "duration": 29.286
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_connections.py::test_snowflake[iceberg-snowflake_iceberg]",
+      "outcome": "passed",
+      "duration": 8.791
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_connections.py::test_snowflake[native-snowflake]",
+      "outcome": "passed",
+      "duration": 7.984
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_demo.py::test_the_demo_on_snowflake[snowflake]",
+      "outcome": "passed",
+      "duration": 703.102
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_demo.py::test_the_demo_on_snowflake[snowflake_iceberg]",
+      "outcome": "passed",
+      "duration": 373.765
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_every_action_on_snowflake[iceberg]",
+      "outcome": "passed",
+      "duration": 235.118
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_every_action_on_snowflake[native]",
+      "outcome": "passed",
+      "duration": 226.92
+    }
+  ]
+}

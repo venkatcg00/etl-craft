@@ -1,0 +1,1054 @@
+{
+  "schema": 1,
+  "suite": "engine-postgres",
+  "marker": "engine_postgres",
+  "package_version": "0.1.0",
+  "commit": "355975f532eb6e07121e6748d05e3e9d2100dba2",
+  "dirty": false,
+  "wheel_sha256": null,
+  "python": "3.11.16",
+  "platform": "Linux-7.2.6-1-cachyos-x86_64-with-glibc2.44",
+  "started_at": "2026-09-26T07:28:39+00:00",
+  "finished_at": "2026-09-26T07:29:58+00:00",
+  "exit_status": 0,
+  "counts": {
+    "passed": 206,
+    "skipped": 0,
+    "xfailed": 0,
+    "xpassed": 0,
+    "failed": 0,
+    "error": 0
+  },
+  "tests": [
+    {
+      "nodeid": "tests/integration/engine/test_catalog.py::test_a_folder_that_holds_other_files_is_refused[postgresql]",
+      "outcome": "passed",
+      "duration": 0.264
+    },
+    {
+      "nodeid": "tests/integration/engine/test_catalog.py::test_a_pipeline_page_lists_what_operators_changed_in_its_last_run[postgresql]",
+      "outcome": "passed",
+      "duration": 0.238
+    },
+    {
+      "nodeid": "tests/integration/engine/test_catalog.py::test_a_tables_graph_runs_to_the_first_source_and_the_last_consumer[postgresql]",
+      "outcome": "passed",
+      "duration": 0.227
+    },
+    {
+      "nodeid": "tests/integration/engine/test_catalog.py::test_every_page_chains_to_what_it_mentions[postgresql]",
+      "outcome": "passed",
+      "duration": 0.225
+    },
+    {
+      "nodeid": "tests/integration/engine/test_catalog.py::test_the_catalog_joins_tasks_tables_and_rules[postgresql]",
+      "outcome": "passed",
+      "duration": 0.366
+    },
+    {
+      "nodeid": "tests/integration/engine/test_catalog.py::test_the_command[postgresql]",
+      "outcome": "passed",
+      "duration": 0.741
+    },
+    {
+      "nodeid": "tests/integration/engine/test_catalog.py::test_the_site_has_a_page_per_asset_and_a_search_index[postgresql]",
+      "outcome": "passed",
+      "duration": 0.248
+    },
+    {
+      "nodeid": "tests/integration/engine/test_catalog.py::test_warehouse_columns_add_types[postgresql]",
+      "outcome": "passed",
+      "duration": 0.286
+    },
+    {
+      "nodeid": "tests/integration/engine/test_clone_command.py::test_cloning_refuses_the_engine_dbs_own_schema",
+      "outcome": "passed",
+      "duration": 0.086
+    },
+    {
+      "nodeid": "tests/integration/engine/test_clone_command.py::test_the_command_copies_the_scope_and_says_what_it_did[postgresql]",
+      "outcome": "passed",
+      "duration": 0.43
+    },
+    {
+      "nodeid": "tests/integration/engine/test_clone_command.py::test_the_command_says_when_cloning_is_off[postgresql-cloning0]",
+      "outcome": "passed",
+      "duration": 0.203
+    },
+    {
+      "nodeid": "tests/integration/engine/test_clone_command.py::test_the_command_says_when_cloning_is_off[postgresql-cloning1]",
+      "outcome": "passed",
+      "duration": 0.19
+    },
+    {
+      "nodeid": "tests/integration/engine/test_dialects.py::test_a_lock_excludes_other_holders_and_times_out[postgresql]",
+      "outcome": "passed",
+      "duration": 0.505
+    },
+    {
+      "nodeid": "tests/integration/engine/test_dialects.py::test_a_lock_is_released_when_its_holder_raises[postgresql]",
+      "outcome": "passed",
+      "duration": 0.179
+    },
+    {
+      "nodeid": "tests/integration/engine/test_dialects.py::test_a_secret_removed_after_loading_is_a_configuration_error",
+      "outcome": "passed",
+      "duration": 0.064
+    },
+    {
+      "nodeid": "tests/integration/engine/test_dialects.py::test_a_wrong_password_fails_when_connecting",
+      "outcome": "passed",
+      "duration": 0.072
+    },
+    {
+      "nodeid": "tests/integration/engine/test_dialects.py::test_the_engine_url_names_the_database_but_never_the_secret[postgresql]",
+      "outcome": "passed",
+      "duration": 0.181
+    },
+    {
+      "nodeid": "tests/integration/engine/test_doctor_setup.py::test_a_project_migration_is_pending_until_setup_applies_it[postgresql]",
+      "outcome": "passed",
+      "duration": 0.422
+    },
+    {
+      "nodeid": "tests/integration/engine/test_doctor_setup.py::test_an_engine_db_that_cannot_be_reached_is_one_failed_check[postgresql]",
+      "outcome": "passed",
+      "duration": 0.09
+    },
+    {
+      "nodeid": "tests/integration/engine/test_doctor_setup.py::test_docs_site_publishing_is_only_warned_about[postgresql]",
+      "outcome": "passed",
+      "duration": 0.139
+    },
+    {
+      "nodeid": "tests/integration/engine/test_doctor_setup.py::test_email_secrets_auth_and_sendmail[postgresql]",
+      "outcome": "passed",
+      "duration": 0.17
+    },
+    {
+      "nodeid": "tests/integration/engine/test_doctor_setup.py::test_every_problem_is_reported_not_only_the_first[postgresql]",
+      "outcome": "passed",
+      "duration": 0.076
+    },
+    {
+      "nodeid": "tests/integration/engine/test_doctor_setup.py::test_relaxed_dependency_gates_are_warned_about[postgresql]",
+      "outcome": "passed",
+      "duration": 0.174
+    },
+    {
+      "nodeid": "tests/integration/engine/test_doctor_setup.py::test_setup_changes_nothing_when_a_check_fails[postgresql]",
+      "outcome": "passed",
+      "duration": 0.135
+    },
+    {
+      "nodeid": "tests/integration/engine/test_doctor_setup.py::test_setup_creates_the_engine_db_then_changes_nothing[postgresql]",
+      "outcome": "passed",
+      "duration": 0.412
+    },
+    {
+      "nodeid": "tests/integration/engine/test_engine_schema.py::test_a_missing_postgres_schema_is_refused_with_the_remedy",
+      "outcome": "passed",
+      "duration": 0.087
+    },
+    {
+      "nodeid": "tests/integration/engine/test_engine_schema.py::test_postgres_tables_live_in_the_engine_schema",
+      "outcome": "passed",
+      "duration": 0.204
+    },
+    {
+      "nodeid": "tests/integration/engine/test_generate_yml.py::test_a_pipeline_becomes_one_dag[postgresql]",
+      "outcome": "passed",
+      "duration": 0.193
+    },
+    {
+      "nodeid": "tests/integration/engine/test_generate_yml.py::test_an_environment_without_schedules[postgresql]",
+      "outcome": "passed",
+      "duration": 0.19
+    },
+    {
+      "nodeid": "tests/integration/engine/test_generate_yml.py::test_remote_mode_names_each_rule_it_cannot_apply[postgresql-UPDATE CFG_PIPELINE_DEPENDENCY SET DEPENDENCY_TYPE = 'HAS_DATA'-SALES-depends on pipeline UP with DEPENDENCY_TYPE = 'HAS_DATA']",
+      "outcome": "passed",
+      "duration": 0.266
+    },
+    {
+      "nodeid": "tests/integration/engine/test_generate_yml.py::test_remote_mode_names_each_rule_it_cannot_apply[postgresql-UPDATE CFG_TASKS SET RUN_CONDITION = 'N', RUN_CONDITION_COUNT = 1 WHERE TASK_CODE = 'load'-SALES.load-RUN_CONDITION = 'N' (RUN_CONDITION_COUNT = 1)]",
+      "outcome": "passed",
+      "duration": 0.201
+    },
+    {
+      "nodeid": "tests/integration/engine/test_generate_yml.py::test_remote_mode_names_each_rule_it_cannot_apply[postgresql-UPDATE CFG_TASK_DEPENDENCY SET DEPENDENCY_TYPE = 'HAS_DATA' WHERE DEPENDS_ON_PIPELINE_ID <> PIPELINE_ID-SALES.load-depends on UP.publish with DEPENDENCY_TYPE = 'HAS_DATA']",
+      "outcome": "passed",
+      "duration": 0.229
+    },
+    {
+      "nodeid": "tests/integration/engine/test_generate_yml.py::test_remote_mode_puts_every_rule_in_the_dag[postgresql]",
+      "outcome": "passed",
+      "duration": 0.217
+    },
+    {
+      "nodeid": "tests/integration/engine/test_generate_yml.py::test_the_command_writes_yaml[postgresql]",
+      "outcome": "passed",
+      "duration": 0.265
+    },
+    {
+      "nodeid": "tests/integration/engine/test_generate_yml.py::test_the_docs_dag_writes_the_catalog_again_on_its_schedule[postgresql]",
+      "outcome": "passed",
+      "duration": 0.183
+    },
+    {
+      "nodeid": "tests/integration/engine/test_generate_yml.py::test_the_global_dag[postgresql]",
+      "outcome": "passed",
+      "duration": 0.188
+    },
+    {
+      "nodeid": "tests/integration/engine/test_generate_yml.py::test_the_global_dag_in_remote_mode_needs_one_type_per_pipeline[postgresql]",
+      "outcome": "passed",
+      "duration": 0.201
+    },
+    {
+      "nodeid": "tests/integration/engine/test_inspect_commands.py::test_graph[postgresql]",
+      "outcome": "passed",
+      "duration": 0.22
+    },
+    {
+      "nodeid": "tests/integration/engine/test_inspect_commands.py::test_history[postgresql]",
+      "outcome": "passed",
+      "duration": 0.268
+    },
+    {
+      "nodeid": "tests/integration/engine/test_inspect_commands.py::test_list[postgresql]",
+      "outcome": "passed",
+      "duration": 0.214
+    },
+    {
+      "nodeid": "tests/integration/engine/test_inspect_commands.py::test_steps[postgresql]",
+      "outcome": "passed",
+      "duration": 0.222
+    },
+    {
+      "nodeid": "tests/integration/engine/test_inspect_commands.py::test_unknown_codes_and_limits_are_named[postgresql]",
+      "outcome": "passed",
+      "duration": 0.27
+    },
+    {
+      "nodeid": "tests/integration/engine/test_lineage_commands.py::test_a_column_is_traced_to_its_first_sources_and_last_consumers[postgresql]",
+      "outcome": "passed",
+      "duration": 0.278
+    },
+    {
+      "nodeid": "tests/integration/engine/test_lineage_commands.py::test_docs_version_records_a_version_only_when_the_text_changes[postgresql]",
+      "outcome": "passed",
+      "duration": 0.362
+    },
+    {
+      "nodeid": "tests/integration/engine/test_lineage_commands.py::test_lineage_is_stored_and_worked_out_again_only_when_the_sql_changes[postgresql]",
+      "outcome": "passed",
+      "duration": 0.234
+    },
+    {
+      "nodeid": "tests/integration/engine/test_lineage_commands.py::test_the_summary_lists_every_task_and_what_cannot_be_traced[postgresql]",
+      "outcome": "passed",
+      "duration": 0.272
+    },
+    {
+      "nodeid": "tests/integration/engine/test_lineage_commands.py::test_usage_mistakes[postgresql]",
+      "outcome": "passed",
+      "duration": 0.251
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_a_folder_without_a_site_is_refused[postgresql]",
+      "outcome": "passed",
+      "duration": 0.189
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_ngrok_problems_say_what_to_do_and_never_show_the_token[postgresql]",
+      "outcome": "passed",
+      "duration": 2.246
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_only_allowed_visitors_are_served[postgresql]",
+      "outcome": "passed",
+      "duration": 1.715
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_publishing_through_ngrok_keeps_its_link[postgresql]",
+      "outcome": "passed",
+      "duration": 2.227
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_the_command[postgresql]",
+      "outcome": "passed",
+      "duration": 0.73
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_the_site_is_served_privately[postgresql]",
+      "outcome": "passed",
+      "duration": 0.735
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_a_finished_run_is_rebound_only_with_force[postgresql]",
+      "outcome": "passed",
+      "duration": 0.232
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_a_run_is_found_or_started[postgresql]",
+      "outcome": "passed",
+      "duration": 0.207
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_a_single_task_needs_a_run_to_bind_to[postgresql]",
+      "outcome": "passed",
+      "duration": 0.198
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_a_task_run_row_is_bound_once_and_retried_in_place[postgresql]",
+      "outcome": "passed",
+      "duration": 0.206
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_business_rules[postgresql]",
+      "outcome": "passed",
+      "duration": 0.203
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_concurrent_binds_share_one_row[postgresql]",
+      "outcome": "passed",
+      "duration": 0.211
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_concurrent_starts_share_one_run[postgresql]",
+      "outcome": "passed",
+      "duration": 0.203
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_dependency_edges_for_the_gates[postgresql]",
+      "outcome": "passed",
+      "duration": 0.195
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_failure_watch_reads_the_latest_error[postgresql]",
+      "outcome": "passed",
+      "duration": 0.206
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_finalizing_a_run_judges_its_sla[postgresql-1-2.0-MET]",
+      "outcome": "passed",
+      "duration": 0.205
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_finalizing_a_run_judges_its_sla[postgresql-1-None-None]",
+      "outcome": "passed",
+      "duration": 0.213
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_finalizing_a_run_judges_its_sla[postgresql-3-2.0-BREACHED]",
+      "outcome": "passed",
+      "duration": 0.201
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_inactive_tasks_in_the_pipeline_graph[postgresql]",
+      "outcome": "passed",
+      "duration": 0.202
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_losing_the_race_to_bind_a_task_reads_back_the_winner[postgresql]",
+      "outcome": "passed",
+      "duration": 0.207
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_losing_the_race_to_start_a_run_reads_back_the_winner[postgresql]",
+      "outcome": "passed",
+      "duration": 0.202
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_pipeline_detail_reads_its_json_parameters[postgresql]",
+      "outcome": "passed",
+      "duration": 0.191
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_resolve_pipeline_id[postgresql]",
+      "outcome": "passed",
+      "duration": 0.201
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_resolve_task_id[postgresql]",
+      "outcome": "passed",
+      "duration": 0.198
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_run_state_and_statuses[postgresql]",
+      "outcome": "passed",
+      "duration": 0.198
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_task_details_and_parameters[postgresql]",
+      "outcome": "passed",
+      "duration": 0.207
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_the_other_tasks_writing_a_target[postgresql]",
+      "outcome": "passed",
+      "duration": 0.198
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_the_pipeline_graph[postgresql]",
+      "outcome": "passed",
+      "duration": 0.197
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_a_retired_code_can_be_reused_but_not_two_active_ones[postgresql]",
+      "outcome": "passed",
+      "duration": 0.207
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_a_same_pipeline_dependency_fills_in_its_pipeline[postgresql]",
+      "outcome": "passed",
+      "duration": 0.192
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_audit_columns_are_stamped_and_creation_never_changes[postgresql]",
+      "outcome": "passed",
+      "duration": 0.217
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_duration_seconds[postgresql]",
+      "outcome": "passed",
+      "duration": 0.21
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_every_handler_is_accepted[postgresql]",
+      "outcome": "passed",
+      "duration": 0.195
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_existing_tables_is_empty_before_the_schema[postgresql]",
+      "outcome": "passed",
+      "duration": 0.189
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_foreign_keys_are_enforced[postgresql]",
+      "outcome": "passed",
+      "duration": 0.189
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_one_in_progress_run_per_pipeline[postgresql]",
+      "outcome": "passed",
+      "duration": 0.2
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_one_task_run_row_per_task_per_pipeline_run[postgresql]",
+      "outcome": "passed",
+      "duration": 0.223
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_pipeline_parameters_hold_json[postgresql]",
+      "outcome": "passed",
+      "duration": 0.198
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_refresh_type_and_business_rule_type_lists[postgresql]",
+      "outcome": "passed",
+      "duration": 0.191
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_run_condition_and_count[postgresql-ALL-None-True]",
+      "outcome": "passed",
+      "duration": 0.194
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_run_condition_and_count[postgresql-ANY-2-False]",
+      "outcome": "passed",
+      "duration": 0.189
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_run_condition_and_count[postgresql-ANY-None-True]",
+      "outcome": "passed",
+      "duration": 0.185
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_run_condition_and_count[postgresql-MOST-None-False]",
+      "outcome": "passed",
+      "duration": 0.202
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_run_condition_and_count[postgresql-N-0-False]",
+      "outcome": "passed",
+      "duration": 0.191
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_run_condition_and_count[postgresql-N-2-True]",
+      "outcome": "passed",
+      "duration": 0.184
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_run_condition_and_count[postgresql-N-None-False]",
+      "outcome": "passed",
+      "duration": 0.187
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_run_condition_and_count[postgresql-None-2-False]",
+      "outcome": "passed",
+      "duration": 0.194
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_run_condition_and_count[postgresql-None-None-True]",
+      "outcome": "passed",
+      "duration": 0.187
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_self_dependencies_are_refused[postgresql]",
+      "outcome": "passed",
+      "duration": 0.191
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_sla_status_is_met_or_breached[postgresql]",
+      "outcome": "passed",
+      "duration": 0.197
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_task_values_outside_their_lists_are_refused[postgresql-ACTIVE_FLAG-X]",
+      "outcome": "passed",
+      "duration": 0.2
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_task_values_outside_their_lists_are_refused[postgresql-HANDLER-BOGUS]",
+      "outcome": "passed",
+      "duration": 0.187
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_task_values_outside_their_lists_are_refused[postgresql-TASK_TYPE-LOAD]",
+      "outcome": "passed",
+      "duration": 0.187
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_the_migration_ledger[postgresql-ENGINE-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-False]",
+      "outcome": "passed",
+      "duration": 0.178
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_the_migration_ledger[postgresql-ENGINE-None-False]",
+      "outcome": "passed",
+      "duration": 0.206
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_the_migration_ledger[postgresql-ENGINE-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-False]",
+      "outcome": "passed",
+      "duration": 0.202
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_the_migration_ledger[postgresql-ENGINE-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-True]",
+      "outcome": "passed",
+      "duration": 0.182
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_the_migration_ledger[postgresql-LEGACY-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-False]",
+      "outcome": "passed",
+      "duration": 0.183
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_the_migration_ledger[postgresql-PROJECT-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef-True]",
+      "outcome": "passed",
+      "duration": 0.181
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_the_offset_type_list[postgresql]",
+      "outcome": "passed",
+      "duration": 0.193
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_the_schema_creates_every_table[postgresql]",
+      "outcome": "passed",
+      "duration": 0.191
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_the_schema_is_all_or_nothing[postgresql]",
+      "outcome": "passed",
+      "duration": 0.191
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_trackers_share_their_dependency_row_key[postgresql]",
+      "outcome": "passed",
+      "duration": 0.198
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_a_failing_file_rolls_back_with_its_record_and_stops_the_run[postgresql]",
+      "outcome": "passed",
+      "duration": 0.205
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_a_missing_applied_file_is_refused[postgresql]",
+      "outcome": "passed",
+      "duration": 0.216
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_an_edited_applied_file_is_refused_before_anything_runs[postgresql]",
+      "outcome": "passed",
+      "duration": 0.195
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_applied_project_files_need_the_project_directory[postgresql]",
+      "outcome": "passed",
+      "duration": 0.207
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_concurrent_runs_apply_each_file_once[postgresql]",
+      "outcome": "passed",
+      "duration": 0.209
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_init_db_creates_the_schema[postgresql]",
+      "outcome": "passed",
+      "duration": 0.203
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_init_db_records_the_packaged_migrations_it_includes[postgresql]",
+      "outcome": "passed",
+      "duration": 0.219
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_init_db_refuses_a_database_that_already_has_the_schema[postgresql]",
+      "outcome": "passed",
+      "duration": 0.23
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_migrate_applies_engine_then_project_files_in_order[postgresql]",
+      "outcome": "passed",
+      "duration": 0.229
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_migrate_on_a_database_without_the_schema[postgresql]",
+      "outcome": "passed",
+      "duration": 0.085
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_migrate_with_nothing_pending[postgresql]",
+      "outcome": "passed",
+      "duration": 0.196
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_sql_is_run_as_written[postgresql]",
+      "outcome": "passed",
+      "duration": 0.194
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_the_same_filename_in_both_streams_is_two_migrations[postgresql]",
+      "outcome": "passed",
+      "duration": 0.226
+    },
+    {
+      "nodeid": "tests/integration/engine/test_validate.py::test_a_clean_project_has_no_findings[postgresql]",
+      "outcome": "passed",
+      "duration": 0.203
+    },
+    {
+      "nodeid": "tests/integration/engine/test_validate.py::test_a_cycle_inside_a_pipeline[postgresql]",
+      "outcome": "passed",
+      "duration": 0.206
+    },
+    {
+      "nodeid": "tests/integration/engine/test_validate.py::test_an_alert_that_only_watches_for_failures_may_run_mid_run[postgresql]",
+      "outcome": "passed",
+      "duration": 0.44
+    },
+    {
+      "nodeid": "tests/integration/engine/test_validate.py::test_dependencies_and_pipeline_settings[postgresql]",
+      "outcome": "passed",
+      "duration": 0.23
+    },
+    {
+      "nodeid": "tests/integration/engine/test_validate.py::test_remote_mode_fails_the_rules_its_orchestrator_does_not_support[postgresql]",
+      "outcome": "passed",
+      "duration": 0.225
+    },
+    {
+      "nodeid": "tests/integration/engine/test_validate.py::test_task_definitions_are_checked_with_the_handlers_own_rules[postgresql]",
+      "outcome": "passed",
+      "duration": 0.218
+    },
+    {
+      "nodeid": "tests/integration/engine/test_validate.py::test_the_command[postgresql]",
+      "outcome": "passed",
+      "duration": 0.304
+    },
+    {
+      "nodeid": "tests/integration/execution/test_child.py::test_a_failing_handler_records_failed[postgresql-breaks-16-KeyError: 'missing']",
+      "outcome": "passed",
+      "duration": 0.203
+    },
+    {
+      "nodeid": "tests/integration/execution/test_child.py::test_a_failing_handler_records_failed[postgresql-fails-15-nothing to load]",
+      "outcome": "passed",
+      "duration": 0.22
+    },
+    {
+      "nodeid": "tests/integration/execution/test_child.py::test_a_successful_handler_records_success[postgresql]",
+      "outcome": "passed",
+      "duration": 0.198
+    },
+    {
+      "nodeid": "tests/integration/execution/test_child.py::test_an_unknown_task_run[postgresql]",
+      "outcome": "passed",
+      "duration": 0.197
+    },
+    {
+      "nodeid": "tests/integration/execution/test_child.py::test_the_command_line_records_a_handler_failure[postgresql]",
+      "outcome": "passed",
+      "duration": 0.665
+    },
+    {
+      "nodeid": "tests/integration/execution/test_child.py::test_the_context_is_rebuilt_from_the_task_run[postgresql]",
+      "outcome": "passed",
+      "duration": 0.182
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_a_failing_or_missing_sendmail_is_named[postgresql]",
+      "outcome": "passed",
+      "duration": 0.21
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_a_relay_that_cannot_be_reached_is_named[postgresql]",
+      "outcome": "passed",
+      "duration": 0.203
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_alert_mistakes_fail_with_the_remedy[postgresql-params0-EMAIL_TO is required]",
+      "outcome": "passed",
+      "duration": 0.195
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_alert_mistakes_fail_with_the_remedy[postgresql-params1-EMAIL_SUBJECT .* is required]",
+      "outcome": "passed",
+      "duration": 0.19
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_alert_mistakes_fail_with_the_remedy[postgresql-params2-EMAIL_BODY .* is required]",
+      "outcome": "passed",
+      "duration": 0.213
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_alert_mistakes_fail_with_the_remedy[postgresql-params3-EMAIL_SUBJECT uses unknown token\\\\(s\\\\) \\\\$\\\\$when]",
+      "outcome": "passed",
+      "duration": 0.204
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_alert_mistakes_fail_with_the_remedy[postgresql-params4-EMAIL_ON_STATUS names unknown outcome]",
+      "outcome": "passed",
+      "duration": 0.188
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_an_alert_on_other_outcomes_sends_nothing[postgresql]",
+      "outcome": "passed",
+      "duration": 0.219
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_an_alert_reports_the_run_with_a_digest[postgresql]",
+      "outcome": "passed",
+      "duration": 0.241
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_an_alert_through_sendmail[postgresql]",
+      "outcome": "passed",
+      "duration": 0.205
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_the_sla_email_goes_to_the_pipeline_recipients_only_when_enforced[postgresql]",
+      "outcome": "passed",
+      "duration": 0.202
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gates.py::test_a_pipeline_gate_and_what_its_successful_run_consumes[postgresql]",
+      "outcome": "passed",
+      "duration": 0.217
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gates.py::test_a_running_upstream_is_waited_for[postgresql]",
+      "outcome": "passed",
+      "duration": 0.19
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gates.py::test_a_task_dependency_is_judged_on_the_upstreams_last_run_and_consumed_once[postgresql]",
+      "outcome": "passed",
+      "duration": 0.209
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gates.py::test_an_older_satisfying_run_does_not_count_once_a_newer_one_fails[postgresql]",
+      "outcome": "passed",
+      "duration": 0.195
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gates.py::test_has_data_needs_rows_written[postgresql]",
+      "outcome": "passed",
+      "duration": 0.196
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gates.py::test_only_the_needed_dependencies_are_checked[postgresql]",
+      "outcome": "passed",
+      "duration": 0.194
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_failed_task_marked_success_lets_its_dependents_run[postgresql]",
+      "outcome": "passed",
+      "duration": 1.453
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_marked_success_satisfies_has_data_only_with_a_row_count[postgresql]",
+      "outcome": "passed",
+      "duration": 1.525
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_rerun_runs_a_task_and_what_follows_it_again[postgresql]",
+      "outcome": "passed",
+      "duration": 2.202
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_run_marked_success_satisfies_a_downstream_gate[postgresql]",
+      "outcome": "passed",
+      "duration": 1.581
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_stand_in_run_passes_gates_where_the_upstream_cannot_run[postgresql]",
+      "outcome": "passed",
+      "duration": 0.822
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_task_runs_without_its_dependencies_when_told_to[postgresql]",
+      "outcome": "passed",
+      "duration": 0.588
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_cancel_stops_a_running_run[postgresql]",
+      "outcome": "passed",
+      "duration": 0.74
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_relaxed_gates_let_a_run_through_and_record_it[postgresql-off]",
+      "outcome": "passed",
+      "duration": 0.63
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_relaxed_gates_let_a_run_through_and_record_it[postgresql-warn]",
+      "outcome": "passed",
+      "duration": 0.638
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_the_commands[postgresql]",
+      "outcome": "passed",
+      "duration": 1.11
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_the_run_options[postgresql]",
+      "outcome": "passed",
+      "duration": 0.264
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_what_mark_and_cancel_refuse[postgresql]",
+      "outcome": "passed",
+      "duration": 1.105
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_a_failed_connection_test_starts_no_run[postgresql]",
+      "outcome": "passed",
+      "duration": 0.216
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_a_pipeline_runs_in_waves_and_fails_when_a_task_fails[postgresql]",
+      "outcome": "passed",
+      "duration": 1.058
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_a_run_the_orchestrator_ran_no_task_of_is_skipped[postgresql]",
+      "outcome": "passed",
+      "duration": 0.279
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_an_interrupted_run_is_resumed_without_repeating_finished_tasks[postgresql]",
+      "outcome": "passed",
+      "duration": 0.599
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_an_orchestrator_starts_runs_and_finalizes[postgresql]",
+      "outcome": "passed",
+      "duration": 2.497
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_an_unsatisfied_pipeline_dependency_skips_the_run[postgresql]",
+      "outcome": "passed",
+      "duration": 1.03
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_finalize_fails_a_task_whose_orchestrated_process_was_lost[postgresql]",
+      "outcome": "passed",
+      "duration": 0.253
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_finalize_reports_a_lapse_nobody_saw_while_running[postgresql]",
+      "outcome": "passed",
+      "duration": 0.251
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_force_runs_every_task_again[postgresql]",
+      "outcome": "passed",
+      "duration": 0.593
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_remote_mode_refuses_a_whole_pipeline_run[postgresql]",
+      "outcome": "passed",
+      "duration": 0.216
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_remote_mode_refuses_rules_the_orchestrator_does_not_support[postgresql]",
+      "outcome": "passed",
+      "duration": 0.204
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_the_command_line[postgresql]",
+      "outcome": "passed",
+      "duration": 1.172
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_the_sla_is_marked_breached_while_the_run_is_still_going[postgresql]",
+      "outcome": "passed",
+      "duration": 2.253
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_a_missing_script_is_named[postgresql]",
+      "outcome": "passed",
+      "duration": 0.232
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_a_script_runs_in_the_task_process_and_resumes_from_its_offset[postgresql]",
+      "outcome": "passed",
+      "duration": 1.282
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_a_script_that_needs_nothing_from_the_task[postgresql]",
+      "outcome": "passed",
+      "duration": 0.209
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_an_offset_keeps_its_type[postgresql]",
+      "outcome": "passed",
+      "duration": 0.233
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[postgresql-def run(a, b):\\n    pass\\n-params7-run takes 2 arguments; it takes the task, or nothing]",
+      "outcome": "passed",
+      "duration": 0.206
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[postgresql-def run(task):\\n    pass\\n-params10-SCRIPT_NAME is required]",
+      "outcome": "passed",
+      "duration": 0.199
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[postgresql-def run(task):\\n    pass\\n-params8-must be a JSON object]",
+      "outcome": "passed",
+      "duration": 0.199
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[postgresql-def run(task):\\n    pass\\n-params9-INPUT_PARAMS is not valid JSON]",
+      "outcome": "passed",
+      "duration": 0.202
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[postgresql-def run(task):\\n    raise KeyError('id')\\n-params2-load.py failed: KeyError: 'id']",
+      "outcome": "passed",
+      "duration": 0.223
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[postgresql-def run(task):\\n    return 5\\n-params4-load.py returned int, not a ScriptResult]",
+      "outcome": "passed",
+      "duration": 0.228
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[postgresql-def run(task:\\n-params1-importing it failed: SyntaxError]",
+      "outcome": "passed",
+      "duration": 0.24
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[postgresql-from etl_craft.scripting import Offset, ScriptResult\\ndef run(task):\\n    return ScriptResult(-1)\\n-params6-returned row_count=-1]",
+      "outcome": "passed",
+      "duration": 0.198
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[postgresql-from etl_craft.scripting import Offset, ScriptResult\\ndef run(task):\\n    return ScriptResult(True)\\n-params5-load.py returned row_count=True; it must be a whole number, 0 or more]",
+      "outcome": "passed",
+      "duration": 0.224
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[postgresql-import sys\\ndef run(task):\\n    sys.exit(3)\\n-params3-load.py called sys.exit\\\\(3\\\\)]",
+      "outcome": "passed",
+      "duration": 0.206
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[postgresql-x = 1\\n-params0-SCRIPT_NAME='load.py' defines no run\\\\(task\\\\) function]",
+      "outcome": "passed",
+      "duration": 0.221
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_a_handler_error_fails_the_task_with_its_message[postgresql]",
+      "outcome": "passed",
+      "duration": 0.643
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_a_retry_is_a_new_attempt_on_the_same_row_with_its_own_log[postgresql]",
+      "outcome": "passed",
+      "duration": 0.988
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_a_settled_task_is_not_run_again_unless_forced[postgresql]",
+      "outcome": "passed",
+      "duration": 0.98
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_a_task_in_progress_is_not_started_twice[postgresql]",
+      "outcome": "passed",
+      "duration": 0.241
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_a_task_process_that_ends_without_an_outcome_is_recorded_failed[postgresql-exits-exited with code 3]",
+      "outcome": "passed",
+      "duration": 0.554
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_a_task_process_that_ends_without_an_outcome_is_recorded_failed[postgresql-killed-was killed by signal SIGKILL]",
+      "outcome": "passed",
+      "duration": 0.593
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_a_task_process_that_ends_without_an_outcome_is_recorded_failed[postgresql-slow-timed out after 2s and was killed]",
+      "outcome": "passed",
+      "duration": 2.278
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_a_task_succeeds_and_records_its_counts_and_output[postgresql]",
+      "outcome": "passed",
+      "duration": 0.654
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_a_task_waits_for_its_dependencies_and_is_skipped_when_they_can_never_be_met[postgresql]",
+      "outcome": "passed",
+      "duration": 1.104
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_an_unexpected_error_fails_the_task_with_its_traceback_in_the_log[postgresql]",
+      "outcome": "passed",
+      "duration": 0.68
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_errors_before_running[postgresql]",
+      "outcome": "passed",
+      "duration": 0.223
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_reported_values_are_listed_in_the_task_log[postgresql]",
+      "outcome": "passed",
+      "duration": 0.657
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_the_cross_pipeline_gate_decides_a_task_with_dependencies_elsewhere[postgresql]",
+      "outcome": "passed",
+      "duration": 0.624
+    }
+  ]
+}
