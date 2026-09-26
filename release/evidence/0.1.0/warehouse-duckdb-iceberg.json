@@ -1,0 +1,184 @@
+{
+  "schema": 1,
+  "suite": "warehouse-duckdb-iceberg",
+  "marker": "warehouse_duckdb_iceberg",
+  "package_version": "0.1.0",
+  "commit": "355975f532eb6e07121e6748d05e3e9d2100dba2",
+  "dirty": false,
+  "wheel_sha256": null,
+  "python": "3.11.16",
+  "platform": "Linux-7.2.6-1-cachyos-x86_64-with-glibc2.44",
+  "started_at": "2026-09-26T07:30:10+00:00",
+  "finished_at": "2026-09-26T07:30:32+00:00",
+  "exit_status": 0,
+  "counts": {
+    "passed": 32,
+    "skipped": 0,
+    "xfailed": 0,
+    "xpassed": 0,
+    "failed": 0,
+    "error": 0
+  },
+  "tests": [
+    {
+      "nodeid": "tests/integration/warehouse/test_business_rules.py::test_a_bad_rule_stops_the_task_before_any_rule_runs[duckdb_iceberg-changes0-BUSINESS_RULE_KEY_COLUMN='order id' is not a plain column name]",
+      "outcome": "passed",
+      "duration": 0.34
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_business_rules.py::test_a_bad_rule_stops_the_task_before_any_rule_runs[duckdb_iceberg-changes1-BUSINESS_RULE_SQL must be a read-only SELECT]",
+      "outcome": "passed",
+      "duration": 0.338
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_business_rules.py::test_a_bad_rule_stops_the_task_before_any_rule_runs[duckdb_iceberg-changes2-must be one correlated SELECT; it holds 2 statements]",
+      "outcome": "passed",
+      "duration": 0.351
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_business_rules.py::test_a_failing_rule_fails_the_task_after_its_wave_finishes[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 0.743
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_business_rules.py::test_a_task_without_rules_fails[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 0.373
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_business_rules.py::test_rules_flag_breaking_rows_and_a_rerun_or_a_forced_run_clears_fixed_ones[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 1.632
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_cloning.py::test_a_clone_runs_when_a_run_ends[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 0.78
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_cloning.py::test_a_failed_clone_names_the_table_and_leaves_the_run_as_it_ended[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 0.38
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_cloning.py::test_a_mirror_gains_new_columns_and_keeps_old_ones[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 1.119
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_cloning.py::test_every_table_is_mirrored_and_replaced_on_the_next_clone[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 1.936
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_connections.py::test_duckdb_attaches_the_iceberg_catalog",
+      "outcome": "passed",
+      "duration": 0.159
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_connections.py::test_duckdb_attaches_the_iceberg_catalog_with_oauth",
+      "outcome": "passed",
+      "duration": 0.156
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_connections.py::test_duckdb_iceberg_settings_are_checked_before_attaching",
+      "outcome": "passed",
+      "duration": 0.019
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_failing_statement_names_its_step_and_leaves_no_scratch_tables[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 0.287
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_select_names_its_tables_as_schema_table[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 0.39
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_sql_file_with_the_pipeline_id_filter_reads_this_runs_rows[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 0.623
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_storage_location_is_used_where_it_applies_and_refused_elsewhere[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 0.189
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_target_may_name_its_database[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 0.607
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_target_missing_audit_columns_is_refused[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 0.379
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_append_table_adds_rows_on_every_run[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 0.998
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_create_table_stamps_the_run_and_numbers_the_rows[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 0.346
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_delete_rows_soft_and_hard[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 0.973
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_drop_table_needs_this_pipelines_create_table_to_have_run[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 0.769
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_duplicate_merge_keys_fail_unless_an_order_chooses[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 0.698
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_overwrite_table_needs_its_target_then_replaces_the_rows[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 0.849
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_scd1_merge_inserts_updates_and_leaves_unchanged_rows[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 1.038
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_scd1_preserve_target_keeps_values_where_the_source_is_null[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 1.021
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_scd2_merge_keeps_history[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 1.197
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_schema_checks_and_evolution[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 1.083
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_setup_table_refuses_writers_that_need_different_audit_columns[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 0.453
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_setup_table_takes_the_audit_columns_of_the_real_writer[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 0.852
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_warehouse_schema.py::test_an_existing_schema_passes_and_a_missing_one_is_named[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 0.369
+    }
+  ]
+}

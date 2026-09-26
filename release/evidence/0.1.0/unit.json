@@ -1,0 +1,4624 @@
+{
+  "schema": 1,
+  "suite": "unit",
+  "marker": "unit",
+  "package_version": "0.1.0",
+  "commit": "355975f532eb6e07121e6748d05e3e9d2100dba2",
+  "dirty": false,
+  "wheel_sha256": null,
+  "python": "3.11.16",
+  "platform": "Linux-7.2.6-1-cachyos-x86_64-with-glibc2.44",
+  "started_at": "2026-09-26T07:27:43+00:00",
+  "finished_at": "2026-09-26T07:28:07+00:00",
+  "exit_status": 0,
+  "counts": {
+    "passed": 920,
+    "skipped": 0,
+    "xfailed": 0,
+    "xpassed": 0,
+    "failed": 0,
+    "error": 0
+  },
+  "tests": [
+    {
+      "nodeid": "tests/integration/engine/test_cli_commands.py::test_a_missing_config_is_a_configuration_error",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/integration/engine/test_cli_commands.py::test_an_unreachable_engine_db_is_a_configuration_error",
+      "outcome": "passed",
+      "duration": 0.031
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_elapsed_hours_reads_a_naive_start_as_utc",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/integration/execution/test_run_connections.py::test_cloning_needs_the_warehouse_and_a_duckdb_file_is_not_tested",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/integration/execution/test_run_connections.py::test_only_the_connections_a_run_uses_are_tested[handlers0-kwargs0-tested0]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/integration/execution/test_run_connections.py::test_only_the_connections_a_run_uses_are_tested[handlers1-kwargs1-tested1]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/integration/execution/test_run_connections.py::test_only_the_connections_a_run_uses_are_tested[handlers2-kwargs2-tested2]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/integration/execution/test_run_connections.py::test_only_the_connections_a_run_uses_are_tested[handlers3-kwargs3-tested3]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/integration/execution/test_run_connections.py::test_the_probes_report_what_failed",
+      "outcome": "passed",
+      "duration": 0.003
+    },
+    {
+      "nodeid": "tests/unit/test_build_docs_site.py::test_a_failed_build_step_is_reported_with_its_output",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_build_docs_site.py::test_a_leftover_build_branch_is_reported_not_deleted",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/unit/test_build_docs_site.py::test_an_existing_output_directory_is_a_usage_error",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_build_docs_site.py::test_deploy_arguments_add_the_latest_alias_only_when_asked",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_build_docs_site.py::test_each_release_line_uses_its_newest_patch_tag",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_build_docs_site.py::test_missing_mike_is_a_usage_error",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_build_docs_site.py::test_only_release_tags_count",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_build_docs_site.py::test_release_lines_are_ordered_by_number_not_text",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_catalog_site.py::test_a_graph_past_its_size_limit_stops_and_says_where",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_catalog_site.py::test_a_page_name_is_the_key_when_safe_and_hashed_when_not",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_catalog_site.py::test_names_are_escaped_in_the_drawing",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_cli.py::test_a_command_help_includes_the_global_options",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_cli.py::test_a_command_runs_with_its_options_and_the_global_defaults",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_cli.py::test_a_global_option_after_the_command_wins",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_cli.py::test_an_etl_craft_error_becomes_an_error_line_and_its_exit_code[error0-3]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_cli.py::test_an_etl_craft_error_becomes_an_error_line_and_its_exit_code[error1-2]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_cli.py::test_an_etl_craft_error_becomes_an_error_line_and_its_exit_code[error2-4]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_cli.py::test_an_uninstalled_source_tree_reports_an_unknown_version",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_cli.py::test_any_other_exception_is_logged_and_exits_unexpected",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_cli.py::test_global_options_work_before_or_after_the_command[argv0]",
+      "outcome": "passed",
+      "duration": 0.003
+    },
+    {
+      "nodeid": "tests/unit/test_cli.py::test_global_options_work_before_or_after_the_command[argv1]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_cli.py::test_global_options_work_before_or_after_the_command[argv2]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_cli.py::test_help_lists_the_commands_and_the_global_options",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_cli.py::test_invalid_arguments_exit_2_with_the_reason[argv0-invalid choice: 'LOUD']",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_cli.py::test_invalid_arguments_exit_2_with_the_reason[argv1-invalid choice: 'xml']",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_cli.py::test_invalid_arguments_exit_2_with_the_reason[argv2-the following arguments are required: --pipeline_code]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_cli.py::test_invalid_arguments_exit_2_with_the_reason[argv3-invalid choice: 'nope']",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_cli.py::test_no_command_prints_usage_and_exits_2",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_cli.py::test_no_command_with_commands_registered_prints_usage_and_exits_2",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_cli.py::test_python_dash_m_runs_the_same_command_line",
+      "outcome": "passed",
+      "duration": 0.425
+    },
+    {
+      "nodeid": "tests/unit/test_cli.py::test_running_the_package_as_a_module_calls_main",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_cli.py::test_the_installed_version_comes_from_package_metadata",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_cli.py::test_the_log_options_configure_logging",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_cli.py::test_version_flag_prints_the_package_version",
+      "outcome": "passed",
+      "duration": 0.004
+    },
+    {
+      "nodeid": "tests/unit/test_cli_output.py::test_an_empty_result_is_one_parenthesised_line",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_cli_output.py::test_given_streams_are_used_instead_of_the_process_streams",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_cli_output.py::test_results_go_to_stdout_and_errors_to_stderr",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_cli_output.py::test_rows_are_tab_separated_with_none_as_an_empty_field",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_a_database_without_a_dialect_is_a_plain_ansi_warehouse",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_any_other_engine_db_is_refused",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_email_auth_tables_agree",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_engine_for_jdbc_url[  JDBC:PostgreSQL://h/db-postgresql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_engine_for_jdbc_url[jdbc:postgresql://h/db-postgresql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_engine_for_jdbc_url[jdbc:sqlite:engine.db-sqlite]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_every_target_accepts_only_known_modes_and_verified_ones_are_accepted[databricks]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_every_target_accepts_only_known_modes_and_verified_ones_are_accepted[databricks_iceberg]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_every_target_accepts_only_known_modes_and_verified_ones_are_accepted[duckdb]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_every_target_accepts_only_known_modes_and_verified_ones_are_accepted[duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_every_target_accepts_only_known_modes_and_verified_ones_are_accepted[postgres]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_every_target_accepts_only_known_modes_and_verified_ones_are_accepted[postgresql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_every_target_accepts_only_known_modes_and_verified_ones_are_accepted[snowflake]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_every_target_accepts_only_known_modes_and_verified_ones_are_accepted[snowflake_iceberg]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_every_target_accepts_only_known_modes_and_verified_ones_are_accepted[sqlite]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_every_target_accepts_only_known_modes_and_verified_ones_are_accepted[trino_iceberg]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_only_databricks_and_snowflake_take_separate_fields",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_postgres_has_no_iceberg_tables",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_the_postgres_warehouse_authenticates_like_the_engine_db",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_warehouse_names_select_registered_dialects",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_warehouse_spec[databricks-iceberg-databricks_iceberg]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_warehouse_spec[databricks-native-databricks]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_warehouse_spec[duckdb-iceberg-duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_warehouse_spec[duckdb-native-duckdb]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_warehouse_spec[postgresql+psycopg-native-postgres]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_warehouse_spec[snowflake-iceberg-snowflake_iceberg]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_warehouse_spec[snowflake-native-snowflake]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_warehouse_spec[trino-iceberg-trino_iceberg]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_auth.py::test_warehouse_spec[trino-native-trino_iceberg]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_allow_schedule_and_email_follow_the_profile",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_cloning_example_follows_the_profile",
+      "outcome": "passed",
+      "duration": 0.021
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_is_listed_here_and_in_the_index",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-databricks.yml-oauth]",
+      "outcome": "passed",
+      "duration": 0.003
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-databricks.yml-sso]",
+      "outcome": "passed",
+      "duration": 0.003
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-databricks.yml-token]",
+      "outcome": "passed",
+      "duration": 0.004
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-duckdb-iceberg.yml-none]",
+      "outcome": "passed",
+      "duration": 0.004
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-duckdb-iceberg.yml-oauth]",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-duckdb-iceberg.yml-token]",
+      "outcome": "passed",
+      "duration": 0.004
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-email.yml-none]",
+      "outcome": "passed",
+      "duration": 0.004
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-email.yml-oauth]",
+      "outcome": "passed",
+      "duration": 0.004
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-email.yml-password]",
+      "outcome": "passed",
+      "duration": 0.004
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-postgres.yml-key_file]",
+      "outcome": "passed",
+      "duration": 0.007
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-postgres.yml-oauth]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-postgres.yml-password]",
+      "outcome": "passed",
+      "duration": 0.007
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-postgres.yml-sso]",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-postgres.yml-sts]",
+      "outcome": "passed",
+      "duration": 0.007
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-postgres.yml-token]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-snowflake.yml-key_file]",
+      "outcome": "passed",
+      "duration": 0.006
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-snowflake.yml-oauth]",
+      "outcome": "passed",
+      "duration": 0.006
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-snowflake.yml-password]",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-snowflake.yml-sso]",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-snowflake.yml-sts]",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-snowflake.yml-token]",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-trino.yml-key_file]",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-trino.yml-none]",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-trino.yml-oauth]",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-trino.yml-password]",
+      "outcome": "passed",
+      "duration": 0.004
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-trino.yml-sso]",
+      "outcome": "passed",
+      "duration": 0.004
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[auth-trino.yml-token]",
+      "outcome": "passed",
+      "duration": 0.007
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[cloning.yml-dev]",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[cloning.yml-prod]",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[cloning.yml-sit]",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[cloning.yml-uat]",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[docs-site.yml-dev]",
+      "outcome": "passed",
+      "duration": 0.003
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[engine-postgres.yml-dev]",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[engine-postgres.yml-prod]",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[engine-postgres.yml-sit]",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[engine-postgres.yml-uat]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[engine-sqlite.yml-dev]",
+      "outcome": "passed",
+      "duration": 0.004
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[engine-sqlite.yml-prod]",
+      "outcome": "passed",
+      "duration": 0.004
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[engine-sqlite.yml-sit]",
+      "outcome": "passed",
+      "duration": 0.004
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[engine-sqlite.yml-uat]",
+      "outcome": "passed",
+      "duration": 0.004
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[minimal-local.yml-dev]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[orchestration-local.yml-dev]",
+      "outcome": "passed",
+      "duration": 0.007
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[orchestration-local.yml-prod]",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[orchestration-local.yml-sit]",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[orchestration-local.yml-uat]",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[orchestration-remote.yml-dev]",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[orchestration-remote.yml-prod]",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[orchestration-remote.yml-sit]",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[orchestration-remote.yml-uat]",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[secrets-environment.yml-dev]",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[secrets-environment.yml-prod]",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[secrets-environment.yml-sit]",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[secrets-environment.yml-uat]",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[secrets-file.yml-dev]",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[secrets-file.yml-prod]",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[secrets-file.yml-sit]",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[secrets-file.yml-uat]",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-databricks-iceberg.yml-dev]",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-databricks-iceberg.yml-prod]",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-databricks-iceberg.yml-sit]",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-databricks-iceberg.yml-uat]",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-databricks.yml-dev]",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-databricks.yml-prod]",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-databricks.yml-sit]",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-databricks.yml-uat]",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-duckdb-iceberg.yml-dev]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-duckdb-iceberg.yml-prod]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-duckdb-iceberg.yml-sit]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-duckdb-iceberg.yml-uat]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-duckdb.yml-dev]",
+      "outcome": "passed",
+      "duration": 0.007
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-duckdb.yml-prod]",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-duckdb.yml-sit]",
+      "outcome": "passed",
+      "duration": 0.007
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-duckdb.yml-uat]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-postgres.yml-dev]",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-postgres.yml-prod]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-postgres.yml-sit]",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-postgres.yml-uat]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-snowflake-iceberg.yml-dev]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-snowflake-iceberg.yml-prod]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-snowflake-iceberg.yml-sit]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-snowflake-iceberg.yml-uat]",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-snowflake-key-pair.yml-dev]",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-snowflake-key-pair.yml-prod]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-snowflake-key-pair.yml-sit]",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-snowflake-key-pair.yml-uat]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-snowflake.yml-dev]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-snowflake.yml-prod]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-snowflake.yml-sit]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-snowflake.yml-uat]",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-trino-iceberg.yml-dev]",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-trino-iceberg.yml-prod]",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-trino-iceberg.yml-sit]",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_example_loads_for_every_profile[warehouse-trino-iceberg.yml-uat]",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_every_setting_line_says_whether_it_is_a_variable_or_a_value",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_examples.py::test_the_secrets_file_example_reads_only_its_file",
+      "outcome": "passed",
+      "duration": 0.004
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_a_literal_jdbc_url_is_accepted_but_a_literal_secret_is_not",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_a_missing_profile_names_the_ones_that_exist",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_a_profile_can_name_a_variable",
+      "outcome": "passed",
+      "duration": 0.003
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_a_relative_duckdb_file_is_found_beside_the_config",
+      "outcome": "passed",
+      "duration": 0.003
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_a_secret_is_never_taken_as_written",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_a_secret_variable_that_is_not_set_is_a_load_time_error",
+      "outcome": "passed",
+      "duration": 0.007
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_a_warehouse_profile_must_name_its_database",
+      "outcome": "passed",
+      "duration": 0.003
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_an_auth_mode_a_warehouse_does_not_offer_is_refused_at_load",
+      "outcome": "passed",
+      "duration": 0.003
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_an_auth_mode_needs_its_own_fields[warehouse0-client_id]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_an_auth_mode_needs_its_own_fields[warehouse1-region]",
+      "outcome": "passed",
+      "duration": 0.041
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_an_auth_mode_needs_its_own_fields[warehouse2-cert_file]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_an_unselected_multi_profile_section_is_refused",
+      "outcome": "passed",
+      "duration": 0.003
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_cloning_scope_none_disables_it",
+      "outcome": "passed",
+      "duration": 0.003
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_databricks_token_fields_build_a_credential_free_url",
+      "outcome": "passed",
+      "duration": 0.003
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_dependency_gates_default_to_enforce_and_relax_only_in_local_mode",
+      "outcome": "passed",
+      "duration": 0.006
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_docs_site_publishing_settings",
+      "outcome": "passed",
+      "duration": 0.006
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_docs_site_schedule_and_output",
+      "outcome": "passed",
+      "duration": 0.006
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_duckdb_iceberg_profile_carries_its_catalog_fields",
+      "outcome": "passed",
+      "duration": 0.003
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_email_needs_user_and_secret_for_password_auth",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_email_through_sendmail",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_engine_and_warehouse_profiles_name_their_schema",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_engine_validation[engine0-is a sqlite URL]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_engine_validation[engine1-not a supported Engine DB URL]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_engine_validation[engine2-takes \\\\['none'\\\\]]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_every_auth_mode_loads_with_its_fields",
+      "outcome": "passed",
+      "duration": 0.026
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_every_value_is_a_variable_when_one_is_set_and_the_text_otherwise",
+      "outcome": "passed",
+      "duration": 0.003
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_log_dir_defaults_beside_the_config_and_can_be_set",
+      "outcome": "passed",
+      "duration": 0.003
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_orchestration_settings_are_type_checked",
+      "outcome": "passed",
+      "duration": 0.004
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_profile_selection_order",
+      "outcome": "passed",
+      "duration": 0.004
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_schema_mistakes_are_named[sections0-Engine.dev needs schema]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_schema_mistakes_are_named[sections1-Engine.dev.schema must be a plain identifier .* got 'etl-meta']",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_schema_mistakes_are_named[sections2-Warehouse.dev needs schema]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_schema_mistakes_are_named[sections3-Warehouse.dev.schema is 'stage', but its jdbc_url names schema 'sales']",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_sections_must_appear_in_the_documented_order",
+      "outcome": "passed",
+      "duration": 0.003
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_the_earlier_layouts_are_refused_with_a_pointer",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_the_shipped_example_loads_for_dev_with_nothing_set",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_the_shipped_example_prod_profile_overrides_and_resolves",
+      "outcome": "passed",
+      "duration": 0.012
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_the_source_itself_can_come_from_the_environment",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_tier_scoped_variables_win_over_the_plain_name",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_token_fields_are_refused_for_other_warehouses_and_unused_fields",
+      "outcome": "passed",
+      "duration": 0.003
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_unknown_sections_and_keys_are_refused",
+      "outcome": "passed",
+      "duration": 0.003
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_values_come_from_a_secrets_file_relative_to_the_config",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_warehouse_name_must_match_its_jdbc_url",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader.py::test_warehouse_table_format_defaults_to_native_and_postgres_refuses_iceberg",
+      "outcome": "passed",
+      "duration": 0.003
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_a_configuration_error_names_the_setting[raw0-must contain a top-level mapping]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_a_configuration_error_names_the_setting[raw1-missing the Secrets section]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_a_configuration_error_names_the_setting[raw10-Orchestration.Email must be a mapping]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_a_configuration_error_names_the_setting[raw11-port resolved to 'twenty-five', not a number]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_a_configuration_error_names_the_setting[raw12-auth_mode resolved to 'sso', which is not one of]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_a_configuration_error_names_the_setting[raw13-Warehouse.Table_format must be native or iceberg]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_a_configuration_error_names_the_setting[raw14-Warehouse.Name 'Oracle' must be one of \\\\['Databricks', 'DuckDB', 'Postgres']",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_a_configuration_error_names_the_setting[raw15-names its token under `token`, not `secret`]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_a_configuration_error_names_the_setting[raw16-Warehouse\\\\.dev: Snowflake account must be an account identifier]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_a_configuration_error_names_the_setting[raw17-Warehouse\\\\.dev: DuckDB warehouse file]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_a_configuration_error_names_the_setting[raw18-Cloning.Scope must be one of]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_a_configuration_error_names_the_setting[raw19-Cloning.Enabled must be true or false]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_a_configuration_error_names_the_setting[raw2-Secrets must be a mapping]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_a_configuration_error_names_the_setting[raw20-must be true or false]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_a_configuration_error_names_the_setting[raw3-Secrets.Source_type must be one of]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_a_configuration_error_names_the_setting[raw4-Secrets.Path is only used with Source_type: file]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_a_configuration_error_names_the_setting[raw5-Secrets.Path is required]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_a_configuration_error_names_the_setting[raw6-Engine.dev needs jdbc_url]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_a_configuration_error_names_the_setting[raw7-Engine needs at least one profile block]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_a_configuration_error_names_the_setting[raw8-needs secret \\\\(a variable name\\\\) for auth_mode password]",
+      "outcome": "passed",
+      "duration": 0.003
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_a_configuration_error_names_the_setting[raw9-Orchestration.Tags must be a list of strings]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_an_empty_file_is_missing_its_sections",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_boolean_spellings[-False]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_boolean_spellings[0-False]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_boolean_spellings[yes-True]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_databricks_parameters_without_a_value_are_ignored",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_loader_errors.py::test_invalid_yaml_is_a_configuration_error",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_project.py::test_a_bad_sql_file_name_says_what_is_wrong[-SOURCE_SQL_FILE='' is empty]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_project.py::test_a_bad_sql_file_name_says_what_is_wrong[../secrets.sql-without '..']",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_project.py::test_a_bad_sql_file_name_says_what_is_wrong[/etc/passwd.sql-must be a path relative to]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_project.py::test_a_bad_sql_file_name_says_what_is_wrong[missing/none.sql-no such file [^\\u2014]*$]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_project.py::test_a_bad_sql_file_name_says_what_is_wrong[sales/order.sql-no such file .*order\\\\.sql \\u2014 did you mean: sales/orders\\\\.sql]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_project.py::test_a_bad_sql_file_name_says_what_is_wrong[sales/orders.txt-must name a .sql file]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_project.py::test_a_missing_folder_is_named",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_project.py::test_files_are_found_in_their_folders",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_project.py::test_the_project_directory_holds_everything",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_resolve.py::test_a_profile_without_a_secret_resolves_to_empty",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_resolve.py::test_a_secret_can_name_any_variable",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_resolve.py::test_a_secret_is_checked_at_load_and_again_when_resolved",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_resolve.py::test_profile_needs_secret[key_file-extra6-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_resolve.py::test_profile_needs_secret[none-extra3-False]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_resolve.py::test_profile_needs_secret[oauth-extra2-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_resolve.py::test_profile_needs_secret[password-extra0-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_resolve.py::test_profile_needs_secret[sso-extra5-False]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_resolve.py::test_profile_needs_secret[sts-extra4-False]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_resolve.py::test_profile_needs_secret[token-extra1-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_resolve.py::test_profile_variable_name[EMAIL_FROM-uat-from_address-EMAIL_UAT_FROM]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_resolve.py::test_profile_variable_name[ENGINE_PROD_SECRET-prod-secret-ENGINE_PROD_SECRET]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_resolve.py::test_profile_variable_name[ENGINE_SECRET-prod-secret-ENGINE_PROD_SECRET]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_resolve.py::test_profile_variable_name[MY_TOKEN-dev-secret-None]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_resolve.py::test_profile_variable_name[engine_secret-dev-secret-engine_DEV_secret]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_resolve.py::test_read_secrets_file_errors",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_resolve.py::test_resolve_config_path_precedence",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_resolve.py::test_resolve_config_path_without_a_file_names_where_it_was_expected",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_resolve.py::test_resolve_secret_from_a_file_source",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_resolve.py::test_resolve_secret_from_environment",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_resolve.py::test_the_file_source_path_is_relative_to_the_config_file",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_config_resolve.py::test_the_resolver_records_every_lookup_and_explains_missing_variables",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_resolve.py::test_the_search_finds_a_project_directory_in_each_parent",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_resolve.py::test_two_candidates_in_one_directory_are_refused",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_a_duckdb_file_names_its_catalog_after_the_file",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_a_duckdb_file_whose_name_is_not_an_identifier_is_refused[2024_wh.duckdb]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_a_duckdb_file_whose_name_is_not_an_identifier_is_refused[etl craft.duckdb]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_a_duckdb_file_whose_name_is_not_an_identifier_is_refused[my-warehouse.duckdb]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_a_malformed_databricks_url_is_refused",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_a_malformed_snowflake_url_is_refused",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_a_malformed_url_is_refused[not-a-jdbc-url]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_a_malformed_url_is_refused[postgresql://h/db]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_a_mysql_url_selects_pymysql_and_keeps_its_query",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_a_postgres_url_selects_psycopg",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_a_url_that_names_no_catalog_is_refused",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_an_unmapped_scheme_is_its_own_dialect",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_bare_duckdb_is_genuinely_in_memory",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_databricks_fields_are_checked[change0-catalog must be an unquoted SQL identifier]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_databricks_fields_are_checked[change1-schema must be an unquoted SQL identifier]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_databricks_fields_are_checked[change2-must start with jdbc:databricks://]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_databricks_fields_are_checked[change3-Databricks connection requires catalog]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_databricks_fields_build_a_credential_free_url",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_databricks_schema_from_the_path_unless_it_is_default",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_databricks_semicolon_parameters",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_databricks_without_http_path_is_refused",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_duckdb_iceberg_names_its_catalog_in_the_profile",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_duckdb_iceberg_needs_a_plain_catalog_name[]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_duckdb_iceberg_needs_a_plain_catalog_name[my-lake]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_no_warehouse_section",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_other_warehouses_take_no_separate_fields[Oracle]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_other_warehouses_take_no_separate_fields[Postgres]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_parse_duckdb_refuses_another_shape",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_snowflake_account_host_form",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_snowflake_database_without_a_schema",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_snowflake_fields_are_checked[change0-account identifier, not a URL]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_snowflake_fields_are_checked[change1-Snowflake connection requires role]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_snowflake_fields_build_a_url_and_accept_the_full_host",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_snowflake_without_a_database_is_refused",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_strip_databricks_credentials_keeps_only_public_parameters",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_the_active_warehouse_and_its_catalog[jdbc:databricks://h/default;httpPath=/p;ConnCatalog=main-iceberg-databricks_iceberg-main]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_the_active_warehouse_and_its_catalog[jdbc:duckdb:/data/warehouse.duckdb-native-duckdb-warehouse]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_the_active_warehouse_and_its_catalog[jdbc:postgresql://h/wh-native-postgres-wh]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_the_active_warehouse_and_its_catalog[jdbc:snowflake://a.snowflakecomputing.com/?db=DB&schema=S-native-snowflake-DB]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_the_active_warehouse_and_its_catalog[jdbc:trino://t:8080/iceberg/analytics-native-trino_iceberg-iceberg]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_config_targets.py::test_trino_takes_the_generic_parser_with_a_catalog_schema_path",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_enums.py::test_a_failed_task_stays_retryable",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_enums.py::test_enum_values_match_the_stored_values[ActiveFlag]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_enums.py::test_enum_values_match_the_stored_values[AuthMode]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_enums.py::test_enum_values_match_the_stored_values[BusinessRuleType]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_enums.py::test_enum_values_match_the_stored_values[CloningScope]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_enums.py::test_enum_values_match_the_stored_values[DependencyType]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_enums.py::test_enum_values_match_the_stored_values[EmailFlavour]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_enums.py::test_enum_values_match_the_stored_values[GatePolicy]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_enums.py::test_enum_values_match_the_stored_values[Handler]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_enums.py::test_enum_values_match_the_stored_values[InterventionAction]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_enums.py::test_enum_values_match_the_stored_values[Mode]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_enums.py::test_enum_values_match_the_stored_values[OffsetType]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_enums.py::test_enum_values_match_the_stored_values[RefreshType]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_enums.py::test_enum_values_match_the_stored_values[RunCondition]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_enums.py::test_enum_values_match_the_stored_values[RunStatus]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_enums.py::test_enum_values_match_the_stored_values[SlaStatus]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_enums.py::test_enum_values_match_the_stored_values[SqlAction]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_enums.py::test_enum_values_match_the_stored_values[TableFormat]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_enums.py::test_enum_values_match_the_stored_values[TaskType]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_enums.py::test_every_enum_in_the_module_is_checked",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_enums.py::test_members_compare_equal_to_the_raw_strings",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_enums.py::test_settled_statuses_are_terminal_and_not_retryable",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_enums.py::test_status_groups",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_errors.py::test_an_error_keeps_its_message",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_errors.py::test_an_instance_reports_its_class_code",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_errors.py::test_each_error_carries_its_exit_code[CloningError-]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_errors.py::test_each_error_carries_its_exit_code[ConfigurationError-]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_errors.py::test_each_error_carries_its_exit_code[ConnectionTestError-]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_errors.py::test_each_error_carries_its_exit_code[CycleError-]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_errors.py::test_each_error_carries_its_exit_code[EngineDbError-]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_errors.py::test_each_error_carries_its_exit_code[EtlCraftError-]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_errors.py::test_each_error_carries_its_exit_code[GraphError-]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_errors.py::test_each_error_carries_its_exit_code[HandlerError-]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_errors.py::test_each_error_carries_its_exit_code[LockTimeoutError-]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_errors.py::test_each_error_carries_its_exit_code[MetadataError-]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_errors.py::test_each_error_carries_its_exit_code[MigrationError-]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_errors.py::test_each_error_carries_its_exit_code[RemoteUnsupportedError-]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_errors.py::test_each_error_carries_its_exit_code[RunRefusedError-]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_errors.py::test_each_error_carries_its_exit_code[RunStateError-]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_errors.py::test_each_error_carries_its_exit_code[SelfDependencyError-]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_errors.py::test_each_error_carries_its_exit_code[UnknownTaskError-]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_errors.py::test_each_error_carries_its_exit_code[UsageError-]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_errors.py::test_engine_db_errors_share_a_base",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_errors.py::test_every_error_class_is_covered_and_has_its_own_code",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_errors.py::test_the_exit_codes",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_errors.py::test_the_exit_codes_page_lists_every_code",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_filelock.py::test_a_held_lock_times_out_another_holder",
+      "outcome": "passed",
+      "duration": 0.201
+    },
+    {
+      "nodeid": "tests/unit/test_core_filelock.py::test_the_lock_creates_its_file",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_core_filelock.py::test_the_lock_excludes_other_processes_and_dies_with_its_holder",
+      "outcome": "passed",
+      "duration": 0.243
+    },
+    {
+      "nodeid": "tests/unit/test_core_filelock.py::test_the_lock_is_released_after_the_block",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_core_filelock.py::test_the_lock_is_released_when_the_block_raises",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_core_filelock.py::test_zero_wait_waits_until_the_holder_releases",
+      "outcome": "passed",
+      "duration": 0.302
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_a_cycle_error_names_the_cycle",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_any_with_no_dependencies_needs_none",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_build_graph_rejects_an_n_count_larger_than_the_edge_count",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_build_graph_rejects_duplicate_task_ids",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_build_graph_rejects_edge_with_unknown_task_id",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_build_graph_rejects_malformed_run_conditions[ALL-2]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_build_graph_rejects_malformed_run_conditions[BOGUS-None]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_build_graph_rejects_malformed_run_conditions[N-0]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_build_graph_rejects_malformed_run_conditions[N-None]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_build_graph_rejects_malformed_run_conditions[None-2]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_check_acyclic_handles_a_chain_deeper_than_the_recursion_limit",
+      "outcome": "passed",
+      "duration": 0.381
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_check_acyclic_skips_a_root_already_visited_as_a_descendant",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_check_acyclic_still_finds_a_cycle_at_depth",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_dependencies_of_returns_a_copy",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_diamond_shape_waves",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_direct_cycle_rejected",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_each_graph_error_has_its_own_exit_code",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_edge_satisfied_rejects_unknown_dependency_type",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_enum_members_and_raw_strings_are_interchangeable",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_indirect_cycle_rejected",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_linear_chain_waves",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_no_dependencies_is_a_single_wave",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_ready_always_edge_not_satisfied_while_upstream_in_progress",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_ready_always_edge_satisfied_by_any_terminal_status[FAILED]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_ready_always_edge_satisfied_by_any_terminal_status[SKIPPED]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_ready_always_edge_satisfied_by_any_terminal_status[SUCCESS]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_ready_excludes_in_progress_task_itself",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_ready_excludes_terminal_tasks",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_ready_failure_edge_only_satisfied_by_failed_upstream",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_ready_has_data_edge_requires_success_and_positive_target_count",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_ready_holds_an_any_task_whose_same_pipeline_upstream_has_not_run_yet",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_ready_reattempts_failed_task_itself",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_ready_releases_an_any_task_once_its_same_pipeline_upstream_has_failed",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_ready_success_edge_blocks_until_upstream_succeeds",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_ready_task_with_multiple_edges_needs_all_satisfied",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_ready_treats_unevaluated_cross_pipeline_edges_optimistically",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_ready_with_no_edges_all_unstarted_tasks_ready",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_run_condition_any_is_satisfied_by_a_same_pipeline_edge_alone",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_run_condition_any_runs_once_a_single_edge_is_satisfied",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_run_condition_counts_cross_pipeline_edges_too",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_run_condition_defaults_to_all_when_unset",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_run_condition_n_requires_that_many_edges",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_self_dependency_rejected",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_skipped_upstream_never_satisfies_success_edge",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_unknown_dependency_type_rejected",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_unknown_task_id_in_edge_rejected",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_unsatisfiable_cascades_to_a_fixpoint",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_unsatisfiable_counts_an_unevaluated_cross_pipeline_edge_as_still_possible",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_unsatisfiable_does_not_cascade_through_an_always_edge",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_unsatisfiable_flags_a_failure_edge_whose_upstream_succeeded",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_unsatisfiable_flags_a_has_data_edge_whose_upstream_wrote_nothing",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_unsatisfiable_ignores_an_upstream_still_in_progress",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_unsatisfiable_ignores_an_upstream_that_merely_failed",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_unsatisfiable_leaves_tasks_that_already_have_a_row_alone",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_unsatisfiable_still_dooms_an_all_task_whose_same_pipeline_edge_is_hopeless",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_unsatisfiable_treats_a_failure_as_final_when_no_retry_will_come",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_graph.py::test_unsatisfiable_under_any_needs_every_edge_to_be_hopeless",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_log.py::test_an_unconfigured_warning_is_not_printed",
+      "outcome": "passed",
+      "duration": 0.051
+    },
+    {
+      "nodeid": "tests/unit/test_core_log.py::test_an_unknown_format_is_a_usage_error",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_log.py::test_an_unknown_level_is_a_usage_error",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_log.py::test_configure_again_replaces_its_handler",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_log.py::test_configure_writes_to_stderr_by_default",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_log.py::test_importing_the_package_configures_nothing",
+      "outcome": "passed",
+      "duration": 0.055
+    },
+    {
+      "nodeid": "tests/unit/test_core_log.py::test_json_format_includes_a_requested_stack",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_core_log.py::test_json_format_includes_the_exception_and_stringifies_unknown_values",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/unit/test_core_log.py::test_json_format_writes_one_object_per_line",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_log.py::test_log_context_is_added_to_text_and_json_records",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_log.py::test_parse_level[40-40]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_log.py::test_parse_level[Warning-30]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_log.py::test_parse_level[debug-10]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_log.py::test_records_outside_etl_craft_are_not_handled",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_log.py::test_text_format",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_a_catalog_schema_path_has_the_catalog_first",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_fingerprint_joins_parts_with_nul_so_they_cannot_collide",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_fingerprint_of_one_part_is_its_md5",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_env_name[1ABC-False]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_env_name[A-B-False]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_env_name[ENGINE_SECRET-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_env_name[_x1-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_env_name[lower_ok-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_only_comments",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_safe_identifier[-False]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_safe_identifier[../escape-False]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_safe_identifier[1abc-False]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_safe_identifier[P1-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_safe_identifier[_x-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_safe_identifier[a-b-False]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_safe_identifier[customer id-False]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_safe_identifier[customer_id-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_safe_object_ref[a.db.public.t-False]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_safe_object_ref[db.public.t-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_safe_object_ref[public.my table-False]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_safe_object_ref[public.t-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_safe_object_ref[t-False]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_safe_order_term[ updated_at asc nulls last -True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_safe_order_term[a, b-False]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_safe_order_term[coalesce(a, b)-False]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_safe_order_term[updated_at DESC NULLS-False]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_safe_order_term[updated_at DESC-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_safe_order_term[updated_at NULLS FIRST-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_is_safe_order_term[updated_at-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_jdbc_scheme[jdbc:DuckDB:/data/w.duckdb-duckdb]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_jdbc_scheme[jdbc:duckdb:-duckdb]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_jdbc_scheme[jdbc:postgresql://h/db-postgresql]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_jdbc_scheme[jdbc:sqlite:engine.db-sqlite]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_jdbc_scheme_rejects_a_non_jdbc_url",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_parse_env_file_keeps_a_quote_that_is_part_of_the_secret",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_parse_env_file_skips_blanks_comments_and_lines_without_equals",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_parse_jdbc_url_allows_an_empty_database",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_parse_jdbc_url_keeps_the_query_string_after_the_database",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_parse_jdbc_url_port_is_none_unless_a_default_is_given",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_parse_jdbc_url_rejects_another_shape[jdbc:duckdb:/data/w.duckdb]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_parse_jdbc_url_rejects_another_shape[jdbc:postgresql://h]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_parse_jdbc_url_rejects_another_shape[not-a-jdbc-url]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_parse_jdbc_url_rejects_another_shape[postgresql://h/db]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_parse_jdbc_url_with_a_port_and_query",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_qualify_prepends_the_active_database_only_when_none_is_named",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_read_only_problem_explains_what_is_wrong[  -- only a comment\\n-is empty]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_read_only_problem_explains_what_is_wrong[(((-starts with '(((']",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_read_only_problem_explains_what_is_wrong[-is empty]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_read_only_problem_explains_what_is_wrong[DELETE FROM t-starts with 'DELETE', not SELECT/WITH]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_read_only_problem_explains_what_is_wrong[SELECT * INTO new_t FROM t; insert into t values (1)-contains ['INSERT']]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_read_only_problem_explains_what_is_wrong[WITH x AS (DELETE FROM other RETURNING *) SELECT * FROM x-contains ['DELETE'] \\u2014 a read-only SELECT should not]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_read_only_problem_explains_what_is_wrong[select 1; drop table t; truncate u-contains ['TRUNCATE', 'DROP']]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_read_only_sql_passes[  (SELECT a FROM t)]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_read_only_sql_passes[-- DELETE old rows first\\nSELECT a FROM t /* not an UPDATE */]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_read_only_sql_passes[SELECT 'DROP TABLE t; DELETE' AS note FROM t]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_read_only_sql_passes[SELECT a FROM t]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_read_only_sql_passes[SELECT update_date, created_by FROM t]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_read_only_sql_passes[TABLE t]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_read_only_sql_passes[VALUES (1)]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_read_only_sql_passes[with x as (select 1) select * from x]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_sha256_hex",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_split_object_ref",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_split_object_ref_needs_a_schema[.t]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_split_object_ref_needs_a_schema[a.db.public.t]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_split_object_ref_needs_a_schema[db..t]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_split_object_ref_needs_a_schema[public.]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_split_object_ref_needs_a_schema[t]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_split_pipe_list",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_split_pipe_list_requires_a_value[None]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_split_pipe_list_requires_a_value[]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_split_statements_does_not_mistake_other_dollars_for_quotes[SELECT $1 + $2]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_split_statements_does_not_mistake_other_dollars_for_quotes[SELECT $]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_split_statements_does_not_mistake_other_dollars_for_quotes[SELECT $a-b$ x $a-b$]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_split_statements_drops_comment_only_statements",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_split_statements_empty_input_returns_empty_list",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_split_statements_handles_tagged_dollar_quotes",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_split_statements_ignores_blank_and_whitespace_only_segments",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_split_statements_ignores_semicolons_in_literals_and_comments",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_split_statements_keeps_an_unterminated_construct_as_one_statement[SELECT $$ unterminated; body]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_split_statements_keeps_an_unterminated_construct_as_one_statement[SELECT 'unterminated;]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_split_statements_keeps_an_unterminated_construct_as_one_statement[SELECT 1 -- comment at the very end]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_split_statements_keeps_an_unterminated_construct_as_one_statement[SELECT 1 /* unterminated; comment]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_split_statements_keeps_dollar_quoted_bodies_whole",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_sql_without_tokens_or_switches_is_untouched",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_strip_comments_and_literals",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_suggest[LOAD-expected1]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_suggest[pl_alpa-expected0]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_suggest[zzz-expected2]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_suggest_limits_the_list",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_the_filter_token_follows_the_refresh_type[FULL-False-1=1_0]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_the_filter_token_follows_the_refresh_type[FULL-False-1=1_1]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_the_filter_token_follows_the_refresh_type[INCREMENTAL-False-pipeline_run_id = 42]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_the_filter_token_follows_the_refresh_type[INCREMENTAL-True-1=1]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_the_value_token_is_the_run_id_and_every_occurrence_is_replaced",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_token_mistakes_fail_with_the_remedy[SELECT $$pipeline WHERE $$run_date-switches4-unknown token(s) $$pipeline, $$run_date]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_token_mistakes_fail_with_the_remedy[SELECT $$pipeline_id-switches1-uses $$pipeline_id, but PIPELINE_ID_SUBSTITUTION is not]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_token_mistakes_fail_with_the_remedy[SELECT 1 WHERE $$pipeline_id_filter-switches0-uses $$pipeline_id_filter, but PIPELINE_ID_FILTER is not true]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_token_mistakes_fail_with_the_remedy[SELECT 1-switches2-PIPELINE_ID_FILTER is true, but SOURCE_SQL has no $$pipeline_id_filter]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_token_mistakes_fail_with_the_remedy[SELECT 1-switches3-PIPELINE_ID_SUBSTITUTION is true, but SOURCE_SQL has no $$pipeline_id to]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_unquote_leaves_values_too_short_to_be_quoted[\"]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_unquote_leaves_values_too_short_to_be_quoted[']",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_unquote_leaves_values_too_short_to_be_quoted[]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_core_text.py::test_unquote_leaves_values_too_short_to_be_quoted[x]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_credentials.py::test_a_refusal_is_reported_without_the_secret",
+      "outcome": "passed",
+      "duration": 0.503
+    },
+    {
+      "nodeid": "tests/unit/test_credentials.py::test_a_refusal_without_an_rfc_error_body[<html>busy</html>]",
+      "outcome": "passed",
+      "duration": 0.502
+    },
+    {
+      "nodeid": "tests/unit/test_credentials.py::test_a_refusal_without_an_rfc_error_body[body0]",
+      "outcome": "passed",
+      "duration": 0.502
+    },
+    {
+      "nodeid": "tests/unit/test_credentials.py::test_a_refusal_without_an_rfc_error_body[body1]",
+      "outcome": "passed",
+      "duration": 0.503
+    },
+    {
+      "nodeid": "tests/unit/test_credentials.py::test_a_signing_failure_is_a_configuration_error",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/unit/test_credentials.py::test_an_rds_token_is_signed_for_the_host_and_user",
+      "outcome": "passed",
+      "duration": 0.268
+    },
+    {
+      "nodeid": "tests/unit/test_credentials.py::test_an_rds_token_signs_as_the_assumed_role",
+      "outcome": "passed",
+      "duration": 0.059
+    },
+    {
+      "nodeid": "tests/unit/test_credentials.py::test_an_unreachable_endpoint",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_credentials.py::test_sts_without_boto3_names_the_extra",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_credentials.py::test_the_answer_needs_an_access_token[body0]",
+      "outcome": "passed",
+      "duration": 0.502
+    },
+    {
+      "nodeid": "tests/unit/test_credentials.py::test_the_answer_needs_an_access_token[body1]",
+      "outcome": "passed",
+      "duration": 0.502
+    },
+    {
+      "nodeid": "tests/unit/test_credentials.py::test_the_answer_needs_an_access_token[body2]",
+      "outcome": "passed",
+      "duration": 0.502
+    },
+    {
+      "nodeid": "tests/unit/test_credentials.py::test_the_grant_is_posted_and_the_access_token_returned",
+      "outcome": "passed",
+      "duration": 0.503
+    },
+    {
+      "nodeid": "tests/unit/test_email_alert.py::test_recipients",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_email_alert.py::test_the_run_outcome[statuses0-False-SUCCESS]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_email_alert.py::test_the_run_outcome[statuses1-False-FAILED]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_email_alert.py::test_the_run_outcome[statuses2-False-COMPLETED_WITH_ERRORS]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_email_alert.py::test_the_run_outcome[statuses3-False-COMPLETED_WITH_ERRORS]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_email_alert.py::test_the_run_outcome[statuses4-False-COMPLETED_WITH_ERRORS]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_email_alert.py::test_the_run_outcome[statuses5-False-COMPLETED_WITH_ERRORS]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_email_alert.py::test_the_run_outcome[statuses6-True-COMPLETED_WITH_ERRORS]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_email_alert.py::test_the_run_outcome[statuses7-False-SUCCESS]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_email_alert.py::test_the_run_outcome[statuses8-False-SUCCESS]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_email_alert.py::test_tokens_are_replaced_and_an_unknown_one_fails",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_a_dialect_query_overrides_the_shared_one",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_a_lock_needs_a_database_file",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_a_minted_credential_recycles_pooled_connections",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_a_relative_sqlite_path_resolves_beside_the_config",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_an_in_memory_sqlite_engine_db_is_refused[jdbc:sqlite::memory:]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_an_in_memory_sqlite_engine_db_is_refused[jdbc:sqlite:]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_an_old_sqlite_library_is_refused",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_an_unknown_auth_mode_is_refused",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_an_unsupported_engine_db_is_refused",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_both_schemas_define_the_same_tables_and_columns_in_order",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_build_engine_checks_the_auth_mode_and_its_fields",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_dialect_ships_its_schema_and_migration_stream",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_query_resolves_on_every_dialect",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/active_pipeline_codes.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/active_pipeline_dependency_edges.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/active_pipeline_parameters.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/active_pipeline_run.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/active_pipelines.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/active_rule_keys.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/active_task_dependency_edges.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/active_tasks.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/all_pipeline_dependency_edges.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/applied_migrations.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/begin_attempt.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/business_rule_run.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/business_rule_targets.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/business_rules_for_task.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/cancel_pipeline_run.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/cancel_task_run.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/catalog_documentation_versions.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/catalog_pipelines.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/catalog_rules.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/catalog_tasks.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/clear_rule_results.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/consume_pipeline_dependency.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/consume_task_dependency.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/delete_task_lineage.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/delete_task_run.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/documented_tasks.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/failure_watch_messages.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/finish_business_rule_run.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/finish_pipeline_run.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/finish_task_run.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/insert_business_rule_run.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/insert_docs_publication.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/insert_intervention.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/insert_lineage_edge.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/insert_pipeline_run.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/insert_rule_result.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/insert_task_documentation.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/insert_task_run.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/latest_docs_publication.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/latest_finished_pipeline_run.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/latest_finished_task_run.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/latest_pipeline_run.sql]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/latest_task_documentation.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/latest_task_run.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/mark_pipeline_run.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/mark_sla_breached.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/mark_task_run.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/pipeline_dependency_edges.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/pipeline_dependency_tracker.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/pipeline_detail.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/pipeline_graph_tasks.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/pipeline_handlers.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/pipeline_id_by_code.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/pipeline_run_history.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/pipeline_run_sla.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/pipeline_run_start.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/pipeline_run_status.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/pipeline_steps.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/pipeline_task_dependencies.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/record_migration.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/reopen_pipeline_run.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/restart_business_rule_run.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/run_interventions.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/run_state.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/run_task_rows.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/save_task_offset.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/set_task_log.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/sql_tasks.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/target_tasks.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/task_codes.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/task_cross_pipeline_dependencies.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/task_dependency_tracker.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/task_execution_detail.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/task_id_by_code.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/task_lineage.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/task_offset.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/task_parameters.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/task_run.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/task_run_context.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/task_run_history.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/task_run_log.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/task_run_result.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/task_statuses_for_run.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/touch_docs_publication.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[engine/touch_pipeline_run.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[postgres/average_pipeline_duration.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[postgres/average_task_duration.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[postgres/existing_tables.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[sqlite/average_pipeline_duration.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[sqlite/average_task_duration.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_every_selected_column_is_aliased_in_lower_case[sqlite/existing_tables.sql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_for_jdbc_url",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_for_name[postgresql+psycopg-postgresql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_for_name[postgresql-postgresql]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_for_name[sqlite-sqlite]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_key_file_sends_the_certificate_and_passphrase",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_oauth_mints_a_fresh_token_per_connection",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_parse_postgres_url",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_parse_postgres_url_refuses_another_shape[jdbc:mysql://db/etl]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_parse_postgres_url_refuses_another_shape[jdbc:postgresql://db/]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_password_and_token_are_the_password",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_sqlite_connections_enforce_foreign_keys_and_use_wal",
+      "outcome": "passed",
+      "duration": 0.008
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_sqlite_needs_no_authentication",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_sqlite_timestamps_are_stored_as_utc_text_and_read_back_aware",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_sso_hands_libpq_its_oauth_settings",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_sts_uses_an_rds_token_over_tls",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_the_schemas_split_into_whole_statements",
+      "outcome": "passed",
+      "duration": 0.006
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_the_sqlite_splitter_keeps_trigger_bodies_whole",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_engine_dialects.py::test_the_url_query_reaches_the_driver_and_wins",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_evidence_plugin.py::test_a_collection_error_is_recorded_as_an_error",
+      "outcome": "passed",
+      "duration": 0.21
+    },
+    {
+      "nodeid": "tests/unit/test_evidence_plugin.py::test_every_outcome_is_counted_and_listed",
+      "outcome": "passed",
+      "duration": 0.075
+    },
+    {
+      "nodeid": "tests/unit/test_evidence_plugin.py::test_no_failure_text_reaches_the_evidence_file",
+      "outcome": "passed",
+      "duration": 0.037
+    },
+    {
+      "nodeid": "tests/unit/test_evidence_plugin.py::test_outside_a_git_repository_there_is_no_commit",
+      "outcome": "passed",
+      "duration": 0.028
+    },
+    {
+      "nodeid": "tests/unit/test_evidence_plugin.py::test_the_commit_and_uncommitted_changes_are_recorded",
+      "outcome": "passed",
+      "duration": 0.068
+    },
+    {
+      "nodeid": "tests/unit/test_evidence_plugin.py::test_the_tested_wheel_is_identified_by_its_hash",
+      "outcome": "passed",
+      "duration": 0.027
+    },
+    {
+      "nodeid": "tests/unit/test_execution_gates.py::test_an_unknown_dependency_type",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_execution_gates.py::test_an_upstream_that_is_not_running_is_not_waited_for",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_execution_gates.py::test_look_delays",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_execution_gates.py::test_the_last_finished_run_decides",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_execution_gates.py::test_the_unchecked_gate_is_never_definitive",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_execution_gates.py::test_waiting_for_a_running_upstream_follows_its_average_length",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_execution_gates.py::test_waiting_stops_when_the_budget_runs_out",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_execution_gates.py::test_what_satisfies_each_dependency_type[ALWAYS-SKIPPED-False-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_execution_gates.py::test_what_satisfies_each_dependency_type[FAILURE-FAILED-False-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_execution_gates.py::test_what_satisfies_each_dependency_type[FAILURE-SUCCESS-False-False]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_execution_gates.py::test_what_satisfies_each_dependency_type[HAS_DATA-FAILED-True-False]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_execution_gates.py::test_what_satisfies_each_dependency_type[HAS_DATA-SUCCESS-False-False]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_execution_gates.py::test_what_satisfies_each_dependency_type[HAS_DATA-SUCCESS-True-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_execution_gates.py::test_what_satisfies_each_dependency_type[SUCCESS-FAILED-False-False]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_execution_gates.py::test_what_satisfies_each_dependency_type[SUCCESS-SUCCESS-False-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_execution_limits.py::test_a_bad_task_timeout[-1-must not be negative]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_execution_limits.py::test_a_bad_task_timeout[soon-not a whole number]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_execution_limits.py::test_format_task_log",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_execution_limits.py::test_resolve_handler",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_execution_limits.py::test_task_timeout[params0-600]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_execution_limits.py::test_task_timeout[params1-30]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_execution_limits.py::test_task_timeout[params2-0]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_handlers_sql_spec.py::test_a_complete_merge_task",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_handlers_sql_spec.py::test_a_missing_or_unreadable_sql_file_is_metadata",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_handlers_sql_spec.py::test_a_sql_file_is_read_from_sql_files",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_handlers_sql_spec.py::test_definition_mistakes_fail_with_the_remedy[params0-SQL_ACTION is required; one of CREATE_TABLE]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_handlers_sql_spec.py::test_definition_mistakes_fail_with_the_remedy[params1-SQL_ACTION='SCD1_MERG' is not one of .* did you mean: SCD1_MERGE]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_handlers_sql_spec.py::test_definition_mistakes_fail_with_the_remedy[params10-MERGE_KEY does not apply to SQL_ACTION=OVERWRITE_TABLE]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_handlers_sql_spec.py::test_definition_mistakes_fail_with_the_remedy[params11-MERGE_DEDUPE_ORDER applies only to SCD1_MERGE and SCD2_MERGE]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_handlers_sql_spec.py::test_definition_mistakes_fail_with_the_remedy[params12-MERGE_KEY is required for SQL_ACTION=DELETE_ROWS]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_handlers_sql_spec.py::test_definition_mistakes_fail_with_the_remedy[params13-MERGE_KEY='id; drop': 'id; drop' is not a plain column name]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_handlers_sql_spec.py::test_definition_mistakes_fail_with_the_remedy[params14-MERGE_DEDUPE_ORDER='lower\\\\(a\\\\) DESC': 'lower\\\\(a\\\\) DESC' is not]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_handlers_sql_spec.py::test_definition_mistakes_fail_with_the_remedy[params2-TARGET_OBJECT is required for SQL_ACTION=CREATE_TABLE]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_handlers_sql_spec.py::test_definition_mistakes_fail_with_the_remedy[params3-TARGET_OBJECT='orders' must be 'schema.table' or 'database.schema.table']",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_handlers_sql_spec.py::test_definition_mistakes_fail_with_the_remedy[params4-needs a SELECT: set SOURCE_SQL, or SOURCE_SQL_FILE]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_handlers_sql_spec.py::test_definition_mistakes_fail_with_the_remedy[params5-set SOURCE_SQL or SOURCE_SQL_FILE, not both]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_handlers_sql_spec.py::test_definition_mistakes_fail_with_the_remedy[params6-SOURCE_SQL must hold exactly one SELECT; it holds 2 statements]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_handlers_sql_spec.py::test_definition_mistakes_fail_with_the_remedy[params7-SOURCE_SQL must be a read-only SELECT .* starts with 'DELETE']",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_handlers_sql_spec.py::test_definition_mistakes_fail_with_the_remedy[params8-must be true or false]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_handlers_sql_spec.py::test_definition_mistakes_fail_with_the_remedy[params9-HARD_DELETE applies only to DELETE_ROWS, not SQL_ACTION=OVERWRITE_TABLE]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_handlers_sql_spec.py::test_drop_table_takes_no_select",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_handlers_sql_spec.py::test_flags",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_handlers_sql_spec.py::test_setup_for_names_the_writing_action",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_history_gate.py::test_behaviour_comments_and_allowed_lines_pass",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_history_gate.py::test_changelog_binary_and_unknown_files_are_skipped",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_history_gate.py::test_history_commentary_is_reported[# Added (2026-09-24) for the release-dated note]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_history_gate.py::test_history_commentary_is_reported[# [DEVIATION] moved from the old module-decision tag]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_history_gate.py::test_history_commentary_is_reported[# fixes E2-18-review item id]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_history_gate.py::test_history_commentary_is_reported[# per explicit instruction from review-decision provenance]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_history_gate.py::test_with_no_paths_every_tracked_file_is_checked",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_lineage_extract.py::test_copies_expressions_constants_and_ctes",
+      "outcome": "passed",
+      "duration": 0.029
+    },
+    {
+      "nodeid": "tests/unit/test_lineage_extract.py::test_names_are_lower_case_without_the_active_database",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_lineage_extract.py::test_sql_that_cannot_be_traced_says_why[SELECT * FROM staging.orders-SELECT \\\\* cannot be traced]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_lineage_extract.py::test_sql_that_cannot_be_traced_says_why[SELECT FROM WHERE-could not be parsed]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_lineage_extract.py::test_sql_that_cannot_be_traced_says_why[UPDATE t SET a = 1-not a SELECT]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_lineage_extract.py::test_the_graph_walks_across_tasks_both_ways",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_migration_streams.py::test_a_named_project_directory_must_exist",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_migration_streams.py::test_a_stream_reads_sql_files_in_order_with_their_checksums",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_migration_streams.py::test_an_unreadable_file",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_migration_streams.py::test_project_directory_lookup_order",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_migration_streams.py::test_the_packaged_directory_is_not_read_twice_as_a_project",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_migration_streams.py::test_the_packaged_directory_must_exist",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_migration_streams.py::test_verify_ledger_accepts_matching_files",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_reference_pages.py::test_every_engine_db_table_is_described_and_read_whole[postgres]",
+      "outcome": "passed",
+      "duration": 0.004
+    },
+    {
+      "nodeid": "tests/unit/test_reference_pages.py::test_every_engine_db_table_is_described_and_read_whole[sqlite]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_reference_pages.py::test_every_setting_is_shown_in_the_annotated_reference_or_an_example",
+      "outcome": "passed",
+      "duration": 0.131
+    },
+    {
+      "nodeid": "tests/unit/test_reference_pages.py::test_every_task_parameter_is_explained_in_its_handlers_guide",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/unit/test_reference_pages.py::test_the_configuration_page_has_every_section",
+      "outcome": "passed",
+      "duration": 0.136
+    },
+    {
+      "nodeid": "tests/unit/test_reference_pages.py::test_the_parameter_page_lists_what_each_handler_reads",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_reference_pages.py::test_the_schema_page_shows_types_allowed_values_and_unique_keys",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_release_gate.py::test_a_suite_without_evidence_blocks_the_release",
+      "outcome": "passed",
+      "duration": 0.017
+    },
+    {
+      "nodeid": "tests/unit/test_release_gate.py::test_a_wheel_suite_must_record_its_wheel",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/unit/test_release_gate.py::test_changelog_and_release_notes_may_change_after_the_evidence",
+      "outcome": "passed",
+      "duration": 0.021
+    },
+    {
+      "nodeid": "tests/unit/test_release_gate.py::test_code_changed_after_the_evidence_invalidates_it",
+      "outcome": "passed",
+      "duration": 0.021
+    },
+    {
+      "nodeid": "tests/unit/test_release_gate.py::test_evidence_from_a_commit_outside_the_history_is_rejected",
+      "outcome": "passed",
+      "duration": 0.023
+    },
+    {
+      "nodeid": "tests/unit/test_release_gate.py::test_evidence_that_does_not_show_a_clean_pass_is_rejected[overrides0-recorded from a working tree with uncommitted changes]",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/unit/test_release_gate.py::test_evidence_that_does_not_show_a_clean_pass_is_rejected[overrides1-recorded from a working tree with uncommitted changes]",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/unit/test_release_gate.py::test_evidence_that_does_not_show_a_clean_pass_is_rejected[overrides10-unsupported evidence schema 2]",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/unit/test_release_gate.py::test_evidence_that_does_not_show_a_clean_pass_is_rejected[overrides11-no commit recorded]",
+      "outcome": "passed",
+      "duration": 0.012
+    },
+    {
+      "nodeid": "tests/unit/test_release_gate.py::test_evidence_that_does_not_show_a_clean_pass_is_rejected[overrides2-1 skipped]",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/unit/test_release_gate.py::test_evidence_that_does_not_show_a_clean_pass_is_rejected[overrides3-1 failed]",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/unit/test_release_gate.py::test_evidence_that_does_not_show_a_clean_pass_is_rejected[overrides4-1 error]",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/unit/test_release_gate.py::test_evidence_that_does_not_show_a_clean_pass_is_rejected[overrides5-1 xfailed]",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/unit/test_release_gate.py::test_evidence_that_does_not_show_a_clean_pass_is_rejected[overrides6-no tests ran]",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/unit/test_release_gate.py::test_evidence_that_does_not_show_a_clean_pass_is_rejected[overrides7-pytest exited with status 1]",
+      "outcome": "passed",
+      "duration": 0.013
+    },
+    {
+      "nodeid": "tests/unit/test_release_gate.py::test_evidence_that_does_not_show_a_clean_pass_is_rejected[overrides8-recorded at version '0.9.0', not 1.0.0]",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/unit/test_release_gate.py::test_evidence_that_does_not_show_a_clean_pass_is_rejected[overrides9-evidence is for suite 'other']",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/unit/test_release_gate.py::test_passing_evidence_for_every_suite_is_releasable",
+      "outcome": "passed",
+      "duration": 0.034
+    },
+    {
+      "nodeid": "tests/unit/test_release_gate.py::test_the_released_wheel_must_be_the_tested_one",
+      "outcome": "passed",
+      "duration": 0.024
+    },
+    {
+      "nodeid": "tests/unit/test_release_gate.py::test_unreadable_evidence_is_rejected",
+      "outcome": "passed",
+      "duration": 0.012
+    },
+    {
+      "nodeid": "tests/unit/test_release_gate.py::test_wheel_suites_must_all_test_the_same_wheel",
+      "outcome": "passed",
+      "duration": 0.017
+    },
+    {
+      "nodeid": "tests/unit/test_run_suite.py::test_a_wheel_suite_needs_an_existing_wheel",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/unit/test_run_suite.py::test_an_unknown_suite_is_a_usage_error",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_run_suite.py::test_running_a_suite_records_its_evidence",
+      "outcome": "passed",
+      "duration": 1.081
+    },
+    {
+      "nodeid": "tests/unit/test_run_suite.py::test_the_pytest_command_selects_the_suite_and_writes_evidence",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_scripting.py::test_a_value_that_cannot_be_cast_fails[<lambda>-cannot cast NoneType None to a TEXT offset]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_scripting.py::test_a_value_that_cannot_be_cast_fails[<lambda>-cannot cast bool True to a NUMBER offset]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_scripting.py::test_a_value_that_cannot_be_cast_fails[<lambda>-cannot cast int 5 to a TIMESTAMP offset]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_scripting.py::test_a_value_that_cannot_be_cast_fails[<lambda>-cannot cast str 'abc' to a NUMBER offset]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_scripting.py::test_a_value_that_cannot_be_cast_fails[<lambda>-cannot cast str 'abc' to a NUMBER]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_scripting.py::test_a_value_that_cannot_be_cast_fails[<lambda>-cannot cast str 'nan' to a NUMBER offset]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_scripting.py::test_a_value_that_cannot_be_cast_fails[<lambda>-cannot cast str 'yesterday' to a TIMESTAMP]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_scripting.py::test_a_value_that_cannot_be_cast_fails[<lambda>-offset datatype 'DATE' is not one of NUMBER, TEXT, TIMESTAMP]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_scripting.py::test_an_offset_is_a_value_cast_to_its_declared_datatype",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_scripting.py::test_an_offset_is_stored_and_read_back_unchanged[offset0]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_scripting.py::test_an_offset_is_stored_and_read_back_unchanged[offset1]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_scripting.py::test_an_offset_is_stored_and_read_back_unchanged[offset2]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_scripting.py::test_an_offset_is_stored_and_read_back_unchanged[offset3]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_services_fixture.py::test_a_connection_to_itself_is_not_a_service",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_services_fixture.py::test_an_environment_override_moves_a_service",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_services_fixture.py::test_an_unknown_service_is_rejected_with_the_known_names",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_services_fixture.py::test_each_service_defaults_to_its_offset_local_port",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_services_fixture.py::test_reachable_tells_a_listening_port_from_a_closed_one",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_services_fixture.py::test_require_fails_instead_when_services_are_required",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_services_fixture.py::test_require_skips_with_the_way_to_start_the_services",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_suite_markers.py::test_collection_stops_on_a_test_without_a_suite_marker",
+      "outcome": "passed",
+      "duration": 0.039
+    },
+    {
+      "nodeid": "tests/unit/test_suite_markers.py::test_every_suite_marker_is_registered_with_pytest",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_suite_markers.py::test_marked_tests_run_normally",
+      "outcome": "passed",
+      "duration": 0.027
+    },
+    {
+      "nodeid": "tests/unit/test_supervisor.py::test_a_cancellable_child_still_times_out_and_finishes",
+      "outcome": "passed",
+      "duration": 0.518
+    },
+    {
+      "nodeid": "tests/unit/test_supervisor.py::test_a_cancelled_child_is_stopped",
+      "outcome": "passed",
+      "duration": 0.502
+    },
+    {
+      "nodeid": "tests/unit/test_supervisor.py::test_a_child_killed_by_a_signal_reports_the_signal",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/unit/test_supervisor.py::test_a_child_past_its_time_limit_is_stopped",
+      "outcome": "passed",
+      "duration": 0.502
+    },
+    {
+      "nodeid": "tests/unit/test_supervisor.py::test_a_child_that_ignores_sigterm_is_killed_after_the_grace_period",
+      "outcome": "passed",
+      "duration": 1.502
+    },
+    {
+      "nodeid": "tests/unit/test_supervisor.py::test_a_failing_child_keeps_its_exit_code_and_stderr",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/unit/test_supervisor.py::test_a_successful_child",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/unit/test_supervisor.py::test_a_timeout_stops_everything_the_child_started",
+      "outcome": "passed",
+      "duration": 2.003
+    },
+    {
+      "nodeid": "tests/unit/test_supervisor.py::test_an_interrupted_wait_stops_the_child_and_propagates",
+      "outcome": "passed",
+      "duration": 0.013
+    },
+    {
+      "nodeid": "tests/unit/test_supervisor.py::test_an_unknown_signal_number_is_described_by_number",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_supervisor.py::test_etl_craft_argv_runs_this_interpreter",
+      "outcome": "passed",
+      "duration": 0.363
+    },
+    {
+      "nodeid": "tests/unit/test_supervisor.py::test_no_time_limit_when_zero",
+      "outcome": "passed",
+      "duration": 0.012
+    },
+    {
+      "nodeid": "tests/unit/test_supervisor.py::test_output_is_appended_to_the_log_file_and_the_tail_covers_this_run",
+      "outcome": "passed",
+      "duration": 0.013
+    },
+    {
+      "nodeid": "tests/unit/test_supervisor.py::test_run_children_never_runs_more_than_max_parallel_at_once[0-1]",
+      "outcome": "passed",
+      "duration": 1.677
+    },
+    {
+      "nodeid": "tests/unit/test_supervisor.py::test_run_children_never_runs_more_than_max_parallel_at_once[1-1]",
+      "outcome": "passed",
+      "duration": 1.686
+    },
+    {
+      "nodeid": "tests/unit/test_supervisor.py::test_run_children_never_runs_more_than_max_parallel_at_once[2-2]",
+      "outcome": "passed",
+      "duration": 0.841
+    },
+    {
+      "nodeid": "tests/unit/test_supervisor.py::test_run_children_returns_results_in_spec_order",
+      "outcome": "passed",
+      "duration": 0.419
+    },
+    {
+      "nodeid": "tests/unit/test_supervisor.py::test_run_children_starts_the_next_child_when_any_one_ends",
+      "outcome": "passed",
+      "duration": 3.015
+    },
+    {
+      "nodeid": "tests/unit/test_supervisor.py::test_run_children_with_nothing_to_run",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_supervisor.py::test_the_child_gets_the_given_environment_and_directory",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/unit/test_supervisor.py::test_the_child_leads_its_own_session",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/unit/test_supervisor.py::test_the_child_reads_no_input",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/unit/test_supervisor.py::test_the_log_directory_is_created",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/unit/test_supervisor.py::test_the_tail_keeps_only_the_last_bytes_and_replaces_invalid_utf8",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/unit/test_validate_checks.py::test_a_script_is_read_without_running_it[async def run(task):\\n    pass\\n-s.py: run is async]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_validate_checks.py::test_a_script_is_read_without_running_it[def main(task):\\n    pass\\n-SCRIPT_NAME='s.py' defines no run(task) function]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_validate_checks.py::test_a_script_is_read_without_running_it[def run():\\n    pass\\n-None]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_validate_checks.py::test_a_script_is_read_without_running_it[def run(task):\\n    pass\\n-None]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_validate_checks.py::test_a_script_is_read_without_running_it[def run(task, extra=1, *args):\\n    pass\\n-None]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_validate_checks.py::test_a_script_is_read_without_running_it[from helpers import run\\n-None]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_validate_checks.py::test_a_script_is_read_without_running_it[run = lambda task: None\\n-None]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_validate_checks.py::test_an_alert_is_checked_for_every_outcome_it_can_send_on",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_validate_checks.py::test_each_cycle_is_reported_once_from_its_smallest_code",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_validate_checks.py::test_pipeline_parameters_are_typed",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_a_database_without_a_dialect_is_generic_ansi",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_a_databricks_token_is_sent_as_the_literal_user_token",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_a_duckdb_file_is_addressed_by_its_path",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_a_minted_credential_recycles_pooled_connections",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_a_trino_location_with_a_quote_is_refused",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_alter_keywords_and_scalar_values",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_an_unsupported_mode_is_refused_when_presenting",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_audit_column_types",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_building_checks_the_profile_first",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_check_profile_refuses_modes_and_missing_fields",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_create_table_as_in_each_format",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_databricks_external_location",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_databricks_mirrors_are_external_under_the_cloning_base_location",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_databricks_oauth_uses_the_workspace_token_endpoint_by_default",
+      "outcome": "passed",
+      "duration": 0.109
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_databricks_sso_asks_the_connector_for_its_browser_login",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_databricks_sso_without_a_client_and_token_through_the_base",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_dialect_names_and_defaults",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_duckdb_iceberg_attaches_with_a_token",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_duckdb_iceberg_secrets",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_every_dialect_is_registered_once_with_its_spec",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_hash_expressions",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_no_warehouse_section",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_only_trino_has_a_catalog_to_verify",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_password_goes_into_the_connection_url_only",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_postgres_has_no_iceberg_dialect",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_resolve[databricks-iceberg-databricks_iceberg]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_resolve[databricks-native-databricks]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_resolve[duckdb-iceberg-duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_resolve[duckdb-native-duckdb]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_resolve[postgresql+psycopg-native-postgres]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_resolve[snowflake-iceberg-snowflake_iceberg]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_resolve[snowflake-native-snowflake]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_resolve[trino-native-trino_iceberg]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_single_writer_and_in_memory[jdbc:duckdb:-iceberg-False-False]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_single_writer_and_in_memory[jdbc:duckdb:-native-True-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_single_writer_and_in_memory[jdbc:duckdb:/data/warehouse.duckdb-native-True-False]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_single_writer_and_in_memory[jdbc:postgresql://wh:5432/analytics?sslmode=require-native-False-False]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_single_writer_and_in_memory[nonsense-native-False-False]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_snowflake_iceberg_mirrors_need_both_cloning_settings",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_snowflake_iceberg_on_a_customer_volume_and_an_external_catalog",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_snowflake_iceberg_storage_problems[params0-needs BASE_LOCATION]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_snowflake_iceberg_storage_problems[params1-needs an EXTERNAL_VOLUME]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_snowflake_iceberg_storage_problems[params2-identifier]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_snowflake_iceberg_storage_problems[params3-must not contain a quote]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_snowflake_oauth_is_the_connectors_own_flow",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_snowflake_sso_sts_and_key_pair",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_storage_parameters_a_warehouse_would_ignore_are_refused[databricks-params4-CATALOG does not apply]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_storage_parameters_a_warehouse_would_ignore_are_refused[duckdb_iceberg-params1-storage parameters here: none]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_storage_parameters_a_warehouse_would_ignore_are_refused[postgres-params0-EXTERNAL_LOCATION does not apply to]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_storage_parameters_a_warehouse_would_ignore_are_refused[snowflake-params2-EXTERNAL_VOLUME, BASE_LOCATION]",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_storage_parameters_a_warehouse_would_ignore_are_refused[snowflake_iceberg-params3-here: BASE_LOCATION, CATALOG, EXTERNAL_VOLUME]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_storage_parameters_that_apply[databricks_iceberg-params1]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_storage_parameters_that_apply[postgres-params0]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_storage_parameters_that_apply[snowflake_iceberg-params3]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_storage_parameters_that_apply[trino_iceberg-params2]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_task_storage_problem_reports_without_raising",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_the_engine_url_never_carries_the_secret",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_the_postgres_warehouse_authenticates_like_the_engine_db",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_the_snowflake_connector_accepts_every_argument_the_dialect_sends",
+      "outcome": "passed",
+      "duration": 0.403
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_trino_sso_and_key_file_select_the_clients_own_classes",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_trino_token_and_oauth_are_jwts_without_a_user",
+      "outcome": "passed",
+      "duration": 0.051
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_verify_iceberg_catalog_without_a_catalog_or_when_the_check_fails",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_what_each_warehouse_supports[databricks-False-computed-False-False]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_what_each_warehouse_supports[databricks_iceberg-False-computed-False-False]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_what_each_warehouse_supports[duckdb-True-sequence-True-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_what_each_warehouse_supports[duckdb_iceberg-False-computed-False-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_what_each_warehouse_supports[postgres-False-identity-True-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_what_each_warehouse_supports[snowflake-False-computed-False-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_what_each_warehouse_supports[snowflake_iceberg-False-computed-False-True]",
+      "outcome": "passed",
+      "duration": 0.0
+    },
+    {
+      "nodeid": "tests/unit/test_warehouse_dialects.py::test_what_each_warehouse_supports[trino_iceberg-False-computed-False-False]",
+      "outcome": "passed",
+      "duration": 0.001
+    }
+  ]
+}

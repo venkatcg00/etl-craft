@@ -1,6 +1,6 @@
 [project]
 name = "etl-craft"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "Metadata-driven ETL orchestration engine"
 readme = "README.md"
 authors = [{ name = "venkatcg00", email = "venkatcg0@gmail.com" }]
