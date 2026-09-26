@@ -6,67 +6,83 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
-### Added
+## [0.1.0] - 2026-09-26
 
-- Package skeleton for the rewrite: layered packages, `etl-craft --version`, tooling, CI and
-  package verification with pip and uv.
-- Local test services in `docker-compose.yml`: PostgreSQL with password and with
-  client-certificate login, MinIO, an Iceberg REST catalog, Trino and Mailpit, with tests that
-  prove each one works.
-- Release evidence: every test belongs to a suite in `release/required-suites.toml`;
-  `scripts/run_suite.py` records a suite's results, and `scripts/release_gate.py` reports whether
-  the current commit is releasable.
-- Documentation site built with MkDocs Material: overview, section skeleton, exit codes, and a
-  Python API reference generated from the code. `make docs` builds it with `--strict`.
-- The documentation site is deployed to GitHub Pages by the Docs workflow on every push to
-  `main`, with a version selector: `dev` from `main`, and `X.Y` from each release line's
-  newest tag, the newest aliased `latest`. `make docs-site` builds the same site locally.
-- Core domain: the `EtlCraftError` hierarchy with the exit code each family maps to, the
-  Engine DB and configuration value sets as `StrEnum`s with the run-status groups, and
-  `etl_craft.core.log`, which writes the `etl_craft` loggers as text or JSON lines.
-- Command line framework: a command registry, the output layer, `--config`, `--log-level`
-  and `--log-format` before or after the command name, and `error:` lines with the exit code
-  of each `EtlCraftError`. The Command line reference page is generated from the parser.
-- Task dependency graph (`etl_craft.core.graph`): validation, static waves, the tasks ready
-  to start under `ALL`, `ANY` and `N` run conditions, and the never-run tasks that can no
-  longer start. A guide describes dependency types and run conditions.
-- Text helpers (`etl_craft.core.text`): the generic JDBC URL parser, `.env` parsing, a
-  quote- and dollar-quote-aware SQL statement splitter, `$$pipeline_id` substitution, the
-  read-only SELECT lint, identifier and `schema.table` checks, and checksums.
-- Process supervisor (`etl_craft.execution.supervisor`): runs each child as a freshly
-  started interpreter in its own session, appends its output to a log file and keeps the
-  tail, stops the whole process group on timeout, and runs children with bounded
-  parallelism, starting the next as soon as one ends. `etl_craft.core.filelock` provides the
-  cross-process file lock.
-- `craft-connector.yml` loader (`etl_craft.config`): sections in their fixed order, one
-  block per profile, every setting a variable or a value, secrets that must name a variable
-  that is set, and each connection's auth mode and fields checked against what its Engine DB,
-  warehouse or mail relay accepts. Warehouse JDBC URLs, including the DuckDB, Databricks and
-  Snowflake forms, are parsed at load. The annotated example and one example file per
-  connection choice are published with the documentation.
-- Engine DB dialects for SQLite and PostgreSQL (`etl_craft.dialects.engine`): the packaged
-  schema for each, the query catalog, connections with every PostgreSQL auth mode (tokens
-  minted per connection for `oauth` and `sts`), cross-process locks, and schema tests that run
-  the same rules against both databases. A task can no longer set `RUN_CONDITION_COUNT`
-  without `RUN_CONDITION = 'N'`.
-- Warehouse dialects (`etl_craft.dialects.warehouse`) for PostgreSQL, DuckDB, DuckDB over an
-  Iceberg REST catalog, Trino over Iceberg, Databricks (Delta and UniForm) and Snowflake
-  (native and Iceberg), and `etl_craft.warehouse.connection`: warehouse engines with every auth
-  mode, writers of a DuckDB file queued behind an Engine DB lock, and a check that a Trino
-  catalog is Iceberg. Databricks tables can be external (`EXTERNAL_LOCATION`), and Snowflake
-  Iceberg tables can name an external catalog (`CATALOG`).
-- `etl-craft init-db` creates the Engine DB schema in an empty database, and `etl-craft
-  migrate` applies the packaged and project migration streams, checking every applied file's
-  SHA-256 first. Migration SQL runs exactly as written, including `%` on PostgreSQL.
-- The run log (`etl_craft.engine.runlog`): tasks resolve the pipeline's one active run
-  themselves, bind one row per run and retry it in place, and a finished run is judged against
-  its SLA. Repositories (`etl_craft.engine.repository`) read pipelines, tasks, dependencies,
-  business rules and a run's task statuses, and suggest the closest code for an unknown one.
-- Every error class has its own exit status (`ExitCode`: 0 success, 1 a failed run or check,
-  2 usage, 3–15 one per error class, 16 unexpected); an unexpected exception is logged with its
-  traceback instead of escaping. A pipeline with `SLA_IN_HOURS` has every run marked MET or
-  BREACHED; `Enforce_sla` now decides only whether a lapse sends an SLA email.
-- `etl-craft run --pipeline_code P --task_code T` runs one task in a process of its own under
-  its pipeline's active run, only when it may, and records a crash, kill or timeout as `FAILED`
-  with the reason. Each attempt's output goes to its own log file under `Orchestration.Log_dir`,
-  its tail is kept in `TASK_LOG`, and every log record names the pipeline, task, run and attempt.
+The first release: a rewrite of the earlier implementation (kept at the `archive/iteration-2`
+tag) with the same design, in a layered package with its own tests, documentation and release
+evidence.
+
+### Pipelines as metadata
+
+- Pipelines, tasks, their parameters, dependencies and business rules are rows in the Engine
+  DB's `CFG_` tables, which your team writes and etl-craft only reads; history is written to
+  the `AUD_` tables. The Engine DB is a SQLite file or a PostgreSQL schema, created by
+  `etl-craft setup` (or `init-db`) and carried forward by `migrate`, with your project's own
+  migrations beside the packaged ones.
+- `craft-connector.yml`, written by your team, holds the connections, per profile (`dev`,
+  `prod`, ...). Every setting is a variable or a value; a secret always names a variable that
+  must be set. One complete example per choice of Engine DB, warehouse, secrets source, mode
+  and authentication is published with the documentation.
+
+### Running
+
+- `etl-craft run --pipeline_code X` runs a pipeline in dependency waves, one process per task,
+  with bounded parallelism, time limits, per-attempt log files, and resumption: a stopped or
+  retried run never repeats finished tasks. `--task_code` runs one task. The run each task
+  belongs to is resolved from the Engine DB, never passed in.
+- Dependencies of type `SUCCESS`, `FAILURE`, `ALWAYS` and `HAS_DATA`, run conditions `ALL`,
+  `ANY` and `N`, and dependencies on other pipelines and their tasks, judged on the upstream's
+  last finished run and consumed once. SLA tracking on every run, with SLA emails.
+- Four task handlers: `SQL` (one read-only SELECT, wrapped by the engine in one of eight
+  actions: `CREATE_TABLE`, `SETUP_TABLE`, `OVERWRITE_TABLE`, `APPEND_TABLE`, `SCD1_MERGE`,
+  `SCD2_MERGE`, `DROP_TABLE`, `DELETE_ROWS`), `PYTHON` ingestion scripts with offsets and
+  `INPUT_PARAMS`, `BUSINESS_RULES` that flag and clear failing rows in waves, and
+  `EMAIL_ALERT` through SMTP (password or XOAUTH2) or `sendmail`.
+- Warehouses: PostgreSQL, DuckDB, DuckDB over an Iceberg REST catalog, Trino over Iceberg,
+  Databricks (Delta and UniForm) and Snowflake (native and Iceberg). The third-party drivers
+  are extras: `trino`, `databricks`, `snowflake`, `aws`.
+- Local mode: etl-craft is the orchestrator. `mark` sets a task or a run's status with a
+  reason (a failed task marked `SUCCESS` lets its dependents run when the run resumes),
+  `mark --new-run` records a stand-in upstream run, `cancel` stops a run and ends it
+  `CANCELLED`, `run --rerun [--with-downstream]` and `--ignore-dependencies` run a task past
+  the usual checks, and `Orchestration.Dependency_gates: enforce | warn | off` relaxes
+  cross-pipeline gates per profile. Every intervention is recorded in
+  `AUD_RUN_INTERVENTIONS`, and shown by `history` and the catalog.
+- Remote mode: the orchestrator is the only source of truth. `generate-yml` writes each
+  pipeline as a DAG holding every rule (trigger rules, sensors on other pipelines and their
+  tasks, `max_active_runs: 1`); tasks run when the orchestrator says. Rules an orchestrator
+  cannot express (`N` run conditions, `HAS_DATA`, mixed dependency types) fail in `validate`,
+  `generate-yml` and `run --init-only`, naming each one.
+
+### Checking and understanding
+
+- `doctor` reports every check (settings, secrets, connections, schemas, migrations, email,
+  cloning, relaxed gates) and `setup` sets up or upgrades in one command. `validate` checks
+  every pipeline's metadata with the handlers' own rules without running anything.
+- `list`, `graph`, `steps` and `history` inspect pipelines and runs. `lineage` traces columns
+  across tasks and pipelines; `docs-version` keeps task documentation in versions.
+- `generate-docs` writes a searchable catalog site: pipelines with their DAGs, tables with
+  columns, lineage graphs, business rules, last runs and interventions, refreshed on a schedule
+  (`generate-yml --docs`). `publish-docs` serves it through an ngrok tunnel, limited to
+  `Docs_site.Allowed_ips`.
+- Cloning copies the Engine DB tables into the warehouse after every run, and `etl-craft clone`
+  on demand.
+- Every error class has its own exit status, and every failure names the object, the value
+  found, what was expected and the remedy.
+
+### Documentation and examples
+
+- The Support Insights demo (`examples/demo`) and a Quick Start that runs it; guides for every
+  feature; deployment, connector and security pages; and references generated from the code:
+  the command line, `craft-connector.yml`, task parameters, the Engine DB schema and the Python
+  API.
+
+### Verified
+
+- The release was tested from the built wheel, installed with pip and with uv, on Linux, with
+  macOS and Python 3.11 to 3.13 in CI: every Engine DB with every local warehouse, the demo end
+  to end, locally verifiable authentication modes, and the demo's warehouse work on Databricks
+  and Snowflake. The evidence is in `release/evidence/0.1.0/`.
+
+[Unreleased]: https://github.com/venkatcg00/etl-craft/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/venkatcg00/etl-craft/releases/tag/v0.1.0

@@ -5,11 +5,6 @@ dependencies between them are rows in a database, the **Engine DB**. etl-craft r
 and runs the work against one **warehouse**. It runs pipelines by itself, or it generates a DAG
 description for an orchestrator such as Airflow to schedule.
 
-!!! note "Pre-release"
-    etl-craft is being rebuilt ahead of its first release, 0.1.0. Pages marked as planned are
-    written as the features reach the new code base; progress is tracked in the
-    [rewrite plan](development/rewrite-plan.md).
-
 ## Core ideas
 
 **Pipelines are data, not code.** A pipeline is a row in `CFG_PIPELINES`; its tasks are rows in

@@ -6,10 +6,8 @@ without an external orchestrator.
 
 Documentation: <https://venkatcg00.github.io/etl-craft/>
 
-> **Status: pre-release.** The rewrite is feature-complete ahead of the first release (0.1.0).
-> The previous implementation remains available at the `archive/iteration-2` tag, and the
-> rewrite plan and its progress are in
-> [docs/development/rewrite-plan.md](docs/development/rewrite-plan.md).
+> **0.1.0** is the first release. The previous implementation remains available at the
+> `archive/iteration-2` tag; the [changelog](CHANGELOG.md) lists what 0.1.0 holds.
 
 ## Try it
 
