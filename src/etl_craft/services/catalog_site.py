@@ -493,6 +493,12 @@ class _Writer:
                 ("Refresh", _e(row.refresh_type)),
                 ("SLA", _e(f"{row.sla_in_hours:g} hours") if row.sla_in_hours else ""),
                 (
+                    "Paused",
+                    f'<span class="status PAUSED">{_e(p.paused.describe())}</span>'
+                    if p.paused
+                    else "",
+                ),
+                (
                     "Last run",
                     f"{_status(run.status)} {_e(_when(run.start))} → {_e(_when(run.end))}"
                     + (f" · SLA {_e(run.sla_status)}" if run.sla_status else "")

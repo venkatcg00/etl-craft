@@ -6,6 +6,17 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `etl-craft pause` and `resume`: while a pipeline is paused, `run` starts nothing of it and
+  exits `0`, and a run in progress starts no more tasks, to go on once resumed. `list` and the
+  catalog show paused pipelines; `AUD_PIPELINE_PAUSES` keeps every pause.
+- `etl-craft run --skip --reason`: records a run `SKIPPED` on purpose, for the pipelines that
+  depend on it to see.
+- The Engine DB's first migration, `0001_pipeline_pauses.sql`: `etl-craft setup` (or `migrate`)
+  applies it to an Engine DB made by 0.1.0. A test upgrades each released schema and compares
+  it with a new one.
+
 ## [0.1.0] - 2026-09-26
 
 The first release: a rewrite of the earlier implementation (kept at the `archive/iteration-2`

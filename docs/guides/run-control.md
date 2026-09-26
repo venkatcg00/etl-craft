@@ -1,4 +1,4 @@
-# Stepping in: mark, cancel, rerun and bypasses
+# Stepping in: mark, cancel, pause, rerun and bypasses
 
 In local mode etl-craft is the orchestrator, so it is where you step in when a run needs a hand:
 a failure you have fixed by other means, an upstream that cannot run where you are, a task to run
@@ -75,6 +75,31 @@ The pipeline's run in progress ends `CANCELLED`, and so does each of its running
 process running each task looks every two seconds, stops the task's process when it sees the
 cancel, and the process running the pipeline starts nothing more; `run` then exits `1`. The next
 `run --pipeline_code` starts a new run.
+
+## Pause and resume a pipeline
+
+```bash
+etl-craft pause --pipeline_code SALES_DAILY --reason "the CRM is being migrated this week"
+etl-craft resume --pipeline_code SALES_DAILY --reason "the migration is done"
+```
+
+While a pipeline is paused, `etl-craft run` starts nothing of it (whole runs, single tasks and
+`--init-only` alike): it says the pipeline is paused, by whom and why, and exits `0`, so a
+scheduler that keeps calling it raises no alarm. A run in progress when the pipeline is paused
+lets its running tasks finish, starts no more, and stays `IN-PROGRESS`; after `resume`, the next
+`run --pipeline_code` goes on with it. `etl-craft list` and the catalog show every paused
+pipeline, and `AUD_PIPELINE_PAUSES` keeps every pause with who paused and resumed it, when and
+why.
+
+## Skip a run on purpose
+
+```bash
+etl-craft run --pipeline_code SALES_DAILY --skip --reason "public holiday: no sales file"
+```
+
+Records a run of the pipeline `SKIPPED`, running nothing, as a stand-in run does (see
+[Record a stand-in run](#record-a-stand-in-run)). The pipelines that depend on it see a run that
+did nothing: a `SUCCESS` dependency on it is not satisfied, an `ALWAYS` one is.
 
 ## Run a task without its dependencies
 

@@ -46,7 +46,12 @@ from etl_craft.execution.gates import (
     CrossPipelineGate,
     TrackedGate,
 )
-from etl_craft.execution.interventions import check_override, record_change, record_gate_bypass
+from etl_craft.execution.interventions import (
+    check_override,
+    open_pause,
+    record_change,
+    record_gate_bypass,
+)
 from etl_craft.execution.limits import task_timeout_seconds
 from etl_craft.execution.supervisor import (
     KILL_GRACE_SECONDS,
@@ -134,6 +139,14 @@ def run_task(
         check_override(config, option, override.reason)
         if force:
             raise UsageError(f"{option} and --force are different overrides: choose one")
+    if config.mode == Mode.LOCAL:
+        paused = open_pause(engine, pipeline_code)
+        if paused is not None:
+            return _skipped(
+                f"{task_code}: {pipeline_code} is {paused.describe()}; nothing started or "
+                f"recorded. `etl-craft resume --pipeline_code {pipeline_code}` lets it run again"
+            )
+    if override is not None:
         return _run_overridden(engine, config, pipeline_code, task_code, override, child)
     if force and config.mode == Mode.REMOTE:
         raise RunRefusedError(

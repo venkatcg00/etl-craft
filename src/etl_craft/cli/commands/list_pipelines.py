@@ -21,9 +21,17 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     if not pipelines:
         out.empty("no active pipelines")
         return ExitCode.SUCCESS
-    out.rows([("PIPELINE_CODE", "PIPELINE_NAME", "REFRESH_TYPE", "RUN_SCHEDULE", "SLA_IN_HOURS")])
+    header = ("PIPELINE_CODE", "PIPELINE_NAME", "REFRESH_TYPE", "RUN_SCHEDULE", "SLA_IN_HOURS")
+    out.rows([(*header, "PAUSED")])
     out.rows(
-        (p.pipeline_code, p.pipeline_name, p.refresh_type, p.run_schedule, p.sla_in_hours)
+        (
+            p.pipeline_code,
+            p.pipeline_name,
+            p.refresh_type,
+            p.run_schedule,
+            p.sla_in_hours,
+            p.paused.describe() if p.paused else "",
+        )
         for p in pipelines
     )
     return ExitCode.SUCCESS
