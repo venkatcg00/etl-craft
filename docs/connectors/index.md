@@ -10,7 +10,5 @@ warehouse, secrets source, orchestration mode and authentication type. The
 - [Engine DB](engine-db.md): SQLite or PostgreSQL, and how each authenticates.
 - [Warehouses](warehouses.md): each warehouse and table format, how it authenticates, and
   where its data files can live.
-
-!!! note "Planned"
-    - **Authentication**: the modes each connection accepts (`none`, `password`, `token`,
-      `key_file`, `oauth`, `sso`, `sts`), and which are verified against a live service.
+- [Authentication](authentication.md): the auth modes, what each needs, which target accepts
+  which, and which are verified against a live service here.
