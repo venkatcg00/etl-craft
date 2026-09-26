@@ -29,9 +29,11 @@ theme:
         icon: material/brightness-4
         name: Switch to light mode
 
-# The API reference generator runs at build time; it is not a page.
+# The reference generators run at build time; they are not pages.
 exclude_docs: |
   gen_ref_pages.py
+  gen_cli_page.py
+  gen_reference_pages.py
 
 markdown_extensions:
   - admonition
@@ -61,6 +63,7 @@ plugins:
       scripts:
         - docs/gen_ref_pages.py
         - docs/gen_cli_page.py
+        - docs/gen_reference_pages.py
   - literate-nav:
       nav_file: SUMMARY.md
   - section-index
@@ -129,6 +132,9 @@ nav:
       - reference/index.md
       - Command line: reference/cli.md
       - Exit codes: reference/exit-codes.md
+      - craft-connector.yml: reference/configuration.md
+      - Task parameters: reference/task-parameters.md
+      - Engine DB schema: reference/engine-db-schema.md
       - Python API: api/
   - Release notes: release-notes.md
   - Contributing:

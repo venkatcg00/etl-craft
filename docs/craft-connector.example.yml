@@ -80,16 +80,20 @@ Orchestration:
     Allow_schedule: false              # value
     Email:                        # how EMAIL_ALERT tasks and SLA emails are sent —
       # transport: smtp                # value — smtp (the default) | sendmail: hand mail to the
-      #                                #   host's sendmail program (sendmail_path, default
-      #                                #   /usr/sbin/sendmail), with from_address and nothing else
+      #                                #   host's sendmail program, with from_address and
+      #                                #   nothing else
+      # sendmail_path: /usr/sbin/sendmail  # value — with transport: sendmail; the default
       host: EMAIL_HOST                 # variable —   needed only when a pipeline sends email
       port: EMAIL_PORT                 # variable
       from_address: EMAIL_FROM         # variable
       from_name: ETL Craft             # value — optional: the name shown with from_address
-      auth_mode: EMAIL_AUTH_MODE       # variable — none | password
+      auth_mode: EMAIL_AUTH_MODE       # variable — none | password | oauth
       user: EMAIL_USER                 # variable
       use_tls: EMAIL_USE_TLS           # variable
       secret: EMAIL_SECRET             # variable, required: a secret is never used as written
+      # client_id: EMAIL_CLIENT_ID     # variable — with auth_mode oauth (SMTP XOAUTH2): the app's
+      # token_url: EMAIL_TOKEN_URL     #   client id, the token endpoint, and the scope to ask for;
+      # scope: EMAIL_SCOPE             #   secret is then the client secret
   uat:
     Mode: remote                       # value
     Name: Airflow                      # value

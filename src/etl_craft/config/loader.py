@@ -98,6 +98,33 @@ _SMTP_ONLY_EMAIL_KEYS = frozenset(
 _CONNECTION_FIELDS = frozenset(
     {"jdbc_url", "user", "auth_mode", "secret", "schema", *AUTH_EXTRA_FIELDS}
 )
+SECRETS_KEYS = frozenset({"Source_type", "Path", "Profile"})
+WAREHOUSE_SECTION_KEYS = frozenset({"Name", "Table_format"})
+CLONING_KEYS = frozenset({"Enabled", "Scope", "External_volume", "Base_location"})
+DOCS_SITE_KEYS = frozenset({"Schedule", "Output", "Authtoken", "Domain", "Allowed_ips"})
+
+
+def settings_by_section() -> dict[str, frozenset[str]]:
+    """Return every setting the loader accepts, by where it is written.
+
+    ``Engine`` and ``Warehouse`` hold their section settings and the fields of a profile block;
+    a warehouse's own separate fields (such as Snowflake's ``account``) are included.
+    """
+    warehouse_fields: set[str] = set()
+    for spec in WAREHOUSES:
+        warehouse_fields.update(spec.preferred_fields)
+        warehouse_fields.update(spec.profile_fields)
+    return {
+        "Secrets": SECRETS_KEYS,
+        "Orchestration": _ORCHESTRATION_KEYS - {"Email"},
+        "Orchestration.Email": _EMAIL_KEYS,
+        "Engine": frozenset({"Name"}) | _CONNECTION_FIELDS,
+        "Warehouse": WAREHOUSE_SECTION_KEYS | _CONNECTION_FIELDS | warehouse_fields,
+        "Cloning": CLONING_KEYS,
+        "Docs_site": DOCS_SITE_KEYS,
+    }
+
+
 # The field whose presence selects the separate-fields connection shape.
 _PREFERRED_SHAPE_MARKER = {"databricks": "catalog", "snowflake": "account"}
 
@@ -312,7 +339,7 @@ def _reject_unknown(
 
 
 def _parse_source(secrets: dict[str, Any], path: Path, environment: Resolver) -> SourceConfig:
-    _reject_unknown(secrets, {"Source_type", "Path", "Profile"}, "Secrets", path)
+    _reject_unknown(secrets, SECRETS_KEYS, "Secrets", path)
     written_type = environment.text(secrets.get("Source_type"), "Secrets.Source_type")
     source_type = (written_type or "").lower()
     if source_type not in _SOURCE_TYPES:
@@ -653,11 +680,9 @@ def _parse_warehouse(
     for key in ("Name", "Table_format"):
         block.pop(key, None)
     settings = {
-        k: v
-        for k, v in profiled.settings.items()
-        if k in {"Name", "Table_format"} or k not in block
+        k: v for k, v in profiled.settings.items() if k in WAREHOUSE_SECTION_KEYS or k not in block
     }
-    _reject_unknown(settings, {"Name", "Table_format"}, "Warehouse", path)
+    _reject_unknown(settings, WAREHOUSE_SECTION_KEYS, "Warehouse", path)
     table_format = (profiled.text("Table_format") or TableFormat.NATIVE).lower()
     if table_format not in {member.value for member in TableFormat}:
         raise ConfigurationError(
@@ -827,7 +852,7 @@ def _parse_cloning(
         return CloningConfig()
     _reject_unknown(
         profiled.settings,
-        {"Enabled", "Scope", "External_volume", "Base_location"},
+        CLONING_KEYS,
         "Cloning",
         path,
     )
@@ -857,7 +882,7 @@ def _parse_docs_site(
         return DocsSiteConfig()
     _reject_unknown(
         profiled.settings,
-        {"Schedule", "Output", "Authtoken", "Domain", "Allowed_ips"},
+        DOCS_SITE_KEYS,
         "Docs_site",
         path,
     )

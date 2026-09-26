@@ -40,6 +40,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- One row per pipeline: its code, schedule, SLA, refresh type and generated-DAG settings.
 CREATE TABLE CFG_PIPELINES (
     PIPELINE_ID          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     PIPELINE_CODE        VARCHAR NOT NULL,
@@ -64,6 +65,8 @@ CREATE TRIGGER trg_audit_cfg_pipelines
     FOR EACH ROW EXECUTE FUNCTION trg_set_audit_columns();
 COMMENT ON TABLE CFG_PIPELINES IS 'One row per pipeline. PIPELINE_CODE is the key the command line uses; REFRESH_TYPE decides what $$pipeline_id becomes.';
 
+-- A pipeline waiting on another: a new run starts only when the upstream's last finished run
+-- satisfies DEPENDENCY_TYPE.
 CREATE TABLE CFG_PIPELINE_DEPENDENCY (
     PIPELINE_DEPENDENCY_ID  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     PIPELINE_ID             BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
@@ -87,6 +90,7 @@ CREATE TRIGGER trg_audit_cfg_pipeline_dependency
     FOR EACH ROW EXECUTE FUNCTION trg_set_audit_columns();
 COMMENT ON TABLE CFG_PIPELINE_DEPENDENCY IS 'A pipeline waits for another pipeline''s outcome. Checked against AUD_PIPELINE_DEPENDENCY_TRACKER when the pipeline starts.';
 
+-- One row per task: its pipeline, handler and run condition.
 CREATE TABLE CFG_TASKS (
     TASK_ID              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     TASK_CODE            VARCHAR NOT NULL,
@@ -119,6 +123,7 @@ COMMENT ON TABLE CFG_TASKS IS 'One row per task. HANDLER runs it; its settings a
 COMMENT ON COLUMN CFG_TASKS.RUN_CONDITION IS 'ALL | ANY | N: how many of this task''s dependencies must be satisfied. NULL means ALL.';
 COMMENT ON COLUMN CFG_TASKS.RUN_CONDITION_COUNT IS 'How many dependencies must be satisfied when RUN_CONDITION = ''N''; NULL for every other condition.';
 
+-- A task waiting on another, in its own pipeline or, with DEPENDS_ON_PIPELINE_ID, in another.
 CREATE TABLE CFG_TASK_DEPENDENCY (
     TASK_DEPENDENCY_ID      BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     PIPELINE_ID             BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
@@ -147,6 +152,7 @@ CREATE UNIQUE INDEX ux_taskdep_edge_active
 CREATE INDEX ix_taskdep_depends_on ON CFG_TASK_DEPENDENCY (DEPENDS_ON_TASK_ID);
 COMMENT ON TABLE CFG_TASK_DEPENDENCY IS 'A task waits for another task''s outcome. Same-pipeline dependencies order the pipeline''s waves; one on another pipeline''s task is checked against AUD_TASK_DEPENDENCY_TRACKER when the task starts.';
 
+-- A task's settings, as name and value rows; each handler reads its own names.
 CREATE TABLE CFG_TASK_PARAMETERS (
     TASK_PARAMETER_ID  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     TASK_ID            BIGINT NOT NULL REFERENCES CFG_TASKS(TASK_ID),
@@ -166,6 +172,8 @@ CREATE TRIGGER trg_audit_cfg_task_parameters
     FOR EACH ROW EXECUTE FUNCTION trg_set_audit_columns();
 COMMENT ON TABLE CFG_TASK_PARAMETERS IS 'A task''s settings as name and value pairs (SQL_ACTION, TARGET_OBJECT, SOURCE_SQL, ...). Which names each handler reads is documented in the task parameter reference.';
 
+-- A BUSINESS_RULES task's rules: a correlated SELECT that finds the rows of TARGET_TABLE that
+-- break it, and what a failing row gets flagged as.
 CREATE TABLE CFG_BUSINESS_RULES (
     BUSINESS_RULE_ID          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     BUSINESS_RULE_NAME        VARCHAR NOT NULL,
@@ -192,6 +200,7 @@ CREATE TRIGGER trg_audit_cfg_business_rules
     FOR EACH ROW EXECUTE FUNCTION trg_set_audit_columns();
 COMMENT ON TABLE CFG_BUSINESS_RULES IS 'Checks a BUSINESS_RULES task runs against a warehouse table. TARGET_TABLE must have a single-column primary key, named by BUSINESS_RULE_KEY_COLUMN; `validate` checks it in the warehouse.';
 
+-- One row per pipeline run: its status, when it ran, and whether it met its SLA.
 CREATE TABLE AUD_PIPELINES_RUN_LOG (
     PIPELINE_RUN_ID  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     PIPELINE_ID      BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
@@ -209,6 +218,8 @@ CREATE UNIQUE INDEX ux_pipeline_run_one_active
 CREATE INDEX ix_pipeline_run_pipeline ON AUD_PIPELINES_RUN_LOG (PIPELINE_ID);
 COMMENT ON TABLE AUD_PIPELINES_RUN_LOG IS 'One row per pipeline run. Tasks never receive pipeline_run_id; each resolves the pipeline''s one IN-PROGRESS run here.';
 
+-- One row per task per run, updated by each attempt: the latest attempt's status, counts,
+-- message and log tail.
 CREATE TABLE AUD_TASK_RUN_LOG (
     TASK_RUN_ID      BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     TASK_ID          BIGINT NOT NULL REFERENCES CFG_TASKS(TASK_ID),
@@ -255,6 +266,7 @@ CREATE TABLE AUD_RUN_INTERVENTIONS (
 CREATE INDEX ix_run_interventions_run ON AUD_RUN_INTERVENTIONS (PIPELINE_RUN_ID);
 COMMENT ON TABLE AUD_TASK_RUN_LOG IS 'One row per task per pipeline run. A retry updates the row and counts the attempt in ATTEMPT_COUNT; a task already SUCCESS or SKIPPED is not run again.';
 
+-- One row per business rule per task run: whether the rule ran, and how long it took.
 CREATE TABLE AUD_BUSINESS_RULES_RUN_LOG (
     BUSINESS_RULE_RUN_ID  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     BUSINESS_RULE_ID      BIGINT NOT NULL REFERENCES CFG_BUSINESS_RULES(BUSINESS_RULE_ID),
@@ -268,6 +280,7 @@ CREATE UNIQUE INDEX ux_br_run_one_per_task_run
     ON AUD_BUSINESS_RULES_RUN_LOG (BUSINESS_RULE_ID, TASK_RUN_ID);
 COMMENT ON TABLE AUD_BUSINESS_RULES_RUN_LOG IS 'Whether each business rule ran, per task run. What a rule found is in AUD_BUSINESS_RULES_RESULTS.';
 
+-- The rows each rule flagged, by key; a flag is cleared (ACTIVE_FLAG 'N') once its row passes.
 CREATE TABLE AUD_BUSINESS_RULES_RESULTS (
     BUSINESS_RULE_RESULT_ID  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     BUSINESS_RULE_RUN_ID     BIGINT NOT NULL REFERENCES AUD_BUSINESS_RULES_RUN_LOG(BUSINESS_RULE_RUN_ID),
@@ -285,6 +298,7 @@ CREATE INDEX ix_brresults_run ON AUD_BUSINESS_RULES_RESULTS (BUSINESS_RULE_RUN_I
 CREATE INDEX ix_brresults_rule ON AUD_BUSINESS_RULES_RESULTS (BUSINESS_RULE_ID);
 COMMENT ON TABLE AUD_BUSINESS_RULES_RESULTS IS 'One row per record a business rule flagged. A record that passes on a later run is cleared: ACTIVE_FLAG = ''N'' and END_DATE set.';
 
+-- Where each incremental ingestion script got to: the offset it reads from next.
 CREATE TABLE AUD_TASK_OFFSET_TRACKER (
     TASK_ID                 BIGINT PRIMARY KEY REFERENCES CFG_TASKS(TASK_ID),
     OFFSET_TYPE             VARCHAR NOT NULL,
@@ -294,6 +308,7 @@ CREATE TABLE AUD_TASK_OFFSET_TRACKER (
 );
 COMMENT ON TABLE AUD_TASK_OFFSET_TRACKER IS 'The watermark an incremental ingestion script reads and advances.';
 
+-- Column lineage traced from each SQL task's SELECT, stored by a hash of what it depends on.
 CREATE TABLE AUD_COLUMN_LINEAGE (
     COLUMN_LINEAGE_ID  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     TASK_ID            BIGINT NOT NULL REFERENCES CFG_TASKS(TASK_ID),
@@ -319,6 +334,7 @@ CREATE TABLE AUD_DOCS_PUBLICATION (
     LAST_PUBLISHED       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- The versions of each task's DOCUMENTATION, one row per change.
 CREATE TABLE AUD_TASK_DOCUMENTATION (
     TASK_DOCUMENTATION_ID  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     TASK_ID                BIGINT NOT NULL REFERENCES CFG_TASKS(TASK_ID),
@@ -331,6 +347,7 @@ CREATE TABLE AUD_TASK_DOCUMENTATION (
 CREATE INDEX ix_task_documentation_task ON AUD_TASK_DOCUMENTATION (TASK_ID, VERSION DESC);
 COMMENT ON TABLE AUD_TASK_DOCUMENTATION IS 'Each version of a task''s DOCUMENTATION parameter. A new version is recorded only when the text changes.';
 
+-- The upstream run each pipeline dependency last consumed; each upstream run is consumed once.
 CREATE TABLE AUD_PIPELINE_DEPENDENCY_TRACKER (
     PIPELINE_DEPENDENCY_ID         BIGINT PRIMARY KEY REFERENCES CFG_PIPELINE_DEPENDENCY(PIPELINE_DEPENDENCY_ID),
     PIPELINE_ID                    BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
@@ -341,6 +358,7 @@ CREATE TABLE AUD_PIPELINE_DEPENDENCY_TRACKER (
 );
 COMMENT ON TABLE AUD_PIPELINE_DEPENDENCY_TRACKER IS 'The upstream run each pipeline dependency last consumed. An upstream run satisfies the dependency only if it is newer than that one and has the outcome the dependency waits for, so pipelines on different schedules never reuse a stale run.';
 
+-- The upstream task run each cross-pipeline task dependency last consumed.
 CREATE TABLE AUD_TASK_DEPENDENCY_TRACKER (
     TASK_DEPENDENCY_ID         BIGINT PRIMARY KEY REFERENCES CFG_TASK_DEPENDENCY(TASK_DEPENDENCY_ID),
     TASK_ID                    BIGINT NOT NULL REFERENCES CFG_TASKS(TASK_ID),
@@ -353,6 +371,8 @@ CREATE TABLE AUD_TASK_DEPENDENCY_TRACKER (
 );
 COMMENT ON TABLE AUD_TASK_DEPENDENCY_TRACKER IS 'The same as AUD_PIPELINE_DEPENDENCY_TRACKER, for a task''s dependency on a task in another pipeline. Same-pipeline dependencies are checked against the current run instead.';
 
+-- Every migration applied, from etl-craft (ENGINE) and from the project (PROJECT), with its
+-- checksum.
 CREATE TABLE SCHEMA_MIGRATIONS (
     SOURCE      VARCHAR NOT NULL,
     VERSION     VARCHAR NOT NULL,
