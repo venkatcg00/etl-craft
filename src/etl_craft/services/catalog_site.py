@@ -29,8 +29,16 @@ from pathlib import Path
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.project import sql_file
 from etl_craft.core.errors import EtlCraftError, UsageError
-from etl_craft.engine.repository.catalog import LastRun
-from etl_craft.services.catalog import Catalog, TableAsset, TaskAsset, latest_run
+from etl_craft.engine.repository.catalog import Consumption, LastRun, RunSummary, TaskRunSummary
+from etl_craft.services.catalog import (
+    Catalog,
+    PipelineAsset,
+    RunKpis,
+    TableAsset,
+    TaskAsset,
+    latest_run,
+    run_kpis,
+)
 from etl_craft.services.catalog_graph import (
     dag_drawing,
     lineage_drawing,
@@ -43,6 +51,7 @@ MARKER = ".etl-craft-catalog"
 """The file that marks a folder as a catalog site ``generate-docs`` may write over."""
 
 ASSETS = ("catalog.css", "catalog.js")
+BACKFILL_BADGE = ' <span class="badge">backfill</span>'
 SQL_PARAMETERS = frozenset({"SOURCE_SQL"})
 ZOOM_BUTTONS = (
     '<span class="zoom">'
@@ -150,6 +159,57 @@ def script_url(name: str) -> str:
     return f"scripts/{slug(name)}.html"
 
 
+def run_url(pipeline_run_id: int) -> str:
+    """Return the URL of a pipeline run's page, from the site's root."""
+    return f"runs/{pipeline_run_id}.html"
+
+
+def _duration(seconds: float | None) -> str:
+    if seconds is None:
+        return ""
+    whole = round(seconds)
+    hours, rest = divmod(whole, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m"
+    if minutes:
+        return f"{minutes}m {secs:02d}s"
+    return f"{secs}s"
+
+
+def _bars(entries: Sequence[tuple[float | None, str, str, str | None]], unit: str) -> str:
+    """Draw ``entries`` (value, status, label, link), oldest first, as a bar per run.
+
+    Each bar's height is its value against the largest, its colour its status; a run with no
+    value (not ended) is a short grey bar. Each bar links to its run and says what it holds.
+    """
+    if not entries:
+        return ""
+    width, height, gap = 12, 60, 3
+    largest = max((value for value, *_ in entries if value), default=0.0) or 1.0
+    bars = []
+    for index, (value, status, label, url) in enumerate(entries):
+        size = max(2.0, (value or 0.0) / largest * height) if value is not None else 2.0
+        x = index * (width + gap)
+        bar = (
+            f'<rect class="bar {_e(status)}" x="{x}" y="{height - size:.1f}" width="{width}" '
+            f'height="{size:.1f}"><title>{_e(label)}</title></rect>'
+        )
+        bars.append(f'<a href="{_e(url)}">{bar}</a>' if url else bar)
+    total = len(entries) * (width + gap)
+    return (
+        f'<figure class="bars"><svg viewBox="0 0 {total} {height}" width="{total}" '
+        f'height="{height}" role="img" aria-label="{_e(unit)} of each run, oldest first">'
+        f"{''.join(bars)}</svg><figcaption>{_e(unit)} of each run, oldest first; the colour "
+        "is the run's status</figcaption></figure>"
+    )
+
+
+def _rate(kpis: RunKpis) -> str:
+    rate = kpis.success_rate
+    return "" if rate is None else f"{rate:.0%} of {kpis.finished}"
+
+
 def _e(value: object) -> str:
     return html.escape("" if value is None else str(value), quote=True)
 
@@ -180,7 +240,7 @@ def _anchor(*parts: str) -> str:
     return "w-" + slug(".".join(parts))
 
 
-def _counts(run: LastRun) -> str:
+def _counts(run: LastRun | TaskRunSummary) -> str:
     counts = [
         ("source", run.source_count),
         ("target", run.target_count),
@@ -219,6 +279,22 @@ class _Writer:
             self._page(
                 task_url(label), label, "task", self._task(label), "dags", self._task_crumbs(task)
             )
+        for code, pipeline in c.pipelines.items():
+            for run in pipeline.runs:
+                crumbs = [
+                    ("dags.html", "DAGs"),
+                    (pipeline_url(code), code),
+                    (f"{pipeline_url(code)}#runs", "Runs"),
+                    (None, str(run.pipeline_run_id)),
+                ]
+                self._page(
+                    run_url(run.pipeline_run_id),
+                    f"{code} run {run.pipeline_run_id}",
+                    "pipeline run",
+                    self._run(pipeline, run),
+                    "dags",
+                    crumbs,
+                )
         for name, table in c.tables.items():
             if not table.external:
                 self._page(
@@ -370,6 +446,8 @@ class _Writer:
                 "Depends on",
                 "Tasks",
                 "Last run",
+                "Succeeded",
+                "Average run",
             ],
             (
                 [
@@ -383,6 +461,8 @@ class _Writer:
                     f"{_status(p.row.last_run.status)} {_e(_when(p.row.last_run.end))}"
                     if p.row.last_run
                     else "never run",
+                    _rate(run_kpis(p.runs)),
+                    _e(_duration(run_kpis(p.runs).average_seconds)),
                 ]
                 for code, p in c.pipelines.items()
             ),
@@ -552,7 +632,178 @@ class _Writer:
                 ),
                 "",
             )
-        return f"{description}{facts}{self._dag(code)}<h2>Tasks</h2>{tasks}{changes}"
+        return (
+            f"{description}{facts}{self._dag(code)}<h2>Tasks</h2>{tasks}{changes}"
+            f"{self._pipeline_runs(p)}"
+        )
+
+    # Runs
+
+    def _pipeline_runs(self, p: PipelineAsset) -> str:
+        if not p.runs:
+            return '<h2 id="runs">Runs</h2><p class="note">It has not run yet.</p>'
+        kpis = run_kpis(p.runs)
+        summary = _facts(
+            [
+                ("Runs shown", f"the latest {kpis.runs}"),
+                ("Succeeded", _rate(kpis)),
+                ("Failed or cancelled", str(kpis.failed)),
+                ("SLA missed", str(kpis.sla_breached) if p.row.sla_in_hours else ""),
+                ("Average run", _duration(kpis.average_seconds)),
+                ("Longest run", _duration(kpis.longest_seconds)),
+            ]
+        )
+        chart = _bars(
+            [
+                (
+                    run.seconds,
+                    run.status,
+                    f"run {run.pipeline_run_id} {run.status} {_duration(run.seconds)}",
+                    "../" + run_url(run.pipeline_run_id),
+                )
+                for run in reversed(p.runs)
+            ],
+            "Duration",
+        )
+        rows = _table(
+            ["Run", "Run date", "Status", "Started", "Took", "SLA", "Built from", "Changes"],
+            (
+                [
+                    self._link(run_url(run.pipeline_run_id), str(run.pipeline_run_id)),
+                    _e(run.run_date)
+                    + (' <span class="badge">backfill</span>' if run.backfill else ""),
+                    _status(run.status),
+                    _e(_when(run.start)),
+                    _e(_duration(run.seconds)),
+                    _e(run.sla_status),
+                    self._upstream_runs(self.catalog.built_from.get(run.pipeline_run_id, [])),
+                    str(len(p.run_changes.get(run.pipeline_run_id, [])) or ""),
+                ]
+                for run in p.runs
+            ),
+            "",
+        )
+        return f'<h2 id="runs">Runs</h2>{summary}{chart}{rows}'
+
+    def _upstream_runs(self, consumed: Sequence[Consumption]) -> str:
+        return ", ".join(
+            self._run_link(used.upstream_run_id, used.upstream_pipeline)
+            + (f" ({_e(used.upstream_task)})" if used.upstream_task else "")
+            for used in consumed
+        )
+
+    def _run_link(self, pipeline_run_id: int, pipeline_code: str, root: str = "../") -> str:
+        pipeline = self.catalog.pipelines.get(pipeline_code)
+        text = f"{pipeline_code} run {pipeline_run_id}"
+        if pipeline is not None and any(
+            r.pipeline_run_id == pipeline_run_id for r in pipeline.runs
+        ):
+            return self._link(run_url(pipeline_run_id), text, root)
+        return _e(text)
+
+    def _run(self, p: PipelineAsset, run: RunSummary) -> str:
+        code = p.row.pipeline_code
+        facts = _facts(
+            [
+                ("Pipeline", self._link(pipeline_url(code), code)),
+                ("Status", _status(run.status)),
+                ("Run date", _e(run.run_date) + (" (backfill)" if run.backfill else "")),
+                ("Started", _e(_when(run.start))),
+                ("Ended", _e(_when(run.end))),
+                ("Took", _e(_duration(run.seconds))),
+                ("SLA", _e(run.sla_status)),
+                (
+                    "Built from",
+                    self._upstream_runs(self.catalog.built_from.get(run.pipeline_run_id, [])),
+                ),
+                (
+                    "Used by",
+                    ", ".join(
+                        self._run_link(used.pipeline_run_id, used.pipeline_code)
+                        + (f" ({_e(used.task_code)})" if used.task_code else "")
+                        for used in self.catalog.consumed_by.get(run.pipeline_run_id, [])
+                    ),
+                ),
+            ]
+        )
+        tasks = _table(
+            ["Task", "Status", "Attempts", "Took", "Counts", "Message"],
+            (
+                [
+                    self._task_link(label),
+                    _status(task_run.status),
+                    str(task_run.attempts),
+                    _e(_duration(task_run.seconds)),
+                    _e(_counts(task_run)),
+                    _e(task_run.error_message),
+                ]
+                for label in p.tasks
+                for task_run in self.catalog.tasks[label].runs
+                if task_run.pipeline_run_id == run.pipeline_run_id
+            ),
+            "No task ran in this run, or its task runs are older than the history kept here.",
+        )
+        changes = p.run_changes.get(run.pipeline_run_id, [])
+        interventions = ""
+        if changes:
+            interventions = "<h2>Interventions</h2>" + _table(
+                ["Task", "Action", "From", "To", "By", "At", "Reason"],
+                (
+                    [
+                        self._task_link(f"{code}.{c.task_code}") if c.task_code else "the run",
+                        _e(c.action),
+                        _status(c.from_status),
+                        _status(c.to_status) if c.to_status else "reset",
+                        _e(c.requested_by),
+                        _e(_when(c.requested_at)),
+                        _e(c.reason),
+                    ]
+                    for c in changes
+                ),
+                "",
+            )
+        return f"{facts}<h2>Tasks</h2>{tasks}{interventions}"
+
+    def _task_runs(self, task: TaskAsset) -> str:
+        if not task.runs:
+            return ""
+        kpis = run_kpis(task.runs)
+        summary = _facts(
+            [
+                ("Runs shown", f"the latest {kpis.runs}"),
+                ("Succeeded", _rate(kpis)),
+                ("Average run", _duration(kpis.average_seconds)),
+                ("Average rows written", f"{kpis.average_rows:,.0f}" if kpis.average_rows else ""),
+            ]
+        )
+        chart = _bars(
+            [
+                (
+                    float(r.target_count) if r.target_count is not None else None,
+                    r.status,
+                    f"run {r.pipeline_run_id} {r.status} {r.target_count or 0} row(s)",
+                    "../" + run_url(r.pipeline_run_id),
+                )
+                for r in reversed(task.runs)
+            ],
+            "Rows written",
+        )
+        rows = _table(
+            ["Run", "Status", "Attempts", "Took", "Counts", "Message"],
+            (
+                [
+                    self._run_link(r.pipeline_run_id, task.row.pipeline_code),
+                    _status(r.status),
+                    str(r.attempts),
+                    _e(_duration(r.seconds)),
+                    _e(_counts(r)),
+                    _e(r.error_message),
+                ]
+                for r in task.runs
+            ),
+            "",
+        )
+        return f'<h2 id="runs">Runs</h2>{summary}{chart}{rows}'
 
     def _checked(self, task: TaskAsset) -> list[str]:
         return sorted({self.catalog.rules[r].table for r in task.rules})
@@ -655,7 +906,10 @@ class _Writer:
                 ),
                 "",
             )
-        return f"{facts}{lineage}{documentation}{mapping}{self._parameters(task)}"
+        return (
+            f"{facts}{lineage}{documentation}{mapping}{self._parameters(task)}"
+            f"{self._task_runs(task)}"
+        )
 
     def _parameters(self, task: TaskAsset) -> str:
         rows = []

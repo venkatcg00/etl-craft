@@ -24,7 +24,7 @@ comments where the warehouse's information schema has them.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -38,14 +38,20 @@ from etl_craft.config.targets import active_catalog
 from etl_craft.core.enums import Handler, SqlAction
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.engine.repository.catalog import (
+    Consumption,
     LastRun,
     PipelineRow,
     RuleRow,
+    RunSummary,
     TaskRow,
+    TaskRunSummary,
     fetch_catalog_pipelines,
     fetch_catalog_rules,
     fetch_catalog_tasks,
+    fetch_consumption,
     fetch_documentation_versions,
+    fetch_pipeline_runs,
+    fetch_task_runs,
 )
 from etl_craft.engine.repository.interventions import Intervention, fetch_interventions
 from etl_craft.engine.repository.pauses import Pause, fetch_open_pauses
@@ -126,6 +132,7 @@ class TaskAsset:
     upstream: list[tuple[str, str]] = field(default_factory=list)
     downstream: list[tuple[str, str]] = field(default_factory=list)
     rules: list[int] = field(default_factory=list)
+    runs: list[TaskRunSummary] = field(default_factory=list)
 
     @property
     def label(self) -> str:
@@ -142,17 +149,26 @@ class TaskAsset:
 
 @dataclass
 class PipelineAsset:
-    """An active pipeline, its tasks, and the pipelines it depends on.
+    """An active pipeline, its tasks, the pipelines it depends on, and its recent runs.
 
-    ``interventions`` are what operators changed in its last run; ``paused`` is its open pause.
+    ``runs`` are its latest runs, newest first; ``run_changes`` what operators changed in each
+    of them, by run; ``paused`` is its open pause.
     """
 
     row: PipelineRow
     tasks: list[str] = field(default_factory=list)
     depends_on: list[tuple[str, str]] = field(default_factory=list)
     depended_on_by: list[str] = field(default_factory=list)
-    interventions: list[Intervention] = field(default_factory=list)
+    run_changes: dict[int, list[Intervention]] = field(default_factory=dict)
     paused: Pause | None = None
+    runs: list[RunSummary] = field(default_factory=list)
+
+    @property
+    def interventions(self) -> list[Intervention]:
+        """What operators changed in its last run."""
+        if self.row.last_run_id is None:
+            return []
+        return self.run_changes.get(self.row.last_run_id, [])
 
 
 @dataclass
@@ -179,7 +195,11 @@ class ScriptAsset:
 
 @dataclass
 class Catalog:
-    """Every asset, and every edge between tables and between columns."""
+    """Every asset, and every edge between tables and between columns.
+
+    ``built_from`` maps a run to the upstream runs it consumed; ``consumed_by`` maps an upstream
+    run to the downstream runs that consumed it.
+    """
 
     generated_at: datetime
     pipelines: dict[str, PipelineAsset]
@@ -190,6 +210,8 @@ class Catalog:
     column_edges: list[Edge]
     table_edges: list[TableEdge]
     database: str | None = None
+    built_from: dict[int, list[Consumption]] = field(default_factory=dict)
+    consumed_by: dict[int, list[Consumption]] = field(default_factory=dict)
 
     def where(self, table: str) -> tuple[str, str, str]:
         """Return a table's ``(database, schema, table)``; the active database when unnamed."""
@@ -221,15 +243,19 @@ def build_catalog(
         pipeline_edges = fetch_pipeline_edges(conn)
         task_edges = fetch_task_dependency_edges(conn)
         paused = fetch_open_pauses(conn)
-        changes = {
-            row.pipeline_code: [
-                change
-                for change in fetch_interventions(conn, row.pipeline_id, row.last_run_id)
-                if change.pipeline_run_id == row.last_run_id
-            ]
-            for row in pipeline_rows
-            if row.last_run_id is not None
-        }
+        pipeline_runs = fetch_pipeline_runs(conn)
+        task_runs = fetch_task_runs(conn)
+        consumption = fetch_consumption(conn)
+        changes: dict[str, dict[int, list[Intervention]]] = {}
+        for pipeline in pipeline_rows:
+            code = pipeline.pipeline_code
+            listed = {run.pipeline_run_id for run in pipeline_runs.get(code, [])}
+            if not listed:
+                continue
+            by_run = changes.setdefault(code, {})
+            for change in fetch_interventions(conn, pipeline.pipeline_id, min(listed)):
+                if change.pipeline_run_id in listed:
+                    by_run.setdefault(change.pipeline_run_id, []).append(change)
     lineages = {lineage.task: lineage for lineage in collect(engine, config)}
 
     def name_of(object_ref: str) -> str:
@@ -240,8 +266,9 @@ def build_catalog(
         pipelines={
             row.pipeline_code: PipelineAsset(
                 row,
-                interventions=changes.get(row.pipeline_code, []),
+                run_changes=changes.get(row.pipeline_code, {}),
                 paused=paused.get(row.pipeline_code),
+                runs=pipeline_runs.get(row.pipeline_code, []),
             )
             for row in pipeline_rows
         },
@@ -253,6 +280,9 @@ def build_catalog(
         table_edges=[],
         database=database,
     )
+    for used in consumption:
+        catalog.built_from.setdefault(used.pipeline_run_id, []).append(used)
+        catalog.consumed_by.setdefault(used.upstream_run_id, []).append(used)
     for row in task_rows:
         task_params = params[row.task_id]
         task = TaskAsset(
@@ -260,6 +290,7 @@ def build_catalog(
             task_params,
             (task_params.get("DOCUMENTATION") or "").strip() or None,
             versions.get(row.task_id),
+            runs=task_runs.get(row.task_id, []),
         )
         catalog.tasks[task.label] = task
         catalog.pipelines[row.pipeline_code].tasks.append(task.label)
@@ -405,6 +436,52 @@ def _comment(row: dict[str, object]) -> str | None:
         if value:
             return str(value)
     return None
+
+
+@dataclass(frozen=True)
+class RunKpis:
+    """What a pipeline's or task's recent runs add up to."""
+
+    runs: int
+    finished: int
+    succeeded: int
+    failed: int
+    sla_breached: int
+    average_seconds: float | None
+    longest_seconds: float | None
+    average_rows: float | None = None
+
+    @property
+    def success_rate(self) -> float | None:
+        """The share of finished runs that succeeded, or ``None`` before any finished."""
+        return None if not self.finished else self.succeeded / self.finished
+
+
+def run_kpis(runs: Sequence[RunSummary | TaskRunSummary]) -> RunKpis:
+    """Return the KPIs of ``runs``: successes, failures, SLA misses, durations and rows.
+
+    A run counts as finished once it is ``SUCCESS``, ``FAILED`` or ``CANCELLED``; ``SKIPPED``
+    runs did no work and ``IN-PROGRESS`` ones have not ended, so neither counts either way.
+    """
+    finished = [r for r in runs if r.status in ("SUCCESS", "FAILED", "CANCELLED")]
+    seconds = [s for r in finished if (s := r.seconds) is not None]
+    rows = [
+        r.target_count
+        for r in runs
+        if isinstance(r, TaskRunSummary) and r.status == "SUCCESS" and r.target_count is not None
+    ]
+    return RunKpis(
+        runs=len(runs),
+        finished=len(finished),
+        succeeded=sum(1 for r in finished if r.status == "SUCCESS"),
+        failed=sum(1 for r in finished if r.status != "SUCCESS"),
+        sla_breached=sum(
+            1 for r in runs if isinstance(r, RunSummary) and r.sla_status == "BREACHED"
+        ),
+        average_seconds=sum(seconds) / len(seconds) if seconds else None,
+        longest_seconds=max(seconds) if seconds else None,
+        average_rows=sum(rows) / len(rows) if rows else None,
+    )
 
 
 def latest_run(runs: Iterable[LastRun | None]) -> LastRun | None:

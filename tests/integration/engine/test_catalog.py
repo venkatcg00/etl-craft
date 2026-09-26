@@ -6,6 +6,7 @@ import re
 
 import pytest
 import yaml
+from sqlalchemy import text
 
 from etl_craft.cli import main
 from etl_craft.config import load_config
@@ -209,7 +210,7 @@ def test_the_site_has_a_page_per_asset_and_a_search_index(project, tmp_path):
     folder = site.folder
     assert (folder / MARKER).is_file()
     pages = sorted(str(p.relative_to(folder)) for p in folder.rglob("*.html"))
-    assert [p for p in pages if not p.startswith("scripts/")] == sorted(
+    assert [p for p in pages if not p.startswith(("scripts/", "runs/"))] == sorted(
         [
             "dags.html",
             "warehouse.html",
@@ -288,7 +289,7 @@ def test_the_command(project, capsys):
     assert not (root / "catalog").exists()
     assert main(["generate-docs", "--with-warehouse"]) == ExitCode.SUCCESS
     assert capsys.readouterr().out.splitlines()[-1] == (
-        f"generate-docs: wrote 20 page(s) to {root / 'catalog'}"
+        f"generate-docs: wrote 21 page(s) to {root / 'catalog'}"
     )
     assert (root / "catalog" / "index.html").is_file()
 
@@ -370,3 +371,56 @@ def test_a_pipeline_page_lists_what_operators_changed_in_its_last_run(project, t
     assert '<a href="../tasks/INGEST.pull.html">INGEST.pull</a>' in page
     assert "no file today" in page and "op@h" in page
     assert "Interventions" not in (folder / "pipelines/SALES.html").read_text("utf-8")
+
+
+def test_runs_have_pages_with_what_they_were_built_from_and_used_by(project, tmp_path):
+    engine, config, _ = project
+    with engine.begin() as conn:
+        ids = dict(conn.execute(text("SELECT PIPELINE_CODE, PIPELINE_ID FROM CFG_PIPELINES")).all())
+        ingest_run, stage_run = conn.execute(
+            text(
+                "SELECT r.PIPELINE_RUN_ID, r.TASK_RUN_ID FROM AUD_TASK_RUN_LOG r "
+                "JOIN CFG_TASKS t ON t.TASK_ID = r.TASK_ID WHERE t.TASK_CODE = 'stage'"
+            )
+        ).one()
+        sales_run = runlog.find_or_create_active_run(conn, ids["SALES"])
+        dependency, convert = conn.execute(
+            text(
+                "SELECT d.TASK_DEPENDENCY_ID, d.TASK_ID FROM CFG_TASK_DEPENDENCY d "
+                "JOIN CFG_TASKS t ON t.TASK_ID = d.TASK_ID WHERE t.TASK_CODE = 'convert'"
+            )
+        ).one()
+        conn.execute(
+            text(
+                "INSERT INTO AUD_DEPENDENCY_CONSUMPTION (TASK_DEPENDENCY_ID, PIPELINE_ID, "
+                "PIPELINE_RUN_ID, TASK_ID, DEPENDS_ON_PIPELINE_ID, CONSUMED_PIPELINE_RUN_ID, "
+                "CONSUMED_TASK_RUN_ID) VALUES (:d, :p, :r, :t, :up, :ur, :utr)"
+            ),
+            {
+                "d": dependency,
+                "p": ids["SALES"],
+                "r": sales_run,
+                "t": convert,
+                "up": ids["INGEST"],
+                "ur": ingest_run,
+                "utr": stage_run,
+            },
+        )
+        runlog.finalize_pipeline_run(conn, sales_run, "FAILED")
+    catalog = build_catalog(engine, config)
+    assert [run.pipeline_run_id for run in catalog.pipelines["INGEST"].runs] == [ingest_run]
+    assert [c.upstream_run_id for c in catalog.built_from[sales_run]] == [ingest_run]
+    folder = write_site(catalog, config, tmp_path / "site").folder
+
+    pipeline = (folder / "pipelines/INGEST.html").read_text("utf-8")
+    assert '<h2 id="runs">Runs</h2>' in pipeline and 'class="bars"' in pipeline
+    assert f'href="../runs/{ingest_run}.html"' in pipeline
+    upstream = (folder / f"runs/{ingest_run}.html").read_text("utf-8")
+    assert "INGEST.stage" in upstream and "source 12, target 12, inserted 12" in upstream
+    assert f'<a href="../runs/{sales_run}.html">SALES run {sales_run}</a> (convert)' in upstream
+    downstream = (folder / f"runs/{sales_run}.html").read_text("utf-8")
+    assert f'<a href="../runs/{ingest_run}.html">INGEST run {ingest_run}</a> (stage)' in downstream
+    task = (folder / "tasks/INGEST.stage.html").read_text("utf-8")
+    assert "Rows written of each run" in task and "Average rows written" in task
+    dags = (folder / "dags.html").read_text("utf-8")
+    assert "<th>Succeeded</th>" in dags and "100% of 1" in dags and "0% of 1" in dags
