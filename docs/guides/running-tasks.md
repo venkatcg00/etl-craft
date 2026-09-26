@@ -33,6 +33,9 @@ goes up, and the previous attempt's counts, message and log are cleared from the
 `--force` runs the task even if it already succeeded or its dependencies are not met, and may
 bind a run that already finished. It is only available in local mode.
 
+`--ignore-dependencies` and `--rerun` are the recorded, narrower overrides: see
+[Stepping in](run-control.md#run-a-task-without-its-dependencies).
+
 ## In remote mode
 
 The orchestrator decides when a task runs, so `run --task_code` runs it whenever it is told to:

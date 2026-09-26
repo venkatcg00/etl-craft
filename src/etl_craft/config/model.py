@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from etl_craft.core.enums import AuthMode, CloningScope, Mode, TableFormat
+from etl_craft.core.enums import AuthMode, CloningScope, GatePolicy, Mode, TableFormat
 
 CONFIG_FILENAME = "craft-connector.yml"
 PROJECT_DIRNAME = "etl-craft"
@@ -206,6 +206,7 @@ class ExecutionLimits:
 class ConnectorConfig:
     """Everything ``craft-connector.yml`` configures.
 
+    ``dependency_gates`` is what a local run does with its dependencies on other pipelines.
     ``warehouse_table_format`` is the default for tables the engine creates; a task may choose
     another with ``CFG_TASK_PARAMETERS.TABLE_FORMAT``. ``log_dir`` is where each task attempt's
     log file is written. ``config_path`` is where the file was
@@ -228,6 +229,7 @@ class ConnectorConfig:
     limits: ExecutionLimits = field(default_factory=ExecutionLimits)
     config_path: Path | None = None
     orchestrator_name: str | None = None
+    dependency_gates: GatePolicy = GatePolicy.ENFORCE
     settings: tuple[SettingSource, ...] = ()
     log_dir: Path = Path(DEFAULT_LOG_DIR)
 

@@ -24,6 +24,9 @@ Orchestration:
   Max_parallel_tasks: 8                # value
   Enforce_sla: false                   # value — true: email when a run misses its SLA_IN_HOURS
   dev:
+    Dependency_gates: warn             # value — enforce (default) | warn | off: whether a run waits
+                                       # for its dependencies on other pipelines; warn and off
+                                       # go ahead and record the bypass (dev lacks some upstreams)
     Global_dag: false                  # value
     Catchup: false                     # value
     Tags: [analytics]                  # value

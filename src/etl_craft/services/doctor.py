@@ -21,7 +21,7 @@ from etl_craft.config import ConnectorConfig, profile_needs_secret, resolve_secr
 from etl_craft.config.auth import EMAIL_VERIFIED_AUTH_MODES, engine_for_jdbc_url
 from etl_craft.config.model import ConnectionProfile, EmailProfile
 from etl_craft.config.resolve import source_values
-from etl_craft.core.enums import CloningScope, Mode
+from etl_craft.core.enums import CloningScope, GatePolicy, Mode
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.engine.connection import check_reachable, engine_db
 from etl_craft.engine.migrations import pending_migrations
@@ -112,6 +112,18 @@ def _settings(config: ConnectorConfig) -> list[Check]:
         for source in config.settings
         if source.looks_like_a_missing_variable
     )
+    if config.dependency_gates != GatePolicy.ENFORCE:
+        unchecked = config.dependency_gates == GatePolicy.OFF
+        checks.append(
+            warn(
+                "Dependency gates",
+                f"Orchestration.Dependency_gates is {config.dependency_gates}: runs go ahead "
+                "when their dependencies on other pipelines are not satisfied"
+                + (" (they are not checked at all)" if unchecked else "")
+                + ", and each bypass is recorded in AUD_RUN_INTERVENTIONS. Keep it enforce "
+                "wherever the data must be right",
+            )
+        )
     return checks
 
 

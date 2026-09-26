@@ -205,3 +205,13 @@ def test_docs_site_publishing_is_only_warned_about(config, monkeypatch):
         Status.OK,
         "resolved from ETL_CRAFT_TEST_NGROK",
     )
+
+
+def test_relaxed_dependency_gates_are_warned_about(config):
+    assert "Dependency gates" not in found(run_checks(config))
+    status, detail = found(run_checks(replace(config, dependency_gates="off")))["Dependency gates"]
+    assert status is Status.WARN
+    assert detail.startswith("Orchestration.Dependency_gates is off: runs go ahead when")
+    assert "(they are not checked at all)" in detail
+    warned = found(run_checks(replace(config, dependency_gates="warn")))["Dependency gates"]
+    assert "not checked at all" not in warned[1]

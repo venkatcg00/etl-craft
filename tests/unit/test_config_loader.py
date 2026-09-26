@@ -814,3 +814,18 @@ def test_docs_site_publishing_settings(tmp_path):
     ):
         with pytest.raises(ConfigurationError, match=message):
             load_config(_write(tmp_path, _minimal(Docs_site=bad)))
+
+
+def test_dependency_gates_default_to_enforce_and_relax_only_in_local_mode(tmp_path):
+    assert load_config(_write(tmp_path, _minimal())).dependency_gates == "enforce"
+    for policy in ("warn", "off", "WARN"):
+        raw = _minimal(Orchestration={"Mode": "local", "Dependency_gates": policy})
+        assert load_config(_write(tmp_path, raw)).dependency_gates == policy.lower()
+    raw = _minimal(Orchestration={"Mode": "local", "Dependency_gates": "sometimes"})
+    with pytest.raises(ConfigurationError, match="must be enforce, warn or off, got 'sometimes'"):
+        load_config(_write(tmp_path, raw))
+    raw = _minimal(Orchestration={"Mode": "remote", "Dependency_gates": "off"})
+    with pytest.raises(ConfigurationError, match="Dependency_gates is off, but Mode is remote"):
+        load_config(_write(tmp_path, raw))
+    raw = _minimal(Orchestration={"Mode": "remote", "Dependency_gates": "enforce"})
+    assert load_config(_write(tmp_path, raw)).dependency_gates == "enforce"

@@ -63,8 +63,9 @@ tasks are recorded `FAILED`, and the run stays `IN-PROGRESS` so the next run res
 `--force` runs every task in its wave whatever its status or dependencies, and skips the
 pipeline's dependency check. It is only available in local mode.
 
-To step in on a run (mark a task or the run, record a stand-in upstream run, or cancel it), see
-[Stepping in: mark and cancel](run-control.md).
+To step in on a run (mark a task or the run, record a stand-in upstream run, cancel it, run a
+task again or without its dependencies, or relax dependency gates), see
+[Stepping in](run-control.md).
 
 ## Under an orchestrator
 

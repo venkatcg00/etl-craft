@@ -55,6 +55,9 @@ class InterventionAction(StrEnum):
     CANCEL = "CANCEL"
     REOPEN = "REOPEN"
     RESET = "RESET"
+    GATE_BYPASS = "GATE_BYPASS"
+    IGNORE_DEPENDENCIES = "IGNORE_DEPENDENCIES"
+    RERUN = "RERUN"
 
 
 class SlaStatus(StrEnum):
@@ -146,6 +149,18 @@ class Mode(StrEnum):
 
     LOCAL = "local"
     REMOTE = "remote"
+
+
+class GatePolicy(StrEnum):
+    """What a local run does with its dependencies on other pipelines: ``Dependency_gates``.
+
+    ``enforce`` checks them and skips what they do not allow; ``warn`` checks them and runs
+    anyway, recording the bypass; ``off`` does not check them, recording that too.
+    """
+
+    ENFORCE = "enforce"
+    WARN = "warn"
+    OFF = "off"
 
 
 class AuthMode(StrEnum):

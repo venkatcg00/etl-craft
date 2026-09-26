@@ -42,19 +42,26 @@ from typing import TypeVar
 from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.core.enums import SETTLED_STATUSES, Mode, RunStatus, SlaStatus
+from etl_craft.core.enums import (
+    SETTLED_STATUSES,
+    InterventionAction,
+    Mode,
+    RunStatus,
+    SlaStatus,
+)
 from etl_craft.core.errors import EtlCraftError, RunRefusedError, RunStateError
 from etl_craft.core.graph import DependencyGraph, TaskRunState, build_graph
 from etl_craft.core.log import log_context
 from etl_craft.engine import runlog
 from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
+from etl_craft.engine.repository.interventions import fetch_interventions
 from etl_craft.engine.repository.pipelines import (
     PipelineDetail,
     fetch_pipeline_detail,
     fetch_pipeline_handlers,
     resolve_pipeline_id,
 )
-from etl_craft.engine.repository.tasks import fetch_task_codes
+from etl_craft.engine.repository.tasks import fetch_task_codes, resolve_task_id
 from etl_craft.execution.connections import check_run_connections
 from etl_craft.execution.gates import (
     Clock,
@@ -62,8 +69,15 @@ from etl_craft.execution.gates import (
     check_pipeline_dependencies,
     consume_pipeline_dependencies,
 )
+from etl_craft.execution.interventions import check_override, record_gate_bypass
 from etl_craft.execution.remote import require_supported
-from etl_craft.execution.runner import ChildOptions, TaskOutcome, run_cancelled, run_task
+from etl_craft.execution.runner import (
+    ChildOptions,
+    Override,
+    TaskOutcome,
+    run_cancelled,
+    run_task,
+)
 from etl_craft.handlers.mail import send_sla_lapse_email
 
 logger = logging.getLogger(__name__)
@@ -158,7 +172,7 @@ def run_pipeline(
     hooks = hooks or default_hooks(config, engine)
     pipeline_id, detail = _prepare(engine, config, pipeline_code)
     pipeline_run_id, skip_reason = _start_run(
-        engine, pipeline_code, pipeline_id, clock, check_gate=not force
+        engine, config, pipeline_code, pipeline_id, clock, check_gate=not force
     )
     with log_context(pipeline=pipeline_code, pipeline_run_id=pipeline_run_id):
         if skip_reason is not None:
@@ -174,7 +188,7 @@ def run_pipeline(
             pipeline_run_id,
             task_codes,
             force=force,
-            gate=TrackedGate(clock),
+            gate=TrackedGate(clock, config.dependency_gates),
             child=child or ChildOptions(),
         )
         with _SlaWatch(engine, pipeline_code, pipeline_run_id, detail.sla_in_hours, hooks):
@@ -226,7 +240,7 @@ def init_pipeline_run(
             require_supported(conn, config, pipeline_code)
     pipeline_id, _ = _prepare(engine, config, pipeline_code)
     pipeline_run_id, skip_reason = _start_run(
-        engine, pipeline_code, pipeline_id, clock or Clock(), check_gate=not remote
+        engine, config, pipeline_code, pipeline_id, clock or Clock(), check_gate=not remote
     )
     if skip_reason is not None:
         return _skipped_run(
@@ -278,6 +292,91 @@ def finalize_active_run(
         )
 
 
+def rerun_task(
+    engine: Engine,
+    config: ConnectorConfig,
+    pipeline_code: str,
+    task_code: str,
+    reason: str,
+    *,
+    with_downstream: bool = False,
+    child: ChildOptions | None = None,
+    hooks: RunHooks | None = None,
+) -> PipelineOutcome:
+    """Run ``task_code`` again under the pipeline's latest run: ``run --task_code --rerun``.
+
+    With ``with_downstream``, every task after it runs again too; local mode only. The task
+    runs as it stands, without its dependencies checked again. Each task after it runs again,
+    in dependency order, when its dependencies are satisfied by then; the others keep their
+    rows. A run that had ended is reopened for this and then ended again from its tasks'
+    statuses; a run still in progress is left for ``run --pipeline_code`` to finish.
+    """
+    check_override(config, "--rerun", reason)
+    child = child or ChildOptions()
+    with engine.connect() as conn:
+        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+        task_id = resolve_task_id(conn, pipeline_id, task_code)
+        before = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
+        detail = fetch_pipeline_detail(conn, pipeline_id)
+        graph_data = fetch_pipeline_graph(conn, pipeline_id)
+        task_codes = fetch_task_codes(conn, pipeline_id)
+    graph = build_graph(graph_data.tasks, graph_data.same_pipeline_edges)
+    override = Override(reason, rerun=True)
+    first = run_task(engine, config, pipeline_code, task_code, child=child, override=override)
+    with engine.connect() as conn:
+        active = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
+    if first.task_run_id is None or active is None:
+        raise RunStateError(first.message)
+    pipeline_run_id = active
+    ran = [first]
+    left: list[str] = []
+    if with_downstream and first.status == RunStatus.SUCCESS:
+        downstream = graph.downstream_of(task_id)
+        for wave in graph.waves():
+            for later in (t for t in wave if t in downstream):
+                with engine.connect() as conn:
+                    run_state = runlog.fetch_run_state(conn, pipeline_run_id, list(graph.task_ids))
+                if graph.satisfied_edge_count(later, run_state) < graph.required_edge_count(later):
+                    left.append(task_codes[later])
+                    continue
+                ran.append(
+                    run_task(
+                        engine,
+                        config,
+                        pipeline_code,
+                        task_codes[later],
+                        child=child,
+                        override=override,
+                    )
+                )
+    summary = "; ".join(outcome.message for outcome in ran)
+    if left:
+        summary += f"; not run again, their dependencies are not met: {', '.join(left)}"
+    if before is not None:
+        status = (
+            RunStatus.FAILED
+            if any(o.status == RunStatus.FAILED for o in ran)
+            else RunStatus.IN_PROGRESS
+        )
+        return PipelineOutcome(
+            status,
+            f"{pipeline_code}: pipeline_run_id={pipeline_run_id} is still IN-PROGRESS: {summary}",
+            pipeline_run_id,
+        )
+    with log_context(pipeline=pipeline_code, pipeline_run_id=pipeline_run_id):
+        ended = _finalize(
+            engine,
+            pipeline_code,
+            pipeline_id,
+            pipeline_run_id,
+            graph,
+            task_codes,
+            detail.sla_in_hours,
+            hooks or default_hooks(config, engine),
+        )
+    return replace(ended, message=f"{ended.message} (ran again: {summary})")
+
+
 def _prepare(
     engine: Engine, config: ConnectorConfig, pipeline_code: str
 ) -> tuple[int, PipelineDetail]:
@@ -292,17 +391,28 @@ def _prepare(
 
 
 def _start_run(
-    engine: Engine, pipeline_code: str, pipeline_id: int, clock: Clock, *, check_gate: bool
+    engine: Engine,
+    config: ConnectorConfig,
+    pipeline_code: str,
+    pipeline_id: int,
+    clock: Clock,
+    *,
+    check_gate: bool,
 ) -> tuple[int, str | None]:
-    """Return the run to use and, when the gate refused a new one, why it was ``SKIPPED``."""
+    """Return the run to use and, when the gate refused a new one, why it was ``SKIPPED``.
+
+    A gate ``Dependency_gates`` bypassed is recorded against the new run.
+    """
     with engine.connect() as conn:
         existing = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
     if existing is not None:
         logger.info("%s: resuming pipeline_run_id=%d", pipeline_code, existing)
         return existing, None
     reason = None
+    bypassed: tuple[str, ...] = ()
     if check_gate:
-        gate = check_pipeline_dependencies(engine, pipeline_id, clock)
+        gate = check_pipeline_dependencies(engine, pipeline_id, clock, config.dependency_gates)
+        bypassed = gate.bypassed
         if not gate.satisfied:
             reason = "; ".join(gate.reasons)
     with engine.begin() as conn:
@@ -310,6 +420,8 @@ def _start_run(
         if reason is not None:
             runlog.finalize_pipeline_run(conn, pipeline_run_id, RunStatus.SKIPPED)
     logger.info("%s: started pipeline_run_id=%d", pipeline_code, pipeline_run_id)
+    if bypassed:
+        record_gate_bypass(engine, pipeline_id, pipeline_run_id, config.dependency_gates, bypassed)
     return pipeline_run_id, reason
 
 
@@ -597,6 +709,16 @@ def _finalize(
             message += f"; skipped because of the failure: {skipped}"
     if not_run:
         message += f"; not run by the orchestrator: {', '.join(task_codes[t] for t in not_run)}"
+    with engine.connect() as conn:
+        bypasses = [
+            change
+            for change in fetch_interventions(conn, pipeline_id, pipeline_run_id)
+            if change.pipeline_run_id == pipeline_run_id
+            and change.action == InterventionAction.GATE_BYPASS
+        ]
+    if bypasses:
+        where = sorted({change.task_code or pipeline_code for change in bypasses})
+        message += f"; dependency gates bypassed for {', '.join(where)} (see history)"
     if sla is not None and sla.status == SlaStatus.BREACHED:
         message += f"; {sla.describe()}"
     outcome = PipelineOutcome(status, message, pipeline_run_id, sla)
