@@ -1,8 +1,12 @@
 """The seven SQL actions on real warehouses: DuckDB, PostgreSQL, Trino, DuckDB over Iceberg."""
 
+from dataclasses import replace
+from datetime import date
+
 import pytest
 
 from etl_craft.core.errors import HandlerError
+from etl_craft.handlers import sql
 
 
 def sorted_rows(world, sql):
@@ -424,3 +428,24 @@ def test_a_storage_location_is_used_where_it_applies_and_refused_elsewhere(sql_w
             SCHEMA_EVOLUTION="true",
             **placed,
         )
+
+
+def test_run_date_reads_the_rows_of_the_date_the_run_runs_as_of(sql_world):
+    w = sql_world
+    w.execute(
+        f"CREATE TABLE {w.name('sales')} AS SELECT 1 AS id, DATE '2026-08-31' AS sold_on "
+        "UNION ALL SELECT 2, DATE '2026-09-01'"
+    )
+    context = w.task(
+        "daily",
+        SQL_ACTION="CREATE_TABLE",
+        TARGET_OBJECT="daily",
+        SOURCE_SQL=f"SELECT id, $$run_date AS as_of FROM {w.name('sales')} "
+        "WHERE sold_on = $$run_date",
+        RUN_DATE_SUBSTITUTION="true",
+    )
+    result = sql.run(replace(context, run_date=date(2026, 9, 1)), w.engine_db)
+    assert result.source_count == 1
+    assert [(i, str(d)[:10]) for i, d in w.rows(f"SELECT id, as_of FROM {w.name('daily')}")] == [
+        (2, "2026-09-01")
+    ]

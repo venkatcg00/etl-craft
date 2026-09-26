@@ -30,7 +30,7 @@ import logging
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -149,7 +149,10 @@ class ScriptTask:
 
     ``offset`` is where the last successful run left off, ``None`` on the first run.
     ``input_params`` is the task's ``INPUT_PARAMS``, a JSON object, as a dictionary. ``force`` is
-    true when the task was run with ``--force``.
+    true when the task was run with ``--force``. ``run_date`` is the date the run runs as of: the
+    day it started, or the date a backfill run is for. In a backfill (``backfill``), ``offset``
+    is ``None`` and an offset the script returns is not stored: a backfill reads its source for
+    ``run_date``, and leaves the next scheduled run where the last one left off.
     """
 
     pipeline_code: str
@@ -163,6 +166,8 @@ class ScriptTask:
     config: ConnectorConfig
     engine_db: Engine
     logger: logging.Logger
+    run_date: date = field(default_factory=lambda: datetime.now(UTC).date())
+    backfill: bool = False
 
     def table(self, name: str) -> str:
         """Return ``schema.table`` as its full name in the active warehouse database.

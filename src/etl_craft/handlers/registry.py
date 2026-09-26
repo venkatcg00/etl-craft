@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, date, datetime
 
 from sqlalchemy.engine import Engine
 
@@ -24,6 +25,8 @@ class TaskContext:
 
     ``force`` is set by ``run --force``. ``rerun`` is set when the task already ended ``SUCCESS``
     or ``SKIPPED`` under the run and is run again, so nothing it did before is skipped.
+    ``run_date`` is the date the run runs as of (SQL's ``$$run_date``), and ``backfill`` says the
+    run is part of a backfill.
     """
 
     config: ConnectorConfig
@@ -39,6 +42,8 @@ class TaskContext:
     task_params: Mapping[str, str]
     force: bool = False
     rerun: bool = False
+    run_date: date = field(default_factory=lambda: datetime.now(UTC).date())
+    backfill: bool = False
 
 
 @dataclass(frozen=True)

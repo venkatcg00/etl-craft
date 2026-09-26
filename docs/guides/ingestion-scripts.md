@@ -42,6 +42,8 @@ def run(task: ScriptTask) -> ScriptResult:
 | `pipeline_run_id` | the run's id; stamp it on every row you write |
 | `refresh_type` | the pipeline's `FULL` or `INCREMENTAL` |
 | `force` | true when the task was run with `--force` |
+| `run_date` | the date the run runs as of: the day it started (UTC), the `--run-date` it was given, or the date of a backfill run |
+| `backfill` | true in a [backfill](run-control.md#backfill-over-dates) run: `offset` is then `None`, and an offset the script returns is not stored, so read the source for `run_date` |
 | `warehouse()` | a connection to the warehouse, queued behind other writers where the warehouse allows only one (a DuckDB file) |
 | `table(name)` | `schema.table` as its full name in the active warehouse database, such as `analytics.raw.orders`, so the same script writes to each environment's database |
 | `logger` | a logger named after the task |

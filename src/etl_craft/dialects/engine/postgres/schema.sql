@@ -200,7 +200,8 @@ CREATE TRIGGER trg_audit_cfg_business_rules
     FOR EACH ROW EXECUTE FUNCTION trg_set_audit_columns();
 COMMENT ON TABLE CFG_BUSINESS_RULES IS 'Checks a BUSINESS_RULES task runs against a warehouse table. TARGET_TABLE must have a single-column primary key, named by BUSINESS_RULE_KEY_COLUMN; `validate` checks it in the warehouse.';
 
--- One row per pipeline run: its status, when it ran, and whether it met its SLA.
+-- One row per pipeline run: its status, when it ran, whether it met its SLA, the date it ran
+-- as of (RUN_DATE, the SQL tasks' $$run_date), and whether it was part of a backfill.
 CREATE TABLE AUD_PIPELINES_RUN_LOG (
     PIPELINE_RUN_ID  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     PIPELINE_ID      BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
@@ -208,6 +209,9 @@ CREATE TABLE AUD_PIPELINES_RUN_LOG (
     END_DATE         TIMESTAMPTZ,
     STATUS           VARCHAR NOT NULL,
     SLA_STATUS       VARCHAR(8),
+    RUN_DATE         DATE,
+    BACKFILL         VARCHAR(1) NOT NULL DEFAULT 'N',
+    CONSTRAINT ck_pipeline_run_backfill CHECK (BACKFILL IN ('Y','N')),
     CONSTRAINT ck_pipeline_run_status CHECK (STATUS IN ('IN-PROGRESS','SUCCESS','FAILED','SKIPPED','CANCELLED')),
     CONSTRAINT ck_pipeline_run_sla_status CHECK (SLA_STATUS IN ('MET','BREACHED'))
 );

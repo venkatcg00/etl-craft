@@ -32,6 +32,13 @@ let a SELECT use the current run:
 |---|---|---|
 | `$$pipeline_id` | `PIPELINE_ID_SUBSTITUTION = true` | the run's `pipeline_run_id`, such as `97` |
 | `$$pipeline_id_filter` | `PIPELINE_ID_FILTER = true` | `pipeline_run_id = 97`, or `1=1` when the pipeline's `REFRESH_TYPE` is `FULL` |
+| `$$run_date` | `RUN_DATE_SUBSTITUTION = true` | the date the run runs as of, as `DATE '2026-09-01'`: the day it started (UTC), the `--run-date` it was given, or the date of a [backfill](run-control.md#backfill-over-dates) run |
+
+A task that reads by date follows the run's date, so a backfill of a past day reads that day:
+
+```sql
+SELECT order_id, amount FROM raw.orders WHERE order_date = $$run_date
+```
 
 A typical incremental load reads only the rows an earlier task wrote in the same run:
 

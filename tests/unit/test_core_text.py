@@ -1,4 +1,5 @@
 import hashlib
+from datetime import date
 
 import pytest
 
@@ -256,7 +257,7 @@ def test_sql_without_tokens_or_switches_is_untouched():
             {"substitution": True},
             "PIPELINE_ID_SUBSTITUTION is true, but SOURCE_SQL has no $$pipeline_id to",
         ),
-        ("SELECT $$pipeline WHERE $$run_date", {}, "unknown token(s) $$pipeline, $$run_date"),
+        ("SELECT $$pipeline WHERE $$run_day", {}, "unknown token(s) $$pipeline, $$run_day"),
     ],
 )
 def test_token_mistakes_fail_with_the_remedy(sql, switches, message):
@@ -424,3 +425,21 @@ def test_suggest(unknown, expected):
 
 def test_suggest_limits_the_list():
     assert len(text.suggest("t", [f"t{i}" for i in range(10)], limit=3)) == 3
+
+
+def test_run_date_becomes_a_date_literal_when_its_switch_is_on():
+    sql = "SELECT * FROM sales.orders WHERE order_date = $$run_date"
+    replaced = text.substitute_pipeline_id(
+        sql,
+        pipeline_run_id=7,
+        refresh_type="FULL",
+        substitution=False,
+        filter_enabled=False,
+        run_date=date(2026, 9, 1),
+        run_date_substitution=True,
+    )
+    assert replaced == "SELECT * FROM sales.orders WHERE order_date = DATE '2026-09-01'"
+    with pytest.raises(HandlerError, match="uses \\$\\$run_date, but RUN_DATE_SUBSTITUTION"):
+        text.substitute_pipeline_id(
+            sql, pipeline_run_id=7, refresh_type="FULL", substitution=False, filter_enabled=False
+        )

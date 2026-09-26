@@ -158,7 +158,7 @@ def test_remote_mode_puts_every_rule_in_the_dag(engine_db, pipelines):
     assert "cross_pipeline_task_dependencies" not in dag
     assert dag["tasks"] == {
         "__init__": {
-            "bash_command": f"{run} --init-only",
+            "bash_command": f"{run} --init-only --run-date {{{{ data_interval_end | ds }}}}",
             "depends_on": [],
             "trigger_rule": "all_success",
         },

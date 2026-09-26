@@ -3,6 +3,7 @@
 import logging
 import textwrap
 from dataclasses import replace
+from datetime import date
 
 import pytest
 import yaml
@@ -209,3 +210,36 @@ def test_an_offset_keeps_its_type(project):
 def test_a_script_that_needs_nothing_from_the_task(project):
     result = run_in_process(project, RESULT + "def run():\n    return ScriptResult(3)\n")
     assert (result.source_count, result.target_count, result.insert_count) == (3, 3, 3)
+
+
+def test_a_backfill_run_gives_the_date_and_neither_reads_nor_stores_an_offset(project):
+    run_in_process(
+        project, RESULT + "def run(task):\n    return ScriptResult(0, Offset.number(7))\n"
+    )
+    engine, config, _, task = project
+    script = RESULT + textwrap.dedent(
+        """
+        def run(task):
+            assert task.backfill and task.offset is None, (task.backfill, task.offset)
+            assert task.run_date.isoformat() == "2026-09-01", task.run_date
+            return ScriptResult(0, Offset.number(99))
+        """
+    )
+    (config.ingestion_scripts_dir / "load.py").write_text(script, "utf-8")
+    with engine.begin() as conn:
+        run_id = runlog.fetch_active_pipeline_run_id(conn, project[2])
+        runlog.finalize_pipeline_run(conn, run_id, "SUCCESS")
+        backfill_run = runlog.find_or_create_active_run(
+            conn, project[2], run_date=date(2026, 9, 1), backfill=True
+        )
+        binding = runlog.find_or_create_task_run(conn, task, backfill_run)
+    context = build_task_context(engine, config, binding.task_run_id)
+    assert (context.run_date, context.backfill) == (date(2026, 9, 1), True)
+    assert python_scripts.run(context, engine).variables == {}
+    # The stored offset is the one the scheduled run left, not the backfill's.
+    kept = RESULT + "def run(task):\n    assert task.offset == Offset.number(7)\n"
+    kept += "    return ScriptResult(0)\n"
+    with engine.begin() as conn:
+        runlog.finalize_pipeline_run(conn, backfill_run, "SUCCESS")
+        runlog.find_or_create_active_run(conn, project[2])
+    run_in_process(project, kept)

@@ -70,8 +70,11 @@ the remote orchestrator does not support this. ...
 
 Each step has what it runs, the steps it waits for (`depends_on`), and one `trigger_rule`:
 
-- `__init__` runs `etl-craft run --pipeline_code SALES --init-only`: it tests connections and
-  starts the run.
+- `__init__` runs `etl-craft run --pipeline_code SALES --init-only --run-date {{
+  data_interval_end | ds }}`: it tests connections and starts the run as of the orchestrator's
+  date, so `$$run_date` means the day the run fires, as in local mode, and a backfill in the
+  orchestrator runs each day as of its own date. The date is an Airflow template; with another
+  orchestrator, pass its own date for the run.
 - `__wait_for_<PIPELINE>__` waits for another pipeline this one depends on: a `sensor` on that
   pipeline's DAG run (`external_task_id: null`). It comes after `__init__`, so every task the
   orchestrator runs, even an alert that runs because a sensor failed, has a run to bind to.

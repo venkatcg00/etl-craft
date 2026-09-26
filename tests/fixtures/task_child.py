@@ -20,6 +20,9 @@ logger = logging.getLogger("etl_craft.handlers.fake")
 def handler(context, engine):
     behaviour = context.task_params.get("BEHAVIOUR", "succeed")
     logger.info("fake handler doing %s%s", behaviour, " again" if context.rerun else "")
+    logger.info(
+        "as of %s%s", context.run_date.isoformat(), " (backfill)" if context.backfill else ""
+    )
     print(f"stdout from {context.task_code}", flush=True)
     print(f"stderr from {context.task_code}", file=sys.stderr, flush=True)
     if behaviour == "succeed":

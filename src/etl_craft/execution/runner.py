@@ -326,6 +326,7 @@ def _preflight(
     with engine.connect() as conn:
         status = runlog.fetch_task_run_status(conn, task_id, pipeline_run_id)
         run_status = runlog.fetch_pipeline_run_status(conn, pipeline_run_id)
+        backfill = runlog.fetch_run_kind(conn, pipeline_run_id).backfill
         graph_data = fetch_pipeline_graph(conn, pipeline_id)
         run_state = runlog.fetch_run_state(
             conn, pipeline_run_id, [task.task_id for task in graph_data.tasks]
@@ -349,7 +350,12 @@ def _preflight(
     )
     cross = CrossPipelineCheck(0)
     if still_needed > 0 and task_id in graph_data.cross_pipeline_task_ids:
-        cross = gate.check(engine, task_id, still_needed)
+        if backfill:
+            # A backfill checks no dependency on another pipeline, and consumes nothing.
+            node = next(t for t in graph_data.tasks if t.task_id == task_id)
+            cross = CrossPipelineCheck(min(still_needed, node.cross_pipeline_edge_count))
+        else:
+            cross = gate.check(engine, task_id, still_needed)
         still_needed -= cross.satisfied_count
     if still_needed <= 0:
         return None, cross

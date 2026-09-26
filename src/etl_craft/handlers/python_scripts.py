@@ -8,7 +8,8 @@ the attempt's log, and the task's time limit applies to it.
 Its ``INPUT_PARAMS`` task parameter, when set, must be a JSON object; the script gets it as a
 dictionary. The script gets the offset its last successful run stored, and returns the rows it
 wrote, recorded as the source, target and insert counts, and optionally a new offset, stored once
-it has succeeded. A stored offset keeps its type: a script that returns another type fails.
+it has succeeded. A stored offset keeps its type: a script that returns another type fails. A
+backfill run gets no offset and stores none: the script reads its source for ``task.run_date``.
 Everything that can be wrong with the script or what it returns fails the task with a message
 naming the script and the problem.
 """
@@ -58,7 +59,7 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
         stored = fetch_task_offset(conn, context.task_id)
     offset = (
         Offset.from_stored(stored.offset_type, stored.offset_value)
-        if stored is not None and stored.offset_value is not None
+        if stored is not None and stored.offset_value is not None and not context.backfill
         else None
     )
     entry = load_script(path, name)
@@ -74,6 +75,8 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
         config=context.config,
         engine_db=engine_db,
         logger=logging.getLogger(f"{SCRIPT_LOGGER}.{context.task_code}"),
+        run_date=context.run_date,
+        backfill=context.backfill,
     )
     logger.info(
         "running %s from offset %s with input params %s",
@@ -87,7 +90,15 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
     checked = check_result(result, name, stored)
     elapsed = time.monotonic() - started
     variables: dict[str, object] = {}
-    if checked.offset is not None:
+    if checked.offset is not None and context.backfill:
+        logger.warning(
+            "%s returned offset %s in a backfill run for %s; a backfill does not store offsets, "
+            "so the next scheduled run starts where the last one left off",
+            name,
+            checked.offset.stored(),
+            context.run_date.isoformat(),
+        )
+    elif checked.offset is not None:
         with engine_db.begin() as conn:
             save_task_offset(
                 conn,

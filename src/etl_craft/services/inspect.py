@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy.engine import Connection
 
@@ -23,6 +23,7 @@ from etl_craft.engine.repository.tasks import (
     fetch_task_parameters,
     resolve_task_id,
 )
+from etl_craft.engine.runlog import as_date
 
 
 @dataclass(frozen=True)
@@ -137,6 +138,8 @@ class RunEntry:
     start_date: datetime | None
     end_date: datetime | None
     sla_status: str | None = None
+    run_date: date | None = None
+    backfill: bool = False
     attempt_count: int | None = None
     source_count: int | None = None
     target_count: int | None = None
@@ -155,7 +158,15 @@ def run_history(
             statement(conn, "pipeline_run_history"), {"pipeline_id": pipeline_id, "limit": limit}
         )
         return [
-            RunEntry(r.pipeline_run_id, r.status, r.start_date, r.end_date, sla_status=r.sla_status)
+            RunEntry(
+                r.pipeline_run_id,
+                r.status,
+                r.start_date,
+                r.end_date,
+                sla_status=r.sla_status,
+                run_date=None if r.run_date is None else as_date(r.run_date),
+                backfill=r.backfill == "Y",
+            )
             for r in rows
         ]
     task_id = resolve_task_id(conn, pipeline_id, task_code)

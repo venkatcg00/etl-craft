@@ -129,7 +129,7 @@ def test_history(project, capsys):
     code, out = run(capsys, "history", "--pipeline_code", "SALES")
     lines = out.splitlines()
     assert code == ExitCode.SUCCESS
-    assert lines[0] == "PIPELINE_RUN_ID\tSTATUS\tSTART_DATE\tEND_DATE\tSLA_STATUS"
+    assert lines[0] == "PIPELINE_RUN_ID\tSTATUS\tRUN_DATE\tSTART_DATE\tEND_DATE\tSLA_STATUS"
     assert [line.split("\t")[1] for line in lines[1:]] == ["IN-PROGRESS", "SUCCESS"]
     assert lines[2].endswith("\tMET")
 

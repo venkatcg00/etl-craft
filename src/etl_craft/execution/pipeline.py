@@ -35,7 +35,7 @@ import threading
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from types import TracebackType
 from typing import TypeVar
 
@@ -49,7 +49,7 @@ from etl_craft.core.enums import (
     RunStatus,
     SlaStatus,
 )
-from etl_craft.core.errors import EtlCraftError, RunRefusedError, RunStateError
+from etl_craft.core.errors import EtlCraftError, RunRefusedError, RunStateError, UsageError
 from etl_craft.core.graph import DependencyGraph, TaskRunState, build_graph
 from etl_craft.core.log import log_context
 from etl_craft.engine import runlog
@@ -70,7 +70,12 @@ from etl_craft.execution.gates import (
     check_pipeline_dependencies,
     consume_pipeline_dependencies,
 )
-from etl_craft.execution.interventions import check_override, open_pause, record_gate_bypass
+from etl_craft.execution.interventions import (
+    check_override,
+    open_pause,
+    record_change,
+    record_gate_bypass,
+)
 from etl_craft.execution.remote import require_supported
 from etl_craft.execution.runner import (
     ChildOptions,
@@ -158,12 +163,16 @@ def run_pipeline(
     clock: Clock | None = None,
     child: ChildOptions | None = None,
     hooks: RunHooks | None = None,
+    run_date: date | None = None,
+    backfill: str | None = None,
 ) -> PipelineOutcome:
     """Run every active task of ``pipeline_code`` in dependency waves; local mode only.
 
     ``force`` skips the pipeline's gate and runs every task in its static wave, whatever its
-    status or dependencies. When interrupted, the running task processes are stopped and
-    recorded ``FAILED``, and the run stays ``IN-PROGRESS`` so the next run resumes it.
+    status or dependencies. ``run_date`` is the date a new run runs as of (today unless given),
+    and ``backfill``, the reason for one, makes it a backfill run (see ``backfill``). When
+    interrupted, the running task processes are stopped and recorded ``FAILED``, and the run
+    stays ``IN-PROGRESS`` so the next run resumes it.
     """
     if config.mode == Mode.REMOTE:
         raise RunRefusedError(
@@ -178,7 +187,14 @@ def run_pipeline(
     hooks = hooks or default_hooks(config, engine)
     pipeline_id, detail = _prepare(engine, config, pipeline_code)
     pipeline_run_id, skip_reason = _start_run(
-        engine, config, pipeline_code, pipeline_id, clock, check_gate=not force
+        engine,
+        config,
+        pipeline_code,
+        pipeline_id,
+        clock,
+        check_gate=not force and backfill is None,
+        run_date=run_date,
+        backfill=backfill,
     )
     with log_context(pipeline=pipeline_code, pipeline_run_id=pipeline_run_id):
         if skip_reason is not None:
@@ -234,6 +250,105 @@ def run_pipeline(
         )
 
 
+MAX_BACKFILL_DAYS = 366
+"""The most dates one backfill runs; a longer one is split, so a typo cannot start thousands."""
+
+
+@dataclass(frozen=True)
+class BackfillOutcome:
+    """How a backfill went: each run it made, and the one that stopped it, if any."""
+
+    runs: list[PipelineOutcome]
+    stopped: PipelineOutcome | None
+    message: str
+
+    @property
+    def status(self) -> RunStatus:
+        """``SUCCESS`` when every date ran to the end, else the status of the run that stopped."""
+        return RunStatus.SUCCESS if self.stopped is None else self.stopped.status
+
+
+def backfill(
+    engine: Engine,
+    config: ConnectorConfig,
+    pipeline_code: str,
+    first: date,
+    last: date,
+    reason: str,
+    *,
+    clock: Clock | None = None,
+    child: ChildOptions | None = None,
+    hooks: RunHooks | None = None,
+) -> BackfillOutcome:
+    """Run ``pipeline_code`` once for each date from ``first`` to ``last``, oldest first.
+
+    Each is a run of its own, as of its date (SQL's ``$$run_date``, a script's
+    ``task.run_date``), marked a backfill run: it checks no dependency on other pipelines,
+    consumes no upstream run, and its scripts get no offset and store none, so the scheduled
+    runs go on as before. The backfill stops at the first run that does not end ``SUCCESS`` or
+    ``SKIPPED``; a later backfill from that date takes up again. Local mode only, with a reason,
+    at most ``MAX_BACKFILL_DAYS`` dates, and not while the pipeline has a run in progress.
+    """
+    check_override(config, "--backfill", reason)
+    if last < first:
+        raise UsageError(
+            f"--backfill runs from the first date to the last: {first.isoformat()} is after "
+            f"{last.isoformat()}"
+        )
+    days = (last - first).days + 1
+    if days > MAX_BACKFILL_DAYS:
+        raise UsageError(
+            f"--backfill {first.isoformat()}:{last.isoformat()} is {days} dates; one backfill "
+            f"runs at most {MAX_BACKFILL_DAYS}, so split it"
+        )
+    with engine.connect() as conn:
+        active = runlog.fetch_active_pipeline_run_id(conn, resolve_pipeline_id(conn, pipeline_code))
+    if active is not None:
+        raise RunStateError(
+            f"{pipeline_code} has a run in progress (pipeline_run_id={active}); finish or cancel "
+            "it before a backfill"
+        )
+    runs: list[PipelineOutcome] = []
+    for offset in range(days):
+        day = first + timedelta(days=offset)
+        logger.info("%s: backfill run for %s (%d of %d)", pipeline_code, day, offset + 1, days)
+        outcome = run_pipeline(
+            engine,
+            config,
+            pipeline_code,
+            clock=clock,
+            child=child,
+            hooks=hooks,
+            run_date=day,
+            backfill=reason,
+        )
+        runs.append(outcome)
+        if outcome.pipeline_run_id is None:
+            message = f"{pipeline_code}: backfill stopped at {day.isoformat()}: {outcome.message}"
+            logger.warning("%s", message)
+            return BackfillOutcome(runs, outcome, message)
+        if outcome.status not in (RunStatus.SUCCESS, RunStatus.SKIPPED):
+            message = (
+                f"{pipeline_code}: backfill stopped at {day.isoformat()} after {len(runs)} of "
+                f"{days} run(s): {outcome.message}. `etl-craft run --pipeline_code "
+                f"{pipeline_code} --backfill {day.isoformat()}:{last.isoformat()}` takes up "
+                "from there once it is fixed"
+            )
+            if outcome.status == RunStatus.IN_PROGRESS:
+                message = (
+                    f"{pipeline_code}: backfill stopped at {day.isoformat()} after {len(runs)} "
+                    f"of {days} run(s): {outcome.message}"
+                )
+            logger.error("%s", message)
+            return BackfillOutcome(runs, outcome, message)
+    message = (
+        f"{pipeline_code}: backfill of {days} date(s) from {first.isoformat()} to "
+        f"{last.isoformat()} done: " + ", ".join(f"{o.pipeline_run_id} {o.status}" for o in runs)
+    )
+    logger.info("%s", message)
+    return BackfillOutcome(runs, None, message)
+
+
 def init_pipeline_run(
     engine: Engine,
     config: ConnectorConfig,
@@ -241,8 +356,11 @@ def init_pipeline_run(
     *,
     clock: Clock | None = None,
     hooks: RunHooks | None = None,
+    run_date: date | None = None,
 ) -> PipelineOutcome:
     """Start or resume the run of ``pipeline_code``, for an orchestrator's first step.
+
+    ``run_date`` is the date a new run runs as of, such as the orchestrator's logical date.
 
     Tests the run's connections and, for a new run in local mode, checks the pipeline's gate. The
     outcome is ``IN-PROGRESS``, or ``SKIPPED`` when the gate was not satisfied. In remote mode the
@@ -259,7 +377,13 @@ def init_pipeline_run(
             return _paused(pipeline_code, paused)
     pipeline_id, _ = _prepare(engine, config, pipeline_code)
     pipeline_run_id, skip_reason = _start_run(
-        engine, config, pipeline_code, pipeline_id, clock or Clock(), check_gate=not remote
+        engine,
+        config,
+        pipeline_code,
+        pipeline_id,
+        clock or Clock(),
+        check_gate=not remote,
+        run_date=run_date,
     )
     if skip_reason is not None:
         return _skipped_run(
@@ -417,14 +541,26 @@ def _start_run(
     clock: Clock,
     *,
     check_gate: bool,
+    run_date: date | None = None,
+    backfill: str | None = None,
 ) -> tuple[int, str | None]:
     """Return the run to use and, when the gate refused a new one, why it was ``SKIPPED``.
 
-    A gate ``Dependency_gates`` bypassed is recorded against the new run.
+    A new run runs as of ``run_date`` (today unless given). ``backfill``, the reason for a
+    backfill, makes it a backfill run, which checks no dependency on other pipelines. A run in
+    progress is resumed, unless it runs as of another date than ``run_date``. A gate
+    ``Dependency_gates`` bypassed, or skipped by a backfill, is recorded against the new run.
     """
     with engine.connect() as conn:
         existing = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
-    if existing is not None:
+        kind = None if existing is None else runlog.fetch_run_kind(conn, existing)
+    if existing is not None and kind is not None:
+        if run_date is not None and kind.run_date != run_date:
+            raise RunStateError(
+                f"{pipeline_code} has a run in progress (pipeline_run_id={existing}) as of "
+                f"{kind.run_date.isoformat()}, not {run_date.isoformat()}; finish it with "
+                f"`etl-craft run --pipeline_code {pipeline_code}`, or cancel it, first"
+            )
         logger.info("%s: resuming pipeline_run_id=%d", pipeline_code, existing)
         return existing, None
     reason = None
@@ -435,12 +571,25 @@ def _start_run(
         if not gate.satisfied:
             reason = "; ".join(gate.reasons)
     with engine.begin() as conn:
-        pipeline_run_id = runlog.find_or_create_active_run(conn, pipeline_id)
+        pipeline_run_id = runlog.find_or_create_active_run(
+            conn, pipeline_id, run_date=run_date, backfill=backfill is not None
+        )
         if reason is not None:
             runlog.finalize_pipeline_run(conn, pipeline_run_id, RunStatus.SKIPPED)
     logger.info("%s: started pipeline_run_id=%d", pipeline_code, pipeline_run_id)
     if bypassed:
         record_gate_bypass(engine, pipeline_id, pipeline_run_id, config.dependency_gates, bypassed)
+    if backfill is not None:
+        record_change(
+            engine,
+            pipeline_id=pipeline_id,
+            pipeline_run_id=pipeline_run_id,
+            action=InterventionAction.GATE_BYPASS,
+            reason=(
+                f"backfill for {(run_date or runlog.today()).isoformat()}: {backfill}; "
+                "dependencies on other pipelines are not checked, and nothing is consumed"
+            ),
+        )
     return pipeline_run_id, reason
 
 
@@ -728,7 +877,9 @@ def _finalize(
     with engine.begin() as conn:
         breached_before = runlog.fetch_run_sla(conn, pipeline_run_id).sla_status
         sla = runlog.finalize_pipeline_run(conn, pipeline_run_id, status, sla_in_hours=sla_hours)
-    if status == RunStatus.SUCCESS and not orchestrated:
+    with engine.connect() as conn:
+        backfill_run = runlog.fetch_run_kind(conn, pipeline_run_id).backfill
+    if status == RunStatus.SUCCESS and not orchestrated and not backfill_run:
         consume_pipeline_dependencies(engine, pipeline_id, pipeline_run_id)
 
     message = f"{pipeline_code}: pipeline_run_id={pipeline_run_id} {status}"

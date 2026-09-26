@@ -8,6 +8,7 @@ import logging
 import threading
 import time
 from dataclasses import replace
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -29,8 +30,14 @@ from etl_craft.execution.interventions import (
     resume_pipeline,
     skip_run,
 )
-from etl_craft.execution.pipeline import RunHooks, init_pipeline_run, rerun_task, run_pipeline
-from etl_craft.execution.runner import ChildOptions, Override, run_task
+from etl_craft.execution.pipeline import (
+    RunHooks,
+    backfill,
+    init_pipeline_run,
+    rerun_task,
+    run_pipeline,
+)
+from etl_craft.execution.runner import ChildOptions, Override, attempt_log_path, run_task
 from fixtures.metadata import add_dependency, add_pipeline, add_pipeline_dependency, add_task
 
 TESTS_DIR = Path(__file__).parents[2]
@@ -666,3 +673,123 @@ def test_the_pause_and_skip_commands(config, pipeline, capsys, monkeypatch):
     assert cli_main(["run", "--pipeline_code", "P", "--skip", "--task_code", "x"]) == (
         ExitCode.USAGE
     )
+
+
+def runs(engine):
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT p.PIPELINE_CODE AS code, r.STATUS AS status, r.RUN_DATE AS run_date, "
+                "r.BACKFILL AS backfill FROM AUD_PIPELINES_RUN_LOG r JOIN CFG_PIPELINES p "
+                "ON p.PIPELINE_ID = r.PIPELINE_ID ORDER BY r.PIPELINE_RUN_ID"
+            )
+        )
+        return [(r.code, r.status, str(r.run_date)[:10], r.backfill) for r in rows]
+
+
+def without_broken(engine, ids):
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE CFG_TASKS SET ACTIVE_FLAG = 'N' WHERE TASK_ID IN (:b, :a)"),
+            {"b": ids["broken"], "a": ids["after_broken"]},
+        )
+
+
+def test_a_backfill_runs_once_per_date_as_of_that_date(config, pipeline, downstream):
+    engine, ids = pipeline
+    without_broken(engine, ids)
+    today = runlog.today().isoformat()
+    # DOWN's upstream UP never ran: a backfill does not check it, nor consume anything.
+    done = backfill(
+        engine, config, "DOWN", date(2026, 9, 1), date(2026, 9, 3), "reload Sept", child=CHILD
+    )
+    assert done.status == RunStatus.SUCCESS and done.stopped is None
+    assert done.message.startswith(
+        "DOWN: backfill of 3 date(s) from 2026-09-01 to 2026-09-03 done: "
+    )
+    assert runs(engine) == [
+        ("DOWN", "SUCCESS", "2026-09-01", "Y"),
+        ("DOWN", "SUCCESS", "2026-09-02", "Y"),
+        ("DOWN", "SUCCESS", "2026-09-03", "Y"),
+    ]
+    first = done.runs[0].pipeline_run_id
+    log = attempt_log_path(config, "DOWN", first, "load", 1).read_text("utf-8")
+    assert "as of 2026-09-01 (backfill)" in log
+    reasons = [row[7] for row in interventions(engine) if row[2] == "GATE_BYPASS"]
+    assert reasons[0] == (
+        "backfill for 2026-09-01: reload Sept; dependencies on other pipelines are not checked, "
+        "and nothing is consumed"
+    )
+    with engine.connect() as conn:
+        for table in ("AUD_PIPELINE_DEPENDENCY_TRACKER", "AUD_TASK_DEPENDENCY_TRACKER"):
+            assert conn.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar_one() == 0
+
+    # A run of its own gets today, or the date it is given.
+    run_pipeline(engine, config, "P", child=CHILD)
+    run_pipeline(engine, config, "P", child=CHILD, run_date=date(2026, 8, 31))
+    assert runs(engine)[-2:] == [("P", "SUCCESS", today, "N"), ("P", "SUCCESS", "2026-08-31", "N")]
+
+
+def test_a_backfill_stops_at_the_first_run_that_fails(config, pipeline):
+    engine, _ = pipeline
+    done = backfill(engine, config, "P", date(2026, 9, 1), date(2026, 9, 5), "x", child=CHILD)
+    assert done.status == RunStatus.FAILED
+    assert len(done.runs) == 1
+    assert done.message.startswith("P: backfill stopped at 2026-09-01 after 1 of 5 run(s): ")
+    assert done.message.endswith(
+        "`etl-craft run --pipeline_code P --backfill 2026-09-01:2026-09-05` takes up from there "
+        "once it is fixed"
+    )
+
+
+def test_what_a_backfill_refuses(config, pipeline):
+    engine, ids = pipeline
+    with pytest.raises(UsageError, match="2026-09-05 is after 2026-09-01"):
+        backfill(engine, config, "P", date(2026, 9, 5), date(2026, 9, 1), "x")
+    with pytest.raises(UsageError, match="is 367 dates; one backfill runs at most 366"):
+        backfill(engine, config, "P", date(2025, 1, 1), date(2026, 1, 2), "x")
+    with pytest.raises(UsageError, match="--backfill needs a --reason"):
+        backfill(engine, config, "P", date(2026, 9, 1), date(2026, 9, 1), "")
+    with pytest.raises(RunRefusedError, match="--backfill is only available in local mode"):
+        backfill(
+            engine, replace(config, mode=Mode.REMOTE), "P", date(2026, 9, 1), date(2026, 9, 1), "x"
+        )
+    with engine.begin() as conn:
+        run_id = runlog.find_or_create_active_run(conn, ids["P"], run_date=date(2026, 9, 9))
+    with pytest.raises(RunStateError, match=rf"run in progress \(pipeline_run_id={run_id}\)"):
+        backfill(engine, config, "P", date(2026, 9, 1), date(2026, 9, 1), "x")
+    with pytest.raises(RunStateError, match="as of 2026-09-09, not 2026-09-01"):
+        run_pipeline(engine, config, "P", child=CHILD, run_date=date(2026, 9, 1))
+    pause_pipeline(engine, config, "P", "hold", requested_by=WHO)
+    with engine.begin() as conn:
+        runlog.finalize_pipeline_run(conn, run_id, "FAILED")
+    held = backfill(engine, config, "P", date(2026, 9, 1), date(2026, 9, 3), "x", child=CHILD)
+    assert held.stopped is not None and held.message.startswith(
+        "P: backfill stopped at 2026-09-01: "
+    )
+
+
+def test_the_run_date_and_backfill_options(config, engine_db, capsys, monkeypatch):
+    # A pipeline with no tasks: the options are what is tested here.
+    with engine_db.engine.begin() as conn:
+        add_pipeline(conn, "P")
+    monkeypatch.chdir(config.project_dir)
+    both_days = ["--backfill", "2026-09-01:2026-09-02"]
+    assert cli_main(["run", "--pipeline_code", "P", *both_days, "--reason", "r"]) == 0
+    assert "backfill of 2 date(s)" in capsys.readouterr().out
+    assert cli_main(["run", "--pipeline_code", "P", "--run-date", "2026-08-30"]) == 0
+    capsys.readouterr()
+    assert cli_main(["history", "--pipeline_code", "P"]) == ExitCode.SUCCESS
+    history = capsys.readouterr().out.splitlines()
+    assert history[0].startswith("PIPELINE_RUN_ID\tSTATUS\tRUN_DATE\t")
+    assert history[1].split("\t")[2] == "2026-08-30"
+    assert history[2].split("\t")[2] == "2026-09-02 (backfill)"
+    for argv, message in (
+        (["--backfill", "2026-09-01"], "is not FROM:TO"),
+        (["--run-date", "01/09/2026"], "is not a date: write YYYY-MM-DD"),
+    ):
+        with pytest.raises(SystemExit):
+            cli_main(["run", "--pipeline_code", "P", *argv])
+        assert message in capsys.readouterr().err
+    code = cli_main(["run", "--pipeline_code", "P", *both_days, "--task_code", "x"])
+    assert code == ExitCode.USAGE
