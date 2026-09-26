@@ -33,6 +33,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--task-run-id", type=int, required=True)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--rerun", action="store_true")
     parser.add_argument("--log-level", default="INFO")
     parser.add_argument("--log-format", default="text")
     return parser.parse_args(argv)
@@ -47,7 +48,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         with log.log_context(task_run_id=args.task_run_id):
             try:
-                context = build_task_context(engine, config, args.task_run_id, force=args.force)
+                context = build_task_context(
+                    engine, config, args.task_run_id, force=args.force, rerun=args.rerun
+                )
             except EtlCraftError as error:
                 logger.error("could not start the task: %s", error)
                 _record_failure(engine, args.task_run_id, str(error))

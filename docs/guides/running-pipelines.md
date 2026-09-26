@@ -65,8 +65,9 @@ pipeline's dependency check. It is only available in local mode.
 
 ## Under an orchestrator
 
-In remote mode an orchestrator such as Airflow runs the tasks, so `run --pipeline_code` without
-`--task_code` is refused (exit status `10`). The orchestrator runs three kinds of step:
+In remote mode an orchestrator such as Airflow runs the tasks and is the only source of truth for
+scheduling, so `run --pipeline_code` without `--task_code` is refused (exit status `10`). The
+orchestrator runs three kinds of step:
 
 ```bash
 etl-craft run --pipeline_code SALES_DAILY --init-only              # first
@@ -74,12 +75,17 @@ etl-craft run --pipeline_code SALES_DAILY --task_code load_orders  # one per tas
 etl-craft run --pipeline_code SALES_DAILY --finalize-only          # last
 ```
 
-- `--init-only` tests the connections, checks the pipeline's dependencies and starts the run
-  (or resumes the one in progress). It prints `pipeline_run_id=<id> IN-PROGRESS`, or `SKIPPED`
-  with the reason.
-- `--finalize-only` records `SKIPPED` for tasks that can never run, and ends the run `SUCCESS` or
-  `FAILED` from its tasks' statuses. It exits `1` for a `FAILED` run and `9` (`RUN_STATE`) when
-  there is no run in progress.
+- `--init-only` refuses rules the orchestrator does not support (exit status `18`), tests the
+  connections and starts the run (or resumes the one in progress). It prints
+  `pipeline_run_id=<id> IN-PROGRESS`. It does not check the pipeline's dependencies: the DAG's
+  sensors do.
+- `--finalize-only` records a task the orchestrator never ran as `SKIPPED`, and ends the run
+  `FAILED` when a task failed, `SKIPPED` when it ran none, and `SUCCESS` otherwise. It exits `1`
+  for a `FAILED` run and `9` (`RUN_STATE`) when there is no run in progress.
+
+In local mode, `--init-only` checks the pipeline's dependencies and prints `SKIPPED` with the
+reason when they are not satisfied, and `--finalize-only` records `SKIPPED` for tasks that can
+never run. See [Running under an orchestrator](../deploying/orchestrator.md).
 
 ## SLA
 

@@ -7,7 +7,8 @@ checks each active pipeline and task with the same code a run uses. It connects 
 and runs nothing: SQL is read and checked, ingestion scripts are parsed, not imported.
 
 Each finding is a ``FAIL`` (a run would fail, hang or silently do something else) or a ``WARN``
-(it works, but look at this, such as a parameter no handler reads).
+(it works, but look at this, such as a parameter no handler reads). In remote mode, every rule
+the orchestrator does not support is a ``FAIL`` (see ``execution.remote``).
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from sqlalchemy.engine import Connection, Engine
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.project import ingestion_script
 from etl_craft.config.targets import active_catalog
-from etl_craft.core.enums import DependencyType, Handler, SqlAction
+from etl_craft.core.enums import DependencyType, Handler, Mode, SqlAction
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.graph import build_graph
 from etl_craft.core.text import suggest
@@ -43,6 +44,7 @@ from etl_craft.engine.repository.validation import (
     fetch_task_dependency_edges,
 )
 from etl_craft.execution.limits import task_timeout_seconds
+from etl_craft.execution.remote import unsupported_rules
 from etl_craft.handlers import email_alert, python_scripts
 from etl_craft.handlers.business_rules import check_rule
 from etl_craft.handlers.registry import COMMON_PARAMETERS, TaskContext
@@ -129,7 +131,7 @@ def validate(engine: Engine, config: ConnectorConfig, pipeline_code: str | None 
             pipeline_codes=[code for code, _ in pipeline_parameters],
         )
         report = Report()
-        _pipelines(conn, data, report)
+        _pipelines(conn, config, data, report)
         _dependencies(data, report)
         for task in data.tasks:
             _task(conn, config, data, task, report)
@@ -143,7 +145,7 @@ def validate(engine: Engine, config: ConnectorConfig, pipeline_code: str | None 
     return report
 
 
-def _pipelines(conn: Connection, data: _Metadata, report: Report) -> None:
+def _pipelines(conn: Connection, config: ConnectorConfig, data: _Metadata, report: Report) -> None:
     for code, stored in data.pipeline_parameters:
         if not CODE.match(code):
             report.fail(code, _code_problem("PIPELINE_CODE", code))
@@ -156,10 +158,20 @@ def _pipelines(conn: Connection, data: _Metadata, report: Report) -> None:
                 _unknown("PIPELINE_PARAMETERS", name, list(PIPELINE_PARAMETER_KINDS)),
             )
         try:
-            graph = fetch_pipeline_graph(conn, resolve_pipeline_id(conn, code))
+            pipeline_id = resolve_pipeline_id(conn, code)
+            graph = fetch_pipeline_graph(conn, pipeline_id)
             build_graph(graph.tasks, graph.same_pipeline_edges)
         except EtlCraftError as error:
             report.fail(code, str(error))
+            continue
+        if config.mode == Mode.REMOTE:
+            for rule in unsupported_rules(
+                conn, pipeline_id, code, global_dag=config.dag_defaults.global_dag
+            ):
+                report.fail(
+                    rule.where,
+                    f"{rule.rule}; the remote orchestrator does not support this. {rule.remedy}",
+                )
     for edge in data.pipeline_edges:
         if not edge.depends_on_pipeline_active:
             report.fail(

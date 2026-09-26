@@ -17,7 +17,8 @@ the task is forced. Rules run in waves by ``SEQUENCE_NUMBER``: the rules of a wa
 parallel, at most ``Orchestration.Max_parallel_tasks`` at once, and the next wave starts once
 every rule of this one has finished. A rule that fails is recorded ``FAILED`` and the rest of
 its wave still runs; then the task fails, naming every rule that failed. A rule that already
-succeeded under the task run is not run again.
+succeeded under the task run is not run again, unless the task itself is run again after it
+succeeded.
 
 Each rule records its outcome in ``AUD_BUSINESS_RULES_RUN_LOG`` in a transaction of its own.
 """
@@ -188,7 +189,7 @@ class _RuleRunner:
         now = datetime.now(UTC)
         with self.engine_db.begin() as conn:
             binding = begin_rule_run(conn, rule.business_rule_id, self.context.task_run_id, now)
-        if binding.already_succeeded and not self.context.force:
+        if binding.already_succeeded and not (self.context.force or self.context.rerun):
             logger.info(
                 "rule %s already succeeded under this task run; not run again",
                 rule.business_rule_name,

@@ -48,8 +48,8 @@ def add_rule(w, name, sql, *, sequence=1, key="order_id", rule_type="REJECT"):
         )
 
 
-def run_rules(w, *, force=False):
-    context = replace(w.task("rules"), handler="BUSINESS_RULES", force=force)
+def run_rules(w, *, force=False, rerun=False):
+    context = replace(w.task("rules"), handler="BUSINESS_RULES", force=force, rerun=rerun)
     return business_rules.run(context, w.engine_db)
 
 
@@ -77,7 +77,7 @@ def run_log(w):
         return sorted(tuple(row) for row in rows)
 
 
-def test_rules_flag_breaking_rows_and_a_forced_run_clears_fixed_ones(world):
+def test_rules_flag_breaking_rows_and_a_rerun_or_a_forced_run_clears_fixed_ones(world):
     w = world
     inactive = f"SELECT 1 FROM {w.schema}.customers c WHERE c.id = t.customer_id AND c.active = 'N'"
     negative = f"SELECT 1 FROM {w.schema}.customers c WHERE c.id = t.customer_id AND t.amount < 0"
@@ -94,12 +94,18 @@ def test_rules_flag_breaking_rows_and_a_forced_run_clears_fixed_ones(world):
     # A retry under the same task run does not run the rules again.
     assert (run_rules(w).insert_count, run_rules(w).update_count) == (0, 0)
 
+    # Customer 2 becomes active; the task run again after it succeeded checks the run's rows
+    # again and clears order 11.
+    w.execute(f"UPDATE {w.name('customers')} SET active = 'Y' WHERE id = 2")
+    rerun = run_rules(w, rerun=True)
+    assert (rerun.insert_count, rerun.update_count) == (0, 1)
+
     # Customer 3 becomes active; a forced run checks every row and clears order 12.
     w.execute(f"UPDATE {w.name('customers')} SET active = 'Y' WHERE id = 3")
     forced = run_rules(w, force=True)
     assert (forced.insert_count, forced.update_count) == (0, 1)
     assert flags(w) == [
-        ("inactive_customer", "11", "Y", "REJECT"),
+        ("inactive_customer", "11", "N", "REJECT"),
         ("inactive_customer", "12", "N", "REJECT"),
         ("negative_amount", "11", "Y", "REPORT"),
     ]

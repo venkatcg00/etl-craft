@@ -42,12 +42,23 @@ etl-craft generate-docs && open catalog/index.html
 The emails arrive in Mailpit at <http://localhost:58025>. `etl-craft history`, `graph`, `steps`
 and `lineage` show what ran.
 
+## Under an orchestrator
+
+In remote mode (`Orchestration.Mode: remote`) the orchestrator is the only source of truth for
+scheduling: `etl-craft generate-yml --pipeline_code <code>` writes each pipeline as a DAG holding
+every rule, and etl-craft runs each task when the DAG says. Two of the demo's rules have no
+equivalent in an orchestrator (`HAS_DATA` dependencies and a `2 of 3` run condition), so
+`etl-craft validate` fails on them in remote mode and names each one. Load
+`metadata/remote_mode.sql` after the demo's metadata to turn them into rules an orchestrator
+applies.
+
 ## Files
 
 | Path | Holds |
 |---|---|
 | `craft-connector.yml` | SQLite Engine DB, DuckDB warehouse, Mailpit, cloning into `aud` |
 | `metadata/support_insights.sql` | the pipelines, tasks, parameters, dependencies and rules, as `CFG_` rows; runs as written on SQLite and PostgreSQL |
+| `metadata/remote_mode.sql` | the changes remote mode needs, loaded after `support_insights.sql` |
 | `ingestion_scripts/` | the scripts that land each source, plus a flaky feed and a slow task |
 | `sql_files/` | the SELECTs the SQL tasks wrap in their actions |
 | `warehouse_schemas.sql` | the schemas to create first: etl-craft never creates warehouse schemas |

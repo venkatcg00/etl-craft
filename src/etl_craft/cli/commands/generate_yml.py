@@ -44,7 +44,7 @@ def _run(args: argparse.Namespace, out: Output) -> int:
                 )
         finally:
             engine.dispose()
-    text = to_yaml(dag)
+    text = to_yaml(dag, config.mode)
     if args.output is None:
         out.stdout.write(text)
         return ExitCode.SUCCESS

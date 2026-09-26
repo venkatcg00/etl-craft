@@ -12,7 +12,12 @@ from etl_craft.handlers.registry import TaskContext
 
 
 def build_task_context(
-    engine: Engine, config: ConnectorConfig, task_run_id: int, *, force: bool = False
+    engine: Engine,
+    config: ConnectorConfig,
+    task_run_id: int,
+    *,
+    force: bool = False,
+    rerun: bool = False,
 ) -> TaskContext:
     """Return the context of the attempt ``task_run_id`` is running.
 
@@ -40,4 +45,5 @@ def build_task_context(
         refresh_type=detail.refresh_type,
         task_params=params,
         force=force,
+        rerun=rerun,
     )

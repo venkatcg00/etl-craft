@@ -94,6 +94,42 @@ def resolve_run_for_task(
     return int(latest.pipeline_run_id)
 
 
+def resolve_run_for_orchestrator(conn: Connection, pipeline_id: int) -> tuple[int, str | None]:
+    """Return the run a task binds to in remote mode and, when this reopened it, its old status.
+
+    The pipeline's ``IN-PROGRESS`` run when there is one. Otherwise the orchestrator is running a
+    task again after the run ended (a cleared task), so its latest run goes back to
+    ``IN-PROGRESS`` until ``--finalize-only`` ends it again. Raises ``RunStateError`` when the
+    pipeline has no run at all.
+    """
+    active = fetch_active_pipeline_run_id(conn, pipeline_id)
+    if active is not None:
+        return active, None
+    latest = conn.execute(
+        statement(conn, "latest_pipeline_run"), {"pipeline_id": pipeline_id}
+    ).one_or_none()
+    if latest is None:
+        raise RunStateError(
+            f"pipeline_id={pipeline_id} has no run to bind a task to: the orchestrator's first "
+            "step, `etl-craft run --pipeline_code <code> --init-only`, starts it"
+        )
+    try:
+        with conn.begin_nested():
+            conn.execute(
+                statement(conn, "reopen_pipeline_run"),
+                {"pipeline_run_id": latest.pipeline_run_id},
+            )
+    except IntegrityError:
+        winner = fetch_active_pipeline_run_id(conn, pipeline_id)
+        if winner is None:
+            raise RunStateError(
+                f"pipeline_id={pipeline_id}: reopening pipeline_run_id={latest.pipeline_run_id} "
+                "hit a unique violation, but no IN-PROGRESS run exists afterwards"
+            ) from None
+        return winner, None
+    return int(latest.pipeline_run_id), str(latest.status)
+
+
 @dataclass(frozen=True)
 class TaskRunBinding:
     """A task's row under a run: its id, its status, and whether this call created it."""

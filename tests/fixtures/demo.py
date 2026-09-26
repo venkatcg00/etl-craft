@@ -294,9 +294,9 @@ class Demo:
         os.environ.setdefault(S3_VAR, MINIO_PASSWORD)
         return load_config(self.root / "craft-connector.yml")
 
-    def seed(self) -> None:
-        """Load the demo's metadata, with email addresses of this demo's own."""
-        sql = (self.root / "metadata" / "support_insights.sql").read_text(encoding="utf-8")
+    def seed(self, name: str = "support_insights.sql") -> None:
+        """Load a metadata file of the demo's, with email addresses of this demo's own."""
+        sql = (self.root / "metadata" / name).read_text(encoding="utf-8")
         sql = sql.replace("@example.com", f"+{self.tag}@example.com")
         engine = engine_db(self.config)
         try:

@@ -228,19 +228,52 @@ def test_the_demo_runs_under_an_orchestrator(make_demo, installer, engine, wareh
     demo.seed()
     refused = demo.run("run", "--pipeline_code", "SUPPORT_DM")
     assert refused.returncode == 10, refused.stderr[-2000:]
+    # The orchestrator is the only source of truth, and it has no equivalent of HAS_DATA or of
+    # a 2-of-3 run condition: remote mode names each one rather than drop it.
+    invalid = demo.run("validate")
+    assert invalid.returncode == 1, invalid.stdout
+    for rule in (
+        "CLIENT_ALPHA.parse: depends on land with DEPENDENCY_TYPE = 'HAS_DATA'",
+        "SUPPORT_DM.setup_fact: depends on interactions with DEPENDENCY_TYPE = 'HAS_DATA'",
+        "SUPPORT_DM.source_counts: RUN_CONDITION = 'N' (RUN_CONDITION_COUNT = 2)",
+    ):
+        assert rule in " ".join(invalid.stdout.split()), (rule, invalid.stdout)
+    unsupported = demo.run("run", "--pipeline_code", "SUPPORT_DM", "--init-only")
+    assert unsupported.returncode == 18, unsupported.stderr[-2000:]
+    assert "the remote orchestrator does not support this" in unsupported.stderr
+    demo.seed("remote_mode.sql")
+    assert demo.ok("validate").endswith("0 failed, 0 warning(s)\n")
 
     def execute(command: list[str]) -> int:
         assert command[0] == "etl-craft", command
         return demo.run(*command[1:]).returncode
 
     runs = {}
+
+    def sense(sensor: dict) -> str | None:
+        upstream = runs.get(sensor["external_dag_id"])
+        if upstream is None:
+            return None
+        if sensor["external_task_id"] is None:
+            return upstream.state
+        return upstream.states.get(sensor["external_task_id"])
+
     for pipeline in ("CLIENT_ALPHA", "CLIENT_BETA", "SUPPORT_DM"):
         dag = yaml.safe_load(demo.ok("generate-yml", "--pipeline_code", pipeline))
-        runs[pipeline] = run_dag(dag, execute)
+        assert dag["max_active_runs"] == 1
+        runs[pipeline] = run_dag(dag, execute, sense)
         run_id, status = demo.latest_run(pipeline)
         assert status == "SUCCESS", (pipeline, runs[pipeline].states)
+        assert runs[pipeline].state == SUCCESS
 
     dm = runs["SUPPORT_DM"]
+    # The dependencies on both clients' pipelines and tasks were the orchestrator's sensors.
+    assert {name for name in dm.states if name.startswith("__wait_for_")} == {
+        "__wait_for_CLIENT_ALPHA__",
+        "__wait_for_CLIENT_BETA__",
+        "__wait_for_CLIENT_ALPHA.purge_test_calls__",
+        "__wait_for_CLIENT_BETA.parse__",
+    }
     # The flaky feed failed its first try; the orchestrator's retry succeeded, and nothing that
     # finished was run again.
     assert dm.tries["flaky_feed"] == 2
