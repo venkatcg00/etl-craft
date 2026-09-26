@@ -47,6 +47,14 @@ def test_before_the_first_release_the_site_is_the_dev_version(clone, tmp_path):
     assert 'url=dev/"' in (site / "index.html").read_text(encoding="utf-8")
     page = (site / "dev" / "reference" / "exit-codes" / "index.html").read_text(encoding="utf-8")
     assert f'<link rel="canonical" href="{SITE_URL}/dev/reference/exit-codes/">' in page
+    # The references generated from the code are in the build.
+    reference = site / "dev" / "reference"
+    schema = (reference / "engine-db-schema" / "index.html").read_text(encoding="utf-8")
+    assert "AUD_RUN_INTERVENTIONS" in schema
+    parameters = (reference / "task-parameters" / "index.html").read_text(encoding="utf-8")
+    assert "SOURCE_SQL_FILE" in parameters
+    settings = (reference / "configuration" / "index.html").read_text(encoding="utf-8")
+    assert "Dependency_gates" in settings
     assert _git(clone, "branch", "--list", "docs-site-build") == ""
 
 
