@@ -96,6 +96,7 @@ nav:
   - Quick Start: quick-start.md
   - Guides:
       - guides/index.md
+      - Pipelines and tasks: guides/pipelines-and-tasks.md
       - Dependencies and run conditions: guides/dependencies.md
       - SQL tasks: guides/sql-tasks.md
       - Business rules: guides/business-rules.md
@@ -111,14 +112,18 @@ nav:
   - Deploying:
       - deploying/index.md
       - The project directory: deploying/project-layout.md
+      - Local mode: deploying/local-mode.md
       - Running under an orchestrator: deploying/orchestrator.md
       - Checking a deployment, doctor and setup: deploying/doctor-and-setup.md
       - Engine DB setup and upgrades: deploying/engine-db.md
       - Cloning into the warehouse: deploying/cloning.md
+      - Operations: deploying/operations.md
+      - Security: deploying/security.md
   - Connectors:
       - connectors/index.md
       - Engine DB: connectors/engine-db.md
       - Warehouses: connectors/warehouses.md
+      - Authentication: connectors/authentication.md
       - craft-connector.yml examples: examples/README.md
   - Reference:
       - reference/index.md

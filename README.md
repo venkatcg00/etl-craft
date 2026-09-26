@@ -6,21 +6,27 @@ without an external orchestrator.
 
 Documentation: <https://venkatcg00.github.io/etl-craft/>
 
-> **Status: pre-release rewrite.** `main` is being rebuilt in a layered, documented
-> structure, ahead of the first release (0.1.0). Only `etl-craft --version` works so
-> far. The previous implementation remains available at the `archive/iteration-2` tag.
-> The rewrite plan and its progress are in
+> **Status: pre-release.** The rewrite is feature-complete ahead of the first release (0.1.0).
+> The previous implementation remains available at the `archive/iteration-2` tag, and the
+> rewrite plan and its progress are in
 > [docs/development/rewrite-plan.md](docs/development/rewrite-plan.md).
 
-## Install from source
+## Try it
 
-Requires Python 3.11 or newer and [uv](https://docs.astral.sh/uv/).
+The [Quick Start](docs/quick-start.md) runs the Support Insights demo (`examples/demo`): five
+pipelines on a SQLite Engine DB and a DuckDB warehouse, in about ten minutes. It sends its alerts
+to a local Mailpit, which the Quick Start starts with one `docker run`.
 
 ```bash
-uv build                                        # dist/etl_craft-<version>-py3-none-any.whl
-pip install dist/etl_craft-*.whl                # or: uv pip install dist/etl_craft-*.whl
-etl-craft --version
+git clone https://github.com/venkatcg00/etl-craft.git && cd etl-craft
+python -m venv .venv && . .venv/bin/activate
+pip install .                                   # extras: [trino], [databricks], [snowflake], [aws], [publish]
+cd examples/demo
+python prepare.py warehouse && etl-craft setup && python prepare.py metadata
+etl-craft run --pipeline_code CLIENT_ALPHA
 ```
+
+Requires Python 3.11 or newer. `uv build` builds the wheel and sdist into `dist/`.
 
 ## Development
 
