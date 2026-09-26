@@ -12,7 +12,8 @@ nothing; run after the run ended, it reopens the run, which ``--finalize-only`` 
 The task itself runs in a freshly started interpreter, supervised with its time limit. Its
 output goes to the attempt's log file, whose tail is kept in ``TASK_LOG``. When that process
 ends without recording an outcome (it crashed, was killed, or ran out of time), the task is
-recorded ``FAILED`` with the reason.
+recorded ``FAILED`` with the reason. While it runs, the run is watched: once an operator
+cancels it (``etl-craft cancel``), the task process is stopped and the task is ``CANCELLED``.
 """
 
 from __future__ import annotations
@@ -52,6 +53,9 @@ logger = logging.getLogger(__name__)
 CHILD_MODULE = "etl_craft.execution.child"
 """The module a task attempt runs as, with ``python -m``."""
 
+CANCEL_POLL_SECONDS = 2.0
+"""How often a running task looks whether an operator cancelled its run."""
+
 
 @dataclass(frozen=True)
 class TaskOutcome:
@@ -67,7 +71,8 @@ class ChildOptions:
     """How the task process is started: its module, log settings and kill grace period.
 
     Setting ``cancel`` stops a running task process; the pipeline runner sets it when the run is
-    interrupted.
+    interrupted. ``cancel_poll_seconds`` is how often a running task looks whether an operator
+    cancelled its run.
     """
 
     module: str = CHILD_MODULE
@@ -75,6 +80,7 @@ class ChildOptions:
     log_format: str = "text"
     kill_grace_seconds: float = KILL_GRACE_SECONDS
     cancel: threading.Event | None = None
+    cancel_poll_seconds: float = CANCEL_POLL_SECONDS
 
 
 def run_task(
@@ -320,18 +326,85 @@ def _run_attempt(
         f"{timeout}s" if timeout else "none",
         log_path,
     )
-    result = run_child(
-        ChildSpec(argv=(sys.executable, *argv), timeout_seconds=timeout, log_path=log_path),
-        kill_grace_seconds=child.kill_grace_seconds,
-        cancel=child.cancel,
+    with _CancelWatch(engine, pipeline_run_id, child) as stop:
+        result = run_child(
+            ChildSpec(argv=(sys.executable, *argv), timeout_seconds=timeout, log_path=log_path),
+            kill_grace_seconds=child.kill_grace_seconds,
+            cancel=stop,
+        )
+    return _record_attempt(
+        engine, binding.task_run_id, pipeline_run_id, task_code, result, log_path
     )
-    return _record_attempt(engine, binding.task_run_id, task_code, result, log_path)
+
+
+class _CancelWatch:
+    """Sets the event that stops a task process when the run is interrupted or cancelled.
+
+    A thread looks every ``cancel_poll_seconds`` whether an operator cancelled the run, and
+    passes on the pipeline runner's own ``cancel`` event at once.
+    """
+
+    def __init__(self, engine: Engine, pipeline_run_id: int, child: ChildOptions) -> None:
+        self.engine = engine
+        self.pipeline_run_id = pipeline_run_id
+        self.child = child
+        self.stop = threading.Event()
+        self.done = threading.Event()
+        self.thread = threading.Thread(
+            target=self._watch, name="etl-craft-cancel-watch", daemon=True
+        )
+
+    def __enter__(self) -> threading.Event:
+        self.thread.start()
+        return self.stop
+
+    def __exit__(self, *exc: object) -> None:
+        self.done.set()
+        self.thread.join()
+
+    def _watch(self) -> None:
+        interrupt = self.child.cancel
+        poll = max(self.child.cancel_poll_seconds, 0.05)
+        waited = 0.0
+        while not self.done.is_set():
+            if interrupt is not None and interrupt.is_set():
+                self.stop.set()
+                return
+            if waited >= poll:
+                waited = 0.0
+                if run_cancelled(self.engine, self.pipeline_run_id):
+                    logger.warning(
+                        "pipeline_run_id=%d was cancelled; stopping the task", self.pipeline_run_id
+                    )
+                    self.stop.set()
+                    return
+            self.done.wait(0.05)
+            waited += 0.05
+
+
+def run_cancelled(engine: Engine, pipeline_run_id: int) -> bool:
+    """Whether an operator cancelled ``pipeline_run_id``; a failed look counts as no."""
+    try:
+        with engine.connect() as conn:
+            status = runlog.fetch_pipeline_run_status(conn, pipeline_run_id)
+    except Exception:
+        logger.warning("could not read the status of pipeline_run_id=%d", pipeline_run_id)
+        return False
+    return status == RunStatus.CANCELLED
 
 
 def _record_attempt(
-    engine: Engine, task_run_id: int, task_code: str, result: ChildResult, log_path: Path
+    engine: Engine,
+    task_run_id: int,
+    pipeline_run_id: int,
+    task_code: str,
+    result: ChildResult,
+    log_path: Path,
 ) -> TaskOutcome:
-    """Record the attempt's outcome, failing it if the task process ended without one."""
+    """Record the attempt's outcome, failing it if the task process ended without one.
+
+    A task stopped because its run was cancelled is ``CANCELLED``.
+    """
     with engine.begin() as conn:
         recorded = runlog.fetch_task_run_result(conn, task_run_id)
         status = RunStatus(recorded.status)
@@ -339,7 +412,12 @@ def _record_attempt(
         values = conn.execute(
             statement(conn, "task_run_log"), {"task_run_id": task_run_id}
         ).scalar_one_or_none()
-        if status == RunStatus.IN_PROGRESS:
+        cancelled = runlog.fetch_pipeline_run_status(conn, pipeline_run_id) == RunStatus.CANCELLED
+        if status == RunStatus.IN_PROGRESS and cancelled:
+            status = RunStatus.CANCELLED
+            message = f"the run was cancelled, so the task process {result.describe()}"
+            runlog.finish_task_run(conn, task_run_id, status=status, error_message=message)
+        elif status == RunStatus.IN_PROGRESS:
             status = RunStatus.FAILED
             message = f"the task process {result.describe()} before recording an outcome"
             if result.timed_out:

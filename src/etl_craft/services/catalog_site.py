@@ -528,7 +528,25 @@ class _Writer:
             ),
             "No active tasks.",
         )
-        return f"{description}{facts}{self._dag(code)}<h2>Tasks</h2>{tasks}"
+        changes = ""
+        if p.interventions:
+            changes = "<h2>Interventions on the last run</h2>" + _table(
+                ["Task", "Action", "From", "To", "By", "At", "Reason"],
+                (
+                    [
+                        self._task_link(f"{code}.{c.task_code}") if c.task_code else "the run",
+                        _e(c.action),
+                        _status(c.from_status),
+                        _status(c.to_status) if c.to_status else "reset",
+                        _e(c.requested_by),
+                        _e(_when(c.requested_at)),
+                        _e(c.reason),
+                    ]
+                    for c in p.interventions
+                ),
+                "",
+            )
+        return f"{description}{facts}{self._dag(code)}<h2>Tasks</h2>{tasks}{changes}"
 
     def _checked(self, task: TaskAsset) -> list[str]:
         return sorted({self.catalog.rules[r].table for r in task.rules})

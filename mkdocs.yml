@@ -107,6 +107,7 @@ nav:
       - The catalog site: guides/catalog.md
       - Running a pipeline: guides/running-pipelines.md
       - Running a task and reading its logs: guides/running-tasks.md
+      - "Stepping in: mark and cancel": guides/run-control.md
   - Deploying:
       - deploying/index.md
       - The project directory: deploying/project-layout.md

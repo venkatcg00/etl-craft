@@ -17,15 +17,21 @@ class ActiveFlag(StrEnum):
 
 
 class RunStatus(StrEnum):
-    """Status of a pipeline run, a task run or a business-rule run."""
+    """Status of a pipeline run, a task run or a business-rule run.
+
+    ``CANCELLED`` ends a run an operator cancelled, and the tasks it stopped.
+    """
 
     IN_PROGRESS = "IN-PROGRESS"
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"
     SKIPPED = "SKIPPED"
+    CANCELLED = "CANCELLED"
 
 
-TERMINAL_STATUSES = frozenset({RunStatus.SUCCESS, RunStatus.FAILED, RunStatus.SKIPPED})
+TERMINAL_STATUSES = frozenset(
+    {RunStatus.SUCCESS, RunStatus.FAILED, RunStatus.SKIPPED, RunStatus.CANCELLED}
+)
 """Statuses of a task that has finished its attempt."""
 
 SETTLED_STATUSES = frozenset({RunStatus.SUCCESS, RunStatus.SKIPPED})
@@ -34,8 +40,21 @@ SETTLED_STATUSES = frozenset({RunStatus.SUCCESS, RunStatus.SKIPPED})
 NOT_RETRYABLE_STATUSES = frozenset({RunStatus.SUCCESS, RunStatus.SKIPPED, RunStatus.IN_PROGRESS})
 """Statuses that keep a task out of the ready set; ``FAILED`` and never-run tasks are retried."""
 
-FINISHED_RUN_STATUSES = frozenset({RunStatus.SUCCESS, RunStatus.FAILED})
+FINISHED_RUN_STATUSES = frozenset({RunStatus.SUCCESS, RunStatus.FAILED, RunStatus.CANCELLED})
 """Statuses of a pipeline run that has ended."""
+
+MARKABLE_STATUSES = (RunStatus.SUCCESS, RunStatus.FAILED, RunStatus.SKIPPED)
+"""The statuses ``mark`` sets on a task or a run."""
+
+
+class InterventionAction(StrEnum):
+    """What an operator did to a run, as ``AUD_RUN_INTERVENTIONS.ACTION`` records it."""
+
+    MARK = "MARK"
+    NEW_RUN = "NEW_RUN"
+    CANCEL = "CANCEL"
+    REOPEN = "REOPEN"
+    RESET = "RESET"
 
 
 class SlaStatus(StrEnum):

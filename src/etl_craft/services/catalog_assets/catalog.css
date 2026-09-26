@@ -88,7 +88,7 @@ table.list th { color: var(--muted); font-weight: 600; font-size: 12px; }
 pre { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 10px; overflow-x: auto; white-space: pre-wrap; }
 .status { font-weight: 600; font-size: 12px; }
 .status.SUCCESS { color: var(--ok); }
-.status.FAILED { color: var(--bad); }
+.status.FAILED, .status.CANCELLED { color: var(--bad); }
 .status.SKIPPED, .status.IN-PROGRESS { color: var(--warn); }
 .badge { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 10px; border: 1px solid var(--border); color: var(--muted); }
 .badge.warn { color: var(--warn); border-color: var(--warn); }
