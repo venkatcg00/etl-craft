@@ -39,9 +39,10 @@ def run(task: ScriptTask) -> ScriptResult:
     with task.warehouse() as engine, engine.begin() as conn:
         conn.execute(
             text(
-                f"CREATE TABLE IF NOT EXISTS {table} (interaction_id BIGINT, agent_code VARCHAR, "
-                "support_area VARCHAR, contact_date VARCHAR, status VARCHAR, "
-                "duration_seconds VARCHAR, rating VARCHAR, pipeline_run_id BIGINT)"
+                f"CREATE TABLE IF NOT EXISTS {table} (interaction_id BIGINT, "
+                "agent_code VARCHAR(100), support_area VARCHAR(100), contact_date VARCHAR(100), "
+                "status VARCHAR(100), duration_seconds VARCHAR(100), rating VARCHAR(100), "
+                "pipeline_run_id BIGINT)"
             )
         )
         for row in rows:

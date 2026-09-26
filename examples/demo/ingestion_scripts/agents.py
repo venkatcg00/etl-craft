@@ -32,8 +32,9 @@ def run(task: ScriptTask) -> ScriptResult:
     with task.warehouse() as engine, engine.begin() as conn:
         conn.execute(
             text(
-                f"CREATE TABLE IF NOT EXISTS {table} (agent_code VARCHAR, agent_name VARCHAR, "
-                "team VARCHAR, email VARCHAR, left_company VARCHAR)"
+                f"CREATE TABLE IF NOT EXISTS {table} (agent_code VARCHAR(100), "
+                "agent_name VARCHAR(100), team VARCHAR(100), email VARCHAR(100), "
+                "left_company VARCHAR(100))"
             )
         )
         conn.execute(text(f"DELETE FROM {table}"))

@@ -9,9 +9,9 @@ Each mirror has the Engine DB table's name and columns, with portable types: who
 ``BIGINT``, other numbers ``DECIMAL(38, 10)``, timestamps the warehouse's timestamp with time
 zone, and everything else text; JSON values are copied as their text. A mirror is created when
 it is missing, and its rows replaced on every clone, one transaction per table where the
-warehouse has them. A mirror is never dropped, so views built on it keep working: a column an
-upgrade adds to the Engine DB table is added to the mirror, and a column the mirror has that the
-Engine DB table no longer does is left in place, NULL in every row.
+warehouse has them, many rows to an INSERT. A mirror is never dropped, so views built on it keep
+working: a column an upgrade adds to the Engine DB table is added to the mirror, and a column
+the mirror has that the Engine DB table no longer does is left in place, NULL in every row.
 
 Cloning writes only the mirrors, and only in the warehouse profile's schema, which must already
 exist. It refuses a warehouse schema that is the Engine DB's own, where it would empty the
@@ -51,7 +51,14 @@ from etl_craft.warehouse.connection import open_warehouse, warehouse_dialect
 logger = logging.getLogger(__name__)
 
 BATCH_ROWS = 1_000
-"""How many rows are read from the Engine DB and inserted into a mirror at a time."""
+"""How many rows are read from the Engine DB at a time."""
+
+MAX_BOUND_VALUES = 250
+"""Values bound in one INSERT: many rows per statement, within every driver's parameter limit.
+
+A cloud warehouse answers each statement in a second or two, so a row per statement would
+take hours on a busy Engine DB; a statement per few dozen rows takes minutes at most.
+"""
 
 PREFIXES: Mapping[CloningScope, tuple[str, ...]] = {
     CloningScope.CFG: ("CFG_",),
@@ -198,10 +205,7 @@ def _clone_table(
     names = [name for name, _ in columns]
     types = {name: mirror_type(kind, dialect) for name, kind in columns}
     column_ddl = ", ".join(f"{name} {types[name]}" for name in names)
-    insert = text(
-        f"INSERT INTO {mirror} ({', '.join(names)}) "
-        f"VALUES ({', '.join(f':p{i}' for i in range(len(names)))})"
-    )
+    per_statement = max(1, MAX_BOUND_VALUES // len(names))
     rows = 0
     try:
         with warehouse.begin() as conn:
@@ -217,7 +221,9 @@ def _clone_table(
                     conn.execute(text(f"{alter} {name} {types[name]}"))
                 conn.execute(text(f"TRUNCATE TABLE {mirror}"))
             for batch in _batches(engine, table, names):
-                conn.execute(insert, [{f"p{i}": v for i, v in enumerate(row)} for row in batch])
+                for start in range(0, len(batch), per_statement):
+                    chunk = batch[start : start + per_statement]
+                    conn.execute(*_insert_rows(mirror, names, chunk))
                 rows += len(batch)
     except SQLAlchemyError as error:
         raise CloningError(f"cloning {table} into {mirror} failed: {error}") from error
@@ -230,6 +236,17 @@ def _clone_table(
         " (created)" if created else (f" (added {', '.join(added)})" if added else ""),
     )
     return ClonedTable(table, mirror, rows, created, added)
+
+
+def _insert_rows(
+    mirror: str, names: list[str], rows: list[tuple[object, ...]]
+) -> tuple[Any, dict[str, object]]:
+    """Return one INSERT of ``rows`` into ``mirror``, and its parameters."""
+    groups = ", ".join(
+        "(" + ", ".join(f":r{r}c{c}" for c in range(len(names))) + ")" for r in range(len(rows))
+    )
+    params = {f"r{r}c{c}": value for r, row in enumerate(rows) for c, value in enumerate(row)}
+    return text(f"INSERT INTO {mirror} ({', '.join(names)}) VALUES {groups}"), params
 
 
 def _batches(engine: Engine, table: str, names: list[str]) -> Iterator[list[tuple[object, ...]]]:

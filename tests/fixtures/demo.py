@@ -10,12 +10,17 @@ and the emails Mailpit received.
 Each demo works in databases of its own: a SQLite file or a new PostgreSQL database for the
 Engine DB, and a DuckDB file or a new PostgreSQL database for the warehouse. The Iceberg REST
 catalog is shared, so the demo's namespaces there are emptied before it starts.
+
+On Databricks and Snowflake the account is the team's, so the demo never touches a schema it
+did not make: its schemas get a prefix unique to the run (``ec_<tag>_lnd``, ...), written into
+its SQL, scripts and metadata; it creates only those, and drops only those at the end.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -38,6 +43,7 @@ from etl_craft.dialects.engine import for_engine
 from etl_craft.engine.connection import engine_db
 from etl_craft.engine.queries import run_script
 from etl_craft.warehouse.connection import build_warehouse_engine
+from fixtures.cloud import DATABRICKS_VARS, SNOWFLAKE_VARS, require_variables
 from fixtures.services import (
     MINIO_PASSWORD,
     MINIO_USER,
@@ -55,7 +61,7 @@ ENGINES = ("sqlite", "postgres")
 WAREHOUSES = ("duckdb", "postgres", "duckdb_iceberg", "trino_iceberg")
 
 
-def installed_cli(installer: str, root: Path) -> Path:
+def installed_cli(installer: str, root: Path, extras: str = "trino") -> Path:
     """Install the wheel under test into a new virtual environment; return its ``etl-craft``."""
     wheel = os.environ.get("ETL_CRAFT_TEST_WHEEL")
     if not wheel:
@@ -64,7 +70,7 @@ def installed_cli(installer: str, root: Path) -> Path:
             pytest.fail(message, pytrace=False)
         pytest.skip(message)
     venv = root / f"venv-{installer}"
-    target = f"{wheel}[trino]"
+    target = f"{wheel}[{extras}]"
     if installer == "pip":
         subprocess.run([sys.executable, "-m", "venv", str(venv)], check=True)
         python = _venv_bin(venv, "python")
@@ -101,6 +107,15 @@ class Demo:
     tag: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     catalog: str = ""
     cleanup: list[Any] = field(default_factory=list)
+    prefix: str = ""
+
+    @property
+    def cloud(self) -> bool:
+        return self.warehouse_kind.startswith(("databricks", "snowflake"))
+
+    def table(self, name: str) -> str:
+        """Return ``schema.table`` as this demo's warehouse names it, with its catalog."""
+        return f"{self.catalog}.{self.prefix}{name}"
 
     # Building it
 
@@ -108,6 +123,9 @@ class Demo:
         shutil.copytree(
             DEMO, self.root, ignore=shutil.ignore_patterns("*.db", "*.duckdb", ".flaky-*")
         )
+        if self.cloud:
+            self.prefix = f"ec_{self.tag}_"
+            self._rename_schemas()
         smtp = require("mailpit_smtp")
         raw = {
             "Secrets": {"Source_type": "environment"},
@@ -126,13 +144,30 @@ class Demo:
             },
             "Engine": {"dev": self._engine_profile()},
             "Warehouse": self._warehouse_section(),
-            "Cloning": {"dev": {"Enabled": True, "Scope": "all"}},
+            # Snowflake Iceberg copies need a Cloning external volume the test account lacks.
+            "Cloning": {
+                "dev": {"Enabled": self.warehouse_kind != "snowflake_iceberg", "Scope": "all"}
+            },
         }
-        (self.root / "craft-connector.yml").write_text(
-            yaml.safe_dump(raw, sort_keys=False), encoding="utf-8"
-        )
+        path = self.root / "craft-connector.yml"
+        if self.cloud:
+            # The account's own schema, to make the demo's schemas from.
+            path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+            self._make_schemas()
+            raw["Warehouse"] = self._warehouse_section(schema=f"{self.prefix}aud")
+            path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+            return self
+        path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
         self._make_schemas()
         return self
+
+    def _rename_schemas(self) -> None:
+        """Give the demo's schemas this run's prefix, everywhere the project names them."""
+        pattern = re.compile(r"\b(pre_dm|lnd|prs|cdc|ds|dm|aud)\.")
+        for path in self.root.rglob("*"):
+            if path.suffix in (".sql", ".py") and path.is_file():
+                text_ = path.read_text(encoding="utf-8")
+                path.write_text(pattern.sub(rf"{self.prefix}\1.", text_), encoding="utf-8")
 
     def _engine_profile(self) -> dict[str, Any]:
         if self.engine_kind == "sqlite":
@@ -145,8 +180,10 @@ class Demo:
             "secret": PASSWORD_VAR,
         }
 
-    def _warehouse_section(self) -> dict[str, Any]:
+    def _warehouse_section(self, schema: str | None = None) -> dict[str, Any]:
         kind = self.warehouse_kind
+        if self.cloud:
+            return self._cloud_section(schema)
         if kind == "duckdb":
             self.catalog = "warehouse"
             return {"dev": {"jdbc_url": "jdbc:duckdb:warehouse.duckdb", "schema": "aud"}}
@@ -189,6 +226,19 @@ class Demo:
         }
         return {"Name": "DuckDB", "Table_format": "iceberg", "dev": profile}
 
+    def _cloud_section(self, schema: str | None) -> dict[str, Any]:
+        vendor = "DATABRICKS" if self.warehouse_kind.startswith("databricks") else "SNOWFLAKE"
+        names = DATABRICKS_VARS if vendor == "DATABRICKS" else SNOWFLAKE_VARS
+        require_variables(vendor, names)
+        fields: dict[str, Any] = {name.lower(): f"ETL_CRAFT_TEST_{vendor}_{name}" for name in names}
+        self.catalog = os.environ[
+            f"ETL_CRAFT_TEST_{vendor}_{'CATALOG' if vendor == 'DATABRICKS' else 'DATABASE'}"
+        ]
+        if schema is not None:
+            fields["schema"] = schema
+        table_format = "iceberg" if self.warehouse_kind.endswith("iceberg") else "native"
+        return {"Name": vendor.title(), "Table_format": table_format, "dev": fields}
+
     def _new_database(self, role: str) -> str:
         pg = require("postgres")
         name = f"demo_{role}_{self.tag}"
@@ -212,6 +262,19 @@ class Demo:
 
     def _make_schemas(self) -> None:
         """Make the schemas the demo writes, as a team does before its first run."""
+        if self.cloud:
+            names = [f"{self.catalog}.{self.prefix}{schema}" for schema in SCHEMAS]
+            with self.warehouse() as engine, engine.begin() as conn:
+                for name in names:
+                    conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {name}"))
+
+            def drop() -> None:
+                with self.warehouse() as engine, engine.begin() as conn:
+                    for name in names:
+                        conn.execute(text(f"DROP SCHEMA IF EXISTS {name} CASCADE"))
+
+            self.cleanup.append(drop)
+            return
         if self.warehouse_kind in ("duckdb_iceberg", "trino_iceberg"):
             _empty_namespaces(SCHEMAS)
             return
@@ -283,9 +346,10 @@ class Demo:
         return _Closing(build_warehouse_engine(self.config))
 
     def rows(self, sql: str) -> list[tuple[Any, ...]]:
-        """Run ``sql`` on the warehouse; ``{c}`` is replaced by the catalog, as ``{c}.dm.x``."""
+        """Run ``sql`` on the warehouse; ``{c}.`` becomes the catalog and the schema prefix."""
+        sql = sql.replace("{c}.", f"{self.catalog}.{self.prefix}")
         with self.warehouse() as engine, engine.connect() as conn:
-            return [tuple(row) for row in conn.execute(text(sql.format(c=self.catalog)))]
+            return [tuple(row) for row in conn.execute(text(sql))]
 
     def engine_rows(self, sql: str, **params: Any) -> list[tuple[Any, ...]]:
         engine = engine_db(self.config)
