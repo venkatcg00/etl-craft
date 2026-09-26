@@ -1,0 +1,8 @@
+# What running the demo in place creates.
+engine.db*
+warehouse.duckdb*
+logs/
+catalog/
+.catalog.*
+ingestion_scripts/.flaky-has-failed
+__pycache__/

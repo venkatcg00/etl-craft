@@ -131,14 +131,15 @@ def test_a_pipeline_runs_in_waves_and_fails_when_a_task_fails(config, pipeline, 
     run_id = outcome.pipeline_run_id
     assert outcome.status == RunStatus.FAILED
     assert outcome.message == (
-        f"P: pipeline_run_id={run_id} FAILED — 2 task(s) did not succeed: broken (FAILED), "
-        "after_broken (never started); 1 of them could not start because their dependencies "
-        "were not met"
+        f"P: pipeline_run_id={run_id} FAILED — 1 task(s) did not succeed: broken (FAILED); "
+        "skipped because of the failure: after_broken"
     )
     assert statuses(engine, run_id) == {
         "extract": ("SUCCESS", 1, 9),
         "transform": ("SUCCESS", 1, 9),
         "broken": ("FAILED", 1, None),
+        # No retry comes for broken in this run, so what waits on it is skipped, not left.
+        "after_broken": ("SKIPPED", 1, None),
         "alert": ("SKIPPED", 1, None),
     }
     assert run_row(engine, run_id).status == "FAILED"
@@ -325,7 +326,9 @@ def test_the_command_line(config, pipeline, capsys, monkeypatch):
     # The real task process has no handlers installed, so every task that runs fails.
     assert cli_main(["run", "--pipeline_code", "P"]) == ExitCode.FAILURE
     # alert runs because extract failed; transform and after_broken never can.
-    assert "FAILED — 5 task(s) did not succeed" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "FAILED — 3 task(s) did not succeed" in out
+    assert "skipped because of the failure: transform, after_broken" in out
     with engine.begin() as conn:
         start_run(conn, conn.execute(text("SELECT PIPELINE_ID FROM CFG_PIPELINES")).scalar_one())
     assert cli_main(["run", "--pipeline_code", "P", "--finalize-only"]) == ExitCode.FAILURE

@@ -153,7 +153,7 @@ squash-merged by pull request (see `CONTRIBUTING.md` for the definition of done)
 | G2b | `feat/services-validate` | `validate`: every active pipeline's metadata checked without running anything, with the handlers' own checks (SQL spec and storage, `SETUP_TABLE` audit columns, business rules, scripts parsed and not imported, alert subjects and bodies for every outcome), graphs and cycles within and between pipelines, dependencies on inactive tasks and pipelines, `HAS_DATA` on tasks that report no rows, alert ordering, `ROW_ID` rule keys on rebuilt tables, codes, typed `PIPELINE_PARAMETERS`, and unread parameters (WARN); `--pipeline_code`; exit 1 on a FAIL | `validate.py` | E2, F1 | done |
 | G2c | `feat/services-cloning` | Cloning the Engine DB tables of `Scope` into the Warehouse profile's schema after each run (the `on_finalized` hook), and `etl-craft clone`: mirrors created with portable types when missing and never dropped (a column an upgrade adds is added with ALTER TABLE ... ADD COLUMN; one removed stays, NULL), every row replaced per table in one transaction, serialized by a `clone` lock and the single-writer queue; refuses the Engine DB's own schema; a failure after a run is logged and leaves the run's status, by hand it is a `CloningError` (exit 17); `doctor` checks it | `cloning.py` | E2 | done |
 | H1 | `test/connection-matrix` | Every resource with every locally verifiable auth mode, through a `craft-connector.yml`, the loader and `doctor`'s checks (and a real email for the relay); `doctor`'s verified modes are exactly those the matrix and the cloud suites exercise. PostgreSQL `key_file` (client certificate) now verified; its passphrase is optional | `tests/test_auth.py` | G2 | done |
-| H2 | `test/e2e-demo` | Demo project run from the installed package, via pip and via uv | — | G1, G2, F2–F4 | |
+| H2 | `test/e2e-demo` | The Support Insights demo (`examples/demo`, the domain and layers of the Support-Insights platform, on local services), run from the built wheel installed with pip for every Engine DB and local warehouse, and with uv on SQLite and DuckDB, in local mode and under a simulated orchestrator running the generated DAGs; one CI job per warehouse. It found, and this fixes: a local run left the tasks behind a failure unstarted, so its closing alert never ran (they are now `SKIPPED` once no retry can come); `validate` refused an alert that only watches for failures | `tests/e2e/`, `examples/demo` | G1, G2, F2–F4 | done |
 | H3 | `test/cloud-acceptance` | Databricks and Snowflake suites, `make acceptance-cloud`, evidence | cloud tests | G2 | |
 | I1 | `docs/guides` | Quick Start, guides, deployment, connectors | `docs/`, `README.md` | G1, G2 | |
 | I2 | `docs/reference-generated` | Generated CLI, configuration, parameter and schema references; the `docs` evidence suite (a test around the strict build) | — | G1, G2 | |
@@ -167,6 +167,16 @@ After 0.1.0:
 - **K1 `feat/catalog-runs`**: run history and KPIs in the catalog: each pipeline's and task's
   runs over time, durations, row counts and failures, SLA misses, and trends, reachable from the
   DAGs and Warehouse tabs like everything else.
+  The cross-pipeline trackers become an append-only consumption log (one row per downstream
+  run, dependency and upstream run consumed, the gate reading the latest), so the catalog can
+  show which upstream runs each run was built from; and how long a gate waits for a running
+  upstream (an hour today) becomes a setting.
+- **L1 `examples/support-insights`**: a complete example project built on the released package,
+  adapted from the Support-Insights platform (github.com/venkatcg00/Supports-Insights-Docker):
+  its real sources (MongoDB, Kafka, MinIO) landed by ingestion scripts, the `lnd`, `prs`, `cdc`,
+  `pre_dm` and `dm` layers as etl-craft pipelines in place of its PySpark DAGs, orchestrated by
+  the generated DAGs, with the catalog published beside its dashboards. The H2 demo
+  (`examples/demo`) is its starting point: the same domain and layers, on local services only.
 
 ## Checkpoints
 

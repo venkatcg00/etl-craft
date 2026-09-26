@@ -92,6 +92,41 @@ jobs:
         run: >-
           uv run pytest -q -m "warehouse_postgres or warehouse_duckdb or
           warehouse_duckdb_iceberg or warehouse_trino_iceberg"
+      - name: The connection matrix
+        run: uv run pytest -q -m connections
+      - name: Service logs
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Stop the local services
+        if: always()
+        run: make services-down
+
+  e2e:
+    name: end-to-end demo (${{ matrix.warehouse }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        warehouse: [duckdb, postgres, duckdb_iceberg, trino_iceberg]
+    env:
+      ETL_CRAFT_REQUIRE_SERVICES: "1"
+      ETL_CRAFT_E2E_WAREHOUSE: ${{ matrix.warehouse }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked --all-groups --python 3.11
+      - name: Build the wheel
+        run: uv build --wheel --out-dir dist
+      - name: Start the local services
+        run: make services-up
+      - name: The demo from the wheel, installed with pip and with uv
+        run: |
+          export ETL_CRAFT_TEST_WHEEL="$(ls "$PWD"/dist/*.whl)"
+          uv run pytest -q -m "e2e_pip or e2e_uv"
       - name: Service logs
         if: failure()
         run: docker compose logs --no-color

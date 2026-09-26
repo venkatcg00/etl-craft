@@ -174,8 +174,11 @@ def run_pipeline(
                 for wave in graph.waves():
                     waves.run(wave)
                 never_ready: list[int] = []
+                after_failure: list[int] = []
             else:
-                never_ready = _run_until_settled(engine, graph, pipeline_run_id, task_codes, waves)
+                never_ready, after_failure = _run_until_settled(
+                    engine, graph, pipeline_run_id, task_codes, waves
+                )
         return _finalize(
             engine,
             pipeline_code,
@@ -186,6 +189,7 @@ def run_pipeline(
             detail.sla_in_hours,
             hooks,
             never_ready,
+            after_failure,
         )
 
 
@@ -376,12 +380,24 @@ def _run_until_settled(
     pipeline_run_id: int,
     task_codes: dict[int, str],
     waves: _Waves,
-) -> list[int]:
-    """Run waves until every task is settled or none can start; return those never started."""
+) -> tuple[list[int], list[int]]:
+    """Run waves until every task is settled or none can start.
+
+    When nothing more can start, no failed task will be retried in this run, which is about to
+    end: the tasks that could only have run after a failure's retry are recorded ``SKIPPED``,
+    and those that wait for them with ``ALWAYS`` or ``FAILURE`` (an alert) run in turn.
+    Returns the tasks never started, and those skipped because of a failure.
+    """
     task_ids = list(graph.task_ids)
     attempted: set[int] = set()
+    failures_final = False
+    after_failure: list[int] = []
     while True:
-        _settle_unsatisfiable(engine, graph, pipeline_run_id, task_codes)
+        skipped = _settle_unsatisfiable(
+            engine, graph, pipeline_run_id, task_codes, failures_final=failures_final
+        )
+        if failures_final:
+            after_failure.extend(skipped)
         with engine.connect() as conn:
             run_state = runlog.fetch_run_state(conn, pipeline_run_id, task_ids)
         pending = [
@@ -391,21 +407,33 @@ def _run_until_settled(
             and task_id not in attempted
         ]
         if not pending:
-            return []
+            return [], after_failure
         ready = [task_id for task_id in graph.ready(run_state) if task_id not in attempted]
         if not ready:
-            return pending
+            if failures_final and not skipped:
+                return pending, after_failure
+            failures_final = True
+            continue
         attempted.update(ready)
         waves.run(ready)
 
 
 def _settle_unsatisfiable(
-    engine: Engine, graph: DependencyGraph, pipeline_run_id: int, task_codes: dict[int, str]
-) -> None:
-    """Record ``SKIPPED`` for every task not yet run whose dependencies can never be met."""
+    engine: Engine,
+    graph: DependencyGraph,
+    pipeline_run_id: int,
+    task_codes: dict[int, str],
+    *,
+    failures_final: bool = False,
+) -> list[int]:
+    """Record ``SKIPPED`` for every task not yet run whose dependencies can never be met.
+
+    Returns the tasks recorded.
+    """
     with engine.connect() as conn:
         run_state = runlog.fetch_run_state(conn, pipeline_run_id, list(graph.task_ids))
-    for task_id in graph.unsatisfiable(run_state):
+    skipped: list[int] = []
+    for task_id in graph.unsatisfiable(run_state, failures_final=failures_final):
         reason = f"its dependencies can never be met under pipeline_run_id={pipeline_run_id}"
         with engine.begin() as conn:
             binding = runlog.find_or_create_task_run(conn, task_id, pipeline_run_id)
@@ -414,7 +442,9 @@ def _settle_unsatisfiable(
             runlog.finish_task_run(
                 conn, binding.task_run_id, status=RunStatus.SKIPPED, error_message=reason
             )
+        skipped.append(task_id)
         logger.info("%s: SKIPPED — %s", task_codes[task_id], reason)
+    return skipped
 
 
 def _finalize(
@@ -427,6 +457,7 @@ def _finalize(
     sla_hours: float | None,
     hooks: RunHooks,
     never_ready: Sequence[int] = (),
+    after_failure: Sequence[int] = (),
 ) -> PipelineOutcome:
     """End the run from its tasks' statuses, record its SLA, and consume its upstream runs."""
     _settle_unsatisfiable(engine, graph, pipeline_run_id, task_codes)
@@ -453,6 +484,9 @@ def _finalize(
                 f"; {len(never_ready)} of them could not start because their dependencies "
                 "were not met"
             )
+        if after_failure:
+            skipped = ", ".join(task_codes[t] for t in after_failure)
+            message += f"; skipped because of the failure: {skipped}"
     if sla is not None and sla.status == SlaStatus.BREACHED:
         message += f"; {sla.describe()}"
     outcome = PipelineOutcome(status, message, pipeline_run_id, sla)

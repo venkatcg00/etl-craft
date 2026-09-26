@@ -33,7 +33,7 @@ something other than what the metadata says.
 | `SQL` tasks | everything the task checks before it starts: the action, the target, exactly one read-only SELECT (inline, or a file that exists), the pipeline-id tokens, the merge parameters, `TABLE_FORMAT`, storage parameters the warehouse would ignore, and which audit columns a `SETUP_TABLE` target gets |
 | `BUSINESS_RULES` tasks | no active rule; a rule's key column, target table or SQL; a rule keyed on `ROW_ID` of a table a `CREATE_TABLE` or `OVERWRITE_TABLE` task rebuilds, since its flags could never be cleared |
 | `PYTHON` tasks | `SCRIPT_NAME` missing or outside `ingestion_scripts/`, `INPUT_PARAMS` not a JSON object, or a script with a syntax error, no top-level `run`, an `async` `run`, or a `run` that takes more than the task |
-| `EMAIL_ALERT` tasks | recipients, `EMAIL_ON_STATUS`, or tokens in a subject or body; a subject or body missing for any outcome the task can send on; or an alert that does not depend on every task that nothing else depends on, so it could report on a run still in progress |
+| `EMAIL_ALERT` tasks | recipients, `EMAIL_ON_STATUS`, or tokens in a subject or body; a subject or body missing for any outcome the task can send on; or an alert that does not depend on every task that nothing else depends on, so it could report on a run still in progress (an alert whose every dependency is `FAILURE` watches those tasks instead, and is not checked for this) |
 | Every task | a `TASK_TIMEOUT_SECONDS` that is not a whole number; a SQL, business-rules or alert task in a project without the `Warehouse` or `Email` section it needs |
 
 A `WARN` works, but deserves a look:

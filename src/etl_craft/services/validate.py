@@ -241,6 +241,9 @@ def _alert_ordering(data: _Metadata, report: Report) -> None:
         leaves = {t.task_code for t in tasks if t.task_code not in alerts} - depended_on
         for alert_code, alert in sorted(alerts.items()):
             waits = {e.depends_on_task_code: e for e in edges if e.task_code == alert_code}
+            if waits and all(e.dependency_type == DependencyType.FAILURE for e in waits.values()):
+                # A failure watcher: it runs when what it watches fails, not at the run's end.
+                continue
             missing = sorted(leaves - set(waits))
             if missing:
                 report.fail(

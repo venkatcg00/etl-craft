@@ -1,0 +1,40 @@
+# Support Insights demo: an Engine DB in a SQLite file and a DuckDB warehouse beside this file,
+# with alerts sent to a local Mailpit (make services-up starts one on port 51025).
+#
+# Each setting is marked `# variable` or `# value`. A variable is looked up in the secrets
+# source (here: the process environment); when it is not set, the text itself is used.
+
+Secrets:
+  Source_type: environment             # value
+
+Orchestration:
+  Mode: local                          # value — run pipelines with `etl-craft run --pipeline_code`
+  Task_timeout_seconds: 600            # value
+  Max_parallel_tasks: 4                # value
+  Enforce_sla: true                    # value — email the pipeline's EMAIL_RECIPIENTS on an SLA miss
+  Email:
+    host: localhost                    # value
+    port: 51025                        # value — Mailpit's SMTP port
+    from_address: etl-craft@example.com  # value
+    from_name: Support Insights        # value
+    use_tls: false                     # value
+
+Engine:
+  dev:
+    jdbc_url: jdbc:sqlite:engine.db    # value — created beside this file
+    schema: main                       # value
+
+Warehouse:
+  Name: DuckDB                         # value
+  dev:
+    jdbc_url: jdbc:duckdb:warehouse.duckdb  # value — beside this file
+    schema: aud                        # value — where cloning copies the Engine DB tables
+
+Cloning:
+  dev:
+    Enabled: true                      # value
+    Scope: all                         # value
+
+Docs_site:
+  dev:
+    Schedule: "0 2 * * *"              # value — generate-yml --docs writes a DAG that runs nightly
