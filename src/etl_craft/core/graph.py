@@ -232,12 +232,13 @@ class DependencyGraph:
             for edge in self._dependencies_of[task_id]
         )
 
-    def unsatisfiable(self, run_state: RunState) -> list[int]:
+    def unsatisfiable(self, run_state: RunState, *, failures_final: bool = False) -> list[int]:
         """Return the sorted ids of the never-run tasks that can never become ready in this run.
 
         The caller records them ``SKIPPED``. A dependency is lost for good only when its
         upstream is settled (``SUCCESS`` or ``SKIPPED``) and does not satisfy it; a ``FAILED``
-        upstream may still succeed on a retry, and an ``IN-PROGRESS`` one has not finished.
+        upstream may still succeed on a retry, unless ``failures_final`` says no retry will come
+        in this run, and an ``IN-PROGRESS`` one has not finished.
         Skipping a task settles it, which can doom its own dependents, so the search repeats
         until nothing changes. Cross-pipeline dependencies always count as still possible.
 
@@ -251,7 +252,7 @@ class DependencyGraph:
                 for task_id in self._task_ids
                 if task_id not in result
                 and known.get(task_id, TaskRunState()).status is None
-                and self._is_unsatisfiable(task_id, known)
+                and self._is_unsatisfiable(task_id, known, failures_final)
             ]
             if not newly:
                 return sorted(result)
@@ -259,21 +260,26 @@ class DependencyGraph:
                 result.add(task_id)
                 known[task_id] = TaskRunState(status=RunStatus.SKIPPED)
 
-    def _is_unsatisfiable(self, task_id: int, run_state: RunState) -> bool:
+    def _is_unsatisfiable(self, task_id: int, run_state: RunState, failures_final: bool) -> bool:
         if not self.total_edge_count(task_id):
             return False
         still_possible = self._nodes_by_id[task_id].cross_pipeline_edge_count + sum(
             1
             for edge in self._dependencies_of[task_id]
             if not self._edge_permanently_unsatisfiable(
-                edge, run_state.get(edge.depends_on_task_id, TaskRunState())
+                edge, run_state.get(edge.depends_on_task_id, TaskRunState()), failures_final
             )
         )
         return still_possible < self.required_edge_count(task_id)
 
     @classmethod
-    def _edge_permanently_unsatisfiable(cls, edge: TaskEdge, upstream: TaskRunState) -> bool:
-        if upstream.status not in SETTLED_STATUSES:
+    def _edge_permanently_unsatisfiable(
+        cls, edge: TaskEdge, upstream: TaskRunState, failures_final: bool
+    ) -> bool:
+        settled = upstream.status in SETTLED_STATUSES or (
+            failures_final and upstream.status == RunStatus.FAILED
+        )
+        if not settled:
             return False
         return not cls._edge_satisfied(edge, upstream)
 

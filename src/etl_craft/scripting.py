@@ -37,8 +37,10 @@ from typing import Any
 from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
+from etl_craft.config.targets import active_catalog
 from etl_craft.core.enums import OffsetType
 from etl_craft.core.errors import HandlerError
+from etl_craft.core.text import qualify
 from etl_craft.warehouse.connection import open_warehouse
 
 OffsetValue = int | Decimal | str | datetime
@@ -161,6 +163,14 @@ class ScriptTask:
     config: ConnectorConfig
     engine_db: Engine
     logger: logging.Logger
+
+    def table(self, name: str) -> str:
+        """Return ``schema.table`` as its full name in the active warehouse database.
+
+        ``database.schema.table`` is kept as written, so a script names its tables once and
+        writes to the development, test or production database the profile selects.
+        """
+        return qualify(name, active_catalog(self.config))
 
     @contextmanager
     def warehouse(self) -> Iterator[Engine]:

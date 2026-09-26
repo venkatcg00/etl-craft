@@ -315,6 +315,18 @@ def test_unsatisfiable_ignores_an_upstream_that_merely_failed():
     assert graph.unsatisfiable({1: TaskRunState(status="FAILED")}) == []
 
 
+def test_unsatisfiable_treats_a_failure_as_final_when_no_retry_will_come():
+    # A local run with nothing left to start: its failures stand, so what needs them to
+    # succeed is doomed, transitively, and an ALWAYS dependent (an alert) may then run.
+    graph = build_graph(nodes(1, 2, 3, 4), [edge(2, 1), edge(3, 2), edge(4, 3, "ALWAYS")])
+    failed = {1: TaskRunState(status="FAILED")}
+    assert graph.unsatisfiable(failed) == []
+    assert graph.unsatisfiable(failed, failures_final=True) == [2, 3]
+    skipped = {**failed, 2: TaskRunState(status="SKIPPED"), 3: TaskRunState(status="SKIPPED")}
+    # The failed task stays eligible for another attempt; the run loop does not repeat it.
+    assert graph.ready(skipped) == [1, 4]
+
+
 def test_unsatisfiable_ignores_an_upstream_still_in_progress():
     graph = build_graph(nodes(1, 2), [edge(2, 1)])
     assert graph.unsatisfiable({1: TaskRunState(status="IN-PROGRESS")}) == []

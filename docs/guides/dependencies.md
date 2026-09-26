@@ -53,8 +53,12 @@ to start.
   `FAILURE` dependency on a task that succeeded, for example. Skipping cascades: a task that
   waits for the skipped task's `SUCCESS` is skipped too, while an `ALWAYS` dependency on it is
   satisfied.
-- **A failed upstream is not final:** a retry of the run may still turn it into `SUCCESS`, so
-  its dependents wait rather than being skipped.
+- **A failed upstream is not final while the run goes on:** a retry may still turn it into
+  `SUCCESS`, so its dependents wait rather than being skipped. Under an orchestrator the retry
+  comes in the same run. In local mode, once nothing else can start, no retry will come in this
+  run, so the tasks waiting on the failure are recorded `SKIPPED`, and those that wait on them
+  with `ALWAYS` or `FAILURE`, such as an alert, then run. The run ends `FAILED`, and its summary
+  names the tasks skipped because of the failure.
 
 Dependencies on tasks in other pipelines are checked when the task itself starts, so they never
 cause a task to be skipped before it runs.

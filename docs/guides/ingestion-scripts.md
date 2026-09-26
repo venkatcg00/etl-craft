@@ -43,6 +43,7 @@ def run(task: ScriptTask) -> ScriptResult:
 | `refresh_type` | the pipeline's `FULL` or `INCREMENTAL` |
 | `force` | true when the task was run with `--force` |
 | `warehouse()` | a connection to the warehouse, queued behind other writers where the warehouse allows only one (a DuckDB file) |
+| `table(name)` | `schema.table` as its full name in the active warehouse database, such as `analytics.raw.orders`, so the same script writes to each environment's database |
 | `logger` | a logger named after the task |
 | `task_params`, `config` | the task's parameters and the loaded `craft-connector.yml` |
 

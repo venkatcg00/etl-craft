@@ -389,3 +389,25 @@ def test_the_command(project, capsys):
     assert main(["validate", "--pipeline_code", "NOPE"]) == ExitCode.METADATA
     with pytest.raises(MetadataError):
         validate(engine, load_config("craft-connector.yml"), "NOPE")
+
+
+def test_an_alert_that_only_watches_for_failures_may_run_mid_run(project):
+    engine, config, _ = project
+    with engine.begin() as conn:
+        p = good_pipeline(conn, "WATCHED")
+        load = conn.execute(
+            text("SELECT TASK_ID FROM CFG_TASKS WHERE TASK_CODE = 'load' AND PIPELINE_ID = :p"),
+            {"p": p},
+        ).scalar_one()
+        watcher = add_task(
+            conn,
+            p,
+            "watcher",
+            "EMAIL_ALERT",
+            EMAIL_TO="ops@x.io",
+            EMAIL_SUBJECT="$$pipeline_code: $$status",
+            EMAIL_BODY="$$error_message",
+            EMAIL_ON_STATUS="FAILED",
+        )
+        add_dependency(conn, p, watcher, load, "FAILURE")
+    assert found(validate(engine, config)) == []
