@@ -12,9 +12,12 @@ A new run starts only when the pipeline's dependencies on other pipelines are sa
 without that check, and its finished tasks are not run again. Before either, the connections the
 run uses are tested (see ``connections``).
 
-In remote mode an orchestrator runs each task with ``run --task_code``, between ``run
---init-only``, which tests connections, checks the gate and starts the run, and ``run
---finalize-only``, which ends it.
+In remote mode the orchestrator is the only source of truth for scheduling (see ``remote``). It
+runs each task with ``run --task_code``, between ``run --init-only``, which refuses rules the
+orchestrator does not support, tests connections and starts the run, and ``run
+--finalize-only``, which records its decisions and ends the run: a task it never ran is
+``SKIPPED``, and the run is ``FAILED`` when a task failed, ``SKIPPED`` when it ran none. No gate
+is checked and no upstream run is consumed; the orchestrator's DAGs hold those rules.
 
 Every run of a pipeline with ``SLA_IN_HOURS`` is marked ``MET`` or ``BREACHED``. While a local run
 is going, a watcher marks it ``BREACHED`` as soon as the SLA passes; otherwise the finalize step
@@ -56,6 +59,7 @@ from etl_craft.execution.gates import (
     check_pipeline_dependencies,
     consume_pipeline_dependencies,
 )
+from etl_craft.execution.remote import require_supported
 from etl_craft.execution.runner import ChildOptions, TaskOutcome, run_task
 from etl_craft.handlers.mail import send_sla_lapse_email
 
@@ -203,12 +207,18 @@ def init_pipeline_run(
 ) -> PipelineOutcome:
     """Start or resume the run of ``pipeline_code``, for an orchestrator's first step.
 
-    Tests the run's connections and, for a new run, checks the pipeline's gate. The outcome is
-    ``IN-PROGRESS``, or ``SKIPPED`` when the gate was not satisfied.
+    Tests the run's connections and, for a new run in local mode, checks the pipeline's gate. The
+    outcome is ``IN-PROGRESS``, or ``SKIPPED`` when the gate was not satisfied. In remote mode the
+    orchestrator applies the pipeline's rules, so ``RemoteUnsupportedError`` is raised first when
+    it has rules the orchestrator does not support, and no gate is checked.
     """
+    remote = config.mode == Mode.REMOTE
+    if remote:
+        with engine.connect() as conn:
+            require_supported(conn, config, pipeline_code)
     pipeline_id, _ = _prepare(engine, config, pipeline_code)
     pipeline_run_id, skip_reason = _start_run(
-        engine, pipeline_code, pipeline_id, clock or Clock(), check_gate=True
+        engine, pipeline_code, pipeline_id, clock or Clock(), check_gate=not remote
     )
     if skip_reason is not None:
         return _skipped_run(
@@ -230,7 +240,9 @@ def finalize_active_run(
 ) -> PipelineOutcome:
     """End the active run of ``pipeline_code`` from its tasks' statuses, for an orchestrator.
 
-    Raises ``RunStateError`` when the pipeline has no active run.
+    In remote mode this records the orchestrator's decisions (see ``_record_orchestrated``);
+    in local mode, tasks that can never run are recorded ``SKIPPED`` as in a local run. Raises
+    ``RunStateError`` when the pipeline has no active run.
     """
     with engine.connect() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
@@ -254,6 +266,7 @@ def finalize_active_run(
             task_codes,
             detail.sla_in_hours,
             hooks or default_hooks(config, engine),
+            orchestrated=config.mode == Mode.REMOTE,
         )
 
 
@@ -447,6 +460,52 @@ def _settle_unsatisfiable(
     return skipped
 
 
+NOT_RUN_BY_ORCHESTRATOR = "not run by the orchestrator"
+"""Why ``--finalize-only`` records a task ``SKIPPED`` in remote mode."""
+
+
+def _record_orchestrated(
+    engine: Engine, graph: DependencyGraph, pipeline_run_id: int, task_codes: dict[int, str]
+) -> list[int]:
+    """Record what the orchestrator decided about the tasks it left unfinished; remote mode.
+
+    A task with no row under the run was never run: its trigger rule was not met, or the DAG
+    run was stopped. It is recorded ``SKIPPED``. A task still ``IN-PROGRESS`` lost its
+    ``run --task_code`` process (the orchestrator waits for every task before finalizing), so it
+    is recorded ``FAILED``. Returns the tasks recorded ``SKIPPED``.
+    """
+    with engine.connect() as conn:
+        run_state = runlog.fetch_run_state(conn, pipeline_run_id, list(graph.task_ids))
+    not_run: list[int] = []
+    for task_id in sorted(graph.task_ids, key=lambda t: task_codes[t]):
+        state = run_state.get(task_id)
+        if state is not None and state.status != RunStatus.IN_PROGRESS:
+            continue
+        with engine.begin() as conn:
+            binding = runlog.find_or_create_task_run(conn, task_id, pipeline_run_id)
+            if binding.created:
+                runlog.finish_task_run(
+                    conn,
+                    binding.task_run_id,
+                    status=RunStatus.SKIPPED,
+                    error_message=NOT_RUN_BY_ORCHESTRATOR,
+                )
+                not_run.append(task_id)
+                logger.info("%s: SKIPPED — %s", task_codes[task_id], NOT_RUN_BY_ORCHESTRATOR)
+                continue
+            if binding.status != RunStatus.IN_PROGRESS:
+                continue
+            reason = (
+                "still IN-PROGRESS when the orchestrator finalized the run: its run --task_code "
+                "process ended without recording an outcome"
+            )
+            runlog.finish_task_run(
+                conn, binding.task_run_id, status=RunStatus.FAILED, error_message=reason
+            )
+        logger.error("%s: FAILED — %s", task_codes[task_id], reason)
+    return not_run
+
+
 def _finalize(
     engine: Engine,
     pipeline_code: str,
@@ -458,9 +517,20 @@ def _finalize(
     hooks: RunHooks,
     never_ready: Sequence[int] = (),
     after_failure: Sequence[int] = (),
+    *,
+    orchestrated: bool = False,
 ) -> PipelineOutcome:
-    """End the run from its tasks' statuses, record its SLA, and consume its upstream runs."""
-    _settle_unsatisfiable(engine, graph, pipeline_run_id, task_codes)
+    """End the run from its tasks' statuses, record its SLA, and consume its upstream runs.
+
+    ``orchestrated`` (remote mode) records the orchestrator's decisions instead of settling the
+    tasks that can never run, and consumes nothing; a run whose tasks the orchestrator ran none
+    of (a sensor on an upstream failed, say) ends ``SKIPPED``.
+    """
+    not_run: list[int] = []
+    if orchestrated:
+        not_run = _record_orchestrated(engine, graph, pipeline_run_id, task_codes)
+    else:
+        _settle_unsatisfiable(engine, graph, pipeline_run_id, task_codes)
     with engine.connect() as conn:
         run_state = runlog.fetch_run_state(conn, pipeline_run_id, list(graph.task_ids))
     unsettled = {
@@ -469,10 +539,12 @@ def _finalize(
         if run_state.get(task_id, TaskRunState()).status not in SETTLED_STATUSES
     }
     status = RunStatus.FAILED if unsettled else RunStatus.SUCCESS
+    if orchestrated and not unsettled and not_run and len(not_run) == len(graph.task_ids):
+        status = RunStatus.SKIPPED
     with engine.begin() as conn:
         breached_before = runlog.fetch_run_sla(conn, pipeline_run_id).sla_status
         sla = runlog.finalize_pipeline_run(conn, pipeline_run_id, status, sla_in_hours=sla_hours)
-    if status == RunStatus.SUCCESS:
+    if status == RunStatus.SUCCESS and not orchestrated:
         consume_pipeline_dependencies(engine, pipeline_id, pipeline_run_id)
 
     message = f"{pipeline_code}: pipeline_run_id={pipeline_run_id} {status}"
@@ -487,6 +559,8 @@ def _finalize(
         if after_failure:
             skipped = ", ".join(task_codes[t] for t in after_failure)
             message += f"; skipped because of the failure: {skipped}"
+    if not_run:
+        message += f"; not run by the orchestrator: {', '.join(task_codes[t] for t in not_run)}"
     if sla is not None and sla.status == SlaStatus.BREACHED:
         message += f"; {sla.describe()}"
     outcome = PipelineOutcome(status, message, pipeline_run_id, sla)

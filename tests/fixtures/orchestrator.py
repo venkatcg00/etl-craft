@@ -5,6 +5,10 @@ It reads a DAG's ``tasks``: each step's ``bash_command``, the steps it ``depends
 rule is met, and is otherwise ``skipped`` (``upstream_failed`` when a failure is why), which
 counts as settled for the steps after it. A step that fails is run again up to
 ``default_args.retries`` times, as Airflow's retries do.
+
+A ``sensor`` step asks ``sense`` for the state of the DAG run or task it waits for, and succeeds
+when that state is one of its ``allowed_states``; otherwise it fails, as a sensor that times out
+does. A DAG run succeeds when every leaf step succeeded or was skipped, as Airflow decides.
 """
 
 from __future__ import annotations
@@ -23,6 +27,13 @@ class DagRun:
 
     states: dict[str, str] = field(default_factory=dict)
     tries: dict[str, int] = field(default_factory=dict)
+    leaves: list[str] = field(default_factory=list)
+
+    @property
+    def state(self) -> str:
+        """``success`` when every leaf step succeeded or was skipped, else ``failed``."""
+        settled = all(self.states[leaf] in (SUCCESS, SKIPPED) for leaf in self.leaves)
+        return SUCCESS if settled else FAILED
 
 
 def _rule_met(rule: str, upstream: list[str]) -> bool | None:
@@ -44,11 +55,19 @@ def _rule_met(rule: str, upstream: list[str]) -> bool | None:
     raise AssertionError(f"a trigger rule this orchestrator does not know: {rule}")
 
 
-def run_dag(dag: dict[str, Any], execute: Callable[[list[str]], int]) -> DagRun:
-    """Run every step of ``dag``; ``execute`` runs one command and returns its exit status."""
+def run_dag(
+    dag: dict[str, Any],
+    execute: Callable[[list[str]], int],
+    sense: Callable[[dict[str, Any]], str | None] | None = None,
+) -> DagRun:
+    """Run every step of ``dag``; ``execute`` runs one command and returns its exit status.
+
+    ``sense`` returns the state a sensor step waits on, or ``None`` when there is none yet.
+    """
     steps: dict[str, dict[str, Any]] = dag["tasks"]
     retries = int(dag.get("default_args", {}).get("retries", 0))
-    run = DagRun()
+    upstream = {name for step in steps.values() for name in step["depends_on"]}
+    run = DagRun(leaves=[name for name in steps if name not in upstream])
     while len(run.states) < len(steps):
         ready = [
             name
@@ -64,6 +83,12 @@ def run_dag(dag: dict[str, Any], execute: Callable[[list[str]], int]) -> DagRun:
                 continue
             if met is False:
                 run.states[name] = UPSTREAM_FAILED
+                continue
+            if "sensor" in step:
+                assert sense is not None, f"{name} is a sensor, and nothing answers it"
+                run.tries[name] = 1
+                seen = sense(step["sensor"])
+                run.states[name] = SUCCESS if seen in step["sensor"]["allowed_states"] else FAILED
                 continue
             command = shlex.split(step["bash_command"])
             for attempt in range(1, retries + 2):

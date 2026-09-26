@@ -23,6 +23,7 @@ EXIT_CODES = {
     errors.LockTimeoutError: ExitCode.LOCK_TIMEOUT,
     errors.HandlerError: ExitCode.HANDLER,
     errors.CloningError: ExitCode.CLONING,
+    errors.RemoteUnsupportedError: ExitCode.REMOTE_UNSUPPORTED,
 }
 
 
@@ -53,6 +54,7 @@ def test_the_exit_codes():
         ("HANDLER", 15),
         ("UNEXPECTED", 16),
         ("CLONING", 17),
+        ("REMOTE_UNSUPPORTED", 18),
     ]
 
 

@@ -2,6 +2,7 @@
 
 import json
 import logging
+from dataclasses import replace
 
 import pytest
 import yaml
@@ -9,6 +10,7 @@ from sqlalchemy import text
 
 from etl_craft.cli import main
 from etl_craft.config import load_config
+from etl_craft.core.enums import Mode
 from etl_craft.core.errors import ExitCode, MetadataError
 from etl_craft.services.doctor import Status
 from etl_craft.services.validate import validate
@@ -410,4 +412,24 @@ def test_an_alert_that_only_watches_for_failures_may_run_mid_run(project):
             EMAIL_ON_STATUS="FAILED",
         )
         add_dependency(conn, p, watcher, load, "FAILURE")
+    assert found(validate(engine, config)) == []
+
+
+def test_remote_mode_fails_the_rules_its_orchestrator_does_not_support(project):
+    engine, config, _ = project
+    with engine.begin() as conn:
+        good_pipeline(conn)
+    remote = replace(config, mode=Mode.REMOTE)
+    report = validate(engine, remote)
+    assert found(report) == [
+        (
+            "SALES.rules",
+            Status.FAIL,
+            "depends on load with DEPENDENCY_TYPE = 'HAS_DATA'; the remote orchestrator does not "
+            "support this. An orchestrator sees whether a step succeeded, not whether it wrote "
+            "rows. Use DEPENDENCY_TYPE 'SUCCESS' and let the task handle an empty input, or run "
+            "it in local mode (Orchestration.Mode: local), where etl-craft applies it.",
+        )
+    ]
+    # The same metadata is fine in local mode, where etl-craft applies the rule.
     assert found(validate(engine, config)) == []

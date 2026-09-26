@@ -15,7 +15,13 @@ from sqlalchemy import text
 from etl_craft.cli import main as cli_main
 from etl_craft.config import EmailConfig, EmailProfile, load_config
 from etl_craft.core.enums import Mode, RunStatus
-from etl_craft.core.errors import ConnectionTestError, ExitCode, RunRefusedError, RunStateError
+from etl_craft.core.errors import (
+    ConnectionTestError,
+    ExitCode,
+    RemoteUnsupportedError,
+    RunRefusedError,
+    RunStateError,
+)
 from etl_craft.execution.gates import Clock
 from etl_craft.execution.pipeline import (
     RunHooks,
@@ -23,7 +29,7 @@ from etl_craft.execution.pipeline import (
     init_pipeline_run,
     run_pipeline,
 )
-from etl_craft.execution.runner import ChildOptions, run_task
+from etl_craft.execution.runner import ChildOptions, attempt_log_path, run_task
 from fixtures.metadata import (
     add_dependency,
     add_pipeline,
@@ -234,25 +240,120 @@ def test_remote_mode_refuses_a_whole_pipeline_run(config, pipeline):
 
 
 def test_an_orchestrator_starts_runs_and_finalizes(config, pipeline):
-    engine, _ = pipeline
+    engine, ids = pipeline
     remote = replace(config, mode=Mode.REMOTE)
     with pytest.raises(RunStateError, match="P has no active run to finalize"):
         finalize_active_run(engine, remote, "P")
+    with pytest.raises(RunStateError, match="--init-only`, starts it"):
+        run_task(engine, remote, "P", "extract", child=CHILD)
+    # The orchestrator holds the pipeline's dependencies: an unsatisfied one does not stop init.
+    with engine.begin() as conn:
+        add_pipeline_dependency(conn, ids["P"], add_pipeline(conn, "UP"))
 
     started = init_pipeline_run(engine, remote, "P")
     assert started.status == RunStatus.IN_PROGRESS
     assert started.message == f"P: pipeline_run_id={started.pipeline_run_id} IN-PROGRESS"
     # A second init resumes the same run.
     assert init_pipeline_run(engine, remote, "P").pipeline_run_id == started.pipeline_run_id
-    for code in ("extract", "transform", "broken"):
+    # A task runs when the orchestrator says, whatever its dependencies: transform before
+    # extract, and after_broken after broken failed.
+    for code in ("transform", "extract", "broken", "after_broken"):
         run_task(engine, remote, "P", code, child=CHILD)
 
     ended = finalize_active_run(engine, remote, "P")
     assert ended.status == RunStatus.FAILED
-    assert "broken (FAILED), after_broken (never started)" in ended.message
-    # alert can never run once extract succeeded: finalize records it SKIPPED.
-    assert statuses(engine, started.pipeline_run_id)["alert"][0] == "SKIPPED"
-    assert run_row(engine, started.pipeline_run_id).status == "FAILED"
+    assert ended.message == (
+        f"P: pipeline_run_id={started.pipeline_run_id} FAILED — 1 task(s) did not succeed: "
+        "broken (FAILED); not run by the orchestrator: alert"
+    )
+    run_id = started.pipeline_run_id
+    assert statuses(engine, run_id) == {
+        "extract": ("SUCCESS", 1, 9),
+        "transform": ("SUCCESS", 1, 9),
+        "broken": ("FAILED", 1, None),
+        "after_broken": ("SUCCESS", 1, 9),
+        "alert": ("SKIPPED", 1, None),
+    }
+    assert run_row(engine, run_id).status == "FAILED"
+    with engine.connect() as conn:
+        message = conn.execute(
+            text("SELECT ERROR_MESSAGE FROM AUD_TASK_RUN_LOG WHERE TASK_ID = :t"),
+            {"t": ids["alert"]},
+        ).scalar_one()
+    assert message == "not run by the orchestrator"
+
+    # A task cleared after the run ended runs again: the run reopens until finalized again.
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE = 'succeed' WHERE TASK_ID = :t"),
+            {"t": ids["broken"]},
+        )
+    rerun = run_task(engine, remote, "P", "broken", child=CHILD)
+    assert rerun.status == RunStatus.SUCCESS
+    assert run_row(engine, run_id).status == "IN-PROGRESS"
+    assert run_row(engine, run_id).end_date is None
+    # So does one that already succeeded: a new attempt on the same row.
+    assert run_task(engine, remote, "P", "extract", child=CHILD).status == RunStatus.SUCCESS
+    assert statuses(engine, run_id)["extract"] == ("SUCCESS", 2, 9)
+    log = attempt_log_path(remote, "P", run_id, "extract", 2).read_text("utf-8")
+    assert "fake handler doing succeed again" in log
+    again = finalize_active_run(engine, remote, "P")
+    assert (again.status, again.pipeline_run_id) == (RunStatus.SUCCESS, run_id)
+
+
+def test_a_run_the_orchestrator_ran_no_task_of_is_skipped(config, pipeline):
+    engine, _ = pipeline
+    remote = replace(config, mode=Mode.REMOTE)
+    run_id = init_pipeline_run(engine, remote, "P").pipeline_run_id
+    ended = finalize_active_run(engine, remote, "P")
+    assert ended.status == RunStatus.SKIPPED
+    assert ended.message == (
+        f"P: pipeline_run_id={run_id} SKIPPED; not run by the orchestrator: after_broken, "
+        "alert, broken, extract, transform"
+    )
+    assert run_row(engine, run_id).status == "SKIPPED"
+
+
+def test_finalize_fails_a_task_whose_orchestrated_process_was_lost(config, pipeline):
+    engine, ids = pipeline
+    remote = replace(config, mode=Mode.REMOTE)
+    run_id = init_pipeline_run(engine, remote, "P").pipeline_run_id
+    with engine.begin() as conn:
+        task_run(conn, ids["extract"], run_id, status="IN-PROGRESS")
+    ended = finalize_active_run(engine, remote, "P")
+    assert ended.status == RunStatus.FAILED
+    assert "extract (FAILED)" in ended.message
+    with engine.connect() as conn:
+        message = conn.execute(
+            text("SELECT ERROR_MESSAGE FROM AUD_TASK_RUN_LOG WHERE TASK_ID = :t"),
+            {"t": ids["extract"]},
+        ).scalar_one()
+    assert message.startswith("still IN-PROGRESS when the orchestrator finalized the run")
+
+
+def test_remote_mode_refuses_rules_the_orchestrator_does_not_support(config, pipeline):
+    engine, ids = pipeline
+    remote = replace(config, mode=Mode.REMOTE)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE CFG_TASKS SET RUN_CONDITION = 'N', RUN_CONDITION_COUNT = 1 "
+                "WHERE TASK_ID = :t"
+            ),
+            {"t": ids["transform"]},
+        )
+    with pytest.raises(RemoteUnsupportedError) as refused:
+        init_pipeline_run(engine, remote, "P")
+    assert str(refused.value).startswith(
+        "P has 1 rule(s) the remote orchestrator does not support, so they cannot be applied "
+        "in remote mode: P.transform: RUN_CONDITION = 'N' (RUN_CONDITION_COUNT = 1); the remote "
+        "orchestrator does not support this."
+    )
+    assert "or run it in local mode (Orchestration.Mode: local)" in str(refused.value)
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT COUNT(*) FROM AUD_PIPELINES_RUN_LOG")).scalar_one() == 0
+    # Local mode applies the rule itself.
+    assert init_pipeline_run(engine, config, "P").status == RunStatus.IN_PROGRESS
 
 
 def test_the_sla_is_marked_breached_while_the_run_is_still_going(config, engine_db):

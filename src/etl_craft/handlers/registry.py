@@ -20,7 +20,11 @@ from etl_craft.core.errors import HandlerError
 
 @dataclass(frozen=True)
 class TaskContext:
-    """Everything a handler needs about the task it runs, resolved before it starts."""
+    """Everything a handler needs about the task it runs, resolved before it starts.
+
+    ``force`` is set by ``run --force``. ``rerun`` is set when the task already ended ``SUCCESS``
+    or ``SKIPPED`` under the run and is run again, so nothing it did before is skipped.
+    """
 
     config: ConnectorConfig
     pipeline_id: int
@@ -34,6 +38,7 @@ class TaskContext:
     refresh_type: str
     task_params: Mapping[str, str]
     force: bool = False
+    rerun: bool = False
 
 
 @dataclass(frozen=True)

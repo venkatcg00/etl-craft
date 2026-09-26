@@ -1,9 +1,13 @@
 """``run --task_code``: run one task of a pipeline, in its own process.
 
-The task resolves its pipeline's active run itself; nothing hands it a ``pipeline_run_id``. It
-runs only when it may: not again once ``SUCCESS`` or ``SKIPPED`` under the run, not while it is
-already ``IN-PROGRESS``, and only when enough of its dependencies are satisfied. A task whose
-dependencies can never be satisfied under the run is recorded ``SKIPPED``.
+The task resolves its pipeline's active run itself; nothing hands it a ``pipeline_run_id``. In
+local mode it runs only when it may: not again once ``SUCCESS`` or ``SKIPPED`` under the run, not
+while it is already ``IN-PROGRESS``, and only when enough of its dependencies are satisfied. A
+task whose dependencies can never be satisfied under the run is recorded ``SKIPPED``.
+
+In remote mode the orchestrator decides, so the task runs whenever it is told to, with none of
+those checks (see ``remote``). Run again after it succeeded, it is a new attempt that skips
+nothing; run after the run ended, it reopens the run, which ``--finalize-only`` ends again.
 
 The task itself runs in a freshly started interpreter, supervised with its time limit. Its
 output goes to the attempt's log file, whose tail is kept in ``TASK_LOG``. When that process
@@ -86,14 +90,17 @@ def run_task(
     """Run one task under its pipeline's active run and return how it ended.
 
     ``force`` runs the task even when it already succeeded or its dependencies are not met, and
-    rebinds a finished run; it is refused in remote mode, where an orchestrator owns the runs.
-    Raises ``MetadataError`` for an unknown code and ``RunStateError`` when there is no run to
-    bind to.
+    rebinds a finished run; it is local mode's override, refused in remote mode, where the task
+    always runs as the orchestrator says. Raises ``MetadataError`` for an unknown code and
+    ``RunStateError`` when there is no run to bind to.
     """
     if force and config.mode == Mode.REMOTE:
         raise RunRefusedError(
-            "--force is only allowed in local mode; in remote mode the orchestrator owns the runs"
+            "--force is only allowed in local mode; in remote mode run --task_code already runs "
+            "the task whenever the orchestrator says, so there is nothing to override"
         )
+    if config.mode == Mode.REMOTE:
+        return _run_for_orchestrator(engine, config, pipeline_code, task_code, child)
     gate = gate or TrackedGate()
     with engine.connect() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
@@ -116,6 +123,56 @@ def run_task(
     if consumed and outcome.status == RunStatus.SUCCESS:
         gate.consume(engine, task_id, consumed)
     return outcome
+
+
+def _run_for_orchestrator(
+    engine: Engine,
+    config: ConnectorConfig,
+    pipeline_code: str,
+    task_code: str,
+    child: ChildOptions | None,
+) -> TaskOutcome:
+    """Run the task as the orchestrator said, under the run it resolves; remote mode."""
+    with engine.begin() as conn:
+        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+        task_id = resolve_task_id(conn, pipeline_id, task_code)
+        pipeline_run_id, reopened = runlog.resolve_run_for_orchestrator(conn, pipeline_id)
+        status = runlog.fetch_task_run_status(conn, task_id, pipeline_run_id)
+    if reopened is not None:
+        logger.warning(
+            "%s: pipeline_run_id=%d had already ended %s; the orchestrator ran %s again, so the "
+            "run is IN-PROGRESS again until --finalize-only ends it",
+            pipeline_code,
+            pipeline_run_id,
+            reopened,
+            task_code,
+        )
+    if status == RunStatus.IN_PROGRESS:
+        logger.warning(
+            "%s: already IN-PROGRESS under pipeline_run_id=%d; the orchestrator started it again, "
+            "so this is a new attempt",
+            task_code,
+            pipeline_run_id,
+        )
+    rerun = status in SETTLED_STATUSES
+    if rerun:
+        logger.info(
+            "%s: already %s under pipeline_run_id=%d; the orchestrator runs it again",
+            task_code,
+            status,
+            pipeline_run_id,
+        )
+    return _run_attempt(
+        engine,
+        config,
+        task_id,
+        task_code,
+        pipeline_code,
+        pipeline_run_id,
+        False,
+        child,
+        rerun=rerun,
+    )
 
 
 def _preflight(
@@ -226,6 +283,8 @@ def _run_attempt(
     pipeline_run_id: int,
     force: bool,
     child: ChildOptions | None,
+    *,
+    rerun: bool = False,
 ) -> TaskOutcome:
     """Bind and start an attempt, run it in its own process, and record how it ended."""
     child = child or ChildOptions()
@@ -251,6 +310,8 @@ def _run_attempt(
     ]
     if force:
         argv.append("--force")
+    if rerun:
+        argv.append("--rerun")
     logger.info(
         "starting %s attempt %d (task_run_id=%d), time limit %s, log %s",
         task_code,

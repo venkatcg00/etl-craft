@@ -35,6 +35,7 @@ something other than what the metadata says.
 | `PYTHON` tasks | `SCRIPT_NAME` missing or outside `ingestion_scripts/`, `INPUT_PARAMS` not a JSON object, or a script with a syntax error, no top-level `run`, an `async` `run`, or a `run` that takes more than the task |
 | `EMAIL_ALERT` tasks | recipients, `EMAIL_ON_STATUS`, or tokens in a subject or body; a subject or body missing for any outcome the task can send on; or an alert that does not depend on every task that nothing else depends on, so it could report on a run still in progress (an alert whose every dependency is `FAILURE` watches those tasks instead, and is not checked for this) |
 | Every task | a `TASK_TIMEOUT_SECONDS` that is not a whole number; a SQL, business-rules or alert task in a project without the `Warehouse` or `Email` section it needs |
+| Remote mode | a rule the orchestrator does not support: run condition `N`, a `HAS_DATA` dependency, a task whose dependencies have different types, or with `Global_dag` on a pipeline whose dependencies on other pipelines do; see [Running under an orchestrator](../deploying/orchestrator.md#rules-an-orchestrator-does-not-support) |
 
 A `WARN` works, but deserves a look:
 

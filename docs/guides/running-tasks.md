@@ -11,7 +11,7 @@ Nothing passes it a run id. If the pipeline has no active run, the command stops
 `9` (`RUN_STATE`); start one with `run --pipeline_code <code> --init-only`, or
 [run the whole pipeline](running-pipelines.md).
 
-The task does not run, and the command exits `0`, when:
+In local mode, the task does not run, and the command exits `0`, when:
 
 - it already ended `SUCCESS` or `SKIPPED` under this run: a retry never repeats finished work;
 - it is `IN-PROGRESS` under this run: it is never started twice;
@@ -31,8 +31,14 @@ Running a `FAILED` task again is a new attempt on the same `AUD_TASK_RUN_LOG` ro
 goes up, and the previous attempt's counts, message and log are cleared from the row.
 
 `--force` runs the task even if it already succeeded or its dependencies are not met, and may
-bind a run that already finished. It is only available in local mode; in remote mode the
-orchestrator owns the runs.
+bind a run that already finished. It is only available in local mode.
+
+## In remote mode
+
+The orchestrator decides when a task runs, so `run --task_code` runs it whenever it is told to:
+none of the checks above apply. Run again after it succeeded, it is a new attempt that skips
+nothing it did before; run after its run ended (a cleared task), it reopens that run. See
+[Running under an orchestrator](../deploying/orchestrator.md).
 
 ## Time limits
 

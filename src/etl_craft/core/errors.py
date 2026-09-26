@@ -34,6 +34,7 @@ class ExitCode(IntEnum):
     UNEXPECTED = 16
     """An error with no class of its own, including a bug; its traceback is logged."""
     CLONING = 17
+    REMOTE_UNSUPPORTED = 18
 
 
 class EtlCraftError(Exception):
@@ -116,3 +117,9 @@ class CloningError(EtlCraftError):
     """Copying an Engine DB table into the warehouse failed; the message names the table."""
 
     exit_code = ExitCode.CLONING
+
+
+class RemoteUnsupportedError(EtlCraftError):
+    """A pipeline has rules a remote orchestrator does not support; the message names each."""
+
+    exit_code = ExitCode.REMOTE_UNSUPPORTED
