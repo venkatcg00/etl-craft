@@ -108,6 +108,20 @@ class DependencyGraph:
         """Return the edges ``task_id`` waits on."""
         return list(self._dependencies_of[task_id])
 
+    def downstream_of(self, task_id: int) -> set[int]:
+        """Return every task that waits on ``task_id``, directly or through others."""
+        found: set[int] = set()
+        frontier = {task_id}
+        while frontier:
+            frontier = {
+                edge.task_id
+                for edges in self._dependencies_of.values()
+                for edge in edges
+                if edge.depends_on_task_id in frontier and edge.task_id not in found
+            }
+            found |= frontier
+        return found
+
     def waves(self) -> list[list[int]]:
         """Return the tasks in static waves: each wave depends only on earlier waves.
 

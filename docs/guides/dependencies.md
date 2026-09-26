@@ -84,6 +84,9 @@ the task runs.
    `AUD_TASK_DEPENDENCY_TRACKER`. The tracker moves forward only when the downstream run or task
    succeeds, so a downstream that failed is retried against the same upstream run.
 
+`Orchestration.Dependency_gates: warn` or `off` relaxes these checks per profile, recording
+each bypass; see [Relax dependency gates](run-control.md#relax-dependency-gates).
+
 A pipeline whose dependencies are not satisfied has its run recorded `SKIPPED`. A task whose
 dependencies on other pipelines are not satisfied is recorded `SKIPPED` too, unless an upstream in
 its own pipeline has not finished yet. `SKIPPED` is final for that run: the task does not run

@@ -55,7 +55,7 @@ from etl_craft.config.targets import (
     parse_warehouse_url,
     preferred_connection_url,
 )
-from etl_craft.core.enums import AuthMode, CloningScope, Mode, TableFormat
+from etl_craft.core.enums import AuthMode, CloningScope, GatePolicy, Mode, TableFormat
 from etl_craft.core.errors import ConfigurationError
 from etl_craft.core.text import is_env_name, is_safe_identifier
 
@@ -84,6 +84,7 @@ _ORCHESTRATION_KEYS = frozenset(
         "Email_on_failure",
         "Email_recipients",
         "Allow_schedule",
+        "Dependency_gates",
         "Email",
     }
 )
@@ -134,6 +135,7 @@ def parse_config(raw: Any, path: Path) -> ConnectorConfig:
     orchestration = _profiled_settings("Orchestration", raw, global_profile, path, resolver)
     _reject_unknown(orchestration.settings, _ORCHESTRATION_KEYS, "Orchestration", path)
     mode = _parse_mode(orchestration, path)
+    dependency_gates = _parse_dependency_gates(orchestration, mode, path)
     limits = _parse_limits(orchestration, path)
     dag_defaults = _parse_dag_defaults(orchestration, path)
     orchestrator_name = orchestration.text("Name")
@@ -157,6 +159,7 @@ def parse_config(raw: Any, path: Path) -> ConnectorConfig:
         limits=limits,
         config_path=path,
         orchestrator_name=orchestrator_name,
+        dependency_gates=dependency_gates,
         settings=tuple(resolver.sources),
         log_dir=log_dir,
     )
@@ -429,6 +432,27 @@ def _parse_mode(orchestration: _Profiled, path: Path) -> Mode:
             f"{orchestration.resolver.hint(orchestration.where('Mode'))}"
         )
     return Mode(mode)
+
+
+def _parse_dependency_gates(orchestration: _Profiled, mode: Mode, path: Path) -> GatePolicy:
+    raw = orchestration.text("Dependency_gates")
+    if raw is None:
+        return GatePolicy.ENFORCE
+    value = raw.lower()
+    if value not in {member.value for member in GatePolicy}:
+        raise ConfigurationError(
+            f"{path}: Orchestration.Dependency_gates must be enforce, warn or off, got {raw!r}"
+            f"{orchestration.resolver.hint(orchestration.where('Dependency_gates'))}"
+        )
+    policy = GatePolicy(value)
+    if mode == Mode.REMOTE and policy != GatePolicy.ENFORCE:
+        raise ConfigurationError(
+            f"{path}: Orchestration.Dependency_gates is {policy}, but Mode is remote: in remote "
+            "mode etl-craft checks no dependency gate (the orchestrator's sensors do), so there "
+            "is nothing to relax. Remove Dependency_gates from the remote profile, or bypass the "
+            "sensor in the orchestrator"
+        )
+    return policy
 
 
 def _whole_number(settings: _Profiled, key: str, default: int | None, path: Path) -> Any:

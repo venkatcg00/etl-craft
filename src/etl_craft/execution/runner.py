@@ -27,8 +27,14 @@ from pathlib import Path
 from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.core.enums import SETTLED_STATUSES, TERMINAL_STATUSES, Mode, RunStatus
-from etl_craft.core.errors import ConfigurationError, RunRefusedError
+from etl_craft.core.enums import (
+    SETTLED_STATUSES,
+    TERMINAL_STATUSES,
+    InterventionAction,
+    Mode,
+    RunStatus,
+)
+from etl_craft.core.errors import ConfigurationError, RunRefusedError, UsageError
 from etl_craft.core.graph import DependencyGraph, RunState, TaskRunState, build_graph
 from etl_craft.engine import runlog
 from etl_craft.engine.queries import statement
@@ -40,6 +46,7 @@ from etl_craft.execution.gates import (
     CrossPipelineGate,
     TrackedGate,
 )
+from etl_craft.execution.interventions import check_override, record_change, record_gate_bypass
 from etl_craft.execution.limits import task_timeout_seconds
 from etl_craft.execution.supervisor import (
     KILL_GRACE_SECONDS,
@@ -64,6 +71,26 @@ class TaskOutcome:
     status: RunStatus
     message: str
     task_run_id: int | None = None
+
+
+@dataclass(frozen=True)
+class Override:
+    """An operator's override of the checks before a task runs, with the reason for it.
+
+    ``rerun`` runs the task again although it already ended ``SUCCESS`` or ``SKIPPED``, as a
+    new attempt that skips nothing, reopening the run if it had ended (``--rerun``). Otherwise
+    the task runs without its dependencies being checked (``--ignore-dependencies``). Neither
+    checks the task's dependencies or consumes an upstream run, and each is recorded in
+    ``AUD_RUN_INTERVENTIONS``.
+    """
+
+    reason: str
+    rerun: bool = False
+
+    @property
+    def action(self) -> InterventionAction:
+        """How the override is recorded."""
+        return InterventionAction.RERUN if self.rerun else InterventionAction.IGNORE_DEPENDENCIES
 
 
 @dataclass(frozen=True)
@@ -92,14 +119,22 @@ def run_task(
     force: bool = False,
     gate: CrossPipelineGate | None = None,
     child: ChildOptions | None = None,
+    override: Override | None = None,
 ) -> TaskOutcome:
     """Run one task under its pipeline's active run and return how it ended.
 
     ``force`` runs the task even when it already succeeded or its dependencies are not met, and
     rebinds a finished run; it is local mode's override, refused in remote mode, where the task
-    always runs as the orchestrator says. Raises ``MetadataError`` for an unknown code and
+    always runs as the orchestrator says. ``override`` is an operator's recorded override (see
+    ``Override``), also local mode's. Raises ``MetadataError`` for an unknown code and
     ``RunStateError`` when there is no run to bind to.
     """
+    if override is not None:
+        option = "--rerun" if override.rerun else "--ignore-dependencies"
+        check_override(config, option, override.reason)
+        if force:
+            raise UsageError(f"{option} and --force are different overrides: choose one")
+        return _run_overridden(engine, config, pipeline_code, task_code, override, child)
     if force and config.mode == Mode.REMOTE:
         raise RunRefusedError(
             "--force is only allowed in local mode; in remote mode run --task_code already runs "
@@ -107,7 +142,7 @@ def run_task(
         )
     if config.mode == Mode.REMOTE:
         return _run_for_orchestrator(engine, config, pipeline_code, task_code, child)
-    gate = gate or TrackedGate()
+    gate = gate or TrackedGate(policy=config.dependency_gates)
     with engine.connect() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         task_id = resolve_task_id(conn, pipeline_id, task_code)
@@ -117,17 +152,94 @@ def run_task(
         )
     consumed: dict[int, int] | None = None
     if not force:
-        blocked, consumed = _preflight(
-            engine, gate, pipeline_id, task_id, task_code, pipeline_run_id
-        )
+        blocked, cross = _preflight(engine, gate, pipeline_id, task_id, task_code, pipeline_run_id)
         if blocked is not None:
             logger.info(blocked.message)
             return blocked
+        consumed = cross.consumed
+        if cross.bypassed:
+            record_gate_bypass(
+                engine,
+                pipeline_id,
+                pipeline_run_id,
+                config.dependency_gates,
+                cross.bypassed,
+                task_id=task_id,
+            )
     outcome = _run_attempt(
         engine, config, task_id, task_code, pipeline_code, pipeline_run_id, force, child
     )
     if consumed and outcome.status == RunStatus.SUCCESS:
         gate.consume(engine, task_id, consumed)
+    return outcome
+
+
+def _run_overridden(
+    engine: Engine,
+    config: ConnectorConfig,
+    pipeline_code: str,
+    task_code: str,
+    override: Override,
+    child: ChildOptions | None,
+) -> TaskOutcome:
+    """Run the task past the checks the override names, and record it."""
+    with engine.begin() as conn:
+        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+        task_id = resolve_task_id(conn, pipeline_id, task_code)
+        if override.rerun:
+            pipeline_run_id, reopened = runlog.resolve_run_for_orchestrator(conn, pipeline_id)
+        else:
+            pipeline_run_id = runlog.resolve_run_for_task(conn, pipeline_id, mode=config.mode)
+            reopened = None
+        status = runlog.fetch_task_run_status(conn, task_id, pipeline_run_id)
+    if reopened is not None:
+        record_change(
+            engine,
+            pipeline_id=pipeline_id,
+            pipeline_run_id=pipeline_run_id,
+            action=InterventionAction.REOPEN,
+            from_status=reopened,
+            to_status=RunStatus.IN_PROGRESS,
+            reason=override.reason,
+        )
+    if status == RunStatus.IN_PROGRESS:
+        return _skipped(
+            f"{task_code}: already IN-PROGRESS under pipeline_run_id={pipeline_run_id}; not "
+            "starting it twice"
+        )
+    if status in SETTLED_STATUSES and not override.rerun:
+        return _skipped(
+            f"{task_code}: already {status} under pipeline_run_id={pipeline_run_id}; pass "
+            "--rerun to run it again"
+        )
+    logger.warning(
+        "%s: %s under pipeline_run_id=%d, without checking its dependencies: %s",
+        task_code,
+        "running again" if override.rerun else "running",
+        pipeline_run_id,
+        override.reason,
+    )
+    outcome = _run_attempt(
+        engine,
+        config,
+        task_id,
+        task_code,
+        pipeline_code,
+        pipeline_run_id,
+        False,
+        child,
+        rerun=status in SETTLED_STATUSES,
+    )
+    record_change(
+        engine,
+        pipeline_id=pipeline_id,
+        pipeline_run_id=pipeline_run_id,
+        task_id=task_id,
+        action=override.action,
+        from_status=status,
+        to_status=outcome.status,
+        reason=override.reason,
+    )
     return outcome
 
 
@@ -181,6 +293,10 @@ def _run_for_orchestrator(
     )
 
 
+NO_CROSS = CrossPipelineCheck(0)
+"""What a preflight that stopped before the cross-pipeline gate reports from it."""
+
+
 def _preflight(
     engine: Engine,
     gate: CrossPipelineGate,
@@ -188,8 +304,12 @@ def _preflight(
     task_id: int,
     task_code: str,
     pipeline_run_id: int,
-) -> tuple[TaskOutcome | None, dict[int, int]]:
-    """Return the outcome that stops the task from running now, if any, and what it consumed."""
+) -> tuple[TaskOutcome | None, CrossPipelineCheck]:
+    """Return the outcome that stops the task from running now, if any, and the gate's check.
+
+    The check says what the task consumes once it succeeds, and what ``Dependency_gates``
+    bypassed.
+    """
     with engine.connect() as conn:
         status = runlog.fetch_task_run_status(conn, task_id, pipeline_run_id)
         run_status = runlog.fetch_pipeline_run_status(conn, pipeline_run_id)
@@ -200,15 +320,15 @@ def _preflight(
     if status in SETTLED_STATUSES:
         return _skipped(
             f"{task_code}: already {status} under pipeline_run_id={pipeline_run_id}"
-        ), {}
+        ), NO_CROSS
     if status == RunStatus.IN_PROGRESS:
         return _skipped(
             f"{task_code}: already IN-PROGRESS under pipeline_run_id={pipeline_run_id}; not "
             "starting it twice"
-        ), {}
+        ), NO_CROSS
     if run_status == RunStatus.SKIPPED:
         reason = f"pipeline_run_id={pipeline_run_id} is itself SKIPPED"
-        return _record_skipped(engine, task_id, pipeline_run_id, task_code, reason), {}
+        return _record_skipped(engine, task_id, pipeline_run_id, task_code, reason), NO_CROSS
 
     graph = build_graph(graph_data.tasks, graph_data.same_pipeline_edges)
     still_needed = graph.required_edge_count(task_id) - graph.satisfied_edge_count(
@@ -219,18 +339,19 @@ def _preflight(
         cross = gate.check(engine, task_id, still_needed)
         still_needed -= cross.satisfied_count
     if still_needed <= 0:
-        return None, cross.consumed
+        return None, cross
 
     unready = _describe_unready(graph, task_id, pipeline_run_id)
     if cross.reasons:
         reasons = "; ".join(cross.reasons)
         if cross.definitive and not _upstream_pending(graph, task_id, run_state):
-            return _record_skipped(engine, task_id, pipeline_run_id, task_code, reasons), {}
-        return _skipped(f"{task_code}: {reasons}, and {unready}; nothing recorded"), {}
+            return _record_skipped(engine, task_id, pipeline_run_id, task_code, reasons), NO_CROSS
+        return _skipped(f"{task_code}: {reasons}, and {unready}; nothing recorded"), NO_CROSS
     if task_id in graph.unsatisfiable(run_state):
         never = _describe_unready(graph, task_id, pipeline_run_id, can_never=True)
-        return _record_skipped(engine, task_id, pipeline_run_id, task_code, never), {}
-    return _skipped(f"{task_code}: {unready}; nothing recorded, run it again once they are"), {}
+        return _record_skipped(engine, task_id, pipeline_run_id, task_code, never), NO_CROSS
+    waiting = f"{task_code}: {unready}; nothing recorded, run it again once they are"
+    return _skipped(waiting), NO_CROSS
 
 
 def _skipped(message: str) -> TaskOutcome:

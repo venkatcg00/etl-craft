@@ -12,6 +12,11 @@ rows naming another pipeline) are checked before the task runs. Each check:
    older run that would have satisfied it does not count: the last run decides.
 3. Once the downstream succeeds, records that run in the dependency's tracker as consumed. A
    downstream that fails or is skipped consumes nothing, so its retry sees the same upstream run.
+
+``Orchestration.Dependency_gates`` relaxes this in local mode: with ``warn`` a dependency that is
+not satisfied is reported as bypassed and the run or task goes ahead; with ``off`` nothing is
+checked or waited for, and every dependency is reported as bypassed. Only upstream runs that
+satisfied their dependency are consumed.
 """
 
 from __future__ import annotations
@@ -26,7 +31,7 @@ from typing import Protocol, TypeVar
 
 from sqlalchemy.engine import Engine
 
-from etl_craft.core.enums import TERMINAL_STATUSES, DependencyType, RunStatus
+from etl_craft.core.enums import TERMINAL_STATUSES, DependencyType, GatePolicy, RunStatus
 from etl_craft.core.errors import GraphError
 from etl_craft.engine.repository import trackers
 from etl_craft.engine.repository.dependencies import (
@@ -178,13 +183,15 @@ class CrossPipelineCheck:
 
     ``consumed`` maps each satisfied dependency to the upstream task run that satisfied it, for
     the gate to record once the task succeeds. ``definitive`` is false when the gate did not
-    really check, so its reasons never record the task ``SKIPPED``.
+    really check, so its reasons never record the task ``SKIPPED``. ``bypassed`` holds the
+    dependencies ``Dependency_gates`` let through without being satisfied.
     """
 
     satisfied_count: int
     reasons: tuple[str, ...] = ()
     consumed: dict[int, int] = field(default_factory=dict)
     definitive: bool = True
+    bypassed: tuple[str, ...] = ()
 
 
 class CrossPipelineGate(Protocol):
@@ -214,17 +221,27 @@ class UncheckedGate:
 class TrackedGate:
     """The cross-pipeline gate for tasks, backed by ``AUD_TASK_DEPENDENCY_TRACKER``."""
 
-    def __init__(self, clock: Clock | None = None) -> None:
-        """Use ``clock`` to wait and read the time."""
+    def __init__(self, clock: Clock | None = None, policy: GatePolicy = GatePolicy.ENFORCE) -> None:
+        """Use ``clock`` to wait and read the time, and ``policy`` for what is not satisfied."""
         self.clock = clock or Clock()
+        self.policy = policy
 
     def check(self, engine: Engine, task_id: int, needed: int) -> CrossPipelineCheck:
         """Check the task's cross-pipeline dependencies until ``needed`` are satisfied.
 
-        Dependencies after that are neither checked nor waited for.
+        Dependencies after that are neither checked nor waited for. Under ``warn`` the ones not
+        satisfied are bypassed; under ``off`` none is checked and all are bypassed.
         """
         with engine.connect() as conn:
             edges = fetch_cross_pipeline_task_edges(conn, task_id)
+        if self.policy == GatePolicy.OFF:
+            return CrossPipelineCheck(
+                needed,
+                bypassed=tuple(
+                    f"upstream task {edge.depends_on_label} ({edge.dependency_type}) not checked"
+                    for edge in edges
+                ),
+            )
         budget = WaitBudget.start(self.clock)
         satisfied = 0
         reasons: list[str] = []
@@ -252,6 +269,8 @@ class TrackedGate:
             logger.info("%s (%s) is satisfied: %s", label, edge.dependency_type, why)
             satisfied += 1
             consumed[edge.task_dependency_id] = run_id
+        if self.policy == GatePolicy.WARN and satisfied < needed:
+            return CrossPipelineCheck(needed, consumed=consumed, bypassed=tuple(reasons))
         return CrossPipelineCheck(satisfied, tuple(reasons), consumed)
 
     def consume(self, engine: Engine, task_id: int, consumed: dict[int, int]) -> None:
@@ -286,6 +305,7 @@ class PipelineGateResult:
 
     reasons: tuple[str, ...] = ()
     consumed: dict[int, int] = field(default_factory=dict)
+    bypassed: tuple[str, ...] = ()
 
     @property
     def satisfied(self) -> bool:
@@ -294,17 +314,31 @@ class PipelineGateResult:
 
 
 def check_pipeline_dependencies(
-    engine: Engine, pipeline_id: int, clock: Clock | None = None
+    engine: Engine,
+    pipeline_id: int,
+    clock: Clock | None = None,
+    policy: GatePolicy = GatePolicy.ENFORCE,
 ) -> PipelineGateResult:
     """Check every dependency of ``pipeline_id`` on other pipelines; all must be satisfied.
 
-    The check stops at the first unsatisfied dependency, without waiting on the rest.
+    The check stops at the first unsatisfied dependency, without waiting on the rest. Under
+    ``warn`` it checks them all and bypasses the ones not satisfied; under ``off`` it checks
+    none and bypasses them all.
     """
     clock = clock or Clock()
     with engine.connect() as conn:
         edges = fetch_pipeline_dependency_edges(conn, pipeline_id)
+    if policy == GatePolicy.OFF:
+        return PipelineGateResult(
+            bypassed=tuple(
+                f"upstream pipeline {edge.depends_on_pipeline_code} ({edge.dependency_type}) "
+                "not checked"
+                for edge in edges
+            )
+        )
     budget = WaitBudget.start(clock)
     consumed: dict[int, int] = {}
+    bypassed: list[str] = []
     for edge in edges:
         label = f"upstream pipeline {edge.depends_on_pipeline_code}"
         _wait_while_running(
@@ -318,10 +352,14 @@ def check_pipeline_dependencies(
         )
         run_id, why = _judge_pipeline_edge(engine, edge, clock.now())
         if run_id is None:
-            return PipelineGateResult((f"{label} ({edge.dependency_type}) {why}",))
+            reason = f"{label} ({edge.dependency_type}) {why}"
+            if policy == GatePolicy.WARN:
+                bypassed.append(reason)
+                continue
+            return PipelineGateResult((reason,))
         logger.info("%s (%s) is satisfied: %s", label, edge.dependency_type, why)
         consumed[edge.pipeline_dependency_id] = run_id
-    return PipelineGateResult(consumed=consumed)
+    return PipelineGateResult(consumed=consumed, bypassed=tuple(bypassed))
 
 
 def consume_pipeline_dependencies(engine: Engine, pipeline_id: int, pipeline_run_id: int) -> None:

@@ -22,6 +22,7 @@ from __future__ import annotations
 import getpass
 import logging
 import socket
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from sqlalchemy.engine import Connection, Engine
@@ -31,6 +32,7 @@ from etl_craft.config import ConnectorConfig
 from etl_craft.core.enums import (
     FINISHED_RUN_STATUSES,
     MARKABLE_STATUSES,
+    GatePolicy,
     InterventionAction,
     Mode,
     RunStatus,
@@ -300,6 +302,72 @@ def cancel_run(
         )
     logger.warning("%s (by %s: %s)", message, who, reason)
     return Intervened(message, run_id)
+
+
+def record_change(
+    engine: Engine,
+    *,
+    pipeline_id: int,
+    pipeline_run_id: int,
+    action: InterventionAction,
+    reason: str,
+    task_id: int | None = None,
+    from_status: str | None = None,
+    to_status: str | None = None,
+) -> None:
+    """Record one change an operator made to a run, from its own transaction."""
+    with engine.begin() as conn:
+        record.record_intervention(
+            conn,
+            pipeline_id=pipeline_id,
+            pipeline_run_id=pipeline_run_id,
+            task_id=task_id,
+            action=action,
+            from_status=from_status,
+            to_status=to_status,
+            reason=reason,
+            requested_by=current_operator(),
+        )
+
+
+def check_override(config: ConnectorConfig, option: str, reason: str | None) -> str:
+    """Return the reason for ``option``, an override of local mode's checks.
+
+    Raises ``RunRefusedError`` in remote mode and ``UsageError`` without a reason.
+    """
+    if config.mode == Mode.REMOTE:
+        raise RunRefusedError(
+            f"{option} is only available in local mode: in remote mode run --task_code already "
+            "runs the task whenever the orchestrator says (clear it in the orchestrator to run "
+            "it again)"
+        )
+    if reason is None or not reason.strip():
+        raise UsageError(f"{option} needs a --reason: it is recorded with the run")
+    return reason
+
+
+def record_gate_bypass(
+    engine: Engine,
+    pipeline_id: int,
+    pipeline_run_id: int,
+    policy: GatePolicy,
+    bypassed: Sequence[str],
+    *,
+    task_id: int | None = None,
+) -> None:
+    """Record that ``Dependency_gates`` let a run, or a task of it, through unsatisfied gates."""
+    reason = f"Dependency_gates is {policy}: " + "; ".join(bypassed)
+    with engine.begin() as conn:
+        record.record_intervention(
+            conn,
+            pipeline_id=pipeline_id,
+            pipeline_run_id=pipeline_run_id,
+            task_id=task_id,
+            action=InterventionAction.GATE_BYPASS,
+            reason=reason,
+            requested_by=current_operator(),
+        )
+    logger.warning("pipeline_run_id=%d: %s", pipeline_run_id, reason)
 
 
 def _check(

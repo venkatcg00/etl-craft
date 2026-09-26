@@ -55,6 +55,9 @@ Orchestration:
   # CFG_PIPELINES.PIPELINE_PARAMETERS values (CATCHUP, TAGS, RETRIES, ...)
   # override these; anything unset falls back to a built-in default.
   dev:
+    Dependency_gates: warn             # value — local mode: enforce (default) | warn | off. warn
+                                       # and off let a run go ahead when its dependencies on
+                                       # other pipelines are not satisfied, and record the bypass
     Global_dag: false                  # value
     Catchup: false                     # value
     Tags: [analytics]                  # value

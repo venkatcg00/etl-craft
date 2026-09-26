@@ -33,7 +33,17 @@ EXPECTED = {
     enums.AuthMode: {"none", "password", "token", "key_file", "oauth", "sso", "sts"},
     enums.TableFormat: {"native", "iceberg"},
     enums.CloningScope: {"cfg", "aud", "all", "none"},
-    enums.InterventionAction: {"MARK", "NEW_RUN", "CANCEL", "REOPEN", "RESET"},
+    enums.InterventionAction: {
+        "MARK",
+        "NEW_RUN",
+        "CANCEL",
+        "REOPEN",
+        "RESET",
+        "GATE_BYPASS",
+        "IGNORE_DEPENDENCIES",
+        "RERUN",
+    },
+    enums.GatePolicy: {"enforce", "warn", "off"},
 }
 
 

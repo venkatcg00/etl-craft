@@ -1,4 +1,5 @@
-"""``mark`` and ``cancel``: an operator's control over local runs, recorded, on both Engine DBs.
+"""An operator's control over local runs, recorded, on both Engine DBs: ``mark``, ``cancel``,
+``Dependency_gates``, ``run --ignore-dependencies`` and ``run --rerun``.
 
 Tasks run in real task processes whose handlers are fakes (``fixtures.task_child``).
 """
@@ -17,6 +18,7 @@ from etl_craft.cli import main as cli_main
 from etl_craft.config import load_config
 from etl_craft.core.enums import Mode, RunStatus
 from etl_craft.core.errors import ExitCode, RunRefusedError, RunStateError, UsageError
+from etl_craft.engine import runlog
 from etl_craft.execution.gates import Clock
 from etl_craft.execution.interventions import (
     cancel_run,
@@ -24,8 +26,8 @@ from etl_craft.execution.interventions import (
     mark_task,
     record_stand_in_run,
 )
-from etl_craft.execution.pipeline import RunHooks, run_pipeline
-from etl_craft.execution.runner import ChildOptions
+from etl_craft.execution.pipeline import RunHooks, rerun_task, run_pipeline
+from etl_craft.execution.runner import ChildOptions, Override, run_task
 from fixtures.metadata import add_dependency, add_pipeline, add_pipeline_dependency, add_task
 
 TESTS_DIR = Path(__file__).parents[2]
@@ -397,3 +399,140 @@ def test_the_commands(config, pipeline, capsys, monkeypatch):
     with pytest.raises(SystemExit) as usage:
         cli_main(["mark", "--pipeline_code", "P", "--status", "SUCCESS", "--new-run"])
     assert usage.value.code == ExitCode.USAGE
+
+
+def attempts(engine, pipeline_run_id):
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT t.TASK_CODE AS code, r.ATTEMPT_COUNT AS attempts FROM AUD_TASK_RUN_LOG r "
+                "JOIN CFG_TASKS t ON t.TASK_ID = r.TASK_ID WHERE r.PIPELINE_RUN_ID = :id"
+            ),
+            {"id": pipeline_run_id},
+        )
+        return {row.code: row.attempts for row in rows}
+
+
+@pytest.fixture
+def downstream(engine_db):
+    """UP, never run; DOWN depends on it, and DOWN.load on UP.publish."""
+    engine = engine_db.engine
+    with engine.begin() as conn:
+        up = add_pipeline(conn, "UP")
+        publish = add_task(conn, up, "publish")
+        down = add_pipeline(conn, "DOWN")
+        load = add_task(conn, down, "load", BEHAVIOUR="succeed")
+        add_pipeline_dependency(conn, down, up)
+        add_dependency(conn, down, load, publish, upstream_pipeline=up)
+    return engine
+
+
+@pytest.mark.parametrize("policy", ["warn", "off"])
+def test_relaxed_gates_let_a_run_through_and_record_it(config, downstream, policy):
+    engine = downstream
+    relaxed = replace(config, dependency_gates=policy)
+    outcome = run_pipeline(engine, relaxed, "DOWN", child=CHILD, clock=NO_WAIT)
+    assert outcome.status == RunStatus.SUCCESS
+    assert outcome.message.endswith("; dependency gates bypassed for DOWN, load (see history)")
+    changes = interventions(engine)
+    assert [(task, action) for _, task, action, *_ in changes] == [
+        (None, "GATE_BYPASS"),
+        ("load", "GATE_BYPASS"),
+    ]
+    reason = changes[0][7]
+    if policy == "warn":
+        assert reason == (
+            "Dependency_gates is warn: upstream pipeline UP (SUCCESS) has no finished run"
+        )
+    else:
+        assert reason == "Dependency_gates is off: upstream pipeline UP (SUCCESS) not checked"
+    assert changes[1][7].endswith(
+        "upstream task UP.publish (SUCCESS) "
+        + ("has no finished run" if policy == "warn" else "not checked")
+    )
+    # Nothing satisfied the dependencies, so nothing was consumed.
+    with engine.connect() as conn:
+        assert (
+            conn.execute(text("SELECT COUNT(*) FROM AUD_PIPELINE_DEPENDENCY_TRACKER")).scalar_one()
+            == 0
+        )
+    # Enforced, the same gate skips the next run.
+    assert run_pipeline(engine, config, "DOWN", child=CHILD, clock=NO_WAIT).status == "SKIPPED"
+
+
+def test_a_task_runs_without_its_dependencies_when_told_to(config, pipeline):
+    engine, ids = pipeline
+    with engine.begin() as conn:
+        run_id = runlog.find_or_create_active_run(conn, ids["P"])
+    # transform waits for extract, which has not run.
+    waiting = run_task(engine, config, "P", "transform", child=CHILD)
+    assert waiting.status == RunStatus.SKIPPED and "nothing recorded" in waiting.message
+    forced = run_task(
+        engine, config, "P", "transform", child=CHILD, override=Override("extract is late")
+    )
+    assert forced.status == RunStatus.SUCCESS
+    assert interventions(engine)[-1][:5] == (
+        run_id,
+        "transform",
+        "IGNORE_DEPENDENCIES",
+        None,
+        "SUCCESS",
+    )
+    again = run_task(engine, config, "P", "transform", child=CHILD, override=Override("again"))
+    assert again.message.endswith(
+        f"already SUCCESS under pipeline_run_id={run_id}; pass --rerun to run it again"
+    )
+    with pytest.raises(UsageError, match="--ignore-dependencies needs a --reason"):
+        run_task(engine, config, "P", "transform", child=CHILD, override=Override(""))
+    with pytest.raises(UsageError, match="different overrides"):
+        run_task(engine, config, "P", "transform", force=True, override=Override("x"))
+    with pytest.raises(RunRefusedError, match="--ignore-dependencies is only available in local"):
+        run_task(engine, replace(config, mode=Mode.REMOTE), "P", "x", override=Override("x"))
+
+
+def test_a_rerun_runs_a_task_and_what_follows_it_again(config, pipeline):
+    engine, ids = pipeline
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE CFG_TASKS SET ACTIVE_FLAG = 'N' WHERE TASK_ID IN (:b, :a)"),
+            {"b": ids["broken"], "a": ids["after_broken"]},
+        )
+    first = run_pipeline(engine, config, "P", child=CHILD)
+    run_id = first.pipeline_run_id
+    assert first.status == RunStatus.SUCCESS
+
+    alone = rerun_task(engine, config, "P", "extract", "source fixed", child=CHILD)
+    assert alone.status == RunStatus.SUCCESS and alone.pipeline_run_id == run_id
+    assert alone.message.startswith(f"P: pipeline_run_id={run_id} SUCCESS")
+    assert attempts(engine, run_id) == {"extract": 2, "transform": 1, "alert": 1}
+
+    both = rerun_task(
+        engine, config, "P", "extract", "source fixed again", with_downstream=True, child=CHILD
+    )
+    assert both.status == RunStatus.SUCCESS
+    # alert waits for extract to fail, so it is left as it was.
+    assert "not run again, their dependencies are not met: alert" in both.message
+    assert attempts(engine, run_id) == {"extract": 3, "transform": 2, "alert": 1}
+    assert run_status(engine, run_id) == "SUCCESS"
+    assert [(task, action, frm, to) for _, task, action, frm, to, *_ in interventions(engine)] == [
+        (None, "REOPEN", "SUCCESS", "IN-PROGRESS"),
+        ("extract", "RERUN", "SUCCESS", "SUCCESS"),
+        (None, "REOPEN", "SUCCESS", "IN-PROGRESS"),
+        ("extract", "RERUN", "SUCCESS", "SUCCESS"),
+        ("transform", "RERUN", "SUCCESS", "SUCCESS"),
+    ]
+    with pytest.raises(RunRefusedError, match="--rerun is only available in local mode"):
+        rerun_task(engine, replace(config, mode=Mode.REMOTE), "P", "extract", "x")
+
+
+def test_the_run_options(config, pipeline, capsys, monkeypatch):
+    monkeypatch.chdir(config.project_dir)
+    for argv, message in (
+        (["--rerun"], "apply to one task: pass --task_code"),
+        (["--task_code", "extract", "--rerun", "--ignore-dependencies"], "already runs the task"),
+        (["--task_code", "extract", "--with-downstream"], "--with-downstream goes with --rerun"),
+        (["--task_code", "extract", "--reason", "x"], "--reason goes with"),
+        (["--task_code", "extract", "--rerun"], "--rerun needs a --reason"),
+    ):
+        assert cli_main(["run", "--pipeline_code", "P", *argv]) == ExitCode.USAGE
+        assert message in capsys.readouterr().err
