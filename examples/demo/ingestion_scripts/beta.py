@@ -37,8 +37,9 @@ def run(task: ScriptTask) -> ScriptResult:
     with task.warehouse() as engine, engine.begin() as conn:
         conn.execute(
             text(
-                f"CREATE TABLE IF NOT EXISTS {table} (support_identifier BIGINT, agent VARCHAR, "
-                "regarding VARCHAR, event_time TIMESTAMP, status VARCHAR, handle_time BIGINT, "
+                f"CREATE TABLE IF NOT EXISTS {table} (support_identifier BIGINT, "
+                "agent VARCHAR(100), regarding VARCHAR(100), event_time TIMESTAMP, "
+                "status VARCHAR(100), handle_time BIGINT, "
                 "score BIGINT, pipeline_run_id BIGINT)"
             )
         )

@@ -719,6 +719,7 @@ aws = [
 ]
 databricks = [
     { name = "databricks-sqlalchemy" },
+    { name = "sqlalchemy" },
 ]
 publish = [
     { name = "ngrok", version = "1.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -764,6 +765,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "snowflake-sqlalchemy", marker = "extra == 'snowflake'", specifier = ">=1.7" },
     { name = "sqlalchemy", specifier = ">=2.0.54" },
+    { name = "sqlalchemy", marker = "extra == 'databricks'", specifier = ">=2.0.54,<2.1" },
     { name = "sqlglot", specifier = ">=26" },
     { name = "trino", extras = ["sqlalchemy"], marker = "extra == 'trino'", specifier = ">=0.330" },
 ]

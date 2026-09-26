@@ -41,6 +41,8 @@ aws = [
 ]
 databricks = [
     "databricks-sqlalchemy>=2",
+    # databricks-sql-connector's rows are not the tuples SQLAlchemy 2.1 requires.
+    "sqlalchemy>=2.0.54,<2.1",
 ]
 publish = [
     "ngrok>=1.4",

@@ -16,8 +16,20 @@ tree was clean, the wheel's sha256 for suites that test the wheel, and each test
 No failure text is recorded. Run suites from a clean, committed tree; evidence from a dirty
 tree is rejected.
 
-The cloud suites (`where = "local"`) need credentials and run in a local session. They write
-their evidence the same way.
+The cloud suites (`where = "local"`) need credentials and run in a local session:
+
+```bash
+cp .env.acceptance.example .env.acceptance     # gitignored; fill in the Databricks and Snowflake values
+make services-up                               # Mailpit, for the demo's alerts
+make acceptance-cloud                          # or: make acceptance-cloud ENV_FILE=path/to/file
+```
+
+`acceptance-cloud` reads the file with etl-craft's own parser, builds the wheel, and runs
+`cloud-databricks` and `cloud-snowflake` against it: connections, every SQL action, cloning,
+and the demo's warehouse work, on Databricks with Delta and UniForm and on Snowflake with its own
+tables and Iceberg tables. A missing credential fails the suite instead of skipping it. The demo
+creates schemas named `ec_<run>_*` in the configured catalog or database and drops them when it
+ends; it touches no other schema. The evidence is written the same way as every other suite's.
 
 ## Checking the gate
 

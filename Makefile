@@ -58,6 +58,9 @@ test-harness: ## Check that every local test service works
 suite: ## Run one release suite and record its evidence: make suite SUITE=unit [WHEEL=path]
 	$(UV) run python scripts/run_suite.py $(SUITE) $(if $(WHEEL),--wheel $(WHEEL))
 
+acceptance-cloud: ## Run the Databricks and Snowflake suites locally: make acceptance-cloud [ENV_FILE=.env.acceptance]
+	$(UV) run python scripts/acceptance_cloud.py $(if $(ENV_FILE),--env-file $(ENV_FILE))
+
 release-gate: ## Check the release evidence of every required suite
 	$(UV) run python scripts/release_gate.py
 

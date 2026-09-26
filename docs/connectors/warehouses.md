@@ -13,6 +13,9 @@ What the engine creates there depends on the warehouse and the table format:
 | Databricks | Delta tables | Delta tables with UniForm, readable as Iceberg | `etl-craft[databricks]` |
 | Snowflake | ordinary tables | Iceberg tables | `etl-craft[snowflake]` |
 
+`etl-craft[databricks]` keeps SQLAlchemy below 2.1: the Databricks connector returns rows
+that SQLAlchemy 2.1 does not accept. Every other warehouse runs on SQLAlchemy 2.0 and 2.1.
+
 A DuckDB file admits one writing process at a time, so tasks writing to it queue behind each
 other; every other warehouse runs tasks in parallel. On DuckDB, the table format is fixed by the
 connection and a task cannot override it.
