@@ -829,3 +829,12 @@ def test_dependency_gates_default_to_enforce_and_relax_only_in_local_mode(tmp_pa
         load_config(_write(tmp_path, raw))
     raw = _minimal(Orchestration={"Mode": "remote", "Dependency_gates": "enforce"})
     assert load_config(_write(tmp_path, raw)).dependency_gates == "enforce"
+
+
+def test_how_long_a_gate_waits_is_a_setting(tmp_path):
+    assert load_config(_write(tmp_path, _minimal())).limits.gate_wait_minutes == 60
+    raw = _minimal(Orchestration={"Mode": "local", "Gate_wait_minutes": 0})
+    assert load_config(_write(tmp_path, raw)).limits.gate_wait_minutes == 0
+    raw = _minimal(Orchestration={"Mode": "local", "Gate_wait_minutes": -5})
+    with pytest.raises(ConfigurationError, match="Gate_wait_minutes must be a whole number"):
+        load_config(_write(tmp_path, raw))

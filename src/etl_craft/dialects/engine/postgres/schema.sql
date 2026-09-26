@@ -88,7 +88,7 @@ CREATE INDEX ix_pipedep_depends_on ON CFG_PIPELINE_DEPENDENCY (DEPENDS_ON_PIPELI
 CREATE TRIGGER trg_audit_cfg_pipeline_dependency
     BEFORE INSERT OR UPDATE ON CFG_PIPELINE_DEPENDENCY
     FOR EACH ROW EXECUTE FUNCTION trg_set_audit_columns();
-COMMENT ON TABLE CFG_PIPELINE_DEPENDENCY IS 'A pipeline waits for another pipeline''s outcome. Checked against AUD_PIPELINE_DEPENDENCY_TRACKER when the pipeline starts.';
+COMMENT ON TABLE CFG_PIPELINE_DEPENDENCY IS 'A pipeline waits for another pipeline''s outcome. Checked against AUD_DEPENDENCY_CONSUMPTION when the pipeline starts.';
 
 -- One row per task: its pipeline, handler and run condition.
 CREATE TABLE CFG_TASKS (
@@ -150,7 +150,7 @@ CREATE UNIQUE INDEX ux_taskdep_edge_active
     ON CFG_TASK_DEPENDENCY (TASK_ID, DEPENDS_ON_PIPELINE_ID, DEPENDS_ON_TASK_ID, DEPENDENCY_TYPE)
     WHERE ACTIVE_FLAG = 'Y';
 CREATE INDEX ix_taskdep_depends_on ON CFG_TASK_DEPENDENCY (DEPENDS_ON_TASK_ID);
-COMMENT ON TABLE CFG_TASK_DEPENDENCY IS 'A task waits for another task''s outcome. Same-pipeline dependencies order the pipeline''s waves; one on another pipeline''s task is checked against AUD_TASK_DEPENDENCY_TRACKER when the task starts.';
+COMMENT ON TABLE CFG_TASK_DEPENDENCY IS 'A task waits for another task''s outcome. Same-pipeline dependencies order the pipeline''s waves; one on another pipeline''s task is checked against AUD_DEPENDENCY_CONSUMPTION when the task starts.';
 
 -- A task's settings, as name and value rows; each handler reads its own names.
 CREATE TABLE CFG_TASK_PARAMETERS (
@@ -368,29 +368,32 @@ CREATE TABLE AUD_TASK_DOCUMENTATION (
 CREATE INDEX ix_task_documentation_task ON AUD_TASK_DOCUMENTATION (TASK_ID, VERSION DESC);
 COMMENT ON TABLE AUD_TASK_DOCUMENTATION IS 'Each version of a task''s DOCUMENTATION parameter. A new version is recorded only when the text changes.';
 
--- The upstream run each pipeline dependency last consumed; each upstream run is consumed once.
-CREATE TABLE AUD_PIPELINE_DEPENDENCY_TRACKER (
-    PIPELINE_DEPENDENCY_ID         BIGINT PRIMARY KEY REFERENCES CFG_PIPELINE_DEPENDENCY(PIPELINE_DEPENDENCY_ID),
-    PIPELINE_ID                    BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
-    DEPENDS_ON_PIPELINE_ID         BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
-    LAST_CONSUMED_PIPELINE_RUN_ID  BIGINT REFERENCES AUD_PIPELINES_RUN_LOG(PIPELINE_RUN_ID),
-    LAST_CONSUMED_END_DATE         TIMESTAMPTZ,
-    LAST_UPDATED_TIMESTAMP         TIMESTAMPTZ NOT NULL DEFAULT now()
+-- Every upstream run a downstream consumed, one row each, never updated: for a dependency on a
+-- pipeline, the downstream run and the upstream run; for a dependency on another pipeline's task,
+-- the downstream task and the upstream task run. A dependency's latest row is what it last
+-- consumed: an upstream run satisfies it only when it is newer than that one. PIPELINE_RUN_ID is
+-- NULL on the rows carried over from the trackers this table replaced.
+CREATE TABLE AUD_DEPENDENCY_CONSUMPTION (
+    CONSUMPTION_ID            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    PIPELINE_DEPENDENCY_ID    BIGINT REFERENCES CFG_PIPELINE_DEPENDENCY(PIPELINE_DEPENDENCY_ID),
+    TASK_DEPENDENCY_ID        BIGINT REFERENCES CFG_TASK_DEPENDENCY(TASK_DEPENDENCY_ID),
+    PIPELINE_ID               BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
+    PIPELINE_RUN_ID           BIGINT REFERENCES AUD_PIPELINES_RUN_LOG(PIPELINE_RUN_ID),
+    TASK_ID                   BIGINT REFERENCES CFG_TASKS(TASK_ID),
+    DEPENDS_ON_PIPELINE_ID    BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
+    CONSUMED_PIPELINE_RUN_ID  BIGINT NOT NULL REFERENCES AUD_PIPELINES_RUN_LOG(PIPELINE_RUN_ID),
+    CONSUMED_TASK_RUN_ID      BIGINT REFERENCES AUD_TASK_RUN_LOG(TASK_RUN_ID),
+    CONSUMED_AT               TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_consumption_one_dependency CHECK (
+        (PIPELINE_DEPENDENCY_ID IS NULL) <> (TASK_DEPENDENCY_ID IS NULL)
+    )
 );
-COMMENT ON TABLE AUD_PIPELINE_DEPENDENCY_TRACKER IS 'The upstream run each pipeline dependency last consumed. An upstream run satisfies the dependency only if it is newer than that one and has the outcome the dependency waits for, so pipelines on different schedules never reuse a stale run.';
 
--- The upstream task run each cross-pipeline task dependency last consumed.
-CREATE TABLE AUD_TASK_DEPENDENCY_TRACKER (
-    TASK_DEPENDENCY_ID         BIGINT PRIMARY KEY REFERENCES CFG_TASK_DEPENDENCY(TASK_DEPENDENCY_ID),
-    TASK_ID                    BIGINT NOT NULL REFERENCES CFG_TASKS(TASK_ID),
-    PIPELINE_ID                BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
-    DEPENDS_ON_TASK_ID         BIGINT NOT NULL REFERENCES CFG_TASKS(TASK_ID),
-    DEPENDS_ON_PIPELINE_ID     BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
-    LAST_CONSUMED_TASK_RUN_ID  BIGINT REFERENCES AUD_TASK_RUN_LOG(TASK_RUN_ID),
-    LAST_CONSUMED_END_DATE     TIMESTAMPTZ,
-    LAST_UPDATED_TIMESTAMP     TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-COMMENT ON TABLE AUD_TASK_DEPENDENCY_TRACKER IS 'The same as AUD_PIPELINE_DEPENDENCY_TRACKER, for a task''s dependency on a task in another pipeline. Same-pipeline dependencies are checked against the current run instead.';
+CREATE INDEX ix_consumption_pipeline_dependency
+    ON AUD_DEPENDENCY_CONSUMPTION (PIPELINE_DEPENDENCY_ID, CONSUMPTION_ID);
+CREATE INDEX ix_consumption_task_dependency
+    ON AUD_DEPENDENCY_CONSUMPTION (TASK_DEPENDENCY_ID, CONSUMPTION_ID);
+CREATE INDEX ix_consumption_run ON AUD_DEPENDENCY_CONSUMPTION (PIPELINE_RUN_ID);
 
 -- Every migration applied, from etl-craft (ENGINE) and from the project (PROJECT), with its
 -- checksum.

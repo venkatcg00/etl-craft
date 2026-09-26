@@ -83,7 +83,7 @@ def fetch_average_task_seconds(conn: Connection, task_id: int) -> float | None:
 def fetch_pipeline_last_consumed(conn: Connection, pipeline_dependency_id: int) -> int | None:
     """Return the upstream run a pipeline dependency last consumed, or ``None``."""
     value = conn.execute(
-        statement(conn, "pipeline_dependency_tracker"), {"dependency_id": pipeline_dependency_id}
+        statement(conn, "last_consumed_pipeline_run"), {"dependency_id": pipeline_dependency_id}
     ).scalar_one_or_none()
     return None if value is None else int(value)
 
@@ -91,7 +91,7 @@ def fetch_pipeline_last_consumed(conn: Connection, pipeline_dependency_id: int) 
 def fetch_task_last_consumed(conn: Connection, task_dependency_id: int) -> int | None:
     """Return the upstream task run a task dependency last consumed, or ``None``."""
     value = conn.execute(
-        statement(conn, "task_dependency_tracker"), {"dependency_id": task_dependency_id}
+        statement(conn, "last_consumed_task_run"), {"dependency_id": task_dependency_id}
     ).scalar_one_or_none()
     return None if value is None else int(value)
 
@@ -100,15 +100,17 @@ def record_pipeline_consumed(
     conn: Connection,
     pipeline_dependency_id: int,
     pipeline_id: int,
+    pipeline_run_id: int,
     depends_on_pipeline_id: int,
     run_id: int,
 ) -> None:
-    """Record that ``pipeline_id`` consumed upstream run ``run_id`` through the dependency."""
+    """Log that run ``pipeline_run_id`` consumed upstream run ``run_id`` through the dependency."""
     conn.execute(
-        statement(conn, "consume_pipeline_dependency"),
+        statement(conn, "consume_pipeline_run"),
         {
             "dependency_id": pipeline_dependency_id,
             "pipeline_id": pipeline_id,
+            "pipeline_run_id": pipeline_run_id,
             "depends_on_pipeline_id": depends_on_pipeline_id,
             "run_id": run_id,
             "now": datetime.now(UTC),
@@ -121,18 +123,18 @@ def record_task_consumed(
     task_dependency_id: int,
     task_id: int,
     pipeline_id: int,
-    depends_on_task_id: int,
+    pipeline_run_id: int,
     depends_on_pipeline_id: int,
     run_id: int,
 ) -> None:
-    """Record that ``task_id`` consumed upstream task run ``run_id`` through the dependency."""
+    """Log that ``task_id``, under ``pipeline_run_id``, consumed upstream task run ``run_id``."""
     conn.execute(
-        statement(conn, "consume_task_dependency"),
+        statement(conn, "consume_task_run"),
         {
             "dependency_id": task_dependency_id,
             "task_id": task_id,
             "pipeline_id": pipeline_id,
-            "depends_on_task_id": depends_on_task_id,
+            "pipeline_run_id": pipeline_run_id,
             "depends_on_pipeline_id": depends_on_pipeline_id,
             "run_id": run_id,
             "now": datetime.now(UTC),

@@ -23,7 +23,7 @@ On Windows, Task Scheduler runs the same commands with `.venv\Scripts\etl-craft.
 in the project directory. A systemd timer works the same way.
 
 - **Order between pipelines comes from the metadata**, not the schedule. A pipeline that depends
-  on another waits for a running upstream (up to an hour) and judges its last finished run, so
+  on another waits for a running upstream (up to `Orchestration.Gate_wait_minutes`, an hour unless set) and judges its last finished run, so
   `SUPPORT_DM` above starts only on fresh client runs, and is recorded `SKIPPED` otherwise. See
   [Dependencies on other pipelines](../guides/dependencies.md#dependencies-on-other-pipelines).
 - **Start each pipeline from one scheduler entry.** Only one run of a pipeline is in progress at

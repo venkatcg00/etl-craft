@@ -463,8 +463,7 @@ def test_relaxed_gates_let_a_run_through_and_record_it(config, downstream, polic
     # Nothing satisfied the dependencies, so nothing was consumed.
     with engine.connect() as conn:
         assert (
-            conn.execute(text("SELECT COUNT(*) FROM AUD_PIPELINE_DEPENDENCY_TRACKER")).scalar_one()
-            == 0
+            conn.execute(text("SELECT COUNT(*) FROM AUD_DEPENDENCY_CONSUMPTION")).scalar_one() == 0
         )
     # Enforced, the same gate skips the next run.
     assert run_pipeline(engine, config, "DOWN", child=CHILD, clock=NO_WAIT).status == "SKIPPED"
@@ -721,8 +720,9 @@ def test_a_backfill_runs_once_per_date_as_of_that_date(config, pipeline, downstr
         "and nothing is consumed"
     )
     with engine.connect() as conn:
-        for table in ("AUD_PIPELINE_DEPENDENCY_TRACKER", "AUD_TASK_DEPENDENCY_TRACKER"):
-            assert conn.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar_one() == 0
+        assert (
+            conn.execute(text("SELECT COUNT(*) FROM AUD_DEPENDENCY_CONSUMPTION")).scalar_one() == 0
+        )
 
     # A run of its own gets today, or the date it is given.
     run_pipeline(engine, config, "P", child=CHILD)

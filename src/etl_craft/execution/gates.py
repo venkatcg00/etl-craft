@@ -5,13 +5,16 @@ new run of it starts; a task's dependencies on tasks in other pipelines (``CFG_T
 rows naming another pipeline) are checked before the task runs. Each check:
 
 1. Waits while the upstream's latest run is ``IN-PROGRESS``. The first look is at 70% of the
-   upstream's average run length, then 80%, 90% and so on; one check waits at most an hour and
-   looks at most 30 times, across all of its dependencies.
+   upstream's average run length, then 80%, 90% and so on; one check waits at most
+   ``Orchestration.Gate_wait_minutes`` (an hour unless set) and looks at most 30 times, across all
+   of its dependencies.
 2. Judges the upstream's latest finished run. The dependency is satisfied only when that run
    is newer than the one it last consumed and its status satisfies the dependency type. An
    older run that would have satisfied it does not count: the last run decides.
-3. Once the downstream succeeds, records that run in the dependency's tracker as consumed. A
-   downstream that fails or is skipped consumes nothing, so its retry sees the same upstream run.
+3. Once the downstream succeeds, logs that run as consumed in ``AUD_DEPENDENCY_CONSUMPTION``,
+   one row per downstream run (or task), dependency and upstream run; the dependency's latest row
+   is what it last consumed. A downstream that fails or is skipped consumes nothing, so its
+   retry sees the same upstream run.
 
 ``Orchestration.Dependency_gates`` relaxes this in local mode: with ``warn`` a dependency that is
 not satisfied is reported as bypassed and the run or task goes ahead; with ``off`` nothing is
@@ -55,7 +58,8 @@ MAX_LOOKS = 30
 """How many times one check looks at running upstreams, across all its dependencies."""
 
 WAIT_LIMIT_SECONDS = 3600.0
-"""How long one check waits for running upstreams, across all its dependencies."""
+"""How long one check waits for running upstreams, across all its dependencies, unless
+``Orchestration.Gate_wait_minutes`` says otherwise."""
 
 MIN_LOOK_INTERVAL_SECONDS = 1.0
 """The shortest pause between two looks, for an upstream already past its expected length."""
@@ -84,9 +88,9 @@ class WaitBudget:
     looks_left: int = MAX_LOOKS
 
     @classmethod
-    def start(cls, clock: Clock) -> WaitBudget:
-        """Open a full budget from now."""
-        return cls(deadline=clock.now() + timedelta(seconds=WAIT_LIMIT_SECONDS))
+    def start(cls, clock: Clock, seconds: float = WAIT_LIMIT_SECONDS) -> WaitBudget:
+        """Open a full budget from now, of ``seconds``."""
+        return cls(deadline=clock.now() + timedelta(seconds=seconds))
 
     def exhausted(self, clock: Clock) -> bool:
         """Whether the looks or the time have run out."""
@@ -200,7 +204,9 @@ class CrossPipelineGate(Protocol):
     def check(self, engine: Engine, task_id: int, needed: int) -> CrossPipelineCheck:
         """Return how many of the task's cross-pipeline dependencies are satisfied now."""
 
-    def consume(self, engine: Engine, task_id: int, consumed: dict[int, int]) -> None:
+    def consume(
+        self, engine: Engine, task_id: int, pipeline_run_id: int, consumed: dict[int, int]
+    ) -> None:
         """Record the upstream runs a task that succeeded consumed."""
 
 
@@ -213,18 +219,29 @@ class UncheckedGate:
             0, ("its dependencies on other pipelines are not checked",), definitive=False
         )
 
-    def consume(self, engine: Engine, task_id: int, consumed: dict[int, int]) -> None:
+    def consume(
+        self, engine: Engine, task_id: int, pipeline_run_id: int, consumed: dict[int, int]
+    ) -> None:
         """Record nothing."""
         return None
 
 
 class TrackedGate:
-    """The cross-pipeline gate for tasks, backed by ``AUD_TASK_DEPENDENCY_TRACKER``."""
+    """The cross-pipeline gate for tasks, backed by ``AUD_DEPENDENCY_CONSUMPTION``."""
 
-    def __init__(self, clock: Clock | None = None, policy: GatePolicy = GatePolicy.ENFORCE) -> None:
-        """Use ``clock`` to wait and read the time, and ``policy`` for what is not satisfied."""
+    def __init__(
+        self,
+        clock: Clock | None = None,
+        policy: GatePolicy = GatePolicy.ENFORCE,
+        wait_seconds: float = WAIT_LIMIT_SECONDS,
+    ) -> None:
+        """Wait and read the time with ``clock``, and treat what is not satisfied by ``policy``.
+
+        A running upstream is waited for at most ``wait_seconds``.
+        """
         self.clock = clock or Clock()
         self.policy = policy
+        self.wait_seconds = wait_seconds
 
     def check(self, engine: Engine, task_id: int, needed: int) -> CrossPipelineCheck:
         """Check the task's cross-pipeline dependencies until ``needed`` are satisfied.
@@ -242,7 +259,7 @@ class TrackedGate:
                     for edge in edges
                 ),
             )
-        budget = WaitBudget.start(self.clock)
+        budget = WaitBudget.start(self.clock, self.wait_seconds)
         satisfied = 0
         reasons: list[str] = []
         consumed: dict[int, int] = {}
@@ -273,7 +290,9 @@ class TrackedGate:
             return CrossPipelineCheck(needed, consumed=consumed, bypassed=tuple(reasons))
         return CrossPipelineCheck(satisfied, tuple(reasons), consumed)
 
-    def consume(self, engine: Engine, task_id: int, consumed: dict[int, int]) -> None:
+    def consume(
+        self, engine: Engine, task_id: int, pipeline_run_id: int, consumed: dict[int, int]
+    ) -> None:
         """Record the upstream task runs a task that succeeded consumed."""
         with engine.connect() as conn:
             edges = fetch_cross_pipeline_task_edges(conn, task_id)
@@ -287,7 +306,7 @@ class TrackedGate:
                     edge.task_dependency_id,
                     task_id,
                     edge.pipeline_id,
-                    edge.depends_on_task_id,
+                    pipeline_run_id,
                     edge.depends_on_pipeline_id,
                     run_id,
                 )
@@ -318,6 +337,7 @@ def check_pipeline_dependencies(
     pipeline_id: int,
     clock: Clock | None = None,
     policy: GatePolicy = GatePolicy.ENFORCE,
+    wait_seconds: float = WAIT_LIMIT_SECONDS,
 ) -> PipelineGateResult:
     """Check every dependency of ``pipeline_id`` on other pipelines; all must be satisfied.
 
@@ -336,7 +356,7 @@ def check_pipeline_dependencies(
                 for edge in edges
             )
         )
-    budget = WaitBudget.start(clock)
+    budget = WaitBudget.start(clock, wait_seconds)
     consumed: dict[int, int] = {}
     bypassed: list[str] = []
     for edge in edges:
@@ -378,7 +398,12 @@ def consume_pipeline_dependencies(engine: Engine, pipeline_id: int, pipeline_run
             continue
         with engine.begin() as conn:
             trackers.record_pipeline_consumed(
-                conn, edge.pipeline_dependency_id, pipeline_id, edge.depends_on_pipeline_id, run_id
+                conn,
+                edge.pipeline_dependency_id,
+                pipeline_id,
+                pipeline_run_id,
+                edge.depends_on_pipeline_id,
+                run_id,
             )
         logger.info(
             "consumed run %d of upstream pipeline %s", run_id, edge.depends_on_pipeline_code

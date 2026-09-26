@@ -30,8 +30,7 @@ TABLES = (
     "aud_column_lineage",
     "aud_docs_publication",
     "aud_task_documentation",
-    "aud_pipeline_dependency_tracker",
-    "aud_task_dependency_tracker",
+    "aud_dependency_consumption",
     "schema_migrations",
 )
 
@@ -371,7 +370,7 @@ def test_sla_status_is_met_or_breached(seeded):
     refused(db, "UPDATE AUD_PIPELINES_RUN_LOG SET SLA_STATUS = 'LATE'")
 
 
-def test_trackers_share_their_dependency_row_key(seeded):
+def test_the_consumption_log_holds_one_kind_of_dependency_per_row(seeded):
     db, ids = seeded
     dependency = insert_id(
         db,
@@ -381,13 +380,23 @@ def test_trackers_share_their_dependency_row_key(seeded):
         a=ids["a"],
         b=ids["b"],
     )
-    insert = (
-        "INSERT INTO AUD_PIPELINE_DEPENDENCY_TRACKER (PIPELINE_DEPENDENCY_ID, PIPELINE_ID, "
-        "DEPENDS_ON_PIPELINE_ID) VALUES (:d, :a, :b)"
+    upstream_run = insert_id(
+        db,
+        "INSERT INTO AUD_PIPELINES_RUN_LOG (PIPELINE_ID, STATUS) VALUES (:b, 'SUCCESS')",
+        "PIPELINE_RUN_ID",
+        b=ids["b"],
     )
-    run(db, insert, d=dependency, a=ids["a"], b=ids["b"])
-    refused(db, insert, d=dependency, a=ids["a"], b=ids["b"])
-    refused(db, insert, d=999999, a=ids["a"], b=ids["b"])
+    insert = (
+        "INSERT INTO AUD_DEPENDENCY_CONSUMPTION (PIPELINE_DEPENDENCY_ID, TASK_DEPENDENCY_ID, "
+        "PIPELINE_ID, DEPENDS_ON_PIPELINE_ID, CONSUMED_PIPELINE_RUN_ID) "
+        "VALUES (:d, :t, :a, :b, :r)"
+    )
+    # Append-only: the same dependency consumes again and again.
+    run(db, insert, d=dependency, t=None, a=ids["a"], b=ids["b"], r=upstream_run)
+    run(db, insert, d=dependency, t=None, a=ids["a"], b=ids["b"], r=upstream_run)
+    # Exactly one of the two dependency ids.
+    refused(db, insert, d=None, t=None, a=ids["a"], b=ids["b"], r=upstream_run)
+    refused(db, insert, d=999999, t=None, a=ids["a"], b=ids["b"], r=upstream_run)
 
 
 def test_the_offset_type_list(seeded):
