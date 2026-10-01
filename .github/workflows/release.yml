@@ -13,7 +13,7 @@ jobs:
     name: every required suite has passing evidence
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The gate compares each evidence commit with HEAD, so it needs the history.
           fetch-depth: 0
