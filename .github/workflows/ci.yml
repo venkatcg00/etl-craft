@@ -76,7 +76,7 @@ jobs:
     env:
       ETL_CRAFT_REQUIRE_SERVICES: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
@@ -113,7 +113,7 @@ jobs:
       ETL_CRAFT_REQUIRE_SERVICES: "1"
       ETL_CRAFT_E2E_WAREHOUSE: ${{ matrix.warehouse }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
