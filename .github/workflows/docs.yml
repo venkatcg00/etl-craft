@@ -45,7 +45,7 @@ jobs:
       - name: Build every version
         run: uv run python scripts/build_docs_site.py _site
       - name: Upload the site
-        uses: actions/upload-pages-artifact@v4
+        uses: actions/upload-pages-artifact@v5
         with:
           path: _site
 
