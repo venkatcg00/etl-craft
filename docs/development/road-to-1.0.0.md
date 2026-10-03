@@ -1687,8 +1687,8 @@ Every Airflow task maps to an etl-craft task; nothing in the example runs Spark 
 | `SI_REFERENCE` (daily) | `load_seeds` | PYTHON `seeds.py`: reads `seeds/*.csv` into `ds.*` and `info.*` | `infra/sql/13`, `14` |
 | | `ds_*_to_dwh`, `info_*_to_dwh` (one per table) | SQL `SCD1_MERGE` | the triggers in `12_func_triggers_creation.sql` |
 | `SI_CLIENT_ALPHA` (every 15 min) | `alpha_source_to_lnd` | PYTHON `mongo_to_lnd.py`: reads documents after the stored offset, writes `lnd.client_alpha_cs_data`, returns the new offset | `client_alpha_check_new_data`, `client_alpha_branch`, `client_alpha_source_to_lnd` |
-| | `alpha_lnd_to_prs` (depends on the ingestion with `HAS_DATA`) | SQL `SCD1_MERGE` on `source_system_identifier`, `MERGE_DEDUPE_ORDER` on the source timestamp | `client_alpha_lnd_to_prs` (insert, update and duplicate counts) |
-| | `alpha_prs_to_cdc` | SQL `OVERWRITE_TABLE` with `$$pipeline_id` (rows changed in this run) | `client_alpha_prs_to_cdc` |
+| | `alpha_lnd_to_prs` (depends on the ingestion with `HAS_DATA`) | SQL `SCD2_MERGE` on `source_system_identifier`, `MERGE_DEDUPE_ORDER` on the source timestamp, so `prs` keeps every version of a source record | `client_alpha_lnd_to_prs` (insert, update and duplicate counts) |
+| | `alpha_prs_to_cdc` | SQL `OVERWRITE_TABLE` with `$$pipeline_id` and `ACTIVE_FLAG = 'Y'` (the versions `prs` opened in this run) | `client_alpha_prs_to_cdc` |
 | | `alpha_cdc_to_predm` | SQL `OVERWRITE_TABLE`: joins `ds` lookups, maps codes | the transform half of `client_alpha_cdc_to_predm` |
 | | `alpha_rules` | BUSINESS_RULES on `pre_dm.customer_support_stage_alpha`: one `REJECT` rule per validity check of today's `is_valid` logic | the validity half of `client_alpha_cdc_to_predm` and `aud.data_error_history` |
 | | `alpha_predm_to_dm` | SQL `SCD2_MERGE` into `dm.customer_support_fact`, keyed on `source_system_identifier`, excluding rejected keys | `client_alpha_predm_to_dm` |
@@ -1701,7 +1701,7 @@ Rules for building them:
 1. Port each Airflow task's SQL and PySpark logic into one SELECT per SQL task. When a step needs
    something etl-craft can't express (a count, a check, an action), stop and add it to etl-craft
    with a design note in this plan, then cut a new release candidate. Example: the Data Metrics
-   dashboard needs a duplicate count per run; if the `SCD1_MERGE` dedupe step doesn't report it, add
+   dashboard needs a duplicate count per run; if the `SCD2_MERGE` dedupe step doesn't report it, add
    `DUPLICATE_COUNT` to the action's counts rather than computing it in a script.
 2. Ingestion scripts only read the source and write landing rows (the team's responsibility, as
    for any user); they return `ScriptResult(row_count, offset)`.
@@ -1739,7 +1739,7 @@ Both dashboards keep their charts and meanings; only their datasets change.
    | `dag_run_id`, `run_start_date`, `run_duration` | `AUD_PIPELINES_RUN_LOG`: `PIPELINE_RUN_ID`, `START_DATE`, `END_DATE - START_DATE` |
    | `source_name` | the pipeline (`SI_CLIENT_ALPHA` is Alpha), through a small `ds.sources` mapping |
    | `batch_count` | the ingestion task's `SOURCE_COUNT` |
-   | `insert_count`, `update_count` | the `lnd_to_prs` task's `INSERT_COUNT`, `UPDATE_COUNT` |
+   | `insert_count`, `update_count` | the `lnd_to_prs` task (`SCD2_MERGE`): `UPDATE_COUNT` is the keys whose version was closed (updates), and `INSERT_COUNT - UPDATE_COUNT` the new keys (inserts), because an SCD2 merge counts every opened version as an insert |
    | `duplicate_count` | the `lnd_to_prs` task's duplicate count (see rule 1 of `S8.B`) |
    | `valid_count`, `validity_percentage` | rows of the run in `pre_dm` minus the keys the run's `REJECT` rules flagged |
    | `dag_run_status = 'SUCCESS'` filter | `STATUS = 'SUCCESS'` |
