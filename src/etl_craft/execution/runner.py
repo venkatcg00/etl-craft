@@ -30,6 +30,7 @@ from etl_craft.config import ConnectorConfig
 from etl_craft.core.enums import (
     SETTLED_STATUSES,
     TERMINAL_STATUSES,
+    DependencyType,
     InterventionAction,
     Mode,
     RunStatus,
@@ -38,7 +39,10 @@ from etl_craft.core.errors import ConfigurationError, RunRefusedError, UsageErro
 from etl_craft.core.graph import DependencyGraph, RunState, TaskRunState, build_graph
 from etl_craft.engine import runlog
 from etl_craft.engine.queries import statement
-from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
+from etl_craft.engine.repository.dependencies import (
+    fetch_cross_pipeline_task_edges,
+    fetch_pipeline_graph,
+)
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.repository.tasks import fetch_task_parameters, resolve_task_id
 from etl_craft.execution.gates import (
@@ -353,9 +357,7 @@ def _preflight(
     cross = CrossPipelineCheck(0)
     if still_needed > 0 and task_id in graph_data.cross_pipeline_task_ids:
         if backfill:
-            # A backfill checks no dependency on another pipeline, and consumes nothing.
-            node = next(t for t in graph_data.tasks if t.task_id == task_id)
-            cross = CrossPipelineCheck(min(still_needed, node.cross_pipeline_edge_count))
+            cross = _backfill_cross_check(engine, task_id, still_needed)
         else:
             cross = gate.check(engine, task_id, still_needed)
         still_needed -= cross.satisfied_count
@@ -373,6 +375,32 @@ def _preflight(
         return _record_skipped(engine, task_id, pipeline_run_id, task_code, never), NO_CROSS
     waiting = f"{task_code}: {unready}; nothing recorded, run it again once they are"
     return _skipped(waiting), NO_CROSS
+
+
+BACKFILL_ASSUMED = frozenset(
+    {DependencyType.SUCCESS, DependencyType.HAS_DATA, DependencyType.ALWAYS}
+)
+"""The dependency types on another pipeline that a backfill counts as met without checking."""
+
+
+def _backfill_cross_check(engine: Engine, task_id: int, needed: int) -> CrossPipelineCheck:
+    """Judge a task's dependencies on other pipelines in a backfill, which checks none of them.
+
+    A backfill re-runs history as if its upstreams had delivered, so ``SUCCESS``, ``HAS_DATA``
+    and ``ALWAYS`` dependencies count as met. A ``FAILURE`` dependency does not: nothing says an
+    upstream failed, and a task that runs only on an upstream failure (an alert) must not run.
+    Nothing is consumed either way.
+    """
+    with engine.connect() as conn:
+        edges = fetch_cross_pipeline_task_edges(conn, task_id)
+    assumed = sum(1 for edge in edges if edge.dependency_type in BACKFILL_ASSUMED)
+    unmet = [edge for edge in edges if edge.dependency_type not in BACKFILL_ASSUMED]
+    reasons = tuple(
+        f"upstream task {edge.depends_on_label} ({edge.dependency_type}) is not evaluated in a "
+        "backfill, so it is not met"
+        for edge in unmet
+    )
+    return CrossPipelineCheck(min(needed, assumed), reasons)
 
 
 def _skipped(message: str) -> TaskOutcome:

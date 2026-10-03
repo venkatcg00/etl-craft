@@ -16,6 +16,9 @@ rows naming another pipeline) are checked before the task runs. Each check:
    is what it last consumed. A downstream that fails or is skipped consumes nothing, so its
    retry sees the same upstream run.
 
+Runs that are part of a backfill are invisible to all of this: they never satisfy a dependency,
+never fail one, and are never waited for.
+
 ``Orchestration.Dependency_gates`` relaxes this in local mode: with ``warn`` a dependency that is
 not satisfied is reported as bypassed and the run or task goes ahead; with ``off`` nothing is
 checked or waited for, and every dependency is reported as bypassed. Only upstream runs that

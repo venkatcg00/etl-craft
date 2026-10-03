@@ -301,27 +301,41 @@ def backfill(
             f"--backfill {first.isoformat()}:{last.isoformat()} is {days} dates; one backfill "
             f"runs at most {MAX_BACKFILL_DAYS}, so split it"
         )
-    with engine.connect() as conn:
-        active = runlog.fetch_active_pipeline_run_id(conn, resolve_pipeline_id(conn, pipeline_code))
-    if active is not None:
-        raise RunStateError(
-            f"{pipeline_code} has a run in progress (pipeline_run_id={active}); finish or cancel "
-            "it before a backfill"
-        )
     runs: list[PipelineOutcome] = []
     for offset in range(days):
         day = first + timedelta(days=offset)
-        logger.info("%s: backfill run for %s (%d of %d)", pipeline_code, day, offset + 1, days)
-        outcome = run_pipeline(
-            engine,
-            config,
-            pipeline_code,
-            clock=clock,
-            child=child,
-            hooks=hooks,
-            run_date=day,
-            backfill=reason,
-        )
+        try:
+            # Checked before every date: another run may have started since the last one.
+            with engine.connect() as conn:
+                pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+                active = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
+            if active is not None:
+                raise RunStateError(
+                    f"{pipeline_code} has a run in progress (pipeline_run_id={active}); finish "
+                    "or cancel it before a backfill"
+                )
+            logger.info("%s: backfill run for %s (%d of %d)", pipeline_code, day, offset + 1, days)
+            outcome = run_pipeline(
+                engine,
+                config,
+                pipeline_code,
+                clock=clock,
+                child=child,
+                hooks=hooks,
+                run_date=day,
+                backfill=reason,
+            )
+        except RunStateError as error:
+            if not runs:
+                raise
+            message = (
+                f"{pipeline_code}: backfill stopped at {day.isoformat()} after {len(runs)} of "
+                f"{days} run(s): {error}. `etl-craft run --pipeline_code {pipeline_code} "
+                f"--backfill {day.isoformat()}:{last.isoformat()} --reason ...` takes up from there"
+            )
+            logger.error("%s", message)
+            stopped = PipelineOutcome(RunStatus.SKIPPED, message, None)
+            return BackfillOutcome(runs, stopped, message)
         runs.append(outcome)
         if outcome.pipeline_run_id is None:
             message = f"{pipeline_code}: backfill stopped at {day.isoformat()}: {outcome.message}"
@@ -555,6 +569,17 @@ def _start_run(
         existing = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
         kind = None if existing is None else runlog.fetch_run_kind(conn, existing)
     if existing is not None and kind is not None:
+        if kind.backfill and backfill is None:
+            raise RunStateError(
+                f"{pipeline_code} is running backfill run pipeline_run_id={existing} as of "
+                f"{kind.run_date.isoformat()}; a scheduled run starts once it ends (or cancel it "
+                f"with `etl-craft cancel --pipeline_code {pipeline_code} --reason ...`)"
+            )
+        if backfill is not None and not kind.backfill:
+            raise RunStateError(
+                f"{pipeline_code} has a scheduled run in progress (pipeline_run_id={existing}); "
+                "a backfill never takes it over"
+            )
         if run_date is not None and kind.run_date != run_date:
             raise RunStateError(
                 f"{pipeline_code} has a run in progress (pipeline_run_id={existing}) as of "

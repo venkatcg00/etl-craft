@@ -730,6 +730,74 @@ def test_a_backfill_runs_once_per_date_as_of_that_date(config, pipeline, downstr
     assert runs(engine)[-2:] == [("P", "SUCCESS", today, "N"), ("P", "SUCCESS", "2026-08-31", "N")]
 
 
+def test_a_plain_run_does_not_take_over_a_backfills_run(config, pipeline):
+    engine, ids = pipeline
+    with engine.begin() as conn:
+        backfill_run = runlog.find_or_create_active_run(
+            conn, ids["P"], run_date=date(2025, 1, 1), backfill=True
+        )
+    with pytest.raises(RunStateError, match="is running backfill run pipeline_run_id="):
+        run_pipeline(engine, config, "P", child=CHILD)
+    assert run_status(engine, backfill_run) == "IN-PROGRESS"
+    assert statuses(engine, backfill_run) == {}
+
+
+def test_a_backfill_does_not_take_over_a_scheduled_run(config, pipeline):
+    engine, ids = pipeline
+    with engine.begin() as conn:
+        scheduled = runlog.find_or_create_active_run(conn, ids["P"], run_date=date(2026, 9, 2))
+    # The run started by itself between two backfill dates is found before the next date.
+    with pytest.raises(RunStateError, match="finish or cancel it before a backfill"):
+        backfill(engine, config, "P", date(2026, 9, 2), date(2026, 9, 2), "x", child=CHILD)
+    assert run_status(engine, scheduled) == "IN-PROGRESS"
+
+
+def test_a_backfill_stops_when_another_run_starts_between_dates(config, pipeline):
+    engine, ids = pipeline
+    without_broken(engine, ids)
+
+    def a_scheduled_run_starts(outcome):
+        with engine.begin() as conn:
+            runlog.find_or_create_active_run(conn, ids["P"])
+
+    done = backfill(
+        engine,
+        config,
+        "P",
+        date(2026, 9, 1),
+        date(2026, 9, 3),
+        "reload",
+        child=CHILD,
+        hooks=RunHooks(on_finalized=a_scheduled_run_starts),
+    )
+    assert len(done.runs) == 1 and done.stopped is not None
+    assert "backfill stopped at 2026-09-02 after 1 of 3 run(s)" in done.message
+    assert "--backfill 2026-09-02:2026-09-03 --reason ..." in done.message
+
+
+def test_a_backfill_never_meets_a_failure_dependency_on_another_pipeline(config, engine_db):
+    engine = engine_db.engine
+    with engine.begin() as conn:
+        up = add_pipeline(conn, "UP")
+        publish = add_task(conn, up, "publish")
+        down = add_pipeline(conn, "DOWN")
+        load = add_task(conn, down, "load", BEHAVIOUR="succeed")
+        alert = add_task(conn, down, "alert", BEHAVIOUR="succeed")
+        add_dependency(conn, down, load, publish, upstream_pipeline=up)
+        add_dependency(conn, down, alert, publish, "FAILURE", upstream_pipeline=up)
+    done = backfill(engine, config, "DOWN", date(2026, 9, 1), date(2026, 9, 2), "x", child=CHILD)
+    assert done.status == RunStatus.SUCCESS
+    for outcome in done.runs:
+        found = statuses(engine, outcome.pipeline_run_id)
+        assert found["load"][0] == "SUCCESS"
+        assert found["alert"][0] == "SKIPPED"
+    with engine.connect() as conn:
+        reason = conn.execute(
+            text("SELECT ERROR_MESSAGE FROM AUD_TASK_RUN_LOG WHERE TASK_ID = :t"), {"t": alert}
+        ).first()[0]
+    assert "(FAILURE) is not evaluated in a backfill" in reason
+
+
 def test_a_backfill_stops_at_the_first_run_that_fails(config, pipeline):
     engine, _ = pipeline
     done = backfill(engine, config, "P", date(2026, 9, 1), date(2026, 9, 5), "x", child=CHILD)

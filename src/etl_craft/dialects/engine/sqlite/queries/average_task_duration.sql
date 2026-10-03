@@ -1,5 +1,7 @@
--- The average length in seconds of the finished runs of :task_id.
-SELECT AVG((julianday(END_DATE) - julianday(START_DATE)) * 86400.0) AS seconds
-FROM AUD_TASK_RUN_LOG
-WHERE TASK_ID = :task_id AND STATUS IN ('SUCCESS', 'FAILED', 'SKIPPED')
-  AND END_DATE IS NOT NULL
+-- The average length in seconds of the rows of :task_id that really ran: finished SUCCESS or
+-- FAILED, longer than zero, and not under a backfill run.
+SELECT AVG((julianday(t.END_DATE) - julianday(t.START_DATE)) * 86400.0) AS seconds
+FROM AUD_TASK_RUN_LOG t
+JOIN AUD_PIPELINES_RUN_LOG r ON r.PIPELINE_RUN_ID = t.PIPELINE_RUN_ID
+WHERE t.TASK_ID = :task_id AND t.STATUS IN ('SUCCESS', 'FAILED') AND r.BACKFILL = 'N'
+  AND t.END_DATE > t.START_DATE
