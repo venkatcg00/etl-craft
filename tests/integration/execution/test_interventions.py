@@ -940,3 +940,22 @@ def test_mark_keeps_a_skipped_task_another_pipeline_consumed(config, engine_db):
         marked.message
     )
     assert statuses(engine, p_run.pipeline_run_id)["on_failure"][0] == "SKIPPED"
+
+
+def test_a_rerun_of_a_task_still_running_leaves_its_ended_run_alone(config, pipeline):
+    engine, ids = pipeline
+    failed = run_pipeline(engine, config, "P", child=CHILD)
+    assert failed.status == RunStatus.FAILED
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE AUD_TASK_RUN_LOG SET STATUS = 'IN-PROGRESS' "
+                "WHERE TASK_ID = :t AND PIPELINE_RUN_ID = :r"
+            ),
+            {"t": ids["broken"], "r": failed.pipeline_run_id},
+        )
+
+    with pytest.raises(RunStateError, match="broken: already IN-PROGRESS"):
+        rerun_task(engine, config, "P", "broken", "source fixed", child=CHILD)
+    assert run_status(engine, failed.pipeline_run_id) == "FAILED"
+    assert interventions(engine) == []

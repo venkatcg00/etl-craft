@@ -6,11 +6,13 @@ from pathlib import Path
 import pytest
 import yaml
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
 from etl_craft.config import load_config
 from etl_craft.core.enums import RunStatus
-from etl_craft.core.errors import MetadataError, RunRefusedError, RunStateError
+from etl_craft.core.errors import HandlerError, MetadataError, RunRefusedError, RunStateError
 from etl_craft.engine import runlog
+from etl_craft.execution import runner
 from etl_craft.execution.gates import CrossPipelineCheck, UncheckedGate
 from etl_craft.execution.runner import ChildOptions, run_task
 
@@ -328,3 +330,77 @@ def test_the_cross_pipeline_gate_decides_a_task_with_dependencies_elsewhere(proj
     gate = CountingGate(1)
     assert run(project, "values", gate=gate).status == RunStatus.SUCCESS
     assert gate.consumed == [{7: 70}]
+
+
+def task_row_status(engine, task_id, run_id):
+    with engine.connect() as conn:
+        return runlog.fetch_task_run_status(conn, task_id, run_id)
+
+
+def test_a_bad_time_limit_fails_before_the_task_is_bound(project):
+    engine, _, ids = project
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE) "
+                "VALUES (:t, 'TASK_TIMEOUT_SECONDS', 'soon')"
+            ),
+            {"t": ids["ok"]},
+        )
+    with pytest.raises(HandlerError, match="TASK_TIMEOUT_SECONDS='soon' is not a whole number"):
+        run(project, "ok")
+    assert task_row_status(engine, ids["ok"], ids["run"]) is None
+
+
+def test_a_task_process_that_cannot_start_is_recorded_failed(project, monkeypatch):
+    engine, _, ids = project
+
+    def no_process(*args, **kwargs):
+        raise OSError(24, "Too many open files")
+
+    monkeypatch.setattr(runner, "run_child", no_process)
+    with pytest.raises(OSError):
+        run(project, "ok")
+    with engine.connect() as conn:
+        found = runlog.fetch_task_run_result(conn, row_id(engine, ids["ok"], ids["run"]))
+    assert found.status == "FAILED"
+    assert (
+        found.error_message
+        == "could not run the task process: OSError: [Errno 24] Too many open files"
+    )
+
+
+def test_recording_an_outcome_survives_a_dropped_connection(project, monkeypatch):
+    real = runlog.fetch_task_run_result
+    calls = []
+
+    def drops_once(conn, task_run_id):
+        calls.append(task_run_id)
+        if len(calls) == 1:
+            raise OperationalError("SELECT", {}, Exception("server closed the connection"))
+        return real(conn, task_run_id)
+
+    monkeypatch.setattr(runner.runlog, "fetch_task_run_result", drops_once)
+    outcome = run(project, "ok")
+    assert outcome.status == RunStatus.SUCCESS and len(calls) == 2
+
+
+def test_a_failed_task_is_never_rewritten_as_skipped(project):
+    engine, _, ids = project
+    failed = run(project, "fails")
+    assert failed.status == RunStatus.FAILED
+    kept = runner._record_skipped(engine, ids["fails"], ids["run"], "fails", "upstream failed")
+    assert kept.status == RunStatus.FAILED
+    assert "not run again: upstream failed" in kept.message
+    assert row(engine, failed.task_run_id).error_message == "the source file is missing"
+
+
+def row_id(engine, task_id, run_id):
+    with engine.connect() as conn:
+        return conn.execute(
+            text(
+                "SELECT TASK_RUN_ID FROM AUD_TASK_RUN_LOG "
+                "WHERE TASK_ID = :t AND PIPELINE_RUN_ID = :r"
+            ),
+            {"t": task_id, "r": run_id},
+        ).scalar_one()

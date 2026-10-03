@@ -171,6 +171,25 @@ def resolve_run_for_orchestrator(conn: Connection, pipeline_id: int) -> tuple[in
     return int(latest.pipeline_run_id), str(latest.status)
 
 
+def latest_run_for_rerun(conn: Connection, pipeline_id: int) -> int:
+    """Return the run ``--rerun`` acts on: the run in progress, else the latest one.
+
+    Nothing is changed; the caller reopens the run only once it knows the task will run.
+    Raises ``RunStateError`` when the pipeline has no run at all.
+    """
+    active = fetch_active_pipeline_run_id(conn, pipeline_id)
+    if active is not None:
+        return active
+    latest = conn.execute(
+        statement(conn, "latest_pipeline_run"), {"pipeline_id": pipeline_id}
+    ).one_or_none()
+    if latest is None:
+        raise RunStateError(
+            f"pipeline_id={pipeline_id} has no run to rerun a task in; run the pipeline first"
+        )
+    return int(latest.pipeline_run_id)
+
+
 @dataclass(frozen=True)
 class RunKind:
     """The date a run runs as of, and whether it is part of a backfill."""
@@ -271,6 +290,15 @@ def finish_task_run(
             "task_log": task_log,
         },
     )
+
+
+def fail_task_run_if_running(conn: Connection, task_run_id: int, error_message: str) -> bool:
+    """Record ``task_run_id`` ``FAILED`` only if it is still ``IN-PROGRESS``; return whether."""
+    result = conn.execute(
+        statement(conn, "fail_task_run_if_running"),
+        {"task_run_id": task_run_id, "error_message": error_message, "now": datetime.now(UTC)},
+    )
+    return bool(result.rowcount)
 
 
 @dataclass(frozen=True)

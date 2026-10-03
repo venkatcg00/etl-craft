@@ -40,6 +40,7 @@ from types import TracebackType
 from typing import TypeVar
 
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.enums import (
@@ -782,8 +783,10 @@ class _Waves:
                 gate=self.gate,
                 child=self.child,
             )
-        except EtlCraftError as error:
-            logger.error("%s: could not run: %s", task_code, error)
+        except (EtlCraftError, OSError, SQLAlchemyError) as error:
+            # One task's trouble (a bad setting, a failed launch, a database that dropped the
+            # connection) ends that task only; the others in the wave keep running.
+            logger.error("%s: could not run: %s: %s", task_code, type(error).__name__, error)
             return None
 
 
