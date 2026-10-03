@@ -136,7 +136,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    R2[0.2.0 Stabilize] --> R3[0.3 Identity] --> R4[0.4 Overseer] --> R5[0.5 Cluster] --> R6[0.6 At load] --> R7[0.7-0.9 UI and finish] --> R1[1.0.0]
+    R2[0.2.0 Stabilize] --> R3[0.3 Identity] --> R4[0.4 Overseer] --> R5[0.5 Cluster] --> R6[0.6 At load] --> R7[0.7-0.9 UI and finish] --> RC[Release candidates: Support Insights example] --> R1[1.0.0]
 ```
 
 | Release | Theme | Workstreams | Gate to leave the release |
@@ -147,6 +147,7 @@ flowchart LR
 | 0.5 | Cluster: pool interface, worker agents, project namespaces in one Engine DB, connection budget, managed PostgreSQL | S5.A to S5.J | Pool contract tests pass for both providers; many projects share one Engine DB |
 | 0.6 | At load: retention, bounded catalog, incremental cloning, metrics, backup and restore, benchmark | S6.A to S6.G | A sustained-load benchmark stays within its stated budgets; a restore is tested |
 | 0.7 to 0.9 | UI and finish: web UI, authentication and roles, redaction, webhooks, secrets providers, packaging, compatibility policy, soak | S7.A to S7.J | A month-long soak of a real deployment passes |
+| 1.0.0 release candidates | The Support Insights example rebuilt on etl-craft, configured through CI, with its Superset dashboards | S8.A to S8.G | Every pipeline of the example runs and every chart of both dashboards renders correct data |
 | 1.0.0 | Supported contract | | Every item of the [1.0.0 checklist](#100-release-checklist) has evidence |
 
 Releases are ordered by dependency. Do not start 0.4 before 0.3's chaos suite passes: the overseer,
@@ -1590,8 +1591,8 @@ volume, and the managed PostgreSQL Engine DBs (`S5.I`).
 
 ### S7.I The soak
 
-Run a real project (the Support-Insights example, L1 in the rewrite plan, is the intended one) for
-30 days on the reference cluster:
+Run the Support Insights example ([the release-candidate stage](#release-candidate-the-support-insights-example))
+for 30 days on the reference cluster:
 
 - daily `kill -9` of a random worker, a weekly `kill -9` of the overseer, one Engine DB failover or
   restart, one warehouse outage of at least 15 minutes, one upgrade between two 0.9 patch releases;
@@ -1609,6 +1610,183 @@ Run a real project (the Support-Insights example, L1 in the rewrite plan, is the
   from the code where possible (as the existing reference pages are).
 
 **Gate.** The soak passes.
+
+## Release candidate: the Support Insights example
+
+**Goal.** Prove 1.0.0 on a real project before it is released. The
+[Support Insights platform](https://github.com/venkatcg00/Supports-Insights-Docker) is rebuilt on
+etl-craft: everything etl-craft can do replaces what Airflow, PySpark and hand-written SQL do there
+today, its configuration is deployed by CI pipelines, and both Superset dashboards work from the data
+etl-craft produces. **1.0.0 is released only when every pipeline of the example runs and every chart
+of both dashboards renders correct data.**
+
+**Depends on.** Every workstream of 0.2.0 to 0.9 merged and every defect in
+[Appendix A](#appendix-a-defect-traceability) closed. The example is built against 1.0.0 release
+candidates (`1.0.0rc1`, `1.0.0rc2`, ...); a defect it finds is fixed in etl-craft, and a new release
+candidate is cut, never worked around in the example.
+
+**Where it lives.** In the Support Insights repository itself, on a branch `etl-craft` that replaces
+its `main` once this stage passes, so the example stays a standalone project that installs etl-craft
+from PyPI like any user would. The etl-craft repository pins the example's commit in
+`release/example.toml` and runs it as a required release suite (`S8.G`).
+
+### What the example has today
+
+| Part | Today | What happens to it |
+| --- | --- | --- |
+| Sources | MongoDB (client Alpha documents), Kafka (Beta events), MinIO (Gamma gzipped CSVs) | Kept: they are the sources |
+| Synthetic generators and their UI (port 1212) | `generators/*.py`, `infra/entrypoint/data_generator_orchestrator.py` | Kept: they stand in for real source systems |
+| Orchestration | Airflow (webserver, scheduler, its own database), three DAGs `Client_{Alpha,Beta,Gamma}_ETL_Task_Flow` | **Replaced** by the etl-craft overseer and workers |
+| Processing | PySpark in local mode, writing to PostgreSQL over JDBC | **Replaced** by etl-craft SQL tasks running in the warehouse, and Python ingestion scripts |
+| Checkpoints | `get_current_checkpoint` and `aud.dag_runs.source_checkpoint` | **Replaced** by etl-craft offsets |
+| Run audit | `aud.dag_runs`, filled by each DAG's finalize task | **Replaced** by etl-craft's run, task and attempt tables |
+| Data errors | `aud.data_error_history`, written by the CDC-to-PRE_DM step | **Replaced** by business rules and their results |
+| Reference data sync | Triggers in `infra/sql/12_func_triggers_creation.sql` copying `ds.*` and `info.*` into `dwh.*` | **Replaced** by an etl-craft pipeline |
+| Warehouse schemas | `infra/sql/02_schema_creation.sql` | Kept: etl-craft never creates warehouse schemas |
+| Warehouse tables | `infra/sql/03` to `11` | **Replaced**: target tables are created by `SETUP_TABLE` tasks; only the reference (`ds`, `info`) seed tables keep their DDL |
+| Reference data | `infra/sql/13`, `14` inserts | Kept as seed files, loaded by an etl-craft ingestion pipeline |
+| Views | `vw.data_metrics_view`, `vw.customer_support_fact_view` | **Rewritten** over etl-craft's tables (`S8.D`) |
+| Superset | Two dashboards in `superset/exports/dashboard_export.zip` | Kept; datasets repointed and re-exported (`S8.D`) |
+
+### S8.A The project layout
+
+```
+Supports-Insights-Docker/
+├── etl-craft/                        the etl-craft project directory
+│   ├── craft-connector.yml           Engine, Warehouse, Email, Cloning; secrets as variable names
+│   ├── migrations/                   the metadata: numbered SQL files inserting CFG_ rows
+│   │   ├── 0001_projects_and_pools.sql
+│   │   ├── 0002_reference_data.sql
+│   │   ├── 0003_client_alpha.sql
+│   │   ├── 0004_client_beta.sql
+│   │   ├── 0005_client_gamma.sql
+│   │   └── 0006_business_rules.sql
+│   ├── sql_files/                    one SELECT per SQL task, by layer and client
+│   ├── ingestion_scripts/            mongo_to_lnd.py, kafka_to_lnd.py, minio_to_lnd.py, seeds.py
+│   └── seeds/                        ds and info reference data as CSV
+├── generators/                       unchanged
+├── superset/                         dashboards export (re-exported in S8.D)
+├── infra/
+│   ├── docker-compose.yml            postgres, mongo, kafka, minio, superset, generators UI,
+│   │                                 etl-craft overseer, two etl-craft workers
+│   └── sql/                          database, schemas, reference seed tables, vw views
+└── .github/workflows/                the CI pipelines (S8.E)
+```
+
+Engine DB: a database `etl_craft` on the platform's PostgreSQL server, separate from the warehouse
+database `support_insights`. Warehouse: `support_insights` (PostgreSQL). One etl-craft project,
+`support_insights`.
+
+### S8.B Pipelines
+
+Every Airflow task maps to an etl-craft task; nothing in the example runs Spark or Airflow.
+
+| Pipeline | Task | Handler and action | Replaces |
+| --- | --- | --- | --- |
+| `SI_SETUP` (manual, once and on schema change) | one `SETUP_TABLE` per target table in `lnd`, `prs`, `cdc`, `pre_dm`, `dm`, `dwh` | SQL `SETUP_TABLE` | `infra/sql/06` to `11` |
+| `SI_REFERENCE` (daily) | `load_seeds` | PYTHON `seeds.py`: reads `seeds/*.csv` into `ds.*` and `info.*` | `infra/sql/13`, `14` |
+| | `ds_*_to_dwh`, `info_*_to_dwh` (one per table) | SQL `SCD1_MERGE` | the triggers in `12_func_triggers_creation.sql` |
+| `SI_CLIENT_ALPHA` (every 15 min) | `alpha_source_to_lnd` | PYTHON `mongo_to_lnd.py`: reads documents after the stored offset, writes `lnd.client_alpha_cs_data`, returns the new offset | `client_alpha_check_new_data`, `client_alpha_branch`, `client_alpha_source_to_lnd` |
+| | `alpha_lnd_to_prs` (depends on the ingestion with `HAS_DATA`) | SQL `SCD2_MERGE` on `source_system_identifier`, `MERGE_DEDUPE_ORDER` on the source timestamp, so `prs` keeps every version of a source record | `client_alpha_lnd_to_prs` (insert, update and duplicate counts) |
+| | `alpha_prs_to_cdc` | SQL `OVERWRITE_TABLE` with `$$pipeline_id` and `ACTIVE_FLAG = 'Y'` (the versions `prs` opened in this run) | `client_alpha_prs_to_cdc` |
+| | `alpha_cdc_to_predm` | SQL `OVERWRITE_TABLE`: joins `ds` lookups, maps codes | the transform half of `client_alpha_cdc_to_predm` |
+| | `alpha_rules` | BUSINESS_RULES on `pre_dm.customer_support_stage_alpha`: one `REJECT` rule per validity check of today's `is_valid` logic | the validity half of `client_alpha_cdc_to_predm` and `aud.data_error_history` |
+| | `alpha_predm_to_dm` | SQL `SCD2_MERGE` into `dm.customer_support_fact`, keyed on `source_system_identifier`, excluding rejected keys | `client_alpha_predm_to_dm` |
+| | `alpha_failure_alert` (depends on every task with `FAILURE`, run condition `ANY`) | EMAIL_ALERT to the team | Airflow failure emails |
+| `SI_CLIENT_BETA` | as Alpha, with `kafka_to_lnd.py` (consumer offsets stored as etl-craft offsets) | | `Client_Beta_ETL_Task_Flow` |
+| `SI_CLIENT_GAMMA` | as Alpha, with `minio_to_lnd.py` (the last processed object key, `{sequence_number:10d}_...`, as a `TEXT` offset) | | `Client_Gamma_ETL_Task_Flow` |
+
+Rules for building them:
+
+1. Port each Airflow task's SQL and PySpark logic into one SELECT per SQL task. When a step needs
+   something etl-craft can't express (a count, a check, an action), stop and add it to etl-craft
+   with a design note in this plan, then cut a new release candidate. Example: the Data Metrics
+   dashboard needs a duplicate count per run; if the `SCD2_MERGE` dedupe step doesn't report it, add
+   `DUPLICATE_COUNT` to the action's counts rather than computing it in a script.
+2. Ingestion scripts only read the source and write landing rows (the team's responsibility, as
+   for any user); they return `ScriptResult(row_count, offset)`.
+3. The `dm.customer_support_fact` table is created by `SETUP_TABLE` with etl-craft's SCD2 audit
+   columns. Its source-based partitions are dropped (the data is small); `is_active` becomes
+   `ACTIVE_FLAG = 'Y'`, and validity comes from the business rules.
+4. Pools: ingestion tasks run in the `ingestion` pool on worker 1, SQL and rules in the `warehouse`
+   pool on worker 2, so the example exercises the cluster.
+
+### S8.C Configuration through CI
+
+The metadata is code. Every `CFG_` row the example needs is created by a numbered file in
+`etl-craft/migrations/`, applied by `etl-craft migrate`, which records each file with its checksum in
+`SCHEMA_MIGRATIONS` under the `PROJECT` stream. A change to a pipeline is a new migration file
+(`UPDATE` the rows, or retire them with `ACTIVE_FLAG = 'N'` and insert new ones), reviewed in a pull
+request like code. Nobody edits the Engine DB by hand, and the UI's metadata editor is not used for
+the example.
+
+### S8.D Dashboards
+
+Both dashboards keep their charts and meanings; only their datasets change.
+
+1. **Interactions dashboard.** `vw.customer_support_fact_view` is rewritten over the etl-craft fact:
+   `ACTIVE_FLAG = 'Y'` replaces `is_active` and the date range, and rejected keys are excluded through
+   the business-rule results mirrored by cloning. Every chart (total interactions, first-contact
+   resolution, average handle time, average rating, query status treemap, interactions per agent,
+   customer type and support area sunburst, volume over time, latest interactions) must show the same
+   numbers as a reference query written for the test in `S8.F`.
+2. **Data Metrics dashboard.** `vw.data_metrics_view` is rewritten over etl-craft's audit data,
+   mirrored into the warehouse schema `aud_mirror` by cloning (this deployment runs plain PostgreSQL,
+   so cloning stays on). Column by column:
+
+   | Today (`aud.dag_runs`) | From etl-craft |
+   | --- | --- |
+   | `dag_run_id`, `run_start_date`, `run_duration` | `AUD_PIPELINES_RUN_LOG`: `PIPELINE_RUN_ID`, `START_DATE`, `END_DATE - START_DATE` |
+   | `source_name` | the pipeline (`SI_CLIENT_ALPHA` is Alpha), through a small `ds.sources` mapping |
+   | `batch_count` | the ingestion task's `SOURCE_COUNT` |
+   | `insert_count`, `update_count` | the `lnd_to_prs` task (`SCD2_MERGE`): `UPDATE_COUNT` is the keys whose version was closed (updates), and `INSERT_COUNT - UPDATE_COUNT` the new keys (inserts), because an SCD2 merge counts every opened version as an insert |
+   | `duplicate_count` | the `lnd_to_prs` task's duplicate count (see rule 1 of `S8.B`) |
+   | `valid_count`, `validity_percentage` | rows of the run in `pre_dm` minus the keys the run's `REJECT` rules flagged |
+   | `dag_run_status = 'SUCCESS'` filter | `STATUS = 'SUCCESS'` |
+
+3. Re-export the dashboards to `superset/exports/` and import them in `infra/scripts/import_superset_dashboards.sh`.
+
+### S8.E The CI pipelines
+
+In the example repository's `.github/workflows/`:
+
+| Workflow | When | What it does |
+| --- | --- | --- |
+| `validate.yml` | every pull request | Install the pinned etl-craft; start PostgreSQL; `etl-craft init-db`; `etl-craft migrate` (applies every metadata migration to an empty Engine DB); `etl-craft validate` for every pipeline; `etl-craft generate-yml` for every pipeline (proves the export still works); lint the scripts. Fails on any error. |
+| `deploy-config.yml` | merge to `main` | Applies new metadata migrations to the deployed Engine DB with `etl-craft migrate`, using a GitHub environment with the Engine DB secret and required reviewers; publishes the project bundle (`etl-craft bundle publish`); records the deployed commit. |
+| `e2e.yml` | every pull request and nightly | Brings up the whole stack with Docker Compose (sources, generators, warehouse, Engine DB, overseer, two workers, Superset); runs the generators for a fixed batch; waits for the scheduled runs; then runs the checks of `S8.F`. Uploads logs, the catalog and dashboard screenshots as artifacts. |
+
+### S8.F Acceptance checks
+
+`tests/` in the example repository (run by `e2e.yml`):
+
+1. Every scheduled run of the four pipelines ends `SUCCESS`; `etl-craft status` shows no failed or
+   lost attempt.
+2. Row reconciliation: for each client, the number of distinct source records the generators wrote
+   equals the active rows in `dm.customer_support_fact` plus the rejected keys, and no key has two
+   active versions.
+3. Incremental behaviour: a second generator batch is picked up from the stored offsets with no
+   duplicates in `lnd` or `prs`.
+4. Failure and recovery: stop MongoDB during a run; the Alpha run fails, the alert arrives in Mailpit,
+   and after MongoDB returns, `etl-craft run --pipeline_code SI_CLIENT_ALPHA --rerun` (or the next
+   scheduled run) completes with no lost or doubled rows. `kill -9` a worker mid-run; its attempt is
+   reconciled and retried.
+5. Dashboards: through the Superset API, every chart of both dashboards
+   (`GET /api/v1/chart/{id}/data/`) returns rows, no error, and the values of the reference queries.
+   A headless browser loads both dashboards and finds no chart in an error state.
+6. Catalog: `etl-craft generate-docs` builds, and every pipeline's lineage reaches
+   `dm.customer_support_fact`.
+
+### S8.G The release gate
+
+1. Add a required suite `example-support-insights` to `release/required-suites.toml` (`where = "local"`,
+   `wheel = true`): it checks out the commit pinned in `release/example.toml`, installs the release
+   candidate's wheel into the example's images, and runs the example's `e2e.yml` steps.
+2. The soak (`S7.I`) runs on this example.
+3. `release_gate.py` refuses 1.0.0 without passing evidence for this suite on the release commit.
+
+**Gate.** The example's three workflows pass against the final release candidate, every chart of both
+dashboards renders correct data, and the soak on the example passed.
 
 ## 1.0.0 release checklist
 
@@ -1636,6 +1814,8 @@ Run a real project (the Support-Insights example, L1 in the rewrite plan, is the
 - [ ] No secret etl-craft resolves reaches the catalog, the logs, the API or the clones.
 - [ ] `status` and `explain` answer every state, and exit codes tell a script what happened.
 - [ ] Backup, restore and the upgrade procedure are tested.
+- [ ] The Support Insights example passes its CI pipelines against the final release candidate, and
+      every chart of both Superset dashboards renders correct data.
 - [ ] The soak passed.
 - [ ] Every required suite, cloud included, has evidence matched to the release commit and wheel,
       and the release gate rejects incomplete evidence.
