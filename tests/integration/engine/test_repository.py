@@ -457,12 +457,33 @@ def test_finalizing_a_run_judges_its_sla(seeded, hours_ago, sla, expected):
         ).one()
     assert (row.status, row.sla_status) == (RunStatus.SUCCESS, expected)
     assert row.end_date is not None
+    assert result.ended
     if expected is None:
-        assert result is None
+        assert result.sla is None
     else:
-        assert result.status == expected
-        assert result.elapsed_hours == pytest.approx(hours_ago, abs=0.01)
-        assert result.describe().startswith(f"SLA of 2 h {expected}")
+        assert result.sla.status == expected
+        assert result.sla.elapsed_hours == pytest.approx(hours_ago, abs=0.01)
+        assert result.sla.describe().startswith(f"SLA of 2 h {expected}")
+
+
+def test_an_ended_run_is_not_ended_again_and_keeps_its_sla(seeded):
+    engine, ids = seeded
+    with engine.begin() as conn:
+        run_id = runlog.find_or_create_active_run(conn, ids["alpha"])
+        assert runlog.finalize_pipeline_run(conn, run_id, RunStatus.SUCCESS, sla_in_hours=2).ended
+        again = runlog.finalize_pipeline_run(conn, run_id, RunStatus.FAILED, sla_in_hours=2)
+        assert not again.ended
+        assert runlog.fetch_pipeline_run_status(conn, run_id) == RunStatus.SUCCESS
+        conn.execute(
+            text(
+                "UPDATE AUD_PIPELINES_RUN_LOG SET STATUS = 'IN-PROGRESS', START_DATE = :start "
+                "WHERE PIPELINE_RUN_ID = :id"
+            ),
+            {"start": datetime.now(UTC) - timedelta(days=2), "id": run_id},
+        )
+        reopened = runlog.finalize_pipeline_run(conn, run_id, RunStatus.SUCCESS, sla_in_hours=2)
+        assert reopened.ended and reopened.sla.status == SlaStatus.MET
+        assert runlog.fetch_run_sla(conn, run_id).sla_status == SlaStatus.MET
 
 
 def test_losing_the_race_to_start_a_run_reads_back_the_winner(seeded, monkeypatch):

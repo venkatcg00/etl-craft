@@ -1017,13 +1017,26 @@ def _finalize(
     status = RunStatus.FAILED if unsettled else RunStatus.SUCCESS
     if orchestrated and not unsettled and not_run and len(not_run) == len(graph.task_ids):
         status = RunStatus.SKIPPED
-    if not unsettled and graph.task_ids and all(
-        run_state[task_id].status == RunStatus.SKIPPED for task_id in graph.task_ids
+    if (
+        not unsettled
+        and graph.task_ids
+        and all(run_state[task_id].status == RunStatus.SKIPPED for task_id in graph.task_ids)
     ):
         status = RunStatus.SKIPPED
     with engine.begin() as conn:
         breached_before = runlog.fetch_run_sla(conn, pipeline_run_id).sla_status
-        sla = runlog.finalize_pipeline_run(conn, pipeline_run_id, status, sla_in_hours=sla_hours)
+        ending = runlog.finalize_pipeline_run(conn, pipeline_run_id, status, sla_in_hours=sla_hours)
+        current = runlog.fetch_pipeline_run_status(conn, pipeline_run_id)
+    if not ending.ended:
+        message = (
+            f"{pipeline_code}: pipeline_run_id={pipeline_run_id} is {current}: it was ended "
+            f"elsewhere (an operator's cancel, say) while this process was ending it {status}; "
+            f"nothing more was recorded. `etl-craft history --pipeline_code {pipeline_code}` shows "
+            "who ended it"
+        )
+        logger.warning("%s", message)
+        return PipelineOutcome(RunStatus(current), message, pipeline_run_id)
+    sla = ending.sla
     with engine.connect() as conn:
         backfill_run = runlog.fetch_run_kind(conn, pipeline_run_id).backfill
     if status == RunStatus.SUCCESS and not orchestrated and not backfill_run:

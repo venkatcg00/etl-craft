@@ -9,7 +9,7 @@ it never adds a second row.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -373,14 +373,24 @@ def elapsed_hours(start: datetime, now: datetime) -> float:
     return (now - start).total_seconds() / 3600
 
 
+@dataclass(frozen=True)
+class RunEnding:
+    """Whether ``finalize_pipeline_run`` ended the run, and its SLA as recorded."""
+
+    ended: bool
+    sla: SlaResult | None
+
+
 def finalize_pipeline_run(
     conn: Connection, pipeline_run_id: int, status: str, *, sla_in_hours: float | None = None
-) -> SlaResult | None:
-    """End ``pipeline_run_id`` with ``status`` and END_DATE now.
+) -> RunEnding:
+    """End ``pipeline_run_id`` with ``status`` and END_DATE now, if it is still ``IN-PROGRESS``.
 
     With ``sla_in_hours`` (the pipeline's ``SLA_IN_HOURS``, whenever it has one) the run is also
-    marked ``MET`` or ``BREACHED``, measured from START_DATE, whether or not SLA emails are on.
-    STATUS is left alone either way: a late run did its work.
+    marked ``MET`` or ``BREACHED``, measured from START_DATE, whether or not SLA emails are on,
+    unless it already has an SLA status: a run reopened after it met its SLA stays ``MET``, and
+    the returned result carries the recorded status. STATUS is left alone either way: a late run
+    did its work. A run that is no longer ``IN-PROGRESS`` is not changed, and ``ended`` is false.
     """
     now = datetime.now(UTC)
     sla = None
@@ -394,7 +404,7 @@ def finalize_pipeline_run(
             float(sla_in_hours),
             hours,
         )
-    conn.execute(
+    result = conn.execute(
         statement(conn, "finish_pipeline_run"),
         {
             "pipeline_run_id": pipeline_run_id,
@@ -403,7 +413,11 @@ def finalize_pipeline_run(
             "sla_status": None if sla is None else str(sla.status),
         },
     )
-    return sla
+    if sla is not None:
+        recorded = fetch_run_sla(conn, pipeline_run_id).sla_status
+        if recorded is not None and recorded != sla.status:
+            sla = replace(sla, status=SlaStatus(recorded))
+    return RunEnding(bool(result.rowcount), sla)
 
 
 @dataclass(frozen=True)

@@ -8,7 +8,7 @@ import logging
 import threading
 import time
 from dataclasses import replace
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -1035,3 +1035,63 @@ def test_a_run_whose_tasks_were_all_skipped_ends_skipped(config, pipeline):
     after = run_pipeline(engine, config, "R", child=CHILD, clock=NO_WAIT)
     assert after.status == RunStatus.SKIPPED
     assert "upstream pipeline Q (SUCCESS)" in after.message
+
+
+def test_a_met_sla_stays_met_when_the_run_is_ended_again_later(config, engine_db):
+    engine = engine_db.engine
+    with engine.begin() as conn:
+        pipeline_id = add_pipeline(conn, "OK", sla_in_hours=1)
+        add_task(conn, pipeline_id, "quick", BEHAVIOUR="succeed")
+    lapses = []
+    first = run_pipeline(engine, config, "OK", child=CHILD, hooks=RunHooks(lapses.append))
+    assert first.sla.status == "MET"
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE AUD_PIPELINES_RUN_LOG SET START_DATE = :start WHERE PIPELINE_RUN_ID = :id"
+            ),
+            {"start": datetime.now(UTC) - timedelta(days=2), "id": first.pipeline_run_id},
+        )
+    again = rerun_task(
+        engine, config, "OK", "quick", "source fixed", child=CHILD, hooks=RunHooks(lapses.append)
+    )
+    assert (again.status, again.pipeline_run_id) == (RunStatus.SUCCESS, first.pipeline_run_id)
+    assert again.sla.status == "MET" and "BREACHED" not in again.message
+    with engine.connect() as conn:
+        assert runlog.fetch_run_sla(conn, first.pipeline_run_id).sla_status == "MET"
+    assert lapses == []
+
+
+def test_a_run_cancelled_while_it_is_ended_is_left_cancelled(config, pipeline, monkeypatch):
+    engine, ids = pipeline
+    with engine.begin() as conn:
+        down = add_pipeline(conn, "DOWN")
+        add_task(conn, down, "load", BEHAVIOUR="succeed")
+        add_pipeline_dependency(conn, down, ids["P"])
+        conn.execute(
+            text("UPDATE CFG_TASKS SET ACTIVE_FLAG = 'N' WHERE TASK_ID IN (:b, :a)"),
+            {"b": ids["broken"], "a": ids["after_broken"]},
+        )
+    assert run_pipeline(engine, config, "P", child=CHILD).status == RunStatus.SUCCESS
+    real = runlog.fetch_run_sla
+
+    def cancelled_first(conn, pipeline_run_id):
+        conn.execute(
+            text(
+                "UPDATE AUD_PIPELINES_RUN_LOG SET STATUS = 'CANCELLED' WHERE PIPELINE_RUN_ID = :id"
+            ),
+            {"id": pipeline_run_id},
+        )
+        return real(conn, pipeline_run_id)
+
+    monkeypatch.setattr(runlog, "fetch_run_sla", cancelled_first)
+    finished = []
+    outcome = run_pipeline(
+        engine, config, "DOWN", child=CHILD, hooks=RunHooks(on_finalized=finished.append)
+    )
+    assert outcome.status == RunStatus.CANCELLED
+    assert "it was ended elsewhere" in outcome.message
+    assert finished == []
+    with engine.connect() as conn:
+        consumed = conn.execute(text("SELECT COUNT(*) FROM AUD_DEPENDENCY_CONSUMPTION"))
+        assert consumed.scalar_one() == 0
