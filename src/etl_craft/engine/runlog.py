@@ -11,9 +11,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from typing import Any
 
 from sqlalchemy import bindparam
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Connection, Row
 from sqlalchemy.exc import IntegrityError
 
 from etl_craft.core.enums import FINISHED_RUN_STATUSES, Mode, RunStatus, SlaStatus
@@ -99,16 +100,16 @@ def end_run_if(conn: Connection, pipeline_run_id: int, from_status: str, status:
 
 def resolve_run_for_task(
     conn: Connection, pipeline_id: int, *, force: bool = False, mode: Mode = Mode.LOCAL
-) -> int:
-    """Return the run a single ``run --task_code`` binds to.
+) -> tuple[int, str | None]:
+    """Return the run a single ``run --task_code`` binds to, and its old status if reopened.
 
     The pipeline's ``IN-PROGRESS`` run when there is one. Otherwise its latest run, but only with
-    ``force`` when that run already finished, because binding would rewrite a finished run's
-    rows. Raises ``RunStateError`` when there is no run at all, or only a finished one.
+    ``force`` when that run already ended: it goes back to ``IN-PROGRESS`` so the task's outcome
+    can end it again. Raises ``RunStateError`` when there is no run at all, or only an ended one.
     """
     active = fetch_active_pipeline_run_id(conn, pipeline_id)
     if active is not None:
-        return active
+        return active, None
     latest = conn.execute(
         statement(conn, "latest_pipeline_run"), {"pipeline_id": pipeline_id}
     ).one_or_none()
@@ -120,19 +121,15 @@ def resolve_run_for_task(
     if not force and latest.status in FINISHED_RUN_STATUSES:
         remedy = (
             "Start a new run with `etl-craft run --pipeline_code <code> --init-only`, which gives "
-            "it a new pipeline_run_id and leaves the finished run as it was"
+            "it a new pipeline_run_id and leaves the ended run as it was"
         )
         if mode == Mode.LOCAL:
-            remedy += ", or pass --force to bind to the finished run and rewrite its rows"
+            remedy += ", or pass --force to reopen the ended run and rewrite its rows"
         raise RunStateError(
             f"pipeline_id={pipeline_id} has no active run: its latest run "
             f"(pipeline_run_id={latest.pipeline_run_id}) is already {latest.status}. {remedy}."
         )
-    conn.execute(
-        statement(conn, "touch_pipeline_run"),
-        {"pipeline_run_id": latest.pipeline_run_id, "now": datetime.now(UTC)},
-    )
-    return int(latest.pipeline_run_id)
+    return _reopen_latest(conn, pipeline_id, latest)
 
 
 def resolve_run_for_orchestrator(conn: Connection, pipeline_id: int) -> tuple[int, str | None]:
@@ -154,6 +151,15 @@ def resolve_run_for_orchestrator(conn: Connection, pipeline_id: int) -> tuple[in
             f"pipeline_id={pipeline_id} has no run to bind a task to: the orchestrator's first "
             "step, `etl-craft run --pipeline_code <code> --init-only`, starts it"
         )
+    return _reopen_latest(conn, pipeline_id, latest)
+
+
+def _reopen_latest(conn: Connection, pipeline_id: int, latest: Row[Any]) -> tuple[int, str | None]:
+    """Put the pipeline's ended ``latest`` run back ``IN-PROGRESS``; return it and its old status.
+
+    When another process started or reopened a run meanwhile, that run is returned instead, with
+    no old status.
+    """
     try:
         with conn.begin_nested():
             conn.execute(

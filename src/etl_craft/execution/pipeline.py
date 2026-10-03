@@ -524,17 +524,6 @@ def rerun_task(
         summary += f"; not run again, their dependencies are not met: {', '.join(left)}"
     if kept:
         summary += f"; kept SKIPPED: {', '.join(kept)}"
-    with engine.connect() as conn:
-        rows = runlog.fetch_run_state(conn, pipeline_run_id, list(graph.task_ids))
-    not_run = sorted(task_codes[t] for t in graph.task_ids if t not in rows)
-    if before is None and not_run:
-        message = (
-            f"{pipeline_code}: pipeline_run_id={pipeline_run_id} stays IN-PROGRESS: {summary}; "
-            f"{len(not_run)} task(s) still need to run: {', '.join(not_run)}. "
-            f"`etl-craft run --pipeline_code {pipeline_code}` runs them"
-        )
-        logger.warning("%s", message)
-        return PipelineOutcome(RunStatus.IN_PROGRESS, message, pipeline_run_id)
     if before is not None:
         status = (
             RunStatus.FAILED
@@ -546,6 +535,84 @@ def rerun_task(
             f"{pipeline_code}: pipeline_run_id={pipeline_run_id} is still IN-PROGRESS: {summary}",
             pipeline_run_id,
         )
+    return _end_reopened(
+        engine,
+        pipeline_code,
+        pipeline_id,
+        pipeline_run_id,
+        graph,
+        task_codes,
+        detail.sla_in_hours,
+        hooks or default_hooks(config, engine),
+        f"ran again: {summary}",
+    )
+
+
+def force_task(
+    engine: Engine,
+    config: ConnectorConfig,
+    pipeline_code: str,
+    task_code: str,
+    *,
+    child: ChildOptions | None = None,
+    hooks: RunHooks | None = None,
+) -> PipelineOutcome:
+    """Run ``task_code`` past its checks: ``run --task_code --force``; local mode only.
+
+    Under the pipeline's active run the task just runs. A run that had ended is reopened for
+    it and then ended again from its tasks' statuses, so a forced task that fails leaves the
+    run ``FAILED``.
+    """
+    outcome = run_task(engine, config, pipeline_code, task_code, force=True, child=child)
+    with engine.connect() as conn:
+        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+        run_id = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
+        if outcome.reopened is None or run_id is None:
+            return PipelineOutcome(outcome.status, outcome.message, run_id)
+        detail = fetch_pipeline_detail(conn, pipeline_id)
+        graph_data = fetch_pipeline_graph(conn, pipeline_id)
+        task_codes = fetch_task_codes(conn, pipeline_id)
+    graph = build_graph(graph_data.tasks, graph_data.same_pipeline_edges)
+    return _end_reopened(
+        engine,
+        pipeline_code,
+        pipeline_id,
+        run_id,
+        graph,
+        task_codes,
+        detail.sla_in_hours,
+        hooks or default_hooks(config, engine),
+        f"forced: {outcome.message}",
+    )
+
+
+def _end_reopened(
+    engine: Engine,
+    pipeline_code: str,
+    pipeline_id: int,
+    pipeline_run_id: int,
+    graph: DependencyGraph,
+    task_codes: dict[int, str],
+    sla_hours: float | None,
+    hooks: RunHooks,
+    summary: str,
+) -> PipelineOutcome:
+    """End again a run reopened to run some of its tasks, or keep it open for the rest.
+
+    A task with no row under the run has yet to run, so the run stays ``IN-PROGRESS`` for
+    ``run --pipeline_code`` to resume it.
+    """
+    with engine.connect() as conn:
+        rows = runlog.fetch_run_state(conn, pipeline_run_id, list(graph.task_ids))
+    not_run = sorted(task_codes[t] for t in graph.task_ids if t not in rows)
+    if not_run:
+        message = (
+            f"{pipeline_code}: pipeline_run_id={pipeline_run_id} stays IN-PROGRESS ({summary}); "
+            f"{len(not_run)} task(s) still need to run: {', '.join(not_run)}. "
+            f"`etl-craft run --pipeline_code {pipeline_code}` runs them"
+        )
+        logger.warning("%s", message)
+        return PipelineOutcome(RunStatus.IN_PROGRESS, message, pipeline_run_id)
     with log_context(pipeline=pipeline_code, pipeline_run_id=pipeline_run_id):
         ended = _finalize(
             engine,
@@ -554,10 +621,10 @@ def rerun_task(
             pipeline_run_id,
             graph,
             task_codes,
-            detail.sla_in_hours,
-            hooks or default_hooks(config, engine),
+            sla_hours,
+            hooks,
         )
-    return replace(ended, message=f"{ended.message} (ran again: {summary})")
+    return replace(ended, message=f"{ended.message} ({summary})")
 
 
 def _prepare(

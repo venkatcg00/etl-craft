@@ -137,7 +137,7 @@ def mark_task(
             f"{pipeline_code}.{task_code}: marked {status} under pipeline_run_id={run_id} "
             f"(was {before or 'not run'})"
         )
-        if run_status in FINISHED_RUN_STATUSES or run_status == RunStatus.SKIPPED:
+        if run_status in FINISHED_RUN_STATUSES:
             _reopen(conn, pipeline_id, pipeline_code, run_id, run_status, reason, who)
             message += f"; the run was {run_status} and is IN-PROGRESS again"
         reset, kept = _reset_skipped(conn, pipeline_id, run_id, reason, who)

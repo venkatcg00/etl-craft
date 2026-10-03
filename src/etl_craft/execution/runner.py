@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 import sys
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from sqlalchemy.engine import Engine
@@ -76,11 +76,16 @@ CANCEL_POLL_SECONDS = 2.0
 
 @dataclass(frozen=True)
 class TaskOutcome:
-    """How ``run --task_code`` ended: ``SUCCESS``, ``FAILED`` or ``SKIPPED``, and why."""
+    """How ``run --task_code`` ended: ``SUCCESS``, ``FAILED`` or ``SKIPPED``, and why.
+
+    ``reopened`` is the status of the ended run that ``force`` put back ``IN-PROGRESS`` to run
+    the task; the caller ends that run again (``pipeline.force_task``).
+    """
 
     status: RunStatus
     message: str
     task_run_id: int | None = None
+    reopened: str | None = None
 
 
 @dataclass(frozen=True)
@@ -134,7 +139,7 @@ def run_task(
     """Run one task under its pipeline's active run and return how it ended.
 
     ``force`` runs the task even when it already succeeded or its dependencies are not met, and
-    rebinds a finished run; it is local mode's override, refused in remote mode, where the task
+    reopens an ended run; it is local mode's override, refused in remote mode, where the task
     always runs as the orchestrator says. ``override`` is an operator's recorded override (see
     ``Override``), also local mode's. Raises ``MetadataError`` for an unknown code and
     ``RunStateError`` when there is no run to bind to.
@@ -167,8 +172,18 @@ def run_task(
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         task_id = resolve_task_id(conn, pipeline_id, task_code)
     with engine.begin() as conn:
-        pipeline_run_id = runlog.resolve_run_for_task(
+        pipeline_run_id, reopened = runlog.resolve_run_for_task(
             conn, pipeline_id, force=force, mode=config.mode
+        )
+    if reopened is not None:
+        record_change(
+            engine,
+            pipeline_id=pipeline_id,
+            pipeline_run_id=pipeline_run_id,
+            action=InterventionAction.REOPEN,
+            from_status=reopened,
+            to_status=RunStatus.IN_PROGRESS,
+            reason=f"--force: {task_code} runs again under the ended run",
         )
     consumed: dict[int, int] | None = None
     if not force:
@@ -191,6 +206,8 @@ def run_task(
     )
     if consumed and outcome.status == RunStatus.SUCCESS:
         gate.consume(engine, task_id, pipeline_run_id, consumed)
+    if reopened is not None:
+        return replace(outcome, reopened=reopened)
     return outcome
 
 
@@ -210,7 +227,7 @@ def _run_overridden(
             # Decide before reopening anything, so a refused rerun changes nothing.
             pipeline_run_id = runlog.latest_run_for_rerun(conn, pipeline_id)
         else:
-            pipeline_run_id = runlog.resolve_run_for_task(conn, pipeline_id, mode=config.mode)
+            pipeline_run_id, _ = runlog.resolve_run_for_task(conn, pipeline_id, mode=config.mode)
         status = runlog.fetch_task_run_status(conn, task_id, pipeline_run_id)
         reopened = None
         if override.rerun and status != RunStatus.IN_PROGRESS:

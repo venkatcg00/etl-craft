@@ -33,6 +33,7 @@ from etl_craft.execution.interventions import (
 from etl_craft.execution.pipeline import (
     RunHooks,
     backfill,
+    force_task,
     init_pipeline_run,
     rerun_task,
     run_pipeline,
@@ -542,6 +543,10 @@ def test_the_run_options(config, pipeline, capsys, monkeypatch):
         (["--task_code", "extract", "--with-downstream"], "--with-downstream goes with --rerun"),
         (["--task_code", "extract", "--reason", "x"], "--reason goes with"),
         (["--task_code", "extract", "--rerun"], "--rerun needs a --reason"),
+        (
+            ["--task_code", "extract", "--rerun", "--force", "--reason", "x"],
+            "choose one",
+        ),
     ):
         assert cli_main(["run", "--pipeline_code", "P", *argv]) == ExitCode.USAGE
         assert message in capsys.readouterr().err
@@ -958,4 +963,56 @@ def test_a_rerun_of_a_task_still_running_leaves_its_ended_run_alone(config, pipe
     with pytest.raises(RunStateError, match="broken: already IN-PROGRESS"):
         rerun_task(engine, config, "P", "broken", "source fixed", child=CHILD)
     assert run_status(engine, failed.pipeline_run_id) == "FAILED"
+    assert interventions(engine) == []
+
+
+def test_a_skipped_run_is_ended_for_a_single_task(config, pipeline):
+    engine, _ = pipeline
+    skipped = skip_run(engine, config, "P", "public holiday", requested_by=WHO)
+    with pytest.raises(RunStateError, match="is already SKIPPED"):
+        run_task(engine, config, "P", "extract", override=Override("x"), child=CHILD)
+    with pytest.raises(RunStateError, match="is already SKIPPED"):
+        run_task(engine, config, "P", "extract", child=CHILD)
+    assert run_status(engine, skipped.pipeline_run_id) == "SKIPPED"
+
+
+def test_a_forced_task_reopens_an_ended_run_and_ends_it_again(config, pipeline):
+    engine, ids = pipeline
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE CFG_TASKS SET ACTIVE_FLAG = 'N' WHERE TASK_ID IN (:b, :a)"),
+            {"b": ids["broken"], "a": ids["after_broken"]},
+        )
+    first = run_pipeline(engine, config, "P", child=CHILD)
+    assert first.status == RunStatus.SUCCESS
+    behave(engine, ids["transform"], "fail")
+
+    forced = force_task(engine, config, "P", "transform", child=CHILD)
+    assert (forced.status, forced.pipeline_run_id) == (RunStatus.FAILED, first.pipeline_run_id)
+    assert "1 task(s) did not succeed: transform (FAILED)" in forced.message
+    assert run_status(engine, first.pipeline_run_id) == "FAILED"
+    assert [(action, frm, to) for _, _, action, frm, to, *_ in interventions(engine)] == [
+        ("REOPEN", "SUCCESS", "IN-PROGRESS")
+    ]
+    assert "--force: transform runs again" in interventions(engine)[0][7]
+
+
+def test_a_forced_task_in_a_skipped_run_leaves_the_rest_to_run(config, pipeline):
+    engine, _ = pipeline
+    skipped = skip_run(engine, config, "P", "public holiday", requested_by=WHO)
+    forced = force_task(engine, config, "P", "extract", child=CHILD)
+    assert (forced.status, forced.pipeline_run_id) == (
+        RunStatus.IN_PROGRESS,
+        skipped.pipeline_run_id,
+    )
+    assert "still need to run: after_broken, alert, broken, transform" in forced.message
+
+
+def test_a_forced_task_under_an_active_run_leaves_it_open(config, pipeline):
+    engine, _ = pipeline
+    with engine.begin() as conn:
+        run_id = runlog.find_or_create_active_run(conn, pipeline[1]["P"])
+    forced = force_task(engine, config, "P", "extract", child=CHILD)
+    assert (forced.status, forced.pipeline_run_id) == (RunStatus.SUCCESS, run_id)
+    assert run_status(engine, run_id) == "IN-PROGRESS"
     assert interventions(engine) == []

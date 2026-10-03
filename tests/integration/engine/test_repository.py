@@ -299,7 +299,7 @@ def test_a_run_is_found_or_started(seeded):
     with engine.begin() as conn:
         assert runlog.find_or_create_active_run(conn, ids["alpha"]) == run_id
         assert runlog.fetch_pipeline_run_status(conn, run_id) == RunStatus.IN_PROGRESS
-        assert runlog.resolve_run_for_task(conn, ids["alpha"]) == run_id
+        assert runlog.resolve_run_for_task(conn, ids["alpha"]) == (run_id, None)
 
 
 def test_concurrent_starts_share_one_run(seeded):
@@ -329,7 +329,7 @@ def test_a_single_task_needs_a_run_to_bind_to(seeded):
         runlog.resolve_run_for_task(conn, ids["alpha"])
 
 
-def test_a_finished_run_is_rebound_only_with_force(seeded):
+def test_an_ended_run_is_reopened_only_with_force(seeded):
     engine, ids = seeded
     with engine.begin() as conn:
         run_id = runlog.find_or_create_active_run(conn, ids["alpha"])
@@ -340,7 +340,8 @@ def test_a_finished_run_is_rebound_only_with_force(seeded):
         with pytest.raises(RunStateError, match="already SUCCESS") as error:
             runlog.resolve_run_for_task(conn, ids["alpha"], mode=Mode.REMOTE)
         assert "--force" not in str(error.value)
-        assert runlog.resolve_run_for_task(conn, ids["alpha"], force=True) == run_id
+        assert runlog.resolve_run_for_task(conn, ids["alpha"], force=True) == (run_id, "SUCCESS")
+        assert runlog.fetch_active_pipeline_run_id(conn, ids["alpha"]) == run_id
 
 
 def test_a_task_run_row_is_bound_once_and_retried_in_place(seeded):
