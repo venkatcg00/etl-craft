@@ -1,5 +1,5 @@
--- The latest run of :pipeline_id that finished by :ended_by, and whether any of its tasks
--- wrote rows.
+-- The latest run of :pipeline_id that finished by :ended_by and is not part of a backfill, and
+-- whether any of its tasks wrote rows.
 SELECT r.PIPELINE_RUN_ID AS run_id, r.STATUS AS status,
        CASE WHEN EXISTS (
            SELECT 1 FROM AUD_TASK_RUN_LOG t
@@ -9,5 +9,6 @@ FROM AUD_PIPELINES_RUN_LOG r
 WHERE r.PIPELINE_ID = :pipeline_id
   AND r.STATUS IN ('SUCCESS', 'FAILED', 'SKIPPED', 'CANCELLED')
   AND r.END_DATE <= :ended_by
+  AND r.BACKFILL = 'N'
 ORDER BY r.PIPELINE_RUN_ID DESC
 LIMIT 1

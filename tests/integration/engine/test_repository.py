@@ -279,6 +279,18 @@ def test_business_rules(seeded):
 # The run log
 
 
+def test_creating_a_run_never_hands_back_another_processs_run(seeded):
+    engine, ids = seeded
+    with engine.begin() as conn:
+        run_id = runlog.create_active_run(conn, ids["alpha"])
+    with engine.begin() as conn:
+        assert run_id is not None
+        assert runlog.create_active_run(conn, ids["alpha"]) is None
+        assert runlog.end_run_if(conn, run_id, RunStatus.IN_PROGRESS, RunStatus.SKIPPED)
+        assert not runlog.end_run_if(conn, run_id, RunStatus.IN_PROGRESS, RunStatus.FAILED)
+        assert runlog.fetch_pipeline_run_status(conn, run_id) == RunStatus.SKIPPED
+
+
 def test_a_run_is_found_or_started(seeded):
     engine, ids = seeded
     with engine.begin() as conn:
@@ -287,7 +299,7 @@ def test_a_run_is_found_or_started(seeded):
     with engine.begin() as conn:
         assert runlog.find_or_create_active_run(conn, ids["alpha"]) == run_id
         assert runlog.fetch_pipeline_run_status(conn, run_id) == RunStatus.IN_PROGRESS
-        assert runlog.resolve_run_for_task(conn, ids["alpha"]) == run_id
+        assert runlog.resolve_run_for_task(conn, ids["alpha"]) == (run_id, None)
 
 
 def test_concurrent_starts_share_one_run(seeded):
@@ -317,7 +329,7 @@ def test_a_single_task_needs_a_run_to_bind_to(seeded):
         runlog.resolve_run_for_task(conn, ids["alpha"])
 
 
-def test_a_finished_run_is_rebound_only_with_force(seeded):
+def test_an_ended_run_is_reopened_only_with_force(seeded):
     engine, ids = seeded
     with engine.begin() as conn:
         run_id = runlog.find_or_create_active_run(conn, ids["alpha"])
@@ -328,7 +340,8 @@ def test_a_finished_run_is_rebound_only_with_force(seeded):
         with pytest.raises(RunStateError, match="already SUCCESS") as error:
             runlog.resolve_run_for_task(conn, ids["alpha"], mode=Mode.REMOTE)
         assert "--force" not in str(error.value)
-        assert runlog.resolve_run_for_task(conn, ids["alpha"], force=True) == run_id
+        assert runlog.resolve_run_for_task(conn, ids["alpha"], force=True) == (run_id, "SUCCESS")
+        assert runlog.fetch_active_pipeline_run_id(conn, ids["alpha"]) == run_id
 
 
 def test_a_task_run_row_is_bound_once_and_retried_in_place(seeded):
@@ -444,12 +457,33 @@ def test_finalizing_a_run_judges_its_sla(seeded, hours_ago, sla, expected):
         ).one()
     assert (row.status, row.sla_status) == (RunStatus.SUCCESS, expected)
     assert row.end_date is not None
+    assert result.ended
     if expected is None:
-        assert result is None
+        assert result.sla is None
     else:
-        assert result.status == expected
-        assert result.elapsed_hours == pytest.approx(hours_ago, abs=0.01)
-        assert result.describe().startswith(f"SLA of 2 h {expected}")
+        assert result.sla.status == expected
+        assert result.sla.elapsed_hours == pytest.approx(hours_ago, abs=0.01)
+        assert result.sla.describe().startswith(f"SLA of 2 h {expected}")
+
+
+def test_an_ended_run_is_not_ended_again_and_keeps_its_sla(seeded):
+    engine, ids = seeded
+    with engine.begin() as conn:
+        run_id = runlog.find_or_create_active_run(conn, ids["alpha"])
+        assert runlog.finalize_pipeline_run(conn, run_id, RunStatus.SUCCESS, sla_in_hours=2).ended
+        again = runlog.finalize_pipeline_run(conn, run_id, RunStatus.FAILED, sla_in_hours=2)
+        assert not again.ended
+        assert runlog.fetch_pipeline_run_status(conn, run_id) == RunStatus.SUCCESS
+        conn.execute(
+            text(
+                "UPDATE AUD_PIPELINES_RUN_LOG SET STATUS = 'IN-PROGRESS', START_DATE = :start "
+                "WHERE PIPELINE_RUN_ID = :id"
+            ),
+            {"start": datetime.now(UTC) - timedelta(days=2), "id": run_id},
+        )
+        reopened = runlog.finalize_pipeline_run(conn, run_id, RunStatus.SUCCESS, sla_in_hours=2)
+        assert reopened.ended and reopened.sla.status == SlaStatus.MET
+        assert runlog.fetch_run_sla(conn, run_id).sla_status == SlaStatus.MET
 
 
 def test_losing_the_race_to_start_a_run_reads_back_the_winner(seeded, monkeypatch):

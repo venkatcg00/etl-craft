@@ -29,16 +29,18 @@ class FinishedRun:
 
 
 def fetch_latest_pipeline_run(conn: Connection, pipeline_id: int) -> LatestRun | None:
-    """Return the most recently started run of ``pipeline_id``, or ``None``."""
+    """Return the most recently started run of ``pipeline_id`` outside backfills, or ``None``."""
     row = conn.execute(
-        statement(conn, "latest_pipeline_run"), {"pipeline_id": pipeline_id}
+        statement(conn, "latest_scheduled_pipeline_run"), {"pipeline_id": pipeline_id}
     ).one_or_none()
     return None if row is None else LatestRun(row.pipeline_run_id, row.status, row.start_date)
 
 
 def fetch_latest_task_run(conn: Connection, task_id: int) -> LatestRun | None:
-    """Return the latest row of ``task_id``, or ``None``."""
-    row = conn.execute(statement(conn, "latest_task_run"), {"task_id": task_id}).one_or_none()
+    """Return the latest row of ``task_id`` outside backfill runs, or ``None``."""
+    row = conn.execute(
+        statement(conn, "latest_scheduled_task_run"), {"task_id": task_id}
+    ).one_or_none()
     return None if row is None else LatestRun(row.task_run_id, row.status, row.start_date)
 
 

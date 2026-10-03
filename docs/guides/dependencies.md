@@ -93,7 +93,8 @@ each bypass; see [Relax dependency gates](run-control.md#relax-dependency-gates)
 A pipeline whose dependencies are not satisfied has its run recorded `SKIPPED`. A task whose
 dependencies on other pipelines are not satisfied is recorded `SKIPPED` too, unless an upstream in
 its own pipeline has not finished yet. `SKIPPED` is final for that run: the task does not run
-until a new run finds its dependencies satisfied.
+until a new run finds its dependencies satisfied. A run whose tasks were all skipped ends `SKIPPED`
+itself, so a pipeline that depends on it with `SUCCESS` is skipped in turn.
 
 In remote mode none of this is checked by etl-craft and no tracker moves: the orchestrator's
 sensors wait for the upstream instead (see

@@ -8,7 +8,7 @@ from etl_craft.cli.commands import Command
 from etl_craft.cli.commands.common import connect_engine_db, load_command_config
 from etl_craft.cli.output import Output
 from etl_craft.core.enums import MARKABLE_STATUSES
-from etl_craft.core.errors import ExitCode
+from etl_craft.core.errors import ExitCode, UsageError
 from etl_craft.execution.interventions import mark_run, mark_task, record_stand_in_run
 
 
@@ -25,6 +25,12 @@ def _configure(parser: argparse.ArgumentParser) -> None:
         help="with SUCCESS, the row count a HAS_DATA dependency on the task reads",
     )
     parser.add_argument(
+        "--stale",
+        action="store_true",
+        help="with --task_code: mark a task that is still IN-PROGRESS because the process "
+        "running it is gone; never use it while that process may still be running",
+    )
+    parser.add_argument(
         "--new-run",
         action="store_true",
         help="record a finished stand-in run instead, so downstream gates pass where this "
@@ -33,6 +39,8 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
+    if args.stale and (not args.task_code or args.new_run):
+        raise UsageError("--stale marks one task: pass --task_code, without --new-run")
     config = load_command_config(args)
     engine = connect_engine_db(config)
     try:
@@ -55,6 +63,7 @@ def _run(args: argparse.Namespace, out: Output) -> int:
                 args.status,
                 args.reason,
                 rows=args.rows,
+                stale=args.stale,
             )
         else:
             done = mark_run(engine, config, args.pipeline_code, args.status, args.reason)

@@ -19,6 +19,7 @@ from etl_craft.execution.interventions import skip_run
 from etl_craft.execution.pipeline import (
     backfill,
     finalize_active_run,
+    force_task,
     init_pipeline_run,
     rerun_task,
     run_pipeline,
@@ -95,6 +96,9 @@ def _run(args: argparse.Namespace, out: Output) -> int:
         raise UsageError("--ignore-dependencies and --rerun apply to one task: pass --task_code")
     if args.ignore_dependencies and args.rerun:
         raise UsageError("--rerun already runs the task without checking its dependencies")
+    if args.force and (args.ignore_dependencies or args.rerun):
+        option = "--rerun" if args.rerun else "--ignore-dependencies"
+        raise UsageError(f"{option} and --force are different overrides: choose one")
     if args.with_downstream and not args.rerun:
         raise UsageError("--with-downstream goes with --rerun")
     if args.skip and (args.task_code or args.init_only or args.finalize_only or args.force):
@@ -140,6 +144,16 @@ def _run(args: argparse.Namespace, out: Output) -> int:
                 hooks=run_hooks(config, engine),
             )
             status, message = rerun.status, rerun.message
+        elif args.task_code and args.force:
+            forced = force_task(
+                engine,
+                config,
+                args.pipeline_code,
+                args.task_code,
+                child=child,
+                hooks=run_hooks(config, engine),
+            )
+            status, message = forced.status, forced.message
         elif args.task_code:
             override = Override(args.reason or "") if args.ignore_dependencies else None
             outcome = run_task(

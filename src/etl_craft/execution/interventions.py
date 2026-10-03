@@ -27,7 +27,7 @@ from __future__ import annotations
 import getpass
 import logging
 import socket
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 
 from sqlalchemy.engine import Connection, Engine
@@ -79,13 +79,15 @@ def mark_task(
     reason: str,
     *,
     rows: int | None = None,
+    stale: bool = False,
     requested_by: str | None = None,
 ) -> Intervened:
     """Mark ``task_code`` ``status`` under the pipeline's latest run.
 
     A run that has ended is reopened, and the tasks the engine skipped without running are
-    reset, so the next ``run --pipeline_code`` resumes it. Raises ``RunStateError`` when the
-    pipeline has no run, and ``RunRefusedError`` in remote mode or while the task is running.
+    reset, so the next ``run --pipeline_code`` resumes it. A task that is ``IN-PROGRESS`` is
+    refused unless ``stale`` says the process running it is gone. Raises ``RunStateError`` when
+    the pipeline has no run, and ``RunRefusedError`` in remote mode or while the task is running.
     """
     status = _check(config, "mark", reason, status, rows)
     who = requested_by or current_operator()
@@ -94,10 +96,11 @@ def mark_task(
         task_id = resolve_task_id(conn, pipeline_id, task_code)
         run_id, run_status = _latest_run(conn, pipeline_id, pipeline_code)
         before = runlog.fetch_task_run_status(conn, task_id, run_id)
-        if before == RunStatus.IN_PROGRESS:
+        if before == RunStatus.IN_PROGRESS and not stale:
             raise RunRefusedError(
                 f"{pipeline_code}.{task_code} is running under pipeline_run_id={run_id}; wait "
-                "for it to end, or cancel the run with `etl-craft cancel`"
+                "for it to end, or cancel the run with `etl-craft cancel`. If the process "
+                "running it is gone, pass --stale to record its outcome"
             )
         if before == status and rows is None:
             raise UsageError(
@@ -110,7 +113,11 @@ def mark_task(
             conn,
             binding.task_run_id,
             status=status,
-            error_message=f"marked {status} by {who}: {reason}",
+            error_message=(
+                f"marked {status} by {who}"
+                + (" (its process was gone)" if before == RunStatus.IN_PROGRESS else "")
+                + f": {reason}"
+            ),
             target_count=rows,
         )
         record.record_intervention(
@@ -130,12 +137,14 @@ def mark_task(
             f"{pipeline_code}.{task_code}: marked {status} under pipeline_run_id={run_id} "
             f"(was {before or 'not run'})"
         )
-        if run_status in FINISHED_RUN_STATUSES or run_status == RunStatus.SKIPPED:
+        if run_status in FINISHED_RUN_STATUSES:
             _reopen(conn, pipeline_id, pipeline_code, run_id, run_status, reason, who)
             message += f"; the run was {run_status} and is IN-PROGRESS again"
-        reset = _reset_skipped(conn, pipeline_id, run_id, reason, who)
+        reset, kept = _reset_skipped(conn, pipeline_id, run_id, reason, who)
         if reset:
             message += f"; reset to run again: {', '.join(reset)}"
+        if kept:
+            message += f"; kept SKIPPED: {', '.join(kept)}"
     if run_status != RunStatus.IN_PROGRESS or reset:
         message += f". Run `etl-craft run --pipeline_code {pipeline_code}` to resume it"
     logger.warning("%s (by %s: %s)", message, who, reason)
@@ -221,7 +230,14 @@ def record_stand_in_run(
                 f"{pipeline_code} has a run in progress (pipeline_run_id={active}); mark that "
                 "run, or cancel it, before recording a stand-in run"
             )
-        run_id = runlog.find_or_create_active_run(conn, pipeline_id)
+        created = runlog.create_active_run(conn, pipeline_id)
+        if created is None:
+            raise RunStateError(
+                f"{pipeline_code}: another process started a run just now "
+                f"(pipeline_run_id={runlog.fetch_active_pipeline_run_id(conn, pipeline_id)}); "
+                "mark that run, or cancel it, before recording a stand-in run"
+            )
+        run_id = created
         if task_id is not None:
             binding = runlog.find_or_create_task_run(conn, task_id, run_id)
             record.mark_task_run(
@@ -527,13 +543,47 @@ def _reopen(
     )
 
 
+def reset_engine_skipped(
+    engine: Engine,
+    pipeline_id: int,
+    run_id: int,
+    reason: str,
+    *,
+    only: Collection[int] | None = None,
+) -> tuple[list[str], list[str]]:
+    """Reset, in a transaction of its own, the tasks the engine skipped without running.
+
+    ``only`` limits it to those task ids. Return the tasks reset and, one line each, those kept
+    because a downstream consumed them.
+    """
+    with engine.begin() as conn:
+        return _reset_skipped(conn, pipeline_id, run_id, reason, current_operator(), only=only)
+
+
 def _reset_skipped(
-    conn: Connection, pipeline_id: int, run_id: int, reason: str, who: str
-) -> list[str]:
-    """Reset the tasks the engine skipped without running, so the resumed run decides again."""
+    conn: Connection,
+    pipeline_id: int,
+    run_id: int,
+    reason: str,
+    who: str,
+    *,
+    only: Collection[int] | None = None,
+) -> tuple[list[str], list[str]]:
+    """Reset the tasks the engine skipped without running, so the resumed run decides again.
+
+    A skipped row that another pipeline's run consumed, through an ``ALWAYS`` dependency, is
+    part of that run's history, so it is kept as it is. Return the tasks reset, and a line per
+    task kept.
+    """
     reset = []
+    kept = []
     for row in record.fetch_task_rows(conn, run_id):
         if row.status != RunStatus.SKIPPED or row.marked or row.has_rule_runs:
+            continue
+        if only is not None and row.task_id not in only:
+            continue
+        if row.consumed_by is not None:
+            kept.append(f"{row.task_code} (consumed by {row.consumed_by})")
             continue
         record.record_intervention(
             conn,
@@ -548,4 +598,4 @@ def _reset_skipped(
         )
         record.delete_skipped_task_run(conn, row.task_run_id)
         reset.append(row.task_code)
-    return reset
+    return reset, kept

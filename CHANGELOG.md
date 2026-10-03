@@ -46,6 +46,35 @@ All notable changes are recorded here. The format follows
   transaction's first write no longer commits early, DDL rolls back with its transaction, and a
   failure between starting a run and recording that its gate refused it can no longer leave the
   run `IN-PROGRESS` to be resumed without the gate.
+- A run is never taken over, skipped or ended by a process that does not own it. Starting a run
+  never hands back one another process started; a refused gate skips only the run it started; and
+  a run with a task still `IN-PROGRESS` in another process stays `IN-PROGRESS`, naming the task.
+  `mark --task_code X --status FAILED --stale --reason ...` releases a task whose process is gone.
+- Backfills and scheduled runs are kept apart. A plain `run` does not resume a backfill's run and
+  a backfill does not take over a scheduled run; a backfill that meets another run between dates
+  stops with the command that takes up from there. Dependency gates never see backfill runs, and
+  a backfill counts a `FAILURE` dependency on another pipeline as not met. Run-length averages use
+  only `SUCCESS` and `FAILED` runs that are not backfills.
+- `run --task_code --rerun` of a task whose failure ended the run leaves the tasks skipped because
+  of it to run, instead of ending the run `SUCCESS` without them. Resetting skipped tasks (by
+  `mark` or a rerun) keeps a `SKIPPED` row another pipeline's run consumed, naming that run.
+- A task's settings are checked before its row is bound. When its process cannot start, or the
+  command is interrupted, the attempt is recorded `FAILED` with the cause instead of being left
+  `IN-PROGRESS`; recording an attempt's outcome retries a dropped Engine DB connection.
+- A task that already ended `FAILED` is never rewritten `SKIPPED`, and a refused `--rerun` no
+  longer reopens the run.
+- A run skipped on purpose counts as ended: `run --task_code` refuses it like any ended run.
+- A run's SLA is decided once. Ending a reopened run again keeps the `MET` or `BREACHED` it had,
+  and sends no breach email for it.
+- A run cancelled while it was being ended stays `CANCELLED`: nothing is consumed and no
+  end-of-run hook runs.
+
+### Changed
+
+- A local run whose tasks were all `SKIPPED` ends `SKIPPED`, as in remote mode, so a pipeline
+  that depends on it with `SUCCESS` is skipped too.
+- `run --task_code --force` onto an ended run reopens it, records the `REOPEN`, and ends it again
+  from its tasks' statuses after the task: a forced task that fails leaves the run `FAILED`.
 
 ## [0.1.0] - 2026-09-26
 

@@ -30,8 +30,11 @@ when it ends `FAILED`; every other status is listed under [Exit codes](../refere
 Running a `FAILED` task again is a new attempt on the same `AUD_TASK_RUN_LOG` row: `ATTEMPT_COUNT`
 goes up, and the previous attempt's counts, message and log are cleared from the row.
 
-`--force` runs the task even if it already succeeded or its dependencies are not met, and may
-bind a run that already finished. It is only available in local mode.
+`--force` runs the task even if it already succeeded or its dependencies are not met. It is only
+available in local mode. When the pipeline's latest run has already ended (`SKIPPED` included), the
+run is reopened for the task, recorded as a `REOPEN` in its history, and ended again from its tasks'
+statuses once the task ends: a forced task that fails leaves the run `FAILED`. If tasks of the run
+have never run, the run stays `IN-PROGRESS` and `run --pipeline_code <code>` resumes it.
 
 `--ignore-dependencies` and `--rerun` are the recorded, narrower overrides: see
 [Stepping in](run-control.md#run-a-task-without-its-dependencies).

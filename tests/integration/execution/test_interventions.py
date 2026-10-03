@@ -8,7 +8,7 @@ import logging
 import threading
 import time
 from dataclasses import replace
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -33,6 +33,7 @@ from etl_craft.execution.interventions import (
 from etl_craft.execution.pipeline import (
     RunHooks,
     backfill,
+    force_task,
     init_pipeline_run,
     rerun_task,
     run_pipeline,
@@ -542,6 +543,10 @@ def test_the_run_options(config, pipeline, capsys, monkeypatch):
         (["--task_code", "extract", "--with-downstream"], "--with-downstream goes with --rerun"),
         (["--task_code", "extract", "--reason", "x"], "--reason goes with"),
         (["--task_code", "extract", "--rerun"], "--rerun needs a --reason"),
+        (
+            ["--task_code", "extract", "--rerun", "--force", "--reason", "x"],
+            "choose one",
+        ),
     ):
         assert cli_main(["run", "--pipeline_code", "P", *argv]) == ExitCode.USAGE
         assert message in capsys.readouterr().err
@@ -730,6 +735,74 @@ def test_a_backfill_runs_once_per_date_as_of_that_date(config, pipeline, downstr
     assert runs(engine)[-2:] == [("P", "SUCCESS", today, "N"), ("P", "SUCCESS", "2026-08-31", "N")]
 
 
+def test_a_plain_run_does_not_take_over_a_backfills_run(config, pipeline):
+    engine, ids = pipeline
+    with engine.begin() as conn:
+        backfill_run = runlog.find_or_create_active_run(
+            conn, ids["P"], run_date=date(2025, 1, 1), backfill=True
+        )
+    with pytest.raises(RunStateError, match="is running backfill run pipeline_run_id="):
+        run_pipeline(engine, config, "P", child=CHILD)
+    assert run_status(engine, backfill_run) == "IN-PROGRESS"
+    assert statuses(engine, backfill_run) == {}
+
+
+def test_a_backfill_does_not_take_over_a_scheduled_run(config, pipeline):
+    engine, ids = pipeline
+    with engine.begin() as conn:
+        scheduled = runlog.find_or_create_active_run(conn, ids["P"], run_date=date(2026, 9, 2))
+    # The run started by itself between two backfill dates is found before the next date.
+    with pytest.raises(RunStateError, match="finish or cancel it before a backfill"):
+        backfill(engine, config, "P", date(2026, 9, 2), date(2026, 9, 2), "x", child=CHILD)
+    assert run_status(engine, scheduled) == "IN-PROGRESS"
+
+
+def test_a_backfill_stops_when_another_run_starts_between_dates(config, pipeline):
+    engine, ids = pipeline
+    without_broken(engine, ids)
+
+    def a_scheduled_run_starts(outcome):
+        with engine.begin() as conn:
+            runlog.find_or_create_active_run(conn, ids["P"])
+
+    done = backfill(
+        engine,
+        config,
+        "P",
+        date(2026, 9, 1),
+        date(2026, 9, 3),
+        "reload",
+        child=CHILD,
+        hooks=RunHooks(on_finalized=a_scheduled_run_starts),
+    )
+    assert len(done.runs) == 1 and done.stopped is not None
+    assert "backfill stopped at 2026-09-02 after 1 of 3 run(s)" in done.message
+    assert "--backfill 2026-09-02:2026-09-03 --reason ..." in done.message
+
+
+def test_a_backfill_never_meets_a_failure_dependency_on_another_pipeline(config, engine_db):
+    engine = engine_db.engine
+    with engine.begin() as conn:
+        up = add_pipeline(conn, "UP")
+        publish = add_task(conn, up, "publish")
+        down = add_pipeline(conn, "DOWN")
+        load = add_task(conn, down, "load", BEHAVIOUR="succeed")
+        alert = add_task(conn, down, "alert", BEHAVIOUR="succeed")
+        add_dependency(conn, down, load, publish, upstream_pipeline=up)
+        add_dependency(conn, down, alert, publish, "FAILURE", upstream_pipeline=up)
+    done = backfill(engine, config, "DOWN", date(2026, 9, 1), date(2026, 9, 2), "x", child=CHILD)
+    assert done.status == RunStatus.SUCCESS
+    for outcome in done.runs:
+        found = statuses(engine, outcome.pipeline_run_id)
+        assert found["load"][0] == "SUCCESS"
+        assert found["alert"][0] == "SKIPPED"
+    with engine.connect() as conn:
+        reason = conn.execute(
+            text("SELECT ERROR_MESSAGE FROM AUD_TASK_RUN_LOG WHERE TASK_ID = :t"), {"t": alert}
+        ).first()[0]
+    assert "(FAILURE) is not evaluated in a backfill" in reason
+
+
 def test_a_backfill_stops_at_the_first_run_that_fails(config, pipeline):
     engine, _ = pipeline
     done = backfill(engine, config, "P", date(2026, 9, 1), date(2026, 9, 5), "x", child=CHILD)
@@ -793,3 +866,232 @@ def test_the_run_date_and_backfill_options(config, engine_db, capsys, monkeypatc
         assert message in capsys.readouterr().err
     code = cli_main(["run", "--pipeline_code", "P", *both_days, "--task_code", "x"])
     assert code == ExitCode.USAGE
+
+
+def test_a_task_left_running_by_a_dead_process_is_released_with_stale(config, pipeline):
+    engine, ids = pipeline
+    with engine.begin() as conn:
+        run = runlog.find_or_create_active_run(conn, ids["P"])
+        runlog.find_or_create_task_run(conn, ids["extract"], run)
+    held = run_pipeline(engine, config, "P", child=CHILD)
+    assert held.status == RunStatus.IN_PROGRESS
+    assert "--stale" in held.message
+
+    with pytest.raises(RunRefusedError, match="pass --stale"):
+        mark_task(engine, config, "P", "extract", "FAILED", "process died", requested_by=WHO)
+    marked = mark_task(
+        engine, config, "P", "extract", "FAILED", "process died", stale=True, requested_by=WHO
+    )
+    assert "marked FAILED" in marked.message
+    assert statuses(engine, run)["extract"][0] == "FAILED"
+
+    done = run_pipeline(engine, config, "P", child=CHILD)
+    assert (done.status, done.pipeline_run_id) == (RunStatus.FAILED, run)
+    # Resuming retries the task marked FAILED; it succeeds this time, and the run ends.
+    assert statuses(engine, run)["extract"][0] == "SUCCESS"
+    assert statuses(engine, run)["transform"][0] == "SUCCESS"
+
+
+def behave(engine, task_id, behaviour):
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE = :b "
+                "WHERE TASK_ID = :t AND PARAMETER_NAME = 'BEHAVIOUR'"
+            ),
+            {"b": behaviour, "t": task_id},
+        )
+
+
+def test_a_rerun_of_a_failed_task_leaves_what_its_failure_skipped_to_run(config, engine_db):
+    engine = engine_db.engine
+    with engine.begin() as conn:
+        q = add_pipeline(conn, "Q")
+        a = add_task(conn, q, "a", BEHAVIOUR="fail")
+        c = add_task(conn, q, "c", BEHAVIOUR="succeed")
+        add_dependency(conn, q, c, a)
+    failed = run_pipeline(engine, config, "Q", child=CHILD)
+    assert failed.status == RunStatus.FAILED
+    assert statuses(engine, failed.pipeline_run_id)["c"][0] == "SKIPPED"
+
+    behave(engine, a, "succeed")
+    fixed = rerun_task(engine, config, "Q", "a", "source fixed", child=CHILD)
+    assert (fixed.status, fixed.pipeline_run_id) == (RunStatus.IN_PROGRESS, failed.pipeline_run_id)
+    assert "1 task(s) still need to run: c" in fixed.message
+    assert run_status(engine, failed.pipeline_run_id) == "IN-PROGRESS"
+
+    done = run_pipeline(engine, config, "Q", child=CHILD)
+    assert (done.status, done.pipeline_run_id) == (RunStatus.SUCCESS, failed.pipeline_run_id)
+    assert statuses(engine, done.pipeline_run_id)["c"][0] == "SUCCESS"
+
+
+def test_mark_keeps_a_skipped_task_another_pipeline_consumed(config, engine_db):
+    engine = engine_db.engine
+    with engine.begin() as conn:
+        p = add_pipeline(conn, "P")
+        ok = add_task(conn, p, "ok", BEHAVIOUR="succeed")
+        on_failure = add_task(conn, p, "on_failure", BEHAVIOUR="succeed")
+        add_dependency(conn, p, on_failure, ok, "FAILURE")
+        q = add_pipeline(conn, "Q")
+        down = add_task(conn, q, "down", BEHAVIOUR="succeed")
+        add_dependency(conn, q, down, on_failure, "ALWAYS", upstream_pipeline=p)
+    p_run = run_pipeline(engine, config, "P", child=CHILD)
+    assert statuses(engine, p_run.pipeline_run_id)["on_failure"][0] == "SKIPPED"
+    q_run = run_pipeline(engine, config, "Q", child=CHILD)
+    assert q_run.status == RunStatus.SUCCESS  # it consumed P.on_failure's SKIPPED row
+
+    marked = mark_task(engine, config, "P", "ok", "FAILED", "wrong data", requested_by=WHO)
+    assert f"kept SKIPPED: on_failure (consumed by Q.down run {q_run.pipeline_run_id})" in (
+        marked.message
+    )
+    assert statuses(engine, p_run.pipeline_run_id)["on_failure"][0] == "SKIPPED"
+
+
+def test_a_rerun_of_a_task_still_running_leaves_its_ended_run_alone(config, pipeline):
+    engine, ids = pipeline
+    failed = run_pipeline(engine, config, "P", child=CHILD)
+    assert failed.status == RunStatus.FAILED
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE AUD_TASK_RUN_LOG SET STATUS = 'IN-PROGRESS' "
+                "WHERE TASK_ID = :t AND PIPELINE_RUN_ID = :r"
+            ),
+            {"t": ids["broken"], "r": failed.pipeline_run_id},
+        )
+
+    with pytest.raises(RunStateError, match="broken: already IN-PROGRESS"):
+        rerun_task(engine, config, "P", "broken", "source fixed", child=CHILD)
+    assert run_status(engine, failed.pipeline_run_id) == "FAILED"
+    assert interventions(engine) == []
+
+
+def test_a_skipped_run_is_ended_for_a_single_task(config, pipeline):
+    engine, _ = pipeline
+    skipped = skip_run(engine, config, "P", "public holiday", requested_by=WHO)
+    with pytest.raises(RunStateError, match="is already SKIPPED"):
+        run_task(engine, config, "P", "extract", override=Override("x"), child=CHILD)
+    with pytest.raises(RunStateError, match="is already SKIPPED"):
+        run_task(engine, config, "P", "extract", child=CHILD)
+    assert run_status(engine, skipped.pipeline_run_id) == "SKIPPED"
+
+
+def test_a_forced_task_reopens_an_ended_run_and_ends_it_again(config, pipeline):
+    engine, ids = pipeline
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE CFG_TASKS SET ACTIVE_FLAG = 'N' WHERE TASK_ID IN (:b, :a)"),
+            {"b": ids["broken"], "a": ids["after_broken"]},
+        )
+    first = run_pipeline(engine, config, "P", child=CHILD)
+    assert first.status == RunStatus.SUCCESS
+    behave(engine, ids["transform"], "fail")
+
+    forced = force_task(engine, config, "P", "transform", child=CHILD)
+    assert (forced.status, forced.pipeline_run_id) == (RunStatus.FAILED, first.pipeline_run_id)
+    assert "1 task(s) did not succeed: transform (FAILED)" in forced.message
+    assert run_status(engine, first.pipeline_run_id) == "FAILED"
+    assert [(action, frm, to) for _, _, action, frm, to, *_ in interventions(engine)] == [
+        ("REOPEN", "SUCCESS", "IN-PROGRESS")
+    ]
+    assert "--force: transform runs again" in interventions(engine)[0][7]
+
+
+def test_a_forced_task_in_a_skipped_run_leaves_the_rest_to_run(config, pipeline):
+    engine, _ = pipeline
+    skipped = skip_run(engine, config, "P", "public holiday", requested_by=WHO)
+    forced = force_task(engine, config, "P", "extract", child=CHILD)
+    assert (forced.status, forced.pipeline_run_id) == (
+        RunStatus.IN_PROGRESS,
+        skipped.pipeline_run_id,
+    )
+    assert "still need to run: after_broken, alert, broken, transform" in forced.message
+
+
+def test_a_forced_task_under_an_active_run_leaves_it_open(config, pipeline):
+    engine, _ = pipeline
+    with engine.begin() as conn:
+        run_id = runlog.find_or_create_active_run(conn, pipeline[1]["P"])
+    forced = force_task(engine, config, "P", "extract", child=CHILD)
+    assert (forced.status, forced.pipeline_run_id) == (RunStatus.SUCCESS, run_id)
+    assert run_status(engine, run_id) == "IN-PROGRESS"
+    assert interventions(engine) == []
+
+
+def test_a_run_whose_tasks_were_all_skipped_ends_skipped(config, pipeline):
+    engine, ids = pipeline
+    with engine.begin() as conn:
+        q = add_pipeline(conn, "Q")
+        down = add_task(conn, q, "down", BEHAVIOUR="succeed")
+        add_dependency(conn, q, down, ids["broken"], upstream_pipeline=ids["P"])
+        r = add_pipeline(conn, "R")
+        add_task(conn, r, "load", BEHAVIOUR="succeed")
+        add_pipeline_dependency(conn, r, q)
+    run_pipeline(engine, config, "P", child=CHILD)
+    skipped = run_pipeline(engine, config, "Q", child=CHILD, clock=NO_WAIT)
+    assert statuses(engine, skipped.pipeline_run_id)["down"][0] == "SKIPPED"
+    assert skipped.status == RunStatus.SKIPPED
+    assert run_status(engine, skipped.pipeline_run_id) == "SKIPPED"
+    after = run_pipeline(engine, config, "R", child=CHILD, clock=NO_WAIT)
+    assert after.status == RunStatus.SKIPPED
+    assert "upstream pipeline Q (SUCCESS)" in after.message
+
+
+def test_a_met_sla_stays_met_when_the_run_is_ended_again_later(config, engine_db):
+    engine = engine_db.engine
+    with engine.begin() as conn:
+        pipeline_id = add_pipeline(conn, "OK", sla_in_hours=1)
+        add_task(conn, pipeline_id, "quick", BEHAVIOUR="succeed")
+    lapses = []
+    first = run_pipeline(engine, config, "OK", child=CHILD, hooks=RunHooks(lapses.append))
+    assert first.sla.status == "MET"
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE AUD_PIPELINES_RUN_LOG SET START_DATE = :start WHERE PIPELINE_RUN_ID = :id"
+            ),
+            {"start": datetime.now(UTC) - timedelta(days=2), "id": first.pipeline_run_id},
+        )
+    again = rerun_task(
+        engine, config, "OK", "quick", "source fixed", child=CHILD, hooks=RunHooks(lapses.append)
+    )
+    assert (again.status, again.pipeline_run_id) == (RunStatus.SUCCESS, first.pipeline_run_id)
+    assert again.sla.status == "MET" and "BREACHED" not in again.message
+    with engine.connect() as conn:
+        assert runlog.fetch_run_sla(conn, first.pipeline_run_id).sla_status == "MET"
+    assert lapses == []
+
+
+def test_a_run_cancelled_while_it_is_ended_is_left_cancelled(config, pipeline, monkeypatch):
+    engine, ids = pipeline
+    with engine.begin() as conn:
+        down = add_pipeline(conn, "DOWN")
+        add_task(conn, down, "load", BEHAVIOUR="succeed")
+        add_pipeline_dependency(conn, down, ids["P"])
+        conn.execute(
+            text("UPDATE CFG_TASKS SET ACTIVE_FLAG = 'N' WHERE TASK_ID IN (:b, :a)"),
+            {"b": ids["broken"], "a": ids["after_broken"]},
+        )
+    assert run_pipeline(engine, config, "P", child=CHILD).status == RunStatus.SUCCESS
+    real = runlog.fetch_run_sla
+
+    def cancelled_first(conn, pipeline_run_id):
+        conn.execute(
+            text(
+                "UPDATE AUD_PIPELINES_RUN_LOG SET STATUS = 'CANCELLED' WHERE PIPELINE_RUN_ID = :id"
+            ),
+            {"id": pipeline_run_id},
+        )
+        return real(conn, pipeline_run_id)
+
+    monkeypatch.setattr(runlog, "fetch_run_sla", cancelled_first)
+    finished = []
+    outcome = run_pipeline(
+        engine, config, "DOWN", child=CHILD, hooks=RunHooks(on_finalized=finished.append)
+    )
+    assert outcome.status == RunStatus.CANCELLED
+    assert "it was ended elsewhere" in outcome.message
+    assert finished == []
+    with engine.connect() as conn:
+        consumed = conn.execute(text("SELECT COUNT(*) FROM AUD_DEPENDENCY_CONSUMPTION"))
+        assert consumed.scalar_one() == 0

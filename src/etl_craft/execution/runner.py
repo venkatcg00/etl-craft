@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 import sys
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from sqlalchemy.engine import Engine
@@ -30,6 +30,7 @@ from etl_craft.config import ConnectorConfig
 from etl_craft.core.enums import (
     SETTLED_STATUSES,
     TERMINAL_STATUSES,
+    DependencyType,
     InterventionAction,
     Mode,
     RunStatus,
@@ -38,9 +39,13 @@ from etl_craft.core.errors import ConfigurationError, RunRefusedError, UsageErro
 from etl_craft.core.graph import DependencyGraph, RunState, TaskRunState, build_graph
 from etl_craft.engine import runlog
 from etl_craft.engine.queries import statement
-from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
+from etl_craft.engine.repository.dependencies import (
+    fetch_cross_pipeline_task_edges,
+    fetch_pipeline_graph,
+)
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.repository.tasks import fetch_task_parameters, resolve_task_id
+from etl_craft.engine.retry import retrying
 from etl_craft.execution.gates import (
     CrossPipelineCheck,
     CrossPipelineGate,
@@ -71,11 +76,16 @@ CANCEL_POLL_SECONDS = 2.0
 
 @dataclass(frozen=True)
 class TaskOutcome:
-    """How ``run --task_code`` ended: ``SUCCESS``, ``FAILED`` or ``SKIPPED``, and why."""
+    """How ``run --task_code`` ended: ``SUCCESS``, ``FAILED`` or ``SKIPPED``, and why.
+
+    ``reopened`` is the status of the ended run that ``force`` put back ``IN-PROGRESS`` to run
+    the task; the caller ends that run again (``pipeline.force_task``).
+    """
 
     status: RunStatus
     message: str
     task_run_id: int | None = None
+    reopened: str | None = None
 
 
 @dataclass(frozen=True)
@@ -129,7 +139,7 @@ def run_task(
     """Run one task under its pipeline's active run and return how it ended.
 
     ``force`` runs the task even when it already succeeded or its dependencies are not met, and
-    rebinds a finished run; it is local mode's override, refused in remote mode, where the task
+    reopens an ended run; it is local mode's override, refused in remote mode, where the task
     always runs as the orchestrator says. ``override`` is an operator's recorded override (see
     ``Override``), also local mode's. Raises ``MetadataError`` for an unknown code and
     ``RunStateError`` when there is no run to bind to.
@@ -162,8 +172,18 @@ def run_task(
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         task_id = resolve_task_id(conn, pipeline_id, task_code)
     with engine.begin() as conn:
-        pipeline_run_id = runlog.resolve_run_for_task(
+        pipeline_run_id, reopened = runlog.resolve_run_for_task(
             conn, pipeline_id, force=force, mode=config.mode
+        )
+    if reopened is not None:
+        record_change(
+            engine,
+            pipeline_id=pipeline_id,
+            pipeline_run_id=pipeline_run_id,
+            action=InterventionAction.REOPEN,
+            from_status=reopened,
+            to_status=RunStatus.IN_PROGRESS,
+            reason=f"--force: {task_code} runs again under the ended run",
         )
     consumed: dict[int, int] | None = None
     if not force:
@@ -186,6 +206,8 @@ def run_task(
     )
     if consumed and outcome.status == RunStatus.SUCCESS:
         gate.consume(engine, task_id, pipeline_run_id, consumed)
+    if reopened is not None:
+        return replace(outcome, reopened=reopened)
     return outcome
 
 
@@ -202,11 +224,14 @@ def _run_overridden(
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         task_id = resolve_task_id(conn, pipeline_id, task_code)
         if override.rerun:
-            pipeline_run_id, reopened = runlog.resolve_run_for_orchestrator(conn, pipeline_id)
+            # Decide before reopening anything, so a refused rerun changes nothing.
+            pipeline_run_id = runlog.latest_run_for_rerun(conn, pipeline_id)
         else:
-            pipeline_run_id = runlog.resolve_run_for_task(conn, pipeline_id, mode=config.mode)
-            reopened = None
+            pipeline_run_id, _ = runlog.resolve_run_for_task(conn, pipeline_id, mode=config.mode)
         status = runlog.fetch_task_run_status(conn, task_id, pipeline_run_id)
+        reopened = None
+        if override.rerun and status != RunStatus.IN_PROGRESS:
+            pipeline_run_id, reopened = runlog.resolve_run_for_orchestrator(conn, pipeline_id)
     if reopened is not None:
         record_change(
             engine,
@@ -353,9 +378,7 @@ def _preflight(
     cross = CrossPipelineCheck(0)
     if still_needed > 0 and task_id in graph_data.cross_pipeline_task_ids:
         if backfill:
-            # A backfill checks no dependency on another pipeline, and consumes nothing.
-            node = next(t for t in graph_data.tasks if t.task_id == task_id)
-            cross = CrossPipelineCheck(min(still_needed, node.cross_pipeline_edge_count))
+            cross = _backfill_cross_check(engine, task_id, still_needed)
         else:
             cross = gate.check(engine, task_id, still_needed)
         still_needed -= cross.satisfied_count
@@ -373,6 +396,32 @@ def _preflight(
         return _record_skipped(engine, task_id, pipeline_run_id, task_code, never), NO_CROSS
     waiting = f"{task_code}: {unready}; nothing recorded, run it again once they are"
     return _skipped(waiting), NO_CROSS
+
+
+BACKFILL_ASSUMED = frozenset(
+    {DependencyType.SUCCESS, DependencyType.HAS_DATA, DependencyType.ALWAYS}
+)
+"""The dependency types on another pipeline that a backfill counts as met without checking."""
+
+
+def _backfill_cross_check(engine: Engine, task_id: int, needed: int) -> CrossPipelineCheck:
+    """Judge a task's dependencies on other pipelines in a backfill, which checks none of them.
+
+    A backfill re-runs history as if its upstreams had delivered, so ``SUCCESS``, ``HAS_DATA``
+    and ``ALWAYS`` dependencies count as met. A ``FAILURE`` dependency does not: nothing says an
+    upstream failed, and a task that runs only on an upstream failure (an alert) must not run.
+    Nothing is consumed either way.
+    """
+    with engine.connect() as conn:
+        edges = fetch_cross_pipeline_task_edges(conn, task_id)
+    assumed = sum(1 for edge in edges if edge.dependency_type in BACKFILL_ASSUMED)
+    unmet = [edge for edge in edges if edge.dependency_type not in BACKFILL_ASSUMED]
+    reasons = tuple(
+        f"upstream task {edge.depends_on_label} ({edge.dependency_type}) is not evaluated in a "
+        "backfill, so it is not met"
+        for edge in unmet
+    )
+    return CrossPipelineCheck(min(needed, assumed), reasons)
 
 
 def _skipped(message: str) -> TaskOutcome:
@@ -402,8 +451,20 @@ def _describe_unready(
 def _record_skipped(
     engine: Engine, task_id: int, pipeline_run_id: int, task_code: str, reason: str
 ) -> TaskOutcome:
+    """Record the task ``SKIPPED`` with ``reason``, unless it already has an outcome.
+
+    A task that failed before keeps its row, error and log: it is reported as not retried,
+    and stays ``FAILED``.
+    """
     with engine.begin() as conn:
         binding = runlog.find_or_create_task_run(conn, task_id, pipeline_run_id)
+        if not binding.created and binding.status != RunStatus.SKIPPED:
+            return TaskOutcome(
+                RunStatus(binding.status),
+                f"{task_code}: {binding.status} earlier under pipeline_run_id={pipeline_run_id} "
+                f"and not run again: {reason}",
+                binding.task_run_id,
+            )
         runlog.finish_task_run(
             conn, binding.task_run_id, status=RunStatus.SKIPPED, error_message=reason
         )
@@ -434,15 +495,73 @@ def _run_attempt(
     *,
     rerun: bool = False,
 ) -> TaskOutcome:
-    """Bind and start an attempt, run it in its own process, and record how it ended."""
+    """Bind and start an attempt, run it in its own process, and record how it ended.
+
+    Whatever can be checked before binding is checked first, so a bad setting fails without
+    touching the task's row. Anything that fails after binding (the log folder, starting the
+    process, an interrupt) records the attempt ``FAILED`` with the cause, unless the task process
+    recorded an outcome first, and is then raised.
+    """
     child = child or ChildOptions()
     if config.config_path is None:
         raise ConfigurationError("a task process needs the craft-connector.yml it was loaded from")
+    with engine.connect() as conn:
+        params = fetch_task_parameters(conn, task_id)
+    timeout = task_timeout_seconds(params, config)
     with engine.begin() as conn:
         binding = runlog.find_or_create_task_run(conn, task_id, pipeline_run_id)
         attempt = 1 if binding.created else runlog.begin_attempt(conn, binding.task_run_id)
-        params = fetch_task_parameters(conn, task_id)
-    timeout = task_timeout_seconds(params, config)
+    try:
+        return _start_and_record(
+            engine,
+            config,
+            binding.task_run_id,
+            attempt,
+            timeout,
+            task_code,
+            pipeline_code,
+            pipeline_run_id,
+            force,
+            child,
+            rerun=rerun,
+        )
+    except BaseException as error:
+        _fail_after_bind(engine, binding.task_run_id, task_code, error)
+        raise
+
+
+def _fail_after_bind(
+    engine: Engine, task_run_id: int, task_code: str, error: BaseException
+) -> None:
+    """Record an attempt that could not run to its end; never hide the error being raised."""
+    if isinstance(error, KeyboardInterrupt):
+        message = "stopped: the process running the task was interrupted (SIGINT or SIGTERM)"
+    else:
+        message = f"could not run the task process: {type(error).__name__}: {error}"
+    try:
+        with engine.begin() as conn:
+            if runlog.fail_task_run_if_running(conn, task_run_id, message):
+                logger.error("%s: FAILED — %s", task_code, message)
+    except Exception:
+        logger.exception("%s: could not record that its attempt failed", task_code)
+
+
+def _start_and_record(
+    engine: Engine,
+    config: ConnectorConfig,
+    task_run_id: int,
+    attempt: int,
+    timeout: int,
+    task_code: str,
+    pipeline_code: str,
+    pipeline_run_id: int,
+    force: bool,
+    child: ChildOptions,
+    *,
+    rerun: bool,
+) -> TaskOutcome:
+    """Start the bound attempt's task process, wait for it, and record how it ended."""
+    assert config.config_path is not None
     log_path = attempt_log_path(config, pipeline_code, pipeline_run_id, task_code, attempt)
     argv = [
         "-m",
@@ -450,7 +569,7 @@ def _run_attempt(
         "--config",
         str(config.config_path),
         "--task-run-id",
-        str(binding.task_run_id),
+        str(task_run_id),
         "--log-level",
         child.log_level,
         "--log-format",
@@ -464,7 +583,7 @@ def _run_attempt(
         "starting %s attempt %d (task_run_id=%d), time limit %s, log %s",
         task_code,
         attempt,
-        binding.task_run_id,
+        task_run_id,
         f"{timeout}s" if timeout else "none",
         log_path,
     )
@@ -474,8 +593,9 @@ def _run_attempt(
             kill_grace_seconds=child.kill_grace_seconds,
             cancel=stop,
         )
-    return _record_attempt(
-        engine, binding.task_run_id, pipeline_run_id, task_code, result, log_path
+    return retrying(
+        f"recording how {task_code} ended",
+        lambda: _record_attempt(engine, task_run_id, pipeline_run_id, task_code, result, log_path),
     )
 
 

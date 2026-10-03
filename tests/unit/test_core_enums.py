@@ -81,7 +81,7 @@ def test_status_groups():
         RunStatus.SKIPPED,
         RunStatus.IN_PROGRESS,
     } == enums.NOT_RETRYABLE_STATUSES
-    assert {RunStatus.SUCCESS, RunStatus.FAILED, RunStatus.CANCELLED} == enums.FINISHED_RUN_STATUSES
+    assert enums.TERMINAL_STATUSES == enums.FINISHED_RUN_STATUSES
 
 
 def test_a_failed_task_stays_retryable():

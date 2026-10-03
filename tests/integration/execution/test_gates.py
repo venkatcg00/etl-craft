@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import text
 
+from etl_craft.engine import runlog
 from etl_craft.execution.gates import (
     Clock,
     TrackedGate,
@@ -196,3 +197,53 @@ def test_a_pipeline_gate_and_what_its_successful_run_consumes(world):
     assert (consumed.run_id, consumed.consumed) == (down_run, first)
     # The newer run is left for DOWN's next run.
     assert check_pipeline_dependencies(engine, ids["down"], NO_WAIT).consumed == {edge: second}
+
+
+def backfill_run(conn, pipeline_id, task_statuses, status="SUCCESS"):
+    """A run of ``pipeline_id`` that is part of a backfill, its tasks and itself ended as given."""
+    run_id = runlog.find_or_create_active_run(conn, pipeline_id, backfill=True)
+    for task_id, task_status in task_statuses.items():
+        task_run(conn, task_id, run_id, task_status, target_count=1)
+    if status != "IN-PROGRESS":
+        finish_run(conn, run_id, status)
+    return run_id
+
+
+def never_sleep(seconds):
+    raise AssertionError(f"the gate waited {seconds}s for a backfill run")
+
+
+def test_a_finished_backfill_run_never_satisfies_a_gate(world):
+    engine, ids = world
+    edge = depend(engine, ids, "SUCCESS")
+    with engine.begin() as conn:
+        add_pipeline_dependency(conn, ids["down"], ids["up"], "SUCCESS")
+        backfill_run(conn, ids["up"], {ids["publish"]: "SUCCESS"})
+    assert not check_pipeline_dependencies(engine, ids["down"], NO_WAIT).satisfied
+    task_gate = TrackedGate(NO_WAIT).check(engine, ids["load"], 1)
+    assert task_gate.satisfied_count == 0 and edge not in task_gate.consumed
+
+
+def test_a_failed_backfill_run_never_blocks_a_gate(world):
+    engine, ids = world
+    edge = depend(engine, ids, "SUCCESS")
+    with engine.begin() as conn:
+        pipeline_edge = add_pipeline_dependency(conn, ids["down"], ids["up"], "SUCCESS")
+        scheduled, rows = upstream_run(conn, ids["up"], {ids["publish"]: ("SUCCESS",)})
+        backfill_run(conn, ids["up"], {ids["publish"]: "FAILED"}, status="FAILED")
+    passed = check_pipeline_dependencies(engine, ids["down"], NO_WAIT)
+    assert passed.satisfied and passed.consumed == {pipeline_edge: scheduled}
+    task_gate = TrackedGate(NO_WAIT).check(engine, ids["load"], 1)
+    assert task_gate.consumed == {edge: rows[ids["publish"]]}
+
+
+def test_a_running_backfill_run_is_never_waited_for(world):
+    engine, ids = world
+    depend(engine, ids, "SUCCESS")
+    with engine.begin() as conn:
+        add_pipeline_dependency(conn, ids["down"], ids["up"], "SUCCESS")
+        upstream_run(conn, ids["up"], {ids["publish"]: ("SUCCESS",)})
+        backfill_run(conn, ids["up"], {ids["publish"]: "IN-PROGRESS"}, status="IN-PROGRESS")
+    clock = Clock(sleep=never_sleep)
+    assert check_pipeline_dependencies(engine, ids["down"], clock).satisfied
+    assert TrackedGate(clock).check(engine, ids["load"], 1).satisfied_count == 1

@@ -40,8 +40,8 @@ SETTLED_STATUSES = frozenset({RunStatus.SUCCESS, RunStatus.SKIPPED})
 NOT_RETRYABLE_STATUSES = frozenset({RunStatus.SUCCESS, RunStatus.SKIPPED, RunStatus.IN_PROGRESS})
 """Statuses that keep a task out of the ready set; ``FAILED`` and never-run tasks are retried."""
 
-FINISHED_RUN_STATUSES = frozenset({RunStatus.SUCCESS, RunStatus.FAILED, RunStatus.CANCELLED})
-"""Statuses of a pipeline run that has ended."""
+FINISHED_RUN_STATUSES = TERMINAL_STATUSES
+"""Statuses of a pipeline run that has ended, a run skipped on purpose included."""
 
 MARKABLE_STATUSES = (RunStatus.SUCCESS, RunStatus.FAILED, RunStatus.SKIPPED)
 """The statuses ``mark`` sets on a task or a run."""

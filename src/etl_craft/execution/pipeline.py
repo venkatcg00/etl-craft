@@ -40,6 +40,7 @@ from types import TracebackType
 from typing import TypeVar
 
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.enums import (
@@ -54,7 +55,7 @@ from etl_craft.core.graph import DependencyGraph, TaskRunState, build_graph
 from etl_craft.core.log import log_context
 from etl_craft.engine import runlog
 from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
-from etl_craft.engine.repository.interventions import fetch_interventions
+from etl_craft.engine.repository.interventions import fetch_interventions, fetch_task_rows
 from etl_craft.engine.repository.pauses import Pause
 from etl_craft.engine.repository.pipelines import (
     PipelineDetail,
@@ -62,6 +63,7 @@ from etl_craft.engine.repository.pipelines import (
     fetch_pipeline_handlers,
     resolve_pipeline_id,
 )
+from etl_craft.engine.repository.runs import fetch_latest_pipeline_run
 from etl_craft.engine.repository.tasks import fetch_task_codes, resolve_task_id
 from etl_craft.execution.connections import check_run_connections
 from etl_craft.execution.gates import (
@@ -75,6 +77,7 @@ from etl_craft.execution.interventions import (
     open_pause,
     record_change,
     record_gate_bypass,
+    reset_engine_skipped,
 )
 from etl_craft.execution.remote import require_supported
 from etl_craft.execution.runner import (
@@ -301,27 +304,41 @@ def backfill(
             f"--backfill {first.isoformat()}:{last.isoformat()} is {days} dates; one backfill "
             f"runs at most {MAX_BACKFILL_DAYS}, so split it"
         )
-    with engine.connect() as conn:
-        active = runlog.fetch_active_pipeline_run_id(conn, resolve_pipeline_id(conn, pipeline_code))
-    if active is not None:
-        raise RunStateError(
-            f"{pipeline_code} has a run in progress (pipeline_run_id={active}); finish or cancel "
-            "it before a backfill"
-        )
     runs: list[PipelineOutcome] = []
     for offset in range(days):
         day = first + timedelta(days=offset)
-        logger.info("%s: backfill run for %s (%d of %d)", pipeline_code, day, offset + 1, days)
-        outcome = run_pipeline(
-            engine,
-            config,
-            pipeline_code,
-            clock=clock,
-            child=child,
-            hooks=hooks,
-            run_date=day,
-            backfill=reason,
-        )
+        try:
+            # Checked before every date: another run may have started since the last one.
+            with engine.connect() as conn:
+                pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+                active = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
+            if active is not None:
+                raise RunStateError(
+                    f"{pipeline_code} has a run in progress (pipeline_run_id={active}); finish "
+                    "or cancel it before a backfill"
+                )
+            logger.info("%s: backfill run for %s (%d of %d)", pipeline_code, day, offset + 1, days)
+            outcome = run_pipeline(
+                engine,
+                config,
+                pipeline_code,
+                clock=clock,
+                child=child,
+                hooks=hooks,
+                run_date=day,
+                backfill=reason,
+            )
+        except RunStateError as error:
+            if not runs:
+                raise
+            message = (
+                f"{pipeline_code}: backfill stopped at {day.isoformat()} after {len(runs)} of "
+                f"{days} run(s): {error}. `etl-craft run --pipeline_code {pipeline_code} "
+                f"--backfill {day.isoformat()}:{last.isoformat()} --reason ...` takes up from there"
+            )
+            logger.error("%s", message)
+            stopped = PipelineOutcome(RunStatus.SKIPPED, message, None)
+            return BackfillOutcome(runs, stopped, message)
         runs.append(outcome)
         if outcome.pipeline_run_id is None:
             message = f"{pipeline_code}: backfill stopped at {day.isoformat()}: {outcome.message}"
@@ -460,6 +477,10 @@ def rerun_task(
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         task_id = resolve_task_id(conn, pipeline_id, task_code)
         before = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
+        latest = fetch_latest_pipeline_run(conn, pipeline_id)
+        failed_before = latest is not None and (
+            runlog.fetch_task_run_status(conn, task_id, latest.pipeline_run_id) == RunStatus.FAILED
+        )
         detail = fetch_pipeline_detail(conn, pipeline_id)
         graph_data = fetch_pipeline_graph(conn, pipeline_id)
         task_codes = fetch_task_codes(conn, pipeline_id)
@@ -473,6 +494,12 @@ def rerun_task(
     pipeline_run_id = active
     ran = [first]
     left: list[str] = []
+    kept: list[str] = []
+    if failed_before and first.status == RunStatus.SUCCESS:
+        # The tasks the engine skipped because this task had failed get to run again.
+        _, kept = reset_engine_skipped(
+            engine, pipeline_id, pipeline_run_id, reason, only=graph.downstream_of(task_id)
+        )
     if with_downstream and first.status == RunStatus.SUCCESS:
         downstream = graph.downstream_of(task_id)
         for wave in graph.waves():
@@ -495,6 +522,8 @@ def rerun_task(
     summary = "; ".join(outcome.message for outcome in ran)
     if left:
         summary += f"; not run again, their dependencies are not met: {', '.join(left)}"
+    if kept:
+        summary += f"; kept SKIPPED: {', '.join(kept)}"
     if before is not None:
         status = (
             RunStatus.FAILED
@@ -506,6 +535,84 @@ def rerun_task(
             f"{pipeline_code}: pipeline_run_id={pipeline_run_id} is still IN-PROGRESS: {summary}",
             pipeline_run_id,
         )
+    return _end_reopened(
+        engine,
+        pipeline_code,
+        pipeline_id,
+        pipeline_run_id,
+        graph,
+        task_codes,
+        detail.sla_in_hours,
+        hooks or default_hooks(config, engine),
+        f"ran again: {summary}",
+    )
+
+
+def force_task(
+    engine: Engine,
+    config: ConnectorConfig,
+    pipeline_code: str,
+    task_code: str,
+    *,
+    child: ChildOptions | None = None,
+    hooks: RunHooks | None = None,
+) -> PipelineOutcome:
+    """Run ``task_code`` past its checks: ``run --task_code --force``; local mode only.
+
+    Under the pipeline's active run the task just runs. A run that had ended is reopened for
+    it and then ended again from its tasks' statuses, so a forced task that fails leaves the
+    run ``FAILED``.
+    """
+    outcome = run_task(engine, config, pipeline_code, task_code, force=True, child=child)
+    with engine.connect() as conn:
+        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+        run_id = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
+        if outcome.reopened is None or run_id is None:
+            return PipelineOutcome(outcome.status, outcome.message, run_id)
+        detail = fetch_pipeline_detail(conn, pipeline_id)
+        graph_data = fetch_pipeline_graph(conn, pipeline_id)
+        task_codes = fetch_task_codes(conn, pipeline_id)
+    graph = build_graph(graph_data.tasks, graph_data.same_pipeline_edges)
+    return _end_reopened(
+        engine,
+        pipeline_code,
+        pipeline_id,
+        run_id,
+        graph,
+        task_codes,
+        detail.sla_in_hours,
+        hooks or default_hooks(config, engine),
+        f"forced: {outcome.message}",
+    )
+
+
+def _end_reopened(
+    engine: Engine,
+    pipeline_code: str,
+    pipeline_id: int,
+    pipeline_run_id: int,
+    graph: DependencyGraph,
+    task_codes: dict[int, str],
+    sla_hours: float | None,
+    hooks: RunHooks,
+    summary: str,
+) -> PipelineOutcome:
+    """End again a run reopened to run some of its tasks, or keep it open for the rest.
+
+    A task with no row under the run has yet to run, so the run stays ``IN-PROGRESS`` for
+    ``run --pipeline_code`` to resume it.
+    """
+    with engine.connect() as conn:
+        rows = runlog.fetch_run_state(conn, pipeline_run_id, list(graph.task_ids))
+    not_run = sorted(task_codes[t] for t in graph.task_ids if t not in rows)
+    if not_run:
+        message = (
+            f"{pipeline_code}: pipeline_run_id={pipeline_run_id} stays IN-PROGRESS ({summary}); "
+            f"{len(not_run)} task(s) still need to run: {', '.join(not_run)}. "
+            f"`etl-craft run --pipeline_code {pipeline_code}` runs them"
+        )
+        logger.warning("%s", message)
+        return PipelineOutcome(RunStatus.IN_PROGRESS, message, pipeline_run_id)
     with log_context(pipeline=pipeline_code, pipeline_run_id=pipeline_run_id):
         ended = _finalize(
             engine,
@@ -514,10 +621,10 @@ def rerun_task(
             pipeline_run_id,
             graph,
             task_codes,
-            detail.sla_in_hours,
-            hooks or default_hooks(config, engine),
+            sla_hours,
+            hooks,
         )
-    return replace(ended, message=f"{ended.message} (ran again: {summary})")
+    return replace(ended, message=f"{ended.message} ({summary})")
 
 
 def _prepare(
@@ -555,6 +662,17 @@ def _start_run(
         existing = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
         kind = None if existing is None else runlog.fetch_run_kind(conn, existing)
     if existing is not None and kind is not None:
+        if kind.backfill and backfill is None:
+            raise RunStateError(
+                f"{pipeline_code} is running backfill run pipeline_run_id={existing} as of "
+                f"{kind.run_date.isoformat()}; a scheduled run starts once it ends (or cancel it "
+                f"with `etl-craft cancel --pipeline_code {pipeline_code} --reason ...`)"
+            )
+        if backfill is not None and not kind.backfill:
+            raise RunStateError(
+                f"{pipeline_code} has a scheduled run in progress (pipeline_run_id={existing}); "
+                "a backfill never takes it over"
+            )
         if run_date is not None and kind.run_date != run_date:
             raise RunStateError(
                 f"{pipeline_code} has a run in progress (pipeline_run_id={existing}) as of "
@@ -577,11 +695,24 @@ def _start_run(
         if not gate.satisfied:
             reason = "; ".join(gate.reasons)
     with engine.begin() as conn:
-        pipeline_run_id = runlog.find_or_create_active_run(
+        created = runlog.create_active_run(
             conn, pipeline_id, run_date=run_date, backfill=backfill is not None
         )
-        if reason is not None:
-            runlog.finalize_pipeline_run(conn, pipeline_run_id, RunStatus.SKIPPED)
+        if created is None:
+            other = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
+            raise RunStateError(
+                f"{pipeline_code}: another process started pipeline_run_id={other} while this "
+                "one was checking the pipeline's dependencies; that run is left as it is. See "
+                f"`etl-craft history --pipeline_code {pipeline_code}`"
+            )
+        pipeline_run_id = created
+        if reason is not None and not runlog.end_run_if(
+            conn, pipeline_run_id, RunStatus.IN_PROGRESS, RunStatus.SKIPPED
+        ):
+            raise RunStateError(
+                f"{pipeline_code}: pipeline_run_id={pipeline_run_id} changed before it could "
+                "be recorded SKIPPED; it is left as it is"
+            )
     logger.info("%s: started pipeline_run_id=%d", pipeline_code, pipeline_run_id)
     if bypassed:
         record_gate_bypass(engine, pipeline_id, pipeline_run_id, config.dependency_gates, bypassed)
@@ -719,8 +850,10 @@ class _Waves:
                 gate=self.gate,
                 child=self.child,
             )
-        except EtlCraftError as error:
-            logger.error("%s: could not run: %s", task_code, error)
+        except (EtlCraftError, OSError, SQLAlchemyError) as error:
+            # One task's trouble (a bad setting, a failed launch, a database that dropped the
+            # connection) ends that task only; the others in the wave keep running.
+            logger.error("%s: could not run: %s: %s", task_code, type(error).__name__, error)
             return None
 
 
@@ -862,14 +995,18 @@ def _finalize(
     """End the run from its tasks' statuses, record its SLA, and consume its upstream runs.
 
     ``orchestrated`` (remote mode) records the orchestrator's decisions instead of settling the
-    tasks that can never run, and consumes nothing; a run whose tasks the orchestrator ran none
-    of (a sensor on an upstream failed, say) ends ``SKIPPED``.
+    tasks that can never run, and consumes nothing. A run whose tasks all ended ``SKIPPED``, or
+    whose tasks the orchestrator ran none of (a sensor on an upstream failed, say), ends
+    ``SKIPPED``, which a downstream ``SUCCESS`` dependency does not accept.
     """
     not_run: list[int] = []
     if orchestrated:
         not_run = _record_orchestrated(engine, graph, pipeline_run_id, task_codes)
     else:
         _settle_unsatisfiable(engine, graph, pipeline_run_id, task_codes)
+        running = _running_elsewhere(engine, pipeline_code, pipeline_run_id)
+        if running is not None:
+            return running
     with engine.connect() as conn:
         run_state = runlog.fetch_run_state(conn, pipeline_run_id, list(graph.task_ids))
     unsettled = {
@@ -880,9 +1017,26 @@ def _finalize(
     status = RunStatus.FAILED if unsettled else RunStatus.SUCCESS
     if orchestrated and not unsettled and not_run and len(not_run) == len(graph.task_ids):
         status = RunStatus.SKIPPED
+    if (
+        not unsettled
+        and graph.task_ids
+        and all(run_state[task_id].status == RunStatus.SKIPPED for task_id in graph.task_ids)
+    ):
+        status = RunStatus.SKIPPED
     with engine.begin() as conn:
         breached_before = runlog.fetch_run_sla(conn, pipeline_run_id).sla_status
-        sla = runlog.finalize_pipeline_run(conn, pipeline_run_id, status, sla_in_hours=sla_hours)
+        ending = runlog.finalize_pipeline_run(conn, pipeline_run_id, status, sla_in_hours=sla_hours)
+        current = runlog.fetch_pipeline_run_status(conn, pipeline_run_id)
+    if not ending.ended:
+        message = (
+            f"{pipeline_code}: pipeline_run_id={pipeline_run_id} is {current}: it was ended "
+            f"elsewhere (an operator's cancel, say) while this process was ending it {status}; "
+            f"nothing more was recorded. `etl-craft history --pipeline_code {pipeline_code}` shows "
+            "who ended it"
+        )
+        logger.warning("%s", message)
+        return PipelineOutcome(RunStatus(current), message, pipeline_run_id)
+    sla = ending.sla
     with engine.connect() as conn:
         backfill_run = runlog.fetch_run_kind(conn, pipeline_run_id).backfill
     if status == RunStatus.SUCCESS and not orchestrated and not backfill_run:
@@ -922,6 +1076,36 @@ def _finalize(
         _call_hook("on_sla_lapse", hooks.on_sla_lapse, lapse)
     _call_hook("on_finalized", hooks.on_finalized, outcome)
     return outcome
+
+
+def _running_elsewhere(
+    engine: Engine, pipeline_code: str, pipeline_run_id: int
+) -> PipelineOutcome | None:
+    """Return the outcome that leaves the run open when a task of it is still running.
+
+    By the time a local run is finalized, every task this process started has ended, so a task
+    still ``IN-PROGRESS`` belongs to another process, or to one that died without recording an
+    outcome. Either way the run must not be ended under it.
+    """
+    with engine.connect() as conn:
+        running = [
+            row
+            for row in fetch_task_rows(conn, pipeline_run_id)
+            if row.status == RunStatus.IN_PROGRESS
+        ]
+    if not running:
+        return None
+    listed = ", ".join(f"{row.task_code} (task_run_id={row.task_run_id})" for row in running)
+    first = running[0].task_code
+    message = (
+        f"{pipeline_code}: pipeline_run_id={pipeline_run_id} stays IN-PROGRESS: {listed} "
+        f"{'is' if len(running) == 1 else 'are'} still IN-PROGRESS in another process. When it "
+        f"ends, `etl-craft run --pipeline_code {pipeline_code}` finishes the run. If that process "
+        f"is gone, record the task's outcome with `etl-craft mark --pipeline_code {pipeline_code} "
+        f"--task_code {first} --status FAILED --stale --reason ...`"
+    )
+    logger.warning("%s", message)
+    return PipelineOutcome(RunStatus.IN_PROGRESS, message, pipeline_run_id)
 
 
 class _SlaWatch:
