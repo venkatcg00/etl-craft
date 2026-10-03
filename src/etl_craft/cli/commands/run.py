@@ -10,9 +10,12 @@ from contextlib import contextmanager
 from datetime import date
 from types import FrameType
 
+from sqlalchemy.engine import Engine
+
 from etl_craft.cli.commands import Command
 from etl_craft.cli.commands.common import connect_engine_db, load_command_config
 from etl_craft.cli.output import Output
+from etl_craft.config import ConnectorConfig
 from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import ExitCode, UsageError
 from etl_craft.execution.interventions import skip_run
@@ -115,83 +118,8 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     engine = connect_engine_db(config)
     child = ChildOptions(log_level=args.log_level, log_format=args.log_format)
     try:
-        if args.backfill:
-            first, last = args.backfill
-            with _terminate_as_interrupt():
-                done = backfill(
-                    engine,
-                    config,
-                    args.pipeline_code,
-                    first,
-                    last,
-                    args.reason or "",
-                    child=child,
-                    hooks=run_hooks(config, engine),
-                )
-            status, message = done.status, done.message
-        elif args.skip:
-            skipped = skip_run(engine, config, args.pipeline_code, args.reason or "")
-            status, message = RunStatus.SKIPPED, skipped.message
-        elif args.rerun:
-            rerun = rerun_task(
-                engine,
-                config,
-                args.pipeline_code,
-                args.task_code,
-                args.reason or "",
-                with_downstream=args.with_downstream,
-                child=child,
-                hooks=run_hooks(config, engine),
-            )
-            status, message = rerun.status, rerun.message
-        elif args.task_code and args.force:
-            forced = force_task(
-                engine,
-                config,
-                args.pipeline_code,
-                args.task_code,
-                child=child,
-                hooks=run_hooks(config, engine),
-            )
-            status, message = forced.status, forced.message
-        elif args.task_code:
-            override = Override(args.reason or "") if args.ignore_dependencies else None
-            outcome = run_task(
-                engine,
-                config,
-                args.pipeline_code,
-                args.task_code,
-                force=args.force,
-                child=child,
-                override=override,
-            )
-            status, message = outcome.status, outcome.message
-        elif args.init_only:
-            started = init_pipeline_run(
-                engine,
-                config,
-                args.pipeline_code,
-                hooks=run_hooks(config, engine),
-                run_date=args.run_date,
-            )
-            status, message = started.status, started.message
-        elif args.finalize_only:
-            ended = finalize_active_run(
-                engine, config, args.pipeline_code, hooks=run_hooks(config, engine)
-            )
-            status, message = ended.status, ended.message
-        else:
-            with _terminate_as_interrupt():
-                ran = run_pipeline(
-                    engine,
-                    config,
-                    args.pipeline_code,
-                    force=args.force,
-                    child=child,
-                    hooks=run_hooks(config, engine),
-                    run_date=args.run_date,
-                )
-            status, message = ran.status, ran.message
+        with _terminate_as_interrupt():
+            status, message = _dispatch(args, config, engine, child)
     finally:
         engine.dispose()
     out.line(message)
@@ -200,17 +128,105 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     return ExitCode.SUCCESS
 
 
+def _dispatch(
+    args: argparse.Namespace, config: ConnectorConfig, engine: Engine, child: ChildOptions
+) -> tuple[RunStatus, str]:
+    """Do what ``args`` asks and return how it ended."""
+    if args.backfill:
+        first, last = args.backfill
+        done = backfill(
+            engine,
+            config,
+            args.pipeline_code,
+            first,
+            last,
+            args.reason or "",
+            child=child,
+            hooks=run_hooks(config, engine),
+        )
+        return done.status, done.message
+    elif args.skip:
+        skipped = skip_run(engine, config, args.pipeline_code, args.reason or "")
+        return RunStatus.SKIPPED, skipped.message
+    elif args.rerun:
+        rerun = rerun_task(
+            engine,
+            config,
+            args.pipeline_code,
+            args.task_code,
+            args.reason or "",
+            with_downstream=args.with_downstream,
+            child=child,
+            hooks=run_hooks(config, engine),
+        )
+        return rerun.status, rerun.message
+    elif args.task_code and args.force:
+        forced = force_task(
+            engine,
+            config,
+            args.pipeline_code,
+            args.task_code,
+            child=child,
+            hooks=run_hooks(config, engine),
+        )
+        return forced.status, forced.message
+    elif args.task_code:
+        override = Override(args.reason or "") if args.ignore_dependencies else None
+        outcome = run_task(
+            engine,
+            config,
+            args.pipeline_code,
+            args.task_code,
+            force=args.force,
+            child=child,
+            override=override,
+        )
+        return outcome.status, outcome.message
+    elif args.init_only:
+        started = init_pipeline_run(
+            engine,
+            config,
+            args.pipeline_code,
+            hooks=run_hooks(config, engine),
+            run_date=args.run_date,
+        )
+        return started.status, started.message
+    elif args.finalize_only:
+        ended = finalize_active_run(
+            engine, config, args.pipeline_code, hooks=run_hooks(config, engine)
+        )
+        return ended.status, ended.message
+    else:
+        ran = run_pipeline(
+            engine,
+            config,
+            args.pipeline_code,
+            force=args.force,
+            child=child,
+            hooks=run_hooks(config, engine),
+            run_date=args.run_date,
+        )
+        return ran.status, ran.message
+
+
 @contextmanager
 def _terminate_as_interrupt() -> Iterator[None]:
-    """Treat SIGTERM like Ctrl-C while a whole pipeline runs, so its tasks are stopped too."""
+    """Treat SIGTERM and SIGHUP like Ctrl-C, on every kind of run.
+
+    The task processes the command started are then stopped and their attempts recorded. A
+    SIGKILL cannot be caught: its task processes are left running, and their rows
+    ``IN-PROGRESS`` until ``mark --stale`` releases them.
+    """
     if threading.current_thread() is not threading.main_thread():
         yield
         return
-    previous = signal.signal(signal.SIGTERM, _raise_interrupt)
+    caught = [signal.SIGTERM] + ([signal.SIGHUP] if hasattr(signal, "SIGHUP") else [])
+    previous = {sig: signal.signal(sig, _raise_interrupt) for sig in caught}
     try:
         yield
     finally:
-        signal.signal(signal.SIGTERM, previous)
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
 
 
 def _date(text: str) -> date:
@@ -228,7 +244,7 @@ def _date_range(text: str) -> tuple[date, date]:
 
 
 def _raise_interrupt(signum: int, frame: FrameType | None) -> None:
-    raise KeyboardInterrupt
+    raise KeyboardInterrupt(signal.Signals(signum).name)
 
 
 COMMAND = Command(

@@ -83,4 +83,6 @@ fields. `--log-level DEBUG` adds the detail: for example, the SQL each action ru
 A task whose process ends without reporting an outcome (it crashed, was killed, or ran out of
 time) is recorded `FAILED` with what happened, for example
 `the task process was killed by signal SIGKILL before recording an outcome`, and the end of its
-log shows what it was doing.
+log shows what it was doing. A task process writes its output unbuffered, so the log keeps
+everything it printed up to the end. Once the outcome is recorded the process exits at once:
+threads a script left running end with it, and are named in the log.

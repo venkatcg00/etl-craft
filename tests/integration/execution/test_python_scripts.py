@@ -1,7 +1,12 @@
 """Ingestion scripts: the contract, offsets, INPUT_PARAMS, captured output and every mistake."""
 
 import logging
+import os
+import signal
+import subprocess
+import sys
 import textwrap
+import time
 from dataclasses import replace
 from datetime import date
 
@@ -243,3 +248,97 @@ def test_a_backfill_run_gives_the_date_and_neither_reads_nor_stores_an_offset(pr
         runlog.finalize_pipeline_run(conn, backfill_run, "SUCCESS")
         runlog.find_or_create_active_run(conn, project[2])
     run_in_process(project, kept)
+
+
+def with_script(project, script, **params):
+    engine, config, _, task = project
+    (config.ingestion_scripts_dir / "load.py").write_text(textwrap.dedent(script), "utf-8")
+    with engine.begin() as conn:
+        for name, value in params.items():
+            conn.execute(
+                text(
+                    "INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE) "
+                    "VALUES (:t, :n, :v)"
+                ),
+                {"t": task, "n": name, "v": value},
+            )
+
+
+def attempt_log(config):
+    return next(config.log_dir.glob("P/run-*/load.attempt-1.log")).read_text("utf-8")
+
+
+def test_the_task_process_exits_once_its_outcome_is_recorded(project):
+    engine, config, _, _ = project
+    with_script(
+        project,
+        RESULT + "import threading, time\n"
+        "def run(task):\n"
+        "    threading.Thread(target=time.sleep, args=(60,), name='pool-1').start()\n"
+        "    return ScriptResult(1)\n",
+    )
+    started = time.monotonic()
+    outcome = run_task(engine, config, "P", "load")
+    assert outcome.status == RunStatus.SUCCESS, outcome.message
+    assert time.monotonic() - started < 20
+    assert "exiting with 1 thread(s) still running" in attempt_log(config)
+    assert "pool-1" in attempt_log(config)
+
+
+def test_what_a_script_printed_is_kept_when_it_is_stopped(project):
+    engine, config, _, _ = project
+    with_script(
+        project,
+        "import time\n"
+        "def run(task):\n"
+        "    for n in range(5):\n"
+        "        print(f'line {n}')\n"
+        "    time.sleep(60)\n",
+        TASK_TIMEOUT_SECONDS="2",
+    )
+    outcome = run_task(engine, config, "P", "load")
+    assert outcome.status == RunStatus.FAILED
+    assert "timed out after 2s" in outcome.message
+    log = attempt_log(config)
+    assert all(f"line {n}" in log for n in range(5))
+
+
+@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGHUP])
+@pytest.mark.parametrize("how", [["--task_code", "load"], ["--task_code", "load", "--force"], []])
+def test_a_signal_to_run_stops_the_task_process_and_records_it(project, tmp_path, sig, how):
+    engine, config, _, task = project
+    pid_file = tmp_path / "script.pid"
+    with_script(
+        project,
+        "import os, time\n"
+        "def run(task):\n"
+        f"    open({str(pid_file)!r}, 'w').write(str(os.getpid()))\n"
+        "    time.sleep(60)\n",
+    )
+    parent = subprocess.Popen(
+        [sys.executable, "-m", "etl_craft", "run", "--pipeline_code", "P", *how],
+        env={**os.environ, "ETL_CRAFT_CONFIG": str(config.config_path)},
+        cwd=config.project_dir,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    deadline = time.monotonic() + 30
+    while not pid_file.exists() or not pid_file.read_text():
+        assert parent.poll() is None, parent.stdout.read().decode()
+        assert time.monotonic() < deadline, "the script never started"
+        time.sleep(0.2)
+    child_pid = int(pid_file.read_text())
+    parent.send_signal(sig)
+    parent.wait(timeout=30)
+    with pytest.raises(ProcessLookupError):
+        os.kill(child_pid, 0)
+    with engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT STATUS AS status, ERROR_MESSAGE AS error FROM AUD_TASK_RUN_LOG "
+                "WHERE TASK_ID = :t"
+            ),
+            {"t": task},
+        ).one()
+    assert row.status == "FAILED"
+    assert sig.name in row.error or "interrupted" in row.error, row.error
