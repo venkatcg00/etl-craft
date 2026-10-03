@@ -57,8 +57,11 @@ A run that is still `IN-PROGRESS`, for example because its process was stopped, 
 running the pipeline again: its `SUCCESS` and `SKIPPED` tasks are not run again, and its failed
 tasks get another attempt. A resumed run does not check the pipeline's dependencies again.
 
-Pressing Ctrl-C, or sending the process `SIGTERM`, stops every running task's process. Those
-tasks are recorded `FAILED`, and the run stays `IN-PROGRESS` so the next run resumes it.
+Pressing Ctrl-C, or sending the process `SIGTERM` or `SIGHUP`, stops every running task's
+process. Those tasks are recorded `FAILED`, and the run stays `IN-PROGRESS` so the next run
+resumes it. The same holds for `run --task_code`, `--rerun` and `--backfill`. `SIGKILL` cannot be
+caught: a task it leaves running stays `IN-PROGRESS` until
+`mark --task_code <code> --status FAILED --stale --reason ...` releases it.
 
 `--force` runs every task in its wave whatever its status or dependencies, and skips the
 pipeline's dependency check. It is only available in local mode.

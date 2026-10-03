@@ -19,6 +19,7 @@ cancels it (``etl-craft cancel``), the task process is stopped and the task is `
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import threading
 from dataclasses import dataclass, replace
@@ -535,7 +536,8 @@ def _fail_after_bind(
 ) -> None:
     """Record an attempt that could not run to its end; never hide the error being raised."""
     if isinstance(error, KeyboardInterrupt):
-        message = "stopped: the process running the task was interrupted (SIGINT or SIGTERM)"
+        received = str(error) or "SIGINT"
+        message = f"stopped: the `etl-craft run` running the task received {received}"
     else:
         message = f"could not run the task process: {type(error).__name__}: {error}"
     try:
@@ -589,7 +591,13 @@ def _start_and_record(
     )
     with _CancelWatch(engine, pipeline_run_id, child) as stop:
         result = run_child(
-            ChildSpec(argv=(sys.executable, *argv), timeout_seconds=timeout, log_path=log_path),
+            ChildSpec(
+                argv=(sys.executable, *argv),
+                timeout_seconds=timeout,
+                log_path=log_path,
+                # Output reaches the log as it is written, so a hang or a kill loses none of it.
+                env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            ),
             kill_grace_seconds=child.kill_grace_seconds,
             cancel=stop,
         )

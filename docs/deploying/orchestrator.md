@@ -36,6 +36,12 @@ So in remote mode:
   `FAILED`. The run ends `FAILED` when a task failed, `SKIPPED` when the orchestrator ran none of
   its tasks, and `SUCCESS` otherwise. No dependency tracker moves.
 - `--force` and running a whole pipeline are refused (exit status `10`): they are local mode's.
+- When the orchestrator stops a task (Airflow's `on_kill`, a timeout, a cleared task) by sending
+  `SIGTERM` or `SIGHUP` to `etl-craft run`, the task's process and everything it started are
+  stopped, and the attempt is recorded `FAILED` with the signal. `SIGKILL` cannot be caught: the
+  task's process keeps running and its row stays `IN-PROGRESS` until `--finalize-only` records it
+  `FAILED`. Give the command time to stop before a kill follows (Airflow's
+  `killed_task_cleanup_time`, ten seconds or more).
 
 ## Rules an orchestrator does not support
 

@@ -4,14 +4,25 @@
 everything it writes (its own log records and the handler's output) is captured into the
 attempt's log file. It runs the task's handler and records the outcome on the task's row. If it
 dies before recording anything, the process that started it records the task ``FAILED``.
+
+As a process (``run_as_process``) it turns SIGTERM into ``KeyboardInterrupt``, so what the
+handler wrote is flushed before it is stopped, and it exits as soon as the outcome is recorded,
+without waiting for threads a script left running.
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+import os
+import signal
+import sys
+import threading
 from collections.abc import Sequence
+from contextlib import suppress
 from pathlib import Path
+from types import FrameType
+from typing import NoReturn
 
 from sqlalchemy.engine import Engine
 
@@ -108,5 +119,44 @@ def _record_failure(engine: Engine, task_run_id: int, message: str) -> None:
         finish_task_run(conn, task_run_id, status=RunStatus.FAILED, error_message=message)
 
 
+def run_as_process(argv: Sequence[str] | None = None) -> NoReturn:
+    """Run ``main`` as the task process and exit with its status as soon as it returns."""
+    signal.signal(signal.SIGTERM, _interrupt)
+    exit_now(main(argv))
+
+
+def exit_now(code: int) -> NoReturn:
+    """Flush the output and logs, and exit with ``code`` without waiting for other threads.
+
+    The outcome is recorded by then, so a thread a script left running (a client's pool, say)
+    only held the task's slot. It is named in the log, then ends with the process.
+    """
+    lingering = [
+        thread.name
+        for thread in threading.enumerate()
+        if thread is not threading.main_thread() and thread.is_alive() and not thread.daemon
+    ]
+    if lingering:
+        logger.warning(
+            "exiting with %d thread(s) still running, which end with the task process: %s",
+            len(lingering),
+            ", ".join(lingering),
+        )
+    _flush()
+    logging.shutdown()
+    os._exit(code)
+
+
+def _interrupt(signum: int, frame: FrameType | None) -> None:
+    _flush()
+    raise KeyboardInterrupt(f"stopped by {signal.Signals(signum).name}")
+
+
+def _flush() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        with suppress(OSError, ValueError):
+            stream.flush()
+
+
 if __name__ == "__main__":  # pragma: no cover - run as a separate process
-    raise SystemExit(main())
+    run_as_process()

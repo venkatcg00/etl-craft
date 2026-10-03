@@ -21,6 +21,15 @@ The task is set to `SUCCESS`, `FAILED` or `SKIPPED` under the pipeline's latest 
 `ERROR_MESSAGE` says who marked it and why. A task that is running is refused: cancel the run
 first, or wait.
 
+A task left `IN-PROGRESS` by a process that is gone (the machine restarted, or `etl-craft run`
+was killed with `SIGKILL`) is released with `--stale`, once you have checked that nothing still
+runs it:
+
+```bash
+etl-craft mark --pipeline_code SALES_DAILY --task_code load_orders --status FAILED --stale \
+    --reason "the host restarted at 03:10"
+```
+
 If that run has ended, it is reopened (`IN-PROGRESS` again), and the tasks the engine skipped
 without running are reset, so running the pipeline again resumes it from there:
 

@@ -51,4 +51,4 @@ if __name__ == "__main__":
             ("PYTHON", "SQL", "BUSINESS_RULES", "EMAIL_ALERT"), "fixtures.task_child:handler"
         )
     )
-    raise SystemExit(child.main())
+    child.run_as_process()

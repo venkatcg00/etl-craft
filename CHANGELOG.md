@@ -68,6 +68,13 @@ All notable changes are recorded here. The format follows
   and sends no breach email for it.
 - A run cancelled while it was being ended stays `CANCELLED`: nothing is consumed and no
   end-of-run hook runs.
+- `SIGTERM` or `SIGHUP` to `etl-craft run` stops the task processes it started and records their
+  attempts `FAILED` with the signal, on `run --task_code` and `--rerun` as on whole-pipeline runs
+  and backfills.
+- A task process exits as soon as its outcome is recorded, instead of holding the task's slot
+  until a thread its script left running ends; the threads are named in the attempt's log.
+- A task process writes its output unbuffered and flushes it when stopped, so the attempt's log
+  keeps what a script printed before it hung or timed out.
 
 ### Changed
 
