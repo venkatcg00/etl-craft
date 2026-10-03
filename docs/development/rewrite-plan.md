@@ -174,11 +174,13 @@ After 0.1.0 (the full plan to 1.0.0 is [Road to 1.0.0](road-to-1.0.0.md)):
   run, dependency and upstream run consumed, the gate reading the latest), so the catalog can
   show which upstream runs each run was built from; and how long a gate waits for a running
   upstream (an hour today) becomes a setting.
-- **L1 `examples/support-insights`**: a complete example project built on the released package,
-  adapted from the Support-Insights platform (github.com/venkatcg00/Supports-Insights-Docker):
+- **L1, the Support Insights example**: the Support-Insights platform
+  (github.com/venkatcg00/Supports-Insights-Docker) rebuilt on etl-craft in its own repository, with
   its real sources (MongoDB, Kafka, MinIO) landed by ingestion scripts, the `lnd`, `prs`, `cdc`,
-  `pre_dm` and `dm` layers as etl-craft pipelines in place of its PySpark DAGs, orchestrated by
-  the generated DAGs, with the catalog published beside its dashboards. The H2 demo
+  `pre_dm` and `dm` layers as etl-craft pipelines in place of its Airflow and PySpark DAGs, its
+  configuration deployed by CI pipelines, and its Superset dashboards working from etl-craft's data.
+  It is built against the 1.0.0 release candidates and gates 1.0.0: see
+  [Road to 1.0.0](road-to-1.0.0.md#release-candidate-the-support-insights-example). The H2 demo
   (`examples/demo`) is its starting point: the same domain and layers, on local services only.
 
 ## Checkpoints
