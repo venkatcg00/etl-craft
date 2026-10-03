@@ -39,6 +39,14 @@ All notable changes are recorded here. The format follows
   applies it to an Engine DB made by 0.1.0. A test upgrades each released schema and compares
   it with a new one.
 
+### Fixed
+
+- A transaction on a SQLite Engine DB is now all or nothing. The driver no longer manages
+  transactions itself; every transaction opens with `BEGIN IMMEDIATE`, so a savepoint that was a
+  transaction's first write no longer commits early, DDL rolls back with its transaction, and a
+  failure between starting a run and recording that its gate refused it can no longer leave the
+  run `IN-PROGRESS` to be resumed without the gate.
+
 ## [0.1.0] - 2026-09-26
 
 The first release: a rewrite of the earlier implementation (kept at the `archive/iteration-2`
