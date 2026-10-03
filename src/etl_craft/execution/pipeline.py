@@ -62,6 +62,7 @@ from etl_craft.engine.repository.pipelines import (
     fetch_pipeline_handlers,
     resolve_pipeline_id,
 )
+from etl_craft.engine.repository.runs import fetch_latest_pipeline_run
 from etl_craft.engine.repository.tasks import fetch_task_codes, resolve_task_id
 from etl_craft.execution.connections import check_run_connections
 from etl_craft.execution.gates import (
@@ -75,6 +76,7 @@ from etl_craft.execution.interventions import (
     open_pause,
     record_change,
     record_gate_bypass,
+    reset_engine_skipped,
 )
 from etl_craft.execution.remote import require_supported
 from etl_craft.execution.runner import (
@@ -474,6 +476,10 @@ def rerun_task(
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         task_id = resolve_task_id(conn, pipeline_id, task_code)
         before = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
+        latest = fetch_latest_pipeline_run(conn, pipeline_id)
+        failed_before = latest is not None and (
+            runlog.fetch_task_run_status(conn, task_id, latest.pipeline_run_id) == RunStatus.FAILED
+        )
         detail = fetch_pipeline_detail(conn, pipeline_id)
         graph_data = fetch_pipeline_graph(conn, pipeline_id)
         task_codes = fetch_task_codes(conn, pipeline_id)
@@ -487,6 +493,12 @@ def rerun_task(
     pipeline_run_id = active
     ran = [first]
     left: list[str] = []
+    kept: list[str] = []
+    if failed_before and first.status == RunStatus.SUCCESS:
+        # The tasks the engine skipped because this task had failed get to run again.
+        _, kept = reset_engine_skipped(
+            engine, pipeline_id, pipeline_run_id, reason, only=graph.downstream_of(task_id)
+        )
     if with_downstream and first.status == RunStatus.SUCCESS:
         downstream = graph.downstream_of(task_id)
         for wave in graph.waves():
@@ -509,6 +521,19 @@ def rerun_task(
     summary = "; ".join(outcome.message for outcome in ran)
     if left:
         summary += f"; not run again, their dependencies are not met: {', '.join(left)}"
+    if kept:
+        summary += f"; kept SKIPPED: {', '.join(kept)}"
+    with engine.connect() as conn:
+        rows = runlog.fetch_run_state(conn, pipeline_run_id, list(graph.task_ids))
+    not_run = sorted(task_codes[t] for t in graph.task_ids if t not in rows)
+    if before is None and not_run:
+        message = (
+            f"{pipeline_code}: pipeline_run_id={pipeline_run_id} stays IN-PROGRESS: {summary}; "
+            f"{len(not_run)} task(s) still need to run: {', '.join(not_run)}. "
+            f"`etl-craft run --pipeline_code {pipeline_code}` runs them"
+        )
+        logger.warning("%s", message)
+        return PipelineOutcome(RunStatus.IN_PROGRESS, message, pipeline_run_id)
     if before is not None:
         status = (
             RunStatus.FAILED

@@ -885,3 +885,58 @@ def test_a_task_left_running_by_a_dead_process_is_released_with_stale(config, pi
     # Resuming retries the task marked FAILED; it succeeds this time, and the run ends.
     assert statuses(engine, run)["extract"][0] == "SUCCESS"
     assert statuses(engine, run)["transform"][0] == "SUCCESS"
+
+
+def behave(engine, task_id, behaviour):
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE = :b "
+                "WHERE TASK_ID = :t AND PARAMETER_NAME = 'BEHAVIOUR'"
+            ),
+            {"b": behaviour, "t": task_id},
+        )
+
+
+def test_a_rerun_of_a_failed_task_leaves_what_its_failure_skipped_to_run(config, engine_db):
+    engine = engine_db.engine
+    with engine.begin() as conn:
+        q = add_pipeline(conn, "Q")
+        a = add_task(conn, q, "a", BEHAVIOUR="fail")
+        c = add_task(conn, q, "c", BEHAVIOUR="succeed")
+        add_dependency(conn, q, c, a)
+    failed = run_pipeline(engine, config, "Q", child=CHILD)
+    assert failed.status == RunStatus.FAILED
+    assert statuses(engine, failed.pipeline_run_id)["c"][0] == "SKIPPED"
+
+    behave(engine, a, "succeed")
+    fixed = rerun_task(engine, config, "Q", "a", "source fixed", child=CHILD)
+    assert (fixed.status, fixed.pipeline_run_id) == (RunStatus.IN_PROGRESS, failed.pipeline_run_id)
+    assert "1 task(s) still need to run: c" in fixed.message
+    assert run_status(engine, failed.pipeline_run_id) == "IN-PROGRESS"
+
+    done = run_pipeline(engine, config, "Q", child=CHILD)
+    assert (done.status, done.pipeline_run_id) == (RunStatus.SUCCESS, failed.pipeline_run_id)
+    assert statuses(engine, done.pipeline_run_id)["c"][0] == "SUCCESS"
+
+
+def test_mark_keeps_a_skipped_task_another_pipeline_consumed(config, engine_db):
+    engine = engine_db.engine
+    with engine.begin() as conn:
+        p = add_pipeline(conn, "P")
+        ok = add_task(conn, p, "ok", BEHAVIOUR="succeed")
+        on_failure = add_task(conn, p, "on_failure", BEHAVIOUR="succeed")
+        add_dependency(conn, p, on_failure, ok, "FAILURE")
+        q = add_pipeline(conn, "Q")
+        down = add_task(conn, q, "down", BEHAVIOUR="succeed")
+        add_dependency(conn, q, down, on_failure, "ALWAYS", upstream_pipeline=p)
+    p_run = run_pipeline(engine, config, "P", child=CHILD)
+    assert statuses(engine, p_run.pipeline_run_id)["on_failure"][0] == "SKIPPED"
+    q_run = run_pipeline(engine, config, "Q", child=CHILD)
+    assert q_run.status == RunStatus.SUCCESS  # it consumed P.on_failure's SKIPPED row
+
+    marked = mark_task(engine, config, "P", "ok", "FAILED", "wrong data", requested_by=WHO)
+    assert f"kept SKIPPED: on_failure (consumed by Q.down run {q_run.pipeline_run_id})" in (
+        marked.message
+    )
+    assert statuses(engine, p_run.pipeline_run_id)["on_failure"][0] == "SKIPPED"

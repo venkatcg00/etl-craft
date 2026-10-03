@@ -34,7 +34,7 @@ class Intervention:
 
 @dataclass(frozen=True)
 class TaskRow:
-    """A task's row under a run, and whether an operator marked it."""
+    """A task's row under a run, whether an operator marked it, and who consumed it, if anyone."""
 
     task_run_id: int
     task_id: int
@@ -43,6 +43,7 @@ class TaskRow:
     error_message: str | None
     marked: bool
     has_rule_runs: bool
+    consumed_by: str | None = None
 
 
 def record_intervention(
@@ -89,6 +90,7 @@ def fetch_task_rows(conn: Connection, pipeline_run_id: int) -> list[TaskRow]:
             row.error_message,
             bool(row.marked),
             bool(row.has_rule_runs),
+            row.consumed_by,
         )
         for row in conn.execute(
             statement(conn, "run_task_rows"), {"pipeline_run_id": pipeline_run_id}
