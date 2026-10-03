@@ -1223,19 +1223,21 @@ class AttemptSpec:
     pipeline_code: str
     task_code: str
     handler: str
-    slot_kind: str            # "ingestion" for PYTHON, "warehouse" for everything else
-    bundle_id: int            # S5.F
+    slot_kind: str  # "ingestion" for PYTHON, "warehouse" for everything else
+    bundle_id: int  # S5.F
     config_sha256: str
     timeout_seconds: int
     lease_seconds: int
 
+
 class Pool(Protocol):
     name: str
-    def capacity(self) -> Capacity: ...                    # slots per kind, free per kind
-    def submit(self, spec: AttemptSpec) -> ExecutionHandle: ...   # idempotent per attempt_id
+
+    def capacity(self) -> Capacity: ...  # slots per kind, free per kind
+    def submit(self, spec: AttemptSpec) -> ExecutionHandle: ...  # idempotent per attempt_id
     def status(self, handle: ExecutionHandle) -> HandleStatus: ...
     def cancel(self, handle: ExecutionHandle, grace_seconds: float) -> None: ...
-    def reconcile(self) -> list[HandleStatus]: ...         # after a restart or lost contact
+    def reconcile(self) -> list[HandleStatus]: ...  # after a restart or lost contact
 ```
 
 Rules: `submit` twice with the same `attempt_id` returns the same handle and starts nothing new;
