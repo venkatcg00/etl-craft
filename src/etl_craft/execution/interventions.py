@@ -79,13 +79,15 @@ def mark_task(
     reason: str,
     *,
     rows: int | None = None,
+    stale: bool = False,
     requested_by: str | None = None,
 ) -> Intervened:
     """Mark ``task_code`` ``status`` under the pipeline's latest run.
 
     A run that has ended is reopened, and the tasks the engine skipped without running are
-    reset, so the next ``run --pipeline_code`` resumes it. Raises ``RunStateError`` when the
-    pipeline has no run, and ``RunRefusedError`` in remote mode or while the task is running.
+    reset, so the next ``run --pipeline_code`` resumes it. A task that is ``IN-PROGRESS`` is
+    refused unless ``stale`` says the process running it is gone. Raises ``RunStateError`` when
+    the pipeline has no run, and ``RunRefusedError`` in remote mode or while the task is running.
     """
     status = _check(config, "mark", reason, status, rows)
     who = requested_by or current_operator()
@@ -94,10 +96,11 @@ def mark_task(
         task_id = resolve_task_id(conn, pipeline_id, task_code)
         run_id, run_status = _latest_run(conn, pipeline_id, pipeline_code)
         before = runlog.fetch_task_run_status(conn, task_id, run_id)
-        if before == RunStatus.IN_PROGRESS:
+        if before == RunStatus.IN_PROGRESS and not stale:
             raise RunRefusedError(
                 f"{pipeline_code}.{task_code} is running under pipeline_run_id={run_id}; wait "
-                "for it to end, or cancel the run with `etl-craft cancel`"
+                "for it to end, or cancel the run with `etl-craft cancel`. If the process "
+                "running it is gone, pass --stale to record its outcome"
             )
         if before == status and rows is None:
             raise UsageError(
@@ -110,7 +113,11 @@ def mark_task(
             conn,
             binding.task_run_id,
             status=status,
-            error_message=f"marked {status} by {who}: {reason}",
+            error_message=(
+                f"marked {status} by {who}"
+                + (" (its process was gone)" if before == RunStatus.IN_PROGRESS else "")
+                + f": {reason}"
+            ),
             target_count=rows,
         )
         record.record_intervention(
@@ -221,7 +228,14 @@ def record_stand_in_run(
                 f"{pipeline_code} has a run in progress (pipeline_run_id={active}); mark that "
                 "run, or cancel it, before recording a stand-in run"
             )
-        run_id = runlog.find_or_create_active_run(conn, pipeline_id)
+        created = runlog.create_active_run(conn, pipeline_id)
+        if created is None:
+            raise RunStateError(
+                f"{pipeline_code}: another process started a run just now "
+                f"(pipeline_run_id={runlog.fetch_active_pipeline_run_id(conn, pipeline_id)}); "
+                "mark that run, or cancel it, before recording a stand-in run"
+            )
+        run_id = created
         if task_id is not None:
             binding = runlog.find_or_create_task_run(conn, task_id, run_id)
             record.mark_task_run(

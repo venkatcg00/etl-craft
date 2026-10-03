@@ -793,3 +793,27 @@ def test_the_run_date_and_backfill_options(config, engine_db, capsys, monkeypatc
         assert message in capsys.readouterr().err
     code = cli_main(["run", "--pipeline_code", "P", *both_days, "--task_code", "x"])
     assert code == ExitCode.USAGE
+
+
+def test_a_task_left_running_by_a_dead_process_is_released_with_stale(config, pipeline):
+    engine, ids = pipeline
+    with engine.begin() as conn:
+        run = runlog.find_or_create_active_run(conn, ids["P"])
+        runlog.find_or_create_task_run(conn, ids["extract"], run)
+    held = run_pipeline(engine, config, "P", child=CHILD)
+    assert held.status == RunStatus.IN_PROGRESS
+    assert "--stale" in held.message
+
+    with pytest.raises(RunRefusedError, match="pass --stale"):
+        mark_task(engine, config, "P", "extract", "FAILED", "process died", requested_by=WHO)
+    marked = mark_task(
+        engine, config, "P", "extract", "FAILED", "process died", stale=True, requested_by=WHO
+    )
+    assert "marked FAILED" in marked.message
+    assert statuses(engine, run)["extract"][0] == "FAILED"
+
+    done = run_pipeline(engine, config, "P", child=CHILD)
+    assert (done.status, done.pipeline_run_id) == (RunStatus.FAILED, run)
+    # Resuming retries the task marked FAILED; it succeeds this time, and the run ends.
+    assert statuses(engine, run)["extract"][0] == "SUCCESS"
+    assert statuses(engine, run)["transform"][0] == "SUCCESS"

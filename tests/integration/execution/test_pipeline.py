@@ -22,6 +22,7 @@ from etl_craft.core.errors import (
     RunRefusedError,
     RunStateError,
 )
+from etl_craft.engine import runlog
 from etl_craft.execution.gates import Clock
 from etl_craft.execution.pipeline import (
     RunHooks,
@@ -35,6 +36,7 @@ from fixtures.metadata import (
     add_pipeline,
     add_pipeline_dependency,
     add_task,
+    finish_run,
     start_run,
     task_run,
     upstream_run,
@@ -231,6 +233,51 @@ def test_an_unsatisfied_pipeline_dependency_skips_the_run(config, pipeline):
             {"id": edge},
         ).scalar_one()
     assert consumed == up_run
+
+
+def test_a_refused_gate_leaves_a_run_another_process_started_alone(config, pipeline):
+    # While this run waits for a running upstream, another process starts a run of P, and the
+    # upstream then fails. The gate refuses, and the other process's run must stay as it is.
+    engine, ids = pipeline
+    with engine.begin() as conn:
+        upstream = add_pipeline(conn, "UP")
+        add_pipeline_dependency(conn, ids["P"], upstream)
+        up_run = start_run(conn, upstream)
+    started_elsewhere = []
+
+    def another_process_meanwhile(seconds):
+        if started_elsewhere:
+            return
+        with engine.begin() as conn:
+            started_elsewhere.append(start_run(conn, ids["P"]))
+            finish_run(conn, up_run, "FAILED")
+
+    with pytest.raises(RunStateError, match="another process started pipeline_run_id="):
+        run_pipeline(engine, config, "P", child=CHILD, clock=Clock(sleep=another_process_meanwhile))
+    assert run_row(engine, started_elsewhere[0]).status == "IN-PROGRESS"
+
+
+def test_a_run_is_not_ended_while_another_process_runs_one_of_its_tasks(config, pipeline):
+    engine, ids = pipeline
+    with engine.begin() as conn:
+        run = start_run(conn, ids["P"])
+        elsewhere = task_run(conn, ids["extract"], run, status="IN-PROGRESS")
+
+    held = run_pipeline(engine, config, "P", child=CHILD, clock=NO_WAIT)
+    assert (held.status, held.pipeline_run_id) == (RunStatus.IN_PROGRESS, run)
+    assert f"extract (task_run_id={elsewhere}) is still IN-PROGRESS in another process" in (
+        held.message
+    )
+    assert run_row(engine, run).status == "IN-PROGRESS"
+    assert "transform" not in statuses(engine, run)
+
+    # The other process finishes extract; the next run goes on and ends the run.
+    with engine.begin() as conn:
+        runlog.finish_task_run(conn, elsewhere, status=RunStatus.SUCCESS, target_count=1)
+    done = run_pipeline(engine, config, "P", child=CHILD, clock=NO_WAIT)
+    assert done.pipeline_run_id == run
+    assert done.status == RunStatus.FAILED  # broken fails, as in every run of P
+    assert statuses(engine, run)["transform"][0] == "SUCCESS"
 
 
 def test_remote_mode_refuses_a_whole_pipeline_run(config, pipeline):

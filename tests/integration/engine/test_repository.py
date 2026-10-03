@@ -279,6 +279,18 @@ def test_business_rules(seeded):
 # The run log
 
 
+def test_creating_a_run_never_hands_back_another_processs_run(seeded):
+    engine, ids = seeded
+    with engine.begin() as conn:
+        run_id = runlog.create_active_run(conn, ids["alpha"])
+    with engine.begin() as conn:
+        assert run_id is not None
+        assert runlog.create_active_run(conn, ids["alpha"]) is None
+        assert runlog.end_run_if(conn, run_id, RunStatus.IN_PROGRESS, RunStatus.SKIPPED)
+        assert not runlog.end_run_if(conn, run_id, RunStatus.IN_PROGRESS, RunStatus.FAILED)
+        assert runlog.fetch_pipeline_run_status(conn, run_id) == RunStatus.SKIPPED
+
+
 def test_a_run_is_found_or_started(seeded):
     engine, ids = seeded
     with engine.begin() as conn:

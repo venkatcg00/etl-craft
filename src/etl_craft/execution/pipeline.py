@@ -54,7 +54,7 @@ from etl_craft.core.graph import DependencyGraph, TaskRunState, build_graph
 from etl_craft.core.log import log_context
 from etl_craft.engine import runlog
 from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
-from etl_craft.engine.repository.interventions import fetch_interventions
+from etl_craft.engine.repository.interventions import fetch_interventions, fetch_task_rows
 from etl_craft.engine.repository.pauses import Pause
 from etl_craft.engine.repository.pipelines import (
     PipelineDetail,
@@ -577,11 +577,24 @@ def _start_run(
         if not gate.satisfied:
             reason = "; ".join(gate.reasons)
     with engine.begin() as conn:
-        pipeline_run_id = runlog.find_or_create_active_run(
+        created = runlog.create_active_run(
             conn, pipeline_id, run_date=run_date, backfill=backfill is not None
         )
-        if reason is not None:
-            runlog.finalize_pipeline_run(conn, pipeline_run_id, RunStatus.SKIPPED)
+        if created is None:
+            other = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
+            raise RunStateError(
+                f"{pipeline_code}: another process started pipeline_run_id={other} while this "
+                "one was checking the pipeline's dependencies; that run is left as it is. See "
+                f"`etl-craft history --pipeline_code {pipeline_code}`"
+            )
+        pipeline_run_id = created
+        if reason is not None and not runlog.end_run_if(
+            conn, pipeline_run_id, RunStatus.IN_PROGRESS, RunStatus.SKIPPED
+        ):
+            raise RunStateError(
+                f"{pipeline_code}: pipeline_run_id={pipeline_run_id} changed before it could "
+                "be recorded SKIPPED; it is left as it is"
+            )
     logger.info("%s: started pipeline_run_id=%d", pipeline_code, pipeline_run_id)
     if bypassed:
         record_gate_bypass(engine, pipeline_id, pipeline_run_id, config.dependency_gates, bypassed)
@@ -870,6 +883,9 @@ def _finalize(
         not_run = _record_orchestrated(engine, graph, pipeline_run_id, task_codes)
     else:
         _settle_unsatisfiable(engine, graph, pipeline_run_id, task_codes)
+        running = _running_elsewhere(engine, pipeline_code, pipeline_run_id)
+        if running is not None:
+            return running
     with engine.connect() as conn:
         run_state = runlog.fetch_run_state(conn, pipeline_run_id, list(graph.task_ids))
     unsettled = {
@@ -922,6 +938,36 @@ def _finalize(
         _call_hook("on_sla_lapse", hooks.on_sla_lapse, lapse)
     _call_hook("on_finalized", hooks.on_finalized, outcome)
     return outcome
+
+
+def _running_elsewhere(
+    engine: Engine, pipeline_code: str, pipeline_run_id: int
+) -> PipelineOutcome | None:
+    """Return the outcome that leaves the run open when a task of it is still running.
+
+    By the time a local run is finalized, every task this process started has ended, so a task
+    still ``IN-PROGRESS`` belongs to another process, or to one that died without recording an
+    outcome. Either way the run must not be ended under it.
+    """
+    with engine.connect() as conn:
+        running = [
+            row
+            for row in fetch_task_rows(conn, pipeline_run_id)
+            if row.status == RunStatus.IN_PROGRESS
+        ]
+    if not running:
+        return None
+    listed = ", ".join(f"{row.task_code} (task_run_id={row.task_run_id})" for row in running)
+    first = running[0].task_code
+    message = (
+        f"{pipeline_code}: pipeline_run_id={pipeline_run_id} stays IN-PROGRESS: {listed} "
+        f"{'is' if len(running) == 1 else 'are'} still IN-PROGRESS in another process. When it "
+        f"ends, `etl-craft run --pipeline_code {pipeline_code}` finishes the run. If that process "
+        f"is gone, record the task's outcome with `etl-craft mark --pipeline_code {pipeline_code} "
+        f"--task_code {first} --status FAILED --stale --reason ...`"
+    )
+    logger.warning("%s", message)
+    return PipelineOutcome(RunStatus.IN_PROGRESS, message, pipeline_run_id)
 
 
 class _SlaWatch:

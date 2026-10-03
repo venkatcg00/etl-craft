@@ -35,18 +35,16 @@ def today() -> date:
     return datetime.now(UTC).date()
 
 
-def find_or_create_active_run(
+def create_active_run(
     conn: Connection, pipeline_id: int, *, run_date: date | None = None, backfill: bool = False
-) -> int:
-    """Return the ``IN-PROGRESS`` run of ``pipeline_id``, starting one when there is none.
+) -> int | None:
+    """Start a new ``IN-PROGRESS`` run of ``pipeline_id`` and return its id.
 
-    A new run runs as of ``run_date`` (today, in UTC, unless given), and ``backfill`` marks it
-    part of a backfill. When several processes start a run at once, the unique index lets one
-    insert win; the others read back its run.
+    Return ``None`` when the pipeline already has a run in progress: the unique index on
+    ``IN-PROGRESS`` runs refuses a second one, so of several processes starting a run at once,
+    exactly one gets an id. A new run runs as of ``run_date`` (today, in UTC, unless given),
+    and ``backfill`` marks it part of a backfill.
     """
-    existing = fetch_active_pipeline_run_id(conn, pipeline_id)
-    if existing is not None:
-        return existing
     params = {
         "pipeline_id": pipeline_id,
         "run_date": (run_date or today()).isoformat(),
@@ -56,13 +54,47 @@ def find_or_create_active_run(
         with conn.begin_nested():
             return int(conn.execute(statement(conn, "insert_pipeline_run"), params).scalar_one())
     except IntegrityError:
-        winner = fetch_active_pipeline_run_id(conn, pipeline_id)
-        if winner is None:
-            raise RunStateError(
-                f"pipeline_id={pipeline_id}: starting a run hit a unique violation, but no "
-                "IN-PROGRESS run exists afterwards"
-            ) from None
-        return winner
+        return None
+
+
+def find_or_create_active_run(
+    conn: Connection, pipeline_id: int, *, run_date: date | None = None, backfill: bool = False
+) -> int:
+    """Return the ``IN-PROGRESS`` run of ``pipeline_id``, starting one when there is none.
+
+    For callers that want whichever run is in progress, such as tests building a scene. A
+    command that must not take over another process's run uses ``create_active_run``.
+    """
+    existing = fetch_active_pipeline_run_id(conn, pipeline_id)
+    if existing is not None:
+        return existing
+    created = create_active_run(conn, pipeline_id, run_date=run_date, backfill=backfill)
+    if created is not None:
+        return created
+    winner = fetch_active_pipeline_run_id(conn, pipeline_id)
+    if winner is None:
+        raise RunStateError(
+            f"pipeline_id={pipeline_id}: starting a run hit a unique violation, but no "
+            "IN-PROGRESS run exists afterwards"
+        )
+    return winner
+
+
+def end_run_if(conn: Connection, pipeline_run_id: int, from_status: str, status: str) -> bool:
+    """End ``pipeline_run_id`` with ``status`` only if it is still ``from_status``.
+
+    Return whether it did. The caller decides what a refusal means; nothing is changed then.
+    """
+    result = conn.execute(
+        statement(conn, "end_pipeline_run_if"),
+        {
+            "pipeline_run_id": pipeline_run_id,
+            "from_status": from_status,
+            "status": status,
+            "now": datetime.now(UTC),
+        },
+    )
+    return bool(result.rowcount)
 
 
 def resolve_run_for_task(
