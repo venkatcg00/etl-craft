@@ -3,7 +3,8 @@
 The contribution workflow, including the branch rules and the definition of done, is in
 [CONTRIBUTING.md](https://github.com/venkatcg00/etl-craft/blob/main/CONTRIBUTING.md). The
 [rewrite plan](development/rewrite-plan.md) lists the branches that rebuild etl-craft for its
-first release, and their status.
+first release, and their status. [Road to 1.0.0](development/road-to-1.0.0.md) is the build plan
+from 0.1.0 to 1.0.0: every release, work item, test and defect.
 
 To build this site locally:
 

@@ -165,7 +165,7 @@ squash-merged by pull request (see `CONTRIBUTING.md` for the definition of done)
 In parallel: A2 with A3; F1b, then C4, after F1; B2–B5; C2 with C3; F1–F4 after P1 (F2 after F1); G1 with G2, G1c then G4, then G3; H1–H3 with I1–I2.
 Critical path: A1 → B1 → B4 → C1 → C2 → D1 → E1 → E2 → G2 → H2 → J1.
 
-After 0.1.0:
+After 0.1.0 (the full plan to 1.0.0 is [Road to 1.0.0](road-to-1.0.0.md)):
 
 - **K1**, in four branches. **K1a `feat/pause-and-skip`** (done): skipping a run on purpose (`run --skip --reason`), and pausing and resuming a pipeline, with the Engine DB's first migration and an upgrade test from each released schema. **K1b `feat/backfill`** (done): run dates (`$$run_date`, `task.run_date`, `--run-date`, and the orchestrator's date from generated DAGs) and backfills over dates. **K1c `feat/consumption-log`** (done): the consumption log and the gate's wait as a setting (`Gate_wait_minutes`). **K1d `feat/catalog-runs`** (done): the interventions in each run's history; run history and KPIs in the catalog: each pipeline's and task's
   runs over time, durations, row counts and failures, SLA misses, and trends, reachable from the

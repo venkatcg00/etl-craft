@@ -4,7 +4,8 @@
 
 - `main` is the trunk. Every change reaches it through a pull request with green CI.
 - Cut each branch from `main` and keep it to one item of the
-  [rewrite plan](docs/development/rewrite-plan.md). Name it `<type>/<area>-<topic>`, for example
+  [rewrite plan](docs/development/rewrite-plan.md) or one workstream or item of
+  [Road to 1.0.0](docs/development/road-to-1.0.0.md). Name it `<type>/<area>-<topic>`, for example
   `feat/core-graph` or `test/e2e-demo`.
 - Squash-merge. The squash commit message follows
   [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `refactor:`,
