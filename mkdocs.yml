@@ -140,3 +140,4 @@ nav:
   - Contributing:
       - contributing.md
       - Rewrite plan: development/rewrite-plan.md
+      - Road to 1.0.0: development/road-to-1.0.0.md

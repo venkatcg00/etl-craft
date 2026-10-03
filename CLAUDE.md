@@ -6,7 +6,8 @@ PostgreSQL in production); the engine reads them and runs the work against one w
 
 `main` is a rewrite of the implementation archived at the `archive/iteration-2` tag.
 The design is unchanged; the structure, tests and documentation are new. The plan, its branch
-list and the release checkpoints are in `docs/development/rewrite-plan.md`. Read it before
+list and the release checkpoints are in `docs/development/rewrite-plan.md`. The work from 0.1.0 to
+1.0.0, item by item, is in `docs/development/road-to-1.0.0.md`. Read the relevant plan before
 starting a branch.
 
 ## Commands
