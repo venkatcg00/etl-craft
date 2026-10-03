@@ -1016,3 +1016,22 @@ def test_a_forced_task_under_an_active_run_leaves_it_open(config, pipeline):
     assert (forced.status, forced.pipeline_run_id) == (RunStatus.SUCCESS, run_id)
     assert run_status(engine, run_id) == "IN-PROGRESS"
     assert interventions(engine) == []
+
+
+def test_a_run_whose_tasks_were_all_skipped_ends_skipped(config, pipeline):
+    engine, ids = pipeline
+    with engine.begin() as conn:
+        q = add_pipeline(conn, "Q")
+        down = add_task(conn, q, "down", BEHAVIOUR="succeed")
+        add_dependency(conn, q, down, ids["broken"], upstream_pipeline=ids["P"])
+        r = add_pipeline(conn, "R")
+        add_task(conn, r, "load", BEHAVIOUR="succeed")
+        add_pipeline_dependency(conn, r, q)
+    run_pipeline(engine, config, "P", child=CHILD)
+    skipped = run_pipeline(engine, config, "Q", child=CHILD, clock=NO_WAIT)
+    assert statuses(engine, skipped.pipeline_run_id)["down"][0] == "SKIPPED"
+    assert skipped.status == RunStatus.SKIPPED
+    assert run_status(engine, skipped.pipeline_run_id) == "SKIPPED"
+    after = run_pipeline(engine, config, "R", child=CHILD, clock=NO_WAIT)
+    assert after.status == RunStatus.SKIPPED
+    assert "upstream pipeline Q (SUCCESS)" in after.message

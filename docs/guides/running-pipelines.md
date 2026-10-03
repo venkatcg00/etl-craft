@@ -18,8 +18,8 @@ INFO etl_craft.execution.pipeline [pipeline=SALES_DAILY pipeline_run_id=97]: SAL
 INFO etl_craft.execution.pipeline [pipeline=SALES_DAILY pipeline_run_id=97]: SALES_DAILY: wave 2: load_orders
 ```
 
-The run ends `SUCCESS` when every task is `SUCCESS` or `SKIPPED`, and `FAILED` otherwise; the
-command exits `0` or `1` to match. A failed run names each task that did not succeed:
+The run ends `SUCCESS` when every task is `SUCCESS` or `SKIPPED`, `SKIPPED` when every task is
+`SKIPPED`, and `FAILED` otherwise; the command exits `1` for a failed run and `0` otherwise. A failed run names each task that did not succeed:
 
 ```
 SALES_DAILY: pipeline_run_id=97 FAILED — 2 task(s) did not succeed: load_orders (FAILED), publish (never started); 1 of them could not start because their dependencies were not met

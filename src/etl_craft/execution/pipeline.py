@@ -995,8 +995,9 @@ def _finalize(
     """End the run from its tasks' statuses, record its SLA, and consume its upstream runs.
 
     ``orchestrated`` (remote mode) records the orchestrator's decisions instead of settling the
-    tasks that can never run, and consumes nothing; a run whose tasks the orchestrator ran none
-    of (a sensor on an upstream failed, say) ends ``SKIPPED``.
+    tasks that can never run, and consumes nothing. A run whose tasks all ended ``SKIPPED``, or
+    whose tasks the orchestrator ran none of (a sensor on an upstream failed, say), ends
+    ``SKIPPED``, which a downstream ``SUCCESS`` dependency does not accept.
     """
     not_run: list[int] = []
     if orchestrated:
@@ -1015,6 +1016,10 @@ def _finalize(
     }
     status = RunStatus.FAILED if unsettled else RunStatus.SUCCESS
     if orchestrated and not unsettled and not_run and len(not_run) == len(graph.task_ids):
+        status = RunStatus.SKIPPED
+    if not unsettled and graph.task_ids and all(
+        run_state[task_id].status == RunStatus.SKIPPED for task_id in graph.task_ids
+    ):
         status = RunStatus.SKIPPED
     with engine.begin() as conn:
         breached_before = runlog.fetch_run_sla(conn, pipeline_run_id).sla_status
