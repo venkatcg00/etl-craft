@@ -5,6 +5,12 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    # SQLAlchemy minor/major upgrades require Databricks connector compatibility checks.
+    ignore:
+      - dependency-name: "sqlalchemy"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
 
   - package-ecosystem: "github-actions"
     directory: "/"
