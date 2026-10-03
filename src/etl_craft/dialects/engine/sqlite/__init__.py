@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.engine import URL, Connection, Engine
 
 from etl_craft.config.auth import engine_for_jdbc_url
@@ -36,7 +36,7 @@ BUSY_TIMEOUT_MS = 60_000
 
 
 class SqliteEngineDialect(EngineDialect):
-    """SQLite: one file, file locks, DDL made transactional explicitly."""
+    """SQLite: one file, file locks, and every transaction opened with ``BEGIN IMMEDIATE``."""
 
     spec = engine_for_jdbc_url(JDBC_PREFIX)
     directory = Path(__file__).parent
@@ -51,13 +51,15 @@ class SqliteEngineDialect(EngineDialect):
                 f"so auth_mode must be 'none', got {profile.auth_mode!r}"
             )
         database = resolve_sqlite_path(profile.jdbc_url, config.config_path)
-        return create_engine(
+        engine = create_engine(
             URL.create("sqlite", database=database),
             creator=sqlite_creator(database),
             # The connection already returns datetimes; SQLAlchemy must not parse them again.
             native_datetime=True,
             **engine_kwargs,
         )
+        event.listen(engine, "begin", _begin_immediate)
+        return engine
 
     def split_statements(self, sql_text: str) -> list[str]:
         """Split a script into statements, keeping trigger bodies whole.
@@ -76,14 +78,6 @@ class SqliteEngineDialect(EngineDialect):
         return [
             stmt.strip().rstrip(";").strip() for stmt in statements if not is_only_comments(stmt)
         ]
-
-    def begin_ddl_transaction(self, conn: Connection) -> None:
-        """Open the transaction Python's sqlite3 does not open before DDL.
-
-        It opens one implicitly only before INSERT, UPDATE and DELETE, so DDL would otherwise
-        commit statement by statement and a failed script would leave half its changes.
-        """
-        conn.exec_driver_sql("BEGIN IMMEDIATE")
 
     def duration_seconds_sql(self) -> str:
         """Return ``END_DATE - START_DATE`` in seconds; julianday reads the stored UTC text."""
@@ -142,12 +136,25 @@ def _convert_timestamp(value: bytes) -> datetime:
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
+def _begin_immediate(conn: Connection) -> None:
+    """Open the transaction SQLAlchemy is beginning, taking the write lock at once.
+
+    The driver runs in autocommit mode, so this ``BEGIN`` is the only one sent: every statement,
+    DDL and savepoints included, belongs to the transaction, and a rollback undoes all of it.
+    ``IMMEDIATE`` takes the write lock before the first read, so a transaction that reads and
+    then writes waits for another writer (up to ``BUSY_TIMEOUT_MS``) instead of failing because
+    the data it read changed.
+    """
+    conn.exec_driver_sql("BEGIN IMMEDIATE")
+
+
 def sqlite_creator(database: str) -> Callable[[], Any]:
     """Return a function that opens one configured connection to ``database``.
 
     Each connection uses WAL, so readers proceed while one process writes; waits up to
     ``BUSY_TIMEOUT_MS`` for another writer; and enforces foreign keys, which SQLite leaves off
-    by default. ``TIMESTAMP`` columns read back as timezone-aware datetimes.
+    by default. ``TIMESTAMP`` columns read back as timezone-aware datetimes. The driver opens no
+    transactions of its own (``isolation_level=None``); SQLAlchemy's ``begin`` event does.
     """
     if sqlite3.sqlite_version_info < MIN_SQLITE_VERSION:
         raise ConfigurationError(
@@ -173,6 +180,7 @@ def sqlite_creator(database: str) -> Callable[[], Any]:
             detect_types=sqlite3.PARSE_DECLTYPES,
             # The pool hands connections between threads; each is used by one at a time.
             check_same_thread=False,
+            isolation_level=None,
         )
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
