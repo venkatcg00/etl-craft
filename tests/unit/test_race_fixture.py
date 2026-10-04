@@ -1,6 +1,7 @@
 """Synchronization waits once per caller and restores the patched boundary."""
 
 import threading
+import time
 
 import pytest
 
@@ -34,8 +35,14 @@ def test_both_callers_arrive_before_work_and_repeated_calls_do_not_wait(monkeypa
     assert checkpoint is checked
 
 
-def test_a_caller_that_never_arrives_does_not_leave_the_other_waiting():
+@pytest.mark.parametrize("arrival_delay", [0, 0.15])
+def test_a_caller_that_never_arrives_does_not_leave_the_other_waiting(arrival_delay):
     original = checkpoint
+
+    def first():
+        time.sleep(arrival_delay)
+        return checkpoint(1)
+
     with pytest.raises(threading.BrokenBarrierError):
-        two_at_once(lambda: checkpoint(1), lambda: 2, at=f"{__name__}.checkpoint", timeout=0.05)
+        two_at_once(first, lambda: 2, at=f"{__name__}.checkpoint", timeout=0.05)
     assert checkpoint is original

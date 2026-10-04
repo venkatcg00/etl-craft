@@ -27,6 +27,7 @@ def two_at_once(fn_a, fn_b, *, at, timeout=10):
         patch.setattr(module, name, together)
         futures = [pool.submit(fn) for fn in (fn_a, fn_b)]
         try:
-            return tuple(future.result(timeout=timeout * 2) for future in futures)
+            # Future waits include scheduling time before a caller reaches the barrier.
+            return tuple(future.result(timeout=max(1, timeout * 2)) for future in futures)
         finally:
             barrier.abort()
