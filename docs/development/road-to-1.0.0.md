@@ -72,6 +72,7 @@ item's text, or work done early under another item.
 | S2.K Migrations and small fixes | Done | #88 | B33; S2.K.5 done in S2.A |
 | S2.L Regression suite and release | Done | #90, #91, #92, #93 | 48 stabilization defects; 0.2.0 released |
 | S3.A Identity schema | Done | #95 | Run identities, attempt history and gate-decision schema |
+| S3.I Actors and engine-only writes | Not started; next, before S3.B | | W15 |
 | S3.B to S3.H | Not started | | |
 | 0.4 and later | Not started | | |
 
@@ -87,6 +88,7 @@ What a person picking up the work needs that the code and the item texts do not 
   enforcement and live attempt/gate recording remain subsequent items. Direct SQL inserts
   default to a generated manual identity and must supply other trigger kinds explicitly.
   Upgrade fixtures include both released schemas and their packaged migration ledgers.
+  `S3.I` (next) makes the Engine DB refuse direct SQL writes, including those inserts.
   `S3.B` must allocate the next free exit code: 19 already belongs to `InjectedFaultError`.
 
 - `S2.L`: `release/regressions.toml` maps all 48 defects assigned wholly or partly to 0.2.0.
@@ -170,6 +172,15 @@ includes it on a bounded-wait timeout, and always closes the parent. File-backed
 an unread pipe blocking the CLI; the same helper drives the real CLI lifecycle tests. CI still
 exercises SIGHUP and SIGTERM on Linux and macOS. Linux-only descendant assertions have explicit
 platform declarations in the release suite manifest.
+
+**Timing-sensitive tests on a slow runner.** Once on CI (`tests (py3.13, ubuntu-latest)`, a
+documentation-only pull request), three tests failed together and passed on a rerun:
+`test_what_a_script_printed_is_kept_when_it_is_stopped` and
+`test_a_task_process_that_ends_without_an_outcome_is_recorded_failed[sqlite-slow-...]` (both stop a
+task after `TASK_TIMEOUT_SECONDS=2`, which a loaded runner can spend starting the interpreter),
+and `test_each_release_line_is_built_and_the_newest_is_latest` (over the 120 s pytest timeout).
+Before `S3.H`, give the two task tests a time limit that leaves room for start-up, or wait for the
+script to report it started before the limit begins, and measure the docs-site test's build time.
 
 **Working on the code.**
 
@@ -275,7 +286,7 @@ flowchart LR
 | Release | Theme | Workstreams | Gate to leave the release |
 | --- | --- | --- | --- |
 | 0.2.0 | Stabilize: ship pause, backfill, consumption log and catalog history with every fix that needs no new ownership model | S2.A to S2.L | A regression test per fixed defect; every required suite green on the release commit, cloud included |
-| 0.3 | Identity: run and attempt ids everywhere, attempt ledger, leases, fenced writes, recorded gate decisions, data contract v2 | S3.A to S3.H | The chaos suite passes on SQLite and PostgreSQL |
+| 0.3 | Identity: run and attempt ids everywhere, attempt ledger, leases, fenced writes, recorded gate decisions, actors on every action and engine-only Engine DB writes, data contract v2 | S3.A to S3.I (S3.I right after S3.A) | The chaos suite passes on SQLite and PostgreSQL |
 | 0.4 | Overseer: `etl-craft server`, schedules with time zones, ready-set dispatch, retries, `status`, `explain`, JSON, HTTP API, versioned YAML | S4.A to S4.H | The demo runs a week with no cron or Airflow; `kill -9` of the overseer loses and doubles nothing |
 | 0.5 | Cluster: pool interface, worker agents, project namespaces in one Engine DB, connection budget, managed PostgreSQL | S5.A to S5.J | Pool contract tests pass for both providers; many projects share one Engine DB |
 | 0.6 | At load: retention, bounded catalog, incremental cloning, metrics, backup and restore, benchmark | S6.A to S6.G | A sustained-load benchmark stays within its stated budgets; a restore is tested |
@@ -944,6 +955,101 @@ whether a new revision of an already-consumed upstream run satisfies the depende
 *Tests.* The upgrade test from every released schema; the full catalog diff from `S2.K.1`; the
 migrated attempt rows match the old task rows.
 
+### S3.I Every action names who did it; only etl-craft writes the Engine DB
+
+**Order.** Directly after `S3.A`, before `S3.B`, although it is lettered last. `S3.B` writes the
+function for every status change, and each of them must take the actor from the start rather
+than be changed again later. The write guards must exist before `S3.D` and 0.4 add writers
+(reconciler, overseer, API, workers), and the chaos suite (`S3.H`) checks them.
+
+Branch: `feat/engine-actors-and-audit-guards`. New module `core/actor.py`; migration `0008` on
+both dialects.
+
+- *Problem (W15).* Who did something is recorded in some places only: an intervention or a pause
+  records the operator (`user@host`), but a run records nobody, a task run nobody, and a `CFG_`
+  row only the database login of its last change, without what changed. Any login with access to
+  the Engine DB can `INSERT`, `UPDATE` or `DELETE` audit rows, so the audit trail and run history
+  can be rewritten without a trace, and a hand-edited status bypasses every guard the engine keeps.
+
+**S3.I.1 The actor.**
+
+- `core/actor.py`: `Actor(name: str, kind: ActorKind)`, kinds `HUMAN`, `SCHEDULE` (the overseer's
+  schedule, 0.4), `ORCHESTRATOR` (a generated DAG), `WORKER` (0.5) and `SYSTEM` (the engine acting
+  on its own: finalizing a run, skipping on a gate, reconciling).
+- The CLI resolves the human once per command: `ETL_CRAFT_ACTOR` when set, else
+  `getpass.getuser()@socket.gethostname()`. A value that is empty, longer than 128 characters or
+  holds control characters fails with `ConfigurationError` naming the variable. CI sets it to the
+  person who triggered the job (`github:${{ github.actor }}`); the deployment guide shows this.
+- Remote mode: the generated YAML passes `ETL_CRAFT_ACTOR` with kind `ORCHESTRATOR` and the DAG
+  run id, and the triggering user where the Airflow version exposes one (Airflow 3's
+  `dag_run.triggering_user_name`).
+- Later sources replace only the name: an API token's name (`S4.G`), an authenticated user
+  (`S7.B`), a worker's name (`S5.C`). Nothing else changes.
+- The private `getpass` call in `execution/interventions.py` goes; every caller passes the
+  resolved `Actor` down.
+
+**S3.I.2 Where it is recorded.**
+
+| Table | Change |
+| --- | --- |
+| `AUD_PIPELINES_RUN_LOG` | `STARTED_BY`, `STARTED_BY_KIND`, `ENDED_BY`, `ENDED_BY_KIND` (who ended it: `SYSTEM` for a finalize, the operator for `cancel` or `mark`) |
+| `AUD_TASK_ATTEMPTS` | `REQUESTED_BY` (from `S3.A`) gets `REQUESTED_BY_KIND` |
+| `AUD_RUN_INTERVENTIONS`, `AUD_PIPELINE_PAUSES` | keep `REQUESTED_BY`, `PAUSED_BY`, `RESUMED_BY`; add the matching `_KIND` columns |
+| `AUD_ACTIONS` (new) | one row per state-changing command: `ACTION_ID`, `STARTED_AT`, `ENDED_AT`, `ACTOR`, `ACTOR_KIND`, `HOST`, `COMMAND` (`run`, `mark`, `cancel`, `pause`, `resume`, `migrate`, `setup`, ...), `ARGUMENTS` (JSON, values of sensitive names masked as in `S7.C`), `PIPELINE_ID`, `PIPELINE_RUN_ID`, `TASK_ID`, `OUTCOME`, `EXIT_CODE`. Read-only commands (`history`, `list`, `validate`, `doctor`) write nothing |
+| `AUD_METADATA_CHANGES` (new) | one row per changed `CFG_` row, written by the row triggers: `CHANGE_ID`, `CHANGED_AT`, `ACTOR`, `TABLE_NAME`, `ROW_KEY`, `OPERATION`, `BEFORE_JSON`, `AFTER_JSON`, `MIGRATION` (the project migration file, when one made the change). A task or pipeline switched off (`ACTIVE_FLAG`) is one of these rows |
+| `CFG_*` | `CREATED_BY` and `UPDATED_BY` hold the actor instead of the database login |
+
+So "who triggered this run", "who marked this task", "who paused this pipeline" and "who changed
+this task's parameters, from what to what" are each one query. `history` shows `STARTED_BY` and
+each intervention's actor; a new `etl-craft audit [--pipeline_code P] [--since DATE]` lists
+`AUD_ACTIONS` and `AUD_METADATA_CHANGES`; the catalog's run page shows who started and ended the
+run and who intervened.
+
+**S3.I.3 Only etl-craft writes.** Every `AUD_` and `CFG_` table refuses a write that does not come
+through etl-craft, on both dialects. The engine marks its own connections with the actor:
+
+- *PostgreSQL.* On the engine's `begin` event, `SELECT set_config('etl_craft.actor', :actor, true)`
+  (transaction-local). A `BEFORE INSERT OR UPDATE OR DELETE` row trigger and a `BEFORE TRUNCATE`
+  statement trigger on each table raise when the setting is empty: "AUD_TASK_RUN_LOG is written
+  only by etl-craft; change runs with `etl-craft mark`, `cancel` or `run`, and metadata with a
+  project migration (`etl-craft migrate`)". The `CFG_` audit-stamping triggers read the actor from
+  the same setting.
+- *SQLite.* No sessions or roles: the engine registers a function `etl_craft_actor()` on every
+  connection (`sqlite3.Connection.create_function`, deterministic), and each table gets
+  `BEFORE INSERT`, `UPDATE` and `DELETE` triggers that `RAISE(ABORT, ...)` when it returns NULL.
+  A connection from any other tool (the `sqlite3` shell, a BI tool) has no such function, so the
+  trigger fails and the statement is refused. The guide says so, since SQLite's message is then
+  "no such function: etl_craft_actor".
+- *Append-only tables* (`AUD_RUN_INTERVENTIONS`, `AUD_ACTIONS`, `AUD_METADATA_CHANGES`,
+  `AUD_DEPENDENCY_CONSUMPTION`, `AUD_GATE_DECISIONS`, `AUD_TASK_ATTEMPTS` rows once terminal)
+  refuse `UPDATE` and `DELETE` even from the engine, except retention (`S6.A`), which marks its
+  transaction `etl_craft.purpose = 'retention'` and records what it removed in `AUD_ACTIONS`.
+- *What the guard is.* It stops accidental and casual edits. It is not a security boundary: a
+  login that can set the marker can bypass it. The boundary is privileges, which etl-craft checks
+  but does not create on PostgreSQL: `etl-craft setup --print-grants` prints the statements for an
+  owner role (DDL and migrations), the engine's role (DML) and a read-only role for people, and
+  `doctor` fails when any other login holds `INSERT`, `UPDATE`, `DELETE` or `TRUNCATE` on an
+  `AUD_` or `CFG_` table, naming each grant and the `REVOKE` that removes it. On SQLite the file's
+  permissions are the boundary; `doctor` warns when the file is writable by group or others.
+- Project migrations run through `etl-craft migrate`, so metadata changes keep working and are
+  recorded with the migration's name. Tests that set up state with raw SQL use a helper that runs
+  on an engine connection (carrying the marker); a test of the guard uses a plain connection.
+
+**S3.I.4 Design rule.** Add to `CLAUDE.md`: "Every write to the Engine DB goes through etl-craft
+and names its actor; the Engine DB refuses any other."
+
+- *Tests.* On both dialects: each state-changing command writes one `AUD_ACTIONS` row with the
+  actor from `ETL_CRAFT_ACTOR` and, unset, `user@host`; an invalid `ETL_CRAFT_ACTOR` is refused; a
+  run started by `run` records `STARTED_BY` and its finalize `ENDED_BY = SYSTEM`; `mark`,
+  `cancel`, `pause`, `resume`, `run --skip`, `--rerun` and `--backfill` record their actor; a
+  project migration that changes a task's parameter and switches a pipeline off records both
+  changes with before, after, actor and migration; a plain connection's `INSERT`, `UPDATE` and
+  `DELETE` on every `AUD_` and `CFG_` table (and `TRUNCATE` on PostgreSQL) are refused with the
+  message; the engine's writes succeed; an append-only row cannot be updated by the engine; `doctor`
+  reports an extra grant on PostgreSQL.
+- *Done when* every row that records an action names its actor and kind, and no `AUD_` or `CFG_`
+  row changes except through etl-craft unless `doctor` reports the grant that allowed it.
+
 ### S3.B One module owns every status change
 
 Branch: `feat/engine-transitions`. New module `engine/transitions.py`; queries under
@@ -956,7 +1062,8 @@ Branch: `feat/engine-transitions`. New module `engine/transitions.py`; queries u
      `cancel_attempt`, `lose_attempt`, `renew_lease`. Each runs one guarded `UPDATE` (or `INSERT`),
      checks the row count, and raises `StaleTransitionError` (new error class in `core/errors.py`,
      `ExitCode.STALE_TRANSITION = 20`) naming the row, the expected status and owner, and what it
-     found.
+     found. Every function takes the `Actor` of `S3.I` and records it where the row has a place
+     for it (`STARTED_BY`, `ENDED_BY`, `REQUESTED_BY`).
   2. `finish_attempt` writes the attempt row and the task-run summary (status, counts, attempt count,
      `TASK_LOG`) in the same transaction.
   3. Replace every direct status write in `runlog.py`, `interventions.py`, `pipeline.py` and
@@ -1334,7 +1441,7 @@ Branch: `feat/api`. New package `api/` above `overseer` in the layers; optional 
   3. Authentication: bearer tokens. New table `CFG_API_TOKENS (TOKEN_ID, NAME, TOKEN_SHA256, ROLE, PROJECT_ID, CREATED_BY, CREATED_AT, EXPIRES_AT, REVOKED_AT)`;
      `etl-craft token create --name ci --role operator [--expires 90d]` prints the token once. Roles:
      `viewer` (GET), `operator` (trigger, cancel, pause, mark, rerun, backfill), `admin` (tokens). The
-     token's name is the `REQUESTED_BY` of every intervention it makes (W10, first half; users and the
+     token's name is the actor (`S3.I`) of every action it takes (W10, first half; users and the
      UI come in 0.7).
   4. OpenAPI is generated by FastAPI and published with the docs.
 - *Tests.* Every endpoint with each role (forbidden, allowed); the same operation through CLI and API
@@ -1689,8 +1796,8 @@ Branch: `feat/ui-*`, one per area. Served by `etl-craft server`.
 - Roles per project: `viewer`, `operator` (run controls), `developer` (metadata edits), `admin`
   (users, tokens, pools). API tokens from `S4.G` keep working and get the same roles.
 - Workers authenticate with worker tokens; a worker can only claim attempts of its pool.
-- Every `REQUESTED_BY` is the authenticated user, token or worker name; the CLI run directly against
-  the Engine DB stays `user@host` and needs the Engine DB credentials.
+- Every actor (`S3.I`) is the authenticated user, token or worker name; the CLI run directly
+  against the Engine DB stays `ETL_CRAFT_ACTOR` or `user@host` and needs the Engine DB credentials.
 
 ### S7.C Redaction (W13, B49)
 
@@ -2075,6 +2182,7 @@ Defects found by the reviews, with the work item that fixes each. Severity as de
 | W12 | Run dates are UTC dates | S4.C |
 | W13 | The catalog shows every task parameter | S7.C |
 | W14 | Cloning copies whole tables after every run | S6.E |
+| W15 | Human actions are not attributed everywhere, and audit and metadata tables accept hand edits | S3.I; identity sources in S4.G, S5.C, S7.B |
 
 ## Appendix B: Policy decisions
 
