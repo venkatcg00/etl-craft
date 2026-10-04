@@ -30,6 +30,7 @@ from etl_craft.config import load_config
 from etl_craft.core import log
 from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import EtlCraftError, ExitCode
+from etl_craft.core.faults import fault_point
 from etl_craft.engine.connection import engine_db
 from etl_craft.engine.runlog import finish_task_run
 from etl_craft.execution.context import build_task_context
@@ -104,6 +105,7 @@ def run_handler(engine: Engine, context: TaskContext) -> int:
             rows_written=result.rows_written,
             task_log=format_task_log(result),
         )
+    fault_point("child.after_outcome")
     logger.info(
         "task succeeded: source %s, target %s, inserted %s, updated %s, deleted %s",
         result.source_count,

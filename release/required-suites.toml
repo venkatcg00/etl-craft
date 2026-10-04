@@ -19,9 +19,21 @@ description = "Pure Python tests that need no services."
 marker = "engine_sqlite"
 description = "The Engine DB on SQLite."
 
+[suites.engine-sqlite.platform_only]
+linux = [
+    "tests/integration/execution/test_cli_lifecycle.py::test_signal_stops_the_real_cli_child_and_grandchild[sqlite-15]",
+    "tests/integration/execution/test_cli_lifecycle.py::test_signal_stops_the_real_cli_child_and_grandchild[sqlite-1]",
+]
+
 [suites.engine-postgres]
 marker = "engine_postgres"
 description = "The Engine DB on PostgreSQL."
+
+[suites.engine-postgres.platform_only]
+linux = [
+    "tests/integration/execution/test_cli_lifecycle.py::test_signal_stops_the_real_cli_child_and_grandchild[postgresql-15]",
+    "tests/integration/execution/test_cli_lifecycle.py::test_signal_stops_the_real_cli_child_and_grandchild[postgresql-1]",
+]
 
 [suites.warehouse-postgres]
 marker = "warehouse_postgres"

@@ -35,6 +35,7 @@ class ExitCode(IntEnum):
     """An error with no class of its own, including a bug; its traceback is logged."""
     CLONING = 17
     REMOTE_UNSUPPORTED = 18
+    INJECTED_FAULT = 19
 
 
 class EtlCraftError(Exception):
@@ -123,3 +124,9 @@ class RemoteUnsupportedError(EtlCraftError):
     """A pipeline has rules a remote orchestrator does not support; the message names each."""
 
     exit_code = ExitCode.REMOTE_UNSUPPORTED
+
+
+class InjectedFaultError(EtlCraftError):
+    """A named development fault selected by the caller's environment."""
+
+    exit_code = ExitCode.INJECTED_FAULT

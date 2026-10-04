@@ -25,6 +25,7 @@ from etl_craft.execution.context import build_task_context
 from etl_craft.execution.runner import run_task
 from etl_craft.handlers import python_scripts
 from etl_craft.warehouse.connection import build_warehouse_engine
+from fixtures.cli_project import CliProcess
 from fixtures.metadata import add_pipeline, add_task, start_run
 
 SCRIPT = """
@@ -457,21 +458,27 @@ def test_a_signal_to_run_stops_the_task_process_and_records_it(project, tmp_path
         f"    open({str(pid_file)!r}, 'w').write(str(os.getpid()))\n"
         "    time.sleep(60)\n",
     )
-    parent = subprocess.Popen(
-        [sys.executable, "-m", "etl_craft", "run", "--pipeline_code", "P", *how],
-        env={**os.environ, "ETL_CRAFT_CONFIG": str(config.config_path)},
-        cwd=config.project_dir,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    )
-    deadline = time.monotonic() + 30
-    while not pid_file.exists() or not pid_file.read_text():
-        assert parent.poll() is None, parent.stdout.read().decode()
-        assert time.monotonic() < deadline, "the script never started"
-        time.sleep(0.2)
-    child_pid = int(pid_file.read_text())
-    parent.send_signal(sig)
-    parent.wait(timeout=30)
+    parent_log = tmp_path / "parent.log"
+    with parent_log.open("wb") as output:
+        parent = subprocess.Popen(
+            [sys.executable, "-m", "etl_craft", "run", "--pipeline_code", "P", *how],
+            env={**os.environ, "ETL_CRAFT_CONFIG": str(config.config_path)},
+            cwd=config.project_dir,
+            stdout=output,
+            stderr=subprocess.STDOUT,
+        )
+    command = CliProcess(parent, parent_log)
+    try:
+        deadline = time.monotonic() + 30
+        while not pid_file.exists() or not pid_file.read_text():
+            assert parent.poll() is None, command.output
+            assert time.monotonic() < deadline, f"the script never started: {command.output}"
+            time.sleep(0.2)
+        child_pid = int(pid_file.read_text())
+        command.signal(sig)
+        command.wait(timeout=30)
+    finally:
+        command.close()
     with pytest.raises(ProcessLookupError):
         os.kill(child_pid, 0)
     with engine.connect() as conn:

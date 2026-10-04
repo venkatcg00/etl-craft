@@ -38,6 +38,7 @@ from etl_craft.core.enums import (
     RunStatus,
 )
 from etl_craft.core.errors import ConfigurationError, RunRefusedError, UsageError
+from etl_craft.core.faults import fault_point
 from etl_craft.core.graph import DependencyGraph, RunState, TaskRunState, build_graph
 from etl_craft.engine import runlog
 from etl_craft.engine.queries import statement
@@ -207,6 +208,7 @@ def run_task(
         engine, config, task_id, task_code, pipeline_code, pipeline_run_id, force, child
     )
     if consumed and outcome.status == RunStatus.SUCCESS:
+        fault_point("runner.before_consumption")
         gate.consume(engine, task_id, pipeline_run_id, consumed)
     if reopened is not None:
         return replace(outcome, reopened=reopened)
@@ -510,10 +512,12 @@ def _run_attempt(
     with engine.connect() as conn:
         params = fetch_task_parameters(conn, task_id)
     timeout = task_timeout_seconds(params, config)
+    fault_point("runner.after_timeout")
     with engine.begin() as conn:
         binding = runlog.find_or_create_task_run(conn, task_id, pipeline_run_id)
         attempt = 1 if binding.created else runlog.begin_attempt(conn, binding.task_run_id)
     try:
+        fault_point("runner.after_bind")
         return _start_and_record(
             engine,
             config,

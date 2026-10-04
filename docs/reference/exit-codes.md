@@ -26,3 +26,4 @@ error class has its own status; every error etl-craft raises on purpose belongs 
 | `16` | `UNEXPECTED` | An error with no class of its own, including a bug. Its traceback is written to the log. |
 | `17` | `CLONING` | Copying an Engine DB table into the warehouse failed; the message names the table and the database's error (`CloningError`). |
 | `18` | `REMOTE_UNSUPPORTED` | In remote mode, a pipeline has a rule its orchestrator does not support, such as run condition `N` or a `HAS_DATA` dependency; the message names each pipeline, task and rule, with the remedy (`RemoteUnsupportedError`). |
+| `19` | `INJECTED_FAULT` | A development fault was deliberately injected (`InjectedFaultError`). |

@@ -3,6 +3,9 @@
 A version is releasable only when every suite in [required-suites.toml](required-suites.toml)
 has passing evidence recorded on the commit being released.
 
+Run `make regressions` before recording evidence: every stabilization defect must have
+a named, collected test in `regressions.toml`.
+
 ## Recording evidence
 
 ```bash

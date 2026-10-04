@@ -32,6 +32,7 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.config.project import ingestion_script
 from etl_craft.core.errors import HandlerError
+from etl_craft.core.faults import fault_point
 from etl_craft.core.log import capture_all_loggers
 from etl_craft.engine.repository.offsets import StoredOffset, fetch_task_offset, save_task_offset
 from etl_craft.handlers.registry import HandlerResult, TaskContext
@@ -107,6 +108,7 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
                 context.task_id,
                 StoredOffset(checked.offset.datatype, checked.offset.stored()),
             )
+        fault_point("script.after_offset")
         variables["OFFSET"] = f"{checked.offset.stored()} ({checked.offset.datatype})"
     variables.update(result_variables)
     logger.info(
