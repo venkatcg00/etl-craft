@@ -14,6 +14,12 @@ All notable changes are recorded here. The format follows
   execution attempts. New runs receive manual, backfill or stand-in keys. Attempt transitions,
   lease enforcement and recording gate decisions remain subsequent roadmap work.
 
+### Fixed
+
+- The catalog's search builds links only from the site's own relative pages: a result whose path
+  is not one falls back to the home page, and the page's way back to the site root must be made
+  of `../` steps.
+
 ## [0.2.0] - 2026-10-04
 
 ### Added
