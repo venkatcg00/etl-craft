@@ -230,7 +230,7 @@ def record_stand_in_run(
                 f"{pipeline_code} has a run in progress (pipeline_run_id={active}); mark that "
                 "run, or cancel it, before recording a stand-in run"
             )
-        created = runlog.create_active_run(conn, pipeline_id)
+        created = runlog.create_active_run(conn, pipeline_id, trigger_kind="STAND_IN")
         if created is None:
             raise RunStateError(
                 f"{pipeline_code}: another process started a run just now "

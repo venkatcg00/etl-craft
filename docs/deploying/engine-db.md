@@ -72,3 +72,29 @@ values into a project table and remove those columns before migrating.
 
 PostgreSQL reports advisory-lock contention as a lock timeout. Other connection failures
 report an Engine DB error naming the lock; check connectivity and authentication before retrying.
+
+## Run identity and attempt history
+
+Migration `0007_identity.sql` adds a unique `RUN_KEY` per pipeline, a checked `TRIGGER_KIND`,
+nullable owner, lease and configuration fingerprint fields, and `OUTPUT_REVISION` starting at 1.
+Existing runs receive `legacy:<pipeline_run_id>` keys and `BACKFILL` or `MANUAL` trigger kinds.
+New command-created runs receive `manual:<uuid>`, `backfill:<date>:<uuid>` or `stand-in:<uuid>`
+keys. Direct SQL inserts default to a generated manual key and `MANUAL`; supply the trigger
+kind explicitly when inserting other kinds of runs.
+
+`AUD_TASK_ATTEMPTS` stores attempt identities, lifecycle timestamps, ownership, process details,
+counts and logs. The migration copies each non-skipped task summary into one attempt at its
+current `ATTEMPT_COUNT`, mapping `IN-PROGRESS` to `RUNNING`. Earlier retry outcomes cannot be
+reconstructed from a summary. Skipped tasks retain their summaries without an execution attempt.
+There can be only one queued, claimed or running attempt per task run.
+
+`AUD_GATE_DECISIONS` holds a downstream run or attempt's admission decision, exactly one dependency,
+selected upstream identities and revision, result, reason and decision time. Consumption records
+start at revision 1; dependency `CONSUME_REPAIRS` flags default to `Y`. The schema reference lists
+all fields and constraints. Current execution still writes task summaries and evaluates gates
+through the existing lifecycle; writing each new attempt and gate decision and enforcing leases
+are subsequent roadmap items.
+
+SQLite rebuilds the pipeline run table with the same reference checks, custom object preservation,
+identity-counter protection and extra-column refusal as migration 0006. PostgreSQL alters it in
+place. Both dialects roll back the schema, copied history and migration ledger together on failure.

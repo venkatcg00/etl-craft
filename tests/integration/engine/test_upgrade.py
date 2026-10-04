@@ -12,9 +12,8 @@ import pytest
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 
-from etl_craft.dialects.engine import for_engine
 from etl_craft.engine.migrations import apply_pending_migrations
-from etl_craft.engine.queries import run_script
+from fixtures.released_schema import install
 
 SCHEMAS = Path(__file__).parents[2] / "fixtures" / "schemas"
 CURRENT = Path(__file__).parents[3] / "src" / "etl_craft" / "dialects" / "engine"
@@ -27,7 +26,7 @@ def declared(schema: str) -> dict[str, list[str]]:
         tables[match[1].lower()] = [
             line.split()[0].lower()
             for line in match[2].splitlines()
-            if re.match(r"^\s+[A-Z_]+\s", line)
+            if re.match(r"^\s+[A-Z_][A-Z_0-9]*\s", line)
             and line.split()[0] not in {"CONSTRAINT", "CHECK", "OR", "AND"}
         ]
     return tables
@@ -38,11 +37,8 @@ def test_an_earlier_engine_db_upgrades_to_the_current_schema(
     empty_engine_db, release, monkeypatch, tmp_path
 ):
     engine = empty_engine_db.engine
-    dialect = for_engine(engine)
     folder = "postgres" if engine.dialect.name == "postgresql" else "sqlite"
-    old = (SCHEMAS / release / f"{folder}.sql").read_text(encoding="utf-8")
-    with engine.begin() as conn:
-        run_script(conn, dialect.split_statements(old))
+    install(empty_engine_db, release)
     monkeypatch.delenv("ETL_CRAFT_MIGRATIONS_DIR", raising=False)
     monkeypatch.chdir(tmp_path)
     carried = release == "0.1.0" and _seed_a_tracker_row(engine)

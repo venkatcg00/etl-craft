@@ -109,7 +109,7 @@ class SqliteEngineDialect(EngineDialect):
                         expected = {
                             line.split()[0].lower()
                             for line in body.splitlines()
-                            if re.match(r"^\s+[A-Z_]+\s", line)
+                            if re.match(r"^\s+[A-Z_][A-Z_0-9]*\s", line)
                             and line.split()[0] not in {"CONSTRAINT", "CHECK", "OR", "AND"}
                         }
                         extra = {

@@ -218,6 +218,7 @@ def test_a_failed_metadata_rebuild_rolls_back_and_restores_connection_settings(
     assert apply_pending_migrations(legacy.engine) == [
         "0005_metadata_codes.sql",
         "0006_run_backfill_constraint.sql",
+        "0007_identity.sql",
     ]
 
 

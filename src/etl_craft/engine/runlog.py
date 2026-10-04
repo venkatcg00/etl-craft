@@ -11,7 +11,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
-from typing import Any
+from typing import Any, Literal
+from uuid import uuid4
 
 from sqlalchemy import bindparam
 from sqlalchemy.engine import Connection, Row
@@ -37,7 +38,12 @@ def today() -> date:
 
 
 def create_active_run(
-    conn: Connection, pipeline_id: int, *, run_date: date | None = None, backfill: bool = False
+    conn: Connection,
+    pipeline_id: int,
+    *,
+    run_date: date | None = None,
+    backfill: bool = False,
+    trigger_kind: Literal["MANUAL", "BACKFILL", "STAND_IN"] | None = None,
 ) -> int | None:
     """Start a new ``IN-PROGRESS`` run of ``pipeline_id`` and return its id.
 
@@ -46,10 +52,22 @@ def create_active_run(
     exactly one gets an id. A new run runs as of ``run_date`` (today, in UTC, unless given),
     and ``backfill`` marks it part of a backfill.
     """
+    kind = trigger_kind or ("BACKFILL" if backfill else "MANUAL")
+    if kind not in {"MANUAL", "BACKFILL", "STAND_IN"} or (backfill and kind != "BACKFILL"):
+        raise RunStateError(
+            f"pipeline_id={pipeline_id}: trigger_kind={kind!r}, backfill={backfill!r}; "
+            "expected MANUAL, BACKFILL or STAND_IN, with BACKFILL for a backfill run. "
+            "Use BACKFILL for backfills and MANUAL or STAND_IN for other runs."
+        )
+    logical_date = run_date or today()
+    prefix = "stand-in" if kind == "STAND_IN" else kind.lower()
+    run_key = f"{prefix}:{logical_date}:{uuid4()}" if kind == "BACKFILL" else f"{prefix}:{uuid4()}"
     params = {
+        "run_key": run_key,
+        "trigger_kind": kind,
         "pipeline_id": pipeline_id,
-        "run_date": (run_date or today()).isoformat(),
-        "backfill": "Y" if backfill else "N",
+        "run_date": logical_date.isoformat(),
+        "backfill": "Y" if kind == "BACKFILL" else "N",
     }
     try:
         with conn.begin_nested():

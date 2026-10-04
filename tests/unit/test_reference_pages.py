@@ -63,7 +63,7 @@ def test_every_engine_db_table_is_described_and_read_whole(dialect):
         declared = [
             line.split()[0]
             for line in body.splitlines()
-            if re.match(r"^\s+[A-Z_]+\s", line)
+            if re.match(r"^\s+[A-Z_][A-Z_0-9]*\s", line)
             and line.split()[0] not in {"CONSTRAINT", "CHECK", "OR", "AND"}
         ]
         assert [c.name for c in table.columns] == declared, table.name
@@ -72,6 +72,10 @@ def test_every_engine_db_table_is_described_and_read_whole(dialect):
 def test_the_schema_page_shows_types_allowed_values_and_unique_keys():
     page = pages.schema_page()
     assert "## `AUD_RUN_INTERVENTIONS`" in page
+    assert "## `AUD_TASK_ATTEMPTS`" in page
+    assert "## `AUD_GATE_DECISIONS`" in page
+    assert "| `CONFIG_SHA256` | `VARCHAR(64)` |" in page
+    assert "| `CONSUME_REPAIRS` | `VARCHAR(1)` | no | `'Y'` | `Y`, `N` |" in page
     assert "| `REFRESH_TYPE` | `VARCHAR` | no |  | `FULL`, `INCREMENTAL` |" in page
     assert "Unique: `PIPELINE_CODE where ACTIVE_FLAG = 'Y'`." in page
     assert "| `ACTIVE_FLAG` | `VARCHAR` | no | `'Y'` | `Y`, `N` |" in page

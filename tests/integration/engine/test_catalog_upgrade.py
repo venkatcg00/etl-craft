@@ -12,6 +12,7 @@ from etl_craft.engine.queries import run_script
 from etl_craft.engine.schema import init_db
 from fixtures.catalog import snapshot
 from fixtures.engine_db import engine_config, sqlite_engine_db
+from fixtures.released_schema import install
 
 SCHEMAS = Path(__file__).parents[2] / "fixtures" / "schemas"
 RELEASES = sorted(path.name for path in SCHEMAS.iterdir() if path.is_dir())
@@ -21,9 +22,7 @@ RELEASES = sorted(path.name for path in SCHEMAS.iterdir() if path.is_dir())
 def test_full_catalog_matches_fresh_initialization(empty_engine_db, release, tmp_path, monkeypatch):
     db = empty_engine_db
     folder = "postgres" if db.engine.dialect.name == "postgresql" else "sqlite"
-    old = (SCHEMAS / release / f"{folder}.sql").read_text()
-    with db.engine.begin() as conn:
-        run_script(conn, db.dialect.split_statements(old))
+    install(db, release)
     monkeypatch.delenv("ETL_CRAFT_MIGRATIONS_DIR", raising=False)
     apply_pending_migrations(db.engine)
     if folder == "postgres":
@@ -67,6 +66,17 @@ def before_backfill_constraint(empty_engine_db, monkeypatch):
     for migration in migrations.migration_streams(db.engine)[0].files:
         if migration.version < "0006":
             migrations._apply(db.engine, migration)
+    original = migrations.migration_streams
+
+    def streams(*args, **kwargs):
+        return [
+            replace(stream, files=tuple(f for f in stream.files if f.version < "0007"))
+            if stream.source == migrations.ENGINE
+            else stream
+            for stream in original(*args, **kwargs)
+        ]
+
+    monkeypatch.setattr(migrations, "migration_streams", streams)
     return db
 
 
