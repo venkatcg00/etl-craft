@@ -13,7 +13,13 @@ import yaml
 from sqlalchemy import text
 
 from etl_craft.cli import main as cli_main
-from etl_craft.config import EmailConfig, EmailProfile, load_config
+from etl_craft.config import (
+    ConnectionProfile,
+    ConnectionSection,
+    EmailConfig,
+    EmailProfile,
+    load_config,
+)
 from etl_craft.core.enums import Mode, RunStatus
 from etl_craft.core.errors import (
     ConnectionTestError,
@@ -454,16 +460,70 @@ def test_finalize_reports_a_lapse_nobody_saw_while_running(config, engine_db):
     assert [lapse.pipeline_run_id for lapse in lapses] == [run_id]
 
 
-def test_a_failed_connection_test_starts_no_run(config, pipeline):
-    engine, ids = pipeline
-    with engine.begin() as conn:
-        add_task(conn, ids["P"], "notify", handler="EMAIL_ALERT")
-    relay = EmailProfile("EMAIL", "down", host="127.0.0.1", port=1, from_address="etl@example.com")
-    broken = replace(config, email=EmailConfig("down", {"down": relay}))
-    with pytest.raises(ConnectionTestError, match=r"P: a connection test failed.*email relay: 127"):
-        run_pipeline(engine, broken, "P", child=CHILD)
+def test_a_failed_warehouse_connection_test_starts_no_run(config, pipeline, monkeypatch):
+    engine, _ = pipeline
+    monkeypatch.setenv("ETL_CRAFT_TEST_CONNECTION_PASSWORD", "unused")
+    profile = ConnectionProfile(
+        section="WAREHOUSE",
+        name="down",
+        jdbc_url="jdbc:postgresql://127.0.0.1:1/test",
+        user="etl",
+        auth_mode="password",
+        schema="public",
+        extra={"secret_var": "ETL_CRAFT_TEST_CONNECTION_PASSWORD"},
+    )
+    config = replace(config, warehouse=ConnectionSection("down", {"down": profile}))
+    with pytest.raises(ConnectionTestError, match="warehouse:"):
+        run_pipeline(engine, config, "P", child=CHILD)
     with engine.connect() as conn:
         assert conn.execute(text("SELECT COUNT(*) FROM AUD_PIPELINES_RUN_LOG")).scalar_one() == 0
+
+
+@pytest.mark.parametrize("status", ["SUCCESS", "FAILED", "SKIPPED"])
+def test_an_alert_only_pipeline_keeps_its_alert_outcome(config, engine_db, status):
+    engine = engine_db.engine
+    with engine.begin() as conn:
+        pipeline_id = add_pipeline(conn, "ONLY_MAIL")
+        alert_id = add_task(conn, pipeline_id, "notify", "EMAIL_ALERT")
+        run_id = start_run(conn, pipeline_id)
+        task_run(conn, alert_id, run_id, status)
+    assert finalize_active_run(engine, config, "ONLY_MAIL").status == status
+
+
+@pytest.mark.parametrize("remote", [False, True])
+@pytest.mark.parametrize("data_status", ["SUCCESS", "FAILED", "SKIPPED"])
+def test_alert_failures_do_not_change_the_data_outcome(config, engine_db, remote, data_status):
+    engine = engine_db.engine
+    with engine.begin() as conn:
+        pipeline_id = add_pipeline(conn, "MAIL")
+        data = add_task(conn, pipeline_id, "data")
+        notify = add_task(conn, pipeline_id, "notify", "EMAIL_ALERT")
+        run_id = start_run(conn, pipeline_id)
+        task_run(conn, data, run_id, data_status)
+        notify_run = task_run(conn, notify, run_id, "IN-PROGRESS")
+        runlog.finish_task_run(conn, notify_run, status="FAILED", error_message="relay is down")
+    selected = replace(config, mode=Mode.REMOTE) if remote else config
+    outcome = finalize_active_run(engine, selected, "MAIL")
+    assert outcome.status == data_status
+    with engine.connect() as conn:
+        assert runlog.fetch_task_run_status(conn, notify, run_id) == "FAILED"
+
+
+def test_a_relay_outage_does_not_prevent_data_tasks_from_running(config, engine_db, caplog):
+    engine = engine_db.engine
+    with engine.begin() as conn:
+        pipeline_id = add_pipeline(conn, "MAIL")
+        data = add_task(conn, pipeline_id, "data", BEHAVIOUR="succeed")
+        notify = add_task(conn, pipeline_id, "notify", "EMAIL_ALERT", BEHAVIOUR="fail")
+        add_dependency(conn, pipeline_id, notify, data, "ALWAYS")
+    profile = EmailProfile("EMAIL", "down", "127.0.0.1", 1, "etl@example.com", use_tls=False)
+    broken = replace(config, email=EmailConfig("down", {"down": profile}))
+    outcome = run_pipeline(engine, broken, "MAIL", child=CHILD)
+    assert outcome.status == RunStatus.SUCCESS
+    assert "email relay" in caplog.text and "127.0.0.1:1" in caplog.text
+    with engine.connect() as conn:
+        assert runlog.fetch_task_run_status(conn, data, outcome.pipeline_run_id) == "SUCCESS"
+        assert runlog.fetch_task_run_status(conn, notify, outcome.pipeline_run_id) == "FAILED"
 
 
 def test_the_command_line(config, pipeline, capsys, monkeypatch):

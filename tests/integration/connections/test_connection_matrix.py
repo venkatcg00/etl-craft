@@ -4,7 +4,8 @@ Each case writes a ``craft-connector.yml`` as a team would, loads it, and connec
 engine does: ``doctor``'s checks for the Engine DB and the warehouse (the connection, the
 profile's schema, and a query), and a real email for the relay, since ``doctor`` only greets
 it. The auth modes this matrix and the cloud suites exercise are exactly the ones ``doctor``
-calls verified; any other is usable with a warning.
+calls verified; any other is usable with a warning. The SMTP password case uses a local TLS relay
+with a trusted test certificate; the unauthenticated case uses Mailpit.
 """
 
 import json
@@ -268,9 +269,8 @@ def test_the_warehouse(case, tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("mode", ["none", "password"])
-def test_the_email_relay(mode, tmp_path, monkeypatch):
-    smtp = require("mailpit_smtp")
-    api = require("mailpit_api")
+def test_the_email_relay(mode, tmp_path, monkeypatch, tls_relay):
+    smtp = tls_relay() if mode == "password" else require("mailpit_smtp")
     email = {
         "host": smtp.host,
         "port": smtp.port,
@@ -280,12 +280,23 @@ def test_the_email_relay(mode, tmp_path, monkeypatch):
     }
     if mode == "password":
         monkeypatch.setenv("ETL_CRAFT_MATRIX_EMAIL_SECRET", "relay-password")
-        email |= {"user": "etl@example.com", "secret": "ETL_CRAFT_MATRIX_EMAIL_SECRET"}
+        email |= {
+            "user": "etl@example.com",
+            "secret": "ETL_CRAFT_MATRIX_EMAIL_SECRET",
+            "use_tls": True,
+            "tls_mode": "starttls",
+            "ca_file": str(smtp.ca_file),
+        }
     config = load_config(write(tmp_path, orchestration={"Email": email}))
     checks = checked(config, "Email")
     assert checks["Email relay"][0] is Status.OK and "Email auth" not in checks
     subject = f"matrix {mode} {uuid.uuid4().hex[:8]}"
     send_email(config, ["team@example.com"], subject, "<p>connection matrix</p>")
+    if mode == "password":
+        assert b"AUTH" in smtp.commands
+        assert len(smtp.messages) == 1 and subject.encode() in smtp.messages[0]
+        return
+    api = require("mailpit_api")
     query = urllib.parse.urlencode({"query": f'subject:"{subject}"'})
     with urllib.request.urlopen(f"{api.http_url}/api/v1/search?{query}", timeout=10) as reply:
         assert len(json.load(reply)["messages"]) == 1

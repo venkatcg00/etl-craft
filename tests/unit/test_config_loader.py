@@ -66,6 +66,69 @@ def test_the_shipped_example_loads_for_dev_with_nothing_set():
     assert config.cloning.enabled is False
 
 
+@pytest.mark.parametrize("mode", ["none", "starttls", "ssl"])
+def test_email_tls_modes_and_relative_ca_files(tmp_path, mode, monkeypatch):
+    raw = _minimal()
+    raw["Orchestration"]["Email"] = {
+        "host": "smtp.example.com",
+        "port": 465,
+        "from_address": "etl@example.com",
+        "tls_mode": mode,
+    }
+    if mode != "none":
+        raw["Orchestration"]["Email"]["ca_file"] = "certs/ca.pem"
+    path = _write(tmp_path, raw)
+    monkeypatch.chdir(tmp_path.parent)
+    profile = load_config(path).email.active
+    assert profile.effective_tls_mode == mode
+    assert profile.ca_file == (tmp_path / "certs/ca.pem" if mode != "none" else None)
+
+
+@pytest.mark.parametrize("mode", ["tls", "required", "invalid"])
+def test_unknown_email_tls_modes_are_refused(tmp_path, mode):
+    raw = _minimal()
+    raw["Orchestration"]["Email"] = {
+        "host": "smtp.example.com",
+        "port": 587,
+        "from_address": "etl@example.com",
+        "tls_mode": mode,
+    }
+    with pytest.raises(ConfigurationError, match=r"tls_mode.*not one of none, starttls, ssl"):
+        load_config(_write(tmp_path, raw))
+
+
+@pytest.mark.parametrize("use_tls", [True, False])
+def test_the_email_tls_boolean_supplies_the_mode(tmp_path, use_tls):
+    raw = _minimal()
+    raw["Orchestration"]["Email"] = {
+        "host": "smtp.example.com",
+        "port": 587,
+        "from_address": "etl@example.com",
+        "use_tls": use_tls,
+    }
+    assert load_config(_write(tmp_path, raw)).email.active.effective_tls_mode == (
+        "starttls" if use_tls else "none"
+    )
+
+
+@pytest.mark.parametrize(
+    ("extra", "message"),
+    [
+        ({"tls_mode": "ssl", "use_tls": False}, "conflicts with use_tls=False"),
+        ({"tls_mode": "none", "ca_file": "ca.pem"}, "would be ignored"),
+        ({"transport": "sendmail", "tls_mode": "ssl"}, "tls_mode would be ignored"),
+    ],
+)
+def test_email_settings_that_conflict_or_would_be_ignored_are_refused(tmp_path, extra, message):
+    raw = _minimal()
+    email = {"from_address": "etl@example.com", **extra}
+    if extra.get("transport") != "sendmail":
+        email.update(host="smtp.example.com", port=587)
+    raw["Orchestration"]["Email"] = email
+    with pytest.raises(ConfigurationError, match=message):
+        load_config(_write(tmp_path, raw))
+
+
 def test_the_shipped_example_prod_profile_overrides_and_resolves(tmp_path, monkeypatch):
     # The shipped file selects `dev` as a value; naming a variable instead
     # (Profile: ETL_CRAFT_PROFILE) is how each environment picks its own.

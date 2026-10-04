@@ -47,7 +47,7 @@ from etl_craft.engine.repository.runs import (
 )
 from etl_craft.engine.repository.tasks import fetch_failure_watch_messages
 from etl_craft.engine.runlog import SlaResult, elapsed_hours, fetch_run_sla
-from etl_craft.handlers.mail import page, paragraph, parse_recipients, send_email
+from etl_craft.handlers.mail import page, paragraph, parse_recipients, safe_subject, send_email
 from etl_craft.handlers.registry import HandlerResult, TaskContext
 
 OUTCOMES = tuple(member.value for member in EmailFlavour)
@@ -117,7 +117,7 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
             "task_code": context.task_code,
             "error_message": "; ".join(m.error_message for m in watched if m.error_message),
         }
-        subject = substitute(subject_template, values, "EMAIL_SUBJECT")
+        subject = safe_subject(substitute(subject_template, values, "EMAIL_SUBJECT"))
         parts = [
             f'<p style="color:{OUTCOME_COLORS[EmailFlavour(outcome)]};font-weight:600">'
             f"{html.escape(context.pipeline_code)}: {html.escape(outcome)}</p>"
@@ -130,13 +130,15 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
             parts.append(
                 digest_html([latest_run_of(conn, code) for code in _codes(conn, pipelines)])
             )
-    send_email(context.config, recipients, subject, page("".join(parts)))
+    warning = send_email(context.config, recipients, subject, page("".join(parts)))
     variables: dict[str, object] = {
         "RUN_STATUS": outcome,
         "EMAIL_SENT": "true",
         "EMAIL_TO": "|".join(recipients),
         "EMAIL_SUBJECT": subject,
     }
+    if warning:
+        variables["EMAIL_WARNING"] = warning
     if sla is not None:
         variables["SLA"] = sla.describe()
     return HandlerResult(variables=variables)

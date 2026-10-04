@@ -64,7 +64,7 @@ item's text, or work done early under another item.
 | S2.C Real transactions on SQLite | Done | #77 | B18 |
 | S2.D SQL action guards | Done | #80 | B5, B12, B17, B21, B34, B41, B42, B44, B45, B46; B57 for SQL actions and rules |
 | S2.E The ingestion script contract | Done | #82 | B19, B60 |
-| S2.F Alerts and SMTP | Not started | | |
+| S2.F Alerts and SMTP | Done | #83 | B20, B50, B61 |
 | S2.G Configuration and secrets | Not started | | |
 | S2.H Export and publishing | Not started | | |
 | S2.I A release gate that checks completeness | Not started | | |
@@ -79,6 +79,12 @@ What a person picking up the work needs that the code and the item texts do not 
 
 **Choices that differ from the item text.**
 
+- `S2.F.2`: Email settings use `tls_mode` and `ca_file`, following the lowercase names of the
+  existing Email block. `use_tls` stays supported; conflicting settings are refused.
+- `S2.F.3`: a data pipeline judges its data tasks' outcomes, while a pipeline containing only
+  alerts still judges its alerts. Email preflight failures are logged instead of aborting the
+  run, so a relay outage cannot prevent data tasks from starting; the alert attempt records its
+  delivery failure. The warehouse preflight still refuses a failed connection.
 - `S2.A.7` (B26): a task row left `IN-PROGRESS` by a dead process is released with
   `mark --task_code X --status FAILED --stale --reason ...`. `S3.D` replaces this with leases and
   reconciliation; keep `--stale` as an alias then, as that item says.
@@ -651,6 +657,8 @@ check on the `ScriptResult` (row count, offset type, `variables` is a mapping) b
 `save_task_offset`. The full fix of the offset/status window (B6) is `S3.F`.
 
 ### S2.F Alerts and SMTP
+
+**Status: done** (#83); see [Handover notes](#handover-notes).
 
 Branch: `fix/handlers-email`. Files: `handlers/mail.py`, `handlers/email_alert.py`, `config/model.py`,
 `config/loader.py`, `docs/guides/email-alerts.md` and the configuration reference.

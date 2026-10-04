@@ -1,7 +1,8 @@
 """Connection tests run before a pipeline run starts.
 
 ``run --pipeline_code`` and ``run --init-only`` test the connections the run will use before they
-start or resume it, and stop when one fails, so no run is recorded and no task starts:
+start or resume it. A warehouse failure stops the run before any task starts; email failures
+are logged and left to the alert task or SLA hook to report:
 
 - the warehouse, when a task's handler is ``SQL`` or ``BUSINESS_RULES`` or cloning is on, and
   with cloning on, that the warehouse profile's ``schema``, where cloning writes, exists;
@@ -25,7 +26,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.enums import Handler
 from etl_craft.core.errors import ConnectionTestError, EtlCraftError
-from etl_craft.handlers.mail import sendmail_problem
+from etl_craft.handlers.mail import open_smtp, sendmail_problem, tls_context
 from etl_craft.warehouse.connection import (
     READ_ONLY_WAIT_SECONDS,
     is_single_writer,
@@ -59,7 +60,7 @@ def probe_warehouse(
 
 
 def probe_email_relay(config: ConnectorConfig) -> str | None:
-    """Reach the email relay and send ``NOOP``, or check the sendmail program can run.
+    """Reach the email relay using its TLS mode and send ``NOOP``, or check sendmail.
 
     Returns the problem, or ``None``. It does not log in, so the test never spends an attempt
     against a relay that locks accounts out.
@@ -70,9 +71,11 @@ def probe_email_relay(config: ConnectorConfig) -> str | None:
     if profile.transport == "sendmail":
         return sendmail_problem(profile)
     try:
-        with smtplib.SMTP(profile.host, profile.port, timeout=SMTP_TEST_TIMEOUT_SECONDS) as relay:
+        with open_smtp(profile, timeout=SMTP_TEST_TIMEOUT_SECONDS) as relay:
+            if profile.effective_tls_mode == "starttls":
+                relay.starttls(context=tls_context(profile))
             relay.noop()
-    except (smtplib.SMTPException, OSError) as error:
+    except (smtplib.SMTPException, OSError, EtlCraftError, ValueError) as error:
         return f"{profile.host}:{profile.port}: {error}"
     return None
 
@@ -96,7 +99,11 @@ def check_run_connections(
     if config.email is not None and uses_email:
         problem = probe_email_relay(config)
         if problem is not None:
-            failures.append(f"email relay: {problem}")
+            logger.warning(
+                "%s: email relay: %s; data tasks may run; alerts record delivery failures",
+                pipeline_code,
+                problem,
+            )
     if failures:
         raise ConnectionTestError(
             f"{pipeline_code}: a connection test failed, so no run was started — "

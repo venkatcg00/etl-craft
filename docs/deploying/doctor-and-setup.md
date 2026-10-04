@@ -29,10 +29,11 @@ It exits 1 when any check fails, so it can gate a deployment. It checks:
 | Engine DB connection | the database cannot be reached, or its `schema` does not exist | a SQLite Engine DB in remote mode |
 | Engine DB tables and migrations | there are no Engine DB tables, a migration is pending, or an applied migration file has changed | |
 | Warehouse | the database cannot be reached, its `schema` does not exist, it is an in-memory DuckDB, or a Trino catalog is not Iceberg | |
-| Email | the relay does not answer, or the `sendmail` program cannot be run | |
+| Email | the relay does not answer, TLS certificate or hostname verification fails, the CA file is unreadable, a login uses `tls_mode: none`, or the `sendmail` program cannot be run | |
 
-The relay check connects and sends `NOOP` without logging in, so it never spends a login attempt
-against a relay that locks accounts out.
+The relay check uses the configured TLS mode and CA certificate and sends `NOOP` without logging
+in, so it never spends a login attempt against a relay that locks accounts out. Its output shows
+the mode and trust source.
 
 ## `etl-craft setup`
 

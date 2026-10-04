@@ -36,7 +36,9 @@ def config(warehouse_url=None, relay=None, **fields):
     email = None
     if relay is not None:
         host, port = relay
-        email = EmailConfig("dev", {"dev": EmailProfile("EMAIL", "dev", host, port, "e@x.io")})
+        email = EmailConfig(
+            "dev", {"dev": EmailProfile("EMAIL", "dev", host, port, "e@x.io", use_tls=False)}
+        )
     return ConnectorConfig(
         mode=Mode.LOCAL,
         source=SourceConfig(type="environment"),
@@ -82,7 +84,7 @@ def probes(monkeypatch):
 )
 def test_only_the_connections_a_run_uses_are_tested(probes, handlers, kwargs, tested):
     both = config("jdbc:postgresql://127.0.0.1:1/x", ("127.0.0.1", 1))
-    if tested:
+    if "warehouse" in tested:
         with pytest.raises(ConnectionTestError) as error:
             check_run_connections(None, both, "P", handlers, **kwargs)
         assert str(error.value).startswith("P: a connection test failed, so no run was started")
