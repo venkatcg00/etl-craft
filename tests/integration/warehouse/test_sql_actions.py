@@ -653,10 +653,14 @@ def test_rows_written_counts_what_changed_not_what_the_target_holds(customers):
     assert (empty.rows_written, empty.target_count) == (0, 1)
 
 
+@pytest.mark.parametrize(
+    "sql_world",
+    [pytest.param("trino_iceberg", marks=pytest.mark.warehouse_trino_iceberg)],
+    indirect=True,
+)
 def test_scratch_tables_are_found_in_the_targets_schema_only(sql_world, monkeypatch):
+    """Persistent Trino scratch tables resolve within the target schema."""
     w = sql_world
-    if w.kind in ("duckdb", "postgres", "duckdb_iceberg"):
-        pytest.skip("temporary scratch tables live in the session's own namespace")
     monkeypatch.setattr("secrets.token_hex", lambda n: "abc123")
     params = {"SQL_ACTION": "OVERWRITE_TABLE", "TARGET_OBJECT": "shape"}
     w.setup("shape", "SELECT 1 AS id", "OVERWRITE_TABLE")
