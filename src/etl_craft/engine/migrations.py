@@ -19,7 +19,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.core.errors import MigrationError
-from etl_craft.core.text import sha256_hex
+from etl_craft.core.text import is_metadata_code, sha256_hex
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine import locks
 from etl_craft.engine.queries import run_script, statement
@@ -156,8 +156,11 @@ def _record(conn: Connection, migration: MigrationFile) -> None:
 def _apply(engine: Engine, migration: MigrationFile) -> None:
     dialect = for_engine(engine)
     try:
-        with engine.begin() as conn:
-            dialect.begin_ddl_transaction(conn)
+        with dialect.migration_transaction(
+            engine,
+            rebuild_metadata=migration.source == ENGINE
+            and migration.version == "0005_metadata_codes.sql",
+        ) as conn:
             run_script(conn, dialect.split_statements(migration.sql))
             _record(conn, migration)
     except Exception as error:
@@ -187,6 +190,21 @@ def pending_migrations(
     ]
 
 
+def _check_metadata_codes(conn: Connection) -> None:
+    invalid = [
+        f"{row.object} (id {row.object_id}) = {row.code!r}"
+        for row in conn.execute(statement(conn, "metadata_codes"))
+        if not is_metadata_code(row.code)
+    ]
+    if invalid:
+        raise MigrationError(
+            "metadata code migration cannot run: "
+            + "; ".join(invalid)
+            + "; rename these codes to start with an ASCII letter and contain only letters, "
+            "digits and underscores, at most 128 characters, then run migrate again"
+        )
+
+
 def apply_pending_migrations(
     engine: Engine,
     project_dir: Path | str | None = None,
@@ -208,6 +226,15 @@ def apply_pending_migrations(
         with engine.connect() as conn:
             ledger = _load_ledger(conn)
         verify_ledger(ledger, streams)
+        if any(
+            file.source == ENGINE
+            and file.version == "0005_metadata_codes.sql"
+            and (file.source, file.version) not in ledger
+            for stream in streams
+            for file in stream.files
+        ):
+            with engine.connect() as conn:
+                _check_metadata_codes(conn)
         for stream in streams:
             for migration in stream.files:
                 if (migration.source, migration.version) in ledger:

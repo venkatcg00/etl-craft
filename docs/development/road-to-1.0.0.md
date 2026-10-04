@@ -66,7 +66,7 @@ item's text, or work done early under another item.
 | S2.E The ingestion script contract | Done | #82 | B19, B60 |
 | S2.F Alerts and SMTP | Done | #83 | B20, B50, B61 |
 | S2.G Configuration and secrets | Done | #84 | B48, B49, B55, B56, B58, B59 |
-| S2.H Export and publishing | Not started | | |
+| S2.H Export and publishing | Done | PR pending | B47, B64, B65 |
 | S2.I A release gate that checks completeness | Not started | | |
 | S2.J Business rules at size | Not started (S2.J.2 done in S2.D) | | |
 | S2.K Migrations and small fixes | Not started (S2.K.5 done in S2.A) | | |
@@ -78,6 +78,15 @@ item's text, or work done early under another item.
 What a person picking up the work needs that the code and the item texts do not say.
 
 **Choices that differ from the item text.**
+
+- `S2.H.1`: database checks enforce the 128-character maximum as well as the character rule.
+  SQLite also explicitly rejects embedded NULs, preserves identity-counter high watermarks and
+  custom indexes/triggers, checks references before commit, and refuses extra project columns
+  rather than discarding them. Its rebuild transaction temporarily disables foreign keys and
+  uses legacy rename behavior; both connection settings are restored on every exit.
+- `S2.H.3`: the path check also refuses file and directory-index symlinks outside the site.
+- Python API landing and package indexes have content checks in `make docs`; fuller public
+  Python contract documentation is explicit in `S7.J` and remains part of the 1.0.0 gate.
 
 - `S2.G.2`: the authentication field remains `key_file`; Snowflake presents it as the driver's
   `private_key_file`. A `private_key_file` URL option is also resolved and checked by doctor.
@@ -720,6 +729,8 @@ URLs; `S2.G.4`, `S2.G.5` and `S2.G.9` make that true for everything etl-craft co
 that values in `CFG_TASK_PARAMETERS` and anything a script prints are the team's responsibility.
 
 ### S2.H Export and publishing
+
+**Status: done** (PR pending); see [Handover notes](#handover-notes).
 
 Branch: `fix/services-export-publish`. Files: `services/generate_yml.py`, `services/validate.py`,
 `services/docs_publish.py`, both `schema.sql`, a new migration.
@@ -1700,6 +1711,14 @@ for 30 days on the reference cluster:
   explained by `explain` and the intervention log.
 
 ### S7.J Documentation to finish
+
+**Python API reference.** Keep the Python API landing page useful throughout development,
+with direct links to scripting types, configuration and errors, plus browsable package/module
+indexes. Before 1.0.0, document the public Python contracts with signatures, inputs, returns,
+exceptions and runnable ingestion/warehouse examples; distinguish supported public contracts
+from implementation details. Keep generated reference pages aligned with the released source.
+The documentation gate must inspect rendered content and links on the landing page and the
+`ScriptTask`, `ScriptResult` and `Offset` reference, so an empty page cannot pass a strict build.
 
 - Concepts: runs, attempts, run keys, revisions, leases, pools, projects.
 - Guides: operating a cluster, upgrading, backups, alerts, the UI, writing ingestion scripts (with

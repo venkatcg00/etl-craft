@@ -46,6 +46,14 @@ All notable changes are recorded here. The format follows
 
 ### Fixed
 
+- Pipeline and task codes use one database-enforced rule: an ASCII letter followed by letters,
+  digits or underscores, at most 128 characters. Migration reports invalid legacy codes before
+  applying anything; generated commands quote arguments and refuse invalid codes and control steps.
+- Published catalog GET and HEAD requests reject encoded hidden paths, traversal and symlinks
+  outside the site, including directory indexes.
+- Python API landing and package pages link to their modules and the scripting contracts.
+  Documentation builds check rendered API content as well as strict MkDocs validation.
+
 - Duplicate configuration keys, empty secret variables, credential-bearing JDBC query keys,
   zero task concurrency and invalid TCP ports are refused with setting-specific errors.
 - Key and certificate paths, secrets files and SQLite databases resolve beside the config,

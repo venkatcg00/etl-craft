@@ -46,3 +46,15 @@ are safe.
 
 Two `migrate` runs against the same Engine DB never overlap: the second waits for the first, then
 finds nothing left to apply.
+
+## Pipeline and task code checks
+
+Pipeline and task codes start with an ASCII letter and contain only letters, digits and
+underscores, at most 128 characters. Before the code-check migration applies, `migrate` lists
+all codes that break this rule, including inactive rows. Rename them and run `migrate` again.
+
+PostgreSQL adds and validates named check constraints. SQLite rebuilds the metadata tables in
+one transaction, preserving ids, identity counters, dependencies, audit rows, indexes and
+triggers, and checking foreign-key references before commit. It restores foreign-key enforcement
+on both success and failure. A SQLite metadata table with extra project columns is refused
+before rebuilding: move their values into a project table and remove the extra columns first.

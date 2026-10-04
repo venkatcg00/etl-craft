@@ -197,3 +197,42 @@ def test_only_allowed_visitors_are_served(engine_db, site, ngrok):
     with published(engine_db.engine, config, site, local_only=True) as served:
         assert fetch(served.url + "index.html")[0] == 403
         assert fetch(served.url + "robots.txt")[0] == 403
+
+
+@pytest.mark.parametrize("method", ["GET", "HEAD"])
+@pytest.mark.parametrize(
+    "path", ["/.x", "/%2ex", "/a/../.x", "/%2e%2e/", "/%2eetl-craft-catalog", "/assets/%2e%2e/.x"]
+)
+def test_hidden_and_parent_paths_are_refused(engine_db, site, method, path):
+    (site / ".x").write_text("private contents")
+    with published(engine_db.engine, engine_db.config, site, local_only=True) as served:
+        request = urllib.request.Request(served.url.rstrip("/") + path, method=method)
+        with pytest.raises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(request, timeout=5)
+        assert caught.value.code == 404
+
+
+def test_links_outside_the_site_are_refused_for_get_and_head(engine_db, site, tmp_path):
+    private = tmp_path / "private.txt"
+    private.write_text("private contents")
+    (site / "link.txt").symlink_to(private)
+    with published(engine_db.engine, engine_db.config, site, local_only=True) as served:
+        for method in ("GET", "HEAD"):
+            request = urllib.request.Request(served.url + "link.txt", method=method)
+            with pytest.raises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(request, timeout=5)
+            assert caught.value.code == 404
+
+
+def test_directory_index_links_outside_the_site_are_refused(engine_db, site, tmp_path):
+    private = tmp_path / "private.html"
+    private.write_text("private contents")
+    folder = site / "public"
+    folder.mkdir()
+    (folder / "index.html").symlink_to(private)
+    with published(engine_db.engine, engine_db.config, site, local_only=True) as served:
+        for method in ("GET", "HEAD"):
+            request = urllib.request.Request(served.url + "public/", method=method)
+            with pytest.raises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(request, timeout=5)
+            assert caught.value.code == 404
