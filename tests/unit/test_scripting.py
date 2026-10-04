@@ -18,6 +18,7 @@ pytestmark = pytest.mark.unit
         Offset.number(Decimal("12.50")),
         Offset.text("cursor-9"),
         Offset.timestamp(datetime(2026, 9, 25, 10, 30, tzinfo=UTC)),
+        Offset.timestamp(datetime(2026, 9, 25, 10, 30, 0, 123456, tzinfo=UTC)),
     ],
 )
 def test_an_offset_is_stored_and_read_back_unchanged(offset):
@@ -53,3 +54,13 @@ def test_an_offset_is_a_value_cast_to_its_declared_datatype():
 def test_a_value_that_cannot_be_cast_fails(build, message):
     with pytest.raises(HandlerError, match=message):
         build()
+
+
+class NanosecondTimestamp(datetime):
+    nanosecond = 789
+
+
+def test_a_timestamp_offset_refuses_precision_the_store_cannot_keep():
+    value = NanosecondTimestamp(2026, 1, 1, microsecond=123456)
+    with pytest.raises(HandlerError, match=r"has nanoseconds.*round it to microseconds"):
+        Offset.timestamp(value)

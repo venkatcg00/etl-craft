@@ -18,6 +18,7 @@ from etl_craft.config import load_config
 from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import HandlerError, MetadataError
 from etl_craft.engine import runlog
+from etl_craft.engine.repository.offsets import fetch_task_offset
 from etl_craft.execution.context import build_task_context
 from etl_craft.execution.runner import run_task
 from etl_craft.handlers import python_scripts
@@ -163,6 +164,145 @@ def run_in_process(project, script, **params):
 
 
 RESULT = "from etl_craft.scripting import Offset, ScriptResult\n"
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        "from dataclasses import dataclass\n"
+        "@dataclass\n"
+        "class Row:\n"
+        "    id: int\n"
+        "def run(task):\n"
+        "    assert Row.__annotations__['id'] is int\n"
+        "    return ScriptResult(Row(3).id)\n",
+        "from __future__ import annotations\n"
+        "from dataclasses import dataclass, fields\n"
+        "from typing import ClassVar\n"
+        "@dataclass\n"
+        "class Row:\n"
+        "    kind: ClassVar[str] = 'row'\n"
+        "    id: int\n"
+        "def run(task):\n"
+        "    assert [field.name for field in fields(Row)] == ['id']\n"
+        "    return ScriptResult(Row(3).id)\n",
+        "import pickle\n"
+        "class Row:\n"
+        "    id = 3\n"
+        "def run(task):\n"
+        "    return ScriptResult(pickle.loads(pickle.dumps(Row())).id)\n",
+        "import pickle\n"
+        "from enum import Enum\n"
+        "class Count(Enum):\n"
+        "    THREE = 3\n"
+        "def run(task):\n"
+        "    return ScriptResult(pickle.loads(pickle.dumps(Count.THREE)).value)\n",
+        "from __future__ import annotations\n"
+        "from typing import get_type_hints\n"
+        "class Row:\n"
+        "    pass\n"
+        "class Holder:\n"
+        "    row: Row\n"
+        "def run(task):\n"
+        "    assert get_type_hints(Holder)['row'] is Row\n"
+        "    return ScriptResult(3)\n",
+    ],
+    ids=["dataclass", "future-dataclass", "pickle-class", "enum", "type-hints"],
+)
+def test_scripts_have_real_module_semantics(project, script):
+    future, separator, body = script.partition("from __future__ import annotations\n")
+    source = separator + RESULT + body if separator else RESULT + future
+    assert run_in_process(project, source).insert_count == 3
+
+
+def test_a_script_can_use_a_fork_process_pool(project):
+    import multiprocessing
+
+    if "fork" not in multiprocessing.get_all_start_methods():
+        pytest.skip("the fork start method is unavailable")
+    script = RESULT + textwrap.dedent(
+        """
+        import multiprocessing
+        from concurrent.futures import ProcessPoolExecutor
+        from dataclasses import dataclass
+
+        @dataclass
+        class Row:
+            id: int
+
+        def read_row(value):
+            return Row(value)
+
+        def run(task):
+            with ProcessPoolExecutor(mp_context=multiprocessing.get_context("fork"),
+                                     max_workers=1) as pool:
+                row = pool.submit(read_row, 3).result(timeout=10)
+            return ScriptResult(row.id)
+        """
+    )
+    assert run_in_process(project, script).insert_count == 3
+
+
+@pytest.mark.parametrize("variables", ["None", "42", "[('CUSTOM', 'value')]"])
+@pytest.mark.parametrize("existing", [False, True])
+def test_an_invalid_result_does_not_advance_the_offset(project, variables, existing):
+    engine, _, _, task = project
+    if existing:
+        run_in_process(
+            project, RESULT + "def run(task):\n    return ScriptResult(0, Offset.number(7))\n"
+        )
+    with engine.connect() as conn:
+        before = fetch_task_offset(conn, task)
+    script = RESULT + "def run(task):\n"
+    script += f"    return ScriptResult(0, Offset.number(99), variables={variables})\n"
+    with pytest.raises(HandlerError, match=r"load\.py returned variables=.*must be a mapping"):
+        run_in_process(project, script)
+    with engine.connect() as conn:
+        assert fetch_task_offset(conn, task) == before
+
+
+def test_an_invalid_result_is_recorded_as_a_failed_attempt(project):
+    engine, config, _, task = project
+    with_script(
+        project,
+        RESULT + "def run(task):\n    return ScriptResult(0, Offset.number(99), variables=None)\n",
+    )
+    outcome = run_task(engine, config, "P", "load")
+    assert outcome.status == RunStatus.FAILED
+    assert "must be a mapping" in task_row(engine, outcome.task_run_id).error
+    assert "must be a mapping" in attempt_log(config)
+    with engine.connect() as conn:
+        assert fetch_task_offset(conn, task) is None
+
+
+def test_a_timestamp_offset_keeps_microseconds_in_the_engine_db(project):
+    script = RESULT + textwrap.dedent(
+        """
+        from datetime import UTC, datetime
+
+        def run(task):
+            value = datetime(2026, 1, 1, microsecond=123456, tzinfo=UTC)
+            if task.offset is not None:
+                assert task.offset.value == value
+            return ScriptResult(0, Offset.timestamp(value))
+        """
+    )
+    run_in_process(project, script)
+    assert run_in_process(project, script).variables["OFFSET"] == (
+        "2026-01-01T00:00:00.123456+00:00 (TIMESTAMP)"
+    )
+
+
+def test_result_variables_accept_a_mapping_besides_a_dictionary(project):
+    script = RESULT + textwrap.dedent(
+        """
+        from collections import UserDict
+
+        def run(task):
+            return ScriptResult(0, Offset.number(7), variables=UserDict(REGION="eu"))
+        """
+    )
+    assert run_in_process(project, script).variables == {"OFFSET": "7 (NUMBER)", "REGION": "eu"}
 
 
 @pytest.mark.parametrize(

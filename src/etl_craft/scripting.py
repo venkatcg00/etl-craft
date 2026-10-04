@@ -116,6 +116,11 @@ def _cast(value: object, kind: OffsetType) -> OffsetValue:
         return int(number) if number == number.to_integral_value() else number
     if kind == OffsetType.TIMESTAMP:
         if isinstance(value, datetime):
+            if getattr(value, "nanosecond", 0) != 0:
+                raise HandlerError(
+                    f"offset {value} has nanoseconds, which the offset store can't keep; "
+                    "round it to microseconds"
+                )
             return value
         if isinstance(value, str):
             try:
