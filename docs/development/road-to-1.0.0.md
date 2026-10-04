@@ -51,6 +51,77 @@ passes.
 use. *Medium*: a feature fails or behaves surprisingly in a realistic case. *Low*: an edge case or a
 diagnostics problem.
 
+## Progress
+
+Update this table in the pull request that finishes a workstream, and record in
+[Handover notes](#handover-notes) anything a later item must know: a choice that differs from the
+item's text, or work done early under another item.
+
+| Workstream | Status | Pull request | Closes |
+| --- | --- | --- | --- |
+| S2.A Run admission and finalization | Done | #78 | B2, B4, B7, B10, B13, B15, B23 to B32 |
+| S2.B Signals and the task process | Done | #79 | B3, B53, B54 |
+| S2.C Real transactions on SQLite | Done | #77 | B18 |
+| S2.D SQL action guards | Done | #80 | B5, B12, B17, B21, B34, B41, B42, B44, B45, B46; B57 for SQL actions and rules |
+| S2.E The ingestion script contract | Not started | | |
+| S2.F Alerts and SMTP | Not started | | |
+| S2.G Configuration and secrets | Not started | | |
+| S2.H Export and publishing | Not started | | |
+| S2.I A release gate that checks completeness | Not started | | |
+| S2.J Business rules at size | Not started (S2.J.2 done in S2.D) | | |
+| S2.K Migrations and small fixes | Not started (S2.K.5 done in S2.A) | | |
+| S2.L Regression suite and release | Not started; last | | |
+| 0.3 and later | Not started | | |
+
+### Handover notes
+
+What a person picking up the work needs that the code and the item texts do not say.
+
+**Choices that differ from the item text.**
+
+- `S2.A.7` (B26): a task row left `IN-PROGRESS` by a dead process is released with
+  `mark --task_code X --status FAILED --stale --reason ...`. `S3.D` replaces this with leases and
+  reconciliation; keep `--stale` as an alias then, as that item says.
+- `S2.A.10`: `run --task_code --force` onto an ended run goes through `pipeline.force_task`, which
+  reopens the run (recorded `REOPEN`), runs the task and ends the run again with `_end_reopened`,
+  the helper `rerun_task` uses too. A run with tasks that never ran stays `IN-PROGRESS`.
+- `S2.A.15`: `rerun_task` does not refuse a `CANCELLED` run: `--rerun` is an explicit, recorded
+  operator action. `S2.K.9` covers `--force` onto a cancelled run, which is still open.
+- `S2.D.3`: on warehouses with temporary tables (PostgreSQL, DuckDB, Snowflake) scratch tables stay
+  unqualified, because a temporary table cannot be created in a named schema; their names carry a
+  random token per attempt (`Session.token`), so a bare-name lookup cannot hit another table.
+  Elsewhere they are qualified with the target's catalog and schema.
+- `S2.D.4`: a tie in `MERGE_DEDUPE_ORDER` is refused only between rows that differ (compared by a
+  hash of every column); identical duplicate rows may tie.
+- `S2.D.7` (B45): the quoting check follows the warehouse's folding of unquoted names,
+  `WarehouseDialect.identifier_case` (PostgreSQL and Trino `lower`, Snowflake `upper`, others
+  `None`). DuckDB and Databricks keep the case as written and match names case-insensitively, so
+  `CustomerId` is accepted there. A name that is not a plain identifier is refused everywhere.
+- `S2.D.10` (B21): only a forced run judges the whole table and clears every flag it does not find
+  again. A `FULL` refresh run is not treated as complete, because an `SCD1_MERGE` target keeps the
+  old `PIPELINE_RUN_ID` on unchanged rows. Any run clears the flag of a key with no row (no active
+  version) left in the table.
+
+**Known flaky test.** `test_a_signal_to_run_stops_the_task_process_and_records_it[sqlite-how0-1]`
+(`tests/integration/execution/test_python_scripts.py`, from `S2.B.1`) failed once on macOS CI: the
+parent `etl-craft run --task_code` did not exit within 30 s of `SIGHUP`, and a rerun passed. It
+passes on Linux. Investigate before `S2.L`: capture the parent's output in the test (it is piped
+and never read when `wait` times out), and check how long `_stop_group`'s grace period and the
+recording of the attempt take on macOS.
+
+**Working on the code.**
+
+- Run the suites an item touches against the local services (`make services-up`), then rely on
+  CI for the full matrix. The unit, Engine DB and local warehouse suites take about five minutes
+  on a laptop.
+- If the Iceberg REST catalog or Trino starts failing with `ICEBERG_CATALOG_ERROR` or HTTP 500
+  after a reboot, its local state is stale: `make services-reset` and then `make services-up`.
+- Pipe pytest's output to a file and check its exit status; `pytest | tail` hides a failure.
+- A laptop that suspends during a long run freezes it; pytest's reported time excludes the sleep.
+  Run long suites under `systemd-inhibit --what=sleep` to keep the machine awake.
+- Each test added for an item is checked to fail without the change: stash `src/`
+  (`git stash push src`), run the new tests, `git stash pop`.
+
 ## Target architecture
 
 ### What 1.0.0 is
@@ -232,6 +303,8 @@ data or a wrong final status in single-process use; races between processes rema
 
 ### S2.A Run admission and finalization
 
+**Status: done** (#78); see [Handover notes](#handover-notes).
+
 Branch: `fix/execution-run-admission`. Files: `execution/pipeline.py`, `execution/runner.py`,
 `execution/interventions.py`, `engine/runlog.py`, `core/enums.py`, the queries named below.
 
@@ -412,6 +485,8 @@ update applied (guard `STATUS = 'IN-PROGRESS'`). When it didn't (the run was can
 
 ### S2.B Signals and the task process
 
+**Status: done** (#79); see [Handover notes](#handover-notes).
+
 Branch: `fix/execution-task-process`. Files: `cli/commands/run.py`, `execution/child.py`,
 `execution/runner.py`, `execution/supervisor.py`.
 
@@ -443,6 +518,8 @@ flushes the streams and raises `KeyboardInterrupt`. Test: a script prints five l
 
 ### S2.C Real transactions on SQLite
 
+**Status: done** (#77); see [Handover notes](#handover-notes).
+
 Branch: `fix/engine-sqlite-transactions`. File: `dialects/engine/sqlite/__init__.py`.
 
 - *Problem (B18).* pysqlite's legacy transaction handling sends no `BEGIN` before a `SAVEPOINT`, so
@@ -460,6 +537,8 @@ Branch: `fix/engine-sqlite-transactions`. File: `dialects/engine/sqlite/__init__
   existing migration and schema tests must still pass.
 
 ### S2.D SQL action guards
+
+**Status: done** (#80); see [Handover notes](#handover-notes).
 
 Branch: `fix/handlers-sql-guards`. Files: `handlers/sql/actions.py`, `tables.py`, `session.py`,
 `handlers/business_rules.py`, the SQL guide and task-parameter reference.
