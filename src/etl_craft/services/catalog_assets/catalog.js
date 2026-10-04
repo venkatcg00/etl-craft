@@ -2,9 +2,10 @@
 (function () {
   "use strict";
 
-  // The way back to the site's top from this page: only "../" steps, as the generator writes it.
-  var root = document.body.getAttribute("data-root") || "";
-  if (!/^(\.\.\/)*$/.test(root)) root = "";
+  // The way back to the site's top from this page. Only the number of "../" steps is read from
+  // the page, and the prefix is built from them, so nothing else in the attribute reaches a URL.
+  var steps = (document.body.getAttribute("data-root") || "").split("../").length - 1;
+  var root = new Array(steps + 1).join("../");
 
   // A page of this site: a relative path of plain characters, never a scheme or a host.
   function sitePath(path) {
