@@ -102,6 +102,13 @@ What a person picking up the work needs that the code and the item texts do not 
   old `PIPELINE_RUN_ID` on unchanged rows. Any run clears the flag of a key with no row (no active
   version) left in the table.
 
+**Known flaky test.** `test_a_signal_to_run_stops_the_task_process_and_records_it[sqlite-how0-1]`
+(`tests/integration/execution/test_python_scripts.py`, from `S2.B.1`) failed once on macOS CI: the
+parent `etl-craft run --task_code` did not exit within 30 s of `SIGHUP`, and a rerun passed. It
+passes on Linux. Investigate before `S2.L`: capture the parent's output in the test (it is piped
+and never read when `wait` times out), and check how long `_stop_group`'s grace period and the
+recording of the attempt take on macOS.
+
 **Working on the code.**
 
 - Run the suites an item touches against the local services (`make services-up`), then rely on
