@@ -195,3 +195,17 @@ def test_only_the_active_version_of_a_versioned_table_is_judged(sql_world):
     forced = run_rules(w, force=True)
     assert forced.insert_count == 0
     assert flags(w) == []
+
+
+@pytest.mark.parametrize("ending", [";", " -- the last line is a comment", ";\n-- and a comment"])
+def test_rule_sql_endings_work_when_flagging_and_clearing(world, ending):
+    w = world
+    add_rule(w, "negative_amount", "SELECT 1 WHERE t.amount < 0" + ending)
+    first = run_rules(w)
+    assert (first.insert_count, first.update_count) == (1, 0)
+    assert flags(w) == [("negative_amount", "11", "Y", "REJECT")]
+    w.execute(f"UPDATE {w.name('orders')} SET amount = 3 WHERE order_id = 11")
+    cleared = run_rules(w, rerun=True)
+    assert (cleared.insert_count, cleared.update_count) == (0, 1)
+    assert flags(w) == [("negative_amount", "11", "N", "REJECT")]
+    assert run_log(w) == [("negative_amount", "SUCCESS")]
