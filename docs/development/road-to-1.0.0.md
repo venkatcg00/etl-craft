@@ -842,7 +842,7 @@ Branch: `fix/engine-migration-hygiene` plus small branches as convenient.
 
 ### S2.L Regression suite and release
 
-**Status: in progress.** The harness and named regression mapping are implemented; the
+**Status: in progress.** The harness and named regression mapping are merged (#90); the
 release requires fresh evidence on the 0.2.0 commit and wheel, including both cloud suites.
 
 Branch: `test/regression-0.2`, last.
