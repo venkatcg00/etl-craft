@@ -64,7 +64,7 @@ item's text, or work done early under another item.
 | S2.C Real transactions on SQLite | Done | #77 | B18 |
 | S2.D SQL action guards | Done | #80 | B5, B12, B17, B21, B34, B41, B42, B44, B45, B46; B57 for SQL actions and rules |
 | S2.E The ingestion script contract | Done | #82 | B19, B60 |
-| S2.F Alerts and SMTP | In review | | B20, B50, B61 |
+| S2.F Alerts and SMTP | Done | #83 | B20, B50, B61 |
 | S2.G Configuration and secrets | Not started | | |
 | S2.H Export and publishing | Not started | | |
 | S2.I A release gate that checks completeness | Not started | | |
@@ -658,7 +658,7 @@ check on the `ScriptResult` (row count, offset type, `variables` is a mapping) b
 
 ### S2.F Alerts and SMTP
 
-**Status: in review**, on `fix/handlers-email`.
+**Status: done** (#83); see [Handover notes](#handover-notes).
 
 Branch: `fix/handlers-email`. Files: `handlers/mail.py`, `handlers/email_alert.py`, `config/model.py`,
 `config/loader.py`, `docs/guides/email-alerts.md` and the configuration reference.
