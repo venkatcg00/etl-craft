@@ -17,13 +17,14 @@ naming the script and the problem.
 from __future__ import annotations
 
 import ast
+import importlib.util
 import inspect
 import json
 import logging
 import sys
 import time
 import types
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -88,6 +89,7 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
     with capture_all_loggers():
         result = _call(entry, task, name)
     checked = check_result(result, name, stored)
+    result_variables = dict(checked.variables)
     elapsed = time.monotonic() - started
     variables: dict[str, object] = {}
     if checked.offset is not None and context.backfill:
@@ -106,7 +108,7 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
                 StoredOffset(checked.offset.datatype, checked.offset.stored()),
             )
         variables["OFFSET"] = f"{checked.offset.stored()} ({checked.offset.datatype})"
-    variables.update(checked.variables)
+    variables.update(result_variables)
     logger.info(
         "%s wrote %d row(s) (%.2fs); offset %s",
         name,
@@ -149,18 +151,25 @@ def load_script(path: Path, name: str) -> Callable[..., Any]:
         sys.path.insert(0, folder)
     # Compiled from its source every time, never from cached bytecode, so an edited script is
     # always the one that runs.
-    module = types.ModuleType(f"etl_craft_script_{path.stem}")
+    module_name = f"etl_craft_script_{name.replace('/', '_').replace('.', '_')}"
+    module = types.ModuleType(module_name)
     module.__file__ = str(path)
+    module.__spec__ = importlib.util.spec_from_file_location(module_name, path)
+    sys.modules[module_name] = module
     try:
         source = path.read_text(encoding="utf-8")
-        exec(compile(source, str(path), "exec"), module.__dict__)
-    except Exception as error:
+        exec(compile(source, str(path), "exec", dont_inherit=True), module.__dict__)
+    except BaseException as error:
+        sys.modules.pop(module_name, None)
+        if not isinstance(error, Exception):
+            raise
         logger.exception("importing %s failed", path)
         raise HandlerError(
             f"SCRIPT_NAME={name!r}: importing it failed: {type(error).__name__}: {error}"
         ) from error
     entry = getattr(module, "run", None)
     if not callable(entry):
+        sys.modules.pop(module_name, None)
         raise HandlerError(
             f"SCRIPT_NAME={name!r} defines no run(task) function; see etl_craft.scripting"
         )
@@ -270,5 +279,10 @@ def check_result(result: Any, name: str, stored: StoredOffset | None) -> ScriptR
         raise HandlerError(
             f"{name} returned a {result.offset.datatype} offset, but the stored one is "
             f"{stored.offset_type}; an offset keeps its datatype"
+        )
+    if not isinstance(result.variables, Mapping):
+        raise HandlerError(
+            f"{name} returned variables={result.variables!r}; it must be a mapping, "
+            "such as {'REGION': 'eu'}"
         )
     return result

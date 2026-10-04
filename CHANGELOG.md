@@ -41,6 +41,9 @@ All notable changes are recorded here. The format follows
 
 ### Fixed
 
+- Ingestion scripts load as registered modules with their own future imports, so dataclasses,
+  enums, pickling, type-hint resolution and fork process pools work. Timestamp offsets refuse
+  nanoseconds the store cannot keep, and invalid result variables fail before an offset is saved.
 - A transaction on a SQLite Engine DB is now all or nothing. The driver no longer manages
   transactions itself; every transaction opens with `BEGIN IMMEDIATE`, so a savepoint that was a
   transaction's first write no longer commits early, DDL rolls back with its transaction, and a

@@ -51,7 +51,8 @@ def run(task: ScriptTask) -> ScriptResult:
 
 `ScriptResult` holds `row_count`, the rows the script wrote, a required whole number that the
 engine records as the task's source, target and insert counts; `offset`, the new offset, or `None`
-to keep the stored one; and `variables`, any values of your own, listed in the task log.
+to keep the stored one; and `variables`, a mapping of names to any values of your own, listed
+in the task log. The engine validates the whole result before storing its offset.
 
 A script that needs neither the offset nor `INPUT_PARAMS` can define `run()` without a parameter;
 it still returns a `ScriptResult`.
@@ -65,11 +66,20 @@ to its datatype, as `CAST(value AS type)` would in SQL: `Offset("1042", "NUMBER"
 The offset is stored as text beside its datatype, so one column holds every kind. The next run
 gets it back cast to that datatype: `task.offset.value` is an `int` or `Decimal` for `NUMBER`, a
 `str` for `TEXT` and a `datetime` for `TIMESTAMP`, and `task.offset.datatype` names it.
+Timestamp offsets keep microsecond precision. A datetime with nonzero nanoseconds, such as a
+pandas `Timestamp`, is refused; round it to microseconds before building the offset.
 
 The offset is stored in `AUD_TASK_OFFSET_TRACKER` only when the script succeeds, so a failed run
 is retried from the same place, and it keeps its datatype from one run to the next.
 
 Scripts may import helper modules kept beside them in `ingestion_scripts/`.
+Each script is compiled from its current source and registered as a module named
+`etl_craft_script_` followed by its path relative to `ingestion_scripts/`, with `/` and `.`
+replaced by `_`: `crm/customers.py` becomes `etl_craft_script_crm_customers_py`. The script's
+own future imports apply; dataclasses, enums, pickling and `typing.get_type_hints` work as in
+other modules. A script may use `ProcessPoolExecutor` with the `fork` start method on platforms
+that support it. The `spawn` start method cannot re-import the script by its generated module
+name; put functions needed by spawned workers in a normally importable helper module.
 
 ## Output and logs
 
@@ -101,7 +111,8 @@ The task fails with a message that names the script and the problem when:
 - `run` raises: the message has the exception, and the traceback is in the attempt's log;
 - `run` calls `sys.exit`: raise an exception to fail, return a `ScriptResult` to succeed;
 - `run` returns something other than a `ScriptResult`, a `row_count` that is not a whole number of
-  0 or more, or an offset of a different type from the stored one.
+  0 or more, an offset of a different type from the stored one, or `variables` that is not a mapping;
+- a timestamp offset has nanoseconds the offset store cannot keep.
 
 The task's time limit covers the script: a script still running when it passes is stopped, and the
 task is recorded `FAILED`.

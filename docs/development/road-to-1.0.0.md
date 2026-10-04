@@ -63,7 +63,7 @@ item's text, or work done early under another item.
 | S2.B Signals and the task process | Done | #79 | B3, B53, B54 |
 | S2.C Real transactions on SQLite | Done | #77 | B18 |
 | S2.D SQL action guards | Done | #80 | B5, B12, B17, B21, B34, B41, B42, B44, B45, B46; B57 for SQL actions and rules |
-| S2.E The ingestion script contract | Not started | | |
+| S2.E The ingestion script contract | In review | | B19, B60 |
 | S2.F Alerts and SMTP | Not started | | |
 | S2.G Configuration and secrets | Not started | | |
 | S2.H Export and publishing | Not started | | |
@@ -621,6 +621,8 @@ active flag keys of the rule from the Engine DB in chunks of 1,000, check which 
 judged. An incremental run never clears keys it didn't see. Test both cases on all local warehouses.
 
 ### S2.E The ingestion script contract
+
+**Status: in review**, on `fix/handlers-script-loader`.
 
 Branch: `fix/handlers-script-loader`. Files: `handlers/python_scripts.py`, `scripting.py`,
 `docs/guides/ingestion-scripts.md`.
