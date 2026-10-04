@@ -26,7 +26,7 @@ writes five pipelines this way, and runs as written on SQLite and PostgreSQL.
 
 | Column | Holds |
 |---|---|
-| `PIPELINE_CODE` | the pipeline's code: letters, digits, `_` and `-`. It names the pipeline in every command, DAG id and log folder |
+| `PIPELINE_CODE` | the pipeline's code: one ASCII letter followed by letters, digits or `_`, at most 128 characters. It names the pipeline in every command, DAG id and log folder |
 | `PIPELINE_NAME` | a readable name |
 | `DESCRIPTION` | what the pipeline is for; the [catalog](catalog.md) leads its page with it |
 | `RUN_SCHEDULE` | a cron expression, written into the pipeline's generated DAG |
@@ -51,7 +51,7 @@ writes five pipelines this way, and runs as written on SQLite and PostgreSQL.
 | Column | Holds |
 |---|---|
 | `PIPELINE_ID` | the pipeline the task belongs to |
-| `TASK_CODE` | the task's code, unique in its pipeline: letters, digits, `_` and `-` |
+| `TASK_CODE` | the task's code, unique in its pipeline: one ASCII letter followed by letters, digits or `_`, at most 128 characters |
 | `TASK_TYPE` | `INGESTION` (it brings data in) or `ETL` (it works on data already in); shown by `steps` and the catalog |
 | `HANDLER` | what runs the task (below) |
 | `RUN_CONDITION`, `RUN_CONDITION_COUNT` | how many of its dependencies must be satisfied: `ALL` (the default, when `NULL`), `ANY`, or `N` with a count; see [Dependencies and run conditions](dependencies.md) |

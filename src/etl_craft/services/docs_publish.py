@@ -33,6 +33,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from ipaddress import IPv4Network, IPv6Network, ip_address, ip_network
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 from sqlalchemy.engine import Engine
 
@@ -87,9 +88,41 @@ class _Handler(SimpleHTTPRequestHandler):
             return False
         return any(visitor in network for network in allowed)
 
+    def _safe_path(self, raw: str) -> Path | None:
+        """Decode a request path once and keep it inside the site, with no hidden segments."""
+        try:
+            decoded = unquote(raw.split("?", 1)[0].split("#", 1)[0], errors="strict")
+        except UnicodeDecodeError:
+            return None
+        parts = decoded.replace("\\", "/").split("/")
+        if any(part.startswith(".") for part in parts if part) or "\x00" in decoded:
+            return None
+        root = Path(self.directory).resolve()
+        try:
+            path = root.joinpath(*(part for part in parts if part)).resolve()
+            path.relative_to(root)
+            if path.is_dir():
+                for index in ("index.html", "index.htm"):
+                    candidate = path / index
+                    if candidate.is_file():
+                        candidate.resolve().relative_to(root)
+                        break
+        except (ValueError, OSError, RuntimeError):
+            return None
+        return path
+
+    def translate_path(self, path: str) -> str:
+        safe = self._safe_path(path)
+        if safe is None:
+            raise FileNotFoundError("request path is outside the site's public files")
+        return str(safe)
+
     def do_HEAD(self) -> None:
         if not self._visitor_allowed():
             self.send_error(HTTPStatus.FORBIDDEN)
+            return
+        if self._safe_path(self.path) is None:
+            self.send_error(HTTPStatus.NOT_FOUND)
             return
         super().do_HEAD()
 
@@ -102,6 +135,9 @@ class _Handler(SimpleHTTPRequestHandler):
         if not self._visitor_allowed():
             self.send_error(HTTPStatus.FORBIDDEN)
             return
+        if self._safe_path(self.path) is None:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
         if self.path.split("?", 1)[0] == "/robots.txt":
             body = ROBOTS.encode()
             self.send_response(HTTPStatus.OK)
@@ -109,9 +145,6 @@ class _Handler(SimpleHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-            return
-        if any(part.startswith(".") for part in self.path.split("?", 1)[0].split("/") if part):
-            self.send_error(HTTPStatus.NOT_FOUND)
             return
         super().do_GET()
 

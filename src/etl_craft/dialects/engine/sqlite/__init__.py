@@ -7,6 +7,7 @@ serialized.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
@@ -19,7 +20,7 @@ from sqlalchemy.engine import URL, Connection, Engine
 
 from etl_craft.config.auth import engine_for_jdbc_url
 from etl_craft.core.enums import AuthMode
-from etl_craft.core.errors import ConfigurationError, LockTimeoutError
+from etl_craft.core.errors import ConfigurationError, LockTimeoutError, MigrationError
 from etl_craft.core.filelock import file_lock
 from etl_craft.core.text import is_only_comments
 from etl_craft.dialects.engine.base import EngineDialect
@@ -78,6 +79,68 @@ class SqliteEngineDialect(EngineDialect):
         return [
             stmt.strip().rstrip(";").strip() for stmt in statements if not is_only_comments(stmt)
         ]
+
+    @contextmanager
+    def migration_transaction(
+        self, engine: Engine, *, rebuild_metadata: bool = False
+    ) -> Iterator[Connection]:
+        """Rebuild metadata tables with references checked before commit and pragmas restored."""
+        if not rebuild_metadata:
+            with super().migration_transaction(engine) as conn:
+                yield conn
+            return
+        with engine.connect() as conn:
+            driver = conn.connection.driver_connection
+            assert driver is not None
+            foreign_keys = driver.execute("PRAGMA foreign_keys").fetchone()[0]
+            legacy = driver.execute("PRAGMA legacy_alter_table").fetchone()[0]
+            driver.execute("PRAGMA foreign_keys=OFF")
+            driver.execute("PRAGMA legacy_alter_table=ON")
+            try:
+                with conn.begin():
+                    rebuild_sql = (
+                        self.directory / "migrations" / "0005_metadata_codes.sql"
+                    ).read_text("utf-8")
+                    for table in ("CFG_PIPELINES", "CFG_TASKS"):
+                        body = re.search(
+                            rf"CREATE TABLE {table}_new \((.*?)\n\);", rebuild_sql, re.DOTALL
+                        )
+                        assert body is not None
+                        expected = {
+                            line.split()[0].lower()
+                            for line in body.group(1).splitlines()
+                            if re.match(r"^\s+[A-Z_]+\s", line)
+                            and line.split()[0] not in {"CONSTRAINT", "CHECK", "OR", "AND"}
+                        }
+                        extra = {
+                            row.name.lower()
+                            for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")
+                        } - expected
+                        if extra:
+                            raise MigrationError(
+                                f"{table} has extra column(s) {sorted(extra)} that the metadata "
+                                "rebuild would discard; move their values to a project table "
+                                "and remove the extra columns before migrating"
+                            )
+                    saved = conn.exec_driver_sql(
+                        "SELECT name AS name, sql AS sql FROM sqlite_schema "
+                        "WHERE type IN ('index', 'trigger') AND sql IS NOT NULL "
+                        "AND tbl_name IN ('CFG_PIPELINES', 'CFG_TASKS') "
+                        "AND name NOT IN ('ux_pipelines_code_active', 'ux_tasks_code_active', "
+                        "'trg_audit_cfg_pipelines', 'trg_audit_cfg_tasks')"
+                    ).all()
+                    yield conn
+                    for row in saved:
+                        conn.exec_driver_sql(row.sql)
+                    broken = conn.exec_driver_sql("PRAGMA foreign_key_check").all()
+                    if broken:
+                        raise MigrationError(
+                            f"metadata table rebuild broke foreign key references: {broken}; "
+                            "repair the references before migrating"
+                        )
+            finally:
+                driver.execute(f"PRAGMA legacy_alter_table={int(legacy)}")
+                driver.execute(f"PRAGMA foreign_keys={int(foreign_keys)}")
 
     def duration_seconds_sql(self) -> str:
         """Return ``END_DATE - START_DATE`` in seconds; julianday reads the stored UTC text."""

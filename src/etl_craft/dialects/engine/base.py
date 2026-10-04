@@ -14,7 +14,8 @@ PostgreSQL disagree on the case of unquoted identifiers.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from contextlib import AbstractContextManager
+from collections.abc import Iterator
+from contextlib import AbstractContextManager, contextmanager
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -89,6 +90,15 @@ class EngineDialect(ABC):
     def begin_ddl_transaction(self, conn: Connection) -> None:
         """Make DDL on ``conn`` part of its transaction; PostgreSQL's DDL already is."""
         return None
+
+    @contextmanager
+    def migration_transaction(
+        self, engine: Engine, *, rebuild_metadata: bool = False
+    ) -> Iterator[Connection]:
+        """Apply a migration and its ledger row together, including any dialect's rebuild setup."""
+        with engine.begin() as conn:
+            self.begin_ddl_transaction(conn)
+            yield conn
 
     @cached_property
     def _catalog(self) -> dict[str, Path]:

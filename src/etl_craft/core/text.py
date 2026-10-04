@@ -353,6 +353,15 @@ def read_only_problem(sql: str) -> str | None:
 
 # Identifiers
 
+METADATA_CODE_PATTERN = r"[A-Za-z][A-Za-z0-9_]{0,127}"
+"""Pipeline and task codes: one leading ASCII letter, at most 128 characters."""
+
+
+def is_metadata_code(code: str) -> bool:
+    """Whether a code is safe in commands and cannot collide with control steps."""
+    return re.fullmatch(METADATA_CODE_PATTERN, code) is not None
+
+
 _SAFE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SAFE_OBJECT_REF = re.compile(
     r"^([A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$"

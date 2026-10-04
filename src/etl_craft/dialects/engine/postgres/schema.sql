@@ -55,6 +55,7 @@ CREATE TABLE CFG_PIPELINES (
     CREATE_DATE          TIMESTAMPTZ,
     UPDATED_BY           VARCHAR,
     UPDATED_DATE         TIMESTAMPTZ,
+    CONSTRAINT ck_pipelines_code CHECK (PIPELINE_CODE ~ '^[A-Za-z][A-Za-z0-9_]{0,127}$'),
     CONSTRAINT ck_pipelines_refresh_type CHECK (REFRESH_TYPE IN ('FULL', 'INCREMENTAL')),
     CONSTRAINT ck_pipelines_active_flag  CHECK (ACTIVE_FLAG IN ('Y', 'N'))
 );
@@ -104,6 +105,7 @@ CREATE TABLE CFG_TASKS (
     CREATE_DATE          TIMESTAMPTZ,
     UPDATED_BY           VARCHAR,
     UPDATED_DATE         TIMESTAMPTZ,
+    CONSTRAINT ck_tasks_code CHECK (TASK_CODE ~ '^[A-Za-z][A-Za-z0-9_]{0,127}$'),
     CONSTRAINT ck_tasks_task_type       CHECK (TASK_TYPE IN ('INGESTION','ETL')),
     CONSTRAINT ck_tasks_handler         CHECK (HANDLER IN ('PYTHON','SQL','BUSINESS_RULES','EMAIL_ALERT')),
     CONSTRAINT ck_tasks_active_flag     CHECK (ACTIVE_FLAG IN ('Y','N')),

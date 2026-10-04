@@ -66,6 +66,7 @@ release-gate: ## Check the release evidence of every required suite
 
 docs: ## Build the documentation site into site/ (strict: any warning fails)
 	$(UV) run mkdocs build --strict --site-dir site
+	$(UV) run python scripts/check_docs_content.py site
 
 docs-serve: ## Serve the documentation site with live reload
 	$(UV) run mkdocs serve

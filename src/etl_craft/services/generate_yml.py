@@ -23,6 +23,7 @@ defaults, then a built-in default.
 
 from __future__ import annotations
 
+from shlex import join
 from typing import Any, TypeVar
 
 import yaml
@@ -30,8 +31,9 @@ from sqlalchemy.engine import Connection
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.enums import Mode
-from etl_craft.core.errors import ConfigurationError, GraphError
+from etl_craft.core.errors import ConfigurationError, GraphError, MetadataError
 from etl_craft.core.graph import build_graph
+from etl_craft.core.text import is_metadata_code
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.dependencies import (
     fetch_cross_pipeline_task_edges,
@@ -131,22 +133,50 @@ def _first(*values: T | None) -> T | None:
     return next((value for value in values if value is not None), None)
 
 
+def _require_code(column: str, code: str) -> None:
+    if not is_metadata_code(code):
+        raise MetadataError(
+            f"{column}={code!r} must start with an ASCII letter and contain only letters, digits "
+            "and underscores, at most 128 characters; rename it before generating YAML"
+        )
+
+
+def _command(code: str, *arguments: str) -> str:
+    return join(["etl-craft", "run", "--pipeline_code", code, *arguments])
+
+
+def _check_dag(tasks: dict[str, Any]) -> None:
+    """Refuse missing control steps, missing dependencies and self-dependencies."""
+    if INIT_TASK not in tasks or FINALIZE_TASK not in tasks:
+        raise GraphError("generated DAG needs exactly one __init__ and __finalize__ step")
+    for code, task in tasks.items():
+        if code in task["depends_on"]:
+            raise GraphError(f"generated DAG step {code!r} depends on itself")
+        missing = set(task["depends_on"]) - tasks.keys()
+        if missing:
+            raise GraphError(
+                f"generated DAG step {code!r} depends on missing step(s) {sorted(missing)}"
+            )
+
+
 def pipeline_dag(conn: Connection, config: ConnectorConfig, pipeline_code: str) -> dict[str, Any]:
     """Return the DAG of ``pipeline_code`` as a dict, in the order it is written.
 
     Raises ``RemoteUnsupportedError`` in remote mode for rules the orchestrator does not support.
     """
+    _require_code("PIPELINE_CODE", pipeline_code)
     if config.mode == Mode.REMOTE:
         return _remote_pipeline_dag(conn, config, pipeline_code)
     pipeline_id = resolve_pipeline_id(conn, pipeline_code)
     detail = fetch_pipeline_detail(conn, pipeline_id)
     data = fetch_pipeline_graph(conn, pipeline_id)
     codes = fetch_task_codes(conn, pipeline_id)
+    for code in codes.values():
+        _require_code("TASK_CODE", code)
     build_graph(data.tasks, data.same_pipeline_edges)
-    run = f"etl-craft run --pipeline_code {pipeline_code}"
     tasks: dict[str, Any] = {
         INIT_TASK: {
-            "bash_command": f"{run} --init-only",
+            "bash_command": _command(pipeline_code, "--init-only"),
             "depends_on": [],
             "trigger_rule": "all_success",
         }
@@ -155,7 +185,7 @@ def pipeline_dag(conn: Connection, config: ConnectorConfig, pipeline_code: str) 
     for task in sorted(data.tasks, key=lambda t: codes[t.task_id]):
         edges = [e for e in data.same_pipeline_edges if e.task_id == task.task_id]
         tasks[codes[task.task_id]] = {
-            "bash_command": f"{run} --task_code {codes[task.task_id]}",
+            "bash_command": _command(pipeline_code, "--task_code", codes[task.task_id]),
             "depends_on": sorted(codes[e.depends_on_task_id] for e in edges) or [INIT_TASK],
             "trigger_rule": trigger_rule(
                 task.run_condition or "ALL", [e.dependency_type for e in edges]
@@ -163,7 +193,7 @@ def pipeline_dag(conn: Connection, config: ConnectorConfig, pipeline_code: str) 
         }
     leaves = sorted(codes[t.task_id] for t in data.tasks if t.task_id not in upstream_ids)
     tasks[FINALIZE_TASK] = {
-        "bash_command": f"{run} --finalize-only",
+        "bash_command": _command(pipeline_code, "--finalize-only"),
         "depends_on": leaves or [INIT_TASK],
         "trigger_rule": "all_done",
     }
@@ -202,6 +232,7 @@ def _dag_settings(
     config: ConnectorConfig, detail: PipelineDetail, tasks: dict[str, Any]
 ) -> dict[str, Any]:
     """Return a pipeline's DAG settings around ``tasks``."""
+    _check_dag(tasks)
     defaults = config.dag_defaults
     email_on_failure = bool(_first(detail.email_on_failure, defaults.email_on_failure, False))
     default_args: dict[str, Any] = {
@@ -244,11 +275,12 @@ def _remote_pipeline_dag(
     detail = fetch_pipeline_detail(conn, pipeline_id)
     data = fetch_pipeline_graph(conn, pipeline_id)
     codes = fetch_task_codes(conn, pipeline_id)
+    for code in codes.values():
+        _require_code("TASK_CODE", code)
     build_graph(data.tasks, data.same_pipeline_edges)
-    run = f"etl-craft run --pipeline_code {pipeline_code}"
     tasks: dict[str, Any] = {
         INIT_TASK: {
-            "bash_command": f"{run} --init-only --run-date {RUN_DATE_TEMPLATE}",
+            "bash_command": _command(pipeline_code, "--init-only", "--run-date", RUN_DATE_TEMPLATE),
             "depends_on": [],
             "trigger_rule": "all_success",
         }
@@ -287,14 +319,14 @@ def _remote_pipeline_dag(
                 depends_on.append(name)
                 kinds.append(SENSOR_TYPE)
         steps[codes[task.task_id]] = {
-            "bash_command": f"{run} --task_code {codes[task.task_id]}",
+            "bash_command": _command(pipeline_code, "--task_code", codes[task.task_id]),
             "depends_on": sorted(depends_on) or base,
             "trigger_rule": trigger_rule(task.run_condition or "ALL", kinds),
         }
     tasks.update(steps)
     leaves = sorted(codes[t.task_id] for t in data.tasks if t.task_id not in upstream_ids)
     tasks[FINALIZE_TASK] = {
-        "bash_command": f"{run} --finalize-only",
+        "bash_command": _command(pipeline_code, "--finalize-only"),
         "depends_on": leaves or [INIT_TASK],
         "trigger_rule": "all_done",
     }
@@ -304,6 +336,9 @@ def _remote_pipeline_dag(
 def _sensor(
     dag_id: str, task_id: str | None, states: tuple[list[str], list[str]], depends_on: list[str]
 ) -> dict[str, Any]:
+    _require_code("PIPELINE_CODE", dag_id)
+    if task_id is not None:
+        _require_code("TASK_CODE", task_id)
     allowed, failed = states
     return {
         "sensor": {
@@ -332,6 +367,8 @@ def global_dag(conn: Connection, config: ConnectorConfig) -> dict[str, Any]:
     rows = conn.execute(statement(conn, "all_pipeline_dependency_edges")).all()
     edges: dict[str, list[tuple[str, str]]] = {}
     for row in rows:
+        _require_code("PIPELINE_CODE", row.pipeline_code)
+        _require_code("PIPELINE_CODE", row.depends_on_pipeline_code)
         edges.setdefault(row.pipeline_code, []).append(
             (row.depends_on_pipeline_code, row.dependency_type)
         )
@@ -383,7 +420,7 @@ def docs_dag(config: ConnectorConfig) -> dict[str, Any]:
         "default_args": default_args,
         "tasks": {
             DOCS_TASK: {
-                "bash_command": "etl-craft generate-docs",
+                "bash_command": join(["etl-craft", "generate-docs"]),
                 "depends_on": [],
                 "trigger_rule": "all_success",
             }

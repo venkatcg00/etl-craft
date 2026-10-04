@@ -23,6 +23,34 @@ for source in sorted((SRC / "etl_craft").rglob("*.py")):
 
     nav[parts] = page.as_posix()
     with mkdocs_gen_files.open(Path("api", page), "w", encoding="utf-8") as handle:
+        if parts == ("etl_craft",):
+            handle.write(
+                "# Python API\n\n"
+                "Use these references alongside the guides: signatures, types and docstrings "
+                "come from the installed source. The ingestion-script contract is the entry "
+                "point for writing Python tasks. Other modules describe the engine's current "
+                "implementation; their interfaces may change before 1.0.0.\n\n"
+                "## Start here\n\n"
+                "- [Ingestion script types](scripting.md): `ScriptTask`, `ScriptResult` and "
+                "`Offset`, with the data a task receives and returns.\n"
+                "- [Writing ingestion scripts](../../guides/ingestion-scripts.md): examples, "
+                "offsets, warehouse access and logging.\n"
+                "- [Configuration](config/index.md): loading the project configuration "
+                "and resolving its settings.\n"
+                "- [Core errors](core/errors.md): named errors and their exit statuses.\n\n"
+                "## Packages\n\n"
+            )
+        if source.stem == "__init__":
+            children = sorted(
+                child
+                for child in source.parent.iterdir()
+                if not child.name.startswith("_")
+                and (child.suffix == ".py" or (child / "__init__.py").is_file())
+            )
+            for child in children:
+                target = f"{child.name}/index.md" if child.is_dir() else f"{child.stem}.md"
+                handle.write(f"- [{child.stem}]({target})\n")
+            handle.write("\n")
         handle.write(f"::: {'.'.join(parts)}\n")
     mkdocs_gen_files.set_edit_path(Path("api", page), Path("..") / source.relative_to(ROOT))
 

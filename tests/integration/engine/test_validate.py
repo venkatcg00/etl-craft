@@ -322,8 +322,16 @@ def test_dependencies_and_pipeline_settings(project):
             text("UPDATE CFG_PIPELINES SET PIPELINE_PARAMETERS = :v WHERE PIPELINE_ID = :p"),
             {"p": down, "v": json.dumps({"RETRIES": "3", "TAG": ["x"]})},
         )
+        # Legacy metadata must still receive a useful validator diagnostic.
+        if conn.dialect.name == "sqlite":
+            conn.exec_driver_sql("PRAGMA ignore_check_constraints=ON")
+        else:
+            conn.exec_driver_sql("ALTER TABLE CFG_PIPELINES DROP CONSTRAINT ck_pipelines_code")
+            conn.exec_driver_sql("ALTER TABLE CFG_TASKS DROP CONSTRAINT ck_tasks_code")
         bad_code = add_pipeline(conn, "bad code")
         add_task(conn, bad_code, "x.y", "PYTHON", SCRIPT_NAME="load.py")
+        if conn.dialect.name == "sqlite":
+            conn.exec_driver_sql("PRAGMA ignore_check_constraints=OFF")
     report = validate(engine, config)
     got = found(report)
     fail, warn = Status.FAIL, Status.WARN
@@ -366,7 +374,7 @@ def test_dependencies_and_pipeline_settings(project):
     ) in got
     assert any(w == "DOWN" and "GONE, which is inactive" in m for w, _, m in got)
     assert any(
-        w == "bad code" and m.startswith("PIPELINE_CODE='bad code' may hold") for w, _, m in got
+        w == "bad code" and m.startswith("PIPELINE_CODE='bad code' must start") for w, _, m in got
     )
     assert any(w == "bad code.x.y" and m.startswith("TASK_CODE='x.y'") for w, _, m in got)
     # The rules task reports no rows, but its own pipeline is clean apart from the cycle.

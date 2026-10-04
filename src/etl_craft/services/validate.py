@@ -13,7 +13,6 @@ the orchestrator does not support is a ``FAIL`` (see ``execution.remote``).
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 
@@ -25,7 +24,7 @@ from etl_craft.config.targets import active_catalog
 from etl_craft.core.enums import DependencyType, Handler, Mode, SqlAction
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.graph import build_graph
-from etl_craft.core.text import suggest
+from etl_craft.core.text import is_metadata_code, suggest
 from etl_craft.engine.repository.business_rules import fetch_business_rules_for_task
 from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
 from etl_craft.engine.repository.pipelines import (
@@ -55,9 +54,6 @@ from etl_craft.handlers.sql.spec import WRITERS, read_sql_task
 from etl_craft.handlers.sql.tables import ENGINE_COLUMNS
 from etl_craft.services.doctor import Status
 from etl_craft.services.lineage import dialect_and_catalog, output_columns, table_name
-
-CODE = re.compile(r"^[A-Za-z0-9_-]+$")
-"""What a pipeline or task code may hold: it appears in commands, DAG ids and file names."""
 
 ROWS_REPORTED = frozenset(WRITERS)
 """The SQL actions that report the rows in their target, which a ``HAS_DATA`` edge needs."""
@@ -148,7 +144,7 @@ def validate(engine: Engine, config: ConnectorConfig, pipeline_code: str | None 
 
 def _pipelines(conn: Connection, config: ConnectorConfig, data: _Metadata, report: Report) -> None:
     for code, stored in data.pipeline_parameters:
-        if not CODE.match(code):
+        if not is_metadata_code(code):
             report.fail(code, _code_problem("PIPELINE_CODE", code))
         problems, unknown = pipeline_parameter_problems(stored)
         for problem in problems:
@@ -292,7 +288,7 @@ def _task(
 ) -> None:
     params = data.params[task.task_id]
     where = task.label
-    if not CODE.match(task.task_code):
+    if not is_metadata_code(task.task_code):
         report.fail(where, _code_problem("TASK_CODE", task.task_code))
     try:
         task_timeout_seconds(params, config)
@@ -415,8 +411,8 @@ CHECKS: dict[str, Callable[[Connection, TaskContext, _Metadata], list[str]]] = {
 
 def _code_problem(column: str, code: str) -> str:
     return (
-        f"{column}={code!r} may hold only letters, digits, '_' and '-': it appears in commands, "
-        "DAG ids and file names"
+        f"{column}={code!r} must start with an ASCII letter and contain only letters, digits "
+        "and underscores, at most 128 characters; rename it before generating commands"
     )
 
 

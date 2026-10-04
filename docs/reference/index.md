@@ -8,7 +8,7 @@ Generated from the code, so they always match the release:
 - [Task parameters](task-parameters.md): every `CFG_TASK_PARAMETERS` name, per handler.
 - [Engine DB schema](engine-db-schema.md): every table and column, with allowed values and
   unique keys.
-- [Python API](../api/etl_craft/index.md): the package's modules.
+- [Python API](../api/etl_craft/index.md): scripting contracts, configuration, errors and browsable module references.
 
 And:
 

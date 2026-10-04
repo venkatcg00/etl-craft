@@ -25,7 +25,7 @@ something other than what the metadata says.
 
 | Area | Fails when |
 |---|---|
-| Codes | a `PIPELINE_CODE` or `TASK_CODE` holds anything but letters, digits, `_` and `-`; codes appear in commands, DAG ids and file names |
+| Codes | a `PIPELINE_CODE` or `TASK_CODE` holds anything but one ASCII letter followed by letters, digits or `_`, at most 128 characters; codes appear in commands, DAG ids and file names |
 | `PIPELINE_PARAMETERS` | a value has the wrong type, such as `"RETRIES": "3"` |
 | A pipeline's graph | a cycle, a self-dependency, a run condition its dependencies cannot meet, or a dependency on an inactive task |
 | Pipeline dependencies | a cycle between pipelines, or a dependency on an inactive pipeline |

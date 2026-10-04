@@ -54,6 +54,9 @@ and which are verified against a live service here, are in
 
 ## The catalog site
 
+GET and HEAD requests share the same decoded-path check: hidden path segments, parent traversal
+and links outside the site root are refused with 404, including directory-index symlinks.
+
 The [catalog](../guides/catalog.md) shows every task's SQL, table columns, lineage and run
 details. `publish-docs` serves it only to the addresses in `Docs_site.Allowed_ips`, with
 headers that keep it out of search engines; leave it unpublished where that is too much to share.

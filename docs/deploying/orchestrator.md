@@ -130,3 +130,11 @@ depends on another or is depended on, each triggering that pipeline's own DAG in
 `etl-craft generate-yml --docs` writes the `etl_craft_docs` DAG, which runs
 `etl-craft generate-docs` on the `Docs_site` section's `Schedule`, so the
 [catalog site](../guides/catalog.md) keeps its run details fresh.
+
+## Codes and generated commands
+
+Pipeline and task codes must start with an ASCII letter and contain only letters, digits and
+underscores, at most 128 characters. The database enforces this rule, and `validate` and
+`generate-yml` check legacy metadata too. Names such as `__init__` and `__finalize__` are reserved
+for generated control steps. Generated shell commands quote each argument separately, including
+the run-date template, and generation refuses self-dependencies or missing control steps.
