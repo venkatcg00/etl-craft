@@ -86,3 +86,27 @@ def test_a_failed_build_step_is_reported_with_its_output(tmp_path, capsys, monke
     err = capsys.readouterr().err
     assert "documentation build failed: mike deploy" in err
     assert "Config value error" in err
+
+
+def test_mike_subprocess_finds_tools_beside_the_running_interpreter(tmp_path, monkeypatch):
+    import os
+    import sys
+    from pathlib import Path
+
+    calls = []
+
+    def run(command, cwd, env=None):
+        if env is not None:
+            calls.append(env)
+        return ""
+
+    monkeypatch.setenv("PATH", "/other/tools")
+    monkeypatch.setattr(build_docs_site, "_run", run)
+    monkeypatch.setattr(build_docs_site, "_export", lambda repo, out: None)
+    monkeypatch.setattr(build_docs_site.subprocess, "run", lambda *args, **kwargs: None)
+    build_docs_site.build(tmp_path, tmp_path / "out", "/env/bin/mike")
+    assert calls
+    assert all(
+        env["PATH"].split(os.pathsep) == [str(Path(sys.executable).parent), "/other/tools"]
+        for env in calls
+    )

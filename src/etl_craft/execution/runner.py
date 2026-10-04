@@ -18,6 +18,7 @@ cancels it (``etl-craft cancel``), the task process is stopped and the task is `
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import os
 import sys
@@ -621,7 +622,10 @@ class _CancelWatch:
         self.stop = threading.Event()
         self.done = threading.Event()
         self.thread = threading.Thread(
-            target=self._watch, name="etl-craft-cancel-watch", daemon=True
+            target=contextvars.copy_context().run,
+            args=(self._watch,),
+            name="etl-craft-cancel-watch",
+            daemon=True,
         )
 
     def __enter__(self) -> threading.Event:

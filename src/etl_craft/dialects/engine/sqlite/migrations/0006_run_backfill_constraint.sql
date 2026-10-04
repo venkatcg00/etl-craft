@@ -1,0 +1,24 @@
+-- Name the backfill check while preserving run ids, references and sequence high watermarks.
+CREATE TEMP TABLE etl_craft_run_sequence AS SELECT name, seq FROM sqlite_sequence WHERE name = 'AUD_PIPELINES_RUN_LOG';
+CREATE TABLE AUD_PIPELINES_RUN_LOG_new (
+    PIPELINE_RUN_ID  INTEGER PRIMARY KEY AUTOINCREMENT,
+    PIPELINE_ID      BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
+    START_DATE       TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
+    END_DATE         TIMESTAMP,
+    STATUS           VARCHAR NOT NULL,
+    SLA_STATUS       VARCHAR(8),
+    RUN_DATE         DATE,
+    BACKFILL         VARCHAR(1) NOT NULL DEFAULT 'N',
+    CONSTRAINT ck_pipeline_run_backfill CHECK (BACKFILL IN ('Y','N')),
+    CONSTRAINT ck_pipeline_run_status CHECK (STATUS IN ('IN-PROGRESS','SUCCESS','FAILED','SKIPPED','CANCELLED')),
+    CONSTRAINT ck_pipeline_run_sla_status CHECK (SLA_STATUS IN ('MET','BREACHED'))
+);
+INSERT INTO AUD_PIPELINES_RUN_LOG_new (PIPELINE_RUN_ID, PIPELINE_ID, START_DATE, END_DATE, STATUS, SLA_STATUS, RUN_DATE, BACKFILL) SELECT PIPELINE_RUN_ID, PIPELINE_ID, START_DATE, END_DATE, STATUS, SLA_STATUS, RUN_DATE, BACKFILL FROM AUD_PIPELINES_RUN_LOG;
+DROP TABLE AUD_PIPELINES_RUN_LOG;
+ALTER TABLE AUD_PIPELINES_RUN_LOG_new RENAME TO AUD_PIPELINES_RUN_LOG;
+UPDATE sqlite_sequence SET seq = max(seq, coalesce((SELECT seq FROM etl_craft_run_sequence), seq)) WHERE name = 'AUD_PIPELINES_RUN_LOG';
+INSERT INTO sqlite_sequence (name, seq) SELECT name, seq FROM etl_craft_run_sequence s WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence c WHERE c.name = s.name);
+DROP TABLE etl_craft_run_sequence;
+CREATE UNIQUE INDEX ux_pipeline_run_one_active
+    ON AUD_PIPELINES_RUN_LOG (PIPELINE_ID) WHERE STATUS = 'IN-PROGRESS';
+CREATE INDEX ix_pipeline_run_pipeline ON AUD_PIPELINES_RUN_LOG (PIPELINE_ID);

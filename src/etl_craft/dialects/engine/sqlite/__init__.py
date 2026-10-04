@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import bindparam, create_engine, event, text
 from sqlalchemy.engine import URL, Connection, Engine
 
 from etl_craft.config.auth import engine_for_jdbc_url
@@ -82,7 +82,7 @@ class SqliteEngineDialect(EngineDialect):
 
     @contextmanager
     def migration_transaction(
-        self, engine: Engine, *, rebuild_metadata: bool = False
+        self, engine: Engine, *, rebuild_metadata: str | None = None
     ) -> Iterator[Connection]:
         """Rebuild metadata tables with references checked before commit and pragmas restored."""
         if not rebuild_metadata:
@@ -98,17 +98,17 @@ class SqliteEngineDialect(EngineDialect):
             driver.execute("PRAGMA legacy_alter_table=ON")
             try:
                 with conn.begin():
-                    rebuild_sql = (
-                        self.directory / "migrations" / "0005_metadata_codes.sql"
-                    ).read_text("utf-8")
-                    for table in ("CFG_PIPELINES", "CFG_TASKS"):
-                        body = re.search(
-                            rf"CREATE TABLE {table}_new \((.*?)\n\);", rebuild_sql, re.DOTALL
+                    rebuild_sql = rebuild_metadata
+                    tables = {
+                        match.group(1): match.group(2)
+                        for match in re.finditer(
+                            r"CREATE TABLE (\w+)_new \((.*?)\n\);", rebuild_sql, re.DOTALL
                         )
-                        assert body is not None
+                    }
+                    for table, body in tables.items():
                         expected = {
                             line.split()[0].lower()
-                            for line in body.group(1).splitlines()
+                            for line in body.splitlines()
                             if re.match(r"^\s+[A-Z_]+\s", line)
                             and line.split()[0] not in {"CONSTRAINT", "CHECK", "OR", "AND"}
                         }
@@ -122,12 +122,19 @@ class SqliteEngineDialect(EngineDialect):
                                 "rebuild would discard; move their values to a project table "
                                 "and remove the extra columns before migrating"
                             )
-                    saved = conn.exec_driver_sql(
-                        "SELECT name AS name, sql AS sql FROM sqlite_schema "
-                        "WHERE type IN ('index', 'trigger') AND sql IS NOT NULL "
-                        "AND tbl_name IN ('CFG_PIPELINES', 'CFG_TASKS') "
-                        "AND name NOT IN ('ux_pipelines_code_active', 'ux_tasks_code_active', "
-                        "'trg_audit_cfg_pipelines', 'trg_audit_cfg_tasks')"
+                    core_objects = re.findall(
+                        r"CREATE (?:UNIQUE )?(?:INDEX|TRIGGER) (\w+)", rebuild_sql
+                    )
+                    saved = conn.execute(
+                        text(
+                            "SELECT name AS name, sql AS sql FROM sqlite_schema "
+                            "WHERE type IN ('index', 'trigger') AND sql IS NOT NULL "
+                            "AND upper(tbl_name) IN :tables AND name NOT IN :core_objects"
+                        ).bindparams(
+                            bindparam("tables", expanding=True),
+                            bindparam("core_objects", expanding=True),
+                        ),
+                        {"tables": list(tables), "core_objects": core_objects},
                     ).all()
                     yield conn
                     for row in saved:

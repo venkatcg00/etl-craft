@@ -93,7 +93,7 @@ class EngineDialect(ABC):
 
     @contextmanager
     def migration_transaction(
-        self, engine: Engine, *, rebuild_metadata: bool = False
+        self, engine: Engine, *, rebuild_metadata: str | None = None
     ) -> Iterator[Connection]:
         """Apply a migration and its ledger row together, including any dialect's rebuild setup."""
         with engine.begin() as conn:

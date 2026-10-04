@@ -118,6 +118,11 @@ def resolve_run_for_task(
             f"pipeline_id={pipeline_id} has no run to bind a single task to — start one with "
             "`etl-craft run --pipeline_code <code> --init-only`, or run the whole pipeline"
         )
+    if force and latest.status == RunStatus.CANCELLED:
+        raise RunStateError(
+            f"pipeline_id={pipeline_id}: pipeline_run_id={latest.pipeline_run_id} is CANCELLED; "
+            "start a new run with `etl-craft run --pipeline_code <code> --init-only`"
+        )
     if not force and latest.status in FINISHED_RUN_STATUSES:
         remedy = (
             "Start a new run with `etl-craft run --pipeline_code <code> --init-only`, which gives "

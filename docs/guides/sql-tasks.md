@@ -59,7 +59,11 @@ WHERE $$pipeline_id_filter
 
 A token is replaced only when its parameter is `true`. The task fails before anything runs, naming
 the problem, when the SELECT uses a token whose parameter is not `true`, when a parameter is `true`
-but its token is missing, or when the SELECT holds any other `$$` token.
+but its token is missing, or when the SELECT holds any other `$$` token outside quotes and
+comments. String literals, quoted identifiers and comments are preserved: `'$$pipeline_id'`
+is literal text and does not require a substitution switch. Tokens inside dollar-quoted
+strings are also preserved; tagged delimiters such as `$literal$...$literal$` distinguish
+literal bodies from adjacent bare substitution tokens.
 
 ## The actions
 

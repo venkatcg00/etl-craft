@@ -215,7 +215,10 @@ def test_a_failed_metadata_rebuild_rolls_back_and_restores_connection_settings(
     with legacy.engine.begin() as conn:
         conn.execute(text("DELETE FROM CFG_TASKS WHERE TASK_CODE = '__init__'"))
     monkeypatch.setattr(migrations, "_record", original)
-    assert apply_pending_migrations(legacy.engine) == ["0005_metadata_codes.sql"]
+    assert apply_pending_migrations(legacy.engine) == [
+        "0005_metadata_codes.sql",
+        "0006_run_backfill_constraint.sql",
+    ]
 
 
 def test_database_refuses_embedded_nul_codes(engine_db):

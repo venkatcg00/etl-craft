@@ -31,10 +31,13 @@ Running a `FAILED` task again is a new attempt on the same `AUD_TASK_RUN_LOG` ro
 goes up, and the previous attempt's counts, message and log are cleared from the row.
 
 `--force` runs the task even if it already succeeded or its dependencies are not met. It is only
-available in local mode. When the pipeline's latest run has already ended (`SKIPPED` included), the
+available in local mode. When the pipeline's latest run has already ended (`SKIPPED` included, except `CANCELLED`), the
 run is reopened for the task, recorded as a `REOPEN` in its history, and ended again from its tasks'
 statuses once the task ends: a forced task that fails leaves the run `FAILED`. If tasks of the run
 have never run, the run stays `IN-PROGRESS` and `run --pipeline_code <code>` resumes it.
+
+`--force` refuses a latest run that is `CANCELLED`. Start a new run with
+`etl-craft run --pipeline_code <code> --init-only`, then run the task.
 
 `--ignore-dependencies` and `--rerun` are the recorded, narrower overrides: see
 [Stepping in](run-control.md#run-a-task-without-its-dependencies).

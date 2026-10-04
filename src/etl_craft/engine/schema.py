@@ -41,26 +41,28 @@ def init_db(engine: Engine, *, force: bool = False) -> InitResult:
     migrations are then recorded as applied, because the schema already includes them.
     Raises ``EngineDbError``.
     """
-    if not force:
-        existing = existing_engine_tables(engine)
-        if existing:
-            raise EngineDbError(
-                f"this database already has Engine DB table(s) {existing} — init-db applies the "
-                "full schema to an empty database. Use `etl-craft migrate` to bring an existing "
-                "one up to date, or pass --force if this one should be initialized anyway."
-            )
     dialect = for_engine(engine)
     schema_path = dialect.schema_path()
     statements = dialect.split_statements(schema_path.read_text(encoding="utf-8"))
     with locks.MIGRATE.hold(engine):
+        if not force:
+            existing = existing_engine_tables(engine)
+            if existing:
+                raise EngineDbError(
+                    f"this database already has Engine DB table(s) {existing} — "
+                    "init-db applies the "
+                    "full schema to an empty database. Use `etl-craft migrate` to bring "
+                    "an existing "
+                    "one up to date, or pass --force if this one should be initialized anyway."
+                )
         try:
             with engine.begin() as conn:
                 dialect.begin_ddl_transaction(conn)
                 run_script(conn, statements)
+                recorded = mark_packaged_migrations_applied(conn)
         except Exception as error:
             raise EngineDbError(
                 f"failed applying the {dialect.name} schema ({schema_path.name}): {error}"
             ) from error
     logger.info("applied %d statements from the %s schema", len(statements), dialect.name)
-    recorded = mark_packaged_migrations_applied(engine)
     return InitResult(len(statements), tuple(recorded))

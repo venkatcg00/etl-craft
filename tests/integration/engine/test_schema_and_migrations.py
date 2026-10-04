@@ -72,7 +72,8 @@ def test_init_db_records_the_packaged_migrations_it_includes(empty_engine_db, pa
     assert result.recorded_migrations == ("0001_add_column.sql",)
     # Recorded, not run: the schema already includes it.
     assert ledger(empty_engine_db.engine) == [("ENGINE", "0001_add_column.sql")]
-    assert mark_packaged_migrations_applied(empty_engine_db.engine) == ["0001_add_column.sql"]
+    with empty_engine_db.engine.begin() as conn:
+        assert mark_packaged_migrations_applied(conn) == ["0001_add_column.sql"]
     assert apply_pending_migrations(empty_engine_db.engine) == []
 
 
@@ -191,3 +192,52 @@ def test_concurrent_runs_apply_each_file_once(initialized, tmp_path):
 def test_migrate_on_a_database_without_the_schema(empty_engine_db, tmp_path):
     with pytest.raises(MigrationError, match="could not read SCHEMA_MIGRATIONS"):
         apply_pending_migrations(empty_engine_db.engine)
+
+
+def test_initialization_rolls_back_schema_and_ledger_when_recording_fails(
+    empty_engine_db, monkeypatch
+):
+    from etl_craft.engine import schema
+
+    original = schema.mark_packaged_migrations_applied
+
+    def fail_after_recording(conn):
+        original(conn)
+        raise MigrationError("ledger recording failed")
+
+    monkeypatch.setattr(schema, "mark_packaged_migrations_applied", fail_after_recording)
+    with pytest.raises(EngineDbError, match="ledger recording failed"):
+        init_db(empty_engine_db.engine)
+    assert existing_engine_tables(empty_engine_db.engine) == []
+    assert not table_exists(empty_engine_db.engine, "SCHEMA_MIGRATIONS")
+    monkeypatch.setattr(schema, "mark_packaged_migrations_applied", original)
+    result = init_db(empty_engine_db.engine)
+    assert result.recorded_migrations
+    assert len(ledger(empty_engine_db.engine)) == len(result.recorded_migrations)
+
+
+def test_initialization_checks_existing_tables_only_while_holding_the_lock(
+    empty_engine_db, monkeypatch, packaged
+):
+    from contextlib import contextmanager
+
+    from etl_craft.engine import schema
+
+    held = []
+    original = schema.existing_engine_tables
+
+    @contextmanager
+    def hold(engine):
+        held.append(True)
+        try:
+            yield
+        finally:
+            held.pop()
+
+    def checked(engine):
+        assert held
+        return original(engine)
+
+    monkeypatch.setattr(schema.locks.MIGRATE.__class__, "hold", lambda self, engine: hold(engine))
+    monkeypatch.setattr(schema, "existing_engine_tables", checked)
+    init_db(empty_engine_db.engine)

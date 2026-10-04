@@ -46,6 +46,16 @@ All notable changes are recorded here. The format follows
 
 ### Fixed
 
+- Fresh initialization creates the Engine DB schema and packaged migration ledger atomically
+  under the migration lock. Migration `0006_run_backfill_constraint.sql` aligns the named
+  backfill constraint with fresh databases on PostgreSQL and SQLite, preserving run history.
+- PostgreSQL lock errors distinguish contention from connection failures; remote initialization
+  conflicts name `--finalize-only`, and `--force` refuses cancelled runs with a new-run remedy.
+- Cancellation watcher logs retain run/task context. Lineage caches include the active catalog
+  and sqlglot version. Versioned docs subprocesses find tools beside their Python interpreter.
+- SQL substitutions preserve tokens inside strings, quoted identifiers and comments; the
+  shared statement scanner also handles nested comments and PostgreSQL escaped strings.
+
 - Clearing business-rule flags sends at most 1,000 keys per Engine DB statement, avoiding
   parameter-limit failures for large sets on SQLite and PostgreSQL. All batches share the
   rule's transaction, so a failure cannot leave partially cleared flags or a false success.

@@ -531,3 +531,15 @@ def test_losing_the_race_to_bind_a_task_reads_back_the_winner(seeded, monkeypatc
 def test_elapsed_hours_reads_a_naive_start_as_utc():
     now = datetime(2026, 1, 1, 12, tzinfo=UTC)
     assert runlog.elapsed_hours(datetime(2026, 1, 1, 9), now) == 3
+
+
+def test_force_cannot_reopen_a_cancelled_run(seeded):
+    engine, ids = seeded
+    with engine.begin() as conn:
+        run = runlog.find_or_create_active_run(conn, ids["alpha"])
+        runlog.finalize_pipeline_run(conn, run, "CANCELLED")
+    with engine.begin() as conn:
+        with pytest.raises(RunStateError, match=r"CANCELLED.*start a new run.*init-only"):
+            runlog.resolve_run_for_task(conn, ids["alpha"], force=True)
+        assert runlog.fetch_pipeline_run_status(conn, run) == "CANCELLED"
+        assert runlog.fetch_active_pipeline_run_id(conn, ids["alpha"]) is None

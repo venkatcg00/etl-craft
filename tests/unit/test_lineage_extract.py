@@ -86,3 +86,12 @@ def test_the_graph_walks_across_tasks_both_ways():
         (3, "raw.orders", "INGEST.stage"),
     ]
     assert graph.columns("sales.orders") == ["amount_usd"]
+
+
+def test_cache_key_changes_with_catalog_and_parser_version(monkeypatch):
+    from etl_craft.services import lineage
+
+    key = lineage.lineage_key("SELECT x FROM sales.t", "sales.out", "postgres", "one")
+    assert key != lineage.lineage_key("SELECT x FROM sales.t", "sales.out", "postgres", "two")
+    monkeypatch.setattr(lineage, "SQLGLOT_VERSION", "different")
+    assert key != lineage.lineage_key("SELECT x FROM sales.t", "sales.out", "postgres", "one")
