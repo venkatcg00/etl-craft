@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -25,12 +26,17 @@ def pytest_command(
     suite: Suite, evidence: Path, wheel: Path | None, extra: Sequence[str]
 ) -> list[str]:
     """Build the pytest command line that runs ``suite`` and writes ``evidence``."""
+    validate_extra(extra)
     command = [
         sys.executable,
         "-m",
         "pytest",
         "-m",
         suite.marker,
+        "-o",
+        "addopts=",
+        "--strict-markers",
+        "--strict-config",
         "-p",
         "no:cacheprovider",
         f"--evidence={evidence}",
@@ -38,8 +44,35 @@ def pytest_command(
     ]
     if wheel is not None:
         command.append(f"--evidence-wheel={wheel}")
+    command.extend(suite.selection(sys.platform))
     command.extend(extra)
     return command
+
+
+def validate_extra(extra: Sequence[str]) -> None:
+    """Accept reporting and early-stop options, never test-selection or config overrides."""
+    allowed = {
+        "-q",
+        "-qq",
+        "-v",
+        "-vv",
+        "-x",
+        "--exitfirst",
+        "--disable-warnings",
+        "--no-header",
+        "--no-summary",
+        "-s",
+        "--capture=no",
+    }
+    for argument in extra:
+        if argument in allowed or re.fullmatch(
+            r"--(?:tb=(?:auto|long|short|line|native|no)|maxfail=[0-9]+)", argument
+        ):
+            continue
+        raise ValueError(
+            f"pytest argument {argument!r} is not allowed for release evidence; "
+            "run pytest directly for selected tests, and rerun the complete suite for evidence"
+        )
 
 
 def parse_args(argv: Sequence[str]) -> tuple[argparse.Namespace, list[str]]:
@@ -60,6 +93,14 @@ def parse_args(argv: Sequence[str]) -> tuple[argparse.Namespace, list[str]]:
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the suite and return pytest's exit code (2 for a usage error)."""
     args, pytest_args = parse_args(sys.argv[1:] if argv is None else argv)
+    try:
+        validate_extra(pytest_args)
+    except ValueError as error:
+        print(error, file=sys.stderr)
+        return 2
+    if os.environ.get("PYTEST_ADDOPTS", "").strip():
+        print("unset PYTEST_ADDOPTS before recording complete release evidence", file=sys.stderr)
+        return 2
     suites = load_suites()
     suite = suites.get(args.suite)
     if suite is None:

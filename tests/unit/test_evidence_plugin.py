@@ -1,6 +1,7 @@
 import hashlib
 import json
 import subprocess
+import sys
 
 import pytest
 
@@ -68,7 +69,9 @@ def test_every_outcome_is_counted_and_listed(pytester):
     result, path = run_with_evidence(pytester, "--evidence-suite=unit", "-m", "not slow")
     evidence = json.loads(path.read_text(encoding="utf-8"))
 
-    assert evidence["schema"] == 1
+    assert evidence["schema"] == 2
+    assert evidence["platform_key"] == sys.platform
+    assert evidence["collected"] == sorted(test["nodeid"] for test in evidence["tests"])
     assert evidence["suite"] == "unit"
     assert evidence["marker"] == "not slow"
     assert evidence["package_version"] == etl_craft.__version__

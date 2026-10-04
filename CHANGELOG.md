@@ -46,6 +46,10 @@ All notable changes are recorded here. The format follows
 
 ### Fixed
 
+- Release evidence must name the exact required marker and cover every test collected on HEAD,
+  with one passing outcome per test and consistent counts. Subsets, extra tests and selection
+  overrides cannot satisfy the gate; platform exceptions require explicit suite declarations.
+
 - Pipeline and task codes use one database-enforced rule: an ASCII letter followed by letters,
   digits or underscores, at most 128 characters. Migration reports invalid legacy codes before
   applying anything; generated commands quote arguments and refuse invalid codes and control steps.

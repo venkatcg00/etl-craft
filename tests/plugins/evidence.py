@@ -11,6 +11,7 @@ import hashlib
 import json
 import platform
 import subprocess
+import sys
 from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -18,7 +19,7 @@ from typing import Any
 
 import pytest
 
-SCHEMA = 1
+SCHEMA = 2
 EVIDENCE_DIR = "release/evidence"
 
 # When a test reports in several phases, the worst outcome wins.
@@ -85,6 +86,7 @@ class EvidenceRecorder:
         self.path = path
         self.started_at = now()
         self.commit, self.dirty = git_state(config.rootpath)
+        self.collected: list[str] = []
         self.outcomes: dict[str, str] = {}
         self.durations: dict[str, float] = {}
 
@@ -94,11 +96,14 @@ class EvidenceRecorder:
             self.outcomes[nodeid] = outcome
         self.durations[nodeid] = self.durations.get(nodeid, 0.0) + duration
 
+    def pytest_collection_finish(self, session: pytest.Session) -> None:
+        self.collected = sorted(item.nodeid for item in session.items)
+
     def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
         if report.when == "call" or report.failed or report.skipped:
             self.record(report.nodeid, classify(report), report.duration)
         else:
-            self.record(report.nodeid, "passed", report.duration)
+            self.durations[report.nodeid] = self.durations.get(report.nodeid, 0.0) + report.duration
 
     def pytest_collectreport(self, report: pytest.CollectReport) -> None:
         if report.failed:
@@ -119,6 +124,8 @@ class EvidenceRecorder:
             "wheel_sha256": sha256_of(Path(wheel)) if wheel else None,
             "python": platform.python_version(),
             "platform": platform.platform(),
+            "platform_key": sys.platform,
+            "collected": self.collected,
             "started_at": self.started_at,
             "finished_at": now(),
             "exit_status": int(exitstatus),
