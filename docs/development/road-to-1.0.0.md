@@ -70,7 +70,7 @@ item's text, or work done early under another item.
 | S2.I A release gate that checks completeness | Done | #86 | B63 |
 | S2.J Business rules at size | Done | #87 | B51; B57 done in S2.D |
 | S2.K Migrations and small fixes | Done | #88 | B33; S2.K.5 done in S2.A |
-| S2.L Regression suite and release | In progress: harness and regression traceability; release evidence pending | PR pending | 48 stabilization defects |
+| S2.L Regression suite and release | In progress: harness and regression traceability; release evidence pending | #90 | 48 stabilization defects |
 | 0.3 and later | Not started | | |
 
 ### Handover notes
