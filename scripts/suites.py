@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -20,6 +20,13 @@ class Suite:
     description: str
     wheel: bool = False
     where: str = "ci"
+    platform_only: dict[str, tuple[str, ...]] = field(default_factory=dict)
+
+    def selection(self, platform: str) -> list[str]:
+        """Exclude only the explicitly declared tests for other platforms."""
+        all_nodes = {node for nodes in self.platform_only.values() for node in nodes}
+        selected = set(self.platform_only.get(platform, ()))
+        return [f"--deselect={node}" for node in sorted(all_nodes - selected)]
 
 
 def load_suites(path: Path = SUITES_FILE) -> dict[str, Suite]:
@@ -33,6 +40,9 @@ def load_suites(path: Path = SUITES_FILE) -> dict[str, Suite]:
             description=str(spec.get("description", "")),
             wheel=bool(spec.get("wheel", False)),
             where=str(spec.get("where", "ci")),
+            platform_only={
+                platform: tuple(nodes) for platform, nodes in spec.get("platform_only", {}).items()
+            },
         )
         for name, spec in raw["suites"].items()
     }

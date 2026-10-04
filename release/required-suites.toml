@@ -6,6 +6,9 @@
 #
 # wheel = true    the suite tests the built wheel; run it with --wheel, and its evidence
 #                 records the wheel's sha256
+# platform_only is a table of sys.platform keys (linux, darwin, win32) to complete
+# test node ids. Listed nodes run only on those platforms; unlisted nodes always run.
+# For example: [suites.unit.platform_only] with linux = ["tests/unit/test_platform.py::test_linux"].
 # where = "local" the suite needs credentials and runs in a local session, not in CI
 
 [suites.unit]

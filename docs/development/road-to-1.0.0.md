@@ -67,7 +67,7 @@ item's text, or work done early under another item.
 | S2.F Alerts and SMTP | Done | #83 | B20, B50, B61 |
 | S2.G Configuration and secrets | Done | #84 | B48, B49, B55, B56, B58, B59 |
 | S2.H Export and publishing | Done | #85 | B47, B64, B65 |
-| S2.I A release gate that checks completeness | Not started | | |
+| S2.I A release gate that checks completeness | Done | #86 | B63 |
 | S2.J Business rules at size | Not started (S2.J.2 done in S2.D) | | |
 | S2.K Migrations and small fixes | Not started (S2.K.5 done in S2.A) | | |
 | S2.L Regression suite and release | Not started; last | | |
@@ -78,6 +78,13 @@ item's text, or work done early under another item.
 What a person picking up the work needs that the code and the item texts do not say.
 
 **Choices that differ from the item text.**
+
+- `S2.I`: schema 2 evidence records collected ids and `sys.platform`; new releases require a
+  fresh evidence run. A reporting/early-stop argument allowlist refuses selection and configuration
+  overrides, `PYTEST_ADDOPTS` must be unset, and both runner and collector override config `addopts`.
+  `platform_only` is a table of platform keys to complete node ids; the runner deselects declared
+  tests for other platforms. The gate uses `scripts/collect_suite.py` for machine-readable
+  collection, checks outcome/count consistency, and refuses a dirty release tree.
 
 - `S2.H.1`: database checks enforce the 128-character maximum as well as the character rule.
   SQLite also explicitly rejects embedded NULs, preserves identity-counter high watermarks and
