@@ -1,0 +1,69 @@
+{
+  "schema": 2,
+  "suite": "cloud-snowflake",
+  "marker": "cloud_snowflake",
+  "package_version": "0.2.0",
+  "commit": "63e1c6d20f046abd9a2621bfb245e1243d72d916",
+  "dirty": false,
+  "wheel_sha256": "af68c44fe524cf9f8d336997ff077014be2f8b52fb5050696213294a7fdecf83",
+  "python": "3.11.16",
+  "platform": "Linux-7.2.7-1-cachyos-x86_64-with-glibc2.44",
+  "platform_key": "linux",
+  "collected": [
+    "tests/acceptance/cloud/test_cloud_cloning.py::test_a_mirror_gains_columns_on_snowflake",
+    "tests/acceptance/cloud/test_cloud_connections.py::test_snowflake[iceberg-snowflake_iceberg]",
+    "tests/acceptance/cloud/test_cloud_connections.py::test_snowflake[native-snowflake]",
+    "tests/acceptance/cloud/test_cloud_demo.py::test_the_demo_on_snowflake[snowflake]",
+    "tests/acceptance/cloud/test_cloud_demo.py::test_the_demo_on_snowflake[snowflake_iceberg]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_every_action_on_snowflake[iceberg]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_every_action_on_snowflake[native]"
+  ],
+  "started_at": "2026-10-04T14:18:45+00:00",
+  "finished_at": "2026-10-04T14:44:56+00:00",
+  "exit_status": 0,
+  "counts": {
+    "passed": 7,
+    "skipped": 0,
+    "xfailed": 0,
+    "xpassed": 0,
+    "failed": 0,
+    "error": 0
+  },
+  "tests": [
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_cloning.py::test_a_mirror_gains_columns_on_snowflake",
+      "outcome": "passed",
+      "duration": 25.365
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_connections.py::test_snowflake[iceberg-snowflake_iceberg]",
+      "outcome": "passed",
+      "duration": 9.979
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_connections.py::test_snowflake[native-snowflake]",
+      "outcome": "passed",
+      "duration": 7.996
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_demo.py::test_the_demo_on_snowflake[snowflake]",
+      "outcome": "passed",
+      "duration": 678.67
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_demo.py::test_the_demo_on_snowflake[snowflake_iceberg]",
+      "outcome": "passed",
+      "duration": 371.016
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_every_action_on_snowflake[iceberg]",
+      "outcome": "passed",
+      "duration": 244.427
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_every_action_on_snowflake[native]",
+      "outcome": "passed",
+      "duration": 232.001
+    }
+  ]
+}

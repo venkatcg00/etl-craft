@@ -1,0 +1,75 @@
+{
+  "schema": 2,
+  "suite": "cloud-databricks",
+  "marker": "cloud_databricks",
+  "package_version": "0.2.0",
+  "commit": "63e1c6d20f046abd9a2621bfb245e1243d72d916",
+  "dirty": false,
+  "wheel_sha256": "af68c44fe524cf9f8d336997ff077014be2f8b52fb5050696213294a7fdecf83",
+  "python": "3.11.16",
+  "platform": "Linux-7.2.7-1-cachyos-x86_64-with-glibc2.44",
+  "platform_key": "linux",
+  "collected": [
+    "tests/acceptance/cloud/test_cloud_cloning.py::test_a_mirror_gains_columns_on_databricks[iceberg]",
+    "tests/acceptance/cloud/test_cloud_cloning.py::test_a_mirror_gains_columns_on_databricks[native]",
+    "tests/acceptance/cloud/test_cloud_connections.py::test_databricks[iceberg-databricks_iceberg]",
+    "tests/acceptance/cloud/test_cloud_connections.py::test_databricks[native-databricks]",
+    "tests/acceptance/cloud/test_cloud_demo.py::test_the_demo_on_databricks[databricks]",
+    "tests/acceptance/cloud/test_cloud_demo.py::test_the_demo_on_databricks[databricks_iceberg]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_every_action_on_databricks[iceberg]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_every_action_on_databricks[native]"
+  ],
+  "started_at": "2026-10-04T14:18:45+00:00",
+  "finished_at": "2026-10-04T14:49:59+00:00",
+  "exit_status": 0,
+  "counts": {
+    "passed": 8,
+    "skipped": 0,
+    "xfailed": 0,
+    "xpassed": 0,
+    "failed": 0,
+    "error": 0
+  },
+  "tests": [
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_cloning.py::test_a_mirror_gains_columns_on_databricks[iceberg]",
+      "outcome": "passed",
+      "duration": 29.605
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_cloning.py::test_a_mirror_gains_columns_on_databricks[native]",
+      "outcome": "passed",
+      "duration": 55.708
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_connections.py::test_databricks[iceberg-databricks_iceberg]",
+      "outcome": "passed",
+      "duration": 8.292
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_connections.py::test_databricks[native-databricks]",
+      "outcome": "passed",
+      "duration": 5.837
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_demo.py::test_the_demo_on_databricks[databricks]",
+      "outcome": "passed",
+      "duration": 704.914
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_demo.py::test_the_demo_on_databricks[databricks_iceberg]",
+      "outcome": "passed",
+      "duration": 640.816
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_every_action_on_databricks[iceberg]",
+      "outcome": "passed",
+      "duration": 213.573
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_every_action_on_databricks[native]",
+      "outcome": "passed",
+      "duration": 213.364
+    }
+  ]
+}

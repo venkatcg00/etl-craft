@@ -1,0 +1,39 @@
+{
+  "schema": 2,
+  "suite": "docs",
+  "marker": "docs",
+  "package_version": "0.2.0",
+  "commit": "63e1c6d20f046abd9a2621bfb245e1243d72d916",
+  "dirty": false,
+  "wheel_sha256": null,
+  "python": "3.11.16",
+  "platform": "Linux-7.2.7-1-cachyos-x86_64-with-glibc2.44",
+  "platform_key": "linux",
+  "collected": [
+    "tests/integration/docs/test_docs_site.py::test_before_the_first_release_the_site_is_the_dev_version",
+    "tests/integration/docs/test_docs_site.py::test_each_release_line_is_built_and_the_newest_is_latest"
+  ],
+  "started_at": "2026-10-04T14:39:57+00:00",
+  "finished_at": "2026-10-04T14:40:32+00:00",
+  "exit_status": 0,
+  "counts": {
+    "passed": 2,
+    "skipped": 0,
+    "xfailed": 0,
+    "xpassed": 0,
+    "failed": 0,
+    "error": 0
+  },
+  "tests": [
+    {
+      "nodeid": "tests/integration/docs/test_docs_site.py::test_before_the_first_release_the_site_is_the_dev_version",
+      "outcome": "passed",
+      "duration": 12.279
+    },
+    {
+      "nodeid": "tests/integration/docs/test_docs_site.py::test_each_release_line_is_built_and_the_newest_is_latest",
+      "outcome": "passed",
+      "duration": 22.996
+    }
+  ]
+}

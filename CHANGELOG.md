@@ -6,6 +6,8 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-04
+
 ### Added
 
 - Named development fault points, a synchronized admission-race helper and a reusable real-CLI
@@ -159,6 +161,13 @@ All notable changes are recorded here. The format follows
 - `run --task_code --force` onto an ended run reopens it, records the `REOPEN`, and ends it again
   from its tasks' statuses after the task: a forced task that fails leaves the run `FAILED`.
 
+### Verified
+
+- All 14 required release suites passed from clean commit `63e1c6d`, with 2,118 passing
+  test outcomes and no skips. The built wheel was exercised by pip, uv, package checks and
+  the complete Databricks and Snowflake suites, including both table formats. The evidence
+  and artifact checksums are in `release/evidence/0.2.0/`.
+
 ## [0.1.0] - 2026-09-26
 
 The first release: a rewrite of the earlier implementation (kept at the `archive/iteration-2`
@@ -237,5 +246,6 @@ evidence.
   to end, locally verifiable authentication modes, and the demo's warehouse work on Databricks
   and Snowflake. The evidence is in `release/evidence/0.1.0/`.
 
-[Unreleased]: https://github.com/venkatcg00/etl-craft/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/venkatcg00/etl-craft/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/venkatcg00/etl-craft/releases/tag/v0.2.0
 [0.1.0]: https://github.com/venkatcg00/etl-craft/releases/tag/v0.1.0
