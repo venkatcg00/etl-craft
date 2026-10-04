@@ -1,0 +1,165 @@
+{
+  "schema": 2,
+  "suite": "connections",
+  "marker": "connections",
+  "package_version": "0.2.0",
+  "commit": "63e1c6d20f046abd9a2621bfb245e1243d72d916",
+  "dirty": false,
+  "wheel_sha256": null,
+  "python": "3.11.16",
+  "platform": "Linux-7.2.7-1-cachyos-x86_64-with-glibc2.44",
+  "platform_key": "linux",
+  "collected": [
+    "tests/integration/connections/test_connection_matrix.py::test_a_key_file_that_is_not_the_servers_client_fails_with_the_reason",
+    "tests/integration/connections/test_connection_matrix.py::test_doctor_calls_verified_exactly_what_the_matrix_and_the_cloud_suites_exercise",
+    "tests/integration/connections/test_connection_matrix.py::test_relative_tls_files_work_from_another_working_directory",
+    "tests/integration/connections/test_connection_matrix.py::test_the_email_relay[none]",
+    "tests/integration/connections/test_connection_matrix.py::test_the_email_relay[password]",
+    "tests/integration/connections/test_connection_matrix.py::test_the_engine_db[key_file]",
+    "tests/integration/connections/test_connection_matrix.py::test_the_engine_db[password]",
+    "tests/integration/connections/test_connection_matrix.py::test_the_engine_db[sqlite-none]",
+    "tests/integration/connections/test_connection_matrix.py::test_the_warehouse[duckdb-none]",
+    "tests/integration/connections/test_connection_matrix.py::test_the_warehouse[duckdb_iceberg-none]",
+    "tests/integration/connections/test_connection_matrix.py::test_the_warehouse[duckdb_iceberg-oauth]",
+    "tests/integration/connections/test_connection_matrix.py::test_the_warehouse[postgres-key_file]",
+    "tests/integration/connections/test_connection_matrix.py::test_the_warehouse[postgres-password]",
+    "tests/integration/connections/test_connection_matrix.py::test_the_warehouse[trino_iceberg-none]",
+    "tests/integration/connections/test_email_tls.py::test_a_matching_certificate_and_custom_ca_succeed[ssl]",
+    "tests/integration/connections/test_email_tls.py::test_a_matching_certificate_and_custom_ca_succeed[starttls]",
+    "tests/integration/connections/test_email_tls.py::test_a_missing_ca_file_names_the_resolved_file",
+    "tests/integration/connections/test_email_tls.py::test_an_untrusted_or_wrong_hostname_certificate_is_refused[hostname-ssl]",
+    "tests/integration/connections/test_email_tls.py::test_an_untrusted_or_wrong_hostname_certificate_is_refused[hostname-starttls]",
+    "tests/integration/connections/test_email_tls.py::test_an_untrusted_or_wrong_hostname_certificate_is_refused[untrusted-ssl]",
+    "tests/integration/connections/test_email_tls.py::test_an_untrusted_or_wrong_hostname_certificate_is_refused[untrusted-starttls]",
+    "tests/integration/connections/test_email_tls.py::test_doctor_and_delivery_refuse_login_without_tls",
+    "tests/integration/execution/test_run_connections.py::test_the_probes_reach_live_services"
+  ],
+  "started_at": "2026-10-04T14:26:35+00:00",
+  "finished_at": "2026-10-04T14:26:41+00:00",
+  "exit_status": 0,
+  "counts": {
+    "passed": 23,
+    "skipped": 0,
+    "xfailed": 0,
+    "xpassed": 0,
+    "failed": 0,
+    "error": 0
+  },
+  "tests": [
+    {
+      "nodeid": "tests/integration/connections/test_connection_matrix.py::test_a_key_file_that_is_not_the_servers_client_fails_with_the_reason",
+      "outcome": "passed",
+      "duration": 0.016
+    },
+    {
+      "nodeid": "tests/integration/connections/test_connection_matrix.py::test_doctor_calls_verified_exactly_what_the_matrix_and_the_cloud_suites_exercise",
+      "outcome": "passed",
+      "duration": 0.001
+    },
+    {
+      "nodeid": "tests/integration/connections/test_connection_matrix.py::test_relative_tls_files_work_from_another_working_directory",
+      "outcome": "passed",
+      "duration": 0.033
+    },
+    {
+      "nodeid": "tests/integration/connections/test_connection_matrix.py::test_the_email_relay[none]",
+      "outcome": "passed",
+      "duration": 0.101
+    },
+    {
+      "nodeid": "tests/integration/connections/test_connection_matrix.py::test_the_email_relay[password]",
+      "outcome": "passed",
+      "duration": 0.356
+    },
+    {
+      "nodeid": "tests/integration/connections/test_connection_matrix.py::test_the_engine_db[key_file]",
+      "outcome": "passed",
+      "duration": 0.042
+    },
+    {
+      "nodeid": "tests/integration/connections/test_connection_matrix.py::test_the_engine_db[password]",
+      "outcome": "passed",
+      "duration": 0.086
+    },
+    {
+      "nodeid": "tests/integration/connections/test_connection_matrix.py::test_the_engine_db[sqlite-none]",
+      "outcome": "passed",
+      "duration": 0.022
+    },
+    {
+      "nodeid": "tests/integration/connections/test_connection_matrix.py::test_the_warehouse[duckdb-none]",
+      "outcome": "passed",
+      "duration": 0.721
+    },
+    {
+      "nodeid": "tests/integration/connections/test_connection_matrix.py::test_the_warehouse[duckdb_iceberg-none]",
+      "outcome": "passed",
+      "duration": 0.166
+    },
+    {
+      "nodeid": "tests/integration/connections/test_connection_matrix.py::test_the_warehouse[duckdb_iceberg-oauth]",
+      "outcome": "passed",
+      "duration": 0.16
+    },
+    {
+      "nodeid": "tests/integration/connections/test_connection_matrix.py::test_the_warehouse[postgres-key_file]",
+      "outcome": "passed",
+      "duration": 0.034
+    },
+    {
+      "nodeid": "tests/integration/connections/test_connection_matrix.py::test_the_warehouse[postgres-password]",
+      "outcome": "passed",
+      "duration": 0.031
+    },
+    {
+      "nodeid": "tests/integration/connections/test_connection_matrix.py::test_the_warehouse[trino_iceberg-none]",
+      "outcome": "passed",
+      "duration": 0.273
+    },
+    {
+      "nodeid": "tests/integration/connections/test_email_tls.py::test_a_matching_certificate_and_custom_ca_succeed[ssl]",
+      "outcome": "passed",
+      "duration": 0.394
+    },
+    {
+      "nodeid": "tests/integration/connections/test_email_tls.py::test_a_matching_certificate_and_custom_ca_succeed[starttls]",
+      "outcome": "passed",
+      "duration": 0.425
+    },
+    {
+      "nodeid": "tests/integration/connections/test_email_tls.py::test_a_missing_ca_file_names_the_resolved_file",
+      "outcome": "passed",
+      "duration": 0.257
+    },
+    {
+      "nodeid": "tests/integration/connections/test_email_tls.py::test_an_untrusted_or_wrong_hostname_certificate_is_refused[hostname-ssl]",
+      "outcome": "passed",
+      "duration": 0.372
+    },
+    {
+      "nodeid": "tests/integration/connections/test_email_tls.py::test_an_untrusted_or_wrong_hostname_certificate_is_refused[hostname-starttls]",
+      "outcome": "passed",
+      "duration": 0.294
+    },
+    {
+      "nodeid": "tests/integration/connections/test_email_tls.py::test_an_untrusted_or_wrong_hostname_certificate_is_refused[untrusted-ssl]",
+      "outcome": "passed",
+      "duration": 0.313
+    },
+    {
+      "nodeid": "tests/integration/connections/test_email_tls.py::test_an_untrusted_or_wrong_hostname_certificate_is_refused[untrusted-starttls]",
+      "outcome": "passed",
+      "duration": 0.343
+    },
+    {
+      "nodeid": "tests/integration/connections/test_email_tls.py::test_doctor_and_delivery_refuse_login_without_tls",
+      "outcome": "passed",
+      "duration": 0.249
+    },
+    {
+      "nodeid": "tests/integration/execution/test_run_connections.py::test_the_probes_reach_live_services",
+      "outcome": "passed",
+      "duration": 0.026
+    }
+  ]
+}

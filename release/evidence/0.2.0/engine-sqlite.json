@@ -1,0 +1,2169 @@
+{
+  "schema": 2,
+  "suite": "engine-sqlite",
+  "marker": "engine_sqlite",
+  "package_version": "0.2.0",
+  "commit": "63e1c6d20f046abd9a2621bfb245e1243d72d916",
+  "dirty": false,
+  "wheel_sha256": null,
+  "python": "3.11.16",
+  "platform": "Linux-7.2.7-1-cachyos-x86_64-with-glibc2.44",
+  "platform_key": "linux",
+  "collected": [
+    "tests/integration/engine/test_catalog.py::test_a_folder_that_holds_other_files_is_refused[sqlite]",
+    "tests/integration/engine/test_catalog.py::test_a_pipeline_page_lists_what_operators_changed_in_its_last_run[sqlite]",
+    "tests/integration/engine/test_catalog.py::test_a_tables_graph_runs_to_the_first_source_and_the_last_consumer[sqlite]",
+    "tests/integration/engine/test_catalog.py::test_every_page_chains_to_what_it_mentions[sqlite]",
+    "tests/integration/engine/test_catalog.py::test_runs_have_pages_with_what_they_were_built_from_and_used_by[sqlite]",
+    "tests/integration/engine/test_catalog.py::test_the_catalog_joins_tasks_tables_and_rules[sqlite]",
+    "tests/integration/engine/test_catalog.py::test_the_command[sqlite]",
+    "tests/integration/engine/test_catalog.py::test_the_site_has_a_page_per_asset_and_a_search_index[sqlite]",
+    "tests/integration/engine/test_catalog.py::test_warehouse_columns_add_types[sqlite]",
+    "tests/integration/engine/test_catalog_upgrade.py::test_backfill_constraint_failure_rolls_back_catalog_and_history[sqlite]",
+    "tests/integration/engine/test_catalog_upgrade.py::test_backfill_constraint_preserves_history_references_objects_and_counter[sqlite]",
+    "tests/integration/engine/test_catalog_upgrade.py::test_backfill_constraint_preserves_or_refuses_extra_columns[sqlite]",
+    "tests/integration/engine/test_catalog_upgrade.py::test_full_catalog_matches_fresh_initialization[sqlite-0.1.0]",
+    "tests/integration/engine/test_cli_commands.py::test_an_explicit_config_and_migrations_dir",
+    "tests/integration/engine/test_cli_commands.py::test_init_db_then_migrate",
+    "tests/integration/engine/test_cli_commands.py::test_init_db_twice_is_an_engine_db_error",
+    "tests/integration/engine/test_clone_command.py::test_the_command_copies_the_scope_and_says_what_it_did[sqlite]",
+    "tests/integration/engine/test_clone_command.py::test_the_command_says_when_cloning_is_off[sqlite-cloning0]",
+    "tests/integration/engine/test_clone_command.py::test_the_command_says_when_cloning_is_off[sqlite-cloning1]",
+    "tests/integration/engine/test_dialects.py::test_a_lock_excludes_other_holders_and_times_out[sqlite]",
+    "tests/integration/engine/test_dialects.py::test_a_lock_is_released_when_its_holder_raises[sqlite]",
+    "tests/integration/engine/test_dialects.py::test_the_engine_url_names_the_database_but_never_the_secret[sqlite]",
+    "tests/integration/engine/test_doctor_setup.py::test_a_project_migration_is_pending_until_setup_applies_it[sqlite]",
+    "tests/integration/engine/test_doctor_setup.py::test_an_engine_db_that_cannot_be_reached_is_one_failed_check[sqlite]",
+    "tests/integration/engine/test_doctor_setup.py::test_docs_site_publishing_is_only_warned_about[sqlite]",
+    "tests/integration/engine/test_doctor_setup.py::test_email_secrets_auth_and_sendmail[sqlite]",
+    "tests/integration/engine/test_doctor_setup.py::test_every_problem_is_reported_not_only_the_first[sqlite]",
+    "tests/integration/engine/test_doctor_setup.py::test_relaxed_dependency_gates_are_warned_about[sqlite]",
+    "tests/integration/engine/test_doctor_setup.py::test_setup_changes_nothing_when_a_check_fails[sqlite]",
+    "tests/integration/engine/test_doctor_setup.py::test_setup_creates_the_engine_db_then_changes_nothing[sqlite]",
+    "tests/integration/engine/test_doctor_setup.py::test_the_commands",
+    "tests/integration/engine/test_engine_schema.py::test_sqlite_needs_no_schema_of_its_own",
+    "tests/integration/engine/test_generate_yml.py::test_a_pipeline_becomes_one_dag[sqlite]",
+    "tests/integration/engine/test_generate_yml.py::test_an_environment_without_schedules[sqlite]",
+    "tests/integration/engine/test_generate_yml.py::test_remote_mode_names_each_rule_it_cannot_apply[sqlite-UPDATE CFG_PIPELINE_DEPENDENCY SET DEPENDENCY_TYPE = 'HAS_DATA'-SALES-depends on pipeline UP with DEPENDENCY_TYPE = 'HAS_DATA']",
+    "tests/integration/engine/test_generate_yml.py::test_remote_mode_names_each_rule_it_cannot_apply[sqlite-UPDATE CFG_TASKS SET RUN_CONDITION = 'N', RUN_CONDITION_COUNT = 1 WHERE TASK_CODE = 'load'-SALES.load-RUN_CONDITION = 'N' (RUN_CONDITION_COUNT = 1)]",
+    "tests/integration/engine/test_generate_yml.py::test_remote_mode_names_each_rule_it_cannot_apply[sqlite-UPDATE CFG_TASK_DEPENDENCY SET DEPENDENCY_TYPE = 'HAS_DATA' WHERE DEPENDS_ON_PIPELINE_ID <> PIPELINE_ID-SALES.load-depends on UP.publish with DEPENDENCY_TYPE = 'HAS_DATA']",
+    "tests/integration/engine/test_generate_yml.py::test_remote_mode_puts_every_rule_in_the_dag[sqlite]",
+    "tests/integration/engine/test_generate_yml.py::test_the_command_writes_yaml[sqlite]",
+    "tests/integration/engine/test_generate_yml.py::test_the_docs_dag_writes_the_catalog_again_on_its_schedule[sqlite]",
+    "tests/integration/engine/test_generate_yml.py::test_the_global_dag[sqlite]",
+    "tests/integration/engine/test_generate_yml.py::test_the_global_dag_in_remote_mode_needs_one_type_per_pipeline[sqlite]",
+    "tests/integration/engine/test_inspect_commands.py::test_graph[sqlite]",
+    "tests/integration/engine/test_inspect_commands.py::test_history[sqlite]",
+    "tests/integration/engine/test_inspect_commands.py::test_list[sqlite]",
+    "tests/integration/engine/test_inspect_commands.py::test_steps[sqlite]",
+    "tests/integration/engine/test_inspect_commands.py::test_unknown_codes_and_limits_are_named[sqlite]",
+    "tests/integration/engine/test_lineage_commands.py::test_a_column_is_traced_to_its_first_sources_and_last_consumers[sqlite]",
+    "tests/integration/engine/test_lineage_commands.py::test_catalog_and_parser_changes_invalidate_stored_lineage[sqlite]",
+    "tests/integration/engine/test_lineage_commands.py::test_docs_version_records_a_version_only_when_the_text_changes[sqlite]",
+    "tests/integration/engine/test_lineage_commands.py::test_lineage_is_stored_and_worked_out_again_only_when_the_sql_changes[sqlite]",
+    "tests/integration/engine/test_lineage_commands.py::test_the_summary_lists_every_task_and_what_cannot_be_traced[sqlite]",
+    "tests/integration/engine/test_lineage_commands.py::test_usage_mistakes[sqlite]",
+    "tests/integration/engine/test_metadata_codes.py::test_a_failed_metadata_rebuild_rolls_back_and_restores_connection_settings[sqlite]",
+    "tests/integration/engine/test_metadata_codes.py::test_custom_metadata_columns_are_preserved_or_refused_before_rebuild[sqlite]",
+    "tests/integration/engine/test_metadata_codes.py::test_database_refuses_embedded_nul_codes[sqlite]",
+    "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-pipeline-1load]",
+    "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-pipeline-P\\n]",
+    "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-pipeline-__finalize__]",
+    "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-pipeline-__init__]",
+    "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-pipeline-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]",
+    "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-pipeline-load $(touch x); echo]",
+    "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-pipeline-task-name]",
+    "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-task-1load]",
+    "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-task-P\\n]",
+    "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-task-__finalize__]",
+    "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-task-__init__]",
+    "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-task-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]",
+    "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-task-load $(touch x); echo]",
+    "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-task-task-name]",
+    "tests/integration/engine/test_metadata_codes.py::test_generated_dags_have_controls_and_no_self_dependency[sqlite-local-0]",
+    "tests/integration/engine/test_metadata_codes.py::test_generated_dags_have_controls_and_no_self_dependency[sqlite-local-10]",
+    "tests/integration/engine/test_metadata_codes.py::test_generated_dags_have_controls_and_no_self_dependency[sqlite-local-1]",
+    "tests/integration/engine/test_metadata_codes.py::test_generated_dags_have_controls_and_no_self_dependency[sqlite-local-2]",
+    "tests/integration/engine/test_metadata_codes.py::test_generated_dags_have_controls_and_no_self_dependency[sqlite-local-5]",
+    "tests/integration/engine/test_metadata_codes.py::test_generated_dags_have_controls_and_no_self_dependency[sqlite-remote-0]",
+    "tests/integration/engine/test_metadata_codes.py::test_generated_dags_have_controls_and_no_self_dependency[sqlite-remote-10]",
+    "tests/integration/engine/test_metadata_codes.py::test_generated_dags_have_controls_and_no_self_dependency[sqlite-remote-1]",
+    "tests/integration/engine/test_metadata_codes.py::test_generated_dags_have_controls_and_no_self_dependency[sqlite-remote-2]",
+    "tests/integration/engine/test_metadata_codes.py::test_generated_dags_have_controls_and_no_self_dependency[sqlite-remote-5]",
+    "tests/integration/engine/test_metadata_codes.py::test_generation_refuses_legacy_codes_even_without_database_checks[sqlite-pipeline-local]",
+    "tests/integration/engine/test_metadata_codes.py::test_generation_refuses_legacy_codes_even_without_database_checks[sqlite-pipeline-remote]",
+    "tests/integration/engine/test_metadata_codes.py::test_generation_refuses_legacy_codes_even_without_database_checks[sqlite-task-local]",
+    "tests/integration/engine/test_metadata_codes.py::test_generation_refuses_legacy_codes_even_without_database_checks[sqlite-task-remote]",
+    "tests/integration/engine/test_metadata_codes.py::test_migration_lists_all_invalid_codes_before_changing_anything[sqlite]",
+    "tests/integration/engine/test_metadata_codes.py::test_upgrade_preserves_metadata_references_identity_counters_and_custom_index[sqlite]",
+    "tests/integration/engine/test_publish_docs.py::test_a_folder_without_a_site_is_refused[sqlite]",
+    "tests/integration/engine/test_publish_docs.py::test_directory_index_links_outside_the_site_are_refused[sqlite]",
+    "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused[sqlite-/%2e%2e/-GET]",
+    "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused[sqlite-/%2e%2e/-HEAD]",
+    "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused[sqlite-/%2eetl-craft-catalog-GET]",
+    "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused[sqlite-/%2eetl-craft-catalog-HEAD]",
+    "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused[sqlite-/%2ex-GET]",
+    "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused[sqlite-/%2ex-HEAD]",
+    "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused[sqlite-/.x-GET]",
+    "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused[sqlite-/.x-HEAD]",
+    "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused[sqlite-/a/../.x-GET]",
+    "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused[sqlite-/a/../.x-HEAD]",
+    "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused[sqlite-/assets/%2e%2e/.x-GET]",
+    "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused[sqlite-/assets/%2e%2e/.x-HEAD]",
+    "tests/integration/engine/test_publish_docs.py::test_links_outside_the_site_are_refused_for_get_and_head[sqlite]",
+    "tests/integration/engine/test_publish_docs.py::test_ngrok_problems_say_what_to_do_and_never_show_the_token[sqlite]",
+    "tests/integration/engine/test_publish_docs.py::test_only_allowed_visitors_are_served[sqlite]",
+    "tests/integration/engine/test_publish_docs.py::test_publishing_through_ngrok_keeps_its_link[sqlite]",
+    "tests/integration/engine/test_publish_docs.py::test_the_command[sqlite]",
+    "tests/integration/engine/test_publish_docs.py::test_the_site_is_served_privately[sqlite]",
+    "tests/integration/engine/test_repository.py::test_a_run_is_found_or_started[sqlite]",
+    "tests/integration/engine/test_repository.py::test_a_single_task_needs_a_run_to_bind_to[sqlite]",
+    "tests/integration/engine/test_repository.py::test_a_task_run_row_is_bound_once_and_retried_in_place[sqlite]",
+    "tests/integration/engine/test_repository.py::test_an_ended_run_is_not_ended_again_and_keeps_its_sla[sqlite]",
+    "tests/integration/engine/test_repository.py::test_an_ended_run_is_reopened_only_with_force[sqlite]",
+    "tests/integration/engine/test_repository.py::test_business_rules[sqlite]",
+    "tests/integration/engine/test_repository.py::test_concurrent_binds_share_one_row[sqlite]",
+    "tests/integration/engine/test_repository.py::test_concurrent_starts_share_one_run[sqlite]",
+    "tests/integration/engine/test_repository.py::test_creating_a_run_never_hands_back_another_processs_run[sqlite]",
+    "tests/integration/engine/test_repository.py::test_dependency_edges_for_the_gates[sqlite]",
+    "tests/integration/engine/test_repository.py::test_failure_watch_reads_the_latest_error[sqlite]",
+    "tests/integration/engine/test_repository.py::test_finalizing_a_run_judges_its_sla[sqlite-1-2.0-MET]",
+    "tests/integration/engine/test_repository.py::test_finalizing_a_run_judges_its_sla[sqlite-1-None-None]",
+    "tests/integration/engine/test_repository.py::test_finalizing_a_run_judges_its_sla[sqlite-3-2.0-BREACHED]",
+    "tests/integration/engine/test_repository.py::test_force_cannot_reopen_a_cancelled_run[sqlite]",
+    "tests/integration/engine/test_repository.py::test_inactive_tasks_in_the_pipeline_graph[sqlite]",
+    "tests/integration/engine/test_repository.py::test_losing_the_race_to_bind_a_task_reads_back_the_winner[sqlite]",
+    "tests/integration/engine/test_repository.py::test_losing_the_race_to_start_a_run_reads_back_the_winner[sqlite]",
+    "tests/integration/engine/test_repository.py::test_pipeline_detail_reads_its_json_parameters[sqlite]",
+    "tests/integration/engine/test_repository.py::test_resolve_pipeline_id[sqlite]",
+    "tests/integration/engine/test_repository.py::test_resolve_task_id[sqlite]",
+    "tests/integration/engine/test_repository.py::test_run_state_and_statuses[sqlite]",
+    "tests/integration/engine/test_repository.py::test_task_details_and_parameters[sqlite]",
+    "tests/integration/engine/test_repository.py::test_the_other_tasks_writing_a_target[sqlite]",
+    "tests/integration/engine/test_repository.py::test_the_pipeline_graph[sqlite]",
+    "tests/integration/engine/test_rule_flag_batches.py::test_a_later_batch_failure_rolls_back_flags_and_rule_completion[sqlite]",
+    "tests/integration/engine/test_rule_flag_batches.py::test_clearing_flags_at_the_statement_budget[sqlite-0]",
+    "tests/integration/engine/test_rule_flag_batches.py::test_clearing_flags_at_the_statement_budget[sqlite-1000]",
+    "tests/integration/engine/test_rule_flag_batches.py::test_clearing_flags_at_the_statement_budget[sqlite-1001]",
+    "tests/integration/engine/test_rule_flag_batches.py::test_tens_of_thousands_of_flags_can_be_cleared[sqlite]",
+    "tests/integration/engine/test_schema.py::test_a_retired_code_can_be_reused_but_not_two_active_ones[sqlite]",
+    "tests/integration/engine/test_schema.py::test_a_same_pipeline_dependency_fills_in_its_pipeline[sqlite]",
+    "tests/integration/engine/test_schema.py::test_audit_columns_are_stamped_and_creation_never_changes[sqlite]",
+    "tests/integration/engine/test_schema.py::test_duration_seconds[sqlite]",
+    "tests/integration/engine/test_schema.py::test_every_handler_is_accepted[sqlite]",
+    "tests/integration/engine/test_schema.py::test_existing_tables_is_empty_before_the_schema[sqlite]",
+    "tests/integration/engine/test_schema.py::test_foreign_keys_are_enforced[sqlite]",
+    "tests/integration/engine/test_schema.py::test_one_in_progress_run_per_pipeline[sqlite]",
+    "tests/integration/engine/test_schema.py::test_one_task_run_row_per_task_per_pipeline_run[sqlite]",
+    "tests/integration/engine/test_schema.py::test_pipeline_parameters_hold_json[sqlite]",
+    "tests/integration/engine/test_schema.py::test_refresh_type_and_business_rule_type_lists[sqlite]",
+    "tests/integration/engine/test_schema.py::test_run_condition_and_count[sqlite-ALL-None-True]",
+    "tests/integration/engine/test_schema.py::test_run_condition_and_count[sqlite-ANY-2-False]",
+    "tests/integration/engine/test_schema.py::test_run_condition_and_count[sqlite-ANY-None-True]",
+    "tests/integration/engine/test_schema.py::test_run_condition_and_count[sqlite-MOST-None-False]",
+    "tests/integration/engine/test_schema.py::test_run_condition_and_count[sqlite-N-0-False]",
+    "tests/integration/engine/test_schema.py::test_run_condition_and_count[sqlite-N-2-True]",
+    "tests/integration/engine/test_schema.py::test_run_condition_and_count[sqlite-N-None-False]",
+    "tests/integration/engine/test_schema.py::test_run_condition_and_count[sqlite-None-2-False]",
+    "tests/integration/engine/test_schema.py::test_run_condition_and_count[sqlite-None-None-True]",
+    "tests/integration/engine/test_schema.py::test_self_dependencies_are_refused[sqlite]",
+    "tests/integration/engine/test_schema.py::test_sla_status_is_met_or_breached[sqlite]",
+    "tests/integration/engine/test_schema.py::test_task_values_outside_their_lists_are_refused[sqlite-ACTIVE_FLAG-X]",
+    "tests/integration/engine/test_schema.py::test_task_values_outside_their_lists_are_refused[sqlite-HANDLER-BOGUS]",
+    "tests/integration/engine/test_schema.py::test_task_values_outside_their_lists_are_refused[sqlite-TASK_TYPE-LOAD]",
+    "tests/integration/engine/test_schema.py::test_the_consumption_log_holds_one_kind_of_dependency_per_row[sqlite]",
+    "tests/integration/engine/test_schema.py::test_the_migration_ledger[sqlite-ENGINE-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-False]",
+    "tests/integration/engine/test_schema.py::test_the_migration_ledger[sqlite-ENGINE-None-False]",
+    "tests/integration/engine/test_schema.py::test_the_migration_ledger[sqlite-ENGINE-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-False]",
+    "tests/integration/engine/test_schema.py::test_the_migration_ledger[sqlite-ENGINE-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-True]",
+    "tests/integration/engine/test_schema.py::test_the_migration_ledger[sqlite-LEGACY-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-False]",
+    "tests/integration/engine/test_schema.py::test_the_migration_ledger[sqlite-PROJECT-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef-True]",
+    "tests/integration/engine/test_schema.py::test_the_offset_type_list[sqlite]",
+    "tests/integration/engine/test_schema.py::test_the_schema_creates_every_table[sqlite]",
+    "tests/integration/engine/test_schema.py::test_the_schema_is_all_or_nothing[sqlite]",
+    "tests/integration/engine/test_schema_and_migrations.py::test_a_failing_file_rolls_back_with_its_record_and_stops_the_run[sqlite]",
+    "tests/integration/engine/test_schema_and_migrations.py::test_a_missing_applied_file_is_refused[sqlite]",
+    "tests/integration/engine/test_schema_and_migrations.py::test_an_edited_applied_file_is_refused_before_anything_runs[sqlite]",
+    "tests/integration/engine/test_schema_and_migrations.py::test_applied_project_files_need_the_project_directory[sqlite]",
+    "tests/integration/engine/test_schema_and_migrations.py::test_concurrent_runs_apply_each_file_once[sqlite]",
+    "tests/integration/engine/test_schema_and_migrations.py::test_init_db_creates_the_schema[sqlite]",
+    "tests/integration/engine/test_schema_and_migrations.py::test_init_db_records_the_packaged_migrations_it_includes[sqlite]",
+    "tests/integration/engine/test_schema_and_migrations.py::test_init_db_refuses_a_database_that_already_has_the_schema[sqlite]",
+    "tests/integration/engine/test_schema_and_migrations.py::test_initialization_checks_existing_tables_only_while_holding_the_lock[sqlite]",
+    "tests/integration/engine/test_schema_and_migrations.py::test_initialization_rolls_back_schema_and_ledger_when_recording_fails[sqlite]",
+    "tests/integration/engine/test_schema_and_migrations.py::test_migrate_applies_engine_then_project_files_in_order[sqlite]",
+    "tests/integration/engine/test_schema_and_migrations.py::test_migrate_on_a_database_without_the_schema[sqlite]",
+    "tests/integration/engine/test_schema_and_migrations.py::test_migrate_with_nothing_pending[sqlite]",
+    "tests/integration/engine/test_schema_and_migrations.py::test_sql_is_run_as_written[sqlite]",
+    "tests/integration/engine/test_schema_and_migrations.py::test_the_same_filename_in_both_streams_is_two_migrations[sqlite]",
+    "tests/integration/engine/test_sqlite_transactions.py::test_a_run_started_in_a_transaction_that_fails_is_not_left_in_progress",
+    "tests/integration/engine/test_sqlite_transactions.py::test_a_savepoint_that_is_the_first_write_rolls_back_with_its_transaction",
+    "tests/integration/engine/test_sqlite_transactions.py::test_ddl_rolls_back_with_its_transaction",
+    "tests/integration/engine/test_sqlite_transactions.py::test_transactions_that_read_then_write_wait_for_each_other",
+    "tests/integration/engine/test_upgrade.py::test_an_earlier_engine_db_upgrades_to_the_current_schema[sqlite-0.1.0]",
+    "tests/integration/engine/test_validate.py::test_a_clean_project_has_no_findings[sqlite]",
+    "tests/integration/engine/test_validate.py::test_a_cycle_inside_a_pipeline[sqlite]",
+    "tests/integration/engine/test_validate.py::test_an_alert_that_only_watches_for_failures_may_run_mid_run[sqlite]",
+    "tests/integration/engine/test_validate.py::test_dependencies_and_pipeline_settings[sqlite]",
+    "tests/integration/engine/test_validate.py::test_remote_mode_fails_the_rules_its_orchestrator_does_not_support[sqlite]",
+    "tests/integration/engine/test_validate.py::test_task_definitions_are_checked_with_the_handlers_own_rules[sqlite]",
+    "tests/integration/engine/test_validate.py::test_the_command[sqlite]",
+    "tests/integration/execution/test_admission.py::test_a_fault_between_run_creation_and_skipping_rolls_back[sqlite]",
+    "tests/integration/execution/test_admission.py::test_simultaneous_initializers_leave_one_active_run[sqlite]",
+    "tests/integration/execution/test_child.py::test_a_failing_handler_records_failed[sqlite-breaks-16-KeyError: 'missing']",
+    "tests/integration/execution/test_child.py::test_a_failing_handler_records_failed[sqlite-fails-15-nothing to load]",
+    "tests/integration/execution/test_child.py::test_a_successful_handler_records_success[sqlite]",
+    "tests/integration/execution/test_child.py::test_an_unknown_task_run[sqlite]",
+    "tests/integration/execution/test_child.py::test_the_command_line_records_a_handler_failure[sqlite]",
+    "tests/integration/execution/test_child.py::test_the_context_is_rebuilt_from_the_task_run[sqlite]",
+    "tests/integration/execution/test_cli_lifecycle.py::test_a_child_failure_after_recording_success_keeps_the_recorded_outcome[sqlite-:kill]",
+    "tests/integration/execution/test_cli_lifecycle.py::test_a_child_failure_after_recording_success_keeps_the_recorded_outcome[sqlite-]",
+    "tests/integration/execution/test_cli_lifecycle.py::test_a_fault_after_binding_records_failure_and_allows_retry[sqlite-runner.after_bind]",
+    "tests/integration/execution/test_cli_lifecycle.py::test_a_fault_after_binding_records_failure_and_allows_retry[sqlite-supervisor.after_mkdir]",
+    "tests/integration/execution/test_cli_lifecycle.py::test_a_fault_after_binding_records_failure_and_allows_retry[sqlite-supervisor.after_popen]",
+    "tests/integration/execution/test_cli_lifecycle.py::test_a_hard_exit_after_binding_can_be_cancelled_without_starting_a_child[sqlite]",
+    "tests/integration/execution/test_cli_lifecycle.py::test_a_timeout_parse_fault_leaves_no_bound_attempt[sqlite]",
+    "tests/integration/execution/test_cli_lifecycle.py::test_signal_stops_the_real_cli_child_and_grandchild[sqlite-15]",
+    "tests/integration/execution/test_cli_lifecycle.py::test_signal_stops_the_real_cli_child_and_grandchild[sqlite-1]",
+    "tests/integration/execution/test_email.py::test_a_failing_or_missing_sendmail_is_named[sqlite]",
+    "tests/integration/execution/test_email.py::test_a_multiline_database_error_is_safe_in_the_subject_and_kept_in_the_body[sqlite]",
+    "tests/integration/execution/test_email.py::test_a_relay_that_cannot_be_reached_is_named[sqlite]",
+    "tests/integration/execution/test_email.py::test_alert_mistakes_fail_with_the_remedy[sqlite-params0-EMAIL_TO is required]",
+    "tests/integration/execution/test_email.py::test_alert_mistakes_fail_with_the_remedy[sqlite-params1-EMAIL_SUBJECT .* is required]",
+    "tests/integration/execution/test_email.py::test_alert_mistakes_fail_with_the_remedy[sqlite-params2-EMAIL_BODY .* is required]",
+    "tests/integration/execution/test_email.py::test_alert_mistakes_fail_with_the_remedy[sqlite-params3-EMAIL_SUBJECT uses unknown token\\\\(s\\\\) \\\\$\\\\$when]",
+    "tests/integration/execution/test_email.py::test_alert_mistakes_fail_with_the_remedy[sqlite-params4-EMAIL_ON_STATUS names unknown outcome]",
+    "tests/integration/execution/test_email.py::test_an_alert_on_other_outcomes_sends_nothing[sqlite]",
+    "tests/integration/execution/test_email.py::test_an_alert_reports_the_run_with_a_digest[sqlite]",
+    "tests/integration/execution/test_email.py::test_an_alert_through_sendmail[sqlite]",
+    "tests/integration/execution/test_email.py::test_recipient_refusal_is_recorded_on_the_alert_attempt[sqlite-bad@example.com-FAILED-0]",
+    "tests/integration/execution/test_email.py::test_recipient_refusal_is_recorded_on_the_alert_attempt[sqlite-bad@example.com|ops@example.com-SUCCESS-1]",
+    "tests/integration/execution/test_email.py::test_the_sla_email_goes_to_the_pipeline_recipients_only_when_enforced[sqlite]",
+    "tests/integration/execution/test_gates.py::test_a_failed_backfill_run_never_blocks_a_gate[sqlite]",
+    "tests/integration/execution/test_gates.py::test_a_finished_backfill_run_never_satisfies_a_gate[sqlite]",
+    "tests/integration/execution/test_gates.py::test_a_gate_told_not_to_wait_judges_a_running_upstream_at_once[sqlite]",
+    "tests/integration/execution/test_gates.py::test_a_pipeline_gate_and_what_its_successful_run_consumes[sqlite]",
+    "tests/integration/execution/test_gates.py::test_a_running_backfill_run_is_never_waited_for[sqlite]",
+    "tests/integration/execution/test_gates.py::test_a_running_upstream_is_waited_for[sqlite]",
+    "tests/integration/execution/test_gates.py::test_a_task_dependency_is_judged_on_the_upstreams_last_run_and_consumed_once[sqlite]",
+    "tests/integration/execution/test_gates.py::test_an_older_satisfying_run_does_not_count_once_a_newer_one_fails[sqlite]",
+    "tests/integration/execution/test_gates.py::test_has_data_needs_rows_written[sqlite]",
+    "tests/integration/execution/test_gates.py::test_only_the_needed_dependencies_are_checked[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_backfill_does_not_take_over_a_scheduled_run[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_backfill_never_meets_a_failure_dependency_on_another_pipeline[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_backfill_runs_once_per_date_as_of_that_date[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_backfill_stops_at_the_first_run_that_fails[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_backfill_stops_when_another_run_starts_between_dates[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_failed_task_marked_success_lets_its_dependents_run[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_forced_task_in_a_skipped_run_leaves_the_rest_to_run[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_forced_task_reopens_an_ended_run_and_ends_it_again[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_forced_task_under_an_active_run_leaves_it_open[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_marked_success_satisfies_has_data_only_with_a_row_count[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_met_sla_stays_met_when_the_run_is_ended_again_later[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_paused_pipeline_starts_nothing_until_resumed[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_plain_run_does_not_take_over_a_backfills_run[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_rerun_of_a_failed_task_leaves_what_its_failure_skipped_to_run[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_rerun_of_a_task_still_running_leaves_its_ended_run_alone[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_rerun_runs_a_task_and_what_follows_it_again[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_run_cancelled_while_it_is_ended_is_left_cancelled[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_run_marked_success_satisfies_a_downstream_gate[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_run_paused_while_it_runs_stops_starting_tasks_and_goes_on_once_resumed[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_run_skipped_on_purpose_is_recorded_and_seen_downstream[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_run_whose_tasks_were_all_skipped_ends_skipped[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_skipped_run_is_ended_for_a_single_task[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_stand_in_run_passes_gates_where_the_upstream_cannot_run[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_task_left_running_by_a_dead_process_is_released_with_stale[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_task_runs_without_its_dependencies_when_told_to[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_cancel_stops_a_running_run[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_mark_keeps_a_skipped_task_another_pipeline_consumed[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_relaxed_gates_let_a_run_through_and_record_it[sqlite-off]",
+    "tests/integration/execution/test_interventions.py::test_relaxed_gates_let_a_run_through_and_record_it[sqlite-warn]",
+    "tests/integration/execution/test_interventions.py::test_the_commands[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_the_pause_and_skip_commands[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_the_run_date_and_backfill_options[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_the_run_options[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_what_a_backfill_refuses[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_what_mark_and_cancel_refuse[sqlite]",
+    "tests/integration/execution/test_pipeline.py::test_a_failed_warehouse_connection_test_starts_no_run[sqlite]",
+    "tests/integration/execution/test_pipeline.py::test_a_pipeline_runs_in_waves_and_fails_when_a_task_fails[sqlite]",
+    "tests/integration/execution/test_pipeline.py::test_a_refused_gate_leaves_a_run_another_process_started_alone[sqlite]",
+    "tests/integration/execution/test_pipeline.py::test_a_relay_outage_does_not_prevent_data_tasks_from_running[sqlite]",
+    "tests/integration/execution/test_pipeline.py::test_a_run_is_not_ended_while_another_process_runs_one_of_its_tasks[sqlite]",
+    "tests/integration/execution/test_pipeline.py::test_a_run_the_orchestrator_ran_no_task_of_is_skipped[sqlite]",
+    "tests/integration/execution/test_pipeline.py::test_alert_failures_do_not_change_the_data_outcome[sqlite-FAILED-False]",
+    "tests/integration/execution/test_pipeline.py::test_alert_failures_do_not_change_the_data_outcome[sqlite-FAILED-True]",
+    "tests/integration/execution/test_pipeline.py::test_alert_failures_do_not_change_the_data_outcome[sqlite-SKIPPED-False]",
+    "tests/integration/execution/test_pipeline.py::test_alert_failures_do_not_change_the_data_outcome[sqlite-SKIPPED-True]",
+    "tests/integration/execution/test_pipeline.py::test_alert_failures_do_not_change_the_data_outcome[sqlite-SUCCESS-False]",
+    "tests/integration/execution/test_pipeline.py::test_alert_failures_do_not_change_the_data_outcome[sqlite-SUCCESS-True]",
+    "tests/integration/execution/test_pipeline.py::test_an_alert_only_pipeline_keeps_its_alert_outcome[sqlite-FAILED]",
+    "tests/integration/execution/test_pipeline.py::test_an_alert_only_pipeline_keeps_its_alert_outcome[sqlite-SKIPPED]",
+    "tests/integration/execution/test_pipeline.py::test_an_alert_only_pipeline_keeps_its_alert_outcome[sqlite-SUCCESS]",
+    "tests/integration/execution/test_pipeline.py::test_an_interrupted_run_is_resumed_without_repeating_finished_tasks[sqlite]",
+    "tests/integration/execution/test_pipeline.py::test_an_orchestrator_starts_runs_and_finalizes[sqlite]",
+    "tests/integration/execution/test_pipeline.py::test_an_unsatisfied_pipeline_dependency_skips_the_run[sqlite]",
+    "tests/integration/execution/test_pipeline.py::test_finalize_fails_a_task_whose_orchestrated_process_was_lost[sqlite]",
+    "tests/integration/execution/test_pipeline.py::test_finalize_reports_a_lapse_nobody_saw_while_running[sqlite]",
+    "tests/integration/execution/test_pipeline.py::test_force_runs_every_task_again[sqlite]",
+    "tests/integration/execution/test_pipeline.py::test_remote_init_names_finalize_only_when_another_run_date_is_active[sqlite]",
+    "tests/integration/execution/test_pipeline.py::test_remote_mode_refuses_a_whole_pipeline_run[sqlite]",
+    "tests/integration/execution/test_pipeline.py::test_remote_mode_refuses_rules_the_orchestrator_does_not_support[sqlite]",
+    "tests/integration/execution/test_pipeline.py::test_the_command_line[sqlite]",
+    "tests/integration/execution/test_pipeline.py::test_the_sla_is_marked_breached_while_the_run_is_still_going[sqlite]",
+    "tests/integration/execution/test_python_scripts.py::test_a_backfill_run_gives_the_date_and_neither_reads_nor_stores_an_offset[sqlite]",
+    "tests/integration/execution/test_python_scripts.py::test_a_missing_script_is_named[sqlite]",
+    "tests/integration/execution/test_python_scripts.py::test_a_script_can_use_a_fork_process_pool[sqlite]",
+    "tests/integration/execution/test_python_scripts.py::test_a_script_runs_in_the_task_process_and_resumes_from_its_offset[sqlite]",
+    "tests/integration/execution/test_python_scripts.py::test_a_script_that_needs_nothing_from_the_task[sqlite]",
+    "tests/integration/execution/test_python_scripts.py::test_a_signal_to_run_stops_the_task_process_and_records_it[sqlite-how0-15]",
+    "tests/integration/execution/test_python_scripts.py::test_a_signal_to_run_stops_the_task_process_and_records_it[sqlite-how0-1]",
+    "tests/integration/execution/test_python_scripts.py::test_a_signal_to_run_stops_the_task_process_and_records_it[sqlite-how1-15]",
+    "tests/integration/execution/test_python_scripts.py::test_a_signal_to_run_stops_the_task_process_and_records_it[sqlite-how1-1]",
+    "tests/integration/execution/test_python_scripts.py::test_a_signal_to_run_stops_the_task_process_and_records_it[sqlite-how2-15]",
+    "tests/integration/execution/test_python_scripts.py::test_a_signal_to_run_stops_the_task_process_and_records_it[sqlite-how2-1]",
+    "tests/integration/execution/test_python_scripts.py::test_a_timestamp_offset_keeps_microseconds_in_the_engine_db[sqlite]",
+    "tests/integration/execution/test_python_scripts.py::test_an_invalid_result_does_not_advance_the_offset[sqlite-False-42]",
+    "tests/integration/execution/test_python_scripts.py::test_an_invalid_result_does_not_advance_the_offset[sqlite-False-None]",
+    "tests/integration/execution/test_python_scripts.py::test_an_invalid_result_does_not_advance_the_offset[sqlite-False-[('CUSTOM', 'value')]]",
+    "tests/integration/execution/test_python_scripts.py::test_an_invalid_result_does_not_advance_the_offset[sqlite-True-42]",
+    "tests/integration/execution/test_python_scripts.py::test_an_invalid_result_does_not_advance_the_offset[sqlite-True-None]",
+    "tests/integration/execution/test_python_scripts.py::test_an_invalid_result_does_not_advance_the_offset[sqlite-True-[('CUSTOM', 'value')]]",
+    "tests/integration/execution/test_python_scripts.py::test_an_invalid_result_is_recorded_as_a_failed_attempt[sqlite]",
+    "tests/integration/execution/test_python_scripts.py::test_an_offset_keeps_its_type[sqlite]",
+    "tests/integration/execution/test_python_scripts.py::test_http_request_logs_do_not_expose_query_keys_in_attempt_log[sqlite]",
+    "tests/integration/execution/test_python_scripts.py::test_result_variables_accept_a_mapping_besides_a_dictionary[sqlite]",
+    "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[sqlite-def run(a, b):\\n    pass\\n-params7-run takes 2 arguments; it takes the task, or nothing]",
+    "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[sqlite-def run(task):\\n    pass\\n-params10-SCRIPT_NAME is required]",
+    "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[sqlite-def run(task):\\n    pass\\n-params8-must be a JSON object]",
+    "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[sqlite-def run(task):\\n    pass\\n-params9-INPUT_PARAMS is not valid JSON]",
+    "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[sqlite-def run(task):\\n    raise KeyError('id')\\n-params2-load.py failed: KeyError: 'id']",
+    "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[sqlite-def run(task):\\n    return 5\\n-params4-load.py returned int, not a ScriptResult]",
+    "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[sqlite-def run(task:\\n-params1-importing it failed: SyntaxError]",
+    "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[sqlite-from etl_craft.scripting import Offset, ScriptResult\\ndef run(task):\\n    return ScriptResult(-1)\\n-params6-returned row_count=-1]",
+    "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[sqlite-from etl_craft.scripting import Offset, ScriptResult\\ndef run(task):\\n    return ScriptResult(True)\\n-params5-load.py returned row_count=True; it must be a whole number, 0 or more]",
+    "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[sqlite-import sys\\ndef run(task):\\n    sys.exit(3)\\n-params3-load.py called sys.exit\\\\(3\\\\)]",
+    "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[sqlite-x = 1\\n-params0-SCRIPT_NAME='load.py' defines no run\\\\(task\\\\) function]",
+    "tests/integration/execution/test_python_scripts.py::test_scripts_have_real_module_semantics[sqlite-dataclass]",
+    "tests/integration/execution/test_python_scripts.py::test_scripts_have_real_module_semantics[sqlite-enum]",
+    "tests/integration/execution/test_python_scripts.py::test_scripts_have_real_module_semantics[sqlite-future-dataclass]",
+    "tests/integration/execution/test_python_scripts.py::test_scripts_have_real_module_semantics[sqlite-pickle-class]",
+    "tests/integration/execution/test_python_scripts.py::test_scripts_have_real_module_semantics[sqlite-type-hints]",
+    "tests/integration/execution/test_python_scripts.py::test_the_task_process_exits_once_its_outcome_is_recorded[sqlite]",
+    "tests/integration/execution/test_python_scripts.py::test_what_a_script_printed_is_kept_when_it_is_stopped[sqlite]",
+    "tests/integration/execution/test_runner.py::test_a_bad_time_limit_fails_before_the_task_is_bound[sqlite]",
+    "tests/integration/execution/test_runner.py::test_a_failed_task_is_never_rewritten_as_skipped[sqlite]",
+    "tests/integration/execution/test_runner.py::test_a_handler_error_fails_the_task_with_its_message[sqlite]",
+    "tests/integration/execution/test_runner.py::test_a_retry_is_a_new_attempt_on_the_same_row_with_its_own_log[sqlite]",
+    "tests/integration/execution/test_runner.py::test_a_settled_task_is_not_run_again_unless_forced[sqlite]",
+    "tests/integration/execution/test_runner.py::test_a_task_in_progress_is_not_started_twice[sqlite]",
+    "tests/integration/execution/test_runner.py::test_a_task_process_that_cannot_start_is_recorded_failed[sqlite]",
+    "tests/integration/execution/test_runner.py::test_a_task_process_that_ends_without_an_outcome_is_recorded_failed[sqlite-exits-exited with code 3]",
+    "tests/integration/execution/test_runner.py::test_a_task_process_that_ends_without_an_outcome_is_recorded_failed[sqlite-killed-was killed by signal SIGKILL]",
+    "tests/integration/execution/test_runner.py::test_a_task_process_that_ends_without_an_outcome_is_recorded_failed[sqlite-slow-timed out after 2s and was killed]",
+    "tests/integration/execution/test_runner.py::test_a_task_succeeds_and_records_its_counts_and_output[sqlite]",
+    "tests/integration/execution/test_runner.py::test_a_task_waits_for_its_dependencies_and_is_skipped_when_they_can_never_be_met[sqlite]",
+    "tests/integration/execution/test_runner.py::test_an_unexpected_error_fails_the_task_with_its_traceback_in_the_log[sqlite]",
+    "tests/integration/execution/test_runner.py::test_errors_before_running[sqlite]",
+    "tests/integration/execution/test_runner.py::test_recording_an_outcome_survives_a_dropped_connection[sqlite]",
+    "tests/integration/execution/test_runner.py::test_reported_values_are_listed_in_the_task_log[sqlite]",
+    "tests/integration/execution/test_runner.py::test_the_cross_pipeline_gate_decides_a_task_with_dependencies_elsewhere[sqlite]"
+  ],
+  "started_at": "2026-10-04T14:19:15+00:00",
+  "finished_at": "2026-10-04T14:20:38+00:00",
+  "exit_status": 0,
+  "counts": {
+    "passed": 357,
+    "skipped": 0,
+    "xfailed": 0,
+    "xpassed": 0,
+    "failed": 0,
+    "error": 0
+  },
+  "tests": [
+    {
+      "nodeid": "tests/integration/engine/test_catalog.py::test_a_folder_that_holds_other_files_is_refused[sqlite]",
+      "outcome": "passed",
+      "duration": 0.056
+    },
+    {
+      "nodeid": "tests/integration/engine/test_catalog.py::test_a_pipeline_page_lists_what_operators_changed_in_its_last_run[sqlite]",
+      "outcome": "passed",
+      "duration": 0.099
+    },
+    {
+      "nodeid": "tests/integration/engine/test_catalog.py::test_a_tables_graph_runs_to_the_first_source_and_the_last_consumer[sqlite]",
+      "outcome": "passed",
+      "duration": 0.029
+    },
+    {
+      "nodeid": "tests/integration/engine/test_catalog.py::test_every_page_chains_to_what_it_mentions[sqlite]",
+      "outcome": "passed",
+      "duration": 0.033
+    },
+    {
+      "nodeid": "tests/integration/engine/test_catalog.py::test_runs_have_pages_with_what_they_were_built_from_and_used_by[sqlite]",
+      "outcome": "passed",
+      "duration": 0.035
+    },
+    {
+      "nodeid": "tests/integration/engine/test_catalog.py::test_the_catalog_joins_tasks_tables_and_rules[sqlite]",
+      "outcome": "passed",
+      "duration": 0.066
+    },
+    {
+      "nodeid": "tests/integration/engine/test_catalog.py::test_the_command[sqlite]",
+      "outcome": "passed",
+      "duration": 0.526
+    },
+    {
+      "nodeid": "tests/integration/engine/test_catalog.py::test_the_site_has_a_page_per_asset_and_a_search_index[sqlite]",
+      "outcome": "passed",
+      "duration": 0.036
+    },
+    {
+      "nodeid": "tests/integration/engine/test_catalog.py::test_warehouse_columns_add_types[sqlite]",
+      "outcome": "passed",
+      "duration": 0.074
+    },
+    {
+      "nodeid": "tests/integration/engine/test_catalog_upgrade.py::test_backfill_constraint_failure_rolls_back_catalog_and_history[sqlite]",
+      "outcome": "passed",
+      "duration": 0.073
+    },
+    {
+      "nodeid": "tests/integration/engine/test_catalog_upgrade.py::test_backfill_constraint_preserves_history_references_objects_and_counter[sqlite]",
+      "outcome": "passed",
+      "duration": 0.069
+    },
+    {
+      "nodeid": "tests/integration/engine/test_catalog_upgrade.py::test_backfill_constraint_preserves_or_refuses_extra_columns[sqlite]",
+      "outcome": "passed",
+      "duration": 0.021
+    },
+    {
+      "nodeid": "tests/integration/engine/test_catalog_upgrade.py::test_full_catalog_matches_fresh_initialization[sqlite-0.1.0]",
+      "outcome": "passed",
+      "duration": 0.088
+    },
+    {
+      "nodeid": "tests/integration/engine/test_cli_commands.py::test_an_explicit_config_and_migrations_dir",
+      "outcome": "passed",
+      "duration": 0.023
+    },
+    {
+      "nodeid": "tests/integration/engine/test_cli_commands.py::test_init_db_then_migrate",
+      "outcome": "passed",
+      "duration": 0.028
+    },
+    {
+      "nodeid": "tests/integration/engine/test_cli_commands.py::test_init_db_twice_is_an_engine_db_error",
+      "outcome": "passed",
+      "duration": 0.025
+    },
+    {
+      "nodeid": "tests/integration/engine/test_clone_command.py::test_the_command_copies_the_scope_and_says_what_it_did[sqlite]",
+      "outcome": "passed",
+      "duration": 0.14
+    },
+    {
+      "nodeid": "tests/integration/engine/test_clone_command.py::test_the_command_says_when_cloning_is_off[sqlite-cloning0]",
+      "outcome": "passed",
+      "duration": 0.018
+    },
+    {
+      "nodeid": "tests/integration/engine/test_clone_command.py::test_the_command_says_when_cloning_is_off[sqlite-cloning1]",
+      "outcome": "passed",
+      "duration": 0.018
+    },
+    {
+      "nodeid": "tests/integration/engine/test_dialects.py::test_a_lock_excludes_other_holders_and_times_out[sqlite]",
+      "outcome": "passed",
+      "duration": 0.311
+    },
+    {
+      "nodeid": "tests/integration/engine/test_dialects.py::test_a_lock_is_released_when_its_holder_raises[sqlite]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/integration/engine/test_dialects.py::test_the_engine_url_names_the_database_but_never_the_secret[sqlite]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_doctor_setup.py::test_a_project_migration_is_pending_until_setup_applies_it[sqlite]",
+      "outcome": "passed",
+      "duration": 0.095
+    },
+    {
+      "nodeid": "tests/integration/engine/test_doctor_setup.py::test_an_engine_db_that_cannot_be_reached_is_one_failed_check[sqlite]",
+      "outcome": "passed",
+      "duration": 0.021
+    },
+    {
+      "nodeid": "tests/integration/engine/test_doctor_setup.py::test_docs_site_publishing_is_only_warned_about[sqlite]",
+      "outcome": "passed",
+      "duration": 0.039
+    },
+    {
+      "nodeid": "tests/integration/engine/test_doctor_setup.py::test_email_secrets_auth_and_sendmail[sqlite]",
+      "outcome": "passed",
+      "duration": 0.052
+    },
+    {
+      "nodeid": "tests/integration/engine/test_doctor_setup.py::test_every_problem_is_reported_not_only_the_first[sqlite]",
+      "outcome": "passed",
+      "duration": 0.005
+    },
+    {
+      "nodeid": "tests/integration/engine/test_doctor_setup.py::test_relaxed_dependency_gates_are_warned_about[sqlite]",
+      "outcome": "passed",
+      "duration": 0.056
+    },
+    {
+      "nodeid": "tests/integration/engine/test_doctor_setup.py::test_setup_changes_nothing_when_a_check_fails[sqlite]",
+      "outcome": "passed",
+      "duration": 0.024
+    },
+    {
+      "nodeid": "tests/integration/engine/test_doctor_setup.py::test_setup_creates_the_engine_db_then_changes_nothing[sqlite]",
+      "outcome": "passed",
+      "duration": 0.112
+    },
+    {
+      "nodeid": "tests/integration/engine/test_doctor_setup.py::test_the_commands",
+      "outcome": "passed",
+      "duration": 0.057
+    },
+    {
+      "nodeid": "tests/integration/engine/test_engine_schema.py::test_sqlite_needs_no_schema_of_its_own",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/integration/engine/test_generate_yml.py::test_a_pipeline_becomes_one_dag[sqlite]",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/integration/engine/test_generate_yml.py::test_an_environment_without_schedules[sqlite]",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/integration/engine/test_generate_yml.py::test_remote_mode_names_each_rule_it_cannot_apply[sqlite-UPDATE CFG_PIPELINE_DEPENDENCY SET DEPENDENCY_TYPE = 'HAS_DATA'-SALES-depends on pipeline UP with DEPENDENCY_TYPE = 'HAS_DATA']",
+      "outcome": "passed",
+      "duration": 0.016
+    },
+    {
+      "nodeid": "tests/integration/engine/test_generate_yml.py::test_remote_mode_names_each_rule_it_cannot_apply[sqlite-UPDATE CFG_TASKS SET RUN_CONDITION = 'N', RUN_CONDITION_COUNT = 1 WHERE TASK_CODE = 'load'-SALES.load-RUN_CONDITION = 'N' (RUN_CONDITION_COUNT = 1)]",
+      "outcome": "passed",
+      "duration": 0.016
+    },
+    {
+      "nodeid": "tests/integration/engine/test_generate_yml.py::test_remote_mode_names_each_rule_it_cannot_apply[sqlite-UPDATE CFG_TASK_DEPENDENCY SET DEPENDENCY_TYPE = 'HAS_DATA' WHERE DEPENDS_ON_PIPELINE_ID <> PIPELINE_ID-SALES.load-depends on UP.publish with DEPENDENCY_TYPE = 'HAS_DATA']",
+      "outcome": "passed",
+      "duration": 0.016
+    },
+    {
+      "nodeid": "tests/integration/engine/test_generate_yml.py::test_remote_mode_puts_every_rule_in_the_dag[sqlite]",
+      "outcome": "passed",
+      "duration": 0.02
+    },
+    {
+      "nodeid": "tests/integration/engine/test_generate_yml.py::test_the_command_writes_yaml[sqlite]",
+      "outcome": "passed",
+      "duration": 0.056
+    },
+    {
+      "nodeid": "tests/integration/engine/test_generate_yml.py::test_the_docs_dag_writes_the_catalog_again_on_its_schedule[sqlite]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/integration/engine/test_generate_yml.py::test_the_global_dag[sqlite]",
+      "outcome": "passed",
+      "duration": 0.012
+    },
+    {
+      "nodeid": "tests/integration/engine/test_generate_yml.py::test_the_global_dag_in_remote_mode_needs_one_type_per_pipeline[sqlite]",
+      "outcome": "passed",
+      "duration": 0.018
+    },
+    {
+      "nodeid": "tests/integration/engine/test_inspect_commands.py::test_graph[sqlite]",
+      "outcome": "passed",
+      "duration": 0.027
+    },
+    {
+      "nodeid": "tests/integration/engine/test_inspect_commands.py::test_history[sqlite]",
+      "outcome": "passed",
+      "duration": 0.047
+    },
+    {
+      "nodeid": "tests/integration/engine/test_inspect_commands.py::test_list[sqlite]",
+      "outcome": "passed",
+      "duration": 0.039
+    },
+    {
+      "nodeid": "tests/integration/engine/test_inspect_commands.py::test_steps[sqlite]",
+      "outcome": "passed",
+      "duration": 0.025
+    },
+    {
+      "nodeid": "tests/integration/engine/test_inspect_commands.py::test_unknown_codes_and_limits_are_named[sqlite]",
+      "outcome": "passed",
+      "duration": 0.043
+    },
+    {
+      "nodeid": "tests/integration/engine/test_lineage_commands.py::test_a_column_is_traced_to_its_first_sources_and_last_consumers[sqlite]",
+      "outcome": "passed",
+      "duration": 0.049
+    },
+    {
+      "nodeid": "tests/integration/engine/test_lineage_commands.py::test_catalog_and_parser_changes_invalidate_stored_lineage[sqlite]",
+      "outcome": "passed",
+      "duration": 0.055
+    },
+    {
+      "nodeid": "tests/integration/engine/test_lineage_commands.py::test_docs_version_records_a_version_only_when_the_text_changes[sqlite]",
+      "outcome": "passed",
+      "duration": 0.048
+    },
+    {
+      "nodeid": "tests/integration/engine/test_lineage_commands.py::test_lineage_is_stored_and_worked_out_again_only_when_the_sql_changes[sqlite]",
+      "outcome": "passed",
+      "duration": 0.034
+    },
+    {
+      "nodeid": "tests/integration/engine/test_lineage_commands.py::test_the_summary_lists_every_task_and_what_cannot_be_traced[sqlite]",
+      "outcome": "passed",
+      "duration": 0.043
+    },
+    {
+      "nodeid": "tests/integration/engine/test_lineage_commands.py::test_usage_mistakes[sqlite]",
+      "outcome": "passed",
+      "duration": 0.037
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_a_failed_metadata_rebuild_rolls_back_and_restores_connection_settings[sqlite]",
+      "outcome": "passed",
+      "duration": 0.029
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_custom_metadata_columns_are_preserved_or_refused_before_rebuild[sqlite]",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_database_refuses_embedded_nul_codes[sqlite]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-pipeline-1load]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-pipeline-P\\n]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-pipeline-__finalize__]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-pipeline-__init__]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-pipeline-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-pipeline-load $(touch x); echo]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-pipeline-task-name]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-task-1load]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-task-P\\n]",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-task-__finalize__]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-task-__init__]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-task-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-task-load $(touch x); echo]",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes[sqlite-task-task-name]",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_generated_dags_have_controls_and_no_self_dependency[sqlite-local-0]",
+      "outcome": "passed",
+      "duration": 0.012
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_generated_dags_have_controls_and_no_self_dependency[sqlite-local-10]",
+      "outcome": "passed",
+      "duration": 0.021
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_generated_dags_have_controls_and_no_self_dependency[sqlite-local-1]",
+      "outcome": "passed",
+      "duration": 0.012
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_generated_dags_have_controls_and_no_self_dependency[sqlite-local-2]",
+      "outcome": "passed",
+      "duration": 0.012
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_generated_dags_have_controls_and_no_self_dependency[sqlite-local-5]",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_generated_dags_have_controls_and_no_self_dependency[sqlite-remote-0]",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_generated_dags_have_controls_and_no_self_dependency[sqlite-remote-10]",
+      "outcome": "passed",
+      "duration": 0.017
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_generated_dags_have_controls_and_no_self_dependency[sqlite-remote-1]",
+      "outcome": "passed",
+      "duration": 0.012
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_generated_dags_have_controls_and_no_self_dependency[sqlite-remote-2]",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_generated_dags_have_controls_and_no_self_dependency[sqlite-remote-5]",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_generation_refuses_legacy_codes_even_without_database_checks[sqlite-pipeline-local]",
+      "outcome": "passed",
+      "duration": 0.013
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_generation_refuses_legacy_codes_even_without_database_checks[sqlite-pipeline-remote]",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_generation_refuses_legacy_codes_even_without_database_checks[sqlite-task-local]",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_generation_refuses_legacy_codes_even_without_database_checks[sqlite-task-remote]",
+      "outcome": "passed",
+      "duration": 0.012
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_migration_lists_all_invalid_codes_before_changing_anything[sqlite]",
+      "outcome": "passed",
+      "duration": 0.06
+    },
+    {
+      "nodeid": "tests/integration/engine/test_metadata_codes.py::test_upgrade_preserves_metadata_references_identity_counters_and_custom_index[sqlite]",
+      "outcome": "passed",
+      "duration": 0.025
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_a_folder_without_a_site_is_refused[sqlite]",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_directory_index_links_outside_the_site_are_refused[sqlite]",
+      "outcome": "passed",
+      "duration": 0.531
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused[sqlite-/%2e%2e/-GET]",
+      "outcome": "passed",
+      "duration": 0.525
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused[sqlite-/%2e%2e/-HEAD]",
+      "outcome": "passed",
+      "duration": 0.525
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused[sqlite-/%2eetl-craft-catalog-GET]",
+      "outcome": "passed",
+      "duration": 0.524
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused[sqlite-/%2eetl-craft-catalog-HEAD]",
+      "outcome": "passed",
+      "duration": 0.528
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused[sqlite-/%2ex-GET]",
+      "outcome": "passed",
+      "duration": 0.529
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused[sqlite-/%2ex-HEAD]",
+      "outcome": "passed",
+      "duration": 0.525
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused[sqlite-/.x-GET]",
+      "outcome": "passed",
+      "duration": 0.523
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused[sqlite-/.x-HEAD]",
+      "outcome": "passed",
+      "duration": 0.525
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused[sqlite-/a/../.x-GET]",
+      "outcome": "passed",
+      "duration": 0.529
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused[sqlite-/a/../.x-HEAD]",
+      "outcome": "passed",
+      "duration": 0.532
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused[sqlite-/assets/%2e%2e/.x-GET]",
+      "outcome": "passed",
+      "duration": 0.528
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused[sqlite-/assets/%2e%2e/.x-HEAD]",
+      "outcome": "passed",
+      "duration": 0.526
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_links_outside_the_site_are_refused_for_get_and_head[sqlite]",
+      "outcome": "passed",
+      "duration": 0.528
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_ngrok_problems_say_what_to_do_and_never_show_the_token[sqlite]",
+      "outcome": "passed",
+      "duration": 2.021
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_only_allowed_visitors_are_served[sqlite]",
+      "outcome": "passed",
+      "duration": 1.529
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_publishing_through_ngrok_keeps_its_link[sqlite]",
+      "outcome": "passed",
+      "duration": 2.018
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_the_command[sqlite]",
+      "outcome": "passed",
+      "duration": 0.533
+    },
+    {
+      "nodeid": "tests/integration/engine/test_publish_docs.py::test_the_site_is_served_privately[sqlite]",
+      "outcome": "passed",
+      "duration": 0.524
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_a_run_is_found_or_started[sqlite]",
+      "outcome": "passed",
+      "duration": 0.02
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_a_single_task_needs_a_run_to_bind_to[sqlite]",
+      "outcome": "passed",
+      "duration": 0.016
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_a_task_run_row_is_bound_once_and_retried_in_place[sqlite]",
+      "outcome": "passed",
+      "duration": 0.021
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_an_ended_run_is_not_ended_again_and_keeps_its_sla[sqlite]",
+      "outcome": "passed",
+      "duration": 0.02
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_an_ended_run_is_reopened_only_with_force[sqlite]",
+      "outcome": "passed",
+      "duration": 0.021
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_business_rules[sqlite]",
+      "outcome": "passed",
+      "duration": 0.02
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_concurrent_binds_share_one_row[sqlite]",
+      "outcome": "passed",
+      "duration": 0.022
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_concurrent_starts_share_one_run[sqlite]",
+      "outcome": "passed",
+      "duration": 0.024
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_creating_a_run_never_hands_back_another_processs_run[sqlite]",
+      "outcome": "passed",
+      "duration": 0.021
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_dependency_edges_for_the_gates[sqlite]",
+      "outcome": "passed",
+      "duration": 0.018
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_failure_watch_reads_the_latest_error[sqlite]",
+      "outcome": "passed",
+      "duration": 0.019
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_finalizing_a_run_judges_its_sla[sqlite-1-2.0-MET]",
+      "outcome": "passed",
+      "duration": 0.021
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_finalizing_a_run_judges_its_sla[sqlite-1-None-None]",
+      "outcome": "passed",
+      "duration": 0.017
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_finalizing_a_run_judges_its_sla[sqlite-3-2.0-BREACHED]",
+      "outcome": "passed",
+      "duration": 0.018
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_force_cannot_reopen_a_cancelled_run[sqlite]",
+      "outcome": "passed",
+      "duration": 0.017
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_inactive_tasks_in_the_pipeline_graph[sqlite]",
+      "outcome": "passed",
+      "duration": 0.019
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_losing_the_race_to_bind_a_task_reads_back_the_winner[sqlite]",
+      "outcome": "passed",
+      "duration": 0.017
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_losing_the_race_to_start_a_run_reads_back_the_winner[sqlite]",
+      "outcome": "passed",
+      "duration": 0.019
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_pipeline_detail_reads_its_json_parameters[sqlite]",
+      "outcome": "passed",
+      "duration": 0.019
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_resolve_pipeline_id[sqlite]",
+      "outcome": "passed",
+      "duration": 0.02
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_resolve_task_id[sqlite]",
+      "outcome": "passed",
+      "duration": 0.021
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_run_state_and_statuses[sqlite]",
+      "outcome": "passed",
+      "duration": 0.019
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_task_details_and_parameters[sqlite]",
+      "outcome": "passed",
+      "duration": 0.021
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_the_other_tasks_writing_a_target[sqlite]",
+      "outcome": "passed",
+      "duration": 0.019
+    },
+    {
+      "nodeid": "tests/integration/engine/test_repository.py::test_the_pipeline_graph[sqlite]",
+      "outcome": "passed",
+      "duration": 0.022
+    },
+    {
+      "nodeid": "tests/integration/engine/test_rule_flag_batches.py::test_a_later_batch_failure_rolls_back_flags_and_rule_completion[sqlite]",
+      "outcome": "passed",
+      "duration": 0.046
+    },
+    {
+      "nodeid": "tests/integration/engine/test_rule_flag_batches.py::test_clearing_flags_at_the_statement_budget[sqlite-0]",
+      "outcome": "passed",
+      "duration": 0.018
+    },
+    {
+      "nodeid": "tests/integration/engine/test_rule_flag_batches.py::test_clearing_flags_at_the_statement_budget[sqlite-1000]",
+      "outcome": "passed",
+      "duration": 0.044
+    },
+    {
+      "nodeid": "tests/integration/engine/test_rule_flag_batches.py::test_clearing_flags_at_the_statement_budget[sqlite-1001]",
+      "outcome": "passed",
+      "duration": 0.035
+    },
+    {
+      "nodeid": "tests/integration/engine/test_rule_flag_batches.py::test_tens_of_thousands_of_flags_can_be_cleared[sqlite]",
+      "outcome": "passed",
+      "duration": 0.878
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_a_retired_code_can_be_reused_but_not_two_active_ones[sqlite]",
+      "outcome": "passed",
+      "duration": 0.013
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_a_same_pipeline_dependency_fills_in_its_pipeline[sqlite]",
+      "outcome": "passed",
+      "duration": 0.012
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_audit_columns_are_stamped_and_creation_never_changes[sqlite]",
+      "outcome": "passed",
+      "duration": 0.032
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_duration_seconds[sqlite]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_every_handler_is_accepted[sqlite]",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_existing_tables_is_empty_before_the_schema[sqlite]",
+      "outcome": "passed",
+      "duration": 0.012
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_foreign_keys_are_enforced[sqlite]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_one_in_progress_run_per_pipeline[sqlite]",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_one_task_run_row_per_task_per_pipeline_run[sqlite]",
+      "outcome": "passed",
+      "duration": 0.012
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_pipeline_parameters_hold_json[sqlite]",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_refresh_type_and_business_rule_type_lists[sqlite]",
+      "outcome": "passed",
+      "duration": 0.012
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_run_condition_and_count[sqlite-ALL-None-True]",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_run_condition_and_count[sqlite-ANY-2-False]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_run_condition_and_count[sqlite-ANY-None-True]",
+      "outcome": "passed",
+      "duration": 0.012
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_run_condition_and_count[sqlite-MOST-None-False]",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_run_condition_and_count[sqlite-N-0-False]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_run_condition_and_count[sqlite-N-2-True]",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_run_condition_and_count[sqlite-N-None-False]",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_run_condition_and_count[sqlite-None-2-False]",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_run_condition_and_count[sqlite-None-None-True]",
+      "outcome": "passed",
+      "duration": 0.012
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_self_dependencies_are_refused[sqlite]",
+      "outcome": "passed",
+      "duration": 0.012
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_sla_status_is_met_or_breached[sqlite]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_task_values_outside_their_lists_are_refused[sqlite-ACTIVE_FLAG-X]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_task_values_outside_their_lists_are_refused[sqlite-HANDLER-BOGUS]",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_task_values_outside_their_lists_are_refused[sqlite-TASK_TYPE-LOAD]",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_the_consumption_log_holds_one_kind_of_dependency_per_row[sqlite]",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_the_migration_ledger[sqlite-ENGINE-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-False]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_the_migration_ledger[sqlite-ENGINE-None-False]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_the_migration_ledger[sqlite-ENGINE-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-False]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_the_migration_ledger[sqlite-ENGINE-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-True]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_the_migration_ledger[sqlite-LEGACY-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-False]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_the_migration_ledger[sqlite-PROJECT-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef-True]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_the_offset_type_list[sqlite]",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_the_schema_creates_every_table[sqlite]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema.py::test_the_schema_is_all_or_nothing[sqlite]",
+      "outcome": "passed",
+      "duration": 0.013
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_a_failing_file_rolls_back_with_its_record_and_stops_the_run[sqlite]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_a_missing_applied_file_is_refused[sqlite]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_an_edited_applied_file_is_refused_before_anything_runs[sqlite]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_applied_project_files_need_the_project_directory[sqlite]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_concurrent_runs_apply_each_file_once[sqlite]",
+      "outcome": "passed",
+      "duration": 0.112
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_init_db_creates_the_schema[sqlite]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_init_db_records_the_packaged_migrations_it_includes[sqlite]",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_init_db_refuses_a_database_that_already_has_the_schema[sqlite]",
+      "outcome": "passed",
+      "duration": 0.016
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_initialization_checks_existing_tables_only_while_holding_the_lock[sqlite]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_initialization_rolls_back_schema_and_ledger_when_recording_fails[sqlite]",
+      "outcome": "passed",
+      "duration": 0.018
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_migrate_applies_engine_then_project_files_in_order[sqlite]",
+      "outcome": "passed",
+      "duration": 0.013
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_migrate_on_a_database_without_the_schema[sqlite]",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_migrate_with_nothing_pending[sqlite]",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_sql_is_run_as_written[sqlite]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_schema_and_migrations.py::test_the_same_filename_in_both_streams_is_two_migrations[sqlite]",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_sqlite_transactions.py::test_a_run_started_in_a_transaction_that_fails_is_not_left_in_progress",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_sqlite_transactions.py::test_a_savepoint_that_is_the_first_write_rolls_back_with_its_transaction",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_sqlite_transactions.py::test_ddl_rolls_back_with_its_transaction",
+      "outcome": "passed",
+      "duration": 0.01
+    },
+    {
+      "nodeid": "tests/integration/engine/test_sqlite_transactions.py::test_transactions_that_read_then_write_wait_for_each_other",
+      "outcome": "passed",
+      "duration": 0.016
+    },
+    {
+      "nodeid": "tests/integration/engine/test_upgrade.py::test_an_earlier_engine_db_upgrades_to_the_current_schema[sqlite-0.1.0]",
+      "outcome": "passed",
+      "duration": 0.027
+    },
+    {
+      "nodeid": "tests/integration/engine/test_validate.py::test_a_clean_project_has_no_findings[sqlite]",
+      "outcome": "passed",
+      "duration": 0.019
+    },
+    {
+      "nodeid": "tests/integration/engine/test_validate.py::test_a_cycle_inside_a_pipeline[sqlite]",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/integration/engine/test_validate.py::test_an_alert_that_only_watches_for_failures_may_run_mid_run[sqlite]",
+      "outcome": "passed",
+      "duration": 0.017
+    },
+    {
+      "nodeid": "tests/integration/engine/test_validate.py::test_dependencies_and_pipeline_settings[sqlite]",
+      "outcome": "passed",
+      "duration": 0.022
+    },
+    {
+      "nodeid": "tests/integration/engine/test_validate.py::test_remote_mode_fails_the_rules_its_orchestrator_does_not_support[sqlite]",
+      "outcome": "passed",
+      "duration": 0.02
+    },
+    {
+      "nodeid": "tests/integration/engine/test_validate.py::test_task_definitions_are_checked_with_the_handlers_own_rules[sqlite]",
+      "outcome": "passed",
+      "duration": 0.024
+    },
+    {
+      "nodeid": "tests/integration/engine/test_validate.py::test_the_command[sqlite]",
+      "outcome": "passed",
+      "duration": 0.042
+    },
+    {
+      "nodeid": "tests/integration/execution/test_admission.py::test_a_fault_between_run_creation_and_skipping_rolls_back[sqlite]",
+      "outcome": "passed",
+      "duration": 1.402
+    },
+    {
+      "nodeid": "tests/integration/execution/test_admission.py::test_simultaneous_initializers_leave_one_active_run[sqlite]",
+      "outcome": "passed",
+      "duration": 0.017
+    },
+    {
+      "nodeid": "tests/integration/execution/test_child.py::test_a_failing_handler_records_failed[sqlite-breaks-16-KeyError: 'missing']",
+      "outcome": "passed",
+      "duration": 0.016
+    },
+    {
+      "nodeid": "tests/integration/execution/test_child.py::test_a_failing_handler_records_failed[sqlite-fails-15-nothing to load]",
+      "outcome": "passed",
+      "duration": 0.017
+    },
+    {
+      "nodeid": "tests/integration/execution/test_child.py::test_a_successful_handler_records_success[sqlite]",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/integration/execution/test_child.py::test_an_unknown_task_run[sqlite]",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/integration/execution/test_child.py::test_the_command_line_records_a_handler_failure[sqlite]",
+      "outcome": "passed",
+      "duration": 0.248
+    },
+    {
+      "nodeid": "tests/integration/execution/test_child.py::test_the_context_is_rebuilt_from_the_task_run[sqlite]",
+      "outcome": "passed",
+      "duration": 0.016
+    },
+    {
+      "nodeid": "tests/integration/execution/test_cli_lifecycle.py::test_a_child_failure_after_recording_success_keeps_the_recorded_outcome[sqlite-:kill]",
+      "outcome": "passed",
+      "duration": 1.137
+    },
+    {
+      "nodeid": "tests/integration/execution/test_cli_lifecycle.py::test_a_child_failure_after_recording_success_keeps_the_recorded_outcome[sqlite-]",
+      "outcome": "passed",
+      "duration": 1.186
+    },
+    {
+      "nodeid": "tests/integration/execution/test_cli_lifecycle.py::test_a_fault_after_binding_records_failure_and_allows_retry[sqlite-runner.after_bind]",
+      "outcome": "passed",
+      "duration": 1.918
+    },
+    {
+      "nodeid": "tests/integration/execution/test_cli_lifecycle.py::test_a_fault_after_binding_records_failure_and_allows_retry[sqlite-supervisor.after_mkdir]",
+      "outcome": "passed",
+      "duration": 2.069
+    },
+    {
+      "nodeid": "tests/integration/execution/test_cli_lifecycle.py::test_a_fault_after_binding_records_failure_and_allows_retry[sqlite-supervisor.after_popen]",
+      "outcome": "passed",
+      "duration": 1.918
+    },
+    {
+      "nodeid": "tests/integration/execution/test_cli_lifecycle.py::test_a_hard_exit_after_binding_can_be_cancelled_without_starting_a_child[sqlite]",
+      "outcome": "passed",
+      "duration": 1.666
+    },
+    {
+      "nodeid": "tests/integration/execution/test_cli_lifecycle.py::test_a_timeout_parse_fault_leaves_no_bound_attempt[sqlite]",
+      "outcome": "passed",
+      "duration": 1.251
+    },
+    {
+      "nodeid": "tests/integration/execution/test_cli_lifecycle.py::test_signal_stops_the_real_cli_child_and_grandchild[sqlite-15]",
+      "outcome": "passed",
+      "duration": 1.893
+    },
+    {
+      "nodeid": "tests/integration/execution/test_cli_lifecycle.py::test_signal_stops_the_real_cli_child_and_grandchild[sqlite-1]",
+      "outcome": "passed",
+      "duration": 1.961
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_a_failing_or_missing_sendmail_is_named[sqlite]",
+      "outcome": "passed",
+      "duration": 0.032
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_a_multiline_database_error_is_safe_in_the_subject_and_kept_in_the_body[sqlite]",
+      "outcome": "passed",
+      "duration": 0.055
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_a_relay_that_cannot_be_reached_is_named[sqlite]",
+      "outcome": "passed",
+      "duration": 0.016
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_alert_mistakes_fail_with_the_remedy[sqlite-params0-EMAIL_TO is required]",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_alert_mistakes_fail_with_the_remedy[sqlite-params1-EMAIL_SUBJECT .* is required]",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_alert_mistakes_fail_with_the_remedy[sqlite-params2-EMAIL_BODY .* is required]",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_alert_mistakes_fail_with_the_remedy[sqlite-params3-EMAIL_SUBJECT uses unknown token\\\\(s\\\\) \\\\$\\\\$when]",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_alert_mistakes_fail_with_the_remedy[sqlite-params4-EMAIL_ON_STATUS names unknown outcome]",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_an_alert_on_other_outcomes_sends_nothing[sqlite]",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_an_alert_reports_the_run_with_a_digest[sqlite]",
+      "outcome": "passed",
+      "duration": 0.043
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_an_alert_through_sendmail[sqlite]",
+      "outcome": "passed",
+      "duration": 0.032
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_recipient_refusal_is_recorded_on_the_alert_attempt[sqlite-bad@example.com-FAILED-0]",
+      "outcome": "passed",
+      "duration": 0.497
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_recipient_refusal_is_recorded_on_the_alert_attempt[sqlite-bad@example.com|ops@example.com-SUCCESS-1]",
+      "outcome": "passed",
+      "duration": 0.535
+    },
+    {
+      "nodeid": "tests/integration/execution/test_email.py::test_the_sla_email_goes_to_the_pipeline_recipients_only_when_enforced[sqlite]",
+      "outcome": "passed",
+      "duration": 0.023
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gates.py::test_a_failed_backfill_run_never_blocks_a_gate[sqlite]",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gates.py::test_a_finished_backfill_run_never_satisfies_a_gate[sqlite]",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gates.py::test_a_gate_told_not_to_wait_judges_a_running_upstream_at_once[sqlite]",
+      "outcome": "passed",
+      "duration": 0.013
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gates.py::test_a_pipeline_gate_and_what_its_successful_run_consumes[sqlite]",
+      "outcome": "passed",
+      "duration": 0.016
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gates.py::test_a_running_backfill_run_is_never_waited_for[sqlite]",
+      "outcome": "passed",
+      "duration": 0.017
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gates.py::test_a_running_upstream_is_waited_for[sqlite]",
+      "outcome": "passed",
+      "duration": 0.013
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gates.py::test_a_task_dependency_is_judged_on_the_upstreams_last_run_and_consumed_once[sqlite]",
+      "outcome": "passed",
+      "duration": 0.017
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gates.py::test_an_older_satisfying_run_does_not_count_once_a_newer_one_fails[sqlite]",
+      "outcome": "passed",
+      "duration": 0.014
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gates.py::test_has_data_needs_rows_written[sqlite]",
+      "outcome": "passed",
+      "duration": 0.016
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gates.py::test_only_the_needed_dependencies_are_checked[sqlite]",
+      "outcome": "passed",
+      "duration": 0.011
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_backfill_does_not_take_over_a_scheduled_run[sqlite]",
+      "outcome": "passed",
+      "duration": 0.024
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_backfill_never_meets_a_failure_dependency_on_another_pipeline[sqlite]",
+      "outcome": "passed",
+      "duration": 0.657
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_backfill_runs_once_per_date_as_of_that_date[sqlite]",
+      "outcome": "passed",
+      "duration": 3.022
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_backfill_stops_at_the_first_run_that_fails[sqlite]",
+      "outcome": "passed",
+      "duration": 0.527
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_backfill_stops_when_another_run_starts_between_dates[sqlite]",
+      "outcome": "passed",
+      "duration": 0.792
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_failed_task_marked_success_lets_its_dependents_run[sqlite]",
+      "outcome": "passed",
+      "duration": 0.697
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_forced_task_in_a_skipped_run_leaves_the_rest_to_run[sqlite]",
+      "outcome": "passed",
+      "duration": 0.236
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_forced_task_reopens_an_ended_run_and_ends_it_again[sqlite]",
+      "outcome": "passed",
+      "duration": 0.683
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_forced_task_under_an_active_run_leaves_it_open[sqlite]",
+      "outcome": "passed",
+      "duration": 0.231
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_marked_success_satisfies_has_data_only_with_a_row_count[sqlite]",
+      "outcome": "passed",
+      "duration": 0.758
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_met_sla_stays_met_when_the_run_is_ended_again_later[sqlite]",
+      "outcome": "passed",
+      "duration": 0.462
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_paused_pipeline_starts_nothing_until_resumed[sqlite]",
+      "outcome": "passed",
+      "duration": 0.474
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_plain_run_does_not_take_over_a_backfills_run[sqlite]",
+      "outcome": "passed",
+      "duration": 0.03
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_rerun_of_a_failed_task_leaves_what_its_failure_skipped_to_run[sqlite]",
+      "outcome": "passed",
+      "duration": 0.688
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_rerun_of_a_task_still_running_leaves_its_ended_run_alone[sqlite]",
+      "outcome": "passed",
+      "duration": 0.468
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_rerun_runs_a_task_and_what_follows_it_again[sqlite]",
+      "outcome": "passed",
+      "duration": 1.124
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_run_cancelled_while_it_is_ended_is_left_cancelled[sqlite]",
+      "outcome": "passed",
+      "duration": 0.739
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_run_marked_success_satisfies_a_downstream_gate[sqlite]",
+      "outcome": "passed",
+      "duration": 0.749
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_run_paused_while_it_runs_stops_starting_tasks_and_goes_on_once_resumed[sqlite]",
+      "outcome": "passed",
+      "duration": 2.632
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_run_skipped_on_purpose_is_recorded_and_seen_downstream[sqlite]",
+      "outcome": "passed",
+      "duration": 0.038
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_run_whose_tasks_were_all_skipped_ends_skipped[sqlite]",
+      "outcome": "passed",
+      "duration": 0.482
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_skipped_run_is_ended_for_a_single_task[sqlite]",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_stand_in_run_passes_gates_where_the_upstream_cannot_run[sqlite]",
+      "outcome": "passed",
+      "duration": 0.249
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_task_left_running_by_a_dead_process_is_released_with_stale[sqlite]",
+      "outcome": "passed",
+      "duration": 0.699
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_task_runs_without_its_dependencies_when_told_to[sqlite]",
+      "outcome": "passed",
+      "duration": 0.236
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_cancel_stops_a_running_run[sqlite]",
+      "outcome": "passed",
+      "duration": 0.591
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_mark_keeps_a_skipped_task_another_pipeline_consumed[sqlite]",
+      "outcome": "passed",
+      "duration": 0.469
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_relaxed_gates_let_a_run_through_and_record_it[sqlite-off]",
+      "outcome": "passed",
+      "duration": 0.244
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_relaxed_gates_let_a_run_through_and_record_it[sqlite-warn]",
+      "outcome": "passed",
+      "duration": 0.246
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_the_commands[sqlite]",
+      "outcome": "passed",
+      "duration": 0.74
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_the_pause_and_skip_commands[sqlite]",
+      "outcome": "passed",
+      "duration": 0.085
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_the_run_date_and_backfill_options[sqlite]",
+      "outcome": "passed",
+      "duration": 0.059
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_the_run_options[sqlite]",
+      "outcome": "passed",
+      "duration": 0.037
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_what_a_backfill_refuses[sqlite]",
+      "outcome": "passed",
+      "duration": 0.017
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_what_mark_and_cancel_refuse[sqlite]",
+      "outcome": "passed",
+      "duration": 0.472
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_a_failed_warehouse_connection_test_starts_no_run[sqlite]",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_a_pipeline_runs_in_waves_and_fails_when_a_task_fails[sqlite]",
+      "outcome": "passed",
+      "duration": 0.573
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_a_refused_gate_leaves_a_run_another_process_started_alone[sqlite]",
+      "outcome": "passed",
+      "duration": 0.018
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_a_relay_outage_does_not_prevent_data_tasks_from_running[sqlite]",
+      "outcome": "passed",
+      "duration": 0.463
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_a_run_is_not_ended_while_another_process_runs_one_of_its_tasks[sqlite]",
+      "outcome": "passed",
+      "duration": 0.472
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_a_run_the_orchestrator_ran_no_task_of_is_skipped[sqlite]",
+      "outcome": "passed",
+      "duration": 0.021
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_alert_failures_do_not_change_the_data_outcome[sqlite-FAILED-False]",
+      "outcome": "passed",
+      "duration": 0.018
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_alert_failures_do_not_change_the_data_outcome[sqlite-FAILED-True]",
+      "outcome": "passed",
+      "duration": 0.018
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_alert_failures_do_not_change_the_data_outcome[sqlite-SKIPPED-False]",
+      "outcome": "passed",
+      "duration": 0.019
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_alert_failures_do_not_change_the_data_outcome[sqlite-SKIPPED-True]",
+      "outcome": "passed",
+      "duration": 0.019
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_alert_failures_do_not_change_the_data_outcome[sqlite-SUCCESS-False]",
+      "outcome": "passed",
+      "duration": 0.02
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_alert_failures_do_not_change_the_data_outcome[sqlite-SUCCESS-True]",
+      "outcome": "passed",
+      "duration": 0.017
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_an_alert_only_pipeline_keeps_its_alert_outcome[sqlite-FAILED]",
+      "outcome": "passed",
+      "duration": 0.023
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_an_alert_only_pipeline_keeps_its_alert_outcome[sqlite-SKIPPED]",
+      "outcome": "passed",
+      "duration": 0.018
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_an_alert_only_pipeline_keeps_its_alert_outcome[sqlite-SUCCESS]",
+      "outcome": "passed",
+      "duration": 0.02
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_an_interrupted_run_is_resumed_without_repeating_finished_tasks[sqlite]",
+      "outcome": "passed",
+      "duration": 0.298
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_an_orchestrator_starts_runs_and_finalizes[sqlite]",
+      "outcome": "passed",
+      "duration": 1.329
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_an_unsatisfied_pipeline_dependency_skips_the_run[sqlite]",
+      "outcome": "passed",
+      "duration": 0.465
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_finalize_fails_a_task_whose_orchestrated_process_was_lost[sqlite]",
+      "outcome": "passed",
+      "duration": 0.024
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_finalize_reports_a_lapse_nobody_saw_while_running[sqlite]",
+      "outcome": "passed",
+      "duration": 0.019
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_force_runs_every_task_again[sqlite]",
+      "outcome": "passed",
+      "duration": 0.242
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_remote_init_names_finalize_only_when_another_run_date_is_active[sqlite]",
+      "outcome": "passed",
+      "duration": 0.016
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_remote_mode_refuses_a_whole_pipeline_run[sqlite]",
+      "outcome": "passed",
+      "duration": 0.012
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_remote_mode_refuses_rules_the_orchestrator_does_not_support[sqlite]",
+      "outcome": "passed",
+      "duration": 0.017
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_the_command_line[sqlite]",
+      "outcome": "passed",
+      "duration": 0.501
+    },
+    {
+      "nodeid": "tests/integration/execution/test_pipeline.py::test_the_sla_is_marked_breached_while_the_run_is_still_going[sqlite]",
+      "outcome": "passed",
+      "duration": 2.092
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_a_backfill_run_gives_the_date_and_neither_reads_nor_stores_an_offset[sqlite]",
+      "outcome": "passed",
+      "duration": 0.02
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_a_missing_script_is_named[sqlite]",
+      "outcome": "passed",
+      "duration": 0.017
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_a_script_can_use_a_fork_process_pool[sqlite]",
+      "outcome": "passed",
+      "duration": 0.035
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_a_script_runs_in_the_task_process_and_resumes_from_its_offset[sqlite]",
+      "outcome": "passed",
+      "duration": 0.663
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_a_script_that_needs_nothing_from_the_task[sqlite]",
+      "outcome": "passed",
+      "duration": 0.017
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_a_signal_to_run_stops_the_task_process_and_records_it[sqlite-how0-15]",
+      "outcome": "passed",
+      "duration": 0.983
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_a_signal_to_run_stops_the_task_process_and_records_it[sqlite-how0-1]",
+      "outcome": "passed",
+      "duration": 0.978
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_a_signal_to_run_stops_the_task_process_and_records_it[sqlite-how1-15]",
+      "outcome": "passed",
+      "duration": 1.029
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_a_signal_to_run_stops_the_task_process_and_records_it[sqlite-how1-1]",
+      "outcome": "passed",
+      "duration": 0.978
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_a_signal_to_run_stops_the_task_process_and_records_it[sqlite-how2-15]",
+      "outcome": "passed",
+      "duration": 1.029
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_a_signal_to_run_stops_the_task_process_and_records_it[sqlite-how2-1]",
+      "outcome": "passed",
+      "duration": 1.03
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_a_timestamp_offset_keeps_microseconds_in_the_engine_db[sqlite]",
+      "outcome": "passed",
+      "duration": 0.019
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_an_invalid_result_does_not_advance_the_offset[sqlite-False-42]",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_an_invalid_result_does_not_advance_the_offset[sqlite-False-None]",
+      "outcome": "passed",
+      "duration": 0.018
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_an_invalid_result_does_not_advance_the_offset[sqlite-False-[('CUSTOM', 'value')]]",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_an_invalid_result_does_not_advance_the_offset[sqlite-True-42]",
+      "outcome": "passed",
+      "duration": 0.017
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_an_invalid_result_does_not_advance_the_offset[sqlite-True-None]",
+      "outcome": "passed",
+      "duration": 0.017
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_an_invalid_result_does_not_advance_the_offset[sqlite-True-[('CUSTOM', 'value')]]",
+      "outcome": "passed",
+      "duration": 0.017
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_an_invalid_result_is_recorded_as_a_failed_attempt[sqlite]",
+      "outcome": "passed",
+      "duration": 0.233
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_an_offset_keeps_its_type[sqlite]",
+      "outcome": "passed",
+      "duration": 0.021
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_http_request_logs_do_not_expose_query_keys_in_attempt_log[sqlite]",
+      "outcome": "passed",
+      "duration": 0.772
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_result_variables_accept_a_mapping_besides_a_dictionary[sqlite]",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[sqlite-def run(a, b):\\n    pass\\n-params7-run takes 2 arguments; it takes the task, or nothing]",
+      "outcome": "passed",
+      "duration": 0.016
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[sqlite-def run(task):\\n    pass\\n-params10-SCRIPT_NAME is required]",
+      "outcome": "passed",
+      "duration": 0.018
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[sqlite-def run(task):\\n    pass\\n-params8-must be a JSON object]",
+      "outcome": "passed",
+      "duration": 0.017
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[sqlite-def run(task):\\n    pass\\n-params9-INPUT_PARAMS is not valid JSON]",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[sqlite-def run(task):\\n    raise KeyError('id')\\n-params2-load.py failed: KeyError: 'id']",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[sqlite-def run(task):\\n    return 5\\n-params4-load.py returned int, not a ScriptResult]",
+      "outcome": "passed",
+      "duration": 0.023
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[sqlite-def run(task:\\n-params1-importing it failed: SyntaxError]",
+      "outcome": "passed",
+      "duration": 0.016
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[sqlite-from etl_craft.scripting import Offset, ScriptResult\\ndef run(task):\\n    return ScriptResult(-1)\\n-params6-returned row_count=-1]",
+      "outcome": "passed",
+      "duration": 0.022
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[sqlite-from etl_craft.scripting import Offset, ScriptResult\\ndef run(task):\\n    return ScriptResult(True)\\n-params5-load.py returned row_count=True; it must be a whole number, 0 or more]",
+      "outcome": "passed",
+      "duration": 0.022
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[sqlite-import sys\\ndef run(task):\\n    sys.exit(3)\\n-params3-load.py called sys.exit\\\\(3\\\\)]",
+      "outcome": "passed",
+      "duration": 0.018
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_script_mistakes_fail_with_what_is_wrong[sqlite-x = 1\\n-params0-SCRIPT_NAME='load.py' defines no run\\\\(task\\\\) function]",
+      "outcome": "passed",
+      "duration": 0.016
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_scripts_have_real_module_semantics[sqlite-dataclass]",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_scripts_have_real_module_semantics[sqlite-enum]",
+      "outcome": "passed",
+      "duration": 0.017
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_scripts_have_real_module_semantics[sqlite-future-dataclass]",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_scripts_have_real_module_semantics[sqlite-pickle-class]",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_scripts_have_real_module_semantics[sqlite-type-hints]",
+      "outcome": "passed",
+      "duration": 0.015
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_the_task_process_exits_once_its_outcome_is_recorded[sqlite]",
+      "outcome": "passed",
+      "duration": 0.233
+    },
+    {
+      "nodeid": "tests/integration/execution/test_python_scripts.py::test_what_a_script_printed_is_kept_when_it_is_stopped[sqlite]",
+      "outcome": "passed",
+      "duration": 2.084
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_a_bad_time_limit_fails_before_the_task_is_bound[sqlite]",
+      "outcome": "passed",
+      "duration": 0.017
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_a_failed_task_is_never_rewritten_as_skipped[sqlite]",
+      "outcome": "passed",
+      "duration": 0.237
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_a_handler_error_fails_the_task_with_its_message[sqlite]",
+      "outcome": "passed",
+      "duration": 0.288
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_a_retry_is_a_new_attempt_on_the_same_row_with_its_own_log[sqlite]",
+      "outcome": "passed",
+      "duration": 0.451
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_a_settled_task_is_not_run_again_unless_forced[sqlite]",
+      "outcome": "passed",
+      "duration": 0.454
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_a_task_in_progress_is_not_started_twice[sqlite]",
+      "outcome": "passed",
+      "duration": 0.017
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_a_task_process_that_cannot_start_is_recorded_failed[sqlite]",
+      "outcome": "passed",
+      "duration": 0.019
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_a_task_process_that_ends_without_an_outcome_is_recorded_failed[sqlite-exits-exited with code 3]",
+      "outcome": "passed",
+      "duration": 0.234
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_a_task_process_that_ends_without_an_outcome_is_recorded_failed[sqlite-killed-was killed by signal SIGKILL]",
+      "outcome": "passed",
+      "duration": 0.234
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_a_task_process_that_ends_without_an_outcome_is_recorded_failed[sqlite-slow-timed out after 2s and was killed]",
+      "outcome": "passed",
+      "duration": 2.085
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_a_task_succeeds_and_records_its_counts_and_output[sqlite]",
+      "outcome": "passed",
+      "duration": 0.284
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_a_task_waits_for_its_dependencies_and_is_skipped_when_they_can_never_be_met[sqlite]",
+      "outcome": "passed",
+      "duration": 0.456
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_an_unexpected_error_fails_the_task_with_its_traceback_in_the_log[sqlite]",
+      "outcome": "passed",
+      "duration": 0.29
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_errors_before_running[sqlite]",
+      "outcome": "passed",
+      "duration": 0.016
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_recording_an_outcome_survives_a_dropped_connection[sqlite]",
+      "outcome": "passed",
+      "duration": 0.733
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_reported_values_are_listed_in_the_task_log[sqlite]",
+      "outcome": "passed",
+      "duration": 0.341
+    },
+    {
+      "nodeid": "tests/integration/execution/test_runner.py::test_the_cross_pipeline_gate_decides_a_task_with_dependencies_elsewhere[sqlite]",
+      "outcome": "passed",
+      "duration": 0.237
+    }
+  ]
+}
