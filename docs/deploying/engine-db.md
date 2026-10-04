@@ -12,7 +12,8 @@ Point the `Engine` section of `craft-connector.yml` at an empty database (see
 etl-craft init-db
 ```
 
-`init-db` creates every table in one transaction, so a failure leaves nothing behind. It refuses a
+`init-db` creates every table and records the packaged migrations in one transaction under
+the `MIGRATE` lock, so a failure leaves neither a partial schema nor a partial migration ledger. It refuses a
 database that already has Engine DB tables and names them: use `migrate` for a database that
 already holds an Engine DB. `--force` applies the schema anyway, for a database you know is empty
 apart from a leftover table.
@@ -58,3 +59,16 @@ one transaction, preserving ids, identity counters, dependencies, audit rows, in
 triggers, and checking foreign-key references before commit. It restores foreign-key enforcement
 on both success and failure. A SQLite metadata table with extra project columns is refused
 before rebuilding: move their values into a project table and remove the extra columns first.
+
+## Run backfill constraint
+
+Migration `0006_run_backfill_constraint.sql` names the run's backfill check
+`ck_pipeline_run_backfill`, matching a fresh database. PostgreSQL renames the existing
+constraint. SQLite rebuilds `AUD_PIPELINES_RUN_LOG` in one transaction, preserving history,
+references, identity-counter high watermarks, custom indexes, triggers and views. It checks
+foreign keys before committing and restores connection settings on success and failure.
+Extra project columns on the SQLite run table are refused before rebuilding; move their
+values into a project table and remove those columns before migrating.
+
+PostgreSQL reports advisory-lock contention as a lock timeout. Other connection failures
+report an Engine DB error naming the lock; check connectivity and authentication before retrying.

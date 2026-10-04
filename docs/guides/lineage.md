@@ -36,7 +36,7 @@ traced, with the reason, such as `SELECT *` over a table whose columns are not k
 makes the command exit `1` when there is one.
 
 Lineage is stored in `AUD_COLUMN_LINEAGE` and worked out again only for a task whose SELECT,
-target or warehouse dialect changed; `--refresh` works every task out again. Ingestion scripts are
+target, warehouse dialect, active catalog or installed sqlglot version changed; `--refresh` works every task out again. Ingestion scripts are
 not traced: their SQL, if any, is inside the script.
 
 ## Documentation versions

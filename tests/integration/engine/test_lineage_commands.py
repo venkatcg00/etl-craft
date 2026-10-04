@@ -177,3 +177,17 @@ def test_docs_version_records_a_version_only_when_the_text_changes(project, caps
             )
         )
     assert run(capsys, "docs-version")[1].splitlines()[1] == "SALES\tconvert\t2\tyes"
+
+
+def test_catalog_and_parser_changes_invalidate_stored_lineage(project, monkeypatch):
+    from etl_craft.services import lineage
+
+    engine, config = project
+    monkeypatch.setattr(lineage, "dialect_and_catalog", lambda config: ("postgres", "one"))
+    assert not collect(engine, config)[0].cached
+    assert collect(engine, config)[0].cached
+    monkeypatch.setattr(lineage, "dialect_and_catalog", lambda config: ("postgres", "two"))
+    assert not collect(engine, config)[0].cached
+    assert collect(engine, config)[0].cached
+    monkeypatch.setattr(lineage, "SQLGLOT_VERSION", "different")
+    assert not collect(engine, config)[0].cached

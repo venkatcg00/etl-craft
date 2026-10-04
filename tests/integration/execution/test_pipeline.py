@@ -544,3 +544,13 @@ def test_the_command_line(config, pipeline, capsys, monkeypatch):
     with pytest.raises(SystemExit) as usage:
         cli_main(["run", "--pipeline_code", "P", "--init-only", "--task_code", "extract"])
     assert usage.value.code == ExitCode.USAGE
+
+
+def test_remote_init_names_finalize_only_when_another_run_date_is_active(config, pipeline):
+    from datetime import date
+
+    engine, _ = pipeline
+    remote = replace(config, mode=Mode.REMOTE)
+    init_pipeline_run(engine, remote, "P", run_date=date(2026, 1, 1))
+    with pytest.raises(RunStateError, match="run --pipeline_code P --finalize-only"):
+        init_pipeline_run(engine, remote, "P", run_date=date(2026, 1, 2))

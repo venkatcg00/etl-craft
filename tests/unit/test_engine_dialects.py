@@ -361,3 +361,44 @@ def test_a_minted_credential_recycles_pooled_connections():
         assert str(engine.url) == "postgresql+psycopg://etl@db:5432/etl"
     finally:
         engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "sqlstate,wait,error_type",
+    [
+        ("55P03", 0.2, "LockTimeoutError"),
+        ("55P03", 0, "LockTimeoutError"),
+        ("08006", 2, "EngineDbError"),
+        (None, 0, "EngineDbError"),
+    ],
+)
+def test_postgres_lock_maps_only_lock_unavailability(sqlstate, wait, error_type):
+    from contextlib import contextmanager
+
+    from sqlalchemy.exc import OperationalError
+
+    from etl_craft.core import errors
+
+    class DriverError(Exception):
+        pass
+
+    cause = DriverError("database connection lost")
+    cause.sqlstate = sqlstate
+
+    class Conn:
+        def execute(self, query, params=None):
+            if "pg_advisory" in str(query):
+                raise OperationalError(str(query), params, cause)
+
+    class Engine:
+        @contextmanager
+        def begin(self):
+            yield Conn()
+
+    with (
+        pytest.raises(getattr(errors, error_type), match="migrate") as caught,
+        POSTGRES.lock(Engine(), 1, "migrate", wait_seconds=wait),
+    ):
+        pass
+    assert ("waited" in str(caught.value)) == (sqlstate == "55P03" and bool(wait))
+    assert caught.value.__cause__.orig is cause

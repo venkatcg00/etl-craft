@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -13,7 +13,7 @@ from sqlalchemy.exc import OperationalError
 
 from etl_craft.config.auth import POSTGRES_AUTH_FIELDS, engine_for_jdbc_url
 from etl_craft.core.enums import AuthMode
-from etl_craft.core.errors import ConfigurationError, LockTimeoutError
+from etl_craft.core.errors import ConfigurationError, EngineDbError, LockTimeoutError
 from etl_craft.core.text import JdbcUrl, parse_jdbc_url, public_url_query
 from etl_craft.dialects import credentials
 from etl_craft.dialects.engine.base import EngineDialect
@@ -89,17 +89,19 @@ class PostgresEngineDialect(EngineDialect):
         The lock ends with that connection's transaction, so it is released even when the
         holder's process dies. The caller's own work runs on other connections.
         """
-        with engine.begin() as lock_conn:
-            if wait_seconds:
-                # SET takes a literal, not a bind parameter; the value is a number.
-                timeout_ms = max(int(wait_seconds * 1000), 1)
-                lock_conn.execute(text(f"SET LOCAL lock_timeout = {timeout_ms}"))
+        with ExitStack() as held:
             try:
+                lock_conn = held.enter_context(engine.begin())
+                if wait_seconds:
+                    # SET takes a literal, not a bind parameter; the value is a number.
+                    timeout_ms = max(int(wait_seconds * 1000), 1)
+                    lock_conn.execute(text(f"SET LOCAL lock_timeout = {timeout_ms}"))
                 lock_conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})
             except OperationalError as error:
-                raise LockTimeoutError(
-                    f"timed out after {wait_seconds:g}s waiting for {name}"
-                ) from error
+                if getattr(error.orig, "sqlstate", None) == "55P03":
+                    waited = f"; waited {wait_seconds:g}s" if wait_seconds else ""
+                    raise LockTimeoutError(f"timed out waiting for {name}{waited}") from error
+                raise EngineDbError(f"failed acquiring lock {name}: {error.orig}") from error
             yield
 
 

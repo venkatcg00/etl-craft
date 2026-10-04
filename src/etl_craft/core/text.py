@@ -9,7 +9,7 @@ from __future__ import annotations
 import difflib
 import hashlib
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import date
 from urllib.parse import parse_qsl
@@ -138,45 +138,78 @@ def unquote(value: str) -> str:
 
 # SQL statements
 
-_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
-_LINE_COMMENT = re.compile(r"--[^\n]*")
 
-
-def split_statements(sql_text: str) -> list[str]:
-    """Split SQL text into statements on ``;``, ignoring those inside quotes and comments.
-
-    A small scanner, not a parser: it knows single-quoted strings with their ``''`` escape,
-    dollar-quoted bodies (``$$ ... $$`` and tagged ``$fn$ ... $fn$``), ``--`` line comments and
-    ``/* */`` block comments, and nothing else. Statements are stripped; empty ones and ones
-    holding only comments are dropped.
-    """
-    statements: list[str] = []
-    current: list[str] = []
-    i = 0
+def _sql_parts(sql_text: str, *, placeholders: bool = False) -> Iterator[tuple[str, bool]]:
+    """Yield code and protected quotes/comments using one scanner."""
+    i = start = 0
     length = len(sql_text)
     while i < length:
         ch = sql_text[i]
+        end = i
         if sql_text.startswith("--", i):
             end = sql_text.find("\n", i)
             end = length if end == -1 else end
         elif sql_text.startswith("/*", i):
-            end = sql_text.find("*/", i + 2)
-            end = length if end == -1 else end + 2
-        elif ch == "'":
-            end = _end_of_string_literal(sql_text, i)
+            depth = 1
+            end = i + 2
+            while end < length and depth:
+                if sql_text.startswith("/*", end):
+                    depth += 1
+                    end += 2
+                elif sql_text.startswith("*/", end):
+                    depth -= 1
+                    end += 2
+                else:
+                    end += 1
+        elif ch in ("'", '"', "`"):
+            end = _end_of_string_literal(sql_text, i, ch)
         elif ch == "$" and (tag := _dollar_tag_at(sql_text, i)) is not None:
             close = sql_text.find(tag, i + len(tag))
-            end = length if close == -1 else close + len(tag)
-        elif ch == ";":
-            statements.append("".join(current))
-            current = []
-            i += 1
-            continue
+            match = _TOKEN.match(sql_text, i) if placeholders and tag == "$$" else None
+            token = match is not None and (
+                close == -1
+                or (close != match.end() and _TOKEN.match(sql_text, close) is not None)
+                or _delimiter_in_quote_or_comment(sql_text, match.end(), close)
+                or sql_text.startswith("$$$$", close)
+            )
+            if not token:
+                end = length if close == -1 else close + len(tag)
+        if end > i:
+            if start < i:
+                yield sql_text[start:i], False
+            yield sql_text[i:end], True
+            i = start = end
         else:
-            end = i + 1
-        current.append(sql_text[i:end])
-        i = end
-    statements.append("".join(current))
+            i += 1
+    if start < length:
+        yield sql_text[start:], False
+
+
+def _delimiter_in_quote_or_comment(sql: str, start: int, delimiter: int) -> bool:
+    """Whether a prospective dollar delimiter lies inside quoted text or a comment."""
+    offset = start
+    for part, protected in _sql_parts(sql[start:]):
+        end = offset + len(part)
+        if offset <= delimiter < end:
+            return protected and part.startswith(("'", '"', "`", "--", "/*"))
+        offset = end
+    return False
+
+
+def split_statements(sql_text: str) -> list[str]:
+    """Split SQL on semicolons outside quoted strings, identifiers, bodies and comments."""
+    statements: list[str] = []
+    current = ""
+    for part, protected in _sql_parts(sql_text):
+        if protected:
+            current += part
+            continue
+        pieces = part.split(";")
+        current += pieces[0]
+        for piece in pieces[1:]:
+            statements.append(current)
+            current = piece
+    statements.append(current)
     return [stmt.strip() for stmt in statements if not is_only_comments(stmt)]
 
 
@@ -191,13 +224,17 @@ def as_subquery(select_sql: str) -> str:
     return f"(\n{body}\n)"
 
 
-def _end_of_string_literal(sql_text: str, start: int) -> int:
-    """Return the index just past the single-quoted literal opening at ``start``."""
+def _end_of_string_literal(sql_text: str, start: int, quote: str = "'") -> int:
+    """Return the end of quoted text, honoring doubled quotes and E-string escapes."""
     end = start + 1
     length = len(sql_text)
+    escaped = quote == "'" and start > 0 and sql_text[start - 1] in "Ee"
     while end < length:
-        if sql_text[end] == "'":
-            if end + 1 < length and sql_text[end + 1] == "'":
+        if escaped and sql_text[end] == "\\":
+            end += 2
+            continue
+        if sql_text[end] == quote:
+            if end + 1 < length and sql_text[end + 1] == quote:
                 end += 2
                 continue
             return end + 1
@@ -223,8 +260,10 @@ def _dollar_tag_at(sql_text: str, index: int) -> str | None:
 
 def is_only_comments(statement: str) -> bool:
     """Whether ``statement`` holds nothing but comments and whitespace."""
-    stripped = _LINE_COMMENT.sub("", _BLOCK_COMMENT.sub("", statement))
-    return not stripped.strip()
+    return all(
+        (protected and part.startswith(("--", "/*"))) or not part.strip()
+        for part, protected in _sql_parts(statement)
+    )
 
 
 # SQL task text
@@ -265,7 +304,13 @@ def substitute_pipeline_id(
     task's definition, and running the SQL anyway would read the wrong rows. The id is an
     integer the engine resolved, so it is written into the text directly.
     """
-    found = {match.group(1) for match in _TOKEN.finditer(sql)}
+    parts = list(_sql_parts(sql, placeholders=True))
+    found = {
+        match.group(1)
+        for part, protected in parts
+        if not protected
+        for match in _TOKEN.finditer(part)
+    }
     known = {
         PIPELINE_ID_TOKEN[2:]: substitution,
         PIPELINE_ID_FILTER_TOKEN[2:]: filter_enabled,
@@ -300,7 +345,10 @@ def substitute_pipeline_id(
         PIPELINE_ID_FILTER_TOKEN[2:]: "1=1" if full else f"pipeline_run_id = {run_id}",
         RUN_DATE_TOKEN[2:]: f"DATE '{run_date.isoformat()}'",
     }
-    return _TOKEN.sub(lambda match: replacements[match.group(1)], sql)
+    return "".join(
+        part if protected else _TOKEN.sub(lambda match: replacements[match.group(1)], part)
+        for part, protected in parts
+    )
 
 
 WRITE_KEYWORDS = (

@@ -158,8 +158,10 @@ def _apply(engine: Engine, migration: MigrationFile) -> None:
     try:
         with dialect.migration_transaction(
             engine,
-            rebuild_metadata=migration.source == ENGINE
-            and migration.version == "0005_metadata_codes.sql",
+            rebuild_metadata=migration.sql
+            if migration.source == ENGINE
+            and migration.version in ("0005_metadata_codes.sql", "0006_run_backfill_constraint.sql")
+            else None,
         ) as conn:
             run_script(conn, dialect.split_statements(migration.sql))
             _record(conn, migration)
@@ -245,19 +247,19 @@ def apply_pending_migrations(
     return applied
 
 
-def mark_packaged_migrations_applied(engine: Engine) -> list[str]:
+def mark_packaged_migrations_applied(conn: Connection) -> list[str]:
     """Record the packaged ENGINE migrations as applied without running them.
 
     ``init-db`` calls this: the packaged schema already includes every packaged migration. A
-    project's migrations are not in the schema, so they stay pending.
+    project's migrations are not in the schema, so they stay pending. The caller holds the
+    MIGRATE lock and owns the transaction that creates the schema and records this ledger.
     """
-    stream = migration_streams(engine)[0]
+    stream = migration_streams(conn.engine)[0]
     if not stream.files:
         return []
-    with locks.MIGRATE.hold(engine), engine.begin() as conn:
-        ledger = _load_ledger(conn)
-        verify_ledger(ledger, [stream])
-        for migration in stream.files:
-            if (migration.source, migration.version) not in ledger:
-                _record(conn, migration)
+    ledger = _load_ledger(conn)
+    verify_ledger(ledger, [stream])
+    for migration in stream.files:
+        if (migration.source, migration.version) not in ledger:
+            _record(conn, migration)
     return [migration.version for migration in stream.files]

@@ -117,6 +117,7 @@ def build(repo: Path, out: Path, mike: str) -> list[str]:
     """Build every version into ``out`` and return the version names, newest release first."""
     lines = release_lines(_run(["git", "tag", "--list"], cwd=repo).split())
     env = {**os.environ, **COMMITTER}
+    env["PATH"] = os.pathsep.join((str(Path(sys.executable).parent), env.get("PATH", "")))
     # Each release is built in its own worktree environment, not the one running this script.
     env.pop("VIRTUAL_ENV", None)
     env.pop("UV_PROJECT_ENVIRONMENT", None)

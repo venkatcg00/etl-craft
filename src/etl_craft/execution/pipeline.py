@@ -402,6 +402,7 @@ def init_pipeline_run(
         clock or Clock(),
         check_gate=not remote,
         run_date=run_date,
+        remote=remote,
     )
     if skip_reason is not None:
         return _skipped_run(
@@ -651,6 +652,7 @@ def _start_run(
     check_gate: bool,
     run_date: date | None = None,
     backfill: str | None = None,
+    remote: bool = False,
 ) -> tuple[int, str | None]:
     """Return the run to use and, when the gate refused a new one, why it was ``SKIPPED``.
 
@@ -675,10 +677,11 @@ def _start_run(
                 "a backfill never takes it over"
             )
         if run_date is not None and kind.run_date != run_date:
+            finalize = " --finalize-only" if remote else ""
             raise RunStateError(
                 f"{pipeline_code} has a run in progress (pipeline_run_id={existing}) as of "
                 f"{kind.run_date.isoformat()}, not {run_date.isoformat()}; finish it with "
-                f"`etl-craft run --pipeline_code {pipeline_code}`, or cancel it, first"
+                f"`etl-craft run --pipeline_code {pipeline_code}{finalize}`, or cancel it, first"
             )
         logger.info("%s: resuming pipeline_run_id=%d", pipeline_code, existing)
         return existing, None

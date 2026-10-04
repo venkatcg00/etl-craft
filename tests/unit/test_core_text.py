@@ -443,3 +443,49 @@ def test_run_date_becomes_a_date_literal_when_its_switch_is_on():
         text.substitute_pipeline_id(
             sql, pipeline_run_id=7, refresh_type="FULL", substitution=False, filter_enabled=False
         )
+
+
+@pytest.mark.parametrize(
+    "protected",
+    [
+        "'$$pipeline_id $$run_date $$unknown'",
+        "'a''$$pipeline_id'",
+        '"$$pipeline_id"',
+        "`$$pipeline_id`",
+        "-- $$pipeline_id $$unknown\n",
+        "/* $$pipeline_id $$unknown */",
+        "$body$ $$pipeline_id $$unknown $body$",
+        "$$pipeline_id$$",
+    ],
+)
+def test_substitution_leaves_quoted_text_and_comments_unchanged(protected):
+    sql = f"SELECT {protected} AS note, $$pipeline_id AS id"
+    assert substitute(sql, substitution=True) == f"SELECT {protected} AS note, 42 AS id"
+    assert substitute(f"SELECT {protected}") == f"SELECT {protected}"
+
+
+def test_comment_or_literal_tokens_do_not_satisfy_an_enabled_switch():
+    with pytest.raises(HandlerError, match=r"has no.*pipeline_id to replace"):
+        substitute("SELECT '$$pipeline_id' -- $$pipeline_id\n", substitution=True)
+
+
+@pytest.mark.parametrize(
+    "protected", ["'$$'", "$$$$", "E'a\\' $$pipeline_id'", "/* outer /* inner */ $$pipeline_id */"]
+)
+def test_bare_tokens_next_to_protected_dollar_text(protected):
+    sql = f"SELECT $$pipeline_id AS id, {protected} AS note"
+    assert substitute(sql, substitution=True) == f"SELECT 42 AS id, {protected} AS note"
+
+
+def test_nested_comment_only_sql_is_not_a_statement():
+    assert split_statements("/* outer /* inner ; */ end */; -- tail") == []
+
+
+def test_untagged_dollar_literal_with_reserved_token_and_expression():
+    sql = "SELECT $$pipeline_id + 1$$, $$pipeline_id AS run"
+    assert (
+        text.substitute_pipeline_id(
+            sql, pipeline_run_id=42, refresh_type="FULL", substitution=True, filter_enabled=False
+        )
+        == "SELECT $$pipeline_id + 1$$, 42 AS run"
+    )

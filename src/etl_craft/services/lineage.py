@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from importlib.metadata import version
 
 import sqlglot
 from sqlalchemy.engine import Engine
@@ -48,6 +49,8 @@ from etl_craft.warehouse.connection import warehouse_dialect
 
 COPY = "copy"
 """The transformation of a column copied from its source as it is."""
+
+SQLGLOT_VERSION = version("sqlglot")
 
 SQLGLOT_DIALECTS = {
     "postgres": "postgres",
@@ -178,9 +181,15 @@ def referenced_tables(
     return tuple(sorted(found))
 
 
-def lineage_key(select_sql: str, target_object: str, dialect: str | None) -> str:
+def lineage_key(
+    select_sql: str, target_object: str, dialect: str | None, catalog: str | None = None
+) -> str:
     """Hash what a task's lineage is worked out from; any change means working it out again."""
-    return sha256_hex("\0".join((select_sql, target_object, dialect or "")).encode())
+    return sha256_hex(
+        "\0".join(
+            (select_sql, target_object, dialect or "", catalog or "", SQLGLOT_VERSION)
+        ).encode()
+    )
 
 
 def collect(
@@ -207,7 +216,7 @@ def collect(
             sources = referenced_tables(select_sql, dialect=dialect, catalog=catalog)
             if not target:
                 raise MetadataError("the task has no TARGET_OBJECT")
-            key = lineage_key(select_sql, target, dialect)
+            key = lineage_key(select_sql, target, dialect, catalog)
             with engine.connect() as conn:
                 stored = [] if refresh else fetch_task_lineage(conn, ref.task_id, key)
             if stored:

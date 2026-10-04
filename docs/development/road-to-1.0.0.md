@@ -69,7 +69,7 @@ item's text, or work done early under another item.
 | S2.H Export and publishing | Done | #85 | B47, B64, B65 |
 | S2.I A release gate that checks completeness | Done | #86 | B63 |
 | S2.J Business rules at size | Done | #87 | B51; B57 done in S2.D |
-| S2.K Migrations and small fixes | Not started (S2.K.5 done in S2.A) | | |
+| S2.K Migrations and small fixes | Done | #88 | B33; S2.K.5 done in S2.A |
 | S2.L Regression suite and release | Not started; last | | |
 | 0.3 and later | Not started | | |
 
@@ -78,6 +78,14 @@ item's text, or work done early under another item.
 What a person picking up the work needs that the code and the item texts do not say.
 
 **Choices that differ from the item text.**
+
+- `S2.K.1`: the full-catalog comparison also found SQLite's anonymous backfill check.
+  Migration `0006` therefore exists on both dialects: PostgreSQL renames the constraint;
+  SQLite rebuilds the run table with the guarded transaction used for metadata, preserving
+  references, rows, custom objects and deleted-id high watermarks. Extra project columns
+  are refused before rebuilding. Catalog tests include sequence properties and view definitions
+  and run against every released fixture. The ledger-failure tests exercise rollback after DDL.
+  `S2.K.5` remains covered by `S2.A.4`.
 
 - `S2.J.1`: the Engine DB clears 1,000 keys per statement on the connection supplied by the
   caller; it opens no extra transaction. Tests cover 40,000 keys on SQLite with an enforced
@@ -122,7 +130,7 @@ What a person picking up the work needs that the code and the item texts do not 
   reopens the run (recorded `REOPEN`), runs the task and ends the run again with `_end_reopened`,
   the helper `rerun_task` uses too. A run with tasks that never ran stays `IN-PROGRESS`.
 - `S2.A.15`: `rerun_task` does not refuse a `CANCELLED` run: `--rerun` is an explicit, recorded
-  operator action. `S2.K.9` covers `--force` onto a cancelled run, which is still open.
+  operator action. `S2.K.9` refuses `--force` onto a cancelled run with a new-run remedy.
 - `S2.D.3`: on warehouses with temporary tables (PostgreSQL, DuckDB, Snowflake) scratch tables stay
   unqualified, because a temporary table cannot be created in a named schema; their names carry a
   random token per attempt (`Session.token`), so a bare-name lookup cannot hit another table.
@@ -806,6 +814,8 @@ Branch: `fix/handlers-business-rules-scale`. Files: `handlers/business_rules.py`
 The cost of re-checking every standing flag on every run (B52) is fixed in `S6.D`.
 
 ### S2.K Migrations and small fixes
+
+**Status: done** (#88); see [Handover notes](#handover-notes).
 
 Branch: `fix/engine-migration-hygiene` plus small branches as convenient.
 
