@@ -107,7 +107,9 @@ What a person picking up the work needs that the code and the item texts do not 
   rather than discarding them. Its rebuild transaction temporarily disables foreign keys and
   uses legacy rename behavior; both connection settings are restored on every exit.
 - `S2.H.3`: the path check also refuses file and directory-index symlinks outside the site.
-- Python API landing and package indexes have content checks in `make docs`; fuller public
+- Python API landing and package indexes have content checks in `make docs`;
+  `make docs-site` also checks every released version and the `latest` alias. Released pages
+  use the maintained API renderer with their own tagged source and guides; fuller public
   Python contract documentation is explicit in `S7.J` and remains part of the 1.0.0 gate.
 
 - `S2.G.2`: the authentication field remains `key_file`; Snowflake presents it as the driver's

@@ -6,7 +6,7 @@ The site has one directory per version and a version selector:
 
 - ``dev`` is built from the repository's working tree;
 - each release line ``X.Y`` is built from its newest ``vX.Y.Z`` tag, in a temporary worktree
-  with that tag's own documentation dependencies;
+  with that tag's own source and documentation dependencies, and the maintained API renderer;
 - the newest release line also gets the alias ``latest``.
 
 The site root redirects to ``latest``, or to ``dev`` before the first release. mike assembles
@@ -90,7 +90,10 @@ def _build_release(
         tree = Path(scratch) / "tree"
         _run(["git", "worktree", "add", "--detach", str(tree), tag], cwd=repo)
         try:
+            # The renderer uses the release's modules and guides, with shared navigation text.
+            shutil.copy2(repo / "docs" / "gen_ref_pages.py", tree / "docs" / "gen_ref_pages.py")
             uv_mike = ["uv", "run", "--locked", "--no-default-groups", "--group", "docs", "mike"]
+            _run([*uv_mike[:-1], "mkdocs", "build", "--strict"], cwd=tree, env=env)
             _run([*uv_mike, *deploy_args(version, latest=latest)], cwd=tree, env=env)
         finally:
             subprocess.run(
@@ -124,10 +127,20 @@ def build(repo: Path, out: Path, mike: str) -> list[str]:
     try:
         for index, (version, tag) in enumerate(lines):
             _build_release(repo, version, tag, latest=index == len(lines) - 1, env=env)
+        _run(["mkdocs", "build", "--strict"], cwd=repo, env=env)
         _run([mike, *deploy_args("dev", latest=False)], cwd=repo, env=env)
         default = "latest" if lines else "dev"
         _run([mike, "set-default", "--branch", BUILD_BRANCH, default], cwd=repo, env=env)
         _export(repo, out)
+        for version in [*(version for version, _ in lines), "dev", *(["latest"] if lines else [])]:
+            _run(
+                [
+                    sys.executable,
+                    str(repo / "scripts" / "check_docs_content.py"),
+                    str(out / version),
+                ],
+                cwd=repo,
+            )
     finally:
         subprocess.run(
             ["git", "branch", "-D", BUILD_BRANCH], cwd=repo, capture_output=True, check=False

@@ -1,4 +1,5 @@
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -110,3 +111,49 @@ def test_mike_subprocess_finds_tools_beside_the_running_interpreter(tmp_path, mo
         env["PATH"].split(os.pathsep) == [str(Path(sys.executable).parent), "/other/tools"]
         for env in calls
     )
+
+
+def test_release_uses_shared_api_renderer_but_its_own_source(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    (repo / "docs").mkdir(parents=True)
+    (repo / "docs" / "gen_ref_pages.py").write_text("maintained renderer")
+    calls = []
+
+    def run(command, cwd, env=None):
+        calls.append(command)
+        if command[:3] == ["git", "worktree", "add"]:
+            tree = Path(command[4])
+            (tree / "docs").mkdir(parents=True)
+            (tree / "src").mkdir()
+            (tree / "src" / "release.py").write_text("released source")
+            (tree / "docs" / "guide.md").write_text("released guide")
+            (tree / "docs" / "gen_ref_pages.py").write_text("old renderer")
+        else:
+            assert (cwd / "docs" / "gen_ref_pages.py").read_text() == "maintained renderer"
+            assert (cwd / "src" / "release.py").read_text() == "released source"
+            assert (cwd / "docs" / "guide.md").read_text() == "released guide"
+            if "mkdocs" in command:
+                assert "--strict" in command
+        return ""
+
+    monkeypatch.setattr(build_docs_site, "_run", run)
+    monkeypatch.setattr(build_docs_site.subprocess, "run", lambda *args, **kwargs: None)
+    build_docs_site._build_release(repo, "0.1", "v0.1.0", latest=True, env={})
+    assert len(calls) == 3
+    assert calls[0][-1] == "v0.1.0"
+
+
+def test_every_rendered_version_and_latest_alias_get_content_checks(tmp_path, monkeypatch):
+    calls = []
+
+    def run(command, cwd, env=None):
+        calls.append(command)
+        return "v0.1.0 v0.2.0" if command == ["git", "tag", "--list"] else ""
+
+    monkeypatch.setattr(build_docs_site, "_run", run)
+    monkeypatch.setattr(build_docs_site, "_build_release", lambda *args, **kwargs: None)
+    monkeypatch.setattr(build_docs_site, "_export", lambda *args: None)
+    monkeypatch.setattr(build_docs_site.subprocess, "run", lambda *args, **kwargs: None)
+    assert build_docs_site.build(tmp_path, tmp_path / "out", "mike") == ["0.2", "0.1", "dev"]
+    checked = [Path(command[-1]).name for command in calls if "check_docs_content.py" in command[1]]
+    assert checked == ["0.1", "0.2", "dev", "latest"]
