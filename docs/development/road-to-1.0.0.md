@@ -66,7 +66,7 @@ item's text, or work done early under another item.
 | S2.E The ingestion script contract | Done | #82 | B19, B60 |
 | S2.F Alerts and SMTP | Done | #83 | B20, B50, B61 |
 | S2.G Configuration and secrets | Done | #84 | B48, B49, B55, B56, B58, B59 |
-| S2.H Export and publishing | Done | PR pending | B47, B64, B65 |
+| S2.H Export and publishing | Done | #85 | B47, B64, B65 |
 | S2.I A release gate that checks completeness | Not started | | |
 | S2.J Business rules at size | Not started (S2.J.2 done in S2.D) | | |
 | S2.K Migrations and small fixes | Not started (S2.K.5 done in S2.A) | | |
@@ -730,7 +730,7 @@ that values in `CFG_TASK_PARAMETERS` and anything a script prints are the team's
 
 ### S2.H Export and publishing
 
-**Status: done** (PR pending); see [Handover notes](#handover-notes).
+**Status: done** (#85); see [Handover notes](#handover-notes).
 
 Branch: `fix/services-export-publish`. Files: `services/generate_yml.py`, `services/validate.py`,
 `services/docs_publish.py`, both `schema.sql`, a new migration.
