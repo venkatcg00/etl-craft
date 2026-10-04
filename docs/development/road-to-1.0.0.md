@@ -65,7 +65,7 @@ item's text, or work done early under another item.
 | S2.D SQL action guards | Done | #80 | B5, B12, B17, B21, B34, B41, B42, B44, B45, B46; B57 for SQL actions and rules |
 | S2.E The ingestion script contract | Done | #82 | B19, B60 |
 | S2.F Alerts and SMTP | Done | #83 | B20, B50, B61 |
-| S2.G Configuration and secrets | Done | PR pending | B48, B49, B55, B56, B58, B59 |
+| S2.G Configuration and secrets | Done | #84 | B48, B49, B55, B56, B58, B59 |
 | S2.H Export and publishing | Not started | | |
 | S2.I A release gate that checks completeness | Not started | | |
 | S2.J Business rules at size | Not started (S2.J.2 done in S2.D) | | |
@@ -698,7 +698,7 @@ logged at ERROR), because a broken relay should not block downstream data. Imple
 
 ### S2.G Configuration and secrets
 
-**Status: done** (PR pending); see [Handover notes](#handover-notes).
+**Status: done** (#84); see [Handover notes](#handover-notes).
 
 Branch: `fix/config-strictness`. Files: `config/loader.py`, `config/resolve.py`, `core/text.py`,
 `core/log.py`, `dialects/engine/*/__init__.py`, `warehouse/connection.py`, `services/doctor.py`.
