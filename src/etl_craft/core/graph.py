@@ -77,11 +77,20 @@ class TaskEdge:
 class TaskRunState:
     """What one dependency edge needs from its upstream's ``AUD_TASK_RUN_LOG`` row.
 
-    ``status`` is ``None`` while the task has no row under the active run.
+    ``status`` is ``None`` while the task has no row under the active run. ``rows_written`` is
+    what the attempt inserted, updated or deleted; ``None`` on a row recorded before it was kept,
+    where ``target_count`` stands in for it.
     """
 
     status: str | None = None
     target_count: int | None = None
+    rows_written: int | None = None
+
+    @property
+    def wrote_rows(self) -> bool:
+        """Whether the attempt wrote rows, as a ``HAS_DATA`` dependency asks."""
+        count = self.target_count if self.rows_written is None else self.rows_written
+        return count is not None and count > 0
 
 
 RunState = Mapping[int, TaskRunState]
@@ -306,8 +315,7 @@ class DependencyGraph:
         if edge.dependency_type == DependencyType.ALWAYS:
             return upstream.status in TERMINAL_STATUSES
         if edge.dependency_type == DependencyType.HAS_DATA:
-            count = upstream.target_count
-            return upstream.status == RunStatus.SUCCESS and count is not None and count > 0
+            return upstream.status == RunStatus.SUCCESS and upstream.wrote_rows
         raise GraphError(f"unknown dependency_type: {edge.dependency_type!r}")
 
 

@@ -14,6 +14,11 @@ that a task waits on an upstream task, and which outcome of that upstream it wai
 
 An upstream that has not run yet, or is still `IN-PROGRESS`, satisfies no dependency.
 
+"Wrote" means inserted, updated or deleted, as `AUD_TASK_RUN_LOG.ROWS_WRITTEN` records: an
+`APPEND_TABLE` of no rows, or a merge that changed nothing, does not satisfy `HAS_DATA` however
+many rows its target holds. An ingestion script's `row_count` is the rows it wrote. A row recorded
+before `ROWS_WRITTEN` existed is judged by its `TARGET_COUNT`.
+
 ## Run conditions
 
 `CFG_TASKS.RUN_CONDITION` sets how many of a task's dependencies must be satisfied before it

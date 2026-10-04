@@ -52,8 +52,9 @@ from etl_craft.handlers.sql import task_dialect
 from etl_craft.handlers.sql.actions import writer_action
 from etl_craft.handlers.sql.spec import PARAMETERS as SQL_PARAMETERS
 from etl_craft.handlers.sql.spec import WRITERS, read_sql_task
+from etl_craft.handlers.sql.tables import ENGINE_COLUMNS
 from etl_craft.services.doctor import Status
-from etl_craft.services.lineage import table_name
+from etl_craft.services.lineage import dialect_and_catalog, output_columns, table_name
 
 CODE = re.compile(r"^[A-Za-z0-9_-]+$")
 """What a pipeline or task code may hold: it appears in commands, DAG ids and file names."""
@@ -337,6 +338,15 @@ def _sql(conn: Connection, context: TaskContext, data: _Metadata) -> list[str]:
     if spec.action == SqlAction.SETUP_TABLE:
         others = fetch_target_tasks(conn, context.pipeline_id, context.task_id, spec.target_object)
         writer_action(spec.setup_for, others, spec.target_object)
+    if spec.select_sql is not None:
+        sqlglot_dialect, _ = dialect_and_catalog(context.config)
+        names = output_columns(spec.select_sql, dialect=sqlglot_dialect) or []
+        reserved = [name for name in names if name.lower() in ENGINE_COLUMNS]
+        if reserved:
+            return [
+                f"the SELECT returns {', '.join(reserved)}, which etl-craft writes itself; "
+                "leave them out, or alias them"
+            ]
     return []
 
 

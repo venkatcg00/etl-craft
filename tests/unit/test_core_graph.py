@@ -120,6 +120,13 @@ def test_ready_has_data_edge_requires_success_and_positive_target_count():
     assert 2 not in graph.ready({1: TaskRunState(status="FAILED", target_count=5)})
 
 
+def test_has_data_reads_the_rows_written_before_the_target_count():
+    graph = build_graph(nodes(1, 2), [edge(2, 1, dependency_type="HAS_DATA")])
+    full_but_unchanged = TaskRunState(status="SUCCESS", target_count=5, rows_written=0)
+    assert 2 not in graph.ready({1: full_but_unchanged})
+    assert graph.ready({1: TaskRunState("SUCCESS", target_count=0, rows_written=3)}) == [2]
+
+
 def test_ready_task_with_multiple_edges_needs_all_satisfied():
     graph = build_graph(nodes(1, 2, 3), [edge(3, 1), edge(3, 2)])
     # task 1 already SUCCESS (terminal, excluded); task 2 has no deps of its

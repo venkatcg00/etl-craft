@@ -17,6 +17,7 @@ class SnowflakeWarehouse(WarehouseDialect):
     """Snowflake, ordinary tables."""
 
     spec = warehouse_by_key("snowflake")
+    identifier_case = "upper"
     surrogate_key: SurrogateKey = "computed"
     enforces_primary_keys = False
     key_file_connect_args = ("private_key_file", "private_key_file_pwd")

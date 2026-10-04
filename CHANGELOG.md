@@ -76,8 +76,28 @@ All notable changes are recorded here. The format follows
 - A task process writes its output unbuffered and flushes it when stopped, so the attempt's log
   keeps what a script printed before it hung or timed out.
 
+- SQL tasks check the SELECT's columns before touching the target: a column the engine writes
+  itself (`PIPELINE_RUN_ID`, `ROW_ID`, the audit columns), as a `SELECT *` over an engine-written
+  table returns, or a name that needs quoting, fails the task naming it. `validate` reports the
+  first when the SELECT lists its columns.
+- A NULL in a merge key column fails `SCD1_MERGE`, `SCD2_MERGE` and `DELETE_ROWS` before the
+  target changes, instead of inserting the row again on every run.
+- A `MERGE_DEDUPE_ORDER` that ties between rows that differ fails the task instead of keeping
+  one of them at random.
+- A SELECT ending in a `--` comment works with every action, as one ending in `;` did.
+- Scratch tables carry a token per attempt and, where the warehouse has no temporary tables, live
+  in the target's schema, so a table of the same name elsewhere is never read as one.
+- A soft `DELETE_ROWS` leaves rows already flagged deleted as they were, and a merge brings a
+  soft-deleted key back when its SELECT returns it again.
+- A business rule clears the flag of a key with no row left in its table, and judges only the
+  active versions of a table with `ACTIVE_FLAG`.
+
 ### Changed
 
+- `HAS_DATA` means the upstream wrote rows: inserted, updated or deleted, as the new
+  `AUD_TASK_RUN_LOG.ROWS_WRITTEN` records (migration `0004_rows_written.sql`). An append of no
+  rows, or a merge that changed nothing, no longer satisfies it because the target holds rows.
+  Rows recorded before the migration are judged by `TARGET_COUNT`; `mark --rows` sets both.
 - A local run whose tasks were all `SKIPPED` ends `SKIPPED`, as in remote mode, so a pipeline
   that depends on it with `SUCCESS` is skipped too.
 - `run --task_code --force` onto an ended run reopens it, records the `REOPEN`, and ends it again

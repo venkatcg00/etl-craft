@@ -78,11 +78,19 @@ def finish_run(conn, pipeline_run_id, status="SUCCESS"):
     runlog.finalize_pipeline_run(conn, pipeline_run_id, status)
 
 
-def task_run(conn, task_id, pipeline_run_id, status="SUCCESS", target_count=None):
+def task_run(
+    conn, task_id, pipeline_run_id, status="SUCCESS", target_count=None, rows_written=None
+):
     """Bind ``task_id`` under the run and end it with ``status``; return its row id."""
     binding = runlog.find_or_create_task_run(conn, task_id, pipeline_run_id)
     if status != "IN-PROGRESS":
-        runlog.finish_task_run(conn, binding.task_run_id, status=status, target_count=target_count)
+        runlog.finish_task_run(
+            conn,
+            binding.task_run_id,
+            status=status,
+            target_count=target_count,
+            rows_written=rows_written,
+        )
     return binding.task_run_id
 
 

@@ -8,10 +8,13 @@
 - ``SCD1_MERGE`` updates changed rows in place by merge key and inserts new keys.
 - ``SCD2_MERGE`` closes the active version of a changed key (``ACTIVE_FLAG='N'``) and inserts a
   new one.
+
+  In both merges a key soft-deleted by ``DELETE_ROWS`` that the SELECT returns again comes back
+  (``DELETE_FLAG='N'``), changed or not. A NULL in a merge key column fails the task.
 - ``DROP_TABLE`` drops the target if it exists, once this pipeline's ``CREATE_TABLE`` task for
   it has succeeded in the run.
 - ``DELETE_ROWS`` deletes, or flags ``DELETE_FLAG='Y'``, the target rows whose merge key the
-  SELECT returns.
+  SELECT returns; rows already flagged are left as they are.
 
 Only ``CREATE_TABLE`` and ``SETUP_TABLE`` create tables; every other action fails, naming the
 remedy, when its target does not exist.
@@ -48,6 +51,7 @@ from etl_craft.handlers.sql.tables import (
     check_or_evolve,
     create_target_shape,
     dedupe,
+    refuse_null_keys,
     require_target,
 )
 
@@ -204,6 +208,7 @@ def _merge_stage(session: Session, action: ActionContext, kind: SqlAction) -> tu
     task = action.task
     stage = build_stage(session, action.select_sql)
     source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
+    refuse_null_keys(session, stage, task.merge_key)
     stage = dedupe(session, stage, task.merge_key, task.dedupe_order)
     check_or_evolve(session, stage, kind, schema_evolution=task.schema_evolution)
     add_hash_key(session, stage, task.merge_compare_columns)
@@ -249,8 +254,12 @@ def scd1_merge(session: Session, action: ActionContext) -> HandlerResult:
         )
 
     compared = kept_hash("t") if task.preserve_target else "s.HASH_KEY"
+    # A soft-deleted key the SELECT returns again comes back, changed or not.
     changed = _changed_keys(
-        session, stage, task.merge_key, f"t.HASH_KEY IS DISTINCT FROM {compared}"
+        session,
+        stage,
+        task.merge_key,
+        f"(t.HASH_KEY IS DISTINCT FROM {compared} OR t.DELETE_FLAG = 'Y')",
     )
     update_count = session.count(f"SELECT COUNT(*) FROM {changed}", step="changed rows")
 
@@ -277,6 +286,7 @@ def scd1_merge(session: Session, action: ActionContext) -> HandlerResult:
         "PIPELINE_RUN_ID = :pipeline_run_id",
         "UPDATE_DATE = :now",
         "UPDATED_BY = :updated_by",
+        "DELETE_FLAG = 'N'",
     ]
     session.run(
         f"UPDATE {update_target} SET {', '.join(assignments)} "
@@ -326,7 +336,8 @@ def scd2_merge(session: Session, action: ActionContext) -> HandlerResult:
         session,
         stage,
         task.merge_key,
-        "t.ACTIVE_FLAG = 'Y' AND t.HASH_KEY IS DISTINCT FROM s.HASH_KEY",
+        # A soft-deleted active version is closed and followed by a live one, as a change is.
+        "t.ACTIVE_FLAG = 'Y' AND (t.HASH_KEY IS DISTINCT FROM s.HASH_KEY OR t.DELETE_FLAG = 'Y')",
     )
     closed = session.count(f"SELECT COUNT(*) FROM {changed}", step="changed keys")
     update_target, q = session.mutation_target()
@@ -416,9 +427,21 @@ def delete_rows(session: Session, action: ActionContext) -> HandlerResult:
     source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
     target = session.target
     require_target(session)
+    refuse_null_keys(session, stage, task.merge_key)
+    if not task.hard_delete:
+        have = {name.lower() for name, _ in session.target_columns()}
+        missing = [c for c in ("DELETE_FLAG", "UPDATE_DATE", "UPDATED_BY") if c.lower() not in have]
+        if missing:
+            raise HandlerError(
+                f"{target} lacks {', '.join(missing)}, which a soft DELETE_ROWS sets; run a "
+                "SETUP_TABLE task for it, add the columns, or set HARD_DELETE=true"
+            )
     key_match = " AND ".join(f"t.{k} = s.{k}" for k in task.merge_key)
+    # A soft delete leaves rows already flagged as they were, with their first UPDATE_DATE.
+    live = "" if task.hard_delete else " AND (t.DELETE_FLAG IS NULL OR t.DELETE_FLAG <> 'Y')"
     delete_count = session.count(
-        f"SELECT COUNT(*) FROM {target} t WHERE EXISTS (SELECT 1 FROM {stage} s WHERE {key_match})",
+        f"SELECT COUNT(*) FROM {target} t WHERE EXISTS (SELECT 1 FROM {stage} s WHERE {key_match})"
+        f"{live}",
         step="rows to delete",
     )
     mutation, q = session.mutation_target()
@@ -429,16 +452,10 @@ def delete_rows(session: Session, action: ActionContext) -> HandlerResult:
             step="delete the rows",
         )
     else:
-        have = {name.lower() for name, _ in session.target_columns()}
-        missing = [c for c in ("DELETE_FLAG", "UPDATE_DATE", "UPDATED_BY") if c.lower() not in have]
-        if missing:
-            raise HandlerError(
-                f"{target} lacks {', '.join(missing)}, which a soft DELETE_ROWS sets; run a "
-                "SETUP_TABLE task for it, add the columns, or set HARD_DELETE=true"
-            )
         session.run(
             f"UPDATE {mutation} SET DELETE_FLAG = 'Y', UPDATE_DATE = :now, "
-            f"UPDATED_BY = :updated_by WHERE EXISTS (SELECT 1 FROM {stage} s WHERE {match})",
+            f"UPDATED_BY = :updated_by WHERE EXISTS (SELECT 1 FROM {stage} s WHERE {match}) "
+            f"AND ({q}.DELETE_FLAG IS NULL OR {q}.DELETE_FLAG <> 'Y')",
             action.stamp,
             step="flag the rows deleted",
         )

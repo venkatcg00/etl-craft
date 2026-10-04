@@ -158,6 +158,17 @@ def split_statements(sql_text: str) -> list[str]:
     return [stmt.strip() for stmt in statements if not is_only_comments(stmt)]
 
 
+def as_subquery(select_sql: str) -> str:
+    """Return ``select_sql`` in parentheses, ready to embed in a larger statement.
+
+    A trailing ``;`` is dropped, and each parenthesis is on its own line, so a SELECT that ends
+    in a ``--`` comment does not comment out the closing one.
+    """
+    statements = split_statements(select_sql)
+    body = statements[0] if len(statements) == 1 else select_sql.strip()
+    return f"(\n{body}\n)"
+
+
 def _end_of_string_literal(sql_text: str, start: int) -> int:
     """Return the index just past the single-quoted literal opening at ``start``."""
     end = start + 1

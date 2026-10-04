@@ -449,3 +449,228 @@ def test_run_date_reads_the_rows_of_the_date_the_run_runs_as_of(sql_world):
     assert [(i, str(d)[:10]) for i, d in w.rows(f"SELECT id, as_of FROM {w.name('daily')}")] == [
         (2, "2026-09-01")
     ]
+
+
+def count(world, table, where="1 = 1"):
+    return world.rows(f"SELECT COUNT(*) FROM {world.name(table)} WHERE {where}")[0][0]
+
+
+@pytest.mark.parametrize("action", ["SCD1_MERGE", "SCD2_MERGE", "DELETE_ROWS"])
+def test_a_null_merge_key_is_refused_before_the_target_changes(customers, action):
+    w = customers("SCD2_MERGE" if action == "SCD2_MERGE" else "SCD1_MERGE")
+    loaded = "SELECT 1 AS id, 'Ann' AS name, 'Oslo' AS city"
+    w.run(
+        "load",
+        SQL_ACTION="SCD2_MERGE" if action == "SCD2_MERGE" else "SCD1_MERGE",
+        SOURCE_SQL=loaded,
+        **SCD,
+    )
+    source = (
+        "SELECT CAST(NULL AS INTEGER) AS id, 'Bo' AS name, 'Rome' AS city "
+        "UNION ALL SELECT 1, 'Ann', 'Lima'"
+    )
+    params = SCD
+    if action == "DELETE_ROWS":
+        source = "SELECT CAST(NULL AS INTEGER) AS id UNION ALL SELECT 1"
+        params = {"TARGET_OBJECT": "customers", "MERGE_KEY": "id"}
+    with pytest.raises(HandlerError, match=r"returns 1 row\(s\) with a NULL in MERGE_KEY \(id\)"):
+        w.run("null_key", SQL_ACTION=action, SOURCE_SQL=source, **params)
+    assert sorted_rows(w, f"SELECT id, city, delete_flag FROM {w.name('customers')}") == [
+        (1, "Oslo", "N")
+    ]
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        "CREATE_TABLE",
+        "SETUP_TABLE",
+        "OVERWRITE_TABLE",
+        "APPEND_TABLE",
+        "SCD1_MERGE",
+        "SCD2_MERGE",
+        "DELETE_ROWS",
+    ],
+)
+def test_a_select_returning_engine_columns_is_refused(sql_world, action):
+    w = sql_world
+    w.run("made", SQL_ACTION="CREATE_TABLE", TARGET_OBJECT="made", SOURCE_SQL="SELECT 1 AS id")
+    w.setup("copy", "SELECT 1 AS id", "SCD2_MERGE")
+    before = w.rows(f"SELECT COUNT(*) FROM {w.name('copy')}")
+    params = {
+        "CREATE_TABLE": {},
+        "SETUP_TABLE": {"SETUP_FOR": "SCD2_MERGE"},
+        "OVERWRITE_TABLE": {},
+        "APPEND_TABLE": {},
+        "SCD1_MERGE": {"MERGE_KEY": "id", "MERGE_COMPARE_COLUMNS": "id"},
+        "SCD2_MERGE": {"MERGE_KEY": "id", "MERGE_COMPARE_COLUMNS": "id"},
+        "DELETE_ROWS": {"MERGE_KEY": "id"},
+    }[action]
+    if action == "SETUP_TABLE":
+        w.execute(f"DROP TABLE {w.name('copy')}")
+    with pytest.raises(HandlerError, match=r"(?i)returns pipeline_run_id, row_id, which etl-craft"):
+        w.run(
+            "star",
+            SQL_ACTION=action,
+            TARGET_OBJECT="made" if action == "CREATE_TABLE" else "copy",
+            SOURCE_SQL=f"SELECT * FROM {w.name('made')}",
+            **params,
+        )
+    if action == "SETUP_TABLE":
+        assert "copy" not in w.tables()
+        return
+    assert w.rows(f"SELECT COUNT(*) FROM {w.name('copy')}") == before
+    assert w.rows(f"SELECT id FROM {w.name('made')}") == [(1,)]
+
+
+def test_a_column_name_that_needs_quoting_is_refused(sql_world):
+    w = sql_world
+    quote = "`" if w.kind == "databricks" else '"'
+    with pytest.raises(HandlerError, match=r"'my id', which need\(s\) quoting.*AS my_id"):
+        w.run(
+            "spaced",
+            SQL_ACTION="CREATE_TABLE",
+            TARGET_OBJECT="spaced",
+            SOURCE_SQL=f"SELECT 1 AS {quote}my id{quote}",
+        )
+    mixed = f"SELECT 1 AS {quote}CustomerId{quote}"
+    if w.kind == "postgres":
+        with pytest.raises(HandlerError, match=r"'CustomerId'.*AS customer_id"):
+            w.run("mixed", SQL_ACTION="CREATE_TABLE", TARGET_OBJECT="mixed", SOURCE_SQL=mixed)
+        return
+    # Trino folds every name to lower case; DuckDB keeps the case and matches names without it.
+    w.run("mixed", SQL_ACTION="CREATE_TABLE", TARGET_OBJECT="mixed", SOURCE_SQL=mixed)
+    assert w.rows(f"SELECT customerid FROM {w.name('mixed')}") == [(1,)]
+
+
+@pytest.mark.parametrize("ending", [";", " -- the last line is a comment", ";\n-- and a comment"])
+def test_a_select_may_end_in_a_semicolon_or_a_comment(sql_world, ending):
+    w = sql_world
+    source = "SELECT 1 AS id, CAST('a' AS VARCHAR(10)) AS name" + ending
+    w.run(
+        "setup",
+        SQL_ACTION="SETUP_TABLE",
+        TARGET_OBJECT="ends",
+        SOURCE_SQL=source,
+        SETUP_FOR="OVERWRITE_TABLE",
+    )
+    w.run("load", SQL_ACTION="OVERWRITE_TABLE", TARGET_OBJECT="ends", SOURCE_SQL=source)
+    assert w.rows(f"SELECT id, name FROM {w.name('ends')}") == [(1, "a")]
+
+
+def test_ties_in_the_dedupe_order_are_refused_unless_the_rows_are_the_same(customers):
+    w = customers("SCD1_MERGE")
+    tied = "SELECT 1 AS id, 'a' AS name, 'x' AS city UNION ALL SELECT 1, 'b', 'x'"
+    with pytest.raises(
+        HandlerError,
+        match=r"MERGE_DEDUPE_ORDER \(city DESC\) leaves ties between different rows for 1 "
+        r"key\(s\), for example id=1",
+    ):
+        w.run(
+            "tied", SQL_ACTION="SCD1_MERGE", SOURCE_SQL=tied, MERGE_DEDUPE_ORDER="city DESC", **SCD
+        )
+    assert count(w, "customers") == 0
+    same = "SELECT 1 AS id, 'a' AS name, 'x' AS city UNION ALL SELECT 1, 'a', 'x'"
+    result = w.run(
+        "same", SQL_ACTION="SCD1_MERGE", SOURCE_SQL=same, MERGE_DEDUPE_ORDER="city DESC", **SCD
+    )
+    assert (result.source_count, result.insert_count) == (2, 1)
+
+
+def test_a_soft_delete_leaves_rows_already_deleted_alone(customers):
+    w = customers("SCD1_MERGE")
+    w.run(
+        "load",
+        SQL_ACTION="SCD1_MERGE",
+        SOURCE_SQL="SELECT 1 AS id, 'a' AS name, 'x' AS city",
+        **SCD,
+    )
+    params = {"SQL_ACTION": "DELETE_ROWS", "TARGET_OBJECT": "customers", "MERGE_KEY": "id"}
+    assert w.run("soft", SOURCE_SQL="SELECT 1 AS id", **params).delete_count == 1
+    first = w.rows(f"SELECT update_date FROM {w.name('customers')}")
+    again = w.run("soft", SOURCE_SQL="SELECT 1 AS id", **params)
+    assert (again.delete_count, again.rows_written) == (0, 0)
+    assert w.rows(f"SELECT update_date FROM {w.name('customers')}") == first
+
+
+def test_a_soft_deleted_key_comes_back_when_the_select_returns_it(customers):
+    w = customers("SCD1_MERGE")
+    row = "SELECT 1 AS id, 'a' AS name, 'x' AS city"
+    w.run("load", SQL_ACTION="SCD1_MERGE", SOURCE_SQL=row, **SCD)
+    w.run(
+        "soft",
+        SQL_ACTION="DELETE_ROWS",
+        TARGET_OBJECT="customers",
+        MERGE_KEY="id",
+        SOURCE_SQL="SELECT 1 AS id",
+    )
+    back = w.run("load", SQL_ACTION="SCD1_MERGE", SOURCE_SQL=row, **SCD)
+    assert (back.update_count, back.insert_count) == (1, 0)
+    assert w.rows(f"SELECT name, delete_flag FROM {w.name('customers')}") == [("a", "N")]
+
+
+def test_a_soft_deleted_scd2_key_gets_a_live_version(customers):
+    w = customers("SCD2_MERGE")
+    params = {"SQL_ACTION": "SCD2_MERGE", **SCD}
+    row = "SELECT 1 AS id, 'a' AS name, 'x' AS city"
+    w.run("load", SOURCE_SQL=row, **params)
+    w.run(
+        "soft",
+        SQL_ACTION="DELETE_ROWS",
+        TARGET_OBJECT="customers",
+        MERGE_KEY="id",
+        SOURCE_SQL="SELECT 1 AS id",
+    )
+    back = w.run("load", SOURCE_SQL=row, **params)
+    assert (back.update_count, back.insert_count) == (1, 1)
+    assert sorted_rows(w, f"SELECT active_flag, delete_flag FROM {w.name('customers')}") == [
+        ("N", "Y"),
+        ("Y", "N"),
+    ]
+
+
+def test_rows_written_counts_what_changed_not_what_the_target_holds(customers):
+    w = customers("SCD1_MERGE")
+    row = "SELECT 1 AS id, 'a' AS name, 'x' AS city"
+    assert w.run("load", SQL_ACTION="SCD1_MERGE", SOURCE_SQL=row, **SCD).rows_written == 1
+    unchanged = w.run("load", SQL_ACTION="SCD1_MERGE", SOURCE_SQL=row, **SCD)
+    assert (unchanged.rows_written, unchanged.target_count) == (0, 1)
+    changed = w.run(
+        "load",
+        SQL_ACTION="SCD1_MERGE",
+        SOURCE_SQL="SELECT 1 AS id, 'b' AS name, 'x' AS city",
+        **SCD,
+    )
+    assert changed.rows_written == 1
+    w.setup("log", "SELECT 1 AS id", "APPEND_TABLE")
+    w.run("fill", SQL_ACTION="APPEND_TABLE", TARGET_OBJECT="log", SOURCE_SQL="SELECT 1 AS id")
+    empty = w.run(
+        "fill",
+        SQL_ACTION="APPEND_TABLE",
+        TARGET_OBJECT="log",
+        SOURCE_SQL="SELECT 1 AS id WHERE 1 = 0",
+    )
+    assert (empty.rows_written, empty.target_count) == (0, 1)
+
+
+def test_scratch_tables_are_found_in_the_targets_schema_only(sql_world, monkeypatch):
+    w = sql_world
+    if w.kind in ("duckdb", "postgres", "duckdb_iceberg"):
+        pytest.skip("temporary scratch tables live in the session's own namespace")
+    monkeypatch.setattr("secrets.token_hex", lambda n: "abc123")
+    params = {"SQL_ACTION": "OVERWRITE_TABLE", "TARGET_OBJECT": "shape"}
+    w.setup("shape", "SELECT 1 AS id", "OVERWRITE_TABLE")
+    task_run_id = w.task("over", **params).task_run_id
+    other = f"{w.schema}_other"
+    w.execute(f"CREATE SCHEMA {w.catalog}.{other}")
+    try:
+        w.execute(
+            f"CREATE TABLE {w.catalog}.{other}.etl_stage_{task_run_id}_abc123 AS "
+            "SELECT 1 AS id, 2 AS extra"
+        )
+        w.run("over", SOURCE_SQL="SELECT 5 AS id", SCHEMA_EVOLUTION="true", **params)
+        assert w.columns("shape") == ["id", "pipeline_run_id", "update_date", "row_id"]
+        assert w.rows(f"SELECT id FROM {w.name('shape')}") == [(5,)]
+    finally:
+        w.execute(f"DROP TABLE IF EXISTS {w.catalog}.{other}.etl_stage_{task_run_id}_abc123")
+        w.execute(f"DROP SCHEMA IF EXISTS {w.catalog}.{other}")

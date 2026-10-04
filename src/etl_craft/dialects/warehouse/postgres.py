@@ -17,6 +17,7 @@ class PostgresWarehouse(WarehouseDialect):
     """PostgreSQL, native tables."""
 
     spec = warehouse_by_key("postgres")
+    identifier_case = "lower"
 
     def present(self, profile: ConnectionProfile, secret: str, url: WarehouseUrl) -> Presented:
         """Authenticate through psycopg's own arguments, exactly as the Engine DB does.
