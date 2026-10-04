@@ -8,6 +8,9 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Named development fault points, a synchronized admission-race helper and a reusable real-CLI
+  process harness. Stabilization defects have an explicit regression mapping checked by CI.
+
 - Secrets files accept UTF-8 byte-order marks and `export KEY=VALUE`; missing secret variables
   include suggestions for similarly named keys.
 

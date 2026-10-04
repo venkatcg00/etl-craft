@@ -69,3 +69,26 @@ unreleased features as available in an older version.
 `make docs-site` builds every version strictly and checks the rendered API content in each
 version and the `latest` alias. Use it when changing the shared API renderer or versioned builder;
 `make docs` checks only the current development documentation.
+
+## Lifecycle regression harness
+
+`release/regressions.toml` maps every stabilization defect in the roadmap to named tests.
+`make regressions` verifies the assignments against fresh pytest collection; it runs in
+`make check` and CI. Keep the mapping current when a test is renamed or a defect is reassigned.
+
+`tests/fixtures/races.py` provides `two_at_once(fn_a, fn_b, at="module.function")`: both callers
+wait once at that function before continuing. Place the boundary before a transaction that
+serializes SQLite writers, so neither caller holds the write lock while waiting at the barrier.
+`tests/fixtures/cli_project.py` initializes throwaway Engine DBs through the real CLI and
+provides bounded process waits, file-backed output, row-state polling and signal helpers.
+Linux process-tree assertions read `/proc`; their complete node ids are declared in the suite
+manifest, so evidence runs on other platforms deselect them explicitly.
+
+`ETL_CRAFT_FAULT` enables one named development failure. A matching name raises
+`InjectedFaultError`; append `:kill` to exit immediately with status 137, without cleanup.
+Unset the variable for normal operation. Available boundaries are `runner.after_timeout`
+(before binding), `runner.after_bind`, `supervisor.after_mkdir`, `supervisor.after_popen`,
+`child.after_outcome`, `pipeline.after_insert`, `runner.before_consumption`,
+`pipeline.before_consumption`, and `script.after_offset`. Hard exits can leave audit rows
+running and processes alive: tests must clean up their process trees and use explicit
+operator controls for stale rows. Ownership and reconciliation remain later roadmap work.

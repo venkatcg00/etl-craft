@@ -24,6 +24,7 @@ EXIT_CODES = {
     errors.HandlerError: ExitCode.HANDLER,
     errors.CloningError: ExitCode.CLONING,
     errors.RemoteUnsupportedError: ExitCode.REMOTE_UNSUPPORTED,
+    errors.InjectedFaultError: ExitCode.INJECTED_FAULT,
 }
 
 
@@ -55,6 +56,7 @@ def test_the_exit_codes():
         ("UNEXPECTED", 16),
         ("CLONING", 17),
         ("REMOTE_UNSUPPORTED", 18),
+        ("INJECTED_FAULT", 19),
     ]
 
 

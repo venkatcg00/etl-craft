@@ -1,0 +1,160 @@
+# Named regression tests for each defect assigned to the stabilization release.
+release = "0.2.0"
+
+[defects]
+B2 = [
+    "tests/integration/execution/test_runner.py::test_a_task_process_that_cannot_start_is_recorded_failed",
+]
+B3 = [
+    "tests/integration/execution/test_python_scripts.py::test_a_signal_to_run_stops_the_task_process_and_records_it",
+]
+B4 = [
+    "tests/integration/execution/test_gates.py::test_a_finished_backfill_run_never_satisfies_a_gate",
+    "tests/integration/execution/test_gates.py::test_a_failed_backfill_run_never_blocks_a_gate",
+    "tests/integration/execution/test_gates.py::test_a_running_backfill_run_is_never_waited_for",
+]
+B5 = [
+    "tests/integration/warehouse/test_sql_actions.py::test_a_null_merge_key_is_refused_before_the_target_changes",
+]
+B7 = [
+    "tests/integration/execution/test_interventions.py::test_a_plain_run_does_not_take_over_a_backfills_run",
+    "tests/integration/execution/test_interventions.py::test_a_backfill_does_not_take_over_a_scheduled_run",
+    "tests/integration/execution/test_interventions.py::test_a_backfill_stops_when_another_run_starts_between_dates",
+]
+B10 = [
+    "tests/integration/execution/test_interventions.py::test_mark_keeps_a_skipped_task_another_pipeline_consumed",
+]
+B12 = [
+    "tests/integration/warehouse/test_sql_actions.py::test_a_select_returning_engine_columns_is_refused",
+]
+B13 = [
+    "tests/integration/execution/test_interventions.py::test_a_met_sla_stays_met_when_the_run_is_ended_again_later",
+]
+B15 = [
+    "tests/integration/execution/test_interventions.py::test_a_backfill_never_meets_a_failure_dependency_on_another_pipeline",
+]
+B17 = [
+    "tests/integration/warehouse/test_sql_actions.py::test_a_soft_deleted_key_comes_back_when_the_select_returns_it",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_soft_deleted_scd2_key_gets_a_live_version",
+]
+B18 = [
+    "tests/integration/engine/test_sqlite_transactions.py::test_a_savepoint_that_is_the_first_write_rolls_back_with_its_transaction",
+]
+B19 = [
+    "tests/integration/execution/test_python_scripts.py::test_scripts_have_real_module_semantics",
+]
+B20 = [
+    "tests/integration/execution/test_email.py::test_a_multiline_database_error_is_safe_in_the_subject_and_kept_in_the_body",
+]
+B21 = [
+    "tests/integration/warehouse/test_business_rules.py::test_a_flag_is_cleared_when_its_key_is_gone_from_the_table",
+    "tests/integration/warehouse/test_business_rules.py::test_only_the_active_version_of_a_versioned_table_is_judged",
+]
+B23 = [
+    "tests/integration/execution/test_pipeline.py::test_a_refused_gate_leaves_a_run_another_process_started_alone",
+]
+B24 = [
+    "tests/integration/execution/test_pipeline.py::test_a_run_is_not_ended_while_another_process_runs_one_of_its_tasks",
+]
+B25 = [
+    "tests/integration/execution/test_interventions.py::test_a_rerun_of_a_failed_task_leaves_what_its_failure_skipped_to_run",
+]
+B26 = [
+    "tests/integration/execution/test_interventions.py::test_a_task_left_running_by_a_dead_process_is_released_with_stale",
+]
+B27 = [
+    "tests/integration/execution/test_runner.py::test_recording_an_outcome_survives_a_dropped_connection",
+]
+B28 = [
+    "tests/integration/execution/test_runner.py::test_a_failed_task_is_never_rewritten_as_skipped",
+]
+B29 = [
+    "tests/integration/execution/test_interventions.py::test_a_skipped_run_is_ended_for_a_single_task",
+]
+B30 = [
+    "tests/integration/execution/test_interventions.py::test_a_run_whose_tasks_were_all_skipped_ends_skipped",
+]
+B31 = [
+    "tests/integration/execution/test_interventions.py::test_a_rerun_of_a_task_still_running_leaves_its_ended_run_alone",
+]
+B32 = [
+    "tests/integration/execution/test_interventions.py::test_a_run_cancelled_while_it_is_ended_is_left_cancelled",
+]
+B33 = [
+    "tests/integration/engine/test_catalog_upgrade.py::test_full_catalog_matches_fresh_initialization",
+]
+B34 = [
+    "tests/integration/warehouse/test_sql_actions.py::test_scratch_tables_are_found_in_the_targets_schema_only",
+]
+B41 = [
+    "tests/integration/warehouse/test_sql_actions.py::test_ties_in_the_dedupe_order_are_refused_unless_the_rows_are_the_same",
+]
+B42 = [
+    "tests/integration/warehouse/test_sql_actions.py::test_rows_written_counts_what_changed_not_what_the_target_holds",
+]
+B44 = [
+    "tests/integration/warehouse/test_sql_actions.py::test_a_select_may_end_in_a_semicolon_or_a_comment",
+]
+B45 = [
+    "tests/integration/warehouse/test_sql_actions.py::test_a_column_name_that_needs_quoting_is_refused",
+]
+B46 = [
+    "tests/integration/warehouse/test_sql_actions.py::test_a_soft_delete_leaves_rows_already_deleted_alone",
+]
+B47 = [
+    "tests/integration/engine/test_metadata_codes.py::test_generation_refuses_legacy_codes_even_without_database_checks",
+]
+B48 = [
+    "tests/unit/test_config_strictness.py::test_jdbc_query_credentials_are_refused_without_echoing_value",
+]
+B49 = [
+    "tests/integration/execution/test_python_scripts.py::test_http_request_logs_do_not_expose_query_keys_in_attempt_log",
+]
+B50 = [
+    "tests/integration/connections/test_email_tls.py::test_an_untrusted_or_wrong_hostname_certificate_is_refused",
+]
+B51 = [
+    "tests/integration/engine/test_rule_flag_batches.py::test_tens_of_thousands_of_flags_can_be_cleared",
+    "tests/integration/engine/test_rule_flag_batches.py::test_a_later_batch_failure_rolls_back_flags_and_rule_completion",
+]
+B53 = [
+    "tests/integration/execution/test_python_scripts.py::test_the_task_process_exits_once_its_outcome_is_recorded",
+]
+B54 = [
+    "tests/integration/execution/test_python_scripts.py::test_what_a_script_printed_is_kept_when_it_is_stopped",
+]
+B55 = [
+    "tests/unit/test_config_strictness.py::test_auth_and_url_paths_are_absolute_from_config_directory",
+]
+B56 = [
+    "tests/unit/test_config_strictness.py::test_duplicate_keys_name_path_and_both_lines",
+]
+B57 = [
+    "tests/integration/warehouse/test_business_rules.py::test_rule_sql_endings_work_when_flagging_and_clearing",
+]
+B58 = [
+    "tests/unit/test_config_strictness.py::test_blank_secrets_are_refused_at_load_and_connection",
+]
+B59 = [
+    "tests/unit/test_config_strictness.py::test_iceberg_storage_secret_is_a_name_in_config",
+    "tests/integration/warehouse/test_connections.py::test_storage_secret_is_resolved_again_for_a_new_connection",
+]
+B60 = [
+    "tests/unit/test_scripting.py::test_a_timestamp_offset_refuses_precision_the_store_cannot_keep",
+]
+B61 = [
+    "tests/integration/execution/test_pipeline.py::test_a_relay_outage_does_not_prevent_data_tasks_from_running",
+    "tests/integration/execution/test_email.py::test_recipient_refusal_is_recorded_on_the_alert_attempt",
+]
+B63 = [
+    "tests/unit/test_release_gate.py::test_evidence_for_a_different_marker_is_rejected",
+    "tests/unit/test_release_gate.py::test_a_self_consistent_subset_or_extra_node_cannot_pass",
+]
+B64 = [
+    "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes",
+    "tests/integration/engine/test_metadata_codes.py::test_generated_dags_have_controls_and_no_self_dependency",
+]
+B65 = [
+    "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused",
+    "tests/integration/engine/test_publish_docs.py::test_links_outside_the_site_are_refused_for_get_and_head",
+]

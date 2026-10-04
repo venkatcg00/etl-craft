@@ -70,7 +70,7 @@ item's text, or work done early under another item.
 | S2.I A release gate that checks completeness | Done | #86 | B63 |
 | S2.J Business rules at size | Done | #87 | B51; B57 done in S2.D |
 | S2.K Migrations and small fixes | Done | #88 | B33; S2.K.5 done in S2.A |
-| S2.L Regression suite and release | Not started; last | | |
+| S2.L Regression suite and release | In progress: harness and regression traceability; release evidence pending | #90 | 48 stabilization defects |
 | 0.3 and later | Not started | | |
 
 ### Handover notes
@@ -78,6 +78,13 @@ item's text, or work done early under another item.
 What a person picking up the work needs that the code and the item texts do not say.
 
 **Choices that differ from the item text.**
+
+- `S2.L`: `release/regressions.toml` maps all 48 defects assigned wholly or partly to 0.2.0.
+  `make regressions` checks the mapping against fresh collection. Fault injection uses
+  `InjectedFaultError` (exit 19), following the repository's exception naming rule, and timeout
+  parsing stays before binding. A hard exit after binding leaves a stale row that explicit
+  `cancel` can settle; automatic ownership/reconciliation remains 0.3. The warehouse runtime
+  failure regression checks every target row and scratch cleanup on all local dialects.
 
 - `S2.K.1`: the full-catalog comparison also found SQLite's anonymous backfill check.
   Migration `0006` therefore exists on both dialects: PostgreSQL renames the constraint;
@@ -148,12 +155,11 @@ What a person picking up the work needs that the code and the item texts do not 
   old `PIPELINE_RUN_ID` on unchanged rows. Any run clears the flag of a key with no row (no active
   version) left in the table.
 
-**Known flaky test.** `test_a_signal_to_run_stops_the_task_process_and_records_it[sqlite-how0-1]`
-(`tests/integration/execution/test_python_scripts.py`, from `S2.B.1`) failed once on macOS CI: the
-parent `etl-craft run --task_code` did not exit within 30 s of `SIGHUP`, and a rerun passed. It
-passes on Linux. Investigate before `S2.L`: capture the parent's output in the test (it is piped
-and never read when `wait` times out), and check how long `_stop_group`'s grace period and the
-recording of the attempt take on macOS.
+**Signal-test diagnostics.** The signal regression captures the parent output in a file,
+includes it on a bounded-wait timeout, and always closes the parent. File-backed output avoids
+an unread pipe blocking the CLI; the same helper drives the real CLI lifecycle tests. CI still
+exercises SIGHUP and SIGTERM on Linux and macOS. Linux-only descendant assertions have explicit
+platform declarations in the release suite manifest.
 
 **Working on the code.**
 
@@ -835,6 +841,9 @@ Branch: `fix/engine-migration-hygiene` plus small branches as convenient.
 | S2.K.10 | Minor | `$$` tokens inside SQL string literals and comments are left alone (substitute only outside quotes and comments, using the existing statement splitter's tokenizer). |
 
 ### S2.L Regression suite and release
+
+**Status: in progress.** The harness and named regression mapping are implemented; the
+release requires fresh evidence on the 0.2.0 commit and wheel, including both cloud suites.
 
 Branch: `test/regression-0.2`, last.
 

@@ -1,4 +1,4 @@
-.PHONY: help sync lint format typecheck imports history test coverage check build verify-package clean \
+.PHONY: help sync lint format typecheck imports history test coverage check build verify-package clean regressions \
 	certs services-up services-down services-reset test-harness suite release-gate \
 	docs docs-serve docs-site
 
@@ -33,7 +33,10 @@ test: ## Run the test suite
 coverage: ## Run the test suite with the coverage gate
 	$(UV) run pytest -q --cov --cov-report=term-missing
 
-check: lint typecheck imports history coverage ## Everything CI runs on every pull request
+regressions: ## Check named regression coverage for stabilization defects
+	$(UV) run python scripts/check_regressions.py
+
+check: lint typecheck imports history regressions coverage ## Everything CI runs on every pull request
 
 build: ## Build the wheel and sdist into dist/
 	$(UV) build

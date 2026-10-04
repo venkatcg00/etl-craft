@@ -674,3 +674,22 @@ def test_scratch_tables_are_found_in_the_targets_schema_only(sql_world, monkeypa
     finally:
         w.execute(f"DROP TABLE IF EXISTS {w.catalog}.{other}.etl_stage_{task_run_id}_abc123")
         w.execute(f"DROP SCHEMA IF EXISTS {w.catalog}.{other}")
+
+
+def test_a_runtime_cast_failure_preserves_every_target_row(sql_world):
+    w = sql_world
+    params = {"SQL_ACTION": "OVERWRITE_TABLE", "TARGET_OBJECT": "daily"}
+    w.setup("daily", "SELECT 1 AS id", "OVERWRITE_TABLE")
+    w.run("seed", SOURCE_SQL="SELECT 1 AS id UNION ALL SELECT 2", **params)
+    before = sorted_rows(w, f"SELECT * FROM {w.name('daily')}")
+    with pytest.raises(HandlerError, match="stage the SELECT failed"):
+        w.run(
+            "broken",
+            SOURCE_SQL=(
+                "SELECT CASE WHEN id = 3 THEN CAST('x' AS INTEGER) ELSE id END AS id "
+                "FROM (SELECT 1 AS id UNION ALL SELECT 2 UNION ALL SELECT 3) rows_to_read"
+            ),
+            **params,
+        )
+    assert sorted_rows(w, f"SELECT * FROM {w.name('daily')}") == before
+    assert w.tables() == ["daily"]

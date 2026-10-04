@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
 
+from etl_craft.core.faults import fault_point
+
 logger = logging.getLogger(__name__)
 
 CANCEL_POLL_SECONDS = 0.5
@@ -115,6 +117,7 @@ def run_child(
         logger.debug("started pid %s: %s", process.pid, " ".join(spec.argv))
         timed_out = cancelled = False
         try:
+            fault_point("supervisor.after_popen")
             cancelled = _wait(process, spec.timeout_seconds or None, cancel)
             if cancelled:
                 logger.warning("stopping pid %s: the run was interrupted", process.pid)
@@ -200,6 +203,7 @@ def _output_file(path: Path | None) -> Iterator[IO[bytes]]:
             yield handle
         return
     path.parent.mkdir(parents=True, exist_ok=True)
+    fault_point("supervisor.after_mkdir")
     with path.open("a+b") as handle:
         yield handle
 

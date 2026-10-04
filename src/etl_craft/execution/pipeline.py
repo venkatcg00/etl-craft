@@ -52,6 +52,7 @@ from etl_craft.core.enums import (
     SlaStatus,
 )
 from etl_craft.core.errors import EtlCraftError, RunRefusedError, RunStateError, UsageError
+from etl_craft.core.faults import fault_point
 from etl_craft.core.graph import DependencyGraph, TaskRunState, build_graph
 from etl_craft.core.log import log_context
 from etl_craft.engine import runlog
@@ -710,6 +711,7 @@ def _start_run(
                 f"`etl-craft history --pipeline_code {pipeline_code}`"
             )
         pipeline_run_id = created
+        fault_point("pipeline.after_insert")
         if reason is not None and not runlog.end_run_if(
             conn, pipeline_run_id, RunStatus.IN_PROGRESS, RunStatus.SKIPPED
         ):
@@ -1056,6 +1058,7 @@ def _finalize(
     with engine.connect() as conn:
         backfill_run = runlog.fetch_run_kind(conn, pipeline_run_id).backfill
     if status == RunStatus.SUCCESS and not orchestrated and not backfill_run:
+        fault_point("pipeline.before_consumption")
         consume_pipeline_dependencies(engine, pipeline_id, pipeline_run_id)
 
     message = f"{pipeline_code}: pipeline_run_id={pipeline_run_id} {status}"

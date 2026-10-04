@@ -32,6 +32,8 @@ jobs:
         run: make imports
       - name: History gate
         run: make history
+      - name: Regression traceability
+        run: make regressions
 
   test:
     name: tests (py${{ matrix.python-version }}, ${{ matrix.os }})
