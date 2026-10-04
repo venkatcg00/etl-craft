@@ -70,7 +70,7 @@ item's text, or work done early under another item.
 | S2.I A release gate that checks completeness | Done | #86 | B63 |
 | S2.J Business rules at size | Done | #87 | B51; B57 done in S2.D |
 | S2.K Migrations and small fixes | Done | #88 | B33; S2.K.5 done in S2.A |
-| S2.L Regression suite and release | In progress: harness and regression traceability; release evidence pending | #90 | 48 stabilization defects |
+| S2.L Regression suite and release | Done | #90, #91, #92, #93 | 48 stabilization defects; 0.2.0 released |
 | 0.3 and later | Not started | | |
 
 ### Handover notes
@@ -842,8 +842,10 @@ Branch: `fix/engine-migration-hygiene` plus small branches as convenient.
 
 ### S2.L Regression suite and release
 
-**Status: in progress.** The harness and named regression mapping are merged (#90); the
-release requires fresh evidence on the 0.2.0 commit and wheel, including both cloud suites.
+**Status: done** (#90, #91, #92, #93). [0.2.0 is released](https://github.com/venkatcg00/etl-craft/releases/tag/v0.2.0).
+All 14 required suites passed from clean commit `63e1c6d`, with 2,118 passing test outcomes and
+no skips, including both complete cloud suites. Evidence and artifact checksums are in
+`release/evidence/0.2.0/`; the release gate passes on the release tag.
 
 Branch: `test/regression-0.2`, last.
 
