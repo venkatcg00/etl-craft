@@ -71,7 +71,7 @@ item's text, or work done early under another item.
 | S2.J Business rules at size | Done | #87 | B51; B57 done in S2.D |
 | S2.K Migrations and small fixes | Done | #88 | B33; S2.K.5 done in S2.A |
 | S2.L Regression suite and release | Done | #90, #91, #92, #93 | 48 stabilization defects; 0.2.0 released |
-| S3.A Identity schema | Done | | Run identities, attempt history and gate-decision schema |
+| S3.A Identity schema | Done | #95 | Run identities, attempt history and gate-decision schema |
 | S3.B to S3.H | Not started | | |
 | 0.4 and later | Not started | | |
 
