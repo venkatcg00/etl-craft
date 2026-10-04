@@ -91,7 +91,7 @@ _ORCHESTRATION_KEYS = frozenset(
 )
 _EMAIL_KEYS = frozenset(
     {"host", "port", "from_address", "auth_mode", "user", "use_tls", "secret", "scope"}
-    | {"client_id", "token_url", "transport", "sendmail_path", "from_name"}
+    | {"client_id", "token_url", "transport", "sendmail_path", "from_name", "tls_mode", "ca_file"}
 )
 _SMTP_ONLY_EMAIL_KEYS = frozenset(
     _EMAIL_KEYS - {"from_address", "from_name", "transport", "sendmail_path"}
@@ -599,6 +599,24 @@ def _parse_email(orchestration: _Profiled, path: Path, resolver: Resolver) -> Em
         )
     user = fields.value("user") or ""
     extra = _auth_extra(fields, auth_mode, EMAIL_AUTH_FIELDS[auth_mode], user=user)
+    use_tls = _parse_bool(fields.value("use_tls"), f"{where}.use_tls", path, default=True)
+    tls_mode = fields.value("tls_mode") or ("starttls" if use_tls else "none")
+    if tls_mode not in {"none", "starttls", "ssl"}:
+        raise ConfigurationError(
+            f"{path}: {where}.tls_mode resolved to {tls_mode!r}, which is not one of "
+            f"none, starttls, ssl{fields.hint('tls_mode')}"
+        )
+    if "tls_mode" in block and "use_tls" in block and use_tls != (tls_mode != "none"):
+        raise ConfigurationError(
+            f"{path}: {where}.tls_mode={tls_mode!r} conflicts with use_tls={use_tls}; "
+            "remove use_tls when setting tls_mode"
+        )
+    ca_file = fields.value("ca_file")
+    if ca_file and tls_mode == "none":
+        raise ConfigurationError(
+            f"{path}: {where}.ca_file={ca_file!r} would be ignored with tls_mode=none; "
+            "set tls_mode to starttls or ssl, or remove ca_file"
+        )
     profile = EmailProfile(
         section="EMAIL",
         name=name,
@@ -607,9 +625,11 @@ def _parse_email(orchestration: _Profiled, path: Path, resolver: Resolver) -> Em
         from_address=fields.value("from_address", required=True) or "",
         auth_mode=auth_mode,
         user=user or None,
-        use_tls=_parse_bool(fields.value("use_tls"), f"{where}.use_tls", path, default=True),
+        use_tls=tls_mode != "none",
         extra=extra,
         from_name=fields.value("from_name") or "",
+        tls_mode=tls_mode,
+        ca_file=_relative_to_config(ca_file, path) if ca_file else None,
     )
     return EmailConfig(active_profile=name, profiles={name: profile})
 

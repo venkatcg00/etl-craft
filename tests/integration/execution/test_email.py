@@ -1,5 +1,6 @@
 """Email alerts and SLA emails, sent through the local Mailpit relay and read back from it."""
 
+import html
 import json
 import socket
 import sys
@@ -8,18 +9,22 @@ import urllib.request
 import uuid
 from dataclasses import replace
 
+import psycopg
 import pytest
+import yaml
+from sqlalchemy import text
 
-from etl_craft.config import EmailConfig, EmailProfile, ExecutionLimits
+from etl_craft.config import EmailConfig, EmailProfile, ExecutionLimits, load_config
 from etl_craft.core.errors import HandlerError
 from etl_craft.engine import runlog
 from etl_craft.execution.connections import probe_email_relay
 from etl_craft.execution.context import build_task_context
 from etl_craft.execution.pipeline import SlaLapse, default_hooks
+from etl_craft.execution.runner import run_task
 from etl_craft.handlers import email_alert
 from etl_craft.handlers.mail import send_sla_lapse_email
 from fixtures.metadata import add_dependency, add_pipeline, add_task, start_run, task_run
-from fixtures.services import require
+from fixtures.services import POSTGRES_DB, POSTGRES_PASSWORD, POSTGRES_USER, require
 
 
 def relay_config(config, host, port):
@@ -113,6 +118,106 @@ def test_an_alert_on_other_outcomes_sends_nothing(mailpit, pipeline):
         "EMAIL_SENT": "false",
         "REASON": "FAILED is not in EMAIL_ON_STATUS",
     }
+
+
+def test_a_multiline_database_error_is_safe_in_the_subject_and_kept_in_the_body(mailpit, pipeline):
+    config, read = mailpit
+    engine, ids = pipeline
+    pg = require("postgres")
+    with (
+        psycopg.connect(
+            host=pg.host,
+            port=pg.port,
+            dbname=POSTGRES_DB,
+            user=POSTGRES_USER,
+            password=POSTGRES_PASSWORD,
+        ) as conn,
+        pytest.raises(psycopg.errors.InvalidTextRepresentation) as caught,
+    ):
+        conn.execute("SELECT CAST('bad' AS INTEGER)")
+    error = str(caught.value)
+    assert "\n" in error
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE AUD_TASK_RUN_LOG SET ERROR_MESSAGE = :error WHERE TASK_ID = :task"),
+            {"error": error, "task": ids["check"]},
+        )
+    tag = uuid.uuid4().hex[:8]
+    result = alert(
+        engine,
+        config,
+        ids,
+        EMAIL_TO="ops@example.com",
+        EMAIL_SUBJECT=f"{tag}: $$error_message",
+        EMAIL_BODY="$$error_message",
+    )
+    subject = f"{tag}: " + " ".join(error.split())
+    assert result.variables["EMAIL_SUBJECT"] == subject
+    message = read(tag)
+    assert message["Subject"] == subject
+    assert html.escape(error) in message["HTML"].replace("\r\n", "\n")
+
+
+@pytest.mark.parametrize(
+    ("recipients", "status", "delivered"),
+    [("bad@example.com|ops@example.com", "SUCCESS", 1), ("bad@example.com", "FAILED", 0)],
+)
+def test_recipient_refusal_is_recorded_on_the_alert_attempt(
+    engine_db, tls_relay, tmp_path, recipients, status, delivered
+):
+    relay = tls_relay(refused={"bad@example.com"})
+    profile = engine_db.config.engine.active
+    block = {
+        "jdbc_url": profile.jdbc_url,
+        "schema": "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main",
+    }
+    if profile.auth_mode != "none":
+        block.update(user=profile.user, auth_mode=profile.auth_mode, secret=profile.secret_var)
+    raw = {
+        "Secrets": {"Source_type": "environment"},
+        "Orchestration": {
+            "Mode": "local",
+            "Email": {
+                "host": relay.host,
+                "port": relay.port,
+                "from_address": "etl@example.com",
+                "tls_mode": "starttls",
+                "ca_file": str(relay.ca_file),
+            },
+        },
+        "Engine": {"dev": block},
+    }
+    path = engine_db.config.config_path or tmp_path / "craft-connector.yml"
+    path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    config = load_config(path)
+    engine = engine_db.engine
+    with engine.begin() as conn:
+        pipeline_id = add_pipeline(conn, "PARTIAL")
+        add_task(
+            conn,
+            pipeline_id,
+            "notify",
+            "EMAIL_ALERT",
+            EMAIL_TO=recipients,
+            EMAIL_SUBJECT="subject",
+            EMAIL_BODY="body",
+        )
+        start_run(conn, pipeline_id)
+    outcome = run_task(engine, config, "PARTIAL", "notify")
+    assert outcome.status == status, outcome.message
+    with engine.connect() as conn:
+        log = conn.execute(
+            text("SELECT TASK_LOG AS task_log FROM AUD_TASK_RUN_LOG WHERE TASK_RUN_ID = :id"),
+            {"id": outcome.task_run_id},
+        ).scalar_one()
+    attempt = next(config.log_dir.glob("PARTIAL/run-*/notify.attempt-1.log")).read_text("utf-8")
+    if status == "SUCCESS":
+        assert "EMAIL_WARNING = " in log and "bad@example.com (550: no such recipient)" in log
+        assert "WARNING etl_craft.handlers.mail" in attempt and "bad@example.com" in attempt
+    else:
+        assert "SMTPRecipientsRefused" in log and "550" in log
+        assert "SMTPRecipientsRefused" in attempt
+    assert len(relay.messages) == delivered
 
 
 @pytest.mark.parametrize(

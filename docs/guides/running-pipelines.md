@@ -18,7 +18,7 @@ INFO etl_craft.execution.pipeline [pipeline=SALES_DAILY pipeline_run_id=97]: SAL
 INFO etl_craft.execution.pipeline [pipeline=SALES_DAILY pipeline_run_id=97]: SALES_DAILY: wave 2: load_orders
 ```
 
-The run ends `SUCCESS` when every task is `SUCCESS` or `SKIPPED`, `SKIPPED` when every task is
+The run ends `SUCCESS` when every data task is `SUCCESS` or `SKIPPED`, `SKIPPED` when every data task is
 `SKIPPED`, and `FAILED` otherwise; the command exits `1` for a failed run and `0` otherwise. A failed run names each task that did not succeed:
 
 ```
@@ -30,8 +30,9 @@ A task whose dependencies can never be met under the run is recorded `SKIPPED`, 
 
 ## Before the run starts
 
-The engine first tests the connections the run uses, and stops with exit status `11`
-(`CONNECTION_TEST`) naming each one that failed. Nothing is recorded, and no task starts.
+The engine first tests the connections the run uses. A warehouse failure stops with exit status
+`11` (`CONNECTION_TEST`), naming the failure; nothing is recorded and no task starts. An email
+failure is logged and data tasks may still run; the alert task records any delivery failure.
 
 | Tested | When |
 |---|---|
@@ -40,6 +41,10 @@ The engine first tests the connections the run uses, and stops with exit status 
 
 A DuckDB file warehouse is not tested: there is no server to be down, and a running task may hold
 its one writer's lock.
+
+Email alert failures do not change the outcome of a pipeline containing data tasks; see
+[Email alerts](email-alerts.md#when-sending-fails). A pipeline containing only alerts uses their
+outcomes.
 
 A new run then checks the pipeline's dependencies on other pipelines. When one is not
 satisfied, the run is recorded `SKIPPED` with the reason, no task runs, and the command exits

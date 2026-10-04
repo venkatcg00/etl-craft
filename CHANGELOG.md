@@ -8,6 +8,8 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- SMTP `tls_mode`: verified STARTTLS (the default), implicit TLS (`ssl`), or unauthenticated
+  plain SMTP (`none`), with an optional project-relative `ca_file`. `use_tls` stays supported.
 - Run history and KPIs in the catalog: each pipeline's and task's latest 30 runs, with success
   rates, failures, SLA misses, average and longest durations, average rows written, and a bar
   per run coloured by status; a page per run with its tasks, interventions, and the upstream
@@ -41,6 +43,11 @@ All notable changes are recorded here. The format follows
 
 ### Fixed
 
+- Email subjects collapse whitespace, drop control characters and cap their length at 200
+  characters; the body keeps the full error. Header failures name the transport and step.
+- SMTP verifies certificates and hostnames and refuses password or OAuth login without TLS.
+- Partial recipient refusal succeeds with `EMAIL_WARNING` in the task audit and a WARNING in
+  the attempt log; total refusal fails the task.
 - Ingestion scripts load as registered modules with their own future imports, so dataclasses,
   enums, pickling, type-hint resolution and fork process pools work. Timestamp offsets refuse
   nanoseconds the store cannot keep, and invalid result variables fail before an offset is saved.
@@ -97,6 +104,9 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- A failed email preflight is logged and data tasks may still run. Failed `EMAIL_ALERT` tasks
+  stay failed and are logged at ERROR, but data tasks determine a data pipeline's final outcome.
+  Pipelines containing only alerts still use their alert tasks' outcomes.
 - `HAS_DATA` means the upstream wrote rows: inserted, updated or deleted, as the new
   `AUD_TASK_RUN_LOG.ROWS_WRITTEN` records (migration `0004_rows_written.sql`). An append of no
   rows, or a merge that changed nothing, no longer satisfies it because the target holds rows.

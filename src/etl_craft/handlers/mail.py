@@ -3,9 +3,9 @@
 Every email is HTML, sent from the profile's ``from_address`` under its ``from_name``, when set,
 in one of two ways:
 
-- ``transport: smtp`` (the default): through the SMTP relay at ``host:port``, with STARTTLS when
-  ``use_tls`` is on, logged in to by ``auth_mode``: ``none``, ``password``, or ``oauth`` (SMTP
-  XOAUTH2 with a client-credentials token, for relays that refuse passwords);
+- ``transport: smtp`` (the default): through the SMTP relay at ``host:port``, with verified
+  STARTTLS or implicit TLS, logged in to by ``auth_mode``: ``none``, ``password``, or ``oauth``
+  (SMTP XOAUTH2 with a client-credentials token, for relays that refuse passwords);
 - ``transport: sendmail``: handed to the host's ``sendmail`` program (``sendmail_path``), the
   one ``mailx`` and ``mail`` use, which delivers it through the host's own mail system.
 
@@ -18,7 +18,9 @@ import html
 import logging
 import os
 import smtplib
+import ssl
 import subprocess
+import unicodedata
 from collections.abc import Sequence
 from email.message import EmailMessage
 from email.utils import formataddr, parseaddr
@@ -67,51 +69,110 @@ def paragraph(text: str) -> str:
 
 def send_email(
     config: ConnectorConfig, recipients: Sequence[str], subject: str, body_html: str
-) -> None:
-    """Send one HTML email; ``HandlerError`` naming the relay when it cannot be sent."""
+) -> str | None:
+    """Send HTML email; return a partial-refusal warning, or fail with the transport and cause."""
     if config.email is None:
         raise HandlerError(
             "no Email settings in craft-connector.yml; sending email needs Orchestration's Email "
             "block with the relay's host, port and from address"
         )
     profile = config.email.active
-    message = EmailMessage()
-    message["Subject"] = subject
-    message["From"] = formataddr((profile.from_name, profile.from_address))
-    message["To"] = ", ".join(recipients)
-    message.set_content("This email is HTML; open it in a client that shows HTML.")
-    message.add_alternative(body_html, subtype="html")
-    if profile.transport == "sendmail":
-        _send_with_sendmail(profile, message, recipients)
-        logger.info(
-            "sent %r to %d recipient(s) through %s",
-            subject,
-            len(recipients),
-            profile.sendmail_path,
-        )
-        return
+    subject = safe_subject(subject)
     relay = f"{profile.host}:{profile.port}"
-    step = "connect"
+    destination = (
+        f"sendmail program {profile.sendmail_path}"
+        if profile.transport == "sendmail"
+        else f"relay {relay}"
+    )
+    step = "build headers"
     try:
-        with smtplib.SMTP(profile.host, profile.port, timeout=SMTP_TIMEOUT_SECONDS) as server:
-            if profile.use_tls:
+        message = EmailMessage()
+        message["Subject"] = subject
+        message["From"] = formataddr((profile.from_name, profile.from_address))
+        message["To"] = ", ".join(recipients)
+        message.set_content("This email is HTML; open it in a client that shows HTML.")
+        message.add_alternative(body_html, subtype="html")
+        if profile.transport == "sendmail":
+            step = "send"
+            _send_with_sendmail(profile, message, recipients)
+            logger.info(
+                "sent %r to %d recipient(s) through %s", subject, len(recipients), destination
+            )
+            return None
+        step = "connect"
+        with open_smtp(profile, timeout=SMTP_TIMEOUT_SECONDS) as server:
+            if profile.effective_tls_mode == "starttls":
                 step = "start TLS"
-                server.starttls()
+                server.starttls(context=tls_context(profile))
             step = "log in"
             _log_in(server, config, profile)
             step = "send"
             refused = server.send_message(message, to_addrs=list(recipients))
-    except (smtplib.SMTPException, OSError, EtlCraftError) as error:
+    except (smtplib.SMTPException, OSError, EtlCraftError, ValueError) as error:
         raise HandlerError(
-            f"email to {', '.join(recipients)} was not sent: the relay {relay} failed at "
+            f"email to {', '.join(recipients)} was not sent: the {destination} failed at "
             f"{step}: {type(error).__name__}: {error}"
         ) from error
     if refused:
-        raise HandlerError(
-            f"the relay {relay} refused recipient(s) {', '.join(sorted(refused))}; the others "
-            "were sent the email"
+        details = "; ".join(
+            f"{address} ({code}: "
+            f"{answer.decode('utf-8', 'replace') if isinstance(answer, bytes) else answer})"
+            for address, (code, answer) in sorted(refused.items())
         )
+        if {parseaddr(address)[1] for address in recipients} <= set(refused):
+            raise HandlerError(f"the relay {relay} refused every recipient: {details}")
+        warning = (
+            f"the relay {relay} refused recipient(s) {details}; the others were sent the email"
+        )
+        logger.warning("%s", warning)
+        return warning
     logger.info("sent %r to %d recipient(s) through %s", subject, len(recipients), relay)
+    return None
+
+
+def safe_subject(subject: str) -> str:
+    """Return a single line without control characters, capped at 200 characters."""
+    cleaned = "".join(
+        char for char in " ".join(subject.split()) if unicodedata.category(char) != "Cc"
+    )
+    return cleaned if len(cleaned) <= 200 else cleaned[:199] + "…"
+
+
+def email_tls_problem(profile: EmailProfile) -> str | None:
+    """Return unsafe or unusable TLS settings, naming the profile and the remedy."""
+    mode = profile.effective_tls_mode
+    if mode not in {"none", "starttls", "ssl"}:
+        return f"Email profile {profile.name!r} has tls_mode={mode!r}; use none, starttls or ssl"
+    if mode == "none" and profile.auth_mode != AuthMode.NONE:
+        return (
+            f"Email profile {profile.name!r} has tls_mode=none with auth_mode={profile.auth_mode}; "
+            "set tls_mode to starttls or ssl before sending credentials"
+        )
+    if profile.ca_file is not None and (
+        not profile.ca_file.is_file() or not os.access(profile.ca_file, os.R_OK)
+    ):
+        return (
+            f"Email profile {profile.name!r} ca_file {profile.ca_file} is not a readable file; "
+            "set ca_file to the relay's CA certificate, or omit it to use system trust"
+        )
+    return None
+
+
+def tls_context(profile: EmailProfile) -> ssl.SSLContext:
+    """Create a certificate and hostname verifying context using the configured CA."""
+    return ssl.create_default_context(cafile=str(profile.ca_file) if profile.ca_file else None)
+
+
+def open_smtp(profile: EmailProfile, *, timeout: float) -> smtplib.SMTP:
+    """Connect with the selected SMTP transport, refusing credentials without TLS."""
+    problem = email_tls_problem(profile)
+    if problem:
+        raise HandlerError(problem)
+    if profile.effective_tls_mode == "ssl":
+        return smtplib.SMTP_SSL(
+            profile.host, profile.port, timeout=timeout, context=tls_context(profile)
+        )
+    return smtplib.SMTP(profile.host, profile.port, timeout=timeout)
 
 
 def sendmail_problem(profile: EmailProfile) -> str | None:

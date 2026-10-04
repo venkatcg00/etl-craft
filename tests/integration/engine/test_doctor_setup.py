@@ -142,7 +142,8 @@ def test_email_secrets_auth_and_sendmail(config, monkeypatch):
     assert checks["Email secret"][0] is Status.FAIL
     assert "ETL_CRAFT_TEST_UNSET_SECRET" in checks["Email secret"][1]
     assert checks["Email auth"][0] is Status.WARN
-    assert checks["Email relay"][0] is Status.OK
+    assert checks["Email TLS"][0] is Status.FAIL
+    assert "auth_mode=oauth" in checks["Email TLS"][1]
 
     program = replace(config.email.active, transport="sendmail", sendmail_path=sys.executable)
     checks = found(run_checks(replace(config, email=EmailConfig("dev", {"dev": program}))))

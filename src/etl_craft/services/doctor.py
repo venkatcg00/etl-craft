@@ -27,6 +27,7 @@ from etl_craft.engine.connection import check_reachable, engine_db
 from etl_craft.engine.migrations import pending_migrations
 from etl_craft.engine.schema import existing_engine_tables
 from etl_craft.execution.connections import probe_email_relay, probe_warehouse
+from etl_craft.handlers.mail import email_tls_problem
 from etl_craft.services.cloning import cloning_problem
 from etl_craft.warehouse.connection import (
     build_warehouse_engine,
@@ -281,6 +282,15 @@ def _email(config: ConnectorConfig) -> list[Check]:
         return [ok("Email", f"sendmail at {profile.sendmail_path}, from {profile.from_address}")]
     checks = _secret(config, "Email", profile)
     checks += _auth("Email", profile.auth_mode, EMAIL_VERIFIED_AUTH_MODES, "the SMTP relay")
+    tls_problem = email_tls_problem(profile)
+    if tls_problem:
+        return [*checks, fail("Email TLS", tls_problem)]
+    checks.append(
+        ok(
+            "Email TLS",
+            f"tls_mode={profile.effective_tls_mode}, ca_file={profile.ca_file or 'system trust'}",
+        )
+    )
     problem = probe_email_relay(config)
     if problem:
         return [*checks, fail("Email relay", problem)]

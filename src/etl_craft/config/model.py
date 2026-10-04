@@ -149,6 +149,13 @@ class EmailProfile:
     transport: str = "smtp"
     sendmail_path: str = DEFAULT_SENDMAIL_PATH
     from_name: str = ""
+    tls_mode: str | None = None
+    ca_file: Path | None = None
+
+    @property
+    def effective_tls_mode(self) -> str:
+        """The selected TLS mode, with ``use_tls`` supplying the default when unset."""
+        return self.tls_mode or ("starttls" if self.use_tls else "none")
 
     @property
     def secret_var(self) -> str:

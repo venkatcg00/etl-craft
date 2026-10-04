@@ -4,8 +4,8 @@ In local mode the engine runs every active task of the pipeline under one run, i
 waves. Each wave is the tasks that are ready, at most ``Orchestration.Max_parallel_tasks`` at
 once, and each task goes through ``run_task`` in a process of its own. Waves repeat until every
 task is settled or none can start; a task whose dependencies can never be met is recorded
-``SKIPPED``. The run then ends ``SUCCESS`` when every task is ``SUCCESS`` or ``SKIPPED``, and
-``FAILED`` otherwise.
+``SKIPPED``. Data tasks determine the run's outcome; failed alerts are logged and recorded on
+their own tasks. A pipeline containing only alerts uses those tasks' outcomes.
 
 A new run starts only when the pipeline's dependencies on other pipelines are satisfied (see
 ``gates``); otherwise the run is recorded ``SKIPPED``. An ``IN-PROGRESS`` run is resumed instead,
@@ -16,8 +16,8 @@ In remote mode the orchestrator is the only source of truth for scheduling (see 
 runs each task with ``run --task_code``, between ``run --init-only``, which refuses rules the
 orchestrator does not support, tests connections and starts the run, and ``run
 --finalize-only``, which records its decisions and ends the run: a task it never ran is
-``SKIPPED``, and the run is ``FAILED`` when a task failed, ``SKIPPED`` when it ran none. No gate
-is checked and no upstream run is consumed; the orchestrator's DAGs hold those rules.
+``SKIPPED``, and the run is ``FAILED`` when a data task failed, ``SKIPPED`` when it ran none.
+No gate is checked and no upstream run is consumed; the orchestrator's DAGs hold those rules.
 
 An operator may cancel a local run (``etl-craft cancel``): its running tasks are stopped, no
 other task starts, and the run ends ``CANCELLED``.
@@ -45,6 +45,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.enums import (
     SETTLED_STATUSES,
+    Handler,
     InterventionAction,
     Mode,
     RunStatus,
@@ -63,7 +64,7 @@ from etl_craft.engine.repository.pipelines import (
     fetch_pipeline_handlers,
     resolve_pipeline_id,
 )
-from etl_craft.engine.repository.runs import fetch_latest_pipeline_run
+from etl_craft.engine.repository.runs import fetch_latest_pipeline_run, fetch_task_statuses_for_run
 from etl_craft.engine.repository.tasks import fetch_task_codes, resolve_task_id
 from etl_craft.execution.connections import check_run_connections
 from etl_craft.execution.gates import (
@@ -998,6 +999,7 @@ def _finalize(
     tasks that can never run, and consumes nothing. A run whose tasks all ended ``SKIPPED``, or
     whose tasks the orchestrator ran none of (a sensor on an upstream failed, say), ends
     ``SKIPPED``, which a downstream ``SUCCESS`` dependency does not accept.
+    Alerts do not affect a data pipeline's outcome; a pipeline of only alerts judges its alerts.
     """
     not_run: list[int] = []
     if orchestrated:
@@ -1009,18 +1011,29 @@ def _finalize(
             return running
     with engine.connect() as conn:
         run_state = runlog.fetch_run_state(conn, pipeline_run_id, list(graph.task_ids))
+        data_tasks = {
+            task.task_id
+            for task in fetch_task_statuses_for_run(conn, pipeline_id, pipeline_run_id)
+            if task.handler != Handler.EMAIL_ALERT
+        } & set(graph.task_ids)
+    judged_tasks = data_tasks or set(graph.task_ids)
+    alert_failures = sorted(
+        task_codes[task_id]
+        for task_id in set(graph.task_ids) - data_tasks
+        if run_state.get(task_id, TaskRunState()).status == RunStatus.FAILED
+    )
     unsettled = {
         task_id: run_state.get(task_id, TaskRunState()).status or "never started"
-        for task_id in graph.task_ids
+        for task_id in judged_tasks
         if run_state.get(task_id, TaskRunState()).status not in SETTLED_STATUSES
     }
     status = RunStatus.FAILED if unsettled else RunStatus.SUCCESS
-    if orchestrated and not unsettled and not_run and len(not_run) == len(graph.task_ids):
+    if orchestrated and not unsettled and not_run and judged_tasks <= set(not_run):
         status = RunStatus.SKIPPED
     if (
         not unsettled
-        and graph.task_ids
-        and all(run_state[task_id].status == RunStatus.SKIPPED for task_id in graph.task_ids)
+        and judged_tasks
+        and all(run_state[task_id].status == RunStatus.SKIPPED for task_id in judged_tasks)
     ):
         status = RunStatus.SKIPPED
     with engine.begin() as conn:
@@ -1043,6 +1056,9 @@ def _finalize(
         consume_pipeline_dependencies(engine, pipeline_id, pipeline_run_id)
 
     message = f"{pipeline_code}: pipeline_run_id={pipeline_run_id} {status}"
+    if alert_failures and data_tasks:
+        message += f"; alert task(s) failed: {', '.join(alert_failures)} (see their attempt logs)"
+        logger.error("%s: alert task(s) failed: %s", pipeline_code, ", ".join(alert_failures))
     if unsettled:
         listed = ", ".join(f"{task_codes[t]} ({state})" for t, state in unsettled.items())
         message += f" — {len(unsettled)} task(s) did not succeed: {listed}"
