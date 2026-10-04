@@ -173,6 +173,15 @@ an unread pipe blocking the CLI; the same helper drives the real CLI lifecycle t
 exercises SIGHUP and SIGTERM on Linux and macOS. Linux-only descendant assertions have explicit
 platform declarations in the release suite manifest.
 
+**Timing-sensitive tests on a slow runner.** Once on CI (`tests (py3.13, ubuntu-latest)`, a
+documentation-only pull request), three tests failed together and passed on a rerun:
+`test_what_a_script_printed_is_kept_when_it_is_stopped` and
+`test_a_task_process_that_ends_without_an_outcome_is_recorded_failed[sqlite-slow-...]` (both stop a
+task after `TASK_TIMEOUT_SECONDS=2`, which a loaded runner can spend starting the interpreter),
+and `test_each_release_line_is_built_and_the_newest_is_latest` (over the 120 s pytest timeout).
+Before `S3.H`, give the two task tests a time limit that leaves room for start-up, or wait for the
+script to report it started before the limit begins, and measure the docs-site test's build time.
+
 **Working on the code.**
 
 - Run the suites an item touches against the local services (`make services-up`), then rely on
