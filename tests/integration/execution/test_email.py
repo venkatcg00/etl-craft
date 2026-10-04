@@ -8,6 +8,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import replace
+from pathlib import Path
 
 import psycopg
 import pytest
@@ -20,7 +21,7 @@ from etl_craft.engine import runlog
 from etl_craft.execution.connections import probe_email_relay
 from etl_craft.execution.context import build_task_context
 from etl_craft.execution.pipeline import SlaLapse, default_hooks
-from etl_craft.execution.runner import run_task
+from etl_craft.execution.runner import ChildOptions, run_task
 from etl_craft.handlers import email_alert
 from etl_craft.handlers.mail import send_sla_lapse_email
 from fixtures.metadata import add_dependency, add_pipeline, add_task, start_run, task_run
@@ -163,7 +164,7 @@ def test_a_multiline_database_error_is_safe_in_the_subject_and_kept_in_the_body(
     [("bad@example.com|ops@example.com", "SUCCESS", 1), ("bad@example.com", "FAILED", 0)],
 )
 def test_recipient_refusal_is_recorded_on_the_alert_attempt(
-    engine_db, tls_relay, tmp_path, recipients, status, delivered
+    engine_db, tls_relay, tmp_path, recipients, status, delivered, monkeypatch
 ):
     relay = tls_relay(refused={"bad@example.com"})
     profile = engine_db.config.engine.active
@@ -203,7 +204,10 @@ def test_recipient_refusal_is_recorded_on_the_alert_attempt(
             EMAIL_BODY="body",
         )
         start_run(conn, pipeline_id)
-    outcome = run_task(engine, config, "PARTIAL", "notify")
+    monkeypatch.setenv("PYTHONPATH", str(Path(__file__).parents[2]))
+    outcome = run_task(
+        engine, config, "PARTIAL", "notify", child=ChildOptions(module="fixtures.email_child")
+    )
     assert outcome.status == status, outcome.message
     with engine.connect() as conn:
         log = conn.execute(

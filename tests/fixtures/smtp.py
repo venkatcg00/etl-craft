@@ -11,7 +11,10 @@ import pytest
 
 
 @pytest.fixture
-def tls_relay(tmp_path):
+def tls_relay(tmp_path, monkeypatch):
+    # SMTP resolves the client's EHLO name after connecting. A fixed name keeps DNS lookup
+    # delays outside this relay's idle timeout.
+    monkeypatch.setattr(socket, "getfqdn", lambda name="": "smtp-client.test")
     openssl = shutil.which("openssl")
     if openssl is None:
         pytest.skip("the local TLS relay needs openssl")
