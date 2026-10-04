@@ -84,7 +84,13 @@ name; put functions needed by spawned workers in a normally importable helper mo
 ## Output and logs
 
 The script runs inside the task's own process. Everything it prints, writes to stderr or logs
-through `logging` goes to the attempt's log file, and log records carry the task's context:
+through `logging` goes to the attempt's log file, and log records carry the task's context.
+HTTP and SDK libraries (`urllib3`, `httpx`, `httpcore`, `requests`, `botocore`, `boto3` and
+`s3transfer`) are captured at WARNING or above unless etl-craft's log level is DEBUG, to keep
+request URLs and credential query strings out of routine logs. DEBUG can include those details.
+A script must never print or log secrets, including in its own request URLs or exception messages.
+
+For example:
 
 ```
 2026-09-25 10:15:02,114 INFO etl_craft_script.load_customers [task_run_id=412 pipeline=CRM task=load_customers pipeline_run_id=97 attempt=1]: fetched 120 orders for eu

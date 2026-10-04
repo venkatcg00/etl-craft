@@ -13,6 +13,8 @@ from __future__ import annotations
 import importlib.util
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
+from urllib.parse import parse_qsl
 
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
@@ -20,7 +22,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from etl_craft.config import ConnectorConfig, profile_needs_secret, resolve_secret
 from etl_craft.config.auth import EMAIL_VERIFIED_AUTH_MODES, engine_for_jdbc_url
 from etl_craft.config.model import ConnectionProfile, EmailProfile
-from etl_craft.config.resolve import source_values
+from etl_craft.config.resolve import resolve_named_secret, source_values
 from etl_craft.core.enums import CloningScope, GatePolicy, Mode
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.engine.connection import check_reachable, engine_db
@@ -87,6 +89,7 @@ def run_checks(config: ConnectorConfig, *, engine_state: bool = True) -> list[Ch
             f"{config.config_path} (mode {config.mode}, project {config.project_dir})",
         ),
         *_settings(config),
+        *_files(config),
         *engine_checks,
         *_warehouse(config, queue_on_engine_db=engine_reachable),
         *_email(config),
@@ -125,6 +128,38 @@ def _settings(config: ConnectorConfig) -> list[Check]:
                 "wherever the data must be right",
             )
         )
+    return checks
+
+
+def _files(config: ConnectorConfig) -> list[Check]:
+    """Check every configured certificate, key and mail executable at its absolute path."""
+    paths: list[tuple[str, str]] = []
+    for label, section in (("Engine DB", config.engine), ("Warehouse", config.warehouse)):
+        if section is None:
+            continue
+        profile = section.active
+        for key in ("key_file", "cert_file", "private_key_file"):
+            if profile.extra.get(key):
+                paths.append((f"{label} {key}", str(profile.extra[key])))
+        for key, value in parse_qsl(profile.jdbc_url.partition("?")[2]):
+            if key.lower() in {"sslrootcert", "sslcert", "sslkey", "private_key_file"}:
+                paths.append((f"{label} {key}", value))
+    if config.email is not None:
+        email = config.email.active
+        if email.ca_file is not None:
+            paths.append(("Email ca_file", str(email.ca_file)))
+        if email.transport == "sendmail":
+            paths.append(("Email sendmail_path", email.sendmail_path))
+    checks = []
+    for label, written in paths:
+        path = Path(written)
+        try:
+            with path.open("rb") as stream:
+                stream.read(1)
+        except OSError as error:
+            checks.append(fail(label, f"{path}: not a readable file ({error}); provide the file"))
+        else:
+            checks.append(ok(label, f"{path}: readable"))
     return checks
 
 
@@ -222,6 +257,13 @@ def _warehouse(config: ConnectorConfig, *, queue_on_engine_db: bool) -> list[Che
         return [ok("Warehouse", "no Warehouse section: only SQL and BUSINESS_RULES tasks need one")]
     profile = config.warehouse.active
     checks = _secret(config, "Warehouse", profile)
+    if name := profile.extra.get("s3_secret"):
+        try:
+            resolve_named_secret(config, str(name))
+        except EtlCraftError as error:
+            checks.append(fail("Warehouse storage secret", str(error)))
+        else:
+            checks.append(ok("Warehouse storage secret", f"resolved from {name}"))
     try:
         dialect = warehouse_dialect(config)
     except EtlCraftError as error:

@@ -65,7 +65,7 @@ item's text, or work done early under another item.
 | S2.D SQL action guards | Done | #80 | B5, B12, B17, B21, B34, B41, B42, B44, B45, B46; B57 for SQL actions and rules |
 | S2.E The ingestion script contract | Done | #82 | B19, B60 |
 | S2.F Alerts and SMTP | Done | #83 | B20, B50, B61 |
-| S2.G Configuration and secrets | Not started | | |
+| S2.G Configuration and secrets | Done | #84 | B48, B49, B55, B56, B58, B59 |
 | S2.H Export and publishing | Not started | | |
 | S2.I A release gate that checks completeness | Not started | | |
 | S2.J Business rules at size | Not started (S2.J.2 done in S2.D) | | |
@@ -78,6 +78,13 @@ item's text, or work done early under another item.
 What a person picking up the work needs that the code and the item texts do not say.
 
 **Choices that differ from the item text.**
+
+- `S2.G.2`: the authentication field remains `key_file`; Snowflake presents it as the driver's
+  `private_key_file`. A `private_key_file` URL option is also resolved and checked by doctor.
+  Email's CA setting remains lowercase `ca_file`, as recorded for `S2.F.2`.
+- `S2.G.5`: the warehouse connection creator resolves the stored `s3_secret` variable for each
+  connection and passes its value in a temporary profile to the dialect's `on_connect`. The
+  configuration object and its original profile retain only the variable name.
 
 - `S2.F.2`: Email settings use `tls_mode` and `ca_file`, following the lowercase names of the
   existing Email block. `use_tls` stays supported; conflicting settings are refused.
@@ -690,6 +697,8 @@ logged at ERROR), because a broken relay should not block downstream data. Imple
 `_finalize` by ignoring tasks whose `HANDLER = 'EMAIL_ALERT'` when computing the status.
 
 ### S2.G Configuration and secrets
+
+**Status: done** (#84); see [Handover notes](#handover-notes).
 
 Branch: `fix/config-strictness`. Files: `config/loader.py`, `config/resolve.py`, `core/text.py`,
 `core/log.py`, `dialects/engine/*/__init__.py`, `warehouse/connection.py`, `services/doctor.py`.

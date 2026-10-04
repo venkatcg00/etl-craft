@@ -55,3 +55,8 @@ To check the pipelines themselves, run [`validate`](../guides/validating.md).
 
 `init-db` and `migrate` remain for doing either step alone; see
 [Engine DB setup and upgrades](engine-db.md).
+
+Doctor also checks each configured key, certificate, CA and sendmail file for readability,
+reporting the absolute path. Relative paths, including PostgreSQL's `sslrootcert`, `sslcert`
+and `sslkey` URL parameters, start beside `craft-connector.yml`, regardless of the working
+directory. Symlinked configs use the link's directory.

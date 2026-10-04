@@ -8,6 +8,9 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Secrets files accept UTF-8 byte-order marks and `export KEY=VALUE`; missing secret variables
+  include suggestions for similarly named keys.
+
 - SMTP `tls_mode`: verified STARTTLS (the default), implicit TLS (`ssl`), or unauthenticated
   plain SMTP (`none`), with an optional project-relative `ca_file`. `use_tls` stays supported.
 - Run history and KPIs in the catalog: each pipeline's and task's latest 30 runs, with success
@@ -42,6 +45,13 @@ All notable changes are recorded here. The format follows
   it with a new one.
 
 ### Fixed
+
+- Duplicate configuration keys, empty secret variables, credential-bearing JDBC query keys,
+  zero task concurrency and invalid TCP ports are refused with setting-specific errors.
+- Key and certificate paths, secrets files and SQLite databases resolve beside the config,
+  including symlinked configs. Doctor checks configured files for readability.
+- DuckDB Iceberg storage secrets are retained as variable names and resolved for each new
+  connection; HTTP and SDK INFO logs are suppressed in routine attempt logs.
 
 - Email subjects collapse whitespace, drop control characters and cap their length at 200
   characters; the body keeps the full error. Header failures name the transport and step.

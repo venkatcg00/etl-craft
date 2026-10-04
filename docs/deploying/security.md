@@ -5,13 +5,24 @@
 `craft-connector.yml` never holds a secret. Every `secret` (and every other credential field)
 names a variable, looked up in the process environment or in the `.env`-style file
 `Secrets.Path` points at (see [Variables and values](../examples/README.md#variables-and-values)).
-A secret whose variable is not set stops every command when the file is loaded; it is never
+A secret whose variable is not set or is empty stops every command when the file is loaded; it is never
 taken as written. Keep the secrets file out of version control and readable only by the account
 that runs etl-craft.
 
 Secrets never appear in logs, in error messages, or in the connection URLs etl-craft logs. An
 ingestion script receives its own settings through `CFG_TASK_PARAMETERS`, which are not secret:
-a script that needs a credential reads it from its environment.
+a script that needs a credential reads it from its environment. Values in
+`CFG_TASK_PARAMETERS` and anything a script prints or logs are the team's responsibility.
+
+Credential query keys (`password`, `pwd`, `passwd`, `token`, `access_token`, `secret` and
+`private_key_file_pwd`, in any case) are refused in JDBC URLs; name the secret variable in
+`secret` instead. DuckDB's `s3_secret` is also stored as a variable name and resolved for each
+new connection, so its value is never retained in the configuration object.
+
+Duplicate YAML keys are refused with their section and both line numbers. Relative key,
+certificate, CA and sendmail paths, including `sslrootcert`, `sslcert` and `sslkey` URL settings,
+start at the directory holding `craft-connector.yml`. A symlinked config uses the link's
+folder. `doctor` reports missing or unreadable files at their resolved paths.
 
 ## Least privilege
 

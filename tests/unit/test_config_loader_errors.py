@@ -57,7 +57,7 @@ def postgres_warehouse(**fields):
                     "Email": {"host": "h", "port": "twenty-five", "from_address": "a@b"},
                 }
             ),
-            "port resolved to 'twenty-five', not a number",
+            "port must be a whole number 1 to 65535, got 'twenty-five'",
         ),
         (
             config(
