@@ -19,9 +19,26 @@ from etl_craft.core.errors import ConfigurationError, HandlerError
 
 # JDBC URLs
 
+URL_SECRET_KEYS = frozenset(
+    {"password", "pwd", "passwd", "token", "access_token", "secret", "private_key_file_pwd"}
+)
+
+
+def public_url_query(query: dict[str, str]) -> dict[str, str]:
+    """Keep driver settings while omitting credential-like keys from logged URLs."""
+    return {
+        key: value
+        for key, value in query.items()
+        if key.lower() not in URL_SECRET_KEYS
+        and not any(
+            part in key.lower() for part in ("password", "token", "secret", "api_key", "credential")
+        )
+    }
+
+
 _JDBC_SCHEME = re.compile(r"^jdbc:(?P<scheme>[a-zA-Z0-9_+-]+):")
 _JDBC_URL = re.compile(
-    r"^jdbc:(?P<scheme>[a-zA-Z0-9_+-]+)://(?P<host>[^:/?]+)(:(?P<port>\d+))?"
+    r"^jdbc:(?P<scheme>[a-zA-Z0-9_+-]+)://(?P<host>[^:/?]+)(:(?P<port>[0-9]+))?"
     r"/(?P<database>[^?]*)(\?(?P<query>.*))?$"
 )
 
@@ -71,10 +88,13 @@ def parse_jdbc_url(jdbc_url: str, *, default_port: int | None = None) -> JdbcUrl
             f"not a recognized JDBC URL: {jdbc_url!r} — expected "
             "jdbc:<dialect>://host[:port]/database or jdbc:duckdb:<path>"
         )
+    port = int(match["port"]) if match["port"] else default_port
+    if port is not None and not 1 <= port <= 65535:
+        raise ConfigurationError(f"JDBC port must be 1 to 65535, got {port}")
     return JdbcUrl(
         scheme=match["scheme"],
         host=match["host"],
-        port=int(match["port"]) if match["port"] else default_port,
+        port=port,
         database=match["database"],
         query=dict(parse_qsl(match["query"])) if match["query"] else {},
     )
@@ -98,10 +118,12 @@ def parse_env_file(contents: str) -> dict[str, str]:
     sequences, no multi-line values and no trailing comments.
     """
     values: dict[str, str] = {}
-    for line in contents.splitlines():
+    for line in contents.lstrip("\ufeff").splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
+        if stripped.startswith("export "):
+            stripped = stripped[7:].lstrip()
         key, _, value = stripped.partition("=")
         values[key.strip()] = unquote(value.strip())
     return values

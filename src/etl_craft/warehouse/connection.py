@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from typing import Any
 
 from sqlalchemy import create_engine, text
@@ -19,8 +20,10 @@ from sqlalchemy.engine import URL, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectionProfile, ConnectorConfig, profile_secret
+from etl_craft.config.resolve import resolve_named_secret
 from etl_craft.config.targets import WarehouseUrl, active_catalog, parse_warehouse_url
 from etl_craft.core.errors import ConfigurationError, LockTimeoutError
+from etl_craft.core.text import public_url_query
 from etl_craft.dialects import credentials
 from etl_craft.dialects.engine import for_engine
 from etl_craft.dialects.warehouse import WarehouseDialect, resolve
@@ -65,8 +68,18 @@ def build_warehouse_engine(config: ConnectorConfig, **engine_kwargs: Any) -> Eng
     connect = warehouse_creator(dialect, profile, secret, url)
 
     def creator() -> Any:
+        connection_profile = profile
+        if name := profile.extra.get("s3_secret"):
+            connection_profile = replace(
+                profile,
+                extra={**profile.extra, "s3_secret": resolve_named_secret(config, str(name))},
+            )
         dbapi_connection = connect()
-        dialect.on_connect(dbapi_connection, profile, secret)
+        try:
+            dialect.on_connect(dbapi_connection, connection_profile, secret)
+        except BaseException:
+            dbapi_connection.close()
+            raise
         return dbapi_connection
 
     engine_kwargs.setdefault("pool_pre_ping", True)
@@ -78,7 +91,7 @@ def build_warehouse_engine(config: ConnectorConfig, **engine_kwargs: Any) -> Eng
         host=url.host,
         port=url.port,
         database=url.path or url.database,
-        query=url.query,
+        query=public_url_query(url.query),
     )
     return create_engine(logged_url, creator=creator, **engine_kwargs)
 

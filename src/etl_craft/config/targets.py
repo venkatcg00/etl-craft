@@ -109,6 +109,15 @@ def _parse_duckdb(jdbc_url: str) -> WarehouseUrl:
     )
 
 
+def _url_port(written: str | None) -> int | None:
+    """Validate a URL's optional TCP port."""
+    if written is None:
+        return None
+    if not re.fullmatch(r"[0-9]+", written) or not 1 <= int(written) <= 65535:
+        raise ConfigurationError(f"JDBC port must be ASCII digits from 1 to 65535, got {written!r}")
+    return int(written)
+
+
 def _parse_databricks(jdbc_url: str) -> WarehouseUrl:
     """Parse ``jdbc:databricks://<host>:443/<schema>;httpPath=...;ConnCatalog=...``.
 
@@ -142,7 +151,7 @@ def _parse_databricks(jdbc_url: str) -> WarehouseUrl:
     return WarehouseUrl(
         dialect="databricks",
         host=match["host"],
-        port=int(match["port"]) if match["port"] else None,
+        port=_url_port(match["port"]),
         database=catalog or "",
         catalog=catalog or "",
         query=query,
@@ -173,7 +182,7 @@ def _parse_snowflake(jdbc_url: str) -> WarehouseUrl:
     return WarehouseUrl(
         dialect="snowflake",
         host=match["host"],
-        port=int(match["port"]) if match["port"] else None,
+        port=_url_port(match["port"]),
         database=f"{database}/{schema}" if schema else database,
         catalog=database,
         query=query,

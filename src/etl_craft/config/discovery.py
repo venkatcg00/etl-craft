@@ -27,7 +27,7 @@ def resolve_config_path(explicit: str | Path | None = None, *, start: Path | Non
     from_env = os.environ.get(CONFIG_PATH_ENV_VAR)
     if from_env:
         return Path(from_env)
-    here = (start or Path.cwd()).resolve()
+    here = (start or Path.cwd()).absolute()
     for directory in (here, *here.parents):
         found = [
             candidate

@@ -14,7 +14,7 @@ from sqlalchemy.exc import OperationalError
 from etl_craft.config.auth import POSTGRES_AUTH_FIELDS, engine_for_jdbc_url
 from etl_craft.core.enums import AuthMode
 from etl_craft.core.errors import ConfigurationError, LockTimeoutError
-from etl_craft.core.text import JdbcUrl, parse_jdbc_url
+from etl_craft.core.text import JdbcUrl, parse_jdbc_url, public_url_query
 from etl_craft.dialects import credentials
 from etl_craft.dialects.engine.base import EngineDialect
 
@@ -59,7 +59,7 @@ class PostgresEngineDialect(EngineDialect):
             host=url.host,
             port=url.port,
             database=url.database,
-            query=url.query,
+            query=public_url_query(url.query),
         )
         return create_engine(sqlalchemy_url, creator=creator, **engine_kwargs)
 

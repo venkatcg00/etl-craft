@@ -28,7 +28,7 @@ from etl_craft.config.model import (
     SourceConfig,
 )
 from etl_craft.core.errors import ConfigurationError
-from etl_craft.core.text import is_env_name, parse_env_file
+from etl_craft.core.text import is_env_name, parse_env_file, suggest
 
 
 def read_secrets_file(path: str | None) -> dict[str, str]:
@@ -36,7 +36,7 @@ def read_secrets_file(path: str | None) -> dict[str, str]:
     if not path:
         raise ConfigurationError("Secrets.Path is required when Source_type is file")
     try:
-        contents = Path(path).read_text(encoding="utf-8")
+        contents = Path(path).read_text(encoding="utf-8-sig")
     except OSError as error:
         raise ConfigurationError(f"could not read secrets file {path!r}: {error}") from error
     return parse_env_file(contents)
@@ -159,10 +159,17 @@ class Resolver:
                 names = f"{specific!r} or {name!r}"
             raise ConfigurationError(
                 f"{self.path}: {where} names the secret variable {names}, which is not set "
-                f"in {self.origin}"
+                f"in {self.origin}{self.missing_hint(written)}"
             )
+        if not self.values[name].strip():
+            raise ConfigurationError(f"{self.path}: variable {name} in {self.origin} is empty")
         self.sources.append(SettingSource(where, written, name))
         return name
+
+    def missing_hint(self, name: str) -> str:
+        """Suggest similarly named variables without showing any of their values."""
+        matches = suggest(name, self.values)
+        return f"; did you mean {', '.join(matches)}?" if matches else ""
 
     def hint(self, where: str) -> str:
         """Explain a bad value that was used as written because no variable by its name is set."""
@@ -187,6 +194,21 @@ def resolve_secret(config: ConnectorConfig, profile: ConnectionProfile | EmailPr
     if value is None:
         raise ConfigurationError(
             f"secret {var_name!r} not found (Secrets.Source_type: {config.source.type})"
+        )
+    if not value.strip():
+        raise ConfigurationError(
+            f"variable {var_name} in {config.source.path or 'the process environment'} is empty"
+        )
+    return value
+
+
+def resolve_named_secret(config: ConnectorConfig, name: str) -> str:
+    """Resolve an additional connection secret without retaining it in the config."""
+    value = source_values(config.source).get(name)
+    if value is None or not value.strip():
+        state = "not set" if value is None else "empty"
+        raise ConfigurationError(
+            f"variable {name} in {config.source.path or 'the process environment'} is {state}"
         )
     return value
 

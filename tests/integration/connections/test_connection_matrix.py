@@ -317,3 +317,24 @@ def test_doctor_calls_verified_exactly_what_the_matrix_and_the_cloud_suites_exer
         if section == "Warehouse":
             verified[(section, key)] = warehouse_by_key(key).verified_auth_modes
     assert verified == {**MATRIX, **CLOUD}
+
+
+def test_relative_tls_files_work_from_another_working_directory(tmp_path, monkeypatch):
+    profile = engine_profile("key_file", tmp_path, monkeypatch)
+    for name in ("client.crt", "ca.crt"):
+        (tmp_path / name).write_bytes((CERTS_DIR / name).read_bytes())
+    profile["key_file"] = "client.key"
+    profile["cert_file"] = "client.crt"
+    profile["jdbc_url"] = (
+        profile["jdbc_url"].partition("?")[0] + "?sslmode=verify-full&sslrootcert=ca.crt"
+    )
+    path = write(tmp_path, engine=profile)
+    monkeypatch.chdir(tmp_path.parent)
+    config = load_config(path)
+    checks = checked(config, "Engine DB")
+    assert checks["Engine DB connection"][0] is Status.OK
+    assert str(tmp_path / "client.key") in checks["Engine DB key_file"][1]
+    (tmp_path / "client.key").unlink()
+    checks = {check.name: check for check in run_checks(config, engine_state=False)}
+    assert checks["Engine DB key_file"].status is Status.FAIL
+    assert str(tmp_path / "client.key") in checks["Engine DB key_file"].detail

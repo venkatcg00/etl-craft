@@ -20,6 +20,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlencode
 
 import yaml
 
@@ -57,7 +58,7 @@ from etl_craft.config.targets import (
 )
 from etl_craft.core.enums import AuthMode, CloningScope, GatePolicy, Mode, TableFormat
 from etl_craft.core.errors import ConfigurationError
-from etl_craft.core.text import is_env_name, is_safe_identifier
+from etl_craft.core.text import URL_SECRET_KEYS, is_env_name, is_safe_identifier
 
 SECTIONS = ("Secrets", "Orchestration", "Engine", "Warehouse", "Cloning", "Docs_site")
 """The top-level sections, in the order the file must present them."""
@@ -130,6 +131,70 @@ def settings_by_section() -> dict[str, frozenset[str]]:
 _PREFERRED_SHAPE_MARKER = {"databricks": "catalog", "snowflake": "account"}
 
 
+class _StrictLoader(yaml.SafeLoader):
+    """Refuse duplicate mapping keys, with their section paths and source lines."""
+
+    def construct_document(self, node: Any) -> Any:
+        self.section_paths: dict[int, str] = {}
+
+        def index(current: Any, path: str) -> None:
+            if id(current) in self.section_paths:
+                return
+            self.section_paths[id(current)] = path
+            if isinstance(current, yaml.MappingNode):
+                for key, value in current.value:
+                    index(value, f"{path}.{key.value}" if path else str(key.value))
+            elif isinstance(current, yaml.SequenceNode):
+                for position, value in enumerate(current.value):
+                    index(value, f"{path}[{position}]")
+
+        index(node, "")
+        return super().construct_document(node)
+
+    def construct_mapping(self, node: Any, deep: bool = False) -> dict[Any, Any]:
+        if not isinstance(node, yaml.MappingNode):
+            return super().construct_mapping(node, deep=deep)
+        self.flatten_mapping(node)
+        seen: dict[Any, int] = {}
+        for key_node, _ in node.value:
+            key = self.construct_object(key_node, deep=True)
+            try:
+                first = seen.get(key)
+                if first is not None:
+                    section = self.section_paths.get(id(node), "")
+                    where = f"{section}.{key}" if section else str(key)
+                    raise ConfigurationError(
+                        f"duplicate YAML key {where!r}: line {first} and "
+                        f"line {key_node.start_mark.line + 1}; keep one definition"
+                    )
+                seen[key] = key_node.start_mark.line + 1
+            except TypeError:
+                # SafeLoader supplies the diagnostic for an unhashable mapping key.
+                return super().construct_mapping(node, deep=deep)
+        return super().construct_mapping(node, deep=deep)
+
+
+def _connection_url(written: str, path: Path, where: str) -> str:
+    """Refuse URL credentials and make certificate URL paths project-relative."""
+    base, separator, query = written.partition("?")
+    if not separator:
+        return written
+    pairs = parse_qsl(query, keep_blank_values=True)
+    for key, _ in pairs:
+        if key.lower() in URL_SECRET_KEYS:
+            raise ConfigurationError(
+                f"{path}: {where} contains credential query key {key!r}; "
+                "put the secret in a variable and name it in `secret`"
+            )
+    resolved = [
+        (key, str(_relative_to_config(value, path)))
+        if key.lower() in {"sslrootcert", "sslcert", "sslkey", "private_key_file"}
+        else (key, value)
+        for key, value in pairs
+    ]
+    return f"{base}?{urlencode(resolved)}" if resolved != pairs else written
+
+
 def load_config(path: str | Path) -> ConnectorConfig:
     """Read, parse and validate the ``craft-connector.yml`` at ``path``."""
     path = Path(path)
@@ -139,7 +204,9 @@ def load_config(path: str | Path) -> ConnectorConfig:
             "etl-craft reads it and never writes it"
         )
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        raw = yaml.load(path.read_text(encoding="utf-8"), Loader=_StrictLoader) or {}
+    except ConfigurationError as error:
+        raise ConfigurationError(f"{path}: {error}") from error
     except yaml.YAMLError as error:
         raise ConfigurationError(f"{path} is not valid YAML: {error}") from error
     return parse_config(raw, path)
@@ -150,6 +217,7 @@ def parse_config(raw: Any, path: Path) -> ConnectorConfig:
 
     Relative paths in it (``Secrets.Path``) resolve against ``path``'s directory.
     """
+    path = path.absolute()
     _check_layout(raw, path)
     secrets = _mapping(raw, "Secrets", path, required=True)
     # Secrets.Source_type and Secrets.Path can only come from the process environment: the
@@ -355,11 +423,7 @@ def _parse_source(secrets: dict[str, Any], path: Path, environment: Resolver) ->
         return SourceConfig(type=source_type)
     if raw_path is None:
         raise ConfigurationError(f"{path}: Secrets.Path is required when Source_type is file")
-    source_path = Path(raw_path).expanduser()
-    if not source_path.is_absolute():
-        # Relative to the config file, never the working directory, so every task finds it.
-        source_path = path.resolve().parent / source_path
-    return SourceConfig(type=source_type, path=str(source_path.resolve()))
+    return SourceConfig(type=source_type, path=str(_relative_to_config(raw_path, path)))
 
 
 # Connection profiles
@@ -384,7 +448,10 @@ class _Fields:
         value = self.resolver.resolve(
             raw, f"{self.where}.{key}", profile=self.profile, field_name=key
         )
-        return str(value).strip() if value is not None else None
+        text = str(value).strip() if value is not None else None
+        if text is not None and key == "jdbc_url":
+            return _connection_url(text, self.path, f"{self.where}.{key}")
+        return text
 
     def secret_var(self, key: str = "secret") -> str | None:
         return self.resolver.secret_name(
@@ -418,7 +485,11 @@ def _auth_extra(
     for name in AUTH_EXTRA_FIELDS:
         value = fields.value(name)
         if value:
-            extra[name] = value
+            extra[name] = (
+                str(_relative_to_config(value, path))
+                if name in {"key_file", "cert_file", "private_key_file"}
+                else value
+            )
         elif name in required:
             raise ConfigurationError(f"{path}: {where} needs {name} for auth_mode {auth_mode}")
     return extra
@@ -483,18 +554,52 @@ def _parse_dependency_gates(orchestration: _Profiled, mode: Mode, path: Path) ->
     return policy
 
 
-def _whole_number(settings: _Profiled, key: str, default: int | None, path: Path) -> Any:
+def _bounded_number(
+    value: Any,
+    where: str,
+    path: Path,
+    *,
+    minimum: int = 0,
+    maximum: int | None = None,
+    hint: str = "",
+) -> int:
+    """Accept whole numbers or ASCII decimal strings inside the setting's bounds."""
+    written = value
+    if isinstance(value, str) and re.fullmatch(r"[0-9]+", value.strip()):
+        value = int(value.strip())
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < minimum
+        or (maximum is not None and value > maximum)
+    ):
+        bounds = f"{minimum} to {maximum}" if maximum is not None else f"at least {minimum}"
+        raise ConfigurationError(
+            f"{path}: {where} must be a whole number {bounds}, got {written!r}{hint}"
+        )
+    return value
+
+
+def _whole_number(
+    settings: _Profiled,
+    key: str,
+    default: int | None,
+    path: Path,
+    *,
+    minimum: int = 0,
+    maximum: int | None = None,
+) -> Any:
     value = settings.value(key)
     if value is None:
         return default
-    if isinstance(value, str) and value.strip().isdigit():
-        return int(value.strip())
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise ConfigurationError(
-            f"{path}: Orchestration.{key} must be a whole number, got {value!r}"
-            f"{settings.resolver.hint(settings.where(key))}"
-        )
-    return value
+    return _bounded_number(
+        value,
+        settings.where(key),
+        path,
+        minimum=minimum,
+        maximum=maximum,
+        hint=settings.resolver.hint(settings.where(key)),
+    )
 
 
 def _flag(settings: _Profiled, key: str, default: bool | None, path: Path) -> Any:
@@ -523,7 +628,7 @@ def _parse_limits(settings: _Profiled, path: Path) -> ExecutionLimits:
             settings, "Task_timeout_seconds", defaults.task_timeout_seconds, path
         ),
         max_parallel_tasks=_whole_number(
-            settings, "Max_parallel_tasks", defaults.max_parallel_tasks, path
+            settings, "Max_parallel_tasks", defaults.max_parallel_tasks, path, minimum=1
         ),
         enforce_sla=_flag(settings, "Enforce_sla", False, path),
         gate_wait_minutes=_whole_number(
@@ -577,20 +682,25 @@ def _parse_email(orchestration: _Profiled, path: Path, resolver: Resolver) -> Em
             from_address=fields.value("from_address", required=True) or "",
             from_name=fields.value("from_name") or "",
             transport="sendmail",
-            sendmail_path=fields.value("sendmail_path") or DEFAULT_SENDMAIL_PATH,
+            sendmail_path=str(
+                _relative_to_config(fields.value("sendmail_path") or DEFAULT_SENDMAIL_PATH, path)
+            ),
         )
         return EmailConfig(active_profile=name, profiles={name: sendmail})
     if "sendmail_path" in block:
         raise ConfigurationError(
             f"{path}: {where}.sendmail_path applies only with transport: sendmail"
         )
-    port_raw = fields.value("port", required=True)
-    try:
-        port = int(port_raw or "")
-    except ValueError as error:
-        raise ConfigurationError(
-            f"{path}: {where}.port resolved to {port_raw!r}, not a number{fields.hint('port')}"
-        ) from error
+    port = _bounded_number(
+        fields.resolver.resolve(
+            block.get("port"), f"{where}.port", profile=fields.profile, field_name="port"
+        ),
+        f"{where}.port",
+        path,
+        minimum=1,
+        maximum=65535,
+        hint=fields.hint("port"),
+    )
     auth_mode = fields.value("auth_mode") or AuthMode.NONE
     if auth_mode not in EMAIL_AUTH_FIELDS:
         raise ConfigurationError(
@@ -821,7 +931,7 @@ def _jdbc_url_profile(
         if key == "s3_secret":
             name = fields.secret_var(key)
             if name is not None:
-                extra[key] = fields.resolver.values[name]
+                extra[key] = name
             continue
         value = fields.value(key)
         if value is not None:

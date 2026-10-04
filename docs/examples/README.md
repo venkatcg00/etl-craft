@@ -28,10 +28,17 @@ with a `# variable` or `# value` comment:
   not set, the text itself.
 - A secret (`secret`, `token`, `s3_secret`) must always name a variable that is set. A secret
   is never taken as written. Every command checks this when it loads the file, for the selected
-  profile only, and stops with a "not set" error naming the variable.
+  profile only, and stops with a "not set" or "empty" error naming the variable. Missing
+  variables include suggestions for similarly named keys; values are never shown.
 
 `etl-craft doctor` lists every value that was used as written but looks like a variable name,
 which is how a missing variable shows up.
+
+Secrets files use UTF-8, with or without a byte-order mark, and accept `export KEY=VALUE`.
+All project paths start beside the config, including when it is a symbolic link. Duplicate
+YAML keys are errors, with both source lines named. Numeric settings accept whole numbers or
+ASCII decimal digits: `Max_parallel_tasks` is at least 1, TCP ports are 1 to 65535, and timeouts,
+retry counts and delays are at least 0.
 
 ## Start here
 

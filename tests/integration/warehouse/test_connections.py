@@ -192,6 +192,11 @@ def test_a_trino_catalog_that_is_not_iceberg_is_reported(trino_config):
 # DuckDB over the Iceberg REST catalog
 
 
+@pytest.fixture(autouse=True)
+def storage_secret(monkeypatch):
+    monkeypatch.setenv("ETL_CRAFT_TEST_S3_SECRET", MINIO_PASSWORD)
+
+
 def duckdb_iceberg_config(auth_mode="none", **fields):
     catalog = require("iceberg_rest")
     minio = require("minio")
@@ -207,7 +212,7 @@ def duckdb_iceberg_config(auth_mode="none", **fields):
         s3_url_style="path",
         s3_use_ssl="false",
         s3_key_id=MINIO_USER,
-        s3_secret=MINIO_PASSWORD,
+        s3_secret="ETL_CRAFT_TEST_S3_SECRET",
         **fields,
     )
 
@@ -283,5 +288,25 @@ def test_duckdb_iceberg_settings_are_checked_before_attaching():
     try:
         with pytest.raises(Exception, match="must not contain a quote"):
             engine.connect()
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.warehouse_duckdb_iceberg
+def test_storage_secret_is_resolved_again_for_a_new_connection(monkeypatch):
+    from etl_craft.core.errors import ConfigurationError
+
+    config = duckdb_iceberg_config()
+    engine = build_warehouse_engine(config)
+    try:
+        with engine.connect() as conn:
+            assert conn.exec_driver_sql("SELECT 1").scalar_one() == 1
+        engine.dispose()
+        monkeypatch.setenv("ETL_CRAFT_TEST_S3_SECRET", " ")
+        with pytest.raises(ConfigurationError, match=r"ETL_CRAFT_TEST_S3_SECRET.*empty"):
+            engine.connect()
+        monkeypatch.setenv("ETL_CRAFT_TEST_S3_SECRET", MINIO_PASSWORD)
+        with engine.connect() as conn:
+            assert conn.exec_driver_sql("SELECT 1").scalar_one() == 1
     finally:
         engine.dispose()

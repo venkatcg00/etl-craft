@@ -225,11 +225,12 @@ def sql_world(
                 s3_url_style="path",
                 s3_use_ssl="false",
                 s3_key_id=MINIO_USER,
-                s3_secret=MINIO_PASSWORD,
+                s3_secret="ETL_CRAFT_TEST_S3_SECRET",
             ),
         )
         config = replace(config, warehouse_table_format="iceberg")
         catalog = "lake"
+    monkeypatch.setenv("ETL_CRAFT_TEST_S3_SECRET", MINIO_PASSWORD)
     engine_db = sqlite_engine_db(config.project_dir).engine
     apply_schema(engine_db)
     with engine_db.begin() as conn:

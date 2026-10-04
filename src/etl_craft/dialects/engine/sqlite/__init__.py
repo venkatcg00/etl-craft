@@ -119,7 +119,7 @@ def resolve_sqlite_path(jdbc_url: str, config_path: Path | None = None) -> str:
         )
     path = Path(raw).expanduser()
     if not path.is_absolute() and config_path is not None:
-        path = Path(config_path).resolve().parent / path
+        path = Path(config_path).absolute().parent / path
     return str(path)
 
 

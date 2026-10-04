@@ -152,7 +152,8 @@ def capture_all_loggers() -> Iterator[None]:
     """Write records of loggers outside ``etl_craft`` (a script's own) like ours, in the body.
 
     They go to the stream ``configure`` set up, with the same format and context fields, at the
-    same level. Without a configured handler this does nothing.
+    same level. HTTP and SDK loggers stay at WARNING or above unless our level is DEBUG.
+    Without a configured handler this does nothing.
     """
     ours = logging.getLogger(ROOT_LOGGER)
     configured = [h for h in ours.handlers if isinstance(h, _ConfiguredHandler)]
@@ -165,6 +166,26 @@ def capture_all_loggers() -> Iterator[None]:
     handler.addFilter(
         lambda record: record.name != ROOT_LOGGER and not record.name.startswith(f"{ROOT_LOGGER}.")
     )
+    noisy = ("urllib3", "httpx", "httpcore", "requests", "botocore", "boto3", "s3transfer")
+    previous_levels: dict[logging.Logger, int] = {}
+    if ours.getEffectiveLevel() > logging.DEBUG:
+        names = set(noisy) | {
+            name
+            for name in logging.Logger.manager.loggerDict
+            if any(name.startswith(f"{prefix}.") for prefix in noisy)
+        }
+        for name in names:
+            library = logging.getLogger(name)
+            previous_levels[library] = library.level
+            library.setLevel(max(logging.WARNING, library.level))
+        handler.addFilter(
+            lambda record: (
+                record.levelno >= logging.WARNING
+                or not any(
+                    record.name == name or record.name.startswith(f"{name}.") for name in noisy
+                )
+            )
+        )
     root = logging.getLogger()
     previous = root.level
     root.addHandler(handler)
@@ -174,3 +195,5 @@ def capture_all_loggers() -> Iterator[None]:
     finally:
         root.removeHandler(handler)
         root.setLevel(previous)
+        for library, level in previous_levels.items():
+            library.setLevel(level)

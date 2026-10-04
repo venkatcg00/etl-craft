@@ -150,3 +150,26 @@ def test_log_context_is_added_to_text_and_json_records():
     entry = json.loads(json_stream.getvalue())
     assert (entry["pipeline"], entry["task_run_id"]) == ("P1", 10)
     assert "context" not in entry
+
+
+@pytest.mark.parametrize(
+    "name", ["urllib3", "httpx", "httpcore", "requests", "botocore", "boto3", "s3transfer"]
+)
+@pytest.mark.parametrize("level", ["INFO", "DEBUG"])
+def test_http_library_capture_uses_warning_unless_debug(name, level):
+    stream = io.StringIO()
+    log.configure(level, "text", stream)
+    logger = logging.getLogger(f"{name}.client")
+    previous = logger.level
+    logger.setLevel(logging.DEBUG)
+    try:
+        with log.capture_all_loggers():
+            logger.info("GET /?api_key=secret-value")
+            logger.warning("request failed")
+            logging.getLogger("my_script").info("script progress")
+        assert ("secret-value" in stream.getvalue()) == (level == "DEBUG")
+        assert "request failed" in stream.getvalue()
+        assert "script progress" in stream.getvalue()
+        assert logger.level == logging.DEBUG
+    finally:
+        logger.setLevel(previous)
