@@ -2,7 +2,15 @@
 (function () {
   "use strict";
 
+  // The way back to the site's top from this page: only "../" steps, as the generator writes it.
   var root = document.body.getAttribute("data-root") || "";
+  if (!/^(\.\.\/)*$/.test(root)) root = "";
+
+  // A page of this site: a relative path of plain characters, never a scheme or a host.
+  function sitePath(path) {
+    var plain = /^[A-Za-z0-9_][A-Za-z0-9_\-./]*(#[^\s"'<>]*)?$/.test(path);
+    return plain && !/(^|\/)\.\.(\/|#|$)/.test(path) ? path : "index.html";
+  }
 
   // Run details are as of when the site was generated: say so once they are over a day old.
   var generated = Date.parse(document.body.getAttribute("data-generated") || "");
@@ -72,7 +80,7 @@
   function resultLink(entry) {
     var link = document.createElement("a");
     link.className = "result";
-    link.href = root + entry[3];
+    link.href = root + sitePath(entry[3]);
     var kind = document.createElement("span");
     kind.className = "kind";
     kind.textContent = entry[0];
@@ -109,7 +117,7 @@
       } else if (event.key === "Enter") {
         event.preventDefault();
         if (active >= 0 && links[active]) {
-          window.location.href = links[active].href;
+          links[active].click();
         } else {
           window.location.href = root + "index.html#q=" + encodeURIComponent(box.value);
         }
