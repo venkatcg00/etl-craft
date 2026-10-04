@@ -43,7 +43,7 @@ passes.
 4. Engine DB changes ship as a migration in both `dialects/engine/postgres/migrations/` and
    `dialects/engine/sqlite/migrations/`, the fresh `schema.sql` files are updated to match, and the
    upgrade test passes from every released schema in `tests/fixtures/schemas/`.
-5. New error classes get the next free `ExitCode` (today the last is `REMOTE_UNSUPPORTED = 18`).
+5. New error classes get the next free `ExitCode` (today the last is `INJECTED_FAULT = 19`).
 6. Every failure the item introduces names the object, the value found, what was expected and the
    remedy, and is recorded on the run or attempt it belongs to.
 
@@ -71,13 +71,23 @@ item's text, or work done early under another item.
 | S2.J Business rules at size | Done | #87 | B51; B57 done in S2.D |
 | S2.K Migrations and small fixes | Done | #88 | B33; S2.K.5 done in S2.A |
 | S2.L Regression suite and release | Done | #90, #91, #92, #93 | 48 stabilization defects; 0.2.0 released |
-| 0.3 and later | Not started | | |
+| S3.A Identity schema | Done | #95 | Run identities, attempt history and gate-decision schema |
+| S3.B to S3.H | Not started | | |
+| 0.4 and later | Not started | | |
 
 ### Handover notes
 
 What a person picking up the work needs that the code and the item texts do not say.
 
 **Choices that differ from the item text.**
+
+- `S3.A`: skipped summaries have no execution attempt and remain resettable. Migration 0007
+  copies only the latest known execution attempt; older retry outcomes are unavailable.
+  New runs receive manual, backfill or stand-in identities now, while transitions, lease
+  enforcement and live attempt/gate recording remain subsequent items. Direct SQL inserts
+  default to a generated manual identity and must supply other trigger kinds explicitly.
+  Upgrade fixtures include both released schemas and their packaged migration ledgers.
+  `S3.B` must allocate the next free exit code: 19 already belongs to `InjectedFaultError`.
 
 - `S2.L`: `release/regressions.toml` maps all 48 defects assigned wholly or partly to 0.2.0.
   `make regressions` checks the mapping against fresh collection. Fault injection uses
@@ -908,7 +918,9 @@ fresh `schema.sql` files and the schema reference.
 Partial unique index: one non-terminal attempt per task run
 (`WHERE STATUS IN ('QUEUED','CLAIMED','RUNNING')`). Index on `(STATUS, LEASE_EXPIRES_AT)` for the
 reconciler. Migrate existing task runs by inserting one attempt row per task run with
-`ATTEMPT_NUMBER = ATTEMPT_COUNT` and the row's current values.
+`ATTEMPT_NUMBER = ATTEMPT_COUNT` and the row's current values. `IN-PROGRESS` maps to
+`RUNNING`. `SKIPPED` task rows retain their summary but have no attempt: the task never ran,
+and resetting its gate can remove that summary. Earlier retry attempts cannot be reconstructed.
 
 **`AUD_GATE_DECISIONS`, new table.** One row per dependency judged when a run or attempt was
 admitted.
@@ -943,7 +955,7 @@ Branch: `feat/engine-transitions`. New module `engine/transitions.py`; queries u
      `queue_attempt`, `claim_attempt`, `start_attempt`, `finish_attempt`, `time_out_attempt`,
      `cancel_attempt`, `lose_attempt`, `renew_lease`. Each runs one guarded `UPDATE` (or `INSERT`),
      checks the row count, and raises `StaleTransitionError` (new error class in `core/errors.py`,
-     `ExitCode.STALE_TRANSITION = 19`) naming the row, the expected status and owner, and what it
+     `ExitCode.STALE_TRANSITION = 20`) naming the row, the expected status and owner, and what it
      found.
   2. `finish_attempt` writes the attempt row and the task-run summary (status, counts, attempt count,
      `TASK_LOG`) in the same transaction.

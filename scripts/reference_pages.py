@@ -168,13 +168,15 @@ def schema_tables(schema: Path = SCHEMA) -> list[Table]:
             line = raw.strip().rstrip(",")
             if not line or line.startswith("--"):
                 continue
-            if not re.match(r"^[A-Z_]+\s", line):
+            if not re.match(r"^[A-Z_][A-Z_0-9]*\s", line):
                 continue
             name, rest = line.split(None, 1)
             if name in {"CONSTRAINT", "CHECK", "OR", "AND", "PRIMARY", "UNIQUE"}:
                 continue
-            type_ = re.split(r"\s+(NOT NULL|DEFAULT|REFERENCES|GENERATED|PRIMARY)", rest)[0]
-            default = re.search(r"DEFAULT (.+?)(?:\s+REFERENCES|$)", rest)
+            type_ = re.split(
+                r"\s+(NOT NULL|DEFAULT|REFERENCES|GENERATED|PRIMARY|CONSTRAINT|CHECK)", rest
+            )[0]
+            default = re.search(r"DEFAULT (.+?)(?:\s+REFERENCES|\s+CONSTRAINT|\s+CHECK|$)", rest)
             table.columns.append(
                 Column(
                     name,
@@ -214,9 +216,10 @@ def schema_page() -> str:
             lines += [table.comment, ""]
         lines += ["| Column | Type | Null | Default | Allowed values |", "|---|---|---|---|---|"]
         for col in table.columns:
+            default = col.default.replace("|", r"\|") if col.default else None
             lines.append(
                 f"| `{col.name}` | `{col.type}` | {'yes' if col.nullable else 'no'} | "
-                f"{f'`{col.default}`' if col.default else ''} | "
+                f"{f'`{default}`' if default else ''} | "
                 f"{', '.join(f'`{v}`' for v in col.allowed)} |"
             )
         if table.unique:

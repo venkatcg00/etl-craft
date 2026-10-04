@@ -160,7 +160,8 @@ def _apply(engine: Engine, migration: MigrationFile) -> None:
             engine,
             rebuild_metadata=migration.sql
             if migration.source == ENGINE
-            and migration.version in ("0005_metadata_codes.sql", "0006_run_backfill_constraint.sql")
+            and migration.version
+            in ("0005_metadata_codes.sql", "0006_run_backfill_constraint.sql", "0007_identity.sql")
             else None,
         ) as conn:
             run_script(conn, dialect.split_statements(migration.sql))

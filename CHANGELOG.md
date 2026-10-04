@@ -6,6 +6,14 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Run identities and trigger kinds, owner and lease fields, output revisions and configuration
+  fingerprints; attempt and gate-decision tables, consumed revisions and repair-consumption flags.
+  Migration `0007_identity.sql` preserves historical run identities and copies the latest known
+  execution attempts. New runs receive manual, backfill or stand-in keys. Attempt transitions,
+  lease enforcement and recording gate decisions remain subsequent roadmap work.
+
 ## [0.2.0] - 2026-10-04
 
 ### Added
