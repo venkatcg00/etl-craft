@@ -69,7 +69,7 @@ item's text, or work done early under another item.
 | S2.H Export and publishing | Done | #85 | B47, B64, B65 |
 | S2.I A release gate that checks completeness | Done | #86 | B63 |
 | S2.J Business rules at size | Done | #87 | B51; B57 done in S2.D |
-| S2.K Migrations and small fixes | Done | PR pending | B33; S2.K.5 done in S2.A |
+| S2.K Migrations and small fixes | Done | #88 | B33; S2.K.5 done in S2.A |
 | S2.L Regression suite and release | Not started; last | | |
 | 0.3 and later | Not started | | |
 
@@ -815,7 +815,7 @@ The cost of re-checking every standing flag on every run (B52) is fixed in `S6.D
 
 ### S2.K Migrations and small fixes
 
-**Status: done** (PR pending); see [Handover notes](#handover-notes).
+**Status: done** (#88); see [Handover notes](#handover-notes).
 
 Branch: `fix/engine-migration-hygiene` plus small branches as convenient.
 
