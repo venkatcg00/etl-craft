@@ -11,6 +11,7 @@ from fixtures.scripts import SCRIPTS_DIR, load
 pytestmark = pytest.mark.docs
 
 build_docs_site = load("build_docs_site")
+check_docs_content = load("check_docs_content")
 REPO_ROOT = SCRIPTS_DIR.parent
 SITE_URL = "https://venkatcg00.github.io/etl-craft"
 
@@ -59,8 +60,28 @@ def test_before_the_first_release_the_site_is_the_dev_version(clone, tmp_path):
 
 
 def test_each_release_line_is_built_and_the_newest_is_latest(clone, tmp_path):
+    head = _git(clone, "rev-parse", "HEAD")
+    renderer = clone / "docs" / "gen_ref_pages.py"
+    renderer.write_text(
+        renderer.read_text()
+        + '\nwith mkdocs_gen_files.open("api/etl_craft/index.md", "w") as handle:\n'
+        '    handle.write("::: etl_craft\\n")\n'
+    )
+    _git(clone, "add", "docs/gen_ref_pages.py")
+    _git(
+        clone,
+        "-c",
+        "user.name=docs-test",
+        "-c",
+        "user.email=docs-test@localhost",
+        "commit",
+        "--quiet",
+        "-m",
+        "docs: render package docstring",
+    )
     _git(clone, "tag", "v0.1.0")
     _git(clone, "tag", "v0.1.1")
+    _git(clone, "checkout", "--quiet", "--detach", head)
     site = tmp_path / "site"
     assert build_docs_site.main([str(site), "--repo", str(clone)]) == 0
 
@@ -68,4 +89,5 @@ def test_each_release_line_is_built_and_the_newest_is_latest(clone, tmp_path):
     assert 'url=latest/"' in (site / "index.html").read_text(encoding="utf-8")
     for version in ("0.1", "latest", "dev"):
         assert (site / version / "index.html").is_file()
+        assert check_docs_content.problems(site / version) == []
     assert _git(clone, "worktree", "list").count("\n") == 0
