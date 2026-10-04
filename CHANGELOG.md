@@ -46,6 +46,10 @@ All notable changes are recorded here. The format follows
 
 ### Fixed
 
+- Released documentation versions use the maintained API page renderer against their own
+  tagged source, so API landing and package pages receive documentation corrections. Every
+  version and the `latest` alias pass strict builds and rendered API content checks.
+
 - Fresh initialization creates the Engine DB schema and packaged migration ledger atomically
   under the migration lock. Migration `0006_run_backfill_constraint.sql` aligns the named
   backfill constraint with fresh databases on PostgreSQL and SQLite, preserving run history.
