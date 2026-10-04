@@ -26,6 +26,8 @@ SELECT 1 FROM sales.customers c WHERE c.id = t.customer_id AND c.active = 'N'
 
 Correlate on equality (`c.id = t.customer_id`): some warehouses, Snowflake among them, cannot
 evaluate a subquery correlated any other way. The rule must be one read-only statement.
+A trailing semicolon or SQL comment is allowed, both when flagging rows and when checking
+whether flagged rows now pass.
 
 ## What a run does
 
@@ -52,6 +54,9 @@ Rules with the same `SEQUENCE_NUMBER` form a wave and run in parallel, at most
 has finished.
 
 Each rule records its own row in `AUD_BUSINESS_RULES_RUN_LOG` and commits its flags separately.
+Clearing uses batches of at most 1,000 keys in the Engine DB. Every batch, newly added flags
+and the rule's success status share one transaction: a failed batch rolls all those changes back.
+Existing cleared flags keep their original end date, and flags of other rules remain unchanged.
 A rule that fails is recorded `FAILED`, the rest of its wave still runs, and then the task fails,
 naming every rule that failed with the step and the database's message:
 

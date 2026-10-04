@@ -133,8 +133,16 @@ def flag_rule_keys(
 def clear_rule_keys(
     conn: Connection, business_rule_id: int, keys: Sequence[str], now: datetime
 ) -> None:
-    """Clear the active flags of ``business_rule_id`` on ``keys``."""
+    """Clear active flags in batches of at most 1,000 keys on the caller's transaction."""
     if not keys:
         return
     query = statement(conn, "clear_rule_results").bindparams(bindparam("keys", expanding=True))
-    conn.execute(query, {"business_rule_id": business_rule_id, "keys": list(keys), "now": now})
+    for start in range(0, len(keys), 1000):
+        conn.execute(
+            query,
+            {
+                "business_rule_id": business_rule_id,
+                "keys": list(keys[start : start + 1000]),
+                "now": now,
+            },
+        )

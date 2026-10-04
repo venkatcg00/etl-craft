@@ -68,7 +68,7 @@ item's text, or work done early under another item.
 | S2.G Configuration and secrets | Done | #84 | B48, B49, B55, B56, B58, B59 |
 | S2.H Export and publishing | Done | #85 | B47, B64, B65 |
 | S2.I A release gate that checks completeness | Done | #86 | B63 |
-| S2.J Business rules at size | Not started (S2.J.2 done in S2.D) | | |
+| S2.J Business rules at size | Done | PR pending | B51; B57 done in S2.D |
 | S2.K Migrations and small fixes | Not started (S2.K.5 done in S2.A) | | |
 | S2.L Regression suite and release | Not started; last | | |
 | 0.3 and later | Not started | | |
@@ -78,6 +78,13 @@ item's text, or work done early under another item.
 What a person picking up the work needs that the code and the item texts do not say.
 
 **Choices that differ from the item text.**
+
+- `S2.J.1`: the Engine DB clears 1,000 keys per statement on the connection supplied by the
+  caller; it opens no extra transaction. Tests cover 40,000 keys on SQLite with an enforced
+  1,002-bind budget and 70,000 on PostgreSQL, preserving other rules, standing flags and history,
+  and rolling back earlier batches, new flags and rule completion on a later failure.
+  `S2.J.2` uses the `S2.D` SQL embedding helper; flagging and clearing with trailing semicolons
+  and comments are covered on every local warehouse. Standing-flag lookup cost (B52) remains `S6.D`.
 
 - `S2.I`: schema 2 evidence records collected ids and `sys.platform`; new releases require a
   fresh evidence run. A reporting/early-stop argument allowlist refuses selection and configuration

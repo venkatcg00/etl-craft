@@ -46,6 +46,10 @@ All notable changes are recorded here. The format follows
 
 ### Fixed
 
+- Clearing business-rule flags sends at most 1,000 keys per Engine DB statement, avoiding
+  parameter-limit failures for large sets on SQLite and PostgreSQL. All batches share the
+  rule's transaction, so a failure cannot leave partially cleared flags or a false success.
+
 - Release evidence must name the exact required marker and cover every test collected on HEAD,
   with one passing outcome per test and consistent counts. Subsets, extra tests and selection
   overrides cannot satisfy the gate; platform exceptions require explicit suite declarations.
