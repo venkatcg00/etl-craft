@@ -101,6 +101,7 @@ def run_handler(engine: Engine, context: TaskContext) -> int:
             insert_count=result.insert_count,
             update_count=result.update_count,
             delete_count=result.delete_count,
+            rows_written=result.rows_written,
             task_log=format_task_log(result),
         )
     logger.info(

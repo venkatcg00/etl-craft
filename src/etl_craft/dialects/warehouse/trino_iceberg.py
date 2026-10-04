@@ -22,6 +22,7 @@ class TrinoIcebergWarehouse(WarehouseDialect):
     """Trino, Iceberg catalog: no temporary tables, no alias on UPDATE or DELETE targets."""
 
     spec = warehouse_by_key("trino_iceberg")
+    identifier_case = "lower"
     storage_parameters = frozenset({"EXTERNAL_LOCATION"})
     temporary_tables = False
     mutation_alias = False

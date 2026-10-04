@@ -181,6 +181,14 @@ def test_task_definitions_are_checked_with_the_handlers_own_rules(project):
             SOURCE_SQL="SELECT 1 AS a",
             EXTERNAL_LOCATION="s3://b/x",
         )
+        add_task(
+            conn,
+            p,
+            "engine_columns",
+            SQL_ACTION="APPEND_TABLE",
+            TARGET_OBJECT="s.z",
+            SOURCE_SQL="SELECT id, PIPELINE_RUN_ID, row_id AS ROW_ID FROM s.y",
+        )
         add_task(conn, p, "two_args", "PYTHON", SCRIPT_NAME="two.py")
         add_task(conn, p, "syntax", "PYTHON", SCRIPT_NAME="broken.py")
         add_task(conn, p, "no_run", "PYTHON", SCRIPT_NAME="none.py", INPUT_PARAMS="[1]")
@@ -213,6 +221,7 @@ def test_task_definitions_are_checked_with_the_handlers_own_rules(project):
             "typo",
             "orphan_setup",
             "iceberg_path",
+            "engine_columns",
             "two_args",
             "syntax",
             "no_run",
@@ -254,6 +263,10 @@ def test_task_definitions_are_checked_with_the_handlers_own_rules(project):
     ]
     assert "set SETUP_FOR" in only("orphan_setup")
     assert "EXTERNAL_LOCATION does not apply to DuckDB" in only("iceberg_path")
+    assert only("engine_columns") == (
+        "the SELECT returns PIPELINE_RUN_ID, ROW_ID, which etl-craft writes itself; leave them "
+        "out, or alias them"
+    )
     assert only("two_args") == "two.py: run takes 2 arguments; it takes the task, or nothing"
     assert only("syntax").startswith("SCRIPT_NAME='broken.py' has a syntax error at line 1")
     assert "INPUT_PARAMS must be a JSON object" in only("no_run")

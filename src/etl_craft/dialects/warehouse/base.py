@@ -72,9 +72,6 @@ class WarehouseDialect:
     # Whether CREATE TEMPORARY TABLE exists and behaves. Trino has none; Databricks refuses
     # DROP on a name it shares with a temporary table.
     temporary_tables: bool = True
-    # Whether an unqualified name resolves somewhere sensible. A Databricks session has no
-    # default schema, so scratch tables are qualified there.
-    default_schema: bool = True
     # Whether UPDATE and DELETE accept an alias for their target. Trino rejects one.
     mutation_alias: bool = True
     # Whether ALTER TABLE ... RENAME TO needs a qualified new name.
@@ -88,6 +85,9 @@ class WarehouseDialect:
     single_writer: bool = False
     # The type values are cast to before hashing.
     string_type: str = "VARCHAR"
+    # The case unquoted identifiers fold to ("lower" or "upper"), or None where the database
+    # keeps them as written and matches them case-insensitively.
+    identifier_case: str | None = None
     # How a private key is named in the driver's connect arguments: (path, passphrase).
     key_file_connect_args: tuple[str, str] | None = None
     # The username a bearer token is sent under, where the driver fixes it.

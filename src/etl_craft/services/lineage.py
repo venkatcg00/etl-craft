@@ -141,6 +141,26 @@ def extract(
     return edges
 
 
+def output_columns(select_sql: str, *, dialect: str | None) -> list[str] | None:
+    """Return the names of the columns ``select_sql`` returns, or ``None`` when they are unknown.
+
+    They are unknown when the SELECT does not parse, or returns ``*`` or a column with no name.
+    """
+    try:
+        tree = sqlglot.parse_one(select_sql, read=dialect)
+    except SqlglotError:
+        return None
+    if not isinstance(tree, exp.Query):
+        return None
+    names: list[str] = []
+    for projection in tree.selects:
+        name = projection.alias_or_name
+        if not name or name == "*" or isinstance(projection, exp.Star):
+            return None
+        names.append(name)
+    return names
+
+
 def referenced_tables(
     select_sql: str, *, dialect: str | None, catalog: str | None = None
 ) -> tuple[str, ...]:
@@ -170,7 +190,7 @@ def collect(
 
     ``refresh`` works everything out again. Without ``record`` nothing is stored.
     """
-    dialect, catalog = _dialect_and_catalog(config)
+    dialect, catalog = dialect_and_catalog(config)
     with engine.connect() as conn:
         tasks = [(ref, fetch_task_parameters(conn, ref.task_id)) for ref in fetch_sql_tasks(conn)]
     results: list[TaskLineage] = []
@@ -215,7 +235,8 @@ def collect(
     return results
 
 
-def _dialect_and_catalog(config: ConnectorConfig) -> tuple[str | None, str | None]:
+def dialect_and_catalog(config: ConnectorConfig) -> tuple[str | None, str | None]:
+    """Return the sqlglot dialect and the catalog of the active warehouse; ``None`` without one."""
     if config.warehouse is None:
         return None, None
     return SQLGLOT_DIALECTS.get(warehouse_dialect(config).key), active_catalog(config)

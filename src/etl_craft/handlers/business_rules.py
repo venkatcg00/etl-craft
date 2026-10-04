@@ -10,10 +10,13 @@ c.active = 'N'``. For each rule the engine:
    ``SELECT DISTINCT t.<key> FROM <table> t WHERE <scope> AND EXISTS (<rule>)``;
 2. flags each such key not already flagged, as a row of ``AUD_BUSINESS_RULES_RESULTS`` with
    the rule's ``BUSINESS_RULE_TYPE``;
-3. clears the flags of keys it flagged before whose rows in scope no longer break it.
+3. clears the flags of keys it flagged before whose rows in scope no longer break it, and of
+   keys that no longer have a row in the table at all.
 
 The scope is the rows the current run wrote (``t.PIPELINE_RUN_ID = <run>``), or every row when
-the task is forced. Rules run in waves by ``SEQUENCE_NUMBER``: the rules of a wave run in
+the task is forced; on a table with ``ACTIVE_FLAG`` (an ``SCD2_MERGE`` target) only active
+versions are judged. A forced run judges the whole table, so every flag it does not find again
+is cleared. Rules run in waves by ``SEQUENCE_NUMBER``: the rules of a wave run in
 parallel, at most ``Orchestration.Max_parallel_tasks`` at once, and the next wave starts once
 every rule of this one has finished. A rule that fails is recorded ``FAILED`` and the rest of
 its wave still runs; then the task fails, naming every rule that failed. A rule that already
@@ -34,6 +37,7 @@ from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import bindparam, text
 from sqlalchemy.engine import Engine
@@ -42,6 +46,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.errors import ConfigurationError, HandlerError
 from etl_craft.core.text import (
+    as_subquery,
     is_safe_identifier,
     qualify,
     read_only_problem,
@@ -198,13 +203,22 @@ class _RuleRunner:
         started = time.monotonic()
         step = "prepare"
         try:
+            step = "read the table's columns"
+            scope = self._scope(checked)
             step = "find the keys that break the rule"
-            failing = self._keys(checked, "EXISTS")
+            failing = self._keys(checked, scope, "EXISTS")
             with self.engine_db.connect() as conn:
                 active = fetch_active_rule_keys(conn, rule.business_rule_id)
             new = sorted(failing - active)
             step = "find the flagged keys that now pass"
-            passing = self._now_passing(checked, sorted(active - failing))
+            unflagged = sorted(active - failing)
+            if self.context.force:
+                # The whole table was judged: a flag not found again no longer applies.
+                passing = unflagged
+            else:
+                passing = self._now_passing(checked, scope, unflagged)
+                step = "find the flagged keys whose rows are gone"
+                passing += self._gone(checked, scope, sorted(set(unflagged) - set(passing)))
             step = "record the flags"
             with self.engine_db.begin() as conn:
                 flag_rule_keys(conn, rule, binding.business_rule_run_id, new, now)
@@ -240,36 +254,63 @@ class _RuleRunner:
     def _key(self, checked: _Rule) -> str:
         return f"CAST(t.{checked.rule.business_rule_key_column} AS {self.string_type})"
 
-    def _keys(self, checked: _Rule, test: str) -> set[str]:
+    def _scope(self, checked: _Rule) -> str:
+        """Return the rows the rule judges: the run's scope, and only active versions."""
+        rows = self._query(f"SELECT * FROM {checked.table} WHERE 1 = 0", {}, keys=True)
+        if any(str(name).lower() == "active_flag" for name in rows):
+            return f"{self.scope} AND t.ACTIVE_FLAG = 'Y'"
+        return self.scope
+
+    def _keys(self, checked: _Rule, scope: str, test: str) -> set[str]:
         sql = (
             f"SELECT DISTINCT {self._key(checked)} FROM {checked.table} t "
-            f"WHERE {self.scope} AND {test} ({checked.rule.business_rule_sql})"
+            f"WHERE {scope} AND {test} {as_subquery(checked.rule.business_rule_sql)}"
         )
         return {str(row[0]) for row in self._query(sql, {})}
 
-    def _now_passing(self, checked: _Rule, flagged: Sequence[str]) -> list[str]:
+    def _now_passing(self, checked: _Rule, scope: str, flagged: Sequence[str]) -> list[str]:
         """Return which of the flagged keys have rows in scope that no longer break the rule."""
-        passing: list[str] = []
-        for start in range(0, len(flagged), KEY_CHUNK):
-            chunk = list(flagged[start : start + KEY_CHUNK])
-            sql = (
-                f"SELECT DISTINCT {self._key(checked)} FROM {checked.table} t "
-                f"WHERE {self.scope} AND {self._key(checked)} IN :keys "
-                f"AND NOT EXISTS ({checked.rule.business_rule_sql})"
-            )
-            passing += [str(row[0]) for row in self._query(sql, {"keys": chunk}, expanding=True)]
-        return sorted(passing)
+        return self._chunked(
+            checked,
+            flagged,
+            f"{scope} AND {self._key(checked)} IN :keys "
+            f"AND NOT EXISTS {as_subquery(checked.rule.business_rule_sql)}",
+        )
+
+    def _gone(self, checked: _Rule, scope: str, flagged: Sequence[str]) -> list[str]:
+        """Return which of the flagged keys have no row left in the table (active, if versioned)."""
+        active_only = " AND t.ACTIVE_FLAG = 'Y'" if "t.ACTIVE_FLAG" in scope else ""
+        present = set(
+            self._chunked(checked, flagged, f"{self._key(checked)} IN :keys{active_only}")
+        )
+        return sorted(key for key in flagged if key not in present)
+
+    def _chunked(self, checked: _Rule, keys: Sequence[str], where: str) -> list[str]:
+        """Return which of ``keys`` the rows matching ``where`` have, ``KEY_CHUNK`` at a time.
+
+        ``where`` binds the chunk as ``:keys``.
+        """
+        found: list[str] = []
+        for start in range(0, len(keys), KEY_CHUNK):
+            chunk = list(keys[start : start + KEY_CHUNK])
+            sql = f"SELECT DISTINCT {self._key(checked)} FROM {checked.table} t WHERE {where}"
+            found += [str(row[0]) for row in self._query(sql, {"keys": chunk}, expanding=True)]
+        return sorted(found)
 
     def _query(
-        self, sql: str, params: dict[str, object], *, expanding: bool = False
-    ) -> list[tuple[object, ...]]:
+        self, sql: str, params: dict[str, object], *, expanding: bool = False, keys: bool = False
+    ) -> list[Any]:
+        """Return the rows ``sql`` selects, or with ``keys`` the names of its columns."""
         logger.debug("%s", sql)
         statement = text(sql)
         if expanding:
             statement = statement.bindparams(bindparam("keys", expanding=True))
         try:
             with self.warehouse.connect() as conn:
-                return [tuple(row) for row in conn.execute(statement, params)]
+                result = conn.execute(statement, params)
+                if keys:
+                    return list(result.keys())
+                return [tuple(row) for row in result]
         except SQLAlchemyError:
             logger.error("the failing statement was:\n%s", sql)
             raise

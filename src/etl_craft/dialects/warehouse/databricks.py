@@ -25,7 +25,6 @@ class DatabricksWarehouse(WarehouseDialect):
     spec = warehouse_by_key("databricks")
     storage_parameters = frozenset({"EXTERNAL_LOCATION"})
     temporary_tables = False
-    default_schema = False
     qualified_rename = True
     surrogate_key: SurrogateKey = "computed"
     enforces_primary_keys = False

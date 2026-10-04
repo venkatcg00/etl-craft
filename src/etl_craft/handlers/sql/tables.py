@@ -20,8 +20,12 @@ target's current state, so running the task again converges.
 
 from __future__ import annotations
 
+import re
+from collections.abc import Sequence
+
 from etl_craft.core.enums import SqlAction
 from etl_craft.core.errors import HandlerError
+from etl_craft.core.text import as_subquery
 from etl_craft.handlers.sql.session import ROW_ID_COLUMN, Session
 
 AUDIT_COLUMNS: dict[str, tuple[str, ...]] = {
@@ -49,16 +53,69 @@ AUDIT_COLUMNS: dict[str, tuple[str, ...]] = {
 """The audit columns each action adds after ``PIPELINE_RUN_ID``, in order."""
 
 
+ENGINE_COLUMNS = frozenset(
+    name.lower()
+    for name in (
+        "PIPELINE_RUN_ID",
+        ROW_ID_COLUMN,
+        *(column for columns in AUDIT_COLUMNS.values() for column in columns),
+    )
+)
+"""The columns etl-craft writes itself, lower case; a SELECT may not return them."""
+
+_PLAIN_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
 def build_stage(session: Session, select_sql: str, *, empty: bool = False) -> str:
     """Materialize the SELECT once into this task run's stage table; return its name.
 
     Every later statement reads the stage, so the SELECT runs exactly once. ``empty`` keeps
-    only its shape.
+    only its shape. The stage's columns are checked before anything reads it (see
+    ``check_stage_columns``).
     """
     stage = session.scratch("stage")
-    body = f"SELECT * FROM ({select_sql}) etl_src WHERE 1 = 0" if empty else select_sql
+    body = f"SELECT * FROM {as_subquery(select_sql)} etl_src WHERE 1 = 0" if empty else select_sql
     session.create_scratch(stage, body, step="stage the SELECT")
+    check_stage_columns(session, stage)
     return stage
+
+
+def check_stage_columns(session: Session, stage: str) -> None:
+    """Refuse a SELECT whose columns the engine cannot write; ``HandlerError`` naming them.
+
+    A column etl-craft writes itself (``ENGINE_COLUMNS``), as a ``SELECT *`` over a table the
+    engine wrote returns, would clash with the engine's own value. A column whose name needs
+    quoting could not be named in the statements the engine writes: one that is not a plain
+    identifier, or, where the warehouse folds unquoted names (``identifier_case``), one that
+    is not in that case, such as ``"CustomerId"`` on PostgreSQL.
+    """
+    names = [name for name, _ in session.columns(stage)]
+    reserved = [name for name in names if name.lower() in ENGINE_COLUMNS]
+    if reserved:
+        raise HandlerError(
+            f"{session.action} {session.target}: the SELECT returns {', '.join(reserved)}, which "
+            "etl-craft writes itself; list the columns you need instead of `*`, or alias them"
+        )
+    case = session.dialect.identifier_case
+    folded = {"lower": str.lower, "upper": str.upper}.get(case or "")
+    quoted = [
+        name
+        for name in names
+        if not _PLAIN_IDENTIFIER.fullmatch(name) or (folded is not None and name != folded(name))
+    ]
+    if quoted:
+        raise HandlerError(
+            f"{session.action} {session.target}: the SELECT returns "
+            f"{', '.join(repr(name) for name in quoted)}, which need(s) quoting; alias each to a "
+            f"plain name, for example `AS {_plain(quoted[0])}`"
+        )
+
+
+def _plain(name: str) -> str:
+    """Suggest a plain, lower-case alias for ``name``."""
+    snake = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name)
+    cleaned = re.sub(r"[^A-Za-z0-9_]+", "_", snake).strip("_").lower()
+    return cleaned if cleaned and not cleaned[0].isdigit() else f"c_{cleaned}"
 
 
 def create_target_shape(session: Session, stage: str, audit_columns: tuple[str, ...]) -> None:
@@ -244,40 +301,77 @@ def evolve(
     restore_row_id(session)
 
 
+def refuse_null_keys(session: Session, stage: str, merge_key: tuple[str, ...]) -> None:
+    """Fail when a staged row has a NULL in a merge key column, before the target is touched.
+
+    A NULL key matches no target row, so a merge would insert it again on every run and a
+    delete would never find it.
+    """
+    nulls = " OR ".join(f"{key} IS NULL" for key in merge_key)
+    count = session.count(f"SELECT COUNT(*) FROM {stage} WHERE {nulls}", step="NULL merge keys")
+    if count:
+        raise HandlerError(
+            f"{session.action} {session.target}: the SELECT returns {count} row(s) with a NULL "
+            f"in MERGE_KEY ({', '.join(merge_key)}); every key column must be set: filter those "
+            "rows out or COALESCE the key"
+        )
+
+
 def dedupe(session: Session, stage: str, merge_key: tuple[str, ...], order: str | None) -> str:
     """Return a stage with one row per merge key: this one, or a copy keeping ``order``'s first.
 
     Without ``MERGE_DEDUPE_ORDER``, duplicate keys fail before the target is touched: which row
-    should win is the author's call, never the engine's.
+    should win is the author's call, never the engine's. For the same reason an order that
+    ties between rows that differ fails too; rows that are identical may tie.
     """
     keys = ", ".join(merge_key)
-    duplicates = session.run(
-        f"SELECT {keys}, COUNT(*) FROM {stage} GROUP BY {keys} HAVING COUNT(*) > 1",
-        step="look for duplicate merge keys",
-    ).all()
-    if not duplicates:
+    duplicated = f"SELECT {keys} FROM {stage} GROUP BY {keys} HAVING COUNT(*) > 1"
+    count = session.count(f"SELECT COUNT(*) FROM ({duplicated}) d", step="duplicate merge keys")
+    if not count:
         return stage
     if order is None:
-        sample = "; ".join(
-            ", ".join(f"{k}={v!r}" for k, v in zip(merge_key, row[:-1], strict=True))
-            + f" ({row[-1]} rows)"
-            for row in duplicates[:5]
+        sample = session.run(
+            f"SELECT {keys}, COUNT(*) FROM {stage} GROUP BY {keys} HAVING COUNT(*) > 1 "
+            f"ORDER BY {keys} LIMIT 5",
+            step="examples of duplicate merge keys",
+        ).all()
+        examples = "; ".join(
+            _describe_key(merge_key, row[:-1]) + f" ({row[-1]} rows)" for row in sample
         )
         raise HandlerError(
-            f"the SELECT returns {len(duplicates)} MERGE_KEY value(s) ({keys}) more than once, "
-            f"for example {sample}; a merge needs one row per key. Return one, or set "
+            f"the SELECT returns {count} MERGE_KEY value(s) ({keys}) more than once, "
+            f"for example {examples}; a merge needs one row per key. Return one, or set "
             "MERGE_DEDUPE_ORDER (for example 'updated_at DESC') to choose which row is kept"
         )
-    columns = ", ".join(name for name, _ in session.columns(stage))
+    columns = [name for name, _ in session.columns(stage)]
+    listed = ", ".join(columns)
+    row_hash = session.dialect.hash_expression(list(columns))
+    tied = (
+        f"SELECT {keys} FROM (SELECT {keys}, {row_hash} AS etl_h, RANK() OVER (PARTITION BY "
+        f"{keys} ORDER BY {order}) AS etl_r FROM {stage}) ranked WHERE etl_r = 1 "
+        f"GROUP BY {keys} HAVING COUNT(DISTINCT etl_h) > 1"
+    )
+    ties = session.count(f"SELECT COUNT(*) FROM ({tied}) t", step="ties in MERGE_DEDUPE_ORDER")
+    if ties:
+        sample = session.run(f"{tied} ORDER BY {keys} LIMIT 5", step="examples of ties").all()
+        examples = "; ".join(_describe_key(merge_key, row) for row in sample)
+        raise HandlerError(
+            f"MERGE_DEDUPE_ORDER ({order}) leaves ties between different rows for {ties} "
+            f"key(s), for example {examples}; add a column to the order that breaks the tie"
+        )
     deduped = session.scratch("dedup")
     session.create_scratch(
         deduped,
-        f"SELECT {columns} FROM (SELECT {columns}, ROW_NUMBER() OVER (PARTITION BY {keys} "
+        f"SELECT {listed} FROM (SELECT {listed}, ROW_NUMBER() OVER (PARTITION BY {keys} "
         f"ORDER BY {order}) AS etl_rn FROM {stage}) ranked WHERE etl_rn = 1",
-        step=f"keep one row per merge key by {order} ({len(duplicates)} key(s) had several)",
+        step=f"keep one row per merge key by {order} ({count} key(s) had several)",
     )
     session.drop(stage)
     return deduped
+
+
+def _describe_key(merge_key: tuple[str, ...], values: Sequence[object]) -> str:
+    return ", ".join(f"{k}={v!r}" for k, v in zip(merge_key, values, strict=True))
 
 
 def add_hash_key(session: Session, stage: str, compare_columns: tuple[str, ...]) -> None:

@@ -153,3 +153,45 @@ def test_a_bad_rule_stops_the_task_before_any_rule_runs(world, changes, message)
 def test_a_task_without_rules_fails(world):
     with pytest.raises(HandlerError, match="no active row in CFG_BUSINESS_RULES"):
         run_rules(world)
+
+
+def test_a_flag_is_cleared_when_its_key_is_gone_from_the_table(world):
+    w = world
+    inactive = f"SELECT 1 FROM {w.schema}.customers c WHERE c.id = t.customer_id AND c.active = 'N'"
+    add_rule(w, "inactive_customer", inactive)
+    assert run_rules(w).insert_count == 2
+    # Order 11 is deleted: no row of it is left to judge, so its flag is cleared.
+    w.execute(f"DELETE FROM {w.name('orders')} WHERE order_id = 11")
+    gone = run_rules(w, rerun=True)
+    assert (gone.insert_count, gone.update_count) == (0, 1)
+    assert flags(w) == [
+        ("inactive_customer", "11", "N", "REJECT"),
+        ("inactive_customer", "12", "Y", "REJECT"),
+    ]
+
+
+def test_only_the_active_version_of_a_versioned_table_is_judged(sql_world):
+    w = sql_world
+    w.execute(
+        f"CREATE TABLE {w.name('customers')} AS SELECT 1 AS id, 'Y' AS active UNION ALL "
+        "SELECT 2, 'N'"
+    )
+    w.setup("orders", "SELECT 10 AS order_id, 1 AS customer_id", "SCD2_MERGE")
+    params = {
+        "SQL_ACTION": "SCD2_MERGE",
+        "TARGET_OBJECT": "orders",
+        "MERGE_KEY": "order_id",
+        "MERGE_COMPARE_COLUMNS": "customer_id",
+    }
+    w.run("orders", SOURCE_SQL="SELECT 10 AS order_id, 2 AS customer_id", **params)
+    w.run("orders", SOURCE_SQL="SELECT 10 AS order_id, 1 AS customer_id", **params)
+    w.task("rules")
+    add_rule(
+        w,
+        "inactive_customer",
+        f"SELECT 1 FROM {w.schema}.customers c WHERE c.id = t.customer_id AND c.active = 'N'",
+    )
+    # The closed version points at inactive customer 2; only the active one is judged.
+    forced = run_rules(w, force=True)
+    assert forced.insert_count == 0
+    assert flags(w) == []

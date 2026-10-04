@@ -106,6 +106,10 @@ def test_has_data_needs_rows_written(world):
     with engine.begin() as conn:
         upstream_run(conn, ids["up"], {ids["publish"]: ("SUCCESS", 4)})
     assert TrackedGate(NO_WAIT).check(engine, ids["load"], 1).satisfied_count == 1
+    # A run that changed nothing in a full table wrote no rows.
+    with engine.begin() as conn:
+        upstream_run(conn, ids["up"], {ids["publish"]: ("SUCCESS", 4, 0)})
+    assert TrackedGate(NO_WAIT).check(engine, ids["load"], 1).satisfied_count == 0
 
 
 def test_a_running_upstream_is_waited_for(world):

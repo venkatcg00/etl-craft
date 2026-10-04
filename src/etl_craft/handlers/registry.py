@@ -61,6 +61,14 @@ class HandlerResult:
     delete_count: int | None = None
     variables: Mapping[str, object] = field(default_factory=dict)
 
+    @property
+    def rows_written(self) -> int | None:
+        """The rows inserted, updated and deleted; ``None`` when the handler reported none."""
+        counts = [self.insert_count, self.update_count, self.delete_count]
+        if all(count is None for count in counts):
+            return None
+        return sum(count or 0 for count in counts)
+
 
 def format_task_log(result: HandlerResult) -> str | None:
     """Render ``result`` as ``NAME = value`` lines: its counts, then its variables."""

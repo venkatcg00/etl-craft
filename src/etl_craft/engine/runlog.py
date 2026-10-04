@@ -277,6 +277,7 @@ def finish_task_run(
     insert_count: int | None = None,
     update_count: int | None = None,
     delete_count: int | None = None,
+    rows_written: int | None = None,
     error_message: str | None = None,
     task_log: str | None = None,
 ) -> None:
@@ -292,6 +293,7 @@ def finish_task_run(
             "insert_count": insert_count,
             "update_count": update_count,
             "delete_count": delete_count,
+            "rows_written": rows_written,
             "error_message": error_message,
             "task_log": task_log,
         },
@@ -350,7 +352,9 @@ def fetch_run_state(
         return {}
     query = statement(conn, "run_state").bindparams(bindparam("task_ids", expanding=True))
     rows = conn.execute(query, {"pipeline_run_id": pipeline_run_id, "task_ids": list(task_ids)})
-    return {row.task_id: TaskRunState(row.status, row.target_count) for row in rows}
+    return {
+        row.task_id: TaskRunState(row.status, row.target_count, row.rows_written) for row in rows
+    }
 
 
 @dataclass(frozen=True)

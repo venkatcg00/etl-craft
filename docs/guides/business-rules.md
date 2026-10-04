@@ -30,13 +30,18 @@ evaluate a subquery correlated any other way. The rule must be one read-only sta
 ## What a run does
 
 For each rule, the engine looks at the rows in scope: those written in the current run
-(`t.PIPELINE_RUN_ID` is the run's id), or every row when the task is run with `--force`. Then it:
+(`t.PIPELINE_RUN_ID` is the run's id), or every row when the task is run with `--force`. On a
+table with an `ACTIVE_FLAG` column, such as an `SCD2_MERGE` target, only the active versions
+(`t.ACTIVE_FLAG = 'Y'`) are in scope: a closed version is history, not a row to judge. Then it:
 
 1. flags every key whose row breaks the rule and is not flagged already (`ACTIVE_FLAG = 'Y'`);
 2. clears the flag (`ACTIVE_FLAG = 'N'`, with `END_DATE`) of every flagged key whose row in scope
-   no longer breaks it.
+   no longer breaks it, and of every flagged key with no row (no active version) left in the
+   table.
 
-A flag outside the scope is left as it is, so a normal run changes only what the run touched.
+Any other flag outside the scope is left as it is, so a normal run changes only what the run
+touched. A run with `--force` judges the whole table, so it clears every flag it does not find
+again.
 `AUD_TASK_RUN_LOG` records the keys flagged as `INSERT_COUNT` and those cleared as
 `UPDATE_COUNT`.
 

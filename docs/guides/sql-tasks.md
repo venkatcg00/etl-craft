@@ -20,8 +20,17 @@ environment, so `schema.table` names run unchanged in development, test and prod
 
 Set exactly one of them. The SELECT must be a single read-only statement (`SELECT`, `WITH`,
 `TABLE` or `VALUES`); comments and a trailing `;` are fine. A task holds exactly one query: do
-lookups and aggregations inside it, with CTEs or subqueries, not as statements of their own. It must not return the columns the
-engine manages itself: `PIPELINE_RUN_ID`, `ROW_ID` and the audit columns below.
+lookups and aggregations inside it, with CTEs or subqueries, not as statements of their own.
+
+The columns the SELECT returns are checked before the target is touched, and the task fails,
+naming them, when:
+
+- it returns a column the engine writes itself: `PIPELINE_RUN_ID`, `ROW_ID` or one of the audit
+  columns below. A `SELECT *` over a table the engine wrote returns them all; list the columns
+  you need instead. `validate` reports this too, when the SELECT lists its columns;
+- a column's name would need quoting: anything but letters, digits and `_`, or, on a warehouse
+  that folds unquoted names (PostgreSQL and Trino to lower case, Snowflake to upper case), a name
+  in another case, such as `"CustomerId"` on PostgreSQL. Alias it to a plain name.
 
 ### The pipeline-id tokens
 
@@ -83,13 +92,17 @@ action. Its SELECT only gives the shape; `SELECT ... WHERE 1 = 0` is fine.
 
 `MERGE_KEY` and `MERGE_COMPARE_COLUMNS` are column lists separated by `|`, such as
 `customer_id|region`. A row counts as changed when the MD5 of its compare columns (`HASH_KEY`)
-differs from the target's.
+differs from the target's. Every merge key column must be set: a row with a NULL in one would
+match no target row, so the merges and `DELETE_ROWS` fail on it, with the count. A key that
+`DELETE_ROWS` flagged deleted comes back when a merge's SELECT returns it again: `SCD1_MERGE`
+updates it with `DELETE_FLAG = 'N'`, and `SCD2_MERGE` closes the flagged version and inserts a
+live one. A soft `DELETE_ROWS` leaves rows already flagged as they were.
 
 ### Optional parameters
 
 | Parameter | Applies to | Effect |
 |---|---|---|
-| `MERGE_DEDUPE_ORDER` | the merges | when the SELECT returns a merge key more than once, keep the first row in this order, such as `updated_at DESC`; without it, duplicate keys fail the task |
+| `MERGE_DEDUPE_ORDER` | the merges | when the SELECT returns a merge key more than once, keep the first row in this order, such as `updated_at DESC`; without it, duplicate keys fail the task. An order that ties between rows that differ fails the task too: add a column that breaks the tie |
 | `SETUP_FOR` | `SETUP_TABLE` | the action whose audit columns the table gets: `CREATE_TABLE`, `OVERWRITE_TABLE`, `APPEND_TABLE`, `SCD1_MERGE` or `SCD2_MERGE` |
 | `SCHEMA_EVOLUTION` | `OVERWRITE_TABLE` and the merges | `true` adds a column the SELECT returns but the target lacks, in the SELECT's position |
 | `PRESERVE_TARGET` | `SCD1_MERGE` | `true` keeps the target's value where the SELECT returns NULL |
@@ -154,8 +167,9 @@ database's own message, and the failing SQL is written to the attempt's log:
 SCD1_MERGE analytics.sales.customers: stage the SELECT failed: UndefinedTable: relation "raw.custmers" does not exist
 ```
 
-`AUD_TASK_RUN_LOG` records the source, target, insert, update and delete counts. Each count comes
-from its own `COUNT(*)` query, not from the driver.
+`AUD_TASK_RUN_LOG` records the source, target, insert, update and delete counts, and
+`ROWS_WRITTEN`, their sum of inserts, updates and deletes, which a `HAS_DATA` dependency reads.
+Each count comes from its own `COUNT(*)` query, not from the driver.
 
 ## Running a task again
 
@@ -163,5 +177,6 @@ On PostgreSQL and DuckDB an action's statements commit or roll back together. Tr
 and Snowflake commit each statement, so an action that fails part-way can leave its work half
 done. Every action works out what to do from the target's current state, so running the task
 again completes it. `APPEND_TABLE` is the exception: running it again after it succeeded appends
-the rows again. Scratch tables the action creates (`etl_stage_<task_run_id>` and similar) are
-dropped even when it fails.
+the rows again. Scratch tables the action creates (`etl_stage_<task_run_id>_<token>` and similar,
+with a token of its own per attempt) are dropped even when it fails. Where the warehouse has no
+temporary tables (Trino, Databricks) they are created in the target's schema.

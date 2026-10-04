@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import secrets
 import time
 from collections.abc import Mapping
 from typing import Any
@@ -58,6 +59,7 @@ class Session:
         self.catalog = database or catalog
         self.target = f"{self.catalog}.{self.schema}.{self.table}"
         self.scratch_tables: list[str] = []
+        self.token = secrets.token_hex(3)
 
     # Statements
 
@@ -112,13 +114,15 @@ class Session:
         return qualify(object_ref, self.catalog)
 
     def scratch(self, suffix: str) -> str:
-        """Name a scratch table for this task run; ``etl_<suffix>_<task_run_id>``.
+        """Name a scratch table for this attempt: ``etl_<suffix>_<task_run_id>_<token>``.
 
-        Where the session has no default schema, the name is qualified with the target's schema.
-        Every scratch table is recorded, so ``sweep`` drops it whatever happens.
+        ``token`` is random per session, so no two attempts, of this task or another, share a
+        name. A temporary table lives in the session's own namespace and stays unqualified;
+        anywhere else the name is qualified with the target's catalog and schema. Every scratch
+        table is recorded, so ``sweep`` drops it whatever happens.
         """
-        bare = f"etl_{suffix}_{self.task_run_id}"
-        name = bare if self.dialect.default_schema else self.qualify(f"{self.schema}.{bare}")
+        bare = f"etl_{suffix}_{self.task_run_id}_{self.token}"
+        name = bare if self.dialect.temporary_tables else self.qualify(f"{self.schema}.{bare}")
         if name not in self.scratch_tables:
             self.scratch_tables.append(name)
         return name
@@ -148,8 +152,8 @@ class Session:
     def columns(self, name: str) -> list[tuple[str, str]]:
         """Return ``[(column, data_type)]`` of table ``name`` in column order.
 
-        ``name`` is ``catalog.schema.table``, ``schema.table`` or a bare scratch table name,
-        which is matched by name alone: scratch names are unique per task run.
+        ``name`` is ``catalog.schema.table``, ``schema.table`` or a bare temporary scratch table
+        name, matched by name alone: a scratch name carries a token no other table has.
         """
         parts = name.split(".")
         table = parts[-1]
