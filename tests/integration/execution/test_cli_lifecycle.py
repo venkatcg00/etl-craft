@@ -8,8 +8,6 @@ from pathlib import Path
 import pytest
 from sqlalchemy import text
 
-from fixtures.cli_project import descendants
-
 
 @pytest.mark.parametrize(
     "point", ["runner.after_bind", "supervisor.after_mkdir", "supervisor.after_popen"]
@@ -79,7 +77,7 @@ def test_signal_stops_the_real_cli_child_and_grandchild(cli_project, sig):
         deadline = time.monotonic() + 10
         children = []
         while time.monotonic() < deadline:
-            children = descendants(parent.process.pid)
+            children = parent.descendants()
             if len(children) >= 2:
                 break
             time.sleep(0.02)
@@ -87,11 +85,19 @@ def test_signal_stops_the_real_cli_child_and_grandchild(cli_project, sig):
         parent.signal(sig)
         assert parent.wait() != 0, parent.output
         project.wait_for("SELECT STATUS FROM AUD_TASK_RUN_LOG", expected="FAILED")
-        for pid in children:
-            stat = Path(f"/proc/{pid}/stat")
-            assert (
-                not stat.exists()
-                or stat.read_text(encoding="utf-8").rsplit(")", 1)[1].split()[0] == "Z"
-            )
+
+        def alive(pid):
+            try:
+                fields = (
+                    Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").rsplit(")", 1)[1].split()
+                )
+                return fields[0] != "Z"
+            except FileNotFoundError:
+                return False
+
+        deadline = time.monotonic() + 5
+        while any(alive(pid) for pid in children) and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert not any(alive(pid) for pid in children), parent.output
     finally:
         parent.close()

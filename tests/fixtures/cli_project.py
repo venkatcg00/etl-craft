@@ -5,7 +5,7 @@ import signal
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -44,6 +44,7 @@ class CliProcess:
 
     process: subprocess.Popen
     log_path: Path
+    observed: dict[int, str] = field(default_factory=dict)
 
     @property
     def output(self):
@@ -60,14 +61,40 @@ class CliProcess:
                 f"CLI pid {self.process.pid} timed out; output:\n{self.output}"
             ) from error
 
+    def descendants(self):
+        """Remember descendant birth times so cleanup cannot signal a reused pid."""
+        children = descendants(self.process.pid)
+        for pid in children:
+            try:
+                fields = (
+                    Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").rsplit(")", 1)[1].split()
+                )
+                self.observed[pid] = fields[19]
+            except FileNotFoundError:
+                continue
+        return children
+
     def close(self):
         if self.process.poll() is None:
+            if sys.platform == "linux":
+                self.descendants()
             self.signal(signal.SIGTERM)
             try:
                 self.process.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 self.process.kill()
                 self.process.wait(timeout=10)
+        for pid, started in self.observed.items():
+            try:
+                fields = (
+                    Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").rsplit(")", 1)[1].split()
+                )
+                if fields[19] == started and fields[0] != "Z":
+                    os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                continue
+            except FileNotFoundError:
+                continue
 
 
 @dataclass
