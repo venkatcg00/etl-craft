@@ -33,6 +33,7 @@ from etl_craft.execution.pipeline import (
     rerun_task,
     run_pipeline,
 )
+from etl_craft.execution.reconcile import reconcile
 from etl_craft.execution.runner import ChildOptions, Override, run_task
 from etl_craft.services.cloning import run_hooks
 
@@ -127,6 +128,9 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     engine = connect_engine_db(config)
     child = ChildOptions(log_level=args.log_level, log_format=args.log_format)
     try:
+        with engine.connect() as conn:
+            pipeline_id = resolve_pipeline_id(conn, args.pipeline_code)
+        reconcile(engine, pipeline_id=pipeline_id)
         with _terminate_as_interrupt():
             status, message = _dispatch(args, config, engine, child)
     finally:
@@ -246,7 +250,7 @@ def _terminate_as_interrupt() -> Iterator[None]:
 
     The task processes the command started are then stopped and their attempts recorded. A
     SIGKILL cannot be caught: its task processes are left running, and their rows
-    ``IN-PROGRESS`` until ``mark --stale`` releases them.
+    ``IN-PROGRESS`` until their leases expire and reconciliation releases them.
     """
     if threading.current_thread() is not threading.main_thread():
         yield

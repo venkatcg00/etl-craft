@@ -34,6 +34,7 @@ import logging
 import threading
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from types import TracebackType
@@ -68,6 +69,7 @@ from etl_craft.engine.repository.pipelines import (
 )
 from etl_craft.engine.repository.runs import fetch_task_statuses_for_run
 from etl_craft.engine.repository.tasks import fetch_task_codes, resolve_task_id
+from etl_craft.execution import leases
 from etl_craft.execution.connections import check_run_connections
 from etl_craft.execution.gates import (
     Clock,
@@ -82,6 +84,7 @@ from etl_craft.execution.interventions import (
     record_gate_bypass,
     reset_engine_skipped,
 )
+from etl_craft.execution.reconcile import reconcile
 from etl_craft.execution.remote import require_supported
 from etl_craft.execution.runner import (
     ChildOptions,
@@ -204,7 +207,10 @@ def run_pipeline(
         backfill=backfill,
         selector=selector,
     )
-    with log_context(pipeline=pipeline_code, pipeline_run_id=pipeline_run_id):
+    with (
+        leases.supervise_run(engine, pipeline_run_id) if skip_reason is None else nullcontext(),
+        log_context(pipeline=pipeline_code, pipeline_run_id=pipeline_run_id),
+    ):
         if skip_reason is not None:
             return _skipped_run(pipeline_code, pipeline_run_id, skip_reason, hooks)
         with engine.connect() as conn:
@@ -680,6 +686,7 @@ def _start_run(
     progress is resumed, unless it runs as of another date than ``run_date``. A gate
     ``Dependency_gates`` bypassed, or skipped by a backfill, is recorded against the new run.
     """
+    reconcile(engine, pipeline_id=pipeline_id)
     with engine.begin() as conn:
         candidates = runlog.run_candidates(conn, pipeline_id)
         explicit = selector.run_id is not None or selector.run_key is not None
@@ -864,7 +871,7 @@ class _Waves:
         self.task_codes = task_codes
         self.force = force
         self.gate = gate
-        self.cancel = threading.Event()
+        self.cancel = leases.run_cancel()
         self.child = replace(child, cancel=self.cancel)
         self.count = 0
 
@@ -1104,7 +1111,11 @@ def _finalize(
     with engine.begin() as conn:
         breached_before = runlog.fetch_run_sla(conn, pipeline_run_id).sla_status
         ending = transitions.finalize_pipeline_run(
-            conn, pipeline_run_id, status, sla_in_hours=sla_hours
+            conn,
+            pipeline_run_id,
+            status,
+            sla_in_hours=sla_hours,
+            owner=leases.run_owner(pipeline_run_id),
         )
         current = runlog.fetch_pipeline_run_status(conn, pipeline_run_id)
     if not ending.ended:

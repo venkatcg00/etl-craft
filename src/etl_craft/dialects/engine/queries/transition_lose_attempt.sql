@@ -2,5 +2,6 @@ UPDATE AUD_TASK_ATTEMPTS SET STATUS = 'LOST', ENDED_AT = :now,
 SOURCE_COUNT = :source_count, TARGET_COUNT = :target_count, INSERT_COUNT = :insert_count,
 UPDATE_COUNT = :update_count, DELETE_COUNT = :delete_count, ROWS_WRITTEN = :rows_written,
 ERROR_MESSAGE = :error_message, TASK_LOG = :task_log, EXIT_CODE = :exit_code
-WHERE ATTEMPT_ID = :row_id AND STATUS IN ('CLAIMED','RUNNING') AND LEASE_EXPIRES_AT <= :now AND OWNER_ID = :owner
+WHERE ATTEMPT_ID = :row_id AND STATUS IN ('CLAIMED','RUNNING') AND (LEASE_EXPIRES_AT IS NULL OR LEASE_EXPIRES_AT <= :now)
+AND (OWNER_ID = :owner OR (OWNER_ID IS NULL AND :owner IS NULL))
 RETURNING TASK_RUN_ID AS task_run_id

@@ -65,8 +65,9 @@ tasks get another attempt. A resumed run does not check the pipeline's dependenc
 Pressing Ctrl-C, or sending the process `SIGTERM` or `SIGHUP`, stops every running task's
 process. Those tasks are recorded `FAILED`, and the run stays `IN-PROGRESS` so the next run
 resumes it. The same holds for `run --task_code`, `--rerun` and `--backfill`. `SIGKILL` cannot be
-caught: a task it leaves running stays `IN-PROGRESS` until
-`mark --task_code <code> --status FAILED --stale --reason ...` releases it.
+caught: the next run reconciles expired leases, records orphaned attempts `LOST`, stops
+verified local children and retries failed tasks. `etl-craft reconcile` also requests recovery.
+See [run controls](run-control.md#mark-a-task) for grace periods and uncertain side effects.
 
 `--force` runs every task in its wave whatever its status or dependencies, and skips the
 pipeline's dependency check. It is only available in local mode.

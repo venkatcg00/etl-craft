@@ -236,7 +236,12 @@ def fail_task_run_if_running(conn: Connection, task_run_id: int, error_message: 
 
 
 def finalize_pipeline_run(
-    conn: Connection, pipeline_run_id: int, status: str, *, sla_in_hours: float | None = None
+    conn: Connection,
+    pipeline_run_id: int,
+    status: str,
+    *,
+    sla_in_hours: float | None = None,
+    owner: str | None = None,
 ) -> runlog.RunEnding:
     """End ``pipeline_run_id`` with ``status`` and END_DATE now, if it is still ``IN-PROGRESS``.
 
@@ -265,6 +270,7 @@ def finalize_pipeline_run(
             status,
             SYSTEM_ACTOR,
             sla_status=None if sla is None else str(sla.status),
+            owner=owner,
         )
         ended = True
     except StaleTransitionError:
@@ -334,8 +340,9 @@ def cancel_task_run(conn: Connection, task_run_id: int, error_message: str) -> b
 
 
 def cancel_pipeline_run(conn: Connection, pipeline_run_id: int) -> bool:
-    """Cancel an active unowned run; refuse a changed status or owner."""
-    finish_run(conn, pipeline_run_id, "CANCELLED", current_actor())
+    """Cancel an active run on request; refuse a changed status or owner."""
+    row = conn.execute(statement(conn, "run_lease"), {"row_id": pipeline_run_id}).one()
+    finish_run(conn, pipeline_run_id, "CANCELLED", current_actor(), owner=row.owner_id)
     return True
 
 
@@ -600,7 +607,13 @@ def _sync_summary(conn: Connection, attempt_id: int) -> None:
 
 
 def claim_attempt(
-    conn: Connection, attempt_id: int, actor: Actor, *, owner: str, lease_expires_at: datetime
+    conn: Connection,
+    attempt_id: int,
+    actor: Actor,
+    *,
+    owner: str,
+    lease_expires_at: datetime,
+    host: str | None = None,
 ) -> None:
     """Claim a queued attempt for one owner."""
     with conn.begin_nested():
@@ -611,7 +624,7 @@ def claim_attempt(
             attempt_id,
             "QUEUED (unowned)",
             None,
-            {**_actor_params(actor), "owner": owner, "lease": lease_expires_at},
+            {**_actor_params(actor), "owner": owner, "lease": lease_expires_at, "host": host},
         )
         _sync_summary(conn, attempt_id)
 
@@ -767,7 +780,12 @@ def cancel_attempt(
 
 
 def lose_attempt(
-    conn: Connection, attempt_id: int, actor: Actor, *, owner: str, error_message: str | None = None
+    conn: Connection,
+    attempt_id: int,
+    actor: Actor,
+    *,
+    owner: str | None,
+    error_message: str | None = None,
 ) -> None:
     """Record an uncertain outcome for an owner whose lease expired."""
     _end_attempt(
@@ -867,7 +885,12 @@ def set_task_log(
         attempt_id,
         "latest attempt",
         owner,
-        {"task_run_id": task_run_id, "attempt_id": attempt_id, "task_log": task_log},
+        {
+            "task_run_id": task_run_id,
+            "attempt_id": attempt_id,
+            "task_log": task_log,
+            "now": datetime.now(UTC),
+        },
     )
 
 
@@ -880,15 +903,31 @@ def ensure_attempt_started(
     host: str,
     pid: int,
     completed: bool = False,
+    process_start: str | None = None,
 ) -> None:
     """Accept the same start acknowledged by parent and child, with no second write."""
     try:
-        start_attempt(conn, attempt_id, actor, owner=owner, host=host, pid=pid)
+        start_attempt(
+            conn, attempt_id, actor, owner=owner, host=host, pid=pid, process_start=process_start
+        )
     except StaleTransitionError:
         row = conn.execute(
             statement(conn, "transition_row_attempt"), {"row_id": attempt_id}
         ).one_or_none()
         allowed = {"RUNNING", "SUCCESS", "FAILED"} if completed else {"RUNNING"}
+        if row is not None and row.status == "RUNNING":
+            expiry = row.lease_expires_at
+            instant = (
+                expiry
+                if isinstance(expiry, datetime)
+                else datetime.fromisoformat(str(expiry))
+                if expiry is not None
+                else None
+            )
+            if instant is None or runlog.elapsed_hours(instant, datetime.now(UTC)) >= 0:
+                raise
+        if row is not None and process_start is not None and row.process_start != process_start:
+            raise
         if row is None or row.owner_id != owner or row.pid != pid or row.status not in allowed:
             raise
 
@@ -901,3 +940,27 @@ def create_rule_run(conn: Connection, business_rule_id: int, task_run_id: int) -
             {"business_rule_id": business_rule_id, "task_run_id": task_run_id},
         ).scalar_one()
     )
+
+
+def renew_run_lease(
+    conn: Connection, run_id: int, actor: Actor, *, owner: str, lease_expires_at: datetime
+) -> None:
+    """Renew a supervisor's run lease only while its existing lease is live."""
+    _guard(
+        conn,
+        "renew_run_lease",
+        "run",
+        run_id,
+        "IN-PROGRESS; live lease",
+        owner,
+        {**_actor_params(actor), "lease": lease_expires_at},
+    )
+
+
+def release_run_lease(conn: Connection, run_id: int, *, owner: str, expired: bool = False) -> bool:
+    """Release this exact supervisor when no active attempt remains, optionally after expiry."""
+    query = "transition_expire_run_lease" if expired else "transition_release_run_lease"
+    result = conn.execute(
+        statement(conn, query), {"row_id": run_id, "owner": owner, "now": datetime.now(UTC)}
+    )
+    return result.rowcount == 1

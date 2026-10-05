@@ -25,6 +25,7 @@ MUTATING_COMMANDS = frozenset(
         "run",
         "mark",
         "cancel",
+        "reconcile",
         "pause",
         "resume",
         "migrate",

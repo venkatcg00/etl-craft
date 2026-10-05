@@ -27,7 +27,6 @@ import threading
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from uuid import uuid4
 
 from sqlalchemy.engine import Engine
 
@@ -57,6 +56,7 @@ from etl_craft.engine.repository.dependencies import (
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.repository.tasks import fetch_task_parameters, resolve_task_id
 from etl_craft.engine.retry import retrying
+from etl_craft.execution import leases
 from etl_craft.execution.gates import (
     CrossPipelineCheck,
     CrossPipelineGate,
@@ -69,6 +69,7 @@ from etl_craft.execution.interventions import (
     record_gate_bypass,
 )
 from etl_craft.execution.limits import task_timeout_seconds
+from etl_craft.execution.reconcile import reconcile
 from etl_craft.execution.supervisor import (
     KILL_GRACE_SECONDS,
     ChildResult,
@@ -156,6 +157,9 @@ def run_task(
     ``Override``), also local mode's. Raises ``MetadataError`` for an unknown code and
     ``RunStateError`` when there is no run to bind to.
     """
+    with engine.connect() as conn:
+        reconcile_pipeline = resolve_pipeline_id(conn, pipeline_code)
+    reconcile(engine, pipeline_id=reconcile_pipeline)
     if override is not None:
         option = "--rerun" if override.rerun else "--ignore-dependencies"
         check_override(config, option, override.reason)
@@ -517,13 +521,14 @@ def _run_attempt(
     with engine.begin() as conn:
         binding = transitions.find_or_create_task_run(conn, task_id, pipeline_run_id)
         attempt_id = transitions.queue_attempt(conn, binding.task_run_id, current_actor())
-        owner = str(uuid4())
+        owner = leases.owner_id()
         transitions.claim_attempt(
             conn,
             attempt_id,
             current_actor(),
             owner=owner,
-            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=leases.LEASE_SECONDS),
+            host=socket.gethostname(),
         )
         active = transitions.active_attempt(conn, binding.task_run_id)
         assert active is not None
@@ -605,6 +610,10 @@ def _start_and_record(
         str(config.config_path),
         "--task-run-id",
         str(task_run_id),
+        "--attempt-id",
+        str(attempt_id),
+        "--owner-id",
+        owner,
         "--log-level",
         child.log_level,
         "--log-format",
@@ -622,7 +631,10 @@ def _start_and_record(
         f"{timeout}s" if timeout else "none",
         log_path,
     )
-    with _CancelWatch(engine, pipeline_run_id, child) as stop:
+    with (
+        _CancelWatch(engine, pipeline_run_id, child) as stop,
+        leases.heartbeat(engine, "attempt", attempt_id, owner, stop),
+    ):
         result = run_child(
             ChildSpec(
                 argv=(sys.executable, *argv),
@@ -798,4 +810,5 @@ def _attempt_started(engine: Engine, attempt_id: int, owner: str, pid: int) -> N
             host=socket.gethostname(),
             pid=pid,
             completed=True,
+            process_start=leases.process_start(pid),
         )

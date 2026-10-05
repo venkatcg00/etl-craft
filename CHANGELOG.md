@@ -8,6 +8,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Run and attempt ownership with 60-second leases and 15-second heartbeats. Every run reconciles
+  expired attempts; `etl-craft reconcile` also supports pipeline and task filters. Lost attempts
+  preserve uncertain outcomes, verified local child processes are stopped, and expired idle
+  runs resume under their original identity. `mark --stale` reconciles before marking and
+  refuses live leases. Children receive explicit attempt and owner identities.
+
 - Explicit `--run-id` and `--run-key` selection for run, mark, cancel, history and steps.
   Completed runs require an explicit identity; `history --all` lists runs. Pipeline tasks
   receive their parent's selected run. Remote DAG steps share an orchestrator run key and
@@ -29,7 +35,7 @@ All notable changes are recorded here. The format follows
 - Run identities and trigger kinds, owner and lease fields, output revisions and configuration
   fingerprints; attempt and gate-decision tables, consumed revisions and repair-consumption flags.
   Migration `0007_identity.sql` preserves historical run identities and copies the latest known
-  execution attempts. New runs receive manual, backfill or stand-in keys. Automatic lease renewal/reconciliation and recording gate decisions remain subsequent roadmap work.
+  execution attempts. New runs receive manual, backfill or stand-in keys. Recording gate decisions remains subsequent roadmap work.
 
 ### Fixed
 

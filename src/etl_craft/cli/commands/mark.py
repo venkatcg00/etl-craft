@@ -33,8 +33,8 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--stale",
         action="store_true",
-        help="with --task_code: mark a task that is still IN-PROGRESS because the process "
-        "running it is gone; never use it while that process may still be running",
+        help="with --task_code: reconcile expired attempts before marking; live leases "
+        "still refuse the mark",
     )
     parser.add_argument(
         "--new-run",

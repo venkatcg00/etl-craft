@@ -45,6 +45,9 @@ Each package imports only the packages below it. `lint-imports` enforces this.
 - A task is given its run by whoever starts it; nothing resolves a run by recency. Commands
   select an explicit `--run-id` or `--run-key`, or the single non-terminal run. A partial unique
   index keeps one IN-PROGRESS run per pipeline.
+- Whole-pipeline and task supervisors renew 60-second ownership leases every 15 seconds.
+  Reconcile expired attempts as `LOST` before retrying; never adopt an expired lease directly,
+  and signal a local process only after verifying its PID and process birth identity.
 - Retries resume: tasks already `SUCCESS` or `SKIPPED` under the run are not re-run.
 - Order comes from `CFG_TASK_DEPENDENCY` and `CFG_PIPELINE_DEPENDENCY` rows, never from code.
 - SQL tasks supply exactly one read-only SELECT; the engine wraps it in one of eight actions

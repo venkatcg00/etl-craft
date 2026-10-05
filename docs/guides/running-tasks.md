@@ -104,6 +104,6 @@ threads a script left running end with it, and are named in the log.
 
 The immutable attempt keeps the handler's reported values. The supervisor appends the captured
 output tail to the task summary once the process ends; the complete output remains in that
-attempt's log file. Claimed attempts carry owner and lease fields. Automatic heartbeats and
-reconciliation of expired leases are still planned; use the existing explicit operator controls
-for a process you have confirmed is gone.
+attempt's log file. Supervisors renew attempt leases every 15 seconds.
+Expired leases are reconciled before the next run or by `etl-craft reconcile`; see
+[recovery and run controls](run-control.md#mark-a-task).

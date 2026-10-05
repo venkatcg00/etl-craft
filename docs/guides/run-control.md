@@ -40,17 +40,33 @@ The task is set to `SUCCESS`, `FAILED` or `SKIPPED` under the selected run, and 
 `ERROR_MESSAGE` says who marked it and why. A task that is running is refused: cancel the run
 first, or wait.
 
-A task left `IN-PROGRESS` by a process that is gone (the machine restarted, or `etl-craft run`
-was killed with `SIGKILL`) is released with `--stale`, once you have checked that nothing still
-runs it:
+A task left `IN-PROGRESS` after its supervisor dies is recovered when its lease expires.
+Whole-pipeline supervisors and task supervisors hold 60-second leases, renewed every 15 seconds.
+A second whole-pipeline command refuses while the run remains owned. Every `run` reconciles
+expired leases before admission, or you can request reconciliation directly:
+
+```bash
+etl-craft reconcile --pipeline_code SALES_DAILY
+etl-craft reconcile --pipeline_code SALES_DAILY --task_code load_orders
+```
+
+Without filters, `reconcile` checks every pipeline. An expired local attempt becomes `LOST` and
+its task summary becomes `FAILED`. A verified local child and its observed descendants are
+stopped; host, PID and process birth identity protect against signalling a reused PID. An
+attempt on another host receives another 120 seconds of grace after expiry. An expired run
+with no active attempts becomes unowned and can resume under the same run identity.
+
+`LOST` means the outcome is uncertain: a warehouse commit or external script side effect may
+already have happened. Check the target before retrying operations that cannot safely repeat.
+Old attempt owners cannot write outcomes after expiry or after a newer attempt starts.
+
+`mark --stale` remains a compatibility option: it reconciles this task's expired attempts before
+marking. It refuses while the task remains live; it does not override a valid lease.
 
 ```bash
 etl-craft mark --pipeline_code SALES_DAILY --task_code load_orders --status FAILED --stale \
     --reason "the host restarted at 03:10"
 ```
-
-A stale mark retires the active attempt as `CANCELLED` before changing the summary. The retired
-attempt stays immutable, and a late result from its process cannot overwrite the marked outcome.
 
 If an explicitly selected run has ended, it is reopened (`IN-PROGRESS` again), and the tasks the engine skipped
 without running are reset, so running the pipeline again resumes it from there:
