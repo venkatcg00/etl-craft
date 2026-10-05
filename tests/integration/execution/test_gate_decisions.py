@@ -310,3 +310,159 @@ def test_migration_preserves_a_pending_historical_repair(empty_engine_db):
                 text("SELECT OUTPUT_REVISION, REPAIR_PENDING FROM AUD_PIPELINES_RUN_LOG")
             ).one()
         ) == (2, "N")
+
+
+@pytest.mark.parametrize("point", ["pipeline.before_consumption", "pipeline.after_consumption"])
+@pytest.mark.parametrize("crash", [False, True])
+def test_run_ending_and_consumption_roll_back_together(cli_project, point, crash):
+    project = cli_project
+    upstream(project)
+    with project.engine.begin() as conn:
+        conn.execute(
+            text("UPDATE CFG_PIPELINES SET SLA_IN_HOURS=1 WHERE PIPELINE_ID=:id"),
+            {"id": project.pipeline_id},
+        )
+    code, output = project.run(
+        "run", "--pipeline_code", "P", fault=point + (":kill" if crash else "")
+    )
+    assert code == (137 if crash else 19), output
+    with project.engine.begin() as conn:
+        row = conn.execute(
+            text(
+                "SELECT STATUS, END_DATE, SLA_STATUS FROM AUD_PIPELINES_RUN_LOG "
+                "WHERE PIPELINE_ID=:id"
+            ),
+            {"id": project.pipeline_id},
+        ).one()
+        assert tuple(row) == ("IN-PROGRESS", None, None)
+        assert (
+            conn.execute(text("SELECT COUNT(*) FROM AUD_DEPENDENCY_CONSUMPTION")).scalar_one() == 0
+        )
+        # The dead overseer's lease is expired before the next command reconciles it.
+        conn.execute(
+            text("UPDATE AUD_PIPELINES_RUN_LOG SET LEASE_EXPIRES_AT=:past WHERE PIPELINE_ID=:id"),
+            {"id": project.pipeline_id, "past": "2000-01-01 00:00:00"},
+        )
+    code, output = project.run("run", "--pipeline_code", "P")
+    assert code == 0, output
+    with project.engine.connect() as conn:
+        assert tuple(
+            conn.execute(
+                text("SELECT STATUS, SLA_STATUS FROM AUD_PIPELINES_RUN_LOG WHERE PIPELINE_ID=:id"),
+                {"id": project.pipeline_id},
+            ).one()
+        ) == ("SUCCESS", "MET")
+        assert (
+            conn.execute(text("SELECT COUNT(*) FROM AUD_DEPENDENCY_CONSUMPTION")).scalar_one() == 1
+        )
+
+
+@pytest.mark.parametrize(
+    "point",
+    [
+        "attempt.before_summary",
+        "attempt.after_status",
+        "script.after_offset",
+        "runner.before_consumption",
+        "attempt.after_consumption",
+    ],
+)
+@pytest.mark.parametrize("crash", [False, True])
+def test_attempt_success_offset_and_consumption_roll_back_together(cli_project, point, crash):
+    from etl_craft.engine.repository.offsets import (
+        StoredOffset,
+        fetch_task_offset,
+        save_task_offset,
+    )
+
+    project = cli_project
+    upstream(project, task_edge=True, pipeline_edge=False)
+    code, output = project.run("run", "--pipeline_code", "P", "--init-only")
+    assert code == 0, output
+    (project.config.ingestion_scripts_dir / "load.py").write_text(
+        "from etl_craft.scripting import ScriptResult, Offset\n"
+        "def run(task):\n    assert task.offset == Offset.number(3)\n"
+        "    return ScriptResult(1, Offset.number(9))\n"
+    )
+    with project.engine.begin() as conn:
+        save_task_offset(conn, project.task_id, StoredOffset("NUMBER", "3"))
+    code, output = project.run(
+        "run",
+        "--pipeline_code",
+        "P",
+        "--task_code",
+        "load",
+        fault=point + (":kill" if crash else ""),
+    )
+    assert code == 1, output
+    with project.engine.connect() as conn:
+        assert fetch_task_offset(conn, project.task_id) == StoredOffset("NUMBER", "3")
+        assert conn.execute(text("SELECT STATUS FROM AUD_TASK_ATTEMPTS")).scalar_one() == "FAILED"
+        assert (
+            conn.execute(text("SELECT COUNT(*) FROM AUD_DEPENDENCY_CONSUMPTION")).scalar_one() == 0
+        )
+    code, output = project.run("run", "--pipeline_code", "P", "--task_code", "load")
+    assert code == 0, output
+    with project.engine.connect() as conn:
+        assert fetch_task_offset(conn, project.task_id) == StoredOffset("NUMBER", "9")
+        assert (
+            conn.execute(text("SELECT STATUS FROM AUD_TASK_ATTEMPTS ORDER BY ATTEMPT_ID DESC"))
+            .scalars()
+            .first()
+            == "SUCCESS"
+        )
+        assert (
+            conn.execute(text("SELECT COUNT(*) FROM AUD_DEPENDENCY_CONSUMPTION")).scalar_one() == 1
+        )
+
+
+def test_a_child_crashing_after_commit_keeps_the_complete_success(cli_project):
+    from etl_craft.engine.repository.offsets import StoredOffset, fetch_task_offset
+
+    project = cli_project
+    upstream(project, task_edge=True, pipeline_edge=False)
+    code, output = project.run("run", "--pipeline_code", "P", "--init-only")
+    assert code == 0, output
+    (project.config.ingestion_scripts_dir / "load.py").write_text(
+        "from etl_craft.scripting import ScriptResult, Offset\n"
+        "def run(task):\n    return ScriptResult(1, Offset.number(9))\n"
+    )
+    code, output = project.run(
+        "run", "--pipeline_code", "P", "--task_code", "load", fault="child.after_outcome:kill"
+    )
+    assert code == 0, output
+    with project.engine.connect() as conn:
+        assert fetch_task_offset(conn, project.task_id) == StoredOffset("NUMBER", "9")
+        assert conn.execute(text("SELECT STATUS FROM AUD_TASK_ATTEMPTS")).scalar_one() == "SUCCESS"
+        assert (
+            conn.execute(text("SELECT COUNT(*) FROM AUD_DEPENDENCY_CONSUMPTION")).scalar_one() == 1
+        )
+
+
+def test_finalized_hook_observes_committed_consumption(cli_project):
+    from etl_craft.execution.pipeline import RunHooks, run_pipeline
+
+    project = cli_project
+    upstream(project)
+    observed = []
+
+    def finalized(outcome):
+        with project.engine.connect() as conn:
+            observed.append(
+                tuple(
+                    conn.execute(
+                        text(
+                            "SELECT STATUS, (SELECT COUNT(*) FROM AUD_DEPENDENCY_CONSUMPTION) "
+                            "FROM AUD_PIPELINES_RUN_LOG WHERE PIPELINE_RUN_ID=:run"
+                        ),
+                        {"run": outcome.pipeline_run_id},
+                    ).one()
+                )
+            )
+        raise RuntimeError("hook failed after commit")
+
+    outcome = run_pipeline(
+        project.engine, project.config, "P", hooks=RunHooks(on_finalized=finalized)
+    )
+    assert outcome.status == "SUCCESS"
+    assert observed == [("SUCCESS", 1)]

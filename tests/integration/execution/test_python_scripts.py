@@ -163,7 +163,12 @@ def run_in_process(project, script, **params):
     context = build_task_context(engine, config, binding.task_run_id, force=False)
     if params:
         context = replace(context, task_params={**context.task_params, **params})
-    return python_scripts.run(context, engine)
+    result = python_scripts.run(context, engine)
+    with engine.begin() as conn:
+        transitions.finish_task_run(
+            conn, binding.task_run_id, status="SUCCESS", offset=result.offset
+        )
+    return result
 
 
 RESULT = "from etl_craft.scripting import Offset, ScriptResult\n"
@@ -534,3 +539,20 @@ def test_http_request_logs_do_not_expose_query_keys_in_attempt_log(project):
         server.shutdown()
         server.server_close()
         worker.join(timeout=5)
+
+
+def test_handler_returns_the_offset_without_persisting_it(project):
+    from etl_craft.engine.repository.offsets import StoredOffset
+
+    engine, config, pipeline, task = project
+    (config.ingestion_scripts_dir / "load.py").write_text(
+        RESULT + "def run(task):\n    return ScriptResult(1, Offset.number(9))\n"
+    )
+    with engine.begin() as conn:
+        run_id = runlog.fetch_active_pipeline_run_id(conn, pipeline)
+        binding = transitions.find_or_create_task_run(conn, task, run_id)
+    result = python_scripts.run(build_task_context(engine, config, binding.task_run_id), engine)
+    assert result.offset == StoredOffset("NUMBER", "9")
+    with engine.connect() as conn:
+        assert fetch_task_offset(conn, task) is None
+    assert task_row(engine, binding.task_run_id).status == "IN-PROGRESS"

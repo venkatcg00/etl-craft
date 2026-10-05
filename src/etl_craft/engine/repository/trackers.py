@@ -169,9 +169,11 @@ def consume_pipeline_decisions(conn: Connection, run_id: int) -> None:
     )
 
 
-def consume_task_decisions(conn: Connection, task_id: int, run_id: int) -> None:
+def consume_task_decisions(
+    conn: Connection, task_id: int, run_id: int, *, attempt_id: int | None = None
+) -> None:
     """Consume snapshots of successful attempts without rereading upstream history or edges."""
     conn.execute(
         statement(conn, "consume_task_decisions"),
-        {"task_id": task_id, "run_id": run_id, "now": datetime.now(UTC)},
+        {"task_id": task_id, "run_id": run_id, "attempt_id": attempt_id, "now": datetime.now(UTC)},
     )

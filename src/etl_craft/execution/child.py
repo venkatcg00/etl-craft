@@ -151,6 +151,7 @@ def run_handler(engine: Engine, context: TaskContext) -> int:
             update_count=result.update_count,
             delete_count=result.delete_count,
             rows_written=result.rows_written,
+            offset=result.offset,
             task_log=format_task_log(result),
             attempt_id=None if identity is None else identity[0],
             owner=None if identity is None else identity[1],

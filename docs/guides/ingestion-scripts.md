@@ -69,8 +69,12 @@ gets it back cast to that datatype: `task.offset.value` is an `int` or `Decimal`
 Timestamp offsets keep microsecond precision. A datetime with nonzero nanoseconds, such as a
 pandas `Timestamp`, is refused; round it to microseconds before building the offset.
 
-The offset is stored in `AUD_TASK_OFFSET_TRACKER` only when the script succeeds, so a failed run
-is retried from the same place, and it keeps its datatype from one run to the next.
+The offset is stored in `AUD_TASK_OFFSET_TRACKER` if and only if the attempt is recorded
+`SUCCESS`. The attempt outcome, task summary, new offset and admitted task-dependency consumption
+commit in one Engine DB transaction. A crash before that commit preserves the previous offset;
+a crash after it preserves the complete success. A failed attempt is retried from the same place,
+and the offset keeps its datatype from one run to the next. Warehouse writes made by the script
+commit separately; make them safe to repeat when an attempt must be retried.
 
 Scripts may import helper modules kept beside them in `ingestion_scripts/`.
 Each script is compiled from its current source and registered as a module named

@@ -77,7 +77,8 @@ item's text, or work done early under another item.
 | S3.C Explicit run selection | Done | #100 | B11, B16, W11 |
 | S3.D Leases and reconciliation | Done | #101 | B1, B8, B16, B24, B26, W1 |
 | S3.E Recorded gate decisions and repairs | Done | #102 | B14, B62 |
-| S3.F to S3.H | Not started | | |
+| S3.F Atomic endings | Done | #103 | B6, B9; Engine DB portion of W4 |
+| S3.G to S3.H | Not started | | |
 | 0.4 and later | Not started | | |
 
 ### Handover notes
@@ -86,6 +87,13 @@ What a person picking up the work needs that the code and the item texts do not 
 
 **Choices that differ from the item text.**
 
+- S3.F commits successful attempt outcomes, summaries, returned script offsets and the exact
+  attempt's recorded consumption together. Run finalization commits status, SLA and pipeline
+  consumption before hooks run. Failure injection covers every write boundary and hard process
+  exits on both Engine DB dialects. The Engine DB transaction cannot roll back a script's
+  separately committed warehouse writes; warehouse retry safety remains S3.G.7. Custom gate
+  callbacks retain their completion notification; production snapshot consumption is atomic.
+
 - S3.E records each judged dependency in its admission transaction. Unsatisfied task skips have
   no execution attempt, so their decisions have NULL ATTEMPT_ID. Task decisions use the selected
   task run id and its pipeline's published OUTPUT_REVISION. Migration 0010 adds REPAIR_PENDING:
@@ -93,7 +101,7 @@ What a person picking up the work needs that the code and the item texts do not 
   increments the revision once and clears it. Historical active runs with recorded REOPEN remain
   pending. Execution reads repair flags separately from the dependency projections used by
   inspection and DAG generation, so those services retain their legacy-schema behavior. Snapshot
-  consumption is idempotent; combining consumption with guarded endings remains S3.F.
+  consumption is idempotent and commits with guarded endings.
 
 - S3.D retains `mark --stale` as task-scoped reconciliation before marking; live leases refuse
   the mark. Whole-pipeline commands own run leases; remote init/finalize steps and standalone

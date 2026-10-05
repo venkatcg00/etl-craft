@@ -13,8 +13,11 @@ from sqlalchemy.exc import IntegrityError
 from etl_craft.core.actor import SYSTEM_ACTOR, Actor, current_actor
 from etl_craft.core.enums import FINISHED_RUN_STATUSES, Mode, RunStatus, SlaStatus
 from etl_craft.core.errors import RunStateError, StaleTransitionError
+from etl_craft.core.faults import fault_point
 from etl_craft.engine import runlog
 from etl_craft.engine.queries import statement
+from etl_craft.engine.repository import trackers
+from etl_craft.engine.repository.offsets import StoredOffset, save_task_offset
 
 
 def create_active_run(
@@ -186,6 +189,7 @@ def finish_task_run(
     task_log: str | None = None,
     attempt_id: int | None = None,
     owner: str | None = None,
+    offset: StoredOffset | None = None,
 ) -> None:
     """Record the current attempt's outcome on its row; each attempt writes only its own counts."""
     if attempt_id is not None:
@@ -206,24 +210,34 @@ def finish_task_run(
             rows_written=rows_written,
             error_message=error_message,
             task_log=task_log,
+            offset=offset,
         )
         return
-    conn.execute(
-        statement(conn, "transition_finish_task_run"),
-        {
-            "task_run_id": task_run_id,
-            "status": status,
-            "now": datetime.now(UTC),
-            "source_count": source_count,
-            "target_count": target_count,
-            "insert_count": insert_count,
-            "update_count": update_count,
-            "delete_count": delete_count,
-            "rows_written": rows_written,
-            "error_message": error_message,
-            "task_log": task_log,
-        },
-    )
+    with conn.begin_nested():
+        changed = conn.execute(
+            statement(conn, "transition_finish_task_run"),
+            {
+                "task_run_id": task_run_id,
+                "status": status,
+                "now": datetime.now(UTC),
+                "source_count": source_count,
+                "target_count": target_count,
+                "insert_count": insert_count,
+                "update_count": update_count,
+                "delete_count": delete_count,
+                "rows_written": rows_written,
+                "error_message": error_message,
+                "task_log": task_log,
+            },
+        )
+        if changed.rowcount and status == "SUCCESS" and offset is not None:
+            task_id = (
+                conn.execute(statement(conn, "task_run_context"), {"task_run_id": task_run_id})
+                .one()
+                .task_id
+            )
+            save_task_offset(conn, task_id, offset)
+            fault_point("script.after_offset")
 
 
 def fail_task_run_if_running(conn: Connection, task_run_id: int, error_message: str) -> bool:
@@ -242,6 +256,7 @@ def finalize_pipeline_run(
     *,
     sla_in_hours: float | None = None,
     owner: str | None = None,
+    consume: bool = False,
 ) -> runlog.RunEnding:
     """End ``pipeline_run_id`` with ``status`` and END_DATE now, if it is still ``IN-PROGRESS``.
 
@@ -264,15 +279,20 @@ def finalize_pipeline_run(
             hours,
         )
     try:
-        finish_run(
-            conn,
-            pipeline_run_id,
-            status,
-            SYSTEM_ACTOR,
-            sla_status=None if sla is None else str(sla.status),
-            owner=owner,
-        )
-        ended = True
+        with conn.begin_nested():
+            finish_run(
+                conn,
+                pipeline_run_id,
+                status,
+                SYSTEM_ACTOR,
+                sla_status=None if sla is None else str(sla.status),
+                owner=owner,
+            )
+            ended = True
+            if consume and status == "SUCCESS":
+                fault_point("pipeline.before_consumption")
+                trackers.consume_pipeline_decisions(conn, pipeline_run_id)
+                fault_point("pipeline.after_consumption")
     except StaleTransitionError:
         ended = False
     if sla is not None:
@@ -691,6 +711,8 @@ def _end_attempt(
         row = conn.execute(statement(conn, f"transition_{query}"), params).one_or_none()
         if row is None:
             raise _stale(conn, "attempt", attempt_id, expected, owner)
+        if query == "finish_attempt" and status == "SUCCESS":
+            fault_point("attempt.before_summary")
         _sync_summary(conn, attempt_id)
 
 
@@ -710,28 +732,43 @@ def finish_attempt(
     error_message: str | None = None,
     task_log: str | None = None,
     exit_code: int | None = None,
+    offset: StoredOffset | None = None,
 ) -> None:
-    """Record an owned outcome and all summary values in one transaction."""
+    """Record the owned outcome, summary, offset and admitted consumption atomically."""
     if status not in {"SUCCESS", "FAILED"}:
         raise _stale(conn, "attempt", attempt_id, "SUCCESS or FAILED outcome", owner)
-    _end_attempt(
-        conn,
-        attempt_id,
-        actor,
-        "finish_attempt",
-        "CLAIMED or RUNNING",
-        owner,
-        status,
-        source_count=source_count,
-        target_count=target_count,
-        insert_count=insert_count,
-        update_count=update_count,
-        delete_count=delete_count,
-        rows_written=rows_written,
-        error_message=error_message,
-        task_log=task_log,
-        exit_code=exit_code,
-    )
+    with conn.begin_nested():
+        _end_attempt(
+            conn,
+            attempt_id,
+            actor,
+            "finish_attempt",
+            "CLAIMED or RUNNING",
+            owner,
+            status,
+            source_count=source_count,
+            target_count=target_count,
+            insert_count=insert_count,
+            update_count=update_count,
+            delete_count=delete_count,
+            rows_written=rows_written,
+            error_message=error_message,
+            task_log=task_log,
+            exit_code=exit_code,
+        )
+        if status == "SUCCESS":
+            fault_point("attempt.after_status")
+            row = conn.execute(
+                statement(conn, "task_run_for_attempt"), {"attempt_id": attempt_id}
+            ).one()
+            if offset is not None:
+                save_task_offset(conn, row.task_id, offset)
+                fault_point("script.after_offset")
+            fault_point("runner.before_consumption")
+            trackers.consume_task_decisions(
+                conn, row.task_id, row.pipeline_run_id, attempt_id=attempt_id
+            )
+            fault_point("attempt.after_consumption")
 
 
 def time_out_attempt(

@@ -89,7 +89,9 @@ manifest, so evidence runs on other platforms deselect them explicitly.
 Unset the variable for normal operation. Available boundaries are `runner.after_timeout`
 (before binding), `runner.after_bind`, `supervisor.after_mkdir`, `supervisor.after_popen`,
 `child.after_outcome`, `pipeline.after_insert`, `runner.before_consumption`,
-`pipeline.before_consumption`, and `script.after_offset`. Hard exits can leave audit rows
+`pipeline.before_consumption`, `pipeline.after_consumption`, `attempt.after_status`,
+`attempt.before_summary`, `attempt.after_consumption`, and `script.after_offset`. Ending fault points run inside the
+transaction: an injected exception or hard exit rolls back status, offsets and consumption. Hard exits can leave audit rows
 running and processes alive: tests must clean up their process trees and use explicit
 reconciliation for expired leases. Every run reconciles before admission; `etl-craft reconcile`
 requests it directly, and `mark --stale` reconciles a task before marking.
