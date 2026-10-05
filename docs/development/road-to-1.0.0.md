@@ -74,7 +74,7 @@ item's text, or work done early under another item.
 | S3.A Identity schema | Done | #95 | Run identities, attempt history and gate-decision schema |
 | S3.I Actors and engine-only writes | Done | #98 | W15 |
 | S3.B Centralized transitions | Done | #99 | Guarded lifecycle writes and immutable live attempts; ownership/reconciliation completes in S3.D |
-| S3.C Explicit run selection | In progress | | B11, B16, W11 |
+| S3.C Explicit run selection | Done | #100 | B11, B16, W11 |
 | S3.D to S3.H | Not started | | |
 | 0.4 and later | Not started | | |
 
