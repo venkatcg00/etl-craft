@@ -24,6 +24,7 @@ class DatabricksWarehouse(WarehouseDialect):
 
     spec = warehouse_by_key("databricks")
     storage_parameters = frozenset({"EXTERNAL_LOCATION"})
+    update_uses_merge = True
     temporary_tables = False
     qualified_rename = True
     surrogate_key: SurrogateKey = "computed"
@@ -116,10 +117,6 @@ class DatabricksWarehouse(WarehouseDialect):
         if column in {"CREATE_DATE", "UPDATE_DATE"}:
             return "TIMESTAMP"
         return super().audit_column_type(column)
-
-    def scalar_source_value(self, expression: str) -> str:
-        """Satisfy Spark's rule that a scalar subquery returns one row, after source dedupe."""
-        return f"FIRST({expression})"
 
     def timestamp_text(self, value: str, kind: str) -> str:
         """Convert the session's local representation of instants to a naive UTC value."""

@@ -56,3 +56,7 @@ class PostgresWarehouse(WarehouseDialect):
         finally:
             cursor.close()
         dbapi_connection.commit()
+
+    def prepare_update_stage(self, stage: str, keys: tuple[str, ...]) -> tuple[str, ...]:
+        """Give the planner merge-key access and current temporary-stage statistics."""
+        return (f"CREATE INDEX ON {stage} ({', '.join(keys)})", f"ANALYZE {stage}")

@@ -23,8 +23,9 @@ Each reports the counts it can know: source rows, target rows after the write, a
 inserted, updated or deleted.
 
 A row counts as changed when its ``HASH_KEY``, an MD5 over ``MERGE_COMPARE_COLUMNS``, differs.
-Updates use correlated subqueries rather than ``MERGE`` or ``UPDATE ... FROM``, which not every
-warehouse has.
+Merge updates join the deduplicated stage using the warehouse's UPDATE FROM or matched MERGE
+strategy. SCD2 materializes changed keys before closing active versions so its insert phase can
+still find those keys afterwards.
 """
 
 from __future__ import annotations
@@ -225,14 +226,15 @@ def _merge_stage(session: Session, action: ActionContext, kind: SqlAction) -> tu
     stage = dedupe(session, stage, task.merge_key, task.dedupe_order)
     check_or_evolve(session, stage, kind, schema_evolution=task.schema_evolution)
     add_hash_key(session, stage, task.merge_compare_columns)
+    session.prepare_update_stage(stage, task.merge_key)
     return stage, source
 
 
 def _changed_keys(session: Session, stage: str, merge_key: tuple[str, ...], condition: str) -> str:
     """Materialize the merge keys whose target row meets ``condition``; return the table.
 
-    A plain join, so later statements correlate on key equality alone: Snowflake cannot
-    evaluate a correlated subquery whose correlation is not an equality.
+    Keep changed keys available after SCD2 closes their old active versions, and count each
+    key once even when its target has history.
     """
     changed = session.scratch("changed_keys")
     key_match = " AND ".join(f"t.{k} = s.{k}" for k in merge_key)
@@ -258,7 +260,6 @@ def scd1_merge(session: Session, action: ActionContext) -> HandlerResult:
     keys = {key.lower() for key in task.merge_key}
     non_key = [column for column in stage_columns if column.lower() not in keys]
     target = session.target
-    dialect = session.dialect
     key_match = " AND ".join(f"t.{k} = s.{k}" for k in task.merge_key)
 
     def kept_hash(alias: str) -> str:
@@ -268,44 +269,32 @@ def scd1_merge(session: Session, action: ActionContext) -> HandlerResult:
         )
 
     compared = kept_hash("t") if task.preserve_target else "s.HASH_KEY"
+    condition = f"(t.HASH_KEY IS DISTINCT FROM {compared} OR t.DELETE_FLAG = 'Y')"
     # A soft-deleted key the SELECT returns again comes back, changed or not.
     changed = _changed_keys(
         session,
         stage,
         task.merge_key,
-        f"(t.HASH_KEY IS DISTINCT FROM {compared} OR t.DELETE_FLAG = 'Y')",
+        condition,
     )
     update_count = session.count(f"SELECT COUNT(*) FROM {changed}", step="changed rows")
 
-    update_target, q = session.mutation_target()
-    update_key_match = " AND ".join(f"{q}.{k} = s.{k}" for k in task.merge_key)
-    changed_match = " AND ".join(f"{q}.{k} = ck.{k}" for k in task.merge_key)
-
-    def source_value(column: str) -> str:
-        value = dialect.scalar_source_value(f"s.{column}")
-        return f"(SELECT {value} FROM {stage} s WHERE {update_key_match})"
-
-    assignments = []
+    assignments = {}
     for column in non_key:
-        value = source_value(column)
+        value = f"s.{column}"
         if task.preserve_target:
-            if column.lower() == "hash_key":
-                value = session.hash(
-                    [f"COALESCE({source_value(c)}, {q}.{c})" for c in task.merge_compare_columns],
-                    task.merge_compare_columns,
-                )
-            else:
-                value = f"COALESCE({value}, {q}.{column})"
-        assignments.append(f"{column} = {value}")
-    assignments += [
-        "PIPELINE_RUN_ID = :pipeline_run_id",
-        "UPDATE_DATE = :now",
-        "UPDATED_BY = :updated_by",
-        "DELETE_FLAG = 'N'",
-    ]
+            value = (
+                kept_hash("t") if column.lower() == "hash_key" else f"COALESCE({value}, t.{column})"
+            )
+        assignments[column] = value
+    assignments.update(
+        PIPELINE_RUN_ID=":pipeline_run_id",
+        UPDATE_DATE=":now",
+        UPDATED_BY=":updated_by",
+        DELETE_FLAG="'N'",
+    )
     session.run(
-        f"UPDATE {update_target} SET {', '.join(assignments)} "
-        f"WHERE EXISTS (SELECT 1 FROM {changed} ck WHERE {changed_match})",
+        session.dialect.update_from_stage(target, stage, task.merge_key, assignments, condition),
         action.stamp,
         step="update changed rows",
     )
@@ -355,12 +344,15 @@ def scd2_merge(session: Session, action: ActionContext) -> HandlerResult:
         "t.ACTIVE_FLAG = 'Y' AND (t.HASH_KEY IS DISTINCT FROM s.HASH_KEY OR t.DELETE_FLAG = 'Y')",
     )
     closed = session.count(f"SELECT COUNT(*) FROM {changed}", step="changed keys")
-    update_target, q = session.mutation_target()
-    changed_match = " AND ".join(f"{q}.{k} = ck.{k}" for k in task.merge_key)
+    session.prepare_update_stage(changed, task.merge_key)
     session.run(
-        f"UPDATE {update_target} SET ACTIVE_FLAG = 'N', UPDATE_DATE = :now, "
-        f"UPDATED_BY = :updated_by WHERE {q}.ACTIVE_FLAG = 'Y' AND EXISTS "
-        f"(SELECT 1 FROM {changed} ck WHERE {changed_match})",
+        session.dialect.update_from_stage(
+            target,
+            changed,
+            task.merge_key,
+            {"ACTIVE_FLAG": "'N'", "UPDATE_DATE": ":now", "UPDATED_BY": ":updated_by"},
+            "t.ACTIVE_FLAG = 'Y'",
+        ),
         action.stamp,
         step="close the active version of changed keys",
     )

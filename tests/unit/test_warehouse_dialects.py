@@ -191,12 +191,9 @@ def test_audit_column_types():
     assert for_key("snowflake_iceberg").audit_column_type("HASH_KEY") == "VARCHAR(32)"
 
 
-def test_alter_keywords_and_scalar_values():
+def test_alter_keywords():
     assert for_key("snowflake_iceberg").alter_table_keyword() == "ALTER ICEBERG TABLE"
     assert for_key("snowflake").alter_table_keyword() == "ALTER TABLE"
-    assert for_key("databricks").scalar_source_value("x") == "FIRST(x)"
-    assert for_key("postgres").scalar_source_value("x") == "x"
-    assert for_key("snowflake_iceberg").scalar_source_value("x") == "ANY_VALUE(x)"
 
 
 class RecordingConnection:
@@ -629,3 +626,32 @@ def test_storage_parameters_that_apply(key, params):
 def test_a_trino_location_with_a_quote_is_refused():
     problem = for_key("trino_iceberg").task_storage_problem({"EXTERNAL_LOCATION": "s3://a'b"})
     assert problem == 'EXTERNAL_LOCATION must not contain a quote: "s3://a\'b"'
+
+
+@pytest.mark.parametrize("kind", [d.key for d in all_dialects() if d.key != "generic"])
+def test_joined_updates_use_the_warehouse_write_strategy(kind):
+    dialect = for_key(kind)
+    assignments = {"name": "COALESCE(s.name, t.name)", "UPDATED_BY": ":user"}
+    sql = dialect.update_from_stage(
+        "db.s.people", "stage", ("id", "region"), assignments, "t.live = 'Y'"
+    )
+    match = "t.id = s.id AND t.region = s.region"
+    values = "name = COALESCE(s.name, t.name), UPDATED_BY = :user"
+    if kind.startswith("databricks") or kind == "trino_iceberg":
+        assert sql == (
+            f"MERGE INTO db.s.people t USING stage s ON {match} "
+            f"WHEN MATCHED AND (t.live = 'Y') THEN UPDATE SET {values}"
+        )
+    else:
+        assert (
+            sql
+            == f"UPDATE db.s.people t SET {values} FROM stage s WHERE {match} AND (t.live = 'Y')"
+        )
+
+
+def test_postgres_prepares_composite_merge_keys_and_stage_statistics():
+    assert for_key("postgres").prepare_update_stage("stage", ("id", "region")) == (
+        "CREATE INDEX ON stage (id, region)",
+        "ANALYZE stage",
+    )
+    assert for_key("duckdb").prepare_update_stage("stage", ("id",)) == ()

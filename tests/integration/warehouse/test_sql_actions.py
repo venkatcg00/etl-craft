@@ -697,3 +697,10 @@ def test_a_runtime_cast_failure_preserves_every_target_row(sql_world):
         )
     assert sorted_rows(w, f"SELECT * FROM {w.name('daily')}") == before
     assert w.tables() == ["daily"]
+
+
+@pytest.mark.parametrize("kind", ["SCD1_MERGE", "SCD2_MERGE"])
+def test_joined_merge_matches_composite_keys_and_preserves_other_rows(sql_world, kind):
+    from fixtures.sql_merges import check_composite_merge
+
+    check_composite_merge(sql_world, "composite", kind)

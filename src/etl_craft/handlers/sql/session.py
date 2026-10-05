@@ -221,6 +221,11 @@ class Session:
         """Return the target's columns; empty when it does not exist."""
         return self.columns(self.target)
 
+    def prepare_update_stage(self, stage: str, keys: tuple[str, ...]) -> None:
+        """Prepare a stage for joined updates using its dialect's indexes and statistics."""
+        for sql in self.dialect.prepare_update_stage(stage, keys):
+            self.run(sql, step="prepare the stage for joined updates")
+
     def mutation_target(self) -> tuple[str, str]:
         """Return (target clause, qualifier) for a correlated UPDATE or DELETE on the target.
 
