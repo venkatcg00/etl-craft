@@ -226,8 +226,7 @@ def run_task(
         child,
         decisions=decisions,
     )
-    if consumed and outcome.status == RunStatus.SUCCESS:
-        fault_point("runner.before_consumption")
+    if consumed and outcome.status == RunStatus.SUCCESS and not isinstance(gate, TrackedGate):
         gate.consume(engine, task_id, pipeline_run_id, consumed)
     if reopened is not None:
         return replace(outcome, reopened=reopened)

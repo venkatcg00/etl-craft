@@ -17,6 +17,7 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.errors import HandlerError
+from etl_craft.engine.repository.offsets import StoredOffset
 
 
 @dataclass(frozen=True)
@@ -51,7 +52,8 @@ class HandlerResult:
     """The counts a handler reports for ``AUD_TASK_RUN_LOG``, and any named values.
 
     ``variables`` are the values a task reports by name (an ingestion script's declared return
-    values); they are listed in ``TASK_LOG`` as ``NAME = value`` lines.
+    values); they are listed in ``TASK_LOG`` as ``NAME = value`` lines. ``offset`` is stored
+    together with the attempt's SUCCESS outcome, rather than by the handler.
     """
 
     source_count: int | None = None
@@ -60,6 +62,7 @@ class HandlerResult:
     update_count: int | None = None
     delete_count: int | None = None
     variables: Mapping[str, object] = field(default_factory=dict)
+    offset: StoredOffset | None = None
 
     @property
     def rows_written(self) -> int | None:

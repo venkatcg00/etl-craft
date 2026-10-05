@@ -76,7 +76,6 @@ from etl_craft.execution.gates import (
     Clock,
     TrackedGate,
     check_pipeline_dependencies,
-    consume_pipeline_dependencies,
 )
 from etl_craft.execution.interventions import (
     check_override,
@@ -1114,12 +1113,14 @@ def _finalize(
         status = RunStatus.SKIPPED
     with engine.begin() as conn:
         breached_before = runlog.fetch_run_sla(conn, pipeline_run_id).sla_status
+        backfill_run = runlog.fetch_run_kind(conn, pipeline_run_id).backfill
         ending = transitions.finalize_pipeline_run(
             conn,
             pipeline_run_id,
             status,
             sla_in_hours=sla_hours,
             owner=leases.run_owner(pipeline_run_id),
+            consume=not orchestrated and not backfill_run,
         )
         current = runlog.fetch_pipeline_run_status(conn, pipeline_run_id)
     if not ending.ended:
@@ -1132,12 +1133,6 @@ def _finalize(
         logger.warning("%s", message)
         return PipelineOutcome(RunStatus(current), message, pipeline_run_id)
     sla = ending.sla
-    with engine.connect() as conn:
-        backfill_run = runlog.fetch_run_kind(conn, pipeline_run_id).backfill
-    if status == RunStatus.SUCCESS and not orchestrated and not backfill_run:
-        fault_point("pipeline.before_consumption")
-        consume_pipeline_dependencies(engine, pipeline_id, pipeline_run_id)
-
     message = f"{pipeline_code}: pipeline_run_id={pipeline_run_id} {status}"
     if alert_failures and data_tasks:
         message += f"; alert task(s) failed: {', '.join(alert_failures)} (see their attempt logs)"

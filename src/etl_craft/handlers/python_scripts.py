@@ -7,9 +7,10 @@ the attempt's log, and the task's time limit applies to it.
 
 Its ``INPUT_PARAMS`` task parameter, when set, must be a JSON object; the script gets it as a
 dictionary. The script gets the offset its last successful run stored, and returns the rows it
-wrote, recorded as the source, target and insert counts, and optionally a new offset, stored once
-it has succeeded. A stored offset keeps its type: a script that returns another type fails. A
-backfill run gets no offset and stores none: the script reads its source for ``task.run_date``.
+wrote, recorded as the source, target and insert counts, and optionally a new offset, returned
+to the child for storage with the successful attempt outcome. A stored offset keeps its type:
+a script that returns another type fails. A backfill run gets no offset and stores none:
+the script reads its source for ``task.run_date``.
 Everything that can be wrong with the script or what it returns fails the task with a message
 naming the script and the problem.
 """
@@ -32,9 +33,8 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.config.project import ingestion_script
 from etl_craft.core.errors import HandlerError
-from etl_craft.core.faults import fault_point
 from etl_craft.core.log import capture_all_loggers
-from etl_craft.engine.repository.offsets import StoredOffset, fetch_task_offset, save_task_offset
+from etl_craft.engine.repository.offsets import StoredOffset, fetch_task_offset
 from etl_craft.handlers.registry import HandlerResult, TaskContext
 from etl_craft.scripting import Offset, ScriptResult, ScriptTask
 
@@ -102,13 +102,6 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
             context.run_date.isoformat(),
         )
     elif checked.offset is not None:
-        with engine_db.begin() as conn:
-            save_task_offset(
-                conn,
-                context.task_id,
-                StoredOffset(checked.offset.datatype, checked.offset.stored()),
-            )
-        fault_point("script.after_offset")
         variables["OFFSET"] = f"{checked.offset.stored()} ({checked.offset.datatype})"
     variables.update(result_variables)
     logger.info(
@@ -116,13 +109,20 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
         name,
         checked.row_count,
         elapsed,
-        "unchanged" if checked.offset is None else f"now {checked.offset.stored()}",
+        "unchanged"
+        if checked.offset is None or context.backfill
+        else f"returned {checked.offset.stored()}",
     )
     return HandlerResult(
         source_count=checked.row_count,
         target_count=checked.row_count,
         insert_count=checked.row_count,
         variables=variables,
+        offset=(
+            StoredOffset(checked.offset.datatype, checked.offset.stored())
+            if checked.offset is not None and not context.backfill
+            else None
+        ),
     )
 
 

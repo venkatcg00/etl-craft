@@ -118,3 +118,9 @@ itself, so a pipeline that depends on it with `SUCCESS` is skipped in turn.
 In remote mode none of this is checked by etl-craft and no tracker moves: the orchestrator's
 sensors wait for the upstream instead (see
 [Running under an orchestrator](../deploying/orchestrator.md)).
+
+A successful pipeline ending records its status, SLA result and admitted pipeline-dependency
+consumption in one Engine DB transaction. A successful task attempt records its outcome, summary,
+offset and admitted task-dependency consumption together. A crash before either commit leaves
+none of those ending writes; after the commit, it leaves all of them. Finalization hooks run
+after the pipeline transaction commits.

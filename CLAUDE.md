@@ -52,6 +52,9 @@ Each package imports only the packages below it. `lint-imports` enforces this.
 - Cross-pipeline consumption uses recorded admission decisions, never a new judgement at
   completion. A repaired run publishes one new output revision only when it ends SUCCESS;
   the dependency's CONSUME_REPAIRS flag decides whether the same run's newer revision is fresh.
+- Successful attempt endings commit the outcome, task summary, returned script offset and
+  recorded task-dependency consumption together. Pipeline endings commit status, SLA and
+  recorded pipeline-dependency consumption together; finalization hooks run after commit.
 - Order comes from `CFG_TASK_DEPENDENCY` and `CFG_PIPELINE_DEPENDENCY` rows, never from code.
 - SQL tasks supply exactly one read-only SELECT; the engine wraps it in one of eight actions
   (`CREATE_TABLE`, `SETUP_TABLE`, `OVERWRITE_TABLE`, `APPEND_TABLE`, `SCD1_MERGE`, `SCD2_MERGE`,

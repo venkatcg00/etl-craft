@@ -8,6 +8,10 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Atomic Engine DB endings: successful attempts commit their outcome, summary, returned Python
+  offset and recorded task-dependency consumption together. Pipeline endings commit status, SLA
+  and recorded pipeline-dependency consumption together, before finalization hooks run.
+
 - Recorded gate decisions at pipeline and task-attempt admission. Successful downstream work
   consumes the exact selected upstream identities and revisions, including after upstream repairs
   or metadata changes. Dependencies accept newer published revisions of the same upstream run

@@ -454,3 +454,27 @@ def test_operator_cancel_refuses_a_run_that_finished_after_its_read(engine_db):
         with pytest.raises(StaleTransitionError, match=r"expected status IN-PROGRESS.*SUCCESS"):
             tr.cancel_pipeline_run(conn, run)
         assert runlog.fetch_pipeline_run_status(conn, run) == "SUCCESS"
+
+
+def test_stale_attempt_cannot_advance_its_offset(engine_db):
+    from etl_craft.engine.repository.offsets import (
+        StoredOffset,
+        fetch_task_offset,
+        save_task_offset,
+    )
+
+    with engine_db.engine.begin() as conn:
+        _, task, _, summary = scene(conn)
+        attempt = seed_attempt(conn, summary, "RUNNING")
+        save_task_offset(conn, task, StoredOffset("NUMBER", "3"))
+        with pytest.raises(StaleTransitionError):
+            tr.finish_attempt(
+                conn,
+                attempt,
+                "SUCCESS",
+                ACTOR,
+                owner="wrong-owner",
+                offset=StoredOffset("NUMBER", "9"),
+            )
+        assert fetch_task_offset(conn, task) == StoredOffset("NUMBER", "3")
+        assert conn.execute(text("SELECT STATUS FROM AUD_TASK_ATTEMPTS")).scalar_one() == "RUNNING"
