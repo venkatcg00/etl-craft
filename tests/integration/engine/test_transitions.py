@@ -416,3 +416,20 @@ def test_missing_rows_and_invalid_outcomes_are_stale(engine_db):
         ]:
             with pytest.raises(StaleTransitionError, match="missing"):
                 action()
+
+
+@pytest.mark.parametrize(
+    "status,count,expected",
+    [("SUCCESS", 4, 5), ("FAILED", 2, 3), ("SKIPPED", 1, 1), ("IN-PROGRESS", 0, 1)],
+)
+def test_attempt_number_preserves_legacy_summary_history(engine_db, status, count, expected):
+    with engine_db.engine.begin() as conn:
+        _, _, _, task = scene(conn)
+        conn.execute(
+            text("UPDATE AUD_TASK_RUN_LOG SET STATUS=:status, ATTEMPT_COUNT=:count"),
+            {"status": status, "count": count},
+        )
+        attempt = tr.queue_attempt(conn, task, ACTOR)
+        assert tr.active_attempt(conn, task).attempt_number == expected
+        assert runlog.fetch_task_run_result(conn, task).attempt_count == expected
+        assert tr.active_attempt(conn, task).attempt_id == attempt
