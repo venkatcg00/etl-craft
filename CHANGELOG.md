@@ -8,6 +8,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Explicit `--run-id` and `--run-key` selection for run, mark, cancel, history and steps.
+  Completed runs require an explicit identity; `history --all` lists runs. Pipeline tasks
+  receive their parent's selected run. Remote DAG steps share an orchestrator run key and
+  logical date, so clearing an older DAG run reopens that run. Remote generation requires
+  an Airflow version floor of 2.2.0 (`generate-yml --airflow-version`).
+
 - Centralized guarded run and attempt transitions, with `StaleTransitionError` (exit 20).
   Execution records immutable attempt outcomes and updates their task summaries atomically;
   concurrent admission, wrong owners and superseded results are refused. Reopening records

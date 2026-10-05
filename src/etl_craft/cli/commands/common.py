@@ -29,3 +29,10 @@ def connect_engine_db(config: ConnectorConfig) -> Engine:
         engine.dispose()
         raise
     return engine
+
+
+def configure_run_selector(parser: argparse.ArgumentParser) -> None:
+    """Add mutually exclusive identities for a pipeline's run."""
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--run-id", type=int, help="the exact pipeline run id")
+    selection.add_argument("--run-key", help="the exact run key within this pipeline")

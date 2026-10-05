@@ -13,6 +13,26 @@ etl-craft generate-yml --global --output dags/global.yml     # with Global_dag: 
 Without `--output` the YAML is written to standard output. Convert it into your orchestrator's own
 DAG format; the YAML is the same whatever you run it on.
 
+## Run identity and Airflow version
+
+Remote DAGs target Airflow 2.2.0 or newer. The [Airflow 2.2 template reference](https://airflow.apache.org/docs/apache-airflow/2.2.0/templates-ref.html)
+defines `run_id`, `data_interval_end` and the `ds` filter used by the generated commands.
+Declare your installed version or range with `generate-yml --airflow-version '>=2.2,<3'`;
+the default is `>=2.2.0`. Generation refuses ranges without a supported minimum.
+
+Every execution step (`__init__`, each task and `__finalize__`) receives:
+
+```text
+--run-key 'orchestrator:{{ run_id }}' --run-date '{{ data_interval_end | ds }}'
+```
+
+`__init__` creates that pipeline-scoped key, resumes it, or reopens it after a clear.
+Tasks bind to that exact key, reopening it if it ended. Clearing an older DAG run therefore
+runs under its original id and date, even after newer runs completed. A mismatched date is
+refused; a run's logical date cannot change. An older run cannot reopen while another run of
+the pipeline is active. Clear its finalizer too so it can record the new result. Other
+orchestrators must supply their own stable run key and logical date to all three kinds of step.
+
 ## What the engine does, and what the orchestrator does
 
 | The orchestrator decides | etl-craft keeps |
@@ -29,7 +49,7 @@ So in remote mode:
   `AUD_TASK_RUN_LOG` row, and skips nothing it did before (a business-rules task checks every
   rule again). A task run after `__finalize__` ended the run, because it was cleared, reopens
   that run; the cleared `__finalize__` ends it again.
-- `--init-only` starts the run (or resumes the one in progress) without checking the pipeline's
+- `--init-only` starts, resumes or reopens the run with its key without checking the pipeline's
   dependencies: the DAG's sensors wait for them.
 - `--finalize-only` records the orchestrator's decisions: a task it never ran is `SKIPPED`
   (`not run by the orchestrator`), and a task still `IN-PROGRESS`, whose process was lost, is
@@ -76,7 +96,7 @@ the remote orchestrator does not support this. ...
 
 Each step has what it runs, the steps it waits for (`depends_on`), and one `trigger_rule`:
 
-- `__init__` runs `etl-craft run --pipeline_code SALES --init-only --run-date {{
+- `__init__` runs `etl-craft run --pipeline_code SALES --init-only --run-key 'orchestrator:{{ run_id }}' --run-date {{
   data_interval_end | ds }}`: it tests connections and starts the run as of the orchestrator's
   date, so `$$run_date` means the day the run fires, as in local mode, and a backfill in the
   orchestrator runs each day as of its own date. The date is an Airflow template; with another
@@ -87,9 +107,9 @@ Each step has what it runs, the steps it waits for (`depends_on`), and one `trig
   With `Global_dag: true` there is none: the global DAG triggers the pipelines in order instead.
 - `__wait_for_<PIPELINE>.<task>__` waits for a task of another pipeline this task depends on: a
   `sensor` on that task, after the pipeline sensors and before the task.
-- each task runs `etl-craft run --pipeline_code SALES --task_code <task>`. A task with no other
+- each task runs `etl-craft run --pipeline_code SALES --task_code <task>`. It also receives the run key and date above. A task with no other
   upstream step waits for the pipeline sensors, or for `__init__`.
-- `__finalize__` runs `--finalize-only` after the last tasks, whatever happened to them.
+- `__finalize__` runs `--finalize-only` with the same key and date after the last tasks, whatever happened to them.
 
 A sensor succeeds once its upstream is in one of its `allowed_states`, and fails once it is in one
 of its `failed_states`:

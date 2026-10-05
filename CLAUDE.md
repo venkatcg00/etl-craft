@@ -42,8 +42,9 @@ Each package imports only the packages below it. `lint-imports` enforces this.
 
 - `etl-craft run` is the only execution verb. `--task_code` runs one task; without it the engine
   runs the pipeline in dependency waves, one child process per task.
-- `pipeline_run_id` is never passed to a task. Each task resolves the active run from
-  `AUD_PIPELINES_RUN_LOG`; a partial unique index keeps one IN-PROGRESS run per pipeline.
+- A task is given its run by whoever starts it; nothing resolves a run by recency. Commands
+  select an explicit `--run-id` or `--run-key`, or the single non-terminal run. A partial unique
+  index keeps one IN-PROGRESS run per pipeline.
 - Retries resume: tasks already `SUCCESS` or `SKIPPED` under the run are not re-run.
 - Order comes from `CFG_TASK_DEPENDENCY` and `CFG_PIPELINE_DEPENDENCY` rows, never from code.
 - SQL tasks supply exactly one read-only SELECT; the engine wraps it in one of eight actions

@@ -13,11 +13,17 @@ from types import FrameType
 from sqlalchemy.engine import Engine
 
 from etl_craft.cli.commands import Command
-from etl_craft.cli.commands.common import connect_engine_db, load_command_config
+from etl_craft.cli.commands.common import (
+    configure_run_selector,
+    connect_engine_db,
+    load_command_config,
+)
 from etl_craft.cli.output import Output
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import ExitCode, UsageError
+from etl_craft.engine.repository.pipelines import resolve_pipeline_id
+from etl_craft.engine.runlog import RunSelector, select_run
 from etl_craft.execution.interventions import skip_run
 from etl_craft.execution.pipeline import (
     backfill,
@@ -32,9 +38,10 @@ from etl_craft.services.cloning import run_hooks
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
+    configure_run_selector(parser)
     parser.add_argument("--pipeline_code", required=True, help="the pipeline to run")
     step = parser.add_mutually_exclusive_group()
-    step.add_argument("--task_code", help="run only this task, under the pipeline's active run")
+    step.add_argument("--task_code", help="run only this task, under the selected pipeline run")
     step.add_argument(
         "--init-only",
         action="store_true",
@@ -44,7 +51,7 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     step.add_argument(
         "--finalize-only",
         action="store_true",
-        help="end the pipeline's active run from its tasks' statuses; an orchestrator's last step",
+        help="end the selected pipeline run from its tasks' statuses; an orchestrator's last step",
     )
     parser.add_argument(
         "--force",
@@ -112,8 +119,10 @@ def _run(args: argparse.Namespace, out: Output) -> int:
         args.task_code or args.init_only or args.finalize_only or args.force or args.skip
     ):
         raise UsageError("--backfill runs the whole pipeline once per date; it takes only --reason")
-    if args.run_date and (args.task_code or args.finalize_only or args.skip or args.backfill):
-        raise UsageError("--run-date starts a run: it goes with a whole run or --init-only")
+    if (args.run_id is not None or args.run_key is not None) and (args.backfill or args.skip):
+        raise UsageError("--backfill and --skip create new runs; do not pass a run selector")
+    if args.run_date and (args.skip or args.backfill):
+        raise UsageError("--run-date cannot be combined with --skip or --backfill")
     config = load_command_config(args)
     engine = connect_engine_db(config)
     child = ChildOptions(log_level=args.log_level, log_format=args.log_format)
@@ -132,6 +141,19 @@ def _dispatch(
     args: argparse.Namespace, config: ConnectorConfig, engine: Engine, child: ChildOptions
 ) -> tuple[RunStatus, str]:
     """Do what ``args`` asks and return how it ended."""
+    if args.run_date is not None and (args.task_code or args.finalize_only):
+        with engine.connect() as conn:
+            selected = select_run(
+                conn,
+                resolve_pipeline_id(conn, args.pipeline_code),
+                RunSelector(args.run_id, args.run_key),
+            )
+        args.run_id, args.run_key = selected.pipeline_run_id, None
+        if selected.run_date != args.run_date:
+            raise UsageError(
+                f"run_id={selected.pipeline_run_id} has run_date={selected.run_date}, "
+                f"not {args.run_date}; a run's date cannot change"
+            )
     if args.backfill:
         first, last = args.backfill
         done = backfill(
@@ -158,6 +180,7 @@ def _dispatch(
             with_downstream=args.with_downstream,
             child=child,
             hooks=run_hooks(config, engine),
+            selector=RunSelector(args.run_id, args.run_key),
         )
         return rerun.status, rerun.message
     elif args.task_code and args.force:
@@ -168,6 +191,7 @@ def _dispatch(
             args.task_code,
             child=child,
             hooks=run_hooks(config, engine),
+            selector=RunSelector(args.run_id, args.run_key),
         )
         return forced.status, forced.message
     elif args.task_code:
@@ -180,6 +204,7 @@ def _dispatch(
             force=args.force,
             child=child,
             override=override,
+            selector=RunSelector(args.run_id, args.run_key),
         )
         return outcome.status, outcome.message
     elif args.init_only:
@@ -189,11 +214,16 @@ def _dispatch(
             args.pipeline_code,
             hooks=run_hooks(config, engine),
             run_date=args.run_date,
+            selector=RunSelector(args.run_id, args.run_key),
         )
         return started.status, started.message
     elif args.finalize_only:
         ended = finalize_active_run(
-            engine, config, args.pipeline_code, hooks=run_hooks(config, engine)
+            engine,
+            config,
+            args.pipeline_code,
+            hooks=run_hooks(config, engine),
+            selector=RunSelector(args.run_id, args.run_key),
         )
         return ended.status, ended.message
     else:
@@ -205,6 +235,7 @@ def _dispatch(
             child=child,
             hooks=run_hooks(config, engine),
             run_date=args.run_date,
+            selector=RunSelector(args.run_id, args.run_key),
         )
         return ran.status, ran.message
 

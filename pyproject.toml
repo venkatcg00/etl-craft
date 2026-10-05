@@ -20,6 +20,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "packaging>=24.0",
     "duckdb-engine>=0.13",
     "psycopg[binary]>=3.3.6",
     "pyyaml>=6.0.3",

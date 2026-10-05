@@ -82,7 +82,7 @@ own log under `logs/`.
 ## 5. Look at what happened
 
 ```bash
-etl-craft history --pipeline_code SUPPORT_DM
+etl-craft history --pipeline_code SUPPORT_DM --all
 etl-craft graph --pipeline_code SUPPORT_DM
 etl-craft lineage --table dm.support_fact --column rating --upstream
 etl-craft generate-docs

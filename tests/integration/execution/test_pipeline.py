@@ -295,9 +295,9 @@ def test_remote_mode_refuses_a_whole_pipeline_run(config, pipeline):
 def test_an_orchestrator_starts_runs_and_finalizes(config, pipeline):
     engine, ids = pipeline
     remote = replace(config, mode=Mode.REMOTE)
-    with pytest.raises(RunStateError, match="P has no active run to finalize"):
+    with pytest.raises(RunStateError, match="matched 0 runs"):
         finalize_active_run(engine, remote, "P")
-    with pytest.raises(RunStateError, match="--init-only`, starts it"):
+    with pytest.raises(RunStateError, match="matched 0 runs"):
         run_task(engine, remote, "P", "extract", child=CHILD)
     # The orchestrator holds the pipeline's dependencies: an unsatisfied one does not stop init.
     with engine.begin() as conn:
@@ -341,7 +341,9 @@ def test_an_orchestrator_starts_runs_and_finalizes(config, pipeline):
             text("UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE = 'succeed' WHERE TASK_ID = :t"),
             {"t": ids["broken"]},
         )
-    rerun = run_task(engine, remote, "P", "broken", child=CHILD)
+    rerun = run_task(
+        engine, remote, "P", "broken", child=CHILD, selector=runlog.RunSelector(run_id=run_id)
+    )
     assert rerun.status == RunStatus.SUCCESS
     assert run_row(engine, run_id).status == "IN-PROGRESS"
     assert run_row(engine, run_id).end_date is None

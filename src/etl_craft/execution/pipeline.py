@@ -43,6 +43,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectorConfig
+from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import (
     SETTLED_STATUSES,
     Handler,
@@ -65,7 +66,7 @@ from etl_craft.engine.repository.pipelines import (
     fetch_pipeline_handlers,
     resolve_pipeline_id,
 )
-from etl_craft.engine.repository.runs import fetch_latest_pipeline_run, fetch_task_statuses_for_run
+from etl_craft.engine.repository.runs import fetch_task_statuses_for_run
 from etl_craft.engine.repository.tasks import fetch_task_codes, resolve_task_id
 from etl_craft.execution.connections import check_run_connections
 from etl_craft.execution.gates import (
@@ -170,6 +171,7 @@ def run_pipeline(
     hooks: RunHooks | None = None,
     run_date: date | None = None,
     backfill: str | None = None,
+    selector: runlog.RunSelector = runlog.ACTIVE_RUN,
 ) -> PipelineOutcome:
     """Run every active task of ``pipeline_code`` in dependency waves; local mode only.
 
@@ -200,6 +202,7 @@ def run_pipeline(
         check_gate=not force and backfill is None,
         run_date=run_date,
         backfill=backfill,
+        selector=selector,
     )
     with log_context(pipeline=pipeline_code, pipeline_run_id=pipeline_run_id):
         if skip_reason is not None:
@@ -376,6 +379,7 @@ def init_pipeline_run(
     clock: Clock | None = None,
     hooks: RunHooks | None = None,
     run_date: date | None = None,
+    selector: runlog.RunSelector = runlog.ACTIVE_RUN,
 ) -> PipelineOutcome:
     """Start or resume the run of ``pipeline_code``, for an orchestrator's first step.
 
@@ -404,6 +408,7 @@ def init_pipeline_run(
         check_gate=not remote,
         run_date=run_date,
         remote=remote,
+        selector=selector,
     )
     if skip_reason is not None:
         return _skipped_run(
@@ -422,6 +427,7 @@ def finalize_active_run(
     pipeline_code: str,
     *,
     hooks: RunHooks | None = None,
+    selector: runlog.RunSelector = runlog.ACTIVE_RUN,
 ) -> PipelineOutcome:
     """End the active run of ``pipeline_code`` from its tasks' statuses, for an orchestrator.
 
@@ -431,11 +437,12 @@ def finalize_active_run(
     """
     with engine.connect() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
-        pipeline_run_id = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
-        if pipeline_run_id is None:
+        selected = runlog.select_run(conn, pipeline_id, selector)
+        pipeline_run_id = selected.pipeline_run_id
+        if selected.status != RunStatus.IN_PROGRESS:
             raise RunStateError(
-                f"{pipeline_code} has no active run to finalize; --finalize-only ends the run "
-                "that --init-only started, after its tasks"
+                f"{pipeline_code}: run_id={pipeline_run_id} is {selected.status}; "
+                "expected IN-PROGRESS to finalize"
             )
         detail = fetch_pipeline_detail(conn, pipeline_id)
         graph_data = fetch_pipeline_graph(conn, pipeline_id)
@@ -465,8 +472,9 @@ def rerun_task(
     with_downstream: bool = False,
     child: ChildOptions | None = None,
     hooks: RunHooks | None = None,
+    selector: runlog.RunSelector = runlog.ACTIVE_RUN,
 ) -> PipelineOutcome:
-    """Run ``task_code`` again under the pipeline's latest run: ``run --task_code --rerun``.
+    """Run ``task_code`` again under the selected run: ``run --task_code --rerun``.
 
     With ``with_downstream``, every task after it runs again too; local mode only. The task
     runs as it stands, without its dependencies checked again. Each task after it runs again,
@@ -479,22 +487,23 @@ def rerun_task(
     with engine.connect() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         task_id = resolve_task_id(conn, pipeline_id, task_code)
-        before = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
-        latest = fetch_latest_pipeline_run(conn, pipeline_id)
-        failed_before = latest is not None and (
-            runlog.fetch_task_run_status(conn, task_id, latest.pipeline_run_id) == RunStatus.FAILED
+        selected = runlog.select_run(conn, pipeline_id, selector)
+        pipeline_run_id = selected.pipeline_run_id
+        before = pipeline_run_id if selected.status == RunStatus.IN_PROGRESS else None
+        failed_before = (
+            runlog.fetch_task_run_status(conn, task_id, pipeline_run_id) == RunStatus.FAILED
         )
+        selector = runlog.RunSelector(run_id=pipeline_run_id)
         detail = fetch_pipeline_detail(conn, pipeline_id)
         graph_data = fetch_pipeline_graph(conn, pipeline_id)
         task_codes = fetch_task_codes(conn, pipeline_id)
     graph = build_graph(graph_data.tasks, graph_data.same_pipeline_edges)
     override = Override(reason, rerun=True)
-    first = run_task(engine, config, pipeline_code, task_code, child=child, override=override)
-    with engine.connect() as conn:
-        active = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
-    if first.task_run_id is None or active is None:
+    first = run_task(
+        engine, config, pipeline_code, task_code, child=child, override=override, selector=selector
+    )
+    if first.task_run_id is None:
         raise RunStateError(first.message)
-    pipeline_run_id = active
     ran = [first]
     left: list[str] = []
     kept: list[str] = []
@@ -520,6 +529,7 @@ def rerun_task(
                         task_codes[later],
                         child=child,
                         override=override,
+                        selector=selector,
                     )
                 )
     summary = "; ".join(outcome.message for outcome in ran)
@@ -559,6 +569,7 @@ def force_task(
     *,
     child: ChildOptions | None = None,
     hooks: RunHooks | None = None,
+    selector: runlog.RunSelector = runlog.ACTIVE_RUN,
 ) -> PipelineOutcome:
     """Run ``task_code`` past its checks: ``run --task_code --force``; local mode only.
 
@@ -566,11 +577,17 @@ def force_task(
     it and then ended again from its tasks' statuses, so a forced task that fails leaves the
     run ``FAILED``.
     """
-    outcome = run_task(engine, config, pipeline_code, task_code, force=True, child=child)
     with engine.connect() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
-        run_id = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
-        if outcome.reopened is None or run_id is None:
+        selected = runlog.select_run(conn, pipeline_id, selector)
+    selector = runlog.RunSelector(run_id=selected.pipeline_run_id)
+    outcome = run_task(
+        engine, config, pipeline_code, task_code, force=True, child=child, selector=selector
+    )
+    with engine.connect() as conn:
+        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+        run_id = selected.pipeline_run_id
+        if outcome.reopened is None:
             return PipelineOutcome(outcome.status, outcome.message, run_id)
         detail = fetch_pipeline_detail(conn, pipeline_id)
         graph_data = fetch_pipeline_graph(conn, pipeline_id)
@@ -654,6 +671,7 @@ def _start_run(
     run_date: date | None = None,
     backfill: str | None = None,
     remote: bool = False,
+    selector: runlog.RunSelector = runlog.ACTIVE_RUN,
 ) -> tuple[int, str | None]:
     """Return the run to use and, when the gate refused a new one, why it was ``SKIPPED``.
 
@@ -662,9 +680,39 @@ def _start_run(
     progress is resumed, unless it runs as of another date than ``run_date``. A gate
     ``Dependency_gates`` bypassed, or skipped by a backfill, is recorded against the new run.
     """
-    with engine.connect() as conn:
-        existing = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
-        kind = None if existing is None else runlog.fetch_run_kind(conn, existing)
+    with engine.begin() as conn:
+        candidates = runlog.run_candidates(conn, pipeline_id)
+        explicit = selector.run_id is not None or selector.run_key is not None
+        selected = None
+        if explicit:
+            if selector.run_id is not None or any(
+                r.run_key == selector.run_key for r in candidates
+            ):
+                selected = runlog.select_run(conn, pipeline_id, selector)
+        elif any(r.status in {"QUEUED", "IN-PROGRESS"} for r in candidates):
+            selected = runlog.select_run(conn, pipeline_id)
+        if selected is not None:
+            if explicit and run_date is not None and selected.run_date != run_date:
+                raise RunStateError(
+                    f"{pipeline_code}: run_id={selected.pipeline_run_id} has run_date="
+                    f"{selected.run_date}, not {run_date}; a run's date cannot change"
+                )
+            if selected.status != RunStatus.IN_PROGRESS:
+                if not remote:
+                    raise RunStateError(
+                        f"{pipeline_code}: run_id={selected.pipeline_run_id} is {selected.status}; "
+                        "use --task_code --rerun with a reason, or start a new run"
+                    )
+                transitions.reopen_run(
+                    conn,
+                    selected.pipeline_run_id,
+                    current_actor(),
+                    reason="orchestrator initialized its run again",
+                )
+            existing = selected.pipeline_run_id
+            kind = runlog.fetch_run_kind(conn, existing)
+        else:
+            existing, kind = None, None
     if existing is not None and kind is not None:
         if kind.backfill and backfill is None:
             raise RunStateError(
@@ -699,10 +747,21 @@ def _start_run(
         bypassed = gate.bypassed
         if not gate.satisfied:
             reason = "; ".join(gate.reasons)
+    created: int | None
     with engine.begin() as conn:
-        created = transitions.create_active_run(
-            conn, pipeline_id, run_date=run_date, backfill=backfill is not None
-        )
+        if selector.run_key is not None:
+            created = transitions.create_run(
+                conn,
+                pipeline_id,
+                current_actor(),
+                run_date=run_date or runlog.today(),
+                run_key=selector.run_key,
+                trigger_kind="ORCHESTRATOR" if remote else "MANUAL",
+            )
+        else:
+            created = transitions.create_active_run(
+                conn, pipeline_id, run_date=run_date, backfill=backfill is not None
+            )
         if created is None:
             other = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
             raise RunStateError(
@@ -855,6 +914,7 @@ class _Waves:
                 force=self.force,
                 gate=self.gate,
                 child=self.child,
+                selector=runlog.RunSelector(run_id=self.pipeline_run_id),
             )
         except (EtlCraftError, OSError, SQLAlchemyError) as error:
             # One task's trouble (a bad setting, a failed launch, a database that dropped the

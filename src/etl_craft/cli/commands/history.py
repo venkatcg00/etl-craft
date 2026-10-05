@@ -5,24 +5,51 @@ from __future__ import annotations
 import argparse
 
 from etl_craft.cli.commands import Command
-from etl_craft.cli.commands.common import connect_engine_db, load_command_config
+from etl_craft.cli.commands.common import (
+    configure_run_selector,
+    connect_engine_db,
+    load_command_config,
+)
 from etl_craft.cli.output import Output
-from etl_craft.core.errors import ExitCode
+from etl_craft.core.errors import ExitCode, UsageError
 from etl_craft.engine.repository.interventions import Intervention
+from etl_craft.engine.repository.pipelines import resolve_pipeline_id
+from etl_craft.engine.runlog import RunSelector, select_run
 from etl_craft.services.inspect import run_history, run_interventions
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
+    configure_run_selector(parser)
     parser.add_argument("--pipeline_code", required=True, help="the pipeline to show")
     parser.add_argument("--task_code", help="show this task's runs instead of the pipeline's")
+    parser.add_argument("--all", action="store_true", help="list runs instead of selecting one")
     parser.add_argument("--limit", type=int, default=20, help="how many runs, newest first")
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
+    if args.limit < 1:
+        raise UsageError(f"--limit must be 1 or more, got {args.limit}")
+    if args.all and (args.run_id is not None or args.run_key is not None):
+        raise UsageError("--all lists runs; do not pass a run selector")
     engine = connect_engine_db(load_command_config(args))
     try:
         with engine.connect() as conn:
-            entries = run_history(conn, args.pipeline_code, args.task_code, limit=args.limit)
+            selected = (
+                None
+                if args.all
+                else select_run(
+                    conn,
+                    resolve_pipeline_id(conn, args.pipeline_code),
+                    RunSelector(args.run_id, args.run_key),
+                )
+            )
+            entries = run_history(
+                conn,
+                args.pipeline_code,
+                args.task_code,
+                limit=args.limit,
+                run_id=None if selected is None else selected.pipeline_run_id,
+            )
             changes = run_interventions(conn, args.pipeline_code, entries, args.task_code)
     finally:
         engine.dispose()

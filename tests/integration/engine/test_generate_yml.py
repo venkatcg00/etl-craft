@@ -152,6 +152,7 @@ def test_remote_mode_puts_every_rule_in_the_dag(engine_db, pipelines):
     one_type(pipelines)
     with pipelines.connect() as conn:
         dag = pipeline_dag(conn, remote, "SALES")
+    identity = " --run-key 'orchestrator:{{ run_id }}' --run-date '{{ data_interval_end | ds }}'"
     run = "etl-craft run --pipeline_code SALES"
     assert dag["max_active_runs"] == 1
     assert "pipeline_dependencies" not in dag
@@ -166,7 +167,7 @@ def test_remote_mode_puts_every_rule_in_the_dag(engine_db, pipelines):
             assert step.pop("append_env") is True
     assert dag["tasks"] == {
         "__init__": {
-            "bash_command": f"{run} --init-only --run-date '{{{{ data_interval_end | ds }}}}'",
+            "bash_command": f"{run} --init-only" + identity,
             "depends_on": [],
             "trigger_rule": "all_success",
         },
@@ -193,27 +194,27 @@ def test_remote_mode_puts_every_rule_in_the_dag(engine_db, pipelines):
             "trigger_rule": "all_success",
         },
         "alert": {
-            "bash_command": f"{run} --task_code alert",
+            "bash_command": f"{run} --task_code alert" + identity,
             "depends_on": ["load"],
             "trigger_rule": "one_failed",
         },
         "extract": {
-            "bash_command": f"{run} --task_code extract",
+            "bash_command": f"{run} --task_code extract" + identity,
             "depends_on": ["__wait_for_UP__"],
             "trigger_rule": "all_success",
         },
         "load": {
-            "bash_command": f"{run} --task_code load",
+            "bash_command": f"{run} --task_code load" + identity,
             "depends_on": ["__wait_for_UP.publish__", "extract", "setup"],
             "trigger_rule": "all_success",
         },
         "setup": {
-            "bash_command": f"{run} --task_code setup",
+            "bash_command": f"{run} --task_code setup" + identity,
             "depends_on": ["__wait_for_UP__"],
             "trigger_rule": "all_success",
         },
         "__finalize__": {
-            "bash_command": f"{run} --finalize-only",
+            "bash_command": f"{run} --finalize-only" + identity,
             "depends_on": ["alert"],
             "trigger_rule": "all_done",
         },
@@ -363,3 +364,20 @@ def test_the_docs_dag_writes_the_catalog_again_on_its_schedule(engine_db):
     }
     unscheduled = replace(config, dag_defaults=DagDefaults(allow_schedule=False))
     assert docs_dag(unscheduled)["schedule"] is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("version", ["1.10.15", ">=1.10,<3", "<2.2", "", "wat", ">=2.2rc1"])
+def test_remote_generation_refuses_unsupported_airflow_ranges(version):
+    from etl_craft.services.generate_yml import require_airflow_run_templates
+
+    with pytest.raises(ConfigurationError, match=r"Airflow >=2\.2\.0"):
+        require_airflow_run_templates(version)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("version", ["2.2.0", ">=2.2,<3", "~=2.3", "==2.10.*", ">=3"])
+def test_remote_generation_accepts_supported_airflow_ranges(version):
+    from etl_craft.services.generate_yml import require_airflow_run_templates
+
+    require_airflow_run_templates(version)

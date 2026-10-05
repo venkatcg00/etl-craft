@@ -150,7 +150,16 @@ def test_a_failed_task_marked_success_lets_its_dependents_run(config, pipeline):
     assert failed.status == RunStatus.FAILED
     assert statuses(engine, run_id)["after_broken"] == ("SKIPPED", None)
 
-    marked = mark_task(engine, config, "P", "broken", "SUCCESS", "loaded by hand", requested_by=WHO)
+    marked = mark_task(
+        engine,
+        config,
+        "P",
+        "broken",
+        "SUCCESS",
+        "loaded by hand",
+        requested_by=WHO,
+        selector=runlog.RunSelector(run_id=run_id),
+    )
     assert marked.message == (
         f"P.broken: marked SUCCESS under pipeline_run_id={run_id} (was FAILED); the run was "
         "FAILED and is IN-PROGRESS again; reset to run again: after_broken, alert. Run "
@@ -221,12 +230,31 @@ def test_a_marked_success_satisfies_has_data_only_with_a_row_count(config, pipel
             {"t": ids["after_broken"]},
         )
     run_id = run_pipeline(engine, config, "P", child=CHILD).pipeline_run_id
-    mark_task(engine, config, "P", "broken", "SUCCESS", "no row count", requested_by=WHO)
+    mark_task(
+        engine,
+        config,
+        "P",
+        "broken",
+        "SUCCESS",
+        "no row count",
+        requested_by=WHO,
+        selector=runlog.RunSelector(run_id=run_id),
+    )
     assert run_pipeline(engine, config, "P", child=CHILD).status == RunStatus.SUCCESS
     assert statuses(engine, run_id)["after_broken"] == ("SKIPPED", None)
 
     # Stated with a row count, the marked SUCCESS satisfies it.
-    mark_task(engine, config, "P", "broken", "SUCCESS", "12 rows", rows=12, requested_by=WHO)
+    mark_task(
+        engine,
+        config,
+        "P",
+        "broken",
+        "SUCCESS",
+        "12 rows",
+        rows=12,
+        requested_by=WHO,
+        selector=runlog.RunSelector(run_id=run_id),
+    )
     assert run_pipeline(engine, config, "P", child=CHILD).status == RunStatus.SUCCESS
     assert statuses(engine, run_id)["broken"] == ("SUCCESS", 12)
     assert statuses(engine, run_id)["after_broken"] == ("SUCCESS", 9)
@@ -242,7 +270,15 @@ def test_a_run_marked_success_satisfies_a_downstream_gate(config, pipeline):
     blocked = run_pipeline(engine, config, "DOWN", child=CHILD, clock=NO_WAIT)
     assert blocked.status == RunStatus.SKIPPED
 
-    marked = mark_run(engine, config, "P", "SUCCESS", "broken is not needed", requested_by=WHO)
+    marked = mark_run(
+        engine,
+        config,
+        "P",
+        "SUCCESS",
+        "broken is not needed",
+        requested_by=WHO,
+        selector=runlog.RunSelector(run_id=run_id),
+    )
     assert marked.message == f"P: pipeline_run_id={run_id} marked SUCCESS (was FAILED)"
     assert run_status(engine, run_id) == "SUCCESS"
     # Its tasks keep their statuses.
@@ -351,39 +387,111 @@ def test_cancel_stops_a_running_run(config, pipeline):
         (run_id, None, "CANCEL", "IN-PROGRESS", "CANCELLED"),
     ]
     # The next run is a new one.
-    with pytest.raises(RunStateError, match="P has no run in progress to cancel"):
+    with pytest.raises(RunStateError, match="matched 0 runs"):
         cancel_run(engine, config, "P", "again", requested_by=WHO)
 
 
 def test_what_mark_and_cancel_refuse(config, pipeline):
     engine, _ = pipeline
-    with pytest.raises(RunStateError, match="P has no run to mark; `etl-craft mark --new-run`"):
+    with pytest.raises(RunStateError, match="matched 0 runs"):
         mark_run(engine, config, "P", "SUCCESS", "why", requested_by=WHO)
     run_id = run_pipeline(engine, config, "P", child=CHILD).pipeline_run_id
     with pytest.raises(UsageError, match="needs a --reason"):
-        mark_run(engine, config, "P", "SUCCESS", "  ", requested_by=WHO)
+        mark_run(
+            engine,
+            config,
+            "P",
+            "SUCCESS",
+            "  ",
+            requested_by=WHO,
+            selector=runlog.RunSelector(run_id=run_id),
+        )
     with pytest.raises(UsageError, match="cannot mark 'CANCELLED'"):
-        mark_run(engine, config, "P", "CANCELLED", "why", requested_by=WHO)
+        mark_run(
+            engine,
+            config,
+            "P",
+            "CANCELLED",
+            "why",
+            requested_by=WHO,
+            selector=runlog.RunSelector(run_id=run_id),
+        )
     with pytest.raises(UsageError, match="--rows goes with SUCCESS"):
-        mark_task(engine, config, "P", "broken", "FAILED", "why", rows=1, requested_by=WHO)
+        mark_task(
+            engine,
+            config,
+            "P",
+            "broken",
+            "FAILED",
+            "why",
+            rows=1,
+            requested_by=WHO,
+            selector=runlog.RunSelector(run_id=run_id),
+        )
     with pytest.raises(UsageError, match="cannot be negative"):
-        mark_task(engine, config, "P", "broken", "SUCCESS", "why", rows=-1, requested_by=WHO)
+        mark_task(
+            engine,
+            config,
+            "P",
+            "broken",
+            "SUCCESS",
+            "why",
+            rows=-1,
+            requested_by=WHO,
+            selector=runlog.RunSelector(run_id=run_id),
+        )
     with pytest.raises(UsageError, match=f"already FAILED under pipeline_run_id={run_id}"):
-        mark_task(engine, config, "P", "broken", "FAILED", "why", requested_by=WHO)
+        mark_task(
+            engine,
+            config,
+            "P",
+            "broken",
+            "FAILED",
+            "why",
+            requested_by=WHO,
+            selector=runlog.RunSelector(run_id=run_id),
+        )
     with pytest.raises(UsageError, match="is already FAILED; nothing to mark"):
-        mark_run(engine, config, "P", "FAILED", "why", requested_by=WHO)
+        mark_run(
+            engine,
+            config,
+            "P",
+            "FAILED",
+            "why",
+            requested_by=WHO,
+            selector=runlog.RunSelector(run_id=run_id),
+        )
 
     remote = replace(config, mode=Mode.REMOTE)
     for refused in (
-        lambda: mark_task(engine, remote, "P", "broken", "SUCCESS", "why"),
-        lambda: mark_run(engine, remote, "P", "SUCCESS", "why"),
+        lambda: mark_task(
+            engine,
+            remote,
+            "P",
+            "broken",
+            "SUCCESS",
+            "why",
+            selector=runlog.RunSelector(run_id=run_id),
+        ),
+        lambda: mark_run(
+            engine, remote, "P", "SUCCESS", "why", selector=runlog.RunSelector(run_id=run_id)
+        ),
         lambda: record_stand_in_run(engine, remote, "P", "SUCCESS", "why"),
         lambda: cancel_run(engine, remote, "P", "why"),
     ):
         with pytest.raises(RunRefusedError, match="the orchestrator is the only source of truth"):
             refused()
 
-    mark_task(engine, config, "P", "broken", "SUCCESS", "reopen it", requested_by=WHO)
+    mark_task(
+        engine,
+        config,
+        "P",
+        "broken",
+        "SUCCESS",
+        "reopen it",
+        requested_by=WHO,
+        selector=runlog.RunSelector(run_id=run_id),
+    )
     with pytest.raises(RunStateError, match=r"has a run in progress \(pipeline_run_id="):
         record_stand_in_run(engine, config, "P", "SUCCESS", "why", requested_by=WHO)
     assert interventions(engine)[0][:3] == (run_id, "broken", "MARK")
@@ -394,18 +502,28 @@ def test_the_commands(config, pipeline, capsys, monkeypatch):
     monkeypatch.chdir(config.project_dir)
     run_id = run_pipeline(engine, config, "P", child=CHILD).pipeline_run_id
     code = cli_main(
-        ["mark", "--pipeline_code", "P", "--status", "SUCCESS", "--reason", "fine as it is"]
+        [
+            "mark",
+            "--pipeline_code",
+            "P",
+            "--run-id",
+            str(run_id),
+            "--status",
+            "SUCCESS",
+            "--reason",
+            "fine as it is",
+        ]
     )
     assert code == ExitCode.SUCCESS
     assert capsys.readouterr().out == f"P: pipeline_run_id={run_id} marked SUCCESS (was FAILED)\n"
 
-    assert cli_main(["history", "--pipeline_code", "P"]) == ExitCode.SUCCESS
+    assert cli_main(["history", "--pipeline_code", "P", "--all"]) == ExitCode.SUCCESS
     history = capsys.readouterr().out
     assert "Interventions:" in history
     assert "(the run)" in history and "fine as it is" in history
 
     assert cli_main(["cancel", "--pipeline_code", "P", "--reason", "x"]) == ExitCode.RUN_STATE
-    assert "P has no run in progress to cancel" in capsys.readouterr().err
+    assert "matched 0 runs" in capsys.readouterr().err
     # A reason is required.
     with pytest.raises(SystemExit) as usage:
         cli_main(["mark", "--pipeline_code", "P", "--status", "SUCCESS", "--new-run"])
@@ -511,13 +629,28 @@ def test_a_rerun_runs_a_task_and_what_follows_it_again(config, pipeline):
     run_id = first.pipeline_run_id
     assert first.status == RunStatus.SUCCESS
 
-    alone = rerun_task(engine, config, "P", "extract", "source fixed", child=CHILD)
+    alone = rerun_task(
+        engine,
+        config,
+        "P",
+        "extract",
+        "source fixed",
+        child=CHILD,
+        selector=runlog.RunSelector(run_id=run_id),
+    )
     assert alone.status == RunStatus.SUCCESS and alone.pipeline_run_id == run_id
     assert alone.message.startswith(f"P: pipeline_run_id={run_id} SUCCESS")
     assert attempts(engine, run_id) == {"extract": 2, "transform": 1, "alert": 1}
 
     both = rerun_task(
-        engine, config, "P", "extract", "source fixed again", with_downstream=True, child=CHILD
+        engine,
+        config,
+        "P",
+        "extract",
+        "source fixed again",
+        with_downstream=True,
+        child=CHILD,
+        selector=runlog.RunSelector(run_id=run_id),
     )
     assert both.status == RunStatus.SUCCESS
     # alert waits for extract to fail, so it is left as it was.
@@ -532,7 +665,14 @@ def test_a_rerun_runs_a_task_and_what_follows_it_again(config, pipeline):
         ("transform", "RERUN", "SUCCESS", "SUCCESS"),
     ]
     with pytest.raises(RunRefusedError, match="--rerun is only available in local mode"):
-        rerun_task(engine, replace(config, mode=Mode.REMOTE), "P", "extract", "x")
+        rerun_task(
+            engine,
+            replace(config, mode=Mode.REMOTE),
+            "P",
+            "extract",
+            "x",
+            selector=runlog.RunSelector(run_id=run_id),
+        )
 
 
 def test_the_run_options(config, pipeline, capsys, monkeypatch):
@@ -852,7 +992,7 @@ def test_the_run_date_and_backfill_options(config, engine_db, capsys, monkeypatc
     assert "backfill of 2 date(s)" in capsys.readouterr().out
     assert cli_main(["run", "--pipeline_code", "P", "--run-date", "2026-08-30"]) == 0
     capsys.readouterr()
-    assert cli_main(["history", "--pipeline_code", "P"]) == ExitCode.SUCCESS
+    assert cli_main(["history", "--pipeline_code", "P", "--all"]) == ExitCode.SUCCESS
     history = capsys.readouterr().out.splitlines()
     assert history[0].startswith("PIPELINE_RUN_ID\tSTATUS\tRUN_DATE\t")
     assert history[1].split("\t")[2] == "2026-08-30"
@@ -915,7 +1055,15 @@ def test_a_rerun_of_a_failed_task_leaves_what_its_failure_skipped_to_run(config,
     assert statuses(engine, failed.pipeline_run_id)["c"][0] == "SKIPPED"
 
     behave(engine, a, "succeed")
-    fixed = rerun_task(engine, config, "Q", "a", "source fixed", child=CHILD)
+    fixed = rerun_task(
+        engine,
+        config,
+        "Q",
+        "a",
+        "source fixed",
+        child=CHILD,
+        selector=runlog.RunSelector(run_id=failed.pipeline_run_id),
+    )
     assert (fixed.status, fixed.pipeline_run_id) == (RunStatus.IN_PROGRESS, failed.pipeline_run_id)
     assert "1 task(s) still need to run: c" in fixed.message
     assert run_status(engine, failed.pipeline_run_id) == "IN-PROGRESS"
@@ -940,7 +1088,16 @@ def test_mark_keeps_a_skipped_task_another_pipeline_consumed(config, engine_db):
     q_run = run_pipeline(engine, config, "Q", child=CHILD)
     assert q_run.status == RunStatus.SUCCESS  # it consumed P.on_failure's SKIPPED row
 
-    marked = mark_task(engine, config, "P", "ok", "FAILED", "wrong data", requested_by=WHO)
+    marked = mark_task(
+        engine,
+        config,
+        "P",
+        "ok",
+        "FAILED",
+        "wrong data",
+        requested_by=WHO,
+        selector=runlog.RunSelector(run_id=p_run.pipeline_run_id),
+    )
     assert f"kept SKIPPED: on_failure (consumed by Q.down run {q_run.pipeline_run_id})" in (
         marked.message
     )
@@ -961,7 +1118,15 @@ def test_a_rerun_of_a_task_still_running_leaves_its_ended_run_alone(config, pipe
         )
 
     with pytest.raises(RunStateError, match="broken: already IN-PROGRESS"):
-        rerun_task(engine, config, "P", "broken", "source fixed", child=CHILD)
+        rerun_task(
+            engine,
+            config,
+            "P",
+            "broken",
+            "source fixed",
+            child=CHILD,
+            selector=runlog.RunSelector(run_id=failed.pipeline_run_id),
+        )
     assert run_status(engine, failed.pipeline_run_id) == "FAILED"
     assert interventions(engine) == []
 
@@ -969,9 +1134,9 @@ def test_a_rerun_of_a_task_still_running_leaves_its_ended_run_alone(config, pipe
 def test_a_skipped_run_is_ended_for_a_single_task(config, pipeline):
     engine, _ = pipeline
     skipped = skip_run(engine, config, "P", "public holiday", requested_by=WHO)
-    with pytest.raises(RunStateError, match="is already SKIPPED"):
+    with pytest.raises(RunStateError, match="matched 0 runs"):
         run_task(engine, config, "P", "extract", override=Override("x"), child=CHILD)
-    with pytest.raises(RunStateError, match="is already SKIPPED"):
+    with pytest.raises(RunStateError, match="matched 0 runs"):
         run_task(engine, config, "P", "extract", child=CHILD)
     assert run_status(engine, skipped.pipeline_run_id) == "SKIPPED"
 
@@ -987,7 +1152,14 @@ def test_a_forced_task_reopens_an_ended_run_and_ends_it_again(config, pipeline):
     assert first.status == RunStatus.SUCCESS
     behave(engine, ids["transform"], "fail")
 
-    forced = force_task(engine, config, "P", "transform", child=CHILD)
+    forced = force_task(
+        engine,
+        config,
+        "P",
+        "transform",
+        child=CHILD,
+        selector=runlog.RunSelector(run_id=first.pipeline_run_id),
+    )
     assert (forced.status, forced.pipeline_run_id) == (RunStatus.FAILED, first.pipeline_run_id)
     assert "1 task(s) did not succeed: transform (FAILED)" in forced.message
     assert run_status(engine, first.pipeline_run_id) == "FAILED"
@@ -1000,7 +1172,14 @@ def test_a_forced_task_reopens_an_ended_run_and_ends_it_again(config, pipeline):
 def test_a_forced_task_in_a_skipped_run_leaves_the_rest_to_run(config, pipeline):
     engine, _ = pipeline
     skipped = skip_run(engine, config, "P", "public holiday", requested_by=WHO)
-    forced = force_task(engine, config, "P", "extract", child=CHILD)
+    forced = force_task(
+        engine,
+        config,
+        "P",
+        "extract",
+        child=CHILD,
+        selector=runlog.RunSelector(run_id=skipped.pipeline_run_id),
+    )
     assert (forced.status, forced.pipeline_run_id) == (
         RunStatus.IN_PROGRESS,
         skipped.pipeline_run_id,
@@ -1053,7 +1232,14 @@ def test_a_met_sla_stays_met_when_the_run_is_ended_again_later(config, engine_db
             {"start": datetime.now(UTC) - timedelta(days=2), "id": first.pipeline_run_id},
         )
     again = rerun_task(
-        engine, config, "OK", "quick", "source fixed", child=CHILD, hooks=RunHooks(lapses.append)
+        engine,
+        config,
+        "OK",
+        "quick",
+        "source fixed",
+        child=CHILD,
+        hooks=RunHooks(lapses.append),
+        selector=runlog.RunSelector(run_id=first.pipeline_run_id),
     )
     assert (again.status, again.pipeline_run_id) == (RunStatus.SUCCESS, first.pipeline_run_id)
     assert again.sla.status == "MET" and "BREACHED" not in again.message

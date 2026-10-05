@@ -92,9 +92,10 @@ def test_generated_dags_have_controls_and_no_self_dependency(engine_db, count, m
         arguments = split(step["bash_command"])
         assert arguments[:4] == ["etl-craft", "run", "--pipeline_code", "P"]
         if "--task_code" in arguments:
-            assert arguments[-1] == code
+            assert arguments[arguments.index("--task_code") + 1] == code
         if "--run-date" in arguments:
-            assert arguments[-1] == "{{ data_interval_end | ds }}"
+            assert arguments[arguments.index("--run-date") + 1] == "{{ data_interval_end | ds }}"
+            assert arguments[arguments.index("--run-key") + 1] == "orchestrator:{{ run_id }}"
 
 
 def test_upgrade_preserves_metadata_references_identity_counters_and_custom_index(

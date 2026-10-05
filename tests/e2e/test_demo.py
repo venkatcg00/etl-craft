@@ -206,7 +206,7 @@ def check_the_emails(demo: Demo, *, failed: bool, outcome: str = "SUCCESS") -> N
 
 
 def check_the_reports(demo: Demo) -> None:
-    history = demo.ok("history", "--pipeline_code", "SUPPORT_DM").splitlines()
+    history = demo.ok("history", "--pipeline_code", "SUPPORT_DM", "--all").splitlines()
     assert [line.split("\t")[1] for line in history[1:]] == [
         "SUCCESS",
         "SKIPPED",

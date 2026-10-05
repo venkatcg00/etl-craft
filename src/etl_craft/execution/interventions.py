@@ -2,7 +2,7 @@
 
 In local mode etl-craft is the orchestrator, so it is where an operator steps in:
 
-- ``mark`` sets a task of the pipeline's latest run, or the run itself, to ``SUCCESS``,
+- ``mark`` sets a task of the selected run, or the run itself, to ``SUCCESS``,
   ``FAILED`` or ``SKIPPED``, with a reason. A marked ``SUCCESS`` satisfies a ``HAS_DATA``
   dependency only with a stated row count. Marking a task of a run that has ended reopens the
   run, and the tasks the engine skipped without running are reset, so running the pipeline again
@@ -42,7 +42,6 @@ from etl_craft.core.enums import (
 )
 from etl_craft.core.errors import RunRefusedError, RunStateError, UsageError
 from etl_craft.engine import runlog, transitions
-from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import interventions as record
 from etl_craft.engine.repository import pauses
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
@@ -70,8 +69,9 @@ def mark_task(
     rows: int | None = None,
     stale: bool = False,
     requested_by: str | None = None,
+    selector: runlog.RunSelector = runlog.ACTIVE_RUN,
 ) -> Intervened:
-    """Mark ``task_code`` ``status`` under the pipeline's latest run.
+    """Mark ``task_code`` ``status`` under the selected run.
 
     A run that has ended is reopened, and the tasks the engine skipped without running are
     reset, so the next ``run --pipeline_code`` resumes it. A task that is ``IN-PROGRESS`` is
@@ -83,7 +83,7 @@ def mark_task(
     with engine.begin() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         task_id = resolve_task_id(conn, pipeline_id, task_code)
-        run_id, run_status = _latest_run(conn, pipeline_id, pipeline_code)
+        run_id, run_status = _selected_run(conn, pipeline_id, selector)
         before = runlog.fetch_task_run_status(conn, task_id, run_id)
         if before == RunStatus.IN_PROGRESS and not stale:
             raise RunRefusedError(
@@ -148,8 +148,9 @@ def mark_run(
     reason: str,
     *,
     requested_by: str | None = None,
+    selector: runlog.RunSelector = runlog.ACTIVE_RUN,
 ) -> Intervened:
-    """Mark the pipeline's latest run ``status``, ending it now if it had not ended.
+    """Mark the selected run ``status``, ending it now if it had not ended.
 
     A downstream pipeline's gate judges the marked status. Its tasks keep theirs, and no
     upstream run is consumed. Raises ``RunRefusedError`` while a task of the run is running.
@@ -158,7 +159,7 @@ def mark_run(
     who = requested_by or current_actor().name
     with engine.begin() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
-        run_id, run_status = _latest_run(conn, pipeline_id, pipeline_code)
+        run_id, run_status = _selected_run(conn, pipeline_id, selector)
         running = [
             row.task_code
             for row in record.fetch_task_rows(conn, run_id)
@@ -350,6 +351,7 @@ def cancel_run(
     reason: str,
     *,
     requested_by: str | None = None,
+    selector: runlog.RunSelector = runlog.ACTIVE_RUN,
 ) -> Intervened:
     """End the pipeline's run in progress ``CANCELLED``, with every task still running.
 
@@ -360,9 +362,13 @@ def cancel_run(
     who = requested_by or current_actor().name
     with engine.begin() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
-        run_id = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
-        if run_id is None:
-            raise RunStateError(f"{pipeline_code} has no run in progress to cancel")
+        selected = runlog.select_run(conn, pipeline_id, selector)
+        run_id = selected.pipeline_run_id
+        if selected.status != RunStatus.IN_PROGRESS:
+            raise RunStateError(
+                f"{pipeline_code}: run_id={run_id} is {selected.status}; "
+                "expected IN-PROGRESS to cancel"
+            )
         stopped = []
         for row in record.fetch_task_rows(conn, run_id):
             if row.status != RunStatus.IN_PROGRESS:
@@ -492,15 +498,11 @@ def _check(
     return RunStatus(status)
 
 
-def _latest_run(conn: Connection, pipeline_id: int, pipeline_code: str) -> tuple[int, str]:
-    latest = conn.execute(
-        statement(conn, "latest_pipeline_run"), {"pipeline_id": pipeline_id}
-    ).one_or_none()
-    if latest is None:
-        raise RunStateError(
-            f"{pipeline_code} has no run to mark; `etl-craft mark --new-run` records a stand-in run"
-        )
-    return int(latest.pipeline_run_id), str(latest.status)
+def _selected_run(
+    conn: Connection, pipeline_id: int, selector: runlog.RunSelector
+) -> tuple[int, str]:
+    selected = runlog.select_run(conn, pipeline_id, selector)
+    return selected.pipeline_run_id, selected.status
 
 
 def _reopen(

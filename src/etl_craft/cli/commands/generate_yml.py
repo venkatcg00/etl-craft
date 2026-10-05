@@ -26,6 +26,12 @@ def _configure(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="write the DAG that writes the catalog site again on Docs_site.Schedule",
     )
+    parser.add_argument(
+        "--airflow-version",
+        default=">=2.2.0",
+        metavar="RANGE",
+        help="target Airflow version or PEP 440 range; remote DAGs require a floor of 2.2.0",
+    )
     parser.add_argument("--output", type=Path, metavar="PATH", help="write here, not to stdout")
 
 
@@ -40,7 +46,9 @@ def _run(args: argparse.Namespace, out: Output) -> int:
                 dag = (
                     global_dag(conn, config)
                     if args.global_dag
-                    else pipeline_dag(conn, config, args.pipeline_code)
+                    else pipeline_dag(
+                        conn, config, args.pipeline_code, airflow_version=args.airflow_version
+                    )
                 )
         finally:
             engine.dispose()
