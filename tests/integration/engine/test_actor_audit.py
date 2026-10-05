@@ -44,6 +44,18 @@ def test_attribution_and_immutable_command_requests(engine_db):
         assert tuple(
             conn.execute(text("SELECT ENDED_BY, ENDED_BY_KIND FROM AUD_PIPELINES_RUN_LOG")).one()
         ) == ("etl-craft", "SYSTEM")
+    with acting_as(ALICE), engine.begin() as conn:
+        skipped = runlog.create_active_run(conn, pipeline)
+        assert runlog.end_run_if(conn, skipped, "IN-PROGRESS", "SKIPPED")
+        assert tuple(
+            conn.execute(
+                text(
+                    "SELECT ENDED_BY, ENDED_BY_KIND FROM AUD_PIPELINES_RUN_LOG "
+                    "WHERE PIPELINE_RUN_ID=:run"
+                ),
+                {"run": skipped},
+            ).one()
+        ) == ("etl-craft", "SYSTEM")
     with acting_as(ALICE), command_request("run", {"pipeline_code": "P", "token": "sensitive"}):
         register_engine(engine)
         register_engine(engine)
