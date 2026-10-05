@@ -73,19 +73,24 @@ class PipelineDependencyEdge:
     depends_on_pipeline_id: int
     dependency_type: str
     depends_on_pipeline_code: str
+    consume_repairs: bool = True
 
 
 def fetch_pipeline_dependency_edges(
-    conn: Connection, pipeline_id: int
+    conn: Connection, pipeline_id: int, *, include_repairs: bool = False
 ) -> list[PipelineDependencyEdge]:
     """Return the active dependencies of ``pipeline_id`` on other pipelines."""
-    rows = conn.execute(statement(conn, "pipeline_dependency_edges"), {"pipeline_id": pipeline_id})
+    rows = conn.execute(
+        statement(conn, "pipeline_gate_edges" if include_repairs else "pipeline_dependency_edges"),
+        {"pipeline_id": pipeline_id},
+    )
     return [
         PipelineDependencyEdge(
             row.pipeline_dependency_id,
             row.depends_on_pipeline_id,
             row.dependency_type,
             row.depends_on_pipeline_code,
+            row.consume_repairs == "Y" if include_repairs else True,
         )
         for row in rows
     ]
@@ -104,11 +109,19 @@ class CrossPipelineTaskEdge:
     depends_on_task_id: int
     dependency_type: str
     depends_on_label: str
+    consume_repairs: bool = True
 
 
-def fetch_cross_pipeline_task_edges(conn: Connection, task_id: int) -> list[CrossPipelineTaskEdge]:
+def fetch_cross_pipeline_task_edges(
+    conn: Connection, task_id: int, *, include_repairs: bool = False
+) -> list[CrossPipelineTaskEdge]:
     """Return the active dependencies of ``task_id`` on tasks in other pipelines."""
-    rows = conn.execute(statement(conn, "task_cross_pipeline_dependencies"), {"task_id": task_id})
+    rows = conn.execute(
+        statement(
+            conn, "task_gate_edges" if include_repairs else "task_cross_pipeline_dependencies"
+        ),
+        {"task_id": task_id},
+    )
     return [
         CrossPipelineTaskEdge(
             row.task_dependency_id,
@@ -117,6 +130,7 @@ def fetch_cross_pipeline_task_edges(conn: Connection, task_id: int) -> list[Cros
             row.depends_on_task_id,
             row.dependency_type,
             row.depends_on_label,
+            row.consume_repairs == "Y" if include_repairs else True,
         )
         for row in rows
     ]

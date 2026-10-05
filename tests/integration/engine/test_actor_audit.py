@@ -282,6 +282,7 @@ def test_guarded_upgrade_rolls_back_with_the_ledger(empty_engine_db, monkeypatch
     assert migrations.apply_pending_migrations(db.engine) == [
         "0008_actors_and_audit_guards.sql",
         "0009_preserve_request_actors.sql",
+        "0010_gate_repairs.sql",
     ]
 
 

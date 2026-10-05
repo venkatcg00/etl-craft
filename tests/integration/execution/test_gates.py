@@ -5,7 +5,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import text
 
+from etl_craft.core.actor import current_actor
 from etl_craft.engine import transitions
+from etl_craft.engine.repository import trackers
 from etl_craft.execution.gates import (
     Clock,
     TrackedGate,
@@ -76,6 +78,17 @@ def test_a_task_dependency_is_judged_on_the_upstreams_last_run_and_consumed_once
 
     with engine.begin() as conn:
         down_run = start_run(conn, ids["down"])
+        summary = transitions.create_task_run(conn, ids["load"], down_run, current_actor())
+        attempt = transitions.queue_attempt(conn, summary, current_actor())
+        transitions.claim_attempt(
+            conn,
+            attempt,
+            current_actor(),
+            owner="gate-test",
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+        )
+        trackers.record_decisions(conn, down_run, first.decisions, attempt_id=attempt)
+        transitions.finish_attempt(conn, attempt, "SUCCESS", current_actor(), owner="gate-test")
     gate.consume(engine, ids["load"], down_run, first.consumed)
     assert consumed_task_runs(engine, edge) == [(down_run, rows[ids["publish"]])]
     again = gate.check(engine, ids["load"], 1)
@@ -174,6 +187,7 @@ def test_a_pipeline_gate_and_what_its_successful_run_consumes(world):
     now = datetime.now(UTC)
     with engine.begin() as conn:
         down_run = start_run(conn, ids["down"])
+        trackers.record_decisions(conn, down_run, passed.decisions)
         second = start_run(conn, ids["up"])
         for run_id, started, ended in (
             (first, now - timedelta(seconds=90), now - timedelta(seconds=80)),

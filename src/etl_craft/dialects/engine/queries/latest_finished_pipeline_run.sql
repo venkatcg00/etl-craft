@@ -1,6 +1,6 @@
 -- The latest run of :pipeline_id that finished by :ended_by and is not part of a backfill, and
 -- whether any of its tasks wrote rows (see latest_finished_task_run.sql).
-SELECT r.PIPELINE_RUN_ID AS run_id, r.STATUS AS status,
+SELECT r.PIPELINE_RUN_ID AS run_id, r.STATUS AS status, r.OUTPUT_REVISION AS revision, r.PIPELINE_RUN_ID AS pipeline_run_id,
        CASE WHEN EXISTS (
            SELECT 1 FROM AUD_TASK_RUN_LOG t
            WHERE t.PIPELINE_RUN_ID = r.PIPELINE_RUN_ID

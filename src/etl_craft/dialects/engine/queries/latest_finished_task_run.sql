@@ -1,6 +1,6 @@
 -- The latest finished row of :task_id under a run that is not part of a backfill, and whether
 -- it wrote rows (by its TARGET_COUNT when it was recorded before ROWS_WRITTEN existed).
-SELECT t.TASK_RUN_ID AS run_id, t.STATUS AS status,
+SELECT t.TASK_RUN_ID AS run_id, t.STATUS AS status, r.OUTPUT_REVISION AS revision, r.PIPELINE_RUN_ID AS pipeline_run_id,
        CASE WHEN COALESCE(t.ROWS_WRITTEN, t.TARGET_COUNT) > 0 THEN 1 ELSE 0 END AS has_data
 FROM AUD_TASK_RUN_LOG t
 JOIN AUD_PIPELINES_RUN_LOG r ON r.PIPELINE_RUN_ID = t.PIPELINE_RUN_ID

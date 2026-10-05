@@ -58,6 +58,7 @@ from etl_craft.core.faults import fault_point
 from etl_craft.core.graph import DependencyGraph, TaskRunState, build_graph
 from etl_craft.core.log import log_context
 from etl_craft.engine import runlog, transitions
+from etl_craft.engine.repository import trackers
 from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
 from etl_craft.engine.repository.interventions import fetch_interventions, fetch_task_rows
 from etl_craft.engine.repository.pauses import Pause
@@ -742,6 +743,7 @@ def _start_run(
         logger.info("%s: resuming pipeline_run_id=%d", pipeline_code, existing)
         return existing, None
     reason = None
+    decisions: tuple[trackers.GateDecision, ...] = ()
     bypassed: tuple[str, ...] = ()
     if check_gate:
         gate = check_pipeline_dependencies(
@@ -752,6 +754,7 @@ def _start_run(
             config.limits.gate_wait_minutes * 60,
         )
         bypassed = gate.bypassed
+        decisions = gate.decisions
         if not gate.satisfied:
             reason = "; ".join(gate.reasons)
     created: int | None
@@ -777,6 +780,7 @@ def _start_run(
                 f"`etl-craft history --pipeline_code {pipeline_code}`"
             )
         pipeline_run_id = created
+        trackers.record_decisions(conn, pipeline_run_id, decisions)
         fault_point("pipeline.after_insert")
         if reason is not None and not transitions.end_run_if(
             conn, pipeline_run_id, RunStatus.IN_PROGRESS, RunStatus.SKIPPED

@@ -49,6 +49,9 @@ Each package imports only the packages below it. `lint-imports` enforces this.
   Reconcile expired attempts as `LOST` before retrying; never adopt an expired lease directly,
   and signal a local process only after verifying its PID and process birth identity.
 - Retries resume: tasks already `SUCCESS` or `SKIPPED` under the run are not re-run.
+- Cross-pipeline consumption uses recorded admission decisions, never a new judgement at
+  completion. A repaired run publishes one new output revision only when it ends SUCCESS;
+  the dependency's CONSUME_REPAIRS flag decides whether the same run's newer revision is fresh.
 - Order comes from `CFG_TASK_DEPENDENCY` and `CFG_PIPELINE_DEPENDENCY` rows, never from code.
 - SQL tasks supply exactly one read-only SELECT; the engine wraps it in one of eight actions
   (`CREATE_TABLE`, `SETUP_TABLE`, `OVERWRITE_TABLE`, `APPEND_TABLE`, `SCD1_MERGE`, `SCD2_MERGE`,

@@ -8,6 +8,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Recorded gate decisions at pipeline and task-attempt admission. Successful downstream work
+  consumes the exact selected upstream identities and revisions, including after upstream repairs
+  or metadata changes. Dependencies accept newer published revisions of the same upstream run
+  when `CONSUME_REPAIRS = 'Y'`; `N` accepts only newer run identities. Migration
+  `0010_gate_repairs.sql` tracks pending repairs so failed repairs do not publish a revision.
+
 - Run and attempt ownership with 60-second leases and 15-second heartbeats. Every run reconciles
   expired attempts; `etl-craft reconcile` also supports pipeline and task filters. Lost attempts
   preserve uncertain outcomes, verified local child processes are stopped, and expired idle
@@ -35,7 +41,7 @@ All notable changes are recorded here. The format follows
 - Run identities and trigger kinds, owner and lease fields, output revisions and configuration
   fingerprints; attempt and gate-decision tables, consumed revisions and repair-consumption flags.
   Migration `0007_identity.sql` preserves historical run identities and copies the latest known
-  execution attempts. New runs receive manual, backfill or stand-in keys. Recording gate decisions remains subsequent roadmap work.
+  execution attempts. New runs receive manual, backfill or stand-in keys. Admission records gate decisions and consumes their selected revisions.
 
 ### Fixed
 
