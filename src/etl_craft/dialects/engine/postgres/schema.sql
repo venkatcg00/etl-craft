@@ -522,13 +522,14 @@ CREATE TABLE AUD_METADATA_CHANGES (
 );
 CREATE INDEX ix_metadata_changes_table ON AUD_METADATA_CHANGES (TABLE_NAME, CHANGED_AT);
 
--- Require the transaction marker before changing protected rows or truncating a table.
+-- The canonical hash version published after a target warehouse update commits.
 CREATE TABLE AUD_TARGET_HASH_VERSION (
     TARGET_OBJECT VARCHAR PRIMARY KEY,
     HASH_VERSION INTEGER NOT NULL CONSTRAINT ck_target_hash_version CHECK (HASH_VERSION IN (1,2)),
     RECOMPUTED_AT TIMESTAMPTZ NOT NULL
 );
 
+-- Require the transaction marker before changing protected rows or truncating a table.
 CREATE OR REPLACE FUNCTION etl_craft_guard() RETURNS trigger AS $$
 BEGIN
     IF COALESCE(current_setting('etl_craft.actor', true), '') = '' THEN
