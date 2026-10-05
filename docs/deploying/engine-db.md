@@ -79,8 +79,8 @@ Migration `0007_identity.sql` adds a unique `RUN_KEY` per pipeline, a checked `T
 nullable owner, lease and configuration fingerprint fields, and `OUTPUT_REVISION` starting at 1.
 Existing runs receive `legacy:<pipeline_run_id>` keys and `BACKFILL` or `MANUAL` trigger kinds.
 New command-created runs receive `manual:<uuid>`, `backfill:<date>:<uuid>` or `stand-in:<uuid>`
-keys. Direct SQL inserts default to a generated manual key and `MANUAL`; supply the trigger
-kind explicitly when inserting other kinds of runs.
+keys. Engine inserts default to a generated manual key and `MANUAL`; other trigger kinds
+are supplied explicitly by the engine.
 
 `AUD_TASK_ATTEMPTS` stores attempt identities, lifecycle timestamps, ownership, process details,
 counts and logs. The migration copies each non-skipped task summary into one attempt at its

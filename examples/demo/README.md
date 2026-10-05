@@ -40,6 +40,11 @@ etl-craft run --pipeline_code SUPPORT_DM      # succeeds on the same client runs
 etl-craft generate-docs                       # then open catalog/index.html
 ```
 
+`prepare.py metadata` creates numbered seed migrations under `migrations/` and runs
+`etl-craft migrate`. Repeating it leaves applied files unchanged. To edit loaded metadata,
+add a new project migration instead of editing an applied seed. The optional remote-mode
+seed is added after the main seed.
+
 The emails arrive in Mailpit at <http://localhost:58025>. `etl-craft history`, `graph`, `steps`
 and `lineage` show what ran.
 

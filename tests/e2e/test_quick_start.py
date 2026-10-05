@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import textwrap
 
@@ -64,7 +65,7 @@ def test_the_quick_start_runs_as_written(tmp_path):
         DEMO,
         project,
         ignore=shutil.ignore_patterns(
-            "engine.db*", "warehouse.duckdb*", "logs", "catalog", ".flaky-has-failed"
+            "engine.db*", "warehouse.duckdb*", "logs", "catalog", ".flaky-has-failed", "migrations"
         ),
     )
     printed = []
@@ -88,3 +89,36 @@ def test_the_quick_start_runs_as_written(tmp_path):
         for shown in block.splitlines():
             assert shown in output, shown
     assert (project / "catalog" / "index.html").is_file()
+
+    with sqlite3.connect(project / "engine.db") as conn:
+        count = conn.execute("SELECT COUNT(*) FROM AUD_METADATA_CHANGES").fetchone()[0]
+        assert count > 0
+        assert conn.execute(
+            "SELECT VERSION FROM SCHEMA_MIGRATIONS WHERE SOURCE='PROJECT'"
+        ).fetchall() == [("0001_support_insights.sql",)]
+    repeated = subprocess.run(
+        [str(python), "prepare.py", "metadata"],
+        cwd=project,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert repeated.returncode == 0, repeated.stderr
+    with sqlite3.connect(project / "engine.db") as conn:
+        assert conn.execute("SELECT COUNT(*) FROM AUD_METADATA_CHANGES").fetchone()[0] == count
+    migration = project / "migrations" / "0001_support_insights.sql"
+    original = migration.read_bytes()
+    seed = project / "metadata" / "support_insights.sql"
+    seed.write_text(seed.read_text() + "\n-- edited seed\n")
+    refused = subprocess.run(
+        [str(python), "prepare.py", "metadata"],
+        cwd=project,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert refused.returncode == 1
+    assert "keep existing migrations unchanged" in refused.stderr
+    assert migration.read_bytes() == original

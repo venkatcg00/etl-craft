@@ -50,8 +50,9 @@ etl-craft validate
 - `setup` runs every check `doctor` makes (the config, the Engine DB, the warehouse, the email
   relay, the project folders) and creates the Engine DB's tables in `engine.db`.
 - `prepare.py metadata` loads the pipelines, their tasks, parameters, dependencies and business
-  rules into `engine.db`, as `CFG_` rows. In your own project these rows are your pipelines,
-  written and reviewed like code.
+  rules into `engine.db`, as `CFG_` rows, by copying the seed SQL into numbered project
+  migrations and running `etl-craft migrate`. In your own project, author these migrations
+  directly and review them like code; plain SQL connections cannot edit Engine DB rows.
 - `validate` checks all of it without running anything:
   `checked 5 pipeline(s) and 27 task(s): 0 failed, 0 warning(s)`.
 
