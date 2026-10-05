@@ -73,7 +73,7 @@ item's text, or work done early under another item.
 | S2.L Regression suite and release | Done | #90, #91, #92, #93 | 48 stabilization defects; 0.2.0 released |
 | S3.A Identity schema | Done | #95 | Run identities, attempt history and gate-decision schema |
 | S3.I Actors and engine-only writes | Done | #98 | W15 |
-| S3.B Centralized transitions | In progress | | |
+| S3.B Centralized transitions | Done | #99 | Guarded lifecycle writes and immutable live attempts; ownership/reconciliation completes in S3.D |
 | S3.C to S3.H | Not started | | |
 | 0.4 and later | Not started | | |
 
@@ -1078,6 +1078,8 @@ and names its actor; the Engine DB refuses any other."
   row changes except through etl-craft unless `doctor` reports the grant that allowed it.
 
 ### S3.B One module owns every status change
+
+**Status: done** (#99); see [Handover notes](#handover-notes).
 
 Branch: `feat/engine-transitions`. New module `engine/transitions.py`; queries under
 `dialects/engine/queries/transition_*.sql`.
