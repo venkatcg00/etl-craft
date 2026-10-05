@@ -27,6 +27,7 @@ class TrinoIcebergWarehouse(WarehouseDialect):
     )
     identifier_case = "lower"
     storage_parameters = frozenset({"EXTERNAL_LOCATION"})
+    update_uses_merge = True
     temporary_tables = False
     mutation_alias = False
     qualified_rename = True

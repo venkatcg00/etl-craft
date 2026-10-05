@@ -367,6 +367,27 @@ class WarehouseDialect:
         """Render a UTC timestamp with exactly six fractional digits."""
         raise NotImplementedError(f"{self.key} does not declare timestamp canonicalization")
 
-    def scalar_source_value(self, expression: str) -> str:
-        """Wrap a value read by a correlated scalar subquery, where the dialect requires it."""
-        return expression
+    update_uses_merge: bool = False
+    """Whether a joined update needs MERGE rather than UPDATE ... FROM."""
+
+    def update_from_stage(
+        self,
+        target: str,
+        stage: str,
+        keys: tuple[str, ...],
+        assignments: Mapping[str, str],
+        condition: str,
+    ) -> str:
+        """Update matching target rows from a deduplicated stage using aliases t and s."""
+        match = " AND ".join(f"t.{key} = s.{key}" for key in keys)
+        values = ", ".join(f"{column} = {value}" for column, value in assignments.items())
+        if self.update_uses_merge:
+            return (
+                f"MERGE INTO {target} t USING {stage} s ON {match} "
+                f"WHEN MATCHED AND ({condition}) THEN UPDATE SET {values}"
+            )
+        return f"UPDATE {target} t SET {values} FROM {stage} s WHERE {match} AND ({condition})"
+
+    def prepare_update_stage(self, stage: str, keys: tuple[str, ...]) -> tuple[str, ...]:
+        """Statements that prepare a stage for joined updates on its merge keys."""
+        return ()

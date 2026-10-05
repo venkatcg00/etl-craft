@@ -133,6 +133,16 @@ and Engine DB commit separately: if publication fails after the warehouse update
 merges stay refused until the version is recorded. Dropping or replacing a target clears its
 recorded hash version.
 
+### Joined merge updates
+
+SCD1 updates read values directly from the deduplicated stage in one joined write. PostgreSQL,
+DuckDB and Snowflake use `UPDATE ... FROM`; Databricks and Trino use a matched `MERGE` update.
+SCD2 closes active versions by joining to the changed-key stage, then inserts their new versions.
+Every merge-key column participates in the join. `PRESERVE_TARGET` still keeps target values
+where SCD1 source values are NULL and hashes the values actually stored; unchanged rows keep
+their audit fields. PostgreSQL indexes the stage's merge keys and runs `ANALYZE` before joined
+updates so the planner has current stage statistics.
+
 ### Optional parameters
 
 | Parameter | Applies to | Effect |

@@ -8,6 +8,11 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Joined SCD1 updates and SCD2 version closing use warehouse-specific set-based statements.
+  PostgreSQL indexes and analyzes merge stages; a 100,000-row SCD1 regression checks the
+  30-second performance budget. Composite keys, NULL preservation and unchanged-row audit
+  fields retain their behavior across native and Iceberg warehouses.
+
 - Canonical version-2 merge hashes distinguish NULL, empty text and embedded separators, and
   normalize UTC timestamps, decimal scales and booleans across warehouses. Floating-point
   compare columns are refused. `etl-craft rehash --target S.T [--dry-run]` upgrades all stored

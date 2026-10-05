@@ -79,7 +79,8 @@ item's text, or work done early under another item.
 | S3.E Recorded gate decisions and repairs | Done | #102 | B14, B62 |
 | S3.F Atomic endings | Done | #103 | B6, B9; Engine DB portion of W4 |
 | S3.G.1 Canonical change hash | Done | #104 | B22, B35 |
-| S3.G.2 to S3.H | Not started | | |
+| S3.G.2 Set-based write strategies | Done | #105 | B36 |
+| S3.G.3 to S3.H | Not started | | |
 | 0.4 and later | Not started | | |
 
 ### Handover notes
@@ -88,6 +89,12 @@ What a person picking up the work needs that the code and the item texts do not 
 
 **Choices that differ from the item text.**
 
+- S3.G.2 joins SCD1 updates directly to the deduplicated stage and SCD2 closes to the
+  changed-key stage through `WarehouseDialect.update_from_stage`. PostgreSQL/DuckDB/Snowflake
+  use UPDATE FROM; Databricks/Trino use matched MERGE. PostgreSQL indexes and analyzes both
+  update stages. The 100,000-row PostgreSQL action budget covers the whole merge; shared
+  local/cloud tests cover composite keys, NULL preservation, unchanged audit fields and SCD2
+  history. Insert phases and changed-key materialization retain their existing behavior.
 - S3.G.1 hashes persisted target types so declared decimal scales are stable between stage
   and target. Trino embeds precision/scale in its type text and uses timestamp text rather than
   millisecond-truncating date_format. Session UTC is pinned with SET TIME ZONE on Trino.
