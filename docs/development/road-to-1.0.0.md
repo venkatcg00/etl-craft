@@ -72,7 +72,7 @@ item's text, or work done early under another item.
 | S2.K Migrations and small fixes | Done | #88 | B33; S2.K.5 done in S2.A |
 | S2.L Regression suite and release | Done | #90, #91, #92, #93 | 48 stabilization defects; 0.2.0 released |
 | S3.A Identity schema | Done | #95 | Run identities, attempt history and gate-decision schema |
-| S3.I Actors and engine-only writes | Done | | W15 |
+| S3.I Actors and engine-only writes | Done | #98 | W15 |
 | S3.B to S3.H | Not started | | |
 | 0.4 and later | Not started | | |
 
@@ -964,7 +964,7 @@ migrated attempt rows match the old task rows.
 
 ### S3.I Every action names who did it; only etl-craft writes the Engine DB
 
-**Status: done**; see [Handover notes](#handover-notes).
+**Status: done** (#98); see [Handover notes](#handover-notes).
 
 **Order.** Directly after `S3.A`, before `S3.B`, although it is lettered last. `S3.B` writes the
 function for every status change, and each of them must take the actor from the start rather
