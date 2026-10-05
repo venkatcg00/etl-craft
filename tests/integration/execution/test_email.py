@@ -17,7 +17,7 @@ from sqlalchemy import text
 
 from etl_craft.config import EmailConfig, EmailProfile, ExecutionLimits, load_config
 from etl_craft.core.errors import HandlerError
-from etl_craft.engine import runlog
+from etl_craft.engine import transitions
 from etl_craft.execution.connections import probe_email_relay
 from etl_craft.execution.context import build_task_context
 from etl_craft.execution.pipeline import SlaLapse, default_hooks
@@ -67,7 +67,9 @@ def pipeline(engine_db):
         ids["run"] = start_run(conn, ids["P"])
         task_run(conn, ids["load"], ids["run"], "SUCCESS")
         failed = task_run(conn, ids["check"], ids["run"], "IN-PROGRESS")
-        runlog.finish_task_run(conn, failed, status="FAILED", error_message="3 rows had no key")
+        transitions.finish_task_run(
+            conn, failed, status="FAILED", error_message="3 rows had no key"
+        )
         ids["alert_run"] = task_run(conn, ids["alert"], ids["run"], "IN-PROGRESS")
     return engine, ids
 

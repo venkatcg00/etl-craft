@@ -20,7 +20,7 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectionProfile, ConnectionSection, ConnectorConfig, SourceConfig
 from etl_craft.core.enums import Mode
-from etl_craft.engine import runlog
+from etl_craft.engine import transitions
 from etl_craft.handlers import sql
 from etl_craft.handlers.registry import HandlerResult, TaskContext
 from etl_craft.warehouse.connection import build_warehouse_engine
@@ -111,7 +111,7 @@ class SqlWorld:
                         {"t": self.tasks[code], "n": name, "v": value},
                     )
             pipeline_run_id = run_id or self.pipeline_run_id
-            binding = runlog.find_or_create_task_run(conn, self.tasks[code], pipeline_run_id)
+            binding = transitions.find_or_create_task_run(conn, self.tasks[code], pipeline_run_id)
         return TaskContext(
             config=self.config,
             pipeline_id=self.pipeline_id,
@@ -143,14 +143,16 @@ class SqlWorld:
     def finish(self, code: str, status: str = "SUCCESS") -> None:
         """Record task ``code`` ended under the current run."""
         with self.engine_db.begin() as conn:
-            binding = runlog.find_or_create_task_run(conn, self.tasks[code], self.pipeline_run_id)
-            runlog.finish_task_run(conn, binding.task_run_id, status=status)
+            binding = transitions.find_or_create_task_run(
+                conn, self.tasks[code], self.pipeline_run_id
+            )
+            transitions.finish_task_run(conn, binding.task_run_id, status=status)
 
     def new_run(self) -> int:
         """End the current pipeline run and start another; return its id."""
         with self.engine_db.begin() as conn:
-            runlog.finalize_pipeline_run(conn, self.pipeline_run_id, "SUCCESS")
-            self.pipeline_run_id = runlog.find_or_create_active_run(conn, self.pipeline_id)
+            transitions.finalize_pipeline_run(conn, self.pipeline_run_id, "SUCCESS")
+            self.pipeline_run_id = transitions.find_or_create_active_run(conn, self.pipeline_id)
         return self.pipeline_run_id
 
 
@@ -235,7 +237,7 @@ def sql_world(
     apply_schema(engine_db)
     with engine_db.begin() as conn:
         pipeline_id = add_pipeline(conn, "P", refresh_type="INCREMENTAL")
-        run_id = runlog.find_or_create_active_run(conn, pipeline_id)
+        run_id = transitions.find_or_create_active_run(conn, pipeline_id)
     warehouse = build_warehouse_engine(config)
     with warehouse.begin() as conn:
         conn.execute(

@@ -1,25 +1,19 @@
-"""The run log: which pipeline run a task binds to, and each task's row under it.
+"""Read run identities, task summaries, dependency state and SLA results.
 
-A task is never given a ``pipeline_run_id``. It resolves the pipeline's one ``IN-PROGRESS`` run
-from ``AUD_PIPELINES_RUN_LOG``, where a partial unique index allows only one per pipeline, and
-binds to one ``AUD_TASK_RUN_LOG`` row per run. A retry updates that row and counts the attempt;
-it never adds a second row.
+Lifecycle writes belong to ``engine.transitions``. Tasks resolve the active pipeline run;
+execution attempts keep separate immutable outcomes under each task summary.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
-from typing import Any, Literal
-from uuid import uuid4
 
 from sqlalchemy import bindparam
-from sqlalchemy.engine import Connection, Row
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.engine import Connection
 
-from etl_craft.core.actor import SYSTEM_ACTOR
-from etl_craft.core.enums import FINISHED_RUN_STATUSES, Mode, RunStatus, SlaStatus
+from etl_craft.core.enums import SlaStatus
 from etl_craft.core.errors import RunStateError
 from etl_craft.core.graph import TaskRunState
 from etl_craft.engine.queries import statement
@@ -36,171 +30,6 @@ def fetch_active_pipeline_run_id(conn: Connection, pipeline_id: int) -> int | No
 def today() -> date:
     """Return today's date in UTC: a run's ``RUN_DATE`` unless it is given one."""
     return datetime.now(UTC).date()
-
-
-def create_active_run(
-    conn: Connection,
-    pipeline_id: int,
-    *,
-    run_date: date | None = None,
-    backfill: bool = False,
-    trigger_kind: Literal["MANUAL", "BACKFILL", "STAND_IN"] | None = None,
-) -> int | None:
-    """Start a new ``IN-PROGRESS`` run of ``pipeline_id`` and return its id.
-
-    Return ``None`` when the pipeline already has a run in progress: the unique index on
-    ``IN-PROGRESS`` runs refuses a second one, so of several processes starting a run at once,
-    exactly one gets an id. A new run runs as of ``run_date`` (today, in UTC, unless given),
-    and ``backfill`` marks it part of a backfill.
-    """
-    kind = trigger_kind or ("BACKFILL" if backfill else "MANUAL")
-    if kind not in {"MANUAL", "BACKFILL", "STAND_IN"} or (backfill and kind != "BACKFILL"):
-        raise RunStateError(
-            f"pipeline_id={pipeline_id}: trigger_kind={kind!r}, backfill={backfill!r}; "
-            "expected MANUAL, BACKFILL or STAND_IN, with BACKFILL for a backfill run. "
-            "Use BACKFILL for backfills and MANUAL or STAND_IN for other runs."
-        )
-    logical_date = run_date or today()
-    prefix = "stand-in" if kind == "STAND_IN" else kind.lower()
-    run_key = f"{prefix}:{logical_date}:{uuid4()}" if kind == "BACKFILL" else f"{prefix}:{uuid4()}"
-    params = {
-        "run_key": run_key,
-        "trigger_kind": kind,
-        "pipeline_id": pipeline_id,
-        "run_date": logical_date.isoformat(),
-        "backfill": "Y" if kind == "BACKFILL" else "N",
-    }
-    try:
-        with conn.begin_nested():
-            return int(conn.execute(statement(conn, "insert_pipeline_run"), params).scalar_one())
-    except IntegrityError:
-        return None
-
-
-def find_or_create_active_run(
-    conn: Connection, pipeline_id: int, *, run_date: date | None = None, backfill: bool = False
-) -> int:
-    """Return the ``IN-PROGRESS`` run of ``pipeline_id``, starting one when there is none.
-
-    For callers that want whichever run is in progress, such as tests building a scene. A
-    command that must not take over another process's run uses ``create_active_run``.
-    """
-    existing = fetch_active_pipeline_run_id(conn, pipeline_id)
-    if existing is not None:
-        return existing
-    created = create_active_run(conn, pipeline_id, run_date=run_date, backfill=backfill)
-    if created is not None:
-        return created
-    winner = fetch_active_pipeline_run_id(conn, pipeline_id)
-    if winner is None:
-        raise RunStateError(
-            f"pipeline_id={pipeline_id}: starting a run hit a unique violation, but no "
-            "IN-PROGRESS run exists afterwards"
-        )
-    return winner
-
-
-def end_run_if(conn: Connection, pipeline_run_id: int, from_status: str, status: str) -> bool:
-    """End ``pipeline_run_id`` with ``status`` only if it is still ``from_status``.
-
-    Return whether it did. The caller decides what a refusal means; nothing is changed then.
-    """
-    result = conn.execute(
-        statement(conn, "end_pipeline_run_if"),
-        {
-            "pipeline_run_id": pipeline_run_id,
-            "from_status": from_status,
-            "ended_by": SYSTEM_ACTOR.name,
-            "ended_by_kind": SYSTEM_ACTOR.kind.value,
-            "status": status,
-            "now": datetime.now(UTC),
-        },
-    )
-    return bool(result.rowcount)
-
-
-def resolve_run_for_task(
-    conn: Connection, pipeline_id: int, *, force: bool = False, mode: Mode = Mode.LOCAL
-) -> tuple[int, str | None]:
-    """Return the run a single ``run --task_code`` binds to, and its old status if reopened.
-
-    The pipeline's ``IN-PROGRESS`` run when there is one. Otherwise its latest run, but only with
-    ``force`` when that run already ended: it goes back to ``IN-PROGRESS`` so the task's outcome
-    can end it again. Raises ``RunStateError`` when there is no run at all, or only an ended one.
-    """
-    active = fetch_active_pipeline_run_id(conn, pipeline_id)
-    if active is not None:
-        return active, None
-    latest = conn.execute(
-        statement(conn, "latest_pipeline_run"), {"pipeline_id": pipeline_id}
-    ).one_or_none()
-    if latest is None:
-        raise RunStateError(
-            f"pipeline_id={pipeline_id} has no run to bind a single task to — start one with "
-            "`etl-craft run --pipeline_code <code> --init-only`, or run the whole pipeline"
-        )
-    if force and latest.status == RunStatus.CANCELLED:
-        raise RunStateError(
-            f"pipeline_id={pipeline_id}: pipeline_run_id={latest.pipeline_run_id} is CANCELLED; "
-            "start a new run with `etl-craft run --pipeline_code <code> --init-only`"
-        )
-    if not force and latest.status in FINISHED_RUN_STATUSES:
-        remedy = (
-            "Start a new run with `etl-craft run --pipeline_code <code> --init-only`, which gives "
-            "it a new pipeline_run_id and leaves the ended run as it was"
-        )
-        if mode == Mode.LOCAL:
-            remedy += ", or pass --force to reopen the ended run and rewrite its rows"
-        raise RunStateError(
-            f"pipeline_id={pipeline_id} has no active run: its latest run "
-            f"(pipeline_run_id={latest.pipeline_run_id}) is already {latest.status}. {remedy}."
-        )
-    return _reopen_latest(conn, pipeline_id, latest)
-
-
-def resolve_run_for_orchestrator(conn: Connection, pipeline_id: int) -> tuple[int, str | None]:
-    """Return the run a task binds to in remote mode and, when this reopened it, its old status.
-
-    The pipeline's ``IN-PROGRESS`` run when there is one. Otherwise the orchestrator is running a
-    task again after the run ended (a cleared task), so its latest run goes back to
-    ``IN-PROGRESS`` until ``--finalize-only`` ends it again. Raises ``RunStateError`` when the
-    pipeline has no run at all.
-    """
-    active = fetch_active_pipeline_run_id(conn, pipeline_id)
-    if active is not None:
-        return active, None
-    latest = conn.execute(
-        statement(conn, "latest_pipeline_run"), {"pipeline_id": pipeline_id}
-    ).one_or_none()
-    if latest is None:
-        raise RunStateError(
-            f"pipeline_id={pipeline_id} has no run to bind a task to: the orchestrator's first "
-            "step, `etl-craft run --pipeline_code <code> --init-only`, starts it"
-        )
-    return _reopen_latest(conn, pipeline_id, latest)
-
-
-def _reopen_latest(conn: Connection, pipeline_id: int, latest: Row[Any]) -> tuple[int, str | None]:
-    """Put the pipeline's ended ``latest`` run back ``IN-PROGRESS``; return it and its old status.
-
-    When another process started or reopened a run meanwhile, that run is returned instead, with
-    no old status.
-    """
-    try:
-        with conn.begin_nested():
-            conn.execute(
-                statement(conn, "reopen_pipeline_run"),
-                {"pipeline_run_id": latest.pipeline_run_id},
-            )
-    except IntegrityError:
-        winner = fetch_active_pipeline_run_id(conn, pipeline_id)
-        if winner is None:
-            raise RunStateError(
-                f"pipeline_id={pipeline_id}: reopening pipeline_run_id={latest.pipeline_run_id} "
-                "hit a unique violation, but no IN-PROGRESS run exists afterwards"
-            ) from None
-        return winner, None
-    return int(latest.pipeline_run_id), str(latest.status)
 
 
 def latest_run_for_rerun(conn: Connection, pipeline_id: int) -> int:
@@ -254,85 +83,6 @@ class TaskRunBinding:
     task_run_id: int
     status: str
     created: bool = False
-
-
-def find_or_create_task_run(conn: Connection, task_id: int, pipeline_run_id: int) -> TaskRunBinding:
-    """Return the row of ``task_id`` under ``pipeline_run_id``, creating it ``IN-PROGRESS``.
-
-    Like ``find_or_create_active_run``, a concurrent insert that loses reads back the winner.
-    """
-    params = {"task_id": task_id, "pipeline_run_id": pipeline_run_id}
-    existing = conn.execute(statement(conn, "task_run"), params).one_or_none()
-    if existing is not None:
-        return TaskRunBinding(existing.task_run_id, existing.status)
-    try:
-        with conn.begin_nested():
-            task_run_id = conn.execute(statement(conn, "insert_task_run"), params).scalar_one()
-        return TaskRunBinding(int(task_run_id), RunStatus.IN_PROGRESS, created=True)
-    except IntegrityError:
-        winner = conn.execute(statement(conn, "task_run"), params).one_or_none()
-        if winner is None:
-            raise RunStateError(
-                f"task_id={task_id}, pipeline_run_id={pipeline_run_id}: binding hit a unique "
-                "violation, but no row exists afterwards"
-            ) from None
-        return TaskRunBinding(winner.task_run_id, winner.status)
-
-
-def begin_attempt(conn: Connection, task_run_id: int) -> int:
-    """Start another attempt on an existing row and return its number.
-
-    The row goes back to ``IN-PROGRESS`` with a new START_DATE, and the previous attempt's
-    counts, message and log are cleared, so the row never mixes two attempts' results.
-    """
-    return int(
-        conn.execute(
-            statement(conn, "begin_attempt"),
-            {"task_run_id": task_run_id, "now": datetime.now(UTC)},
-        ).scalar_one()
-    )
-
-
-def finish_task_run(
-    conn: Connection,
-    task_run_id: int,
-    *,
-    status: str,
-    source_count: int | None = None,
-    target_count: int | None = None,
-    insert_count: int | None = None,
-    update_count: int | None = None,
-    delete_count: int | None = None,
-    rows_written: int | None = None,
-    error_message: str | None = None,
-    task_log: str | None = None,
-) -> None:
-    """Record the current attempt's outcome on its row; each attempt writes only its own counts."""
-    conn.execute(
-        statement(conn, "finish_task_run"),
-        {
-            "task_run_id": task_run_id,
-            "status": status,
-            "now": datetime.now(UTC),
-            "source_count": source_count,
-            "target_count": target_count,
-            "insert_count": insert_count,
-            "update_count": update_count,
-            "delete_count": delete_count,
-            "rows_written": rows_written,
-            "error_message": error_message,
-            "task_log": task_log,
-        },
-    )
-
-
-def fail_task_run_if_running(conn: Connection, task_run_id: int, error_message: str) -> bool:
-    """Record ``task_run_id`` ``FAILED`` only if it is still ``IN-PROGRESS``; return whether."""
-    result = conn.execute(
-        statement(conn, "fail_task_run_if_running"),
-        {"task_run_id": task_run_id, "error_message": error_message, "now": datetime.now(UTC)},
-    )
-    return bool(result.rowcount)
 
 
 @dataclass(frozen=True)
@@ -411,45 +161,6 @@ class RunEnding:
     sla: SlaResult | None
 
 
-def finalize_pipeline_run(
-    conn: Connection, pipeline_run_id: int, status: str, *, sla_in_hours: float | None = None
-) -> RunEnding:
-    """End ``pipeline_run_id`` with ``status`` and END_DATE now, if it is still ``IN-PROGRESS``.
-
-    With ``sla_in_hours`` (the pipeline's ``SLA_IN_HOURS``, whenever it has one) the run is also
-    marked ``MET`` or ``BREACHED``, measured from START_DATE, whether or not SLA emails are on,
-    unless it already has an SLA status: a run reopened after it met its SLA stays ``MET``, and
-    the returned result carries the recorded status. STATUS is left alone either way: a late run
-    did its work. A run that is no longer ``IN-PROGRESS`` is not changed, and ``ended`` is false.
-    """
-    now = datetime.now(UTC)
-    sla = None
-    if sla_in_hours is not None:
-        start = conn.execute(
-            statement(conn, "pipeline_run_start"), {"pipeline_run_id": pipeline_run_id}
-        ).scalar_one()
-        hours = elapsed_hours(start, now)
-        sla = SlaResult(
-            SlaStatus.BREACHED if hours > sla_in_hours else SlaStatus.MET,
-            float(sla_in_hours),
-            hours,
-        )
-    result = conn.execute(
-        statement(conn, "finish_pipeline_run"),
-        {
-            "pipeline_run_id": pipeline_run_id,
-            "status": status,
-            "now": now,
-            "sla_status": None if sla is None else str(sla.status),
-        },
-    )
-    if sla is not None:
-        recorded = fetch_run_sla(conn, pipeline_run_id).sla_status
-        if recorded is not None and recorded != sla.status:
-            sla = replace(sla, status=SlaStatus(recorded))
-    return RunEnding(bool(result.rowcount), sla)
-
-
 @dataclass(frozen=True)
 class RunSla:
     """When a run started, and the SLA status recorded for it so far."""
@@ -464,14 +175,3 @@ def fetch_run_sla(conn: Connection, pipeline_run_id: int) -> RunSla:
         statement(conn, "pipeline_run_sla"), {"pipeline_run_id": pipeline_run_id}
     ).one()
     return RunSla(row.start_date, row.sla_status)
-
-
-def mark_sla_breached(conn: Connection, pipeline_run_id: int) -> bool:
-    """Mark a still running ``pipeline_run_id`` ``BREACHED``; return whether this call did.
-
-    ``False`` when the run already finished or was already marked.
-    """
-    result = conn.execute(
-        statement(conn, "mark_sla_breached"), {"pipeline_run_id": pipeline_run_id}
-    )
-    return bool(result.rowcount)

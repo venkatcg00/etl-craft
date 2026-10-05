@@ -29,10 +29,9 @@ from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 
 from sqlalchemy.engine import Connection, Engine
-from sqlalchemy.exc import IntegrityError
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.core.actor import current_actor
+from etl_craft.core.actor import Actor, current_actor
 from etl_craft.core.enums import (
     FINISHED_RUN_STATUSES,
     MARKABLE_STATUSES,
@@ -42,7 +41,7 @@ from etl_craft.core.enums import (
     RunStatus,
 )
 from etl_craft.core.errors import RunRefusedError, RunStateError, UsageError
-from etl_craft.engine import runlog
+from etl_craft.engine import runlog, transitions
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import interventions as record
 from etl_craft.engine.repository import pauses
@@ -97,9 +96,9 @@ def mark_task(
                 f"{pipeline_code}.{task_code} is already {status} under "
                 f"pipeline_run_id={run_id}; nothing to mark"
             )
-        binding = runlog.find_or_create_task_run(conn, task_id, run_id)
+        binding = transitions.find_or_create_task_run(conn, task_id, run_id)
         previous = runlog.fetch_task_run_result(conn, binding.task_run_id).error_message
-        record.mark_task_run(
+        transitions.mark_task_run(
             conn,
             binding.task_run_id,
             status=status,
@@ -174,7 +173,7 @@ def mark_run(
             raise UsageError(
                 f"{pipeline_code}: pipeline_run_id={run_id} is already {status}; nothing to mark"
             )
-        record.mark_pipeline_run(conn, run_id, status)
+        transitions.mark_pipeline_run(conn, run_id, status)
         record.record_intervention(
             conn,
             pipeline_id=pipeline_id,
@@ -220,7 +219,7 @@ def record_stand_in_run(
                 f"{pipeline_code} has a run in progress (pipeline_run_id={active}); mark that "
                 "run, or cancel it, before recording a stand-in run"
             )
-        created = runlog.create_active_run(conn, pipeline_id, trigger_kind="STAND_IN")
+        created = transitions.create_active_run(conn, pipeline_id, trigger_kind="STAND_IN")
         if created is None:
             raise RunStateError(
                 f"{pipeline_code}: another process started a run just now "
@@ -229,15 +228,15 @@ def record_stand_in_run(
             )
         run_id = created
         if task_id is not None:
-            binding = runlog.find_or_create_task_run(conn, task_id, run_id)
-            record.mark_task_run(
+            binding = transitions.find_or_create_task_run(conn, task_id, run_id)
+            transitions.mark_task_run(
                 conn,
                 binding.task_run_id,
                 status=status,
                 error_message=f"stand-in run recorded {status} by {who}: {reason}",
                 target_count=rows,
             )
-        record.mark_pipeline_run(conn, run_id, status)
+        transitions.mark_pipeline_run(conn, run_id, status)
         record.record_intervention(
             conn,
             pipeline_id=pipeline_id,
@@ -368,7 +367,7 @@ def cancel_run(
         for row in record.fetch_task_rows(conn, run_id):
             if row.status != RunStatus.IN_PROGRESS:
                 continue
-            if record.cancel_task_run(conn, row.task_run_id, f"cancelled by {who}: {reason}"):
+            if transitions.cancel_task_run(conn, row.task_run_id, f"cancelled by {who}: {reason}"):
                 stopped.append(row.task_code)
                 record.record_intervention(
                     conn,
@@ -382,7 +381,7 @@ def cancel_run(
                     reason=reason,
                     requested_by=who,
                 )
-        record.cancel_pipeline_run(conn, run_id)
+        transitions.cancel_pipeline_run(conn, run_id)
         record.record_intervention(
             conn,
             pipeline_id=pipeline_id,
@@ -513,24 +512,7 @@ def _reopen(
     reason: str,
     who: str,
 ) -> None:
-    try:
-        with conn.begin_nested():
-            conn.execute(statement(conn, "reopen_pipeline_run"), {"pipeline_run_id": run_id})
-    except IntegrityError:
-        raise RunStateError(
-            f"{pipeline_code}: pipeline_run_id={run_id} cannot be reopened while another run "
-            "of the pipeline is in progress"
-        ) from None
-    record.record_intervention(
-        conn,
-        pipeline_id=pipeline_id,
-        pipeline_run_id=run_id,
-        action=InterventionAction.REOPEN,
-        from_status=run_status,
-        to_status=RunStatus.IN_PROGRESS,
-        reason=reason,
-        requested_by=who,
-    )
+    transitions.reopen_run(conn, run_id, Actor(who, current_actor().kind), reason=reason)
 
 
 def reset_engine_skipped(
@@ -586,6 +568,6 @@ def _reset_skipped(
             reason=reason,
             requested_by=who,
         )
-        record.delete_skipped_task_run(conn, row.task_run_id)
+        transitions.delete_skipped_task_run(conn, row.task_run_id)
         reset.append(row.task_code)
     return reset, kept

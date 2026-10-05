@@ -55,7 +55,7 @@ from etl_craft.core.errors import EtlCraftError, RunRefusedError, RunStateError,
 from etl_craft.core.faults import fault_point
 from etl_craft.core.graph import DependencyGraph, TaskRunState, build_graph
 from etl_craft.core.log import log_context
-from etl_craft.engine import runlog
+from etl_craft.engine import runlog, transitions
 from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
 from etl_craft.engine.repository.interventions import fetch_interventions, fetch_task_rows
 from etl_craft.engine.repository.pauses import Pause
@@ -700,7 +700,7 @@ def _start_run(
         if not gate.satisfied:
             reason = "; ".join(gate.reasons)
     with engine.begin() as conn:
-        created = runlog.create_active_run(
+        created = transitions.create_active_run(
             conn, pipeline_id, run_date=run_date, backfill=backfill is not None
         )
         if created is None:
@@ -712,7 +712,7 @@ def _start_run(
             )
         pipeline_run_id = created
         fault_point("pipeline.after_insert")
-        if reason is not None and not runlog.end_run_if(
+        if reason is not None and not transitions.end_run_if(
             conn, pipeline_run_id, RunStatus.IN_PROGRESS, RunStatus.SKIPPED
         ):
             raise RunStateError(
@@ -927,10 +927,10 @@ def _settle_unsatisfiable(
     for task_id in graph.unsatisfiable(run_state, failures_final=failures_final):
         reason = f"its dependencies can never be met under pipeline_run_id={pipeline_run_id}"
         with engine.begin() as conn:
-            binding = runlog.find_or_create_task_run(conn, task_id, pipeline_run_id)
+            binding = transitions.find_or_create_task_run(conn, task_id, pipeline_run_id)
             if not binding.created:
                 continue
-            runlog.finish_task_run(
+            transitions.finish_task_run(
                 conn, binding.task_run_id, status=RunStatus.SKIPPED, error_message=reason
             )
         skipped.append(task_id)
@@ -960,9 +960,9 @@ def _record_orchestrated(
         if state is not None and state.status != RunStatus.IN_PROGRESS:
             continue
         with engine.begin() as conn:
-            binding = runlog.find_or_create_task_run(conn, task_id, pipeline_run_id)
+            binding = transitions.find_or_create_task_run(conn, task_id, pipeline_run_id)
             if binding.created:
-                runlog.finish_task_run(
+                transitions.finish_task_run(
                     conn,
                     binding.task_run_id,
                     status=RunStatus.SKIPPED,
@@ -977,7 +977,7 @@ def _record_orchestrated(
                 "still IN-PROGRESS when the orchestrator finalized the run: its run --task_code "
                 "process ended without recording an outcome"
             )
-            runlog.finish_task_run(
+            transitions.finish_task_run(
                 conn, binding.task_run_id, status=RunStatus.FAILED, error_message=reason
             )
         logger.error("%s: FAILED — %s", task_codes[task_id], reason)
@@ -1043,7 +1043,9 @@ def _finalize(
         status = RunStatus.SKIPPED
     with engine.begin() as conn:
         breached_before = runlog.fetch_run_sla(conn, pipeline_run_id).sla_status
-        ending = runlog.finalize_pipeline_run(conn, pipeline_run_id, status, sla_in_hours=sla_hours)
+        ending = transitions.finalize_pipeline_run(
+            conn, pipeline_run_id, status, sla_in_hours=sla_hours
+        )
         current = runlog.fetch_pipeline_run_status(conn, pipeline_run_id)
     if not ending.ended:
         message = (
@@ -1183,7 +1185,7 @@ class _SlaWatch:
             return
         try:
             with self.engine.begin() as conn:
-                marked = runlog.mark_sla_breached(conn, self.pipeline_run_id)
+                marked = transitions.mark_sla_breached(conn, self.pipeline_run_id)
         except Exception:
             logger.exception("%s: could not mark the SLA breached", self.pipeline_code)
             return

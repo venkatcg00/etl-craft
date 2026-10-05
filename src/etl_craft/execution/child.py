@@ -16,27 +16,33 @@ import argparse
 import logging
 import os
 import signal
+import socket
 import sys
 import threading
 from collections.abc import Sequence
 from contextlib import suppress
+from contextvars import ContextVar
 from pathlib import Path
 from types import FrameType
 from typing import NoReturn
 
 from sqlalchemy.engine import Engine
 
-from etl_craft.config import load_config
+from etl_craft.config import ConnectorConfig, load_config
 from etl_craft.core import log
+from etl_craft.core.actor import Actor, ActorKind, acting_as, current_actor
 from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import EtlCraftError, ExitCode
 from etl_craft.core.faults import fault_point
+from etl_craft.engine import transitions
 from etl_craft.engine.connection import engine_db
-from etl_craft.engine.runlog import finish_task_run
+from etl_craft.engine.transitions import finish_task_run
 from etl_craft.execution.context import build_task_context
 from etl_craft.handlers.registry import TaskContext, format_task_log, resolve_handler
 
 logger = logging.getLogger(__name__)
+
+_identity: ContextVar[tuple[int, str] | None] = ContextVar("attempt_identity", default=None)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -57,29 +63,60 @@ def main(argv: Sequence[str] | None = None) -> int:
     log.configure(args.log_level, args.log_format)
     config = load_config(args.config)
     engine = engine_db(config)
+    attempt_id = os.environ.get("ETL_CRAFT_ATTEMPT_ID")
+    owner = os.environ.get("ETL_CRAFT_ATTEMPT_OWNER")
+    identity = (int(attempt_id), owner) if attempt_id is not None and owner else None
+    token = _identity.set(identity)
     try:
-        with log.log_context(task_run_id=args.task_run_id):
-            try:
-                context = build_task_context(
-                    engine, config, args.task_run_id, force=args.force, rerun=args.rerun
-                )
-            except EtlCraftError as error:
-                logger.error("could not start the task: %s", error)
-                _record_failure(engine, args.task_run_id, str(error))
-                return error.exit_code
-            with log.log_context(
-                pipeline=context.pipeline_code,
-                task=context.task_code,
-                pipeline_run_id=context.pipeline_run_id,
-                attempt=context.attempt,
-            ):
-                return run_handler(engine, context)
+        with (
+            acting_as(Actor(f"worker:{owner}", ActorKind.WORKER))
+            if identity
+            else acting_as(Actor("etl-craft", ActorKind.SYSTEM))
+        ):
+            return _run_bound(engine, config, args)
     finally:
+        _identity.reset(token)
         engine.dispose()
+
+
+def _run_bound(engine: Engine, config: ConnectorConfig, args: argparse.Namespace) -> int:
+    with log.log_context(task_run_id=args.task_run_id):
+        identity = _identity.get()
+        if identity is not None:
+            try:
+                with engine.begin() as conn:
+                    transitions.assert_attempt(conn, identity[0], args.task_run_id, identity[1])
+                    transitions.ensure_attempt_started(
+                        conn,
+                        identity[0],
+                        current_actor(),
+                        owner=identity[1],
+                        host=socket.gethostname(),
+                        pid=os.getpid(),
+                    )
+            except EtlCraftError as error:
+                logger.error("could not start the attempt: %s", error)
+                return error.exit_code
+        try:
+            context = build_task_context(
+                engine, config, args.task_run_id, force=args.force, rerun=args.rerun
+            )
+        except EtlCraftError as error:
+            logger.error("could not start the task: %s", error)
+            _record_failure(engine, args.task_run_id, str(error))
+            return error.exit_code
+        with log.log_context(
+            pipeline=context.pipeline_code,
+            task=context.task_code,
+            pipeline_run_id=context.pipeline_run_id,
+            attempt=context.attempt,
+        ):
+            return run_handler(engine, context)
 
 
 def run_handler(engine: Engine, context: TaskContext) -> int:
     """Run ``context``'s handler and record its outcome on the task's row."""
+    identity = _identity.get()
     logger.info("running the %s handler", context.handler)
     try:
         result = resolve_handler(context.handler)(context, engine)
@@ -104,6 +141,8 @@ def run_handler(engine: Engine, context: TaskContext) -> int:
             delete_count=result.delete_count,
             rows_written=result.rows_written,
             task_log=format_task_log(result),
+            attempt_id=None if identity is None else identity[0],
+            owner=None if identity is None else identity[1],
         )
     fault_point("child.after_outcome")
     logger.info(
@@ -118,8 +157,16 @@ def run_handler(engine: Engine, context: TaskContext) -> int:
 
 
 def _record_failure(engine: Engine, task_run_id: int, message: str) -> None:
+    identity = _identity.get()
     with engine.begin() as conn:
-        finish_task_run(conn, task_run_id, status=RunStatus.FAILED, error_message=message)
+        finish_task_run(
+            conn,
+            task_run_id,
+            status=RunStatus.FAILED,
+            error_message=message,
+            attempt_id=None if identity is None else identity[0],
+            owner=None if identity is None else identity[1],
+        )
 
 
 def run_as_process(argv: Sequence[str] | None = None) -> NoReturn:

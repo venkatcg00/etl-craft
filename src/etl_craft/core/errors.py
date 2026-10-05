@@ -36,6 +36,7 @@ class ExitCode(IntEnum):
     CLONING = 17
     REMOTE_UNSUPPORTED = 18
     INJECTED_FAULT = 19
+    STALE_TRANSITION = 20
 
 
 class EtlCraftError(Exception):
@@ -130,3 +131,9 @@ class InjectedFaultError(EtlCraftError):
     """A named development fault selected by the caller's environment."""
 
     exit_code = ExitCode.INJECTED_FAULT
+
+
+class StaleTransitionError(EtlCraftError):
+    """A lifecycle write lost its status or owner guard; refresh the row before retrying."""
+
+    exit_code = ExitCode.STALE_TRANSITION

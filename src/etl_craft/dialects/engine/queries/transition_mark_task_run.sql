@@ -6,3 +6,4 @@ SET STATUS = :status, END_DATE = :now, ERROR_MESSAGE = :error_message,
     TARGET_COUNT = CASE WHEN :sets_count = 1 THEN :target_count ELSE TARGET_COUNT END,
     ROWS_WRITTEN = CASE WHEN :sets_count = 1 THEN :target_count ELSE ROWS_WRITTEN END
 WHERE TASK_RUN_ID = :task_run_id
+AND NOT EXISTS (SELECT 1 FROM AUD_TASK_ATTEMPTS a WHERE a.TASK_RUN_ID = :task_run_id AND a.STATUS IN ('QUEUED','CLAIMED','RUNNING'))

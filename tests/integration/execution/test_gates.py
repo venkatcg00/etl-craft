@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import text
 
-from etl_craft.engine import runlog
+from etl_craft.engine import transitions
 from etl_craft.execution.gates import (
     Clock,
     TrackedGate,
@@ -205,7 +205,7 @@ def test_a_pipeline_gate_and_what_its_successful_run_consumes(world):
 
 def backfill_run(conn, pipeline_id, task_statuses, status="SUCCESS"):
     """A run of ``pipeline_id`` that is part of a backfill, its tasks and itself ended as given."""
-    run_id = runlog.find_or_create_active_run(conn, pipeline_id, backfill=True)
+    run_id = transitions.find_or_create_active_run(conn, pipeline_id, backfill=True)
     for task_id, task_status in task_statuses.items():
         task_run(conn, task_id, run_id, task_status, target_count=1)
     if status != "IN-PROGRESS":

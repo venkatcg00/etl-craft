@@ -28,7 +28,15 @@ when it ends `FAILED`; every other status is listed under [Exit codes](../refere
 ## Retries and `--force`
 
 Running a `FAILED` task again is a new attempt on the same `AUD_TASK_RUN_LOG` row: `ATTEMPT_COUNT`
-goes up, and the previous attempt's counts, message and log are cleared from the row.
+goes up, and the previous attempt's counts, message and log are cleared from the summary.
+Each execution also has its own `AUD_TASK_ATTEMPTS` row. It moves through `QUEUED`, `CLAIMED`
+and `RUNNING`; its terminal outcome is immutable. The attempt and summary receive the outcome,
+counts and handler log in one transaction, so a retry preserves the earlier attempt's evidence.
+A skipped task that never executed has a summary without an execution attempt.
+
+Admission allows one active attempt per task run. A concurrent claim or a result from an old
+attempt or wrong owner is refused with exit `20` (`STALE_TRANSITION`), naming the row, expected
+status and owner, and state found. Check the run's history before retrying the command.
 
 `--force` runs the task even if it already succeeded or its dependencies are not met. It is only
 available in local mode. When the pipeline's latest run has already ended (`SKIPPED` included, except `CANCELLED`), the
@@ -44,8 +52,9 @@ have never run, the run stays `IN-PROGRESS` and `run --pipeline_code <code>` res
 
 ## In remote mode
 
-The orchestrator decides when a task runs, so `run --task_code` runs it whenever it is told to:
-none of the checks above apply. Run again after it succeeded, it is a new attempt that skips
+The orchestrator decides when a task runs, so `run --task_code` runs it whenever it is told to.
+Dependency and settled-task checks are delegated to it; the Engine DB still refuses a second
+active attempt for the same task run. Run again after it succeeded, it is a new attempt that skips
 nothing it did before; run after its run ended (a cleared task), it reopens that run. See
 [Running under an orchestrator](../deploying/orchestrator.md).
 
@@ -53,7 +62,8 @@ nothing it did before; run after its run ended (a cleared task), it reopens that
 
 A task gets `Orchestration.Task_timeout_seconds` (six hours unless set; `0` for no limit), or its
 own `TASK_TIMEOUT_SECONDS` parameter. When the limit passes, the task's process and everything it
-started are stopped, and the task is recorded `FAILED` with the reason.
+started are stopped. Its attempt is recorded `TIMED_OUT`, and its task summary reads `FAILED`
+with the reason.
 
 ## Logs
 
@@ -90,3 +100,9 @@ time) is recorded `FAILED` with what happened, for example
 log shows what it was doing. A task process writes its output unbuffered, so the log keeps
 everything it printed up to the end. Once the outcome is recorded the process exits at once:
 threads a script left running end with it, and are named in the log.
+
+The immutable attempt keeps the handler's reported values. The supervisor appends the captured
+output tail to the task summary once the process ends; the complete output remains in that
+attempt's log file. Claimed attempts carry owner and lease fields. Automatic heartbeats and
+reconciliation of expired leases are still planned; use the existing explicit operator controls
+for a process you have confirmed is gone.

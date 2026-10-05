@@ -9,6 +9,7 @@ from datetime import datetime
 from sqlalchemy import bindparam
 from sqlalchemy.engine import Connection
 
+from etl_craft.engine import transitions
 from etl_craft.engine.queries import statement
 
 
@@ -77,14 +78,11 @@ def begin_rule_run(
     params = {"business_rule_id": business_rule_id, "task_run_id": task_run_id}
     row = conn.execute(statement(conn, "business_rule_run"), params).one_or_none()
     if row is None:
-        run_id = conn.execute(statement(conn, "insert_business_rule_run"), params).scalar_one()
+        run_id = transitions.create_rule_run(conn, business_rule_id, task_run_id)
         return RuleRunBinding(int(run_id), False)
     if row.status == "SUCCESS":
         return RuleRunBinding(int(row.business_rule_run_id), True)
-    conn.execute(
-        statement(conn, "restart_business_rule_run"),
-        {"business_rule_run_id": row.business_rule_run_id, "now": now},
-    )
+    transitions.restart_rule_run(conn, int(row.business_rule_run_id), now)
     return RuleRunBinding(int(row.business_rule_run_id), False)
 
 
@@ -92,10 +90,7 @@ def finish_rule_run(
     conn: Connection, business_rule_run_id: int, status: str, now: datetime
 ) -> None:
     """End a rule's run-log row with ``status``."""
-    conn.execute(
-        statement(conn, "finish_business_rule_run"),
-        {"business_rule_run_id": business_rule_run_id, "status": status, "now": now},
-    )
+    transitions.finish_rule_run(conn, business_rule_run_id, status, now)
 
 
 def fetch_active_rule_keys(conn: Connection, business_rule_id: int) -> set[str]:

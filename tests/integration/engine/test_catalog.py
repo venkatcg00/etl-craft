@@ -11,7 +11,7 @@ from sqlalchemy import text
 from etl_craft.cli import main
 from etl_craft.config import load_config
 from etl_craft.core.errors import ExitCode, UsageError
-from etl_craft.engine import runlog
+from etl_craft.engine import transitions
 from etl_craft.execution.interventions import mark_task
 from etl_craft.services.catalog import build_catalog
 from etl_craft.services.catalog_graph import lineage_drawing
@@ -120,7 +120,7 @@ def project(engine_db, tmp_path, monkeypatch):
         add_dependency(conn, ingest, stage, pull)
         add_dependency(conn, sales, convert, stage, upstream_pipeline=ingest)
         add_dependency(conn, sales, rules, convert, "HAS_DATA")
-        run_id = runlog.find_or_create_active_run(conn, ingest)
+        run_id = transitions.find_or_create_active_run(conn, ingest)
         insert_row(
             conn,
             "INSERT INTO AUD_TASK_RUN_LOG (TASK_ID, PIPELINE_RUN_ID, STATUS, END_DATE, "
@@ -130,7 +130,7 @@ def project(engine_db, tmp_path, monkeypatch):
             t=stage,
             r=run_id,
         )
-        runlog.finalize_pipeline_run(conn, run_id, "SUCCESS")
+        transitions.finalize_pipeline_run(conn, run_id, "SUCCESS")
     return engine, load_config(root / "craft-connector.yml"), root
 
 
@@ -383,7 +383,7 @@ def test_runs_have_pages_with_what_they_were_built_from_and_used_by(project, tmp
                 "JOIN CFG_TASKS t ON t.TASK_ID = r.TASK_ID WHERE t.TASK_CODE = 'stage'"
             )
         ).one()
-        sales_run = runlog.find_or_create_active_run(conn, ids["SALES"])
+        sales_run = transitions.find_or_create_active_run(conn, ids["SALES"])
         dependency, convert = conn.execute(
             text(
                 "SELECT d.TASK_DEPENDENCY_ID, d.TASK_ID FROM CFG_TASK_DEPENDENCY d "
@@ -406,7 +406,7 @@ def test_runs_have_pages_with_what_they_were_built_from_and_used_by(project, tmp
                 "utr": stage_run,
             },
         )
-        runlog.finalize_pipeline_run(conn, sales_run, "FAILED")
+        transitions.finalize_pipeline_run(conn, sales_run, "FAILED")
     catalog = build_catalog(engine, config)
     assert [run.pipeline_run_id for run in catalog.pipelines["INGEST"].runs] == [ingest_run]
     assert [c.upstream_run_id for c in catalog.built_from[sales_run]] == [ingest_run]

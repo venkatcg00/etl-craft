@@ -19,7 +19,7 @@ from sqlalchemy import text
 from etl_craft.config import load_config
 from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import HandlerError, MetadataError
-from etl_craft.engine import runlog
+from etl_craft.engine import runlog, transitions
 from etl_craft.engine.repository.offsets import fetch_task_offset
 from etl_craft.execution.context import build_task_context
 from etl_craft.execution.runner import run_task
@@ -138,7 +138,7 @@ def test_a_script_runs_in_the_task_process_and_resumes_from_its_offset(project):
     # The next run starts where this one left off.
     assert "load.py wrote 2 row(s)" in log
     with engine.begin() as conn:
-        runlog.finalize_pipeline_run(
+        transitions.finalize_pipeline_run(
             conn, runlog.fetch_active_pipeline_run_id(conn, pipeline), "SUCCESS"
         )
         start_run(conn, pipeline)
@@ -159,7 +159,7 @@ def run_in_process(project, script, **params):
     (config.ingestion_scripts_dir / "load.py").write_text(textwrap.dedent(script), "utf-8")
     with engine.begin() as conn:
         run_id = runlog.fetch_active_pipeline_run_id(conn, project[2])
-        binding = runlog.find_or_create_task_run(conn, task, run_id)
+        binding = transitions.find_or_create_task_run(conn, task, run_id)
     context = build_task_context(engine, config, binding.task_run_id, force=False)
     if params:
         context = replace(context, task_params={**context.task_params, **params})
@@ -376,11 +376,11 @@ def test_a_backfill_run_gives_the_date_and_neither_reads_nor_stores_an_offset(pr
     (config.ingestion_scripts_dir / "load.py").write_text(script, "utf-8")
     with engine.begin() as conn:
         run_id = runlog.fetch_active_pipeline_run_id(conn, project[2])
-        runlog.finalize_pipeline_run(conn, run_id, "SUCCESS")
-        backfill_run = runlog.find_or_create_active_run(
+        transitions.finalize_pipeline_run(conn, run_id, "SUCCESS")
+        backfill_run = transitions.find_or_create_active_run(
             conn, project[2], run_date=date(2026, 9, 1), backfill=True
         )
-        binding = runlog.find_or_create_task_run(conn, task, backfill_run)
+        binding = transitions.find_or_create_task_run(conn, task, backfill_run)
     context = build_task_context(engine, config, binding.task_run_id)
     assert (context.run_date, context.backfill) == (date(2026, 9, 1), True)
     assert python_scripts.run(context, engine).variables == {}
@@ -388,8 +388,8 @@ def test_a_backfill_run_gives_the_date_and_neither_reads_nor_stores_an_offset(pr
     kept = RESULT + "def run(task):\n    assert task.offset == Offset.number(7)\n"
     kept += "    return ScriptResult(0)\n"
     with engine.begin() as conn:
-        runlog.finalize_pipeline_run(conn, backfill_run, "SUCCESS")
-        runlog.find_or_create_active_run(conn, project[2])
+        transitions.finalize_pipeline_run(conn, backfill_run, "SUCCESS")
+        transitions.find_or_create_active_run(conn, project[2])
     run_in_process(project, kept)
 
 

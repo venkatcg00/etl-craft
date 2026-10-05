@@ -6,3 +6,4 @@ SET STATUS = :status, END_DATE = :now,
     DELETE_COUNT = :delete_count, ROWS_WRITTEN = :rows_written,
     ERROR_MESSAGE = :error_message, TASK_LOG = :task_log
 WHERE TASK_RUN_ID = :task_run_id AND STATUS <> 'CANCELLED'
+AND NOT EXISTS (SELECT 1 FROM AUD_TASK_ATTEMPTS a WHERE a.TASK_RUN_ID = :task_run_id AND a.STATUS IN ('QUEUED','CLAIMED','RUNNING'))

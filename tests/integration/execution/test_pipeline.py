@@ -28,7 +28,7 @@ from etl_craft.core.errors import (
     RunRefusedError,
     RunStateError,
 )
-from etl_craft.engine import runlog
+from etl_craft.engine import runlog, transitions
 from etl_craft.execution.gates import Clock
 from etl_craft.execution.pipeline import (
     RunHooks,
@@ -279,7 +279,7 @@ def test_a_run_is_not_ended_while_another_process_runs_one_of_its_tasks(config, 
 
     # The other process finishes extract; the next run goes on and ends the run.
     with engine.begin() as conn:
-        runlog.finish_task_run(conn, elsewhere, status=RunStatus.SUCCESS, target_count=1)
+        transitions.finish_task_run(conn, elsewhere, status=RunStatus.SUCCESS, target_count=1)
     done = run_pipeline(engine, config, "P", child=CHILD, clock=NO_WAIT)
     assert done.pipeline_run_id == run
     assert done.status == RunStatus.FAILED  # broken fails, as in every run of P
@@ -501,7 +501,9 @@ def test_alert_failures_do_not_change_the_data_outcome(config, engine_db, remote
         run_id = start_run(conn, pipeline_id)
         task_run(conn, data, run_id, data_status)
         notify_run = task_run(conn, notify, run_id, "IN-PROGRESS")
-        runlog.finish_task_run(conn, notify_run, status="FAILED", error_message="relay is down")
+        transitions.finish_task_run(
+            conn, notify_run, status="FAILED", error_message="relay is down"
+        )
     selected = replace(config, mode=Mode.REMOTE) if remote else config
     outcome = finalize_active_run(engine, selected, "MAIL")
     assert outcome.status == data_status

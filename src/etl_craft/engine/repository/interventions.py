@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.actor import current_actor
-from etl_craft.core.enums import InterventionAction, RunStatus
+from etl_craft.core.enums import InterventionAction
 from etl_craft.engine.queries import statement
 
 
@@ -98,70 +98,6 @@ def fetch_task_rows(conn: Connection, pipeline_run_id: int) -> list[TaskRow]:
             statement(conn, "run_task_rows"), {"pipeline_run_id": pipeline_run_id}
         )
     ]
-
-
-def mark_task_run(
-    conn: Connection,
-    task_run_id: int,
-    *,
-    status: str,
-    error_message: str,
-    target_count: int | None,
-) -> None:
-    """Set a task row's status as an operator marked it."""
-    conn.execute(
-        statement(conn, "mark_task_run"),
-        {
-            "task_run_id": task_run_id,
-            "status": status,
-            "error_message": error_message,
-            "target_count": target_count,
-            "sets_count": 1 if status == RunStatus.SUCCESS else 0,
-            "now": datetime.now(UTC),
-        },
-    )
-
-
-def mark_pipeline_run(conn: Connection, pipeline_run_id: int, status: str) -> None:
-    """Set a run's status as an operator marked it, ending it now if it had not ended."""
-    conn.execute(
-        statement(conn, "mark_pipeline_run"),
-        {
-            "pipeline_run_id": pipeline_run_id,
-            "status": status,
-            "now": datetime.now(UTC),
-            "ended_by": current_actor().name,
-            "ended_by_kind": current_actor().kind.value,
-        },
-    )
-
-
-def cancel_task_run(conn: Connection, task_run_id: int, error_message: str) -> bool:
-    """End an ``IN-PROGRESS`` task row ``CANCELLED``; return whether it was still running."""
-    result = conn.execute(
-        statement(conn, "cancel_task_run"),
-        {"task_run_id": task_run_id, "error_message": error_message, "now": datetime.now(UTC)},
-    )
-    return bool(result.rowcount)
-
-
-def cancel_pipeline_run(conn: Connection, pipeline_run_id: int) -> bool:
-    """End an ``IN-PROGRESS`` run ``CANCELLED``; return whether it was still in progress."""
-    result = conn.execute(
-        statement(conn, "cancel_pipeline_run"),
-        {
-            "pipeline_run_id": pipeline_run_id,
-            "now": datetime.now(UTC),
-            "ended_by": current_actor().name,
-            "ended_by_kind": current_actor().kind.value,
-        },
-    )
-    return bool(result.rowcount)
-
-
-def delete_skipped_task_run(conn: Connection, task_run_id: int) -> None:
-    """Remove a ``SKIPPED`` row of a task that never ran, so the resumed run decides again."""
-    conn.execute(statement(conn, "delete_task_run"), {"task_run_id": task_run_id})
 
 
 def fetch_interventions(

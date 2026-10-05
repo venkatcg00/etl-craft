@@ -73,7 +73,8 @@ item's text, or work done early under another item.
 | S2.L Regression suite and release | Done | #90, #91, #92, #93 | 48 stabilization defects; 0.2.0 released |
 | S3.A Identity schema | Done | #95 | Run identities, attempt history and gate-decision schema |
 | S3.I Actors and engine-only writes | Done | #98 | W15 |
-| S3.B to S3.H | Not started | | |
+| S3.B Centralized transitions | Done | #99 | Guarded lifecycle writes and immutable live attempts; ownership/reconciliation completes in S3.D |
+| S3.C to S3.H | Not started | | |
 | 0.4 and later | Not started | | |
 
 ### Handover notes
@@ -85,16 +86,27 @@ What a person picking up the work needs that the code and the item texts do not 
 - `S3.I`: each action is the request itself, recorded once with `OUTCOME = REQUESTED` and
   no exit code; execution outcomes belong to runs and attempts. Bootstrap commands record
   after the audit table exists. CLI callers scope one resolved `Actor` through `acting_as`;
-  unscoped library work uses `SYSTEM`. `S3.B` can pass that actor explicitly into transitions.
+  unscoped library work uses `SYSTEM`. Transitions take an explicit actor.
   Historical unknown actors remain NULL. Project-created reserved-prefix tables gain guards
   during migrations, and captured metadata includes project columns. Privilege checks report
   source grants reaching other ordinary logins, including inherited groups; revoking from the
   source role removes the permission. Owners and superusers retain administrative authority.
 
+- `S3.B`: pipeline runs are created directly `IN-PROGRESS`; `start_run` attaches their owner,
+  while queued pipeline admission remains 0.4. Actual executions queue, claim and start ledger
+  attempts; terminal attempt changes and summaries are atomic. Parent and child share the
+  exact attempt and owner, and acknowledge one process id. Terminal attempts keep the handler
+  log; captured process output is appended only to the fenced summary and its file. A stale
+  operator mark cancels the active attempt before overriding the summary, preserving its
+  immutable evidence. `reopen_run` records REOPEN atomically. Lease APIs are guarded, but
+  automatic heartbeats and reconciliation remain `S3.D`. Migration 0009 keeps historical
+  requesters unknown during PostgreSQL updates. Lifecycle writers moved from `runlog` into
+  `transitions`; `runlog` contains reads and result types.
+
 - `S3.A`: skipped summaries have no execution attempt and remain resettable. Migration 0007
   copies only the latest known execution attempt; older retry outcomes are unavailable.
-  New runs receive manual, backfill or stand-in identities now, while transitions, lease
-  enforcement and live attempt/gate recording remain subsequent items. Direct SQL inserts
+  New runs receive manual, backfill or stand-in identities. Live attempt transitions are in
+  `S3.B`; automatic lease management and gate recording remain subsequent items. Direct SQL inserts
   default to a generated manual identity and must supply other trigger kinds explicitly.
   Upgrade fixtures include both released schemas and their packaged migration ledgers.
   `S3.I` makes the Engine DB refuse direct SQL writes, including those inserts.
@@ -1066,6 +1078,8 @@ and names its actor; the Engine DB refuses any other."
   row changes except through etl-craft unless `doctor` reports the grant that allowed it.
 
 ### S3.B One module owns every status change
+
+**Status: done** (#99); see [Handover notes](#handover-notes).
 
 Branch: `feat/engine-transitions`. New module `engine/transitions.py`; queries under
 `dialects/engine/queries/transition_*.sql`.

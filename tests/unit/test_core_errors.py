@@ -25,6 +25,7 @@ EXIT_CODES = {
     errors.CloningError: ExitCode.CLONING,
     errors.RemoteUnsupportedError: ExitCode.REMOTE_UNSUPPORTED,
     errors.InjectedFaultError: ExitCode.INJECTED_FAULT,
+    errors.StaleTransitionError: ExitCode.STALE_TRANSITION,
 }
 
 
@@ -57,6 +58,7 @@ def test_the_exit_codes():
         ("CLONING", 17),
         ("REMOTE_UNSUPPORTED", 18),
         ("INJECTED_FAULT", 19),
+        ("STALE_TRANSITION", 20),
     ]
 
 
