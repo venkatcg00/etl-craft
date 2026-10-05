@@ -85,12 +85,26 @@ the task runs.
 2. **The last run decides.** The upstream's latest finished run must satisfy the dependency
    type, just as within a pipeline. An older run that would have satisfied it does not count: if
    the upstream succeeded yesterday and failed today, a `SUCCESS` dependency is not satisfied.
-3. **Each upstream run is consumed once.** The run must also be newer than the one the dependency
-   last consumed. `AUD_DEPENDENCY_CONSUMPTION` logs every upstream run consumed, one row per
-   downstream run (or task), dependency and upstream run, and a dependency's latest row is what it
-   last consumed. A row is added only when the downstream run or task succeeds, so a downstream
-   that failed is retried against the same upstream run; and the log says which upstream runs
-   each run was built from.
+3. **Consumption uses the admission decision.** A gate records each dependency it judges in
+   `AUD_GATE_DECISIONS`, with the selected upstream run, published output revision, result,
+   reason and decision time. Pipeline decisions are recorded with run creation; task decisions
+   are recorded with attempt admission. A successful downstream consumes only its recorded
+   `SATISFIED` decisions. Reopening an upstream, completing a newer run, or changing dependency
+   metadata while the downstream runs cannot change what that downstream consumes.
+4. **Repairs can be fresh output.** A higher upstream run id is new. The same run id is new only
+   when its published `OUTPUT_REVISION` is higher and this dependency has `CONSUME_REPAIRS = 'Y'`
+   (the default on both dependency tables). Set it to `N` when the dependency should accept only
+   new run identities. An older run id never becomes new merely by gaining a higher revision.
+
+A run starts at output revision 1. Reopening it sets `REPAIR_PENDING = 'Y'`; a successful ending
+publishes the repair by incrementing the revision once and clearing the flag. A failed or cancelled
+repair does not publish a revision. Cross-pipeline task decisions use their task run identity and
+the containing pipeline's published output revision.
+
+`AUD_DEPENDENCY_CONSUMPTION` records the selected upstream identity and revision. Failed or skipped
+downstream work consumes nothing; bypassed decisions also consume nothing. Pipeline retries resume
+with their original admission decisions, while a retried task receives decisions for its new
+attempt. Skipped tasks can retain an unsatisfied decision without an execution attempt.
 
 `Orchestration.Dependency_gates: warn` or `off` relaxes these checks per profile, recording
 each bypass; see [Relax dependency gates](run-control.md#relax-dependency-gates).

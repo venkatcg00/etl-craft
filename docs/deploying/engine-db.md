@@ -93,7 +93,12 @@ selected upstream identities and revision, result, reason and decision time. Con
 start at revision 1; dependency `CONSUME_REPAIRS` flags default to `Y`. The schema reference lists
 all fields and constraints. Execution writes immutable attempts and updates their task summaries atomically. Run and
   attempt supervisors renew ownership leases; reconciliation fences expired attempts as `LOST`.
-  Recording gate decisions remains a subsequent roadmap item.
+Admission records the selected upstream identities and revisions in `AUD_GATE_DECISIONS`,
+and successful downstream work consumes only its recorded satisfied decisions.
+
+Migration `0010_gate_repairs.sql` adds `REPAIR_PENDING` to pipeline runs. Reopening sets the flag;
+successful publication increments `OUTPUT_REVISION` once and clears it. Existing output revisions
+are preserved, and active historical runs with a recorded REOPEN remain pending after migration.
 
 SQLite rebuilds the pipeline run table with the same reference checks, custom object preservation,
 identity-counter protection and extra-column refusal as migration 0006. PostgreSQL alters it in

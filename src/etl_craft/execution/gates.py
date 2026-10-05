@@ -9,10 +9,12 @@ rows naming another pipeline) are checked before the task runs. Each check:
    ``Orchestration.Gate_wait_minutes`` (an hour unless set) and looks at most 30 times, across all
    of its dependencies.
 2. Judges the upstream's latest finished run. The dependency is satisfied only when that run
-   is newer than the one it last consumed and its status satisfies the dependency type. An
+   has a newer run id or an allowed newer published revision, and its status satisfies the
+   dependency type. An
    older run that would have satisfied it does not count: the last run decides.
 3. Once the downstream succeeds, logs that run as consumed in ``AUD_DEPENDENCY_CONSUMPTION``,
-   one row per downstream run (or task), dependency and upstream run; the dependency's latest row
+   one row per downstream run (or task), dependency, upstream run and revision;
+   the dependency's latest row
    is what it last consumed. A downstream that fails or is skipped consumes nothing, so its
    retry sees the same upstream run.
 
@@ -41,11 +43,9 @@ from etl_craft.core.enums import TERMINAL_STATUSES, DependencyType, GatePolicy, 
 from etl_craft.core.errors import GraphError
 from etl_craft.engine.repository import trackers
 from etl_craft.engine.repository.dependencies import (
-    PipelineDependencyEdge,
     fetch_cross_pipeline_task_edges,
     fetch_pipeline_dependency_edges,
 )
-from etl_craft.engine.runlog import fetch_run_sla
 
 logger = logging.getLogger(__name__)
 
@@ -126,17 +126,38 @@ def satisfies(dependency_type: str, run: trackers.FinishedRun) -> bool:
 
 
 def judge(
-    dependency_type: str, run: trackers.FinishedRun | None, last_consumed: int | None
+    dependency_type: str,
+    run: trackers.FinishedRun | None,
+    last_consumed: trackers.ConsumedRun | int | None,
+    *,
+    consume_repairs: bool = True,
 ) -> tuple[int | None, str]:
     """Return the upstream run that satisfies a dependency, or ``None`` and why none does.
 
-    Only the latest finished run is judged. It must be newer than ``last_consumed``, the run the
-    dependency last consumed, and satisfy ``dependency_type``.
+    Only the latest finished run is judged. A higher run id is new; the same id is new only
+    with a higher revision and ``consume_repairs``. Its status must satisfy ``dependency_type``.
     """
     if run is None:
         return None, "has no finished run"
-    if last_consumed is not None and run.run_id <= last_consumed:
-        return None, f"has no run since run {last_consumed}, which was already consumed"
+    last = (
+        trackers.ConsumedRun(last_consumed, 1) if isinstance(last_consumed, int) else last_consumed
+    )
+    if (
+        last is not None
+        and run.run_id == last.run_id
+        and run.revision > last.revision
+        and not consume_repairs
+    ):
+        return None, (
+            f"run {run.run_id} revision {run.revision} is newer than consumed revision "
+            f"{last.revision}, but CONSUME_REPAIRS='N'; enable CONSUME_REPAIRS "
+            "to accept repairs"
+        )
+    if last is not None and (
+        run.run_id < last.run_id
+        or (run.run_id == last.run_id and (not consume_repairs or run.revision <= last.revision))
+    ):
+        return None, f"has no run since run {last.run_id}, which was already consumed"
     if not satisfies(dependency_type, run):
         detail = " with no rows written" if run.status == RunStatus.SUCCESS else ""
         return None, (
@@ -199,6 +220,7 @@ class CrossPipelineCheck:
     consumed: dict[int, int] = field(default_factory=dict)
     definitive: bool = True
     bypassed: tuple[str, ...] = ()
+    decisions: tuple[trackers.GateDecision, ...] = ()
 
 
 class CrossPipelineGate(Protocol):
@@ -253,10 +275,16 @@ class TrackedGate:
         satisfied are bypassed; under ``off`` none is checked and all are bypassed.
         """
         with engine.connect() as conn:
-            edges = fetch_cross_pipeline_task_edges(conn, task_id)
+            edges = fetch_cross_pipeline_task_edges(conn, task_id, include_repairs=True)
         if self.policy == GatePolicy.OFF:
             return CrossPipelineCheck(
                 needed,
+                decisions=tuple(
+                    trackers.GateDecision(
+                        edge.task_dependency_id, True, None, "BYPASSED", "dependency gates are off"
+                    )
+                    for edge in edges
+                ),
                 bypassed=tuple(
                     f"upstream task {edge.depends_on_label} ({edge.dependency_type}) not checked"
                     for edge in edges
@@ -266,6 +294,7 @@ class TrackedGate:
         satisfied = 0
         reasons: list[str] = []
         consumed: dict[int, int] = {}
+        decisions: list[trackers.GateDecision] = []
         for edge in edges:
             if satisfied >= needed:
                 break
@@ -282,7 +311,22 @@ class TrackedGate:
             with engine.connect() as conn:
                 run = trackers.fetch_latest_finished_task_run(conn, edge.depends_on_task_id)
                 last = trackers.fetch_task_last_consumed(conn, edge.task_dependency_id)
-            run_id, why = judge(edge.dependency_type, run, last)
+            run_id, why = judge(
+                edge.dependency_type, run, last, consume_repairs=edge.consume_repairs
+            )
+            decisions.append(
+                trackers.GateDecision(
+                    edge.task_dependency_id,
+                    True,
+                    run,
+                    "SATISFIED"
+                    if run_id is not None
+                    else "BYPASSED"
+                    if self.policy == GatePolicy.WARN
+                    else "UNSATISFIED",
+                    why,
+                )
+            )
             if run_id is None:
                 reasons.append(f"{label} ({edge.dependency_type}) {why}")
                 continue
@@ -290,30 +334,17 @@ class TrackedGate:
             satisfied += 1
             consumed[edge.task_dependency_id] = run_id
         if self.policy == GatePolicy.WARN and satisfied < needed:
-            return CrossPipelineCheck(needed, consumed=consumed, bypassed=tuple(reasons))
-        return CrossPipelineCheck(satisfied, tuple(reasons), consumed)
+            return CrossPipelineCheck(
+                needed, consumed=consumed, bypassed=tuple(reasons), decisions=tuple(decisions)
+            )
+        return CrossPipelineCheck(satisfied, tuple(reasons), consumed, decisions=tuple(decisions))
 
     def consume(
         self, engine: Engine, task_id: int, pipeline_run_id: int, consumed: dict[int, int]
     ) -> None:
         """Record the upstream task runs a task that succeeded consumed."""
-        with engine.connect() as conn:
-            edges = fetch_cross_pipeline_task_edges(conn, task_id)
         with engine.begin() as conn:
-            for edge in edges:
-                run_id = consumed.get(edge.task_dependency_id)
-                if run_id is None:
-                    continue
-                trackers.record_task_consumed(
-                    conn,
-                    edge.task_dependency_id,
-                    task_id,
-                    edge.pipeline_id,
-                    pipeline_run_id,
-                    edge.depends_on_pipeline_id,
-                    run_id,
-                )
-                logger.info("consumed run %d of upstream task %s", run_id, edge.depends_on_label)
+            trackers.consume_task_decisions(conn, task_id, pipeline_run_id)
 
 
 def _read(engine: Engine, fetch: Callable[..., T], *args: object) -> T:
@@ -328,6 +359,7 @@ class PipelineGateResult:
     reasons: tuple[str, ...] = ()
     consumed: dict[int, int] = field(default_factory=dict)
     bypassed: tuple[str, ...] = ()
+    decisions: tuple[trackers.GateDecision, ...] = ()
 
     @property
     def satisfied(self) -> bool:
@@ -350,18 +382,25 @@ def check_pipeline_dependencies(
     """
     clock = clock or Clock()
     with engine.connect() as conn:
-        edges = fetch_pipeline_dependency_edges(conn, pipeline_id)
+        edges = fetch_pipeline_dependency_edges(conn, pipeline_id, include_repairs=True)
     if policy == GatePolicy.OFF:
         return PipelineGateResult(
+            decisions=tuple(
+                trackers.GateDecision(
+                    edge.pipeline_dependency_id, False, None, "BYPASSED", "dependency gates are off"
+                )
+                for edge in edges
+            ),
             bypassed=tuple(
                 f"upstream pipeline {edge.depends_on_pipeline_code} ({edge.dependency_type}) "
                 "not checked"
                 for edge in edges
-            )
+            ),
         )
     budget = WaitBudget.start(clock, wait_seconds)
     consumed: dict[int, int] = {}
     bypassed: list[str] = []
+    decisions: list[trackers.GateDecision] = []
     for edge in edges:
         label = f"upstream pipeline {edge.depends_on_pipeline_code}"
         _wait_while_running(
@@ -373,52 +412,39 @@ def check_pipeline_dependencies(
             budget,
             clock,
         )
-        run_id, why = _judge_pipeline_edge(engine, edge, clock.now())
+        with engine.connect() as conn:
+            run = trackers.fetch_latest_finished_pipeline_run(
+                conn, edge.depends_on_pipeline_id, clock.now()
+            )
+            last = trackers.fetch_pipeline_last_consumed(conn, edge.pipeline_dependency_id)
+        run_id, why = judge(edge.dependency_type, run, last, consume_repairs=edge.consume_repairs)
+        decisions.append(
+            trackers.GateDecision(
+                edge.pipeline_dependency_id,
+                False,
+                run,
+                "SATISFIED"
+                if run_id is not None
+                else "BYPASSED"
+                if policy == GatePolicy.WARN
+                else "UNSATISFIED",
+                why,
+            )
+        )
         if run_id is None:
             reason = f"{label} ({edge.dependency_type}) {why}"
             if policy == GatePolicy.WARN:
                 bypassed.append(reason)
                 continue
-            return PipelineGateResult((reason,))
+            return PipelineGateResult((reason,), decisions=tuple(decisions))
         logger.info("%s (%s) is satisfied: %s", label, edge.dependency_type, why)
         consumed[edge.pipeline_dependency_id] = run_id
-    return PipelineGateResult(consumed=consumed, bypassed=tuple(bypassed))
+    return PipelineGateResult(
+        consumed=consumed, bypassed=tuple(bypassed), decisions=tuple(decisions)
+    )
 
 
 def consume_pipeline_dependencies(engine: Engine, pipeline_id: int, pipeline_run_id: int) -> None:
-    """Record the upstream runs a successful run of ``pipeline_id`` consumed.
-
-    They are judged again as they stood when ``pipeline_run_id`` started, which is when its gate
-    passed; an upstream run that finished later is left for the next run. This works whether the
-    gate ran in this process or in an earlier ``run --init-only``.
-    """
-    with engine.connect() as conn:
-        edges = fetch_pipeline_dependency_edges(conn, pipeline_id)
-        started = fetch_run_sla(conn, pipeline_run_id).start_date
-    for edge in edges:
-        run_id, _ = _judge_pipeline_edge(engine, edge, started)
-        if run_id is None:
-            continue
-        with engine.begin() as conn:
-            trackers.record_pipeline_consumed(
-                conn,
-                edge.pipeline_dependency_id,
-                pipeline_id,
-                pipeline_run_id,
-                edge.depends_on_pipeline_id,
-                run_id,
-            )
-        logger.info(
-            "consumed run %d of upstream pipeline %s", run_id, edge.depends_on_pipeline_code
-        )
-
-
-def _judge_pipeline_edge(
-    engine: Engine, edge: PipelineDependencyEdge, ended_by: datetime
-) -> tuple[int | None, str]:
-    with engine.connect() as conn:
-        run = trackers.fetch_latest_finished_pipeline_run(
-            conn, edge.depends_on_pipeline_id, ended_by
-        )
-        last = trackers.fetch_pipeline_last_consumed(conn, edge.pipeline_dependency_id)
-    return judge(edge.dependency_type, run, last)
+    """Consume a successful run's recorded satisfied decisions; never judge its history again."""
+    with engine.begin() as conn:
+        trackers.consume_pipeline_decisions(conn, pipeline_run_id)

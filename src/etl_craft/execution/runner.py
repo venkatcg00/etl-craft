@@ -49,6 +49,7 @@ from etl_craft.core.faults import fault_point
 from etl_craft.core.graph import DependencyGraph, RunState, TaskRunState, build_graph
 from etl_craft.engine import runlog, transitions
 from etl_craft.engine.queries import statement
+from etl_craft.engine.repository import trackers
 from etl_craft.engine.repository.dependencies import (
     fetch_cross_pipeline_task_edges,
     fetch_pipeline_graph,
@@ -197,12 +198,14 @@ def run_task(
             selector=selector,
         )
     consumed: dict[int, int] | None = None
+    decisions: tuple[trackers.GateDecision, ...] = ()
     if not force:
         blocked, cross = _preflight(engine, gate, pipeline_id, task_id, task_code, pipeline_run_id)
         if blocked is not None:
             logger.info(blocked.message)
             return blocked
         consumed = cross.consumed
+        decisions = cross.decisions
         if cross.bypassed:
             record_gate_bypass(
                 engine,
@@ -213,7 +216,15 @@ def run_task(
                 task_id=task_id,
             )
     outcome = _run_attempt(
-        engine, config, task_id, task_code, pipeline_code, pipeline_run_id, force, child
+        engine,
+        config,
+        task_id,
+        task_code,
+        pipeline_code,
+        pipeline_run_id,
+        force,
+        child,
+        decisions=decisions,
     )
     if consumed and outcome.status == RunStatus.SUCCESS:
         fault_point("runner.before_consumption")
@@ -398,7 +409,9 @@ def _preflight(
     if cross.reasons:
         reasons = "; ".join(cross.reasons)
         if cross.definitive and not _upstream_pending(graph, task_id, run_state):
-            return _record_skipped(engine, task_id, pipeline_run_id, task_code, reasons), NO_CROSS
+            return _record_skipped(
+                engine, task_id, pipeline_run_id, task_code, reasons, decisions=cross.decisions
+            ), NO_CROSS
         return _skipped(f"{task_code}: {reasons}, and {unready}; nothing recorded"), NO_CROSS
     if task_id in graph.unsatisfiable(run_state):
         never = _describe_unready(graph, task_id, pipeline_run_id, can_never=True)
@@ -458,7 +471,13 @@ def _describe_unready(
 
 
 def _record_skipped(
-    engine: Engine, task_id: int, pipeline_run_id: int, task_code: str, reason: str
+    engine: Engine,
+    task_id: int,
+    pipeline_run_id: int,
+    task_code: str,
+    reason: str,
+    *,
+    decisions: tuple[trackers.GateDecision, ...] = (),
 ) -> TaskOutcome:
     """Record the task ``SKIPPED`` with ``reason``, unless it already has an outcome.
 
@@ -474,6 +493,7 @@ def _record_skipped(
                 f"and not run again: {reason}",
                 binding.task_run_id,
             )
+        trackers.record_decisions(conn, pipeline_run_id, decisions)
         transitions.finish_task_run(
             conn, binding.task_run_id, status=RunStatus.SKIPPED, error_message=reason
         )
@@ -503,6 +523,7 @@ def _run_attempt(
     child: ChildOptions | None,
     *,
     rerun: bool = False,
+    decisions: tuple[trackers.GateDecision, ...] = (),
 ) -> TaskOutcome:
     """Bind and start an attempt, run it in its own process, and record how it ended.
 
@@ -530,6 +551,7 @@ def _run_attempt(
             lease_expires_at=datetime.now(UTC) + timedelta(seconds=leases.LEASE_SECONDS),
             host=socket.gethostname(),
         )
+        trackers.record_decisions(conn, pipeline_run_id, decisions, attempt_id=attempt_id)
         active = transitions.active_attempt(conn, binding.task_run_id)
         assert active is not None
         attempt = active.attempt_number

@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from etl_craft.core.errors import GraphError
-from etl_craft.engine.repository.trackers import FinishedRun, LatestRun
+from etl_craft.engine.repository.trackers import ConsumedRun, FinishedRun, LatestRun
 from etl_craft.execution import gates
 from etl_craft.execution.gates import Clock, WaitBudget, judge, next_look_delay, satisfies
 
@@ -121,3 +121,25 @@ def test_the_unchecked_gate_is_never_definitive():
     check = gates.UncheckedGate().check(None, 1, 1)
     assert (check.satisfied_count, check.definitive) == (0, False)
     assert gates.UncheckedGate().consume(None, 1, 1, {}) is None
+
+
+@pytest.mark.parametrize(
+    ("run_id", "revision", "repairs", "accepted"),
+    [
+        (5, 2, True, True),
+        (5, 2, False, False),
+        (5, 1, True, False),
+        (4, 99, True, False),
+        (6, 1, False, True),
+    ],
+)
+def test_freshness_compares_identity_and_revision(run_id, revision, repairs, accepted):
+    selected, reason = judge(
+        "SUCCESS",
+        FinishedRun(run_id, "SUCCESS", True, revision),
+        ConsumedRun(5, 1),
+        consume_repairs=repairs,
+    )
+    assert selected == (run_id if accepted else None)
+    if run_id == 5 and revision == 2 and not repairs:
+        assert "CONSUME_REPAIRS='N'" in reason
