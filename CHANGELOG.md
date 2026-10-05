@@ -8,6 +8,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Canonical version-2 merge hashes distinguish NULL, empty text and embedded separators, and
+  normalize UTC timestamps, decimal scales and booleans across warehouses. Floating-point
+  compare columns are refused. `etl-craft rehash --target S.T [--dry-run]` upgrades all stored
+  hashes, including SCD2 history, and migration `0011_target_hash_version.sql` tracks the contract
+  published after warehouse commits. Target locks coordinate SQL mutations and hash upgrades.
+
 - Atomic Engine DB endings: successful attempts commit their outcome, summary, returned Python
   offset and recorded task-dependency consumption together. Pipeline endings commit status, SLA
   and recorded pipeline-dependency consumption together, before finalization hooks run.

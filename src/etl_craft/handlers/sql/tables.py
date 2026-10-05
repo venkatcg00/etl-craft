@@ -228,8 +228,8 @@ def require_target(session: Session) -> list[tuple[str, str]]:
     return columns
 
 
-def check_or_evolve(session: Session, stage: str, action: str, *, schema_evolution: bool) -> None:
-    """Check the existing target against the stage, adding new columns when allowed."""
+def check_target_audit(session: Session, action: str) -> list[tuple[str, str]]:
+    """Refuse an absent target or missing action-managed columns before any write."""
     audit = AUDIT_COLUMNS[action]
     target_columns = require_target(session)
     required = ("PIPELINE_RUN_ID", *audit)
@@ -241,6 +241,13 @@ def check_or_evolve(session: Session, stage: str, action: str, *, schema_evoluti
             f"SQL_ACTION={action} maintains; run a SETUP_TABLE task for it, or add the columns. "
             "SCHEMA_EVOLUTION adds only the SELECT's own columns"
         )
+    return target_columns
+
+
+def check_or_evolve(session: Session, stage: str, action: str, *, schema_evolution: bool) -> None:
+    """Check the existing target against the stage, adding new columns when allowed."""
+    target_columns = check_target_audit(session, action)
+    required = ("PIPELINE_RUN_ID", *AUDIT_COLUMNS[action])
     managed = {column.lower() for column in required} | {ROW_ID_COLUMN.lower()}
     stage_columns = session.columns(stage)
     stage_names = [name for name, _ in stage_columns]
@@ -380,5 +387,5 @@ def add_hash_key(session: Session, stage: str, compare_columns: tuple[str, ...])
     Added after the schema check, which compares the SELECT's own columns only.
     """
     session.run(f"ALTER TABLE {stage} ADD COLUMN HASH_KEY VARCHAR(32)", step="add HASH_KEY")
-    hashed = session.dialect.hash_expression([f"{stage}.{column}" for column in compare_columns])
+    hashed = session.hash([f"{stage}.{column}" for column in compare_columns], compare_columns)
     session.run(f"UPDATE {stage} SET HASH_KEY = {hashed}", step="hash the compare columns")

@@ -38,6 +38,7 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.core.enums import RunStatus, SqlAction
 from etl_craft.core.errors import HandlerError
+from etl_craft.engine.repository.hash_versions import fetch_hash_version
 from etl_craft.engine.repository.tasks import TargetTask, fetch_target_tasks
 from etl_craft.engine.runlog import fetch_task_run_status
 from etl_craft.handlers.registry import HandlerResult, TaskContext
@@ -49,6 +50,7 @@ from etl_craft.handlers.sql.tables import (
     add_row_id,
     build_stage,
     check_or_evolve,
+    check_target_audit,
     create_target_shape,
     dedupe,
     refuse_null_keys,
@@ -91,6 +93,7 @@ def create_table(session: Session, action: ActionContext) -> HandlerResult:
     """Replace the target with the SELECT's rows, stamped with the run id."""
     stage = build_stage(session, action.select_sql)
     source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
+    session.clear_hash_version = True
     session.run(f"DROP TABLE IF EXISTS {session.target}", step="drop the old target")
     computed = session.dialect.surrogate_key == "computed"
     # Where ROW_ID cannot be added afterwards, the rows are numbered as the table is created.
@@ -125,6 +128,8 @@ def setup_table(session: Session, action: ActionContext) -> HandlerResult:
     stage = build_stage(session, action.select_sql, empty=True)
     create_target_shape(session, stage, AUDIT_COLUMNS[writer])
     session.drop(stage)
+    if writer in {SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE}:
+        session.publish_hash_version = 2
     logger.info("created %s with the audit columns of %s", session.target, writer)
     return HandlerResult(source_count=0, target_count=0, insert_count=0)
 
@@ -206,6 +211,14 @@ def append_table(session: Session, action: ActionContext) -> HandlerResult:
 def _merge_stage(session: Session, action: ActionContext, kind: SqlAction) -> tuple[str, int]:
     """Stage, de-duplicate, check and hash the SELECT for a merge; return (stage, source rows)."""
     task = action.task
+    check_target_audit(session, kind)
+    with action.engine_db.connect() as conn:
+        version = fetch_hash_version(conn, session.target)
+    if version != 2:
+        raise HandlerError(
+            f"{session.target} has hash version {version or 'unknown'}; "
+            f"run `etl-craft rehash --target {session.target_object}` before merging"
+        )
     stage = build_stage(session, action.select_sql)
     source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
     refuse_null_keys(session, stage, task.merge_key)
@@ -249,8 +262,9 @@ def scd1_merge(session: Session, action: ActionContext) -> HandlerResult:
     key_match = " AND ".join(f"t.{k} = s.{k}" for k in task.merge_key)
 
     def kept_hash(alias: str) -> str:
-        return dialect.hash_expression(
-            [f"COALESCE(s.{c}, {alias}.{c})" for c in task.merge_compare_columns]
+        return session.hash(
+            [f"COALESCE(s.{c}, {alias}.{c})" for c in task.merge_compare_columns],
+            task.merge_compare_columns,
         )
 
     compared = kept_hash("t") if task.preserve_target else "s.HASH_KEY"
@@ -276,8 +290,9 @@ def scd1_merge(session: Session, action: ActionContext) -> HandlerResult:
         value = source_value(column)
         if task.preserve_target:
             if column.lower() == "hash_key":
-                value = dialect.hash_expression(
-                    [f"COALESCE({source_value(c)}, {q}.{c})" for c in task.merge_compare_columns]
+                value = session.hash(
+                    [f"COALESCE({source_value(c)}, {q}.{c})" for c in task.merge_compare_columns],
+                    task.merge_compare_columns,
                 )
             else:
                 value = f"COALESCE({value}, {q}.{column})"
@@ -416,6 +431,7 @@ def drop_table(session: Session, action: ActionContext) -> HandlerResult:
     if not session.target_columns():
         logger.info("%s does not exist; nothing to drop", session.target)
         return HandlerResult()
+    session.clear_hash_version = True
     session.run(f"DROP TABLE {session.target}", step="drop the target")
     return HandlerResult()
 

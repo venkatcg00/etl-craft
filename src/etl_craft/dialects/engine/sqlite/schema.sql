@@ -497,6 +497,13 @@ CREATE TABLE AUD_METADATA_CHANGES (
     CONSTRAINT ck_metadata_actor_kind CHECK (ACTOR_KIND IN ('HUMAN','SCHEDULE','ORCHESTRATOR','WORKER','SYSTEM'))
 );
 CREATE INDEX ix_metadata_changes_table ON AUD_METADATA_CHANGES (TABLE_NAME, CHANGED_AT);
+-- The canonical hash version published after a target warehouse update commits.
+CREATE TABLE AUD_TARGET_HASH_VERSION (
+    TARGET_OBJECT VARCHAR PRIMARY KEY,
+    HASH_VERSION INTEGER NOT NULL CONSTRAINT ck_target_hash_version CHECK (HASH_VERSION IN (1,2)),
+    RECOMPUTED_AT TIMESTAMP NOT NULL
+);
+
 CREATE TRIGGER trg_actor_guard_cfg_pipelines_insert BEFORE INSERT ON CFG_PIPELINES
 BEGIN
     SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'CFG_PIPELINES is written only by etl-craft; use etl-craft mark, cancel or run, or a project migration (etl-craft migrate)') END;
@@ -862,4 +869,19 @@ END;
 CREATE TRIGGER trg_attribute_run_insert AFTER INSERT ON AUD_PIPELINES_RUN_LOG
 BEGIN
     UPDATE AUD_PIPELINES_RUN_LOG SET STARTED_BY=COALESCE(NEW.STARTED_BY, etl_craft_actor()), STARTED_BY_KIND=COALESCE(NEW.STARTED_BY_KIND, etl_craft_actor_kind()), ENDED_BY=CASE WHEN NEW.END_DATE IS NOT NULL THEN COALESCE(NEW.ENDED_BY, etl_craft_actor()) ELSE NEW.ENDED_BY END, ENDED_BY_KIND=CASE WHEN NEW.END_DATE IS NOT NULL THEN COALESCE(NEW.ENDED_BY_KIND, etl_craft_actor_kind()) ELSE NEW.ENDED_BY_KIND END WHERE PIPELINE_RUN_ID=NEW.PIPELINE_RUN_ID;
+END;
+
+CREATE TRIGGER trg_actor_guard_aud_target_hash_version_insert BEFORE INSERT ON AUD_TARGET_HASH_VERSION
+BEGIN
+    SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'AUD_TARGET_HASH_VERSION is written only by etl-craft; use etl-craft rehash') END;
+END;
+
+CREATE TRIGGER trg_actor_guard_aud_target_hash_version_update BEFORE UPDATE ON AUD_TARGET_HASH_VERSION
+BEGIN
+    SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'AUD_TARGET_HASH_VERSION is written only by etl-craft; use etl-craft rehash') END;
+END;
+
+CREATE TRIGGER trg_actor_guard_aud_target_hash_version_delete BEFORE DELETE ON AUD_TARGET_HASH_VERSION
+BEGIN
+    SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'AUD_TARGET_HASH_VERSION is written only by etl-craft; use etl-craft rehash') END;
 END;

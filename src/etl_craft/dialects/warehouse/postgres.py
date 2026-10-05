@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from etl_craft.config.auth import warehouse_by_key
 from etl_craft.dialects.engine.postgres import DEFAULT_PORT, psycopg_auth_kwargs
@@ -34,3 +34,25 @@ class PostgresWarehouse(WarehouseDialect):
         )
         connect_args = {name: value for name, value in kwargs.items() if name not in url.query}
         return Presented(username=profile.user or None, connect_args=connect_args)
+
+    def timestamp_text(self, value: str, kind: str) -> str:
+        """Normalize instants to UTC; naive timestamps already represent UTC."""
+        utc = (
+            f"({value} AT TIME ZONE 'UTC')"
+            if "WITH TIME ZONE" in kind or kind == "TIMESTAMPTZ"
+            else value
+        )
+        return f"TO_CHAR({utc}, 'YYYY-MM-DD\"T\"HH24:MI:SS.US')"
+
+    def date_text(self, value: str) -> str:
+        """Use ISO dates even when DateStyle differs."""
+        return f"TO_CHAR({value}, 'YYYY-MM-DD')"
+
+    def on_connect(self, dbapi_connection: Any, profile: ConnectionProfile, secret: str) -> None:
+        """Pin every new warehouse session to UTC."""
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("SET TimeZone = 'UTC'")
+        finally:
+            cursor.close()
+        dbapi_connection.commit()

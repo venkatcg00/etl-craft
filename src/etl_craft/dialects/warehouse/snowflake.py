@@ -54,3 +54,35 @@ class SnowflakeWarehouse(WarehouseDialect):
         The stage holds one row per merge key by then, so ANY_VALUE is that row's value.
         """
         return f"ANY_VALUE({expression})"
+
+    def timestamp_text(self, value: str, kind: str) -> str:
+        """Format UTC instants and naive UTC values without session format defaults."""
+        utc = (
+            f"CONVERT_TIMEZONE('UTC', {value})"
+            if kind.startswith(("TIMESTAMP_TZ", "TIMESTAMP_LTZ"))
+            else value
+        )
+        return f"TO_CHAR(CAST({utc} AS TIMESTAMP_NTZ), 'YYYY-MM-DD\"T\"HH24:MI:SS.FF6')"
+
+    def date_text(self, value: str) -> str:
+        """Ignore DATE_OUTPUT_FORMAT."""
+        return f"TO_CHAR({value}, 'YYYY-MM-DD')"
+
+    def decimal_text(self, value: str, kind: str) -> str:
+        """Keep every declared fractional digit without integer padding."""
+        precision, scale = [int(n) for n in kind[kind.index("(") + 1 : -1].split(",")]
+        model = "FM" + "9" * max(precision - scale - 1, 0) + "0"
+        if scale:
+            model += "." + "0" * scale
+        return f"TO_CHAR(CAST({value} AS {kind}), '{model}')"
+
+    def on_connect(self, dbapi_connection: Any, profile: ConnectionProfile, secret: str) -> None:
+        """Pin every new warehouse session to UTC."""
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute(
+                "ALTER SESSION SET TIMEZONE = 'UTC', "
+                "TIMESTAMP_OUTPUT_FORMAT = 'YYYY-MM-DD\"T\"HH24:MI:SS.FF6'"
+            )
+        finally:
+            cursor.close()

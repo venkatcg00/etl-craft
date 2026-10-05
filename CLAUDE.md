@@ -60,6 +60,10 @@ Each package imports only the packages below it. `lint-imports` enforces this.
   (`CREATE_TABLE`, `SETUP_TABLE`, `OVERWRITE_TABLE`, `APPEND_TABLE`, `SCD1_MERGE`, `SCD2_MERGE`,
   `DROP_TABLE`, `DELETE_ROWS`) and owns every write. Only `CREATE_TABLE` and `SETUP_TABLE`
   create tables; the others fail when their target is missing.
+- Merge hashes use typed, NULL-tagged, length-prefixed values and UTC timestamps. Fresh merge
+  targets publish hash version 2 after creation; existing targets need `etl-craft rehash` before
+  merging. Never publish a hash version before its warehouse update commits. Target mutations
+  and rehashing hold the same Engine DB target lock.
 - One warehouse per deployment. Third-party SQLAlchemy dialects are optional extras and never
   imported by engine code.
 - `craft-connector.yml` is written by the team and only read by the engine. Secrets are always

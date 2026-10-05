@@ -60,6 +60,8 @@ class Session:
         self.target = f"{self.catalog}.{self.schema}.{self.table}"
         self.scratch_tables: list[str] = []
         self.token = secrets.token_hex(3)
+        self.publish_hash_version: int | None = None
+        self.clear_hash_version = False
 
     # Statements
 
@@ -172,6 +174,48 @@ class Session:
             step=f"read the columns of {name}",
         ).all()
         return [(str(row[0]), str(row[1])) for row in rows]
+
+    def hash_types(self, name: str) -> dict[str, str]:
+        """Return types and declared decimal scales for hashing table ``name``.
+
+        ``name`` is ``catalog.schema.table``, ``schema.table`` or a bare temporary scratch table
+        name, matched by name alone: a scratch name carries a token no other table has.
+        """
+        parts = name.split(".")
+        table = parts[-1]
+        schema = parts[-2] if len(parts) >= 2 else None
+        catalog = parts[0] if len(parts) == 3 else None
+        where = "lower(table_name) = lower(:table)"
+        if schema is not None:
+            self.dialect.load_table_metadata(self.conn, schema, table)
+            where += " AND lower(table_schema) = lower(:schema)"
+        if catalog is not None:
+            where += " AND lower(table_catalog) = lower(:catalog)"
+        rows = self.run(
+            f"SELECT {self.dialect.hash_metadata_columns} FROM information_schema.columns "
+            f"WHERE {where} ORDER BY ordinal_position",
+            {"table": table, "schema": schema, "catalog": catalog},
+            step=f"read the columns of {name}",
+        ).all()
+        types = {}
+        for row in rows:
+            kind = row[1].upper()
+            if (
+                kind in {"DECIMAL", "NUMERIC", "NUMBER"}
+                and row[2] is not None
+                and row[3] is not None
+            ):
+                kind = f"DECIMAL({int(row[2])},{int(row[3])})"
+            types[row[0].lower()] = kind
+        return types
+
+    def hash(self, values: list[str], columns: tuple[str, ...]) -> str:
+        """Hash values using the target columns' persisted types and decimal scales."""
+        types = self.hash_types(self.target)
+        missing = [column for column in columns if column.lower() not in types]
+        if missing:
+            raise HandlerError(f"{self.target} lacks compare columns {', '.join(missing)}")
+        return self.dialect.hash_expression(values, [types[column.lower()] for column in columns])
 
     def target_columns(self) -> list[tuple[str, str]]:
         """Return the target's columns; empty when it does not exist."""

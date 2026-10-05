@@ -15,7 +15,10 @@ from sqlalchemy.engine import Engine
 from etl_craft.config.targets import active_catalog, parse_warehouse_url
 from etl_craft.core.enums import TableFormat
 from etl_craft.core.errors import ConfigurationError, HandlerError
+from etl_craft.core.text import qualify
 from etl_craft.dialects.warehouse import WarehouseDialect, resolve
+from etl_craft.engine import locks
+from etl_craft.engine.repository.hash_versions import clear_hash_version, save_hash_version
 from etl_craft.handlers.registry import HandlerResult, TaskContext
 from etl_craft.handlers.sql.actions import ACTIONS, ActionContext, utc_now
 from etl_craft.handlers.sql.session import Session
@@ -46,27 +49,33 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
         dialect.display_name,
     )
     logger.debug("the SELECT:\n%s", task.select_sql)
-    with open_warehouse(config, engine_db) as warehouse, warehouse.begin() as conn:
-        session = Session(
-            conn,
-            dialect,
-            catalog=catalog,
-            action=task.action,
-            target_object=task.target_object,
-            task_run_id=context.task_run_id,
-            params=context.task_params,
-        )
-        action = ActionContext(
-            task=task,
-            context=context,
-            engine_db=engine_db,
-            user=config.warehouse.active.user or "",
-            now=utc_now(),
-        )
-        try:
-            result = ACTIONS[task.action](session, action)
-        finally:
-            session.sweep()
+    with locks.target(qualify(task.target_object, catalog)).hold(engine_db):
+        with open_warehouse(config, engine_db) as warehouse, warehouse.begin() as conn:
+            session = Session(
+                conn,
+                dialect,
+                catalog=catalog,
+                action=task.action,
+                target_object=task.target_object,
+                task_run_id=context.task_run_id,
+                params=context.task_params,
+            )
+            action = ActionContext(
+                task=task,
+                context=context,
+                engine_db=engine_db,
+                user=config.warehouse.active.user or "",
+                now=utc_now(),
+            )
+            try:
+                result = ACTIONS[task.action](session, action)
+            finally:
+                session.sweep()
+        with engine_db.begin() as conn:
+            if session.clear_hash_version:
+                clear_hash_version(conn, session.target)
+            if session.publish_hash_version is not None:
+                save_hash_version(conn, session.target, session.publish_hash_version)
     return result
 
 

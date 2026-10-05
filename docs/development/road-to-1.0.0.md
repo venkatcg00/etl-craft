@@ -78,7 +78,8 @@ item's text, or work done early under another item.
 | S3.D Leases and reconciliation | Done | #101 | B1, B8, B16, B24, B26, W1 |
 | S3.E Recorded gate decisions and repairs | Done | #102 | B14, B62 |
 | S3.F Atomic endings | Done | #103 | B6, B9; Engine DB portion of W4 |
-| S3.G to S3.H | Not started | | |
+| S3.G.1 Canonical change hash | Done | #104 | B22, B35 |
+| S3.G.2 to S3.H | Not started | | |
 | 0.4 and later | Not started | | |
 
 ### Handover notes
@@ -86,6 +87,16 @@ item's text, or work done early under another item.
 What a person picking up the work needs that the code and the item texts do not say.
 
 **Choices that differ from the item text.**
+
+- S3.G.1 hashes persisted target types so declared decimal scales are stable between stage
+  and target. Trino embeds precision/scale in its type text and uses timestamp text rather than
+  millisecond-truncating date_format. Session UTC is pinned with SET TIME ZONE on Trino.
+  Migration 0011 leaves existing targets unknown; fresh merge setups publish version 2 only
+  after their warehouse commit. Rehash derives one ordered compare contract from active merge
+  tasks, updates every row including SCD2 history, and then publishes its version. Target locks
+  coordinate mutations with upgrades; they provide the locking primitive planned for S3.G.5,
+  whose concurrency tests remain outstanding. Warehouse/Engine DB commits remain separate;
+  failed version publication is recoverable by repeating rehash.
 
 - S3.F commits successful attempt outcomes, summaries, returned script offsets and the exact
   attempt's recorded consumption together. Run finalization commits status, SLA and pipeline

@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import sqlite3
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import psycopg
@@ -161,6 +162,8 @@ def seeded_tables(db):
             "command": "run",
             "arguments": "{}",
             "outcome": "REQUESTED",
+            "target_object": "warehouse.s.t",
+            "recomputed_at": datetime.now(UTC),
         }
         inspector = inspect(conn)
         schema = None if engine.dialect.name == "sqlite" else inspector.default_schema_name
@@ -181,7 +184,7 @@ def seeded_tables(db):
                 if (
                     column.get("identity")
                     or column.get("autoincrement")
-                    or (column.get("primary_key") and lower != "task_id")
+                    or (column.get("primary_key") and lower not in {"task_id", "target_object"})
                 ):
                     continue
                 if (
@@ -283,6 +286,7 @@ def test_guarded_upgrade_rolls_back_with_the_ledger(empty_engine_db, monkeypatch
         "0008_actors_and_audit_guards.sql",
         "0009_preserve_request_actors.sql",
         "0010_gate_repairs.sql",
+        "0011_target_hash_version.sql",
     ]
 
 
