@@ -60,6 +60,9 @@ Each package imports only the packages below it. `lint-imports` enforces this.
   name the exact object, the value found, what was expected and the remedy, and record it in the
   audit tables and the attempt's log.
 
+- Every write to the Engine DB goes through etl-craft and names its actor; the Engine DB
+  refuses any other. Metadata edits use project migrations; audit history is append-only.
+
 ## Conventions
 
 - Comments and docstrings describe current behaviour. No decision tags, dates, review ids or

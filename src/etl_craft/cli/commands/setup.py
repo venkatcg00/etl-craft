@@ -9,15 +9,27 @@ from etl_craft.cli.commands.common import load_command_config
 from etl_craft.cli.commands.doctor import report
 from etl_craft.cli.output import Output
 from etl_craft.core.errors import ExitCode
+from etl_craft.engine.privileges import grants_sql
 from etl_craft.services.setup import setup
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
-    del parser
+    parser.add_argument(
+        "--print-grants",
+        action="store_true",
+        help="print PostgreSQL role grants without executing them",
+    )
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    result = setup(load_command_config(args))
+    config = load_command_config(args)
+    if args.print_grants:
+        if not config.engine.active.jdbc_url.startswith("jdbc:postgresql:"):
+            out.line("SQLite uses file permissions; restrict the database file to its owner.")
+        else:
+            out.line(grants_sql(config.engine.active.schema or "public"))
+        return ExitCode.SUCCESS
+    result = setup(config)
     if report(out, result.checks):
         out.line("setup: nothing changed; fix the failed check(s) and run setup again")
         return ExitCode.FAILURE

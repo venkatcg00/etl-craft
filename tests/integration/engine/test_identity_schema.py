@@ -1,5 +1,7 @@
 """Identity constraints and historical attempts on both Engine DB dialects."""
 
+from dataclasses import replace
+
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -17,6 +19,17 @@ def released(empty_engine_db, monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ETL_CRAFT_MIGRATIONS_DIR", raising=False)
     install(empty_engine_db, "0.2.0")
+    original = migrations.migration_streams
+    monkeypatch.setattr(
+        migrations,
+        "migration_streams",
+        lambda *args, **kwargs: [
+            replace(stream, files=tuple(f for f in stream.files if f.version < "0008"))
+            if stream.source == migrations.ENGINE
+            else stream
+            for stream in original(*args, **kwargs)
+        ],
+    )
     return empty_engine_db
 
 

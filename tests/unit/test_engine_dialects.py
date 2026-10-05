@@ -122,7 +122,7 @@ def schema_columns(path: Path) -> dict[str, list[str]]:
 def test_both_schemas_define_the_same_tables_and_columns_in_order():
     postgres = schema_columns(POSTGRES.schema_path())
     sqlite = schema_columns(SQLITE.schema_path())
-    assert len(postgres) == 20
+    assert len(postgres) == 22
     assert {"AUD_TASK_ATTEMPTS", "AUD_GATE_DECISIONS"} <= postgres.keys()
     assert postgres == sqlite
 
@@ -137,7 +137,7 @@ def test_the_schemas_split_into_whole_statements():
         for s in POSTGRES.split_statements(POSTGRES.schema_path().read_text("utf-8"))
     ]
     functions = [s for s in postgres if s.startswith("CREATE OR REPLACE FUNCTION")]
-    assert len(functions) == 2
+    assert len(functions) == 5
     assert all(s.endswith("LANGUAGE plpgsql") for s in functions)
     sqlite = [
         without_comments(s)

@@ -31,7 +31,20 @@ def _run(args: argparse.Namespace, out: Output) -> int:
         return ExitCode.SUCCESS
     if args.task_code is None:
         out.rows(
-            [("PIPELINE_RUN_ID", "STATUS", "RUN_DATE", "START_DATE", "END_DATE", "SLA_STATUS")]
+            [
+                (
+                    "PIPELINE_RUN_ID",
+                    "STATUS",
+                    "RUN_DATE",
+                    "START_DATE",
+                    "END_DATE",
+                    "SLA_STATUS",
+                    "STARTED_BY",
+                    "STARTED_BY_KIND",
+                    "ENDED_BY",
+                    "ENDED_BY_KIND",
+                )
+            ]
         )
         out.rows(
             (
@@ -41,6 +54,10 @@ def _run(args: argparse.Namespace, out: Output) -> int:
                 e.start_date,
                 e.end_date,
                 e.sla_status,
+                e.started_by,
+                e.started_by_kind,
+                e.ended_by,
+                e.ended_by_kind,
             )
             for e in entries
         )

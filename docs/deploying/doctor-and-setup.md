@@ -28,6 +28,7 @@ It exits 1 when any check fails, so it can gate a deployment. It checks:
 | Auth | | an `auth_mode` has not been verified against a live service |
 | Engine DB connection | the database cannot be reached, or its `schema` does not exist | a SQLite Engine DB in remote mode |
 | Engine DB tables and migrations | there are no Engine DB tables, a migration is pending, or an applied migration file has changed | |
+| Engine DB write access | PostgreSQL grants writes to another login or PUBLIC | the SQLite file is writable by group or others |
 | Warehouse | the database cannot be reached, its `schema` does not exist, it is an in-memory DuckDB, or a Trino catalog is not Iceberg | |
 | Email | the relay does not answer, TLS certificate or hostname verification fails, the CA file is unreadable, a login uses `tls_mode: none`, or the `sendmail` program cannot be run | |
 
@@ -60,3 +61,7 @@ Doctor also checks each configured key, certificate, CA and sendmail file for re
 reporting the absolute path. Relative paths, including PostgreSQL's `sslrootcert`, `sslcert`
 and `sslkey` URL parameters, start beside `craft-connector.yml`, regardless of the working
 directory. Symlinked configs use the link's directory.
+
+`setup --print-grants` prints PostgreSQL owner, engine and reader role statements for review and
+executes nothing. On SQLite it explains the file-permission boundary. See
+[Actors and write guards](engine-db.md#actors-and-write-guards) for deployment privileges.

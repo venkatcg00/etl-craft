@@ -29,6 +29,9 @@ htmlcov/
 *.duckdb
 *.db.*.lock
 
+# Generated demo seed migrations
+/examples/demo/migrations/
+
 # Editors
 .idea/
 .vscode/

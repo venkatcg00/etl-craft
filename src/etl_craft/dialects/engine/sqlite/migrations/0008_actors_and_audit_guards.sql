@@ -1,189 +1,6 @@
--- etl-craft Engine DB schema for SQLite.
---
--- The same tables and columns as the PostgreSQL schema, so every Engine DB query reads the same
--- shape from either. `etl-craft init-db` applies it to an empty database in one transaction.
--- Where SQLite differs:
---
---   * Identity columns are INTEGER PRIMARY KEY AUTOINCREMENT, so an id is never reused: the
---     dependency trackers compare runs by id.
---   * Timestamps are TIMESTAMP holding UTC text in one fixed format
---     ('YYYY-MM-DD HH:MM:SS.ffffff+00:00'), so text comparison orders them. The connection
---     writes and reads that format; the column defaults produce it too.
---   * PIPELINE_PARAMETERS is TEXT holding JSON, checked with json_valid.
---   * SQLite actor functions supply the identity; triggers stamp CREATED_BY and UPDATED_BY.
---     AFTER UPDATE triggers keep CREATED_BY and CREATE_DATE unchanged and stamp UPDATED_DATE,
---     since SQLite triggers cannot assign to NEW; their own UPDATE does not fire them again.
---   * A task dependency without DEPENDS_ON_PIPELINE_ID is filled in by an AFTER trigger, and
---     ck_taskdep_no_self_dep is checked again when it does.
---   * There is no COMMENT ON; the PostgreSQL schema carries the table comments.
---
--- Trigger bodies contain semicolons; the dialect splits this file with SQLite's own
--- complete_statement, which keeps each BEGIN ... END; whole.
-
-CREATE TABLE CFG_PIPELINES (
-    PIPELINE_ID          INTEGER PRIMARY KEY AUTOINCREMENT,
-    PIPELINE_CODE        VARCHAR NOT NULL,
-    PIPELINE_NAME        VARCHAR NOT NULL,
-    DESCRIPTION          VARCHAR,
-    RUN_SCHEDULE         VARCHAR,
-    SLA_IN_HOURS         NUMERIC,
-    REFRESH_TYPE         VARCHAR NOT NULL,
-    ACTIVE_FLAG          VARCHAR NOT NULL DEFAULT 'Y',
-    PIPELINE_PARAMETERS  TEXT,
-    CREATED_BY           VARCHAR DEFAULT 'etl-craft',
-    CREATE_DATE          TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    UPDATED_BY           VARCHAR DEFAULT 'etl-craft',
-    UPDATED_DATE         TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    CONSTRAINT ck_pipelines_code CHECK (PIPELINE_CODE GLOB '[A-Za-z]*' AND PIPELINE_CODE NOT GLOB '*[^A-Za-z0-9_]*' AND length(PIPELINE_CODE) <= 128 AND instr(PIPELINE_CODE, char(0)) = 0),
-    CONSTRAINT ck_pipelines_refresh_type CHECK (REFRESH_TYPE IN ('FULL', 'INCREMENTAL')),
-    CONSTRAINT ck_pipelines_active_flag  CHECK (ACTIVE_FLAG IN ('Y', 'N')),
-    CONSTRAINT ck_pipelines_parameters_json
-        CHECK (PIPELINE_PARAMETERS IS NULL OR json_valid(PIPELINE_PARAMETERS))
-);
-
-CREATE UNIQUE INDEX ux_pipelines_code_active
-    ON CFG_PIPELINES (PIPELINE_CODE) WHERE ACTIVE_FLAG = 'Y';
-
-
-
--- A pipeline waiting on another: a new run starts only when the upstream's last finished run
--- satisfies DEPENDENCY_TYPE.
-CREATE TABLE CFG_PIPELINE_DEPENDENCY (
-    PIPELINE_DEPENDENCY_ID  INTEGER PRIMARY KEY AUTOINCREMENT,
-    PIPELINE_ID             BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
-    DEPENDS_ON_PIPELINE_ID  BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
-    DEPENDENCY_TYPE         VARCHAR NOT NULL,
-    ACTIVE_FLAG             VARCHAR NOT NULL DEFAULT 'Y',
-    CREATED_BY              VARCHAR DEFAULT 'etl-craft',
-    CREATE_DATE             TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    UPDATED_BY              VARCHAR DEFAULT 'etl-craft',
-    UPDATED_DATE            TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    CONSUME_REPAIRS         VARCHAR(1) NOT NULL DEFAULT 'Y' CONSTRAINT ck_pipedep_consume_repairs CHECK (CONSUME_REPAIRS IN ('Y','N')),
-    CONSTRAINT ck_pipedep_type        CHECK (DEPENDENCY_TYPE IN ('SUCCESS','FAILURE','ALWAYS','HAS_DATA')),
-    CONSTRAINT ck_pipedep_active_flag CHECK (ACTIVE_FLAG IN ('Y','N')),
-    CONSTRAINT ck_pipedep_no_self_dep CHECK (PIPELINE_ID <> DEPENDS_ON_PIPELINE_ID)
-);
-
-CREATE UNIQUE INDEX ux_pipedep_edge_active
-    ON CFG_PIPELINE_DEPENDENCY (PIPELINE_ID, DEPENDS_ON_PIPELINE_ID, DEPENDENCY_TYPE)
-    WHERE ACTIVE_FLAG = 'Y';
-CREATE INDEX ix_pipedep_depends_on ON CFG_PIPELINE_DEPENDENCY (DEPENDS_ON_PIPELINE_ID);
-
-
-
--- One row per task: its pipeline, handler and run condition.
-CREATE TABLE CFG_TASKS (
-    TASK_ID              INTEGER PRIMARY KEY AUTOINCREMENT,
-    TASK_CODE            VARCHAR NOT NULL,
-    TASK_TYPE            VARCHAR NOT NULL,
-    PIPELINE_ID          BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
-    HANDLER              VARCHAR NOT NULL,
-    RUN_CONDITION        VARCHAR,
-    RUN_CONDITION_COUNT  INT,
-    ACTIVE_FLAG          VARCHAR NOT NULL DEFAULT 'Y',
-    CREATED_BY           VARCHAR DEFAULT 'etl-craft',
-    CREATE_DATE          TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    UPDATED_BY           VARCHAR DEFAULT 'etl-craft',
-    UPDATED_DATE         TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    CONSTRAINT ck_tasks_code CHECK (TASK_CODE GLOB '[A-Za-z]*' AND TASK_CODE NOT GLOB '*[^A-Za-z0-9_]*' AND length(TASK_CODE) <= 128 AND instr(TASK_CODE, char(0)) = 0),
-    CONSTRAINT ck_tasks_task_type     CHECK (TASK_TYPE IN ('INGESTION','ETL')),
-    CONSTRAINT ck_tasks_handler       CHECK (HANDLER IN ('PYTHON','SQL','BUSINESS_RULES','EMAIL_ALERT')),
-    CONSTRAINT ck_tasks_active_flag   CHECK (ACTIVE_FLAG IN ('Y','N')),
-    CONSTRAINT ck_tasks_run_condition CHECK (RUN_CONDITION IS NULL OR RUN_CONDITION IN ('ALL','ANY','N')),
-    CONSTRAINT ck_tasks_run_condition_count CHECK (
-        (COALESCE(RUN_CONDITION, '') = 'N' AND RUN_CONDITION_COUNT IS NOT NULL
-            AND RUN_CONDITION_COUNT >= 1)
-        OR (RUN_CONDITION IS NOT 'N' AND RUN_CONDITION_COUNT IS NULL)
-    )
-);
-
-CREATE UNIQUE INDEX ux_tasks_code_active
-    ON CFG_TASKS (PIPELINE_ID, TASK_CODE) WHERE ACTIVE_FLAG = 'Y';
-
-
-
--- A task waiting on another, in its own pipeline or, with DEPENDS_ON_PIPELINE_ID, in another.
-CREATE TABLE CFG_TASK_DEPENDENCY (
-    TASK_DEPENDENCY_ID      INTEGER PRIMARY KEY AUTOINCREMENT,
-    PIPELINE_ID             BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
-    TASK_ID                 BIGINT NOT NULL REFERENCES CFG_TASKS(TASK_ID),
-    DEPENDS_ON_PIPELINE_ID  BIGINT REFERENCES CFG_PIPELINES(PIPELINE_ID),
-    DEPENDS_ON_TASK_ID      BIGINT NOT NULL REFERENCES CFG_TASKS(TASK_ID),
-    DEPENDENCY_TYPE         VARCHAR NOT NULL,
-    ACTIVE_FLAG             VARCHAR NOT NULL DEFAULT 'Y',
-    CREATED_BY              VARCHAR DEFAULT 'etl-craft',
-    CREATE_DATE             TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    UPDATED_BY              VARCHAR DEFAULT 'etl-craft',
-    UPDATED_DATE            TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    CONSUME_REPAIRS         VARCHAR(1) NOT NULL DEFAULT 'Y' CONSTRAINT ck_taskdep_consume_repairs CHECK (CONSUME_REPAIRS IN ('Y','N')),
-    CONSTRAINT ck_taskdep_type        CHECK (DEPENDENCY_TYPE IN ('SUCCESS','FAILURE','ALWAYS','HAS_DATA')),
-    CONSTRAINT ck_taskdep_active_flag CHECK (ACTIVE_FLAG IN ('Y','N')),
-    CONSTRAINT ck_taskdep_no_self_dep CHECK (NOT (TASK_ID = DEPENDS_ON_TASK_ID AND PIPELINE_ID = DEPENDS_ON_PIPELINE_ID))
-);
-
-CREATE TRIGGER trg_default_taskdep_pipeline_insert AFTER INSERT ON CFG_TASK_DEPENDENCY
-WHEN NEW.DEPENDS_ON_PIPELINE_ID IS NULL
-BEGIN
-    UPDATE CFG_TASK_DEPENDENCY SET DEPENDS_ON_PIPELINE_ID = NEW.PIPELINE_ID
-    WHERE TASK_DEPENDENCY_ID = NEW.TASK_DEPENDENCY_ID;
-END;
-
-
-
-CREATE UNIQUE INDEX ux_taskdep_edge_active
-    ON CFG_TASK_DEPENDENCY (TASK_ID, DEPENDS_ON_PIPELINE_ID, DEPENDS_ON_TASK_ID, DEPENDENCY_TYPE)
-    WHERE ACTIVE_FLAG = 'Y';
-CREATE INDEX ix_taskdep_depends_on ON CFG_TASK_DEPENDENCY (DEPENDS_ON_TASK_ID);
-
--- A task's settings, as name and value rows; each handler reads its own names.
-CREATE TABLE CFG_TASK_PARAMETERS (
-    TASK_PARAMETER_ID  INTEGER PRIMARY KEY AUTOINCREMENT,
-    TASK_ID            BIGINT NOT NULL REFERENCES CFG_TASKS(TASK_ID),
-    PARAMETER_NAME     VARCHAR NOT NULL,
-    PARAMETER_VALUE    VARCHAR,
-    ACTIVE_FLAG        VARCHAR NOT NULL DEFAULT 'Y',
-    CREATED_BY         VARCHAR DEFAULT 'etl-craft',
-    CREATE_DATE        TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    UPDATED_BY         VARCHAR DEFAULT 'etl-craft',
-    UPDATED_DATE       TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    CONSTRAINT ck_taskparameters_active_flag CHECK (ACTIVE_FLAG IN ('Y','N'))
-);
-
-CREATE UNIQUE INDEX ux_taskparameters_name_active
-    ON CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME) WHERE ACTIVE_FLAG = 'Y';
-
-
-
--- A BUSINESS_RULES task's rules: a correlated SELECT that finds the rows of TARGET_TABLE that
--- break it, and what a failing row gets flagged as.
-CREATE TABLE CFG_BUSINESS_RULES (
-    BUSINESS_RULE_ID          INTEGER PRIMARY KEY AUTOINCREMENT,
-    BUSINESS_RULE_NAME        VARCHAR NOT NULL,
-    PIPELINE_ID               BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
-    TASK_ID                   BIGINT NOT NULL REFERENCES CFG_TASKS(TASK_ID),
-    BUSINESS_RULE_SQL         VARCHAR NOT NULL,
-    BUSINESS_RULE_TYPE        VARCHAR NOT NULL,
-    BUSINESS_RULE_KEY_COLUMN  VARCHAR NOT NULL,
-    TARGET_TABLE              VARCHAR NOT NULL,
-    SEQUENCE_NUMBER           BIGINT NOT NULL,
-    ACTIVE_FLAG               VARCHAR NOT NULL DEFAULT 'Y',
-    CREATED_BY                VARCHAR DEFAULT 'etl-craft',
-    CREATE_DATE               TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    UPDATED_BY                VARCHAR DEFAULT 'etl-craft',
-    UPDATED_DATE              TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    CONSTRAINT ck_br_type        CHECK (BUSINESS_RULE_TYPE IN ('INCOMPLETE','REJECT','REPORT')),
-    CONSTRAINT ck_br_active_flag CHECK (ACTIVE_FLAG IN ('Y','N'))
-);
-
-CREATE UNIQUE INDEX ux_br_name_active
-    ON CFG_BUSINESS_RULES (TASK_ID, BUSINESS_RULE_NAME) WHERE ACTIVE_FLAG = 'Y';
-CREATE INDEX ix_br_pipeline ON CFG_BUSINESS_RULES (PIPELINE_ID);
-
-
-
--- One row per pipeline run: its status, when it ran, whether it met its SLA, the date it ran
--- as of (RUN_DATE, the SQL tasks' $$run_date), and whether it was part of a backfill.
-CREATE TABLE AUD_PIPELINES_RUN_LOG (
+-- Preserve existing identities and unknown historical actors while adding actor defaults.
+CREATE TEMP TABLE etl_craft_actor_sequence AS SELECT name, seq FROM sqlite_sequence WHERE name = 'AUD_PIPELINES_RUN_LOG';
+CREATE TABLE AUD_PIPELINES_RUN_LOG_new (
     PIPELINE_RUN_ID  INTEGER PRIMARY KEY AUTOINCREMENT,
     PIPELINE_ID      BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
     START_DATE       TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
@@ -207,207 +24,18 @@ CREATE TABLE AUD_PIPELINES_RUN_LOG (
     CONSTRAINT ck_pipeline_run_status CHECK (STATUS IN ('IN-PROGRESS','SUCCESS','FAILED','SKIPPED','CANCELLED')),
     CONSTRAINT ck_pipeline_run_sla_status CHECK (SLA_STATUS IN ('MET','BREACHED'))
 );
-
--- At most one IN-PROGRESS run per pipeline: this index is what makes run-id resolution safe
--- when several task processes start at once.
+INSERT INTO AUD_PIPELINES_RUN_LOG_new (PIPELINE_RUN_ID, PIPELINE_ID, START_DATE, END_DATE, STATUS, SLA_STATUS, RUN_DATE, BACKFILL, RUN_KEY, TRIGGER_KIND, OWNER_ID, LEASE_EXPIRES_AT, OUTPUT_REVISION, CONFIG_SHA256, STARTED_BY, STARTED_BY_KIND, ENDED_BY, ENDED_BY_KIND) SELECT PIPELINE_RUN_ID, PIPELINE_ID, START_DATE, END_DATE, STATUS, SLA_STATUS, RUN_DATE, BACKFILL, RUN_KEY, TRIGGER_KIND, OWNER_ID, LEASE_EXPIRES_AT, OUTPUT_REVISION, CONFIG_SHA256, NULL, NULL, NULL, NULL FROM AUD_PIPELINES_RUN_LOG;
+DROP TABLE AUD_PIPELINES_RUN_LOG;
+ALTER TABLE AUD_PIPELINES_RUN_LOG_new RENAME TO AUD_PIPELINES_RUN_LOG;
+UPDATE sqlite_sequence SET seq=max(seq, coalesce((SELECT seq FROM etl_craft_actor_sequence), seq)) WHERE name='AUD_PIPELINES_RUN_LOG';
+INSERT INTO sqlite_sequence (name, seq) SELECT name, seq FROM etl_craft_actor_sequence s WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence c WHERE c.name=s.name);
+DROP TABLE etl_craft_actor_sequence;
 CREATE UNIQUE INDEX ux_pipeline_run_one_active
     ON AUD_PIPELINES_RUN_LOG (PIPELINE_ID) WHERE STATUS = 'IN-PROGRESS';
 CREATE INDEX ix_pipeline_run_pipeline ON AUD_PIPELINES_RUN_LOG (PIPELINE_ID);
 CREATE UNIQUE INDEX ux_pipeline_run_key ON AUD_PIPELINES_RUN_LOG (PIPELINE_ID, RUN_KEY);
-
-
--- One row per task per run, updated by each attempt: the latest attempt's status, counts,
--- message and log tail.
-CREATE TABLE AUD_TASK_RUN_LOG (
-    TASK_RUN_ID      INTEGER PRIMARY KEY AUTOINCREMENT,
-    TASK_ID          BIGINT NOT NULL REFERENCES CFG_TASKS(TASK_ID),
-    PIPELINE_RUN_ID  BIGINT NOT NULL REFERENCES AUD_PIPELINES_RUN_LOG(PIPELINE_RUN_ID),
-    START_DATE       TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    END_DATE         TIMESTAMP,
-    STATUS           VARCHAR NOT NULL,
-    SOURCE_COUNT     BIGINT,
-    TARGET_COUNT     BIGINT,
-    INSERT_COUNT     BIGINT,
-    UPDATE_COUNT     BIGINT,
-    DELETE_COUNT     BIGINT,
-    ERROR_MESSAGE    VARCHAR,
-    TASK_LOG         VARCHAR,
-    ATTEMPT_COUNT    INT NOT NULL DEFAULT 1,
-    ROWS_WRITTEN     BIGINT,
-    CONSTRAINT ck_task_run_status CHECK (STATUS IN ('IN-PROGRESS','SUCCESS','FAILED','SKIPPED','CANCELLED'))
-);
-
-CREATE UNIQUE INDEX ux_task_run_one_per_pipeline_run
-    ON AUD_TASK_RUN_LOG (TASK_ID, PIPELINE_RUN_ID);
-CREATE INDEX ix_task_run_pipeline_run ON AUD_TASK_RUN_LOG (PIPELINE_RUN_ID);
-
--- Every change an operator made to a run: a task or a run marked, a stand-in run recorded, a run
--- cancelled or reopened, a task reset to run again or run again, a task run without its
--- dependencies, and a dependency gate bypassed. TASK_ID is NULL for a change to the run.
--- FROM_STATUS and PREVIOUS_MESSAGE keep what the row held before, so nothing is erased;
--- TO_STATUS is NULL for a task reset to not run yet.
-CREATE TABLE AUD_RUN_INTERVENTIONS (
-    INTERVENTION_ID   INTEGER PRIMARY KEY AUTOINCREMENT,
-    PIPELINE_ID       BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
-    PIPELINE_RUN_ID   BIGINT NOT NULL REFERENCES AUD_PIPELINES_RUN_LOG(PIPELINE_RUN_ID),
-    TASK_ID           BIGINT REFERENCES CFG_TASKS(TASK_ID),
-    ACTION            VARCHAR(24) NOT NULL,
-    FROM_STATUS       VARCHAR(16),
-    TO_STATUS         VARCHAR(16),
-    TARGET_COUNT      BIGINT,
-    PREVIOUS_MESSAGE  VARCHAR,
-    REASON            VARCHAR NOT NULL,
-    REQUESTED_BY      VARCHAR NOT NULL,
-    REQUESTED_AT      TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    REQUESTED_BY_KIND VARCHAR DEFAULT (etl_craft_actor_kind()) CONSTRAINT ck_aud_run_interventions_requested_by_kind CHECK (REQUESTED_BY_KIND IN ('HUMAN','SCHEDULE','ORCHESTRATOR','WORKER','SYSTEM')),
-    CONSTRAINT ck_intervention_action CHECK (ACTION IN ('MARK','NEW_RUN','CANCEL','REOPEN','RESET',
-                                                     'GATE_BYPASS','IGNORE_DEPENDENCIES','RERUN'))
-);
-
-CREATE INDEX ix_run_interventions_run ON AUD_RUN_INTERVENTIONS (PIPELINE_RUN_ID);
-
--- Each time a pipeline was paused: while a pause has no RESUMED_AT, `run` starts nothing of the
--- pipeline, and a run in progress starts no more tasks until the pipeline is resumed.
-CREATE TABLE AUD_PIPELINE_PAUSES (
-    PIPELINE_PAUSE_ID  INTEGER PRIMARY KEY AUTOINCREMENT,
-    PIPELINE_ID        BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
-    PAUSED_AT          TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    PAUSED_BY          VARCHAR NOT NULL,
-    REASON             VARCHAR NOT NULL,
-    RESUMED_AT         TIMESTAMP,
-    RESUMED_BY         VARCHAR,
-    RESUME_REASON      VARCHAR,
-    PAUSED_BY_KIND VARCHAR DEFAULT (etl_craft_actor_kind()) CONSTRAINT ck_aud_pipeline_pauses_paused_by_kind CHECK (PAUSED_BY_KIND IN ('HUMAN','SCHEDULE','ORCHESTRATOR','WORKER','SYSTEM')),
-    RESUMED_BY_KIND VARCHAR CONSTRAINT ck_aud_pipeline_pauses_resumed_by_kind CHECK (RESUMED_BY_KIND IN ('HUMAN','SCHEDULE','ORCHESTRATOR','WORKER','SYSTEM'))
-);
-
--- At most one open pause per pipeline.
-CREATE UNIQUE INDEX ux_pipeline_pauses_open
-    ON AUD_PIPELINE_PAUSES (PIPELINE_ID) WHERE RESUMED_AT IS NULL;
-
--- One row per business rule per task run: whether the rule ran, and how long it took.
-CREATE TABLE AUD_BUSINESS_RULES_RUN_LOG (
-    BUSINESS_RULE_RUN_ID  INTEGER PRIMARY KEY AUTOINCREMENT,
-    BUSINESS_RULE_ID      BIGINT NOT NULL REFERENCES CFG_BUSINESS_RULES(BUSINESS_RULE_ID),
-    TASK_RUN_ID           BIGINT NOT NULL REFERENCES AUD_TASK_RUN_LOG(TASK_RUN_ID),
-    START_DATE            TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    END_DATE              TIMESTAMP,
-    STATUS                VARCHAR NOT NULL,
-    CONSTRAINT ck_br_run_status CHECK (STATUS IN ('IN-PROGRESS','SUCCESS','FAILED','SKIPPED'))
-);
-
-CREATE UNIQUE INDEX ux_br_run_one_per_task_run
-    ON AUD_BUSINESS_RULES_RUN_LOG (BUSINESS_RULE_ID, TASK_RUN_ID);
-
--- The rows each rule flagged, by key; a flag is cleared (ACTIVE_FLAG 'N') once its row passes.
-CREATE TABLE AUD_BUSINESS_RULES_RESULTS (
-    BUSINESS_RULE_RESULT_ID  INTEGER PRIMARY KEY AUTOINCREMENT,
-    BUSINESS_RULE_RUN_ID     BIGINT NOT NULL REFERENCES AUD_BUSINESS_RULES_RUN_LOG(BUSINESS_RULE_RUN_ID),
-    BUSINESS_RULE_ID         BIGINT NOT NULL REFERENCES CFG_BUSINESS_RULES(BUSINESS_RULE_ID),
-    BUSINESS_RULE_KEY        VARCHAR NOT NULL,
-    TARGET_TABLE             VARCHAR NOT NULL,
-    STATUS                   VARCHAR NOT NULL,
-    ACTIVE_FLAG              VARCHAR NOT NULL DEFAULT 'Y',
-    START_DATE               TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    END_DATE                 TIMESTAMP,
-    CONSTRAINT ck_brresults_status      CHECK (STATUS IN ('INCOMPLETE','REJECT','REPORT')),
-    CONSTRAINT ck_brresults_active_flag CHECK (ACTIVE_FLAG IN ('Y','N'))
-);
-
-CREATE INDEX ix_brresults_run ON AUD_BUSINESS_RULES_RESULTS (BUSINESS_RULE_RUN_ID);
-CREATE INDEX ix_brresults_rule ON AUD_BUSINESS_RULES_RESULTS (BUSINESS_RULE_ID);
-
--- Where each incremental ingestion script got to: the offset it reads from next.
-CREATE TABLE AUD_TASK_OFFSET_TRACKER (
-    TASK_ID                 BIGINT PRIMARY KEY REFERENCES CFG_TASKS(TASK_ID),
-    OFFSET_TYPE             VARCHAR NOT NULL,
-    OFFSET_VALUE            VARCHAR,
-    LAST_UPDATED_TIMESTAMP  TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    CONSTRAINT ck_offset_type CHECK (OFFSET_TYPE IN ('NUMBER','TEXT','TIMESTAMP'))
-);
-
--- Column lineage traced from each SQL task's SELECT, stored by a hash of what it depends on.
-CREATE TABLE AUD_COLUMN_LINEAGE (
-    COLUMN_LINEAGE_ID  INTEGER PRIMARY KEY AUTOINCREMENT,
-    TASK_ID            BIGINT NOT NULL REFERENCES CFG_TASKS(TASK_ID),
-    SOURCE_SQL_HASH    VARCHAR NOT NULL,
-    TARGET_OBJECT      VARCHAR NOT NULL,
-    TARGET_COLUMN      VARCHAR NOT NULL,
-    SOURCE_OBJECT      VARCHAR,
-    SOURCE_COLUMN      VARCHAR,
-    TRANSFORMATION     VARCHAR,
-    COMPUTED_AT        TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00')
-);
-
-CREATE INDEX ix_column_lineage_task ON AUD_COLUMN_LINEAGE (TASK_ID, SOURCE_SQL_HASH);
-CREATE INDEX ix_column_lineage_target ON AUD_COLUMN_LINEAGE (TARGET_OBJECT, TARGET_COLUMN);
-CREATE INDEX ix_column_lineage_source ON AUD_COLUMN_LINEAGE (SOURCE_OBJECT, SOURCE_COLUMN);
-
--- The URL the catalog site is published at, one row per URL: the latest is current. A publish
--- that is given another URL fails unless told to accept it, so shared links keep working.
-CREATE TABLE AUD_DOCS_PUBLICATION (
-    DOCS_PUBLICATION_ID  INTEGER PRIMARY KEY AUTOINCREMENT,
-    PUBLISHED_URL        VARCHAR NOT NULL,
-    FIRST_PUBLISHED      TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    LAST_PUBLISHED       TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00')
-);
-
--- The versions of each task's DOCUMENTATION, one row per change.
-CREATE TABLE AUD_TASK_DOCUMENTATION (
-    TASK_DOCUMENTATION_ID  INTEGER PRIMARY KEY AUTOINCREMENT,
-    TASK_ID                BIGINT NOT NULL REFERENCES CFG_TASKS(TASK_ID),
-    VERSION                INT NOT NULL,
-    DOCUMENTATION_HASH     VARCHAR NOT NULL,
-    DOCUMENTATION          VARCHAR NOT NULL,
-    RECORDED_AT            TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    CONSTRAINT ux_task_documentation_version UNIQUE (TASK_ID, VERSION)
-);
-
-CREATE INDEX ix_task_documentation_task ON AUD_TASK_DOCUMENTATION (TASK_ID, VERSION DESC);
-
--- Every upstream run a downstream consumed, one row each, never updated: for a dependency on a
--- pipeline, the downstream run and the upstream run; for a dependency on another pipeline's task,
--- the downstream task and the upstream task run. A dependency's latest row is what it last
--- consumed: an upstream run satisfies it only when it is newer than that one. PIPELINE_RUN_ID is
--- NULL on the rows carried over from the trackers this table replaced.
-CREATE TABLE AUD_DEPENDENCY_CONSUMPTION (
-    CONSUMPTION_ID            INTEGER PRIMARY KEY AUTOINCREMENT,
-    PIPELINE_DEPENDENCY_ID    BIGINT REFERENCES CFG_PIPELINE_DEPENDENCY(PIPELINE_DEPENDENCY_ID),
-    TASK_DEPENDENCY_ID        BIGINT REFERENCES CFG_TASK_DEPENDENCY(TASK_DEPENDENCY_ID),
-    PIPELINE_ID               BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
-    PIPELINE_RUN_ID           BIGINT REFERENCES AUD_PIPELINES_RUN_LOG(PIPELINE_RUN_ID),
-    TASK_ID                   BIGINT REFERENCES CFG_TASKS(TASK_ID),
-    DEPENDS_ON_PIPELINE_ID    BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
-    CONSUMED_PIPELINE_RUN_ID  BIGINT NOT NULL REFERENCES AUD_PIPELINES_RUN_LOG(PIPELINE_RUN_ID),
-    CONSUMED_TASK_RUN_ID      BIGINT REFERENCES AUD_TASK_RUN_LOG(TASK_RUN_ID),
-    CONSUMED_AT               TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    CONSUMED_REVISION INT NOT NULL DEFAULT 1,
-    CONSTRAINT ck_consumption_one_dependency CHECK (
-        (PIPELINE_DEPENDENCY_ID IS NULL) <> (TASK_DEPENDENCY_ID IS NULL)
-    )
-);
-
-CREATE INDEX ix_consumption_pipeline_dependency
-    ON AUD_DEPENDENCY_CONSUMPTION (PIPELINE_DEPENDENCY_ID, CONSUMPTION_ID);
-CREATE INDEX ix_consumption_task_dependency
-    ON AUD_DEPENDENCY_CONSUMPTION (TASK_DEPENDENCY_ID, CONSUMPTION_ID);
-CREATE INDEX ix_consumption_run ON AUD_DEPENDENCY_CONSUMPTION (PIPELINE_RUN_ID);
-
--- Every migration applied, from etl-craft (ENGINE) and from the project (PROJECT), with its
--- checksum.
-CREATE TABLE SCHEMA_MIGRATIONS (
-    SOURCE      VARCHAR NOT NULL,
-    VERSION     VARCHAR NOT NULL,
-    CHECKSUM    VARCHAR(64) NOT NULL,
-    APPLIED_AT  TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    CONSTRAINT pk_schema_migrations PRIMARY KEY (SOURCE, VERSION),
-    CONSTRAINT ck_schema_migrations_source CHECK (SOURCE IN ('ENGINE', 'PROJECT')),
-    CONSTRAINT ck_schema_migrations_checksum
-        CHECK (length(CHECKSUM) = 64 AND CHECKSUM NOT GLOB '*[^0-9a-f]*')
-);
-
--- Attempt history and the dependencies judged at admission.
-CREATE TABLE AUD_TASK_ATTEMPTS (
+CREATE TEMP TABLE etl_craft_actor_sequence AS SELECT name, seq FROM sqlite_sequence WHERE name = 'AUD_TASK_ATTEMPTS';
+CREATE TABLE AUD_TASK_ATTEMPTS_new (
     ATTEMPT_ID       INTEGER PRIMARY KEY AUTOINCREMENT,
     TASK_RUN_ID      BIGINT NOT NULL REFERENCES AUD_TASK_RUN_LOG(TASK_RUN_ID),
     ATTEMPT_NUMBER   INT NOT NULL,
@@ -436,30 +64,63 @@ CREATE TABLE AUD_TASK_ATTEMPTS (
     REQUESTED_BY_KIND VARCHAR DEFAULT (etl_craft_actor_kind()) CONSTRAINT ck_aud_task_attempts_requested_by_kind CHECK (REQUESTED_BY_KIND IN ('HUMAN','SCHEDULE','ORCHESTRATOR','WORKER','SYSTEM')),
     CONSTRAINT ck_attempt_status CHECK (STATUS IN ('QUEUED','CLAIMED','RUNNING','SUCCESS','FAILED','TIMED_OUT','CANCELLED','LOST'))
 );
+INSERT INTO AUD_TASK_ATTEMPTS_new (ATTEMPT_ID, TASK_RUN_ID, ATTEMPT_NUMBER, STATUS, OWNER_ID, LEASE_EXPIRES_AT, HEARTBEAT_AT, QUEUED_AT, CLAIMED_AT, STARTED_AT, ENDED_AT, HOST, PID, PROCESS_START, EXIT_CODE, SOURCE_COUNT, TARGET_COUNT, INSERT_COUNT, UPDATE_COUNT, DELETE_COUNT, ROWS_WRITTEN, ERROR_MESSAGE, TASK_LOG, LOG_PATH, REQUESTED_BY, REQUESTED_BY_KIND) SELECT ATTEMPT_ID, TASK_RUN_ID, ATTEMPT_NUMBER, STATUS, OWNER_ID, LEASE_EXPIRES_AT, HEARTBEAT_AT, QUEUED_AT, CLAIMED_AT, STARTED_AT, ENDED_AT, HOST, PID, PROCESS_START, EXIT_CODE, SOURCE_COUNT, TARGET_COUNT, INSERT_COUNT, UPDATE_COUNT, DELETE_COUNT, ROWS_WRITTEN, ERROR_MESSAGE, TASK_LOG, LOG_PATH, REQUESTED_BY, NULL FROM AUD_TASK_ATTEMPTS;
+DROP TABLE AUD_TASK_ATTEMPTS;
+ALTER TABLE AUD_TASK_ATTEMPTS_new RENAME TO AUD_TASK_ATTEMPTS;
+UPDATE sqlite_sequence SET seq=max(seq, coalesce((SELECT seq FROM etl_craft_actor_sequence), seq)) WHERE name='AUD_TASK_ATTEMPTS';
+INSERT INTO sqlite_sequence (name, seq) SELECT name, seq FROM etl_craft_actor_sequence s WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence c WHERE c.name=s.name);
+DROP TABLE etl_craft_actor_sequence;
 CREATE UNIQUE INDEX ux_attempt_number ON AUD_TASK_ATTEMPTS (TASK_RUN_ID, ATTEMPT_NUMBER);
 CREATE UNIQUE INDEX ux_attempt_one_active ON AUD_TASK_ATTEMPTS (TASK_RUN_ID)
     WHERE STATUS IN ('QUEUED','CLAIMED','RUNNING');
 CREATE INDEX ix_attempt_status_lease ON AUD_TASK_ATTEMPTS (STATUS, LEASE_EXPIRES_AT);
-
--- Each dependency judged at admission, with the selected upstream revision and reason.
-CREATE TABLE AUD_GATE_DECISIONS (
-    DECISION_ID              INTEGER PRIMARY KEY AUTOINCREMENT,
-    PIPELINE_RUN_ID          BIGINT NOT NULL REFERENCES AUD_PIPELINES_RUN_LOG(PIPELINE_RUN_ID),
-    ATTEMPT_ID               BIGINT REFERENCES AUD_TASK_ATTEMPTS(ATTEMPT_ID),
-    PIPELINE_DEPENDENCY_ID   BIGINT REFERENCES CFG_PIPELINE_DEPENDENCY(PIPELINE_DEPENDENCY_ID),
-    TASK_DEPENDENCY_ID       BIGINT REFERENCES CFG_TASK_DEPENDENCY(TASK_DEPENDENCY_ID),
-    SELECTED_PIPELINE_RUN_ID BIGINT REFERENCES AUD_PIPELINES_RUN_LOG(PIPELINE_RUN_ID),
-    SELECTED_TASK_RUN_ID     BIGINT REFERENCES AUD_TASK_RUN_LOG(TASK_RUN_ID),
-    SELECTED_REVISION        INT,
-    RESULT                   VARCHAR NOT NULL,
-    REASON                   VARCHAR NOT NULL,
-    DECIDED_AT               TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    CONSTRAINT ck_gate_one_dependency CHECK (
-        (PIPELINE_DEPENDENCY_ID IS NOT NULL AND TASK_DEPENDENCY_ID IS NULL)
-        OR (PIPELINE_DEPENDENCY_ID IS NULL AND TASK_DEPENDENCY_ID IS NOT NULL)
-    ),
-    CONSTRAINT ck_gate_result CHECK (RESULT IN ('SATISFIED','UNSATISFIED','BYPASSED'))
+CREATE TEMP TABLE etl_craft_actor_sequence AS SELECT name, seq FROM sqlite_sequence WHERE name = 'AUD_RUN_INTERVENTIONS';
+CREATE TABLE AUD_RUN_INTERVENTIONS_new (
+    INTERVENTION_ID   INTEGER PRIMARY KEY AUTOINCREMENT,
+    PIPELINE_ID       BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
+    PIPELINE_RUN_ID   BIGINT NOT NULL REFERENCES AUD_PIPELINES_RUN_LOG(PIPELINE_RUN_ID),
+    TASK_ID           BIGINT REFERENCES CFG_TASKS(TASK_ID),
+    ACTION            VARCHAR(24) NOT NULL,
+    FROM_STATUS       VARCHAR(16),
+    TO_STATUS         VARCHAR(16),
+    TARGET_COUNT      BIGINT,
+    PREVIOUS_MESSAGE  VARCHAR,
+    REASON            VARCHAR NOT NULL,
+    REQUESTED_BY      VARCHAR NOT NULL,
+    REQUESTED_AT      TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
+    REQUESTED_BY_KIND VARCHAR DEFAULT (etl_craft_actor_kind()) CONSTRAINT ck_aud_run_interventions_requested_by_kind CHECK (REQUESTED_BY_KIND IN ('HUMAN','SCHEDULE','ORCHESTRATOR','WORKER','SYSTEM')),
+    CONSTRAINT ck_intervention_action CHECK (ACTION IN ('MARK','NEW_RUN','CANCEL','REOPEN','RESET',
+                                                     'GATE_BYPASS','IGNORE_DEPENDENCIES','RERUN'))
 );
+INSERT INTO AUD_RUN_INTERVENTIONS_new (INTERVENTION_ID, PIPELINE_ID, PIPELINE_RUN_ID, TASK_ID, ACTION, FROM_STATUS, TO_STATUS, TARGET_COUNT, PREVIOUS_MESSAGE, REASON, REQUESTED_BY, REQUESTED_AT, REQUESTED_BY_KIND) SELECT INTERVENTION_ID, PIPELINE_ID, PIPELINE_RUN_ID, TASK_ID, ACTION, FROM_STATUS, TO_STATUS, TARGET_COUNT, PREVIOUS_MESSAGE, REASON, REQUESTED_BY, REQUESTED_AT, NULL FROM AUD_RUN_INTERVENTIONS;
+DROP TABLE AUD_RUN_INTERVENTIONS;
+ALTER TABLE AUD_RUN_INTERVENTIONS_new RENAME TO AUD_RUN_INTERVENTIONS;
+UPDATE sqlite_sequence SET seq=max(seq, coalesce((SELECT seq FROM etl_craft_actor_sequence), seq)) WHERE name='AUD_RUN_INTERVENTIONS';
+INSERT INTO sqlite_sequence (name, seq) SELECT name, seq FROM etl_craft_actor_sequence s WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence c WHERE c.name=s.name);
+DROP TABLE etl_craft_actor_sequence;
+CREATE INDEX ix_run_interventions_run ON AUD_RUN_INTERVENTIONS (PIPELINE_RUN_ID);
+CREATE TEMP TABLE etl_craft_actor_sequence AS SELECT name, seq FROM sqlite_sequence WHERE name = 'AUD_PIPELINE_PAUSES';
+CREATE TABLE AUD_PIPELINE_PAUSES_new (
+    PIPELINE_PAUSE_ID  INTEGER PRIMARY KEY AUTOINCREMENT,
+    PIPELINE_ID        BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
+    PAUSED_AT          TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
+    PAUSED_BY          VARCHAR NOT NULL,
+    REASON             VARCHAR NOT NULL,
+    RESUMED_AT         TIMESTAMP,
+    RESUMED_BY         VARCHAR,
+    RESUME_REASON      VARCHAR,
+    PAUSED_BY_KIND VARCHAR DEFAULT (etl_craft_actor_kind()) CONSTRAINT ck_aud_pipeline_pauses_paused_by_kind CHECK (PAUSED_BY_KIND IN ('HUMAN','SCHEDULE','ORCHESTRATOR','WORKER','SYSTEM')),
+    RESUMED_BY_KIND VARCHAR CONSTRAINT ck_aud_pipeline_pauses_resumed_by_kind CHECK (RESUMED_BY_KIND IN ('HUMAN','SCHEDULE','ORCHESTRATOR','WORKER','SYSTEM'))
+);
+INSERT INTO AUD_PIPELINE_PAUSES_new (PIPELINE_PAUSE_ID, PIPELINE_ID, PAUSED_AT, PAUSED_BY, REASON, RESUMED_AT, RESUMED_BY, RESUME_REASON, PAUSED_BY_KIND, RESUMED_BY_KIND) SELECT PIPELINE_PAUSE_ID, PIPELINE_ID, PAUSED_AT, PAUSED_BY, REASON, RESUMED_AT, RESUMED_BY, RESUME_REASON, NULL, NULL FROM AUD_PIPELINE_PAUSES;
+DROP TABLE AUD_PIPELINE_PAUSES;
+ALTER TABLE AUD_PIPELINE_PAUSES_new RENAME TO AUD_PIPELINE_PAUSES;
+UPDATE sqlite_sequence SET seq=max(seq, coalesce((SELECT seq FROM etl_craft_actor_sequence), seq)) WHERE name='AUD_PIPELINE_PAUSES';
+INSERT INTO sqlite_sequence (name, seq) SELECT name, seq FROM etl_craft_actor_sequence s WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence c WHERE c.name=s.name);
+DROP TABLE etl_craft_actor_sequence;
+CREATE UNIQUE INDEX ux_pipeline_pauses_open
+    ON AUD_PIPELINE_PAUSES (PIPELINE_ID) WHERE RESUMED_AT IS NULL;
+-- Attribute actions without inventing identities for historical rows.
 
 -- An immutable record of a command request; run and attempt outcomes live in their own logs.
 CREATE TABLE AUD_ACTIONS (
@@ -496,6 +157,12 @@ CREATE TABLE AUD_METADATA_CHANGES (
     CONSTRAINT ck_metadata_actor_kind CHECK (ACTOR_KIND IN ('HUMAN','SCHEDULE','ORCHESTRATOR','WORKER','SYSTEM'))
 );
 CREATE INDEX ix_metadata_changes_table ON AUD_METADATA_CHANGES (TABLE_NAME, CHANGED_AT);
+DROP TRIGGER trg_audit_cfg_pipelines;
+DROP TRIGGER trg_audit_cfg_pipeline_dependency;
+DROP TRIGGER trg_audit_cfg_tasks;
+DROP TRIGGER trg_audit_cfg_task_dependency;
+DROP TRIGGER trg_audit_cfg_task_parameters;
+DROP TRIGGER trg_audit_cfg_business_rules;
 CREATE TRIGGER trg_actor_guard_cfg_pipelines_insert BEFORE INSERT ON CFG_PIPELINES
 BEGIN
     SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'CFG_PIPELINES is written only by etl-craft; use etl-craft mark, cancel or run, or a project migration (etl-craft migrate)') END;

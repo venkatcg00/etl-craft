@@ -121,7 +121,9 @@ class Demo:
 
     def build(self) -> Demo:
         shutil.copytree(
-            DEMO, self.root, ignore=shutil.ignore_patterns("*.db", "*.duckdb", ".flaky-*")
+            DEMO,
+            self.root,
+            ignore=shutil.ignore_patterns("*.db", "*.duckdb", ".flaky-*", "migrations"),
         )
         if self.cloud:
             self.prefix = f"ec_{self.tag}_"

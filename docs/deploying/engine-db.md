@@ -79,8 +79,8 @@ Migration `0007_identity.sql` adds a unique `RUN_KEY` per pipeline, a checked `T
 nullable owner, lease and configuration fingerprint fields, and `OUTPUT_REVISION` starting at 1.
 Existing runs receive `legacy:<pipeline_run_id>` keys and `BACKFILL` or `MANUAL` trigger kinds.
 New command-created runs receive `manual:<uuid>`, `backfill:<date>:<uuid>` or `stand-in:<uuid>`
-keys. Direct SQL inserts default to a generated manual key and `MANUAL`; supply the trigger
-kind explicitly when inserting other kinds of runs.
+keys. Engine inserts default to a generated manual key and `MANUAL`; other trigger kinds
+are supplied explicitly by the engine.
 
 `AUD_TASK_ATTEMPTS` stores attempt identities, lifecycle timestamps, ownership, process details,
 counts and logs. The migration copies each non-skipped task summary into one attempt at its
@@ -98,3 +98,70 @@ are subsequent roadmap items.
 SQLite rebuilds the pipeline run table with the same reference checks, custom object preservation,
 identity-counter protection and extra-column refusal as migration 0006. PostgreSQL alters it in
 place. Both dialects roll back the schema, copied history and migration ledger together on failure.
+
+## Actors and write guards
+
+Migration `0008_actors_and_audit_guards.sql` attributes new actions and metadata changes. Historical
+rows keep unknown actor fields empty; the migration does not invent who performed them. SQLite
+rebuilds the run, attempt, intervention and pause tables to add actor defaults, preserving rows,
+references, custom objects and identity counters with the same rollback checks as migration 0007.
+
+The CLI resolves one actor per command from `ETL_CRAFT_ACTOR`, or `user@hostname` when it is unset.
+Names must be non-empty, contain no control characters and fit 128 characters. Set a stable name
+in automation:
+
+```bash
+export ETL_CRAFT_ACTOR=github:alice
+etl-craft migrate
+```
+
+CI uses `github:${{ github.actor }}`. `ETL_CRAFT_ACTOR_KIND` defaults to `HUMAN`; generated remote
+DAGs set `ORCHESTRATOR` and include the DAG run id and Airflow's triggering user when available.
+Other sources are `SCHEDULE`, `WORKER` and `SYSTEM`. These environment values identify an action;
+they do not authenticate a user. Library callers can scope an `Actor` with
+`etl_craft.core.actor.acting_as(actor)`; otherwise library work uses the engine's `SYSTEM` actor.
+A run records its starter, and its ending actor: system finalization, or the person marking or
+cancelling it. Pauses, resumes, interventions and attempts record their actor kind too.
+
+`AUD_ACTIONS` contains one immutable request per state-changing command. `OUTCOME = REQUESTED`
+means the action was to request work, whether the flow subsequently runs or is refused. Its
+start and end timestamps describe recording that request, and `EXIT_CODE` remains empty. No
+completion update is required: run and attempt tables hold execution outcomes. Sensitive argument
+names are masked before recording. Read-only commands, including `audit`, make no audit writes.
+For an empty or older database, initialization or migration records its request after the audit
+table becomes available.
+
+Every `CFG_` row change records its actor, before and after JSON, operation and row key in
+`AUD_METADATA_CHANGES`. Project migrations include their filename and capture added columns;
+project-created `CFG_` and `AUD_` tables receive write guards as their DDL runs. Make metadata
+changes in a new project migration and run `etl-craft migrate`.
+
+A plain connection cannot write `CFG_` or `AUD_` tables. PostgreSQL requires the engine's
+transaction-local actor marker, including for `TRUNCATE`. SQLite requires functions registered
+on engine connections; the SQLite shell or a BI tool instead reports `no such function:
+etl_craft_actor` (or the corresponding actor-kind function). `CREATED_BY` and `UPDATED_BY` are
+stamped with the actor. Interventions, actions, metadata changes, consumption and gate decisions
+are append-only; terminal attempts cannot be changed. Retention is a separate future operation.
+
+### PostgreSQL privileges
+
+The marker guards prevent accidental edits. A database owner or a login that can set the marker
+can bypass them; database privileges are the access boundary. Review the suggested grants:
+
+```bash
+etl-craft setup --print-grants
+```
+
+This prints SQL and executes nothing. Use a DDL owner for schema creation and migrations, a
+separate engine login for DML, and a read-only role for people. Transfer existing table and
+sequence ownership to the owner role, and remove other write grants. Default privileges must be
+set for the role that creates tables. `doctor` reports explicit `INSERT`, `UPDATE`, `DELETE` and
+`TRUNCATE` grants reaching other ordinary logins or `PUBLIC`, including inherited roles, with the exact
+`REVOKE` against the role holding the grant.
+Owners and administrators retain their administrative authority; keep those credentials separate.
+
+### SQLite file access
+
+Restrict the Engine DB file and its containing directory to the deployment account. `doctor`
+warns when the file is writable by group or others and suggests `chmod go-w`. Filesystem access
+is the boundary: anyone who can replace the file or its triggers can bypass the connection guard.

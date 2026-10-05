@@ -27,6 +27,7 @@ from etl_craft.core.enums import CloningScope, GatePolicy, Mode
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.engine.connection import check_reachable, engine_db
 from etl_craft.engine.migrations import pending_migrations
+from etl_craft.engine.privileges import extra_write_grants
 from etl_craft.engine.schema import existing_engine_tables
 from etl_craft.execution.connections import probe_email_relay, probe_warehouse
 from etl_craft.handlers.mail import email_tls_problem
@@ -244,7 +245,29 @@ def _engine_state(config: ConnectorConfig, engine: Engine) -> list[Check]:
                 f"{len(pending)} pending: {', '.join(pending)}; run `etl-craft migrate`",
             )
         ]
-    return [ok("Engine DB migrations", "up to date")]
+    checks = [ok("Engine DB migrations", "up to date")]
+    if engine.dialect.name == "postgresql":
+        for table, role, privilege in extra_write_grants(engine):
+            quoted_role = '"' + role.replace('"', '""') + '"' if role != "PUBLIC" else role
+            schema = config.engine.active.schema or "public"
+            qualified = '"' + schema.replace('"', '""') + '"."' + table.replace('"', '""') + '"'
+            checks.append(
+                fail(
+                    "Engine DB write grant",
+                    f"{role} holds {privilege} on {qualified}; "
+                    f"REVOKE {privilege} ON {qualified} FROM {quoted_role};",
+                )
+            )
+    elif engine.url.database and engine.url.database != ":memory:":
+        path = Path(engine.url.database)
+        if path.stat().st_mode & 0o022:
+            checks.append(
+                warn(
+                    "Engine DB file permissions",
+                    f"{path} is writable by group or others; restrict access with chmod go-w",
+                )
+            )
+    return checks
 
 
 def _warehouse(config: ConnectorConfig, *, queue_on_engine_db: bool) -> list[Check]:

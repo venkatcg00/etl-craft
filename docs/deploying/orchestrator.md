@@ -138,3 +138,8 @@ underscores, at most 128 characters. The database enforces this rule, and `valid
 `generate-yml` check legacy metadata too. Names such as `__init__` and `__finalize__` are reserved
 for generated control steps. Generated shell commands quote each argument separately, including
 the run-date template, and generation refuses self-dependencies or missing control steps.
+
+Generated remote Bash tasks pass `ETL_CRAFT_ACTOR_KIND=ORCHESTRATOR` and an actor name containing
+`dag_run.run_id`. Airflow 3's `dag_run.triggering_user_name` is included when available; otherwise
+the user part is `scheduler`. `append_env` preserves the task's configured environment. This
+attributes requests without coupling their audit records to the eventual flow outcome.

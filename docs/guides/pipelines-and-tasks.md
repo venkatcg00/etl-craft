@@ -1,9 +1,9 @@
 # Pipelines and tasks
 
-A pipeline is rows in the Engine DB's `CFG_` tables, which your team writes (by SQL, a migration
-of its own, or any tool) and etl-craft only reads. Nothing about a pipeline lives in code: to
-change one, change its rows, reviewed like any other change, and check them with
-[`validate`](validating.md).
+A pipeline is rows in the Engine DB's `CFG_` tables, authored by your team in project SQL
+migrations and applied with `etl-craft migrate`. Review the migration like code, then check the
+rows with [`validate`](validating.md). Plain SQL connections cannot edit these rows; each
+change records its actor and before/after values. See [Engine DB setup and upgrades](../deploying/engine-db.md).
 
 ```mermaid
 flowchart LR
@@ -17,7 +17,7 @@ flowchart LR
 Every `CFG_` row has `ACTIVE_FLAG` (`Y` or `N`): setting it to `N` retires the row without
 deleting it, and only active rows are read. Codes are unique among active rows, so a retired
 pipeline's code can be used again. `CREATED_BY`, `CREATE_DATE`, `UPDATED_BY` and `UPDATED_DATE`
-are kept by the database.
+are kept by database triggers, with the actor as the creator and updater.
 
 The demo's [`metadata/support_insights.sql`](https://github.com/venkatcg00/etl-craft/blob/main/examples/demo/metadata/support_insights.sql)
 writes five pipelines this way, and runs as written on SQLite and PostgreSQL.
@@ -86,7 +86,8 @@ in another; a `CFG_PIPELINE_DEPENDENCY` row makes a pipeline wait on another. Ea
 
 ## An example
 
-A pipeline that loads orders and then checks them, on SQLite or PostgreSQL:
+Put this SQL in a new project migration to load orders and then check them, on SQLite or
+PostgreSQL. Apply it with `etl-craft migrate`:
 
 ```sql
 INSERT INTO CFG_PIPELINES (PIPELINE_CODE, PIPELINE_NAME, DESCRIPTION, REFRESH_TYPE, RUN_SCHEDULE)

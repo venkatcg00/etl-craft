@@ -24,9 +24,7 @@ source of truth, so these are refused: mark or clear the task in the orchestrato
 
 from __future__ import annotations
 
-import getpass
 import logging
-import socket
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 
@@ -34,6 +32,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import IntegrityError
 
 from etl_craft.config import ConnectorConfig
+from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import (
     FINISHED_RUN_STATUSES,
     MARKABLE_STATUSES,
@@ -61,15 +60,6 @@ class Intervened:
     pipeline_run_id: int
 
 
-def current_operator() -> str:
-    """Return who is asking, as ``user@host``, for ``REQUESTED_BY``."""
-    try:
-        user = getpass.getuser()
-    except (KeyError, OSError):
-        user = "unknown"
-    return f"{user}@{socket.gethostname()}"
-
-
 def mark_task(
     engine: Engine,
     config: ConnectorConfig,
@@ -90,7 +80,7 @@ def mark_task(
     the pipeline has no run, and ``RunRefusedError`` in remote mode or while the task is running.
     """
     status = _check(config, "mark", reason, status, rows)
-    who = requested_by or current_operator()
+    who = requested_by or current_actor().name
     with engine.begin() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         task_id = resolve_task_id(conn, pipeline_id, task_code)
@@ -166,7 +156,7 @@ def mark_run(
     upstream run is consumed. Raises ``RunRefusedError`` while a task of the run is running.
     """
     status = _check(config, "mark", reason, status, None)
-    who = requested_by or current_operator()
+    who = requested_by or current_actor().name
     with engine.begin() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         run_id, run_status = _latest_run(conn, pipeline_id, pipeline_code)
@@ -220,7 +210,7 @@ def record_stand_in_run(
     status = _check(config, "mark --new-run", reason, status, rows)
     if rows is not None and task_code is None:
         raise UsageError("--rows states a task's row count: name the task with --task_code")
-    who = requested_by or current_operator()
+    who = requested_by or current_actor().name
     with engine.begin() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         task_id = None if task_code is None else resolve_task_id(conn, pipeline_id, task_code)
@@ -301,7 +291,7 @@ def pause_pipeline(
     Raises ``RunStateError`` when it is already paused.
     """
     _check(config, "pause", reason, None, None)
-    who = requested_by or current_operator()
+    who = requested_by or current_actor().name
     with engine.begin() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         existing = pauses.fetch_open_pause(conn, pipeline_id)
@@ -332,7 +322,7 @@ def resume_pipeline(
     Raises ``RunStateError`` when it is not paused.
     """
     _check(config, "resume", reason, None, None)
-    who = requested_by or current_operator()
+    who = requested_by or current_actor().name
     with engine.begin() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         if not pauses.close_pause(conn, pipeline_id, who, reason):
@@ -368,7 +358,7 @@ def cancel_run(
     pipeline starts nothing more. Raises ``RunStateError`` when no run is in progress.
     """
     _check(config, "cancel", reason, None, None)
-    who = requested_by or current_operator()
+    who = requested_by or current_actor().name
     with engine.begin() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         run_id = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
@@ -435,7 +425,7 @@ def record_change(
             from_status=from_status,
             to_status=to_status,
             reason=reason,
-            requested_by=current_operator(),
+            requested_by=current_actor().name,
         )
 
 
@@ -474,7 +464,7 @@ def record_gate_bypass(
             task_id=task_id,
             action=InterventionAction.GATE_BYPASS,
             reason=reason,
-            requested_by=current_operator(),
+            requested_by=current_actor().name,
         )
     logger.warning("pipeline_run_id=%d: %s", pipeline_run_id, reason)
 
@@ -557,7 +547,7 @@ def reset_engine_skipped(
     because a downstream consumed them.
     """
     with engine.begin() as conn:
-        return _reset_skipped(conn, pipeline_id, run_id, reason, current_operator(), only=only)
+        return _reset_skipped(conn, pipeline_id, run_id, reason, current_actor().name, only=only)
 
 
 def _reset_skipped(

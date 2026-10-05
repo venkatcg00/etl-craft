@@ -3,18 +3,19 @@
     python prepare.py warehouse   # the schemas the demo writes, in warehouse.duckdb
     python prepare.py metadata    # the pipelines, as CFG_ rows, in engine.db (after setup)
 
-etl-craft never creates warehouse schemas and never writes CFG_ rows: your team does both. This
-script does them for the demo, from warehouse_schemas.sql and metadata/support_insights.sql.
+The team creates warehouse schemas and authors CFG_ rows as project migrations. This script
+prepares both from warehouse_schemas.sql and metadata/support_insights.sql, then runs migrate.
 Pass metadata/remote_mode.sql after `metadata` to load it too.
 """
 
 from __future__ import annotations
 
-import sqlite3
 import sys
 from pathlib import Path
 
 import duckdb
+
+from etl_craft.cli import main
 
 HERE = Path(__file__).resolve().parent
 
@@ -32,10 +33,28 @@ def metadata(files: list[str]) -> None:
     database = HERE / "engine.db"
     if not database.exists():
         raise SystemExit("engine.db does not exist yet: run `etl-craft setup` first")
-    with sqlite3.connect(database) as conn:
-        for name in files or ["metadata/support_insights.sql"]:
-            conn.executescript((HERE / name).read_text(encoding="utf-8"))
-            print(f"loaded {name} into engine.db")
+    migrations = HERE / "migrations"
+    migrations.mkdir(exist_ok=True)
+    for name in files or ["metadata/support_insights.sql"]:
+        source = HERE / name
+        existing = sorted(migrations.glob(f"*_{source.name}"))
+        destination = (
+            existing[0]
+            if existing
+            else migrations / (f"{len(list(migrations.glob('*.sql'))) + 1:04d}_{source.name}")
+        )
+        sql = source.read_text(encoding="utf-8")
+        if destination.exists():
+            if destination.read_text(encoding="utf-8") != sql:
+                raise SystemExit(
+                    f"{name} differs from {destination}; keep existing migrations unchanged "
+                    "and add a new project migration for the edit"
+                )
+        else:
+            destination.write_text(sql, encoding="utf-8")
+    result = main(["--config", str(HERE / "craft-connector.yml"), "migrate"])
+    if result:
+        raise SystemExit(result)
 
 
 if __name__ == "__main__":

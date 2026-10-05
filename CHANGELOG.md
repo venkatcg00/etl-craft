@@ -8,6 +8,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Actor identities on run starts and endings, attempts, interventions and pauses; immutable
+  command requests and metadata before/after history, with `etl-craft audit` filters. Migration
+  `0008_actors_and_audit_guards.sql` protects audit and metadata writes on SQLite and PostgreSQL.
+  Generated remote DAGs pass their actor, `setup --print-grants` prints deployment role SQL,
+  and `doctor` checks extra write grants and SQLite file permissions.
+
 - Run identities and trigger kinds, owner and lease fields, output revisions and configuration
   fingerprints; attempt and gate-decision tables, consumed revisions and repair-consumption flags.
   Migration `0007_identity.sql` preserves historical run identities and copies the latest known
