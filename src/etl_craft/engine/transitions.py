@@ -343,7 +343,7 @@ def mark_task_run(
     active = active_attempt(conn, task_run_id)
     if active is not None:
         cancel_attempt(conn, active.attempt_id, current_actor(), error_message=error_message)
-    conn.execute(
+    result = conn.execute(
         statement(conn, "transition_mark_task_run"),
         {
             "task_run_id": task_run_id,
@@ -354,6 +354,9 @@ def mark_task_run(
             "now": datetime.now(UTC),
         },
     )
+
+    if result.rowcount != 1:
+        raise _stale(conn, "task", task_run_id, "existing summary; no active attempt", None)
 
 
 def mark_pipeline_run(conn: Connection, pipeline_run_id: int, status: str) -> None:
@@ -375,17 +378,9 @@ def cancel_task_run(conn: Connection, task_run_id: int, error_message: str) -> b
 
 
 def cancel_pipeline_run(conn: Connection, pipeline_run_id: int) -> bool:
-    """End an ``IN-PROGRESS`` run ``CANCELLED``; return whether it was still in progress."""
-    result = conn.execute(
-        statement(conn, "transition_cancel_pipeline_run"),
-        {
-            "pipeline_run_id": pipeline_run_id,
-            "now": datetime.now(UTC),
-            "ended_by": current_actor().name,
-            "ended_by_kind": current_actor().kind.value,
-        },
-    )
-    return bool(result.rowcount)
+    """Cancel an active unowned run; refuse a changed status or owner."""
+    finish_run(conn, pipeline_run_id, "CANCELLED", current_actor())
+    return True
 
 
 def delete_skipped_task_run(conn: Connection, task_run_id: int) -> None:

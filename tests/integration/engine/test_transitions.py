@@ -433,3 +433,24 @@ def test_attempt_number_preserves_legacy_summary_history(engine_db, status, coun
         assert tr.active_attempt(conn, task).attempt_number == expected
         assert runlog.fetch_task_run_result(conn, task).attempt_count == expected
         assert tr.active_attempt(conn, task).attempt_id == attempt
+
+
+def test_operator_mark_refuses_an_attempt_admitted_after_its_read(engine_db, monkeypatch):
+    with engine_db.engine.begin() as conn:
+        _, _, _, task = scene(conn)
+        attempt = tr.queue_attempt(conn, task, ACTOR)
+        apply(conn, "claim_attempt", attempt)
+        monkeypatch.setattr(tr, "active_attempt", lambda *_: None)
+        with pytest.raises(StaleTransitionError, match=r"no active attempt.*active attempt"):
+            tr.mark_task_run(conn, task, status="SUCCESS", error_message="manual", target_count=99)
+        assert runlog.fetch_task_run_result(conn, task).status == "IN-PROGRESS"
+        assert conn.execute(text("SELECT STATUS FROM AUD_TASK_ATTEMPTS")).scalar_one() == "CLAIMED"
+
+
+def test_operator_cancel_refuses_a_run_that_finished_after_its_read(engine_db):
+    with engine_db.engine.begin() as conn:
+        _, _, run, _ = scene(conn)
+        tr.finish_run(conn, run, "SUCCESS", ACTOR)
+        with pytest.raises(StaleTransitionError, match=r"expected status IN-PROGRESS.*SUCCESS"):
+            tr.cancel_pipeline_run(conn, run)
+        assert runlog.fetch_pipeline_run_status(conn, run) == "SUCCESS"
