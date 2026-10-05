@@ -87,7 +87,9 @@ What a person picking up the work needs that the code and the item texts do not 
   after the audit table exists. CLI callers scope one resolved `Actor` through `acting_as`;
   unscoped library work uses `SYSTEM`. `S3.B` can pass that actor explicitly into transitions.
   Historical unknown actors remain NULL. Project-created reserved-prefix tables gain guards
-  during migrations, and captured metadata includes project columns.
+  during migrations, and captured metadata includes project columns. Privilege checks report
+  source grants reaching other ordinary logins, including inherited groups; revoking from the
+  source role removes the permission. Owners and superusers retain administrative authority.
 
 - `S3.A`: skipped summaries have no execution attempt and remain resettable. Migration 0007
   copies only the latest known execution attempt; older retry outcomes are unavailable.

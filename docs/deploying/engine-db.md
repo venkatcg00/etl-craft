@@ -156,7 +156,8 @@ This prints SQL and executes nothing. Use a DDL owner for schema creation and mi
 separate engine login for DML, and a read-only role for people. Transfer existing table and
 sequence ownership to the owner role, and remove other write grants. Default privileges must be
 set for the role that creates tables. `doctor` reports explicit `INSERT`, `UPDATE`, `DELETE` and
-`TRUNCATE` grants to other logins or `PUBLIC`, including inherited roles, with the exact `REVOKE`.
+`TRUNCATE` grants reaching other ordinary logins or `PUBLIC`, including inherited roles, with the exact
+`REVOKE` against the role holding the grant.
 Owners and administrators retain their administrative authority; keep those credentials separate.
 
 ### SQLite file access

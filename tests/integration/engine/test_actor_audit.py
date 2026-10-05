@@ -294,19 +294,41 @@ def test_postgres_extra_write_grant_is_reported(engine_db):
             conn.exec_driver_sql(f'CREATE ROLE "{role}" LOGIN')
             conn.exec_driver_sql(f'GRANT UPDATE ON CFG_TASKS TO "{role}"')
         assert ("cfg_tasks", role, "UPDATE") in extra_write_grants(engine_db.engine)
+        group = role + "_group"
+        with engine_db.engine.begin() as conn:
+            conn.exec_driver_sql(f'CREATE ROLE "{group}" NOLOGIN')
+            conn.exec_driver_sql(f'GRANT "{group}" TO "{role}"')
+            conn.exec_driver_sql(f'REVOKE UPDATE ON CFG_TASKS FROM "{role}"')
+            conn.exec_driver_sql(f'GRANT UPDATE ON CFG_TASKS TO "{group}"')
+        assert ("cfg_tasks", group, "UPDATE") in extra_write_grants(engine_db.engine)
+        assert ("cfg_tasks", role, "UPDATE") not in extra_write_grants(engine_db.engine)
         from etl_craft.engine.migrations import mark_packaged_migrations_applied
         from etl_craft.services.doctor import Status, _engine_state
 
         with engine_db.engine.begin() as conn:
             mark_packaged_migrations_applied(conn)
         checks = _engine_state(engine_db.config, engine_db.engine)
-        assert any(
-            check.status == Status.FAIL and role in check.detail and "REVOKE UPDATE" in check.detail
+        finding = next(
+            check
             for check in checks
+            if check.status == Status.FAIL
+            and group in check.detail
+            and "REVOKE UPDATE" in check.detail
         )
+        revoke = finding.detail.split("; ", 1)[1]
+        assert f'FROM "{group}"' in revoke
+        with engine_db.engine.begin() as conn:
+            conn.exec_driver_sql(revoke)
+        assert ("cfg_tasks", group, "UPDATE") not in extra_write_grants(engine_db.engine)
+
     finally:
         with engine_db.engine.begin() as conn:
             conn.exec_driver_sql(f'DROP OWNED BY "{role}"')
+            if conn.execute(
+                text("SELECT 1 FROM pg_roles WHERE rolname=:group"), {"group": role + "_group"}
+            ).first():
+                conn.exec_driver_sql(f'DROP OWNED BY "{role}_group"')
+                conn.exec_driver_sql(f'DROP ROLE "{role}_group"')
             conn.exec_driver_sql(f'DROP ROLE "{role}"')
 
 
