@@ -12,9 +12,8 @@ STATUS_WRITE = re.compile(r"\bSET\s+[^;]*\bSTATUS\s*=", re.IGNORECASE | re.DOTAL
 
 
 def test_no_direct_status_writes():
-    queries = ROOT / "dialects" / "engine" / "queries"
     writing = set()
-    for path in queries.glob("*.sql"):
+    for path in ROOT.rglob("*.sql"):
         if STATUS_WRITE.search(path.read_text()):
             assert path.name.startswith("transition_"), path
             writing.add(path.stem)
