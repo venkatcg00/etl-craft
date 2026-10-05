@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from test_catalog_upgrade import assert_history, seed_run_history
 
 from etl_craft.core.errors import MigrationError, RunStateError
-from etl_craft.engine import migrations, runlog
+from etl_craft.engine import migrations, transitions
 from fixtures.catalog import snapshot
 from fixtures.metadata import add_pipeline, add_pipeline_dependency, add_task
 from fixtures.released_schema import install
@@ -130,8 +130,8 @@ def test_attempt_identity_and_active_uniqueness(engine_db):
     with engine_db.engine.begin() as conn:
         p = add_pipeline(conn, "P")
         t = add_task(conn, p, "load")
-        r = runlog.find_or_create_active_run(conn, p)
-        task_run = runlog.find_or_create_task_run(conn, t, r).task_run_id
+        r = transitions.find_or_create_active_run(conn, p)
+        task_run = transitions.find_or_create_task_run(conn, t, r).task_run_id
     insert = text(
         "INSERT INTO AUD_TASK_ATTEMPTS (TASK_RUN_ID, ATTEMPT_NUMBER, STATUS) VALUES (:t, :n, :s)"
     )
@@ -148,7 +148,7 @@ def test_attempt_identity_and_active_uniqueness(engine_db):
 def test_run_keys_and_trigger_kinds(engine_db):
     with engine_db.engine.begin() as conn:
         p = add_pipeline(conn, "P")
-        r = runlog.create_active_run(conn, p, backfill=True)
+        r = transitions.create_active_run(conn, p, backfill=True)
         key, kind = conn.execute(
             text(
                 "SELECT RUN_KEY, TRIGGER_KIND FROM AUD_PIPELINES_RUN_LOG WHERE PIPELINE_RUN_ID=:r"
@@ -156,7 +156,7 @@ def test_run_keys_and_trigger_kinds(engine_db):
             {"r": r},
         ).one()
         assert key.startswith("backfill:") and kind == "BACKFILL"
-        runlog.end_run_if(conn, r, "IN-PROGRESS", "SUCCESS")
+        transitions.end_run_if(conn, r, "IN-PROGRESS", "SUCCESS")
     for value, trigger in ((key, "MANUAL"), ("other", "INVALID")):
         with pytest.raises(IntegrityError), engine_db.engine.begin() as conn:
             conn.execute(
@@ -183,7 +183,7 @@ def test_gate_decision_dependency_and_result_constraints(engine_db):
         p = add_pipeline(conn, "DOWN")
         up = add_pipeline(conn, "UP")
         dep = add_pipeline_dependency(conn, p, up)
-        r = runlog.find_or_create_active_run(conn, p)
+        r = transitions.find_or_create_active_run(conn, p)
         assert (
             conn.execute(text("SELECT CONSUME_REPAIRS FROM CFG_PIPELINE_DEPENDENCY")).scalar_one()
             == "Y"
@@ -220,8 +220,7 @@ def test_identity_migration_refuses_or_preserves_project_columns(released):
 
 
 def test_skipped_summary_can_be_reset_after_migration(released):
-    from etl_craft.engine.repository.interventions import delete_skipped_task_run
-    from fixtures.metadata import task_run
+    from etl_craft.engine.transitions import delete_skipped_task_run
 
     with released.engine.begin() as conn:
         p = add_pipeline(conn, "P")
@@ -233,7 +232,13 @@ def test_skipped_summary_can_be_reset_after_migration(released):
             ),
             {"p": p},
         ).scalar_one()
-        skipped = task_run(conn, t, r, status="SKIPPED")
+        skipped = conn.execute(
+            text(
+                "INSERT INTO AUD_TASK_RUN_LOG (TASK_ID, PIPELINE_RUN_ID, STATUS) "
+                "VALUES (:t, :r, 'SKIPPED') RETURNING TASK_RUN_ID"
+            ),
+            {"t": t, "r": r},
+        ).scalar_one()
     migrations.apply_pending_migrations(released.engine)
     with released.engine.begin() as conn:
         delete_skipped_task_run(conn, skipped)
@@ -245,7 +250,7 @@ def test_skipped_summary_can_be_reset_after_migration(released):
 def test_new_run_identity_kind(engine_db, trigger_kind, prefix):
     with engine_db.engine.begin() as conn:
         p = add_pipeline(conn, "P")
-        runlog.create_active_run(conn, p, trigger_kind=trigger_kind)
+        transitions.create_active_run(conn, p, trigger_kind=trigger_kind)
         key, kind = conn.execute(
             text("SELECT RUN_KEY, TRIGGER_KIND FROM AUD_PIPELINES_RUN_LOG")
         ).one()
@@ -256,5 +261,5 @@ def test_inconsistent_trigger_kind_is_refused_before_inserting(engine_db):
     with engine_db.engine.begin() as conn:
         p = add_pipeline(conn, "P")
         with pytest.raises(RunStateError, match="expected MANUAL, BACKFILL or STAND_IN"):
-            runlog.create_active_run(conn, p, backfill=True, trigger_kind="STAND_IN")
+            transitions.create_active_run(conn, p, backfill=True, trigger_kind="STAND_IN")
         assert conn.execute(text("SELECT COUNT(*) FROM AUD_PIPELINES_RUN_LOG")).scalar_one() == 0

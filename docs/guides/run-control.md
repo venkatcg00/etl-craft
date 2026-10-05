@@ -30,6 +30,9 @@ etl-craft mark --pipeline_code SALES_DAILY --task_code load_orders --status FAIL
     --reason "the host restarted at 03:10"
 ```
 
+A stale mark retires the active attempt as `CANCELLED` before changing the summary. The retired
+attempt stays immutable, and a late result from its process cannot overwrite the marked outcome.
+
 If that run has ended, it is reopened (`IN-PROGRESS` again), and the tasks the engine skipped
 without running are reset, so running the pipeline again resumes it from there:
 

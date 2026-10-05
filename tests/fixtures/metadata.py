@@ -2,7 +2,7 @@
 
 from sqlalchemy import text
 
-from etl_craft.engine import runlog
+from etl_craft.engine import transitions
 
 
 def insert(conn, sql, id_column, **params):
@@ -71,20 +71,20 @@ def add_pipeline_dependency(conn, pipeline_id, depends_on, kind="SUCCESS"):
 
 
 def start_run(conn, pipeline_id):
-    return runlog.find_or_create_active_run(conn, pipeline_id)
+    return transitions.find_or_create_active_run(conn, pipeline_id)
 
 
 def finish_run(conn, pipeline_run_id, status="SUCCESS"):
-    runlog.finalize_pipeline_run(conn, pipeline_run_id, status)
+    transitions.finalize_pipeline_run(conn, pipeline_run_id, status)
 
 
 def task_run(
     conn, task_id, pipeline_run_id, status="SUCCESS", target_count=None, rows_written=None
 ):
     """Bind ``task_id`` under the run and end it with ``status``; return its row id."""
-    binding = runlog.find_or_create_task_run(conn, task_id, pipeline_run_id)
+    binding = transitions.find_or_create_task_run(conn, task_id, pipeline_run_id)
     if status != "IN-PROGRESS":
-        runlog.finish_task_run(
+        transitions.finish_task_run(
             conn,
             binding.task_run_id,
             status=status,

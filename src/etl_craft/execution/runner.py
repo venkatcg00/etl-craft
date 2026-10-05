@@ -21,14 +21,18 @@ from __future__ import annotations
 import contextvars
 import logging
 import os
+import socket
 import sys
 import threading
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import uuid4
 
 from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
+from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import (
     SETTLED_STATUSES,
     TERMINAL_STATUSES,
@@ -37,10 +41,14 @@ from etl_craft.core.enums import (
     Mode,
     RunStatus,
 )
-from etl_craft.core.errors import ConfigurationError, RunRefusedError, UsageError
+from etl_craft.core.errors import (
+    ConfigurationError,
+    RunRefusedError,
+    UsageError,
+)
 from etl_craft.core.faults import fault_point
 from etl_craft.core.graph import DependencyGraph, RunState, TaskRunState, build_graph
-from etl_craft.engine import runlog
+from etl_craft.engine import runlog, transitions
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.dependencies import (
     fetch_cross_pipeline_task_edges,
@@ -175,17 +183,11 @@ def run_task(
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         task_id = resolve_task_id(conn, pipeline_id, task_code)
     with engine.begin() as conn:
-        pipeline_run_id, reopened = runlog.resolve_run_for_task(
-            conn, pipeline_id, force=force, mode=config.mode
-        )
-    if reopened is not None:
-        record_change(
-            engine,
-            pipeline_id=pipeline_id,
-            pipeline_run_id=pipeline_run_id,
-            action=InterventionAction.REOPEN,
-            from_status=reopened,
-            to_status=RunStatus.IN_PROGRESS,
+        pipeline_run_id, reopened = transitions.resolve_run_for_task(
+            conn,
+            pipeline_id,
+            force=force,
+            mode=config.mode,
             reason=f"--force: {task_code} runs again under the ended run",
         )
     consumed: dict[int, int] | None = None
@@ -231,21 +233,14 @@ def _run_overridden(
             # Decide before reopening anything, so a refused rerun changes nothing.
             pipeline_run_id = runlog.latest_run_for_rerun(conn, pipeline_id)
         else:
-            pipeline_run_id, _ = runlog.resolve_run_for_task(conn, pipeline_id, mode=config.mode)
+            pipeline_run_id, _ = transitions.resolve_run_for_task(
+                conn, pipeline_id, mode=config.mode
+            )
         status = runlog.fetch_task_run_status(conn, task_id, pipeline_run_id)
-        reopened = None
         if override.rerun and status != RunStatus.IN_PROGRESS:
-            pipeline_run_id, reopened = runlog.resolve_run_for_orchestrator(conn, pipeline_id)
-    if reopened is not None:
-        record_change(
-            engine,
-            pipeline_id=pipeline_id,
-            pipeline_run_id=pipeline_run_id,
-            action=InterventionAction.REOPEN,
-            from_status=reopened,
-            to_status=RunStatus.IN_PROGRESS,
-            reason=override.reason,
-        )
+            pipeline_run_id, _ = transitions.resolve_run_for_orchestrator(
+                conn, pipeline_id, reason=override.reason
+            )
     if status == RunStatus.IN_PROGRESS:
         return _skipped(
             f"{task_code}: already IN-PROGRESS under pipeline_run_id={pipeline_run_id}; not "
@@ -298,7 +293,7 @@ def _run_for_orchestrator(
     with engine.begin() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         task_id = resolve_task_id(conn, pipeline_id, task_code)
-        pipeline_run_id, reopened = runlog.resolve_run_for_orchestrator(conn, pipeline_id)
+        pipeline_run_id, reopened = transitions.resolve_run_for_orchestrator(conn, pipeline_id)
         status = runlog.fetch_task_run_status(conn, task_id, pipeline_run_id)
     if reopened is not None:
         logger.warning(
@@ -461,7 +456,7 @@ def _record_skipped(
     and stays ``FAILED``.
     """
     with engine.begin() as conn:
-        binding = runlog.find_or_create_task_run(conn, task_id, pipeline_run_id)
+        binding = transitions.find_or_create_task_run(conn, task_id, pipeline_run_id)
         if not binding.created and binding.status != RunStatus.SKIPPED:
             return TaskOutcome(
                 RunStatus(binding.status),
@@ -469,7 +464,7 @@ def _record_skipped(
                 f"and not run again: {reason}",
                 binding.task_run_id,
             )
-        runlog.finish_task_run(
+        transitions.finish_task_run(
             conn, binding.task_run_id, status=RunStatus.SKIPPED, error_message=reason
         )
     return TaskOutcome(RunStatus.SKIPPED, f"{task_code}: SKIPPED — {reason}", binding.task_run_id)
@@ -514,8 +509,19 @@ def _run_attempt(
     timeout = task_timeout_seconds(params, config)
     fault_point("runner.after_timeout")
     with engine.begin() as conn:
-        binding = runlog.find_or_create_task_run(conn, task_id, pipeline_run_id)
-        attempt = 1 if binding.created else runlog.begin_attempt(conn, binding.task_run_id)
+        binding = transitions.find_or_create_task_run(conn, task_id, pipeline_run_id)
+        attempt_id = transitions.queue_attempt(conn, binding.task_run_id, current_actor())
+        owner = str(uuid4())
+        transitions.claim_attempt(
+            conn,
+            attempt_id,
+            current_actor(),
+            owner=owner,
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+        )
+        active = transitions.active_attempt(conn, binding.task_run_id)
+        assert active is not None
+        attempt = active.attempt_number
     try:
         fault_point("runner.after_bind")
         return _start_and_record(
@@ -530,14 +536,24 @@ def _run_attempt(
             force,
             child,
             rerun=rerun,
+            attempt_id=attempt_id,
+            owner=owner,
         )
     except BaseException as error:
-        _fail_after_bind(engine, binding.task_run_id, task_code, error)
+        _fail_after_bind(
+            engine, binding.task_run_id, task_code, error, attempt_id=attempt_id, owner=owner
+        )
         raise
 
 
 def _fail_after_bind(
-    engine: Engine, task_run_id: int, task_code: str, error: BaseException
+    engine: Engine,
+    task_run_id: int,
+    task_code: str,
+    error: BaseException,
+    *,
+    attempt_id: int,
+    owner: str,
 ) -> None:
     """Record an attempt that could not run to its end; never hide the error being raised."""
     if isinstance(error, KeyboardInterrupt):
@@ -547,7 +563,11 @@ def _fail_after_bind(
         message = f"could not run the task process: {type(error).__name__}: {error}"
     try:
         with engine.begin() as conn:
-            if runlog.fail_task_run_if_running(conn, task_run_id, message):
+            active = transitions.active_attempt(conn, task_run_id)
+            if active is not None and active.attempt_id == attempt_id and active.owner == owner:
+                transitions.finish_attempt(
+                    conn, attempt_id, "FAILED", current_actor(), owner=owner, error_message=message
+                )
                 logger.error("%s: FAILED — %s", task_code, message)
     except Exception:
         logger.exception("%s: could not record that its attempt failed", task_code)
@@ -566,6 +586,8 @@ def _start_and_record(
     child: ChildOptions,
     *,
     rerun: bool,
+    attempt_id: int,
+    owner: str,
 ) -> TaskOutcome:
     """Start the bound attempt's task process, wait for it, and record how it ended."""
     assert config.config_path is not None
@@ -601,14 +623,29 @@ def _start_and_record(
                 timeout_seconds=timeout,
                 log_path=log_path,
                 # Output reaches the log as it is written, so a hang or a kill loses none of it.
-                env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                env={
+                    **os.environ,
+                    "PYTHONUNBUFFERED": "1",
+                    "ETL_CRAFT_ATTEMPT_ID": str(attempt_id),
+                    "ETL_CRAFT_ATTEMPT_OWNER": owner,
+                },
             ),
             kill_grace_seconds=child.kill_grace_seconds,
             cancel=stop,
+            on_started=lambda pid: _attempt_started(engine, attempt_id, owner, pid),
         )
     return retrying(
         f"recording how {task_code} ended",
-        lambda: _record_attempt(engine, task_run_id, pipeline_run_id, task_code, result, log_path),
+        lambda: _record_attempt(
+            engine,
+            task_run_id,
+            pipeline_run_id,
+            task_code,
+            result,
+            log_path,
+            attempt_id=attempt_id,
+            owner=owner,
+        ),
     )
 
 
@@ -678,12 +715,16 @@ def _record_attempt(
     task_code: str,
     result: ChildResult,
     log_path: Path,
+    *,
+    attempt_id: int,
+    owner: str,
 ) -> TaskOutcome:
     """Record the attempt's outcome, failing it if the task process ended without one.
 
     A task stopped because its run was cancelled is ``CANCELLED``.
     """
     with engine.begin() as conn:
+        transitions.assert_attempt(conn, attempt_id, task_run_id, owner)
         recorded = runlog.fetch_task_run_result(conn, task_run_id)
         status = RunStatus(recorded.status)
         message = recorded.error_message
@@ -694,7 +735,7 @@ def _record_attempt(
         if status == RunStatus.IN_PROGRESS and cancelled:
             status = RunStatus.CANCELLED
             message = f"the run was cancelled, so the task process {result.describe()}"
-            runlog.finish_task_run(conn, task_run_id, status=status, error_message=message)
+            transitions.cancel_attempt(conn, attempt_id, current_actor(), error_message=message)
         elif status == RunStatus.IN_PROGRESS:
             status = RunStatus.FAILED
             message = f"the task process {result.describe()} before recording an outcome"
@@ -703,11 +744,29 @@ def _record_attempt(
                     " (set the task's TASK_TIMEOUT_SECONDS, or Orchestration.Task_timeout_seconds,"
                     " to change its time limit)"
                 )
-            runlog.finish_task_run(conn, task_run_id, status=status, error_message=message)
+            if result.timed_out:
+                transitions.time_out_attempt(
+                    conn,
+                    attempt_id,
+                    current_actor(),
+                    owner=owner,
+                    error_message=message,
+                    task_log=result.output_tail,
+                )
+            else:
+                transitions.finish_attempt(
+                    conn,
+                    attempt_id,
+                    "FAILED",
+                    current_actor(),
+                    owner=owner,
+                    error_message=message,
+                    task_log=result.output_tail,
+                    exit_code=result.returncode,
+                )
             logger.error("%s: %s; see %s", task_code, message, log_path)
-        conn.execute(
-            statement(conn, "set_task_log"),
-            {"task_run_id": task_run_id, "task_log": _task_log(values, result.output_tail)},
+        transitions.set_task_log(
+            conn, task_run_id, attempt_id, owner, _task_log(values, result.output_tail)
         )
     if status == RunStatus.SUCCESS:
         logger.info("%s: SUCCESS", task_code)
@@ -720,3 +779,17 @@ def _task_log(values: str | None, output_tail: str) -> str | None:
     """Combine the task's reported values with the tail of its output."""
     parts = [part for part in (values, output_tail.strip()) if part]
     return "\n\n".join(parts) or None
+
+
+def _attempt_started(engine: Engine, attempt_id: int, owner: str, pid: int) -> None:
+    """Record the process started by this attempt's owner."""
+    with engine.begin() as conn:
+        transitions.ensure_attempt_started(
+            conn,
+            attempt_id,
+            current_actor(),
+            owner=owner,
+            host=socket.gethostname(),
+            pid=pid,
+            completed=True,
+        )

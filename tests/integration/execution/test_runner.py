@@ -11,7 +11,7 @@ from sqlalchemy.exc import OperationalError
 from etl_craft.config import load_config
 from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import HandlerError, MetadataError, RunRefusedError, RunStateError
-from etl_craft.engine import runlog
+from etl_craft.engine import runlog, transitions
 from etl_craft.execution import runner
 from etl_craft.execution.gates import CrossPipelineCheck, UncheckedGate
 from etl_craft.execution.runner import ChildOptions, run_task
@@ -107,7 +107,7 @@ def project(engine_db, tmp_path):
                 ),
                 {"p": ids["pipeline"], "t": ids[task], "u": ids[upstream], "k": kind},
             )
-        ids["run"] = runlog.find_or_create_active_run(conn, ids["pipeline"])
+        ids["run"] = transitions.find_or_create_active_run(conn, ids["pipeline"])
     return engine, config, ids
 
 
@@ -261,7 +261,7 @@ def test_a_task_waits_for_its_dependencies_and_is_skipped_when_they_can_never_be
 def test_a_task_in_progress_is_not_started_twice(project):
     engine, _, ids = project
     with engine.begin() as conn:
-        runlog.find_or_create_task_run(conn, ids["ok"], ids["run"])
+        transitions.find_or_create_task_run(conn, ids["ok"], ids["run"])
     outcome = run(project, "ok")
     assert outcome.status == RunStatus.SKIPPED
     assert "already IN-PROGRESS" in outcome.message
@@ -275,7 +275,7 @@ def test_errors_before_running(project):
     with pytest.raises(RunRefusedError):
         run_task(engine, remote, "P", "ok", force=True, child=CHILD)
     with engine.begin() as conn:
-        runlog.finalize_pipeline_run(conn, ids["run"], RunStatus.SUCCESS)
+        transitions.finalize_pipeline_run(conn, ids["run"], RunStatus.SUCCESS)
     with pytest.raises(RunStateError, match="already SUCCESS"):
         run(project, "ok")
 

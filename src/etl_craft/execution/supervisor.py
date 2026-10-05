@@ -15,7 +15,7 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
@@ -94,6 +94,7 @@ def run_child(
     tail_bytes: int = TAIL_BYTES,
     kill_grace_seconds: float = KILL_GRACE_SECONDS,
     cancel: threading.Event | None = None,
+    on_started: Callable[[int], None] | None = None,
 ) -> ChildResult:
     """Run ``spec`` to completion and return how it ended.
 
@@ -117,6 +118,8 @@ def run_child(
         logger.debug("started pid %s: %s", process.pid, " ".join(spec.argv))
         timed_out = cancelled = False
         try:
+            if on_started is not None:
+                on_started(process.pid)
             fault_point("supervisor.after_popen")
             cancelled = _wait(process, spec.timeout_seconds or None, cancel)
             if cancelled:

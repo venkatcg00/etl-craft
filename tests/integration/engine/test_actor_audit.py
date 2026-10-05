@@ -12,7 +12,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.exc import DBAPIError
 
 from etl_craft.core.actor import Actor, ActorKind, acting_as
-from etl_craft.engine import migrations, runlog
+from etl_craft.engine import migrations, transitions
 from etl_craft.engine.audit import command_request, register_engine
 from etl_craft.engine.privileges import extra_write_grants
 from fixtures.metadata import add_pipeline, add_pipeline_dependency, add_task
@@ -35,18 +35,18 @@ def test_attribution_and_immutable_command_requests(engine_db):
     engine = engine_db.engine
     with acting_as(ALICE), engine.begin() as conn:
         pipeline = add_pipeline(conn, "P")
-        run = runlog.create_active_run(conn, pipeline)
+        run = transitions.create_active_run(conn, pipeline)
         row = conn.execute(
             text("SELECT STARTED_BY, STARTED_BY_KIND FROM AUD_PIPELINES_RUN_LOG")
         ).one()
         assert tuple(row) == ("alice", "HUMAN")
-        runlog.finalize_pipeline_run(conn, run, "SUCCESS")
+        transitions.finalize_pipeline_run(conn, run, "SUCCESS")
         assert tuple(
             conn.execute(text("SELECT ENDED_BY, ENDED_BY_KIND FROM AUD_PIPELINES_RUN_LOG")).one()
         ) == ("etl-craft", "SYSTEM")
     with acting_as(ALICE), engine.begin() as conn:
-        skipped = runlog.create_active_run(conn, pipeline)
-        assert runlog.end_run_if(conn, skipped, "IN-PROGRESS", "SKIPPED")
+        skipped = transitions.create_active_run(conn, pipeline)
+        assert transitions.end_run_if(conn, skipped, "IN-PROGRESS", "SKIPPED")
         assert tuple(
             conn.execute(
                 text(
@@ -132,9 +132,9 @@ def seeded_tables(db):
         t1 = add_task(conn, p1, "load")
         t2 = add_task(conn, p2, "load")
         dependency = add_pipeline_dependency(conn, p1, p2)
-        r1 = runlog.create_active_run(conn, p1)
-        r2 = runlog.create_active_run(conn, p2)
-        task_run = runlog.find_or_create_task_run(conn, t1, r1).task_run_id
+        r1 = transitions.create_active_run(conn, p1)
+        r2 = transitions.create_active_run(conn, p2)
+        task_run = transitions.find_or_create_task_run(conn, t1, r1).task_run_id
         values = {
             "pipeline_id": p1,
             "task_id": t1,
@@ -279,7 +279,10 @@ def test_guarded_upgrade_rolls_back_with_the_ledger(empty_engine_db, monkeypatch
         migrations.apply_pending_migrations(db.engine)
     assert snapshot(db.engine) == before
     monkeypatch.setattr(migrations, "_record", original)
-    assert migrations.apply_pending_migrations(db.engine) == ["0008_actors_and_audit_guards.sql"]
+    assert migrations.apply_pending_migrations(db.engine) == [
+        "0008_actors_and_audit_guards.sql",
+        "0009_preserve_request_actors.sql",
+    ]
 
 
 @pytest.mark.parametrize(

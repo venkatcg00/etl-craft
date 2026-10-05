@@ -5,7 +5,7 @@ import threading
 import pytest
 from sqlalchemy import text
 
-from etl_craft.engine import runlog
+from etl_craft.engine import transitions
 from fixtures.engine_db import apply_schema, sqlite_engine_db
 
 pytestmark = pytest.mark.engine_sqlite
@@ -59,7 +59,7 @@ def test_a_run_started_in_a_transaction_that_fails_is_not_left_in_progress(engin
     # The window between starting a run and marking it SKIPPED, when the gate refused it.
     pid = pipeline_id(engine)
     with pytest.raises(BoomError), engine.begin() as conn:
-        runlog.find_or_create_active_run(conn, pid)
+        transitions.find_or_create_active_run(conn, pid)
         raise BoomError
     assert run_count(engine) == 0
 

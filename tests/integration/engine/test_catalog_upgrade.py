@@ -81,7 +81,7 @@ def before_backfill_constraint(empty_engine_db, monkeypatch):
 
 
 def seed_run_history(db):
-    from fixtures.metadata import add_pipeline, add_task, task_run
+    from fixtures.metadata import add_pipeline, add_task
 
     with db.engine.begin() as conn:
         pipeline = add_pipeline(conn, "P")
@@ -94,7 +94,13 @@ def seed_run_history(db):
             ),
             {"pipeline": pipeline},
         ).scalar_one()
-        task_run(conn, task, run)
+        conn.execute(
+            text(
+                "INSERT INTO AUD_TASK_RUN_LOG (TASK_ID, PIPELINE_RUN_ID, STATUS, END_DATE) "
+                "VALUES (:task, :run, 'SUCCESS', CURRENT_TIMESTAMP)"
+            ),
+            {"task": task, "run": run},
+        )
         removed = conn.execute(
             text(
                 "INSERT INTO AUD_PIPELINES_RUN_LOG (PIPELINE_ID, STATUS) "

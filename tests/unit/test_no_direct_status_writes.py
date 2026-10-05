@@ -1,0 +1,38 @@
+"""Lifecycle SQL is executed only by the module owning transitions."""
+
+import ast
+import re
+from pathlib import Path
+
+import pytest
+
+pytestmark = pytest.mark.unit
+ROOT = Path(__file__).resolve().parents[2] / "src" / "etl_craft"
+STATUS_WRITE = re.compile(r"\bSET\s+[^;]*\bSTATUS\s*=", re.IGNORECASE | re.DOTALL)
+
+
+def test_no_direct_status_writes():
+    queries = ROOT / "dialects" / "engine" / "queries"
+    writing = set()
+    for path in queries.glob("*.sql"):
+        if STATUS_WRITE.search(path.read_text()):
+            assert path.name.startswith("transition_"), path
+            writing.add(path.stem)
+    assert writing
+    for path in ROOT.rglob("*.py"):
+        if path == ROOT / "engine" / "transitions.py":
+            continue
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                assert node.value not in writing, (path, node.lineno, node.value)
+                assert not STATUS_WRITE.search(node.value), (path, node.lineno)
+
+
+@pytest.mark.parametrize("sql", ["SET STATUS = :status", "SET END_DATE = :now,\n STATUS = :status"])
+def test_status_write_detection(sql):
+    assert STATUS_WRITE.search(sql)
+
+
+def test_sla_status_is_independent():
+    assert not STATUS_WRITE.search("SET SLA_STATUS = 'BREACHED'")

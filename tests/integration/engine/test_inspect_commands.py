@@ -8,7 +8,7 @@ from sqlalchemy import text
 
 from etl_craft.cli import main
 from etl_craft.core.errors import ExitCode
-from etl_craft.engine import runlog
+from etl_craft.engine import transitions
 from fixtures.metadata import (
     add_dependency,
     add_pipeline,
@@ -69,10 +69,10 @@ def project(engine_db, tmp_path, monkeypatch):
         add_pipeline_dependency(conn, ids["SALES"], ids["UP"])
         first = start_run(conn, ids["SALES"])
         task_run(conn, ids["extract"], first, "SUCCESS", 10)
-        runlog.finalize_pipeline_run(conn, first, "SUCCESS", sla_in_hours=2)
+        transitions.finalize_pipeline_run(conn, first, "SUCCESS", sla_in_hours=2)
         ids["second"] = start_run(conn, ids["SALES"])
         failed = task_run(conn, ids["extract"], ids["second"], "IN-PROGRESS")
-        runlog.finish_task_run(conn, failed, status="FAILED", error_message="source down")
+        transitions.finish_task_run(conn, failed, status="FAILED", error_message="source down")
     return ids
 
 

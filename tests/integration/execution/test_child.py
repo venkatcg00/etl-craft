@@ -10,7 +10,7 @@ from etl_craft.cli import main as cli_main
 from etl_craft.config import load_config
 from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import ExitCode, HandlerError
-from etl_craft.engine import runlog
+from etl_craft.engine import runlog, transitions
 from etl_craft.execution import child
 from etl_craft.execution.context import build_task_context
 from etl_craft.handlers import registry
@@ -65,8 +65,8 @@ def bound(engine_db, tmp_path):
             ),
             {"t": task},
         )
-        run_id = runlog.find_or_create_active_run(conn, pipeline)
-        binding = runlog.find_or_create_task_run(conn, task, run_id)
+        run_id = transitions.find_or_create_active_run(conn, pipeline)
+        binding = transitions.find_or_create_task_run(conn, task, run_id)
     return engine, config_path, binding.task_run_id, run_id
 
 
@@ -146,7 +146,7 @@ def test_the_command_line_records_a_handler_failure(bound, capsys, monkeypatch):
     monkeypatch.chdir(config_path.parent)
     # An earlier attempt failed, so this run is a retry of the same row.
     with engine.begin() as conn:
-        runlog.finish_task_run(conn, task_run_id, status=RunStatus.FAILED)
+        transitions.finish_task_run(conn, task_run_id, status=RunStatus.FAILED)
         conn.execute(text("UPDATE CFG_TASKS SET HANDLER = 'EMAIL_ALERT'"))
     code = cli_main(["run", "--pipeline_code", "P", "--task_code", "T"])
     assert code == ExitCode.FAILURE
@@ -155,5 +155,5 @@ def test_the_command_line_records_a_handler_failure(bound, capsys, monkeypatch):
     assert status(engine, task_run_id).error_message == message
     # A settled task is skipped and exits 0.
     with engine.begin() as conn:
-        runlog.finish_task_run(conn, task_run_id, status=RunStatus.SUCCESS)
+        transitions.finish_task_run(conn, task_run_id, status=RunStatus.SUCCESS)
     assert cli_main(["run", "--pipeline_code", "P", "--task_code", "T"]) == ExitCode.SUCCESS

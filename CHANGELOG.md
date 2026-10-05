@@ -8,6 +8,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Centralized guarded run and attempt transitions, with `StaleTransitionError` (exit 20).
+  Execution records immutable attempt outcomes and updates their task summaries atomically;
+  concurrent admission, wrong owners and superseded results are refused. Reopening records
+  its intervention in the same transaction. Migration `0009_preserve_request_actors.sql`
+  keeps unknown historical requesters unknown when their attempts change.
+
 - Actor identities on run starts and endings, attempts, interventions and pauses; immutable
   command requests and metadata before/after history, with `etl-craft audit` filters. Migration
   `0008_actors_and_audit_guards.sql` protects audit and metadata writes on SQLite and PostgreSQL.
@@ -17,8 +23,7 @@ All notable changes are recorded here. The format follows
 - Run identities and trigger kinds, owner and lease fields, output revisions and configuration
   fingerprints; attempt and gate-decision tables, consumed revisions and repair-consumption flags.
   Migration `0007_identity.sql` preserves historical run identities and copies the latest known
-  execution attempts. New runs receive manual, backfill or stand-in keys. Attempt transitions,
-  lease enforcement and recording gate decisions remain subsequent roadmap work.
+  execution attempts. New runs receive manual, backfill or stand-in keys. Automatic lease renewal/reconciliation and recording gate decisions remain subsequent roadmap work.
 
 ### Fixed
 
