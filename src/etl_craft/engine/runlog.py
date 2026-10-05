@@ -1,6 +1,6 @@
 """Read run identities, task summaries, dependency state and SLA results.
 
-Lifecycle writes belong to ``engine.transitions``. Tasks resolve the active pipeline run;
+Lifecycle writes belong to ``engine.transitions``. Tasks receive a selected pipeline run;
 execution attempts keep separate immutable outcomes under each task summary.
 """
 
@@ -32,23 +32,85 @@ def today() -> date:
     return datetime.now(UTC).date()
 
 
-def latest_run_for_rerun(conn: Connection, pipeline_id: int) -> int:
-    """Return the run ``--rerun`` acts on: the run in progress, else the latest one.
+@dataclass(frozen=True)
+class RunSelector:
+    """An explicit run id or pipeline-scoped key, or the single non-terminal run."""
 
-    Nothing is changed; the caller reopens the run only once it knows the task will run.
-    Raises ``RunStateError`` when the pipeline has no run at all.
-    """
-    active = fetch_active_pipeline_run_id(conn, pipeline_id)
-    if active is not None:
-        return active
-    latest = conn.execute(
-        statement(conn, "latest_pipeline_run"), {"pipeline_id": pipeline_id}
-    ).one_or_none()
-    if latest is None:
-        raise RunStateError(
-            f"pipeline_id={pipeline_id} has no run to rerun a task in; run the pipeline first"
+    run_id: int | None = None
+    run_key: str | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse conflicting or empty identities before looking at any run."""
+        if self.run_id is not None and self.run_key is not None:
+            raise RunStateError("choose --run-id or --run-key, not both")
+        if self.run_id is not None and self.run_id < 1:
+            raise RunStateError("--run-id must be a positive integer")
+        if self.run_key is not None and not self.run_key.strip():
+            raise RunStateError("--run-key must not be empty")
+
+
+ACTIVE_RUN = RunSelector()
+
+
+@dataclass(frozen=True)
+class RunIdentity:
+    """A run's identity and logical date, independent of when it started."""
+
+    pipeline_run_id: int
+    run_key: str
+    trigger_kind: str
+    run_date: date
+    status: str
+
+
+def run_candidates(conn: Connection, pipeline_id: int) -> list[RunIdentity]:
+    """List runs of this pipeline by id, for selection and actionable refusals."""
+    return [
+        RunIdentity(
+            int(r.pipeline_run_id),
+            str(r.run_key),
+            str(r.trigger_kind),
+            as_date(r.run_date),
+            str(r.status),
         )
-    return int(latest.pipeline_run_id)
+        for r in conn.execute(
+            statement(conn, "pipeline_run_candidates"), {"pipeline_id": pipeline_id}
+        )
+    ]
+
+
+def select_run(
+    conn: Connection, pipeline_id: int, selector: RunSelector = ACTIVE_RUN
+) -> RunIdentity:
+    """Select exactly one run; never select an ended run without an explicit identity."""
+    candidates = run_candidates(conn, pipeline_id)
+    matches = [
+        r
+        for r in candidates
+        if (
+            r.pipeline_run_id == selector.run_id
+            if selector.run_id is not None
+            else r.run_key == selector.run_key
+            if selector.run_key is not None
+            else r.status in {"QUEUED", "IN-PROGRESS"}
+        )
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    listed = (
+        "\n".join(
+            f"id={r.pipeline_run_id} key={r.run_key} kind={r.trigger_kind} "
+            f"run_date={r.run_date} status={r.status}"
+            for r in candidates
+        )
+        or "(no runs)"
+    )
+    raise RunStateError(
+        f"pipeline_id={pipeline_id}: run selection matched {len(matches)} runs "
+        f"(--run-id={selector.run_id!r}, --run-key={selector.run_key!r}); expected exactly one. "
+        "Pass --run-id or --run-key belonging to this pipeline, or start a new run with "
+        "--init-only. Candidates:\n" + listed
+    )
 
 
 @dataclass(frozen=True)

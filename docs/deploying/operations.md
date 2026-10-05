@@ -42,5 +42,5 @@ See [Engine DB setup and upgrades](engine-db.md).
 
 - The exit status of every command (see [Exit codes](../reference/exit-codes.md)).
 - Alert tasks and SLA emails (see [Email alerts](../guides/email-alerts.md)).
-- `etl-craft history --pipeline_code X` for runs and interventions, and the
+- `etl-craft history --pipeline_code X --all` for runs and interventions, and the
   [catalog site](../guides/catalog.md) for every pipeline's last run, refreshed nightly.

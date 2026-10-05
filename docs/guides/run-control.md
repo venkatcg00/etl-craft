@@ -10,14 +10,33 @@ In remote mode the orchestrator is the only source of truth for runs, so all of 
 (exit status `10`): mark, clear or stop the task in the orchestrator instead. See
 [Running under an orchestrator](../deploying/orchestrator.md).
 
+## Choose the run
+
+`run`, `mark`, `cancel`, `history` and `steps` accept `--run-id 42` or
+`--run-key 'manual:...'`. The identity must belong to `--pipeline_code`. Without a selector,
+operations use the pipeline's single non-terminal run. When none or several exist, the command
+refuses and lists candidates with their id, key, trigger kind, run date and status. It never
+selects a completed run by recency.
+
+```bash
+etl-craft history --pipeline_code SALES_DAILY --all
+etl-craft history --pipeline_code SALES_DAILY --run-id 42
+etl-craft steps --pipeline_code SALES_DAILY --run-id 42
+```
+
+`history --all --limit 20` lists runs for finding an identity. `steps` shows each task's status
+under the selected run alongside its current metadata parameters. Creating a run with a whole
+`run` or `--init-only` needs no existing identity; a missing `--run-key` creates that key.
+`--backfill`, `--skip` and `mark --new-run` create their own new identities and refuse selectors.
+
 ## Mark a task
 
 ```bash
-etl-craft mark --pipeline_code SALES_DAILY --task_code load_orders --status SUCCESS \
+etl-craft mark --pipeline_code SALES_DAILY --run-id 42 --task_code load_orders --status SUCCESS \
     --reason "loaded by hand from the 06:00 file"
 ```
 
-The task is set to `SUCCESS`, `FAILED` or `SKIPPED` under the pipeline's latest run, and its
+The task is set to `SUCCESS`, `FAILED` or `SKIPPED` under the selected run, and its
 `ERROR_MESSAGE` says who marked it and why. A task that is running is refused: cancel the run
 first, or wait.
 
@@ -33,7 +52,7 @@ etl-craft mark --pipeline_code SALES_DAILY --task_code load_orders --status FAIL
 A stale mark retires the active attempt as `CANCELLED` before changing the summary. The retired
 attempt stays immutable, and a late result from its process cannot overwrite the marked outcome.
 
-If that run has ended, it is reopened (`IN-PROGRESS` again), and the tasks the engine skipped
+If an explicitly selected run has ended, it is reopened (`IN-PROGRESS` again), and the tasks the engine skipped
 without running are reset, so running the pipeline again resumes it from there:
 
 ```bash
@@ -46,7 +65,7 @@ Mark a task `FAILED` and it gets another attempt.
 A marked `SUCCESS` satisfies a `HAS_DATA` dependency only when you state the row count:
 
 ```bash
-etl-craft mark --pipeline_code SALES_DAILY --task_code load_orders --status SUCCESS \
+etl-craft mark --pipeline_code SALES_DAILY --run-id 42 --task_code load_orders --status SUCCESS \
     --rows 1200 --reason "1200 rows loaded by hand"
 ```
 
@@ -129,7 +148,7 @@ not end `SUCCESS` or `SKIPPED`, and says how to take up from that date once it i
 at most 366 dates, and not while the pipeline has a run in progress or is paused.
 
 A single run can be given its date too: `etl-craft run --pipeline_code SALES_DAILY --run-date
-2026-09-01`. `etl-craft history` shows each run's date, and which were backfill runs.
+2026-09-01`. `etl-craft history --all` shows each run's date, and which were backfill runs.
 
 ## Run a task without its dependencies
 
@@ -145,13 +164,13 @@ its pipeline or elsewhere, and consumes no upstream run. A task that already end
 ## Run a task again
 
 ```bash
-etl-craft run --pipeline_code SALES_DAILY --task_code load_orders --rerun \
+etl-craft run --pipeline_code SALES_DAILY --run-id 42 --task_code load_orders --rerun \
     --reason "the source resent the file"
-etl-craft run --pipeline_code SALES_DAILY --task_code load_orders --rerun --with-downstream \
+etl-craft run --pipeline_code SALES_DAILY --run-id 42 --task_code load_orders --rerun --with-downstream \
     --reason "the source resent the file"
 ```
 
-The task runs again under the pipeline's latest run, although it already ended, as a new attempt
+The task runs again under the selected run, although it already ended, as a new attempt
 on its row that skips nothing (a business-rules task checks every rule again), without its
 dependencies being checked. With `--with-downstream`, every task after it runs again too, in
 dependency order, each once its own dependencies are satisfied; those whose dependencies are not
@@ -185,7 +204,7 @@ orchestrator's sensors are the gates.
 
 ## What was changed
 
-`etl-craft history --pipeline_code SALES_DAILY` lists the interventions on the runs it shows,
+`etl-craft history --pipeline_code SALES_DAILY --all` lists the interventions on the runs it shows,
 under the runs, and the [catalog](catalog.md) lists those on each pipeline's last run.
 `AUD_RUN_INTERVENTIONS` holds every one:
 

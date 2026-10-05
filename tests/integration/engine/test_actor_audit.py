@@ -383,10 +383,24 @@ def test_cli_actor_requests_and_read_only_audit(engine_db, tmp_path, monkeypatch
         assert result == 0, capsys.readouterr()
 
     command("run", "--pipeline_code", "P", "--init-only")
+    with engine_db.engine.connect() as conn:
+        run_id = conn.execute(
+            text("SELECT PIPELINE_RUN_ID FROM AUD_PIPELINES_RUN_LOG")
+        ).scalar_one()
     command("pause", "--pipeline_code", "P", "--reason", "wait")
     command("resume", "--pipeline_code", "P", "--reason", "ready")
     command("cancel", "--pipeline_code", "P", "--reason", "stop")
-    command("mark", "--pipeline_code", "P", "--status", "SUCCESS", "--reason", "verified")
+    command(
+        "mark",
+        "--pipeline_code",
+        "P",
+        "--run-id",
+        str(run_id),
+        "--status",
+        "SUCCESS",
+        "--reason",
+        "verified",
+    )
     capsys.readouterr()
     command("audit", "--pipeline_code", "P", "--since", "2026-01-01")
     shown = capsys.readouterr().out
@@ -395,7 +409,7 @@ def test_cli_actor_requests_and_read_only_audit(engine_db, tmp_path, monkeypatch
     assert "unrelated_parameter_history" not in shown
     command("setup", "--print-grants")
     assert "file permissions" in capsys.readouterr().out if profile.auth_mode == "none" else True
-    command("history", "--pipeline_code", "P")
+    command("history", "--pipeline_code", "P", "--run-id", str(run_id))
     assert "STARTED_BY" in capsys.readouterr().out
     with engine_db.engine.connect() as conn:
         actions = conn.execute(

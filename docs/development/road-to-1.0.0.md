@@ -74,7 +74,8 @@ item's text, or work done early under another item.
 | S3.A Identity schema | Done | #95 | Run identities, attempt history and gate-decision schema |
 | S3.I Actors and engine-only writes | Done | #98 | W15 |
 | S3.B Centralized transitions | Done | #99 | Guarded lifecycle writes and immutable live attempts; ownership/reconciliation completes in S3.D |
-| S3.C to S3.H | Not started | | |
+| S3.C Explicit run selection | Done | #100 | B11, B16, W11 |
+| S3.D to S3.H | Not started | | |
 | 0.4 and later | Not started | | |
 
 ### Handover notes
@@ -82,6 +83,13 @@ item's text, or work done early under another item.
 What a person picking up the work needs that the code and the item texts do not say.
 
 **Choices that differ from the item text.**
+
+- S3.C distinguishes admission from selecting an existing run: a whole pipeline run or
+  `--init-only` can create a new identity when no active run exists; a missing explicit key
+  creates that key. Task, operator and inspection commands refuse absent/ambiguous selection.
+  `history --all` retains the ability to discover completed ids. The Airflow minimum is 2.2.0
+  for the combined `run_id` and `data_interval_end` templates; `--airflow-version` declares
+  the target range with a default floor of 2.2.0. No additional config field is required.
 
 - `S3.I`: each action is the request itself, recorded once with `OUTCOME = REQUESTED` and
   no exit code; execution outcomes belong to runs and attempts. Bootstrap commands record

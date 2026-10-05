@@ -46,3 +46,11 @@ environment where some upstreams never run, see [Stepping in](../guides/run-cont
 The same metadata runs under an orchestrator in remote mode, which then holds every rule; see
 [Running under an orchestrator](orchestrator.md). A few rules have no equivalent in an
 orchestrator's DAG, and remote mode names them.
+
+## Selecting an existing run
+
+Pass `--run-id` or `--run-key` when addressing an existing run, especially a completed run.
+Without an identity, task and operator commands require the single non-terminal run; they
+never adopt the latest completed run. Whole-pipeline execution passes the selected id to its
+wave tasks. `history --all` lists runs; `history` and `steps` inspect the selected run.
+See [run controls](../guides/run-control.md#choose-the-run) for examples.

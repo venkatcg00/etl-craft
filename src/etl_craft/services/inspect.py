@@ -23,7 +23,7 @@ from etl_craft.engine.repository.tasks import (
     fetch_task_parameters,
     resolve_task_id,
 )
-from etl_craft.engine.runlog import as_date
+from etl_craft.engine.runlog import as_date, fetch_task_run_status
 
 
 @dataclass(frozen=True)
@@ -110,9 +110,12 @@ class Step:
     run_condition: str | None
     run_condition_count: int | None
     parameters: dict[str, str]
+    status: str | None = None
 
 
-def pipeline_steps(conn: Connection, pipeline_code: str) -> list[Step]:
+def pipeline_steps(
+    conn: Connection, pipeline_code: str, *, run_id: int | None = None
+) -> list[Step]:
     """Return the active tasks of ``pipeline_code`` with their parameters, by task code."""
     pipeline_id = resolve_pipeline_id(conn, pipeline_code)
     rows = conn.execute(statement(conn, "pipeline_steps"), {"pipeline_id": pipeline_id}).all()
@@ -124,6 +127,7 @@ def pipeline_steps(conn: Connection, pipeline_code: str) -> list[Step]:
             row.run_condition,
             row.run_condition_count,
             dict(sorted(fetch_task_parameters(conn, row.task_id).items())),
+            None if run_id is None else fetch_task_run_status(conn, row.task_id, run_id),
         )
         for row in rows
     ]
@@ -151,7 +155,12 @@ class RunEntry:
 
 
 def run_history(
-    conn: Connection, pipeline_code: str, task_code: str | None = None, *, limit: int = 20
+    conn: Connection,
+    pipeline_code: str,
+    task_code: str | None = None,
+    *,
+    limit: int = 20,
+    run_id: int | None = None,
 ) -> list[RunEntry]:
     """Return the latest ``limit`` runs of a pipeline, or of one of its tasks, newest first."""
     if limit < 1:
@@ -159,7 +168,8 @@ def run_history(
     pipeline_id = resolve_pipeline_id(conn, pipeline_code)
     if task_code is None:
         rows = conn.execute(
-            statement(conn, "pipeline_run_history"), {"pipeline_id": pipeline_id, "limit": limit}
+            statement(conn, "pipeline_run_history"),
+            {"pipeline_id": pipeline_id, "limit": limit, "run_id": run_id},
         )
         return [
             RunEntry(
@@ -178,7 +188,9 @@ def run_history(
             for r in rows
         ]
     task_id = resolve_task_id(conn, pipeline_id, task_code)
-    rows = conn.execute(statement(conn, "task_run_history"), {"task_id": task_id, "limit": limit})
+    rows = conn.execute(
+        statement(conn, "task_run_history"), {"task_id": task_id, "limit": limit, "run_id": run_id}
+    )
     return [
         RunEntry(
             r.pipeline_run_id,

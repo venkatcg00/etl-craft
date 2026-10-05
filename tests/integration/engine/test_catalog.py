@@ -11,7 +11,7 @@ from sqlalchemy import text
 from etl_craft.cli import main
 from etl_craft.config import load_config
 from etl_craft.core.errors import ExitCode, UsageError
-from etl_craft.engine import transitions
+from etl_craft.engine import runlog, transitions
 from etl_craft.execution.interventions import mark_task
 from etl_craft.services.catalog import build_catalog
 from etl_craft.services.catalog_graph import lineage_drawing
@@ -358,7 +358,17 @@ def test_every_page_chains_to_what_it_mentions(project, tmp_path):
 
 def test_a_pipeline_page_lists_what_operators_changed_in_its_last_run(project, tmp_path):
     engine, config, _ = project
-    mark_task(engine, config, "INGEST", "pull", "SKIPPED", "no file today", requested_by="op@h")
+    run_id = build_catalog(engine, config).pipelines["INGEST"].runs[0].pipeline_run_id
+    mark_task(
+        engine,
+        config,
+        "INGEST",
+        "pull",
+        "SKIPPED",
+        "no file today",
+        requested_by="op@h",
+        selector=runlog.RunSelector(run_id=run_id),
+    )
     catalog = build_catalog(engine, config)
     assert [(c.task_code, c.action) for c in catalog.pipelines["INGEST"].interventions] == [
         ("pull", "MARK"),

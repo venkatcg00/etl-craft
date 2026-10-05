@@ -27,6 +27,8 @@ from shlex import join
 from typing import Any, TypeVar
 
 import yaml
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import InvalidVersion, Version
 from sqlalchemy.engine import Connection
 
 from etl_craft.config import ConnectorConfig
@@ -60,8 +62,9 @@ FINALIZE_TASK = "__finalize__"
 GLOBAL_DAG_ID = "etl_craft_global_orchestration"
 DOCS_DAG_ID = "etl_craft_docs"
 DOCS_TASK = "generate_docs"
+RUN_KEY_TEMPLATE = "orchestrator:{{ run_id }}"
 RUN_DATE_TEMPLATE = "{{ data_interval_end | ds }}"
-"""How a remote DAG's ``__init__`` passes the run's date: Airflow's end of the data interval,
+"""How each remote DAG step passes the run's date: Airflow's end of the data interval,
 the day a scheduled run fires, so ``$$run_date`` means the same as in local mode, and a backfill
 by the orchestrator runs each day as of its own date."""
 
@@ -89,7 +92,8 @@ REMOTE_HEADER = """\
 # Remote mode: this DAG is the only source of truth for scheduling. etl-craft runs
 # each task when told to and checks none of these rules itself.
 #
-# `tasks:` is what the orchestrator runs. `__init__` passes the run's date as
+# Every execution step passes its stable run key and date. The key is
+# `--run-key orchestrator:{{ run_id }}` and the date is
 # `--run-date {{ data_interval_end | ds }}`, an Airflow template: with another
 # orchestrator, pass its own date for the run. Each task has one `trigger_rule`, worked
 # out from its RUN_CONDITION and its dependencies' DEPENDENCY_TYPE. A step with `sensor:`
@@ -159,13 +163,20 @@ def _check_dag(tasks: dict[str, Any]) -> None:
             )
 
 
-def pipeline_dag(conn: Connection, config: ConnectorConfig, pipeline_code: str) -> dict[str, Any]:
+def pipeline_dag(
+    conn: Connection,
+    config: ConnectorConfig,
+    pipeline_code: str,
+    *,
+    airflow_version: str = ">=2.2.0",
+) -> dict[str, Any]:
     """Return the DAG of ``pipeline_code`` as a dict, in the order it is written.
 
     Raises ``RemoteUnsupportedError`` in remote mode for rules the orchestrator does not support.
     """
     _require_code("PIPELINE_CODE", pipeline_code)
     if config.mode == Mode.REMOTE:
+        require_airflow_run_templates(airflow_version)
         return _remote_pipeline_dag(conn, config, pipeline_code)
     pipeline_id = resolve_pipeline_id(conn, pipeline_code)
     detail = fetch_pipeline_detail(conn, pipeline_id)
@@ -280,7 +291,7 @@ def _remote_pipeline_dag(
     build_graph(data.tasks, data.same_pipeline_edges)
     tasks: dict[str, Any] = {
         INIT_TASK: {
-            "bash_command": _command(pipeline_code, "--init-only", "--run-date", RUN_DATE_TEMPLATE),
+            "bash_command": _remote_command(pipeline_code, "--init-only"),
             "depends_on": [],
             "trigger_rule": "all_success",
         }
@@ -319,14 +330,14 @@ def _remote_pipeline_dag(
                 depends_on.append(name)
                 kinds.append(SENSOR_TYPE)
         steps[codes[task.task_id]] = {
-            "bash_command": _command(pipeline_code, "--task_code", codes[task.task_id]),
+            "bash_command": _remote_command(pipeline_code, "--task_code", codes[task.task_id]),
             "depends_on": sorted(depends_on) or base,
             "trigger_rule": trigger_rule(task.run_condition or "ALL", kinds),
         }
     tasks.update(steps)
     leaves = sorted(codes[t.task_id] for t in data.tasks if t.task_id not in upstream_ids)
     tasks[FINALIZE_TASK] = {
-        "bash_command": _command(pipeline_code, "--finalize-only"),
+        "bash_command": _remote_command(pipeline_code, "--finalize-only"),
         "depends_on": leaves or [INIT_TASK],
         "trigger_rule": "all_done",
     }
@@ -335,6 +346,34 @@ def _remote_pipeline_dag(
             step["env"] = _orchestrator_env()
             step["append_env"] = True
     return _dag_settings(config, detail, tasks)
+
+
+def _remote_command(code: str, *arguments: str) -> str:
+    return _command(
+        code, *arguments, "--run-key", RUN_KEY_TEMPLATE, "--run-date", RUN_DATE_TEMPLATE
+    )
+
+
+def require_airflow_run_templates(version_range: str) -> None:
+    """Require a declared version floor supporting run identity and data-interval templates."""
+    minimum = Version("2.2.0")
+    try:
+        spec = SpecifierSet(
+            version_range if any(c in version_range for c in "<>=!~") else "==" + version_range
+        )
+        safe_floor = any(
+            constraint.operator in {">=", ">", "~=", "=="}
+            and Version(constraint.version.removesuffix(".*")) >= minimum
+            for constraint in spec
+        )
+    except (InvalidSpecifier, InvalidVersion):
+        safe_floor = False
+    if not safe_floor:
+        raise ConfigurationError(
+            f"Airflow version range {version_range!r} has no supported minimum; "
+            "remote DAGs require Airflow >=2.2.0 for run_id and data_interval_end templates. "
+            "Pass --airflow-version '>=2.2.0' or a supported exact version."
+        )
 
 
 def _orchestrator_env() -> dict[str, str]:

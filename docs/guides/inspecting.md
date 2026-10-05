@@ -31,11 +31,13 @@ A dependency on a task in another pipeline is written `PIPELINE.TASK`. See
 
 ## `etl-craft steps --pipeline_code SALES`
 
-The pipeline's active tasks: handler, task type, run condition and every active parameter.
+The pipeline's active tasks: status under the selected run, handler, task type, run condition
+and every active parameter. Pass `--run-id` or `--run-key`; without either, exactly one
+non-terminal run must exist.
 
-## `etl-craft history --pipeline_code SALES [--task_code load] [--limit 20]`
+## `etl-craft history --pipeline_code SALES [--run-id 42 | --run-key KEY | --all]`
 
-The latest runs, newest first: for the pipeline, each run's status, start and end, SLA status, and starting and ending actors with their kinds;
+The selected run, or with `--all --limit 20`, recent runs newest first: for the pipeline, each run's status, start and end, SLA status, and starting and ending actors with their kinds;
 for one task, each run's status, attempts, source and target counts, start and end, and error
 message.
 

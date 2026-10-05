@@ -5,13 +5,20 @@ from __future__ import annotations
 import argparse
 
 from etl_craft.cli.commands import Command
-from etl_craft.cli.commands.common import connect_engine_db, load_command_config
+from etl_craft.cli.commands.common import (
+    configure_run_selector,
+    connect_engine_db,
+    load_command_config,
+)
 from etl_craft.cli.output import Output
 from etl_craft.core.errors import ExitCode
+from etl_craft.engine.repository.pipelines import resolve_pipeline_id
+from etl_craft.engine.runlog import RunSelector, select_run
 from etl_craft.services.inspect import pipeline_steps
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
+    configure_run_selector(parser)
     parser.add_argument("--pipeline_code", required=True, help="the pipeline to show")
 
 
@@ -19,16 +26,22 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     engine = connect_engine_db(load_command_config(args))
     try:
         with engine.connect() as conn:
-            steps = pipeline_steps(conn, args.pipeline_code)
+            selected = select_run(
+                conn,
+                resolve_pipeline_id(conn, args.pipeline_code),
+                RunSelector(args.run_id, args.run_key),
+            )
+            steps = pipeline_steps(conn, args.pipeline_code, run_id=selected.pipeline_run_id)
     finally:
         engine.dispose()
     if not steps:
         out.empty("no active tasks")
         return ExitCode.SUCCESS
-    out.rows([("TASK_CODE", "HANDLER", "TASK_TYPE", "RUN_CONDITION", "PARAMETERS")])
+    out.rows([("TASK_CODE", "STATUS", "HANDLER", "TASK_TYPE", "RUN_CONDITION", "PARAMETERS")])
     out.rows(
         (
             s.task_code,
+            s.status or "NOT-RUN",
             s.handler,
             s.task_type,
             f"N={s.run_condition_count}" if s.run_condition == "N" else s.run_condition or "ALL",

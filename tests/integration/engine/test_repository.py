@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import text
 
-from etl_craft.core.enums import Mode, RunStatus, SlaStatus
+from etl_craft.core.enums import RunStatus, SlaStatus
 from etl_craft.core.errors import MetadataError, RunStateError
 from etl_craft.core.graph import TaskEdge, TaskRunState, build_graph
 from etl_craft.engine import runlog, transitions
@@ -325,7 +325,7 @@ def test_concurrent_starts_share_one_run(seeded):
 
 def test_a_single_task_needs_a_run_to_bind_to(seeded):
     engine, ids = seeded
-    with engine.begin() as conn, pytest.raises(RunStateError, match="has no run to bind"):
+    with engine.begin() as conn, pytest.raises(RunStateError, match="matched 0 runs"):
         transitions.resolve_run_for_task(conn, ids["alpha"])
 
 
@@ -335,12 +335,14 @@ def test_an_ended_run_is_reopened_only_with_force(seeded):
         run_id = transitions.find_or_create_active_run(conn, ids["alpha"])
         transitions.finalize_pipeline_run(conn, run_id, RunStatus.SUCCESS)
     with engine.begin() as conn:
-        with pytest.raises(RunStateError, match=r"already SUCCESS.*or pass --force"):
-            transitions.resolve_run_for_task(conn, ids["alpha"])
-        with pytest.raises(RunStateError, match="already SUCCESS") as error:
-            transitions.resolve_run_for_task(conn, ids["alpha"], mode=Mode.REMOTE)
-        assert "--force" not in str(error.value)
-        assert transitions.resolve_run_for_task(conn, ids["alpha"], force=True) == (
+        with pytest.raises(RunStateError, match="matched 0 runs"):
+            transitions.resolve_run_for_task(conn, ids["alpha"], force=True)
+        selector = runlog.RunSelector(run_id=run_id)
+        with pytest.raises(RunStateError, match="is SUCCESS"):
+            transitions.resolve_run_for_task(conn, ids["alpha"], selector=selector)
+        assert transitions.resolve_run_for_task(
+            conn, ids["alpha"], force=True, selector=selector
+        ) == (
             run_id,
             "SUCCESS",
         )
@@ -551,6 +553,8 @@ def test_force_cannot_reopen_a_cancelled_run(seeded):
         transitions.finalize_pipeline_run(conn, run, "CANCELLED")
     with engine.begin() as conn:
         with pytest.raises(RunStateError, match=r"CANCELLED.*start a new run.*init-only"):
-            transitions.resolve_run_for_task(conn, ids["alpha"], force=True)
+            transitions.resolve_run_for_task(
+                conn, ids["alpha"], force=True, selector=runlog.RunSelector(run_id=run)
+            )
         assert runlog.fetch_pipeline_run_status(conn, run) == "CANCELLED"
         assert runlog.fetch_active_pipeline_run_id(conn, ids["alpha"]) is None

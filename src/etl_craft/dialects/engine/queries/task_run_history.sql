@@ -4,5 +4,6 @@ SELECT PIPELINE_RUN_ID AS pipeline_run_id, STATUS AS status, START_DATE AS start
        TARGET_COUNT AS target_count, ERROR_MESSAGE AS error_message
 FROM AUD_TASK_RUN_LOG
 WHERE TASK_ID = :task_id
+AND (CAST(:run_id AS bigint) IS NULL OR PIPELINE_RUN_ID = :run_id)
 ORDER BY START_DATE DESC, TASK_RUN_ID DESC
 LIMIT :limit

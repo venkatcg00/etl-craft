@@ -5,14 +5,20 @@ from __future__ import annotations
 import argparse
 
 from etl_craft.cli.commands import Command
-from etl_craft.cli.commands.common import connect_engine_db, load_command_config
+from etl_craft.cli.commands.common import (
+    configure_run_selector,
+    connect_engine_db,
+    load_command_config,
+)
 from etl_craft.cli.output import Output
 from etl_craft.core.enums import MARKABLE_STATUSES
 from etl_craft.core.errors import ExitCode, UsageError
+from etl_craft.engine.runlog import RunSelector
 from etl_craft.execution.interventions import mark_run, mark_task, record_stand_in_run
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
+    configure_run_selector(parser)
     parser.add_argument("--pipeline_code", required=True, help="the pipeline whose run to mark")
     parser.add_argument("--task_code", help="mark this task of the run; without it, the run itself")
     parser.add_argument(
@@ -41,6 +47,8 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 def _run(args: argparse.Namespace, out: Output) -> int:
     if args.stale and (not args.task_code or args.new_run):
         raise UsageError("--stale marks one task: pass --task_code, without --new-run")
+    if args.new_run and (args.run_id is not None or args.run_key is not None):
+        raise UsageError("--new-run creates a stand-in run; do not pass a run selector")
     config = load_command_config(args)
     engine = connect_engine_db(config)
     try:
@@ -64,9 +72,17 @@ def _run(args: argparse.Namespace, out: Output) -> int:
                 args.reason,
                 rows=args.rows,
                 stale=args.stale,
+                selector=RunSelector(args.run_id, args.run_key),
             )
         else:
-            done = mark_run(engine, config, args.pipeline_code, args.status, args.reason)
+            done = mark_run(
+                engine,
+                config,
+                args.pipeline_code,
+                args.status,
+                args.reason,
+                selector=RunSelector(args.run_id, args.run_key),
+            )
     finally:
         engine.dispose()
     out.line(done.message)

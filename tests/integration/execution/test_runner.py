@@ -276,7 +276,7 @@ def test_errors_before_running(project):
         run_task(engine, remote, "P", "ok", force=True, child=CHILD)
     with engine.begin() as conn:
         transitions.finalize_pipeline_run(conn, ids["run"], RunStatus.SUCCESS)
-    with pytest.raises(RunStateError, match="already SUCCESS"):
+    with pytest.raises(RunStateError, match="matched 0 runs"):
         run(project, "ok")
 
 

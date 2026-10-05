@@ -1,0 +1,5 @@
+SELECT PIPELINE_RUN_ID AS pipeline_run_id, RUN_KEY AS run_key,
+       TRIGGER_KIND AS trigger_kind, RUN_DATE AS run_date, STATUS AS status
+FROM AUD_PIPELINES_RUN_LOG
+WHERE PIPELINE_ID = :pipeline_id
+ORDER BY PIPELINE_RUN_ID

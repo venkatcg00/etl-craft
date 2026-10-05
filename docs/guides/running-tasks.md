@@ -6,10 +6,11 @@
 etl-craft run --pipeline_code SALES_DAILY --task_code load_orders
 ```
 
-The task runs under its pipeline's active run: the one `IN-PROGRESS` run in `AUD_PIPELINES_RUN_LOG`.
-Nothing passes it a run id. If the pipeline has no active run, the command stops with exit status
-`9` (`RUN_STATE`); start one with `run --pipeline_code <code> --init-only`, or
-[run the whole pipeline](running-pipelines.md).
+The task receives its run from its caller. Pass `--run-id` or `--run-key` to select it;
+without either, the command requires exactly one non-terminal run of the pipeline. It refuses
+when none or several exist and lists candidates. A completed run is never selected by recency.
+The whole-pipeline runner passes its selected run to every task. Use
+`history --pipeline_code SALES --all` to find completed run ids.
 
 In local mode, the task does not run, and the command exits `0`, when:
 
@@ -39,12 +40,12 @@ attempt or wrong owner is refused with exit `20` (`STALE_TRANSITION`), naming th
 status and owner, and state found. Check the run's history before retrying the command.
 
 `--force` runs the task even if it already succeeded or its dependencies are not met. It is only
-available in local mode. When the pipeline's latest run has already ended (`SKIPPED` included, except `CANCELLED`), the
+available in local mode. When the explicitly selected run has already ended (`SKIPPED` included, except `CANCELLED`), the
 run is reopened for the task, recorded as a `REOPEN` in its history, and ended again from its tasks'
 statuses once the task ends: a forced task that fails leaves the run `FAILED`. If tasks of the run
 have never run, the run stays `IN-PROGRESS` and `run --pipeline_code <code>` resumes it.
 
-`--force` refuses a latest run that is `CANCELLED`. Start a new run with
+`--force` refuses a selected run that is `CANCELLED`. Start a new run with
 `etl-craft run --pipeline_code <code> --init-only`, then run the task.
 
 `--ignore-dependencies` and `--rerun` are the recorded, narrower overrides: see

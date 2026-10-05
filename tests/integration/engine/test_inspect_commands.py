@@ -118,15 +118,15 @@ def test_steps(project, capsys):
     code, out = run(capsys, "steps", "--pipeline_code", "SALES")
     assert code == ExitCode.SUCCESS
     assert out.splitlines() == [
-        "TASK_CODE\tHANDLER\tTASK_TYPE\tRUN_CONDITION\tPARAMETERS",
-        "alert\tEMAIL_ALERT\tETL\tANY\t",
-        "extract\tPYTHON\tETL\tALL\tSCRIPT_NAME=x.py",
-        "load\tSQL\tETL\tALL\tSQL_ACTION=SCD1_MERGE, TARGET_OBJECT=s.orders",
+        "TASK_CODE\tSTATUS\tHANDLER\tTASK_TYPE\tRUN_CONDITION\tPARAMETERS",
+        "alert\tNOT-RUN\tEMAIL_ALERT\tETL\tANY\t",
+        "extract\tFAILED\tPYTHON\tETL\tALL\tSCRIPT_NAME=x.py",
+        "load\tNOT-RUN\tSQL\tETL\tALL\tSQL_ACTION=SCD1_MERGE, TARGET_OBJECT=s.orders",
     ]
 
 
 def test_history(project, capsys):
-    code, out = run(capsys, "history", "--pipeline_code", "SALES")
+    code, out = run(capsys, "history", "--pipeline_code", "SALES", "--all")
     lines = out.splitlines()
     assert code == ExitCode.SUCCESS
     assert lines[0] == (
@@ -148,7 +148,10 @@ def test_history(project, capsys):
         "1",
         "source down",
     )
-    assert run(capsys, "history", "--pipeline_code", "UP") == (ExitCode.SUCCESS, "(no runs yet)\n")
+    assert run(capsys, "history", "--pipeline_code", "UP", "--all") == (
+        ExitCode.SUCCESS,
+        "(no runs yet)\n",
+    )
 
 
 def test_unknown_codes_and_limits_are_named(project, capsys):
