@@ -330,7 +330,21 @@ def _remote_pipeline_dag(
         "depends_on": leaves or [INIT_TASK],
         "trigger_rule": "all_done",
     }
+    for step in tasks.values():
+        if "bash_command" in step:
+            step["env"] = _orchestrator_env()
+            step["append_env"] = True
     return _dag_settings(config, detail, tasks)
+
+
+def _orchestrator_env() -> dict[str, str]:
+    return {
+        "ETL_CRAFT_ACTOR": (
+            "airflow:{{ dag_run.run_id }}:"
+            "{{ dag_run.triggering_user_name | default('scheduler', true) }}"
+        ),
+        "ETL_CRAFT_ACTOR_KIND": "ORCHESTRATOR",
+    }
 
 
 def _sensor(
@@ -421,6 +435,11 @@ def docs_dag(config: ConnectorConfig) -> dict[str, Any]:
         "tasks": {
             DOCS_TASK: {
                 "bash_command": join(["etl-craft", "generate-docs"]),
+                **(
+                    {"env": _orchestrator_env(), "append_env": True}
+                    if config.mode == Mode.REMOTE
+                    else {}
+                ),
                 "depends_on": [],
                 "trigger_rule": "all_success",
             }

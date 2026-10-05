@@ -1,4 +1,4 @@
 -- Set :pipeline_run_id to :status, as an operator marked it, ending it now if it had not ended.
 UPDATE AUD_PIPELINES_RUN_LOG
-SET STATUS = :status, END_DATE = COALESCE(END_DATE, :now)
+SET STATUS = :status, END_DATE = COALESCE(END_DATE, :now), ENDED_BY = :ended_by, ENDED_BY_KIND = :ended_by_kind
 WHERE PIPELINE_RUN_ID = :pipeline_run_id

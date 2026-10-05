@@ -10,6 +10,7 @@ from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.config.auth import engine_for_jdbc_url
 from etl_craft.core.errors import ConfigurationError
+from etl_craft.dialects.engine.actors import mark_connections
 from etl_craft.dialects.engine.base import EngineDialect
 
 if TYPE_CHECKING:
@@ -64,4 +65,6 @@ def build_engine(
 ) -> Engine:
     """Build a SQLAlchemy engine for ``profile``, by default the active Engine profile."""
     profile = profile or config.engine.active
-    return for_jdbc_url(profile.jdbc_url).build_engine(config, profile, **engine_kwargs)
+    engine = for_jdbc_url(profile.jdbc_url).build_engine(config, profile, **engine_kwargs)
+    mark_connections(engine)
+    return engine

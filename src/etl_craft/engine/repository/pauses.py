@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.engine import Connection
 
+from etl_craft.core.actor import current_actor
 from etl_craft.engine.queries import statement
 
 
@@ -47,6 +48,7 @@ def record_pause(conn: Connection, pipeline_id: int, paused_by: str, reason: str
         {
             "pipeline_id": pipeline_id,
             "now": datetime.now(UTC),
+            "actor_kind": current_actor().kind.value,
             "paused_by": paused_by,
             "reason": reason,
         },
@@ -60,6 +62,7 @@ def close_pause(conn: Connection, pipeline_id: int, resumed_by: str, reason: str
         {
             "pipeline_id": pipeline_id,
             "now": datetime.now(UTC),
+            "actor_kind": current_actor().kind.value,
             "resumed_by": resumed_by,
             "reason": reason,
         },

@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
+from etl_craft.core.actor import migration as current_migration
 from etl_craft.core.errors import MigrationError
 from etl_craft.core.text import is_metadata_code, sha256_hex
 from etl_craft.dialects.engine import for_engine
@@ -155,19 +157,39 @@ def _record(conn: Connection, migration: MigrationFile) -> None:
 
 def _apply(engine: Engine, migration: MigrationFile) -> None:
     dialect = for_engine(engine)
+    token = current_migration.set(migration.version if migration.source == PROJECT else "")
     try:
         with dialect.migration_transaction(
             engine,
             rebuild_metadata=migration.sql
             if migration.source == ENGINE
             and migration.version
-            in ("0005_metadata_codes.sql", "0006_run_backfill_constraint.sql", "0007_identity.sql")
+            in (
+                "0005_metadata_codes.sql",
+                "0006_run_backfill_constraint.sql",
+                "0007_identity.sql",
+                "0008_actors_and_audit_guards.sql",
+            )
             else None,
         ) as conn:
-            run_script(conn, dialect.split_statements(migration.sql))
+            statements = dialect.split_statements(migration.sql)
+            if migration.source == PROJECT:
+                if dialect.name == "sqlite":
+                    from etl_craft.dialects.engine.sqlite.audit import refresh_metadata_triggers
+                else:
+                    from etl_craft.dialects.engine.postgres.audit import refresh_metadata_triggers
+
+                for sql in statements:
+                    run_script(conn, [sql])
+                    if re.search(r"\b(?:ALTER|CREATE)\s+TABLE\b", sql, re.IGNORECASE):
+                        refresh_metadata_triggers(conn)
+            else:
+                run_script(conn, statements)
             _record(conn, migration)
     except Exception as error:
         raise MigrationError(f"{migration.version} failed to apply: {error}") from error
+    finally:
+        current_migration.reset(token)
 
 
 def pending_migrations(

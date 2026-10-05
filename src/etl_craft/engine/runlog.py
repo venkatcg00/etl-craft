@@ -18,6 +18,7 @@ from sqlalchemy import bindparam
 from sqlalchemy.engine import Connection, Row
 from sqlalchemy.exc import IntegrityError
 
+from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import FINISHED_RUN_STATUSES, Mode, RunStatus, SlaStatus
 from etl_craft.core.errors import RunStateError
 from etl_craft.core.graph import TaskRunState
@@ -109,6 +110,8 @@ def end_run_if(conn: Connection, pipeline_run_id: int, from_status: str, status:
         {
             "pipeline_run_id": pipeline_run_id,
             "from_status": from_status,
+            "ended_by": current_actor().name,
+            "ended_by_kind": current_actor().kind.value,
             "status": status,
             "now": datetime.now(UTC),
         },

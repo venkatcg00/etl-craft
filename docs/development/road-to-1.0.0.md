@@ -72,7 +72,7 @@ item's text, or work done early under another item.
 | S2.K Migrations and small fixes | Done | #88 | B33; S2.K.5 done in S2.A |
 | S2.L Regression suite and release | Done | #90, #91, #92, #93 | 48 stabilization defects; 0.2.0 released |
 | S3.A Identity schema | Done | #95 | Run identities, attempt history and gate-decision schema |
-| S3.I Actors and engine-only writes | Not started; next, before S3.B | | W15 |
+| S3.I Actors and engine-only writes | Done | | W15 |
 | S3.B to S3.H | Not started | | |
 | 0.4 and later | Not started | | |
 
@@ -82,13 +82,20 @@ What a person picking up the work needs that the code and the item texts do not 
 
 **Choices that differ from the item text.**
 
+- `S3.I`: each action is the request itself, recorded once with `OUTCOME = REQUESTED` and
+  no exit code; execution outcomes belong to runs and attempts. Bootstrap commands record
+  after the audit table exists. CLI callers scope one resolved `Actor` through `acting_as`;
+  unscoped library work uses `SYSTEM`. `S3.B` can pass that actor explicitly into transitions.
+  Historical unknown actors remain NULL. Project-created reserved-prefix tables gain guards
+  during migrations, and captured metadata includes project columns.
+
 - `S3.A`: skipped summaries have no execution attempt and remain resettable. Migration 0007
   copies only the latest known execution attempt; older retry outcomes are unavailable.
   New runs receive manual, backfill or stand-in identities now, while transitions, lease
   enforcement and live attempt/gate recording remain subsequent items. Direct SQL inserts
   default to a generated manual identity and must supply other trigger kinds explicitly.
   Upgrade fixtures include both released schemas and their packaged migration ledgers.
-  `S3.I` (next) makes the Engine DB refuse direct SQL writes, including those inserts.
+  `S3.I` makes the Engine DB refuse direct SQL writes, including those inserts.
   `S3.B` must allocate the next free exit code: 19 already belongs to `InjectedFaultError`.
 
 - `S2.L`: `release/regressions.toml` maps all 48 defects assigned wholly or partly to 0.2.0.
@@ -957,6 +964,8 @@ migrated attempt rows match the old task rows.
 
 ### S3.I Every action names who did it; only etl-craft writes the Engine DB
 
+**Status: done**; see [Handover notes](#handover-notes).
+
 **Order.** Directly after `S3.A`, before `S3.B`, although it is lettered last. `S3.B` writes the
 function for every status change, and each of them must take the actor from the start rather
 than be changed again later. The write guards must exist before `S3.D` and 0.4 add writers
@@ -986,7 +995,7 @@ both dialects.
 - Later sources replace only the name: an API token's name (`S4.G`), an authenticated user
   (`S7.B`), a worker's name (`S5.C`). Nothing else changes.
 - The private `getpass` call in `execution/interventions.py` goes; every caller passes the
-  resolved `Actor` down.
+  resolved `Actor` through the call chain.
 
 **S3.I.2 Where it is recorded.**
 
@@ -1004,6 +1013,10 @@ this task's parameters, from what to what" are each one query. `history` shows `
 each intervention's actor; a new `etl-craft audit [--pipeline_code P] [--since DATE]` lists
 `AUD_ACTIONS` and `AUD_METADATA_CHANGES`; the catalog's run page shows who started and ended the
 run and who intervened.
+
+An action completes when its request is recorded, independently of whether the flow runs.
+`OUTCOME` is `REQUESTED` and `EXIT_CODE` is NULL; start/end describe recording the request.
+The immutable row needs no later update. Execution results remain in runs and attempts.
 
 **S3.I.3 Only etl-craft writes.** Every `AUD_` and `CFG_` table refuses a write that does not come
 through etl-craft, on both dialects. The engine marks its own connections with the actor:

@@ -157,6 +157,10 @@ class RunSummary:
     start: datetime | None
     end: datetime | None
     sla_status: str | None
+    started_by: str | None = None
+    started_by_kind: str | None = None
+    ended_by: str | None = None
+    ended_by_kind: str | None = None
 
     @property
     def seconds(self) -> float | None:
@@ -211,6 +215,10 @@ def fetch_pipeline_runs(conn: Connection, limit: int = RUN_HISTORY) -> dict[str,
                 r.start_date,
                 r.end_date,
                 r.sla_status,
+                r.started_by,
+                r.started_by_kind,
+                r.ended_by,
+                r.ended_by_kind,
             )
         )
     return runs

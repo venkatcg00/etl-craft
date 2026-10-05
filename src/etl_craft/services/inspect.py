@@ -144,6 +144,10 @@ class RunEntry:
     source_count: int | None = None
     target_count: int | None = None
     error_message: str | None = None
+    started_by: str | None = None
+    started_by_kind: str | None = None
+    ended_by: str | None = None
+    ended_by_kind: str | None = None
 
 
 def run_history(
@@ -163,6 +167,10 @@ def run_history(
                 r.status,
                 r.start_date,
                 r.end_date,
+                started_by=r.started_by,
+                started_by_kind=r.started_by_kind,
+                ended_by=r.ended_by,
+                ended_by_kind=r.ended_by_kind,
                 sla_status=r.sla_status,
                 run_date=None if r.run_date is None else as_date(r.run_date),
                 backfill=r.backfill == "Y",

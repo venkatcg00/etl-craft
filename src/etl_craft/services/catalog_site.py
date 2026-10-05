@@ -710,6 +710,10 @@ class _Writer:
                 ("Run date", _e(run.run_date) + (" (backfill)" if run.backfill else "")),
                 ("Started", _e(_when(run.start))),
                 ("Ended", _e(_when(run.end))),
+                ("Started by", _e(run.started_by)),
+                ("Starter kind", _e(run.started_by_kind)),
+                ("Ended by", _e(run.ended_by)),
+                ("Ending kind", _e(run.ended_by_kind)),
                 ("Took", _e(_duration(run.seconds))),
                 ("SLA", _e(run.sla_status)),
                 (

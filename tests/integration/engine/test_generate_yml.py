@@ -156,6 +156,14 @@ def test_remote_mode_puts_every_rule_in_the_dag(engine_db, pipelines):
     assert dag["max_active_runs"] == 1
     assert "pipeline_dependencies" not in dag
     assert "cross_pipeline_task_dependencies" not in dag
+    for step in dag["tasks"].values():
+        if "bash_command" in step:
+            assert step.pop("env") == {
+                "ETL_CRAFT_ACTOR": "airflow:{{ dag_run.run_id }}:"
+                "{{ dag_run.triggering_user_name | default('scheduler', true) }}",
+                "ETL_CRAFT_ACTOR_KIND": "ORCHESTRATOR",
+            }
+            assert step.pop("append_env") is True
     assert dag["tasks"] == {
         "__init__": {
             "bash_command": f"{run} --init-only --run-date '{{{{ data_interval_end | ds }}}}'",

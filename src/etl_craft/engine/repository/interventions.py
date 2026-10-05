@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.engine import Connection
 
+from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import InterventionAction, RunStatus
 from etl_craft.engine.queries import statement
 
@@ -74,6 +75,7 @@ def record_intervention(
             "previous_message": previous_message,
             "reason": reason,
             "requested_by": requested_by,
+            "requested_by_kind": current_actor().kind.value,
             "now": datetime.now(UTC),
         },
     )
@@ -124,7 +126,13 @@ def mark_pipeline_run(conn: Connection, pipeline_run_id: int, status: str) -> No
     """Set a run's status as an operator marked it, ending it now if it had not ended."""
     conn.execute(
         statement(conn, "mark_pipeline_run"),
-        {"pipeline_run_id": pipeline_run_id, "status": status, "now": datetime.now(UTC)},
+        {
+            "pipeline_run_id": pipeline_run_id,
+            "status": status,
+            "now": datetime.now(UTC),
+            "ended_by": current_actor().name,
+            "ended_by_kind": current_actor().kind.value,
+        },
     )
 
 
@@ -141,7 +149,12 @@ def cancel_pipeline_run(conn: Connection, pipeline_run_id: int) -> bool:
     """End an ``IN-PROGRESS`` run ``CANCELLED``; return whether it was still in progress."""
     result = conn.execute(
         statement(conn, "cancel_pipeline_run"),
-        {"pipeline_run_id": pipeline_run_id, "now": datetime.now(UTC)},
+        {
+            "pipeline_run_id": pipeline_run_id,
+            "now": datetime.now(UTC),
+            "ended_by": current_actor().name,
+            "ended_by_kind": current_actor().kind.value,
+        },
     )
     return bool(result.rowcount)
 

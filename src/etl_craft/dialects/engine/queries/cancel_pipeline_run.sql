@@ -1,4 +1,4 @@
 -- End the IN-PROGRESS :pipeline_run_id CANCELLED.
 UPDATE AUD_PIPELINES_RUN_LOG
-SET STATUS = 'CANCELLED', END_DATE = :now
+SET STATUS = 'CANCELLED', END_DATE = :now, ENDED_BY = :ended_by, ENDED_BY_KIND = :ended_by_kind
 WHERE PIPELINE_RUN_ID = :pipeline_run_id AND STATUS = 'IN-PROGRESS'
