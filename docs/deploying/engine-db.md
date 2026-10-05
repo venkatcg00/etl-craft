@@ -170,3 +170,8 @@ Owners and administrators retain their administrative authority; keep those cred
 Restrict the Engine DB file and its containing directory to the deployment account. `doctor`
 warns when the file is writable by group or others and suggests `chmod go-w`. Filesystem access
 is the boundary: anyone who can replace the file or its triggers can bypass the connection guard.
+
+`AUD_TARGET_HASH_VERSION` records each qualified warehouse target's published change-hash version
+and recomputation time. Migration `0011_target_hash_version.sql` creates this guarded tracker
+without guessing the hash version of existing tables. Upgrade those merge targets with
+[`etl-craft rehash`](../guides/sql-tasks.md#change-hash-version-2).

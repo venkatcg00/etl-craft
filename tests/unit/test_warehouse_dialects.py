@@ -149,13 +149,39 @@ def test_what_each_warehouse_supports(key, single_writer, surrogate_key, primary
 
 
 def test_hash_expressions():
-    assert for_key("postgres").hash_expression(["a", "b"]) == (
-        "MD5(COALESCE(CAST(a AS VARCHAR), '') || '|' || COALESCE(CAST(b AS VARCHAR), ''))"
+    encoded = (
+        "CASE WHEN a IS NULL THEN 'N' ELSE 'V' || "
+        "CAST(LENGTH(CAST(a AS VARCHAR)) AS VARCHAR) || ':' || CAST(a AS VARCHAR) END"
     )
-    assert for_key("databricks").hash_expression(["a"]) == "MD5(COALESCE(CAST(a AS STRING), ''))"
-    assert for_key("trino_iceberg").hash_expression(["a"]) == (
-        "lower(to_hex(md5(to_utf8(COALESCE(CAST(a AS VARCHAR), '')))))"
+    assert for_key("postgres").hash_expression(["a"]) == f"MD5({encoded})"
+    assert (
+        for_key("databricks").hash_expression(["a"])
+        == f"MD5({encoded.replace('VARCHAR', 'STRING')})"
     )
+    assert (
+        for_key("trino_iceberg").hash_expression(["a"]) == f"lower(to_hex(md5(to_utf8({encoded}))))"
+    )
+
+
+@pytest.mark.parametrize("key", ["postgres", "duckdb", "snowflake", "databricks", "trino_iceberg"])
+def test_connections_pin_utc_and_close_the_setup_cursor(key):
+    from unittest.mock import Mock
+
+    conn = Mock()
+    for_key(key).on_connect(conn, None, "")
+    assert "UTC" in conn.cursor.return_value.execute.call_args.args[0]
+    conn.cursor.return_value.close.assert_called_once()
+    if key == "postgres":
+        conn.commit.assert_called_once()
+
+
+@pytest.mark.parametrize("key", ["postgres", "duckdb", "snowflake", "databricks", "trino_iceberg"])
+@pytest.mark.parametrize("kind", ["DOUBLE", "REAL", "FLOAT", "ARRAY", "NUMERIC"])
+def test_unsafe_hash_types_are_refused(key, kind):
+    from etl_craft.core.errors import HandlerError
+
+    with pytest.raises(HandlerError, match=r"cast to|without a declared scale"):
+        for_key(key).hash_expression(["amount"], [kind])
 
 
 def test_audit_column_types():
@@ -483,7 +509,6 @@ def test_dialect_names_and_defaults():
     assert (postgres.sqlalchemy_name, postgres.per_task_format) == ("postgresql", True)
     assert duckdb.per_task_format is False
     assert postgres.load_table_metadata(object(), "s", "t") is None
-    assert postgres.on_connect(object(), profile("none", POSTGRES), "") is None
     assert postgres.cloning_storage_problem(CloningConfig()) is None
     databricks = for_key("databricks")
     assert databricks.create_table_clause() == "USING DELTA"

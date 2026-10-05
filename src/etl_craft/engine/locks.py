@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from hashlib import blake2b
 
 from sqlalchemy.engine import Engine
 
@@ -27,3 +28,10 @@ MIGRATE = EngineLock("migrate", 8_241_007)
 
 CLONE = EngineLock("clone", 8_241_008)
 """Serializes cloning, so two runs finishing together never write the same mirror at once."""
+
+
+def target(name: str) -> EngineLock:
+    """Serialize target mutations and hash-contract publication across processes."""
+    normalized = name.lower()
+    key = int.from_bytes(blake2b(normalized.encode(), digest_size=8).digest(), "big", signed=True)
+    return EngineLock(f"target-{key & ((1 << 64) - 1):016x}", key)

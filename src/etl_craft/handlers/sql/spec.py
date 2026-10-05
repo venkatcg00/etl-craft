@@ -14,7 +14,8 @@ remedy, so no action ever starts on a half-valid definition.
 - ``RUN_DATE_SUBSTITUTION``: ``true`` replaces ``$$run_date`` with the date the run runs as of,
   ``DATE 'YYYY-MM-DD'``: the day it started, or the date of a backfill run.
 - ``MERGE_KEY`` (``SCD1_MERGE``, ``SCD2_MERGE``, ``DELETE_ROWS``): ``|``-separated key columns.
-- ``MERGE_COMPARE_COLUMNS`` (the merges): ``|``-separated columns hashed into ``HASH_KEY``.
+- ``MERGE_COMPARE_COLUMNS`` (the merges): ordered ``|``-separated scalar columns hashed into
+  version-2 ``HASH_KEY``; floating point is refused, and decimals require a declared scale.
 - ``MERGE_DEDUPE_ORDER`` (the merges): ``ORDER BY`` terms choosing the row kept per key.
 - ``SCHEMA_EVOLUTION`` (``OVERWRITE_TABLE`` and the merges): ``true`` adds new SELECT columns
   to the target.

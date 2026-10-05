@@ -11,6 +11,7 @@ What a dialect accepts (its name, table format and auth modes) is its ``spec`` f
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
@@ -20,7 +21,7 @@ from sqlalchemy.engine import Connection
 
 from etl_craft.config.auth import AuthFields, WarehouseSpec
 from etl_craft.core.enums import AuthMode, TableFormat
-from etl_craft.core.errors import ConfigurationError
+from etl_craft.core.errors import ConfigurationError, HandlerError
 from etl_craft.dialects import credentials
 
 if TYPE_CHECKING:
@@ -280,20 +281,91 @@ class WarehouseDialect:
         """Return ``TEMPORARY TABLE``, or ``TABLE`` where temporary tables are unusable."""
         return "TEMPORARY TABLE" if self.temporary_tables else "TABLE"
 
+    hash_metadata_columns = "column_name, data_type, numeric_precision, numeric_scale"
+
     # Expressions
 
-    def hash_expression(self, values: list[str]) -> str:
-        """Return MD5 over the NULL-safe, ``|``-joined text of ``values``, as 32 hex characters.
+    def hash_expression(self, values: list[str], types: list[str] | None = None) -> str:
+        """Return the version-2 MD5 of typed, NULL-tagged, length-prefixed values."""
+        return f"MD5({self._hash_input(values, types)})"
 
-        Each value is COALESCEd to an empty string, so one NULL does not turn the whole
-        concatenation NULL and make every row containing a NULL hash the same.
-        """
-        return f"MD5({self._hash_input(values)})"
+    def _hash_input(self, values: list[str], types: list[str] | None = None) -> str:
+        kinds = types if types is not None else ["VARCHAR"] * len(values)
+        parts = []
+        for value, kind in zip(values, kinds, strict=True):
+            rendered = self.canonical_text(value, kind)
+            parts.append(
+                f"CASE WHEN {value} IS NULL THEN 'N' ELSE 'V' || "
+                f"CAST(LENGTH({rendered}) AS {self.string_type}) || ':' || {rendered} END"
+            )
+        return " || ".join(parts)
 
-    def _hash_input(self, values: list[str]) -> str:
-        return " || '|' || ".join(
-            f"COALESCE(CAST({value} AS {self.string_type}), '')" for value in values
-        )
+    def canonical_text(self, value: str, kind: str) -> str:
+        """Render supported scalar values independently of session output formats."""
+        kind = kind.upper()
+        base = re.split(r"[ (]", kind)[0]
+        if base in {"FLOAT", "FLOAT4", "FLOAT8", "DOUBLE", "REAL", "BINARY_FLOAT", "BINARY_DOUBLE"}:
+            raise HandlerError(
+                f"MERGE_COMPARE_COLUMNS includes {value} ({kind}): floats have no stable text "
+                "form; cast to DECIMAL in the SELECT"
+            )
+        if base in {
+            "TIMESTAMP",
+            "TIMESTAMPTZ",
+            "TIMESTAMP_NS",
+            "TIMESTAMP_MS",
+            "TIMESTAMP_S",
+            "TIMESTAMP_NTZ",
+            "TIMESTAMP_LTZ",
+            "TIMESTAMP_TZ",
+            "DATETIME",
+        }:
+            return self.timestamp_text(value, kind)
+        if base in {"BOOLEAN", "BOOL"}:
+            return f"CASE WHEN {value} THEN 'true' ELSE 'false' END"
+        if base in {"DECIMAL", "NUMERIC", "NUMBER"}:
+            if not re.fullmatch(r"(?:DECIMAL|NUMERIC|NUMBER)\(\d+,\s*\d+\)", kind):
+                raise HandlerError(
+                    f"{value} has {kind} without a declared scale; cast to DECIMAL(p,s)"
+                )
+            return self.decimal_text(value, kind)
+        if base == "DATE":
+            return self.date_text(value)
+        if base not in {
+            "VARCHAR",
+            "CHAR",
+            "CHARACTER",
+            "TEXT",
+            "STRING",
+            "BPCHAR",
+            "TINYINT",
+            "SMALLINT",
+            "INTEGER",
+            "INT",
+            "BIGINT",
+            "HUGEINT",
+            "UTINYINT",
+            "USMALLINT",
+            "UINTEGER",
+            "UBIGINT",
+        }:
+            raise HandlerError(
+                f"MERGE_COMPARE_COLUMNS includes {value} ({kind}): unsupported "
+                "canonical type; cast to TEXT or DECIMAL in the SELECT"
+            )
+        return f"CAST({value} AS {self.string_type})"
+
+    def decimal_text(self, value: str, kind: str) -> str:
+        """Keep the decimal's declared scale, including trailing zeroes."""
+        return f"CAST(CAST({value} AS {kind}) AS {self.string_type})"
+
+    def date_text(self, value: str) -> str:
+        """Render dates in ISO format."""
+        return f"CAST({value} AS {self.string_type})"
+
+    def timestamp_text(self, value: str, kind: str) -> str:
+        """Render a UTC timestamp with exactly six fractional digits."""
+        raise NotImplementedError(f"{self.key} does not declare timestamp canonicalization")
 
     def scalar_source_value(self, expression: str) -> str:
         """Wrap a value read by a correlated scalar subquery, where the dialect requires it."""

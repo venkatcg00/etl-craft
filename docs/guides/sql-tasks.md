@@ -102,6 +102,37 @@ match no target row, so the merges and `DELETE_ROWS` fail on it, with the count.
 updates it with `DELETE_FLAG = 'N'`, and `SCD2_MERGE` closes the flagged version and inserts a
 live one. A soft `DELETE_ROWS` leaves rows already flagged as they were.
 
+### Change hash version 2
+
+`HASH_KEY` remains a 32-character MD5 digest. Its input encodes each compare column as `N`
+for NULL, or `V<character-length>:<canonical-value>` for a non-NULL value, in the configured
+column order. NULL and empty text are distinct; embedded separators and Unicode text cannot
+shift column boundaries. Booleans use `true`/`false`, dates use `YYYY-MM-DD`, timestamps use UTC
+ISO text with six fractional digits, and decimals keep their declared scale, including trailing
+zeroes. Naive timestamps represent UTC. Every new warehouse connection starts in UTC, and the
+hash expressions normalize timestamps even if the session time zone is changed afterwards.
+
+Floating-point compare columns are refused: cast them to `DECIMAL(p,s)` in the SELECT and use
+that declared decimal type in the target. Decimal columns without a declared scale and
+unsupported types such as arrays are refused too; cast them to a supported scalar type.
+
+A fresh `SETUP_TABLE` target for a merge records hash version 2 after its warehouse transaction
+commits. Existing targets have an unknown or older version and refuse merges until upgraded:
+
+```bash
+etl-craft rehash --target sales.customers --dry-run
+etl-craft rehash --target sales.customers
+```
+
+The command reads the active merge tasks for that qualified target; they must declare one
+common ordered `MERGE_COMPARE_COLUMNS` list. Dry-run validates the types and prints the UPDATE
+and row count without changing hashes or their version. Rehash updates every row in one warehouse
+statement, including inactive SCD2 history, and changes only `HASH_KEY`. It then records version 2
+in `AUD_TARGET_HASH_VERSION`. Target locks coordinate SQL writes and rehashing. The warehouse
+and Engine DB commit separately: if publication fails after the warehouse update, rerun rehash;
+merges stay refused until the version is recorded. Dropping or replacing a target clears its
+recorded hash version.
+
 ### Optional parameters
 
 | Parameter | Applies to | Effect |

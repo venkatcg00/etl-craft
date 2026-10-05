@@ -120,3 +120,20 @@ class DatabricksWarehouse(WarehouseDialect):
     def scalar_source_value(self, expression: str) -> str:
         """Satisfy Spark's rule that a scalar subquery returns one row, after source dedupe."""
         return f"FIRST({expression})"
+
+    def timestamp_text(self, value: str, kind: str) -> str:
+        """Convert the session's local representation of instants to a naive UTC value."""
+        utc = (
+            value
+            if kind == "TIMESTAMP_NTZ"
+            else f"CONVERT_TIMEZONE(CURRENT_TIMEZONE(), 'UTC', CAST({value} AS TIMESTAMP_NTZ))"
+        )
+        return f"REPLACE(DATE_FORMAT({utc}, 'yyyy-MM-dd HH:mm:ss.SSSSSS'), ' ', 'T')"
+
+    def on_connect(self, dbapi_connection: Any, profile: ConnectionProfile, secret: str) -> None:
+        """Pin every new warehouse session to UTC."""
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("SET TIME ZONE 'UTC'")
+        finally:
+            cursor.close()

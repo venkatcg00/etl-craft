@@ -44,6 +44,7 @@ class DuckDBIcebergWarehouse(DuckDBWarehouse):
         storage uses ``s3_key_id`` and ``s3_secret`` when both are set, else the AWS credential
         chain.
         """
+        super().on_connect(dbapi_connection, profile, secret)
         extra = profile.extra
         catalog = attached_catalog_name(extra)
         uri = str(extra.get("catalog_uri") or "").strip()

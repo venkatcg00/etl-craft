@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
@@ -22,6 +22,9 @@ class TrinoIcebergWarehouse(WarehouseDialect):
     """Trino, Iceberg catalog: no temporary tables, no alias on UPDATE or DELETE targets."""
 
     spec = warehouse_by_key("trino_iceberg")
+    hash_metadata_columns = (
+        "column_name, data_type, NULL AS numeric_precision, NULL AS numeric_scale"
+    )
     identifier_case = "lower"
     storage_parameters = frozenset({"EXTERNAL_LOCATION"})
     temporary_tables = False
@@ -73,6 +76,24 @@ class TrinoIcebergWarehouse(WarehouseDialect):
             return f"EXTERNAL_LOCATION must not contain a quote: {location!r}"
         return None
 
-    def hash_expression(self, values: list[str]) -> str:
+    def hash_expression(self, values: list[str], types: list[str] | None = None) -> str:
         """Hex-encode md5(), which takes and returns varbinary on Trino."""
-        return f"lower(to_hex(md5(to_utf8({self._hash_input(values)}))))"
+        return f"lower(to_hex(md5(to_utf8({self._hash_input(values, types)}))))"
+
+    def timestamp_text(self, value: str, kind: str) -> str:
+        """Keep microseconds without the millisecond truncation of date_format."""
+        utc = f"({value} AT TIME ZONE 'UTC')" if "WITH TIME ZONE" in kind else value
+        rendered = f"CAST({utc} AS VARCHAR)"
+        fraction = f"COALESCE(REGEXP_EXTRACT({rendered}, '[.]([0-9]+)', 1), '')"
+        return (
+            f"REPLACE(SUBSTR({rendered}, 1, 19), ' ', 'T') || '.' || "
+            f"RPAD(SUBSTR({fraction}, 1, 6), 6, '0')"
+        )
+
+    def on_connect(self, dbapi_connection: Any, profile: ConnectionProfile, secret: str) -> None:
+        """Pin every new warehouse session to UTC."""
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("SET TIME ZONE 'UTC'")
+        finally:
+            cursor.close()

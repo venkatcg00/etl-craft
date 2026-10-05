@@ -523,6 +523,12 @@ CREATE TABLE AUD_METADATA_CHANGES (
 CREATE INDEX ix_metadata_changes_table ON AUD_METADATA_CHANGES (TABLE_NAME, CHANGED_AT);
 
 -- Require the transaction marker before changing protected rows or truncating a table.
+CREATE TABLE AUD_TARGET_HASH_VERSION (
+    TARGET_OBJECT VARCHAR PRIMARY KEY,
+    HASH_VERSION INTEGER NOT NULL CONSTRAINT ck_target_hash_version CHECK (HASH_VERSION IN (1,2)),
+    RECOMPUTED_AT TIMESTAMPTZ NOT NULL
+);
+
 CREATE OR REPLACE FUNCTION etl_craft_guard() RETURNS trigger AS $$
 BEGIN
     IF COALESCE(current_setting('etl_craft.actor', true), '') = '' THEN
@@ -639,3 +645,6 @@ CREATE TRIGGER trg_attribute_aud_pipelines_run_log BEFORE INSERT OR UPDATE ON AU
 CREATE TRIGGER trg_attribute_aud_task_attempts BEFORE INSERT OR UPDATE ON AUD_TASK_ATTEMPTS FOR EACH ROW EXECUTE FUNCTION etl_craft_attribute();
 CREATE TRIGGER trg_attribute_aud_run_interventions BEFORE INSERT OR UPDATE ON AUD_RUN_INTERVENTIONS FOR EACH ROW EXECUTE FUNCTION etl_craft_attribute();
 CREATE TRIGGER trg_attribute_aud_pipeline_pauses BEFORE INSERT OR UPDATE ON AUD_PIPELINE_PAUSES FOR EACH ROW EXECUTE FUNCTION etl_craft_attribute();
+
+CREATE TRIGGER trg_actor_guard_aud_target_hash_version BEFORE INSERT OR UPDATE OR DELETE ON AUD_TARGET_HASH_VERSION FOR EACH ROW EXECUTE FUNCTION etl_craft_guard();
+CREATE TRIGGER trg_truncate_aud_target_hash_version BEFORE TRUNCATE ON AUD_TARGET_HASH_VERSION FOR EACH STATEMENT EXECUTE FUNCTION etl_craft_guard();
