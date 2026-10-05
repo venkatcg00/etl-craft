@@ -91,9 +91,9 @@ There can be only one queued, claimed or running attempt per task run.
 `AUD_GATE_DECISIONS` holds a downstream run or attempt's admission decision, exactly one dependency,
 selected upstream identities and revision, result, reason and decision time. Consumption records
 start at revision 1; dependency `CONSUME_REPAIRS` flags default to `Y`. The schema reference lists
-all fields and constraints. Current execution still writes task summaries and evaluates gates
-through the existing lifecycle; writing each new attempt and gate decision and enforcing leases
-are subsequent roadmap items.
+all fields and constraints. Execution writes immutable attempts and updates their task summaries atomically. Run and
+  attempt supervisors renew ownership leases; reconciliation fences expired attempts as `LOST`.
+  Recording gate decisions remains a subsequent roadmap item.
 
 SQLite rebuilds the pipeline run table with the same reference checks, custom object preservation,
 identity-counter protection and extra-column refusal as migration 0006. PostgreSQL alters it in

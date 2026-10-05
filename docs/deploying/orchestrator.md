@@ -59,8 +59,8 @@ So in remote mode:
 - When the orchestrator stops a task (Airflow's `on_kill`, a timeout, a cleared task) by sending
   `SIGTERM` or `SIGHUP` to `etl-craft run`, the task's process and everything it started are
   stopped, and the attempt is recorded `FAILED` with the signal. `SIGKILL` cannot be caught: the
-  task's process keeps running and its row stays `IN-PROGRESS` until `--finalize-only` records it
-  `FAILED`. Give the command time to stop before a kill follows (Airflow's
+  task's process can remain running until its expired lease is reconciled. The next `run` or
+  `etl-craft reconcile` fences the attempt as `LOST` and stops verified local children. Give the command time to stop before a kill follows (Airflow's
   `killed_task_cleanup_time`, ten seconds or more).
 
 ## Rules an orchestrator does not support

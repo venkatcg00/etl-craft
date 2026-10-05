@@ -17,6 +17,7 @@ from sqlalchemy import text
 
 from etl_craft.cli import main as cli_main
 from etl_craft.config import load_config
+from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import Mode, RunStatus
 from etl_craft.core.errors import ExitCode, RunRefusedError, RunStateError, UsageError
 from etl_craft.engine import runlog, transitions
@@ -1019,6 +1020,16 @@ def test_a_task_left_running_by_a_dead_process_is_released_with_stale(config, pi
 
     with pytest.raises(RunRefusedError, match="pass --stale"):
         mark_task(engine, config, "P", "extract", "FAILED", "process died", requested_by=WHO)
+    with engine.begin() as conn:
+        summary = transitions.find_or_create_task_run(conn, ids["extract"], run)
+        attempt = transitions.queue_attempt(conn, summary.task_run_id, current_actor())
+        transitions.claim_attempt(
+            conn,
+            attempt,
+            current_actor(),
+            owner="dead",
+            lease_expires_at=datetime.now(UTC) - timedelta(seconds=121),
+        )
     marked = mark_task(
         engine, config, "P", "extract", "FAILED", "process died", stale=True, requested_by=WHO
     )

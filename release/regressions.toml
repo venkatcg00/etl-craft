@@ -54,12 +54,14 @@ B23 = [
     "tests/integration/execution/test_pipeline.py::test_a_refused_gate_leaves_a_run_another_process_started_alone",
 ]
 B24 = [
+    "tests/integration/execution/test_leases.py::test_child_sigkill_is_failed_by_live_parent",
     "tests/integration/execution/test_pipeline.py::test_a_run_is_not_ended_while_another_process_runs_one_of_its_tasks",
 ]
 B25 = [
     "tests/integration/execution/test_interventions.py::test_a_rerun_of_a_failed_task_leaves_what_its_failure_skipped_to_run",
 ]
 B26 = [
+    "tests/integration/execution/test_leases.py::test_parent_sigkill_reconciles_and_retries_real_child",
     "tests/integration/execution/test_interventions.py::test_a_task_left_running_by_a_dead_process_is_released_with_stale",
 ]
 B27 = [

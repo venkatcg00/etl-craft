@@ -23,6 +23,8 @@ description = "The Engine DB on SQLite."
 linux = [
     "tests/integration/execution/test_cli_lifecycle.py::test_signal_stops_the_real_cli_child_and_grandchild[sqlite-15]",
     "tests/integration/execution/test_cli_lifecycle.py::test_signal_stops_the_real_cli_child_and_grandchild[sqlite-1]",
+    "tests/integration/execution/test_leases.py::test_parent_sigkill_reconciles_and_retries_real_child[sqlite]",
+    "tests/integration/execution/test_leases.py::test_child_sigkill_is_failed_by_live_parent[sqlite]",
 ]
 
 [suites.engine-postgres]
@@ -33,6 +35,8 @@ description = "The Engine DB on PostgreSQL."
 linux = [
     "tests/integration/execution/test_cli_lifecycle.py::test_signal_stops_the_real_cli_child_and_grandchild[postgresql-15]",
     "tests/integration/execution/test_cli_lifecycle.py::test_signal_stops_the_real_cli_child_and_grandchild[postgresql-1]",
+    "tests/integration/execution/test_leases.py::test_parent_sigkill_reconciles_and_retries_real_child[postgresql]",
+    "tests/integration/execution/test_leases.py::test_child_sigkill_is_failed_by_live_parent[postgresql]",
 ]
 
 [suites.warehouse-postgres]

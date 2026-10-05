@@ -1,0 +1,5 @@
+SELECT PIPELINE_RUN_ID AS pipeline_run_id, OWNER_ID AS owner_id,
+ LEASE_EXPIRES_AT AS lease_expires_at
+FROM AUD_PIPELINES_RUN_LOG
+WHERE STATUS = 'IN-PROGRESS' AND OWNER_ID IS NOT NULL
+ AND (CAST(:pipeline_id AS bigint) IS NULL OR PIPELINE_ID = :pipeline_id)

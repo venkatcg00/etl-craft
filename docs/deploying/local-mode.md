@@ -27,8 +27,9 @@ in the project directory. A systemd timer works the same way.
   `SUPPORT_DM` above starts only on fresh client runs, and is recorded `SKIPPED` otherwise. See
   [Dependencies on other pipelines](../guides/dependencies.md#dependencies-on-other-pipelines).
 - **Start each pipeline from one scheduler entry.** Only one run of a pipeline is in progress at
-  a time; running it again resumes that run, but do not start two `run` processes for the same
-  pipeline at once.
+  a time; running it again resumes that run once its previous supervisor has released ownership.
+  A second whole-pipeline command refuses while the run has an owner. Expired ownership is
+  reconciled before admission.
 - **The exit status says what happened**: `0` for `SUCCESS` or `SKIPPED`, `1` for a run that
   failed or was cancelled, and one status per kind of error (see
   [Exit codes](../reference/exit-codes.md)), so the scheduler can alert on it. The pipeline's

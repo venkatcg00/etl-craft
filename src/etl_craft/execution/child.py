@@ -38,6 +38,7 @@ from etl_craft.engine import transitions
 from etl_craft.engine.connection import engine_db
 from etl_craft.engine.transitions import finish_task_run
 from etl_craft.execution.context import build_task_context
+from etl_craft.execution.leases import process_start
 from etl_craft.handlers.registry import TaskContext, format_task_log, resolve_handler
 
 logger = logging.getLogger(__name__)
@@ -50,11 +51,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="etl_craft.execution.child")
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--task-run-id", type=int, required=True)
+    parser.add_argument("--attempt-id", type=int)
+    parser.add_argument("--owner-id")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--rerun", action="store_true")
     parser.add_argument("--log-level", default="INFO")
     parser.add_argument("--log-format", default="text")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if (args.attempt_id is None) != (args.owner_id is None):
+        parser.error("--attempt-id and --owner-id must be supplied together")
+    return args
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -63,8 +69,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     log.configure(args.log_level, args.log_format)
     config = load_config(args.config)
     engine = engine_db(config)
-    attempt_id = os.environ.get("ETL_CRAFT_ATTEMPT_ID")
-    owner = os.environ.get("ETL_CRAFT_ATTEMPT_OWNER")
+    attempt_id = args.attempt_id or os.environ.get("ETL_CRAFT_ATTEMPT_ID")
+    owner = args.owner_id or os.environ.get("ETL_CRAFT_ATTEMPT_OWNER")
     identity = (int(attempt_id), owner) if attempt_id is not None and owner else None
     token = _identity.set(identity)
     try:
@@ -93,6 +99,7 @@ def _run_bound(engine: Engine, config: ConnectorConfig, args: argparse.Namespace
                         owner=identity[1],
                         host=socket.gethostname(),
                         pid=os.getpid(),
+                        process_start=process_start(os.getpid()),
                     )
             except EtlCraftError as error:
                 logger.error("could not start the attempt: %s", error)
@@ -111,7 +118,11 @@ def _run_bound(engine: Engine, config: ConnectorConfig, args: argparse.Namespace
             pipeline_run_id=context.pipeline_run_id,
             attempt=context.attempt,
         ):
-            return run_handler(engine, context)
+            try:
+                return run_handler(engine, context)
+            except EtlCraftError as error:
+                logger.error("attempt outcome refused: %s", error)
+                return error.exit_code
 
 
 def run_handler(engine: Engine, context: TaskContext) -> int:

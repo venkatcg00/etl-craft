@@ -91,4 +91,5 @@ Unset the variable for normal operation. Available boundaries are `runner.after_
 `child.after_outcome`, `pipeline.after_insert`, `runner.before_consumption`,
 `pipeline.before_consumption`, and `script.after_offset`. Hard exits can leave audit rows
 running and processes alive: tests must clean up their process trees and use explicit
-operator controls for stale rows. Ownership and reconciliation remain later roadmap work.
+reconciliation for expired leases. Every run reconciles before admission; `etl-craft reconcile`
+requests it directly, and `mark --stale` reconciles a task before marking.

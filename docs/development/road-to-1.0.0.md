@@ -75,7 +75,8 @@ item's text, or work done early under another item.
 | S3.I Actors and engine-only writes | Done | #98 | W15 |
 | S3.B Centralized transitions | Done | #99 | Guarded lifecycle writes and immutable live attempts; ownership/reconciliation completes in S3.D |
 | S3.C Explicit run selection | Done | #100 | B11, B16, W11 |
-| S3.D to S3.H | Not started | | |
+| S3.D Leases and reconciliation | Done | #101 | B1, B8, B16, B24, B26, W1 |
+| S3.E to S3.H | Not started | | |
 | 0.4 and later | Not started | | |
 
 ### Handover notes
@@ -83,6 +84,14 @@ item's text, or work done early under another item.
 What a person picking up the work needs that the code and the item texts do not say.
 
 **Choices that differ from the item text.**
+
+- S3.D retains `mark --stale` as task-scoped reconciliation before marking; live leases refuse
+  the mark. Whole-pipeline commands own run leases; remote init/finalize steps and standalone
+  tasks retain orchestrator admission, with attempts owned by their supervisors. Process birth
+  identities include Linux boot identity and start ticks; other platforms use process creation
+  times. Verified child groups receive SIGTERM, with verified surviving descendants killed after
+  ten seconds. An attempt claimed before spawning records its host too. Unknown historical hosts
+  use the foreign-host grace. `LOST` fences audit writes but cannot undo committed side effects.
 
 - S3.C distinguishes admission from selecting an existing run: a whole pipeline run or
   `--init-only` can create a new identity when no active run exists; a missing explicit key
@@ -104,10 +113,11 @@ What a person picking up the work needs that the code and the item texts do not 
   while queued pipeline admission remains 0.4. Actual executions queue, claim and start ledger
   attempts; terminal attempt changes and summaries are atomic. Parent and child share the
   exact attempt and owner, and acknowledge one process id. Terminal attempts keep the handler
-  log; captured process output is appended only to the fenced summary and its file. A stale
-  operator mark cancels the active attempt before overriding the summary, preserving its
-  immutable evidence. `reopen_run` records REOPEN atomically. Lease APIs are guarded, but
-  automatic heartbeats and reconciliation remain `S3.D`. Migration 0009 keeps historical
+  log; captured process output is appended only to the fenced summary and its file. An operator
+  mark preserves immutable attempt evidence; stale marks reconcile expired attempts before
+  overriding their summaries. `reopen_run` records REOPEN atomically. Lease APIs and automatic
+  heartbeats are guarded, and expired ownership is reconciled before execution admission.
+  Migration 0009 keeps historical
   requesters unknown during PostgreSQL updates. Lifecycle writers moved from `runlog` into
   `transitions`; `runlog` contains reads and result types.
 

@@ -46,6 +46,7 @@ from etl_craft.engine.repository import interventions as record
 from etl_craft.engine.repository import pauses
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.repository.tasks import resolve_task_id
+from etl_craft.execution.reconcile import reconcile
 
 logger = logging.getLogger(__name__)
 
@@ -75,23 +76,30 @@ def mark_task(
 
     A run that has ended is reopened, and the tasks the engine skipped without running are
     reset, so the next ``run --pipeline_code`` resumes it. A task that is ``IN-PROGRESS`` is
-    refused unless ``stale`` says the process running it is gone. Raises ``RunStateError`` when
+    refused while its lease is live. ``stale`` reconciles expired attempts before marking.
+    Raises ``RunStateError`` when
     the pipeline has no run, and ``RunRefusedError`` in remote mode or while the task is running.
     """
     status = _check(config, "mark", reason, status, rows)
     who = requested_by or current_actor().name
+    lost = []
+    if stale:
+        with engine.connect() as conn:
+            pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+            task_id = resolve_task_id(conn, pipeline_id, task_code)
+        lost = reconcile(engine, pipeline_id=pipeline_id, task_id=task_id).lost
     with engine.begin() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         task_id = resolve_task_id(conn, pipeline_id, task_code)
         run_id, run_status = _selected_run(conn, pipeline_id, selector)
         before = runlog.fetch_task_run_status(conn, task_id, run_id)
-        if before == RunStatus.IN_PROGRESS and not stale:
+        if before == RunStatus.IN_PROGRESS:
             raise RunRefusedError(
                 f"{pipeline_code}.{task_code} is running under pipeline_run_id={run_id}; wait "
                 "for it to end, or cancel the run with `etl-craft cancel`. If the process "
-                "running it is gone, pass --stale to record its outcome"
+                "running it is gone, pass --stale after its lease expires to record its outcome"
             )
-        if before == status and rows is None:
+        if before == status and rows is None and not lost:
             raise UsageError(
                 f"{pipeline_code}.{task_code} is already {status} under "
                 f"pipeline_run_id={run_id}; nothing to mark"
