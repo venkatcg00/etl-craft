@@ -8,6 +8,11 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- SQL validation refuses active writers that resolve different table formats for the same
+  qualified target, including writers in other pipelines. Creation, setup, overwrite and merges
+  check the existing Databricks Delta/UniForm or Snowflake native/Iceberg format before staging
+  or changing the target; format changes require an explicit migration or another target.
+
 - Native cloud SQL targets use generated `ROW_ID` keys: Databricks Delta and UniForm identity
   columns and ordered Snowflake autoincrement. Atomic clone publication keeps identity-backed
   `CREATE_TABLE` replacement safe; overwrites and schema evolution retain the generator.

@@ -126,6 +126,10 @@ class WarehouseDialect:
         """Return candidate creation and atomic publication SQL for an identity table."""
         raise NotImplementedError(f"{self.key} does not publish identity table replacements")
 
+    def existing_table_format(self, conn: Connection, target: str) -> TableFormat:
+        """Read a table's format, or use the sole format supported by this dialect."""
+        return self.table_format
+
     def row_id_generated(self, conn: Connection, target: str) -> bool:
         """Whether inserts into this existing table omit ROW_ID and let its default fill it."""
         return self.surrogate_key != "computed"

@@ -14,7 +14,7 @@ import logging
 from sqlalchemy.engine import Engine
 
 from etl_craft.config.targets import active_catalog, parse_warehouse_url
-from etl_craft.core.enums import TableFormat
+from etl_craft.core.enums import SqlAction, TableFormat
 from etl_craft.core.errors import ConfigurationError, HandlerError
 from etl_craft.core.text import qualify
 from etl_craft.dialects.warehouse import WarehouseDialect, resolve
@@ -71,6 +71,18 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
                 now=utc_now(),
             )
             try:
+                if (
+                    task.action
+                    in {
+                        SqlAction.CREATE_TABLE,
+                        SqlAction.SETUP_TABLE,
+                        SqlAction.OVERWRITE_TABLE,
+                        SqlAction.SCD1_MERGE,
+                        SqlAction.SCD2_MERGE,
+                    }
+                    and session.target_columns()
+                ):
+                    session.check_target_format()
                 result = ACTIONS[task.action](session, action)
             finally:
                 session.sweep()

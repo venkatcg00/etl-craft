@@ -705,3 +705,36 @@ def test_joined_merge_matches_composite_keys_and_preserves_other_rows(sql_world,
     from fixtures.sql_merges import check_composite_merge
 
     check_composite_merge(sql_world, "composite", kind)
+
+
+@pytest.mark.parametrize(
+    "action", ["CREATE_TABLE", "SETUP_TABLE", "OVERWRITE_TABLE", "SCD1_MERGE", "SCD2_MERGE"]
+)
+def test_format_mismatch_fails_before_staging_or_mutating(sql_world, monkeypatch, action):
+    from etl_craft.core.enums import TableFormat
+    from etl_craft.dialects.warehouse.base import WarehouseDialect
+
+    w = sql_world
+    w.run(
+        "seed", SQL_ACTION="CREATE_TABLE", TARGET_OBJECT="format_guard", SOURCE_SQL="SELECT 1 AS id"
+    )
+    before = w.rows(f"SELECT * FROM {w.name('format_guard')}")
+    opposite = (
+        TableFormat.NATIVE
+        if w.config.warehouse_table_format == TableFormat.ICEBERG
+        else TableFormat.ICEBERG
+    )
+    monkeypatch.setattr(
+        WarehouseDialect, "existing_table_format", lambda self, conn, target: opposite
+    )
+    params = {"MERGE_KEY": "id", "MERGE_COMPARE_COLUMNS": "id"} if action.startswith("SCD") else {}
+    with pytest.raises(HandlerError, match=r"existing table format is .*set TABLE_FORMAT="):
+        w.run(
+            "conflict",
+            SQL_ACTION=action,
+            TARGET_OBJECT="format_guard",
+            SOURCE_SQL="SELECT id FROM nonexistent_source",
+            **params,
+        )
+    assert w.rows(f"SELECT * FROM {w.name('format_guard')}") == before
+    assert w.tables() == ["format_guard"]

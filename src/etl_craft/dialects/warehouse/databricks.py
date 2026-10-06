@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
@@ -10,7 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from etl_craft.config.auth import warehouse_by_key
-from etl_craft.core.enums import AuthMode
+from etl_craft.core.enums import AuthMode, TableFormat
 from etl_craft.core.errors import ConfigurationError, HandlerError
 from etl_craft.dialects import credentials
 from etl_craft.dialects.warehouse.base import (
@@ -75,6 +76,31 @@ class DatabricksWarehouse(WarehouseDialect):
             candidate,
             f"{columns}, ROW_ID BIGINT GENERATED ALWAYS AS IDENTITY",
             "databricks",
+        )
+
+    def existing_table_format(self, conn: Connection, target: str) -> TableFormat:
+        """Distinguish ordinary Delta from Delta exposing Iceberg metadata through UniForm."""
+        detail = conn.execute(text(f"DESCRIBE DETAIL {target}")).mappings().one()
+        provider = str(detail["format"]).lower()
+        if provider != "delta":
+            raise HandlerError(
+                f"{target}: existing storage format is {provider!r}; this warehouse writes "
+                "Delta or Delta with UniForm. Migrate the table explicitly or use another target"
+            )
+        properties = detail["properties"]
+        try:
+            if isinstance(properties, str):
+                properties = json.loads(properties)
+            properties = dict(properties)
+        except (TypeError, ValueError) as error:
+            raise HandlerError(
+                f"{target}: cannot read table properties to determine its format"
+            ) from error
+        enabled = str(properties.get("delta.universalFormat.enabledFormats", ""))
+        return (
+            TableFormat.ICEBERG
+            if "iceberg" in {value.strip().lower() for value in enabled.split(",")}
+            else TableFormat.NATIVE
         )
 
     def row_id_generated(self, conn: Connection, target: str) -> bool:

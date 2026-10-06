@@ -193,6 +193,26 @@ would otherwise land somewhere other than intended. Schema evolution adds column
 
 Yes/no parameters take `true` or `false`; anything else fails the task.
 
+### One table format per target
+
+A task resolves its format from `TABLE_FORMAT`, or from `Warehouse.Table_format` when the
+parameter is absent. `etl-craft validate` compares active SQL writers across pipelines: every
+writer and setup task on the same qualified target must resolve to the same format. Case
+variants and targets qualified with the active database refer to the same table; an explicitly
+different database refers to another target. Validation reads metadata without connecting to
+the warehouse, so it cannot inspect tables created outside the engine.
+
+Before `CREATE_TABLE`, `SETUP_TABLE`, `OVERWRITE_TABLE` or either merge acts on an existing
+target, the engine checks its format under the target mutation lock. A mismatch fails before
+the source is staged or the target is changed, including a setup that would otherwise do
+nothing. Set `TABLE_FORMAT` to the existing format, or choose another target. Changing the
+parameter is not a table migration.
+
+Databricks distinguishes ordinary Delta (`native`) from Delta with UniForm Iceberg reads
+(`iceberg`) using [table details](https://docs.databricks.com/aws/en/delta/iceberg-reads).
+Snowflake reads [the table's `IS_ICEBERG` flag](https://docs.snowflake.com/en/sql-reference/info-schema/tables)
+in its own database. Warehouses with only one supported table format use that fixed format.
+
 ### The columns the engine adds
 
 After the SELECT's own columns, every table the engine creates has:

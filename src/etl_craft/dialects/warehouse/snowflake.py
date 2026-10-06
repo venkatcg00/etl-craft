@@ -10,7 +10,8 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from etl_craft.config.auth import warehouse_by_key
-from etl_craft.core.enums import AuthMode
+from etl_craft.core.enums import AuthMode, TableFormat
+from etl_craft.core.errors import HandlerError
 from etl_craft.dialects.warehouse.base import (
     Presented,
     ReplaceStrategy,
@@ -69,6 +70,23 @@ class SnowflakeWarehouse(WarehouseDialect):
             f"{columns}, ROW_ID BIGINT AUTOINCREMENT START 1 INCREMENT 1 ORDER",
             "snowflake",
         )
+
+    def existing_table_format(self, conn: Connection, target: str) -> TableFormat:
+        """Read Snowflake's native/Iceberg flag in the target's own database."""
+        catalog, schema, table = target.split(".")
+        flag = str(
+            conn.execute(
+                text(
+                    f"SELECT is_iceberg FROM {catalog}.information_schema.tables "
+                    "WHERE lower(table_schema) = lower(:schema) "
+                    "AND lower(table_name) = lower(:table)"
+                ),
+                {"schema": schema, "table": table},
+            ).scalar_one()
+        ).upper()
+        if flag not in {"YES", "NO"}:
+            raise HandlerError(f"{target}: cannot determine table format from IS_ICEBERG={flag!r}")
+        return TableFormat.ICEBERG if flag == "YES" else TableFormat.NATIVE
 
     def row_id_generated(self, conn: Connection, target: str) -> bool:
         """Recognize actual native identity metadata, including targets created before this run."""
