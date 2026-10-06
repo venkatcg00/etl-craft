@@ -329,6 +329,7 @@ def test_a_stand_in_run_passes_gates_where_the_upstream_cannot_run(config, pipel
     )
 
 
+@pytest.mark.chaos
 def test_cancel_stops_a_running_run(config, pipeline):
     engine, ids = pipeline
     with engine.begin() as conn:
@@ -740,6 +741,7 @@ def test_a_paused_pipeline_starts_nothing_until_resumed(config, pipeline):
         pause_pipeline(engine, remote, "P", "x")
 
 
+@pytest.mark.chaos
 def test_a_run_paused_while_it_runs_stops_starting_tasks_and_goes_on_once_resumed(config, pipeline):
     engine, ids = pipeline
     with engine.begin() as conn:
@@ -876,6 +878,7 @@ def test_a_backfill_runs_once_per_date_as_of_that_date(config, pipeline, downstr
     assert runs(engine)[-2:] == [("P", "SUCCESS", today, "N"), ("P", "SUCCESS", "2026-08-31", "N")]
 
 
+@pytest.mark.chaos
 def test_a_plain_run_does_not_take_over_a_backfills_run(config, pipeline):
     engine, ids = pipeline
     with engine.begin() as conn:
@@ -888,6 +891,7 @@ def test_a_plain_run_does_not_take_over_a_backfills_run(config, pipeline):
     assert statuses(engine, backfill_run) == {}
 
 
+@pytest.mark.chaos
 def test_a_backfill_does_not_take_over_a_scheduled_run(config, pipeline):
     engine, ids = pipeline
     with engine.begin() as conn:
@@ -898,6 +902,7 @@ def test_a_backfill_does_not_take_over_a_scheduled_run(config, pipeline):
     assert run_status(engine, scheduled) == "IN-PROGRESS"
 
 
+@pytest.mark.chaos
 def test_a_backfill_stops_when_another_run_starts_between_dates(config, pipeline):
     engine, ids = pipeline
     without_broken(engine, ids)
@@ -1115,6 +1120,7 @@ def test_mark_keeps_a_skipped_task_another_pipeline_consumed(config, engine_db):
     assert statuses(engine, p_run.pipeline_run_id)["on_failure"][0] == "SKIPPED"
 
 
+@pytest.mark.chaos
 def test_a_rerun_of_a_task_still_running_leaves_its_ended_run_alone(config, pipeline):
     engine, ids = pipeline
     failed = run_pipeline(engine, config, "P", child=CHILD)

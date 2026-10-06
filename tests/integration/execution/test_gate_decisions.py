@@ -83,6 +83,7 @@ def test_pipeline_consumes_the_admitted_revision_after_upstream_reopens(cli_proj
         )
 
 
+@pytest.mark.chaos
 def test_task_consumes_its_claim_snapshot_after_upstream_repairs(cli_project):
     project = cli_project
     run, task_run = upstream(project, task_edge=True, pipeline_edge=False)
@@ -314,6 +315,7 @@ def test_migration_preserves_a_pending_historical_repair(empty_engine_db):
 
 @pytest.mark.parametrize("point", ["pipeline.before_consumption", "pipeline.after_consumption"])
 @pytest.mark.parametrize("crash", [False, True])
+@pytest.mark.chaos
 def test_run_ending_and_consumption_roll_back_together(cli_project, point, crash):
     project = cli_project
     upstream(project)
@@ -368,6 +370,7 @@ def test_run_ending_and_consumption_roll_back_together(cli_project, point, crash
     ],
 )
 @pytest.mark.parametrize("crash", [False, True])
+@pytest.mark.chaos
 def test_attempt_success_offset_and_consumption_roll_back_together(cli_project, point, crash):
     from etl_craft.engine.repository.offsets import (
         StoredOffset,
@@ -416,6 +419,7 @@ def test_attempt_success_offset_and_consumption_roll_back_together(cli_project, 
         )
 
 
+@pytest.mark.chaos
 def test_a_child_crashing_after_commit_keeps_the_complete_success(cli_project):
     from etl_craft.engine.repository.offsets import StoredOffset, fetch_task_offset
 

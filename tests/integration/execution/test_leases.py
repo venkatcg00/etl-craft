@@ -64,6 +64,7 @@ def expire(engine, attempt, *, seconds=1, host=None):
         )
 
 
+@pytest.mark.chaos
 def test_reconciliation_fences_dead_owner_and_retry(engine_db):
     engine = engine_db.engine
     pipeline, _, summary, attempt, owner = scene(engine)
@@ -112,6 +113,7 @@ def test_foreign_owner_gets_two_lease_periods_of_grace(engine_db):
     assert reconcile(engine).lost == [attempt]
 
 
+@pytest.mark.chaos
 def test_expired_owner_cannot_finish_or_renew_before_reconciliation(engine_db):
     engine = engine_db.engine
     _, _, summary, attempt, owner = scene(engine)
@@ -204,6 +206,7 @@ def test_reused_pid_is_never_signalled(monkeypatch):
     stop_process(os.getpid(), "old-birth", grace_seconds=0)
 
 
+@pytest.mark.chaos
 def test_parent_sigkill_reconciles_and_retries_real_child(cli_project):
     if sys.platform != "linux":
         pytest.skip("process-tree recovery requires Linux /proc")
@@ -271,6 +274,7 @@ def test_parent_sigkill_reconciles_and_retries_real_child(cli_project):
         assert conn.execute(text("SELECT TARGET_COUNT FROM AUD_TASK_RUN_LOG")).scalar_one() == 7
 
 
+@pytest.mark.chaos
 def test_child_sigkill_is_failed_by_live_parent(cli_project):
     if sys.platform != "linux":
         pytest.skip("process-tree recovery requires Linux /proc")
@@ -310,6 +314,7 @@ def test_child_sigkill_is_failed_by_live_parent(cli_project):
         )
 
 
+@pytest.mark.chaos
 def test_concurrent_reconciliation_waits_for_verified_child_to_stop(engine_db, monkeypatch):
     engine = engine_db.engine
     _, run, _, attempt, _ = scene(engine)

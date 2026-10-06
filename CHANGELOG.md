@@ -17,6 +17,10 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- A chaos suite for concurrent admission, process loss, fenced recovery, operator races and
+  remote deliveries, including a five-second PostgreSQL outage. CI requires twenty consecutive
+  passes per Engine DB for execution and test changes and uploads each iteration's results.
+
 - Consistent `PIPELINE_ID`, `PIPELINE_RUN_ID` and `TASK_RUN_ID` audit columns on every SQL target,
   with those identities also exposed to ingestion scripts and business-rule SQL. Append retries
   replace only their task run's batch under the target lock; legacy append targets warn on every

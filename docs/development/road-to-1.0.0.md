@@ -85,7 +85,7 @@ item's text, or work done early under another item.
 | S3.G.5 Concurrent ROW_ID allocation | Done | #108 | B38 |
 | S3.G.6 One table format per target | Done | #109 | B43 |
 | S3.G.7 Retry-safe appends | Done | #110 | W4 |
-| S3.H Chaos suite | Not started | | |
+| S3.H Chaos suite | Done | #111 | |
 | 0.4 and later | Not started | | |
 
 ### Handover notes
@@ -293,8 +293,8 @@ documentation-only pull request), three tests failed together and passed on a re
 `test_a_task_process_that_ends_without_an_outcome_is_recorded_failed[sqlite-slow-...]` (both stop a
 task after `TASK_TIMEOUT_SECONDS=2`, which a loaded runner can spend starting the interpreter),
 and `test_each_release_line_is_built_and_the_newest_is_latest` (over the 120 s pytest timeout).
-Before `S3.H`, give the two task tests a time limit that leaves room for start-up, or wait for the
-script to report it started before the limit begins, and measure the docs-site test's build time.
+The two task tests allow ten seconds for interpreter startup and handler output. The versioned
+docs-site test records its build duration and has a 240-second timeout.
 
 **Working on the code.**
 
@@ -1425,6 +1425,26 @@ Scenarios (each asserts the final Engine DB state and, where relevant, warehouse
 8. Backfill and scheduled runs interleaved.
 9. Upstream repair while a downstream gate waits.
 10. Remote mode: duplicate `run --task_code` deliveries, late `__finalize__`, clearing an old DAG run.
+
+The `chaos` marker selects both established recovery regressions and real command-line races.
+The added process tests check warehouse provenance as well as the final audit state:
+
+| Scenario | Coverage |
+|---|---|
+| Duplicate task delivery | Local and remote CLI callers; one attempt and one warehouse batch |
+| Pipeline callers during a gate wait | Three callers wait for an upstream repair; one admitted supervisor consumes the repaired revision |
+| Parent loss | Hard exits at each startup boundary, transactional ending boundaries and a live parent SIGKILL; reconcile before retry |
+| Child loss | Live child SIGKILL and hard exits at summary, offset, consumption and committed-outcome boundaries |
+| Zombie completion | Expired/reconciled owners cannot change the current attempt, summary, logs or offset |
+| Engine DB outage | Isolated PostgreSQL database denies connections for five seconds and terminates its sessions; fence, restore and retry |
+| Operator intervention | Live cancellation, pause/resume, rerun refusal, and stale mark/cancel guards |
+| Backfill overlap | Scheduled and backfill identities cannot take over each other's runs or start between backfill dates |
+| Repair during a gate wait | Admission records and consumption retain the selected upstream revision |
+| Remote deliveries | Duplicate live tasks, late finalize and clearing an older keyed DAG run preserve newer runs |
+
+CI selects the suite when execution, engine, tests, suite definitions or the CI workflow change,
+and stores JUnit results for each iteration. The PostgreSQL outage restores database access in
+cleanup; process tests release or stop their children even when an assertion fails.
 
 **Gate.** The chaos suite passes on both dialects 20 times in a row in CI.
 

@@ -106,3 +106,23 @@ transaction: an injected exception or hard exit rolls back status, offsets and c
 running and processes alive: tests must clean up their process trees and use explicit
 reconciliation for expired leases. Every run reconciles before admission; `etl-craft reconcile`
 requests it directly, and `mark --stale` reconciles a task before marking.
+
+
+## Chaos checks
+
+The chaos suite uses the existing admission, lease, transaction and intervention tests alongside
+real CLI races, startup hard exits, late remote deliveries and a PostgreSQL outage.
+Each test keeps its Engine DB marker and also carries the shared marker:
+
+```bash
+make services-up
+ETL_CRAFT_REQUIRE_SERVICES=1 uv run pytest -q -m chaos
+ETL_CRAFT_REQUIRE_SERVICES=1 uv run pytest -q -m "chaos and engine_sqlite"
+ETL_CRAFT_REQUIRE_SERVICES=1 uv run pytest -q -m "chaos and engine_postgres"
+```
+
+CI runs twenty consecutive passes per Engine DB when execution, engine, tests, suite definitions
+or the CI workflow change. An iteration stops at its first failure and fails the job; every
+completed iteration has an uploaded JUnit report. The PostgreSQL outage affects only the test's
+temporary database, prevents new connections for five seconds, and restores access in cleanup.
+Tests advance abandoned leases explicitly rather than waiting for their normal expiry.

@@ -89,3 +89,15 @@ marker = "cloud_snowflake"
 description = "Connections and the demo subset on Snowflake, native and Iceberg."
 wheel = true
 where = "local"
+
+[suites.chaos]
+marker = "chaos"
+description = "Concurrent execution, process loss and recovery on SQLite and PostgreSQL."
+
+[suites.chaos.platform_only]
+linux = [
+    "tests/integration/execution/test_leases.py::test_parent_sigkill_reconciles_and_retries_real_child[sqlite]",
+    "tests/integration/execution/test_leases.py::test_parent_sigkill_reconciles_and_retries_real_child[postgresql]",
+    "tests/integration/execution/test_leases.py::test_child_sigkill_is_failed_by_live_parent[sqlite]",
+    "tests/integration/execution/test_leases.py::test_child_sigkill_is_failed_by_live_parent[postgresql]",
+]
