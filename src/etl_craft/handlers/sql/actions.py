@@ -117,7 +117,7 @@ def create_table(session: Session, action: ActionContext) -> HandlerResult:
                 f"{session.target}: cannot safely stage replacement at its existing storage path; "
                 "use OVERWRITE_TABLE to keep the table definition"
             )
-        candidate = session.scratch("replace")
+        candidate = session.scratch("replace", persistent=True)
         session.create_table_as(candidate, select_sql, step="prepare the complete replacement")
         if not computed:
             raise HandlerError(

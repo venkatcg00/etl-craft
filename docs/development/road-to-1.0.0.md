@@ -91,7 +91,9 @@ What a person picking up the work needs that the code and the item texts do not 
 **Choices that differ from the item text.**
 
 - S3.G.3 retains original objects for fallback CREATE_TABLE recovery so failed promotion
-  preserves their complete definition; fallback overwrite keeps durable row copies and restores
+  preserves their complete definition. Persistent candidates are qualified with the target's
+  catalog and schema, even when the connection's default schema differs. Fallback overwrite
+  keeps durable row copies and restores
   into the existing object. Snowflake Iceberg uses compensation because atomic replacement is
   not guaranteed across its catalog modes. Native replacements carry table comments; atomic
   CTAS carries warehouse-provided table properties and refuses column metadata it cannot retain.
@@ -2019,6 +2021,38 @@ ngrok; verify its real tunnel in the relevant acceptance suite.
 **Done when.** A team can generate its pipeline catalog and serve it through each of the three
 options using the guide, with working navigation and a stable shared URL. The documented proxy
 example passes the integration checks, and local and organization hosting require no ngrok setup.
+
+### S7.L ETL Craft logo and CLI banner
+
+**Problem.** ETL Craft needs its own recognizable logo and a terminal banner, similar to the
+startup identity shown by Airflow. Use an original ETL Craft design consistently across the CLI,
+package documentation, generated project catalog and web UI.
+
+**Where.** The CLI entry point and help renderer, packaged branding assets, `mkdocs.yml`,
+the documentation assets, the generated catalog templates and the web UI (`S7.A`).
+
+**Change.**
+
+1. Create an original logo, wordmark and favicon with editable vector sources, small raster
+   exports, monochrome variants and versions suited to light and dark backgrounds. Keep their
+   ownership and license explicit and include concise usage guidance.
+2. Derive a readable ASCII terminal banner from that identity, including the installed package
+   version. Define which interactive entry points display it and provide an explicit way to
+   suppress it. Render it once per invocation, never from library imports, workers or task children.
+3. Keep JSON, generated files, piped output and other machine-readable command contracts free of
+   the banner. Respect non-interactive terminals, narrow widths, `NO_COLOR` and `TERM=dumb`;
+   use plain text when color or terminal capabilities are unavailable.
+4. Apply the logo and favicon to the package documentation, generated catalog and web UI, with
+   accessible alternative text and legible sizing. Package required assets so installed wheels
+   and source distributions behave the same as a repository checkout.
+
+**Tests.** Verify interactive display, suppression, narrow and plain terminals, installed version
+text, and absence from JSON, redirected output and child processes. Check that wheel and source
+installations contain the assets and that documentation, catalog and UI links resolve. Review the
+logo and banner visually in light and dark modes before release.
+
+**Done when.** ETL Craft has an original, documented visual identity and a recognizable CLI banner
+that works from an installed package without changing automation output.
 
 **Gate.** The soak passes.
 

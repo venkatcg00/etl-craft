@@ -25,6 +25,11 @@ make docs            # documentation site, strict build into site/ (make docs-se
 
 Before opening a pull request, finish the full local `make check docs` run and all relevant
 service and live-cloud acceptance tests. Do not open the PR while these checks are still running.
+Build the current wheel and source distribution together, then run the installed-wheel demos
+across all four local warehouses with
+`ETL_CRAFT_TEST_WHEEL` pointing to that wheel and `ETL_CRAFT_REQUIRE_SERVICES=1`. The regular
+coverage run skips those demos when no wheel is supplied; `make verify-package` checks installation
+but does not run the pipeline demos.
 
 ## Layers
 

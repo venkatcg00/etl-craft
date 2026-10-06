@@ -30,6 +30,11 @@ and CI runs it on every pull request.
 
 Before opening a pull request, run the complete `make check docs` suite locally and finish
 relevant service and live-cloud acceptance tests. Fix failures before creating the PR.
+Build the current wheel and source distribution together, then run the installed-wheel demos
+across all four local warehouses with
+`ETL_CRAFT_TEST_WHEEL` pointing to that wheel and `ETL_CRAFT_REQUIRE_SERVICES=1`. The regular
+coverage run skips those demos when no wheel is supplied; `make verify-package` checks installation
+but does not run the pipeline demos.
 
 ## Definition of done
 

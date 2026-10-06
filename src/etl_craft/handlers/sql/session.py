@@ -115,16 +115,21 @@ class Session:
         """Return ``database.schema.table`` for ``schema.table``, in the target's database."""
         return qualify(object_ref, self.catalog)
 
-    def scratch(self, suffix: str) -> str:
+    def scratch(self, suffix: str, *, persistent: bool = False) -> str:
         """Name a scratch table for this attempt: ``etl_<suffix>_<task_run_id>_<token>``.
 
         ``token`` is random per session, so no two attempts, of this task or another, share a
         name. A temporary table lives in the session's own namespace and stays unqualified;
-        anywhere else the name is qualified with the target's catalog and schema. Every scratch
+        persistent candidates and warehouses without temporary tables use the target's catalog
+        and schema. Every scratch
         table is recorded, so ``sweep`` drops it whatever happens.
         """
         bare = f"etl_{suffix}_{self.task_run_id}_{self.token}"
-        name = bare if self.dialect.temporary_tables else self.qualify(f"{self.schema}.{bare}")
+        name = (
+            bare
+            if self.dialect.temporary_tables and not persistent
+            else self.qualify(f"{self.schema}.{bare}")
+        )
         if name not in self.scratch_tables:
             self.scratch_tables.append(name)
         return name

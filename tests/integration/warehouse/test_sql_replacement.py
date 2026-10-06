@@ -134,3 +134,41 @@ def test_transactional_cleanup_failure_rolls_back_replacement(sql_world, monkeyp
         with pytest.raises(HandlerError, match="cleanup unavailable"):
             w.run("daily", SOURCE_SQL="SELECT 2 AS id", **params)
     assert w.rows(f"SELECT id FROM {w.name('daily')}") == [(1,)]
+
+
+def test_replacement_uses_target_schema_instead_of_connection_default(sql_world, monkeypatch):
+    from etl_craft.core.errors import InjectedFaultError
+    from etl_craft.warehouse.connection import warehouse_dialect
+
+    w = sql_world
+    other = f"{w.schema}_other"
+    schema = other if w.kind == "postgres" else f"{w.catalog}.{other}"
+    target = f"{w.catalog}.{other}.outside"
+    w.execute(f"CREATE SCHEMA {schema}")
+    params = {"SQL_ACTION": "CREATE_TABLE", "TARGET_OBJECT": f"{other}.outside"}
+    try:
+        w.run("outside", SOURCE_SQL="SELECT 1 AS id", **params)
+        assert w.rows(f"SELECT id FROM {target}") == [(1,)]
+        w.run("outside", SOURCE_SQL="SELECT 2 AS id", **params)
+        assert w.rows(f"SELECT id FROM {target}") == [(2,)]
+        assert "outside" not in w.tables()
+        point = (
+            "before_publish"
+            if warehouse_dialect(w.config).replace_strategy == "create_or_replace"
+            else "after_publish"
+        )
+        with monkeypatch.context() as patch:
+            patch.setenv("ETL_CRAFT_FAULT", f"sql.replace.{point}")
+            with pytest.raises(InjectedFaultError):
+                w.run("outside", SOURCE_SQL="SELECT 3 AS id", **params)
+        assert w.rows(f"SELECT id FROM {target}") == [(2,)]
+    finally:
+        tables = w.rows(
+            "SELECT table_name FROM information_schema.tables WHERE lower(table_schema) = "
+            "lower(:schema)",
+            schema=other,
+        )
+        for (table,) in tables:
+            w.execute(f"DROP TABLE IF EXISTS {w.catalog}.{other}.{table}")
+        cascade = " CASCADE" if w.kind in {"postgres", "duckdb"} else ""
+        w.execute(f"DROP SCHEMA {schema}{cascade}")
