@@ -10,8 +10,8 @@ from sqlalchemy.engine import Connection
 from etl_craft.config.auth import warehouse_by_key
 from etl_craft.config.targets import attached_catalog_name
 from etl_craft.core.enums import AuthMode
-from etl_craft.core.errors import ConfigurationError
-from etl_craft.dialects.warehouse.base import Presented, SurrogateKey
+from etl_craft.core.errors import ConfigurationError, HandlerError
+from etl_craft.dialects.warehouse.base import Presented, ReplaceStrategy, SurrogateKey
 from etl_craft.dialects.warehouse.duckdb import DuckDBWarehouse
 
 if TYPE_CHECKING:
@@ -28,6 +28,7 @@ class DuckDBIcebergWarehouse(DuckDBWarehouse):
     """
 
     spec = warehouse_by_key("duckdb_iceberg")
+    replace_strategy: ReplaceStrategy = "copy_and_restore"
     single_writer = False
     surrogate_key: SurrogateKey = "computed"
     enforces_primary_keys = False
@@ -97,6 +98,50 @@ class DuckDBIcebergWarehouse(DuckDBWarehouse):
         # An attached Iceberg catalog does not take part in DuckDB transactions; each
         # statement commits on its own.
         dbapi_connection.begin = _no_transaction
+
+    def preserve_replacement_properties(
+        self, conn: Connection, target: str, candidate: str
+    ) -> None:
+        """Carry Iceberg properties and refuse layouts this CTAS cannot reproduce."""
+        metadata = conn.execute(
+            text("SELECT metadata FROM iceberg_load_table_response(:target)"), {"target": target}
+        ).scalar_one()
+        spec = next(
+            s for s in metadata["partition-specs"] if s["spec-id"] == metadata["default-spec-id"]
+        )
+        schema = next(
+            s for s in metadata["schemas"] if s["schema-id"] == metadata["current-schema-id"]
+        )
+        if (
+            spec["fields"]
+            or metadata["default-sort-order-id"]
+            or metadata["format-version"] != 2
+            or any(f.get("doc") or f["required"] for f in schema["fields"])
+        ):
+            raise HandlerError(
+                f"{target}: CTAS cannot preserve partitioning, sort order or column metadata; "
+                "use OVERWRITE_TABLE"
+            )
+        properties = {str(k): str(v) for k, v in metadata["properties"].items()}
+        if properties:
+            conn.execute(
+                text("CALL set_iceberg_table_properties(:candidate, MAP(:keys, :values))"),
+                {
+                    "candidate": candidate,
+                    "keys": list(properties),
+                    "values": list(properties.values()),
+                },
+            )
+        actual = {
+            str(row[0]): str(row[1])
+            for row in conn.execute(
+                text("SELECT * FROM iceberg_table_properties(:candidate)"), {"candidate": candidate}
+            ).all()
+        }
+        if any(actual.get(k) != v for k, v in properties.items()):
+            raise HandlerError(
+                f"{target}: replacement properties did not match; use OVERWRITE_TABLE"
+            )
 
     def load_table_metadata(self, conn: Connection, schema: str, table: str) -> None:
         """Load an Iceberg table's schema so information_schema.columns reports it.

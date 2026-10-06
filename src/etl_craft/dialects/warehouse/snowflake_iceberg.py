@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
@@ -11,6 +12,7 @@ from sqlalchemy.engine import Connection
 from etl_craft.config.auth import warehouse_by_key
 from etl_craft.core.errors import ConfigurationError, HandlerError
 from etl_craft.core.text import is_safe_identifier
+from etl_craft.dialects.warehouse.base import ReplaceStrategy
 from etl_craft.dialects.warehouse.snowflake import SnowflakeWarehouse
 
 if TYPE_CHECKING:
@@ -35,7 +37,41 @@ class SnowflakeIcebergWarehouse(SnowflakeWarehouse):
     """
 
     spec = warehouse_by_key("snowflake_iceberg")
+    replace_strategy: ReplaceStrategy = "copy_and_restore"
     storage_parameters = frozenset({"EXTERNAL_VOLUME", "BASE_LOCATION", "CATALOG"})
+
+    def preserve_replacement_properties(
+        self, conn: Connection, target: str, candidate: str
+    ) -> None:
+        """Carry table comments; refuse customer storage and clustering before promotion."""
+        ddl = str(
+            conn.execute(text("SELECT GET_DDL('TABLE', :target)"), {"target": target}).scalar_one()
+        )
+        volume = re.search(r"EXTERNAL_VOLUME\s*=\s*'([^']*)'", ddl, re.IGNORECASE)
+        if (volume and volume[1] != SNOWFLAKE_MANAGED_VOLUME) or re.search(
+            r"CLUSTER BY|NOT NULL|PRIMARY KEY|UNIQUE|COMMENT\s+'", ddl, re.IGNORECASE
+        ):
+            raise HandlerError(
+                f"{target}: CTAS cannot preserve storage, clustering or column metadata; "
+                "use OVERWRITE_TABLE"
+            )
+        catalog, schema, table = target.split(".")
+        query = text(
+            f"SELECT comment FROM {catalog}.information_schema.tables "
+            "WHERE lower(table_schema) = lower(:schema) AND lower(table_name) = lower(:table)"
+        )
+        comment = conn.execute(query, {"schema": schema, "table": table}).scalar_one()
+        if comment is not None:
+            conn.execute(text(f"COMMENT ON TABLE {candidate} IS :comment"), {"comment": comment})
+        actual = conn.execute(
+            query, {"schema": schema, "table": candidate.split(".")[-1]}
+        ).scalar_one()
+        if actual != comment:
+            raise HandlerError(f"{target}: replacement comment did not match; use OVERWRITE_TABLE")
+
+    def backup_table(self, conn: Connection, backup: str, target: str) -> None:
+        """Keep recovery rows in a native table, independent of an Iceberg base location."""
+        conn.execute(text(f"CREATE TABLE {backup} AS SELECT * FROM {target}"))
 
     def create_table_as(
         self, conn: Connection, qualified_name: str, select_sql: str, params: Mapping[str, str]

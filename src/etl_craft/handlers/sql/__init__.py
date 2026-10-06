@@ -2,8 +2,9 @@
 
 The task supplies a SELECT, inline in ``SOURCE_SQL`` or as a file under the project's
 ``sql_files/`` in ``SOURCE_SQL_FILE``, and names its ``SQL_ACTION`` and ``TARGET_OBJECT``; the
-engine owns every write. The parameters are checked first (``spec``), then the action runs in
-one warehouse transaction (``actions``), with every statement logged (``session``).
+engine owns every write. The parameters are checked first (``spec``), then the action uses the
+warehouse's transaction or publication strategy (``actions``), with every statement logged
+(``session``).
 """
 
 from __future__ import annotations

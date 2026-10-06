@@ -80,7 +80,8 @@ item's text, or work done early under another item.
 | S3.F Atomic endings | Done | #103 | B6, B9; Engine DB portion of W4 |
 | S3.G.1 Canonical change hash | Done | #104 | B22, B35 |
 | S3.G.2 Set-based write strategies | Done | #105 | B36 |
-| S3.G.3 to S3.H | Not started | | |
+| S3.G.3 Safe table replacement | In progress | | B37, W5; cloud acceptance pending |
+| S3.G.4 to S3.H | Not started | | |
 | 0.4 and later | Not started | | |
 
 ### Handover notes
@@ -89,6 +90,16 @@ What a person picking up the work needs that the code and the item texts do not 
 
 **Choices that differ from the item text.**
 
+- S3.G.3 retains original objects for fallback CREATE_TABLE recovery so failed promotion
+  preserves their complete definition; fallback overwrite keeps durable row copies and restores
+  into the existing object. Snowflake Iceberg uses compensation because atomic replacement is
+  not guaranteed across its catalog modes. Native replacements carry table comments; atomic
+  CTAS carries warehouse-provided table properties and refuses column metadata it cannot retain.
+  DuckDB Iceberg transfers table properties but refuses partitioning, sorting and column metadata
+  for CREATE_TABLE. Cleanup after committed non-transactional publication is a warning; native
+  transactional cleanup failures roll back. Non-transactional overwrite refuses the current
+  destructive schema-evolution rebuild pending S3.G.4. Recovery faults do not simulate rollback
+  after a single atomic statement; they inject before it or make the statement itself fail.
 - S3.G.2 joins SCD1 updates directly to the deduplicated stage and SCD2 closes to the
   changed-key stage through `WarehouseDialect.update_from_stage`. PostgreSQL/DuckDB/Snowflake
   use UPDATE FROM; Databricks/Trino use matched MERGE. PostgreSQL indexes and analyzes both
@@ -1295,10 +1306,17 @@ guide, task-parameter reference, cloud acceptance tests.
     `INSERT OVERWRITE INTO`, and Trino Iceberg (which has no multi-statement transactions) uses
     `CREATE OR REPLACE TABLE <target> WITH (<current properties>) AS SELECT <target columns> ...`,
     which commits one new snapshot. Read the current properties with `SHOW CREATE TABLE` first.
-  - `copy_and_restore` (DuckDB over Iceberg and any dialect without the above): copy the target to
-    `<target>__etl_keep_<token>` first, and restore it if any later statement fails.
-  A table-properties check before and after (`S3.G.4`) guards against `CREATE OR REPLACE` dropping
-  partitioning or comments; where it would, the dialect uses `copy_and_restore`.
+  - `copy_and_restore` (DuckDB over Iceberg, Snowflake Iceberg and any dialect without the above):
+    prepare a complete candidate before retaining the original object as
+    `<target>__etl_keep_<token>` and promoting the candidate for `CREATE_TABLE`. For overwrite,
+    copy the original rows to that recovery name and restore them into the existing definition
+    if any later statement fails. A failed restoration retains the recovery table and names it
+    in the error. This is compensation with a brief reader-visible window, not atomic publication.
+  Check protected table properties before publication and verify their preservation in the
+  warehouse tests. Refuse layouts whose partitioning or metadata cannot be carried forward.
+  Do not run a fallible verification statement after an atomic publication and report the already
+  committed replacement as failed. Schema evolution by ALTER (`S3.G.4`) completes the type and
+  property contract; until then, non-transactional overwrite refuses adding columns by rebuilding.
 - *Tests.* Warehouse fault injection for `CREATE_TABLE` and `OVERWRITE_TABLE` on every local warehouse:
   after the failure the target has its old rows and properties. Cloud acceptance repeats it on
   Snowflake and Databricks.
@@ -1964,6 +1982,43 @@ The documentation gate must inspect rendered content and links on the landing pa
   the contract: what a script gets, what it returns, when its offset is stored, how it is stopped).
 - Reference: every config key, task parameter, CLI command, API endpoint and JSON document, generated
   from the code where possible (as the existing reference pages are).
+
+### S7.K Hosting the metadata-generated catalog documentation
+
+**Problem.** Teams need to share the pipeline documentation generated from Engine DB metadata
+at a local address, through ngrok, or at a URL managed by their organization. `generate-docs`
+and `publish-docs` already support local serving with a chosen host and port and ngrok with an
+optional reserved domain. Complete the organization URL path and document all three deployment
+options. This is the generated project catalog, separate from the package's versioned documentation.
+
+**Where.** `services/docs_publish.py`, `cli/commands/publish_docs.py`, the `Docs_site` configuration,
+`engine/repository/docs_site.py`, `docs/guides/catalog.md`, and deployment examples in `deploy/`.
+
+**Change.**
+
+1. Keep localhost serving with a configurable port and loopback binding by default. Document how
+   to run it as a persistent service and regenerate the catalog while it is being served.
+2. Keep ngrok optional, including its configured domain and existing URL-change checks; a team
+   can publish locally or behind its own proxy without ngrok credentials or its SDK.
+3. Support an organization-managed public URL routed to the serving port by a reverse proxy or
+   ingress. Configure the external base URL, including an optional path prefix, separately from
+   the listen address. Record the externally usable publication URL and apply the existing
+   explicit URL-change acceptance rule. Ensure page links, assets and redirects work beneath
+   the configured prefix.
+4. Provide a reverse-proxy example and explain the organization's DNS, TLS and port routing
+   responsibilities. Describe where team authentication is enforced. Trust forwarded visitor
+   addresses only from explicitly configured proxies, so the existing IP restrictions remain
+   meaningful and direct clients cannot spoof them.
+
+**Tests.** Exercise local serving on a selected port, the ngrok adapter, and an organization URL
+through a local test proxy at both `/` and a path prefix. Verify catalog pages and assets, recorded
+public URLs and URL-change rejection, regeneration without broken requests, trusted-proxy IP
+handling, hidden-file protection and service shutdown. Keep ordinary tests independent of live
+ngrok; verify its real tunnel in the relevant acceptance suite.
+
+**Done when.** A team can generate its pipeline catalog and serve it through each of the three
+options using the guide, with working navigation and a stable shared URL. The documented proxy
+example passes the integration checks, and local and organization hosting require no ngrok setup.
 
 **Gate.** The soak passes.
 

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from sqlalchemy import text
+from sqlalchemy.engine import Connection
+
 from etl_craft.config.auth import warehouse_by_key
-from etl_craft.dialects.warehouse.base import SurrogateKey, WarehouseDialect
+from etl_craft.dialects.warehouse.base import ReplaceStrategy, SurrogateKey, WarehouseDialect
 
 if TYPE_CHECKING:
     from etl_craft.config import ConnectionProfile
@@ -18,6 +21,7 @@ class DuckDBWarehouse(WarehouseDialect):
     """
 
     spec = warehouse_by_key("duckdb")
+    replace_strategy: ReplaceStrategy = "transactional"
     surrogate_key: SurrogateKey = "sequence"
     single_writer = True
 
@@ -37,3 +41,15 @@ class DuckDBWarehouse(WarehouseDialect):
             cursor.execute("SET TimeZone = 'UTC'")
         finally:
             cursor.close()
+
+    def replacement_comment(self, conn: Connection, target: str) -> str | None:
+        """Read the native table's comment before replacing its definition."""
+        catalog, schema, table = target.split(".")
+        value = conn.execute(
+            text(
+                "SELECT comment FROM duckdb_tables() WHERE database_name = :catalog "
+                "AND schema_name = :schema AND table_name = :table"
+            ),
+            {"catalog": catalog, "schema": schema, "table": table},
+        ).scalar_one()
+        return None if value is None else str(value)

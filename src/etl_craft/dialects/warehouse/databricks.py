@@ -12,7 +12,13 @@ from etl_craft.config.auth import warehouse_by_key
 from etl_craft.core.enums import AuthMode
 from etl_craft.core.errors import ConfigurationError, HandlerError
 from etl_craft.dialects import credentials
-from etl_craft.dialects.warehouse.base import Presented, SurrogateKey, WarehouseDialect
+from etl_craft.dialects.warehouse.base import (
+    Presented,
+    ReplaceStrategy,
+    SurrogateKey,
+    WarehouseDialect,
+)
+from etl_craft.dialects.warehouse.replacement import replacement_ddl
 
 if TYPE_CHECKING:
     from etl_craft.config import CloningConfig, ConnectionProfile
@@ -23,6 +29,7 @@ class DatabricksWarehouse(WarehouseDialect):
     """Databricks, Delta tables. A session has no default schema, so scratch tables are named."""
 
     spec = warehouse_by_key("databricks")
+    replace_strategy: ReplaceStrategy = "create_or_replace"
     storage_parameters = frozenset({"EXTERNAL_LOCATION"})
     update_uses_merge = True
     temporary_tables = False
@@ -134,3 +141,27 @@ class DatabricksWarehouse(WarehouseDialect):
             cursor.execute("SET TIME ZONE 'UTC'")
         finally:
             cursor.close()
+
+    def replacement_ddl(
+        self,
+        conn: Connection,
+        target: str,
+        select_sql: str,
+        params: Mapping[str, str],
+        *,
+        existing: bool,
+    ) -> str:
+        """Preserve the existing table's declared properties in one CTAS replacement."""
+        if existing:
+            if params.get("EXTERNAL_LOCATION"):
+                raise HandlerError(
+                    f"{target}: replacement cannot change EXTERNAL_LOCATION; use OVERWRITE_TABLE"
+                )
+            ddl = str(conn.execute(text(f"SHOW CREATE TABLE {target}")).scalar_one())
+            return replacement_ddl(ddl, target, select_sql, "databricks")
+        location = (params.get("EXTERNAL_LOCATION") or "").strip()
+        return f"CREATE OR REPLACE TABLE {target} {self.delta_clause(location)} AS {select_sql}"
+
+    def overwrite_statement(self, target: str, columns: str, select_sql: str) -> str:
+        """Commit a complete Delta overwrite with one statement."""
+        return f"INSERT OVERWRITE TABLE {target} ({columns}) {select_sql}"

@@ -22,6 +22,7 @@ from fixtures.cloud import DATABRICKS_VARS, SNOWFLAKE_VARS, require_variables, w
 from fixtures.engine_db import apply_schema, sqlite_engine_db
 from fixtures.metadata import add_pipeline, insert
 from fixtures.sql_merges import check_composite_merge
+from fixtures.sql_replacement import check_replacement_failure
 from fixtures.sql_warehouse import SqlWorld
 
 # Some forty statements against a remote warehouse, one to three seconds each, cold start aside.
@@ -54,7 +55,16 @@ def walk_every_action(w):
     suffix = uuid.uuid4().hex[:8]
     names = {
         base: f"etl_craft_{base}_{suffix}"
-        for base in ("orders", "customers", "history", "events", "joined_scd1", "joined_scd2")
+        for base in (
+            "orders",
+            "customers",
+            "history",
+            "events",
+            "joined_scd1",
+            "joined_scd2",
+            "replace_create",
+            "replace_overwrite",
+        )
     }
     scd = {"MERGE_KEY": "id", "MERGE_COMPARE_COLUMNS": "name"}
     # Typed like a real source column: Snowflake gives a bare literal its own length, and the
@@ -165,6 +175,9 @@ def walk_every_action(w):
 
         check_composite_merge(w, names["joined_scd1"], "SCD1_MERGE")
         check_composite_merge(w, names["joined_scd2"], "SCD2_MERGE")
+
+        check_replacement_failure(w, names["replace_create"], "CREATE_TABLE")
+        check_replacement_failure(w, names["replace_overwrite"], "OVERWRITE_TABLE")
 
         w.finish("create")
         w.run("drop", SQL_ACTION="DROP_TABLE", TARGET_OBJECT=names["orders"])

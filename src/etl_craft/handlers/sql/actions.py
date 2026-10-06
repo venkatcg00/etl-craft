@@ -1,9 +1,9 @@
 """The eight SQL actions. Each wraps the task's SELECT in the writes it stands for.
 
-- ``CREATE_TABLE`` drops the target and creates it again from the SELECT's rows.
+- ``CREATE_TABLE`` replaces the target from the staged SELECT with rollback or recovery.
 - ``SETUP_TABLE`` creates the target, empty, from the SELECT's shape plus the audit columns of
   the action that writes it, when it does not exist yet; an existing target is left alone.
-- ``OVERWRITE_TABLE`` empties the target and inserts the SELECT's rows.
+- ``OVERWRITE_TABLE`` replaces the rows with atomic publication or row recovery.
 - ``APPEND_TABLE`` inserts the SELECT's rows, without comparing the shapes.
 - ``SCD1_MERGE`` updates changed rows in place by merge key and inserts new keys.
 - ``SCD2_MERGE`` closes the active version of a changed key (``ACTIVE_FLAG='N'``) and inserts a
@@ -30,6 +30,7 @@ still find those keys afterwards.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -39,10 +40,12 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.core.enums import RunStatus, SqlAction
 from etl_craft.core.errors import HandlerError
+from etl_craft.core.faults import fault_point
 from etl_craft.engine.repository.hash_versions import fetch_hash_version
 from etl_craft.engine.repository.tasks import TargetTask, fetch_target_tasks
 from etl_craft.engine.runlog import fetch_task_run_status
 from etl_craft.handlers.registry import HandlerResult, TaskContext
+from etl_craft.handlers.sql.replacement import cleanup, promote, recover_overwrite
 from etl_craft.handlers.sql.session import Session
 from etl_craft.handlers.sql.spec import SqlTask
 from etl_craft.handlers.sql.tables import (
@@ -94,20 +97,56 @@ def create_table(session: Session, action: ActionContext) -> HandlerResult:
     """Replace the target with the SELECT's rows, stamped with the run id."""
     stage = build_stage(session, action.select_sql)
     source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
-    session.clear_hash_version = True
-    session.run(f"DROP TABLE IF EXISTS {session.target}", step="drop the old target")
+    existing = bool(session.target_columns())
+    strategy = session.dialect.replace_strategy
     computed = session.dialect.surrogate_key == "computed"
-    # Where ROW_ID cannot be added afterwards, the rows are numbered as the table is created.
     row_id = ", CAST(ROW_NUMBER() OVER (ORDER BY NULL) AS BIGINT) AS ROW_ID" if computed else ""
-    session.create_table_as(
-        session.target,
+    select_sql = (
         f"SELECT s.*, CAST({int(action.context.pipeline_run_id)} AS BIGINT) AS PIPELINE_RUN_ID"
-        f"{row_id} FROM {stage} s",
-        step="create the target from the SELECT",
+        f"{row_id} FROM {stage} s"
     )
-    if not computed:
-        add_row_id(session)
-    session.drop(stage)
+    if strategy == "create_or_replace":
+        ddl = session.dialect.replacement_ddl(
+            session.conn, session.target, select_sql, session.params, existing=existing
+        )
+        fault_point("sql.replace.before_publish")
+        session.run(ddl, step="atomically replace the target")
+    elif strategy == "copy_and_restore":
+        if existing and any(session.params.get(k) for k in ("EXTERNAL_LOCATION", "BASE_LOCATION")):
+            raise HandlerError(
+                f"{session.target}: cannot safely stage replacement at its existing storage path; "
+                "use OVERWRITE_TABLE to keep the table definition"
+            )
+        candidate = session.scratch("replace")
+        session.create_table_as(candidate, select_sql, step="prepare the complete replacement")
+        if not computed:
+            raise HandlerError(
+                f"{session.target}: safe replacement requires a declared ROW_ID strategy"
+            )
+        if existing:
+            session.dialect.preserve_replacement_properties(session.conn, session.target, candidate)
+        promote(session, candidate, existing=existing)
+    else:
+        comment = (
+            session.dialect.replacement_comment(session.conn, session.target) if existing else None
+        )
+        fault_point("sql.replace.before_publish")
+        session.run(f"DROP TABLE IF EXISTS {session.target}", step="drop the old target")
+        fault_point("sql.replace.after_clear")
+        session.create_table_as(
+            session.target, select_sql, step="create the target from the SELECT"
+        )
+        if not computed:
+            add_row_id(session)
+        if comment is not None:
+            escaped = comment.replace("'", "''")
+            session.run(
+                f"COMMENT ON TABLE {session.target} IS '{escaped}'",
+                step="preserve the table comment",
+            )
+        fault_point("sql.replace.after_publish")
+    session.clear_hash_version = True
+    cleanup(session, stage)
     return HandlerResult(source_count=source, target_count=source, insert_count=source)
 
 
@@ -171,19 +210,68 @@ def overwrite_table(session: Session, action: ActionContext) -> HandlerResult:
     """Empty the target and insert the SELECT's rows."""
     stage = build_stage(session, action.select_sql)
     source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
+    strategy = session.dialect.replace_strategy
+    if strategy != "transactional" and action.task.schema_evolution:
+        target_names = {name.lower() for name, _ in require_target(session)}
+        added = [name for name, _ in session.columns(stage) if name.lower() not in target_names]
+        if added:
+            raise HandlerError(
+                f"{session.target}: safe overwrite cannot rebuild its definition to add "
+                f"{', '.join(added)}; add these columns with ALTER TABLE before overwriting"
+            )
     check_or_evolve(
         session, stage, SqlAction.OVERWRITE_TABLE, schema_evolution=action.task.schema_evolution
     )
     columns = ", ".join(name for name, _ in session.columns(stage))
-    session.run(f"TRUNCATE TABLE {session.target}", step="empty the target")
-    row_id_columns, row_id_values = session.row_id_insert_parts()
-    session.run(
-        f"INSERT INTO {session.target} ({columns}, PIPELINE_RUN_ID, UPDATE_DATE{row_id_columns}) "
-        f"SELECT {columns}, :pipeline_run_id, :now{row_id_values} FROM {stage}",
-        action.stamp,
-        step="insert the SELECT's rows",
-    )
-    session.drop(stage)
+    computed = session.dialect.surrogate_key == "computed"
+    row_id_columns = ", ROW_ID" if computed else ""
+    row_id_values = ", CAST(ROW_NUMBER() OVER (ORDER BY NULL) AS BIGINT)" if computed else ""
+    select_sql = f"SELECT {columns}, :pipeline_run_id, :now{row_id_values} FROM {stage}"
+    written_columns = f"{columns}, PIPELINE_RUN_ID, UPDATE_DATE{row_id_columns}"
+    if strategy == "create_or_replace":
+        if session.dialect.overwrite_uses_ctas:
+            names = [name for name, _ in session.columns(stage)] + [
+                "PIPELINE_RUN_ID",
+                "UPDATE_DATE",
+                "ROW_ID",
+            ]
+            types = session.hash_types(session.target)
+            expressions = [
+                f"CAST({name} AS {types[name.lower()]}) AS {name}" for name in names[:-3]
+            ]
+            expressions += [
+                "CAST(:pipeline_run_id AS BIGINT) AS PIPELINE_RUN_ID",
+                f"CAST(:now AS {types['update_date']}) AS UPDATE_DATE",
+                "CAST(ROW_NUMBER() OVER (ORDER BY NULL) AS BIGINT) AS ROW_ID",
+            ]
+            ddl = session.dialect.replacement_ddl(
+                session.conn,
+                session.target,
+                f"SELECT {', '.join(expressions)} FROM {stage}",
+                {},
+                existing=True,
+            )
+        else:
+            ddl = session.dialect.overwrite_statement(session.target, written_columns, select_sql)
+        fault_point("sql.replace.before_publish")
+        session.run(ddl, action.stamp, step="atomically overwrite the target")
+    else:
+        guard = (
+            recover_overwrite(session)
+            if strategy == "copy_and_restore"
+            else contextlib.nullcontext()
+        )
+        with guard:
+            fault_point("sql.replace.before_publish")
+            session.run(f"TRUNCATE TABLE {session.target}", step="empty the target")
+            fault_point("sql.replace.after_clear")
+            session.run(
+                f"INSERT INTO {session.target} ({written_columns}) {select_sql}",
+                action.stamp,
+                step="insert the SELECT's rows",
+            )
+            fault_point("sql.replace.after_publish")
+    cleanup(session, stage)
     return HandlerResult(source_count=source, target_count=source, insert_count=source)
 
 

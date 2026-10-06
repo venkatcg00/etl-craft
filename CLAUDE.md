@@ -23,6 +23,9 @@ make release-gate    # is HEAD releasable? (release/README.md)
 make docs            # documentation site, strict build into site/ (make docs-serve to preview)
 ```
 
+Before opening a pull request, finish the full local `make check docs` run and all relevant
+service and live-cloud acceptance tests. Do not open the PR while these checks are still running.
+
 ## Layers
 
 Each package imports only the packages below it. `lint-imports` enforces this.

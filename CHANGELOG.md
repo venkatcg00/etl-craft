@@ -8,6 +8,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Safe SQL table replacement: native PostgreSQL and DuckDB roll back failed replacements;
+  Snowflake, Databricks and Trino use atomic publication where supported. DuckDB and Snowflake
+  Iceberg retain recovery tables and restore failed writes, leaving backups available if
+  restoration also fails. Table comments and supported properties survive; unsupported layouts
+  and destructive non-transactional overwrite evolution are refused before publication.
+
 - Joined SCD1 updates and SCD2 version closing use warehouse-specific set-based statements.
   PostgreSQL indexes and analyzes merge stages; a 100,000-row SCD1 regression checks the
   30-second performance budget. Composite keys, NULL preservation and unchanged-row audit

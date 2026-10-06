@@ -11,7 +11,13 @@ from sqlalchemy.engine import Connection
 from etl_craft.config.auth import warehouse_by_key
 from etl_craft.core.enums import AuthMode
 from etl_craft.core.errors import HandlerError
-from etl_craft.dialects.warehouse.base import Presented, SurrogateKey, WarehouseDialect
+from etl_craft.dialects.warehouse.base import (
+    Presented,
+    ReplaceStrategy,
+    SurrogateKey,
+    WarehouseDialect,
+)
+from etl_craft.dialects.warehouse.replacement import replacement_ddl
 
 if TYPE_CHECKING:
     from etl_craft.config import ConnectionProfile
@@ -22,6 +28,8 @@ class TrinoIcebergWarehouse(WarehouseDialect):
     """Trino, Iceberg catalog: no temporary tables, no alias on UPDATE or DELETE targets."""
 
     spec = warehouse_by_key("trino_iceberg")
+    replace_strategy: ReplaceStrategy = "create_or_replace"
+    overwrite_uses_ctas = True
     hash_metadata_columns = (
         "column_name, data_type, NULL AS numeric_precision, NULL AS numeric_scale"
     )
@@ -98,3 +106,24 @@ class TrinoIcebergWarehouse(WarehouseDialect):
             cursor.execute("SET TIME ZONE 'UTC'")
         finally:
             cursor.close()
+
+    def replacement_ddl(
+        self,
+        conn: Connection,
+        target: str,
+        select_sql: str,
+        params: Mapping[str, str],
+        *,
+        existing: bool,
+    ) -> str:
+        """Preserve the existing table's declared properties in one CTAS replacement."""
+        if existing:
+            if params.get("EXTERNAL_LOCATION"):
+                raise HandlerError(
+                    f"{target}: replacement cannot change EXTERNAL_LOCATION; use OVERWRITE_TABLE"
+                )
+            ddl = str(conn.execute(text(f"SHOW CREATE TABLE {target}")).scalar_one())
+            return replacement_ddl(ddl, target, select_sql, "trino")
+        location = (params.get("EXTERNAL_LOCATION") or "").strip()
+        clause = f" WITH (location = '{location}')" if location else ""
+        return f"CREATE OR REPLACE TABLE {target}{clause} AS {select_sql}"
