@@ -53,6 +53,7 @@ def _commands() -> tuple[Command, ...]:
         run,
         setup,
         steps,
+        upgrade_targets,
         validate,
     )
 
@@ -62,6 +63,7 @@ def _commands() -> tuple[Command, ...]:
         cancel.COMMAND,
         reconcile.COMMAND,
         rehash.COMMAND,
+        upgrade_targets.COMMAND,
         pause.COMMAND,
         resume.COMMAND,
         list_pipelines.COMMAND,

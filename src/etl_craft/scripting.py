@@ -10,14 +10,18 @@ A task with ``HANDLER = 'PYTHON'`` names a script under the project's ``ingestio
         since = task.offset.value if task.offset else 0
         rows = read_source_after(since)            # the script's own code
         with task.warehouse() as engine, engine.begin() as conn:
-            written = write(conn, rows, pipeline_run_id=task.pipeline_run_id)
+            written = write(
+                conn, rows, pipeline_id=task.pipeline_id,
+                pipeline_run_id=task.pipeline_run_id, task_run_id=task.task_run_id,
+            )
         return ScriptResult(
             row_count=written,
             offset=Offset.number(max(r.id for r in rows)) if rows else None,
         )
 
 The script reads its source from where the last successful run left off (``task.offset``) and
-writes its table, stamping each row with ``task.pipeline_run_id``. It reports the rows it wrote,
+writes its table, stamping each row with ``task.pipeline_id``, ``task.pipeline_run_id`` and
+``task.task_run_id``. It reports the rows it wrote,
 which the engine records as the task's source, target and insert counts, and, when it moved on,
 the new offset, which the engine stores for the next run. A script that needs neither the offset
 nor ``INPUT_PARAMS`` may define ``run()`` without a parameter. Everything it prints or logs goes
@@ -153,6 +157,8 @@ class ScriptTask:
     """What a script is given to run.
 
     ``offset`` is where the last successful run left off, ``None`` on the first run.
+    ``pipeline_id`` identifies the pipeline definition, ``pipeline_run_id`` its execution,
+    and ``task_run_id`` this task's execution, shared by its retries.
     ``input_params`` is the task's ``INPUT_PARAMS``, a JSON object, as a dictionary. ``force`` is
     true when the task was run with ``--force``. ``run_date`` is the date the run runs as of: the
     day it started, or the date a backfill run is for. In a backfill (``backfill``), ``offset``
@@ -163,6 +169,8 @@ class ScriptTask:
     pipeline_code: str
     task_code: str
     pipeline_run_id: int
+    pipeline_id: int
+    task_run_id: int
     refresh_type: str
     offset: Offset | None
     input_params: Mapping[str, Any]

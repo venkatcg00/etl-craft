@@ -31,6 +31,8 @@ if TYPE_CHECKING:
 SurrogateKey = Literal["identity", "sequence", "computed"]
 
 AUDIT_COLUMN_TYPES: dict[str, str] = {
+    "TASK_RUN_ID": "BIGINT",
+    "PIPELINE_ID": "BIGINT",
     "HASH_KEY": "VARCHAR(32)",
     "CREATE_DATE": "TIMESTAMP WITH TIME ZONE",
     "UPDATE_DATE": "TIMESTAMP WITH TIME ZONE",
@@ -371,6 +373,10 @@ class WarehouseDialect:
     def evolution_column_type(self, data_type: str) -> str:
         """Return the full stage type in the target table format's DDL representation."""
         return data_type
+
+    def is_bigint_type(self, data_type: str) -> bool:
+        """Whether a stored column has the signed BIGINT type used for task-run ids."""
+        return self.same_column_type(data_type, "BIGINT")
 
     def audit_column_type(self, column: str) -> str:
         """Return the DDL type of an engine-managed audit column."""

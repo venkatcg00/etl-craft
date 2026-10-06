@@ -307,7 +307,15 @@ class _RuleRunner:
             statement = statement.bindparams(bindparam("keys", expanding=True))
         try:
             with self.warehouse.connect() as conn:
-                result = conn.execute(statement, params)
+                result = conn.execute(
+                    statement,
+                    {
+                        "pipeline_id": self.context.pipeline_id,
+                        "pipeline_run_id": self.context.pipeline_run_id,
+                        "task_run_id": self.context.task_run_id,
+                        **params,
+                    },
+                )
                 if keys:
                     return list(result.keys())
                 return [tuple(row) for row in result]

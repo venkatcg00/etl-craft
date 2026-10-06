@@ -42,16 +42,22 @@ def run(task: ScriptTask) -> ScriptResult:
                 f"CREATE TABLE IF NOT EXISTS {table} (interaction_id BIGINT, "
                 "agent_code VARCHAR(100), support_area VARCHAR(100), contact_date VARCHAR(100), "
                 "status VARCHAR(100), duration_seconds VARCHAR(100), rating VARCHAR(100), "
-                "pipeline_run_id BIGINT)"
+                "pipeline_run_id BIGINT, pipeline_id BIGINT, task_run_id BIGINT)"
             )
         )
         for row in rows:
             conn.execute(
                 text(
                     f"INSERT INTO {table} VALUES (:interaction_id, :agent_code, :support_area, "
-                    ":contact_date, :status, :duration_seconds, :rating, :run)"
+                    ":contact_date, :status, :duration_seconds, :rating, "
+                    ":pipeline_run_id, :pipeline_id, :task_run_id)"
                 ),
-                {**row, "run": task.pipeline_run_id},
+                {
+                    **row,
+                    "pipeline_run_id": task.pipeline_run_id,
+                    "pipeline_id": task.pipeline_id,
+                    "task_run_id": task.task_run_id,
+                },
             )
     task.logger.info("landed Client Alpha interactions %d to %d", last + 1, last + count)
     return ScriptResult(row_count=len(rows), offset=Offset.number(last + count))

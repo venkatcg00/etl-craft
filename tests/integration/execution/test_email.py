@@ -88,11 +88,12 @@ def test_an_alert_reports_the_run_with_a_digest(mailpit, pipeline):
         config,
         ids,
         EMAIL_TO="ops@example.com|lead@example.com",
-        EMAIL_SUBJECT=f"{tag} $$pipeline_code run $$pipeline_id: $$status",
+        EMAIL_SUBJECT=f"{tag} $$pipeline_code pipeline $$pipeline_id "
+        "run $$pipeline_run_id task $$task_run_id: $$status",
         EMAIL_BODY="Failures: $$error_message",
         EMAIL_PIPELINES="P|NOPE",
     )
-    subject = f"{tag} P run {ids['run']}: FAILED"
+    subject = f"{tag} P pipeline {ids['P']} run {ids['run']} task {ids['alert_run']}: FAILED"
     assert result.variables["EMAIL_SUBJECT"] == subject
     message = read(subject)
     assert [to["Address"] for to in message["To"]] == ["ops@example.com", "lead@example.com"]

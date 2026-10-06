@@ -50,9 +50,11 @@ from etl_craft.handlers.sql.session import Session
 from etl_craft.handlers.sql.spec import SqlTask
 from etl_craft.handlers.sql.tables import (
     AUDIT_COLUMNS,
+    IDENTITY_COLUMNS,
     add_hash_key,
     add_row_id,
     build_stage,
+    check_identity_types,
     check_or_evolve,
     check_target_audit,
     create_target_shape,
@@ -85,6 +87,8 @@ class ActionContext:
         """The values the audit columns are stamped with."""
         return {
             "pipeline_run_id": self.context.pipeline_run_id,
+            "pipeline_id": self.context.pipeline_id,
+            "task_run_id": self.context.task_run_id,
             "now": self.now,
             "updated_by": self.user,
         }
@@ -103,6 +107,8 @@ def create_table(session: Session, action: ActionContext) -> HandlerResult:
     row_id = ", CAST(ROW_NUMBER() OVER (ORDER BY NULL) AS BIGINT) AS ROW_ID" if computed else ""
     select_sql = (
         f"SELECT s.*, CAST({int(action.context.pipeline_run_id)} AS BIGINT) AS PIPELINE_RUN_ID"
+        f", CAST({int(action.context.pipeline_id)} AS BIGINT) AS PIPELINE_ID"
+        f", CAST({int(action.context.task_run_id)} AS BIGINT) AS TASK_RUN_ID"
         f"{row_id} FROM {stage} s"
     )
     if session.dialect.identity_in_create:
@@ -110,7 +116,8 @@ def create_table(session: Session, action: ActionContext) -> HandlerResult:
         types = session.column_types(stage)
         names = [name for name, _ in session.columns(stage)]
         columns = ", ".join(
-            [f"{name} {types[name.lower()]}" for name in names] + ["PIPELINE_RUN_ID BIGINT"]
+            [f"{name} {types[name.lower()]}" for name in names]
+            + ["PIPELINE_RUN_ID BIGINT", "PIPELINE_ID BIGINT", "TASK_RUN_ID BIGINT"]
         )
         create_ddl, publish_ddl = session.dialect.identity_replacement_ddl(
             session.conn,
@@ -122,7 +129,8 @@ def create_table(session: Session, action: ActionContext) -> HandlerResult:
         )
         session.run(create_ddl, step="create the identity replacement")
         session.run(
-            f"INSERT INTO {candidate} ({', '.join(names)}, PIPELINE_RUN_ID) {select_sql}",
+            f"INSERT INTO {candidate} "
+            f"({', '.join(names)}, PIPELINE_RUN_ID, PIPELINE_ID, TASK_RUN_ID) {select_sql}",
             step="populate the identity replacement",
         )
         fault_point("sql.replace.before_publish")
@@ -241,14 +249,21 @@ def overwrite_table(session: Session, action: ActionContext) -> HandlerResult:
     computed = not session.row_id_generated()
     row_id_columns = ", ROW_ID" if computed else ""
     row_id_values = ", CAST(ROW_NUMBER() OVER (ORDER BY NULL) AS BIGINT)" if computed else ""
-    select_sql = f"SELECT {columns}, :pipeline_run_id, :now{row_id_values} FROM {stage}"
-    written_columns = f"{columns}, PIPELINE_RUN_ID, UPDATE_DATE{row_id_columns}"
+    select_sql = (
+        f"SELECT {columns}, :pipeline_run_id, :pipeline_id, :task_run_id, :now{row_id_values} "
+        f"FROM {stage}"
+    )
+    written_columns = (
+        f"{columns}, PIPELINE_RUN_ID, PIPELINE_ID, TASK_RUN_ID, UPDATE_DATE{row_id_columns}"
+    )
     if strategy == "create_or_replace":
         if session.dialect.overwrite_uses_ctas:
             names = [name for name, _ in session.target_columns()]
             types = session.column_types(session.target)
             managed = {
                 "pipeline_run_id": "CAST(:pipeline_run_id AS BIGINT) AS PIPELINE_RUN_ID",
+                "task_run_id": "CAST(:task_run_id AS BIGINT) AS TASK_RUN_ID",
+                "pipeline_id": "CAST(:pipeline_id AS BIGINT) AS PIPELINE_ID",
                 "update_date": f"CAST(:now AS {types['update_date']}) AS UPDATE_DATE",
                 "row_id": "CAST(ROW_NUMBER() OVER (ORDER BY NULL) AS BIGINT) AS ROW_ID",
             }
@@ -288,22 +303,49 @@ def overwrite_table(session: Session, action: ActionContext) -> HandlerResult:
 
 
 def append_table(session: Session, action: ActionContext) -> HandlerResult:
-    """Insert the SELECT's rows, stamped with the run and CREATE_DATE, without shape checks.
+    """Replace this task run's appended batch, retaining rows from other loads.
 
-    Columns are matched by name; a column the target lacks fails the insert, with the database's
-    own message.
+    TASK_RUN_ID makes retries converge after an insert committed without its task outcome. Legacy
+    targets without it append normally and warn that retries can duplicate rows.
     """
     stage = build_stage(session, action.select_sql)
     source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
-    require_target(session)
+    target = require_target(session)
+    retry_safe = any(name.lower() == "task_run_id" for name, _ in target)
+    if retry_safe:
+        present = {name.lower() for name, _ in target}
+        check_identity_types(session, tuple(c for c in IDENTITY_COLUMNS if c.lower() in present))
+        session.run(
+            f"DELETE FROM {session.target} WHERE TASK_RUN_ID = :task_run_id",
+            {"task_run_id": action.context.task_run_id},
+            step="clear this task run's previous append",
+        )
+        fault_point("sql.append.after_delete")
+    else:
+        logger.warning(
+            "%s lacks TASK_RUN_ID; retrying this append can duplicate rows. "
+            "Run etl-craft upgrade-targets --action APPEND_TABLE --target %s",
+            session.target,
+            session.target_object,
+        )
     columns = ", ".join(name for name, _ in session.columns(stage))
     row_id_columns, row_id_values = session.row_id_insert_parts()
+    pipeline_column = (
+        ", PIPELINE_ID" if any(name.lower() == "pipeline_id" for name, _ in target) else ""
+    )
+    pipeline_value = ", :pipeline_id" if pipeline_column else ""
+    task_run_column = ", TASK_RUN_ID" if retry_safe else ""
+    task_run_value = ", :task_run_id" if retry_safe else ""
     session.run(
-        f"INSERT INTO {session.target} ({columns}, PIPELINE_RUN_ID, CREATE_DATE{row_id_columns}) "
-        f"SELECT {columns}, :pipeline_run_id, :now{row_id_values} FROM {stage}",
+        f"INSERT INTO {session.target} "
+        f"({columns}, PIPELINE_RUN_ID, CREATE_DATE"
+        f"{pipeline_column}{task_run_column}{row_id_columns}) "
+        f"SELECT {columns}, :pipeline_run_id, :now{pipeline_value}{task_run_value}{row_id_values} "
+        f"FROM {stage}",
         action.stamp,
         step="append the SELECT's rows",
     )
+    fault_point("sql.append.after_insert")
     session.drop(stage)
     target_count = session.count(f"SELECT COUNT(*) FROM {session.target}", step="target rows")
     return HandlerResult(source_count=source, target_count=target_count, insert_count=source)
@@ -389,6 +431,8 @@ def scd1_merge(session: Session, action: ActionContext) -> HandlerResult:
         assignments[column] = value
     assignments.update(
         PIPELINE_RUN_ID=":pipeline_run_id",
+        TASK_RUN_ID=":task_run_id",
+        PIPELINE_ID=":pipeline_id",
         UPDATE_DATE=":now",
         UPDATED_BY=":updated_by",
         DELETE_FLAG="'N'",
@@ -406,9 +450,11 @@ def scd1_merge(session: Session, action: ActionContext) -> HandlerResult:
     columns = ", ".join(stage_columns)
     row_id_columns, row_id_values = session.row_id_insert_parts()
     session.run(
-        f"INSERT INTO {target} ({columns}, PIPELINE_RUN_ID, CREATE_DATE, CREATED_BY, "
+        f"INSERT INTO {target} ({columns}, PIPELINE_RUN_ID, PIPELINE_ID, TASK_RUN_ID, "
+        f"CREATE_DATE, CREATED_BY, "
         f"UPDATE_DATE, UPDATED_BY, DELETE_FLAG{row_id_columns}) "
-        f"SELECT {columns}, :pipeline_run_id, :now, :updated_by, :now, :updated_by, "
+        f"SELECT {columns}, :pipeline_run_id, :pipeline_id, :task_run_id, "
+        f":now, :updated_by, :now, :updated_by, "
         f"'N'{row_id_values} FROM {stage} s WHERE {new_keys}",
         action.stamp,
         step="insert new rows",
@@ -450,7 +496,14 @@ def scd2_merge(session: Session, action: ActionContext) -> HandlerResult:
             target,
             changed,
             task.merge_key,
-            {"ACTIVE_FLAG": "'N'", "UPDATE_DATE": ":now", "UPDATED_BY": ":updated_by"},
+            {
+                "ACTIVE_FLAG": "'N'",
+                "UPDATE_DATE": ":now",
+                "UPDATED_BY": ":updated_by",
+                "PIPELINE_RUN_ID": ":pipeline_run_id",
+                "TASK_RUN_ID": ":task_run_id",
+                "PIPELINE_ID": ":pipeline_id",
+            },
             "t.ACTIVE_FLAG = 'Y'",
         ),
         action.stamp,
@@ -459,9 +512,11 @@ def scd2_merge(session: Session, action: ActionContext) -> HandlerResult:
 
     columns = ", ".join(stage_columns)
     insert_head = (
-        f"INSERT INTO {target} ({columns}, PIPELINE_RUN_ID, CREATE_DATE, CREATED_BY, "
+        f"INSERT INTO {target} ({columns}, PIPELINE_RUN_ID, PIPELINE_ID, TASK_RUN_ID, "
+        f"CREATE_DATE, CREATED_BY, "
         "UPDATE_DATE, UPDATED_BY, DELETE_FLAG, ACTIVE_FLAG{row_id_columns}) "
-        f"SELECT {columns}, :pipeline_run_id, :now, :updated_by, :now, :updated_by, 'N', "
+        f"SELECT {columns}, :pipeline_run_id, :pipeline_id, :task_run_id, "
+        f":now, :updated_by, :now, :updated_by, 'N', "
         "'Y'{row_id_values} "
     )
     row_id_columns, row_id_values = session.row_id_insert_parts()
@@ -538,12 +593,24 @@ def delete_rows(session: Session, action: ActionContext) -> HandlerResult:
     refuse_null_keys(session, stage, task.merge_key)
     if not task.hard_delete:
         have = {name.lower() for name, _ in session.target_columns()}
-        missing = [c for c in ("DELETE_FLAG", "UPDATE_DATE", "UPDATED_BY") if c.lower() not in have]
+        missing = [
+            c
+            for c in (
+                "PIPELINE_RUN_ID",
+                "PIPELINE_ID",
+                "TASK_RUN_ID",
+                "DELETE_FLAG",
+                "UPDATE_DATE",
+                "UPDATED_BY",
+            )
+            if c.lower() not in have
+        ]
         if missing:
             raise HandlerError(
                 f"{target} lacks {', '.join(missing)}, which a soft DELETE_ROWS sets; run a "
                 "SETUP_TABLE task for it, add the columns, or set HARD_DELETE=true"
             )
+        check_identity_types(session)
     key_match = " AND ".join(f"t.{k} = s.{k}" for k in task.merge_key)
     # A soft delete leaves rows already flagged as they were, with their first UPDATE_DATE.
     live = "" if task.hard_delete else " AND (t.DELETE_FLAG IS NULL OR t.DELETE_FLAG <> 'Y')"
@@ -562,6 +629,8 @@ def delete_rows(session: Session, action: ActionContext) -> HandlerResult:
     else:
         session.run(
             f"UPDATE {mutation} SET DELETE_FLAG = 'Y', UPDATE_DATE = :now, "
+            f"PIPELINE_RUN_ID = :pipeline_run_id, PIPELINE_ID = :pipeline_id, "
+            f"TASK_RUN_ID = :task_run_id, "
             f"UPDATED_BY = :updated_by WHERE EXISTS (SELECT 1 FROM {stage} s WHERE {match}) "
             f"AND ({q}.DELETE_FLAG IS NULL OR {q}.DELETE_FLAG <> 'Y')",
             action.stamp,

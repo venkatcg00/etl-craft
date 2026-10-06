@@ -6,7 +6,22 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Execution identity names have one meaning across SQL, ingestion, business rules and email:
+  `pipeline_id` is the definition, `pipeline_run_id` the pipeline execution, and `task_run_id` the
+  task execution. SQL uses matching substitution switches. Migrate SQL and email templates that
+  used `$$pipeline_id` for a run to `$$pipeline_run_id`; rename `PIPELINE_ID_SUBSTITUTION` to
+  `PIPELINE_RUN_ID_SUBSTITUTION` for those SQL tasks. Rename `$$pipeline_id_filter` and
+  `PIPELINE_ID_FILTER` to `$$pipeline_run_id_filter` and `PIPELINE_RUN_ID_FILTER`.
+
 ### Added
+
+- Consistent `PIPELINE_ID`, `PIPELINE_RUN_ID` and `TASK_RUN_ID` audit columns on every SQL target,
+  with those identities also exposed to ingestion scripts and business-rule SQL. Append retries
+  replace only their task run's batch under the target lock; legacy append targets warn on every
+  write. `etl-craft upgrade-targets [--action APPEND_TABLE] [--target S.T] [--dry-run]` adds missing
+  nullable identity columns to configured SQL and ingestion targets without changing history.
 
 - SQL validation refuses active writers that resolve different table formats for the same
   qualified target, including writers in other pipelines. Creation, setup, overwrite and merges

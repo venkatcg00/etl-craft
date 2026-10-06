@@ -21,7 +21,8 @@ stakeholders on ``SUCCESS``) agree. The task's parameters:
 - ``EMAIL_PIPELINES``: ``ALL``, or pipeline codes separated by ``|``, adds a table of each
   one's latest run with a section per pipeline listing its tasks.
 
-Subjects and bodies may use ``$$status`` (the outcome), ``$$pipeline_id`` (the run's id),
+Subjects and bodies may use ``$$status`` (the outcome), ``$$pipeline_id`` (the pipeline definition),
+``$$pipeline_run_id`` (the pipeline execution) and ``$$task_run_id`` (this task execution),
 ``$$pipeline_code``, ``$$task_code`` and ``$$error_message`` (the error messages of the tasks
 this one watches through a ``FAILURE`` dependency). Any other ``$$`` token fails the task.
 """
@@ -68,7 +69,15 @@ STATUS_COLORS = {
     "UNKNOWN": "#6e7781",
 }
 
-TOKENS = ("status", "pipeline_id", "pipeline_code", "task_code", "error_message")
+TOKENS = (
+    "status",
+    "pipeline_id",
+    "pipeline_run_id",
+    "task_run_id",
+    "pipeline_code",
+    "task_code",
+    "error_message",
+)
 PARAMETERS = frozenset(
     {
         "EMAIL_TO",
@@ -112,7 +121,9 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
             )
         values = {
             "status": outcome,
-            "pipeline_id": str(context.pipeline_run_id),
+            "pipeline_id": str(context.pipeline_id),
+            "pipeline_run_id": str(context.pipeline_run_id),
+            "task_run_id": str(context.task_run_id),
             "pipeline_code": context.pipeline_code,
             "task_code": context.task_code,
             "error_message": "; ".join(m.error_message for m in watched if m.error_message),

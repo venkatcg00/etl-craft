@@ -45,11 +45,13 @@ def run(task):
     ids = list(range(start + 1, start + count + 1))
     with task.warehouse() as engine, engine.begin() as conn:
         conn.exec_driver_sql(
-            "CREATE TABLE IF NOT EXISTS main.events (id INTEGER, region VARCHAR, run BIGINT)"
+            "CREATE TABLE IF NOT EXISTS main.events (id INTEGER, region VARCHAR, "
+            "pipeline_run_id BIGINT, pipeline_id BIGINT, task_run_id BIGINT)"
         )
         for i in ids:
             conn.exec_driver_sql(
-                f"INSERT INTO main.events VALUES ({i}, '{region}', {task.pipeline_run_id})"
+                f"INSERT INTO main.events VALUES ({i}, '{region}', {task.pipeline_run_id}, "
+                f"{task.pipeline_id}, {task.task_run_id})"
             )
     return ScriptResult(
         row_count=len(ids),
@@ -149,9 +151,15 @@ def test_a_script_runs_in_the_task_process_and_resumes_from_its_offset(project):
     try:
         with warehouse.connect() as conn:
             ids = sorted(conn.exec_driver_sql("SELECT id FROM main.events").scalars())
+            identities = conn.exec_driver_sql(
+                "SELECT DISTINCT pipeline_id, pipeline_run_id, task_run_id FROM main.events"
+            ).fetchall()
     finally:
         warehouse.dispose()
     assert ids == [1, 2, 3, 4]
+    assert {r[0] for r in identities} == {pipeline}
+    assert {r[2] for r in identities} == {first.task_run_id, second.task_run_id}
+    assert len({r[1] for r in identities}) == 2
 
 
 def run_in_process(project, script, **params):

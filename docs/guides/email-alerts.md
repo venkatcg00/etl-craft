@@ -62,7 +62,9 @@ Subjects and bodies may use these tokens:
 | Token | Becomes |
 |---|---|
 | `$$status` | the outcome |
-| `$$pipeline_id` | the run's `pipeline_run_id` |
+| `$$pipeline_id` | the pipeline definition's `pipeline_id` |
+| `$$pipeline_run_id` | the run's `pipeline_run_id` |
+| `$$task_run_id` | the alert task execution's `task_run_id` |
 | `$$pipeline_code`, `$$task_code` | the pipeline's and the alert task's codes |
 | `$$error_message` | the error messages of the tasks this one watches through `FAILURE` dependencies |
 

@@ -194,15 +194,15 @@ def test_is_only_comments():
     assert not text.is_only_comments("/* a */ SELECT 1")
 
 
-# $$pipeline_id and $$pipeline_id_filter
+# $$pipeline_run_id and $$pipeline_run_id_filter
 
 
 def substitute(sql, *, substitution=False, filter_enabled=False, **kwargs):
     kwargs.setdefault("refresh_type", "INCREMENTAL")
-    return text.substitute_pipeline_id(
+    return text.substitute_task_tokens(
         sql,
         pipeline_run_id=42,
-        substitution=substitution,
+        pipeline_run_id_substitution=substitution,
         filter_enabled=filter_enabled,
         **kwargs,
     )
@@ -219,15 +219,15 @@ def substitute(sql, *, substitution=False, filter_enabled=False, **kwargs):
     ],
 )
 def test_the_filter_token_follows_the_refresh_type(refresh_type, force_all, expected):
-    sql = "SELECT 1 FROM t WHERE $$pipeline_id_filter"
+    sql = "SELECT 1 FROM t WHERE $$pipeline_run_id_filter"
     result = substitute(sql, filter_enabled=True, refresh_type=refresh_type, force_all=force_all)
     assert result == f"SELECT 1 FROM t WHERE {expected}"
 
 
 def test_the_value_token_is_the_run_id_and_every_occurrence_is_replaced():
     sql = (
-        "SELECT $$pipeline_id AS run FROM a WHERE $$pipeline_id_filter "
-        "UNION ALL SELECT $$pipeline_id FROM b WHERE $$pipeline_id_filter"
+        "SELECT $$pipeline_run_id AS run FROM a WHERE $$pipeline_run_id_filter "
+        "UNION ALL SELECT $$pipeline_run_id FROM b WHERE $$pipeline_run_id_filter"
     )
     result = substitute(sql, substitution=True, filter_enabled=True, refresh_type="FULL")
     assert result == ("SELECT 42 AS run FROM a WHERE 1=1 UNION ALL SELECT 42 FROM b WHERE 1=1")
@@ -242,20 +242,24 @@ def test_sql_without_tokens_or_switches_is_untouched():
     ("sql", "switches", "message"),
     [
         (
-            "SELECT 1 WHERE $$pipeline_id_filter",
+            "SELECT 1 WHERE $$pipeline_run_id_filter",
             {},
-            "uses $$pipeline_id_filter, but PIPELINE_ID_FILTER is not true",
+            "uses $$pipeline_run_id_filter, but PIPELINE_RUN_ID_FILTER is not true",
         ),
-        ("SELECT $$pipeline_id", {}, "uses $$pipeline_id, but PIPELINE_ID_SUBSTITUTION is not"),
+        (
+            "SELECT $$pipeline_run_id",
+            {},
+            "uses $$pipeline_run_id, but PIPELINE_RUN_ID_SUBSTITUTION is not",
+        ),
         (
             "SELECT 1",
             {"filter_enabled": True},
-            "PIPELINE_ID_FILTER is true, but SOURCE_SQL has no $$pipeline_id_filter",
+            "PIPELINE_RUN_ID_FILTER is true, but SOURCE_SQL has no $$pipeline_run_id_filter",
         ),
         (
             "SELECT 1",
             {"substitution": True},
-            "PIPELINE_ID_SUBSTITUTION is true, but SOURCE_SQL has no $$pipeline_id to",
+            "PIPELINE_RUN_ID_SUBSTITUTION is true, but SOURCE_SQL has no $$pipeline_run_id to",
         ),
         ("SELECT $$pipeline WHERE $$run_day", {}, "unknown token(s) $$pipeline, $$run_day"),
     ],
@@ -429,51 +433,56 @@ def test_suggest_limits_the_list():
 
 def test_run_date_becomes_a_date_literal_when_its_switch_is_on():
     sql = "SELECT * FROM sales.orders WHERE order_date = $$run_date"
-    replaced = text.substitute_pipeline_id(
+    replaced = text.substitute_task_tokens(
         sql,
         pipeline_run_id=7,
         refresh_type="FULL",
-        substitution=False,
+        pipeline_run_id_substitution=False,
         filter_enabled=False,
         run_date=date(2026, 9, 1),
         run_date_substitution=True,
     )
     assert replaced == "SELECT * FROM sales.orders WHERE order_date = DATE '2026-09-01'"
     with pytest.raises(HandlerError, match="uses \\$\\$run_date, but RUN_DATE_SUBSTITUTION"):
-        text.substitute_pipeline_id(
-            sql, pipeline_run_id=7, refresh_type="FULL", substitution=False, filter_enabled=False
+        text.substitute_task_tokens(
+            sql,
+            pipeline_run_id=7,
+            refresh_type="FULL",
+            pipeline_run_id_substitution=False,
+            filter_enabled=False,
         )
 
 
 @pytest.mark.parametrize(
     "protected",
     [
-        "'$$pipeline_id $$run_date $$unknown'",
-        "'a''$$pipeline_id'",
-        '"$$pipeline_id"',
-        "`$$pipeline_id`",
-        "-- $$pipeline_id $$unknown\n",
-        "/* $$pipeline_id $$unknown */",
-        "$body$ $$pipeline_id $$unknown $body$",
-        "$$pipeline_id$$",
+        "'$$pipeline_run_id $$run_date $$unknown'",
+        "'a''$$pipeline_run_id'",
+        '"$$pipeline_run_id"',
+        "`$$pipeline_run_id`",
+        "-- $$pipeline_run_id $$unknown\n",
+        "/* $$pipeline_run_id $$unknown */",
+        "$body$ $$pipeline_run_id $$unknown $body$",
+        "$$pipeline_run_id$$",
     ],
 )
 def test_substitution_leaves_quoted_text_and_comments_unchanged(protected):
-    sql = f"SELECT {protected} AS note, $$pipeline_id AS id"
+    sql = f"SELECT {protected} AS note, $$pipeline_run_id AS id"
     assert substitute(sql, substitution=True) == f"SELECT {protected} AS note, 42 AS id"
     assert substitute(f"SELECT {protected}") == f"SELECT {protected}"
 
 
 def test_comment_or_literal_tokens_do_not_satisfy_an_enabled_switch():
-    with pytest.raises(HandlerError, match=r"has no.*pipeline_id to replace"):
-        substitute("SELECT '$$pipeline_id' -- $$pipeline_id\n", substitution=True)
+    with pytest.raises(HandlerError, match=r"has no.*pipeline_run_id to replace"):
+        substitute("SELECT '$$pipeline_run_id' -- $$pipeline_run_id\n", substitution=True)
 
 
 @pytest.mark.parametrize(
-    "protected", ["'$$'", "$$$$", "E'a\\' $$pipeline_id'", "/* outer /* inner */ $$pipeline_id */"]
+    "protected",
+    ["'$$'", "$$$$", "E'a\\' $$pipeline_run_id'", "/* outer /* inner */ $$pipeline_run_id */"],
 )
 def test_bare_tokens_next_to_protected_dollar_text(protected):
-    sql = f"SELECT $$pipeline_id AS id, {protected} AS note"
+    sql = f"SELECT $$pipeline_run_id AS id, {protected} AS note"
     assert substitute(sql, substitution=True) == f"SELECT 42 AS id, {protected} AS note"
 
 
@@ -482,10 +491,14 @@ def test_nested_comment_only_sql_is_not_a_statement():
 
 
 def test_untagged_dollar_literal_with_reserved_token_and_expression():
-    sql = "SELECT $$pipeline_id + 1$$, $$pipeline_id AS run"
+    sql = "SELECT $$pipeline_run_id + 1$$, $$pipeline_run_id AS run"
     assert (
-        text.substitute_pipeline_id(
-            sql, pipeline_run_id=42, refresh_type="FULL", substitution=True, filter_enabled=False
+        text.substitute_task_tokens(
+            sql,
+            pipeline_run_id=42,
+            refresh_type="FULL",
+            pipeline_run_id_substitution=True,
+            filter_enabled=False,
         )
-        == "SELECT $$pipeline_id + 1$$, 42 AS run"
+        == "SELECT $$pipeline_run_id + 1$$, 42 AS run"
     )

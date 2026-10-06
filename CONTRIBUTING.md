@@ -99,7 +99,8 @@ Unset the variable for normal operation. Available boundaries are `runner.after_
 `child.after_outcome`, `pipeline.after_insert`, `runner.before_consumption`,
 `pipeline.before_consumption`, `pipeline.after_consumption`, `attempt.after_status`,
 `attempt.before_summary`, `attempt.after_consumption`, and `script.after_offset`. Replacement boundaries are `sql.replace.before_publish`,
-`sql.replace.after_clear` and `sql.replace.after_publish`; atomic single-statement replacement
+`sql.replace.after_clear` and `sql.replace.after_publish`; append boundaries are
+`sql.append.after_delete` and `sql.append.after_insert`. Atomic single-statement replacement
 uses only `before_publish`. Ending fault points run inside the
 transaction: an injected exception or hard exit rolls back status, offsets and consumption. Hard exits can leave audit rows
 running and processes alive: tests must clean up their process trees and use explicit

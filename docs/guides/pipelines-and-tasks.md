@@ -31,7 +31,7 @@ writes five pipelines this way, and runs as written on SQLite and PostgreSQL.
 | `DESCRIPTION` | what the pipeline is for; the [catalog](catalog.md) leads its page with it |
 | `RUN_SCHEDULE` | a cron expression, written into the pipeline's generated DAG |
 | `SLA_IN_HOURS` | how long a run may take; each run is marked `MET` or `BREACHED` (see [Running a pipeline](running-pipelines.md#sla)) |
-| `REFRESH_TYPE` | `FULL` or `INCREMENTAL`; SQL tasks read it through [`$$pipeline_id_filter`](sql-tasks.md) |
+| `REFRESH_TYPE` | `FULL` or `INCREMENTAL`; SQL tasks read it through [`$$pipeline_run_id_filter`](sql-tasks.md) |
 | `PIPELINE_PARAMETERS` | a JSON object of the generated DAG's settings (below) |
 
 `PIPELINE_PARAMETERS` holds the settings of the pipeline's generated DAG, each overriding the

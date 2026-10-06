@@ -26,7 +26,13 @@ def run(task: ScriptTask) -> ScriptResult:
     rows = fetch_orders(region, after_id=since, days=days)  # your own code
     task.logger.info("fetched %d orders for %s", len(rows), region)
     with task.warehouse() as engine, engine.begin() as conn:
-        written = insert_orders(conn, rows, pipeline_run_id=task.pipeline_run_id)
+        written = insert_orders(
+            conn,
+            rows,
+            pipeline_id=task.pipeline_id,
+            pipeline_run_id=task.pipeline_run_id,
+            task_run_id=task.task_run_id,
+        )
     return ScriptResult(
         row_count=written,
         offset=Offset.number(max(r.id for r in rows)) if rows else None,
@@ -39,7 +45,9 @@ def run(task: ScriptTask) -> ScriptResult:
 |---|---|
 | `offset` | where the last successful run left off, an `Offset` with its `value` and `datatype`, or `None` on the first run |
 | `input_params` | `INPUT_PARAMS` as a dictionary, empty when unset |
-| `pipeline_run_id` | the run's id; stamp it on every row you write |
+| `pipeline_id` | the pipeline definition's id; stamp it on every row you write |
+| `pipeline_run_id` | the pipeline execution's id; stamp it on every row you write |
+| `task_run_id` | this task execution's id, shared by its retries; stamp it on every row you write |
 | `refresh_type` | the pipeline's `FULL` or `INCREMENTAL` |
 | `force` | true when the task was run with `--force` |
 | `run_date` | the date the run runs as of: the day it started (UTC), the `--run-date` it was given, or the date of a backfill run |
