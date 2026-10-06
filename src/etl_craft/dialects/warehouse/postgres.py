@@ -79,3 +79,16 @@ class PostgresWarehouse(WarehouseDialect):
         if row[0] == "p":
             raise HandlerError(f"{target}: CTAS cannot preserve partitioning; use OVERWRITE_TABLE")
         return None if row[1] is None else str(row[1])
+
+    def full_column_types(self, conn: Connection, table: str) -> dict[str, str]:
+        """Keep PostgreSQL modifiers, array element types and timestamp precision."""
+        name = ".".join(table.split(".")[-2:])
+        rows = conn.execute(
+            text(
+                "SELECT attname AS column_name, format_type(atttypid, atttypmod) AS data_type "
+                "FROM pg_attribute WHERE attrelid = CAST(:name AS regclass) "
+                "AND attnum > 0 AND NOT attisdropped ORDER BY attnum"
+            ),
+            {"name": name},
+        ).all()
+        return {str(row[0]).lower(): str(row[1]) for row in rows}

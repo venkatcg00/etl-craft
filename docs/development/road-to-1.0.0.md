@@ -81,7 +81,8 @@ item's text, or work done early under another item.
 | S3.G.1 Canonical change hash | Done | #104 | B22, B35 |
 | S3.G.2 Set-based write strategies | Done | #105 | B36 |
 | S3.G.3 Safe table replacement | Done | #106 | B37, W5 |
-| S3.G.4 to S3.H | Not started | | |
+| S3.G.4 ALTER-based schema evolution | Done | #107 | B39, B40 |
+| S3.G.5 to S3.H | Not started | | |
 | 0.4 and later | Not started | | |
 
 ### Handover notes
@@ -90,6 +91,17 @@ What a person picking up the work needs that the code and the item texts do not 
 
 **Choices that differ from the item text.**
 
+- S3.G.4 appends nullable columns with full warehouse types and keeps the target definition.
+  Type comparison is strict when SCHEMA_EVOLUTION is enabled; ordinary writes keep their
+  warehouse conversion behavior. Metadata is read in bulk; full_column_type exposes the
+  individual-column contract. Snowflake DESCRIBE retains timestamp precision as well as string
+  lengths and numeric modifiers. Snowflake Iceberg string comparisons ignore native-stage
+  VARCHAR limits and emits unbounded VARCHAR additions because Iceberg stores unbounded strings. DuckDB Iceberg cannot ALTER-add
+  nested types, so a batch
+  containing them is refused before any additions; use Trino on the same catalog for those
+  columns. DuckDB and Iceberg normalize unsupported string bounds to their stored string type.
+  Partial non-transactional additions remain nullable and a retry completes the current column
+  set. Trino overwrite preserves target column order when publishing its replacement snapshot.
 - S3.G.3 retains original objects for fallback CREATE_TABLE recovery so failed promotion
   preserves their complete definition. Persistent candidates are qualified with the target's
   catalog and schema, even when the connection's default schema differs. Fallback overwrite
@@ -99,8 +111,7 @@ What a person picking up the work needs that the code and the item texts do not 
   CTAS carries warehouse-provided table properties and refuses column metadata it cannot retain.
   DuckDB Iceberg transfers table properties but refuses partitioning, sorting and column metadata
   for CREATE_TABLE. Cleanup after committed non-transactional publication is a warning; native
-  transactional cleanup failures roll back. Non-transactional overwrite refuses the current
-  destructive schema-evolution rebuild pending S3.G.4. Recovery faults do not simulate rollback
+  transactional cleanup failures roll back. Recovery faults do not simulate rollback
   after a single atomic statement; they inject before it or make the statement itself fail.
 - S3.G.2 joins SCD1 updates directly to the deduplicated stage and SCD2 closes to the
   changed-key stage through `WarehouseDialect.update_from_stage`. PostgreSQL/DuckDB/Snowflake
@@ -1330,10 +1341,16 @@ guide, task-parameter reference, cloud acceptance tests.
   `format_type(atttypid, atttypmod)`, DuckDB `information_schema.columns.data_type`, Trino
   `DESCRIBE`, Snowflake `DATA_TYPE` plus `CHARACTER_MAXIMUM_LENGTH`, `NUMERIC_PRECISION`,
   `NUMERIC_SCALE`, Databricks `DESCRIBE TABLE`) and run `ALTER TABLE <target> ADD COLUMN <name> <type>`.
-  A changed type of an existing column is refused with both types named. Remove the drop, CTAS and
+  With SCHEMA_EVOLUTION enabled, a changed type of an existing column is refused with both
+  types named, after applying the table format's stored-type normalization. Preflight every
+  addition before DDL; DuckDB Iceberg nested additions are refused with a capable-catalog-engine
+  remedy because its ALTER implementation cannot add them. Remove the drop, CTAS and
   rename path and `restore_row_id`'s rebuild where no longer needed.
-- *Tests.* Evolve `DECIMAL(12,2)`, `CHAR(3)`, `VARCHAR(20)`, arrays and timestamps on every local
-  warehouse; partitioning, comments and snapshot history survive on Trino Iceberg; a dependent view
+- *Tests.* Evolve `DECIMAL(12,2)`, `CHAR(3)`, `VARCHAR(20)` and timestamps on every local
+  warehouse, with stored string bounds where supported. Add arrays where supported and prove
+  DuckDB Iceberg refuses a batch containing a nested addition before mutation. Verify type-change
+  refusal and retry after partial additions on local and live cloud warehouses. Partitioning,
+  comments and snapshot history survive on Trino Iceberg; a dependent view
   doesn't block PostgreSQL.
 
 **S3.G.5 `ROW_ID` without duplicates under concurrency (B38).** On dialects with

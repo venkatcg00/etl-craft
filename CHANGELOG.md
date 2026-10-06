@@ -8,11 +8,17 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- SQL schema evolution adds nullable columns through `ALTER TABLE`, retaining existing rows,
+  keys, comments, dependencies, storage locations and supported table properties. Complete
+  warehouse types preserve precision, scale and supported lengths and nested types. Opted-in
+  evolution refuses existing-column type changes before DDL; DuckDB Iceberg nested additions
+  are refused with a catalog-engine remedy. Partial non-transactional additions can be retried.
+
 - Safe SQL table replacement: native PostgreSQL and DuckDB roll back failed replacements;
   Snowflake, Databricks and Trino use atomic publication where supported. DuckDB and Snowflake
   Iceberg retain recovery tables and restore failed writes, leaving backups available if
   restoration also fails. Table comments and supported properties survive; unsupported layouts
-  and destructive non-transactional overwrite evolution are refused before publication.
+  are refused before publication.
 
 - Joined SCD1 updates and SCD2 version closing use warehouse-specific set-based statements.
   PostgreSQL indexes and analyzes merge stages; a 100,000-row SCD1 regression checks the

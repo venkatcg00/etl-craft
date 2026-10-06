@@ -180,6 +180,14 @@ class Session:
         ).all()
         return [(str(row[0]), str(row[1])) for row in rows]
 
+    def column_types(self, name: str) -> dict[str, str]:
+        """Read the table's complete types once, with lowercase column keys."""
+        logger.debug("read complete column types of %s", name)
+        try:
+            return self.dialect.full_column_types(self.conn, name)
+        except SQLAlchemyError as error:
+            raise self._failure(f"read complete column types of {name}", error) from error
+
     def hash_types(self, name: str) -> dict[str, str]:
         """Return types and declared decimal scales for hashing table ``name``.
 

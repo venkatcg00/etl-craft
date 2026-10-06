@@ -181,27 +181,13 @@ def test_schema_checks_and_evolution(sql_world):
         w.run("evolve", SOURCE_SQL="SELECT 1 AS id, 7 AS score, 'a' AS name", **params)
     with pytest.raises(HandlerError, match=r"has column\(s\) name that the SELECT no longer"):
         w.run("evolve", SOURCE_SQL="SELECT 1 AS id", **params)
-    if w.kind in {"trino_iceberg", "duckdb_iceberg"}:
-        before = w.rows(f"SELECT * FROM {w.name('wide')}")
-        with pytest.raises(HandlerError, match="add these columns with ALTER TABLE"):
-            w.run(
-                "evolve",
-                SOURCE_SQL="SELECT 2 AS id, 7 AS score, 'b' AS name",
-                SCHEMA_EVOLUTION="true",
-                **params,
-            )
-        assert w.rows(f"SELECT * FROM {w.name('wide')}") == before
-        w.execute(f"ALTER TABLE {w.name('wide')} ADD COLUMN score INTEGER")
-        w.run("evolve", SOURCE_SQL="SELECT 2 AS id, 7 AS score, 'b' AS name", **params)
-        assert w.rows(f"SELECT id, score, name FROM {w.name('wide')}") == [(2, 7, "b")]
-        return
     w.run(
         "evolve",
-        SOURCE_SQL="SELECT 2 AS id, 7 AS score, 'b' AS name",
+        SOURCE_SQL="SELECT 2 AS id, 7 AS score, CAST('b' AS VARCHAR(10)) AS name",
         SCHEMA_EVOLUTION="true",
         **params,
     )
-    assert w.columns("wide") == ["id", "score", "name", "pipeline_run_id", "update_date", "row_id"]
+    assert w.columns("wide") == ["id", "name", "pipeline_run_id", "update_date", "row_id", "score"]
     assert w.rows(f"SELECT id, score, name FROM {w.name('wide')}") == [(2, 7, "b")]
 
 
@@ -423,7 +409,6 @@ def test_a_storage_location_is_used_where_it_applies_and_refused_elsewhere(sql_w
     w.run("located", **params)
     ddl = w.rows(f"SHOW CREATE TABLE {w.name('located')}")[0][0]
     assert f"location = '{location}'" in ddl
-    # Schema evolution rebuilds the table, which would lose its location: refused.
     placed = {"EXTERNAL_LOCATION": f"s3://warehouse/custom/{w.schema}/placed"}
     w.run(
         "setup_placed",
@@ -433,15 +418,17 @@ def test_a_storage_location_is_used_where_it_applies_and_refused_elsewhere(sql_w
         SETUP_FOR="OVERWRITE_TABLE",
         **placed,
     )
-    with pytest.raises(HandlerError, match="add these columns with ALTER TABLE"):
-        w.run(
-            "evolve_placed",
-            SQL_ACTION="OVERWRITE_TABLE",
-            TARGET_OBJECT="placed",
-            SOURCE_SQL="SELECT 1 AS id, 2 AS extra",
-            SCHEMA_EVOLUTION="true",
-            **placed,
-        )
+    w.run(
+        "evolve_placed",
+        SQL_ACTION="OVERWRITE_TABLE",
+        TARGET_OBJECT="placed",
+        SOURCE_SQL="SELECT 1 AS id, 2 AS extra",
+        SCHEMA_EVOLUTION="true",
+        **placed,
+    )
+    assert w.rows(f"SELECT id, extra FROM {w.name('placed')}") == [(1, 2)]
+    ddl = w.rows(f"SHOW CREATE TABLE {w.name('placed')}")[0][0]
+    assert f"location = '{placed['EXTERNAL_LOCATION']}'" in ddl
 
 
 def test_run_date_reads_the_rows_of_the_date_the_run_runs_as_of(sql_world):

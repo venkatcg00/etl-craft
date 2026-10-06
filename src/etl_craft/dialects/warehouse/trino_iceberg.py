@@ -127,3 +127,8 @@ class TrinoIcebergWarehouse(WarehouseDialect):
         location = (params.get("EXTERNAL_LOCATION") or "").strip()
         clause = f" WITH (location = '{location}')" if location else ""
         return f"CREATE OR REPLACE TABLE {target}{clause} AS {select_sql}"
+
+    def full_column_types(self, conn: Connection, table: str) -> dict[str, str]:
+        """DESCRIBE retains precision and nested types exposed by the Iceberg connector."""
+        rows = conn.execute(text(f"DESCRIBE {table}")).all()
+        return {str(row[0]).lower(): str(row[1]) for row in rows}

@@ -655,3 +655,18 @@ def test_postgres_prepares_composite_merge_keys_and_stage_statistics():
         "ANALYZE stage",
     )
     assert for_key("duckdb").prepare_update_stage("stage", ("id",)) == ()
+
+
+@pytest.mark.parametrize(
+    ("source", "target", "same"),
+    [
+        ("VARCHAR(20)", "VARCHAR(134217728)", True),
+        ("ARRAY(VARCHAR(20))", "ARRAY(VARCHAR(134217728))", True),
+        ("NUMBER(12,2)", "NUMBER(12,3)", False),
+        ("TIMESTAMP_NTZ(6)", "TIMESTAMP_NTZ(9)", False),
+        ("ARRAY(VARCHAR(20))", "ARRAY(NUMBER(12,2))", False),
+    ],
+)
+def test_snowflake_iceberg_type_comparison_ignores_only_string_bounds(source, target, same):
+    assert for_key("snowflake_iceberg").same_column_type(source, target) == same
+    assert for_key("snowflake").same_column_type(source, target) == (source == target)

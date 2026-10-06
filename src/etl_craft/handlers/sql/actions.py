@@ -211,14 +211,6 @@ def overwrite_table(session: Session, action: ActionContext) -> HandlerResult:
     stage = build_stage(session, action.select_sql)
     source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
     strategy = session.dialect.replace_strategy
-    if strategy != "transactional" and action.task.schema_evolution:
-        target_names = {name.lower() for name, _ in require_target(session)}
-        added = [name for name, _ in session.columns(stage) if name.lower() not in target_names]
-        if added:
-            raise HandlerError(
-                f"{session.target}: safe overwrite cannot rebuild its definition to add "
-                f"{', '.join(added)}; add these columns with ALTER TABLE before overwriting"
-            )
     check_or_evolve(
         session, stage, SqlAction.OVERWRITE_TABLE, schema_evolution=action.task.schema_evolution
     )
@@ -230,19 +222,16 @@ def overwrite_table(session: Session, action: ActionContext) -> HandlerResult:
     written_columns = f"{columns}, PIPELINE_RUN_ID, UPDATE_DATE{row_id_columns}"
     if strategy == "create_or_replace":
         if session.dialect.overwrite_uses_ctas:
-            names = [name for name, _ in session.columns(stage)] + [
-                "PIPELINE_RUN_ID",
-                "UPDATE_DATE",
-                "ROW_ID",
-            ]
-            types = session.hash_types(session.target)
+            names = [name for name, _ in session.target_columns()]
+            types = session.column_types(session.target)
+            managed = {
+                "pipeline_run_id": "CAST(:pipeline_run_id AS BIGINT) AS PIPELINE_RUN_ID",
+                "update_date": f"CAST(:now AS {types['update_date']}) AS UPDATE_DATE",
+                "row_id": "CAST(ROW_NUMBER() OVER (ORDER BY NULL) AS BIGINT) AS ROW_ID",
+            }
             expressions = [
-                f"CAST({name} AS {types[name.lower()]}) AS {name}" for name in names[:-3]
-            ]
-            expressions += [
-                "CAST(:pipeline_run_id AS BIGINT) AS PIPELINE_RUN_ID",
-                f"CAST(:now AS {types['update_date']}) AS UPDATE_DATE",
-                "CAST(ROW_NUMBER() OVER (ORDER BY NULL) AS BIGINT) AS ROW_ID",
+                managed.get(name.lower(), f"CAST({name} AS {types[name.lower()]}) AS {name}")
+                for name in names
             ]
             ddl = session.dialect.replacement_ddl(
                 session.conn,
