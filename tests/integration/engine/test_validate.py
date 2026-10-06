@@ -454,3 +454,65 @@ def test_remote_mode_fails_the_rules_its_orchestrator_does_not_support(project):
     ]
     # The same metadata is fine in local mode, where etl-craft applies the rule.
     assert found(validate(engine, config)) == []
+
+
+@pytest.mark.parametrize("default", ["native", "iceberg"])
+@pytest.mark.parametrize("conflicting", [False, True])
+@pytest.mark.parametrize("active", [False, True])
+def test_target_formats_are_compared_across_pipelines_and_qualified_names(
+    project, default, conflicting, active
+):
+    engine, config, _ = project
+    profile = replace(
+        config.warehouse.active,
+        jdbc_url="jdbc:snowflake://account.snowflakecomputing.com/?db=analytics",
+    )
+    section = replace(config.warehouse, profiles={config.warehouse.active_profile: profile})
+    config = replace(config, warehouse=section, warehouse_table_format=default)
+    with engine.begin() as conn:
+        p = add_pipeline(conn, "A")
+        q = add_pipeline(conn, "B")
+        add_task(
+            conn,
+            p,
+            "setup",
+            SQL_ACTION="SETUP_TABLE",
+            SETUP_FOR="APPEND_TABLE",
+            TARGET_OBJECT="sales.orders",
+            SOURCE_SQL="SELECT 1 AS id",
+        )
+        other = add_task(
+            conn,
+            q,
+            "append",
+            SQL_ACTION="APPEND_TABLE",
+            TARGET_OBJECT="ANALYTICS.SALES.ORDERS",
+            TABLE_FORMAT=("iceberg" if default == "native" else "native")
+            if conflicting
+            else default,
+            SOURCE_SQL="SELECT 1 AS id",
+        )
+        add_task(
+            conn,
+            q,
+            "separate",
+            SQL_ACTION="CREATE_TABLE",
+            TARGET_OBJECT="elsewhere.sales.orders",
+            SOURCE_SQL="SELECT 1 AS id",
+        )
+        if not active:
+            conn.execute(
+                text("UPDATE CFG_TASKS SET ACTIVE_FLAG = 'N' WHERE TASK_ID = :id"), {"id": other}
+            )
+    report = validate(engine, config)
+    conflicts = [f for f in report.findings if "different table formats" in f.message]
+    if not conflicting or not active:
+        assert conflicts == []
+        return
+    assert {f.where for f in conflicts} == {"A.setup", "B.append"}
+    assert all(
+        "analytics.sales.orders" in f.message and "A.setup" in f.message and "B.append" in f.message
+        for f in conflicts
+    )
+    scoped = validate(engine, config, "A")
+    assert any(f.where == "A.setup" and "B.append" in f.message for f in scoped.findings)

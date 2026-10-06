@@ -276,6 +276,19 @@ class Session:
             f", {base} + CAST(ROW_NUMBER() OVER (ORDER BY NULL) AS BIGINT)",
         )
 
+    def check_target_format(self) -> None:
+        """Refuse a format mismatch before creating or evolving an existing target."""
+        try:
+            existing = self.dialect.existing_table_format(self.conn, self.target)
+        except SQLAlchemyError as error:
+            raise self._failure("read the existing table format", error) from error
+        if existing != self.dialect.table_format:
+            raise HandlerError(
+                f"{self.action} {self.target}: existing table format is {existing}, "
+                f"but this task resolves to {self.dialect.table_format}; set TABLE_FORMAT="
+                f"{existing} or use a different TARGET_OBJECT. Migrate formats explicitly"
+            )
+
     def row_id_generated(self) -> bool:
         """Read the existing target's generator rather than assuming new-table defaults."""
         logger.debug("read the ROW_ID generator of %s", self.target)

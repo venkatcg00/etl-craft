@@ -287,3 +287,122 @@ def test_row_id_generation_on_snowflake(tmp_path, table_format):
     fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
     schema = os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"]
     walk_row_id_generation(cloud_world(tmp_path, "Snowflake", fields, table_format, schema))
+
+
+def walk_table_format_checks(w):
+    """Refuse both format changes, including replacement and no-op setup, before source reads."""
+    from etl_craft.config.targets import parse_warehouse_url
+    from etl_craft.core.errors import HandlerError
+    from etl_craft.dialects.warehouse import resolve
+
+    target = f"etl_craft_format_{uuid.uuid4().hex[:8]}"
+    opposite = (
+        TableFormat.ICEBERG
+        if w.config.warehouse_table_format == TableFormat.NATIVE
+        else TableFormat.NATIVE
+    )
+    actual = w.config.warehouse_table_format
+    replacement = target + "_replace"
+    try:
+        w.setup(target, "SELECT CAST(1 AS BIGINT) AS id", "OVERWRITE_TABLE")
+        w.run(
+            "seed",
+            SQL_ACTION="OVERWRITE_TABLE",
+            TARGET_OBJECT=target,
+            SOURCE_SQL="SELECT CAST(1 AS BIGINT) AS id",
+        )
+        before = w.rows(f"SELECT * FROM {w.name(target)}")
+        for requested in (actual, opposite):
+            dialect = resolve(
+                parse_warehouse_url(w.config.warehouse.active.jdbc_url).dialect, requested
+            )
+            with w.warehouse.connect() as conn:
+                assert dialect.existing_table_format(conn, w.name(target)) == actual
+        for action in (
+            "CREATE_TABLE",
+            "SETUP_TABLE",
+            "OVERWRITE_TABLE",
+            "SCD1_MERGE",
+            "SCD2_MERGE",
+        ):
+            params = (
+                {"MERGE_KEY": "id", "MERGE_COMPARE_COLUMNS": "id"}
+                if action.startswith("SCD")
+                else {}
+            )
+            with pytest.raises(
+                HandlerError, match=f"existing table format is {actual}.*resolves to {opposite}"
+            ):
+                w.run(
+                    "conflict",
+                    SQL_ACTION=action,
+                    TARGET_OBJECT=target,
+                    TABLE_FORMAT=opposite,
+                    SOURCE_SQL="SELECT id FROM nonexistent_source",
+                    **params,
+                )
+        assert w.rows(f"SELECT * FROM {w.name(target)}") == before
+        w.run(
+            "evolve",
+            SQL_ACTION="OVERWRITE_TABLE",
+            TARGET_OBJECT=target,
+            TABLE_FORMAT=actual,
+            SCHEMA_EVOLUTION="true",
+            SOURCE_SQL="SELECT CAST(2 AS BIGINT) AS id, CAST('ok' AS VARCHAR(20)) AS added",
+        )
+        assert w.rows(f"SELECT id, added FROM {w.name(target)}") == [(2, "ok")]
+        w.run(
+            "create_replacement",
+            SQL_ACTION="CREATE_TABLE",
+            TARGET_OBJECT=replacement,
+            TABLE_FORMAT=actual,
+            SOURCE_SQL="SELECT CAST(3 AS BIGINT) AS id",
+        )
+        w.run(
+            "replace",
+            SQL_ACTION="CREATE_TABLE",
+            TARGET_OBJECT=replacement,
+            TABLE_FORMAT=actual,
+            SOURCE_SQL="SELECT CAST(4 AS BIGINT) AS id",
+        )
+        assert w.rows(f"SELECT id FROM {w.name(replacement)}") == [(4,)]
+        with w.warehouse.connect() as conn:
+            for name in (target, replacement):
+                assert dialect.existing_table_format(conn, w.name(name)) == actual
+    finally:
+        for name in (target, replacement):
+            w.execute(f"DROP TABLE IF EXISTS {w.name(name)}")
+        w.warehouse.dispose()
+        w.engine_db.dispose()
+
+
+@pytest.mark.cloud_databricks
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_table_formats_on_databricks(tmp_path, table_format):
+    require_variables("DATABRICKS", DATABRICKS_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_DATABRICKS_{name}" for name in DATABRICKS_VARS}
+    walk_table_format_checks(
+        cloud_world(
+            tmp_path,
+            "Databricks",
+            fields,
+            table_format,
+            os.environ["ETL_CRAFT_TEST_DATABRICKS_SCHEMA"],
+        )
+    )
+
+
+@pytest.mark.cloud_snowflake
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_table_formats_on_snowflake(tmp_path, table_format):
+    require_variables("SNOWFLAKE", SNOWFLAKE_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
+    walk_table_format_checks(
+        cloud_world(
+            tmp_path,
+            "Snowflake",
+            fields,
+            table_format,
+            os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"],
+        )
+    )

@@ -83,7 +83,8 @@ item's text, or work done early under another item.
 | S3.G.3 Safe table replacement | Done | #106 | B37, W5 |
 | S3.G.4 ALTER-based schema evolution | Done | #107 | B39, B40 |
 | S3.G.5 Concurrent ROW_ID allocation | Done | #108 | B38 |
-| S3.G.6 to S3.H | Not started | | |
+| S3.G.6 One table format per target | Done | #109 | B43 |
+| S3.G.7 to S3.H | Not started | | |
 | 0.4 and later | Not started | | |
 
 ### Handover notes

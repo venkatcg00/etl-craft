@@ -52,7 +52,7 @@ def check_replacement_failure(w, target, action):
     result = w.run(target, SOURCE_SQL="SELECT 3 AS id", **params)
     assert result.insert_count == 1 and w.rows(f"SELECT id FROM {w.name(target)}") == [(3,)]
     assert "replacement metadata must survive" in str(definition(w, target))
-    assert not any("__etl_keep_" in table for table in w.tables())
+    assert not any(table.startswith(f"{target.lower()}__etl_keep_") for table in w.tables())
 
 
 def definition(w, target, *, comment=False):

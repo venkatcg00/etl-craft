@@ -24,7 +24,7 @@ from etl_craft.config.targets import active_catalog
 from etl_craft.core.enums import DependencyType, Handler, Mode, SqlAction
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.graph import build_graph
-from etl_craft.core.text import is_metadata_code, suggest
+from etl_craft.core.text import is_metadata_code, qualify, suggest
 from etl_craft.engine.repository.business_rules import fetch_business_rules_for_task
 from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
 from etl_craft.engine.repository.pipelines import (
@@ -130,6 +130,7 @@ def validate(engine: Engine, config: ConnectorConfig, pipeline_code: str | None 
         report = Report()
         _pipelines(conn, config, data, report)
         _dependencies(data, report)
+        _target_formats(config, data, report)
         for task in data.tasks:
             _task(conn, config, data, task, report)
 
@@ -298,7 +299,19 @@ def _task(
     if known is not None:
         for name in sorted(set(params) - known - COMMON_PARAMETERS):
             report.warn(where, _unknown(f"{task.handler} task parameter", name, sorted(known)))
-    context = TaskContext(
+    context = _context(config, task, params)
+    check = CHECKS.get(task.handler)
+    if check is None:
+        return
+    try:
+        for problem in check(conn, context, data):
+            report.fail(where, problem)
+    except EtlCraftError as error:
+        report.fail(where, str(error))
+
+
+def _context(config: ConnectorConfig, task: ActiveTask, params: Mapping[str, str]) -> TaskContext:
+    return TaskContext(
         config=config,
         pipeline_id=task.pipeline_id,
         pipeline_code=task.pipeline_code,
@@ -311,14 +324,39 @@ def _task(
         refresh_type=task.refresh_type,
         task_params=params,
     )
-    check = CHECKS.get(task.handler)
-    if check is None:
+
+
+def _target_formats(config: ConnectorConfig, data: _Metadata, report: Report) -> None:
+    """Compare active writers across pipelines using their resolved, qualified targets."""
+    if config.warehouse is None:
         return
-    try:
-        for problem in check(conn, context, data):
-            report.fail(where, problem)
-    except EtlCraftError as error:
-        report.fail(where, str(error))
+    catalog = active_catalog(config)
+    targets: dict[str, list[tuple[str, str]]] = {}
+    for task in data.tasks:
+        if task.handler != Handler.SQL:
+            continue
+        context = _context(config, task, data.params[task.task_id])
+        try:
+            spec = read_sql_task(context)
+            dialect = task_dialect(context)
+        except EtlCraftError:
+            # Each task's definition check reports invalid parameters separately.
+            continue
+        if spec.action == SqlAction.DROP_TABLE:
+            continue
+        target = qualify(spec.target_object, catalog).lower()
+        targets.setdefault(target, []).append((task.label, dialect.table_format))
+    for target, writers in targets.items():
+        if len({table_format for _, table_format in writers}) < 2:
+            continue
+        listed = ", ".join(f"{label} ({table_format})" for label, table_format in writers)
+        for label, _ in writers:
+            report.fail(
+                label,
+                f"{target}: tasks resolve to different table formats: {listed}; "
+                "use the same TABLE_FORMAT for every task writing this target, "
+                "or give different formats separate TARGET_OBJECTs",
+            )
 
 
 def _sql(conn: Connection, context: TaskContext, data: _Metadata) -> list[str]:
