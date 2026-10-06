@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
+
+from sqlalchemy import text
+from sqlalchemy.engine import Connection
 
 from etl_craft.config.auth import warehouse_by_key
 from etl_craft.core.enums import AuthMode
-from etl_craft.dialects.warehouse.base import Presented, SurrogateKey, WarehouseDialect
+from etl_craft.dialects.warehouse.base import (
+    Presented,
+    ReplaceStrategy,
+    SurrogateKey,
+    WarehouseDialect,
+)
+from etl_craft.dialects.warehouse.replacement import replacement_ddl
 
 if TYPE_CHECKING:
     from etl_craft.config import ConnectionProfile
@@ -17,6 +27,7 @@ class SnowflakeWarehouse(WarehouseDialect):
     """Snowflake, ordinary tables."""
 
     spec = warehouse_by_key("snowflake")
+    replace_strategy: ReplaceStrategy = "create_or_replace"
     identifier_case = "upper"
     surrogate_key: SurrogateKey = "computed"
     enforces_primary_keys = False
@@ -79,3 +90,26 @@ class SnowflakeWarehouse(WarehouseDialect):
             )
         finally:
             cursor.close()
+
+    def replacement_ddl(
+        self,
+        conn: Connection,
+        target: str,
+        select_sql: str,
+        params: Mapping[str, str],
+        *,
+        existing: bool,
+    ) -> str:
+        """Preserve the existing table's declared properties in one CTAS replacement."""
+        if existing:
+            ddl = str(
+                conn.execute(
+                    text("SELECT GET_DDL('TABLE', :target)"), {"target": target}
+                ).scalar_one()
+            )
+            return replacement_ddl(ddl, target, select_sql, "snowflake")
+        return f"CREATE OR REPLACE TABLE {target} AS {select_sql}"
+
+    def overwrite_statement(self, target: str, columns: str, select_sql: str) -> str:
+        """Commit deletion and insertion together, retaining the table definition."""
+        return f"INSERT OVERWRITE INTO {target} ({columns}) {select_sql}"

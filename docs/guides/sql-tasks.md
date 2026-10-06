@@ -73,14 +73,44 @@ active `Warehouse` profile's database, so the same rows work in every environmen
 
 | `SQL_ACTION` | What happens | Also needs |
 |---|---|---|
-| `CREATE_TABLE` | drops the target and creates it again from the SELECT's rows | — |
+| `CREATE_TABLE` | replaces the target with the SELECT's rows | — |
 | `SETUP_TABLE` | creates the target, empty, from the SELECT's shape plus the audit columns of the action that writes it, when it does not exist; an existing target is left as it is | `SETUP_FOR` when no task in the pipeline writes the target |
-| `OVERWRITE_TABLE` | empties the target and inserts the SELECT's rows | an existing target |
+| `OVERWRITE_TABLE` | replaces the target's rows from the SELECT | an existing target |
 | `APPEND_TABLE` | inserts the SELECT's rows, without comparing the shapes | an existing target |
 | `SCD1_MERGE` | updates changed rows in place, by merge key, and inserts new keys | an existing target, `MERGE_KEY`, `MERGE_COMPARE_COLUMNS` |
 | `SCD2_MERGE` | closes the active version of each changed key (`ACTIVE_FLAG = 'N'`) and inserts a new active one | an existing target, `MERGE_KEY`, `MERGE_COMPARE_COLUMNS` |
 | `DROP_TABLE` | drops the target if it exists, once this pipeline's `CREATE_TABLE` task for it has succeeded in the run; a target already gone is not an error | no SELECT |
 | `DELETE_ROWS` | flags the target rows whose `MERGE_KEY` the SELECT returns (`DELETE_FLAG = 'Y'`), or deletes them with `HARD_DELETE = true` | an existing target, `MERGE_KEY` |
+
+### Replacement failures and table properties
+
+`CREATE_TABLE` and `OVERWRITE_TABLE` stage the SELECT before changing the target. The warehouse
+then protects publication using the strategy below. A rejected SELECT or a failed publication
+retains the old rows; successful replacements report the staged row count.
+
+| Warehouse | Publication strategy |
+|---|---|
+| PostgreSQL and native DuckDB | The replacement runs inside one transaction. An exception rolls back the old rows and definition. `CREATE_TABLE` carries the table comment; it refuses partitioned PostgreSQL parents. |
+| Snowflake native tables | `CREATE OR REPLACE TABLE AS SELECT` carries the existing table properties and grants; `INSERT OVERWRITE INTO` retains the definition for overwrite. |
+| Databricks Delta and Delta with Iceberg compatibility | `CREATE OR REPLACE TABLE AS SELECT` carries the existing table properties; `INSERT OVERWRITE TABLE` retains the definition for overwrite. |
+| Trino Iceberg | `CREATE OR REPLACE TABLE AS SELECT` publishes one replacement, retaining the declared properties, partitioning and table comment. Overwrite casts each value to its target type. |
+| DuckDB over Iceberg and Snowflake Iceberg | A prepared candidate replaces the target after its original object has been retained under a recovery name. Overwrite first copies the old rows and restores them into the existing definition if a later statement fails. |
+
+Atomic CTAS refuses column constraints, defaults or comments that it cannot carry forward.
+Use a write that retains the existing definition; on Snowflake and Databricks,
+`OVERWRITE_TABLE` does this. On DuckDB over Iceberg, `CREATE_TABLE` carries table properties
+but refuses partitioning, sort order and column metadata; use `OVERWRITE_TABLE` for those tables.
+Snowflake Iceberg replacement refuses customer storage, clustering and column metadata it
+cannot reproduce. Replacement at an explicitly supplied existing storage path is refused;
+use overwrite to retain that table's location. PostgreSQL and native DuckDB still rebuild the
+columns for `CREATE_TABLE`, so indexes, grants and column metadata are not copied.
+
+The recovery strategy is compensation, with a brief window during rename or truncate when
+readers can see a missing or empty target. It restores the original on a caught exception;
+a hard process exit or outage can interrupt recovery. If restoration fails, the error names
+`<target>__etl_keep_<token>`, which is retained for manual recovery. Stop writers and restore
+that original object or its rows before retrying. A successful non-transactional publication
+remains successful if scratch or backup cleanup fails; the warning names the table to remove.
 
 ### Creating tables
 
@@ -191,7 +221,9 @@ task fails with the reason when:
 - the SELECT returns a new column and `SCHEMA_EVOLUTION` is not `true`.
 
 With `SCHEMA_EVOLUTION = true` the target is rebuilt with the new column, which is NULL in the
-rows already there. Indexes and grants on the old table are not carried over.
+rows already there. Indexes and grants on the old table are not carried over. Safe overwrite
+on warehouses without transactional DDL refuses this rebuild: add the new columns with
+`ALTER TABLE` before overwriting.
 
 ## Logs and counts
 

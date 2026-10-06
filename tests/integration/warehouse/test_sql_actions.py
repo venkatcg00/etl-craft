@@ -181,6 +181,20 @@ def test_schema_checks_and_evolution(sql_world):
         w.run("evolve", SOURCE_SQL="SELECT 1 AS id, 7 AS score, 'a' AS name", **params)
     with pytest.raises(HandlerError, match=r"has column\(s\) name that the SELECT no longer"):
         w.run("evolve", SOURCE_SQL="SELECT 1 AS id", **params)
+    if w.kind in {"trino_iceberg", "duckdb_iceberg"}:
+        before = w.rows(f"SELECT * FROM {w.name('wide')}")
+        with pytest.raises(HandlerError, match="add these columns with ALTER TABLE"):
+            w.run(
+                "evolve",
+                SOURCE_SQL="SELECT 2 AS id, 7 AS score, 'b' AS name",
+                SCHEMA_EVOLUTION="true",
+                **params,
+            )
+        assert w.rows(f"SELECT * FROM {w.name('wide')}") == before
+        w.execute(f"ALTER TABLE {w.name('wide')} ADD COLUMN score INTEGER")
+        w.run("evolve", SOURCE_SQL="SELECT 2 AS id, 7 AS score, 'b' AS name", **params)
+        assert w.rows(f"SELECT id, score, name FROM {w.name('wide')}") == [(2, 7, "b")]
+        return
     w.run(
         "evolve",
         SOURCE_SQL="SELECT 2 AS id, 7 AS score, 'b' AS name",
@@ -419,7 +433,7 @@ def test_a_storage_location_is_used_where_it_applies_and_refused_elsewhere(sql_w
         SETUP_FOR="OVERWRITE_TABLE",
         **placed,
     )
-    with pytest.raises(HandlerError, match=r"cannot keep its EXTERNAL_LOCATION .* ADD COLUMN"):
+    with pytest.raises(HandlerError, match="add these columns with ALTER TABLE"):
         w.run(
             "evolve_placed",
             SQL_ACTION="OVERWRITE_TABLE",

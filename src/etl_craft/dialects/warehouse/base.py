@@ -62,6 +62,9 @@ STORAGE_PARAMETERS = ("EXTERNAL_LOCATION", "EXTERNAL_VOLUME", "BASE_LOCATION", "
 """Task parameters that place a table's data files; each dialect accepts only its own."""
 
 
+ReplaceStrategy = Literal["transactional", "create_or_replace", "copy_and_restore"]
+
+
 class WarehouseDialect:
     """What differs between warehouses; the defaults are the ANSI behaviour PostgreSQL follows."""
 
@@ -73,6 +76,9 @@ class WarehouseDialect:
     # Whether CREATE TEMPORARY TABLE exists and behaves. Trino has none; Databricks refuses
     # DROP on a name it shares with a temporary table.
     temporary_tables: bool = True
+    replace_strategy: ReplaceStrategy = "copy_and_restore"
+    """How a replacement protects an existing target from a failed write."""
+
     # Whether UPDATE and DELETE accept an alias for their target. Trino rejects one.
     mutation_alias: bool = True
     # Whether ALTER TABLE ... RENAME TO needs a qualified new name.
@@ -238,6 +244,41 @@ class WarehouseDialect:
         prefix = f"CREATE TABLE {qualified_name}"
         statement = f"{prefix} {clause} AS {select_sql}" if clause else f"{prefix} AS {select_sql}"
         conn.execute(text(statement))
+
+    def replacement_comment(self, conn: Connection, target: str) -> str | None:
+        """Capture the comment before a transactional replacement removes the old object."""
+        return None
+
+    def preserve_replacement_properties(
+        self, conn: Connection, target: str, candidate: str
+    ) -> None:
+        """Refuse promotion unless the dialect can preserve the target's protected properties."""
+        raise HandlerError(
+            f"{target}: this warehouse cannot preserve replacement properties; use OVERWRITE_TABLE"
+        )
+
+    def backup_table(self, conn: Connection, backup: str, target: str) -> None:
+        """Keep a durable row copy without reusing the target's configured storage path."""
+        self.create_table_as(conn, backup, f"SELECT * FROM {target}", {})
+
+    def replacement_ddl(
+        self,
+        conn: Connection,
+        target: str,
+        select_sql: str,
+        params: Mapping[str, str],
+        *,
+        existing: bool,
+    ) -> str:
+        """Render a single atomic replacement, or refuse when the dialect cannot do it."""
+        raise HandlerError(f"{self.display_name} cannot atomically replace {target}")
+
+    overwrite_uses_ctas: bool = False
+    """Whether an overwrite publishes a replacement snapshot with CTAS."""
+
+    def overwrite_statement(self, target: str, columns: str, select_sql: str) -> str:
+        """Replace rows without a separate truncate, where the warehouse supports it."""
+        raise HandlerError(f"{self.display_name} cannot atomically overwrite {target}")
 
     def mirror_table_ddl(self, name: str, column_ddl: str, cloning: CloningConfig) -> str | None:
         """Return the DDL for a cloning mirror, or ``None`` for a plain CREATE TABLE."""

@@ -28,6 +28,14 @@ They never record history: no decision tags, dates, review item ids or "changed 
 That context belongs in the pull request and the commit message. `make history` enforces this,
 and CI runs it on every pull request.
 
+Before opening a pull request, run the complete `make check docs` suite locally and finish
+relevant service and live-cloud acceptance tests. Fix failures before creating the PR.
+Build the current wheel and source distribution together, then run the installed-wheel demos
+across all four local warehouses with
+`ETL_CRAFT_TEST_WHEEL` pointing to that wheel and `ETL_CRAFT_REQUIRE_SERVICES=1`. The regular
+coverage run skips those demos when no wheel is supplied; `make verify-package` checks installation
+but does not run the pipeline demos.
+
 ## Definition of done
 
 A branch is ready to merge when:
@@ -90,7 +98,9 @@ Unset the variable for normal operation. Available boundaries are `runner.after_
 (before binding), `runner.after_bind`, `supervisor.after_mkdir`, `supervisor.after_popen`,
 `child.after_outcome`, `pipeline.after_insert`, `runner.before_consumption`,
 `pipeline.before_consumption`, `pipeline.after_consumption`, `attempt.after_status`,
-`attempt.before_summary`, `attempt.after_consumption`, and `script.after_offset`. Ending fault points run inside the
+`attempt.before_summary`, `attempt.after_consumption`, and `script.after_offset`. Replacement boundaries are `sql.replace.before_publish`,
+`sql.replace.after_clear` and `sql.replace.after_publish`; atomic single-statement replacement
+uses only `before_publish`. Ending fault points run inside the
 transaction: an injected exception or hard exit rolls back status, offsets and consumption. Hard exits can leave audit rows
 running and processes alive: tests must clean up their process trees and use explicit
 reconciliation for expired leases. Every run reconciles before admission; `etl-craft reconcile`

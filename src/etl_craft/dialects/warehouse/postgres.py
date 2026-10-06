@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from sqlalchemy import text
+from sqlalchemy.engine import Connection
+
 from etl_craft.config.auth import warehouse_by_key
+from etl_craft.core.errors import HandlerError
 from etl_craft.dialects.engine.postgres import DEFAULT_PORT, psycopg_auth_kwargs
-from etl_craft.dialects.warehouse.base import Presented, WarehouseDialect
+from etl_craft.dialects.warehouse.base import Presented, ReplaceStrategy, WarehouseDialect
 
 if TYPE_CHECKING:
     from etl_craft.config import ConnectionProfile
@@ -17,6 +21,7 @@ class PostgresWarehouse(WarehouseDialect):
     """PostgreSQL, native tables."""
 
     spec = warehouse_by_key("postgres")
+    replace_strategy: ReplaceStrategy = "transactional"
     identifier_case = "lower"
 
     def present(self, profile: ConnectionProfile, secret: str, url: WarehouseUrl) -> Presented:
@@ -60,3 +65,17 @@ class PostgresWarehouse(WarehouseDialect):
     def prepare_update_stage(self, stage: str, keys: tuple[str, ...]) -> tuple[str, ...]:
         """Give the planner merge-key access and current temporary-stage statistics."""
         return (f"CREATE INDEX ON {stage} ({', '.join(keys)})", f"ANALYZE {stage}")
+
+    def replacement_comment(self, conn: Connection, target: str) -> str | None:
+        """Preserve comments and refuse rebuilding a partitioned parent as an ordinary table."""
+        name = ".".join(target.split(".")[-2:])
+        row = conn.execute(
+            text(
+                "SELECT relkind, obj_description(oid) AS comment FROM pg_class "
+                "WHERE oid = CAST(:name AS regclass)"
+            ),
+            {"name": name},
+        ).one()
+        if row[0] == "p":
+            raise HandlerError(f"{target}: CTAS cannot preserve partitioning; use OVERWRITE_TABLE")
+        return None if row[1] is None else str(row[1])
