@@ -55,3 +55,54 @@ def test_atomic_ctas_refuses_column_metadata(dialect, metadata):
 def test_incomplete_definition_is_refused():
     with pytest.raises(HandlerError, match="complete table definition"):
         replacement_ddl("CREATE TABLE c.s.t AS SELECT 1", "c.s.t", "SELECT 2", "trino")
+
+
+@pytest.mark.parametrize(
+    "dialect,identity,properties,clone",
+    [
+        (
+            "databricks",
+            "BIGINT GENERATED ALWAYS AS IDENTITY",
+            "USING DELTA LOCATION 's3://bucket/table' COMMENT 'kept' "
+            "TBLPROPERTIES ('delta.enableChangeDataFeed' = 'true')",
+            "DEEP CLONE c.s.candidate LOCATION 's3://bucket/table'",
+        ),
+        (
+            "snowflake",
+            "BIGINT NOT NULL AUTOINCREMENT START 1 INCREMENT 1 ORDER",
+            "COMMENT = 'kept' DATA_RETENTION_TIME_IN_DAYS = 3",
+            "CLONE c.s.candidate COPY GRANTS",
+        ),
+    ],
+)
+def test_identity_candidates_keep_properties_and_publish_atomically(
+    dialect, identity, properties, clone
+):
+    from etl_craft.dialects.warehouse.replacement import identity_replacement
+
+    create, publish = identity_replacement(
+        f"CREATE TABLE c.s.target (id BIGINT, row_id {identity}) {properties}",
+        "c.s.target",
+        "c.s.candidate",
+        f"id BIGINT, row_id {identity}",
+        dialect,
+    )
+    assert create.startswith("CREATE TABLE c.s.candidate")
+    assert "kept" in create
+    assert "IDENTITY" in create or "AUTOINCREMENT" in create
+    assert "LOCATION" not in create
+    assert publish == f"CREATE OR REPLACE TABLE c.s.target {clone}"
+
+
+@pytest.mark.parametrize("dialect", ["databricks", "snowflake"])
+def test_identity_replacement_refuses_business_column_constraints(dialect):
+    from etl_craft.dialects.warehouse.replacement import identity_replacement
+
+    with pytest.raises(HandlerError, match="column metadata"):
+        identity_replacement(
+            "CREATE TABLE c.s.target (id BIGINT NOT NULL)",
+            "c.s.target",
+            "c.s.candidate",
+            "id BIGINT, row_id BIGINT",
+            dialect,
+        )

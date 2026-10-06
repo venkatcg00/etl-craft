@@ -120,6 +120,18 @@ def _plain(name: str) -> str:
 
 def create_target_shape(session: Session, stage: str, audit_columns: tuple[str, ...]) -> None:
     """Create the target, empty: the stage's columns, ``PIPELINE_RUN_ID``, ``audit_columns``."""
+    if session.dialect.identity_in_create:
+        types = session.column_types(stage)
+        columns = [f"{name} {types[name.lower()]}" for name, _ in session.columns(stage)]
+        columns.append("PIPELINE_RUN_ID BIGINT")
+        columns.extend(
+            f"{name} {session.dialect.audit_column_type(name)}" for name in audit_columns
+        )
+        session.run(
+            session.dialect.identity_table_ddl(session.target, ", ".join(columns), session.params),
+            step="create the target with an identity ROW_ID",
+        )
+        return
     parts = [f"s.{name}" for name, _ in session.columns(stage)]
     parts.append("CAST(NULL AS BIGINT) AS PIPELINE_RUN_ID")
     parts.extend(

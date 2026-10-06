@@ -50,6 +50,8 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
         dialect.display_name,
     )
     logger.debug("the SELECT:\n%s", task.select_sql)
+    # Hold through warehouse commit: a computed ROW_ID base must include the previous insert.
+    # Generated keys still share mutation ordering with replacement and hash upgrades.
     with locks.target(qualify(task.target_object, catalog)).hold(engine_db):
         with open_warehouse(config, engine_db) as warehouse, warehouse.begin() as conn:
             session = Session(

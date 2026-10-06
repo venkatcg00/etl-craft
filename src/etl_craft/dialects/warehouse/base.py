@@ -86,6 +86,8 @@ class WarehouseDialect:
     # How ROW_ID is generated: an identity column, a sequence default, or computed per insert
     # where the table format has neither (Iceberg).
     surrogate_key: SurrogateKey = "identity"
+    identity_in_create: bool = False
+    """Whether ROW_ID must be declared when creating the table, rather than added later."""
     # Whether the database enforces a PRIMARY KEY, which business rules rely on.
     enforces_primary_keys: bool = True
     # Whether only one process may write at a time (a DuckDB file).
@@ -106,6 +108,27 @@ class WarehouseDialect:
         """Use ``spec`` instead of the class's own, for a warehouse without its own dialect."""
         if spec is not None:
             self.spec = spec
+
+    def identity_table_ddl(self, target: str, columns: str, params: Mapping[str, str]) -> str:
+        """Create an empty table with the supplied columns and a generated ROW_ID."""
+        raise NotImplementedError(f"{self.key} does not declare identity columns in CREATE")
+
+    def identity_replacement_ddl(
+        self,
+        conn: Connection,
+        target: str,
+        candidate: str,
+        columns: str,
+        params: Mapping[str, str],
+        *,
+        existing: bool,
+    ) -> tuple[str, str]:
+        """Return candidate creation and atomic publication SQL for an identity table."""
+        raise NotImplementedError(f"{self.key} does not publish identity table replacements")
+
+    def row_id_generated(self, conn: Connection, target: str) -> bool:
+        """Whether inserts into this existing table omit ROW_ID and let its default fill it."""
+        return self.surrogate_key != "computed"
 
     @property
     def key(self) -> str:

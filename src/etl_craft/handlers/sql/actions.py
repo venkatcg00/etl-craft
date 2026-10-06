@@ -105,7 +105,30 @@ def create_table(session: Session, action: ActionContext) -> HandlerResult:
         f"SELECT s.*, CAST({int(action.context.pipeline_run_id)} AS BIGINT) AS PIPELINE_RUN_ID"
         f"{row_id} FROM {stage} s"
     )
-    if strategy == "create_or_replace":
+    if session.dialect.identity_in_create:
+        candidate = session.scratch("replace", persistent=True)
+        types = session.column_types(stage)
+        names = [name for name, _ in session.columns(stage)]
+        columns = ", ".join(
+            [f"{name} {types[name.lower()]}" for name in names] + ["PIPELINE_RUN_ID BIGINT"]
+        )
+        create_ddl, publish_ddl = session.dialect.identity_replacement_ddl(
+            session.conn,
+            session.target,
+            candidate,
+            columns,
+            session.params,
+            existing=existing,
+        )
+        session.run(create_ddl, step="create the identity replacement")
+        session.run(
+            f"INSERT INTO {candidate} ({', '.join(names)}, PIPELINE_RUN_ID) {select_sql}",
+            step="populate the identity replacement",
+        )
+        fault_point("sql.replace.before_publish")
+        session.run(publish_ddl, step="atomically replace the target")
+        cleanup(session, candidate)
+    elif strategy == "create_or_replace":
         ddl = session.dialect.replacement_ddl(
             session.conn, session.target, select_sql, session.params, existing=existing
         )
@@ -215,7 +238,7 @@ def overwrite_table(session: Session, action: ActionContext) -> HandlerResult:
         session, stage, SqlAction.OVERWRITE_TABLE, schema_evolution=action.task.schema_evolution
     )
     columns = ", ".join(name for name, _ in session.columns(stage))
-    computed = session.dialect.surrogate_key == "computed"
+    computed = not session.row_id_generated()
     row_id_columns = ", ROW_ID" if computed else ""
     row_id_values = ", CAST(ROW_NUMBER() OVER (ORDER BY NULL) AS BIGINT)" if computed else ""
     select_sql = f"SELECT {columns}, :pipeline_run_id, :now{row_id_values} FROM {stage}"

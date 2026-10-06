@@ -208,6 +208,26 @@ After the SELECT's own columns, every table the engine creates has:
 
 `CREATED_BY` and `UPDATED_BY` hold the warehouse user the engine connects as.
 
+`ROW_ID` is an internal key, not a business key or a gap-free row counter. PostgreSQL uses
+identity columns and native DuckDB uses a sequence. New Databricks Delta tables, including
+UniForm tables, declare `GENERATED ALWAYS AS IDENTITY`; native Snowflake tables use ordered
+`AUTOINCREMENT`. Inserts omit generated keys, and overwrites and schema evolution retain their
+generator. Native cloud `CREATE_TABLE` prepares an independent table with its identity and rows,
+then atomically clones it into the target; a failed preparation or publication leaves the old
+target intact. Table properties survive and Snowflake replacement copies existing grants.
+
+Trino, DuckDB Iceberg and Snowflake Iceberg allocate `MAX(ROW_ID) + ROW_NUMBER()`. The Engine DB
+lock for the qualified target is held from before opening the warehouse transaction until that
+transaction commits, so competing task processes cannot read the same base. Older Databricks or
+Snowflake targets without a generator keep this computed strategy; an ordinary write does not
+rebuild them. A deliberate `CREATE_TABLE` replacement creates a new identity-backed target.
+
+Generated keys need no `MAX(ROW_ID)` allocation. The same target mutation lock still coordinates
+writes with table replacement and hash upgrades, and serializes Databricks identity writes, whose
+concurrent transactions are unsupported. All competing etl-craft writers must use the same Engine
+DB. Writes from other tools are outside this lock; concurrent external writes to computed-key
+targets can produce duplicate keys.
+
 ## When the target and the SELECT disagree
 
 Before `OVERWRITE_TABLE` or a merge writes a row, the target is compared with the SELECT, and the

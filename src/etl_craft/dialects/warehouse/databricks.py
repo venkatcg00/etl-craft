@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
@@ -18,7 +19,7 @@ from etl_craft.dialects.warehouse.base import (
     SurrogateKey,
     WarehouseDialect,
 )
-from etl_craft.dialects.warehouse.replacement import replacement_ddl
+from etl_craft.dialects.warehouse.replacement import identity_replacement, replacement_ddl
 
 if TYPE_CHECKING:
     from etl_craft.config import CloningConfig, ConnectionProfile
@@ -34,10 +35,59 @@ class DatabricksWarehouse(WarehouseDialect):
     update_uses_merge = True
     temporary_tables = False
     qualified_rename = True
-    surrogate_key: SurrogateKey = "computed"
+    surrogate_key: SurrogateKey = "identity"
+    identity_in_create = True
     enforces_primary_keys = False
     string_type = "STRING"
     token_username = "token"
+
+    def identity_table_ddl(self, target: str, columns: str, params: Mapping[str, str]) -> str:
+        """Declare Delta's identity before any rows are inserted."""
+        location = (params.get("EXTERNAL_LOCATION") or "").strip()
+        return (
+            f"CREATE TABLE {target} ({columns}, ROW_ID BIGINT GENERATED ALWAYS AS IDENTITY) "
+            f"{self.delta_clause(location)}"
+        )
+
+    def identity_replacement_ddl(
+        self,
+        conn: Connection,
+        target: str,
+        candidate: str,
+        columns: str,
+        params: Mapping[str, str],
+        *,
+        existing: bool,
+    ) -> tuple[str, str]:
+        """Prepare independent identity rows, then deep-clone them into the target atomically."""
+        if existing and params.get("EXTERNAL_LOCATION"):
+            raise HandlerError(
+                f"{target}: replacement cannot change EXTERNAL_LOCATION; use OVERWRITE_TABLE"
+            )
+        ddl = (
+            str(conn.execute(text(f"SHOW CREATE TABLE {target}")).scalar_one())
+            if existing
+            else self.identity_table_ddl(target, columns, params)
+        )
+        return identity_replacement(
+            ddl,
+            target,
+            candidate,
+            f"{columns}, ROW_ID BIGINT GENERATED ALWAYS AS IDENTITY",
+            "databricks",
+        )
+
+    def row_id_generated(self, conn: Connection, target: str) -> bool:
+        """Keep older computed ROW_ID tables writable until explicitly replaced."""
+        ddl = str(conn.execute(text(f"SHOW CREATE TABLE {target}")).scalar_one())
+        return bool(
+            re.search(
+                r"\b`?ROW_ID`?\s+BIGINT\s+(?:NOT NULL\s+)?"
+                r"GENERATED\s+(?:ALWAYS|BY DEFAULT)\s+AS\s+IDENTITY\b",
+                ddl,
+                re.I,
+            )
+        )
 
     def oauth_token(self, profile: ConnectionProfile, secret: str, url: WarehouseUrl) -> str:
         """Mint a workspace access token for a service principal (OAuth machine-to-machine).
