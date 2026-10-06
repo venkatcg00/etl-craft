@@ -82,7 +82,7 @@ item's text, or work done early under another item.
 | S3.G.2 Set-based write strategies | Done | #105 | B36 |
 | S3.G.3 Safe table replacement | Done | #106 | B37, W5 |
 | S3.G.4 ALTER-based schema evolution | Done | #107 | B39, B40 |
-| S3.G.5 Concurrent ROW_ID allocation | Done | | B38 |
+| S3.G.5 Concurrent ROW_ID allocation | Done | #108 | B38 |
 | S3.G.6 to S3.H | Not started | | |
 | 0.4 and later | Not started | | |
 
@@ -295,6 +295,11 @@ Before `S3.H`, give the two task tests a time limit that leaves room for start-u
 script to report it started before the limit begins, and measure the docs-site test's build time.
 
 **Working on the code.**
+
+- Run installed-wheel demo sessions one at a time: local Iceberg demos share fixed namespaces
+  and empty them when preparing a case. Use one coverage run with the wheel supplied, or run
+  ordinary coverage without the wheel and run the wheel end-to-end/package suites separately.
+  Overlapping demo sessions can mix rows and remove each other's tables.
 
 - Run the suites an item touches against the local services (`make services-up`), then rely on
   CI for the full matrix. The unit, Engine DB and local warehouse suites take about five minutes
