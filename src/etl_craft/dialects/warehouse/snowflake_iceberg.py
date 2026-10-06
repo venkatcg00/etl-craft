@@ -62,7 +62,10 @@ class SnowflakeIcebergWarehouse(SnowflakeWarehouse):
         )
         comment = conn.execute(query, {"schema": schema, "table": table}).scalar_one()
         if comment is not None:
-            conn.execute(text(f"COMMENT ON TABLE {candidate} IS :comment"), {"comment": comment})
+            conn.execute(
+                text(f"ALTER ICEBERG TABLE {candidate} SET COMMENT = :comment"),
+                {"comment": comment},
+            )
         actual = conn.execute(
             query, {"schema": schema, "table": candidate.split(".")[-1]}
         ).scalar_one()

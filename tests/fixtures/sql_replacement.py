@@ -73,9 +73,12 @@ def definition(w, target, *, comment=False):
     try:
         with engine.begin() as conn:
             if comment:
-                conn.execute(
-                    text(f"COMMENT ON TABLE {name} IS 'replacement metadata must survive'")
+                statement = (
+                    f"ALTER ICEBERG TABLE {name} SET COMMENT = 'replacement metadata must survive'"
+                    if dialect.key == "snowflake_iceberg"
+                    else f"COMMENT ON TABLE {name} IS 'replacement metadata must survive'"
                 )
+                conn.execute(text(statement))
             if dialect.key == "postgres":
                 return conn.execute(
                     text("SELECT obj_description(CAST(:name AS regclass))"),

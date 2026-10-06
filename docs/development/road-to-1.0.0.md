@@ -80,7 +80,7 @@ item's text, or work done early under another item.
 | S3.F Atomic endings | Done | #103 | B6, B9; Engine DB portion of W4 |
 | S3.G.1 Canonical change hash | Done | #104 | B22, B35 |
 | S3.G.2 Set-based write strategies | Done | #105 | B36 |
-| S3.G.3 Safe table replacement | In progress | | B37, W5; cloud acceptance pending |
+| S3.G.3 Safe table replacement | Done | #106 | B37, W5 |
 | S3.G.4 to S3.H | Not started | | |
 | 0.4 and later | Not started | | |
 
