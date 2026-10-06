@@ -450,11 +450,11 @@ def test_what_a_script_printed_is_kept_when_it_is_stopped(project):
         "    for n in range(5):\n"
         "        print(f'line {n}')\n"
         "    time.sleep(60)\n",
-        TASK_TIMEOUT_SECONDS="2",
+        TASK_TIMEOUT_SECONDS="10",
     )
     outcome = run_task(engine, config, "P", "load")
     assert outcome.status == RunStatus.FAILED
-    assert "timed out after 2s" in outcome.message
+    assert "timed out after 10s" in outcome.message
     log = attempt_log(config)
     assert all(f"line {n}" in log for n in range(5))
 

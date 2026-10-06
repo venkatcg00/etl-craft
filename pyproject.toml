@@ -151,6 +151,7 @@ markers = [
     "cloud_databricks: Databricks, run locally with credentials",
     "cloud_snowflake: Snowflake, run locally with credentials",
     "harness: the local test services themselves",
+    "chaos: concurrent execution, process loss and recovery",
 ]
 
 [tool.coverage.run]

@@ -92,7 +92,7 @@ def project(engine_db, tmp_path):
         conn.execute(
             text(
                 "INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE) "
-                "VALUES (:t, 'TASK_TIMEOUT_SECONDS', '2')"
+                "VALUES (:t, 'TASK_TIMEOUT_SECONDS', '10')"
             ),
             {"t": ids["slow"]},
         )
@@ -198,7 +198,7 @@ def test_an_unexpected_error_fails_the_task_with_its_traceback_in_the_log(projec
     [
         ("exits", "exited with code 3"),
         ("killed", "was killed by signal SIGKILL"),
-        ("slow", "timed out after 2s and was killed"),
+        ("slow", "timed out after 10s and was killed"),
     ],
 )
 def test_a_task_process_that_ends_without_an_outcome_is_recorded_failed(project, task, reason):

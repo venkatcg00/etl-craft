@@ -1,5 +1,6 @@
 """Simultaneous initialization cannot finalize another caller's active run."""
 
+import pytest
 from sqlalchemy import text
 
 from etl_craft.core.errors import RunStateError
@@ -8,6 +9,7 @@ from fixtures.metadata import add_pipeline
 from fixtures.races import two_at_once
 
 
+@pytest.mark.chaos
 def test_simultaneous_initializers_leave_one_active_run(engine_db):
     db = engine_db
     with db.engine.begin() as conn:

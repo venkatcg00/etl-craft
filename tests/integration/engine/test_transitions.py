@@ -374,6 +374,7 @@ def test_run_reopen_and_history_are_atomic(engine_db):
         )
 
 
+@pytest.mark.chaos
 def test_cancelled_attempt_cannot_overwrite_an_operator_mark(engine_db):
     with engine_db.engine.begin() as conn:
         _, _, _, task = scene(conn)
@@ -435,6 +436,7 @@ def test_attempt_number_preserves_legacy_summary_history(engine_db, status, coun
         assert tr.active_attempt(conn, task).attempt_id == attempt
 
 
+@pytest.mark.chaos
 def test_operator_mark_refuses_an_attempt_admitted_after_its_read(engine_db, monkeypatch):
     with engine_db.engine.begin() as conn:
         _, _, _, task = scene(conn)
@@ -447,6 +449,7 @@ def test_operator_mark_refuses_an_attempt_admitted_after_its_read(engine_db, mon
         assert conn.execute(text("SELECT STATUS FROM AUD_TASK_ATTEMPTS")).scalar_one() == "CLAIMED"
 
 
+@pytest.mark.chaos
 def test_operator_cancel_refuses_a_run_that_finished_after_its_read(engine_db):
     with engine_db.engine.begin() as conn:
         _, _, run, _ = scene(conn)
@@ -456,6 +459,7 @@ def test_operator_cancel_refuses_a_run_that_finished_after_its_read(engine_db):
         assert runlog.fetch_pipeline_run_status(conn, run) == "SUCCESS"
 
 
+@pytest.mark.chaos
 def test_stale_attempt_cannot_advance_its_offset(engine_db):
     from etl_craft.engine.repository.offsets import (
         StoredOffset,

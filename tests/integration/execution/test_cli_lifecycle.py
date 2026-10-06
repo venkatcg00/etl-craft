@@ -12,6 +12,7 @@ from sqlalchemy import text
 @pytest.mark.parametrize(
     "point", ["runner.after_bind", "supervisor.after_mkdir", "supervisor.after_popen"]
 )
+@pytest.mark.chaos
 def test_a_fault_after_binding_records_failure_and_allows_retry(cli_project, point):
     project = cli_project
     assert project.run("run", "--pipeline_code", "P", "--init-only")[0] == 0
@@ -40,6 +41,7 @@ def test_a_timeout_parse_fault_leaves_no_bound_attempt(cli_project):
 
 
 @pytest.mark.parametrize("mode", ["", ":kill"])
+@pytest.mark.chaos
 def test_a_child_failure_after_recording_success_keeps_the_recorded_outcome(cli_project, mode):
     project = cli_project
     code, output = project.run("run", "--pipeline_code", "P", fault="child.after_outcome" + mode)

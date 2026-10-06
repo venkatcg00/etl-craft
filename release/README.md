@@ -44,6 +44,19 @@ tables and Iceberg tables. A missing credential fails the suite instead of skipp
 creates schemas named `ec_<run>_*` in the configured catalog or database and drops them when it
 ends; it touches no other schema. The evidence is written the same way as every other suite's.
 
+## Chaos stability
+
+The `chaos` release suite includes both Engine DB dialects. Run it with the local services up:
+
+```bash
+ETL_CRAFT_REQUIRE_SERVICES=1 python scripts/run_suite.py chaos
+```
+
+Release evidence records the complete suite once, using the same evidence rules as other suites.
+The CI stability gate separately requires twenty consecutive passes on SQLite and twenty on
+PostgreSQL for changes to execution, engine, tests, the suite manifest or the CI workflow.
+Each iteration uploads its JUnit results; any failure stops that dialect's job.
+
 ## Checking the gate
 
 ```bash

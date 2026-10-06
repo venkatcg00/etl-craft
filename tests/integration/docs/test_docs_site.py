@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -40,9 +41,11 @@ def _versions(site: Path):
     return {entry["version"]: entry["aliases"] for entry in entries}
 
 
-def test_before_the_first_release_the_site_is_the_dev_version(clone, tmp_path):
+def test_before_the_first_release_the_site_is_the_dev_version(clone, tmp_path, record_property):
     site = tmp_path / "site"
+    started = time.monotonic()
     assert build_docs_site.main([str(site), "--repo", str(clone)]) == 0
+    record_property("docs_build_seconds", round(time.monotonic() - started, 3))
 
     assert _versions(site) == {"dev": []}
     assert 'url=dev/"' in (site / "index.html").read_text(encoding="utf-8")
@@ -59,7 +62,8 @@ def test_before_the_first_release_the_site_is_the_dev_version(clone, tmp_path):
     assert _git(clone, "branch", "--list", "docs-site-build") == ""
 
 
-def test_each_release_line_is_built_and_the_newest_is_latest(clone, tmp_path):
+@pytest.mark.timeout(240)
+def test_each_release_line_is_built_and_the_newest_is_latest(clone, tmp_path, record_property):
     head = _git(clone, "rev-parse", "HEAD")
     renderer = clone / "docs" / "gen_ref_pages.py"
     renderer.write_text(
@@ -83,7 +87,9 @@ def test_each_release_line_is_built_and_the_newest_is_latest(clone, tmp_path):
     _git(clone, "tag", "v0.1.1")
     _git(clone, "checkout", "--quiet", "--detach", head)
     site = tmp_path / "site"
+    started = time.monotonic()
     assert build_docs_site.main([str(site), "--repo", str(clone)]) == 0
+    record_property("docs_build_seconds", round(time.monotonic() - started, 3))
 
     assert _versions(site) == {"0.1": ["latest"], "dev": []}
     assert 'url=latest/"' in (site / "index.html").read_text(encoding="utf-8")

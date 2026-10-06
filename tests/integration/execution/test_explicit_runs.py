@@ -11,6 +11,7 @@ from fixtures.metadata import add_pipeline
 
 
 @pytest.mark.parametrize("clear_init", [False, True])
+@pytest.mark.chaos
 def test_clearing_an_older_dag_run_keeps_its_key_and_date(cli_project, clear_init):
     project = cli_project
     raw = yaml.safe_load(project.config.config_path.read_text())
