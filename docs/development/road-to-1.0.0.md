@@ -81,7 +81,7 @@ item's text, or work done early under another item.
 | S3.G.1 Canonical change hash | Done | #104 | B22, B35 |
 | S3.G.2 Set-based write strategies | Done | #105 | B36 |
 | S3.G.3 Safe table replacement | Done | #106 | B37, W5 |
-| S3.G.4 ALTER-based schema evolution | Done | | B39, B40 |
+| S3.G.4 ALTER-based schema evolution | Done | #107 | B39, B40 |
 | S3.G.5 to S3.H | Not started | | |
 | 0.4 and later | Not started | | |
 
