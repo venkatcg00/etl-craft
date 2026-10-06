@@ -10,7 +10,7 @@ Before ``OVERWRITE_TABLE`` and the merges write a row, the target is checked aga
 - a target missing one of the action's engine-managed columns fails, naming them;
 - a SELECT missing a column the target has fails: columns are never dropped;
 - a SELECT with a new column fails unless ``SCHEMA_EVOLUTION`` is true, when the target is
-  rebuilt with the column in the SELECT's position, existing rows NULL in it.
+  extended with nullable columns at the end, preserving existing rows and properties.
 
 Where the warehouse has transactional DDL (PostgreSQL, DuckDB) an action's statements commit or
 roll back together. Trino and the cloud warehouses commit each statement, so an action that
@@ -177,45 +177,6 @@ def add_row_id(session: Session) -> None:
     session.run(f"ALTER TABLE {target} ADD PRIMARY KEY ({ROW_ID_COLUMN})", step="key on ROW_ID")
 
 
-def restore_row_id(session: Session) -> None:
-    """Make a rebuilt target's carried-over ROW_ID its key again, continuing after its values."""
-    has_row_id = any(name.lower() == ROW_ID_COLUMN.lower() for name, _ in session.target_columns())
-    if not has_row_id:
-        add_row_id(session)
-        return
-    strategy = session.dialect.surrogate_key
-    if strategy == "computed":
-        return
-    target = session.target
-    next_value = session.count(
-        f"SELECT COALESCE(MAX({ROW_ID_COLUMN}), 0) + 1 FROM {target}", step="next ROW_ID"
-    )
-    if strategy == "sequence":
-        sequence = sequence_name(session)
-        session.run(f"DROP SEQUENCE IF EXISTS {sequence}", step="clear the ROW_ID sequence")
-        session.run(
-            f"CREATE SEQUENCE {sequence} START {next_value}", step="create the ROW_ID sequence"
-        )
-        session.run(
-            f"ALTER TABLE {target} ALTER COLUMN {ROW_ID_COLUMN} SET DEFAULT nextval('{sequence}')",
-            step="default ROW_ID to the sequence",
-        )
-    else:
-        session.run(
-            f"ALTER TABLE {target} ALTER COLUMN {ROW_ID_COLUMN} SET NOT NULL",
-            step="ROW_ID not null",
-        )
-        session.run(
-            f"ALTER TABLE {target} ALTER COLUMN {ROW_ID_COLUMN} ADD GENERATED ALWAYS AS IDENTITY",
-            step="make ROW_ID an identity",
-        )
-        session.run(
-            f"ALTER TABLE {target} ALTER COLUMN {ROW_ID_COLUMN} RESTART WITH {next_value}",
-            step="continue ROW_ID",
-        )
-    session.run(f"ALTER TABLE {target} ADD PRIMARY KEY ({ROW_ID_COLUMN})", step="key on ROW_ID")
-
-
 def require_target(session: Session) -> list[tuple[str, str]]:
     """Return the target's columns; ``HandlerError`` naming the remedy when it does not exist."""
     columns = session.target_columns()
@@ -254,58 +215,52 @@ def check_or_evolve(session: Session, stage: str, action: str, *, schema_evoluti
     stage_set = {name.lower() for name in stage_names}
     business = [name for name, _ in target_columns if name.lower() not in managed]
     business_set = {name.lower() for name in business}
-    if stage_set == business_set:
-        return
     missing = [name for name in business if name.lower() not in stage_set]
     if missing:
         raise HandlerError(
             f"{session.target} has column(s) {', '.join(missing)} that the SELECT no longer "
             "returns; columns are never dropped, so return them (NULL if need be)"
         )
+    if schema_evolution:
+        stage_types = session.column_types(stage)
+        target_types = session.column_types(session.target)
+        for name in business:
+            source_type = stage_types[name.lower()]
+            target_type = target_types[name.lower()]
+            if not session.dialect.same_column_type(source_type, target_type):
+                raise HandlerError(
+                    f"{session.target}.{name}: SCHEMA_EVOLUTION cannot change the existing type "
+                    f"{target_type} to the SELECT's type {source_type}; cast the SELECT to "
+                    "the target type or migrate the column explicitly"
+                )
+    else:
+        stage_types = {}
     new = [name for name in stage_names if name.lower() not in business_set]
+    if not new:
+        return
     if not schema_evolution:
         raise HandlerError(
             f"the SELECT returns new column(s) {', '.join(new)} that {session.target} does not "
             "have; set SCHEMA_EVOLUTION=true to add them"
         )
-    evolve(session, managed, stage_columns, target_columns)
+    evolve(session, [(name, stage_types[name.lower()]) for name in new])
 
 
-def evolve(
-    session: Session,
-    managed: set[str],
-    stage_columns: list[tuple[str, str]],
-    target_columns: list[tuple[str, str]],
-) -> None:
-    """Rebuild the target with the stage's column order, keeping its rows and ROW_ID values.
-
-    A new column is NULL in existing rows. Indexes and grants on the old table are not
-    carried over.
-    """
-    old = {name.lower() for name, _ in target_columns if name.lower() not in managed}
-    parts = [
-        f"t.{name}" if name.lower() in old else f"CAST(NULL AS {data_type}) AS {name}"
-        for name, data_type in stage_columns
+def evolve(session: Session, columns: list[tuple[str, str]]) -> None:
+    """Append nullable columns without rebuilding rows, keys, properties or dependencies."""
+    columns = [
+        (name, session.dialect.evolution_column_type(data_type)) for name, data_type in columns
     ]
-    parts.extend(f"t.{name}" for name, _ in target_columns if name.lower() in managed)
-    added = [name for name, _ in stage_columns if name.lower() not in old]
-    location = (session.params.get("EXTERNAL_LOCATION") or "").strip()
-    if location:
-        raise HandlerError(
-            f"the SELECT returns new column(s) {', '.join(added)}, but SCHEMA_EVOLUTION rebuilds "
-            f"the table, which cannot keep its EXTERNAL_LOCATION ({location}); add the "
-            f"column(s) to {session.target} yourself (ALTER TABLE ... ADD COLUMN)"
+    for name, data_type in columns:
+        problem = session.dialect.column_addition_problem(data_type)
+        if problem:
+            raise HandlerError(f"{session.target}.{name}: {problem}")
+    for name, data_type in columns:
+        session.run(
+            f"{session.dialect.alter_table_keyword()} {session.target} "
+            f"ADD COLUMN {name} {data_type}",
+            step=f"add column {name} ({data_type})",
         )
-    rebuild = session.qualify(f"{session.schema}.{session.table}__etl_evolve")
-    session.drop(rebuild)
-    session.create_table_as(
-        rebuild,
-        f"SELECT {', '.join(parts)} FROM {session.target} t",
-        step=f"rebuild the target with new column(s) {', '.join(added)}",
-    )
-    session.run(f"DROP TABLE {session.target}", step="replace the target")
-    session.rename(rebuild, session.target)
-    restore_row_id(session)
 
 
 def refuse_null_keys(session: Session, stage: str, merge_key: tuple[str, ...]) -> None:

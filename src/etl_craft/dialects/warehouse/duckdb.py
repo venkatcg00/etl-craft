@@ -53,3 +53,23 @@ class DuckDBWarehouse(WarehouseDialect):
             {"catalog": catalog, "schema": schema, "table": table},
         ).scalar_one()
         return None if value is None else str(value)
+
+    def full_column_types(self, conn: Connection, table: str) -> dict[str, str]:
+        """DuckDB's information schema retains precision and complete nested types."""
+        parts = table.split(".")
+        name = parts[-1]
+        schema = parts[-2] if len(parts) >= 2 else None
+        catalog = parts[0] if len(parts) == 3 else None
+        if schema is not None:
+            self.load_table_metadata(conn, schema, name)
+        rows = conn.execute(
+            text(
+                "SELECT column_name, data_type FROM information_schema.columns "
+                "WHERE lower(table_name) = lower(:table) "
+                "AND (:schema IS NULL OR lower(table_schema) = lower(:schema)) "
+                "AND (:catalog IS NULL OR lower(table_catalog) = lower(:catalog)) "
+                "ORDER BY ordinal_position"
+            ),
+            {"table": name, "schema": schema, "catalog": catalog},
+        ).all()
+        return {str(row[0]).lower(): str(row[1]) for row in rows}

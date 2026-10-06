@@ -21,6 +21,7 @@ from etl_craft.warehouse.connection import build_warehouse_engine
 from fixtures.cloud import DATABRICKS_VARS, SNOWFLAKE_VARS, require_variables, write_config
 from fixtures.engine_db import apply_schema, sqlite_engine_db
 from fixtures.metadata import add_pipeline, insert
+from fixtures.sql_evolution import check_evolution, check_interrupted_evolution
 from fixtures.sql_merges import check_composite_merge
 from fixtures.sql_replacement import check_replacement_failure
 from fixtures.sql_warehouse import SqlWorld
@@ -207,3 +208,34 @@ def test_every_action_on_snowflake(tmp_path, table_format):
     fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
     schema = os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"]
     walk_every_action(cloud_world(tmp_path, "Snowflake", fields, table_format, schema))
+
+
+def walk_schema_evolution(w):
+    suffix = uuid.uuid4().hex[:8]
+    targets = [f"etl_craft_evolve_{suffix}", f"etl_craft_partial_{suffix}"]
+    try:
+        check_evolution(w, targets[0])
+        check_interrupted_evolution(w, targets[1])
+    finally:
+        for target in targets:
+            w.execute(f"DROP TABLE IF EXISTS {w.name(target)}")
+        w.warehouse.dispose()
+        w.engine_db.dispose()
+
+
+@pytest.mark.cloud_databricks
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_schema_evolution_on_databricks(tmp_path, table_format):
+    require_variables("DATABRICKS", DATABRICKS_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_DATABRICKS_{name}" for name in DATABRICKS_VARS}
+    schema = os.environ["ETL_CRAFT_TEST_DATABRICKS_SCHEMA"]
+    walk_schema_evolution(cloud_world(tmp_path, "Databricks", fields, table_format, schema))
+
+
+@pytest.mark.cloud_snowflake
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_schema_evolution_on_snowflake(tmp_path, table_format):
+    require_variables("SNOWFLAKE", SNOWFLAKE_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
+    schema = os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"]
+    walk_schema_evolution(cloud_world(tmp_path, "Snowflake", fields, table_format, schema))

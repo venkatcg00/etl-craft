@@ -179,7 +179,7 @@ updates so the planner has current stage statistics.
 |---|---|---|
 | `MERGE_DEDUPE_ORDER` | the merges | when the SELECT returns a merge key more than once, keep the first row in this order, such as `updated_at DESC`; without it, duplicate keys fail the task. An order that ties between rows that differ fails the task too: add a column that breaks the tie |
 | `SETUP_FOR` | `SETUP_TABLE` | the action whose audit columns the table gets: `CREATE_TABLE`, `OVERWRITE_TABLE`, `APPEND_TABLE`, `SCD1_MERGE` or `SCD2_MERGE` |
-| `SCHEMA_EVOLUTION` | `OVERWRITE_TABLE` and the merges | `true` adds a column the SELECT returns but the target lacks, in the SELECT's position |
+| `SCHEMA_EVOLUTION` | `OVERWRITE_TABLE` and the merges | `true` appends nullable columns the SELECT returns but the target lacks, with their complete types |
 | `PRESERVE_TARGET` | `SCD1_MERGE` | `true` keeps the target's value where the SELECT returns NULL |
 | `HARD_DELETE` | `DELETE_ROWS` | `true` deletes rows instead of flagging them |
 | `TABLE_FORMAT` | all | `native` or `iceberg`, for this task's target, where the warehouse lets a task choose |
@@ -188,8 +188,7 @@ updates so the planner has current stage statistics.
 | `CATALOG` | tables it creates, on Snowflake Iceberg | a catalog integration for an externally managed Iceberg catalog |
 
 A storage parameter a warehouse does not use fails the task rather than being ignored: the table
-would otherwise land somewhere other than intended. A table with an `EXTERNAL_LOCATION` cannot be
-rebuilt by `SCHEMA_EVOLUTION`, which would lose its location; add new columns to it yourself. See
+would otherwise land somewhere other than intended. Schema evolution adds columns in place, retaining the table's storage location. See
 [Warehouses](../connectors/warehouses.md#storage-outside-the-warehouses-own) for each warehouse.
 
 Yes/no parameters take `true` or `false`; anything else fails the task.
@@ -220,10 +219,30 @@ task fails with the reason when:
   NULL if need be;
 - the SELECT returns a new column and `SCHEMA_EVOLUTION` is not `true`.
 
-With `SCHEMA_EVOLUTION = true` the target is rebuilt with the new column, which is NULL in the
-rows already there. Indexes and grants on the old table are not carried over. Safe overwrite
-on warehouses without transactional DDL refuses this rebuild: add the new columns with
-`ALTER TABLE` before overwriting.
+With `SCHEMA_EVOLUTION = true`, new columns are appended with `ALTER TABLE ... ADD COLUMN`.
+They are nullable and NULL in existing rows. The engine reads complete types from the materialized
+stage, preserving precision, scale, declared lengths and nested types where the warehouse supports
+them. It keeps the existing table, rows, `ROW_ID` generator, storage location, comments, grants,
+partitioning and snapshot history. An overwrite still replaces rows using its publication strategy.
+Writes name their columns explicitly, so the SELECT's order need not match the table's order.
+
+Evolution never changes an existing column's type. With `SCHEMA_EVOLUTION = true`, the engine
+compares the complete types of existing business columns even if no columns need adding, and
+refuses differences before any additions. The error names the target, column and both types:
+cast the SELECT to the target's declared type or migrate that column explicitly. Without schema
+evolution, ordinary writes retain the warehouse's existing conversion behavior.
+
+The warehouse's stored types govern evolution: DuckDB normalizes `CHAR` and bounded `VARCHAR`
+to `VARCHAR`, and Iceberg stores strings without declared lengths. DuckDB over Iceberg cannot
+add nested columns with `ALTER TABLE`; the engine refuses a batch containing such an addition
+before adding any columns. Add arrays, maps or structs through a capable catalog engine, such
+as Trino, then return those columns from the SELECT.
+
+All types are checked before additions begin. PostgreSQL and native DuckDB roll back additions
+if the action fails. On warehouses whose DDL commits independently, a failure during additions
+or a later write can leave some nullable new columns in place; existing rows survive the failed
+addition. Retry the same SELECT to complete from the current column set. Evolution does not
+rebuild the table as a fallback.
 
 ## Logs and counts
 

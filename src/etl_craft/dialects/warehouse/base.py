@@ -314,6 +314,37 @@ class WarehouseDialect:
         """Return the keyword that alters a table this dialect created."""
         return "ALTER TABLE"
 
+    def full_column_types(self, conn: Connection, table: str) -> dict[str, str]:
+        """Read reusable DDL types, including nested types and declared sizes."""
+        rows = conn.execute(text(f"DESCRIBE TABLE {table}")).all()
+        return {
+            str(row[0]).lower(): str(row[1])
+            for row in rows
+            if row[0] and not str(row[0]).startswith("#")
+        }
+
+    def full_column_type(self, conn: Connection, table: str, column: str) -> str:
+        """Return a column's complete warehouse type, refusing missing metadata."""
+        columns = self.full_column_types(conn, table)
+        if column.lower() not in columns:
+            raise HandlerError(f"{table}.{column}: cannot read the complete column type")
+        return columns[column.lower()]
+
+    def column_addition_problem(self, data_type: str) -> str | None:
+        """Return why this type cannot be added without rebuilding, or None."""
+        return None
+
+    def same_column_type(self, source: str, target: str) -> bool:
+        """Compare types as this warehouse stores and reports them."""
+        return (
+            self.evolution_column_type(source).strip().casefold()
+            == self.evolution_column_type(target).strip().casefold()
+        )
+
+    def evolution_column_type(self, data_type: str) -> str:
+        """Return the full stage type in the target table format's DDL representation."""
+        return data_type
+
     def audit_column_type(self, column: str) -> str:
         """Return the DDL type of an engine-managed audit column."""
         return AUDIT_COLUMN_TYPES[column]

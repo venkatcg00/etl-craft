@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
@@ -33,6 +34,15 @@ class DuckDBIcebergWarehouse(DuckDBWarehouse):
     surrogate_key: SurrogateKey = "computed"
     enforces_primary_keys = False
     bearer_needs_user = False
+
+    def column_addition_problem(self, data_type: str) -> str | None:
+        """DuckDB Iceberg cannot add nested columns through ALTER TABLE."""
+        if re.search(r"\[|^(STRUCT|MAP|UNION)\s*\(", data_type.strip(), re.IGNORECASE):
+            return (
+                f"DuckDB Iceberg cannot add nested type {data_type} with ALTER TABLE; "
+                "add this column through a catalog engine that supports it, such as Trino"
+            )
+        return None
 
     def present(self, profile: ConnectionProfile, secret: str, url: WarehouseUrl) -> Presented:
         """Present nothing to DuckDB itself: the catalog login happens in ``on_connect``."""

@@ -179,6 +179,11 @@ class SnowflakeIcebergWarehouse(SnowflakeWarehouse):
         """Return ALTER ICEBERG TABLE: Snowflake refuses plain ALTER TABLE on an Iceberg table."""
         return "ALTER ICEBERG TABLE"
 
+    def evolution_column_type(self, data_type: str) -> str:
+        """Iceberg strings have no bounds; native stages can report different VARCHAR limits."""
+        pattern = r"\bVARCHAR\s*\(\s*\d+\s*\)"
+        return re.sub(pattern, "VARCHAR", data_type, flags=re.IGNORECASE)
+
     def audit_column_type(self, column: str) -> str:
         """Use TIMESTAMP_NTZ(6) for audit instants: Iceberg tables here take no zoned timestamp.
 
