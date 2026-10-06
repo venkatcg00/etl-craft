@@ -50,8 +50,8 @@ def test_a_complete_merge_task(project):
             project,
             SQL_ACTION="scd2_merge",
             TARGET_OBJECT=" sales.orders ",
-            SOURCE_SQL="SELECT id, name FROM raw.orders WHERE $$pipeline_id_filter;",
-            PIPELINE_ID_FILTER="TRUE",
+            SOURCE_SQL="SELECT id, name FROM raw.orders WHERE $$pipeline_run_id_filter;",
+            PIPELINE_RUN_ID_FILTER="TRUE",
             MERGE_KEY="id | region",
             MERGE_COMPARE_COLUMNS="name",
             MERGE_DEDUPE_ORDER="updated_at DESC NULLS LAST,id",
@@ -69,8 +69,8 @@ def test_a_complete_merge_task(project):
 
 def test_a_sql_file_is_read_from_sql_files(project):
     (project / "sql_files" / "orders.sql").write_text(
-        "-- all orders on a full refresh\nSELECT $$pipeline_id AS run\nFROM raw.orders\n"
-        "WHERE $$pipeline_id_filter\n",
+        "-- all orders on a full refresh\nSELECT $$pipeline_run_id AS run\nFROM raw.orders\n"
+        "WHERE $$pipeline_run_id_filter\n",
         encoding="utf-8",
     )
     task = read_sql_task(
@@ -78,8 +78,8 @@ def test_a_sql_file_is_read_from_sql_files(project):
             project,
             refresh_type="FULL",
             SOURCE_SQL_FILE="orders.sql",
-            PIPELINE_ID_SUBSTITUTION="true",
-            PIPELINE_ID_FILTER="true",
+            PIPELINE_RUN_ID_SUBSTITUTION="true",
+            PIPELINE_RUN_ID_FILTER="true",
             **BASE,
         )
     )
@@ -204,3 +204,20 @@ def test_flags():
     assert parse_flag({"X": " "}, "X") is False
     assert parse_flag({"X": " False "}, "X") is False
     assert parse_flag({"X": "TRUE"}, "X") is True
+
+
+def test_execution_identity_tokens_have_distinct_named_values(project):
+    task = read_sql_task(
+        context(
+            project,
+            **BASE,
+            SOURCE_SQL="SELECT $$pipeline_id AS definition_id, "
+            "$$pipeline_run_id AS execution_id, $$task_run_id AS task_execution_id",
+            PIPELINE_ID_SUBSTITUTION="true",
+            PIPELINE_RUN_ID_SUBSTITUTION="true",
+            TASK_RUN_ID_SUBSTITUTION="true",
+        )
+    )
+    assert (
+        task.select_sql == "SELECT 1 AS definition_id, 42 AS execution_id, 7 AS task_execution_id"
+    )

@@ -224,6 +224,7 @@ def test_a_failed_metadata_rebuild_rolls_back_and_restores_connection_settings(
         "0009_preserve_request_actors.sql",
         "0010_gate_repairs.sql",
         "0011_target_hash_version.sql",
+        "0013_execution_identity_comment.sql",
     ]
 
 

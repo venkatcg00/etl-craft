@@ -269,7 +269,9 @@ def is_only_comments(statement: str) -> bool:
 # SQL task text
 
 PIPELINE_ID_TOKEN = "$$pipeline_id"
-PIPELINE_ID_FILTER_TOKEN = "$$pipeline_id_filter"
+PIPELINE_RUN_ID_TOKEN = "$$pipeline_run_id"
+TASK_RUN_ID_TOKEN = "$$task_run_id"
+PIPELINE_RUN_ID_FILTER_TOKEN = "$$pipeline_run_id_filter"
 RUN_DATE_TOKEN = "$$run_date"
 LINEAGE_RUN_DATE = date(1970, 1, 1)
 """The ``$$run_date`` lineage and validation read a task's SELECT with: fixed, so a task's
@@ -277,25 +279,30 @@ lineage does not look changed every day."""
 _TOKEN = re.compile(r"\$\$([A-Za-z_][A-Za-z0-9_]*)")
 
 
-def substitute_pipeline_id(
+def substitute_task_tokens(
     sql: str,
     *,
     pipeline_run_id: int,
     refresh_type: str,
-    substitution: bool,
+    pipeline_run_id_substitution: bool,
     filter_enabled: bool,
     source: str = "SOURCE_SQL",
     force_all: bool = False,
     run_date: date = LINEAGE_RUN_DATE,
     run_date_substitution: bool = False,
+    pipeline_id: int = 0,
+    task_run_id: int = 0,
+    pipeline_id_substitution: bool = False,
+    task_run_id_substitution: bool = False,
 ) -> str:
-    """Replace the pipeline-id and run-date tokens in ``sql``, each only when its switch is on.
+    """Replace execution-identity and run-date tokens, each only when its switch is on.
 
-    - ``$$pipeline_id`` becomes the run's ``pipeline_run_id``, when ``substitution`` is on
-      (the task's ``PIPELINE_ID_SUBSTITUTION``).
-    - ``$$pipeline_id_filter`` becomes ``pipeline_run_id = <id>``, or ``1=1`` for a ``FULL``
+    - ``$$pipeline_id``, ``$$pipeline_run_id`` and ``$$task_run_id`` become their named ids,
+      enabled by ``PIPELINE_ID_SUBSTITUTION``, ``PIPELINE_RUN_ID_SUBSTITUTION`` and
+      ``TASK_RUN_ID_SUBSTITUTION`` respectively.
+    - ``$$pipeline_run_id_filter`` becomes ``pipeline_run_id = <id>``, or ``1=1`` for a ``FULL``
       refresh or when ``force_all`` asks for every row, when ``filter_enabled`` is on (the
-      task's ``PIPELINE_ID_FILTER``).
+      task's ``PIPELINE_RUN_ID_FILTER``).
     - ``$$run_date`` becomes the date the run runs as of, as ``DATE 'YYYY-MM-DD'``, when
       ``run_date_substitution`` is on (the task's ``RUN_DATE_SUBSTITUTION``).
 
@@ -312,20 +319,24 @@ def substitute_pipeline_id(
         for match in _TOKEN.finditer(part)
     }
     known = {
-        PIPELINE_ID_TOKEN[2:]: substitution,
-        PIPELINE_ID_FILTER_TOKEN[2:]: filter_enabled,
+        PIPELINE_ID_TOKEN[2:]: pipeline_id_substitution,
+        PIPELINE_RUN_ID_TOKEN[2:]: pipeline_run_id_substitution,
+        TASK_RUN_ID_TOKEN[2:]: task_run_id_substitution,
+        PIPELINE_RUN_ID_FILTER_TOKEN[2:]: filter_enabled,
         RUN_DATE_TOKEN[2:]: run_date_substitution,
     }
     switch = {
         PIPELINE_ID_TOKEN[2:]: "PIPELINE_ID_SUBSTITUTION",
-        PIPELINE_ID_FILTER_TOKEN[2:]: "PIPELINE_ID_FILTER",
+        PIPELINE_RUN_ID_TOKEN[2:]: "PIPELINE_RUN_ID_SUBSTITUTION",
+        TASK_RUN_ID_TOKEN[2:]: "TASK_RUN_ID_SUBSTITUTION",
+        PIPELINE_RUN_ID_FILTER_TOKEN[2:]: "PIPELINE_RUN_ID_FILTER",
         RUN_DATE_TOKEN[2:]: "RUN_DATE_SUBSTITUTION",
     }
     unknown = sorted(found - known.keys())
     if unknown:
         raise HandlerError(
             f"{source} uses unknown token(s) {', '.join('$$' + t for t in unknown)}; the known "
-            f"tokens are {PIPELINE_ID_TOKEN}, {PIPELINE_ID_FILTER_TOKEN} and {RUN_DATE_TOKEN}"
+            f"tokens are {', '.join('$$' + name for name in known)}"
         )
     for name, enabled in known.items():
         if name in found and not enabled:
@@ -341,8 +352,10 @@ def substitute_pipeline_id(
     run_id = int(pipeline_run_id)
     full = force_all or refresh_type == RefreshType.FULL
     replacements = {
-        PIPELINE_ID_TOKEN[2:]: str(run_id),
-        PIPELINE_ID_FILTER_TOKEN[2:]: "1=1" if full else f"pipeline_run_id = {run_id}",
+        PIPELINE_ID_TOKEN[2:]: str(int(pipeline_id)),
+        PIPELINE_RUN_ID_TOKEN[2:]: str(run_id),
+        TASK_RUN_ID_TOKEN[2:]: str(int(task_run_id)),
+        PIPELINE_RUN_ID_FILTER_TOKEN[2:]: "1=1" if full else f"pipeline_run_id = {run_id}",
         RUN_DATE_TOKEN[2:]: f"DATE '{run_date.isoformat()}'",
     }
     return "".join(

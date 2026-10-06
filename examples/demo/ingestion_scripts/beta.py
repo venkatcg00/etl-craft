@@ -40,16 +40,22 @@ def run(task: ScriptTask) -> ScriptResult:
                 f"CREATE TABLE IF NOT EXISTS {table} (support_identifier BIGINT, "
                 "agent VARCHAR(100), regarding VARCHAR(100), event_time TIMESTAMP, "
                 "status VARCHAR(100), handle_time BIGINT, "
-                "score BIGINT, pipeline_run_id BIGINT)"
+                "score BIGINT, pipeline_run_id BIGINT, pipeline_id BIGINT, task_run_id BIGINT)"
             )
         )
         for event in events:
             conn.execute(
                 text(
                     f"INSERT INTO {table} VALUES (:support_identifier, :agent, :regarding, "
-                    ":event_time, :status, :handle_time, :score, :run)"
+                    ":event_time, :status, :handle_time, :score, "
+                    ":pipeline_run_id, :pipeline_id, :task_run_id)"
                 ),
-                {**event, "run": task.pipeline_run_id},
+                {
+                    **event,
+                    "pipeline_run_id": task.pipeline_run_id,
+                    "pipeline_id": task.pipeline_id,
+                    "task_run_id": task.task_run_id,
+                },
             )
     newest = events[-1]["event_time"]
     return ScriptResult(row_count=len(events), offset=Offset.timestamp(newest))

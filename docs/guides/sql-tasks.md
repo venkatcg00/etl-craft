@@ -34,13 +34,15 @@ naming them, when:
 
 ### The pipeline-id tokens
 
-Every table the engine writes records the run that wrote each row in `PIPELINE_RUN_ID`. Two tokens
-let a SELECT use the current run:
+Every table the engine writes records its execution identities. Named tokens let a SELECT use
+the current pipeline definition, pipeline execution and task execution:
 
 | Token | Enabled by | Becomes |
 |---|---|---|
-| `$$pipeline_id` | `PIPELINE_ID_SUBSTITUTION = true` | the run's `pipeline_run_id`, such as `97` |
-| `$$pipeline_id_filter` | `PIPELINE_ID_FILTER = true` | `pipeline_run_id = 97`, or `1=1` when the pipeline's `REFRESH_TYPE` is `FULL` |
+| `$$pipeline_id` | `PIPELINE_ID_SUBSTITUTION = true` | the pipeline definition's `pipeline_id` |
+| `$$pipeline_run_id` | `PIPELINE_RUN_ID_SUBSTITUTION = true` | the run's `pipeline_run_id`, such as `97` |
+| `$$task_run_id` | `TASK_RUN_ID_SUBSTITUTION = true` | this task execution's `task_run_id`, shared by its retries |
+| `$$pipeline_run_id_filter` | `PIPELINE_RUN_ID_FILTER = true` | `pipeline_run_id = 97`, or `1=1` when the pipeline's `REFRESH_TYPE` is `FULL` |
 | `$$run_date` | `RUN_DATE_SUBSTITUTION = true` | the date the run runs as of, as `DATE '2026-09-01'`: the day it started (UTC), the `--run-date` it was given, or the date of a [backfill](run-control.md#backfill-over-dates) run |
 
 A task that reads by date follows the run's date, so a backfill of a past day reads that day:
@@ -52,15 +54,15 @@ SELECT order_id, amount FROM raw.orders WHERE order_date = $$run_date
 A typical incremental load reads only the rows an earlier task wrote in the same run:
 
 ```sql
-SELECT order_id, amount, $$pipeline_id AS loaded_in_run
+SELECT order_id, amount, $$pipeline_run_id AS loaded_in_run
 FROM staging.orders
-WHERE $$pipeline_id_filter
+WHERE $$pipeline_run_id_filter
 ```
 
 A token is replaced only when its parameter is `true`. The task fails before anything runs, naming
 the problem, when the SELECT uses a token whose parameter is not `true`, when a parameter is `true`
 but its token is missing, or when the SELECT holds any other `$$` token outside quotes and
-comments. String literals, quoted identifiers and comments are preserved: `'$$pipeline_id'`
+comments. String literals, quoted identifiers and comments are preserved: `'$$pipeline_run_id'`
 is literal text and does not require a substitution switch. Tokens inside dollar-quoted
 strings are also preserved; tagged delimiters such as `$literal$...$literal$` distinguish
 literal bodies from adjacent bare substitution tokens.
@@ -76,7 +78,7 @@ active `Warehouse` profile's database, so the same rows work in every environmen
 | `CREATE_TABLE` | replaces the target with the SELECT's rows | — |
 | `SETUP_TABLE` | creates the target, empty, from the SELECT's shape plus the audit columns of the action that writes it, when it does not exist; an existing target is left as it is | `SETUP_FOR` when no task in the pipeline writes the target |
 | `OVERWRITE_TABLE` | replaces the target's rows from the SELECT | an existing target |
-| `APPEND_TABLE` | inserts the SELECT's rows, without comparing the shapes | an existing target |
+| `APPEND_TABLE` | replaces this task run's previous batch, then inserts the SELECT's rows, without comparing the shapes | an existing target |
 | `SCD1_MERGE` | updates changed rows in place, by merge key, and inserts new keys | an existing target, `MERGE_KEY`, `MERGE_COMPARE_COLUMNS` |
 | `SCD2_MERGE` | closes the active version of each changed key (`ACTIVE_FLAG = 'N'`) and inserts a new active one | an existing target, `MERGE_KEY`, `MERGE_COMPARE_COLUMNS` |
 | `DROP_TABLE` | drops the target if it exists, once this pipeline's `CREATE_TABLE` task for it has succeeded in the run; a target already gone is not an error | no SELECT |
@@ -219,14 +221,18 @@ After the SELECT's own columns, every table the engine creates has:
 
 | Column | Added by |
 |---|---|
-| `PIPELINE_RUN_ID` | every action |
+| `PIPELINE_ID`, `PIPELINE_RUN_ID`, `TASK_RUN_ID` | every action |
 | `UPDATE_DATE` | `OVERWRITE_TABLE` |
 | `CREATE_DATE` | `APPEND_TABLE` |
 | `HASH_KEY`, `CREATE_DATE`, `CREATED_BY`, `UPDATE_DATE`, `UPDATED_BY`, `DELETE_FLAG` | `SCD1_MERGE` |
 | the `SCD1_MERGE` columns and `ACTIVE_FLAG` | `SCD2_MERGE` |
 | `ROW_ID` | every action; a generated key that business rules refer to |
 
-`CREATED_BY` and `UPDATED_BY` hold the warehouse user the engine connects as.
+`PIPELINE_ID` identifies the pipeline definition, `PIPELINE_RUN_ID` its execution, and
+`TASK_RUN_ID` the task execution that last inserted or changed the row. All three are BIGINT
+columns. Merge updates, closed SCD2 versions and soft deletes stamp the executing task's
+identities; unchanged rows retain their provenance. `CREATED_BY` and `UPDATED_BY` hold the
+warehouse user the engine connects as.
 
 `ROW_ID` is an internal key, not a business key or a gap-free row counter. PostgreSQL uses
 identity columns and native DuckDB uses a sequence. New Databricks Delta tables, including
@@ -312,7 +318,44 @@ Each count comes from its own `COUNT(*)` query, not from the driver.
 On PostgreSQL and DuckDB an action's statements commit or roll back together. Trino, Databricks
 and Snowflake commit each statement, so an action that fails part-way can leave its work half
 done. Every action works out what to do from the target's current state, so running the task
-again completes it. `APPEND_TABLE` is the exception: running it again after it succeeded appends
-the rows again. Scratch tables the action creates (`etl_stage_<task_run_id>_<token>` and similar,
+again completes it. Scratch tables the action creates (`etl_stage_<task_run_id>_<token>` and similar,
 with a token of its own per attempt) are dropped even when it fails. Where the warehouse has no
 temporary tables (Trino, Databricks) they are created in the target's schema.
+
+
+### Retrying an append
+
+Every new SQL target includes `TASK_RUN_ID BIGINT`. An append stamps each inserted row with its
+existing task-run identity, alongside `PIPELINE_ID` and `PIPELINE_RUN_ID`. Under the target
+mutation lock, an append first stages its SELECT, deletes rows with that task run's `TASK_RUN_ID`,
+then inserts the staged batch. Retrying the same task run replaces its earlier attempt's rows;
+other task runs and historical rows with NULL task-run identities remain untouched. A new pipeline
+run gets a new task-run identity and appends another batch. An empty retry removes its earlier
+batch. `insert_count` and `ROWS_WRITTEN` describe the inserted batch, not the retry cleanup.
+
+PostgreSQL and native DuckDB commit the delete and insert together. On warehouses that commit
+each statement, a failure between them can leave the batch absent until its retry completes.
+`ROW_ID` values may change when a batch is replaced; they are internal keys, not stable source
+identities. Writers outside etl-craft do not participate in the target lock.
+
+Existing targets without `TASK_RUN_ID` keep appending and log a warning on every append because a
+retry can duplicate rows. Upgrade existing configured SQL and ingestion targets:
+
+```bash
+etl-craft upgrade-targets --dry-run
+etl-craft upgrade-targets
+# Select append targets only, or one target:
+etl-craft upgrade-targets --action APPEND_TABLE
+etl-craft upgrade-targets --action APPEND_TABLE --target sales.events
+```
+
+The command adds missing `PIPELINE_ID`, `PIPELINE_RUN_ID` and `TASK_RUN_ID` columns as nullable
+BIGINT under the same target lock. It validates the stored table format and refuses conflicting
+writer formats or incompatible identity types. It scans active SQL tasks and Python ingestion
+tasks with `TARGET_OBJECT` configured. For targets owned only by Python scripts without an explicit `TABLE_FORMAT`, it uses the stored format because the scripts own their table definitions. It preserves existing rows, leaving new identity fields NULL; it cannot identify
+or remove duplicates from past retries. Already upgraded targets are left intact. Existing overwrite
+and merge targets need these columns before their next write; `SCHEMA_EVOLUTION` does not add audit
+columns. Each target is
+upgraded separately, so rerun the command if an error interrupts a multi-target upgrade. A dry run
+validates targets and prints additions without changing the warehouse; its request is still
+recorded in `AUD_ACTIONS`.

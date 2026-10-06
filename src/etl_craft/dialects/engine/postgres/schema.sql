@@ -64,7 +64,7 @@ CREATE UNIQUE INDEX ux_pipelines_code_active
 CREATE TRIGGER trg_audit_cfg_pipelines
     BEFORE INSERT OR UPDATE ON CFG_PIPELINES
     FOR EACH ROW EXECUTE FUNCTION trg_set_audit_columns();
-COMMENT ON TABLE CFG_PIPELINES IS 'One row per pipeline. PIPELINE_CODE is the key the command line uses; REFRESH_TYPE decides what $$pipeline_id becomes.';
+COMMENT ON TABLE CFG_PIPELINES IS 'One row per pipeline. PIPELINE_CODE is the key the command line uses; REFRESH_TYPE decides whether $$pipeline_run_id_filter reads the run or all rows.';
 
 -- A pipeline waiting on another: a new run starts only when the upstream's last finished run
 -- satisfies DEPENDENCY_TYPE.

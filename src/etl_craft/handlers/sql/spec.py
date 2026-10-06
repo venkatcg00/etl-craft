@@ -8,8 +8,8 @@ remedy, so no action ever starts on a half-valid definition.
   ``database.schema.table``.
 - ``SOURCE_SQL`` or ``SOURCE_SQL_FILE`` (every action but ``DROP_TABLE``): the read-only
   SELECT, inline or as a file under ``sql_files/``; exactly one of them.
-- ``PIPELINE_ID_SUBSTITUTION``: ``true`` replaces ``$$pipeline_id`` with the run id.
-- ``PIPELINE_ID_FILTER``: ``true`` replaces ``$$pipeline_id_filter`` with
+- ``PIPELINE_RUN_ID_SUBSTITUTION``: ``true`` replaces ``$$pipeline_run_id`` with the run id.
+- ``PIPELINE_RUN_ID_FILTER``: ``true`` replaces ``$$pipeline_run_id_filter`` with
   ``pipeline_run_id = <id>``, or ``1=1`` on a FULL refresh.
 - ``RUN_DATE_SUBSTITUTION``: ``true`` replaces ``$$run_date`` with the date the run runs as of,
   ``DATE 'YYYY-MM-DD'``: the day it started, or the date of a backfill run.
@@ -43,7 +43,7 @@ from etl_craft.core.text import (
     is_safe_order_term,
     read_only_problem,
     split_statements,
-    substitute_pipeline_id,
+    substitute_task_tokens,
     suggest,
 )
 from etl_craft.dialects.warehouse.base import STORAGE_PARAMETERS
@@ -75,8 +75,10 @@ PARAMETERS = frozenset(
         "TARGET_OBJECT",
         "SOURCE_SQL",
         "SOURCE_SQL_FILE",
+        "PIPELINE_RUN_ID_SUBSTITUTION",
         "PIPELINE_ID_SUBSTITUTION",
-        "PIPELINE_ID_FILTER",
+        "TASK_RUN_ID_SUBSTITUTION",
+        "PIPELINE_RUN_ID_FILTER",
         "RUN_DATE_SUBSTITUTION",
         "MERGE_KEY",
         "MERGE_COMPARE_COLUMNS",
@@ -208,6 +210,8 @@ def _select(context: TaskContext) -> tuple[str, str]:
         context.config,
         context.task_params,
         pipeline_run_id=context.pipeline_run_id,
+        pipeline_id=context.pipeline_id,
+        task_run_id=context.task_run_id,
         refresh_type=context.refresh_type,
         run_date=context.run_date,
     )
@@ -220,6 +224,8 @@ def resolve_select(
     pipeline_run_id: int,
     refresh_type: str,
     run_date: date = LINEAGE_RUN_DATE,
+    pipeline_id: int = 0,
+    task_run_id: int = 0,
 ) -> tuple[str, str]:
     """Return a SQL task's SELECT, inline or from its file, with the tokens replaced.
 
@@ -249,12 +255,16 @@ def resolve_select(
             "SOURCE_SQL_FILE naming a file under sql_files/"
         )
     # Tokens first: a ``$$`` would otherwise read as a dollar-quoted string when splitting.
-    substituted = substitute_pipeline_id(
+    substituted = substitute_task_tokens(
         raw,
         pipeline_run_id=pipeline_run_id,
         refresh_type=refresh_type,
-        substitution=parse_flag(params, "PIPELINE_ID_SUBSTITUTION"),
-        filter_enabled=parse_flag(params, "PIPELINE_ID_FILTER"),
+        pipeline_run_id_substitution=parse_flag(params, "PIPELINE_RUN_ID_SUBSTITUTION"),
+        pipeline_id_substitution=parse_flag(params, "PIPELINE_ID_SUBSTITUTION"),
+        task_run_id_substitution=parse_flag(params, "TASK_RUN_ID_SUBSTITUTION"),
+        pipeline_id=pipeline_id,
+        task_run_id=task_run_id,
+        filter_enabled=parse_flag(params, "PIPELINE_RUN_ID_FILTER"),
         source=source,
         run_date=run_date,
         run_date_substitution=parse_flag(params, "RUN_DATE_SUBSTITUTION"),

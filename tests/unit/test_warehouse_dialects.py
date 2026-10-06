@@ -704,3 +704,21 @@ def test_snowflake_reads_existing_identity_defaults(default, generated):
         )
     )
     assert for_key("snowflake").row_id_generated(conn, "c.s.t") is generated
+
+
+@pytest.mark.parametrize(
+    "key, data_type, expected",
+    [
+        ("postgres", "BIGINT", True),
+        ("duckdb", "BIGINT", True),
+        ("databricks", "bigint", True),
+        ("trino_iceberg", "bigint", True),
+        ("snowflake", "NUMBER(38,0)", True),
+        ("snowflake_iceberg", "NUMBER(19, 0)", True),
+        ("snowflake", "NUMBER(38,2)", False),
+        ("postgres", "INTEGER", False),
+        ("snowflake_iceberg", "VARCHAR", False),
+    ],
+)
+def test_task_run_id_accepts_signed_bigint_representations(key, data_type, expected):
+    assert for_key(key).is_bigint_type(data_type) is expected

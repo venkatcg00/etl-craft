@@ -28,11 +28,15 @@ from etl_craft.core.errors import HandlerError
 from etl_craft.core.text import as_subquery
 from etl_craft.handlers.sql.session import ROW_ID_COLUMN, Session
 
+IDENTITY_COLUMNS = ("PIPELINE_ID", "PIPELINE_RUN_ID", "TASK_RUN_ID")
+
 AUDIT_COLUMNS: dict[str, tuple[str, ...]] = {
-    SqlAction.CREATE_TABLE: (),
-    SqlAction.OVERWRITE_TABLE: ("UPDATE_DATE",),
-    SqlAction.APPEND_TABLE: ("CREATE_DATE",),
+    SqlAction.CREATE_TABLE: ("PIPELINE_ID", "TASK_RUN_ID"),
+    SqlAction.OVERWRITE_TABLE: ("PIPELINE_ID", "TASK_RUN_ID", "UPDATE_DATE"),
+    SqlAction.APPEND_TABLE: ("PIPELINE_ID", "TASK_RUN_ID", "CREATE_DATE"),
     SqlAction.SCD1_MERGE: (
+        "PIPELINE_ID",
+        "TASK_RUN_ID",
         "HASH_KEY",
         "CREATE_DATE",
         "CREATED_BY",
@@ -41,6 +45,8 @@ AUDIT_COLUMNS: dict[str, tuple[str, ...]] = {
         "DELETE_FLAG",
     ),
     SqlAction.SCD2_MERGE: (
+        "PIPELINE_ID",
+        "TASK_RUN_ID",
         "HASH_KEY",
         "CREATE_DATE",
         "CREATED_BY",
@@ -214,6 +220,7 @@ def check_target_audit(session: Session, action: str) -> list[tuple[str, str]]:
             f"SQL_ACTION={action} maintains; run a SETUP_TABLE task for it, or add the columns. "
             "SCHEMA_EVOLUTION adds only the SELECT's own columns"
         )
+    check_identity_types(session)
     return target_columns
 
 
@@ -356,3 +363,15 @@ def add_hash_key(session: Session, stage: str, compare_columns: tuple[str, ...])
     session.run(f"ALTER TABLE {stage} ADD COLUMN HASH_KEY VARCHAR(32)", step="add HASH_KEY")
     hashed = session.hash([f"{stage}.{column}" for column in compare_columns], compare_columns)
     session.run(f"UPDATE {stage} SET HASH_KEY = {hashed}", step="hash the compare columns")
+
+
+def check_identity_types(session: Session, columns: tuple[str, ...] = IDENTITY_COLUMNS) -> None:
+    """Refuse identity columns that cannot hold the engine's integer ids."""
+    types = session.column_types(session.target)
+    for column in columns:
+        kind = types[column.lower()]
+        if not session.dialect.is_bigint_type(kind):
+            raise HandlerError(
+                f"{session.target}.{column} has type {kind}; expected BIGINT. "
+                "Migrate this column explicitly before writing or upgrading"
+            )

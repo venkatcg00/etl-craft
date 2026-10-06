@@ -29,6 +29,22 @@ evaluate a subquery correlated any other way. The rule must be one read-only sta
 A trailing semicolon or SQL comment is allowed, both when flagging rows and when checking
 whether flagged rows now pass.
 
+## Execution identities
+
+Rule SQL receives `:pipeline_id`, `:pipeline_run_id` and `:task_run_id` as bound integer inputs.
+They identify the pipeline definition, its execution and the business-rule task execution.
+The table's `t.TASK_RUN_ID` records the SQL or ingestion task that wrote that row; the rule's
+`:task_run_id` identifies the task evaluating the rule. Evaluating a rule preserves the row's
+provenance. For example:
+
+```sql
+SELECT 1 FROM sales.customers c
+WHERE c.id = t.customer_id
+  AND t.PIPELINE_ID = :pipeline_id
+  AND t.PIPELINE_RUN_ID = :pipeline_run_id
+  AND c.active = 'N'
+```
+
 ## What a run does
 
 For each rule, the engine looks at the rows in scope: those written in the current run

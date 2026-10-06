@@ -52,6 +52,7 @@ def test_an_alert_is_checked_for_every_outcome_it_can_send_on():
         "no EMAIL_BODY for outcome(s) FAILED, COMPLETED_WITH_ERRORS, SUCCESS: set EMAIL_BODY, "
         "or EMAIL_BODY_<OUTCOME> for each, or leave them out of EMAIL_ON_STATUS",
         "EMAIL_SUBJECT uses unknown token(s) $$x; the tokens are $$status, $$pipeline_id, "
+        "$$pipeline_run_id, $$task_run_id, "
         "$$pipeline_code, $$task_code, $$error_message",
     ]
 

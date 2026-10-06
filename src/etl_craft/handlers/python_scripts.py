@@ -69,6 +69,8 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
         pipeline_code=context.pipeline_code,
         task_code=context.task_code,
         pipeline_run_id=context.pipeline_run_id,
+        pipeline_id=context.pipeline_id,
+        task_run_id=context.task_run_id,
         refresh_type=context.refresh_type,
         offset=offset,
         input_params=input_params,

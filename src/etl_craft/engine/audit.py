@@ -26,6 +26,7 @@ MUTATING_COMMANDS = frozenset(
         "mark",
         "cancel",
         "reconcile",
+        "upgrade-targets",
         "pause",
         "resume",
         "migrate",

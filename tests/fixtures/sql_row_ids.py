@@ -48,6 +48,7 @@ def check_row_id_generation(w, target):
     w.setup(appended, select, "APPEND_TABLE")
     append = {"SQL_ACTION": "APPEND_TABLE", "TARGET_OBJECT": appended}
     w.run(appended, SOURCE_SQL=select + " UNION ALL SELECT 2", **append)
+    w.new_run()
     w.run(appended, SOURCE_SQL="SELECT CAST(3 AS BIGINT) AS id", **append)
     keys = w.rows(f"SELECT row_id FROM {w.name(appended)}")
     assert len(keys) == 3 and len(set(keys)) == 3 and all(row[0] is not None for row in keys)

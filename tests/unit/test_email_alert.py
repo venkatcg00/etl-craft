@@ -44,14 +44,14 @@ def test_the_run_outcome(statuses, sla_missed, expected):
 def test_tokens_are_replaced_and_an_unknown_one_fails():
     values = {
         "status": "FAILED",
-        "pipeline_id": "97",
+        "pipeline_run_id": "97",
         "pipeline_code": "P",
         "task_code": "a",
         "error_message": "",
     }
-    assert substitute("$$pipeline_code run $$pipeline_id: $$status", values, "EMAIL_SUBJECT") == (
-        "P run 97: FAILED"
-    )
+    assert substitute(
+        "$$pipeline_code run $$pipeline_run_id: $$status", values, "EMAIL_SUBJECT"
+    ) == ("P run 97: FAILED")
     with pytest.raises(HandlerError, match=r"EMAIL_BODY uses unknown token\(s\) \$\$run_date; the"):
         substitute("on $$run_date", values, "EMAIL_BODY")
 

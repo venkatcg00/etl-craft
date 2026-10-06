@@ -84,7 +84,8 @@ item's text, or work done early under another item.
 | S3.G.4 ALTER-based schema evolution | Done | #107 | B39, B40 |
 | S3.G.5 Concurrent ROW_ID allocation | Done | #108 | B38 |
 | S3.G.6 One table format per target | Done | #109 | B43 |
-| S3.G.7 to S3.H | Not started | | |
+| S3.G.7 Retry-safe appends | Done | #110 | W4 |
+| S3.H Chaos suite | Not started | | |
 | 0.4 and later | Not started | | |
 
 ### Handover notes
@@ -1389,13 +1390,19 @@ read the existing table's format where the warehouse exposes it and refuse a mis
 
 **S3.G.7 Retry-safe appends (W4).**
 
-- *Change.* `APPEND_TABLE` targets get one more audit column, `LOAD_ID BIGINT`, set to the task run id.
-  `SETUP_TABLE` adds it for `APPEND_TABLE` writers. Before inserting, an append deletes
-  `WHERE LOAD_ID = :task_run_id` (rows from an earlier attempt of the same task run), in the same
-  transaction where the warehouse has one. Targets without `LOAD_ID` get a WARNING on every append
-  that a retry can duplicate rows, and `etl-craft upgrade-targets --action APPEND_TABLE` adds the
-  column.
-- *Tests.* An append attempt that fails after inserting, then a retry: rows appear once.
+- *Change.* Every SQL target records `PIPELINE_ID`, `PIPELINE_RUN_ID` and `TASK_RUN_ID` as BIGINT,
+  with those names used consistently in ingestion `ScriptTask` inputs and business-rule SQL bind
+  parameters. Inserts, merge updates, closed SCD2 versions and soft deletes stamp their executing
+  identities. SQL and email tokens use `pipeline_id` for the definition, `pipeline_run_id` for the
+  pipeline execution and `task_run_id` for the task execution; SQL switches match those names.
+  `APPEND_TABLE` uses the existing task-run id in `TASK_RUN_ID`. Before inserting it deletes
+  `WHERE TASK_RUN_ID = :task_run_id` (rows from an earlier attempt of the same task run), in the same
+  transaction where the warehouse has one. Targets without `TASK_RUN_ID` get a WARNING on every append
+  that a retry can duplicate rows, and `etl-craft upgrade-targets [--action APPEND_TABLE]` adds missing
+  nullable identity columns to configured SQL and ingestion targets without rewriting historical rows.
+- *Tests.* An append attempt that fails after inserting, then a retry: rows appear once. Every SQL
+  writer stamps its executing identities; ingestion scripts and business rules receive the same
+  named values. Upgrading preserves historical rows and leaves their new identity fields NULL.
 
 ### S3.H The chaos suite
 
@@ -2173,7 +2180,7 @@ Every Airflow task maps to an etl-craft task; nothing in the example runs Spark 
 | | `ds_*_to_dwh`, `info_*_to_dwh` (one per table) | SQL `SCD1_MERGE` | the triggers in `12_func_triggers_creation.sql` |
 | `SI_CLIENT_ALPHA` (every 15 min) | `alpha_source_to_lnd` | PYTHON `mongo_to_lnd.py`: reads documents after the stored offset, writes `lnd.client_alpha_cs_data`, returns the new offset | `client_alpha_check_new_data`, `client_alpha_branch`, `client_alpha_source_to_lnd` |
 | | `alpha_lnd_to_prs` (depends on the ingestion with `HAS_DATA`) | SQL `SCD2_MERGE` on `source_system_identifier`, `MERGE_DEDUPE_ORDER` on the source timestamp, so `prs` keeps every version of a source record | `client_alpha_lnd_to_prs` (insert, update and duplicate counts) |
-| | `alpha_prs_to_cdc` | SQL `OVERWRITE_TABLE` with `$$pipeline_id` and `ACTIVE_FLAG = 'Y'` (the versions `prs` opened in this run) | `client_alpha_prs_to_cdc` |
+| | `alpha_prs_to_cdc` | SQL `OVERWRITE_TABLE` with `$$pipeline_run_id` and `ACTIVE_FLAG = 'Y'` (the versions `prs` opened in this run) | `client_alpha_prs_to_cdc` |
 | | `alpha_cdc_to_predm` | SQL `OVERWRITE_TABLE`: joins `ds` lookups, maps codes | the transform half of `client_alpha_cdc_to_predm` |
 | | `alpha_rules` | BUSINESS_RULES on `pre_dm.customer_support_stage_alpha`: one `REJECT` rule per validity check of today's `is_valid` logic | the validity half of `client_alpha_cdc_to_predm` and `aud.data_error_history` |
 | | `alpha_predm_to_dm` | SQL `SCD2_MERGE` into `dm.customer_support_fact`, keyed on `source_system_identifier`, excluding rejected keys | `client_alpha_predm_to_dm` |

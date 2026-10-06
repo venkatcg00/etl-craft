@@ -22,7 +22,14 @@ def test_create_table_stamps_the_run_and_numbers_the_rows(sql_world):
         SOURCE_SQL="SELECT 1 AS id, 'a' AS name UNION ALL SELECT 2, 'b'",
     )
     assert (result.source_count, result.target_count, result.insert_count) == (2, 2, 2)
-    assert w.columns("orders") == ["id", "name", "pipeline_run_id", "row_id"]
+    assert w.columns("orders") == [
+        "id",
+        "name",
+        "pipeline_run_id",
+        "pipeline_id",
+        "task_run_id",
+        "row_id",
+    ]
     assert sorted_rows(w, f"SELECT id, name, pipeline_run_id FROM {w.name('orders')}") == [
         (1, "a", w.pipeline_run_id),
         (2, "b", w.pipeline_run_id),
@@ -38,7 +45,14 @@ def test_overwrite_table_needs_its_target_then_replaces_the_rows(sql_world):
     with pytest.raises(HandlerError, match=r"does not exist\. Only CREATE_TABLE and SETUP_TABLE"):
         w.run("overwrite", SOURCE_SQL="SELECT 1 AS id", **params)
     w.setup("daily", "SELECT 1 AS id", "OVERWRITE_TABLE")
-    assert w.columns("daily") == ["id", "pipeline_run_id", "update_date", "row_id"]
+    assert w.columns("daily") == [
+        "id",
+        "pipeline_run_id",
+        "pipeline_id",
+        "task_run_id",
+        "update_date",
+        "row_id",
+    ]
     first = w.run("overwrite", SOURCE_SQL="SELECT 1 AS id UNION ALL SELECT 2", **params)
     assert first.insert_count == 2
     second = w.run("overwrite", SOURCE_SQL="SELECT 3 AS id", **params)
@@ -54,7 +68,14 @@ def test_append_table_adds_rows_on_every_run(sql_world):
     with pytest.raises(HandlerError, match=r"the target .* does not exist"):
         w.run("append", SOURCE_SQL="SELECT 1 AS id", **params)
     w.setup("events", "SELECT 1 AS id", "APPEND_TABLE")
-    assert w.columns("events") == ["id", "pipeline_run_id", "create_date", "row_id"]
+    assert w.columns("events") == [
+        "id",
+        "pipeline_run_id",
+        "pipeline_id",
+        "task_run_id",
+        "create_date",
+        "row_id",
+    ]
     first = w.run("append", SOURCE_SQL="SELECT 1 AS id UNION ALL SELECT 2", **params)
     w.new_run()
     second = w.run("append", SOURCE_SQL="SELECT 3 AS id", **params)
@@ -187,14 +208,25 @@ def test_schema_checks_and_evolution(sql_world):
         SCHEMA_EVOLUTION="true",
         **params,
     )
-    assert w.columns("wide") == ["id", "name", "pipeline_run_id", "update_date", "row_id", "score"]
+    assert w.columns("wide") == [
+        "id",
+        "name",
+        "pipeline_run_id",
+        "pipeline_id",
+        "task_run_id",
+        "update_date",
+        "row_id",
+        "score",
+    ]
     assert w.rows(f"SELECT id, score, name FROM {w.name('wide')}") == [(2, 7, "b")]
 
 
 def test_a_target_missing_audit_columns_is_refused(sql_world):
     w = sql_world
     w.execute(f"CREATE TABLE {w.name('bare')} AS SELECT 1 AS id, 'a' AS name, 'b' AS city")
-    with pytest.raises(HandlerError, match="lacks PIPELINE_RUN_ID, HASH_KEY, CREATE_DATE"):
+    with pytest.raises(
+        HandlerError, match="lacks PIPELINE_RUN_ID, PIPELINE_ID, TASK_RUN_ID, HASH_KEY, CREATE_DATE"
+    ):
         w.run(
             "bare",
             SQL_ACTION="SCD1_MERGE",
@@ -269,6 +301,8 @@ def test_setup_table_takes_the_audit_columns_of_the_real_writer(sql_world):
         "name",
         "city",
         "pipeline_run_id",
+        "pipeline_id",
+        "task_run_id",
         "hash_key",
         "create_date",
         "created_by",
@@ -300,7 +334,7 @@ def test_setup_table_refuses_writers_that_need_different_audit_columns(sql_world
     assert "customers" not in w.tables()
 
 
-def test_a_sql_file_with_the_pipeline_id_filter_reads_this_runs_rows(sql_world):
+def test_a_sql_file_with_pipeline_run_id_filter_reads_this_runs_rows(sql_world):
     w = sql_world
     w.run("seed", SQL_ACTION="CREATE_TABLE", TARGET_OBJECT="events", SOURCE_SQL="SELECT 1 AS id")
     other_run = w.pipeline_run_id
@@ -311,8 +345,9 @@ def test_a_sql_file_with_the_pipeline_id_filter_reads_this_runs_rows(sql_world):
     sql_file = w.project / "sql_files" / "loads" / "events.sql"
     sql_file.parent.mkdir(parents=True)
     sql_file.write_text(
-        f"-- this run's events\nSELECT id, $$pipeline_id AS loaded_by\nFROM {w.name('events')}\n"
-        "WHERE $$pipeline_id_filter;\n",
+        f"-- this run's events\nSELECT id, $$pipeline_run_id AS loaded_by\n"
+        f"FROM {w.name('events')}\n"
+        "WHERE $$pipeline_run_id_filter;\n",
         encoding="utf-8",
     )
     result = w.run(
@@ -320,8 +355,8 @@ def test_a_sql_file_with_the_pipeline_id_filter_reads_this_runs_rows(sql_world):
         SQL_ACTION="CREATE_TABLE",
         TARGET_OBJECT="loaded",
         SOURCE_SQL_FILE="loads/events.sql",
-        PIPELINE_ID_SUBSTITUTION="true",
-        PIPELINE_ID_FILTER="true",
+        PIPELINE_RUN_ID_SUBSTITUTION="true",
+        PIPELINE_RUN_ID_FILTER="true",
     )
     assert result.source_count == 1
     assert w.rows(f"SELECT id, loaded_by FROM {w.name('loaded')}") == [(2, w.pipeline_run_id)]
@@ -333,8 +368,8 @@ def test_a_sql_file_with_the_pipeline_id_filter_reads_this_runs_rows(sql_world):
         SQL_ACTION="CREATE_TABLE",
         TARGET_OBJECT="loaded",
         SOURCE_SQL_FILE="loads/events.sql",
-        PIPELINE_ID_SUBSTITUTION="true",
-        PIPELINE_ID_FILTER="true",
+        PIPELINE_RUN_ID_SUBSTITUTION="true",
+        PIPELINE_RUN_ID_FILTER="true",
     )
     assert full.source_count == 2
 
@@ -509,7 +544,10 @@ def test_a_select_returning_engine_columns_is_refused(sql_world, action):
     }[action]
     if action == "SETUP_TABLE":
         w.execute(f"DROP TABLE {w.name('copy')}")
-    with pytest.raises(HandlerError, match=r"(?i)returns pipeline_run_id, row_id, which etl-craft"):
+    with pytest.raises(
+        HandlerError,
+        match=r"(?i)returns pipeline_run_id, pipeline_id, task_run_id, row_id, which etl-craft",
+    ):
         w.run(
             "star",
             SQL_ACTION=action,
@@ -645,6 +683,7 @@ def test_rows_written_counts_what_changed_not_what_the_target_holds(customers):
     assert changed.rows_written == 1
     w.setup("log", "SELECT 1 AS id", "APPEND_TABLE")
     w.run("fill", SQL_ACTION="APPEND_TABLE", TARGET_OBJECT="log", SOURCE_SQL="SELECT 1 AS id")
+    w.new_run()
     empty = w.run(
         "fill",
         SQL_ACTION="APPEND_TABLE",
@@ -674,7 +713,14 @@ def test_scratch_tables_are_found_in_the_targets_schema_only(sql_world, monkeypa
             "SELECT 1 AS id, 2 AS extra"
         )
         w.run("over", SOURCE_SQL="SELECT 5 AS id", SCHEMA_EVOLUTION="true", **params)
-        assert w.columns("shape") == ["id", "pipeline_run_id", "update_date", "row_id"]
+        assert w.columns("shape") == [
+            "id",
+            "pipeline_run_id",
+            "pipeline_id",
+            "task_run_id",
+            "update_date",
+            "row_id",
+        ]
         assert w.rows(f"SELECT id FROM {w.name('shape')}") == [(5,)]
     finally:
         w.execute(f"DROP TABLE IF EXISTS {w.catalog}.{other}.etl_stage_{task_run_id}_abc123")

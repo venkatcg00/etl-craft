@@ -21,6 +21,7 @@ from etl_craft.warehouse.connection import build_warehouse_engine
 from fixtures.cloud import DATABRICKS_VARS, SNOWFLAKE_VARS, require_variables, write_config
 from fixtures.engine_db import apply_schema, sqlite_engine_db
 from fixtures.metadata import add_pipeline, insert
+from fixtures.sql_appends import check_append_retries, check_identity_inputs, check_legacy_upgrade
 from fixtures.sql_evolution import check_evolution, check_interrupted_evolution
 from fixtures.sql_merges import check_composite_merge
 from fixtures.sql_replacement import check_replacement_failure
@@ -138,7 +139,7 @@ def walk_every_action(w):
         assert appended.insert_count == 2
 
         # A business rule over the merged customers: flag those that have an order.
-        w.task("rules")
+        rule_context = w.task("rules")
         with w.engine_db.begin() as conn:
             insert(
                 conn,
@@ -149,7 +150,10 @@ def walk_every_action(w):
                 "BUSINESS_RULE_ID",
                 p=w.pipeline_id,
                 t=w.tasks["rules"],
-                rule_sql=f"SELECT 1 FROM {w.name(names['orders'])} o WHERE o.id = t.id",
+                rule_sql=f"SELECT 1 FROM {w.name(names['orders'])} o WHERE o.id = t.id "
+                f"AND :pipeline_id = {w.pipeline_id} "
+                f"AND :pipeline_run_id = {w.pipeline_run_id} "
+                f"AND :task_run_id = {rule_context.task_run_id}",
                 target=f"{w.schema}.{names['customers']}",
             )
         rules = business_rules.run(
@@ -398,6 +402,137 @@ def test_table_formats_on_snowflake(tmp_path, table_format):
     require_variables("SNOWFLAKE", SNOWFLAKE_VARS)
     fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
     walk_table_format_checks(
+        cloud_world(
+            tmp_path,
+            "Snowflake",
+            fields,
+            table_format,
+            os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"],
+        )
+    )
+
+
+def walk_append_retries(w):
+    """Real autocommit retries converge; legacy upgrades preserve the prior loads."""
+    target = f"etl_craft_append_{uuid.uuid4().hex[:8]}"
+    try:
+        check_append_retries(w, target)
+        check_legacy_upgrade(w, target + "_legacy")
+    finally:
+        for name in (target, target + "_legacy"):
+            w.execute(f"DROP TABLE IF EXISTS {w.name(name)}")
+        w.warehouse.dispose()
+        w.engine_db.dispose()
+
+
+@pytest.mark.cloud_databricks
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_append_retries_on_databricks(tmp_path, table_format):
+    require_variables("DATABRICKS", DATABRICKS_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_DATABRICKS_{name}" for name in DATABRICKS_VARS}
+    walk_append_retries(
+        cloud_world(
+            tmp_path,
+            "Databricks",
+            fields,
+            table_format,
+            os.environ["ETL_CRAFT_TEST_DATABRICKS_SCHEMA"],
+        )
+    )
+
+
+@pytest.mark.cloud_snowflake
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_append_retries_on_snowflake(tmp_path, table_format):
+    require_variables("SNOWFLAKE", SNOWFLAKE_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
+    walk_append_retries(
+        cloud_world(
+            tmp_path,
+            "Snowflake",
+            fields,
+            table_format,
+            os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"],
+        )
+    )
+
+
+def walk_identity_inputs(w):
+    target = f"etl_craft_identity_{uuid.uuid4().hex[:8]}"
+    try:
+        check_identity_inputs(w, target)
+    finally:
+        w.execute(f"DROP TABLE IF EXISTS {w.name(target)}")
+        w.warehouse.dispose()
+        w.engine_db.dispose()
+
+
+@pytest.mark.cloud_databricks
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_identity_inputs_on_databricks(tmp_path, table_format):
+    require_variables("DATABRICKS", DATABRICKS_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_DATABRICKS_{name}" for name in DATABRICKS_VARS}
+    walk_identity_inputs(
+        cloud_world(
+            tmp_path,
+            "Databricks",
+            fields,
+            table_format,
+            os.environ["ETL_CRAFT_TEST_DATABRICKS_SCHEMA"],
+        )
+    )
+
+
+@pytest.mark.cloud_snowflake
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_identity_inputs_on_snowflake(tmp_path, table_format):
+    require_variables("SNOWFLAKE", SNOWFLAKE_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
+    walk_identity_inputs(
+        cloud_world(
+            tmp_path,
+            "Snowflake",
+            fields,
+            table_format,
+            os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"],
+        )
+    )
+
+
+def walk_ingestion_upgrade(w):
+    from fixtures.sql_appends import check_ingestion_target_upgrade
+
+    target = f"etl_craft_ingestion_{uuid.uuid4().hex[:8]}"
+    try:
+        check_ingestion_target_upgrade(w, target)
+    finally:
+        w.execute(f"DROP TABLE IF EXISTS {w.name(target)}")
+        w.warehouse.dispose()
+        w.engine_db.dispose()
+
+
+@pytest.mark.cloud_databricks
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_ingestion_upgrade_on_databricks(tmp_path, table_format):
+    require_variables("DATABRICKS", DATABRICKS_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_DATABRICKS_{name}" for name in DATABRICKS_VARS}
+    walk_ingestion_upgrade(
+        cloud_world(
+            tmp_path,
+            "Databricks",
+            fields,
+            table_format,
+            os.environ["ETL_CRAFT_TEST_DATABRICKS_SCHEMA"],
+        )
+    )
+
+
+@pytest.mark.cloud_snowflake
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_ingestion_upgrade_on_snowflake(tmp_path, table_format):
+    require_variables("SNOWFLAKE", SNOWFLAKE_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
+    walk_ingestion_upgrade(
         cloud_world(
             tmp_path,
             "Snowflake",

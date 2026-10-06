@@ -34,12 +34,22 @@ def run(task: ScriptTask) -> ScriptResult:
             text(
                 f"CREATE TABLE IF NOT EXISTS {table} (agent_code VARCHAR(100), "
                 "agent_name VARCHAR(100), team VARCHAR(100), email VARCHAR(100), "
-                "left_company VARCHAR(100))"
+                "left_company VARCHAR(100), pipeline_run_id BIGINT, "
+                "pipeline_id BIGINT, task_run_id BIGINT)"
             )
         )
         conn.execute(text(f"DELETE FROM {table}"))
         for row in rows:
             conn.execute(
-                text(f"INSERT INTO {table} VALUES (:code, :name, :team, :email, :left)"), row
+                text(
+                    f"INSERT INTO {table} VALUES (:code, :name, :team, :email, :left, "
+                    ":pipeline_run_id, :pipeline_id, :task_run_id)"
+                ),
+                {
+                    **row,
+                    "pipeline_run_id": task.pipeline_run_id,
+                    "pipeline_id": task.pipeline_id,
+                    "task_run_id": task.task_run_id,
+                },
             )
     return ScriptResult(row_count=len(rows), offset=Offset.number(version))

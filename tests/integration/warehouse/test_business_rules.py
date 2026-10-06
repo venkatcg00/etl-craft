@@ -77,6 +77,25 @@ def run_log(w):
         return sorted(tuple(row) for row in rows)
 
 
+def test_rules_receive_pipeline_and_task_run_identities(world):
+    w = world
+    context = replace(w.task("rules"), handler="BUSINESS_RULES")
+    add_rule(
+        w,
+        "identities",
+        f"SELECT 1 WHERE :pipeline_id = {context.pipeline_id} "
+        f"AND :pipeline_run_id = {context.pipeline_run_id} "
+        f"AND :task_run_id = {context.task_run_id}",
+    )
+    before = w.rows(f"SELECT pipeline_id, pipeline_run_id, task_run_id FROM {w.name('orders')}")
+    result = business_rules.run(context, w.engine_db)
+    assert result.insert_count == 3
+    assert (
+        w.rows(f"SELECT pipeline_id, pipeline_run_id, task_run_id FROM {w.name('orders')}")
+        == before
+    )
+
+
 def test_rules_flag_breaking_rows_and_a_rerun_or_a_forced_run_clears_fixed_ones(world):
     w = world
     inactive = f"SELECT 1 FROM {w.schema}.customers c WHERE c.id = t.customer_id AND c.active = 'N'"

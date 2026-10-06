@@ -108,7 +108,7 @@ def good_pipeline(conn, code="SALES"):
         "EMAIL_ALERT",
         EMAIL_TO="ops@x.io",
         EMAIL_SUBJECT="$$pipeline_code: $$status",
-        EMAIL_BODY="Run $$pipeline_id finished.",
+        EMAIL_BODY="Run $$pipeline_run_id finished.",
     )
     add_dependency(conn, p, setup, ingest)
     add_dependency(conn, p, load, setup)

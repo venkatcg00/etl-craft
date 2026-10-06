@@ -71,6 +71,10 @@ class SnowflakeWarehouse(WarehouseDialect):
             "snowflake",
         )
 
+    def is_bigint_type(self, data_type: str) -> bool:
+        """Recognize native and Iceberg BIGINT's Snowflake numeric representations."""
+        return data_type.upper().replace(" ", "") in {"BIGINT", "NUMBER(38,0)", "NUMBER(19,0)"}
+
     def existing_table_format(self, conn: Connection, target: str) -> TableFormat:
         """Read Snowflake's native/Iceberg flag in the target's own database."""
         catalog, schema, table = target.split(".")
