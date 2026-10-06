@@ -8,6 +8,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Native cloud SQL targets use generated `ROW_ID` keys: Databricks Delta and UniForm identity
+  columns and ordered Snowflake autoincrement. Atomic clone publication keeps identity-backed
+  `CREATE_TABLE` replacement safe; overwrites and schema evolution retain the generator.
+  Older computed-key targets remain writable. Concurrent Trino append processes share the
+  qualified target lock through warehouse commit, with SQLite and PostgreSQL Engine DB coverage.
+
 - SQL schema evolution adds nullable columns through `ALTER TABLE`, retaining existing rows,
   keys, comments, dependencies, storage locations and supported table properties. Complete
   warehouse types preserve precision, scale and supported lengths and nested types. Opted-in

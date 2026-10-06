@@ -259,11 +259,12 @@ class Session:
     def row_id_insert_parts(self) -> tuple[str, str]:
         """Return the extra (columns, values) an INSERT needs where ROW_ID does not fill itself.
 
-        An identity column or a sequence default fills ROW_ID; Iceberg has neither, so there
-        each insert supplies the largest ROW_ID present plus a row number. The base is read
+        An identity column or a sequence default fills ROW_ID. Targets without a generator
+        supply the largest ROW_ID present plus a row number under the target mutation lock.
+        The base is read
         before the INSERT, since engines disagree about reading the table a statement writes.
         """
-        if self.dialect.surrogate_key != "computed":
+        if self.row_id_generated():
             return "", ""
         base = self.count(
             f"SELECT COALESCE(MAX({ROW_ID_COLUMN}), 0) FROM {self.target}",
@@ -274,3 +275,11 @@ class Session:
             f", {ROW_ID_COLUMN}",
             f", {base} + CAST(ROW_NUMBER() OVER (ORDER BY NULL) AS BIGINT)",
         )
+
+    def row_id_generated(self) -> bool:
+        """Read the existing target's generator rather than assuming new-table defaults."""
+        logger.debug("read the ROW_ID generator of %s", self.target)
+        try:
+            return self.dialect.row_id_generated(self.conn, self.target)
+        except SQLAlchemyError as error:
+            raise self._failure("read the ROW_ID generator", error) from error

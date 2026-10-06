@@ -82,7 +82,8 @@ item's text, or work done early under another item.
 | S3.G.2 Set-based write strategies | Done | #105 | B36 |
 | S3.G.3 Safe table replacement | Done | #106 | B37, W5 |
 | S3.G.4 ALTER-based schema evolution | Done | #107 | B39, B40 |
-| S3.G.5 to S3.H | Not started | | |
+| S3.G.5 Concurrent ROW_ID allocation | Done | #108 | B38 |
+| S3.G.6 to S3.H | Not started | | |
 | 0.4 and later | Not started | | |
 
 ### Handover notes
@@ -90,6 +91,18 @@ item's text, or work done early under another item.
 What a person picking up the work needs that the code and the item texts do not say.
 
 **Choices that differ from the item text.**
+
+- S3.G.5 reuses the qualified target mutation lock introduced by S3.G.1; it already covers the
+  computed MAX read, inserts and warehouse commit. Native identity allocation skips MAX and
+  does not acquire an additional allocation lock. The existing mutation lock remains necessary
+  for replacement/hash coordination and Databricks identity tables' single-writer restriction.
+  New Databricks Delta/UniForm and native Snowflake targets declare identity columns before
+  insertion. CREATE_TABLE populates an independent identity candidate and publishes an atomic
+  deep clone on Databricks or clone with COPY GRANTS on Snowflake. Existing table properties
+  survive; unsupported business-column metadata is refused before publication. Ordinary writes
+  inspect the actual generator and continue allocating computed keys for older targets, without
+  rebuilding them. Trino append regressions run in separate processes against both Engine DB
+  lock backends and verify the second process cannot read MAX until the first commits.
 
 - S3.G.4 appends nullable columns with full warehouse types and keeps the target definition.
   Type comparison is strict when SCHEMA_EVOLUTION is enabled; ordinary writes keep their
@@ -125,8 +138,8 @@ What a person picking up the work needs that the code and the item texts do not 
   Migration 0011 leaves existing targets unknown; fresh merge setups publish version 2 only
   after their warehouse commit. Rehash derives one ordered compare contract from active merge
   tasks, updates every row including SCD2 history, and then publishes its version. Target locks
-  coordinate mutations with upgrades; they provide the locking primitive planned for S3.G.5,
-  whose concurrency tests remain outstanding. Warehouse/Engine DB commits remain separate;
+  coordinate mutations with upgrades and computed ROW_ID allocation; S3.G.5 covers competing
+  append processes on both lock backends. Warehouse/Engine DB commits remain separate;
   failed version publication is recoverable by repeating rehash.
 
 - S3.F commits successful attempt outcomes, summaries, returned script offsets and the exact
@@ -282,6 +295,11 @@ Before `S3.H`, give the two task tests a time limit that leaves room for start-u
 script to report it started before the limit begins, and measure the docs-site test's build time.
 
 **Working on the code.**
+
+- Run installed-wheel demo sessions one at a time: local Iceberg demos share fixed namespaces
+  and empty them when preparing a case. Use one coverage run with the wheel supplied, or run
+  ordinary coverage without the wheel and run the wheel end-to-end/package suites separately.
+  Overlapping demo sessions can mix rows and remove each other's tables.
 
 - Run the suites an item touches against the local services (`make services-up`), then rely on
   CI for the full matrix. The unit, Engine DB and local warehouse suites take about five minutes
@@ -1353,12 +1371,16 @@ guide, task-parameter reference, cloud acceptance tests.
   comments and snapshot history survive on Trino Iceberg; a dependent view
   doesn't block PostgreSQL.
 
-**S3.G.5 `ROW_ID` without duplicates under concurrency (B38).** On dialects with
-`surrogate_key == "computed"`, hold an Engine DB lock keyed by the target name (`engine/locks.py`,
-`locks.target(name)`; PostgreSQL advisory lock, SQLite file lock) around the `MAX(ROW_ID)` read and
-the `INSERT`. Where the warehouse supports identity columns (Databricks Delta `GENERATED ALWAYS AS IDENTITY`,
-Snowflake `AUTOINCREMENT`), new tables use them and the lock is skipped. Test: two concurrent appends
-on Trino produce unique `ROW_ID`s.
+**S3.G.5 `ROW_ID` without duplicates under concurrency (B38).** Hold the qualified target's
+Engine DB mutation lock (`locks.target(name)`, PostgreSQL advisory lock or SQLite file lock)
+through the computed `MAX(ROW_ID)` read, `INSERT` and warehouse commit. Reuse the lock introduced
+by S3.G.1. New Databricks Delta/UniForm and native Snowflake tables use identity columns; identity
+allocation skips MAX. Keep the mutation lock for replacement/hash coordination and Databricks'
+restriction on concurrent identity writes. Create native cloud replacements with an identity
+candidate populated before atomic clone publication. Ordinary writes detect actual generators
+and keep older computed-key targets writable without automatic migration. Test two concurrent
+Trino append processes on both Engine DB backends, allocation failure/retry, and native/Iceberg
+cloud create, replacement, append, overwrite, evolution and legacy targets.
 
 **S3.G.6 One table format per target (B43).** `validate` fails when tasks writing the same
 `TARGET_OBJECT` resolve to different table formats. At run time, actions that create or evolve a table

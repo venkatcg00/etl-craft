@@ -12,7 +12,7 @@ from sqlalchemy.engine import Connection
 from etl_craft.config.auth import warehouse_by_key
 from etl_craft.core.errors import ConfigurationError, HandlerError
 from etl_craft.core.text import is_safe_identifier
-from etl_craft.dialects.warehouse.base import ReplaceStrategy
+from etl_craft.dialects.warehouse.base import ReplaceStrategy, SurrogateKey
 from etl_craft.dialects.warehouse.snowflake import SnowflakeWarehouse
 
 if TYPE_CHECKING:
@@ -37,8 +37,14 @@ class SnowflakeIcebergWarehouse(SnowflakeWarehouse):
     """
 
     spec = warehouse_by_key("snowflake_iceberg")
+    surrogate_key: SurrogateKey = "computed"
+    identity_in_create = False
     replace_strategy: ReplaceStrategy = "copy_and_restore"
     storage_parameters = frozenset({"EXTERNAL_VOLUME", "BASE_LOCATION", "CATALOG"})
+
+    def row_id_generated(self, conn: Connection, target: str) -> bool:
+        """Iceberg inserts supply computed keys under the target lock."""
+        return False
 
     def preserve_replacement_properties(
         self, conn: Connection, target: str, candidate: str

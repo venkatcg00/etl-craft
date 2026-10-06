@@ -24,6 +24,7 @@ from fixtures.metadata import add_pipeline, insert
 from fixtures.sql_evolution import check_evolution, check_interrupted_evolution
 from fixtures.sql_merges import check_composite_merge
 from fixtures.sql_replacement import check_replacement_failure
+from fixtures.sql_row_ids import check_row_id_generation
 from fixtures.sql_warehouse import SqlWorld
 
 # Some forty statements against a remote warehouse, one to three seconds each, cold start aside.
@@ -239,3 +240,50 @@ def test_schema_evolution_on_snowflake(tmp_path, table_format):
     fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
     schema = os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"]
     walk_schema_evolution(cloud_world(tmp_path, "Snowflake", fields, table_format, schema))
+
+
+def walk_row_id_generation(w):
+    target = f"etl_row_ids_{uuid.uuid4().hex[:8]}"
+    names = [target, target + "_create", target + "_append", target + "_legacy"]
+    try:
+        check_row_id_generation(w, target)
+        from etl_craft.warehouse.connection import warehouse_dialect
+
+        dialect = warehouse_dialect(w.config)
+        if dialect.identity_in_create:
+            legacy = target + "_legacy"
+            w.execute(
+                f"CREATE TABLE {w.name(legacy)} AS SELECT CAST(1 AS BIGINT) AS id, "
+                "CAST(1 AS BIGINT) AS pipeline_run_id, CURRENT_TIMESTAMP AS create_date, "
+                "CAST(7 AS BIGINT) AS row_id"
+            )
+            w.run(
+                legacy,
+                SQL_ACTION="APPEND_TABLE",
+                TARGET_OBJECT=legacy,
+                SOURCE_SQL="SELECT CAST(2 AS BIGINT) AS id",
+            )
+            assert sorted(w.rows(f"SELECT row_id FROM {w.name(legacy)}")) == [(7,), (8,)]
+    finally:
+        for name in names:
+            w.execute(f"DROP TABLE IF EXISTS {w.name(name)}")
+        w.warehouse.dispose()
+        w.engine_db.dispose()
+
+
+@pytest.mark.cloud_databricks
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_row_id_generation_on_databricks(tmp_path, table_format):
+    require_variables("DATABRICKS", DATABRICKS_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_DATABRICKS_{name}" for name in DATABRICKS_VARS}
+    schema = os.environ["ETL_CRAFT_TEST_DATABRICKS_SCHEMA"]
+    walk_row_id_generation(cloud_world(tmp_path, "Databricks", fields, table_format, schema))
+
+
+@pytest.mark.cloud_snowflake
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_row_id_generation_on_snowflake(tmp_path, table_format):
+    require_variables("SNOWFLAKE", SNOWFLAKE_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
+    schema = os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"]
+    walk_row_id_generation(cloud_world(tmp_path, "Snowflake", fields, table_format, schema))
