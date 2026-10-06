@@ -84,7 +84,7 @@ item's text, or work done early under another item.
 | S3.G.4 ALTER-based schema evolution | Done | #107 | B39, B40 |
 | S3.G.5 Concurrent ROW_ID allocation | Done | #108 | B38 |
 | S3.G.6 One table format per target | Done | #109 | B43 |
-| S3.G.7 Retry-safe appends | Done | | W4 |
+| S3.G.7 Retry-safe appends | Done | #110 | W4 |
 | S3.H Chaos suite | Not started | | |
 | 0.4 and later | Not started | | |
 
