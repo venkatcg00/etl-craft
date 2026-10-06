@@ -85,7 +85,7 @@ item's text, or work done early under another item.
 | S3.G.5 Concurrent ROW_ID allocation | Done | #108 | B38 |
 | S3.G.6 One table format per target | Done | #109 | B43 |
 | S3.G.7 Retry-safe appends | Done | #110 | W4 |
-| S3.H Chaos suite | Done | | |
+| S3.H Chaos suite | Done | #111 | |
 | 0.4 and later | Not started | | |
 
 ### Handover notes
