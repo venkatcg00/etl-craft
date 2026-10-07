@@ -422,8 +422,16 @@ def create_run(
     run_date: date | None = None,
     trigger_kind: str = "MANUAL",
     run_key: str | None = None,
+    status: str = "IN-PROGRESS",
 ) -> int:
-    """Create an active run; queued pipeline admission belongs to the scheduler."""
+    """Create an active run or a queued/skipped schedule with its exact key."""
+    if status not in {"IN-PROGRESS", "QUEUED", "SKIPPED"} or (
+        status != "IN-PROGRESS" and trigger_kind != "SCHEDULE"
+    ):
+        raise RunStateError(
+            f"pipeline_id={pipeline_id}: initial status={status!r}; "
+            "only schedules may start QUEUED or SKIPPED"
+        )
     if trigger_kind not in {"SCHEDULE", "MANUAL", "BACKFILL", "ORCHESTRATOR", "STAND_IN"}:
         raise RunStateError(
             f"pipeline_id={pipeline_id}: invalid trigger_kind={trigger_kind!r}; "
@@ -439,6 +447,10 @@ def create_run(
                     **_actor_params(actor),
                     "pipeline_id": pipeline_id,
                     "run_date": logical_date,
+                    "status": status,
+                    "end_date": datetime.now(UTC) if status == "SKIPPED" else None,
+                    "ended_by": actor.name if status == "SKIPPED" else None,
+                    "ended_by_kind": actor.kind.value if status == "SKIPPED" else None,
                     "backfill": "Y" if trigger_kind == "BACKFILL" else "N",
                     "trigger_kind": trigger_kind,
                     "run_key": key,
@@ -458,6 +470,25 @@ def create_run(
         raise StaleTransitionError(
             f"pipeline_id={pipeline_id}, run_key={key!r}: expected no active run and a new key, "
             f"owner=None; found {state}. Check run history before retrying."
+        ) from error
+
+
+def admit_run(conn: Connection, pipeline_run_id: int, actor: Actor) -> None:
+    """Admit one queued run only while its pipeline has no active run."""
+    try:
+        with conn.begin_nested():
+            _guard(
+                conn,
+                "admit_run",
+                "run",
+                pipeline_run_id,
+                "QUEUED; no active sibling",
+                None,
+                _actor_params(actor),
+            )
+    except IntegrityError as error:
+        raise StaleTransitionError(
+            f"pipeline_run_id={pipeline_run_id}: another run became active; leave this run queued"
         ) from error
 
 

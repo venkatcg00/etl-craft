@@ -34,6 +34,11 @@ CREATE TABLE CFG_PIPELINES (
     CREATE_DATE          TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
     UPDATED_BY           VARCHAR DEFAULT 'etl-craft',
     UPDATED_DATE         TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
+    SCHEDULE_TIMEZONE VARCHAR,
+    CATCHUP VARCHAR(1) NOT NULL DEFAULT 'N' CONSTRAINT ck_schedule_catchup CHECK (CATCHUP IN ('Y','N')),
+    MAX_CATCHUP_RUNS INT NOT NULL DEFAULT 1 CONSTRAINT ck_schedule_catchup_runs CHECK (MAX_CATCHUP_RUNS > 0 AND typeof(MAX_CATCHUP_RUNS) = 'integer'),
+    OVERLAP_POLICY VARCHAR NOT NULL DEFAULT 'SKIP' CONSTRAINT ck_schedule_overlap CHECK (OVERLAP_POLICY IN ('SKIP','QUEUE')),
+    SCHEDULE_START_DATE DATE,
     CONSTRAINT ck_pipelines_code CHECK (PIPELINE_CODE GLOB '[A-Za-z]*' AND PIPELINE_CODE NOT GLOB '*[^A-Za-z0-9_]*' AND length(PIPELINE_CODE) <= 128 AND instr(PIPELINE_CODE, char(0)) = 0),
     CONSTRAINT ck_pipelines_refresh_type CHECK (REFRESH_TYPE IN ('FULL', 'INCREMENTAL')),
     CONSTRAINT ck_pipelines_active_flag  CHECK (ACTIVE_FLAG IN ('Y', 'N')),
@@ -205,7 +210,7 @@ CREATE TABLE AUD_PIPELINES_RUN_LOG (
     REPAIR_PENDING   VARCHAR NOT NULL DEFAULT 'N' CONSTRAINT ck_run_repair_pending CHECK (REPAIR_PENDING IN ('Y','N')),
     CONSTRAINT ck_pipeline_run_trigger_kind CHECK (TRIGGER_KIND IN ('SCHEDULE','MANUAL','BACKFILL','ORCHESTRATOR','STAND_IN')),
     CONSTRAINT ck_pipeline_run_backfill CHECK (BACKFILL IN ('Y','N')),
-    CONSTRAINT ck_pipeline_run_status CHECK (STATUS IN ('IN-PROGRESS','SUCCESS','FAILED','SKIPPED','CANCELLED')),
+    CONSTRAINT ck_pipeline_run_status CHECK (STATUS IN ('QUEUED','IN-PROGRESS','SUCCESS','FAILED','SKIPPED','CANCELLED')),
     CONSTRAINT ck_pipeline_run_sla_status CHECK (SLA_STATUS IN ('MET','BREACHED'))
 );
 
@@ -916,3 +921,5 @@ WHEN etl_craft_actor() IS NULL OR etl_craft_actor() = ''
 BEGIN
     SELECT RAISE(ABORT, 'AUD_OVERSEERS is written only by etl-craft');
 END;
+
+CREATE INDEX ix_pipeline_schedule_key ON AUD_PIPELINES_RUN_LOG (PIPELINE_ID, RUN_KEY) WHERE TRIGGER_KIND = 'SCHEDULE';

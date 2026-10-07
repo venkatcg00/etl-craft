@@ -1,6 +1,6 @@
 # Running the local server
 
-`etl-craft server` supervises active local pipeline runs until it receives SIGTERM or Ctrl-C.
+`etl-craft server` creates scheduled runs and supervises active local pipeline runs until it receives SIGTERM or Ctrl-C.
 It uses the same task handlers, wave execution, gates, leases, cancellation guards, SLA checks
 and finalization hooks as foreground `etl-craft run`.
 
@@ -24,15 +24,59 @@ etl-craft --config /srv/etl-craft/craft-connector.yml history \
 
 Initialization performs the usual admission checks. The server picks up an unowned
 `IN-PROGRESS` run by its exact `pipeline_run_id`; it never chooses an ended run by recency.
-It does not create schedules or admit `QUEUED` runs yet. Schedule generation, nonblocking
-ready-set dispatch and automatic retries are subsequent roadmap items. Existing wave and
-gate behavior remains in force. To run under Airflow or another orchestrator, use
+Scheduled runs begin `QUEUED`. The oldest queued run of each pipeline is admitted through
+the existing pipeline gates when there is no active sibling. Existing wave and blocking gate
+behavior remains in force; nonblocking ready-set dispatch and automatic retries are subsequent
+roadmap items. To run under Airflow or another orchestrator, use
 [remote mode](orchestrator.md); `server` refuses that mode.
 
 `Max_parallel_tasks` limits tasks inside each pipeline and bounds the number of concurrent
 pipeline supervisors. Runs still owned by another foreground process are left with that
 process. Paused or inactive pipelines receive no dispatch; resuming a pipeline allows its
 active run to continue.
+
+## Schedules and logical dates
+
+Configure schedules through a [project migration](engine-db.md). For example:
+
+```sql
+UPDATE CFG_PIPELINES
+SET RUN_SCHEDULE = '0 2 * * *',
+    SCHEDULE_TIMEZONE = 'America/New_York',
+    SCHEDULE_START_DATE = '2026-10-01',
+    CATCHUP = 'Y', MAX_CATCHUP_RUNS = 2, OVERLAP_POLICY = 'QUEUE'
+WHERE PIPELINE_CODE = 'SALES';
+```
+
+Run `etl-craft validate` after editing metadata. `RUN_SCHEDULE` accepts five fields (minute,
+hour, day of month, month, weekday), lists, ranges and positive steps; month names `JAN`–`DEC`
+and weekdays `SUN`–`SAT` are supported. Sunday is 0 or 7. The macros are `@hourly`, `@daily`,
+`@weekly` and `@monthly`. Restricted day-of-month and weekday fields match either day,
+following [cron's day-field rule](https://man7.org/linux/man-pages/man5/crontab.5.html).
+A NULL schedule creates no automatic runs.
+
+`SCHEDULE_TIMEZONE` is an IANA name. NULL uses `Orchestration.Timezone`, which defaults to
+`UTC`. A missing wall-clock minute during a DST jump fires at the next valid minute; a repeated
+minute fires once, at its first occurrence. Audit timestamps remain UTC. A scheduled run's
+`RUN_DATE` is the tick's date in its schedule timezone; manual runs and stand-ins without an
+explicit date use the project timezone. Generated remote DAGs use the schedule timezone for
+both their start date and the `data_interval_end` date passed to CLI tasks.
+
+Each tick gets `RUN_KEY = schedule:<UTC ISO instant>` and `TRIGGER_KIND = SCHEDULE`. The key
+prevents duplicate ticks after restart. `SCHEDULE_START_DATE` includes that local calendar date;
+when absent, scheduling begins after the pipeline's creation timestamp.
+
+With `CATCHUP = 'N'` (default), only the latest due tick is queued. With `CATCHUP = 'Y'`, up to
+`MAX_CATCHUP_RUNS` latest ticks are queued, oldest first. Older missed ticks are recorded
+`SKIPPED`, with reason `missed while no overseer was running`. Each tick commits separately,
+so long catch-up histories release the database writer lock between records.
+
+`OVERLAP_POLICY = 'SKIP'` (default) records a due tick `SKIPPED` with reason
+`previous run still active` when the pipeline already has queued or active work. `QUEUE`
+preserves the tick for later admission. Only one run per pipeline can be `IN-PROGRESS`.
+You can inspect or cancel a queued run by its exact `--run-id` or `--run-key`.
+These columns govern the local server; the existing `PIPELINE_PARAMETERS.CATCHUP` boolean
+continues to control Airflow's generated DAG catch-up setting.
 
 ## Leadership and recovery
 

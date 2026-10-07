@@ -292,6 +292,7 @@ def test_guarded_upgrade_rolls_back_with_the_ledger(empty_engine_db, monkeypatch
         "0011_target_hash_version.sql",
         "0013_execution_identity_comment.sql",
         "0014_overseers.sql",
+        "0015_schedules.sql",
     ]
 
 

@@ -8,7 +8,7 @@ import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -25,6 +25,7 @@ from etl_craft.execution.gates import Clock
 from etl_craft.execution.leases import as_utc
 from etl_craft.execution.reconcile import reconcile
 from etl_craft.overseer.leadership import leadership
+from etl_craft.overseer.schedules import Schedules
 from etl_craft.services.cloning import run_hooks
 from etl_craft.services.operations import OperationContext
 
@@ -84,6 +85,7 @@ def serve(ctx: OperationContext, stop: threading.Event) -> None:
     if ctx.config.mode != Mode.LOCAL:
         raise RunRefusedError("server supervises local execution; set Orchestration.Mode to local")
     working = WorkingSet()
+    schedules = Schedules()
     next_heartbeat = 0.0
     quiesce = stop
     jobs: dict[int, tuple[Future[pipeline.PipelineOutcome], threading.Event]] = {}
@@ -120,6 +122,7 @@ def serve(ctx: OperationContext, stop: threading.Event) -> None:
                         overseers.heartbeat(ctx.engine, overseer_id)
                         next_heartbeat = time.monotonic() + 15
                     reconcile(ctx.engine)
+                    schedules.refresh(ctx, datetime.now(UTC), stop)
                     for run_id, (future, _) in list(jobs.items()):
                         if future.done():
                             del jobs[run_id]

@@ -13,6 +13,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy import bindparam
 from sqlalchemy.engine import Connection
 
+from etl_craft.core.cron import timezone
 from etl_craft.core.enums import SlaStatus
 from etl_craft.core.errors import RunStateError
 from etl_craft.core.graph import TaskRunState
@@ -27,9 +28,9 @@ def fetch_active_pipeline_run_id(conn: Connection, pipeline_id: int) -> int | No
     return None if run_id is None else int(run_id)
 
 
-def today() -> date:
-    """Return today's date in UTC: a run's ``RUN_DATE`` unless it is given one."""
-    return datetime.now(UTC).date()
+def today(zone: str = "UTC") -> date:
+    """Return today in the supplied project timezone; audit timestamps remain UTC."""
+    return datetime.now(timezone(zone)).date()
 
 
 @dataclass(frozen=True)

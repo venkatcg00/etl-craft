@@ -76,6 +76,7 @@ _ORCHESTRATION_KEYS = frozenset(
         "Task_timeout_seconds",
         "Max_parallel_tasks",
         "Shutdown_grace_seconds",
+        "Timezone",
         "Enforce_sla",
         "Gate_wait_minutes",
         "Global_dag",
@@ -234,6 +235,15 @@ def parse_config(raw: Any, path: Path) -> ConnectorConfig:
     mode = _parse_mode(orchestration, path)
     dependency_gates = _parse_dependency_gates(orchestration, mode, path)
     limits = _parse_limits(orchestration, path)
+    project_timezone = orchestration.text("Timezone")
+    project_timezone = "UTC" if project_timezone is None else project_timezone
+    from etl_craft.core.cron import timezone
+    from etl_craft.core.errors import MetadataError
+
+    try:
+        timezone(project_timezone)
+    except MetadataError as error:
+        raise ConfigurationError(f"{path}: Orchestration.Timezone: {error}") from error
     dag_defaults = _parse_dag_defaults(orchestration, path)
     orchestrator_name = orchestration.text("Name")
     log_dir = _relative_to_config(orchestration.text("Log_dir") or DEFAULT_LOG_DIR, path)
@@ -245,6 +255,7 @@ def parse_config(raw: Any, path: Path) -> ConnectorConfig:
 
     config = ConnectorConfig(
         mode=mode,
+        timezone=project_timezone,
         source=source,
         engine=engine,
         cloning=cloning,

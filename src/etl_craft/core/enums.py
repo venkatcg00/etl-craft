@@ -22,6 +22,7 @@ class RunStatus(StrEnum):
     ``CANCELLED`` ends a run an operator cancelled, and the tasks it stopped.
     """
 
+    QUEUED = "QUEUED"
     IN_PROGRESS = "IN-PROGRESS"
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"

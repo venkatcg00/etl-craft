@@ -20,11 +20,17 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Local server schedules support five-field cron, timezone-aware ticks, bounded catch-up,
+  overlap policies and durable queued runs with exact UTC tick keys. Upgrade the Engine DB
+  for migration `0015_schedules`; validate schedule metadata before starting the server.
+  Manual run dates default to `Orchestration.Timezone` (UTC unless configured), while audit
+  timestamps stay UTC. Generated DAGs preserve schedule timezone and logical-date semantics.
+
 - `etl-craft server` supervises active local runs under one deployment leader, with PostgreSQL
   session locking and committed execution notifications, SQLite file locking, bounded active
   graph caching, exact-run crash recovery and configurable graceful shutdown. Upgrade the
-  Engine DB for the new `AUD_OVERSEERS` process history. Schedules and ready-set dispatch remain
-  subsequent roadmap items.
+  Engine DB for the new `AUD_OVERSEERS` process history. Ready-set dispatch remains a
+  subsequent roadmap item.
 
 - Actor-scoped Python operations for run lifecycle, tasks, pipeline controls, backfills and
   inspection, with frozen views and canonical execution identities. The corresponding CLI

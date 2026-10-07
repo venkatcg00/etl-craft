@@ -55,6 +55,11 @@ CREATE TABLE CFG_PIPELINES (
     CREATE_DATE          TIMESTAMPTZ,
     UPDATED_BY           VARCHAR,
     UPDATED_DATE         TIMESTAMPTZ,
+    SCHEDULE_TIMEZONE VARCHAR,
+    CATCHUP VARCHAR(1) NOT NULL DEFAULT 'N' CONSTRAINT ck_schedule_catchup CHECK (CATCHUP IN ('Y','N')),
+    MAX_CATCHUP_RUNS INT NOT NULL DEFAULT 1 CONSTRAINT ck_schedule_catchup_runs CHECK (MAX_CATCHUP_RUNS > 0),
+    OVERLAP_POLICY VARCHAR NOT NULL DEFAULT 'SKIP' CONSTRAINT ck_schedule_overlap CHECK (OVERLAP_POLICY IN ('SKIP','QUEUE')),
+    SCHEDULE_START_DATE DATE,
     CONSTRAINT ck_pipelines_code CHECK (PIPELINE_CODE ~ '^[A-Za-z][A-Za-z0-9_]{0,127}$'),
     CONSTRAINT ck_pipelines_refresh_type CHECK (REFRESH_TYPE IN ('FULL', 'INCREMENTAL')),
     CONSTRAINT ck_pipelines_active_flag  CHECK (ACTIVE_FLAG IN ('Y', 'N'))
@@ -228,7 +233,7 @@ CREATE TABLE AUD_PIPELINES_RUN_LOG (
     REPAIR_PENDING   VARCHAR NOT NULL DEFAULT 'N' CONSTRAINT ck_run_repair_pending CHECK (REPAIR_PENDING IN ('Y','N')),
     CONSTRAINT ck_pipeline_run_trigger_kind CHECK (TRIGGER_KIND IN ('SCHEDULE','MANUAL','BACKFILL','ORCHESTRATOR','STAND_IN')),
     CONSTRAINT ck_pipeline_run_backfill CHECK (BACKFILL IN ('Y','N')),
-    CONSTRAINT ck_pipeline_run_status CHECK (STATUS IN ('IN-PROGRESS','SUCCESS','FAILED','SKIPPED','CANCELLED')),
+    CONSTRAINT ck_pipeline_run_status CHECK (STATUS IN ('QUEUED','IN-PROGRESS','SUCCESS','FAILED','SKIPPED','CANCELLED')),
     CONSTRAINT ck_pipeline_run_sla_status CHECK (SLA_STATUS IN ('MET','BREACHED'))
 );
 -- At most one IN-PROGRESS run per pipeline: this index is what makes run-id resolution safe
@@ -677,3 +682,5 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER trg_notify_aud_pipelines_run_log AFTER INSERT OR UPDATE OR DELETE ON aud_pipelines_run_log FOR EACH STATEMENT EXECUTE FUNCTION etl_craft_notify_execution();
 CREATE TRIGGER trg_notify_aud_task_attempts AFTER INSERT OR UPDATE OR DELETE ON aud_task_attempts FOR EACH STATEMENT EXECUTE FUNCTION etl_craft_notify_execution();
 CREATE TRIGGER trg_notify_aud_pipeline_pauses AFTER INSERT OR UPDATE OR DELETE ON aud_pipeline_pauses FOR EACH STATEMENT EXECUTE FUNCTION etl_craft_notify_execution();
+
+CREATE INDEX ix_pipeline_schedule_key ON AUD_PIPELINES_RUN_LOG (PIPELINE_ID, RUN_KEY) WHERE TRIGGER_KIND = 'SCHEDULE';

@@ -23,6 +23,7 @@ defaults, then a built-in default.
 
 from __future__ import annotations
 
+import json
 from shlex import join
 from typing import Any, TypeVar
 
@@ -32,6 +33,7 @@ from packaging.version import InvalidVersion, Version
 from sqlalchemy.engine import Connection
 
 from etl_craft.config import ConnectorConfig
+from etl_craft.core.cron import timezone
 from etl_craft.core.enums import Mode
 from etl_craft.core.errors import ConfigurationError, GraphError, MetadataError
 from etl_craft.core.graph import build_graph
@@ -179,11 +181,11 @@ def pipeline_dag(
         require_airflow_run_templates(airflow_version)
         return _remote_pipeline_dag(conn, config, pipeline_code)
     pipeline_id = resolve_pipeline_id(conn, pipeline_code)
-    detail = fetch_pipeline_detail(conn, pipeline_id)
     data = fetch_pipeline_graph(conn, pipeline_id)
     codes = fetch_task_codes(conn, pipeline_id)
     for code in codes.values():
         _require_code("TASK_CODE", code)
+    detail = fetch_pipeline_detail(conn, pipeline_id)
     build_graph(data.tasks, data.same_pipeline_edges)
     tasks: dict[str, Any] = {
         INIT_TASK: {
@@ -257,7 +259,17 @@ def _dag_settings(
     }
     if email_on_failure:
         default_args["email"] = _first(detail.email_recipients, defaults.email_recipients, [])
+    zone = detail.schedule_timezone if detail.schedule_timezone is not None else config.timezone
+    timezone(zone)
+    dates: dict[str, Any] = {}
+    if zone != "UTC":
+        dates["timezone"] = zone
+        if detail.create_date is not None:
+            dates["start_date"] = detail.create_date.astimezone(timezone(zone)).isoformat()
+    if detail.schedule_start_date is not None:
+        dates["start_date"] = detail.schedule_start_date.isoformat()
     return {
+        **dates,
         "dag_id": detail.pipeline_code,
         "description": detail.description,
         "schedule": detail.run_schedule if defaults.allow_schedule else None,
@@ -283,15 +295,16 @@ def _remote_pipeline_dag(
     """
     require_supported(conn, config, pipeline_code)
     pipeline_id = resolve_pipeline_id(conn, pipeline_code)
-    detail = fetch_pipeline_detail(conn, pipeline_id)
     data = fetch_pipeline_graph(conn, pipeline_id)
     codes = fetch_task_codes(conn, pipeline_id)
     for code in codes.values():
         _require_code("TASK_CODE", code)
+    detail = fetch_pipeline_detail(conn, pipeline_id)
     build_graph(data.tasks, data.same_pipeline_edges)
+    zone = detail.schedule_timezone if detail.schedule_timezone is not None else config.timezone
     tasks: dict[str, Any] = {
         INIT_TASK: {
-            "bash_command": _remote_command(pipeline_code, "--init-only"),
+            "bash_command": _remote_command(pipeline_code, "--init-only", zone=zone),
             "depends_on": [],
             "trigger_rule": "all_success",
         }
@@ -330,14 +343,16 @@ def _remote_pipeline_dag(
                 depends_on.append(name)
                 kinds.append(SENSOR_TYPE)
         steps[codes[task.task_id]] = {
-            "bash_command": _remote_command(pipeline_code, "--task_code", codes[task.task_id]),
+            "bash_command": _remote_command(
+                pipeline_code, "--task_code", codes[task.task_id], zone=zone
+            ),
             "depends_on": sorted(depends_on) or base,
             "trigger_rule": trigger_rule(task.run_condition or "ALL", kinds),
         }
     tasks.update(steps)
     leaves = sorted(codes[t.task_id] for t in data.tasks if t.task_id not in upstream_ids)
     tasks[FINALIZE_TASK] = {
-        "bash_command": _remote_command(pipeline_code, "--finalize-only"),
+        "bash_command": _remote_command(pipeline_code, "--finalize-only", zone=zone),
         "depends_on": leaves or [INIT_TASK],
         "trigger_rule": "all_done",
     }
@@ -348,10 +363,14 @@ def _remote_pipeline_dag(
     return _dag_settings(config, detail, tasks)
 
 
-def _remote_command(code: str, *arguments: str) -> str:
-    return _command(
-        code, *arguments, "--run-key", RUN_KEY_TEMPLATE, "--run-date", RUN_DATE_TEMPLATE
+def _remote_command(code: str, *arguments: str, zone: str = "UTC") -> str:
+    timezone(zone)
+    logical_date = (
+        RUN_DATE_TEMPLATE
+        if zone == "UTC"
+        else f"{{{{ data_interval_end.in_timezone({json.dumps(zone)}) | ds }}}}"
     )
+    return _command(code, *arguments, "--run-key", RUN_KEY_TEMPLATE, "--run-date", logical_date)
 
 
 def require_airflow_run_templates(version_range: str) -> None:
