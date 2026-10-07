@@ -107,6 +107,7 @@ nav:
       - Email alerts: guides/email-alerts.md
       - Validating pipelines: guides/validating.md
       - Inspecting pipelines: guides/inspecting.md
+      - Service operations and JSON: guides/service-operations.md
       - Lineage and documentation versions: guides/lineage.md
       - The catalog site: guides/catalog.md
       - Running a pipeline: guides/running-pipelines.md

@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import argparse
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig, load_config, resolve_config_path
+from etl_craft.core.actor import current_actor
 from etl_craft.engine.connection import check_reachable, engine_db
+from etl_craft.execution.runner import ChildOptions
+from etl_craft.services.operations import OperationContext
 
 logger = logging.getLogger(__name__)
 
@@ -36,3 +41,30 @@ def configure_run_selector(parser: argparse.ArgumentParser) -> None:
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--run-id", type=int, help="the exact pipeline run id")
     selection.add_argument("--run-key", help="the exact run key within this pipeline")
+
+
+def configure_output(parser: argparse.ArgumentParser) -> None:
+    """Offer one schema-versioned operation document instead of text output."""
+    parser.add_argument(
+        "--format",
+        dest="output_format",
+        choices=("text", "json"),
+        default="text",
+        help="result format (default: text)",
+    )
+
+
+@contextmanager
+def command_context(args: argparse.Namespace) -> Iterator[OperationContext]:
+    """Load command resources and dispose them after the service operation."""
+    config = load_command_config(args)
+    engine = connect_engine_db(config)
+    try:
+        yield OperationContext(
+            engine,
+            config,
+            current_actor(),
+            ChildOptions(log_level=args.log_level, log_format=args.log_format),
+        )
+    finally:
+        engine.dispose()

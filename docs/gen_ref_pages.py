@@ -38,7 +38,15 @@ for source in sorted((SRC / "etl_craft").rglob("*.py")):
                 "- [Configuration](config/index.md): loading the project configuration "
                 "and resolving its settings.\n"
                 "- [Core errors](core/errors.md): named errors and their exit statuses.\n\n"
-                "## Packages\n\n"
+                + (
+                    "- [Service operations](services/operations/index.md): actor-scoped calls "
+                    "and structured result documents.\n"
+                    "- [Calling operations and JSON output](../../guides/service-operations.md): "
+                    "Python and CLI examples.\n\n"
+                    if (SRC / "etl_craft/services/operations/__init__.py").is_file()
+                    else ""
+                )
+                + "## Packages\n\n"
             )
         if source.stem == "__init__":
             children = sorted(

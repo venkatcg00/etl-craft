@@ -152,6 +152,7 @@ class RunEntry:
     started_by_kind: str | None = None
     ended_by: str | None = None
     ended_by_kind: str | None = None
+    task_run_id: int | None = None
 
 
 def run_history(
@@ -197,6 +198,7 @@ def run_history(
             r.status,
             r.start_date,
             r.end_date,
+            task_run_id=r.task_run_id,
             attempt_count=r.attempt_count,
             source_count=r.source_count,
             target_count=r.target_count,

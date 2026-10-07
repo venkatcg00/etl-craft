@@ -10,35 +10,22 @@ from contextlib import contextmanager
 from datetime import date
 from types import FrameType
 
-from sqlalchemy.engine import Engine
-
 from etl_craft.cli.commands import Command
 from etl_craft.cli.commands.common import (
+    command_context,
+    configure_output,
     configure_run_selector,
-    connect_engine_db,
-    load_command_config,
 )
 from etl_craft.cli.output import Output
-from etl_craft.config import ConnectorConfig
 from etl_craft.core.enums import RunStatus
-from etl_craft.core.errors import ExitCode, UsageError
-from etl_craft.engine.repository.pipelines import resolve_pipeline_id
-from etl_craft.engine.runlog import RunSelector, select_run
-from etl_craft.execution.interventions import skip_run
-from etl_craft.execution.pipeline import (
-    backfill,
-    finalize_active_run,
-    force_task,
-    init_pipeline_run,
-    rerun_task,
-    run_pipeline,
-)
-from etl_craft.execution.reconcile import reconcile
-from etl_craft.execution.runner import ChildOptions, Override, run_task
-from etl_craft.services.cloning import run_hooks
+from etl_craft.core.errors import ExitCode
+from etl_craft.engine.runlog import RunSelector
+from etl_craft.services.operations import PipelineRef, runs
+from etl_craft.services.operations.requests import RunRequest
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
+    configure_output(parser)
     configure_run_selector(parser)
     parser.add_argument("--pipeline_code", required=True, help="the pipeline to run")
     step = parser.add_mutually_exclusive_group()
@@ -101,147 +88,32 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    if args.force and (args.init_only or args.finalize_only):
-        raise UsageError("--force runs tasks; it does not apply to --init-only or --finalize-only")
-    if (args.ignore_dependencies or args.rerun) and not args.task_code:
-        raise UsageError("--ignore-dependencies and --rerun apply to one task: pass --task_code")
-    if args.ignore_dependencies and args.rerun:
-        raise UsageError("--rerun already runs the task without checking its dependencies")
-    if args.force and (args.ignore_dependencies or args.rerun):
-        option = "--rerun" if args.rerun else "--ignore-dependencies"
-        raise UsageError(f"{option} and --force are different overrides: choose one")
-    if args.with_downstream and not args.rerun:
-        raise UsageError("--with-downstream goes with --rerun")
-    if args.skip and (args.task_code or args.init_only or args.finalize_only or args.force):
-        raise UsageError("--skip records a whole run SKIPPED; it takes only --reason")
-    if args.reason and not (args.ignore_dependencies or args.rerun or args.skip or args.backfill):
-        raise UsageError("--reason goes with --ignore-dependencies, --rerun, --skip or --backfill")
-    if args.backfill and (
-        args.task_code or args.init_only or args.finalize_only or args.force or args.skip
-    ):
-        raise UsageError("--backfill runs the whole pipeline once per date; it takes only --reason")
-    if (args.run_id is not None or args.run_key is not None) and (args.backfill or args.skip):
-        raise UsageError("--backfill and --skip create new runs; do not pass a run selector")
-    if args.run_date and (args.skip or args.backfill):
-        raise UsageError("--run-date cannot be combined with --skip or --backfill")
-    config = load_command_config(args)
-    engine = connect_engine_db(config)
-    child = ChildOptions(log_level=args.log_level, log_format=args.log_format)
-    try:
-        with engine.connect() as conn:
-            pipeline_id = resolve_pipeline_id(conn, args.pipeline_code)
-        reconcile(engine, pipeline_id=pipeline_id)
-        with _terminate_as_interrupt():
-            status, message = _dispatch(args, config, engine, child)
-    finally:
-        engine.dispose()
-    out.line(message)
-    if status in (RunStatus.FAILED, RunStatus.CANCELLED):
-        return ExitCode.FAILURE
-    return ExitCode.SUCCESS
-
-
-def _dispatch(
-    args: argparse.Namespace, config: ConnectorConfig, engine: Engine, child: ChildOptions
-) -> tuple[RunStatus, str]:
-    """Do what ``args`` asks and return how it ended."""
-    if args.run_date is not None and (args.task_code or args.finalize_only):
-        with engine.connect() as conn:
-            selected = select_run(
-                conn,
-                resolve_pipeline_id(conn, args.pipeline_code),
-                RunSelector(args.run_id, args.run_key),
-            )
-        args.run_id, args.run_key = selected.pipeline_run_id, None
-        if selected.run_date != args.run_date:
-            raise UsageError(
-                f"run_id={selected.pipeline_run_id} has run_date={selected.run_date}, "
-                f"not {args.run_date}; a run's date cannot change"
-            )
-    if args.backfill:
-        first, last = args.backfill
-        done = backfill(
-            engine,
-            config,
-            args.pipeline_code,
-            first,
-            last,
-            args.reason or "",
-            child=child,
-            hooks=run_hooks(config, engine),
-        )
-        return done.status, done.message
-    elif args.skip:
-        skipped = skip_run(engine, config, args.pipeline_code, args.reason or "")
-        return RunStatus.SKIPPED, skipped.message
-    elif args.rerun:
-        rerun = rerun_task(
-            engine,
-            config,
-            args.pipeline_code,
-            args.task_code,
-            args.reason or "",
-            with_downstream=args.with_downstream,
-            child=child,
-            hooks=run_hooks(config, engine),
-            selector=RunSelector(args.run_id, args.run_key),
-        )
-        return rerun.status, rerun.message
-    elif args.task_code and args.force:
-        forced = force_task(
-            engine,
-            config,
-            args.pipeline_code,
-            args.task_code,
-            child=child,
-            hooks=run_hooks(config, engine),
-            selector=RunSelector(args.run_id, args.run_key),
-        )
-        return forced.status, forced.message
-    elif args.task_code:
-        override = Override(args.reason or "") if args.ignore_dependencies else None
-        outcome = run_task(
-            engine,
-            config,
-            args.pipeline_code,
-            args.task_code,
-            force=args.force,
-            child=child,
-            override=override,
-            selector=RunSelector(args.run_id, args.run_key),
-        )
-        return outcome.status, outcome.message
-    elif args.init_only:
-        started = init_pipeline_run(
-            engine,
-            config,
-            args.pipeline_code,
-            hooks=run_hooks(config, engine),
-            run_date=args.run_date,
-            selector=RunSelector(args.run_id, args.run_key),
-        )
-        return started.status, started.message
-    elif args.finalize_only:
-        ended = finalize_active_run(
-            engine,
-            config,
-            args.pipeline_code,
-            hooks=run_hooks(config, engine),
-            selector=RunSelector(args.run_id, args.run_key),
-        )
-        return ended.status, ended.message
+    request = RunRequest(
+        PipelineRef(args.pipeline_code),
+        selector=RunSelector(args.run_id, args.run_key),
+        task_code=args.task_code,
+        init_only=args.init_only,
+        finalize_only=args.finalize_only,
+        force=args.force,
+        ignore_dependencies=args.ignore_dependencies,
+        rerun=args.rerun,
+        with_downstream=args.with_downstream,
+        skip=args.skip,
+        run_date=args.run_date,
+        backfill=args.backfill,
+        reason=args.reason,
+    )
+    with command_context(args) as ctx, _terminate_as_interrupt():
+        done = runs.execute_run(ctx, request)
+    if args.output_format == "json":
+        out.document(done)
     else:
-        ran = run_pipeline(
-            engine,
-            config,
-            args.pipeline_code,
-            force=args.force,
-            child=child,
-            hooks=run_hooks(config, engine),
-            run_date=args.run_date,
-            selector=RunSelector(args.run_id, args.run_key),
-        )
-        return ran.status, ran.message
+        out.line(done.message)
+    return (
+        ExitCode.FAILURE
+        if done.status in (RunStatus.FAILED, RunStatus.CANCELLED)
+        else ExitCode.SUCCESS
+    )
 
 
 @contextmanager

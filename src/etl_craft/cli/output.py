@@ -6,9 +6,12 @@ to the log records.
 
 from __future__ import annotations
 
+import json
 import sys
 from collections.abc import Iterable
 from typing import TextIO
+
+from etl_craft.services.operations import to_json
 
 
 class Output:
@@ -36,6 +39,10 @@ class Output:
     def line(self, text: str = "") -> None:
         """Write one line of results."""
         print(text, file=self.stdout)
+
+    def document(self, result: object) -> None:
+        """Write the same JSON document returned by the service serializer."""
+        self.line(json.dumps(to_json(result), ensure_ascii=False, allow_nan=False))
 
     def rows(self, rows: Iterable[Iterable[object]]) -> None:
         """Write one tab-separated line per row; ``None`` becomes an empty field."""

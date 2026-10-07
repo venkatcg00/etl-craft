@@ -6,36 +6,35 @@ import argparse
 
 from etl_craft.cli.commands import Command
 from etl_craft.cli.commands.common import (
+    command_context,
+    configure_output,
     configure_run_selector,
-    connect_engine_db,
-    load_command_config,
 )
 from etl_craft.cli.output import Output
 from etl_craft.core.errors import ExitCode
 from etl_craft.engine.runlog import RunSelector
-from etl_craft.execution.interventions import cancel_run
+from etl_craft.services.operations import PipelineRef, runs
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
+    configure_output(parser)
     configure_run_selector(parser)
     parser.add_argument("--pipeline_code", required=True, help="the pipeline whose run to cancel")
     parser.add_argument("--reason", required=True, help="why; recorded with the change")
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    config = load_command_config(args)
-    engine = connect_engine_db(config)
-    try:
-        done = cancel_run(
-            engine,
-            config,
-            args.pipeline_code,
+    with command_context(args) as ctx:
+        done = runs.cancel_run(
+            ctx,
+            PipelineRef(args.pipeline_code),
             args.reason,
             selector=RunSelector(args.run_id, args.run_key),
         )
-    finally:
-        engine.dispose()
-    out.line(done.message)
+    if args.output_format == "json":
+        out.document(done)
+    else:
+        out.line(done.message)
     return ExitCode.SUCCESS
 
 

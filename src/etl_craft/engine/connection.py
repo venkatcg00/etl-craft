@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from sqlalchemy import text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectorConfig
@@ -39,3 +41,13 @@ def check_reachable(engine: Engine, schema: str = "") -> None:
         raise ConfigurationError(f"could not connect to the Engine DB: {error}") from error
     if problem is not None:
         raise ConfigurationError(problem)
+
+
+@contextmanager
+def read_snapshot(engine: Engine) -> Iterator[Connection]:
+    """Read related views in one stable transaction, including concurrent PostgreSQL writes."""
+    with engine.connect() as conn:
+        if engine.dialect.name == "postgresql":
+            conn = conn.execution_options(isolation_level="REPEATABLE READ")
+        with conn.begin():
+            yield conn

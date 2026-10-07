@@ -5,19 +5,19 @@ from __future__ import annotations
 import argparse
 
 from etl_craft.cli.commands import Command
-from etl_craft.cli.commands.common import connect_engine_db, load_command_config
+from etl_craft.cli.commands.common import command_context, configure_output
 from etl_craft.cli.output import Output
 from etl_craft.core.errors import ExitCode
-from etl_craft.services.inspect import list_pipelines
+from etl_craft.services.operations import inspect
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    engine = connect_engine_db(load_command_config(args))
-    try:
-        with engine.connect() as conn:
-            pipelines = list_pipelines(conn)
-    finally:
-        engine.dispose()
+    with command_context(args) as ctx:
+        done = inspect.list_pipelines(ctx)
+    if args.output_format == "json":
+        out.document(done)
+        return ExitCode.SUCCESS
+    pipelines = done.pipelines
     if not pipelines:
         out.empty("no active pipelines")
         return ExitCode.SUCCESS
@@ -40,6 +40,6 @@ def _run(args: argparse.Namespace, out: Output) -> int:
 COMMAND = Command(
     name="list",
     help="List the active pipelines.",
-    configure=lambda parser: None,
+    configure=configure_output,
     run=_run,
 )
