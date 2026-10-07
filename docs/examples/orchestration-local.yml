@@ -1,4 +1,4 @@
-# Local orchestration: etl-craft runs the waves itself.
+# Local orchestration: etl-craft dispatches ready tasks itself.
 #
 # `etl-craft run --pipeline_code X` resolves each ready wave from
 # CFG_TASK_DEPENDENCY and runs one subprocess per task, at most

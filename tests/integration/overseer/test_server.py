@@ -230,10 +230,7 @@ def test_shutdown_interrupts_gate_wait_without_starting_a_task(cli_project):
     assert p.run("pause", "--pipeline_code", "UPSTREAM", "--reason", "maintenance")[0] == 0
     assert p.run("run", "--pipeline_code", "P", "--init-only", "--run-key", "gate")[0] == 0
     server = p.start("server")
-    deadline = time.monotonic() + 10
-    while "waiting for it to finish" not in server.output and time.monotonic() < deadline:
-        time.sleep(0.02)
-    assert "waiting for it to finish" in server.output, server.output
+    p.wait_for("SELECT COUNT(*) FROM AUD_GATE_WAITS WHERE NEXT_CHECK_AT IS NOT NULL", expected=1)
     started = time.monotonic()
     server.signal(signal.SIGTERM)
     assert server.wait(timeout=5) == 0, server.output

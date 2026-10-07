@@ -200,10 +200,10 @@ def test_pipeline_decisions_roll_back_with_admission(cli_project):
         assert conn.execute(text("SELECT COUNT(*) FROM AUD_GATE_DECISIONS")).scalar_one() == 0
         assert (
             conn.execute(
-                text("SELECT COUNT(*) FROM AUD_PIPELINES_RUN_LOG WHERE PIPELINE_ID=:pipeline"),
+                text("SELECT STATUS FROM AUD_PIPELINES_RUN_LOG WHERE PIPELINE_ID=:pipeline"),
                 {"pipeline": project.pipeline_id},
             ).scalar_one()
-            == 0
+            == "QUEUED"
         )
 
 

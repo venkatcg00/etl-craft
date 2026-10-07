@@ -138,9 +138,9 @@ def run_row(engine, pipeline_run_id):
         ).one()
 
 
-def test_a_pipeline_runs_in_waves_and_fails_when_a_task_fails(config, pipeline, caplog):
+def test_a_pipeline_dispatches_ready_tasks_and_fails_when_a_task_fails(config, pipeline, caplog):
     engine, _ = pipeline
-    caplog.set_level(logging.INFO, "etl_craft.execution.pipeline")
+    caplog.set_level(logging.INFO, "etl_craft.execution")
     outcome = run_pipeline(engine, config, "P", child=CHILD, clock=NO_WAIT)
     run_id = outcome.pipeline_run_id
     assert outcome.status == RunStatus.FAILED
@@ -157,8 +157,8 @@ def test_a_pipeline_runs_in_waves_and_fails_when_a_task_fails(config, pipeline, 
         "alert": ("SKIPPED", 1, None),
     }
     assert run_row(engine, run_id).status == "FAILED"
-    waves = [r.getMessage() for r in caplog.records if ": wave " in r.getMessage()]
-    assert waves == ["P: wave 1: extract, broken", "P: wave 2: transform"]
+    dispatches = [r.getMessage() for r in caplog.records if ": dispatch " in r.getMessage()]
+    assert dispatches == ["P: dispatch extract", "P: dispatch broken", "P: dispatch transform"]
 
 
 def test_an_interrupted_run_is_resumed_without_repeating_finished_tasks(config, pipeline):

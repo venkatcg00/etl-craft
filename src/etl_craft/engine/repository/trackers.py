@@ -31,7 +31,7 @@ class FinishedRun:
 
 
 def fetch_latest_pipeline_run(conn: Connection, pipeline_id: int) -> LatestRun | None:
-    """Return the most recently started run of ``pipeline_id`` outside backfills, or ``None``."""
+    """Return the active upstream or its latest started run; exclude queued and backfill runs."""
     row = conn.execute(
         statement(conn, "latest_scheduled_pipeline_run"), {"pipeline_id": pipeline_id}
     ).one_or_none()

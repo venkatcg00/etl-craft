@@ -6,16 +6,16 @@
 etl-craft run --pipeline_code SALES_DAILY
 ```
 
-In local mode this runs every active task of the pipeline under one run, in dependency waves.
-Each wave holds the tasks that are ready, and runs at most `Orchestration.Max_parallel_tasks`
-of them at once (8 unless set), each in a process of its own. When a wave ends, the engine looks
-again at what is ready, until every task has settled or nothing more can start. Every task runs
-as it would under [`run --task_code`](running-tasks.md): the same logs, time limits and
-recorded outcome.
+In local mode this runs every active task under one pipeline run. Each completion releases any
+newly ready tasks immediately; a slow independent task does not hold back another branch.
+At most `Orchestration.Max_parallel_tasks` tasks run at once (8 unless set), each in its own
+process with the same logs, time limits and outcomes as [`run --task_code`](running-tasks.md).
+Cross-pipeline gate waits persist their deadline and next look without holding a worker slot.
 
 ```
-INFO etl_craft.execution.pipeline [pipeline=SALES_DAILY pipeline_run_id=97]: SALES_DAILY: wave 1: extract_orders, extract_customers
-INFO etl_craft.execution.pipeline [pipeline=SALES_DAILY pipeline_run_id=97]: SALES_DAILY: wave 2: load_orders
+INFO etl_craft.execution.scheduler [pipeline=SALES_DAILY pipeline_run_id=97]: SALES_DAILY: dispatch extract_orders
+INFO etl_craft.execution.scheduler [pipeline=SALES_DAILY pipeline_run_id=97]: SALES_DAILY: dispatch extract_customers
+INFO etl_craft.execution.scheduler [pipeline=SALES_DAILY pipeline_run_id=97]: SALES_DAILY: dispatch load_orders
 ```
 
 The run ends `SUCCESS` when every data task is `SUCCESS` or `SKIPPED`, `SKIPPED` when every data task is
@@ -46,7 +46,9 @@ Email alert failures do not change the outcome of a pipeline containing data tas
 [Email alerts](email-alerts.md#when-sending-fails). A pipeline containing only alerts uses their
 outcomes.
 
-A new run then checks the pipeline's dependencies on other pipelines. When one is not
+A new run is recorded `QUEUED` while its dependencies on other pipelines are checked.
+`AUD_GATE_WAITS` retains its deadline and look count across restarts; admission changes it
+to `IN-PROGRESS` only when there is no active sibling. When one is not
 satisfied, the run is recorded `SKIPPED` with the reason, no task runs, and the command exits
 `0`:
 
@@ -58,9 +60,10 @@ See [Dependencies on other pipelines](dependencies.md#dependencies-on-other-pipe
 
 ## Resuming a run
 
-A run that is still `IN-PROGRESS`, for example because its process was stopped, is resumed by
+A run that is still `QUEUED` or `IN-PROGRESS`, for example because its process was stopped, is resumed by
 running the pipeline again: its `SUCCESS` and `SKIPPED` tasks are not run again, and its failed
-tasks get another attempt. A resumed run does not check the pipeline's dependencies again.
+tasks get another attempt. An admitted run does not check the pipeline's dependencies again; a queued run resumes its
+recorded gate budget.
 
 Pressing Ctrl-C, or sending the process `SIGTERM` or `SIGHUP`, stops every running task's
 process. Those tasks are recorded `FAILED`, and the run stays `IN-PROGRESS` so the next run
@@ -69,7 +72,8 @@ caught: the next run reconciles expired leases, records orphaned attempts `LOST`
 verified local children and retries failed tasks. `etl-craft reconcile` also requests recovery.
 See [run controls](run-control.md#mark-a-task) for grace periods and uncertain side effects.
 
-`--force` runs every task in its wave whatever its status or dependencies, and skips the
+`--force` runs every task after its same-pipeline upstreams finish, regardless of their outcomes
+or its previous status, and skips the
 pipeline's dependency check. It is only available in local mode.
 
 To step in on a run (mark a task or the run, record a stand-in upstream run, cancel it, run a

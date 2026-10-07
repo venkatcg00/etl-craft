@@ -21,17 +21,15 @@ def test_simultaneous_initializers_leave_one_active_run(engine_db):
         except RunStateError as error:
             return error
 
-    results = two_at_once(
-        initialize, initialize, at="etl_craft.execution.pipeline.check_pipeline_dependencies"
-    )
+    results = two_at_once(initialize, initialize, at="etl_craft.execution.pipeline.check_gate_now")
     winners = [result for result in results if not isinstance(result, RunStateError)]
     refused = [result for result in results if isinstance(result, RunStateError)]
     assert len(winners) == len(refused) == 1
     assert "another process started" in str(refused[0])
     with db.engine.connect() as conn:
-        assert conn.execute(text("SELECT STATUS FROM AUD_PIPELINES_RUN_LOG")).scalars().all() == [
-            "IN-PROGRESS"
-        ]
+        statuses = conn.execute(text("SELECT STATUS FROM AUD_PIPELINES_RUN_LOG")).scalars().all()
+        assert statuses.count("IN-PROGRESS") == 1
+        assert all(status in {"IN-PROGRESS", "QUEUED"} for status in statuses)
 
 
 def test_a_fault_between_run_creation_and_skipping_rolls_back(cli_project):
@@ -48,7 +46,9 @@ def test_a_fault_between_run_creation_and_skipping_rolls_back(cli_project):
     code, output = project.run("run", "--pipeline_code", "P", fault="pipeline.after_insert")
     assert code != 0, output
     with project.engine.connect() as conn:
-        assert conn.execute(text("SELECT COUNT(*) FROM AUD_PIPELINES_RUN_LOG")).scalar_one() == 0
+        assert (
+            conn.execute(text("SELECT STATUS FROM AUD_PIPELINES_RUN_LOG")).scalar_one() == "QUEUED"
+        )
     code, output = project.run("run", "--pipeline_code", "P")
     assert code == 0, output
     project.wait_for("SELECT STATUS FROM AUD_PIPELINES_RUN_LOG", expected="SKIPPED")

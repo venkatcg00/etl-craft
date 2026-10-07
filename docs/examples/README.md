@@ -57,7 +57,7 @@ retry counts and delays are at least 0.
 
 | File | Engine | Warehouse | Mode | Shows |
 |---|---|---|---|---|
-| `orchestration-local.yml` | SQLite | DuckDB file | local | etl-craft runs the waves; per-profile DAG defaults for previewing `generate-yml` |
+| `orchestration-local.yml` | SQLite | DuckDB file | local | etl-craft dispatches ready tasks; per-profile DAG defaults for previewing `generate-yml` |
 | `orchestration-remote.yml` | PostgreSQL | PostgreSQL | remote | Airflow runs each task; `Allow_schedule: false` outside prod, Email per profile, `Global_dag` in prod |
 
 ## Engine DB

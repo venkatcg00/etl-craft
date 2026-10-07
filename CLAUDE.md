@@ -44,7 +44,7 @@ Each package imports only the packages below it. `lint-imports` enforces this.
 | `cli` | argparse commands, output, exit codes |
 | `overseer` | leadership, active-run working set, local supervision and shutdown |
 | `services` | actor-scoped operations, doctor, setup, validate, cloning, DAG YAML, lineage, docs site |
-| `execution` | task runner, process supervisor, wave scheduler, run lifecycle, cross-pipeline gates |
+| `execution` | task runner, process supervisor, ready-task scheduler, run lifecycle, cross-pipeline gates |
 | `handlers` | SQL actions, business rules, Python ingestion scripts, email alerts |
 | `engine` / `warehouse` | Engine DB access and warehouse access (siblings, independent) |
 | `dialects` | per-database SQL and connection details (engine: `schema.sql`, `migrations/`, `queries/`) |
@@ -54,7 +54,8 @@ Each package imports only the packages below it. `lint-imports` enforces this.
 ## Design rules that must hold
 
 - `etl-craft run` is the only execution verb. `--task_code` runs one task; without it the engine
-  runs the pipeline in dependency waves, one child process per task.
+  starts ready tasks after each completion, one child process per task. Gate waits use no worker
+  slots and retain their budget in AUD_GATE_WAITS.
 - A task is given its run by whoever starts it; nothing resolves a run by recency. Commands
   select an explicit `--run-id` or `--run-key`, or the single non-terminal run. A partial unique
   index keeps one IN-PROGRESS run per pipeline.

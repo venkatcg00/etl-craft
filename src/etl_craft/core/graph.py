@@ -136,8 +136,8 @@ class DependencyGraph:
 
         This is the guaranteed-safe order, not the earliest one: a task comes after every
         upstream, even when its ``ANY`` or ``N`` condition could let it start sooner. ``graph``
-        prints it, generated DAGs chain it, and a ``--force`` run follows it because it skips
-        the status checks ``ready`` relies on. Task ids within a wave are sorted.
+        prints it, generated DAGs chain it, and operator repairs use its topological order.
+        Task ids within a wave are sorted.
         """
         remaining = set(self._task_ids)
         resolved: set[int] = set()
@@ -185,7 +185,7 @@ class DependencyGraph:
 
         ``cross_pipeline_satisfied`` is how many of its cross-pipeline dependencies the
         cross-pipeline gate has confirmed. ``None`` means they have not been evaluated, and
-        they all count as satisfied: the wave scheduler has to start the task for its gate to
+        they all count as satisfied: the scheduler has to consider the task for its gate to
         evaluate them, so counting them as unsatisfied would never start it.
         """
         node = self._nodes_by_id[task_id]

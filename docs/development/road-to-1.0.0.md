@@ -95,7 +95,8 @@ item's text, or work done early under another item.
 | S4.A Service layer | Done | #113 | Actor-scoped operations, frozen views and CLI JSON parity |
 | S4.B Overseer core | Done | #114 | Leadership, active-run recovery, notifications and shutdown |
 | S4.C Schedules | Done | #115 | UTC tick identities, timezone dates, bounded catch-up and overlap policy |
-| S4.D and later | Not started | | |
+| S4.D Ready-set dispatch | Done | #116 | Shared cooperative scheduling and durable gate waits without worker slots |
+| S4.E and later | Not started | | |
 
 ### Handover notes
 
@@ -105,8 +106,8 @@ What a person picking up the work needs that the code and the item texts do not 
 
 - S4.B supervises CLI-initialized IN-PROGRESS runs through the existing local wave runner.
   S4.C creates schedules and admits the oldest QUEUED run through the existing blocking gates
-  when there is no active sibling. S4.D replaces blocking gates with ready-set dispatch and persisted
-  nonblocking admission; S4.E adds automatic retries. Shutdown interrupts current gate sleeps
+  when there is no active sibling. S4.D shares cooperative ready-set scheduling between the foreground CLI and server,
+  with persisted nonblocking gate admission; S4.E adds automatic retries. Shutdown interrupts current gate sleeps
   without starting a task or inventing an attempt. Graph revisions include the latest
   metadata-change id alongside timestamp maxima so deletions also invalidate the cache.
   Hard-killed overseer history remains unclosed; leadership comes from the held session lock,

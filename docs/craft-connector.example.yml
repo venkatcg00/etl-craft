@@ -39,7 +39,7 @@ Secrets:
 
 Orchestration:
   # Profile: prod                 # overrides Secrets.Profile for this section only
-  Mode: local                          # value — local: etl-craft runs the waves itself.
+  Mode: local                          # value — local: etl-craft dispatches ready tasks itself.
                                        # remote: an orchestrator runs one task at a time
                                        #   from the YAML `etl-craft generate-yml` emits.
   # Name: Airflow                 # informational: generate-yml emits one YAML DAG shape;
