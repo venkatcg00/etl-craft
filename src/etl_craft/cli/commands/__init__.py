@@ -51,6 +51,7 @@ def _commands() -> tuple[Command, ...]:
         rehash,
         resume,
         run,
+        server,
         setup,
         steps,
         upgrade_targets,
@@ -59,6 +60,7 @@ def _commands() -> tuple[Command, ...]:
 
     return (
         run.COMMAND,
+        server.COMMAND,
         mark.COMMAND,
         cancel.COMMAND,
         reconcile.COMMAND,

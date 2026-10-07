@@ -212,6 +212,7 @@ class ExecutionLimits:
     max_parallel_tasks: int = DEFAULT_MAX_PARALLEL_TASKS
     enforce_sla: bool = False
     gate_wait_minutes: int = DEFAULT_GATE_WAIT_MINUTES
+    shutdown_grace_seconds: int = 60
 
 
 @dataclass(frozen=True)

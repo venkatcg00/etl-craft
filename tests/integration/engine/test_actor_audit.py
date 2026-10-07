@@ -194,7 +194,10 @@ def seeded_tables(db):
                 value = values.get(lower)
                 if value is None:
                     type_name = str(column["type"]).upper()
-                    value = 1 if "INT" in type_name or "NUMERIC" in type_name else "sample"
+                    if "TIMESTAMP" in type_name or "DATETIME" in type_name:
+                        value = datetime.now(UTC)
+                    else:
+                        value = 1 if "INT" in type_name or "NUMERIC" in type_name else "sample"
                 if table.upper() == "AUD_BUSINESS_RULES_RESULTS" and lower == "status":
                     value = "REPORT"
                 payload[name] = value
@@ -288,6 +291,7 @@ def test_guarded_upgrade_rolls_back_with_the_ledger(empty_engine_db, monkeypatch
         "0010_gate_repairs.sql",
         "0011_target_hash_version.sql",
         "0013_execution_identity_comment.sql",
+        "0014_overseers.sql",
     ]
 
 

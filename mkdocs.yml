@@ -117,6 +117,7 @@ nav:
       - deploying/index.md
       - The project directory: deploying/project-layout.md
       - Local mode: deploying/local-mode.md
+      - Local server: deploying/server.md
       - Running under an orchestrator: deploying/orchestrator.md
       - Checking a deployment, doctor and setup: deploying/doctor-and-setup.md
       - Engine DB setup and upgrades: deploying/engine-db.md

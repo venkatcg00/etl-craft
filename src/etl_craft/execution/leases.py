@@ -137,7 +137,9 @@ def heartbeat(
 
 
 @contextmanager
-def supervise_run(engine: Engine, run_id: int) -> Iterator[None]:
+def supervise_run(
+    engine: Engine, run_id: int, *, cancel: threading.Event | None = None
+) -> Iterator[None]:
     """Claim and heartbeat one run; no other supervisor can adopt its live or expired lease."""
     owner = owner_id()
     with engine.begin() as conn:
@@ -155,7 +157,7 @@ def supervise_run(engine: Engine, run_id: int) -> Iterator[None]:
             owner=owner,
             lease_expires_at=datetime.now(UTC) + timedelta(seconds=LEASE_SECONDS),
         )
-    cancel = threading.Event()
+    cancel = cancel if cancel is not None else threading.Event()
     token = _run.set(RunSupervisor(run_id, owner, cancel))
     failed = False
     try:

@@ -171,6 +171,7 @@ name = "Layers: each layer imports only the layers below it"
 type = "layers"
 layers = [
     "etl_craft.cli",
+    "etl_craft.overseer",
     "etl_craft.services",
     "etl_craft.execution",
     "etl_craft.handlers",

@@ -93,13 +93,22 @@ item's text, or work done early under another item.
 | S3.G.7 Retry-safe appends | Done | #110 | W4 |
 | S3.H Chaos suite | Done | #111 | |
 | S4.A Service layer | Done | #113 | Actor-scoped operations, frozen views and CLI JSON parity |
-| S4.B and later | Not started | | |
+| S4.B Overseer core | Done | #114 | Leadership, active-run recovery, notifications and shutdown |
+| S4.C and later | Not started | | |
 
 ### Handover notes
 
 What a person picking up the work needs that the code and the item texts do not say.
 
 **Choices that differ from the item text.**
+
+- S4.B supervises CLI-initialized IN-PROGRESS runs through the existing local wave runner.
+  S4.C adds schedule creation and S4.D adds QUEUED admission, ready-set dispatch and persisted
+  nonblocking gates; S4.E adds automatic retries. Shutdown interrupts current gate sleeps
+  without starting a task or inventing an attempt. Graph revisions include the latest
+  metadata-change id alongside timestamp maxima so deletions also invalidate the cache.
+  Hard-killed overseer history remains unclosed; leadership comes from the held session lock,
+  and recovery fences expired attempts before reusing their exact task-run identities.
 
 - S4.A returns an `OperationResult` envelope around stored `RunView`, `TaskRunView` and
   pipeline snapshots. The envelope's outcome is distinct from the stored status: a successful
