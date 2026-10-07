@@ -32,7 +32,7 @@ def scene(conn):
     pipeline = add_pipeline(conn, "P")
     task = add_task(conn, pipeline, "T")
     run = tr.create_run(conn, pipeline, ACTOR)
-    summary = tr.create_task_run(conn, task, run, ACTOR)
+    summary = tr.find_or_create_task_run(conn, task, run).task_run_id
     return pipeline, task, run, summary
 
 
@@ -234,7 +234,7 @@ def test_run_state_matrix(engine_db, status, operation):
 
 def test_run_owner_live_attempt_and_other_run_guards(engine_db):
     with engine_db.engine.begin() as conn:
-        pipeline, task_id, run, task = scene(conn)
+        pipeline, _, run, task = scene(conn)
         tr.start_run(
             conn,
             run,
@@ -263,7 +263,7 @@ def test_run_owner_live_attempt_and_other_run_guards(engine_db):
         with pytest.raises(StaleTransitionError):
             tr.create_run(conn, pipeline, ACTOR)
         with pytest.raises(StaleTransitionError):
-            tr.create_task_run(conn, task_id, run, ACTOR)
+            tr.queue_attempt(conn, task, ACTOR)
         assert runlog.fetch_pipeline_run_status(conn, other) == "IN-PROGRESS"
 
 
@@ -391,18 +391,13 @@ def test_cancelled_attempt_cannot_overwrite_an_operator_mark(engine_db):
         ).one() == ("SUCCESS", 12, "loaded by hand")
 
 
-def test_task_creation_requires_its_own_active_pipeline(engine_db):
+def test_attempt_queue_requires_an_active_pipeline(engine_db):
     with engine_db.engine.begin() as conn:
-        _, task, run, _ = scene(conn)
-        other = add_pipeline(conn, "Other")
-        other_run = tr.create_run(conn, other, ACTOR)
+        _, _, run, summary = scene(conn)
+        tr.finish_run(conn, run, "SUCCESS", ACTOR)
         with pytest.raises(StaleTransitionError):
-            tr.create_task_run(conn, task, other_run, ACTOR)
-        next_task = add_task(conn, other, "Next")
-        tr.finish_run(conn, other_run, "SUCCESS", ACTOR)
-        with pytest.raises(StaleTransitionError):
-            tr.create_task_run(conn, next_task, other_run, ACTOR)
-        assert runlog.fetch_pipeline_run_status(conn, run) == "IN-PROGRESS"
+            tr.queue_attempt(conn, summary, ACTOR)
+        assert conn.execute(text("SELECT COUNT(*) FROM AUD_TASK_ATTEMPTS")).scalar_one() == 0
 
 
 def test_missing_rows_and_invalid_outcomes_are_stale(engine_db):

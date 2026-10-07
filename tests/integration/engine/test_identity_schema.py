@@ -10,7 +10,7 @@ from test_catalog_upgrade import assert_history, seed_run_history
 from etl_craft.core.errors import MigrationError, RunStateError
 from etl_craft.engine import migrations, transitions
 from fixtures.catalog import snapshot
-from fixtures.metadata import add_pipeline, add_pipeline_dependency, add_task
+from fixtures.metadata import add_pipeline, add_pipeline_dependency, add_task, start_run
 from fixtures.released_schema import install
 
 
@@ -130,7 +130,7 @@ def test_attempt_identity_and_active_uniqueness(engine_db):
     with engine_db.engine.begin() as conn:
         p = add_pipeline(conn, "P")
         t = add_task(conn, p, "load")
-        r = transitions.find_or_create_active_run(conn, p)
+        r = start_run(conn, p)
         task_run = transitions.find_or_create_task_run(conn, t, r).task_run_id
     insert = text(
         "INSERT INTO AUD_TASK_ATTEMPTS (TASK_RUN_ID, ATTEMPT_NUMBER, STATUS) VALUES (:t, :n, :s)"
@@ -183,7 +183,7 @@ def test_gate_decision_dependency_and_result_constraints(engine_db):
         p = add_pipeline(conn, "DOWN")
         up = add_pipeline(conn, "UP")
         dep = add_pipeline_dependency(conn, p, up)
-        r = transitions.find_or_create_active_run(conn, p)
+        r = start_run(conn, p)
         assert (
             conn.execute(text("SELECT CONSUME_REPAIRS FROM CFG_PIPELINE_DEPENDENCY")).scalar_one()
             == "Y"

@@ -16,7 +16,13 @@ from etl_craft.execution.interventions import mark_task
 from etl_craft.services.catalog import build_catalog
 from etl_craft.services.catalog_graph import lineage_drawing
 from etl_craft.services.catalog_site import MARKER, table_url, write_site
-from fixtures.metadata import add_dependency, add_pipeline, add_pipeline_dependency, add_task
+from fixtures.metadata import (
+    add_dependency,
+    add_pipeline,
+    add_pipeline_dependency,
+    add_task,
+    start_run,
+)
 from fixtures.metadata import insert as insert_row
 
 
@@ -120,7 +126,7 @@ def project(engine_db, tmp_path, monkeypatch):
         add_dependency(conn, ingest, stage, pull)
         add_dependency(conn, sales, convert, stage, upstream_pipeline=ingest)
         add_dependency(conn, sales, rules, convert, "HAS_DATA")
-        run_id = transitions.find_or_create_active_run(conn, ingest)
+        run_id = start_run(conn, ingest)
         insert_row(
             conn,
             "INSERT INTO AUD_TASK_RUN_LOG (TASK_ID, PIPELINE_RUN_ID, STATUS, END_DATE, "
@@ -393,7 +399,7 @@ def test_runs_have_pages_with_what_they_were_built_from_and_used_by(project, tmp
                 "JOIN CFG_TASKS t ON t.TASK_ID = r.TASK_ID WHERE t.TASK_CODE = 'stage'"
             )
         ).one()
-        sales_run = transitions.find_or_create_active_run(conn, ids["SALES"])
+        sales_run = start_run(conn, ids["SALES"])
         dependency, convert = conn.execute(
             text(
                 "SELECT d.TASK_DEPENDENCY_ID, d.TASK_ID FROM CFG_TASK_DEPENDENCY d "

@@ -27,15 +27,12 @@ class OperationContext:
     """Resources owned by the caller; operations never dispose the Engine DB.
 
     actor scopes requests and dispatched work; automatic transitions retain their system actor.
-    project is reserved for the project's namespace; the configuration's project_dir
-    remains the root of local files.
     """
 
     engine: Engine
     config: ConnectorConfig
     actor: Actor
     child: ChildOptions = field(default_factory=ChildOptions)
-    project: str | None = None
 
 
 @contextmanager

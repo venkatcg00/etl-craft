@@ -383,33 +383,11 @@ def test_qualify_prepends_the_active_database_only_when_none_is_named():
     assert text.qualify("other.public.some_table", "etl_craft") == "other.public.some_table"
 
 
-def test_split_pipe_list():
-    assert text.split_pipe_list(" id | region ||", param_name="MERGE_KEY") == ["id", "region"]
-
-
-@pytest.mark.parametrize("value", [None, ""])
-def test_split_pipe_list_requires_a_value(value):
-    with pytest.raises(HandlerError, match=r"CFG_TASK_PARAMETERS\.MERGE_KEY is required"):
-        text.split_pipe_list(value, param_name="MERGE_KEY")
-
-
 # Checksums
 
 
 def test_sha256_hex():
     assert text.sha256_hex(b"SELECT 1;") == hashlib.sha256(b"SELECT 1;").hexdigest()
-
-
-def test_fingerprint_of_one_part_is_its_md5():
-    # Documentation versions store this value, so it must not change.
-    assert text.fingerprint("docs") == hashlib.md5(b"docs").hexdigest()
-
-
-def test_fingerprint_joins_parts_with_nul_so_they_cannot_collide():
-    assert text.fingerprint("ab", "c") != text.fingerprint("a", "bc")
-    assert text.fingerprint("SELECT 1", "public.t", "") == (
-        hashlib.md5(b"SELECT 1\0public.t\0").hexdigest()
-    )
 
 
 # Suggestions

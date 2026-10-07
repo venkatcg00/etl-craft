@@ -40,7 +40,13 @@ from etl_craft.execution.pipeline import (
     run_pipeline,
 )
 from etl_craft.execution.runner import ChildOptions, Override, attempt_log_path, run_task
-from fixtures.metadata import add_dependency, add_pipeline, add_pipeline_dependency, add_task
+from fixtures.metadata import (
+    add_dependency,
+    add_pipeline,
+    add_pipeline_dependency,
+    add_task,
+    start_run,
+)
 
 TESTS_DIR = Path(__file__).parents[2]
 CHILD = ChildOptions(module="fixtures.task_child", kill_grace_seconds=2, cancel_poll_seconds=0.2)
@@ -593,7 +599,7 @@ def test_relaxed_gates_let_a_run_through_and_record_it(config, downstream, polic
 def test_a_task_runs_without_its_dependencies_when_told_to(config, pipeline):
     engine, ids = pipeline
     with engine.begin() as conn:
-        run_id = transitions.find_or_create_active_run(conn, ids["P"])
+        run_id = start_run(conn, ids["P"])
     # transform waits for extract, which has not run.
     waiting = run_task(engine, config, "P", "transform", child=CHILD)
     assert waiting.status == RunStatus.SKIPPED and "nothing recorded" in waiting.message
@@ -882,9 +888,7 @@ def test_a_backfill_runs_once_per_date_as_of_that_date(config, pipeline, downstr
 def test_a_plain_run_does_not_take_over_a_backfills_run(config, pipeline):
     engine, ids = pipeline
     with engine.begin() as conn:
-        backfill_run = transitions.find_or_create_active_run(
-            conn, ids["P"], run_date=date(2025, 1, 1), backfill=True
-        )
+        backfill_run = start_run(conn, ids["P"], run_date=date(2025, 1, 1), backfill=True)
     with pytest.raises(RunStateError, match="is running backfill run pipeline_run_id="):
         run_pipeline(engine, config, "P", child=CHILD)
     assert run_status(engine, backfill_run) == "IN-PROGRESS"
@@ -895,7 +899,7 @@ def test_a_plain_run_does_not_take_over_a_backfills_run(config, pipeline):
 def test_a_backfill_does_not_take_over_a_scheduled_run(config, pipeline):
     engine, ids = pipeline
     with engine.begin() as conn:
-        scheduled = transitions.find_or_create_active_run(conn, ids["P"], run_date=date(2026, 9, 2))
+        scheduled = start_run(conn, ids["P"], run_date=date(2026, 9, 2))
     # The run started by itself between two backfill dates is found before the next date.
     with pytest.raises(RunStateError, match="finish or cancel it before a backfill"):
         backfill(engine, config, "P", date(2026, 9, 2), date(2026, 9, 2), "x", child=CHILD)
@@ -909,7 +913,7 @@ def test_a_backfill_stops_when_another_run_starts_between_dates(config, pipeline
 
     def a_scheduled_run_starts(outcome):
         with engine.begin() as conn:
-            transitions.find_or_create_active_run(conn, ids["P"])
+            start_run(conn, ids["P"])
 
     done = backfill(
         engine,
@@ -974,7 +978,7 @@ def test_what_a_backfill_refuses(config, pipeline):
             engine, replace(config, mode=Mode.REMOTE), "P", date(2026, 9, 1), date(2026, 9, 1), "x"
         )
     with engine.begin() as conn:
-        run_id = transitions.find_or_create_active_run(conn, ids["P"], run_date=date(2026, 9, 9))
+        run_id = start_run(conn, ids["P"], run_date=date(2026, 9, 9))
     with pytest.raises(RunStateError, match=rf"run in progress \(pipeline_run_id={run_id}\)"):
         backfill(engine, config, "P", date(2026, 9, 1), date(2026, 9, 1), "x")
     with pytest.raises(RunStateError, match="as of 2026-09-09, not 2026-09-01"):
@@ -1017,7 +1021,7 @@ def test_the_run_date_and_backfill_options(config, engine_db, capsys, monkeypatc
 def test_a_task_left_running_by_a_dead_process_is_released_with_stale(config, pipeline):
     engine, ids = pipeline
     with engine.begin() as conn:
-        run = transitions.find_or_create_active_run(conn, ids["P"])
+        run = start_run(conn, ids["P"])
         transitions.find_or_create_task_run(conn, ids["extract"], run)
     held = run_pipeline(engine, config, "P", child=CHILD)
     assert held.status == RunStatus.IN_PROGRESS
@@ -1207,7 +1211,7 @@ def test_a_forced_task_in_a_skipped_run_leaves_the_rest_to_run(config, pipeline)
 def test_a_forced_task_under_an_active_run_leaves_it_open(config, pipeline):
     engine, _ = pipeline
     with engine.begin() as conn:
-        run_id = transitions.find_or_create_active_run(conn, pipeline[1]["P"])
+        run_id = start_run(conn, pipeline[1]["P"])
     forced = force_task(engine, config, "P", "extract", child=CHILD)
     assert (forced.status, forced.pipeline_run_id) == (RunStatus.SUCCESS, run_id)
     assert run_status(engine, run_id) == "IN-PROGRESS"

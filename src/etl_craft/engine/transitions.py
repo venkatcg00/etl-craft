@@ -58,29 +58,6 @@ def create_active_run(
         return None
 
 
-def find_or_create_active_run(
-    conn: Connection, pipeline_id: int, *, run_date: date | None = None, backfill: bool = False
-) -> int:
-    """Return the ``IN-PROGRESS`` run of ``pipeline_id``, starting one when there is none.
-
-    For callers that want whichever run is in progress, such as tests building a scene. A
-    command that must not take over another process's run uses ``create_active_run``.
-    """
-    existing = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
-    if existing is not None:
-        return existing
-    created = create_active_run(conn, pipeline_id, run_date=run_date, backfill=backfill)
-    if created is not None:
-        return created
-    winner = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
-    if winner is None:
-        raise RunStateError(
-            f"pipeline_id={pipeline_id}: starting a run hit a unique violation, but no "
-            "IN-PROGRESS run exists afterwards"
-        )
-    return winner
-
-
 def end_run_if(conn: Connection, pipeline_run_id: int, from_status: str, status: str) -> bool:
     """End ``pipeline_run_id`` with ``status`` only if it is still ``from_status``.
 
@@ -138,7 +115,7 @@ def find_or_create_task_run(
 ) -> runlog.TaskRunBinding:
     """Return the row of ``task_id`` under ``pipeline_run_id``, creating it ``IN-PROGRESS``.
 
-    Like ``find_or_create_active_run``, a concurrent insert that loses reads back the winner.
+    A concurrent insert that loses reads back the winner.
     """
     params = {"task_id": task_id, "pipeline_run_id": pipeline_run_id}
     existing = conn.execute(statement(conn, "task_run"), params).one_or_none()
@@ -158,20 +135,6 @@ def find_or_create_task_run(
                 "violation, but no row exists afterwards"
             ) from None
         return runlog.TaskRunBinding(winner.task_run_id, winner.status)
-
-
-def begin_attempt(conn: Connection, task_run_id: int) -> int:
-    """Start another attempt on an existing row and return its number.
-
-    The row goes back to ``IN-PROGRESS`` with a new START_DATE, and the previous attempt's
-    counts, message and log are cleared, so the row never mixes two attempts' results.
-    """
-    return int(
-        conn.execute(
-            statement(conn, "transition_begin_attempt"),
-            {"task_run_id": task_run_id, "now": datetime.now(UTC)},
-        ).scalar_one()
-    )
 
 
 def finish_task_run(
@@ -238,15 +201,6 @@ def finish_task_run(
             )
             save_task_offset(conn, task_id, offset)
             fault_point("script.after_offset")
-
-
-def fail_task_run_if_running(conn: Connection, task_run_id: int, error_message: str) -> bool:
-    """Record ``task_run_id`` ``FAILED`` only if it is still ``IN-PROGRESS``; return whether."""
-    result = conn.execute(
-        statement(conn, "transition_fail_task_run_if_running"),
-        {"task_run_id": task_run_id, "error_message": error_message, "now": datetime.now(UTC)},
-    )
-    return bool(result.rowcount)
 
 
 def finalize_pipeline_run(
@@ -594,38 +548,6 @@ def mark_run(
         owner,
         {**_actor_params(actor), "status": status},
     )
-
-
-def create_task_run(conn: Connection, task_id: int, pipeline_run_id: int, actor: Actor) -> int:
-    """Create a task summary before its first attempt is queued."""
-    try:
-        with conn.begin_nested():
-            row = conn.execute(
-                statement(conn, "transition_create_task_run"),
-                {
-                    **_actor_params(actor),
-                    "task_id": task_id,
-                    "pipeline_run_id": pipeline_run_id,
-                },
-            ).scalar_one_or_none()
-            if row is None:
-                raise _stale(
-                    conn,
-                    "run",
-                    pipeline_run_id,
-                    f"IN-PROGRESS; task_id={task_id} belongs to pipeline",
-                    None,
-                )
-            return int(row)
-    except IntegrityError as error:
-        found = conn.execute(
-            statement(conn, "task_run"), {"task_id": task_id, "pipeline_run_id": pipeline_run_id}
-        ).one_or_none()
-        state = "invalid parent" if found is None else repr(dict(found._mapping))
-        raise StaleTransitionError(
-            f"task_id={task_id}, pipeline_run_id={pipeline_run_id}: expected no task summary, "
-            f"owner=None; found {state}. Read run history before retrying."
-        ) from error
 
 
 def queue_attempt(

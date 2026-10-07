@@ -15,8 +15,7 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,11 +33,6 @@ TAIL_BYTES = 64 * 1024
 
 KILL_GRACE_SECONDS = 10.0
 """How long a timed-out child's process group has to exit after SIGTERM before SIGKILL."""
-
-
-def etl_craft_argv(*args: str) -> tuple[str, ...]:
-    """Return the command that runs ``etl-craft *args`` in this interpreter's environment."""
-    return (sys.executable, "-m", "etl_craft", *args)
 
 
 @dataclass(frozen=True)
@@ -146,30 +140,6 @@ def run_child(
     )
     logger.debug("pid %s %s after %.1fs", process.pid, result.describe(), elapsed)
     return result
-
-
-def run_children(
-    specs: Sequence[ChildSpec],
-    *,
-    max_parallel: int,
-    tail_bytes: int = TAIL_BYTES,
-    kill_grace_seconds: float = KILL_GRACE_SECONDS,
-) -> list[ChildResult]:
-    """Run every spec, at most ``max_parallel`` at a time, and return results in spec order.
-
-    A new child starts as soon as a running one ends. ``max_parallel`` below 1 counts as 1.
-    """
-    if not specs:
-        return []
-    workers = min(max(max_parallel, 1), len(specs))
-    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="etl-craft-child") as pool:
-        futures = [
-            pool.submit(
-                run_child, spec, tail_bytes=tail_bytes, kill_grace_seconds=kill_grace_seconds
-            )
-            for spec in specs
-        ]
-        return [future.result() for future in futures]
 
 
 def _wait(

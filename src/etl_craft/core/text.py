@@ -484,32 +484,12 @@ def qualify(object_ref: str, catalog: str) -> str:
     return f"{database or catalog}.{schema_name}.{table_name}"
 
 
-def split_pipe_list(value: str | None, *, param_name: str) -> list[str]:
-    """Split a ``|``-separated task parameter into its stripped, non-empty items.
-
-    Raises ``HandlerError`` when the parameter is missing or empty.
-    """
-    if not value:
-        raise HandlerError(f"CFG_TASK_PARAMETERS.{param_name} is required for this SQL_ACTION")
-    return [part.strip() for part in value.split("|") if part.strip()]
-
-
 # Checksums
 
 
 def sha256_hex(payload: bytes) -> str:
     """Return the SHA-256 hex digest of ``payload``; migrations record it to detect edits."""
     return hashlib.sha256(payload).hexdigest()
-
-
-def fingerprint(*parts: str) -> str:
-    """Return an MD5 hex digest of ``parts`` for change detection, not security.
-
-    The parts are joined with NUL, which no identifier or SQL text contains, so different inputs
-    cannot collide by concatenating to the same string.
-    """
-    material = "\0".join(parts)
-    return hashlib.md5(material.encode(), usedforsecurity=False).hexdigest()
 
 
 # Suggestions

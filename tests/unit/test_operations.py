@@ -80,7 +80,9 @@ def seed(ctx, *, active=False, task=False):
         task_run_id = None
         if task_id is not None and pipeline_run_id is not None:
             actor = current_actor()
-            task_run_id = transitions.create_task_run(conn, task_id, pipeline_run_id, actor)
+            task_run_id = transitions.find_or_create_task_run(
+                conn, task_id, pipeline_run_id
+            ).task_run_id
             attempt = transitions.queue_attempt(conn, task_run_id, actor)
             transitions.claim_attempt(
                 conn,

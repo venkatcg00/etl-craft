@@ -15,12 +15,11 @@ from sqlalchemy.exc import DBAPIError
 
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.enums import TableFormat
-from etl_craft.engine import transitions
 from etl_craft.handlers import business_rules
 from etl_craft.warehouse.connection import build_warehouse_engine
 from fixtures.cloud import DATABRICKS_VARS, SNOWFLAKE_VARS, require_variables, write_config
 from fixtures.engine_db import apply_schema, sqlite_engine_db
-from fixtures.metadata import add_pipeline, insert
+from fixtures.metadata import add_pipeline, insert, start_run
 from fixtures.sql_appends import check_append_retries, check_identity_inputs, check_legacy_upgrade
 from fixtures.sql_evolution import check_evolution, check_interrupted_evolution
 from fixtures.sql_merges import check_composite_merge
@@ -40,7 +39,7 @@ def cloud_world(tmp_path, name, fields, table_format, schema):
     apply_schema(engine_db)
     with engine_db.begin() as conn:
         pipeline_id = add_pipeline(conn, "P")
-        run_id = transitions.find_or_create_active_run(conn, pipeline_id)
+        run_id = start_run(conn, pipeline_id)
     warehouse = build_warehouse_engine(config)
     return SqlWorld(
         "cloud",

@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
+from etl_craft.engine.queries import statement
 from fixtures.engine_db import apply_schema
 
 TABLES = (
@@ -447,8 +448,8 @@ def test_duration_seconds(seeded):
         start=datetime(2026, 1, 1, 10, 0, 0).astimezone(),
         end=datetime(2026, 1, 1, 10, 1, 30).astimezone(),
     )
-    seconds = scalar(
-        db,
-        f"SELECT {db.dialect.duration_seconds_sql()} AS seconds FROM AUD_PIPELINES_RUN_LOG",
-    )
+    with db.engine.connect() as conn:
+        seconds = conn.execute(
+            statement(conn, "average_pipeline_duration"), {"pipeline_id": ids["a"]}
+        ).scalar_one()
     assert float(seconds) == pytest.approx(90.0)

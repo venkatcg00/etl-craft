@@ -12,7 +12,6 @@ from etl_craft.execution.gates import (
     Clock,
     TrackedGate,
     check_pipeline_dependencies,
-    consume_pipeline_dependencies,
 )
 from fixtures.metadata import (
     add_dependency,
@@ -78,7 +77,7 @@ def test_a_task_dependency_is_judged_on_the_upstreams_last_run_and_consumed_once
 
     with engine.begin() as conn:
         down_run = start_run(conn, ids["down"])
-        summary = transitions.create_task_run(conn, ids["load"], down_run, current_actor())
+        summary = transitions.find_or_create_task_run(conn, ids["load"], down_run).task_run_id
         attempt = transitions.queue_attempt(conn, summary, current_actor())
         transitions.claim_attempt(
             conn,
@@ -89,7 +88,6 @@ def test_a_task_dependency_is_judged_on_the_upstreams_last_run_and_consumed_once
         )
         trackers.record_decisions(conn, down_run, first.decisions, attempt_id=attempt)
         transitions.finish_attempt(conn, attempt, "SUCCESS", current_actor(), owner="gate-test")
-    gate.consume(engine, ids["load"], down_run, first.consumed)
     assert consumed_task_runs(engine, edge) == [(down_run, rows[ids["publish"]])]
     again = gate.check(engine, ids["load"], 1)
     assert again.satisfied_count == 0
@@ -202,8 +200,7 @@ def test_a_pipeline_gate_and_what_its_successful_run_consumes(world):
                 ),
                 {"started": started, "ended": ended, "done": int(ended is not None), "id": run_id},
             )
-        finish_run(conn, down_run)
-    consume_pipeline_dependencies(engine, ids["down"], down_run)
+        transitions.finalize_pipeline_run(conn, down_run, "SUCCESS", consume=True)
     with engine.connect() as conn:
         consumed = conn.execute(
             text(
@@ -219,7 +216,7 @@ def test_a_pipeline_gate_and_what_its_successful_run_consumes(world):
 
 def backfill_run(conn, pipeline_id, task_statuses, status="SUCCESS"):
     """A run of ``pipeline_id`` that is part of a backfill, its tasks and itself ended as given."""
-    run_id = transitions.find_or_create_active_run(conn, pipeline_id, backfill=True)
+    run_id = start_run(conn, pipeline_id, backfill=True)
     for task_id, task_status in task_statuses.items():
         task_run(conn, task_id, run_id, task_status, target_count=1)
     if status != "IN-PROGRESS":

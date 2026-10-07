@@ -782,6 +782,7 @@ def _start_run(
             backfill=backfill,
             remote=remote,
             selector=selector,
+            initialize_only=True,
         ),
         clock,
     )
@@ -799,6 +800,7 @@ def _start_steps(
     backfill: str | None = None,
     remote: bool = False,
     selector: runlog.RunSelector = runlog.ACTIVE_RUN,
+    initialize_only: bool = False,
 ) -> Generator[float, None, tuple[int, str | None]]:
     """Return the run to use and, when the gate refused a new one, why it was ``SKIPPED``.
 
@@ -911,6 +913,8 @@ def _start_steps(
                 transitions.admit_run(conn, queued, current_actor())
             except StaleTransitionError as error:
                 other = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
+                if initialize_only and other == queued:
+                    return queued, None
                 raise RunStateError(
                     f"{pipeline_code}: another process started pipeline_run_id={other}; "
                     f"pipeline_run_id={queued} stays QUEUED; select it explicitly to resume"

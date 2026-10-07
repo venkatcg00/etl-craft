@@ -44,23 +44,6 @@ def fetch_business_rules_for_task(conn: Connection, task_id: int) -> list[Busine
 
 
 @dataclass(frozen=True)
-class BusinessRuleTarget:
-    """An active business rule's warehouse table and the key column it flags rows by."""
-
-    business_rule_name: str
-    target_table: str
-    key_column: str
-
-
-def fetch_business_rule_targets(conn: Connection) -> list[BusinessRuleTarget]:
-    """Return every active business rule's table and key column, across all pipelines."""
-    rows = conn.execute(statement(conn, "business_rule_targets"))
-    return [
-        BusinessRuleTarget(row.business_rule_name, row.target_table, row.key_column) for row in rows
-    ]
-
-
-@dataclass(frozen=True)
 class RuleRunBinding:
     """A rule's run-log row under a task run, and whether it already succeeded there."""
 
