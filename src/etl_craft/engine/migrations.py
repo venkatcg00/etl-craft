@@ -169,22 +169,23 @@ def _apply(engine: Engine, migration: MigrationFile) -> None:
                 "0006_run_backfill_constraint.sql",
                 "0007_identity.sql",
                 "0008_actors_and_audit_guards.sql",
+                "0015_schedules.sql",
             )
             else None,
         ) as conn:
             statements = dialect.split_statements(migration.sql)
+            if dialect.name == "sqlite":
+                from etl_craft.dialects.engine.sqlite.audit import refresh_metadata_triggers
+            else:
+                from etl_craft.dialects.engine.postgres.audit import refresh_metadata_triggers
             if migration.source == PROJECT:
-                if dialect.name == "sqlite":
-                    from etl_craft.dialects.engine.sqlite.audit import refresh_metadata_triggers
-                else:
-                    from etl_craft.dialects.engine.postgres.audit import refresh_metadata_triggers
-
                 for sql in statements:
                     run_script(conn, [sql])
                     if re.search(r"\b(?:ALTER|CREATE)\s+TABLE\b", sql, re.IGNORECASE):
                         refresh_metadata_triggers(conn)
             else:
                 run_script(conn, statements)
+                refresh_metadata_triggers(conn)
             _record(conn, migration)
     except Exception as error:
         raise MigrationError(f"{migration.version} failed to apply: {error}") from error

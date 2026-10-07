@@ -241,6 +241,7 @@ class ConnectorConfig:
     email: EmailConfig | None = None
     limits: ExecutionLimits = field(default_factory=ExecutionLimits)
     config_path: Path | None = None
+    timezone: str = "UTC"
     orchestrator_name: str | None = None
     dependency_gates: GatePolicy = GatePolicy.ENFORCE
     settings: tuple[SettingSource, ...] = ()

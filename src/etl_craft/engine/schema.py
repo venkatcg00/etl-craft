@@ -59,6 +59,11 @@ def init_db(engine: Engine, *, force: bool = False) -> InitResult:
             with engine.begin() as conn:
                 dialect.begin_ddl_transaction(conn)
                 run_script(conn, statements)
+                if dialect.name == "sqlite":
+                    from etl_craft.dialects.engine.sqlite.audit import refresh_metadata_triggers
+                else:
+                    from etl_craft.dialects.engine.postgres.audit import refresh_metadata_triggers
+                refresh_metadata_triggers(conn)
                 recorded = mark_packaged_migrations_applied(conn)
         except Exception as error:
             raise EngineDbError(

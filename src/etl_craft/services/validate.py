@@ -15,16 +15,19 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import date
 
 from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.project import ingestion_script
 from etl_craft.config.targets import active_catalog
+from etl_craft.core.cron import parse, timezone
 from etl_craft.core.enums import DependencyType, Handler, Mode, SqlAction
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.graph import build_graph
 from etl_craft.core.text import is_metadata_code, qualify, suggest
+from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.business_rules import fetch_business_rules_for_task
 from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
 from etl_craft.engine.repository.pipelines import (
@@ -128,6 +131,26 @@ def validate(engine: Engine, config: ConnectorConfig, pipeline_code: str | None 
             pipeline_codes=[code for code, _ in pipeline_parameters],
         )
         report = Report()
+        for schedule in conn.execute(statement(conn, "overseer_schedules")):
+            zone = (
+                schedule.schedule_timezone
+                if schedule.schedule_timezone is not None
+                else config.timezone
+            )
+            for column, value, check in (
+                ("SCHEDULE_TIMEZONE", zone, timezone),
+                ("RUN_SCHEDULE", schedule.run_schedule, parse),
+                ("SCHEDULE_START_DATE", schedule.schedule_start_date, date.fromisoformat),
+            ):
+                if value is None:
+                    continue
+                try:
+                    check(str(value))
+                except (EtlCraftError, ValueError) as error:
+                    report.fail(
+                        schedule.pipeline_code,
+                        f"{column}={value!r}: {error}; correct this pipeline's schedule settings",
+                    )
         _pipelines(conn, config, data, report)
         _dependencies(data, report)
         _target_formats(config, data, report)

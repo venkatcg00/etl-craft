@@ -911,3 +911,13 @@ def test_server_shutdown_grace_is_nonnegative_and_defaults_to_sixty(tmp_path):
     raw["Orchestration"]["Shutdown_grace_seconds"] = -1
     with pytest.raises(ConfigurationError, match="Shutdown_grace_seconds"):
         load_config(_write(tmp_path, raw))
+
+
+def test_project_timezone_defaults_to_utc_and_must_be_iana(tmp_path):
+    assert load_config(_write(tmp_path, _minimal())).timezone == "UTC"
+    raw = _minimal()
+    raw["Orchestration"]["Timezone"] = "Asia/Kolkata"
+    assert load_config(_write(tmp_path, raw)).timezone == "Asia/Kolkata"
+    raw["Orchestration"]["Timezone"] = "missing/zone"
+    with pytest.raises(ConfigurationError, match=r"Orchestration\.Timezone"):
+        load_config(_write(tmp_path, raw))

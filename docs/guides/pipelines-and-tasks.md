@@ -29,7 +29,12 @@ writes five pipelines this way, and runs as written on SQLite and PostgreSQL.
 | `PIPELINE_CODE` | the pipeline's code: one ASCII letter followed by letters, digits or `_`, at most 128 characters. It names the pipeline in every command, DAG id and log folder |
 | `PIPELINE_NAME` | a readable name |
 | `DESCRIPTION` | what the pipeline is for; the [catalog](catalog.md) leads its page with it |
-| `RUN_SCHEDULE` | a cron expression, written into the pipeline's generated DAG |
+| `RUN_SCHEDULE` | a five-field cron expression or supported macro for the local server and generated DAG (see [Schedules](../deploying/server.md#schedules-and-logical-dates)) |
+| `SCHEDULE_TIMEZONE` | nullable IANA timezone; NULL uses `Orchestration.Timezone` (default `UTC`) |
+| `SCHEDULE_START_DATE` | nullable local date to begin scheduling; NULL uses the creation timestamp |
+| `CATCHUP` | local server: `Y` queues bounded missed ticks; `N` (default) queues only the latest |
+| `MAX_CATCHUP_RUNS` | positive whole number, default 1; maximum retained ticks with catch-up enabled |
+| `OVERLAP_POLICY` | local server: `SKIP` (default) records ticks skipped while work is pending; `QUEUE` retains them |
 | `SLA_IN_HOURS` | how long a run may take; each run is marked `MET` or `BREACHED` (see [Running a pipeline](running-pipelines.md#sla)) |
 | `REFRESH_TYPE` | `FULL` or `INCREMENTAL`; SQL tasks read it through [`$$pipeline_run_id_filter`](sql-tasks.md) |
 | `PIPELINE_PARAMETERS` | a JSON object of the generated DAG's settings (below) |

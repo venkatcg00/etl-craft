@@ -228,7 +228,9 @@ def record_stand_in_run(
                 f"{pipeline_code} has a run in progress (pipeline_run_id={active}); mark that "
                 "run, or cancel it, before recording a stand-in run"
             )
-        created = transitions.create_active_run(conn, pipeline_id, trigger_kind="STAND_IN")
+        created = transitions.create_active_run(
+            conn, pipeline_id, run_date=runlog.today(config.timezone), trigger_kind="STAND_IN"
+        )
         if created is None:
             raise RunStateError(
                 f"{pipeline_code}: another process started a run just now "
@@ -361,10 +363,11 @@ def cancel_run(
     requested_by: str | None = None,
     selector: runlog.RunSelector = runlog.ACTIVE_RUN,
 ) -> Intervened:
-    """End the pipeline's run in progress ``CANCELLED``, with every task still running.
+    """End the pipeline's queued or active run ``CANCELLED``, with every task still running.
 
     The process running each task stops it within a few seconds, and the process running the
-    pipeline starts nothing more. Raises ``RunStateError`` when no run is in progress.
+    pipeline starts nothing more. Raises ``RunStateError`` when the selected run is not queued
+    or active.
     """
     _check(config, "cancel", reason, None, None)
     who = requested_by or current_actor().name
@@ -372,10 +375,10 @@ def cancel_run(
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         selected = runlog.select_run(conn, pipeline_id, selector)
         run_id = selected.pipeline_run_id
-        if selected.status != RunStatus.IN_PROGRESS:
+        if selected.status not in {RunStatus.QUEUED, RunStatus.IN_PROGRESS}:
             raise RunStateError(
                 f"{pipeline_code}: run_id={run_id} is {selected.status}; "
-                "expected IN-PROGRESS to cancel"
+                "expected QUEUED or IN-PROGRESS to cancel"
             )
         stopped = []
         for row in record.fetch_task_rows(conn, run_id):
@@ -401,7 +404,7 @@ def cancel_run(
             pipeline_id=pipeline_id,
             pipeline_run_id=run_id,
             action=InterventionAction.CANCEL,
-            from_status=RunStatus.IN_PROGRESS,
+            from_status=selected.status,
             to_status=RunStatus.CANCELLED,
             reason=reason,
             requested_by=who,

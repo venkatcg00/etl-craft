@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy.engine import Connection
@@ -46,6 +47,9 @@ class PipelineDetail:
     sla_in_hours: float | None
     refresh_type: str
     created_by: str | None
+    create_date: datetime | None = None
+    schedule_timezone: str | None = None
+    schedule_start_date: date | None = None
     catchup: bool | None = None
     tags: list[str] | None = None
     retries: int | None = None
@@ -64,6 +68,9 @@ def fetch_pipeline_detail(conn: Connection, pipeline_id: int) -> PipelineDetail:
     params: Any = row.pipeline_parameters or {}
     if isinstance(params, str):
         params = json.loads(params)
+    created = None if row.create_date is None else datetime.fromisoformat(str(row.create_date))
+    if created is not None and created.tzinfo is None:
+        created = created.replace(tzinfo=UTC)
     return PipelineDetail(
         pipeline_code=row.pipeline_code,
         pipeline_name=row.pipeline_name,
@@ -72,6 +79,11 @@ def fetch_pipeline_detail(conn: Connection, pipeline_id: int) -> PipelineDetail:
         sla_in_hours=float(row.sla_in_hours) if row.sla_in_hours is not None else None,
         refresh_type=row.refresh_type,
         created_by=row.created_by,
+        create_date=created,
+        schedule_timezone=row.schedule_timezone,
+        schedule_start_date=None
+        if row.schedule_start_date is None
+        else date.fromisoformat(str(row.schedule_start_date)),
         catchup=params.get("CATCHUP"),
         tags=params.get("TAGS"),
         retries=params.get("RETRIES"),

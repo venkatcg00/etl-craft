@@ -706,6 +706,7 @@ def _start_run(
     ``Dependency_gates`` bypassed, or skipped by a backfill, is recorded against the new run.
     """
     reconcile(engine, pipeline_id=pipeline_id)
+    queued: int | None = None
     with engine.begin() as conn:
         candidates = runlog.run_candidates(conn, pipeline_id)
         explicit = selector.run_id is not None or selector.run_key is not None
@@ -723,7 +724,7 @@ def _start_run(
                     f"{pipeline_code}: run_id={selected.pipeline_run_id} has run_date="
                     f"{selected.run_date}, not {run_date}; a run's date cannot change"
                 )
-            if selected.status != RunStatus.IN_PROGRESS:
+            if selected.status not in {"QUEUED", RunStatus.IN_PROGRESS}:
                 if not remote:
                     raise RunStateError(
                         f"{pipeline_code}: run_id={selected.pipeline_run_id} is {selected.status}; "
@@ -735,8 +736,13 @@ def _start_run(
                     current_actor(),
                     reason="orchestrator initialized its run again",
                 )
-            existing = selected.pipeline_run_id
-            kind = runlog.fetch_run_kind(conn, existing)
+            if selected.status == "QUEUED":
+                queued = selected.pipeline_run_id
+                logical_date = selected.run_date
+                existing, kind = None, None
+            else:
+                existing = selected.pipeline_run_id
+                kind = runlog.fetch_run_kind(conn, existing)
         else:
             existing, kind = None, None
     if existing is not None and kind is not None:
@@ -760,6 +766,9 @@ def _start_run(
             )
         logger.info("%s: resuming pipeline_run_id=%d", pipeline_code, existing)
         return existing, None
+    logical_date = (
+        logical_date if queued is not None else (run_date or runlog.today(config.timezone))
+    )
     reason = None
     decisions: tuple[trackers.GateDecision, ...] = ()
     bypassed: tuple[str, ...] = ()
@@ -777,18 +786,21 @@ def _start_run(
             reason = "; ".join(gate.reasons)
     created: int | None
     with engine.begin() as conn:
-        if selector.run_key is not None:
+        if queued is not None:
+            transitions.admit_run(conn, queued, current_actor())
+            created = queued
+        elif selector.run_key is not None:
             created = transitions.create_run(
                 conn,
                 pipeline_id,
                 current_actor(),
-                run_date=run_date or runlog.today(),
+                run_date=logical_date,
                 run_key=selector.run_key,
                 trigger_kind="ORCHESTRATOR" if remote else "MANUAL",
             )
         else:
             created = transitions.create_active_run(
-                conn, pipeline_id, run_date=run_date, backfill=backfill is not None
+                conn, pipeline_id, run_date=logical_date, backfill=backfill is not None
             )
         if created is None:
             other = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
@@ -817,7 +829,7 @@ def _start_run(
             pipeline_run_id=pipeline_run_id,
             action=InterventionAction.GATE_BYPASS,
             reason=(
-                f"backfill for {(run_date or runlog.today()).isoformat()}: {backfill}; "
+                f"backfill for {logical_date.isoformat()}: {backfill}; "
                 "dependencies on other pipelines are not checked, and nothing is consumed"
             ),
         )

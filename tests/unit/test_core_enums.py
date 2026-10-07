@@ -9,7 +9,7 @@ pytestmark = pytest.mark.unit
 
 EXPECTED = {
     enums.ActiveFlag: {"Y", "N"},
-    enums.RunStatus: {"IN-PROGRESS", "SUCCESS", "FAILED", "SKIPPED", "CANCELLED"},
+    enums.RunStatus: {"QUEUED", "IN-PROGRESS", "SUCCESS", "FAILED", "SKIPPED", "CANCELLED"},
     enums.SlaStatus: {"MET", "BREACHED"},
     enums.RefreshType: {"FULL", "INCREMENTAL"},
     enums.DependencyType: {"SUCCESS", "FAILURE", "ALWAYS", "HAS_DATA"},
