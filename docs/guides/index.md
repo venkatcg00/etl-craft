@@ -26,3 +26,6 @@ How to model and run pipelines with etl-craft.
 - [Stepping in: mark, cancel, pause, backfill, rerun and bypasses](run-control.md): marking a
   task or a run, stand-in runs, cancelling, pausing, skipping a run, backfilling, running a task again or without its dependencies, relaxing
   dependency gates, and the record every change leaves; local mode.
+
+- [Service operations and JSON](service-operations.md): calling the same operations from Python
+  and the CLI, execution identities, actors and schema-versioned documents.

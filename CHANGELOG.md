@@ -20,6 +20,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Actor-scoped Python operations for run lifecycle, tasks, pipeline controls, backfills and
+  inspection, with frozen views and canonical execution identities. The corresponding CLI
+  commands use `--format json` to return the same schema-versioned documents. Requests remain
+  append-only and CLI delegation records each request once; related views share a stable
+  database snapshot.
+
 - A chaos suite for concurrent admission, process loss, fenced recovery, operator races and
   remote deliveries, including a five-second PostgreSQL outage. Release validation requires twenty
   consecutive passes per Engine DB and uploads each iteration's results.

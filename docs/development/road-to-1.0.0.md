@@ -43,7 +43,7 @@ passes.
 4. Engine DB changes ship as a migration in both `dialects/engine/postgres/migrations/` and
    `dialects/engine/sqlite/migrations/`, the fresh `schema.sql` files are updated to match, and the
    upgrade test passes from every released schema in `tests/fixtures/schemas/`.
-5. New error classes get the next free `ExitCode` (today the last is `INJECTED_FAULT = 19`).
+5. New error classes get the next free `ExitCode` (the current last is `STALE_TRANSITION = 20`).
 6. Every failure the item introduces names the object, the value found, what was expected and the
    remedy, and is recorded on the run or attempt it belongs to.
 
@@ -92,13 +92,23 @@ item's text, or work done early under another item.
 | S3.G.6 One table format per target | Done | #109 | B43 |
 | S3.G.7 Retry-safe appends | Done | #110 | W4 |
 | S3.H Chaos suite | Done | #111 | |
-| 0.4 and later | Not started | | |
+| S4.A Service layer | Done | #113 | Actor-scoped operations, frozen views and CLI JSON parity |
+| S4.B and later | Not started | | |
 
 ### Handover notes
 
 What a person picking up the work needs that the code and the item texts do not say.
 
 **Choices that differ from the item text.**
+
+- S4.A returns an `OperationResult` envelope around stored `RunView`, `TaskRunView` and
+  pipeline snapshots. The envelope's outcome is distinct from the stored status: a successful
+  mark of FAILED reports SUCCESS for the operation and FAILED for its run. Backfills retain
+  every per-date result, including a stopped outcome with no invented execution identity.
+  CLI output uses the single `--format json` option. Existing execution functions own all
+  lifecycle behavior; automatic system transitions keep their actor, and API/CLI requests
+  are recorded once without updating action rows. Explanation views arrive with S4.F.
+  Snapshot reads are consistent across related rows on SQLite and PostgreSQL.
 
 - S3.G.5 reuses the qualified target mutation lock introduced by S3.G.1; it already covers the
   computed MAX read, inserts and warehouse commit. Native identity allocation skips MAX and
@@ -1591,12 +1601,13 @@ Branch: `feat/cli-status-explain`.
      status and attempts; its run condition and the required count; every dependency with its
      upstream, type, upstream status and whether it is met; each cross-pipeline decision with its
      reason; the retry schedule; and one sentence saying what would make it run.
-  3. `--format json` on `list`, `graph`, `steps`, `history`, `status`, `explain`, `validate`,
-     `doctor` and `lineage`.
-  4. Exit codes: `ExitCode.INCOMPLETE = 20` when a command left a run unfinished (paused mid-run, a
+  3. Extend the `--format json` support from S4.A to `status`, `explain`, `validate`,
+     `doctor` and `lineage`, using the same operation serializer.
+  4. Exit codes: `ExitCode.INCOMPLETE` when a command left a run unfinished (paused mid-run, a
      backfill stopped by a pause, a pipeline run left for another process) and
-     `ExitCode.WAITING = 21` when `run --task_code` recorded nothing because dependencies aren't met
-     yet. A paused pipeline that started nothing keeps exit 0, as documented. Record this as a
+     `ExitCode.WAITING` when `run --task_code` recorded nothing because dependencies aren't met
+     yet. Assign the next unused exit codes when implementing these outcomes; 20 already
+     belongs to STALE_TRANSITION. A paused pipeline that started nothing keeps exit 0, as documented. Record this as a
      behaviour change in `CHANGELOG.md` and `docs/reference/exit-codes.md`.
 - *Tests.* An `explain` golden test per state (not run, waiting on a gate, blocked by a failure,
   unsatisfiable, retry scheduled, paused, succeeded, skipped); JSON schema tests.
@@ -2439,7 +2450,7 @@ change it only by updating this table and the documentation together.
 
 | Question | Rule adopted | Where |
 | --- | --- | --- |
-| Exit status of a paused or waiting outcome | 0 when a paused pipeline started nothing (as documented today); `INCOMPLETE = 20` when a run was left unfinished; `WAITING = 21` when a task recorded nothing because dependencies aren't met | S4.F |
+| Exit status of a paused or waiting outcome | 0 when a paused pipeline started nothing (as documented today); `INCOMPLETE` when a run was left unfinished; `WAITING` when a task recorded nothing because dependencies aren't met | S4.F |
 | What a repair publishes | A reopened run that ends in success again gets a new output revision; each dependency's `CONSUME_REPAIRS` says whether it consumes revisions (default yes) | S3.E |
 | SLA after a repair | Decided once and never re-measured; the repair's duration is shown separately | S2.A.13 |
 | Backfills and dependencies on other pipelines | `SUCCESS`, `HAS_DATA` and `ALWAYS` edges count as met; `FAILURE` edges don't | S2.A.5 |

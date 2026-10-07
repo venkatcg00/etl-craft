@@ -8,7 +8,7 @@ import socket
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -16,7 +16,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
-from etl_craft.core.actor import current_actor
+from etl_craft.core.actor import Actor, current_actor
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,7 @@ class ActionRequest:
     command: str
     arguments: dict[str, Any]
     requested_at: datetime
+    actor: Actor = field(default_factory=current_actor)
     engine: Engine | None = None
     recorded: bool = False
 
@@ -92,7 +93,7 @@ class ActionRequest:
                     ),
                     {"pipeline": pipeline, "code": self.arguments["task_code"]},
                 ).scalar_one_or_none()
-            actor = current_actor()
+            actor = self.actor
             payload = json.dumps(self.arguments, default=str)
             arguments = (
                 "CAST(:arguments AS JSONB)" if engine.dialect.name == "postgresql" else ":arguments"
@@ -136,6 +137,10 @@ def register_engine(engine: Engine) -> None:
 def command_request(command: str, arguments: Mapping[str, Any]) -> Iterator[None]:
     """Record state-changing command requests; read-only commands make no audit writes."""
     if command not in MUTATING_COMMANDS or (command == "docs-version" and arguments.get("check")):
+        yield
+        return
+    existing = _request.get()
+    if existing is not None and existing.command == command and existing.actor == current_actor():
         yield
         return
     request = ActionRequest(command, mask_arguments(arguments), datetime.now(UTC))

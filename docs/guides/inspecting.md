@@ -55,3 +55,9 @@ deleted, and dependency edges involving that pipeline.
 An action is complete when the request is recorded: `REQUESTED` does not promise that a flow
 ran or succeeded. Use `history` for execution outcomes. See [Actors and write guards](../deploying/engine-db.md#actors-and-write-guards)
 for identity configuration and why metadata changes go through migrations.
+
+## JSON documents
+
+These commands accept `--format json` and return the same schema-versioned documents as
+their Python service operations. Task history includes the canonical `task_run_id` and its
+ordered attempt records. See [Service operations and JSON](service-operations.md).
