@@ -46,6 +46,9 @@ passes.
 5. New error classes get the next free `ExitCode` (the current last is `STALE_TRANSITION = 20`).
 6. Every failure the item introduces names the object, the value found, what was expected and the
    remedy, and is recorded on the run or attempt it belongs to.
+7. Replacement work deletes the superseded path in the same item. Do not add an interface, factory,
+   compatibility branch or dependency for a single implementation or caller; record the concrete
+   second use first. Prefer the standard library and an existing repository helper.
 
 **CI cost policy.** Validate each pull-request revision without repeating the test workflow after
 merge. Keep ordinary regression coverage in PR checks. Repeated chaos, sustained-load benchmarks
@@ -1615,14 +1618,18 @@ Branch: `feat/cli-status-explain`.
      reason; the retry schedule; and one sentence saying what would make it run.
   3. Extend the `--format json` support from S4.A to `status`, `explain`, `validate`,
      `doctor` and `lineage`, using the same operation serializer.
-  4. Exit codes: `ExitCode.INCOMPLETE` when a command left a run unfinished (paused mid-run, a
+  4. Keep CLI modules as adapters: when a service operation replaces a direct command path, delete
+     the command-owned path in the same change. Make `Command.configure` optional so commands with
+     no options do not need empty functions.
+  5. Exit codes: `ExitCode.INCOMPLETE` when a command left a run unfinished (paused mid-run, a
      backfill stopped by a pause, a pipeline run left for another process) and
      `ExitCode.WAITING` when `run --task_code` recorded nothing because dependencies aren't met
      yet. Assign the next unused exit codes when implementing these outcomes; 20 already
      belongs to STALE_TRANSITION. A paused pipeline that started nothing keeps exit 0, as documented. Record this as a
      behaviour change in `CHANGELOG.md` and `docs/reference/exit-codes.md`.
 - *Tests.* An `explain` golden test per state (not run, waiting on a gate, blocked by a failure,
-  unsatisfiable, retry scheduled, paused, succeeded, skipped); JSON schema tests.
+  unsatisfiable, retry scheduled, paused, succeeded, skipped); JSON schema tests. Parser construction
+  covers a command with no configure callback, replacing per-command no-op tests.
 
 ### S4.G The HTTP API
 
@@ -1664,6 +1671,153 @@ Branch: `feat/export-yaml-v1`.
      installs Airflow, and assert the task graph, trigger rules and commands match etl-craft's graph.
      A pipeline the orchestrator can't express is refused at generation (`require_supported`).
 - *Tests.* As above, plus schema validation of every generated file.
+
+### S4.I Cut what nothing needs
+
+Branch: one per item, `refactor/<area>-<topic>` (for example `refactor/engine-transitions-dead-paths`).
+Do S4.I.1 to S4.I.4 before S4.E so retries, `explain` and the API build on the smaller surface;
+S4.I.5 and S4.I.6 change public behaviour and can land any time before S7.G.
+
+- *Problem.* A whole-repository review of `main` after S4.D, looking only for over-engineering,
+  found about 1,200 lines of `src/` that can go without changing behaviour: functions only tests
+  call, a second model layer under the service operations, the same helper written several times,
+  checks repeated after the loader already made them, and compatibility branches for layouts and
+  platforms 1.0 does not support. Each item below names the code to delete and what replaces it.
+  Correctness, security and performance were out of scope for this review.
+- *Change.*
+  1. **Delete code only tests call** (`refactor/core-dead-code`). Move a helper a test still needs
+     into `tests/fixtures/`; delete the rest with its tests and its catalog query files.
+     - `core/text.py`: `split_pipe_list`, `fingerprint`.
+     - `core/enums.py`: `ActiveFlag`, `TaskType`, `BusinessRuleType` (the schema's CHECK constraints
+       already close these value sets).
+     - `engine/transitions.py`: `find_or_create_active_run` (to a fixture), `begin_attempt`,
+       `fail_task_run_if_running`, `create_task_run`, with `transition_begin_attempt.sql`,
+       `transition_fail_task_run_if_running.sql` and `transition_create_task_run.sql`; port their
+       tests to the attempt path (`queue_attempt`, `claim_attempt`, `finish_attempt`).
+     - `execution/supervisor.py`: `run_children`, `etl_craft_argv`.
+     - `execution/gates.py`: the `CrossPipelineGate` protocol, `UncheckedGate`,
+       `TrackedGate.consume` and `consume_pipeline_dependencies`. Consumption already commits inside
+       `finish_attempt` and `finalize_pipeline_run`, so the `not isinstance(gate, TrackedGate)`
+       branch in `runner.run_task` goes too, and `run_task` and `_preflight` take a `TrackedGate`.
+     - `engine/repository/business_rules.py`: `fetch_business_rule_targets`.
+     - `dialects/engine/base.py`: `begin_ddl_transaction` (no dialect overrides it) and its three
+       calls; `duration_seconds_sql` and both implementations (the `average_*_duration.sql` files
+       per dialect carry the expression; the one test that uses it reads the query instead).
+     - `services/operations/context.py`: `OperationContext.project`, which nothing sets. S5.G adds
+       the project field when projects exist.
+  2. **One model layer under the service operations** (`refactor/services-operations-surface`).
+     - `services/inspect.py` builds `PipelineSummary`, `PipelineGraph`, `Step` and `RunEntry` only for
+       `services/operations/inspect.py`, which maps each into its own view and reads every row
+       again (`pipeline_view` and `run_view` per summary). Run the queries in
+       `services/operations/inspect.py` and delete `services/inspect.py`'s dataclasses.
+     - `services/operations/runs.py` and `tasks.py`: twelve operations each write their audit
+       arguments out by hand and resolve the pipeline id on a separate connection after the work.
+       Record one request per entry point (`execute_run`, `mark`, and the direct calls) from
+       `RunRequest.arguments()` or the call's own arguments, and resolve the id once inside
+       `results.result`.
+     - `PipelineRef` wraps one string; pass `pipeline_code`.
+     - `pause_pipeline` and `resume_pipeline` (service and CLI) differ only in the verb: one function
+       and one command module each, parameterised by it.
+     - `cli`: the eleven `if args.output_format == "json": out.document(done) else: out.line(...)`
+       blocks become one `Output.result(done, args.output_format)`; `commands._commands()` imports
+       lazily but runs at import time, so use plain imports. (S4.F.4 covers `Command.configure`.)
+  3. **Write each helper once** (`refactor/core-shared-helpers`).
+     - `execution/leases.as_utc` moves to `core` and replaces the hand-written naive-to-UTC code in
+       `engine/runlog.elapsed_hours`, `engine/repository/pipelines.fetch_pipeline_detail`,
+       `engine/repository/catalog._seconds`, `transitions.ensure_attempt_started`,
+       `execution/gates`, `execution/pipeline._SlaWatch`, `services/catalog` and
+       `services/operations/snapshots.timestamp`. `overseer/schedules` reads
+       `SCHEDULE_START_DATE` with `runlog.as_date`.
+     - `config/loader.py`: six blocks that lower-case a value, check it against an enum and raise
+       (`Mode`, `Dependency_gates`, `Table_format`, `Cloning.Scope`, `transport`, `tls_mode`), and
+       `handlers/sql.task_dialect`'s `TABLE_FORMAT`, become one helper that takes the enum.
+     - `config/loader._parse_docs_site` checks `Docs_site.Schedule` against its own macro list,
+       which accepts `@yearly` and `@annually` while `core/cron.MACROS` does not; add those two
+       macros to `core/cron.MACROS` and validate the setting with `core.cron.parse`.
+     - `config/resolve.resolve_secret` is `resolve_named_secret(config, profile.secret_var)`.
+     - `core/text._ENV_NAME` repeats `_SAFE_IDENTIFIER`; `handlers/email_alert._TOKEN` repeats
+       `core/text._TOKEN`; the credential words live in three lists (`URL_SECRET_KEYS`, the inline
+       list in `public_url_query`, `engine/audit.SENSITIVE`). Keep one of each.
+     - `handlers/sql/session.py`: `columns` and `hash_types` repeat the name splitting and the
+       `information_schema` filter (and `DuckDBWarehouse.full_column_types` a third time); share one
+       helper. `handlers/sql/spec._select` is a single-call wrapper; inline it.
+     - `dialects/warehouse`: five dialects copy the same `on_connect` cursor block to pin UTC. Give
+       `WarehouseDialect` a `session_sql` attribute run by one base `on_connect`.
+     - `dialects/warehouse/base.py`: seven properties only forward to `spec` (`key`,
+       `display_name`, `sqlalchemy_name`, `table_format`, `per_task_format`, `auth_fields`,
+       `auth_modes`); callers read `dialect.spec`.
+     - `engine/schema.py` and `engine/migrations.py` each branch on the dialect name to import
+       `refresh_metadata_triggers`; make it an `EngineDialect` method.
+     - `engine/migrations._apply` lists the packaged files that need SQLite's metadata rebuild by
+       name, and `apply_pending_migrations` special-cases `0005`. Mark those files with a header
+       line (`-- etl-craft: rebuild-metadata`, `-- etl-craft: check-metadata-codes`) and read the
+       marker, so a new migration does not edit Python.
+     - `overseer/leadership.py` derives its advisory-lock key the way `engine/locks.target` does;
+       `overseer/server.py` reads a run's owner and status with inline SQL that
+       `runlog.fetch_pipeline_run_status` and the `run_lease` query already provide. Reuse them.
+  4. **Thinner engine and execution plumbing** (`refactor/execution-plumbing`).
+     - `engine/transitions.py`: six count arguments (`source_count` to `rows_written`) are threaded
+       through `finish_task_run`, `_end_attempt` and `finish_attempt`, and again in
+       `HandlerResult`. Pass one frozen `Counts`.
+     - `resolve_run_for_task` and `resolve_run_for_orchestrator` differ by one check: one function.
+       `create_active_run` repeats `create_run`'s trigger-kind validation; `mark_pipeline_run` is a
+       one-line wrapper of `mark_run`; `cancel_pipeline_run` always returns `True`.
+     - `engine/repository/dependencies.py`: `include_repairs` chooses between near-identical query
+       pairs; always read `CONSUME_REPAIRS` and delete `pipeline_dependency_edges.sql` and
+       `task_cross_pipeline_dependencies.sql`.
+     - `engine/repository/*`: row-to-dataclass functions copy each field by hand
+       (`TaskExecutionDetail`, `TaskStatus`, `ActiveTask`, `DependencyEdge`, `Intervention`,
+       `TaskRow`, ...). Alias the columns to the field names, convert `Y`/`N` in the query, and
+       build them with `Cls(**row._mapping)`.
+     - `execution/pipeline.py`: `pipeline_steps`, `finalize_active_run`, `rerun_task` and
+       `force_task` each load the detail, graph data and task codes and build the graph; share one
+       loader. `force_task` resolves the pipeline id twice. `run_pipeline` and `_start_run` forward
+       nine and five keyword arguments to their generators; forward `**kwargs`.
+     - `execution/runner.run_task` resolves the pipeline id up to three times per call; resolve it
+       once and pass it to `_run_overridden` and `_run_for_orchestrator`.
+     - `handlers/sql/actions.py`: `utc_now` wraps `datetime.now(UTC)`; the `t.key = s.key` join is
+       built five times. Use the call and one helper.
+     - Connection-time re-validation: `WarehouseDialect.check_profile`, and in
+       `dialects/engine/postgres` `require_auth_fields` and the auth-mode check in `build_engine`,
+       repeat what the loader's `_auth_extra` and `_check_auth_mode` already enforced against the
+       same `config/auth.py` tables. Delete the connection-time copies; a hand-built
+       `ConnectorConfig` in a test goes through `parse_config`.
+  5. **Configuration shapes 1.0 does not need** (`refactor/config-single-profile`; public:
+     `CHANGELOG.md` and `docs/reference/` in the same pull request).
+     - `ConnectionSection` and `EmailConfig` keep `profiles: dict` and `active_profile`, yet the
+       loader only ever stores the selected profile. Store the profile itself; the two dozen
+       `.active` reads become direct.
+     - `Orchestration.Email` accepts both `use_tls` and `tls_mode` for one setting, with a conflict
+       check between them; keep `tls_mode`, delete `use_tls`, `EmailProfile.use_tls` and
+       `effective_tls_mode`, and update `docs/craft-connector.example.yml`.
+     - `config/loader._check_layout` recognises the earlier file layout
+       (`_EARLIER_LAYOUT_SECTIONS`, `Variables` blocks). Unknown sections already fail naming the
+       expected ones; delete the special case.
+     - An unsupported warehouse is treated as a plain ANSI one (`GenericWarehouse`, `known=False`,
+       `GENERIC_AUTH_FIELDS`, `WarehouseDialect.__init__(spec)`, and the `mysql+pymysql` entry in
+       `config/targets._SQLALCHEMY_DIALECTS`). That guesses instead of failing: raise
+       `ConfigurationError` naming the supported warehouses, and delete the generic path.
+     - `APPEND_TABLE` still appends to a target without `TASK_RUN_ID`, with a warning that retries
+       can duplicate rows. Fail instead, naming `etl-craft upgrade-targets --action APPEND_TABLE`,
+       and delete the branch.
+  6. **Platform and dependency surface** (`refactor/packaging-surface`; public: `CHANGELOG.md`).
+     - `core/filelock.py` and `execution/supervisor.py` carry `win32` branches; the package
+       declares Linux and macOS only. Delete them, and `start_new_session` no longer needs a
+       platform check.
+     - `packaging` is a runtime dependency for one call,
+       `services/generate_yml.require_airflow_run_templates`. Parse the version floor with the
+       standard library (or accept only `>=X.Y.Z` and `X.Y.Z`) and drop the dependency.
+     - `duckdb-engine` is a core dependency, though `CLAUDE.md` makes third-party SQLAlchemy
+       dialects optional extras. Move it to an `etl-craft[duckdb]` extra, or record in Appendix B
+       why DuckDB is the exception (it is the default local warehouse of the demos and tests).
+- *Tests.* No new behaviour, so no new tests except where behaviour changes on purpose: an
+  unsupported warehouse fails with `ConfigurationError`; `use_tls` is an unknown key; an
+  `APPEND_TABLE` target without `TASK_RUN_ID` fails naming `upgrade-targets`; `@yearly` and
+  `@annually` are accepted by both `Docs_site.Schedule` and `RUN_SCHEDULE`. Tests of deleted helpers are deleted
+  with them, or ported to the code that replaced them. Coverage must not fall.
+- *Done when.* Each item's list is empty when searched for by name, `make check` and the local
+  service suites pass, the installed-wheel demos pass on all four local warehouses, and the
+  pull request states its `src/` line delta.
 
 **Gate.** The demo runs for seven days under `etl-craft server` with no cron or Airflow; a scripted
 `kill -9` of the server at random times loses and doubles nothing; every task state reached has an
@@ -1717,6 +1871,9 @@ can confirm and says when it can't. The overseer only talks to pools through thi
 Branch: `feat/pools-local`. Wraps today's supervisor: one child process per attempt on the overseer's
 host, slots from `Orchestration.Max_parallel_tasks` split by kind (settings `Local_ingestion_slots`,
 `Local_warehouse_slots`). It is the default pool, the only one on SQLite, and what the CLI uses.
+Once it owns local submission, delete the executor lifecycle and child-dispatch plumbing from
+`execution.scheduler`; keep one local execution path behind the provider. Do not retain the current
+direct executor path as a fallback: the local provider is the fallback.
 
 ### S5.C The PostgreSQL queue and the worker agent
 
@@ -2047,6 +2204,11 @@ Write `docs/reference/compatibility.md` and keep to it from 1.0.0:
 - A deprecation stays one minor release before removal, with a warning.
 - The supported matrix: Python versions, PostgreSQL versions, warehouses and their tested table
   formats, Airflow versions for the DAG factory.
+- Before declaring the 1.0 public surface, remove pre-1.0 aliases, compatibility branches and
+  exported helpers with no external contract. Verify each runtime dependency has a direct runtime
+  use or an explicitly documented driver/plugin role; move development-only packages out of the
+  runtime set and delete unused ones. Record the before/after runtime dependency list and deleted
+  public names in the release notes; do not add a compatibility layer for unreleased APIs.
 
 ### S7.H Cloud acceptance
 
