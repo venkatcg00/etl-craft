@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 MUTATING_COMMANDS = frozenset(
     {
         "run",
+        "server",
         "mark",
         "cancel",
         "reconcile",

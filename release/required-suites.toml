@@ -25,6 +25,7 @@ linux = [
     "tests/integration/execution/test_cli_lifecycle.py::test_signal_stops_the_real_cli_child_and_grandchild[sqlite-1]",
     "tests/integration/execution/test_leases.py::test_parent_sigkill_reconciles_and_retries_real_child[sqlite]",
     "tests/integration/execution/test_leases.py::test_child_sigkill_is_failed_by_live_parent[sqlite]",
+    "tests/integration/overseer/test_server.py::test_killed_server_reconciles_before_retrying_exact_task_run[sqlite]",
 ]
 
 [suites.engine-postgres]
@@ -37,6 +38,7 @@ linux = [
     "tests/integration/execution/test_cli_lifecycle.py::test_signal_stops_the_real_cli_child_and_grandchild[postgresql-1]",
     "tests/integration/execution/test_leases.py::test_parent_sigkill_reconciles_and_retries_real_child[postgresql]",
     "tests/integration/execution/test_leases.py::test_child_sigkill_is_failed_by_live_parent[postgresql]",
+    "tests/integration/overseer/test_server.py::test_killed_server_reconciles_before_retrying_exact_task_run[postgresql]",
 ]
 
 [suites.warehouse-postgres]
@@ -99,5 +101,7 @@ linux = [
     "tests/integration/execution/test_leases.py::test_parent_sigkill_reconciles_and_retries_real_child[sqlite]",
     "tests/integration/execution/test_leases.py::test_parent_sigkill_reconciles_and_retries_real_child[postgresql]",
     "tests/integration/execution/test_leases.py::test_child_sigkill_is_failed_by_live_parent[sqlite]",
+    "tests/integration/overseer/test_server.py::test_killed_server_reconciles_before_retrying_exact_task_run[sqlite]",
     "tests/integration/execution/test_leases.py::test_child_sigkill_is_failed_by_live_parent[postgresql]",
+    "tests/integration/overseer/test_server.py::test_killed_server_reconciles_before_retrying_exact_task_run[postgresql]",
 ]

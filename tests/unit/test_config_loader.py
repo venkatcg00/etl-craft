@@ -901,3 +901,13 @@ def test_how_long_a_gate_waits_is_a_setting(tmp_path):
     raw = _minimal(Orchestration={"Mode": "local", "Gate_wait_minutes": -5})
     with pytest.raises(ConfigurationError, match="Gate_wait_minutes must be a whole number"):
         load_config(_write(tmp_path, raw))
+
+
+def test_server_shutdown_grace_is_nonnegative_and_defaults_to_sixty(tmp_path):
+    assert load_config(_write(tmp_path, _minimal())).limits.shutdown_grace_seconds == 60
+    raw = _minimal()
+    raw["Orchestration"]["Shutdown_grace_seconds"] = 0
+    assert load_config(_write(tmp_path, raw)).limits.shutdown_grace_seconds == 0
+    raw["Orchestration"]["Shutdown_grace_seconds"] = -1
+    with pytest.raises(ConfigurationError, match="Shutdown_grace_seconds"):
+        load_config(_write(tmp_path, raw))

@@ -1,0 +1,24 @@
+-- Read active definitions and their metadata revision without loading ended runs.
+SELECT p.PIPELINE_ID AS pipeline_id, r.PIPELINE_RUN_ID AS pipeline_run_id,
+       p.PIPELINE_CODE AS pipeline_code, r.BACKFILL AS backfill,
+       (SELECT MAX(v.updated_date) FROM (
+           SELECT UPDATED_DATE AS updated_date FROM CFG_PIPELINES
+           WHERE PIPELINE_ID = p.PIPELINE_ID
+           UNION ALL
+           SELECT UPDATED_DATE AS updated_date FROM CFG_TASKS
+           WHERE PIPELINE_ID = p.PIPELINE_ID
+           UNION ALL
+           SELECT d.UPDATED_DATE AS updated_date FROM CFG_TASK_DEPENDENCY d
+           JOIN CFG_TASKS t ON t.TASK_ID = d.TASK_ID WHERE t.PIPELINE_ID = p.PIPELINE_ID
+           UNION ALL
+           SELECT UPDATED_DATE AS updated_date FROM CFG_PIPELINE_DEPENDENCY
+           WHERE PIPELINE_ID = p.PIPELINE_ID
+       ) v) AS metadata_version,
+       (SELECT MAX(CHANGE_ID) FROM AUD_METADATA_CHANGES) AS change_id
+FROM AUD_PIPELINES_RUN_LOG r JOIN CFG_PIPELINES p ON p.PIPELINE_ID = r.PIPELINE_ID
+WHERE r.STATUS = 'IN-PROGRESS' AND p.ACTIVE_FLAG = 'Y'
+AND NOT EXISTS (
+    SELECT 1 FROM AUD_PIPELINE_PAUSES a WHERE a.PIPELINE_ID = p.PIPELINE_ID
+    AND a.RESUMED_AT IS NULL
+)
+ORDER BY r.PIPELINE_RUN_ID

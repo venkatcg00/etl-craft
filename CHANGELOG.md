@@ -20,6 +20,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- `etl-craft server` supervises active local runs under one deployment leader, with PostgreSQL
+  session locking and committed execution notifications, SQLite file locking, bounded active
+  graph caching, exact-run crash recovery and configurable graceful shutdown. Upgrade the
+  Engine DB for the new `AUD_OVERSEERS` process history. Schedules and ready-set dispatch remain
+  subsequent roadmap items.
+
 - Actor-scoped Python operations for run lifecycle, tasks, pipeline controls, backfills and
   inspection, with frozen views and canonical execution identities. The corresponding CLI
   commands use `--format json` to return the same schema-versioned documents. Requests remain

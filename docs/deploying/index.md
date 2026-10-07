@@ -15,3 +15,5 @@ Running etl-craft on a machine or under an orchestrator.
 - [Engine DB setup and upgrades](engine-db.md): `init-db`, `migrate`, and your own migrations.
 - [Operations](operations.md): backups, upgrades, logs and watching runs.
 - [Security](security.md): secrets, least-privilege accounts, and what tasks can do.
+
+- [Local server](server.md): leadership, submitting active runs, crash recovery and graceful shutdown.

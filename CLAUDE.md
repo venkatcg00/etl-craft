@@ -42,6 +42,7 @@ Each package imports only the packages below it. `lint-imports` enforces this.
 | Package | Responsibility |
 |---|---|
 | `cli` | argparse commands, output, exit codes |
+| `overseer` | leadership, active-run working set, local supervision and shutdown |
 | `services` | actor-scoped operations, doctor, setup, validate, cloning, DAG YAML, lineage, docs site |
 | `execution` | task runner, process supervisor, wave scheduler, run lifecycle, cross-pipeline gates |
 | `handlers` | SQL actions, business rules, Python ingestion scripts, email alerts |

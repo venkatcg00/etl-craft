@@ -75,6 +75,7 @@ _ORCHESTRATION_KEYS = frozenset(
         "Log_dir",
         "Task_timeout_seconds",
         "Max_parallel_tasks",
+        "Shutdown_grace_seconds",
         "Enforce_sla",
         "Gate_wait_minutes",
         "Global_dag",
@@ -629,6 +630,9 @@ def _parse_limits(settings: _Profiled, path: Path) -> ExecutionLimits:
         ),
         max_parallel_tasks=_whole_number(
             settings, "Max_parallel_tasks", defaults.max_parallel_tasks, path, minimum=1
+        ),
+        shutdown_grace_seconds=_whole_number(
+            settings, "Shutdown_grace_seconds", defaults.shutdown_grace_seconds, path
         ),
         enforce_sla=_flag(settings, "Enforce_sla", False, path),
         gate_wait_minutes=_whole_number(

@@ -59,7 +59,7 @@ from etl_craft.core.graph import DependencyGraph, TaskRunState, build_graph
 from etl_craft.core.log import log_context
 from etl_craft.engine import runlog, transitions
 from etl_craft.engine.repository import trackers
-from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
+from etl_craft.engine.repository.dependencies import PipelineGraphData, fetch_pipeline_graph
 from etl_craft.engine.repository.interventions import fetch_interventions, fetch_task_rows
 from etl_craft.engine.repository.pauses import Pause
 from etl_craft.engine.repository.pipelines import (
@@ -175,6 +175,8 @@ def run_pipeline(
     run_date: date | None = None,
     backfill: str | None = None,
     selector: runlog.RunSelector = runlog.ACTIVE_RUN,
+    stop_dispatch: threading.Event | None = None,
+    graph_data: PipelineGraphData | None = None,
 ) -> PipelineOutcome:
     """Run every active task of ``pipeline_code`` in dependency waves; local mode only.
 
@@ -208,13 +210,18 @@ def run_pipeline(
         selector=selector,
     )
     with (
-        leases.supervise_run(engine, pipeline_run_id) if skip_reason is None else nullcontext(),
+        leases.supervise_run(
+            engine, pipeline_run_id, cancel=None if child is None else child.cancel
+        )
+        if skip_reason is None
+        else nullcontext(),
         log_context(pipeline=pipeline_code, pipeline_run_id=pipeline_run_id),
     ):
         if skip_reason is not None:
             return _skipped_run(pipeline_code, pipeline_run_id, skip_reason, hooks)
         with engine.connect() as conn:
-            graph_data = fetch_pipeline_graph(conn, pipeline_id)
+            if graph_data is None:
+                graph_data = fetch_pipeline_graph(conn, pipeline_id)
             task_codes = fetch_task_codes(conn, pipeline_id)
         graph = build_graph(graph_data.tasks, graph_data.same_pipeline_edges)
         waves = _Waves(
@@ -227,10 +234,15 @@ def run_pipeline(
             gate=TrackedGate(clock, config.dependency_gates, config.limits.gate_wait_minutes * 60),
             child=child or ChildOptions(),
         )
+        waves.stop_dispatch = stop_dispatch
         with _SlaWatch(engine, pipeline_code, pipeline_run_id, detail.sla_in_hours, hooks):
             if force:
                 for wave in graph.waves():
-                    if run_cancelled(engine, pipeline_run_id) or waves.paused():
+                    if (
+                        waves.cancel.is_set()
+                        or run_cancelled(engine, pipeline_run_id)
+                        or waves.paused()
+                    ):
                         break
                     waves.run(wave)
                 never_ready: list[int] = []
@@ -241,6 +253,13 @@ def run_pipeline(
                 )
         if run_cancelled(engine, pipeline_run_id):
             return _cancelled_run(engine, pipeline_code, pipeline_run_id, task_codes, hooks)
+        if waves.cancel.is_set() or (stop_dispatch is not None and stop_dispatch.is_set()):
+            return PipelineOutcome(
+                RunStatus.IN_PROGRESS,
+                f"pipeline_run_id={pipeline_run_id}: supervisor stopped admitting tasks; "
+                "resume this run",
+                pipeline_run_id,
+            )
         paused = open_pause(engine, pipeline_code)
         if paused is not None:
             message = (
@@ -877,6 +896,7 @@ class _Waves:
         self.cancel = leases.run_cancel()
         self.child = replace(child, cancel=self.cancel)
         self.count = 0
+        self.stop_dispatch: threading.Event | None = None
 
     def run(self, task_ids: Sequence[int]) -> None:
         """Run ``task_ids``, at most ``Max_parallel_tasks`` at once, and wait for all of them.
@@ -907,7 +927,9 @@ class _Waves:
 
     def paused(self) -> bool:
         """Whether the pipeline was paused, so no more tasks start."""
-        return open_pause(self.engine, self.pipeline_code) is not None
+        return (self.stop_dispatch is not None and self.stop_dispatch.is_set()) or (
+            open_pause(self.engine, self.pipeline_code) is not None
+        )
 
     def _run_one(self, task_code: str) -> TaskOutcome | None:
         if self.cancel.is_set() or run_cancelled(self.engine, self.pipeline_run_id):
@@ -927,6 +949,12 @@ class _Waves:
                 selector=runlog.RunSelector(run_id=self.pipeline_run_id),
             )
         except (EtlCraftError, OSError, SQLAlchemyError) as error:
+            if (
+                isinstance(error, InterruptedError)
+                and self.stop_dispatch is not None
+                and self.stop_dispatch.is_set()
+            ):
+                return None
             # One task's trouble (a bad setting, a failed launch, a database that dropped the
             # connection) ends that task only; the others in the wave keep running.
             logger.error("%s: could not run: %s: %s", task_code, type(error).__name__, error)
@@ -952,7 +980,7 @@ def _run_until_settled(
     failures_final = False
     after_failure: list[int] = []
     while True:
-        if run_cancelled(engine, pipeline_run_id) or waves.paused():
+        if waves.cancel.is_set() or run_cancelled(engine, pipeline_run_id) or waves.paused():
             return [], after_failure
         skipped = _settle_unsatisfiable(
             engine, graph, pipeline_run_id, task_codes, failures_final=failures_final
