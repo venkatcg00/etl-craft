@@ -153,6 +153,7 @@ def test_three_pipeline_callers_waiting_on_a_repair_admit_one_supervisor(cli_pro
     from etl_craft.core.actor import current_actor
     from etl_craft.core.errors import RunStateError
     from etl_craft.engine import transitions as tr
+    from etl_craft.engine.runlog import RunSelector
     from etl_craft.execution.gates import Clock
     from etl_craft.execution.pipeline import run_pipeline
     from fixtures.metadata import add_pipeline, add_pipeline_dependency, upstream_run
@@ -164,13 +165,16 @@ def test_three_pipeline_callers_waiting_on_a_repair_admit_one_supervisor(cli_pro
         run, _ = upstream_run(conn, upstream, {})
         tr.reopen_run(conn, run, current_actor(), reason="repair while consumers wait")
         add_pipeline_dependency(conn, project.pipeline_id, upstream)
+        downstream_run = tr.create_run(conn, project.pipeline_id, current_actor(), status="QUEUED")
     waiting = Barrier(4, timeout=30)
 
     def wait(seconds):
-        waiting.wait()
-        # The repair commits before the gate's next observation.
-        while not (project.config.project_dir / "repaired").exists():
-            time.sleep(0.01)
+        if not (project.config.project_dir / "repaired").exists():
+            waiting.wait()
+            while not (project.config.project_dir / "repaired").exists():
+                time.sleep(0.01)
+        else:
+            time.sleep(min(seconds, 0.01))
 
     def execute():
         try:
@@ -179,6 +183,7 @@ def test_three_pipeline_callers_waiting_on_a_repair_admit_one_supervisor(cli_pro
                 load_config(project.config.config_path),
                 "P",
                 clock=Clock(sleep=wait),
+                selector=RunSelector(run_id=downstream_run),
             )
         except RunStateError as error:
             return error

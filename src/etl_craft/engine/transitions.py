@@ -426,11 +426,11 @@ def create_run(
 ) -> int:
     """Create an active run or a queued/skipped schedule with its exact key."""
     if status not in {"IN-PROGRESS", "QUEUED", "SKIPPED"} or (
-        status != "IN-PROGRESS" and trigger_kind != "SCHEDULE"
+        status == "SKIPPED" and trigger_kind != "SCHEDULE"
     ):
         raise RunStateError(
             f"pipeline_id={pipeline_id}: initial status={status!r}; "
-            "only schedules may start QUEUED or SKIPPED"
+            "only schedules may start SKIPPED"
         )
     if trigger_kind not in {"SCHEDULE", "MANUAL", "BACKFILL", "ORCHESTRATOR", "STAND_IN"}:
         raise RunStateError(

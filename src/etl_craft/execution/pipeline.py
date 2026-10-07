@@ -1,11 +1,12 @@
 """``run --pipeline_code``: run a whole pipeline; ``--init-only`` and ``--finalize-only``.
 
-In local mode the engine runs every active task of the pipeline under one run, in dependency
-waves. Each wave is the tasks that are ready, at most ``Orchestration.Max_parallel_tasks`` at
-once, and each task goes through ``run_task`` in a process of its own. Waves repeat until every
-task is settled or none can start; a task whose dependencies can never be met is recorded
-``SKIPPED``. Data tasks determine the run's outcome; failed alerts are logged and recorded on
-their own tasks. A pipeline containing only alerts uses those tasks' outcomes.
+In local mode the engine runs every active task under one run, starting ready tasks after each
+completion, at most ``Orchestration.Max_parallel_tasks`` at once. Each task goes through
+``run_task`` in a process of its own. Gates wait cooperatively without a worker;
+a task whose dependencies can never be met is recorded ``SKIPPED``. Execution continues until
+every task is settled or none can start. Data tasks determine the run's outcome; failed alerts
+are logged and recorded on their own tasks. A pipeline containing only alerts uses those
+tasks' outcomes.
 
 A new run starts only when the pipeline's dependencies on other pipelines are satisfied (see
 ``gates``); otherwise the run is recorded ``SKIPPED``. An ``IN-PROGRESS`` run is resumed instead,
@@ -32,8 +33,8 @@ from __future__ import annotations
 import contextvars
 import logging
 import threading
-from collections.abc import Callable, Sequence
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections.abc import Callable, Generator, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
@@ -41,7 +42,6 @@ from types import TracebackType
 from typing import TypeVar
 
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import current_actor
@@ -53,7 +53,7 @@ from etl_craft.core.enums import (
     RunStatus,
     SlaStatus,
 )
-from etl_craft.core.errors import EtlCraftError, RunRefusedError, RunStateError, UsageError
+from etl_craft.core.errors import RunRefusedError, RunStateError, StaleTransitionError, UsageError
 from etl_craft.core.faults import fault_point
 from etl_craft.core.graph import DependencyGraph, TaskRunState, build_graph
 from etl_craft.core.log import log_context
@@ -74,8 +74,10 @@ from etl_craft.execution import leases
 from etl_craft.execution.connections import check_run_connections
 from etl_craft.execution.gates import (
     Clock,
-    TrackedGate,
-    check_pipeline_dependencies,
+    PipelineGateResult,
+)
+from etl_craft.execution.gates import (
+    check_gate as check_gate_now,
 )
 from etl_craft.execution.interventions import (
     check_override,
@@ -89,10 +91,10 @@ from etl_craft.execution.remote import require_supported
 from etl_craft.execution.runner import (
     ChildOptions,
     Override,
-    TaskOutcome,
     run_cancelled,
     run_task,
 )
+from etl_craft.execution.scheduler import Scheduler
 from etl_craft.handlers.mail import send_sla_lapse_email
 
 logger = logging.getLogger(__name__)
@@ -178,9 +180,56 @@ def run_pipeline(
     stop_dispatch: threading.Event | None = None,
     graph_data: PipelineGraphData | None = None,
 ) -> PipelineOutcome:
-    """Run every active task of ``pipeline_code`` in dependency waves; local mode only.
+    """Run the cooperative local scheduler in the foreground until it settles."""
+    steps = pipeline_steps(
+        engine,
+        config,
+        pipeline_code,
+        force=force,
+        clock=clock,
+        child=child,
+        hooks=hooks,
+        run_date=run_date,
+        backfill=backfill,
+        selector=selector,
+        stop_dispatch=stop_dispatch,
+        graph_data=graph_data,
+    )
+    return _drive(steps, clock or Clock())
 
-    ``force`` skips the pipeline's gate and runs every task in its static wave, whatever its
+
+def _drive(steps: Generator[float, None, T], clock: Clock) -> T:
+    """Wait only in the foreground supervisor; workers never wait on gate deadlines."""
+    try:
+        while True:
+            try:
+                delay = next(steps)
+            except StopIteration as done:
+                return done.value  # type: ignore[no-any-return]
+            clock.sleep(delay)
+    finally:
+        steps.close()
+
+
+def pipeline_steps(
+    engine: Engine,
+    config: ConnectorConfig,
+    pipeline_code: str,
+    *,
+    force: bool = False,
+    clock: Clock | None = None,
+    child: ChildOptions | None = None,
+    hooks: RunHooks | None = None,
+    run_date: date | None = None,
+    backfill: str | None = None,
+    selector: runlog.RunSelector = runlog.ACTIVE_RUN,
+    stop_dispatch: threading.Event | None = None,
+    graph_data: PipelineGraphData | None = None,
+    pool: ThreadPoolExecutor | None = None,
+) -> Generator[float, None, PipelineOutcome]:
+    """Advance ready tasks of ``pipeline_code`` cooperatively; local mode only.
+
+    ``force`` skips the pipeline's gate and runs every task after its upstreams finish, whatever its
     status or dependencies. ``run_date`` is the date a new run runs as of (today unless given),
     and ``backfill``, the reason for one, makes it a backfill run (see ``backfill``). When
     interrupted, the running task processes are stopped and recorded ``FAILED``, and the run
@@ -198,7 +247,7 @@ def run_pipeline(
     clock = clock or Clock()
     hooks = hooks or default_hooks(config, engine)
     pipeline_id, detail = _prepare(engine, config, pipeline_code)
-    pipeline_run_id, skip_reason = _start_run(
+    pipeline_run_id, skip_reason = yield from _start_steps(
         engine,
         config,
         pipeline_code,
@@ -209,6 +258,10 @@ def run_pipeline(
         backfill=backfill,
         selector=selector,
     )
+    if run_cancelled(engine, pipeline_run_id):
+        with engine.connect() as conn:
+            task_codes = fetch_task_codes(conn, pipeline_id)
+        return _cancelled_run(engine, pipeline_code, pipeline_run_id, task_codes, hooks)
     with (
         leases.supervise_run(
             engine, pipeline_run_id, cancel=None if child is None else child.cancel
@@ -224,36 +277,44 @@ def run_pipeline(
                 graph_data = fetch_pipeline_graph(conn, pipeline_id)
             task_codes = fetch_task_codes(conn, pipeline_id)
         graph = build_graph(graph_data.tasks, graph_data.same_pipeline_edges)
-        waves = _Waves(
+        scheduler = Scheduler(
             engine,
             config,
             pipeline_code,
+            pipeline_id,
             pipeline_run_id,
             task_codes,
+            graph,
             force=force,
-            gate=TrackedGate(clock, config.dependency_gates, config.limits.gate_wait_minutes * 60),
+            clock=clock,
+            pool=pool,
             child=child or ChildOptions(),
+            paused=lambda: (
+                (stop_dispatch is not None and stop_dispatch.is_set())
+                or open_pause(engine, pipeline_code) is not None
+            ),
+            settle=lambda final: _settle_unsatisfiable(
+                engine, graph, pipeline_run_id, task_codes, failures_final=final
+            ),
         )
-        waves.stop_dispatch = stop_dispatch
-        with _SlaWatch(engine, pipeline_code, pipeline_run_id, detail.sla_in_hours, hooks):
-            if force:
-                for wave in graph.waves():
-                    if (
-                        waves.cancel.is_set()
-                        or run_cancelled(engine, pipeline_run_id)
-                        or waves.paused()
-                    ):
-                        break
-                    waves.run(wave)
-                never_ready: list[int] = []
-                after_failure: list[int] = []
-            else:
-                never_ready, after_failure = _run_until_settled(
-                    engine, graph, pipeline_run_id, task_codes, waves
-                )
+        try:
+            with _SlaWatch(engine, pipeline_code, pipeline_run_id, detail.sla_in_hours, hooks):
+                while not scheduler.step():
+                    delay = (
+                        0.1
+                        if scheduler.jobs or scheduler.next_check_at is None
+                        else max(0.0, (scheduler.next_check_at - clock.now()).total_seconds())
+                    )
+                    yield delay
+        except BaseException:
+            scheduler.close(interrupted=True)
+            raise
+        else:
+            scheduler.close()
+        never_ready, after_failure = scheduler.never_ready, scheduler.after_failure
         if run_cancelled(engine, pipeline_run_id):
             return _cancelled_run(engine, pipeline_code, pipeline_run_id, task_codes, hooks)
-        if waves.cancel.is_set() or (stop_dispatch is not None and stop_dispatch.is_set()):
+        if scheduler.cancel.is_set() or (stop_dispatch is not None and stop_dispatch.is_set()):
             return PipelineOutcome(
                 RunStatus.IN_PROGRESS,
                 f"pipeline_run_id={pipeline_run_id}: supervisor stopped admitting tasks; "
@@ -435,6 +496,16 @@ def init_pipeline_run(
         remote=remote,
         selector=selector,
     )
+    if run_cancelled(engine, pipeline_run_id):
+        with engine.connect() as conn:
+            task_codes = fetch_task_codes(conn, pipeline_id)
+        return _cancelled_run(
+            engine,
+            pipeline_code,
+            pipeline_run_id,
+            task_codes,
+            hooks or default_hooks(config, engine),
+        )
     if skip_reason is not None:
         return _skipped_run(
             pipeline_code, pipeline_run_id, skip_reason, hooks or default_hooks(config, engine)
@@ -698,6 +769,37 @@ def _start_run(
     remote: bool = False,
     selector: runlog.RunSelector = runlog.ACTIVE_RUN,
 ) -> tuple[int, str | None]:
+    """Initialize or resume a run, driving the shared gate admission in the foreground."""
+    return _drive(
+        _start_steps(
+            engine,
+            config,
+            pipeline_code,
+            pipeline_id,
+            clock,
+            check_gate=check_gate,
+            run_date=run_date,
+            backfill=backfill,
+            remote=remote,
+            selector=selector,
+        ),
+        clock,
+    )
+
+
+def _start_steps(
+    engine: Engine,
+    config: ConnectorConfig,
+    pipeline_code: str,
+    pipeline_id: int,
+    clock: Clock,
+    *,
+    check_gate: bool,
+    run_date: date | None = None,
+    backfill: str | None = None,
+    remote: bool = False,
+    selector: runlog.RunSelector = runlog.ACTIVE_RUN,
+) -> Generator[float, None, tuple[int, str | None]]:
     """Return the run to use and, when the gate refused a new one, why it was ``SKIPPED``.
 
     A new run runs as of ``run_date`` (today unless given). ``backfill``, the reason for a
@@ -773,21 +875,46 @@ def _start_run(
     decisions: tuple[trackers.GateDecision, ...] = ()
     bypassed: tuple[str, ...] = ()
     if check_gate:
-        gate = check_pipeline_dependencies(
-            engine,
-            pipeline_id,
-            clock,
-            config.dependency_gates,
-            config.limits.gate_wait_minutes * 60,
-        )
-        bypassed = gate.bypassed
-        decisions = gate.decisions
+        if queued is None:
+            with engine.begin() as conn:
+                queued = transitions.create_run(
+                    conn,
+                    pipeline_id,
+                    current_actor(),
+                    run_date=logical_date,
+                    run_key=selector.run_key,
+                    status="QUEUED",
+                )
+        while True:
+            if run_cancelled(engine, queued):
+                return queued, None
+            result = check_gate_now(
+                engine,
+                queued,
+                pipeline_id,
+                clock=clock,
+                policy=config.dependency_gates,
+                wait_seconds=config.limits.gate_wait_minutes * 60,
+            )
+            if result.next_check_at is None:
+                break
+            yield max(0.0, (result.next_check_at - clock.now()).total_seconds())
+        assert isinstance(result.check, PipelineGateResult)
+        gate = result.check
+        bypassed, decisions = gate.bypassed, gate.decisions
         if not gate.satisfied:
             reason = "; ".join(gate.reasons)
     created: int | None
     with engine.begin() as conn:
         if queued is not None:
-            transitions.admit_run(conn, queued, current_actor())
+            try:
+                transitions.admit_run(conn, queued, current_actor())
+            except StaleTransitionError as error:
+                other = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
+                raise RunStateError(
+                    f"{pipeline_code}: another process started pipeline_run_id={other}; "
+                    f"pipeline_run_id={queued} stays QUEUED; select it explicitly to resume"
+                ) from error
             created = queued
         elif selector.run_key is not None:
             created = transitions.create_run(
@@ -881,142 +1008,6 @@ def _cancelled_run(
     logger.warning("%s", message)
     _call_hook("on_finalized", hooks.on_finalized, outcome)
     return outcome
-
-
-class _Waves:
-    """Runs one wave of tasks at a time, each through ``run_task``, in parallel."""
-
-    def __init__(
-        self,
-        engine: Engine,
-        config: ConnectorConfig,
-        pipeline_code: str,
-        pipeline_run_id: int,
-        task_codes: dict[int, str],
-        *,
-        force: bool,
-        gate: TrackedGate,
-        child: ChildOptions,
-    ) -> None:
-        self.engine = engine
-        self.config = config
-        self.pipeline_code = pipeline_code
-        self.pipeline_run_id = pipeline_run_id
-        self.task_codes = task_codes
-        self.force = force
-        self.gate = gate
-        self.cancel = leases.run_cancel()
-        self.child = replace(child, cancel=self.cancel)
-        self.count = 0
-        self.stop_dispatch: threading.Event | None = None
-
-    def run(self, task_ids: Sequence[int]) -> None:
-        """Run ``task_ids``, at most ``Max_parallel_tasks`` at once, and wait for all of them.
-
-        When waiting is interrupted, the running task processes are stopped first.
-        """
-        if not task_ids:
-            return
-        self.count += 1
-        codes = [self.task_codes[task_id] for task_id in task_ids]
-        logger.info("%s: wave %d: %s", self.pipeline_code, self.count, ", ".join(codes))
-        workers = min(max(self.config.limits.max_parallel_tasks, 1), len(codes))
-        with ThreadPoolExecutor(workers, thread_name_prefix="etl-craft-task") as pool:
-            futures = [
-                pool.submit(contextvars.copy_context().run, self._run_one, code) for code in codes
-            ]
-            try:
-                for future in as_completed(futures):
-                    future.result()
-            except BaseException:
-                self.cancel.set()
-                logger.warning(
-                    "%s: interrupted; stopping the running tasks. The run stays IN-PROGRESS, "
-                    "so the next run resumes it",
-                    self.pipeline_code,
-                )
-                raise
-
-    def paused(self) -> bool:
-        """Whether the pipeline was paused, so no more tasks start."""
-        return (self.stop_dispatch is not None and self.stop_dispatch.is_set()) or (
-            open_pause(self.engine, self.pipeline_code) is not None
-        )
-
-    def _run_one(self, task_code: str) -> TaskOutcome | None:
-        if self.cancel.is_set() or run_cancelled(self.engine, self.pipeline_run_id):
-            return None
-        if self.paused():
-            logger.info("%s: not started, the pipeline is paused", task_code)
-            return None
-        try:
-            return run_task(
-                self.engine,
-                self.config,
-                self.pipeline_code,
-                task_code,
-                force=self.force,
-                gate=self.gate,
-                child=self.child,
-                selector=runlog.RunSelector(run_id=self.pipeline_run_id),
-            )
-        except (EtlCraftError, OSError, SQLAlchemyError) as error:
-            if (
-                isinstance(error, InterruptedError)
-                and self.stop_dispatch is not None
-                and self.stop_dispatch.is_set()
-            ):
-                return None
-            # One task's trouble (a bad setting, a failed launch, a database that dropped the
-            # connection) ends that task only; the others in the wave keep running.
-            logger.error("%s: could not run: %s: %s", task_code, type(error).__name__, error)
-            return None
-
-
-def _run_until_settled(
-    engine: Engine,
-    graph: DependencyGraph,
-    pipeline_run_id: int,
-    task_codes: dict[int, str],
-    waves: _Waves,
-) -> tuple[list[int], list[int]]:
-    """Run waves until every task is settled or none can start.
-
-    When nothing more can start, no failed task will be retried in this run, which is about to
-    end: the tasks that could only have run after a failure's retry are recorded ``SKIPPED``,
-    and those that wait for them with ``ALWAYS`` or ``FAILURE`` (an alert) run in turn.
-    Returns the tasks never started, and those skipped because of a failure.
-    """
-    task_ids = list(graph.task_ids)
-    attempted: set[int] = set()
-    failures_final = False
-    after_failure: list[int] = []
-    while True:
-        if waves.cancel.is_set() or run_cancelled(engine, pipeline_run_id) or waves.paused():
-            return [], after_failure
-        skipped = _settle_unsatisfiable(
-            engine, graph, pipeline_run_id, task_codes, failures_final=failures_final
-        )
-        if failures_final:
-            after_failure.extend(skipped)
-        with engine.connect() as conn:
-            run_state = runlog.fetch_run_state(conn, pipeline_run_id, task_ids)
-        pending = [
-            task_id
-            for task_id in task_ids
-            if run_state.get(task_id, TaskRunState()).status not in SETTLED_STATUSES
-            and task_id not in attempted
-        ]
-        if not pending:
-            return [], after_failure
-        ready = [task_id for task_id in graph.ready(run_state) if task_id not in attempted]
-        if not ready:
-            if failures_final and not skipped:
-                return pending, after_failure
-            failures_final = True
-            continue
-        attempted.update(ready)
-        waves.run(ready)
 
 
 def _settle_unsatisfiable(

@@ -20,6 +20,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Ready-task scheduling shared by the local CLI and server: each completion releases ready
+  downstream work immediately. Gate waits persist deadlines and look counts in `AUD_GATE_WAITS`
+  without holding task workers, and survive restarts. Upgrade with migration `0016_gate_waits`.
+  The server uses one bounded task pool and cooperative pipeline supervision. Gate averages
+  exclude stand-in runs as well as backfills.
+
 - Local server schedules support five-field cron, timezone-aware ticks, bounded catch-up,
   overlap policies and durable queued runs with exact UTC tick keys. Upgrade the Engine DB
   for migration `0015_schedules`; validate schedule metadata before starting the server.
@@ -29,8 +35,7 @@ All notable changes are recorded here. The format follows
 - `etl-craft server` supervises active local runs under one deployment leader, with PostgreSQL
   session locking and committed execution notifications, SQLite file locking, bounded active
   graph caching, exact-run crash recovery and configurable graceful shutdown. Upgrade the
-  Engine DB for the new `AUD_OVERSEERS` process history. Ready-set dispatch remains a
-  subsequent roadmap item.
+  Engine DB for the new `AUD_OVERSEERS` process history.
 
 - Actor-scoped Python operations for run lifecycle, tasks, pipeline controls, backfills and
   inspection, with frozen views and canonical execution identities. The corresponding CLI

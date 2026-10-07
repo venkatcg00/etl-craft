@@ -149,6 +149,7 @@ def run_task(
     child: ChildOptions | None = None,
     override: Override | None = None,
     selector: runlog.RunSelector = runlog.ACTIVE_RUN,
+    admission: CrossPipelineCheck | None = None,
 ) -> TaskOutcome:
     """Run one task under its pipeline's active run and return how it ended.
 
@@ -200,7 +201,9 @@ def run_task(
     consumed: dict[int, int] | None = None
     decisions: tuple[trackers.GateDecision, ...] = ()
     if not force:
-        blocked, cross = _preflight(engine, gate, pipeline_id, task_id, task_code, pipeline_run_id)
+        blocked, cross = _preflight(
+            engine, gate, pipeline_id, task_id, task_code, pipeline_run_id, admission
+        )
         if blocked is not None:
             logger.info(blocked.message)
             return blocked
@@ -363,6 +366,7 @@ def _preflight(
     task_id: int,
     task_code: str,
     pipeline_run_id: int,
+    admission: CrossPipelineCheck | None = None,
 ) -> tuple[TaskOutcome | None, CrossPipelineCheck]:
     """Return the outcome that stops the task from running now, if any, and the gate's check.
 
@@ -399,7 +403,9 @@ def _preflight(
         if backfill:
             cross = _backfill_cross_check(engine, task_id, still_needed)
         else:
-            cross = gate.check(engine, task_id, still_needed)
+            cross = (
+                admission if admission is not None else gate.check(engine, task_id, still_needed)
+            )
         still_needed -= cross.satisfied_count
     if still_needed <= 0:
         return None, cross

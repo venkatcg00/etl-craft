@@ -12,8 +12,8 @@ description for an orchestrator such as Airflow to schedule.
 `CFG_PIPELINE_DEPENDENCY`. Changing a pipeline means changing rows, reviewed like any other
 change.
 
-**One verb runs everything.** `etl-craft run --pipeline_code X` runs a pipeline in dependency
-waves, one child process per task. `etl-craft run --pipeline_code X --task_code Y` runs one task;
+**One verb runs everything.** `etl-craft run --pipeline_code X` runs a pipeline by dispatching
+ready tasks after each completion, one child process per task. `etl-craft run --pipeline_code X --task_code Y` runs one task;
 it is the command a generated orchestrator DAG calls for each step.
 
 **Runs resolve themselves.** A run's id is never passed between tasks. Each task finds the

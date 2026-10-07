@@ -1,7 +1,7 @@
 # Running the local server
 
 `etl-craft server` creates scheduled runs and supervises active local pipeline runs until it receives SIGTERM or Ctrl-C.
-It uses the same task handlers, wave execution, gates, leases, cancellation guards, SLA checks
+It uses the same task handlers, ready-task dispatch, gates, leases, cancellation guards, SLA checks
 and finalization hooks as foreground `etl-craft run`.
 
 ## Starting and submitting work
@@ -25,13 +25,13 @@ etl-craft --config /srv/etl-craft/craft-connector.yml history \
 Initialization performs the usual admission checks. The server picks up an unowned
 `IN-PROGRESS` run by its exact `pipeline_run_id`; it never chooses an ended run by recency.
 Scheduled runs begin `QUEUED`. The oldest queued run of each pipeline is admitted through
-the existing pipeline gates when there is no active sibling. Existing wave and blocking gate
-behavior remains in force; nonblocking ready-set dispatch and automatic retries are subsequent
-roadmap items. To run under Airflow or another orchestrator, use
+the pipeline gates when there is no active sibling. Gate checks never sleep or enter the task
+worker pool. Ready tasks are dispatched after each completion; automatic retries remain a
+subsequent roadmap item. To run under Airflow or another orchestrator, use
 [remote mode](orchestrator.md); `server` refuses that mode.
 
-`Max_parallel_tasks` limits tasks inside each pipeline and bounds the number of concurrent
-pipeline supervisors. Runs still owned by another foreground process are left with that
+`Max_parallel_tasks` bounds the server's shared task worker pool. Cooperative pipeline
+supervision and pending gate checks do not use those slots. Runs still owned by another foreground process are left with that
 process. Paused or inactive pipelines receive no dispatch; resuming a pipeline allows its
 active run to continue.
 
@@ -78,6 +78,20 @@ You can inspect or cancel a queued run by its exact `--run-id` or `--run-key`.
 These columns govern the local server; the existing `PIPELINE_PARAMETERS.CATCHUP` boolean
 continues to control Airflow's generated DAG catch-up setting.
 
+## Gate waits and dispatch
+
+Migration `0016_gate_waits` adds `AUD_GATE_WAITS`. Each run and task has at most one current
+wait; NULL `TASK_ID` identifies pipeline admission. `FIRST_CHECK_AT`, `WAIT_UNTIL`, `LOOKS` and
+`NEXT_CHECK_AT` preserve the budget across restarts. Completed checks clear `NEXT_CHECK_AT`,
+retaining the last budget for inspection. Gate timings remain 70%, 80%, and subsequent fractions
+of the upstream's average real run length, at least one second apart, limited by
+`Gate_wait_minutes` and 30 looks. Stand-in and backfill runs do not influence that average.
+
+The server advances pipeline supervision from its main loop. It starts a task worker only after
+a final gate judgement, passing that snapshot to the task runner for atomic decision recording.
+A waiting task creates no attempt. Pauses, cancellation, ownership leases, process guards, SLA
+checks and finalization hooks apply to the same exact execution identities as foreground runs.
+
 ## Leadership and recovery
 
 Only one server owns a deployment. PostgreSQL holds a schema-specific session advisory lock
@@ -92,7 +106,7 @@ not constitute leadership and is not given an invented stop time.
 
 The loop polls once per second. On PostgreSQL, committed changes to pipeline runs, task
 attempts and pipeline pauses also wake it through `LISTEN etl_craft_events`. Rolled-back
-changes send no notification. A restarted server rebuilds its working set from active runs;
+changes send no notification. A restarted server rebuilds its working set from queued and active runs;
 it caches only their graphs, invalidating them on metadata edits or deletions.
 
 A crashed server's run and attempt leases must expire before another server takes ownership.
