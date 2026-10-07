@@ -53,9 +53,10 @@ ETL_CRAFT_REQUIRE_SERVICES=1 python scripts/run_suite.py chaos
 ```
 
 Release evidence records the complete suite once, using the same evidence rules as other suites.
-The CI stability gate separately requires twenty consecutive passes on SQLite and twenty on
-PostgreSQL for changes to execution, engine, tests, the suite manifest or the CI workflow.
-Each iteration uploads its JUnit results; any failure stops that dialect's job.
+The Release gate workflow separately requires twenty consecutive passes on SQLite and twenty on
+PostgreSQL, after the evidence check passes. It runs on release branches or manual dispatch,
+keeping repeated stress checks out of pull-request CI. Each iteration uploads its JUnit results;
+any failure stops that dialect's job.
 
 ## Checking the gate
 
