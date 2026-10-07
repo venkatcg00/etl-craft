@@ -31,6 +31,10 @@ across all four local warehouses with
 coverage run skips those demos when no wheel is supplied; `make verify-package` checks installation
 but does not run the pipeline demos.
 
+Pull-request CI runs once per revision and does not repeat after merge. Keep repeated chaos and
+other expensive stress gates in release validation; ordinary regression cases still run once
+with the regular suite. Documentation deployment runs after merge.
+
 ## Layers
 
 Each package imports only the packages below it. `lint-imports` enforces this.

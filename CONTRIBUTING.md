@@ -121,8 +121,10 @@ ETL_CRAFT_REQUIRE_SERVICES=1 uv run pytest -q -m "chaos and engine_sqlite"
 ETL_CRAFT_REQUIRE_SERVICES=1 uv run pytest -q -m "chaos and engine_postgres"
 ```
 
-CI runs twenty consecutive passes per Engine DB when execution, engine, tests, suite definitions
-or the CI workflow change. An iteration stops at its first failure and fails the job; every
-completed iteration has an uploaded JUnit report. The PostgreSQL outage affects only the test's
-temporary database, prevents new connections for five seconds, and restores access in cleanup.
+Pull requests run the normal regression checks once; the CI workflow does not repeat after merge.
+The Release gate workflow requires twenty consecutive chaos passes per Engine DB on release
+branches or manual dispatch, after the evidence check passes. An iteration stops at its first
+failure and fails the job; every completed iteration has an uploaded JUnit report. The PostgreSQL
+outage affects only the test's temporary database, prevents new connections for five seconds,
+and restores access in cleanup.
 Tests advance abandoned leases explicitly rather than waiting for their normal expiry.

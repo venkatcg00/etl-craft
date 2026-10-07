@@ -1,8 +1,6 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
 
@@ -17,75 +15,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  changes:
-    name: select chaos checks
-    runs-on: ubuntu-latest
-    outputs:
-      chaos: ${{ steps.paths.outputs.chaos }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - id: paths
-        name: Check execution, engine and suite changes
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: |
-          base="$BASE_SHA"
-          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
-            base="$(git rev-parse HEAD^)"
-          fi
-          changed=false
-          while IFS= read -r path; do
-            case "$path" in
-              src/etl_craft/execution/*|src/etl_craft/engine/*|tests/*|release/required-suites.toml|.github/workflows/ci.yml)
-                changed=true ;;
-            esac
-          done < <(git diff --name-only "$base" HEAD)
-          echo "chaos=$changed" >> "$GITHUB_OUTPUT"
-
-  chaos:
-    name: chaos (${{ matrix.engine }}, 20 consecutive runs)
-    needs: changes
-    if: needs.changes.outputs.chaos == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 180
-    strategy:
-      fail-fast: false
-      matrix:
-        engine: [engine_sqlite, engine_postgres]
-    env:
-      ETL_CRAFT_REQUIRE_SERVICES: "1"
-      CHAOS_ENGINE: ${{ matrix.engine }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-      - name: Install dependencies
-        run: uv sync --locked --all-groups --python 3.11
-      - name: Start local services
-        run: make services-up
-      - name: Require twenty consecutive passes
-        run: |
-          mkdir -p chaos-results
-          for iteration in {1..20}; do
-            echo "Chaos iteration $iteration/20 ($CHAOS_ENGINE)"
-            uv run pytest -q -x -m "chaos and $CHAOS_ENGINE" --junitxml="chaos-results/iteration-$iteration.xml"
-          done
-      - name: Upload iteration results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: chaos-${{ matrix.engine }}
-          path: chaos-results/
-      - name: Service logs
-        if: failure()
-        run: docker compose logs --no-color
-      - name: Stop local services
-        if: always()
-        run: make services-down
-
   static:
     name: lint / types / layers / history
     runs-on: ubuntu-latest

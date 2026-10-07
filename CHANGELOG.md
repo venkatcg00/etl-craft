@@ -8,6 +8,9 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- CI validates pull requests without repeating after merge. Twenty consecutive chaos passes per
+  Engine DB run in release validation after the evidence check, rather than on every PR.
+
 - Execution identity names have one meaning across SQL, ingestion, business rules and email:
   `pipeline_id` is the definition, `pipeline_run_id` the pipeline execution, and `task_run_id` the
   task execution. SQL uses matching substitution switches. Migrate SQL and email templates that
@@ -18,8 +21,8 @@ All notable changes are recorded here. The format follows
 ### Added
 
 - A chaos suite for concurrent admission, process loss, fenced recovery, operator races and
-  remote deliveries, including a five-second PostgreSQL outage. CI requires twenty consecutive
-  passes per Engine DB for execution and test changes and uploads each iteration's results.
+  remote deliveries, including a five-second PostgreSQL outage. Release validation requires twenty
+  consecutive passes per Engine DB and uploads each iteration's results.
 
 - Consistent `PIPELINE_ID`, `PIPELINE_RUN_ID` and `TASK_RUN_ID` audit columns on every SQL target,
   with those identities also exposed to ingestion scripts and business-rule SQL. Append retries

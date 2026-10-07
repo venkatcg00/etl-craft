@@ -47,6 +47,12 @@ passes.
 6. Every failure the item introduces names the object, the value found, what was expected and the
    remedy, and is recorded on the run or attempt it belongs to.
 
+**CI cost policy.** Validate each pull-request revision without repeating the test workflow after
+merge. Keep ordinary regression coverage in PR checks. Repeated chaos, sustained-load benchmarks
+and full example-stack acceptance belong to release validation or deliberate manual runs;
+post-merge workflows publish documentation and deploy approved changes. Run all required checks
+locally before opening a PR.
+
 **Severity words.** *High*: possible wrong data, wrong run state or a security exposure under normal
 use. *Medium*: a feature fails or behaves surprisingly in a realistic case. *Low*: an edge case or a
 diagnostics problem.
@@ -1407,7 +1413,8 @@ read the existing table's format where the warehouse exposes it and refuse a mis
 ### S3.H The chaos suite
 
 Branch: `test/chaos-suite`. New marker `chaos` in `release/required-suites.toml`, run on SQLite and
-PostgreSQL, in CI on every pull request that touches `execution/` or `engine/`.
+PostgreSQL. Ordinary regression coverage runs once in pull-request CI; the repeated stability
+gate runs before release.
 
 Scenarios (each asserts the final Engine DB state and, where relevant, warehouse rows):
 
@@ -1442,11 +1449,13 @@ The added process tests check warehouse provenance as well as the final audit st
 | Repair during a gate wait | Admission records and consumption retain the selected upstream revision |
 | Remote deliveries | Duplicate live tasks, late finalize and clearing an older keyed DAG run preserve newer runs |
 
-CI selects the suite when execution, engine, tests, suite definitions or the CI workflow change,
-and stores JUnit results for each iteration. The PostgreSQL outage restores database access in
-cleanup; process tests release or stop their children even when an assertion fails.
+The Release gate workflow runs twenty iterations per dialect on release branches or manual
+dispatch, after checking release evidence, and stores JUnit results for each iteration.
+Pull-request CI runs ordinary regressions once and does not repeat after merge. Keep expensive
+stress repetitions in release validation as further roadmap items add test coverage. The PostgreSQL
+outage restores database access in cleanup; process tests release or stop their children even when an assertion fails.
 
-**Gate.** The chaos suite passes on both dialects 20 times in a row in CI.
+**Gate.** The chaos suite passes on both dialects 20 times in a row in release CI.
 
 ## Release 0.4: Overseer
 
@@ -2266,7 +2275,7 @@ In the example repository's `.github/workflows/`:
 | --- | --- | --- |
 | `validate.yml` | every pull request | Install the pinned etl-craft; start PostgreSQL; `etl-craft init-db`; `etl-craft migrate` (applies every metadata migration to an empty Engine DB); `etl-craft validate` for every pipeline; `etl-craft generate-yml` for every pipeline (proves the export still works); lint the scripts. Fails on any error. |
 | `deploy-config.yml` | merge to `main` | Applies new metadata migrations to the deployed Engine DB with `etl-craft migrate`, using a GitHub environment with the Engine DB secret and required reviewers; publishes the project bundle (`etl-craft bundle publish`); records the deployed commit. |
-| `e2e.yml` | every pull request and nightly | Brings up the whole stack with Docker Compose (sources, generators, warehouse, Engine DB, overseer, two workers, Superset); runs the generators for a fixed batch; waits for the scheduled runs; then runs the checks of `S8.F`. Uploads logs, the catalog and dashboard screenshots as artifacts. |
+| `e2e.yml` | before release or manual dispatch | Brings up the whole stack with Docker Compose (sources, generators, warehouse, Engine DB, overseer, two workers, Superset); runs the generators for a fixed batch; waits for the scheduled runs; then runs the checks of `S8.F`. Uploads logs, the catalog and dashboard screenshots as artifacts. |
 
 ### S8.F Acceptance checks
 
