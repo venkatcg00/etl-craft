@@ -6,10 +6,9 @@ from dataclasses import replace
 import pytest
 
 from etl_craft.core.errors import HandlerError
-from etl_craft.engine import transitions
 from etl_craft.handlers.sql.session import Session
 from fixtures.engine_db import apply_schema
-from fixtures.metadata import add_pipeline
+from fixtures.metadata import add_pipeline, start_run
 from fixtures.sql_row_ids import check_row_id_generation, run_paused_append
 
 
@@ -29,7 +28,7 @@ def test_concurrent_appends_keep_row_ids_unique_across_processes(sql_world, requ
         w.engine_db = db.engine
         with db.engine.begin() as conn:
             w.pipeline_id = add_pipeline(conn, "P", refresh_type="INCREMENTAL")
-            w.pipeline_run_id = transitions.find_or_create_active_run(conn, w.pipeline_id)
+            w.pipeline_run_id = start_run(conn, w.pipeline_id)
     w.setup("events", "SELECT 1 AS id", "APPEND_TABLE")
     params = {"SQL_ACTION": "APPEND_TABLE", "TARGET_OBJECT": "events"}
     w.run("seed", SOURCE_SQL="SELECT 0 AS id", **params)

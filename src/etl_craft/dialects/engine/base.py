@@ -71,10 +71,6 @@ class EngineDialect(ABC):
         """
         return None
 
-    @abstractmethod
-    def duration_seconds_sql(self) -> str:
-        """Return the SQL expression for ``END_DATE - START_DATE`` in seconds."""
-
     def schema_path(self) -> Path:
         """Return the full schema a fresh install applies."""
         return self.directory / "schema.sql"
@@ -87,17 +83,12 @@ class EngineDialect(ABC):
         """Split a script into statements this database accepts one at a time."""
         return split_statements(sql_text)
 
-    def begin_ddl_transaction(self, conn: Connection) -> None:
-        """Make DDL on ``conn`` part of its transaction; PostgreSQL's DDL already is."""
-        return None
-
     @contextmanager
     def migration_transaction(
         self, engine: Engine, *, rebuild_metadata: str | None = None
     ) -> Iterator[Connection]:
         """Apply a migration and its ledger row together, including any dialect's rebuild setup."""
         with engine.begin() as conn:
-            self.begin_ddl_transaction(conn)
             yield conn
 
     @cached_property

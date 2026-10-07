@@ -9,13 +9,6 @@ from __future__ import annotations
 from enum import StrEnum
 
 
-class ActiveFlag(StrEnum):
-    """``ACTIVE_FLAG`` on every ``CFG_`` row."""
-
-    YES = "Y"
-    NO = "N"
-
-
 class RunStatus(StrEnum):
     """Status of a pipeline run, a task run or a business-rule run.
 
@@ -84,13 +77,6 @@ class DependencyType(StrEnum):
     HAS_DATA = "HAS_DATA"
 
 
-class TaskType(StrEnum):
-    """What a task does in its pipeline."""
-
-    INGESTION = "INGESTION"
-    ETL = "ETL"
-
-
 class Handler(StrEnum):
     """The handler that runs a task."""
 
@@ -106,14 +92,6 @@ class RunCondition(StrEnum):
     ALL = "ALL"
     ANY = "ANY"
     N = "N"
-
-
-class BusinessRuleType(StrEnum):
-    """What a failing business rule does to its rows."""
-
-    INCOMPLETE = "INCOMPLETE"
-    REJECT = "REJECT"
-    REPORT = "REPORT"
 
 
 class OffsetType(StrEnum):

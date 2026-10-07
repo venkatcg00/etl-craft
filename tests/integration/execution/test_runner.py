@@ -13,8 +13,9 @@ from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import HandlerError, MetadataError, RunRefusedError, RunStateError
 from etl_craft.engine import runlog, transitions
 from etl_craft.execution import runner
-from etl_craft.execution.gates import CrossPipelineCheck, UncheckedGate
+from etl_craft.execution.gates import CrossPipelineCheck
 from etl_craft.execution.runner import ChildOptions, run_task
+from fixtures.metadata import start_run
 
 TESTS_DIR = Path(__file__).parents[2]
 CHILD = ChildOptions(module="fixtures.task_child", log_level="DEBUG", kill_grace_seconds=2)
@@ -107,7 +108,7 @@ def project(engine_db, tmp_path):
                 ),
                 {"p": ids["pipeline"], "t": ids[task], "u": ids[upstream], "k": kind},
             )
-        ids["run"] = transitions.find_or_create_active_run(conn, ids["pipeline"])
+        ids["run"] = start_run(conn, ids["pipeline"])
     return engine, config, ids
 
 
@@ -280,20 +281,6 @@ def test_errors_before_running(project):
         run(project, "ok")
 
 
-class CountingGate:
-    def __init__(self, satisfied, definitive=True):
-        self.result = CrossPipelineCheck(
-            satisfied, ("upstream X has not run",), {7: 70}, definitive
-        )
-        self.consumed = []
-
-    def check(self, engine, task_id, needed):
-        return self.result
-
-    def consume(self, engine, task_id, pipeline_run_id, consumed):
-        self.consumed.append(consumed)
-
-
 def test_the_cross_pipeline_gate_decides_a_task_with_dependencies_elsewhere(project):
     engine, _, ids = project
     with engine.begin() as conn:
@@ -317,19 +304,19 @@ def test_the_cross_pipeline_gate_decides_a_task_with_dependencies_elsewhere(proj
             ),
             {"p": ids["pipeline"], "t": ids["values"], "q": other, "u": upstream},
         )
-    # Not really checked: nothing is recorded, so the task can run later.
-    unchecked = run(project, "values", gate=UncheckedGate())
+    # An unfinished admission leaves no task summary, so a later check can admit it.
+    unchecked = run(
+        project,
+        "values",
+        admission=CrossPipelineCheck(0, ("upstream X has not run",), definitive=False),
+    )
     assert unchecked.status == RunStatus.SKIPPED and unchecked.task_run_id is None
-    assert "not checked" in unchecked.message
-    # Checked and unsatisfied, with no same-pipeline upstream pending: recorded SKIPPED.
-    refused = run(project, "values", gate=CountingGate(0))
+    assert "not run" in unchecked.message
+    refused = run(project, "values", admission=CrossPipelineCheck(0, ("upstream X has not run",)))
     assert row(engine, refused.task_run_id).error_message == "upstream X has not run"
-    # Satisfied: the task runs, and what it consumed is handed back to the gate.
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM AUD_TASK_RUN_LOG WHERE TASK_ID = :t"), {"t": ids["values"]})
-    gate = CountingGate(1)
-    assert run(project, "values", gate=gate).status == RunStatus.SUCCESS
-    assert gate.consumed == [{7: 70}]
+    assert run(project, "values", admission=CrossPipelineCheck(1)).status == RunStatus.SUCCESS
 
 
 def task_row_status(engine, task_id, run_id):

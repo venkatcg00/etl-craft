@@ -6,11 +6,13 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import text
 
+from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import RunStatus, SlaStatus
 from etl_craft.core.errors import MetadataError, RunStateError
 from etl_craft.core.graph import TaskEdge, TaskRunState, build_graph
 from etl_craft.engine import runlog, transitions
 from etl_craft.engine.repository import business_rules, dependencies, pipelines, runs, tasks
+from fixtures.metadata import start_run
 
 
 def insert(conn, sql, id_column, **params):
@@ -270,10 +272,6 @@ def test_business_rules(seeded):
         rules = business_rules.fetch_business_rules_for_task(conn, ids["rules"])
         assert [rule.business_rule_name for rule in rules] == ["first", "second"]
         assert rules[0].business_rule_key_column == "id"
-        assert [t.business_rule_name for t in business_rules.fetch_business_rule_targets(conn)] == [
-            "first",
-            "second",
-        ]
 
 
 # The run log
@@ -295,9 +293,9 @@ def test_a_run_is_found_or_started(seeded):
     engine, ids = seeded
     with engine.begin() as conn:
         assert runlog.fetch_active_pipeline_run_id(conn, ids["alpha"]) is None
-        run_id = transitions.find_or_create_active_run(conn, ids["alpha"])
+        run_id = start_run(conn, ids["alpha"])
     with engine.begin() as conn:
-        assert transitions.find_or_create_active_run(conn, ids["alpha"]) == run_id
+        assert start_run(conn, ids["alpha"]) == run_id
         assert runlog.fetch_pipeline_run_status(conn, run_id) == RunStatus.IN_PROGRESS
         assert transitions.resolve_run_for_task(conn, ids["alpha"]) == (run_id, None)
 
@@ -310,7 +308,7 @@ def test_concurrent_starts_share_one_run(seeded):
         try:
             barrier.wait(10)
             with engine.begin() as conn:
-                results.append(transitions.find_or_create_active_run(conn, ids["alpha"]))
+                results.append(start_run(conn, ids["alpha"]))
         except Exception as error:  # pragma: no cover - surfaced by the assertion below
             errors.append(error)
 
@@ -332,7 +330,7 @@ def test_a_single_task_needs_a_run_to_bind_to(seeded):
 def test_an_ended_run_is_reopened_only_with_force(seeded):
     engine, ids = seeded
     with engine.begin() as conn:
-        run_id = transitions.find_or_create_active_run(conn, ids["alpha"])
+        run_id = start_run(conn, ids["alpha"])
         transitions.finalize_pipeline_run(conn, run_id, RunStatus.SUCCESS)
     with engine.begin() as conn:
         with pytest.raises(RunStateError, match="matched 0 runs"):
@@ -352,15 +350,25 @@ def test_an_ended_run_is_reopened_only_with_force(seeded):
 def test_a_task_run_row_is_bound_once_and_retried_in_place(seeded):
     engine, ids = seeded
     with engine.begin() as conn:
-        run_id = transitions.find_or_create_active_run(conn, ids["alpha"])
+        run_id = start_run(conn, ids["alpha"])
         first = transitions.find_or_create_task_run(conn, ids["extract"], run_id)
         assert first.created and first.status == RunStatus.IN_PROGRESS
         again = transitions.find_or_create_task_run(conn, ids["extract"], run_id)
         assert again == runlog.TaskRunBinding(first.task_run_id, RunStatus.IN_PROGRESS)
-        transitions.finish_task_run(
+        attempt = transitions.queue_attempt(conn, first.task_run_id, current_actor())
+        transitions.claim_attempt(
             conn,
-            first.task_run_id,
-            status=RunStatus.FAILED,
+            attempt,
+            current_actor(),
+            owner="retry-test",
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+        )
+        transitions.finish_attempt(
+            conn,
+            attempt,
+            RunStatus.FAILED,
+            current_actor(),
+            owner="retry-test",
             source_count=10,
             target_count=7,
             error_message="boom",
@@ -371,7 +379,15 @@ def test_a_task_run_row_is_bound_once_and_retried_in_place(seeded):
         )
         assert runlog.fetch_task_run_status(conn, ids["extract"], run_id) == RunStatus.FAILED
         assert runlog.fetch_task_run_status(conn, ids["load"], run_id) is None
-        assert transitions.begin_attempt(conn, first.task_run_id) == 2
+        attempt = transitions.queue_attempt(conn, first.task_run_id, current_actor())
+        transitions.claim_attempt(
+            conn,
+            attempt,
+            current_actor(),
+            owner="retry-test",
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+        )
+        assert runlog.fetch_task_run_result(conn, first.task_run_id).attempt_count == 2
         cleared = conn.execute(
             text(
                 "SELECT STATUS AS status, SOURCE_COUNT AS source_count, "
@@ -386,7 +402,7 @@ def test_a_task_run_row_is_bound_once_and_retried_in_place(seeded):
 def test_concurrent_binds_share_one_row(seeded):
     engine, ids = seeded
     with engine.begin() as conn:
-        run_id = transitions.find_or_create_active_run(conn, ids["alpha"])
+        run_id = start_run(conn, ids["alpha"])
     results, errors, barrier = [], [], threading.Barrier(4)
 
     def bind():
@@ -410,7 +426,7 @@ def test_concurrent_binds_share_one_row(seeded):
 def test_run_state_and_statuses(seeded):
     engine, ids = seeded
     with engine.begin() as conn:
-        run_id = transitions.find_or_create_active_run(conn, ids["alpha"])
+        run_id = start_run(conn, ids["alpha"])
         binding = transitions.find_or_create_task_run(conn, ids["extract"], run_id)
         transitions.finish_task_run(
             conn, binding.task_run_id, status=RunStatus.SUCCESS, target_count=5
@@ -429,7 +445,7 @@ def test_run_state_and_statuses(seeded):
 def test_failure_watch_reads_the_latest_error(seeded):
     engine, ids = seeded
     with engine.begin() as conn:
-        run_id = transitions.find_or_create_active_run(conn, ids["alpha"])
+        run_id = start_run(conn, ids["alpha"])
         binding = transitions.find_or_create_task_run(conn, ids["load"], run_id)
         transitions.finish_task_run(
             conn, binding.task_run_id, status=RunStatus.FAILED, error_message="merge failed"
@@ -447,7 +463,7 @@ def test_failure_watch_reads_the_latest_error(seeded):
 def test_finalizing_a_run_judges_its_sla(seeded, hours_ago, sla, expected):
     engine, ids = seeded
     with engine.begin() as conn:
-        run_id = transitions.find_or_create_active_run(conn, ids["alpha"])
+        run_id = start_run(conn, ids["alpha"])
         conn.execute(
             text(
                 "UPDATE AUD_PIPELINES_RUN_LOG SET START_DATE = :start WHERE PIPELINE_RUN_ID = :id"
@@ -478,7 +494,7 @@ def test_finalizing_a_run_judges_its_sla(seeded, hours_ago, sla, expected):
 def test_an_ended_run_is_not_ended_again_and_keeps_its_sla(seeded):
     engine, ids = seeded
     with engine.begin() as conn:
-        run_id = transitions.find_or_create_active_run(conn, ids["alpha"])
+        run_id = start_run(conn, ids["alpha"])
         assert transitions.finalize_pipeline_run(
             conn, run_id, RunStatus.SUCCESS, sla_in_hours=2
         ).ended
@@ -499,29 +515,10 @@ def test_an_ended_run_is_not_ended_again_and_keeps_its_sla(seeded):
         assert runlog.fetch_run_sla(conn, run_id).sla_status == SlaStatus.MET
 
 
-def test_losing_the_race_to_start_a_run_reads_back_the_winner(seeded, monkeypatch):
-    engine, ids = seeded
-    with engine.begin() as conn:
-        winner = transitions.find_or_create_active_run(conn, ids["alpha"])
-    real = runlog.fetch_active_pipeline_run_id
-    calls = []
-
-    def first_lookup_misses(conn, pipeline_id):
-        calls.append(pipeline_id)
-        return None if len(calls) == 1 else real(conn, pipeline_id)
-
-    monkeypatch.setattr(runlog, "fetch_active_pipeline_run_id", first_lookup_misses)
-    with engine.begin() as conn:
-        assert transitions.find_or_create_active_run(conn, ids["alpha"]) == winner
-    monkeypatch.setattr(runlog, "fetch_active_pipeline_run_id", lambda conn, pipeline_id: None)
-    with engine.begin() as conn, pytest.raises(RunStateError, match="no IN-PROGRESS run exists"):
-        transitions.find_or_create_active_run(conn, ids["alpha"])
-
-
 def test_losing_the_race_to_bind_a_task_reads_back_the_winner(seeded, monkeypatch):
     engine, ids = seeded
     with engine.begin() as conn:
-        run_id = transitions.find_or_create_active_run(conn, ids["alpha"])
+        run_id = start_run(conn, ids["alpha"])
         winner = transitions.find_or_create_task_run(conn, ids["load"], run_id)
     real_statement = runlog.statement
     seen = []
@@ -549,7 +546,7 @@ def test_elapsed_hours_reads_a_naive_start_as_utc():
 def test_force_cannot_reopen_a_cancelled_run(seeded):
     engine, ids = seeded
     with engine.begin() as conn:
-        run = transitions.find_or_create_active_run(conn, ids["alpha"])
+        run = start_run(conn, ids["alpha"])
         transitions.finalize_pipeline_run(conn, run, "CANCELLED")
     with engine.begin() as conn:
         with pytest.raises(RunStateError, match=r"CANCELLED.*start a new run.*init-only"):

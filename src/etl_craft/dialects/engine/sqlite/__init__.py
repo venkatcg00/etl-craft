@@ -149,10 +149,6 @@ class SqliteEngineDialect(EngineDialect):
                 driver.execute(f"PRAGMA legacy_alter_table={int(legacy)}")
                 driver.execute(f"PRAGMA foreign_keys={int(foreign_keys)}")
 
-    def duration_seconds_sql(self) -> str:
-        """Return ``END_DATE - START_DATE`` in seconds; julianday reads the stored UTC text."""
-        return "(julianday(END_DATE) - julianday(START_DATE)) * 86400.0"
-
     @contextmanager
     def lock(self, engine: Engine, key: int, name: str, wait_seconds: float = 0) -> Iterator[None]:
         """Hold an OS file lock beside the database file.

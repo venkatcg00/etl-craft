@@ -8,15 +8,12 @@ from etl_craft.core.enums import RunStatus
 pytestmark = pytest.mark.unit
 
 EXPECTED = {
-    enums.ActiveFlag: {"Y", "N"},
     enums.RunStatus: {"QUEUED", "IN-PROGRESS", "SUCCESS", "FAILED", "SKIPPED", "CANCELLED"},
     enums.SlaStatus: {"MET", "BREACHED"},
     enums.RefreshType: {"FULL", "INCREMENTAL"},
     enums.DependencyType: {"SUCCESS", "FAILURE", "ALWAYS", "HAS_DATA"},
-    enums.TaskType: {"INGESTION", "ETL"},
     enums.Handler: {"PYTHON", "SQL", "BUSINESS_RULES", "EMAIL_ALERT"},
     enums.RunCondition: {"ALL", "ANY", "N"},
-    enums.BusinessRuleType: {"INCOMPLETE", "REJECT", "REPORT"},
     enums.OffsetType: {"NUMBER", "TEXT", "TIMESTAMP"},
     enums.SqlAction: {
         "CREATE_TABLE",

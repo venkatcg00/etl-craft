@@ -8,6 +8,10 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- Removed unused internal helpers and lifecycle shortcuts. Tests now use the production
+  attempt queue/claim/finish path and atomic dependency consumption; test scene setup stays
+  in fixtures. No configuration, schema or command behavior changes.
+
 - CI validates pull requests without repeating after merge. Twenty consecutive chaos passes per
   Engine DB run in release validation after the evidence check, rather than on every PR.
 

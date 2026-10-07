@@ -35,7 +35,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from functools import partial
-from typing import Protocol, TypeVar
+from typing import TypeVar
 
 from sqlalchemy.engine import Engine
 
@@ -226,34 +226,6 @@ class CrossPipelineCheck:
     next_check_at: datetime | None = None
 
 
-class CrossPipelineGate(Protocol):
-    """Checks a task's dependencies on tasks in other pipelines."""
-
-    def check(self, engine: Engine, task_id: int, needed: int) -> CrossPipelineCheck:
-        """Return how many of the task's cross-pipeline dependencies are satisfied now."""
-
-    def consume(
-        self, engine: Engine, task_id: int, pipeline_run_id: int, consumed: dict[int, int]
-    ) -> None:
-        """Record the upstream runs a task that succeeded consumed."""
-
-
-class UncheckedGate:
-    """A gate that satisfies no cross-pipeline dependency, for use where none is checked."""
-
-    def check(self, engine: Engine, task_id: int, needed: int) -> CrossPipelineCheck:
-        """Report every cross-pipeline dependency as unsatisfied."""
-        return CrossPipelineCheck(
-            0, ("its dependencies on other pipelines are not checked",), definitive=False
-        )
-
-    def consume(
-        self, engine: Engine, task_id: int, pipeline_run_id: int, consumed: dict[int, int]
-    ) -> None:
-        """Record nothing."""
-        return None
-
-
 class TrackedGate:
     """The cross-pipeline gate for tasks, backed by ``AUD_DEPENDENCY_CONSUMPTION``."""
 
@@ -351,13 +323,6 @@ class TrackedGate:
                 needed, consumed=consumed, bypassed=tuple(reasons), decisions=tuple(decisions)
             )
         return CrossPipelineCheck(satisfied, tuple(reasons), consumed, decisions=tuple(decisions))
-
-    def consume(
-        self, engine: Engine, task_id: int, pipeline_run_id: int, consumed: dict[int, int]
-    ) -> None:
-        """Record the upstream task runs a task that succeeded consumed."""
-        with engine.begin() as conn:
-            trackers.consume_task_decisions(conn, task_id, pipeline_run_id)
 
 
 def _read(engine: Engine, fetch: Callable[..., T], *args: object) -> T:
@@ -461,12 +426,6 @@ def check_pipeline_dependencies(
     return PipelineGateResult(
         consumed=consumed, bypassed=tuple(bypassed), decisions=tuple(decisions)
     )
-
-
-def consume_pipeline_dependencies(engine: Engine, pipeline_id: int, pipeline_run_id: int) -> None:
-    """Consume a successful run's recorded satisfied decisions; never judge its history again."""
-    with engine.begin() as conn:
-        trackers.consume_pipeline_decisions(conn, pipeline_run_id)
 
 
 @dataclass(frozen=True)

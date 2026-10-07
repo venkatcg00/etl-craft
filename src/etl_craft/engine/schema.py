@@ -57,7 +57,6 @@ def init_db(engine: Engine, *, force: bool = False) -> InitResult:
                 )
         try:
             with engine.begin() as conn:
-                dialect.begin_ddl_transaction(conn)
                 run_script(conn, statements)
                 if dialect.name == "sqlite":
                     from etl_craft.dialects.engine.sqlite.audit import refresh_metadata_triggers

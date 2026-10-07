@@ -1,4 +1,3 @@
-import json
 import os
 import signal
 import subprocess
@@ -8,8 +7,7 @@ import time
 
 import pytest
 
-from etl_craft.execution import supervisor
-from etl_craft.execution.supervisor import ChildResult, ChildSpec, run_child, run_children
+from etl_craft.execution.supervisor import ChildResult, ChildSpec, run_child
 
 pytestmark = pytest.mark.unit
 
@@ -175,53 +173,6 @@ def test_an_interrupted_wait_stops_the_child_and_propagates(monkeypatch, tmp_pat
     with pytest.raises(KeyboardInterrupt):
         run_child(python(code), kill_grace_seconds=5)
     assert _wait_until_gone(calls[0])
-
-
-def test_etl_craft_argv_runs_this_interpreter():
-    argv = supervisor.etl_craft_argv("--version")
-    assert argv == (sys.executable, "-m", "etl_craft", "--version")
-    result = run_child(ChildSpec(argv=argv))
-    assert result.succeeded
-    assert result.output_tail.startswith("etl-craft ")
-
-
-def test_run_children_returns_results_in_spec_order():
-    specs = [
-        python(f"import time; time.sleep({delay}); print({i})")
-        for i, delay in enumerate([0.4, 0, 0.2])
-    ]
-    results = run_children(specs, max_parallel=3)
-    assert [r.output_tail for r in results] == ["0\n", "1\n", "2\n"]
-    assert [r.spec for r in results] == specs
-
-
-def test_run_children_with_nothing_to_run():
-    assert run_children([], max_parallel=4) == []
-
-
-@pytest.mark.parametrize(("max_parallel", "expected_peak"), [(2, 2), (0, 1), (1, 1)])
-def test_run_children_never_runs_more_than_max_parallel_at_once(max_parallel, expected_peak):
-    code = (
-        "import json, time\n"
-        "start = time.time(); time.sleep(0.4)\n"
-        "print(json.dumps([start, time.time()]))\n"
-    )
-    results = run_children([python(code) for _ in range(4)], max_parallel=max_parallel)
-    intervals = [json.loads(r.output_tail) for r in results]
-    peak = max(
-        sum(1 for start, end in intervals if start <= moment < end) for moment, _ in intervals
-    )
-    assert peak == expected_peak
-
-
-def test_run_children_starts_the_next_child_when_any_one_ends():
-    # One slow child must not hold back the others: with two slots, the three short children
-    # run one after another in the second slot while the slow one is still going.
-    slow = python("import time; time.sleep(3); print(time.time())")
-    fast = python("import time; time.sleep(0.2); print(time.time())")
-    results = run_children([slow, fast, fast, fast], max_parallel=2)
-    slow_end = float(results[0].output_tail)
-    assert all(float(r.output_tail) < slow_end for r in results[1:])
 
 
 def test_a_cancelled_child_is_stopped():

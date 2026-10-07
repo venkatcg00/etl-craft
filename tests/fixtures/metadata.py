@@ -2,7 +2,7 @@
 
 from sqlalchemy import text
 
-from etl_craft.engine import transitions
+from etl_craft.engine import runlog, transitions
 
 
 def insert(conn, sql, id_column, **params):
@@ -70,8 +70,14 @@ def add_pipeline_dependency(conn, pipeline_id, depends_on, kind="SUCCESS"):
     )
 
 
-def start_run(conn, pipeline_id):
-    return transitions.find_or_create_active_run(conn, pipeline_id)
+def start_run(conn, pipeline_id, *, run_date=None, backfill=False):
+    """Reuse the active run for a test scene, creating it when none exists."""
+    existing = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
+    if existing is not None:
+        return existing
+    created = transitions.create_active_run(conn, pipeline_id, run_date=run_date, backfill=backfill)
+    assert created is not None
+    return created
 
 
 def finish_run(conn, pipeline_run_id, status="SUCCESS"):

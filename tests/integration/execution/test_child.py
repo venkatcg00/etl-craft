@@ -15,6 +15,7 @@ from etl_craft.execution import child
 from etl_craft.execution.context import build_task_context
 from etl_craft.handlers import registry
 from etl_craft.handlers.registry import HandlerResult
+from fixtures.metadata import start_run
 
 
 @pytest.fixture(autouse=True)
@@ -65,7 +66,7 @@ def bound(engine_db, tmp_path):
             ),
             {"t": task},
         )
-        run_id = transitions.find_or_create_active_run(conn, pipeline)
+        run_id = start_run(conn, pipeline)
         binding = transitions.find_or_create_task_run(conn, task, run_id)
     return engine, config_path, binding.task_run_id, run_id
 

@@ -60,7 +60,6 @@ from etl_craft.engine.retry import retrying
 from etl_craft.execution import leases
 from etl_craft.execution.gates import (
     CrossPipelineCheck,
-    CrossPipelineGate,
     TrackedGate,
 )
 from etl_craft.execution.interventions import (
@@ -145,7 +144,7 @@ def run_task(
     task_code: str,
     *,
     force: bool = False,
-    gate: CrossPipelineGate | None = None,
+    gate: TrackedGate | None = None,
     child: ChildOptions | None = None,
     override: Override | None = None,
     selector: runlog.RunSelector = runlog.ACTIVE_RUN,
@@ -198,7 +197,6 @@ def run_task(
             reason=f"--force: {task_code} runs again under the ended run",
             selector=selector,
         )
-    consumed: dict[int, int] | None = None
     decisions: tuple[trackers.GateDecision, ...] = ()
     if not force:
         blocked, cross = _preflight(
@@ -207,7 +205,6 @@ def run_task(
         if blocked is not None:
             logger.info(blocked.message)
             return blocked
-        consumed = cross.consumed
         decisions = cross.decisions
         if cross.bypassed:
             record_gate_bypass(
@@ -229,8 +226,6 @@ def run_task(
         child,
         decisions=decisions,
     )
-    if consumed and outcome.status == RunStatus.SUCCESS and not isinstance(gate, TrackedGate):
-        gate.consume(engine, task_id, pipeline_run_id, consumed)
     if reopened is not None:
         return replace(outcome, reopened=reopened)
     return outcome
@@ -361,7 +356,7 @@ NO_CROSS = CrossPipelineCheck(0)
 
 def _preflight(
     engine: Engine,
-    gate: CrossPipelineGate,
+    gate: TrackedGate,
     pipeline_id: int,
     task_id: int,
     task_code: str,

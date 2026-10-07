@@ -53,7 +53,6 @@ def apply_schema(engine: Engine) -> int:
     dialect = for_engine(engine)
     statements = dialect.split_statements(dialect.schema_path().read_text(encoding="utf-8"))
     with engine.begin() as conn:
-        dialect.begin_ddl_transaction(conn)
         for statement in statements:
             conn.exec_driver_sql(statement)
     return len(statements)

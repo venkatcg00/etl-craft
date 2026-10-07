@@ -25,7 +25,7 @@ from etl_craft.handlers import sql
 from etl_craft.handlers.registry import HandlerResult, TaskContext
 from etl_craft.warehouse.connection import build_warehouse_engine
 from fixtures.engine_db import apply_schema, sqlite_engine_db
-from fixtures.metadata import add_pipeline, add_task
+from fixtures.metadata import add_pipeline, add_task, start_run
 from fixtures.services import (
     MINIO_PASSWORD,
     MINIO_USER,
@@ -152,7 +152,7 @@ class SqlWorld:
         """End the current pipeline run and start another; return its id."""
         with self.engine_db.begin() as conn:
             transitions.finalize_pipeline_run(conn, self.pipeline_run_id, "SUCCESS")
-            self.pipeline_run_id = transitions.find_or_create_active_run(conn, self.pipeline_id)
+            self.pipeline_run_id = start_run(conn, self.pipeline_id)
         return self.pipeline_run_id
 
 
@@ -237,7 +237,7 @@ def sql_world(
     apply_schema(engine_db)
     with engine_db.begin() as conn:
         pipeline_id = add_pipeline(conn, "P", refresh_type="INCREMENTAL")
-        run_id = transitions.find_or_create_active_run(conn, pipeline_id)
+        run_id = start_run(conn, pipeline_id)
     warehouse = build_warehouse_engine(config)
     with warehouse.begin() as conn:
         conn.execute(

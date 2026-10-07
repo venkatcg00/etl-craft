@@ -27,7 +27,7 @@ def scene(engine):
         pipeline = add_pipeline(conn, "P")
         task = add_task(conn, pipeline, "T")
         run = tr.create_run(conn, pipeline, current_actor())
-        summary = tr.create_task_run(conn, task, run, current_actor())
+        summary = tr.find_or_create_task_run(conn, task, run).task_run_id
         attempt = tr.queue_attempt(conn, summary, current_actor())
         owner = leases.owner_id()
         tr.claim_attempt(

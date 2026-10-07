@@ -117,12 +117,6 @@ def test_an_upstream_that_is_not_running_is_not_waited_for():
     assert fake.slept == [] and budget.looks_left == gates.MAX_LOOKS
 
 
-def test_the_unchecked_gate_is_never_definitive():
-    check = gates.UncheckedGate().check(None, 1, 1)
-    assert (check.satisfied_count, check.definitive) == (0, False)
-    assert gates.UncheckedGate().consume(None, 1, 1, {}) is None
-
-
 @pytest.mark.parametrize(
     ("run_id", "revision", "repairs", "accepted"),
     [
