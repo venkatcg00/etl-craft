@@ -6,6 +6,11 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- CLI initialization accepts its exact queued run when the server admitted it concurrently,
+  without rewriting gate decisions or taking over a different run.
+
 ### Changed
 
 - Removed unused internal helpers and lifecycle shortcuts. Tests now use the production
