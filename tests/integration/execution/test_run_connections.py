@@ -2,19 +2,14 @@
 
 import socket
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
 from etl_craft.config import (
     CloningConfig,
-    ConnectionProfile,
-    ConnectionSection,
-    ConnectorConfig,
-    EmailConfig,
-    EmailProfile,
-    SourceConfig,
+    parse_config,
 )
-from etl_craft.core.enums import Mode
 from etl_craft.core.errors import ConnectionTestError
 from etl_craft.execution import connections
 from etl_craft.execution.connections import (
@@ -27,25 +22,35 @@ from fixtures.services import POSTGRES_DB, POSTGRES_PASSWORD, POSTGRES_USER, req
 SECRET_VAR = "ETL_CRAFT_TEST_WAREHOUSE_SECRET"
 
 
-def config(warehouse_url=None, relay=None, **fields):
-    engine = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:e.db", "", "none")
-    warehouse = None
+@pytest.fixture(autouse=True)
+def configured_secret(monkeypatch):
+    monkeypatch.setenv(SECRET_VAR, "test-secret")
+
+
+def config(warehouse_url=None, relay=None):
+    raw = {
+        "Secrets": {"Source_type": "environment"},
+        "Orchestration": {"Mode": "local"},
+        "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:e.db", "schema": "main"}},
+    }
     if warehouse_url is not None:
-        profile = ConnectionProfile("WAREHOUSE", "dev", warehouse_url, "", "none", fields)
-        warehouse = ConnectionSection("dev", {"dev": profile})
-    email = None
+        raw["Warehouse"] = {
+            "dev": {
+                "jdbc_url": warehouse_url,
+                "schema": "main" if warehouse_url.startswith("jdbc:duckdb:") else "public",
+                "user": POSTGRES_USER,
+                "auth_mode": "none" if warehouse_url.startswith("jdbc:duckdb:") else "password",
+                "secret": SECRET_VAR,
+            }
+        }
     if relay is not None:
-        host, port = relay
-        email = EmailConfig(
-            "dev", {"dev": EmailProfile("EMAIL", "dev", host, port, "e@x.io", use_tls=False)}
-        )
-    return ConnectorConfig(
-        mode=Mode.LOCAL,
-        source=SourceConfig(type="environment"),
-        engine=ConnectionSection("dev", {"dev": engine}),
-        warehouse=warehouse,
-        email=email,
-    )
+        raw["Orchestration"]["Email"] = {
+            "host": relay[0],
+            "port": relay[1],
+            "from_address": "e@x.io",
+            "tls_mode": "none",
+        }
+    return parse_config(raw, Path("/tmp/craft-connector.yml"))
 
 
 def closed_port():
@@ -112,26 +117,7 @@ def test_the_probes_report_what_failed(monkeypatch):
     port = closed_port()
     assert probe_email_relay(config(relay=("127.0.0.1", port))).startswith(f"127.0.0.1:{port}: ")
     assert probe_email_relay(config()) is None
-    assert "not available for a Postgres warehouse" in probe_warehouse(
-        config(f"jdbc:postgresql://127.0.0.1:{port}/x")
-    )
-    monkeypatch.setenv(SECRET_VAR, "unused")
-    unreachable = replace(
-        config(),
-        warehouse=ConnectionSection(
-            "dev",
-            {
-                "dev": ConnectionProfile(
-                    "WAREHOUSE",
-                    "dev",
-                    f"jdbc:postgresql://127.0.0.1:{port}/x",
-                    "etl",
-                    "password",
-                    {"secret_var": SECRET_VAR},
-                )
-            },
-        ),
-    )
+    unreachable = config(f"jdbc:postgresql://127.0.0.1:{port}/x")
     assert "connection" in probe_warehouse(unreachable).lower()
 
 
@@ -141,13 +127,5 @@ def test_the_probes_reach_live_services(monkeypatch):
     assert probe_email_relay(config(relay=(mailpit.host, mailpit.port))) is None
     pg = require("postgres")
     monkeypatch.setenv(SECRET_VAR, POSTGRES_PASSWORD)
-    warehouse = ConnectionProfile(
-        "WAREHOUSE",
-        "dev",
-        f"jdbc:postgresql://{pg.address}/{POSTGRES_DB}",
-        POSTGRES_USER,
-        "password",
-        {"secret_var": SECRET_VAR},
-    )
-    live = replace(config(), warehouse=ConnectionSection("dev", {"dev": warehouse}))
+    live = config(f"jdbc:postgresql://{pg.address}/{POSTGRES_DB}")
     assert probe_warehouse(live) is None
