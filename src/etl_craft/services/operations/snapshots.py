@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime
 
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Connection, RowMapping
 
 from etl_craft.core.errors import RunStateError, UsageError
 from etl_craft.engine.queries import statement
@@ -51,7 +51,12 @@ def run_view(conn: Connection, pipeline_id: int, pipeline_run_id: int) -> RunVie
             f"pipeline_id={pipeline_id}: no pipeline_run_id={pipeline_run_id}; "
             "select a run belonging to this pipeline"
         )
-    values = dict(row._mapping)
+    return run_document(row._mapping)
+
+
+def run_document(row: RowMapping) -> RunView:
+    """Convert a stored run row into its public document."""
+    values = dict(row)
     values["run_date"] = None if values["run_date"] is None else as_date(values["run_date"])
     values["start_date"] = timestamp(values["start_date"])
     values["end_date"] = timestamp(values["end_date"])
@@ -84,7 +89,12 @@ def task_run_view(
     ).one_or_none()
     if row is None:
         return None
-    values = dict(row._mapping)
+    return task_document(conn, row._mapping)
+
+
+def task_document(conn: Connection, row: RowMapping) -> TaskRunView:
+    """Convert a task summary and its attempts into one public document."""
+    values = dict(row)
     values["start_date"] = timestamp(values["start_date"])
     values["end_date"] = timestamp(values["end_date"])
     attempts = []

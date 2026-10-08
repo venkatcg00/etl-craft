@@ -11,15 +11,15 @@ from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.repository.tasks import resolve_task_id
 from etl_craft.engine.runlog import RunSelector, select_run
 from etl_craft.execution.reconcile import reconcile
-from etl_craft.services.operations.context import OperationContext, PipelineRef
+from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.models import OperationResult
 from etl_craft.services.operations.snapshots import run_view, task_run_view
 
 
-def prepare_execution(ctx: OperationContext, pipeline: PipelineRef) -> int:
+def prepare_execution(ctx: OperationContext, pipeline_code: str) -> int:
     """Reconcile expired owners before dispatch, without adopting them."""
     with ctx.engine.connect() as conn:
-        pipeline_id = resolve_pipeline_id(conn, pipeline.pipeline_code)
+        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
     reconcile(ctx.engine, pipeline_id=pipeline_id)
     return pipeline_id
 
@@ -42,17 +42,19 @@ def selected_date(
 
 def result(
     ctx: OperationContext,
-    pipeline: PipelineRef,
-    pipeline_id: int,
+    pipeline_code: str,
     status: RunStatus,
     message: str,
     *,
     pipeline_run_id: int | None = None,
     task_run_id: int | None = None,
     task_code: str | None = None,
+    pipeline_id: int | None = None,
 ) -> OperationResult:
     """Read one consistent result; a task's returned id determines its pipeline run."""
     with read_snapshot(ctx.engine) as conn:
+        if pipeline_id is None:
+            pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         task = None
         if task_run_id is not None:
             task = task_run_view(conn, pipeline_id, task_run_id=task_run_id)
@@ -75,4 +77,4 @@ def result(
                 task_id=resolve_task_id(conn, pipeline_id, task_code),
             )
         run = None if pipeline_run_id is None else run_view(conn, pipeline_id, pipeline_run_id)
-    return OperationResult(status, message, pipeline_id, pipeline.pipeline_code, run, task)
+    return OperationResult(status, message, pipeline_id, pipeline_code, run, task)

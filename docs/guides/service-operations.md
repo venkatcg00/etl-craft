@@ -1,7 +1,7 @@
 # Service operations
 
 The CLI and Python callers use the same functions in `etl_craft.services.operations`.
-Operations take a frozen `OperationContext` and `PipelineRef`, return frozen result
+Operations take a frozen `OperationContext` and a pipeline code, return frozen result
 dataclasses, and never print or dispose the caller's engine.
 
 ## Calling from Python
@@ -18,7 +18,7 @@ from etl_craft.config import load_config
 from etl_craft.core.actor import resolve_actor
 from etl_craft.engine.connection import check_reachable, engine_db
 from etl_craft.engine.runlog import RunSelector
-from etl_craft.services.operations import OperationContext, PipelineRef, to_json
+from etl_craft.services.operations import OperationContext, to_json
 from etl_craft.services.operations import runs
 
 config = load_config(Path("craft-connector.yml"))
@@ -28,7 +28,7 @@ try:
     ctx = OperationContext(engine, config, resolve_actor())
     done = runs.initialize_run(
         ctx,
-        PipelineRef("SALES"),
+        "SALES",
         run_date=date(2026, 10, 1),
         selector=RunSelector(run_key="python:2026-10-01"),
     )
@@ -46,9 +46,11 @@ options. Project files remain relative to `config.project_dir`.
 | --- | --- |
 | `runs` | `trigger_run`, `initialize_run`, `finalize_run`, `skip_run`, `mark`, `mark_run`, `stand_in_run`, `cancel_run`, `reconcile_runs` |
 | `tasks` | `run_task`, `force_task`, `rerun_task`, `mark_task` |
-| `pipelines` | `pause_pipeline`, `resume_pipeline` |
+| `pipelines` | `set_pause` |
 | `backfills` | `run_backfill` |
 | `inspect` | `list_pipelines`, `pipeline_graph`, `pipeline_steps`, `run_history`, `audit` |
+
+Pass `verb="pause"` or `verb="resume"` to `pipelines.set_pause(ctx, pipeline_code, reason, ...)`.
 
 `execute_run(ctx, RunRequest(...))` dispatches the same request used by `etl-craft run`.
 `reason` on `tasks.run_task` requests the dependency override and must be non-empty; without

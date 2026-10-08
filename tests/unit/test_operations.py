@@ -7,7 +7,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 import yaml
-from sqlalchemy import text
+from sqlalchemy import event, text
 
 from etl_craft.cli import main
 from etl_craft.config import load_config
@@ -21,7 +21,6 @@ from etl_craft.execution import pipeline as execution
 from etl_craft.execution import runner
 from etl_craft.services.operations import (
     OperationContext,
-    PipelineRef,
     backfills,
     inspect,
     pipelines,
@@ -36,7 +35,7 @@ from fixtures.engine_db import apply_schema, sqlite_engine_db
 from fixtures.metadata import add_pipeline, add_task, start_run
 
 pytestmark = pytest.mark.unit
-P = PipelineRef("P")
+P = "P"
 
 
 @pytest.fixture(autouse=True)
@@ -186,7 +185,7 @@ def test_task_mark_preserves_failed_attempt_history_and_canonical_ids(ctx):
 
 def test_cancel_pause_resume_and_reconcile_do_not_invent_executions(ctx):
     _, run_id, _, _ = seed(ctx, active=True)
-    paused = pipelines.pause_pipeline(ctx, P, "maintenance")
+    paused = pipelines.set_pause(ctx, P, "maintenance", verb="pause")
     assert paused.pipeline.paused.paused_by == "api-user"
     assert paused.run is None and paused.task is None
     assert "T" in to_json(paused)["pipeline"]["paused"]["paused_at"]
@@ -195,7 +194,7 @@ def test_cancel_pause_resume_and_reconcile_do_not_invent_executions(ctx):
     assert refused.run is None and refused.task is None
     task = tasks.run_task(ctx, P, "not_started")
     assert task.status == "SKIPPED" and task.task is None
-    resumed = pipelines.resume_pipeline(ctx, P, "ready")
+    resumed = pipelines.set_pause(ctx, P, "ready", verb="resume")
     assert resumed.pipeline.paused is None
     cancelled = runs.cancel_run(ctx, P, "stop", selector=RunSelector(run_id=run_id))
     assert cancelled.status == "SUCCESS" and cancelled.run.status == "CANCELLED"
@@ -225,7 +224,7 @@ def test_backfill_preserves_dates_ids_and_one_action(ctx):
 
 def test_backfill_pause_has_a_stopped_outcome_without_a_run(ctx):
     seed(ctx)
-    pipelines.pause_pipeline(ctx, P, "maintenance")
+    pipelines.set_pause(ctx, P, "maintenance", verb="pause")
     done = backfills.run_backfill(ctx, P, date(2026, 10, 1), date(2026, 10, 2), "repair")
     assert done.stopped is not None and done.stopped.run is None
     assert done.runs == (done.stopped,)
@@ -300,7 +299,7 @@ def test_wrong_pipeline_and_wrong_date_are_refused_without_changing_history(ctx)
 def test_refused_api_request_keeps_its_actor_and_does_not_leak_scope(ctx):
     parent = current_actor()
     with pytest.raises(MetadataError):
-        runs.initialize_run(ctx, PipelineRef("MISSING"))
+        runs.initialize_run(ctx, "MISSING")
     assert current_actor() == parent
     with ctx.engine.connect() as conn:
         row = conn.execute(text("SELECT ACTOR, OUTCOME, ARGUMENTS FROM AUD_ACTIONS")).one()
@@ -325,8 +324,8 @@ def test_nested_requests_with_different_actors_are_distinct(ctx):
         ("run", runs, "execute_run", ["--init-only"]),
         ("mark", runs, "mark", ["--status", "FAILED", "--reason", "verified"]),
         ("cancel", runs, "cancel_run", ["--reason", "stop"]),
-        ("pause", pipelines, "pause_pipeline", ["--reason", "maintenance"]),
-        ("resume", pipelines, "resume_pipeline", ["--reason", "ready"]),
+        ("pause", pipelines, "set_pause", ["--reason", "maintenance"]),
+        ("resume", pipelines, "set_pause", ["--reason", "ready"]),
         ("reconcile", runs, "reconcile_runs", []),
         ("graph", inspect, "pipeline_graph", []),
         ("steps", inspect, "pipeline_steps", []),
@@ -340,7 +339,7 @@ def test_cli_json_is_the_service_document_with_one_action(
 ):
     seed(ctx, active=True, task=command in {"steps", "history"})
     if command == "resume":
-        pipelines.pause_pipeline(ctx, P, "maintenance")
+        pipelines.set_pause(ctx, P, "maintenance", verb="pause")
     before_actions = action_count(ctx)
     observed = []
     original = getattr(service, function)
@@ -423,3 +422,43 @@ def test_missing_override_reason_is_refused_before_a_task_runs(ctx):
         runs.execute_run(ctx, RunRequest(P, task_code="load", ignore_dependencies=True))
     assert to_json(inspect.run_history(ctx, P, "load")) == before
     assert action_count(ctx) == 1
+
+
+@pytest.mark.parametrize("view", ["list", "history"])
+def test_inspection_reads_do_not_grow_per_pipeline_or_run(ctx, view):
+    seed(ctx)
+    queries = []
+
+    def record(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT"):
+            queries.append(statement)
+
+    event.listen(ctx.engine, "before_cursor_execute", record)
+    try:
+        if view == "history":
+            runs.stand_in_run(ctx, P, "SUCCESS", "verified")
+        queries.clear()
+        first = (
+            inspect.list_pipelines(ctx)
+            if view == "list"
+            else inspect.run_history(ctx, P, all_runs=True)
+        )
+        baseline = len(queries)
+        for number in range(1, 5):
+            if view == "list":
+                with ctx.engine.begin() as conn:
+                    add_pipeline(conn, f"P{number}")
+            else:
+                runs.stand_in_run(ctx, P, "SUCCESS", "verified")
+        queries.clear()
+        expanded = (
+            inspect.list_pipelines(ctx)
+            if view == "list"
+            else inspect.run_history(ctx, P, all_runs=True)
+        )
+        assert len(queries) == baseline
+        field = "pipelines" if view == "list" else "entries"
+        assert len(getattr(first, field)) == 1
+        assert len(getattr(expanded, field)) == 5
+    finally:
+        event.remove(ctx.engine, "before_cursor_execute", record)

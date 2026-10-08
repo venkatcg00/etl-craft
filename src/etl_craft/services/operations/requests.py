@@ -8,14 +8,13 @@ from typing import Any
 
 from etl_craft.core.errors import UsageError
 from etl_craft.engine.runlog import ACTIVE_RUN, RunSelector
-from etl_craft.services.operations.context import PipelineRef
 
 
 @dataclass(frozen=True)
 class RunRequest:
     """One pipeline, task, lifecycle step or backfill request."""
 
-    pipeline: PipelineRef
+    pipeline_code: str
     selector: RunSelector = ACTIVE_RUN
     task_code: str | None = None
     init_only: bool = False
@@ -74,10 +73,8 @@ class RunRequest:
     def arguments(self) -> dict[str, Any]:
         """Return audit arguments without configuration objects or secrets."""
         result = {f.name: getattr(self, f.name) for f in fields(self)}
-        result.pop("pipeline")
         result.pop("selector")
         return {
-            "pipeline_code": self.pipeline.pipeline_code,
             "run_id": self.selector.run_id,
             "run_key": self.selector.run_key,
             **result,

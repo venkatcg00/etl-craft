@@ -5,8 +5,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Sequence
 
-from etl_craft.cli.commands import Command
-from etl_craft.cli.commands.common import load_command_config
+from etl_craft.cli.commands.common import Command, load_command_config
 from etl_craft.cli.output import Output
 from etl_craft.core.errors import ExitCode
 from etl_craft.services.doctor import Check, Status, run_checks

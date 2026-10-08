@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import argparse
 
-from etl_craft.cli.commands import Command
-from etl_craft.cli.commands.common import connect_engine_db, load_command_config
+from etl_craft.cli.commands.common import Command, connect_engine_db, load_command_config
 from etl_craft.cli.output import Output
 from etl_craft.core.errors import ExitCode
 from etl_craft.services.doctor import Status

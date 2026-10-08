@@ -5,8 +5,8 @@ from __future__ import annotations
 import argparse
 from collections.abc import Sequence
 
-from etl_craft.cli.commands import Command
 from etl_craft.cli.commands.common import (
+    Command,
     command_context,
     configure_output,
     configure_run_selector,
@@ -15,7 +15,7 @@ from etl_craft.cli.output import Output
 from etl_craft.core.errors import ExitCode, UsageError
 from etl_craft.engine.repository.interventions import Intervention
 from etl_craft.engine.runlog import RunSelector
-from etl_craft.services.operations import PipelineRef, inspect
+from etl_craft.services.operations import inspect
 from etl_craft.services.operations.models import RunView, TaskRunView
 
 
@@ -36,33 +36,64 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     with command_context(args) as ctx:
         done = inspect.run_history(
             ctx,
-            PipelineRef(args.pipeline_code),
+            args.pipeline_code,
             args.task_code,
             limit=args.limit,
             all_runs=args.all,
             selector=RunSelector(args.run_id, args.run_key),
         )
-    if args.output_format == "json":
-        out.document(done)
-        return ExitCode.SUCCESS
-    entries, changes = done.entries, done.changes
-    if not entries:
-        out.empty("no runs yet")
-        return ExitCode.SUCCESS
-    if args.task_code is None:
+
+    def render_text() -> None:
+        entries, changes = done.entries, done.changes
+        if not entries:
+            out.empty("no runs yet")
+            return
+        if args.task_code is None:
+            out.rows(
+                [
+                    (
+                        "PIPELINE_RUN_ID",
+                        "STATUS",
+                        "RUN_DATE",
+                        "START_DATE",
+                        "END_DATE",
+                        "SLA_STATUS",
+                        "STARTED_BY",
+                        "STARTED_BY_KIND",
+                        "ENDED_BY",
+                        "ENDED_BY_KIND",
+                    )
+                ]
+            )
+            out.rows(
+                (
+                    e.pipeline_run_id,
+                    e.status,
+                    f"{e.run_date} (backfill)" if e.backfill else e.run_date,
+                    e.start_date,
+                    e.end_date,
+                    e.sla_status,
+                    e.started_by,
+                    e.started_by_kind,
+                    e.ended_by,
+                    e.ended_by_kind,
+                )
+                for e in entries
+                if isinstance(e, RunView)
+            )
+            _interventions(out, changes)
+            return
         out.rows(
             [
                 (
                     "PIPELINE_RUN_ID",
                     "STATUS",
-                    "RUN_DATE",
+                    "ATTEMPTS",
+                    "SOURCE_COUNT",
+                    "TARGET_COUNT",
                     "START_DATE",
                     "END_DATE",
-                    "SLA_STATUS",
-                    "STARTED_BY",
-                    "STARTED_BY_KIND",
-                    "ENDED_BY",
-                    "ENDED_BY_KIND",
+                    "ERROR_MESSAGE",
                 )
             ]
         )
@@ -70,49 +101,20 @@ def _run(args: argparse.Namespace, out: Output) -> int:
             (
                 e.pipeline_run_id,
                 e.status,
-                f"{e.run_date} (backfill)" if e.backfill else e.run_date,
+                e.attempt_count,
+                e.source_count,
+                e.target_count,
                 e.start_date,
                 e.end_date,
-                e.sla_status,
-                e.started_by,
-                e.started_by_kind,
-                e.ended_by,
-                e.ended_by_kind,
+                e.error_message,
             )
             for e in entries
-            if isinstance(e, RunView)
+            if isinstance(e, TaskRunView)
         )
         _interventions(out, changes)
-        return ExitCode.SUCCESS
-    out.rows(
-        [
-            (
-                "PIPELINE_RUN_ID",
-                "STATUS",
-                "ATTEMPTS",
-                "SOURCE_COUNT",
-                "TARGET_COUNT",
-                "START_DATE",
-                "END_DATE",
-                "ERROR_MESSAGE",
-            )
-        ]
-    )
-    out.rows(
-        (
-            e.pipeline_run_id,
-            e.status,
-            e.attempt_count,
-            e.source_count,
-            e.target_count,
-            e.start_date,
-            e.end_date,
-            e.error_message,
-        )
-        for e in entries
-        if isinstance(e, TaskRunView)
-    )
-    _interventions(out, changes)
+        return
+
+    out.result(done, args.output_format, text=render_text)
     return ExitCode.SUCCESS
 
 
