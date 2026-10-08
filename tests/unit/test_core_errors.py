@@ -26,6 +26,7 @@ EXIT_CODES = {
     errors.RemoteUnsupportedError: ExitCode.REMOTE_UNSUPPORTED,
     errors.InjectedFaultError: ExitCode.INJECTED_FAULT,
     errors.StaleTransitionError: ExitCode.STALE_TRANSITION,
+    errors.SqlGuardError: ExitCode.SQL_GUARD,
 }
 
 
@@ -59,6 +60,7 @@ def test_the_exit_codes():
         ("REMOTE_UNSUPPORTED", 18),
         ("INJECTED_FAULT", 19),
         ("STALE_TRANSITION", 20),
+        ("SQL_GUARD", 21),
     ]
 
 

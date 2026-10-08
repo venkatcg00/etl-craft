@@ -9,7 +9,7 @@ from sqlglot.errors import ErrorLevel, SqlglotError
 from sqlglot.generators.databricks import DatabricksGenerator
 from sqlglot.parsers.databricks import DatabricksParser
 
-from etl_craft.core.errors import HandlerError
+from etl_craft.core.errors import SqlGuardError
 
 
 class _DatabricksReplacement(Databricks):
@@ -38,10 +38,12 @@ def replacement_ddl(ddl: str, target: str, select_sql: str, dialect: str) -> str
         format_ = _DatabricksReplacement() if dialect == "databricks" else dialect
         create = parse_one(ddl, read=format_)
         if not isinstance(create, exp.Create) or not isinstance(create.this, exp.Schema):
-            raise HandlerError(f"{target}: cannot read a complete table definition for replacement")
+            raise SqlGuardError(
+                f"{target}: cannot read a complete table definition for replacement"
+            )
         for column in create.this.expressions:
             if not isinstance(column, exp.ColumnDef) or column.args.get("constraints"):
-                raise HandlerError(
+                raise SqlGuardError(
                     f"{target}: atomic CTAS cannot preserve column metadata; "
                     "use a table-preserving write instead"
                 )
@@ -55,7 +57,7 @@ def replacement_ddl(ddl: str, target: str, select_sql: str, dialect: str) -> str
             create.set("properties", properties)
         return create.sql(dialect=format_, unsupported_level=ErrorLevel.RAISE)
     except SqlglotError as error:
-        raise HandlerError(
+        raise SqlGuardError(
             f"{target}: cannot preserve its table definition; use a table-preserving write"
         ) from error
 
@@ -73,11 +75,13 @@ def identity_replacement(
         format_ = _DatabricksReplacement() if dialect == "databricks" else dialect
         create = parse_one(ddl, read=format_)
         if not isinstance(create, exp.Create) or not isinstance(create.this, exp.Schema):
-            raise HandlerError(f"{target}: cannot read a complete table definition for replacement")
+            raise SqlGuardError(
+                f"{target}: cannot read a complete table definition for replacement"
+            )
         default = create.find(exp.CollateProperty) if dialect == "databricks" else None
         for column in create.this.expressions:
             if not isinstance(column, exp.ColumnDef):
-                raise HandlerError(f"{target}: replacement cannot preserve column metadata")
+                raise SqlGuardError(f"{target}: replacement cannot preserve column metadata")
             constraints = [
                 constraint
                 for constraint in column.args.get("constraints") or []
@@ -94,7 +98,7 @@ def identity_replacement(
                 for c in constraints
             )
             if constraints and not managed:
-                raise HandlerError(
+                raise SqlGuardError(
                     f"{target}: replacement cannot preserve column metadata; "
                     "use a table-preserving write instead"
                 )
@@ -103,7 +107,7 @@ def identity_replacement(
             collation.this.sql().upper() != default.this.sql().upper()
             for collation in shape.find_all(exp.CollateColumnConstraint)
         ):
-            raise HandlerError(f"{target}: replacement cannot change column collations")
+            raise SqlGuardError(f"{target}: replacement cannot change column collations")
         create.set("this", shape.this)
         create.set("replace", False)
         create.set("exists", False)
@@ -126,6 +130,6 @@ def identity_replacement(
         )
         return candidate_ddl, f"CREATE OR REPLACE TABLE {target} {clone}"
     except SqlglotError as error:
-        raise HandlerError(
+        raise SqlGuardError(
             f"{target}: cannot preserve its table definition; use a table-preserving write"
         ) from error

@@ -21,7 +21,7 @@ from sqlalchemy.engine import Connection
 
 from etl_craft.config.auth import WarehouseSpec
 from etl_craft.core.enums import AuthMode, TableFormat
-from etl_craft.core.errors import ConfigurationError, HandlerError
+from etl_craft.core.errors import ConfigurationError, SqlGuardError
 from etl_craft.dialects import credentials
 
 if TYPE_CHECKING:
@@ -231,7 +231,7 @@ class WarehouseDialect:
         self, conn: Connection, target: str, candidate: str
     ) -> None:
         """Refuse promotion unless the dialect can preserve the target's protected properties."""
-        raise HandlerError(
+        raise SqlGuardError(
             f"{target}: this warehouse cannot preserve replacement properties; use OVERWRITE_TABLE"
         )
 
@@ -249,14 +249,14 @@ class WarehouseDialect:
         existing: bool,
     ) -> str:
         """Render a single atomic replacement, or refuse when the dialect cannot do it."""
-        raise HandlerError(f"{self.spec.display_name} cannot atomically replace {target}")
+        raise SqlGuardError(f"{self.spec.display_name} cannot atomically replace {target}")
 
     overwrite_uses_ctas: bool = False
     """Whether an overwrite publishes a replacement snapshot with CTAS."""
 
     def overwrite_statement(self, target: str, columns: str, select_sql: str) -> str:
         """Replace rows without a separate truncate, where the warehouse supports it."""
-        raise HandlerError(f"{self.spec.display_name} cannot atomically overwrite {target}")
+        raise SqlGuardError(f"{self.spec.display_name} cannot atomically overwrite {target}")
 
     def mirror_table_ddl(self, name: str, column_ddl: str, cloning: CloningConfig) -> str | None:
         """Return the DDL for a cloning mirror, or ``None`` for a plain CREATE TABLE."""
@@ -326,7 +326,7 @@ class WarehouseDialect:
         """Return a column's complete warehouse type, refusing missing metadata."""
         columns = self.full_column_types(conn, table)
         if column.lower() not in columns:
-            raise HandlerError(f"{table}.{column}: cannot read the complete column type")
+            raise SqlGuardError(f"{table}.{column}: cannot read the complete column type")
         return columns[column.lower()]
 
     def column_addition_problem(self, data_type: str) -> str | None:
@@ -380,7 +380,7 @@ class WarehouseDialect:
         kind = kind.upper()
         base = re.split(r"[ (]", kind)[0]
         if base in {"FLOAT", "FLOAT4", "FLOAT8", "DOUBLE", "REAL", "BINARY_FLOAT", "BINARY_DOUBLE"}:
-            raise HandlerError(
+            raise SqlGuardError(
                 f"MERGE_COMPARE_COLUMNS includes {value} ({kind}): floats have no stable text "
                 "form; cast to DECIMAL in the SELECT"
             )
@@ -400,7 +400,7 @@ class WarehouseDialect:
             return f"CASE WHEN {value} THEN 'true' ELSE 'false' END"
         if base in {"DECIMAL", "NUMERIC", "NUMBER"}:
             if not re.fullmatch(r"(?:DECIMAL|NUMERIC|NUMBER)\(\d+,\s*\d+\)", kind):
-                raise HandlerError(
+                raise SqlGuardError(
                     f"{value} has {kind} without a declared scale; cast to DECIMAL(p,s)"
                 )
             return self.decimal_text(value, kind)
@@ -424,7 +424,7 @@ class WarehouseDialect:
             "UINTEGER",
             "UBIGINT",
         }:
-            raise HandlerError(
+            raise SqlGuardError(
                 f"MERGE_COMPARE_COLUMNS includes {value} ({kind}): unsupported "
                 "canonical type; cast to TEXT or DECIMAL in the SELECT"
             )

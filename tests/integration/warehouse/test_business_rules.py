@@ -164,8 +164,9 @@ def test_a_bad_rule_stops_the_task_before_any_rule_runs(world, changes, message)
     w = world
     add_rule(w, "fine", "SELECT 1")
     add_rule(w, "bad", changes.get("sql", "SELECT 1"), key=changes.get("key", "order_id"))
-    with pytest.raises(HandlerError, match=message):
+    with pytest.raises(HandlerError, match=message) as failure:
         run_rules(w)
+    assert not failure.value.retryable
     assert run_log(w) == []
 
 

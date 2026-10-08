@@ -33,7 +33,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import inspect, text
+from sqlalchemy import column, inspect, text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.types import TypeEngine
@@ -220,7 +220,7 @@ def _clone_table(
                 for name in added:
                     conn.execute(text(f"{alter} {name} {types[name]}"))
                 conn.execute(text(f"TRUNCATE TABLE {mirror}"))
-            for batch in _batches(engine, table, names):
+            for batch in _batches(engine, table, columns):
                 for start in range(0, len(batch), per_statement):
                     chunk = batch[start : start + per_statement]
                     conn.execute(*_insert_rows(mirror, names, chunk))
@@ -249,10 +249,15 @@ def _insert_rows(
     return text(f"INSERT INTO {mirror} ({', '.join(names)}) VALUES {groups}"), params
 
 
-def _batches(engine: Engine, table: str, names: list[str]) -> Iterator[list[tuple[object, ...]]]:
+def _batches(
+    engine: Engine, table: str, columns: list[tuple[str, TypeEngine[Any]]]
+) -> Iterator[list[tuple[object, ...]]]:
+    names = [name for name, _ in columns]
     with engine.connect() as conn:
         result = conn.execution_options(stream_results=True, yield_per=BATCH_ROWS).execute(
-            text(f"SELECT {', '.join(names)} FROM {table}")
+            text(f"SELECT {', '.join(names)} FROM {table}").columns(
+                *(column(name, kind) for name, kind in columns)
+            )
         )
         for partition in result.partitions(BATCH_ROWS):
             yield [tuple(_value(v) for v in row) for row in partition]

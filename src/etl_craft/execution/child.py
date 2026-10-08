@@ -110,7 +110,7 @@ def _run_bound(engine: Engine, config: ConnectorConfig, args: argparse.Namespace
             )
         except EtlCraftError as error:
             logger.error("could not start the task: %s", error)
-            _record_failure(engine, args.task_run_id, str(error))
+            _record_failure(engine, args.task_run_id, str(error), retryable=error.retryable)
             return error.exit_code
         with log.log_context(
             pipeline=context.pipeline_code,
@@ -134,7 +134,7 @@ def run_handler(engine: Engine, context: TaskContext) -> int:
     except EtlCraftError as error:
         logger.error("task failed: %s", error)
         logger.debug("traceback", exc_info=True)
-        _record_failure(engine, context.task_run_id, str(error))
+        _record_failure(engine, context.task_run_id, str(error), retryable=error.retryable)
         return error.exit_code
     except Exception as error:
         logger.exception("task failed with an unexpected %s", type(error).__name__)
@@ -163,7 +163,9 @@ def run_handler(engine: Engine, context: TaskContext) -> int:
     return ExitCode.SUCCESS
 
 
-def _record_failure(engine: Engine, task_run_id: int, message: str) -> None:
+def _record_failure(
+    engine: Engine, task_run_id: int, message: str, *, retryable: bool = True
+) -> None:
     identity = _identity.get()
     with engine.begin() as conn:
         finish_task_run(
@@ -171,6 +173,7 @@ def _record_failure(engine: Engine, task_run_id: int, message: str) -> None:
             task_run_id,
             status=RunStatus.FAILED,
             error_message=message,
+            retryable=retryable,
             attempt_id=None if identity is None else identity[0],
             owner=None if identity is None else identity[1],
         )

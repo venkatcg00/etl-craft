@@ -10,7 +10,7 @@ from sqlalchemy.engine import Connection
 
 from etl_craft.config.auth import warehouse_by_key
 from etl_craft.core.enums import AuthMode
-from etl_craft.core.errors import HandlerError
+from etl_craft.core.errors import SqlGuardError
 from etl_craft.dialects.warehouse.base import (
     Presented,
     ReplaceStrategy,
@@ -73,7 +73,7 @@ class TrinoIcebergWarehouse(WarehouseDialect):
         """
         problem = self.task_storage_problem(params)
         if problem:
-            raise HandlerError(problem)
+            raise SqlGuardError(problem)
         location = (params.get("EXTERNAL_LOCATION") or "").strip()
         clause = f" WITH (location = '{location}')" if location else ""
         conn.execute(text(f"CREATE TABLE {qualified_name}{clause} AS {select_sql}"))
@@ -113,7 +113,7 @@ class TrinoIcebergWarehouse(WarehouseDialect):
         """Preserve the existing table's declared properties in one CTAS replacement."""
         if existing:
             if params.get("EXTERNAL_LOCATION"):
-                raise HandlerError(
+                raise SqlGuardError(
                     f"{target}: replacement cannot change EXTERNAL_LOCATION; use OVERWRITE_TABLE"
                 )
             ddl = str(conn.execute(text(f"SHOW CREATE TABLE {target}")).scalar_one())

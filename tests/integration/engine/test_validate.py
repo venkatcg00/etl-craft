@@ -516,3 +516,20 @@ def test_target_formats_are_compared_across_pipelines_and_qualified_names(
     )
     scoped = validate(engine, config, "A")
     assert any(f.where == "A.setup" and "B.append" in f.message for f in scoped.findings)
+
+
+@pytest.mark.parametrize(
+    "parameters",
+    [
+        {"RETRIES": "-1"},
+        {"RETRY_DELAY_SECONDS": "later"},
+        {"RETRY_BACKOFF": "nan"},
+    ],
+)
+def test_validate_rejects_invalid_retry_parameters(project, parameters):
+    engine, config, _ = project
+    with engine.begin() as conn:
+        pipeline = add_pipeline(conn, "P")
+        add_task(conn, pipeline, "load", handler="PYTHON", PYTHON_SCRIPT="load.py", **parameters)
+    report = validate(engine, config)
+    assert any("CFG_TASK_PARAMETERS." in check.message for check in report.findings)

@@ -35,7 +35,7 @@ from datetime import date
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.project import sql_file
 from etl_craft.core.enums import SqlAction
-from etl_craft.core.errors import HandlerError, MetadataError
+from etl_craft.core.errors import MetadataError, SqlGuardError
 from etl_craft.core.text import (
     LINEAGE_RUN_DATE,
     is_safe_identifier,
@@ -114,14 +114,14 @@ class SqlTask:
 
 
 def read_sql_task(context: TaskContext) -> SqlTask:
-    """Read and check the SQL task's parameters; ``HandlerError`` or ``MetadataError`` if wrong."""
+    """Read and check the SQL task's parameters; ``SqlGuardError`` or ``MetadataError`` if wrong."""
     params = context.task_params
     action = _action(params)
     target = (params.get("TARGET_OBJECT") or "").strip()
     if not target:
-        raise HandlerError(f"TARGET_OBJECT is required for SQL_ACTION={action}")
+        raise SqlGuardError(f"TARGET_OBJECT is required for SQL_ACTION={action}")
     if not is_safe_object_ref(target):
-        raise HandlerError(
+        raise SqlGuardError(
             f"TARGET_OBJECT={target!r} must be 'schema.table' or 'database.schema.table', "
             "letters, digits and underscores only; without a database, the active Warehouse "
             "profile's is used"
@@ -132,7 +132,7 @@ def read_sql_task(context: TaskContext) -> SqlTask:
     if action == SqlAction.DROP_TABLE:
         given = [name for name in ("SOURCE_SQL", "SOURCE_SQL_FILE") if params.get(name)]
         if given:
-            raise HandlerError(f"SQL_ACTION=DROP_TABLE takes no SELECT, but {given[0]} is set")
+            raise SqlGuardError(f"SQL_ACTION=DROP_TABLE takes no SELECT, but {given[0]} is set")
     else:
         select_sql, source = resolve_select(
             context.config,
@@ -155,11 +155,11 @@ def read_sql_task(context: TaskContext) -> SqlTask:
     else:
         for name in ("MERGE_COMPARE_COLUMNS", "MERGE_DEDUPE_ORDER"):
             if params.get(name):
-                raise HandlerError(
+                raise SqlGuardError(
                     f"{name} applies only to SCD1_MERGE and SCD2_MERGE, not {action}"
                 )
     if action not in KEYED and params.get("MERGE_KEY"):
-        raise HandlerError(f"MERGE_KEY does not apply to SQL_ACTION={action}")
+        raise SqlGuardError(f"MERGE_KEY does not apply to SQL_ACTION={action}")
     setup_for = _setup_for(params.get("SETUP_FOR"), action)
 
     return SqlTask(
@@ -184,7 +184,7 @@ def _action(params: Mapping[str, str]) -> SqlAction:
         return SqlAction(written.upper())
     hints = suggest(written.upper(), actions)
     hint = f" — did you mean: {', '.join(hints)}" if hints else ""
-    raise HandlerError(
+    raise SqlGuardError(
         f"SQL_ACTION={written!r} is not one of {', '.join(actions)}{hint}"
         if written
         else f"SQL_ACTION is required; one of {', '.join(actions)}"
@@ -198,7 +198,7 @@ def parse_flag(params: Mapping[str, str], name: str) -> bool:
         return False
     lowered = value.strip().lower()
     if lowered not in {"true", "false"}:
-        raise HandlerError(f"{name}={value!r} must be true or false")
+        raise SqlGuardError(f"{name}={value!r} must be true or false")
     return lowered == "true"
 
 
@@ -208,7 +208,7 @@ def _flag(
     enabled = parse_flag(params, name)
     if name in params and action not in applies:
         names = ", ".join(sorted(applies))
-        raise HandlerError(f"{name} applies only to {names}, not SQL_ACTION={action}")
+        raise SqlGuardError(f"{name} applies only to {names}, not SQL_ACTION={action}")
     return enabled
 
 
@@ -224,13 +224,13 @@ def resolve_select(
 ) -> tuple[str, str]:
     """Return a SQL task's SELECT, inline or from its file, with the tokens replaced.
 
-    Also returns where it came from, for messages. ``HandlerError`` or ``MetadataError`` when
+    Also returns where it came from, for messages. ``SqlGuardError`` or ``MetadataError`` when
     the task has no usable single read-only SELECT.
     """
     inline = params.get("SOURCE_SQL")
     file_name = params.get("SOURCE_SQL_FILE")
     if inline and file_name:
-        raise HandlerError(
+        raise SqlGuardError(
             "set SOURCE_SQL or SOURCE_SQL_FILE, not both: the task would have two SELECTs"
         )
     if file_name:
@@ -245,7 +245,7 @@ def resolve_select(
     elif inline:
         raw, source = inline, "SOURCE_SQL"
     else:
-        raise HandlerError(
+        raise SqlGuardError(
             f"SQL_ACTION={params.get('SQL_ACTION')} needs a SELECT: set SOURCE_SQL, or "
             "SOURCE_SQL_FILE naming a file under sql_files/"
         )
@@ -266,13 +266,13 @@ def resolve_select(
     )
     statements = split_statements(substituted)
     if len(statements) != 1:
-        raise HandlerError(
+        raise SqlGuardError(
             f"{source} must hold exactly one SELECT; it holds {len(statements)} statements"
         )
     select_sql = statements[0]
     problem = read_only_problem(select_sql)
     if problem is not None:
-        raise HandlerError(
+        raise SqlGuardError(
             f"{source} must be a read-only SELECT (the engine writes the target itself); it "
             f"{problem}"
         )
@@ -283,10 +283,10 @@ def _columns(params: Mapping[str, str], name: str, action: SqlAction) -> tuple[s
     value = params.get(name) or ""
     columns = tuple(part.strip() for part in value.split("|") if part.strip())
     if not columns:
-        raise HandlerError(f"{name} is required for SQL_ACTION={action}: '|'-separated columns")
+        raise SqlGuardError(f"{name} is required for SQL_ACTION={action}: '|'-separated columns")
     bad = [column for column in columns if not is_safe_identifier(column)]
     if bad:
-        raise HandlerError(
+        raise SqlGuardError(
             f"{name}={value!r}: {', '.join(repr(b) for b in bad)} is not a plain column name"
         )
     return columns
@@ -296,10 +296,10 @@ def _setup_for(value: str | None, action: SqlAction) -> SqlAction | None:
     if value is None or not value.strip():
         return None
     if action != SqlAction.SETUP_TABLE:
-        raise HandlerError(f"SETUP_FOR applies only to SETUP_TABLE, not SQL_ACTION={action}")
+        raise SqlGuardError(f"SETUP_FOR applies only to SETUP_TABLE, not SQL_ACTION={action}")
     written = value.strip().upper()
     if written not in WRITERS:
-        raise HandlerError(
+        raise SqlGuardError(
             f"SETUP_FOR={value!r} must name the action that writes the table: "
             f"{', '.join(sorted(WRITERS))}"
         )
@@ -312,7 +312,7 @@ def _dedupe_order(value: str | None) -> str | None:
     terms = [term.strip() for term in value.split(",")]
     bad = [term for term in terms if not is_safe_order_term(term)]
     if bad:
-        raise HandlerError(
+        raise SqlGuardError(
             f"MERGE_DEDUPE_ORDER={value!r}: {', '.join(repr(b) for b in bad)} is not "
             "'column [ASC|DESC] [NULLS FIRST|LAST]'"
         )

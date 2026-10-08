@@ -213,8 +213,9 @@ def test_connections_pin_utc_and_close_the_setup_cursor(key):
 def test_unsafe_hash_types_are_refused(key, kind):
     from etl_craft.core.errors import HandlerError
 
-    with pytest.raises(HandlerError, match=r"cast to|without a declared scale"):
+    with pytest.raises(HandlerError, match=r"cast to|without a declared scale") as failure:
         for_key(key).hash_expression(["amount"], [kind])
+    assert not failure.value.retryable
 
 
 def test_audit_column_types():

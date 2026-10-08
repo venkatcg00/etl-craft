@@ -12,7 +12,7 @@ from sqlalchemy.engine import Connection
 
 from etl_craft.config.auth import warehouse_by_key
 from etl_craft.core.enums import AuthMode, TableFormat
-from etl_craft.core.errors import ConfigurationError, HandlerError
+from etl_craft.core.errors import ConfigurationError, SqlGuardError
 from etl_craft.dialects import credentials
 from etl_craft.dialects.warehouse.base import (
     Presented,
@@ -62,7 +62,7 @@ class DatabricksWarehouse(WarehouseDialect):
     ) -> tuple[str, str]:
         """Prepare independent identity rows, then deep-clone them into the target atomically."""
         if existing and params.get("EXTERNAL_LOCATION"):
-            raise HandlerError(
+            raise SqlGuardError(
                 f"{target}: replacement cannot change EXTERNAL_LOCATION; use OVERWRITE_TABLE"
             )
         ddl = (
@@ -83,7 +83,7 @@ class DatabricksWarehouse(WarehouseDialect):
         detail = conn.execute(text(f"DESCRIBE DETAIL {target}")).mappings().one()
         provider = str(detail["format"]).lower()
         if provider != "delta":
-            raise HandlerError(
+            raise SqlGuardError(
                 f"{target}: existing storage format is {provider!r}; this warehouse writes "
                 "Delta or Delta with UniForm. Migrate the table explicitly or use another target"
             )
@@ -93,7 +93,7 @@ class DatabricksWarehouse(WarehouseDialect):
                 properties = json.loads(properties)
             properties = dict(properties)
         except (TypeError, ValueError) as error:
-            raise HandlerError(
+            raise SqlGuardError(
                 f"{target}: cannot read table properties to determine its format"
             ) from error
         enabled = str(properties.get("delta.universalFormat.enabledFormats", ""))
@@ -167,7 +167,7 @@ class DatabricksWarehouse(WarehouseDialect):
         """
         problem = self.task_storage_problem(params)
         if problem:
-            raise HandlerError(problem)
+            raise SqlGuardError(problem)
         location = (params.get("EXTERNAL_LOCATION") or "").strip()
         conn.execute(
             text(f"CREATE TABLE {qualified_name} {self.delta_clause(location)} AS {select_sql}")
@@ -224,7 +224,7 @@ class DatabricksWarehouse(WarehouseDialect):
         """Preserve the existing table's declared properties in one CTAS replacement."""
         if existing:
             if params.get("EXTERNAL_LOCATION"):
-                raise HandlerError(
+                raise SqlGuardError(
                     f"{target}: replacement cannot change EXTERNAL_LOCATION; use OVERWRITE_TABLE"
                 )
             ddl = str(conn.execute(text(f"SHOW CREATE TABLE {target}")).scalar_one())

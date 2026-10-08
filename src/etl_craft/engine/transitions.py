@@ -135,6 +135,7 @@ def finish_task_run(
     attempt_id: int | None = None,
     owner: str | None = None,
     offset: StoredOffset | None = None,
+    retryable: bool = True,
 ) -> None:
     """Record the current attempt's outcome on its row; each attempt writes only its own counts."""
     if attempt_id is not None:
@@ -150,6 +151,7 @@ def finish_task_run(
             counts=counts,
             error_message=error_message,
             task_log=task_log,
+            retryable=retryable,
             offset=offset,
         )
         return
@@ -517,12 +519,24 @@ def mark_run(
 
 
 def queue_attempt(
-    conn: Connection, task_run_id: int, actor: Actor, *, log_path: str | None = None
+    conn: Connection,
+    task_run_id: int,
+    actor: Actor,
+    *,
+    log_path: str | None = None,
+    not_before: datetime | None = None,
+    previous_attempt_id: int | None = None,
 ) -> int:
     """Queue one attempt, serializing admission through its task summary."""
     try:
         with conn.begin_nested():
-            params = {**_actor_params(actor), "row_id": task_run_id, "log_path": log_path}
+            params = {
+                **_actor_params(actor),
+                "row_id": task_run_id,
+                "log_path": log_path,
+                "not_before": not_before,
+                "previous_attempt_id": previous_attempt_id,
+            }
             _guard(
                 conn,
                 "reserve_attempt",
@@ -605,6 +619,7 @@ def _end_attempt(
     error_message: str | None = None,
     task_log: str | None = None,
     exit_code: int | None = None,
+    retryable: bool = True,
 ) -> None:
     with conn.begin_nested():
         params = {
@@ -616,6 +631,7 @@ def _end_attempt(
             "error_message": error_message,
             "task_log": task_log,
             "exit_code": exit_code,
+            "retryable": retryable,
         }
         row = conn.execute(statement(conn, f"transition_{query}"), params).one_or_none()
         if row is None:
@@ -637,6 +653,7 @@ def finish_attempt(
     task_log: str | None = None,
     exit_code: int | None = None,
     offset: StoredOffset | None = None,
+    retryable: bool = True,
 ) -> None:
     """Record the owned outcome, summary, offset and admitted consumption atomically."""
     if status not in {"SUCCESS", "FAILED"}:
@@ -654,6 +671,7 @@ def finish_attempt(
             error_message=error_message,
             task_log=task_log,
             exit_code=exit_code,
+            retryable=retryable,
         )
         if status == "SUCCESS":
             fault_point("attempt.after_status")

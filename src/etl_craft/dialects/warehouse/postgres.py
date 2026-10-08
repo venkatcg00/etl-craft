@@ -8,7 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from etl_craft.config.auth import warehouse_by_key
-from etl_craft.core.errors import HandlerError
+from etl_craft.core.errors import SqlGuardError
 from etl_craft.dialects.engine.postgres import DEFAULT_PORT, psycopg_auth_kwargs
 from etl_craft.dialects.warehouse.base import Presented, ReplaceStrategy, WarehouseDialect
 
@@ -75,7 +75,7 @@ class PostgresWarehouse(WarehouseDialect):
             {"name": name},
         ).one()
         if row[0] == "p":
-            raise HandlerError(f"{target}: CTAS cannot preserve partitioning; use OVERWRITE_TABLE")
+            raise SqlGuardError(f"{target}: CTAS cannot preserve partitioning; use OVERWRITE_TABLE")
         return None if row[1] is None else str(row[1])
 
     def full_column_types(self, conn: Connection, table: str) -> dict[str, str]:
