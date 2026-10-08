@@ -95,13 +95,13 @@ def connect(auth_mode, jdbc_url, secret="", table_format=TableFormat.NATIVE, **k
     ],
 )
 def test_resolve(name, table_format, key):
-    assert resolve(name, table_format).key == key
+    assert resolve(name, table_format).spec.key == key
 
 
 def test_a_database_without_a_dialect_is_generic_ansi():
     dialect = resolve("oracle", "native")
     assert isinstance(dialect, GenericWarehouse)
-    assert (dialect.key, dialect.surrogate_key, dialect.enforces_primary_keys) == (
+    assert (dialect.spec.key, dialect.surrogate_key, dialect.enforces_primary_keys) == (
         "oracle",
         "computed",
         False,
@@ -114,11 +114,10 @@ def test_postgres_has_no_iceberg_dialect():
 
 
 def test_every_dialect_is_registered_once_with_its_spec():
-    keys = [dialect.key for dialect in all_dialects()]
+    keys = [dialect.spec.key for dialect in all_dialects()]
     assert len(keys) == len(set(keys)) == 8
     for dialect in all_dialects():
-        assert for_key(dialect.key) is dialect
-        assert dialect.table_format == dialect.spec.table_format
+        assert for_key(dialect.spec.key) is dialect
     with pytest.raises(LookupError):
         for_key("oracle")
 
@@ -503,8 +502,8 @@ def test_only_trino_has_a_catalog_to_verify():
 
 def test_dialect_names_and_defaults():
     postgres, duckdb = for_key("postgres"), for_key("duckdb")
-    assert (postgres.sqlalchemy_name, postgres.per_task_format) == ("postgresql", True)
-    assert duckdb.per_task_format is False
+    assert (postgres.spec.sqlalchemy_name, postgres.spec.per_task_format) == ("postgresql", True)
+    assert duckdb.spec.per_task_format is False
     assert postgres.load_table_metadata(object(), "s", "t") is None
     assert postgres.cloning_storage_problem(CloningConfig()) is None
     databricks = for_key("databricks")
@@ -628,7 +627,7 @@ def test_a_trino_location_with_a_quote_is_refused():
     assert problem == 'EXTERNAL_LOCATION must not contain a quote: "s3://a\'b"'
 
 
-@pytest.mark.parametrize("kind", [d.key for d in all_dialects() if d.key != "generic"])
+@pytest.mark.parametrize("kind", [d.spec.key for d in all_dialects() if d.spec.key != "generic"])
 def test_joined_updates_use_the_warehouse_write_strategy(kind):
     dialect = for_key(kind)
     assignments = {"name": "COALESCE(s.name, t.name)", "UPDATED_BY": ":user"}
@@ -722,3 +721,15 @@ def test_snowflake_reads_existing_identity_defaults(default, generated):
 )
 def test_task_run_id_accepts_signed_bigint_representations(key, data_type, expected):
     assert for_key(key).is_bigint_type(data_type) is expected
+
+
+@pytest.mark.parametrize("key", ["postgres", "duckdb", "snowflake", "databricks", "trino_iceberg"])
+def test_failed_session_setup_closes_the_cursor_without_committing(key):
+    from unittest.mock import Mock
+
+    conn = Mock()
+    conn.cursor.return_value.execute.side_effect = RuntimeError("setup failed")
+    with pytest.raises(RuntimeError, match="setup failed"):
+        for_key(key).on_connect(conn, None, "")
+    conn.cursor.return_value.close.assert_called_once()
+    conn.commit.assert_not_called()

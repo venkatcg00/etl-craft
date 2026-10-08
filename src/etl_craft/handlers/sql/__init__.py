@@ -14,7 +14,7 @@ import logging
 from sqlalchemy.engine import Engine
 
 from etl_craft.config.targets import active_catalog, parse_warehouse_url
-from etl_craft.core.enums import SqlAction, TableFormat
+from etl_craft.core.enums import SqlAction, TableFormat, enum_value
 from etl_craft.core.errors import ConfigurationError, HandlerError
 from etl_craft.core.text import qualify
 from etl_craft.dialects.warehouse import WarehouseDialect, resolve
@@ -47,7 +47,7 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
         task.action,
         f"{catalog}.{task.target_object}",
         task.source,
-        dialect.display_name,
+        dialect.spec.display_name,
     )
     logger.debug("the SELECT:\n%s", task.select_sql)
     # Hold through warehouse commit: a computed ROW_ID base must include the previous insert.
@@ -104,15 +104,16 @@ def task_dialect(context: TaskContext) -> WarehouseDialect:
     assert config.warehouse is not None
     default = config.warehouse_table_format
     written = (context.task_params.get("TABLE_FORMAT") or "").strip().lower()
-    formats = [member.value for member in TableFormat]
-    if written and written not in formats:
-        raise HandlerError(f"TABLE_FORMAT={written!r} is not one of {', '.join(formats)}")
-    table_format = written or default
+    table_format = enum_value(
+        TableFormat,
+        written or default,
+        HandlerError(f"TABLE_FORMAT={written!r} is not one of {', '.join(TableFormat)}"),
+    )
     url = parse_warehouse_url(config.warehouse.active.jdbc_url)
     dialect = resolve(url.dialect, table_format)
-    if not dialect.per_task_format and table_format != default:
+    if not dialect.spec.per_task_format and table_format != default:
         raise HandlerError(
-            f"on {dialect.display_name} the table format is fixed by the connection "
+            f"on {dialect.spec.display_name} the table format is fixed by the connection "
             f"(Warehouse.Table_format={default}); TABLE_FORMAT={written} cannot change it"
         )
     return dialect

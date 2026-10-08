@@ -7,6 +7,19 @@ members compare equal to the raw strings read from either.
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import TypeVar
+
+from etl_craft.core.errors import EtlCraftError
+
+E = TypeVar("E", bound=StrEnum)
+
+
+def enum_value(enum: type[E], value: str, error: EtlCraftError) -> E:
+    """Read a case-insensitive enum value or raise the caller's domain diagnostic."""
+    try:
+        return enum(value.strip().lower())
+    except ValueError:
+        raise error from None
 
 
 class RunStatus(StrEnum):
@@ -168,3 +181,18 @@ class CloningScope(StrEnum):
     AUD = "aud"
     ALL = "all"
     NONE = "none"
+
+
+class EmailTransport(StrEnum):
+    """How the mail handler delivers a message."""
+
+    SMTP = "smtp"
+    SENDMAIL = "sendmail"
+
+
+class TlsMode(StrEnum):
+    """How an SMTP session starts TLS."""
+
+    NONE = "none"
+    STARTTLS = "starttls"
+    SSL = "ssl"

@@ -13,6 +13,7 @@ from sqlalchemy import text
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.enums import TableFormat
 from etl_craft.core.text import qualify
+from etl_craft.handlers.sql.session import Session
 from etl_craft.warehouse.connection import build_warehouse_engine, warehouse_dialect
 from fixtures.cloud import DATABRICKS_VARS, SNOWFLAKE_VARS, require_variables, write_config
 
@@ -31,7 +32,7 @@ def create_read_drop(config, schema, params=None):
             conn.commit()
     finally:
         engine.dispose()
-    return dialect.key
+    return dialect.spec.key
 
 
 @pytest.mark.cloud_databricks
@@ -60,3 +61,39 @@ def test_snowflake(tmp_path, table_format, key):
     assert config.warehouse.active.auth_mode == "token"
     schema = os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"]
     assert create_read_drop(config, schema) == key
+
+
+@pytest.mark.cloud_snowflake
+def test_snowflake_iceberg_rename_keeps_a_nondefault_schema(tmp_path):
+    require_variables("SNOWFLAKE", SNOWFLAKE_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
+    config = write_config(tmp_path, "Snowflake", fields, TableFormat.ICEBERG)
+    dialect = warehouse_dialect(config)
+    schema = f"etl_rename_{uuid.uuid4().hex[:10]}"
+    namespace = f"{active_catalog(config)}.{schema}"
+    source, target = f"{namespace}.candidate", f"{namespace}.target"
+    engine = build_warehouse_engine(config)
+    try:
+        with engine.connect() as conn:
+            try:
+                conn.execute(text(f"CREATE SCHEMA {namespace}_session"))
+                conn.execute(text(f"CREATE SCHEMA {namespace}"))
+                conn.execute(text(f"USE SCHEMA {namespace}_session"))
+                dialect.create_table_as(conn, source, "SELECT 1 AS id", {})
+                session = Session(
+                    conn,
+                    dialect,
+                    catalog=active_catalog(config),
+                    action="CREATE_TABLE",
+                    target_object=f"{schema}.target",
+                    task_run_id=1,
+                    params={},
+                )
+                session.rename(source, target)
+                assert conn.execute(text(f"SELECT id FROM {target}")).scalar_one() == 1
+            finally:
+                conn.execute(text(f"DROP SCHEMA IF EXISTS {namespace} CASCADE"))
+                conn.execute(text(f"DROP SCHEMA IF EXISTS {namespace}_session CASCADE"))
+            conn.commit()
+    finally:
+        engine.dispose()

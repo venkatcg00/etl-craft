@@ -241,3 +241,32 @@ def test_initialization_checks_existing_tables_only_while_holding_the_lock(
     monkeypatch.setattr(schema.locks.MIGRATE.__class__, "hold", lambda self, engine: hold(engine))
     monkeypatch.setattr(schema, "existing_engine_tables", checked)
     init_db(empty_engine_db.engine)
+
+
+def test_engine_header_markers_drive_policy_for_a_new_filename(initialized, packaged, monkeypatch):
+    from contextlib import contextmanager
+
+    dialect = for_engine(initialized)
+    transaction = type(dialect).migration_transaction
+    checks = []
+    rebuilds = []
+    check_codes = migrations._check_metadata_codes
+
+    def checked(conn):
+        checks.append(True)
+        check_codes(conn)
+
+    @contextmanager
+    def recorded(self, engine, *, rebuild_metadata=None):
+        assert checks == [True]
+        rebuilds.append(rebuild_metadata)
+        with transaction(self, engine, rebuild_metadata=rebuild_metadata) as conn:
+            yield conn
+
+    monkeypatch.setattr(migrations, "_check_metadata_codes", checked)
+    monkeypatch.setattr(type(dialect), "migration_transaction", recorded)
+    sql = "-- etl-craft: rebuild-metadata\n-- etl-craft: check-metadata-codes\nSELECT 1;"
+    write(packaged, "0099_new_policy.sql", sql)
+    assert apply_pending_migrations(initialized) == ["0099_new_policy.sql"]
+    assert rebuilds == [sql]
+    assert ledger(initialized) == [("ENGINE", "0099_new_policy.sql")]

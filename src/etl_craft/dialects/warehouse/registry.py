@@ -44,7 +44,7 @@ def all_dialects() -> tuple[WarehouseDialect, ...]:
 def for_key(key: str) -> WarehouseDialect:
     """Return the dialect registered under ``key``, such as ``trino_iceberg``."""
     for dialect in all_dialects():
-        if dialect.key == key:
+        if dialect.spec.key == key:
             return dialect
     raise LookupError(f"no warehouse dialect named {key!r}")
 

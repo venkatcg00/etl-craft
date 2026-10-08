@@ -68,5 +68,5 @@ def test_a_wrong_password_fails_when_connecting(postgres_database, monkeypatch):
 @pytest.mark.engine_postgres
 def test_a_secret_removed_after_loading_is_a_configuration_error(postgres_database, monkeypatch):
     monkeypatch.delenv(SECRET_VAR)
-    with pytest.raises(ConfigurationError, match=f"'{SECRET_VAR}' not found"):
+    with pytest.raises(ConfigurationError, match=f"{SECRET_VAR}.*not set"):
         build_engine(postgres_database.config)

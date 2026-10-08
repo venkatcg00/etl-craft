@@ -14,6 +14,7 @@ from etl_craft.core.actor import SYSTEM_ACTOR, Actor, current_actor
 from etl_craft.core.enums import FINISHED_RUN_STATUSES, Mode, RunStatus, SlaStatus
 from etl_craft.core.errors import RunStateError, StaleTransitionError
 from etl_craft.core.faults import fault_point
+from etl_craft.core.time import as_utc
 from etl_craft.engine import runlog
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import trackers
@@ -907,13 +908,7 @@ def ensure_attempt_started(
         allowed = {"RUNNING", "SUCCESS", "FAILED"} if completed else {"RUNNING"}
         if row is not None and row.status == "RUNNING":
             expiry = row.lease_expires_at
-            instant = (
-                expiry
-                if isinstance(expiry, datetime)
-                else datetime.fromisoformat(str(expiry))
-                if expiry is not None
-                else None
-            )
+            instant = None if expiry is None else as_utc(expiry)
             if instant is None or runlog.elapsed_hours(instant, datetime.now(UTC)) >= 0:
                 raise
         if row is not None and process_start is not None and row.process_start != process_start:

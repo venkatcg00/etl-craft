@@ -41,6 +41,12 @@ Before applying anything, `migrate` checks every file it has applied before: a f
 removed or edited stops the run. Released migrations are never edited; add a new file instead.
 Keep your project migrations directory for every later run, since `migrate` needs it for that check.
 
+Packaged ENGINE migrations declare special policies with SQL header comments:
+`-- etl-craft: rebuild-metadata` enables SQLite's guarded metadata rebuild, and
+`-- etl-craft: check-metadata-codes` validates existing codes before applying pending migrations.
+The packaged `migration-markers.toml` supplies these markers for existing files without changing
+any SQL bytes or stored checksums. These internal markers are refused in PROJECT migrations.
+
 Name project files `NNNN_short_description.sql` so they sort in the order they must apply. Each
 statement runs exactly as written: colons, percent signs and semicolons inside string literals
 are safe.

@@ -210,13 +210,7 @@ class DatabricksWarehouse(WarehouseDialect):
         )
         return f"REPLACE(DATE_FORMAT({utc}, 'yyyy-MM-dd HH:mm:ss.SSSSSS'), ' ', 'T')"
 
-    def on_connect(self, dbapi_connection: Any, profile: ConnectionProfile, secret: str) -> None:
-        """Pin every new warehouse session to UTC."""
-        cursor = dbapi_connection.cursor()
-        try:
-            cursor.execute("SET TIME ZONE 'UTC'")
-        finally:
-            cursor.close()
+    session_sql = "SET TIME ZONE 'UTC'"
 
     def replacement_ddl(
         self,

@@ -37,6 +37,7 @@ from etl_craft.config.project import ingestion_script
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.enums import Handler, SqlAction
 from etl_craft.core.errors import EtlCraftError
+from etl_craft.core.time import as_utc
 from etl_craft.engine.repository.catalog import (
     Consumption,
     LastRun,
@@ -487,9 +488,4 @@ def run_kpis(runs: Sequence[RunSummary | TaskRunSummary]) -> RunKpis:
 def latest_run(runs: Iterable[LastRun | None]) -> LastRun | None:
     """Return the run that ended last, or ``None`` when none has."""
     finished = [run for run in runs if run is not None and run.end is not None]
-    return max(finished, key=lambda run: _aware(run.end), default=None)
-
-
-def _aware(value: datetime | None) -> datetime:
-    assert value is not None
-    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    return max(finished, key=lambda run: as_utc(run.end), default=None)

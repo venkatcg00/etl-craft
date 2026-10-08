@@ -24,6 +24,7 @@ from etl_craft.core.errors import ConfigurationError, LockTimeoutError, Migratio
 from etl_craft.core.filelock import file_lock
 from etl_craft.core.text import is_only_comments
 from etl_craft.dialects.engine.base import EngineDialect
+from etl_craft.dialects.engine.sqlite.audit import refresh_metadata_triggers
 
 if TYPE_CHECKING:
     from etl_craft.config import ConnectionProfile, ConnectorConfig
@@ -41,6 +42,10 @@ class SqliteEngineDialect(EngineDialect):
 
     spec = engine_for_jdbc_url(JDBC_PREFIX)
     directory = Path(__file__).parent
+
+    def refresh_metadata_triggers(self, conn: Connection) -> None:
+        """Install this database's metadata capture and write guards."""
+        refresh_metadata_triggers(conn)
 
     def build_engine(
         self, config: ConnectorConfig, profile: ConnectionProfile, **engine_kwargs: Any

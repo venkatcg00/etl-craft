@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.errors import MetadataError
 from etl_craft.core.text import suggest
+from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
 
 
@@ -68,9 +69,7 @@ def fetch_pipeline_detail(conn: Connection, pipeline_id: int) -> PipelineDetail:
     params: Any = row.pipeline_parameters or {}
     if isinstance(params, str):
         params = json.loads(params)
-    created = None if row.create_date is None else datetime.fromisoformat(str(row.create_date))
-    if created is not None and created.tzinfo is None:
-        created = created.replace(tzinfo=UTC)
+    created = None if row.create_date is None else as_utc(row.create_date)
     return PipelineDetail(
         pipeline_code=row.pipeline_code,
         pipeline_name=row.pipeline_name,

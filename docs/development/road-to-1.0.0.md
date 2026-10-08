@@ -101,7 +101,8 @@ item's text, or work done early under another item.
 | S4.D Ready-set dispatch | Done | #116 | Shared cooperative scheduling and durable gate waits without worker slots |
 | S4.I.1 Delete code only tests call | Done | #118 | Removed unused helpers, lifecycle shortcuts and gate consumption wrappers |
 | S4.I.2 Service operations surface | Done | #119 | Direct views, pipeline codes and one audit path per request |
-| S4.I.3–4 | Not started | | Complete before S4.E |
+| S4.I.3 Write each helper once | Done | #120 | Shared UTC, enum, cron, credential, warehouse and migration helpers |
+| S4.I.4 | Not started | | Complete before S4.E |
 | S4.E and later | Not started | | |
 
 ### Handover notes
@@ -109,6 +110,14 @@ item's text, or work done early under another item.
 What a person picking up the work needs that the code and the item texts do not say.
 
 **Choices that differ from the item text.**
+
+- S4.I.3 keeps existing migration SQL bytes immutable so stored checksums remain valid.
+  `dialects/engine/migration-markers.toml` supplies their policy markers; new ENGINE migrations
+  declare markers in SQL headers. PROJECT migrations cannot request these internal policies.
+  Live Databricks acceptance also requires recognizing inherited column collations in current
+  SHOW CREATE output; identity replacements preserve the table default and still refuse overrides.
+  Snowflake acceptance also fixes renames to retain the fully qualified destination instead of
+  publishing Iceberg replacements in the connection's default schema.
 
 - S4.B supervises CLI-initialized IN-PROGRESS runs through the existing local wave runner.
   S4.C creates schedules and admits the oldest QUEUED run through the existing blocking gates
@@ -1754,7 +1763,8 @@ S4.I.5 and S4.I.6 change public behaviour and can land any time before S7.G.
      - `engine/migrations._apply` lists the packaged files that need SQLite's metadata rebuild by
        name, and `apply_pending_migrations` special-cases `0005`. Mark those files with a header
        line (`-- etl-craft: rebuild-metadata`, `-- etl-craft: check-metadata-codes`) and read the
-       marker, so a new migration does not edit Python.
+       marker, so a new migration does not edit Python. Existing SQL files keep their original
+       bytes and receive markers from the packaged manifest to preserve applied checksums.
      - `overseer/leadership.py` derives its advisory-lock key the way `engine/locks.target` does;
        `overseer/server.py` reads a run's owner and status with inline SQL that
        `runlog.fetch_pipeline_run_status` and the `run_lease` query already provide. Reuse them.

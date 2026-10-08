@@ -8,6 +8,7 @@ from datetime import datetime
 from etl_craft.core.actor import acting_as
 from etl_craft.core.errors import UsageError
 from etl_craft.core.graph import build_graph
+from etl_craft.core.time import as_utc
 from etl_craft.engine.connection import read_snapshot
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.audit_reads import fetch_audit_records
@@ -25,7 +26,6 @@ from etl_craft.engine.repository.tasks import (
     resolve_task_id,
 )
 from etl_craft.engine.runlog import ACTIVE_RUN, RunSelector, select_run
-from etl_craft.execution.leases import as_utc
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.models import (
     ActionView,

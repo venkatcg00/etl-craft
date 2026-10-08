@@ -292,7 +292,7 @@ def _warehouse(config: ConnectorConfig, *, queue_on_engine_db: bool) -> list[Che
     except EtlCraftError as error:
         return [*checks, fail("Warehouse", str(error))]
     checks += _auth(
-        "Warehouse", profile.auth_mode, dialect.spec.verified_auth_modes, dialect.display_name
+        "Warehouse", profile.auth_mode, dialect.spec.verified_auth_modes, dialect.spec.display_name
     )
     if is_in_memory(config):
         return [
@@ -320,9 +320,9 @@ def _warehouse(config: ConnectorConfig, *, queue_on_engine_db: bool) -> list[Che
     if problem is not None:
         return [*checks, fail("Warehouse connection", problem)]
     checks.append(
-        ok("Warehouse connection", f"{dialect.display_name}, schema {profile.schema} exists")
+        ok("Warehouse connection", f"{dialect.spec.display_name}, schema {profile.schema} exists")
     )
-    if dialect.key == "trino_iceberg":
+    if dialect.spec.key == "trino_iceberg":
         warehouse = build_warehouse_engine(config)
         try:
             catalog_problem = verify_iceberg_catalog(config, warehouse)

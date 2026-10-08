@@ -1,0 +1,9 @@
+# Existing migration bytes remain immutable; new migrations declare markers in SQL headers.
+rebuild-metadata = [
+  "0005_metadata_codes.sql",
+  "0006_run_backfill_constraint.sql",
+  "0007_identity.sql",
+  "0008_actors_and_audit_guards.sql",
+  "0015_schedules.sql",
+]
+check-metadata-codes = ["0005_metadata_codes.sql"]

@@ -134,7 +134,15 @@ def read_sql_task(context: TaskContext) -> SqlTask:
         if given:
             raise HandlerError(f"SQL_ACTION=DROP_TABLE takes no SELECT, but {given[0]} is set")
     else:
-        select_sql, source = _select(context)
+        select_sql, source = resolve_select(
+            context.config,
+            context.task_params,
+            pipeline_run_id=context.pipeline_run_id,
+            pipeline_id=context.pipeline_id,
+            task_run_id=context.task_run_id,
+            refresh_type=context.refresh_type,
+            run_date=context.run_date,
+        )
 
     merge_key: tuple[str, ...] = ()
     if action in KEYED:
@@ -202,19 +210,6 @@ def _flag(
         names = ", ".join(sorted(applies))
         raise HandlerError(f"{name} applies only to {names}, not SQL_ACTION={action}")
     return enabled
-
-
-def _select(context: TaskContext) -> tuple[str, str]:
-    """Return the task's SELECT with its tokens replaced, and where it came from."""
-    return resolve_select(
-        context.config,
-        context.task_params,
-        pipeline_run_id=context.pipeline_run_id,
-        pipeline_id=context.pipeline_id,
-        task_run_id=context.task_run_id,
-        refresh_type=context.refresh_type,
-        run_date=context.run_date,
-    )
 
 
 def resolve_select(

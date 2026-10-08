@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 
 from sqlalchemy import bindparam
 from sqlalchemy.engine import Connection
@@ -17,6 +17,7 @@ from etl_craft.core.cron import timezone
 from etl_craft.core.enums import SlaStatus
 from etl_craft.core.errors import RunStateError
 from etl_craft.core.graph import TaskRunState
+from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
 
 
@@ -211,9 +212,7 @@ class SlaResult:
 
 def elapsed_hours(start: datetime, now: datetime) -> float:
     """Return the hours from ``start`` to ``now``, reading a naive ``start`` as UTC."""
-    if start.tzinfo is None:
-        start = start.replace(tzinfo=UTC)
-    return (now - start).total_seconds() / 3600
+    return (as_utc(now) - as_utc(start)).total_seconds() / 3600
 
 
 @dataclass(frozen=True)

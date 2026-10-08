@@ -4,18 +4,18 @@
 def golden_sql(dialect):
     aware = (
         "from_iso8601_timestamp_nanos('2020-01-02T08:34:05.123456+05:30')"
-        if dialect.key == "trino_iceberg"
+        if dialect.spec.key == "trino_iceberg"
         else "TIMESTAMPTZ '2020-01-02 08:34:05.123456+05:30'"
     )
     aware_type = "TIMESTAMP WITH TIME ZONE"
     naive = "TIMESTAMP '2020-01-02 03:04:05.123456'"
     naive_type = "TIMESTAMP"
-    if dialect.key.startswith("snowflake"):
+    if dialect.spec.key.startswith("snowflake"):
         aware = "TO_TIMESTAMP_TZ('2020-01-02 08:34:05.123456+05:30')"
         aware_type = "TIMESTAMP_TZ"
         naive = "TO_TIMESTAMP_NTZ('2020-01-02 03:04:05.123456')"
         naive_type = "TIMESTAMP_NTZ"
-    elif dialect.key.startswith("databricks"):
+    elif dialect.spec.key.startswith("databricks"):
         aware = "CAST('2020-01-02T08:34:05.123456+05:30' AS TIMESTAMP)"
         aware_type = "TIMESTAMP"
         naive = "CAST('2020-01-02 03:04:05.123456' AS TIMESTAMP_NTZ)"

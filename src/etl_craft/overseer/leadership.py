@@ -6,7 +6,6 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from hashlib import blake2b
 from typing import Any
 
 from sqlalchemy import text
@@ -14,6 +13,7 @@ from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.core.errors import LockTimeoutError, RunRefusedError
 from etl_craft.core.filelock import file_lock
+from etl_craft.engine.locks import advisory_key
 from etl_craft.engine.repository.overseers import active_overseer
 
 
@@ -55,11 +55,7 @@ def leadership(engine: Engine) -> Iterator[Leadership]:
     with engine.connect() as raw:
         conn = raw.execution_options(isolation_level="AUTOCOMMIT")
         schema = str(conn.execute(text("SELECT current_schema() AS schema")).scalar_one())
-        key = int.from_bytes(
-            blake2b(f"etl-craft:overseer:{schema}".encode(), digest_size=8).digest(),
-            "big",
-            signed=True,
-        )
+        key = advisory_key(f"etl-craft:overseer:{schema}")
         acquired = conn.execute(
             text("SELECT pg_try_advisory_lock(:key) AS held"), {"key": key}
         ).scalar_one()

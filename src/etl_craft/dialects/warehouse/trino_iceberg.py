@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
@@ -99,13 +99,7 @@ class TrinoIcebergWarehouse(WarehouseDialect):
             f"RPAD(SUBSTR({fraction}, 1, 6), 6, '0')"
         )
 
-    def on_connect(self, dbapi_connection: Any, profile: ConnectionProfile, secret: str) -> None:
-        """Pin every new warehouse session to UTC."""
-        cursor = dbapi_connection.cursor()
-        try:
-            cursor.execute("SET TIME ZONE 'UTC'")
-        finally:
-            cursor.close()
+    session_sql = "SET TIME ZONE 'UTC'"
 
     def replacement_ddl(
         self,

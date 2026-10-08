@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from etl_craft.config.auth import AuthFields, WarehouseSpec
+from etl_craft.config.auth import WarehouseSpec
 from etl_craft.core.enums import AuthMode, TableFormat
 from etl_craft.core.errors import ConfigurationError, HandlerError
 from etl_craft.dialects import credentials
@@ -113,7 +113,7 @@ class WarehouseDialect:
 
     def identity_table_ddl(self, target: str, columns: str, params: Mapping[str, str]) -> str:
         """Create an empty table with the supplied columns and a generated ROW_ID."""
-        raise NotImplementedError(f"{self.key} does not declare identity columns in CREATE")
+        raise NotImplementedError(f"{self.spec.key} does not declare identity columns in CREATE")
 
     def identity_replacement_ddl(
         self,
@@ -126,63 +126,28 @@ class WarehouseDialect:
         existing: bool,
     ) -> tuple[str, str]:
         """Return candidate creation and atomic publication SQL for an identity table."""
-        raise NotImplementedError(f"{self.key} does not publish identity table replacements")
+        raise NotImplementedError(f"{self.spec.key} does not publish identity table replacements")
 
     def existing_table_format(self, conn: Connection, target: str) -> TableFormat:
         """Read a table's format, or use the sole format supported by this dialect."""
-        return self.table_format
+        return self.spec.table_format
 
     def row_id_generated(self, conn: Connection, target: str) -> bool:
         """Whether inserts into this existing table omit ROW_ID and let its default fill it."""
         return self.surrogate_key != "computed"
-
-    @property
-    def key(self) -> str:
-        """This dialect's name, such as ``databricks_iceberg``."""
-        return self.spec.key
-
-    @property
-    def display_name(self) -> str:
-        """The ``Warehouse.Name`` for this database, such as ``Databricks``."""
-        return self.spec.display_name
-
-    @property
-    def sqlalchemy_name(self) -> str:
-        """SQLAlchemy's name for this database, as a connected engine reports it."""
-        return self.spec.sqlalchemy_name
-
-    @property
-    def table_format(self) -> TableFormat:
-        """The table format this dialect writes."""
-        return self.spec.table_format
-
-    @property
-    def per_task_format(self) -> bool:
-        """Whether a task may choose another table format than the warehouse's own."""
-        return self.spec.per_task_format
-
-    @property
-    def auth_fields(self) -> AuthFields:
-        """The profile fields each auth mode needs; its keys are the modes accepted."""
-        return self.spec.auth_fields
-
-    @property
-    def auth_modes(self) -> frozenset[str]:
-        """The auth modes this warehouse accepts."""
-        return self.spec.auth_modes
 
     # Connecting
 
     def check_profile(self, profile: ConnectionProfile) -> None:
         """Raise ``ConfigurationError`` unless ``profile`` can authenticate here."""
         mode = profile.auth_mode
-        label = self.display_name or self.key
-        if mode not in self.auth_fields:
+        label = self.spec.display_name or self.spec.key
+        if mode not in self.spec.auth_fields:
             raise ConfigurationError(
                 f"auth_mode {mode!r} is not available for a {label} warehouse — use one of "
-                f"{sorted(self.auth_modes)}"
+                f"{sorted(self.spec.auth_modes)}"
             )
-        for name in self.auth_fields[mode]:
+        for name in self.spec.auth_fields[mode]:
             if name in {"user", "secret"} or profile.extra.get(name):
                 continue
             noun = "path" if name.endswith("_file") else "value"
@@ -222,8 +187,8 @@ class WarehouseDialect:
                 connect_args[passphrase_arg] = secret
             return Presented(username=user, connect_args=connect_args)
         raise ConfigurationError(
-            f"auth_mode {mode!r} is not available for a {self.display_name or self.key} "
-            f"warehouse — use one of {sorted(self.auth_modes)}"
+            f"auth_mode {mode!r} is not available for a {self.spec.display_name or self.spec.key} "
+            f"warehouse — use one of {sorted(self.spec.auth_modes)}"
         )
 
     def present_bearer(self, token: str, user: str | None) -> Presented:
@@ -235,7 +200,7 @@ class WarehouseDialect:
 
     def _bearer_user_message(self, mode: str) -> str:
         return (
-            f"auth_mode='{mode}' needs a `user` for dialect {self.key!r} — it is sent in the "
+            f"auth_mode='{mode}' needs a `user` for dialect {self.spec.key!r} — it is sent in the "
             "username position alongside the token"
         )
 
@@ -248,9 +213,18 @@ class WarehouseDialect:
             profile.extra.get("scope"),
         )
 
+    session_sql: str | None = None
+    """Setup SQL for each new warehouse connection."""
+
     def on_connect(self, dbapi_connection: Any, profile: ConnectionProfile, secret: str) -> None:
-        """Run the setup a new connection needs before any statement; none by default."""
-        return None
+        """Apply this dialect's session settings, closing its setup cursor on failure too."""
+        if self.session_sql is None:
+            return
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute(self.session_sql)
+        finally:
+            cursor.close()
 
     def load_table_metadata(self, conn: Connection, schema: str, table: str) -> None:
         """Make information_schema.columns describe ``schema.table``; it already does by default."""
@@ -300,14 +274,14 @@ class WarehouseDialect:
         existing: bool,
     ) -> str:
         """Render a single atomic replacement, or refuse when the dialect cannot do it."""
-        raise HandlerError(f"{self.display_name} cannot atomically replace {target}")
+        raise HandlerError(f"{self.spec.display_name} cannot atomically replace {target}")
 
     overwrite_uses_ctas: bool = False
     """Whether an overwrite publishes a replacement snapshot with CTAS."""
 
     def overwrite_statement(self, target: str, columns: str, select_sql: str) -> str:
         """Replace rows without a separate truncate, where the warehouse supports it."""
-        raise HandlerError(f"{self.display_name} cannot atomically overwrite {target}")
+        raise HandlerError(f"{self.spec.display_name} cannot atomically overwrite {target}")
 
     def mirror_table_ddl(self, name: str, column_ddl: str, cloning: CloningConfig) -> str | None:
         """Return the DDL for a cloning mirror, or ``None`` for a plain CREATE TABLE."""
@@ -330,8 +304,9 @@ class WarehouseDialect:
             return None
         accepted = ", ".join(sorted(self.storage_parameters)) or "none"
         return (
-            f"{', '.join(extra)} does not apply to {self.display_name} with the "
-            f"{self.table_format} table format, and would be ignored; storage parameters here: "
+            f"{', '.join(extra)} does not apply to {self.spec.display_name} with the "
+            f"{self.spec.table_format} table format, and would be ignored; "
+            "storage parameters here: "
             f"{accepted}"
         )
 
@@ -342,6 +317,26 @@ class WarehouseDialect:
     def alter_table_keyword(self) -> str:
         """Return the keyword that alters a table this dialect created."""
         return "ALTER TABLE"
+
+    def column_metadata_query(
+        self, conn: Connection, table: str, columns: str
+    ) -> tuple[str, dict[str, str | None]]:
+        """Read information-schema columns for a bare, schema- or catalog-qualified table."""
+        parts = table.split(".")
+        name = parts[-1]
+        schema = parts[-2] if len(parts) >= 2 else None
+        catalog = parts[0] if len(parts) == 3 else None
+        where = "lower(table_name) = lower(:table)"
+        if schema is not None:
+            self.load_table_metadata(conn, schema, name)
+            where += " AND lower(table_schema) = lower(:schema)"
+        if catalog is not None:
+            where += " AND lower(table_catalog) = lower(:catalog)"
+        return (
+            f"SELECT {columns} FROM information_schema.columns "
+            f"WHERE {where} ORDER BY ordinal_position",
+            {"table": name, "schema": schema, "catalog": catalog},
+        )
 
     def full_column_types(self, conn: Connection, table: str) -> dict[str, str]:
         """Read reusable DDL types, including nested types and declared sizes."""
@@ -470,7 +465,7 @@ class WarehouseDialect:
 
     def timestamp_text(self, value: str, kind: str) -> str:
         """Render a UTC timestamp with exactly six fractional digits."""
-        raise NotImplementedError(f"{self.key} does not declare timestamp canonicalization")
+        raise NotImplementedError(f"{self.spec.key} does not declare timestamp canonicalization")
 
     update_uses_merge: bool = False
     """Whether a joined update needs MERGE rather than UPDATE ... FROM."""

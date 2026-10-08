@@ -55,7 +55,7 @@ def scalar(engine, sql):
 @pytest.mark.warehouse_duckdb
 def test_a_duckdb_file_warehouse(tmp_path):
     config = warehouse_config(f"jdbc:duckdb:{tmp_path / 'warehouse.duckdb'}")
-    assert warehouse_dialect(config).key == "duckdb"
+    assert warehouse_dialect(config).spec.key == "duckdb"
     with open_warehouse(config) as engine, engine.begin() as conn:
         conn.execute(text("CREATE SCHEMA staging"))
         conn.execute(text("CREATE TABLE staging.t AS SELECT 42 AS answer"))
@@ -149,7 +149,7 @@ def trino_config():
 
 @pytest.mark.warehouse_trino_iceberg
 def test_trino_writes_and_reads_an_iceberg_table(trino_config):
-    assert warehouse_dialect(trino_config).key == "trino_iceberg"
+    assert warehouse_dialect(trino_config).spec.key == "trino_iceberg"
     table = f"iceberg.etl_craft_test.t_{uuid.uuid4().hex[:8]}"
     engine = build_warehouse_engine(trino_config)
     try:
@@ -248,7 +248,7 @@ def round_trip(config):
 @pytest.mark.warehouse_duckdb_iceberg
 def test_duckdb_attaches_the_iceberg_catalog():
     config = duckdb_iceberg_config()
-    assert warehouse_dialect(config).key == "duckdb_iceberg"
+    assert warehouse_dialect(config).spec.key == "duckdb_iceberg"
     round_trip(config)
 
 

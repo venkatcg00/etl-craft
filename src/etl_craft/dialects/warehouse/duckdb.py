@@ -2,16 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
-
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from etl_craft.config.auth import warehouse_by_key
 from etl_craft.dialects.warehouse.base import ReplaceStrategy, SurrogateKey, WarehouseDialect
-
-if TYPE_CHECKING:
-    from etl_craft.config import ConnectionProfile
 
 
 class DuckDBWarehouse(WarehouseDialect):
@@ -34,13 +29,7 @@ class DuckDBWarehouse(WarehouseDialect):
         )
         return f"STRFTIME({utc}, '%Y-%m-%dT%H:%M:%S.%f')"
 
-    def on_connect(self, dbapi_connection: Any, profile: ConnectionProfile, secret: str) -> None:
-        """Pin every new warehouse session to UTC."""
-        cursor = dbapi_connection.cursor()
-        try:
-            cursor.execute("SET TimeZone = 'UTC'")
-        finally:
-            cursor.close()
+    session_sql = "SET TimeZone = 'UTC'"
 
     def replacement_comment(self, conn: Connection, target: str) -> str | None:
         """Read the native table's comment before replacing its definition."""
@@ -56,20 +45,6 @@ class DuckDBWarehouse(WarehouseDialect):
 
     def full_column_types(self, conn: Connection, table: str) -> dict[str, str]:
         """DuckDB's information schema retains precision and complete nested types."""
-        parts = table.split(".")
-        name = parts[-1]
-        schema = parts[-2] if len(parts) >= 2 else None
-        catalog = parts[0] if len(parts) == 3 else None
-        if schema is not None:
-            self.load_table_metadata(conn, schema, name)
-        rows = conn.execute(
-            text(
-                "SELECT column_name, data_type FROM information_schema.columns "
-                "WHERE lower(table_name) = lower(:table) "
-                "AND (:schema IS NULL OR lower(table_schema) = lower(:schema)) "
-                "AND (:catalog IS NULL OR lower(table_catalog) = lower(:catalog)) "
-                "ORDER BY ordinal_position"
-            ),
-            {"table": name, "schema": schema, "catalog": catalog},
-        ).all()
+        query, parameters = self.column_metadata_query(conn, table, "column_name, data_type")
+        rows = conn.execute(text(query), parameters).all()
         return {str(row[0]).lower(): str(row[1]) for row in rows}

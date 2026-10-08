@@ -14,6 +14,8 @@ MACROS = {
     "@daily": "0 0 * * *",
     "@weekly": "0 0 * * SUN",
     "@monthly": "0 0 1 * *",
+    "@yearly": "0 0 1 1 *",
+    "@annually": "0 0 1 1 *",
 }
 
 

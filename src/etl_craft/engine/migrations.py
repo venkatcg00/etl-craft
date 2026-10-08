@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,6 +32,8 @@ logger = logging.getLogger(__name__)
 MIGRATIONS_DIR_ENV_VAR = "ETL_CRAFT_MIGRATIONS_DIR"
 ENGINE = "ENGINE"
 PROJECT = "PROJECT"
+MARKERS = frozenset({"rebuild-metadata", "check-metadata-codes"})
+PACKAGED_MARKERS = Path(__file__).parents[1] / "dialects/engine/migration-markers.toml"
 
 
 @dataclass(frozen=True)
@@ -41,6 +44,7 @@ class MigrationFile:
     path: Path
     sql: str
     checksum: str
+    markers: frozenset[str] = frozenset()
 
     @property
     def version(self) -> str:
@@ -77,6 +81,7 @@ def resolve_project_migrations_dir(
 
 def read_stream(source: str, directory: Path) -> Stream:
     """Read every ``*.sql`` file in ``directory``, in filename order."""
+    defaults = tomllib.loads(PACKAGED_MARKERS.read_text()) if source == ENGINE else {}
     files = []
     for path in sorted(p for p in directory.glob("*.sql") if p.is_file()):
         try:
@@ -84,7 +89,18 @@ def read_stream(source: str, directory: Path) -> Stream:
             sql = payload.decode("utf-8")
         except (OSError, UnicodeDecodeError) as error:
             raise MigrationError(f"could not read migration {str(path)!r}: {error}") from error
-        files.append(MigrationFile(source, path, sql, sha256_hex(payload)))
+        markers = frozenset(
+            marker.strip() for marker in re.findall(r"^-- etl-craft: (.*)$", sql, re.MULTILINE)
+        )
+        markers |= {marker for marker, names in defaults.items() if path.name in names}
+        if markers and source != ENGINE:
+            raise MigrationError(f"{path.name}: etl-craft migration markers are ENGINE-only")
+        if markers - MARKERS:
+            raise MigrationError(
+                f"{path.name}: unknown migration markers {sorted(markers - MARKERS)}; "
+                f"use {sorted(MARKERS)}"
+            )
+        files.append(MigrationFile(source, path, sql, sha256_hex(payload), markers))
     return Stream(source, directory, tuple(files))
 
 
@@ -162,30 +178,18 @@ def _apply(engine: Engine, migration: MigrationFile) -> None:
         with dialect.migration_transaction(
             engine,
             rebuild_metadata=migration.sql
-            if migration.source == ENGINE
-            and migration.version
-            in (
-                "0005_metadata_codes.sql",
-                "0006_run_backfill_constraint.sql",
-                "0007_identity.sql",
-                "0008_actors_and_audit_guards.sql",
-                "0015_schedules.sql",
-            )
+            if migration.source == ENGINE and "rebuild-metadata" in migration.markers
             else None,
         ) as conn:
             statements = dialect.split_statements(migration.sql)
-            if dialect.name == "sqlite":
-                from etl_craft.dialects.engine.sqlite.audit import refresh_metadata_triggers
-            else:
-                from etl_craft.dialects.engine.postgres.audit import refresh_metadata_triggers
             if migration.source == PROJECT:
                 for sql in statements:
                     run_script(conn, [sql])
                     if re.search(r"\b(?:ALTER|CREATE)\s+TABLE\b", sql, re.IGNORECASE):
-                        refresh_metadata_triggers(conn)
+                        dialect.refresh_metadata_triggers(conn)
             else:
                 run_script(conn, statements)
-                refresh_metadata_triggers(conn)
+                dialect.refresh_metadata_triggers(conn)
             _record(conn, migration)
     except Exception as error:
         raise MigrationError(f"{migration.version} failed to apply: {error}") from error
@@ -254,7 +258,7 @@ def apply_pending_migrations(
         verify_ledger(ledger, streams)
         if any(
             file.source == ENGINE
-            and file.version == "0005_metadata_codes.sql"
+            and "check-metadata-codes" in file.markers
             and (file.source, file.version) not in ledger
             for stream in streams
             for file in stream.files

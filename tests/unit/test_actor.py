@@ -11,6 +11,7 @@ from etl_craft.core.actor import (
     resolve_actor,
 )
 from etl_craft.core.errors import ConfigurationError
+from etl_craft.core.text import public_url_query
 from etl_craft.engine.audit import mask_arguments
 
 pytestmark = pytest.mark.unit
@@ -69,3 +70,12 @@ def test_missing_local_user_names_the_actor_remedy(monkeypatch):
     monkeypatch.setattr("getpass.getuser", missing_user)
     with pytest.raises(ConfigurationError, match="set ETL_CRAFT_ACTOR"):
         resolve_actor()
+
+
+@pytest.mark.parametrize("key", ["api_key", "pwd", "passwd", "private_key", "credential", "TOKEN"])
+def test_audit_and_logged_urls_share_credential_labels(key):
+    values = {key: "secret", "sslmode": "require"}
+    assert public_url_query(values) == {"sslmode": "require"}
+    assert mask_arguments({"nested": values}) == {
+        "nested": {key: "[REDACTED]", "sslmode": "require"}
+    }

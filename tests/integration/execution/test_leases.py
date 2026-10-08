@@ -15,6 +15,7 @@ from sqlalchemy import text
 
 from etl_craft.core.actor import current_actor
 from etl_craft.core.errors import RunStateError, StaleTransitionError
+from etl_craft.core.time import as_utc
 from etl_craft.engine import runlog
 from etl_craft.engine import transitions as tr
 from etl_craft.execution import leases
@@ -365,10 +366,10 @@ def test_run_heartbeat_renews_its_exact_owner(engine_db, monkeypatch):
                 after, owner = conn.execute(
                     text("SELECT LEASE_EXPIRES_AT, OWNER_ID FROM AUD_PIPELINES_RUN_LOG")
                 ).one()
-            if leases.as_utc(after) > leases.as_utc(before):
+            if as_utc(after) > as_utc(before):
                 break
             time.sleep(0.02)
-        assert leases.as_utc(after) > leases.as_utc(before)
+        assert as_utc(after) > as_utc(before)
         assert owner == leases.run_owner(run)
         assert not leases.run_cancel().is_set()
 

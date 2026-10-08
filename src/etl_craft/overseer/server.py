@@ -11,18 +11,17 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
-from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
 from etl_craft.core.enums import Mode
 from etl_craft.core.errors import EngineDbError, EtlCraftError, RunRefusedError
+from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import overseers
 from etl_craft.engine.repository.dependencies import PipelineGraphData, fetch_pipeline_graph
-from etl_craft.engine.runlog import RunSelector
+from etl_craft.engine.runlog import RunSelector, fetch_pipeline_run_status
 from etl_craft.execution import pipeline
-from etl_craft.execution.leases import as_utc
 from etl_craft.execution.reconcile import reconcile
 from etl_craft.overseer.leadership import leadership
 from etl_craft.overseer.schedules import Schedules
@@ -132,13 +131,13 @@ def serve(ctx: OperationContext, stop: threading.Event) -> None:
                         if run.pipeline_run_id in jobs:
                             continue
                         with ctx.engine.connect() as conn:
-                            owner = conn.execute(
-                                text(
-                                    "SELECT OWNER_ID AS owner_id FROM AUD_PIPELINES_RUN_LOG "
-                                    "WHERE PIPELINE_RUN_ID=:id"
-                                ),
-                                {"id": run.pipeline_run_id},
-                            ).scalar_one()
+                            owner = (
+                                conn.execute(
+                                    statement(conn, "run_lease"), {"row_id": run.pipeline_run_id}
+                                )
+                                .one()
+                                .owner_id
+                            )
                         if owner is not None:
                             continue
                         cancel = threading.Event()
@@ -163,13 +162,7 @@ def serve(ctx: OperationContext, stop: threading.Event) -> None:
                 # Queued admissions have no child or lease to drain.
                 for run_id, (steps, context, _) in list(jobs.items()):
                     with ctx.engine.connect() as conn:
-                        status = conn.execute(
-                            text(
-                                "SELECT STATUS AS status FROM AUD_PIPELINES_RUN_LOG "
-                                "WHERE PIPELINE_RUN_ID=:id"
-                            ),
-                            {"id": run_id},
-                        ).scalar_one()
+                        status = fetch_pipeline_run_status(conn, run_id)
                     if status == "QUEUED":
                         context.run(steps.close)
                         del jobs[run_id]

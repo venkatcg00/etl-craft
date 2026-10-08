@@ -51,7 +51,7 @@ WHERE PIPELINE_CODE = 'SALES';
 Run `etl-craft validate` after editing metadata. `RUN_SCHEDULE` accepts five fields (minute,
 hour, day of month, month, weekday), lists, ranges and positive steps; month names `JAN`–`DEC`
 and weekdays `SUN`–`SAT` are supported. Sunday is 0 or 7. The macros are `@hourly`, `@daily`,
-`@weekly` and `@monthly`. Restricted day-of-month and weekday fields match either day,
+`@weekly`, `@monthly`, `@yearly` and `@annually`. Restricted day-of-month and weekday fields match either day,
 following [cron's day-field rule](https://man7.org/linux/man-pages/man5/crontab.5.html).
 A NULL schedule creates no automatic runs.
 

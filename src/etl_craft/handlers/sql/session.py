@@ -162,22 +162,10 @@ class Session:
         ``name`` is ``catalog.schema.table``, ``schema.table`` or a bare temporary scratch table
         name, matched by name alone: a scratch name carries a token no other table has.
         """
-        parts = name.split(".")
-        table = parts[-1]
-        schema = parts[-2] if len(parts) >= 2 else None
-        catalog = parts[0] if len(parts) == 3 else None
-        where = "lower(table_name) = lower(:table)"
-        if schema is not None:
-            self.dialect.load_table_metadata(self.conn, schema, table)
-            where += " AND lower(table_schema) = lower(:schema)"
-        if catalog is not None:
-            where += " AND lower(table_catalog) = lower(:catalog)"
-        rows = self.run(
-            "SELECT column_name, data_type FROM information_schema.columns "
-            f"WHERE {where} ORDER BY ordinal_position",
-            {"table": table, "schema": schema, "catalog": catalog},
-            step=f"read the columns of {name}",
-        ).all()
+        query, parameters = self.dialect.column_metadata_query(
+            self.conn, name, "column_name, data_type"
+        )
+        rows = self.run(query, parameters, step=f"read the columns of {name}").all()
         return [(str(row[0]), str(row[1])) for row in rows]
 
     def column_types(self, name: str) -> dict[str, str]:
@@ -194,22 +182,10 @@ class Session:
         ``name`` is ``catalog.schema.table``, ``schema.table`` or a bare temporary scratch table
         name, matched by name alone: a scratch name carries a token no other table has.
         """
-        parts = name.split(".")
-        table = parts[-1]
-        schema = parts[-2] if len(parts) >= 2 else None
-        catalog = parts[0] if len(parts) == 3 else None
-        where = "lower(table_name) = lower(:table)"
-        if schema is not None:
-            self.dialect.load_table_metadata(self.conn, schema, table)
-            where += " AND lower(table_schema) = lower(:schema)"
-        if catalog is not None:
-            where += " AND lower(table_catalog) = lower(:catalog)"
-        rows = self.run(
-            f"SELECT {self.dialect.hash_metadata_columns} FROM information_schema.columns "
-            f"WHERE {where} ORDER BY ordinal_position",
-            {"table": table, "schema": schema, "catalog": catalog},
-            step=f"read the columns of {name}",
-        ).all()
+        query, parameters = self.dialect.column_metadata_query(
+            self.conn, name, self.dialect.hash_metadata_columns
+        )
+        rows = self.run(query, parameters, step=f"read the columns of {name}").all()
         types = {}
         for row in rows:
             kind = row[1].upper()
@@ -282,10 +258,10 @@ class Session:
             existing = self.dialect.existing_table_format(self.conn, self.target)
         except SQLAlchemyError as error:
             raise self._failure("read the existing table format", error) from error
-        if existing != self.dialect.table_format:
+        if existing != self.dialect.spec.table_format:
             raise HandlerError(
                 f"{self.action} {self.target}: existing table format is {existing}, "
-                f"but this task resolves to {self.dialect.table_format}; set TABLE_FORMAT="
+                f"but this task resolves to {self.dialect.spec.table_format}; set TABLE_FORMAT="
                 f"{existing} or use a different TARGET_OBJECT. Migrate formats explicitly"
             )
 
