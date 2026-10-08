@@ -16,13 +16,6 @@ from etl_craft.execution.runner import ChildOptions
 
 
 @dataclass(frozen=True)
-class PipelineRef:
-    """A pipeline code in the context's Engine DB."""
-
-    pipeline_code: str
-
-
-@dataclass(frozen=True)
 class OperationContext:
     """Resources owned by the caller; operations never dispose the Engine DB.
 

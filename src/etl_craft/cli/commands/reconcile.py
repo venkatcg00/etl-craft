@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import argparse
 
-from etl_craft.cli.commands import Command
-from etl_craft.cli.commands.common import command_context, configure_output
+from etl_craft.cli.commands.common import Command, command_context, configure_output
 from etl_craft.cli.output import Output
 from etl_craft.core.errors import ExitCode, UsageError
-from etl_craft.services.operations import PipelineRef, runs
+from etl_craft.services.operations import runs
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -23,7 +22,7 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     with command_context(args) as ctx:
         report = runs.reconcile_runs(
             ctx,
-            None if args.pipeline_code is None else PipelineRef(args.pipeline_code),
+            args.pipeline_code,
             args.task_code,
         )
     if args.output_format == "json":

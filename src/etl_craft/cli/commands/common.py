@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 
 from sqlalchemy.engine import Engine
 
+from etl_craft.cli.output import Output
 from etl_craft.config import ConnectorConfig, load_config, resolve_config_path
 from etl_craft.core.actor import current_actor
 from etl_craft.engine.connection import check_reachable, engine_db
@@ -16,6 +18,22 @@ from etl_craft.execution.runner import ChildOptions
 from etl_craft.services.operations import OperationContext
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class Command:
+    """One subcommand: its name, its one-line help, its options and what it does.
+
+    ``configure`` adds the command's own options to its parser. ``run`` receives the parsed
+    arguments, including the global ``config``, ``log_level`` and ``log_format``, and returns
+    the exit code. It reports failures by raising an ``EtlCraftError``, which the command line
+    turns into an ``error:`` line and that error's exit code.
+    """
+
+    name: str
+    help: str
+    configure: Callable[[argparse.ArgumentParser], None]
+    run: Callable[[argparse.Namespace, Output], int]
 
 
 def load_command_config(args: argparse.Namespace) -> ConnectorConfig:

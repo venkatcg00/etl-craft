@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import TextIO
 
 from etl_craft.services.operations import to_json
+from etl_craft.services.operations.models import BackfillView, OperationResult, ReconciliationView
 
 
 class Output:
@@ -43,6 +44,22 @@ class Output:
     def document(self, result: object) -> None:
         """Write the same JSON document returned by the service serializer."""
         self.line(json.dumps(to_json(result), ensure_ascii=False, allow_nan=False))
+
+    def result(
+        self,
+        done: object,
+        output_format: str,
+        *,
+        text: Callable[[], None] | None = None,
+    ) -> None:
+        """Write JSON or render the command's text, defaulting to its outcome message."""
+        if output_format == "json":
+            self.document(done)
+        elif text is not None:
+            text()
+        else:
+            assert isinstance(done, (OperationResult, BackfillView, ReconciliationView))
+            self.line(done.message)
 
     def rows(self, rows: Iterable[Iterable[object]]) -> None:
         """Write one tab-separated line per row; ``None`` becomes an empty field."""

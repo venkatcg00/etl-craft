@@ -13,6 +13,11 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- Service operations take pipeline codes directly and build inspection documents from stored rows
+  without intermediate summary models or duplicate reads. Run and mark calls share their audit
+  dispatch; pause and resume share one service and CLI implementation. JSON schemas and CLI
+  text remain unchanged. Python callers use `set_pause(..., verb="pause")` or `verb="resume"`.
+
 - Removed unused internal helpers and lifecycle shortcuts. Tests now use the production
   attempt queue/claim/finish path and atomic dependency consumption; test scene setup stays
   in fixtures. No configuration, schema or command behavior changes.

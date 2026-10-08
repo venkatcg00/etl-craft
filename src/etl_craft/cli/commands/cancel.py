@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import argparse
 
-from etl_craft.cli.commands import Command
 from etl_craft.cli.commands.common import (
+    Command,
     command_context,
     configure_output,
     configure_run_selector,
@@ -13,7 +13,7 @@ from etl_craft.cli.commands.common import (
 from etl_craft.cli.output import Output
 from etl_craft.core.errors import ExitCode
 from etl_craft.engine.runlog import RunSelector
-from etl_craft.services.operations import PipelineRef, runs
+from etl_craft.services.operations import runs
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -27,14 +27,11 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     with command_context(args) as ctx:
         done = runs.cancel_run(
             ctx,
-            PipelineRef(args.pipeline_code),
+            args.pipeline_code,
             args.reason,
             selector=RunSelector(args.run_id, args.run_key),
         )
-    if args.output_format == "json":
-        out.document(done)
-    else:
-        out.line(done.message)
+    out.result(done, args.output_format)
     return ExitCode.SUCCESS
 
 

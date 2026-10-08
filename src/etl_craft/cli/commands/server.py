@@ -7,8 +7,7 @@ import signal
 import threading
 from types import FrameType
 
-from etl_craft.cli.commands import Command
-from etl_craft.cli.commands.common import command_context
+from etl_craft.cli.commands.common import Command, command_context
 from etl_craft.cli.output import Output
 from etl_craft.core.errors import ExitCode
 from etl_craft.overseer.server import serve

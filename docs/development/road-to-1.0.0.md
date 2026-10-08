@@ -100,7 +100,8 @@ item's text, or work done early under another item.
 | S4.C Schedules | Done | #115 | UTC tick identities, timezone dates, bounded catch-up and overlap policy |
 | S4.D Ready-set dispatch | Done | #116 | Shared cooperative scheduling and durable gate waits without worker slots |
 | S4.I.1 Delete code only tests call | Done | #118 | Removed unused helpers, lifecycle shortcuts and gate consumption wrappers |
-| S4.I.2–4 | Not started | | Complete before S4.E |
+| S4.I.2 Service operations surface | Done | #119 | Direct views, pipeline codes and one audit path per request |
+| S4.I.3–4 | Not started | | Complete before S4.E |
 | S4.E and later | Not started | | |
 
 ### Handover notes
