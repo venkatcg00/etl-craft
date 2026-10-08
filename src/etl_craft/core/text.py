@@ -19,21 +19,30 @@ from etl_craft.core.errors import ConfigurationError, HandlerError
 
 # JDBC URLs
 
-URL_SECRET_KEYS = frozenset(
-    {"password", "pwd", "passwd", "token", "access_token", "secret", "private_key_file_pwd"}
+SECRET_KEYS = frozenset(
+    {
+        "password",
+        "pwd",
+        "passwd",
+        "token",
+        "access_token",
+        "secret",
+        "private_key_file_pwd",
+        "api_key",
+        "credential",
+        "private_key",
+    }
 )
+
+
+def is_secret_name(name: str) -> bool:
+    """Whether a name contains a credential label that must not expose its value."""
+    return any(word in name.lower() for word in SECRET_KEYS)
 
 
 def public_url_query(query: dict[str, str]) -> dict[str, str]:
     """Keep driver settings while omitting credential-like keys from logged URLs."""
-    return {
-        key: value
-        for key, value in query.items()
-        if key.lower() not in URL_SECRET_KEYS
-        and not any(
-            part in key.lower() for part in ("password", "token", "secret", "api_key", "credential")
-        )
-    }
+    return {key: value for key, value in query.items() if not is_secret_name(key)}
 
 
 _JDBC_SCHEME = re.compile(r"^jdbc:(?P<scheme>[a-zA-Z0-9_+-]+):")
@@ -102,12 +111,12 @@ def parse_jdbc_url(jdbc_url: str, *, default_port: int | None = None) -> JdbcUrl
 
 # Secrets files and environment variable names
 
-_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_SAFE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def is_env_name(name: str) -> bool:
     """Whether ``name`` can be an environment variable name."""
-    return bool(_ENV_NAME.match(name))
+    return bool(_SAFE_IDENTIFIER.match(name))
 
 
 def parse_env_file(contents: str) -> dict[str, str]:
@@ -165,10 +174,10 @@ def _sql_parts(sql_text: str, *, placeholders: bool = False) -> Iterator[tuple[s
             end = _end_of_string_literal(sql_text, i, ch)
         elif ch == "$" and (tag := _dollar_tag_at(sql_text, i)) is not None:
             close = sql_text.find(tag, i + len(tag))
-            match = _TOKEN.match(sql_text, i) if placeholders and tag == "$$" else None
+            match = TOKEN.match(sql_text, i) if placeholders and tag == "$$" else None
             token = match is not None and (
                 close == -1
-                or (close != match.end() and _TOKEN.match(sql_text, close) is not None)
+                or (close != match.end() and TOKEN.match(sql_text, close) is not None)
                 or _delimiter_in_quote_or_comment(sql_text, match.end(), close)
                 or sql_text.startswith("$$$$", close)
             )
@@ -276,7 +285,7 @@ RUN_DATE_TOKEN = "$$run_date"
 LINEAGE_RUN_DATE = date(1970, 1, 1)
 """The ``$$run_date`` lineage and validation read a task's SELECT with: fixed, so a task's
 lineage does not look changed every day."""
-_TOKEN = re.compile(r"\$\$([A-Za-z_][A-Za-z0-9_]*)")
+TOKEN = re.compile(r"\$\$([A-Za-z_][A-Za-z0-9_]*)")
 
 
 def substitute_task_tokens(
@@ -316,7 +325,7 @@ def substitute_task_tokens(
         match.group(1)
         for part, protected in parts
         if not protected
-        for match in _TOKEN.finditer(part)
+        for match in TOKEN.finditer(part)
     }
     known = {
         PIPELINE_ID_TOKEN[2:]: pipeline_id_substitution,
@@ -359,7 +368,7 @@ def substitute_task_tokens(
         RUN_DATE_TOKEN[2:]: f"DATE '{run_date.isoformat()}'",
     }
     return "".join(
-        part if protected else _TOKEN.sub(lambda match: replacements[match.group(1)], part)
+        part if protected else TOKEN.sub(lambda match: replacements[match.group(1)], part)
         for part, protected in parts
     )
 
@@ -423,7 +432,6 @@ def is_metadata_code(code: str) -> bool:
     return re.fullmatch(METADATA_CODE_PATTERN, code) is not None
 
 
-_SAFE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SAFE_OBJECT_REF = re.compile(
     r"^([A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$"
 )

@@ -30,7 +30,6 @@ this one watches through a ``FAILURE`` dependency). Any other ``$$`` token fails
 from __future__ import annotations
 
 import html
-import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -39,6 +38,7 @@ from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.core.enums import EmailFlavour, Handler, RunStatus, SlaStatus
 from etl_craft.core.errors import HandlerError, MetadataError
+from etl_craft.core.text import TOKEN
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.pipelines import fetch_pipeline_detail, resolve_pipeline_id
 from etl_craft.engine.repository.runs import (
@@ -89,7 +89,6 @@ PARAMETERS = frozenset(
     }
 )
 """The task parameters an alert task reads."""
-_TOKEN = re.compile(r"\$\$([A-Za-z_][A-Za-z0-9_]*)")
 
 
 def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
@@ -208,13 +207,13 @@ def run_outcome(statuses: Sequence[TaskStatus], *, exclude_task_id: int, sla_mis
 
 def substitute(text: str, values: Mapping[str, str], setting: str) -> str:
     """Replace the ``$$`` tokens in ``text``; ``HandlerError`` naming an unknown one."""
-    unknown = sorted({m.group(1) for m in _TOKEN.finditer(text)} - set(values))
+    unknown = sorted({m.group(1) for m in TOKEN.finditer(text)} - set(values))
     if unknown:
         raise HandlerError(
             f"{setting} uses unknown token(s) {', '.join('$$' + t for t in unknown)}; the "
             f"tokens are {', '.join('$$' + t for t in TOKENS)}"
         )
-    return _TOKEN.sub(lambda m: values[m.group(1)], text)
+    return TOKEN.sub(lambda m: values[m.group(1)], text)
 
 
 def sla_so_far(conn: Connection, context: TaskContext) -> SlaResult | None:

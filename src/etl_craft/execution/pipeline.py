@@ -57,6 +57,7 @@ from etl_craft.core.errors import RunRefusedError, RunStateError, StaleTransitio
 from etl_craft.core.faults import fault_point
 from etl_craft.core.graph import DependencyGraph, TaskRunState, build_graph
 from etl_craft.core.log import log_context
+from etl_craft.core.time import as_utc
 from etl_craft.engine import runlog, transitions
 from etl_craft.engine.repository import trackers
 from etl_craft.engine.repository.dependencies import PipelineGraphData, fetch_pipeline_graph
@@ -1262,8 +1263,7 @@ class _SlaWatch:
             return self
         with self.engine.connect() as conn:
             start = runlog.fetch_run_sla(conn, self.pipeline_run_id).start_date
-        if start.tzinfo is None:
-            start = start.replace(tzinfo=UTC)
+        start = as_utc(start)
         self.thread = threading.Thread(
             target=contextvars.copy_context().run,
             args=(self._watch, start, hours),

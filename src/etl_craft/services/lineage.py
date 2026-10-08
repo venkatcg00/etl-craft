@@ -248,7 +248,7 @@ def dialect_and_catalog(config: ConnectorConfig) -> tuple[str | None, str | None
     """Return the sqlglot dialect and the catalog of the active warehouse; ``None`` without one."""
     if config.warehouse is None:
         return None, None
-    return SQLGLOT_DIALECTS.get(warehouse_dialect(config).key), active_catalog(config)
+    return SQLGLOT_DIALECTS.get(warehouse_dialect(config).spec.key), active_catalog(config)
 
 
 def _edge(stored: StoredEdge, task: str) -> Edge:

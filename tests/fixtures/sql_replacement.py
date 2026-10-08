@@ -65,7 +65,7 @@ def definition(w, target, *, comment=False):
     engine = w.warehouse
     name = w.name(target)
     extra_engine = None
-    if dialect.key == "duckdb_iceberg":
+    if dialect.spec.key == "duckdb_iceberg":
         trino = require("trino")
         extra_engine = create_engine(f"trino://etl@{trino.address}/iceberg/{w.schema}")
         engine = extra_engine
@@ -75,16 +75,16 @@ def definition(w, target, *, comment=False):
             if comment:
                 statement = (
                     f"ALTER ICEBERG TABLE {name} SET COMMENT = 'replacement metadata must survive'"
-                    if dialect.key == "snowflake_iceberg"
+                    if dialect.spec.key == "snowflake_iceberg"
                     else f"COMMENT ON TABLE {name} IS 'replacement metadata must survive'"
                 )
                 conn.execute(text(statement))
-            if dialect.key == "postgres":
+            if dialect.spec.key == "postgres":
                 return conn.execute(
                     text("SELECT obj_description(CAST(:name AS regclass))"),
                     {"name": f"{w.schema}.{target}"},
                 ).scalar_one()
-            if dialect.key == "duckdb":
+            if dialect.spec.key == "duckdb":
                 return conn.execute(
                     text(
                         "SELECT comment FROM duckdb_tables() WHERE schema_name = :schema "
@@ -92,7 +92,7 @@ def definition(w, target, *, comment=False):
                     ),
                     {"schema": w.schema, "table": target},
                 ).scalar_one()
-            if dialect.key.startswith("snowflake"):
+            if dialect.spec.key.startswith("snowflake"):
                 return conn.execute(
                     text("SELECT GET_DDL('TABLE', :name)"), {"name": name}
                 ).scalar_one()

@@ -98,8 +98,8 @@ def upgrade_targets(
         raise HandlerError(f"{target}: no active {action or 'SQL'} task writes this target")
     for key in sorted(targets):
         writers = [writer for writer in contracts[key] if writer[3]]
-        if len({dialect.table_format for _, _, dialect, _ in writers}) > 1:
-            names = ", ".join(f"{label} ({d.table_format})" for _, label, d, _ in writers)
+        if len({dialect.spec.table_format for _, _, dialect, _ in writers}) > 1:
+            names = ", ".join(f"{label} ({d.spec.table_format})" for _, label, d, _ in writers)
             raise HandlerError(
                 f"{key}: active tasks resolve different table formats: {names}; "
                 "fix TABLE_FORMAT before upgrading"

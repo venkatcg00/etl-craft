@@ -852,7 +852,7 @@ def test_docs_site_schedule_and_output(tmp_path):
     assert config.docs_site.output == tmp_path / "site"
     daily = load_config(_write(tmp_path, _minimal(Docs_site={"Schedule": "@daily"})))
     assert daily.docs_site.schedule == "@daily" and daily.docs_site.output is None
-    with pytest.raises(ConfigurationError, match="must be a cron expression of five fields"):
+    with pytest.raises(ConfigurationError, match="must be a valid cron expression"):
         load_config(_write(tmp_path, _minimal(Docs_site={"Schedule": "nightly"})))
     with pytest.raises(ConfigurationError, match="unknown key"):
         load_config(_write(tmp_path, _minimal(Docs_site={"When": "0 2 * * *"})))
@@ -921,3 +921,36 @@ def test_project_timezone_defaults_to_utc_and_must_be_iana(tmp_path):
     raw["Orchestration"]["Timezone"] = "missing/zone"
     with pytest.raises(ConfigurationError, match=r"Orchestration\.Timezone"):
         load_config(_write(tmp_path, raw))
+
+
+@pytest.mark.parametrize("schedule", ["60 * * * *", "0 0 30 FEB *"])
+def test_docs_schedule_uses_the_server_cron_validation(tmp_path, schedule):
+    with pytest.raises(ConfigurationError, match="must be a valid cron expression"):
+        load_config(_write(tmp_path, _minimal(Docs_site={"Schedule": schedule})))
+
+
+@pytest.mark.parametrize("schedule", ["@yearly", "@annually"])
+def test_docs_annual_schedule_macros(tmp_path, schedule):
+    assert (
+        load_config(_write(tmp_path, _minimal(Docs_site={"Schedule": schedule}))).docs_site.schedule
+        == schedule
+    )
+
+
+def test_email_and_orchestration_enum_settings_ignore_case_and_surrounding_spaces(tmp_path):
+    raw = _minimal(
+        Orchestration={
+            "Mode": " LOCAL ",
+            "Email": {
+                "transport": " SMTP ",
+                "tls_mode": " SSL ",
+                "host": "smtp.example.com",
+                "port": 465,
+                "from_address": "etl@example.com",
+            },
+        }
+    )
+    config = load_config(_write(tmp_path, raw))
+    assert config.mode == "local"
+    assert config.email.active.transport == "smtp"
+    assert config.email.active.effective_tls_mode == "ssl"

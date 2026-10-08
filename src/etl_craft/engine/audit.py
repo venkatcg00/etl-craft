@@ -17,6 +17,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.core.actor import Actor, current_actor
+from etl_craft.core.text import is_secret_name
 
 logger = logging.getLogger(__name__)
 
@@ -40,14 +41,13 @@ MUTATING_COMMANDS = frozenset(
         "lineage",
     }
 )
-SENSITIVE = ("password", "secret", "token", "credential", "private_key")
 
 
 def mask_arguments(arguments: Mapping[str, Any]) -> dict[str, Any]:
     """Mask values of sensitive names, including nested arguments, before serialization."""
     return {
         key: "[REDACTED]"
-        if any(word in key.lower() for word in SENSITIVE)
+        if is_secret_name(key)
         else mask_arguments(value)
         if isinstance(value, dict)
         else value

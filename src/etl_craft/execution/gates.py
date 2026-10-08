@@ -41,13 +41,13 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.core.enums import TERMINAL_STATUSES, DependencyType, GatePolicy, RunStatus
 from etl_craft.core.errors import GraphError
+from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import trackers
 from etl_craft.engine.repository.dependencies import (
     fetch_cross_pipeline_task_edges,
     fetch_pipeline_dependency_edges,
 )
-from etl_craft.execution.leases import as_utc
 
 logger = logging.getLogger(__name__)
 
@@ -188,9 +188,7 @@ def _wait_while_running(
     logger.info("%s is running (run %d); waiting for it to finish", label, latest.run_id)
     while not budget.exhausted(clock):
         now = clock.now()
-        start = latest.start_date
-        if start.tzinfo is None:
-            start = start.replace(tzinfo=UTC)
+        start = as_utc(latest.start_date)
         delay = next_look_delay(
             average,
             (now - start).total_seconds(),

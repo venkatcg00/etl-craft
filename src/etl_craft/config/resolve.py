@@ -189,17 +189,7 @@ def resolve_secret(config: ConnectorConfig, profile: ConnectionProfile | EmailPr
 
     Raises ``ConfigurationError`` if the variable is no longer set.
     """
-    var_name = profile.secret_var
-    value = source_values(config.source).get(var_name)
-    if value is None:
-        raise ConfigurationError(
-            f"secret {var_name!r} not found (Secrets.Source_type: {config.source.type})"
-        )
-    if not value.strip():
-        raise ConfigurationError(
-            f"variable {var_name} in {config.source.path or 'the process environment'} is empty"
-        )
-    return value
+    return resolve_named_secret(config, profile.secret_var)
 
 
 def resolve_named_secret(config: ConnectorConfig, name: str) -> str:

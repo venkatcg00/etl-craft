@@ -17,6 +17,7 @@ from etl_craft.core.errors import ConfigurationError, EngineDbError, LockTimeout
 from etl_craft.core.text import JdbcUrl, parse_jdbc_url, public_url_query
 from etl_craft.dialects import credentials
 from etl_craft.dialects.engine.base import EngineDialect
+from etl_craft.dialects.engine.postgres.audit import refresh_metadata_triggers
 
 if TYPE_CHECKING:
     from etl_craft.config import ConnectionProfile, ConnectorConfig
@@ -29,6 +30,10 @@ class PostgresEngineDialect(EngineDialect):
 
     spec = engine_for_jdbc_url("jdbc:postgresql:")
     directory = Path(__file__).parent
+
+    def refresh_metadata_triggers(self, conn: Connection) -> None:
+        """Install this database's metadata capture and write guards."""
+        refresh_metadata_triggers(conn)
 
     def build_engine(
         self, config: ConnectorConfig, profile: ConnectionProfile, **engine_kwargs: Any

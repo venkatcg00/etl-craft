@@ -186,8 +186,8 @@ def test_pipeline_gate_wait_is_persisted_before_admission_and_resumes_after_rest
 def test_persisted_gate_looks_follow_the_average_and_stop_at_the_shared_budget(
     engine_db, wait_seconds, expected_looks
 ):
+    from etl_craft.core.time import as_utc
     from etl_craft.engine.repository.trackers import fetch_latest_pipeline_run
-    from etl_craft.execution.leases import as_utc
 
     db = engine_db
     with db.engine.begin() as conn:

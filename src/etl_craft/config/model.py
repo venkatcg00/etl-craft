@@ -123,7 +123,6 @@ class DocsSiteConfig:
     allowed_ips: tuple[str, ...] = ()
 
 
-EMAIL_TRANSPORTS = ("smtp", "sendmail")
 DEFAULT_SENDMAIL_PATH = "/usr/sbin/sendmail"
 
 

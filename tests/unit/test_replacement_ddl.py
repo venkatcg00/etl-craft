@@ -106,3 +106,52 @@ def test_identity_replacement_refuses_business_column_constraints(dialect):
             "id BIGINT, row_id BIGINT",
             dialect,
         )
+
+
+@pytest.mark.parametrize("collation", ["UTF8_BINARY", "UTF8_LCASE"])
+def test_databricks_identity_replacement_keeps_inherited_column_collations(collation):
+    from etl_craft.dialects.warehouse.replacement import identity_replacement
+
+    create, publish = identity_replacement(
+        f"CREATE TABLE c.s.target (code STRING COLLATE {collation}, "
+        "row_id BIGINT GENERATED ALWAYS AS IDENTITY) USING DELTA "
+        f"DEFAULT COLLATION {collation}",
+        "c.s.target",
+        "c.s.candidate",
+        "code STRING, row_id BIGINT GENERATED ALWAYS AS IDENTITY",
+        "databricks",
+    )
+    assert f"DEFAULT COLLATION {collation}" in create
+    assert "code STRING" in create
+    assert "GENERATED ALWAYS AS IDENTITY" in create
+    assert publish == "CREATE OR REPLACE TABLE c.s.target DEEP CLONE c.s.candidate"
+
+
+@pytest.mark.parametrize(
+    "definition, columns",
+    [
+        (
+            "CREATE TABLE t (code STRING COLLATE UTF8_LCASE) USING DELTA "
+            "DEFAULT COLLATION UTF8_BINARY",
+            "code STRING",
+        ),
+        ("CREATE TABLE t (code STRING COLLATE UTF8_BINARY) USING DELTA", "code STRING"),
+        (
+            "CREATE TABLE t (code STRING COLLATE UTF8_BINARY NOT NULL) USING DELTA "
+            "DEFAULT COLLATION UTF8_BINARY",
+            "code STRING",
+        ),
+        (
+            "CREATE TABLE t (code STRING COLLATE UTF8_BINARY) USING DELTA "
+            "DEFAULT COLLATION UTF8_BINARY",
+            "code STRING COLLATE UTF8_LCASE",
+        ),
+    ],
+)
+def test_databricks_replacement_refuses_distinct_collations_and_other_constraints(
+    definition, columns
+):
+    from etl_craft.dialects.warehouse.replacement import identity_replacement
+
+    with pytest.raises(HandlerError, match=r"column metadata|column collations"):
+        identity_replacement(definition, "t", "candidate", columns, "databricks")

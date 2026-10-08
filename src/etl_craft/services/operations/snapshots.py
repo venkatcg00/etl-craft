@@ -8,11 +8,11 @@ from datetime import datetime
 from sqlalchemy.engine import Connection, RowMapping
 
 from etl_craft.core.errors import RunStateError, UsageError
+from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.pauses import fetch_open_pause
 from etl_craft.engine.repository.pipelines import fetch_pipeline_detail
 from etl_craft.engine.runlog import as_date
-from etl_craft.execution.leases import as_utc
 from etl_craft.services.operations.models import AttemptView, PipelineView, RunView, TaskRunView
 
 

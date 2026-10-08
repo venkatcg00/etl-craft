@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 
 from sqlalchemy.engine import Connection
 
+from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
 from etl_craft.engine.runlog import as_date
 
@@ -264,8 +265,4 @@ def fetch_consumption(conn: Connection) -> list[Consumption]:
 def _seconds(start: datetime | None, end: datetime | None) -> float | None:
     if start is None or end is None:
         return None
-    if start.tzinfo is None:
-        start = start.replace(tzinfo=UTC)
-    if end.tzinfo is None:
-        end = end.replace(tzinfo=UTC)
-    return max((end - start).total_seconds(), 0.0)
+    return max((as_utc(end) - as_utc(start)).total_seconds(), 0.0)

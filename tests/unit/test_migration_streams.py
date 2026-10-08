@@ -79,3 +79,38 @@ def test_verify_ledger_accepts_matching_files(tmp_path):
     (tmp_path / "0001_a.sql").write_bytes(b"SELECT 1;")
     stream = migrations.read_stream("PROJECT", tmp_path)
     migrations.verify_ledger({("PROJECT", "0001_a.sql"): sha256_hex(b"SELECT 1;")}, [stream])
+
+
+@pytest.mark.parametrize(
+    "name, sql",
+    [
+        (
+            "0099_named_without_python.sql",
+            "-- etl-craft: rebuild-metadata\n-- etl-craft: check-metadata-codes\nSELECT 1;",
+        ),
+        ("0005_metadata_codes.sql", "SELECT 1;"),
+    ],
+)
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_engine_markers_preserve_the_original_checksum(tmp_path, name, sql, newline):
+    payload = sql.replace("\n", newline).encode()
+    (tmp_path / name).write_bytes(payload)
+    stream = migrations.read_stream(migrations.ENGINE, tmp_path)
+    (migration,) = stream.files
+    assert migration.markers == {"rebuild-metadata", "check-metadata-codes"}
+    assert migration.checksum == sha256_hex(payload)
+    migrations.verify_ledger({(migrations.ENGINE, name): sha256_hex(payload)}, [stream])
+
+
+@pytest.mark.parametrize(
+    "source, marker, message",
+    [
+        (migrations.ENGINE, "unknown", "unknown migration markers"),
+        (migrations.ENGINE, "bad_marker_1", "unknown migration markers"),
+        (migrations.PROJECT, "rebuild-metadata", "ENGINE-only"),
+    ],
+)
+def test_invalid_migration_markers_are_refused(tmp_path, source, marker, message):
+    (tmp_path / "0099_marked.sql").write_text(f"-- etl-craft: {marker}\nSELECT 1;")
+    with pytest.raises(MigrationError, match=message):
+        migrations.read_stream(source, tmp_path)

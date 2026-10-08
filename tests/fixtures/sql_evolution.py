@@ -18,19 +18,19 @@ def types(w, table):
 def check_evolution(w, target):
     """Add exact types, retain old rows and keys, and refuse type changes before DDL."""
     dialect = warehouse_dialect(w.config)
-    snowflake = dialect.key.startswith("snowflake")
+    snowflake = dialect.spec.key.startswith("snowflake")
     array = (
         "CAST(ARRAY_CONSTRUCT(1, 2) AS ARRAY(INTEGER))"
         if snowflake
         else "ARRAY(1, 2)"
-        if dialect.key.startswith("databricks")
+        if dialect.spec.key.startswith("databricks")
         else "ARRAY[1, 2]"
     )
     timestamp = (
         "TIMESTAMP_NTZ(6)"
         if snowflake
         else "TIMESTAMP"
-        if dialect.key.startswith("databricks")
+        if dialect.spec.key.startswith("databricks")
         else "TIMESTAMP(6)"
     )
     shape = "SELECT CAST(1 AS BIGINT) AS id, CAST('Ann' AS VARCHAR(20)) AS name"
@@ -44,7 +44,7 @@ def check_evolution(w, target):
     w.run(target, SOURCE_SQL=shape, **params)
     before = types(w, target)
     key = w.rows(f"SELECT id, row_id FROM {w.name(target)}")
-    has_arrays = dialect.key != "duckdb_iceberg"
+    has_arrays = dialect.spec.key != "duckdb_iceberg"
     array_column = f", {array} AS numbers" if has_arrays else ""
     new_columns = ["amount", "code", "label", "happened_at"]
     if has_arrays:
@@ -65,11 +65,11 @@ def check_evolution(w, target):
     assert "12" in after["amount"] and "2" in after["amount"]
     if has_arrays:
         assert "ARRAY" in after["numbers"].upper() or "[]" in after["numbers"]
-    if dialect.key == "postgres":
+    if dialect.spec.key == "postgres":
         assert after["code"] == "character(3)"
         assert after["label"] == "character varying(20)"
         assert after["happened_at"] == "timestamp(6) without time zone"
-    elif dialect.key == "snowflake":
+    elif dialect.spec.key == "snowflake":
         assert after["code"] == "VARCHAR(3)"
         assert after["label"] == "VARCHAR(20)"
         assert after["happened_at"] == "TIMESTAMP_NTZ(6)"

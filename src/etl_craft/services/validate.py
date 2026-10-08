@@ -368,7 +368,7 @@ def _target_formats(config: ConnectorConfig, data: _Metadata, report: Report) ->
         if spec.action == SqlAction.DROP_TABLE:
             continue
         target = qualify(spec.target_object, catalog).lower()
-        targets.setdefault(target, []).append((task.label, dialect.table_format))
+        targets.setdefault(target, []).append((task.label, dialect.spec.table_format))
     for target, writers in targets.items():
         if len({table_format for _, table_format in writers}) < 2:
             continue

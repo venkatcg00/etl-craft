@@ -26,6 +26,8 @@ EXPECTED = {
         "DELETE_ROWS",
     },
     enums.EmailFlavour: {"FAILED", "COMPLETED_WITH_ERRORS", "SUCCESS"},
+    enums.EmailTransport: {"smtp", "sendmail"},
+    enums.TlsMode: {"none", "starttls", "ssl"},
     enums.Mode: {"local", "remote"},
     enums.AuthMode: {"none", "password", "token", "key_file", "oauth", "sso", "sts"},
     enums.TableFormat: {"native", "iceberg"},

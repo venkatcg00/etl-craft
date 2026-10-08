@@ -37,7 +37,6 @@ from etl_craft.config.auth import (
 from etl_craft.config.model import (
     DEFAULT_LOG_DIR,
     DEFAULT_SENDMAIL_PATH,
-    EMAIL_TRANSPORTS,
     EXAMPLE_PATH,
     CloningConfig,
     ConnectionProfile,
@@ -56,9 +55,19 @@ from etl_craft.config.targets import (
     parse_warehouse_url,
     preferred_connection_url,
 )
-from etl_craft.core.enums import AuthMode, CloningScope, GatePolicy, Mode, TableFormat
-from etl_craft.core.errors import ConfigurationError
-from etl_craft.core.text import URL_SECRET_KEYS, is_env_name, is_safe_identifier
+from etl_craft.core.cron import parse as parse_cron
+from etl_craft.core.enums import (
+    AuthMode,
+    CloningScope,
+    EmailTransport,
+    GatePolicy,
+    Mode,
+    TableFormat,
+    TlsMode,
+    enum_value,
+)
+from etl_craft.core.errors import ConfigurationError, MetadataError
+from etl_craft.core.text import SECRET_KEYS, is_env_name, is_safe_identifier
 
 SECTIONS = ("Secrets", "Orchestration", "Engine", "Warehouse", "Cloning", "Docs_site")
 """The top-level sections, in the order the file must present them."""
@@ -183,7 +192,7 @@ def _connection_url(written: str, path: Path, where: str) -> str:
         return written
     pairs = parse_qsl(query, keep_blank_values=True)
     for key, _ in pairs:
-        if key.lower() in URL_SECRET_KEYS:
+        if key.lower() in SECRET_KEYS:
             raise ConfigurationError(
                 f"{path}: {where} contains credential query key {key!r}; "
                 "put the secret in a variable and name it in `secret`"
@@ -535,27 +544,29 @@ def _connection_block(
 
 
 def _parse_mode(orchestration: _Profiled, path: Path) -> Mode:
-    mode = (orchestration.text("Mode") or "").lower()
-    if mode not in {member.value for member in Mode}:
-        raise ConfigurationError(
+    return enum_value(
+        Mode,
+        orchestration.text("Mode") or "",
+        ConfigurationError(
             f"{path}: Orchestration.Mode must be local or remote, got "
             f"{orchestration.settings.get('Mode')!r}"
             f"{orchestration.resolver.hint(orchestration.where('Mode'))}"
-        )
-    return Mode(mode)
+        ),
+    )
 
 
 def _parse_dependency_gates(orchestration: _Profiled, mode: Mode, path: Path) -> GatePolicy:
     raw = orchestration.text("Dependency_gates")
     if raw is None:
         return GatePolicy.ENFORCE
-    value = raw.lower()
-    if value not in {member.value for member in GatePolicy}:
-        raise ConfigurationError(
+    policy = enum_value(
+        GatePolicy,
+        raw,
+        ConfigurationError(
             f"{path}: Orchestration.Dependency_gates must be enforce, warn or off, got {raw!r}"
             f"{orchestration.resolver.hint(orchestration.where('Dependency_gates'))}"
-        )
-    policy = GatePolicy(value)
+        ),
+    )
     if mode == Mode.REMOTE and policy != GatePolicy.ENFORCE:
         raise ConfigurationError(
             f"{path}: Orchestration.Dependency_gates is {policy}, but Mode is remote: in remote "
@@ -675,12 +686,15 @@ def _parse_email(orchestration: _Profiled, path: Path, resolver: Resolver) -> Em
         raise ConfigurationError(f"{path}: {where} must be a mapping")
     _reject_unknown(block, _EMAIL_KEYS, where, path)
     fields = _Fields(block, where, orchestration.profile, resolver, path)
-    transport = (fields.value("transport") or "smtp").lower()
-    if transport not in EMAIL_TRANSPORTS:
-        raise ConfigurationError(
+    transport = fields.value("transport") or "smtp"
+    transport = enum_value(
+        EmailTransport,
+        transport,
+        ConfigurationError(
             f"{path}: {where}.transport resolved to {transport!r}, which is not one of "
-            f"{', '.join(EMAIL_TRANSPORTS)}{fields.hint('transport')}"
-        )
+            f"{', '.join(EmailTransport)}{fields.hint('transport')}"
+        ),
+    )
     name = orchestration.profile or "default"
     if transport == "sendmail":
         smtp_only = sorted(set(block) & _SMTP_ONLY_EMAIL_KEYS)
@@ -726,11 +740,14 @@ def _parse_email(orchestration: _Profiled, path: Path, resolver: Resolver) -> Em
     extra = _auth_extra(fields, auth_mode, EMAIL_AUTH_FIELDS[auth_mode], user=user)
     use_tls = _parse_bool(fields.value("use_tls"), f"{where}.use_tls", path, default=True)
     tls_mode = fields.value("tls_mode") or ("starttls" if use_tls else "none")
-    if tls_mode not in {"none", "starttls", "ssl"}:
-        raise ConfigurationError(
+    tls_mode = enum_value(
+        TlsMode,
+        tls_mode,
+        ConfigurationError(
             f"{path}: {where}.tls_mode resolved to {tls_mode!r}, which is not one of "
             f"none, starttls, ssl{fields.hint('tls_mode')}"
-        )
+        ),
+    )
     if "tls_mode" in block and "use_tls" in block and use_tls != (tls_mode != "none"):
         raise ConfigurationError(
             f"{path}: {where}.tls_mode={tls_mode!r} conflicts with use_tls={use_tls}; "
@@ -832,12 +849,14 @@ def _parse_warehouse(
         k: v for k, v in profiled.settings.items() if k in WAREHOUSE_SECTION_KEYS or k not in block
     }
     _reject_unknown(settings, WAREHOUSE_SECTION_KEYS, "Warehouse", path)
-    table_format = (profiled.text("Table_format") or TableFormat.NATIVE).lower()
-    if table_format not in {member.value for member in TableFormat}:
-        raise ConfigurationError(
+    table_format = enum_value(
+        TableFormat,
+        profiled.text("Table_format") or TableFormat.NATIVE,
+        ConfigurationError(
             f"{path}: Warehouse.Table_format must be native or iceberg, got "
             f"{settings.get('Table_format')!r}"
-        )
+        ),
+    )
     declared = profiled.text("Name")
     expected_dialect = WAREHOUSE_NAMES.get(declared.lower()) if declared else None
     if declared and expected_dialect is None:
@@ -858,7 +877,7 @@ def _parse_warehouse(
     else:
         profile = _jdbc_url_profile(fields, profiled, declared, expected_dialect, table_format)
     section = ConnectionSection(active_profile=profile.name, profiles={profile.name: profile})
-    return section, TableFormat(table_format)
+    return section, table_format
 
 
 def _preferred_shape_profile(
@@ -1005,20 +1024,21 @@ def _parse_cloning(
         "Cloning",
         path,
     )
-    scope = (profiled.text("Scope") or CloningScope.CFG).lower()
-    scopes = sorted(member.value for member in CloningScope)
-    if scope not in scopes:
-        raise ConfigurationError(f"{path}: Cloning.Scope must be one of {scopes}, got {scope!r}")
+    scope = profiled.text("Scope") or CloningScope.CFG
+    scope = enum_value(
+        CloningScope,
+        scope,
+        ConfigurationError(
+            f"{path}: Cloning.Scope must be one of {sorted(CloningScope)}, got {scope!r}"
+        ),
+    )
     enabled = _parse_bool(profiled.value("Enabled"), profiled.where("Enabled"), path, default=False)
     return CloningConfig(
         enabled=enabled and scope != CloningScope.NONE,
-        scope=CloningScope(scope),
+        scope=scope,
         external_volume=profiled.text("External_volume") or "",
         base_location=profiled.text("Base_location") or "",
     )
-
-
-_CRON_MACROS = frozenset({"@yearly", "@annually", "@monthly", "@weekly", "@daily", "@hourly"})
 
 
 def _parse_docs_site(
@@ -1036,12 +1056,13 @@ def _parse_docs_site(
         path,
     )
     schedule = (profiled.text("Schedule") or "").strip() or None
-    if schedule is not None and schedule not in _CRON_MACROS and len(schedule.split()) != 5:
-        raise ConfigurationError(
-            f"{path}: {profiled.where('Schedule')} must be a cron expression of five fields, "
-            f"such as '0 2 * * *' (02:00 every day), or one of {', '.join(sorted(_CRON_MACROS))}; "
-            f"got {schedule!r}"
-        )
+    if schedule is not None:
+        try:
+            parse_cron(schedule)
+        except MetadataError as error:
+            raise ConfigurationError(
+                f"{path}: {profiled.where('Schedule')} must be a valid cron expression; {error}"
+            ) from error
     output = profiled.text("Output")
     authtoken = profiled.settings.get("Authtoken")
     if authtoken is not None and not (

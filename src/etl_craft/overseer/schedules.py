@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from collections import deque
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.engine import Engine
@@ -13,10 +13,11 @@ from etl_craft.core.actor import Actor, ActorKind, acting_as
 from etl_craft.core.cron import next_after, timezone
 from etl_craft.core.enums import InterventionAction
 from etl_craft.core.errors import MetadataError
+from etl_craft.core.time import as_utc
 from etl_craft.engine import transitions
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.interventions import record_intervention
-from etl_craft.execution.leases import as_utc
+from etl_craft.engine.runlog import as_date
 from etl_craft.services.operations import OperationContext
 
 SCHEDULE_ACTOR = Actor("schedule", ActorKind.SCHEDULE)
@@ -58,7 +59,7 @@ class Schedules:
                     else ctx.config.timezone
                 )
                 if row.schedule_start_date is not None:
-                    start = date.fromisoformat(str(row.schedule_start_date))
+                    start = as_date(row.schedule_start_date)
                     cursor = datetime.combine(start, time(), zone).astimezone(UTC) - timedelta(
                         microseconds=1
                     )

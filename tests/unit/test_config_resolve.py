@@ -64,7 +64,7 @@ def test_a_secret_is_checked_at_load_and_again_when_resolved(tmp_path, monkeypat
     monkeypatch.setenv("ETL_CRAFT_POSTGRES_DEV_SECRET", "s3cr3t")
     config = load_config(write_config(tmp_path, VALID_YAML))
     monkeypatch.delenv("ETL_CRAFT_POSTGRES_DEV_SECRET")
-    with pytest.raises(ConfigurationError, match="'ETL_CRAFT_POSTGRES_DEV_SECRET' not found"):
+    with pytest.raises(ConfigurationError, match=r"ETL_CRAFT_POSTGRES_DEV_SECRET.*not set"):
         resolve_secret(config, config.engine.active)
 
 

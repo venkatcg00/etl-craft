@@ -66,17 +66,27 @@ def identity_replacement(
     """Carry table properties into an identity candidate and publish it with an atomic clone.
 
     The candidate uses independent managed storage. Only publication writes the original
-    external location; column constraints other than the managed identity remain a refusal.
+    external location. Only the managed identity and collations inherited from the preserved
+    table default are accepted; other column constraints are refused.
     """
     try:
         format_ = _DatabricksReplacement() if dialect == "databricks" else dialect
         create = parse_one(ddl, read=format_)
         if not isinstance(create, exp.Create) or not isinstance(create.this, exp.Schema):
             raise HandlerError(f"{target}: cannot read a complete table definition for replacement")
+        default = create.find(exp.CollateProperty) if dialect == "databricks" else None
         for column in create.this.expressions:
             if not isinstance(column, exp.ColumnDef):
                 raise HandlerError(f"{target}: replacement cannot preserve column metadata")
-            constraints = column.args.get("constraints") or []
+            constraints = [
+                constraint
+                for constraint in column.args.get("constraints") or []
+                if not (
+                    default is not None
+                    and isinstance(constraint.kind, exp.CollateColumnConstraint)
+                    and constraint.kind.this.sql().upper() == default.this.sql().upper()
+                )
+            ]
             managed = column.name.lower() == "row_id" and all(
                 isinstance(
                     c.kind, (exp.GeneratedAsIdentityColumnConstraint, exp.NotNullColumnConstraint)
@@ -89,6 +99,11 @@ def identity_replacement(
                     "use a table-preserving write instead"
                 )
         shape = parse_one(f"CREATE TABLE {candidate} ({columns})", read=format_)
+        if default is not None and any(
+            collation.this.sql().upper() != default.this.sql().upper()
+            for collation in shape.find_all(exp.CollateColumnConstraint)
+        ):
+            raise HandlerError(f"{target}: replacement cannot change column collations")
         create.set("this", shape.this)
         create.set("replace", False)
         create.set("exists", False)

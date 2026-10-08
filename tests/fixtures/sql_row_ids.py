@@ -53,9 +53,9 @@ def check_row_id_generation(w, target):
     keys = w.rows(f"SELECT row_id FROM {w.name(appended)}")
     assert len(keys) == 3 and len(set(keys)) == 3 and all(row[0] is not None for row in keys)
     if dialect.identity_in_create:
-        ddl = "SHOW CREATE TABLE" if dialect.key.startswith("databricks") else "DESCRIBE TABLE"
+        ddl = "SHOW CREATE TABLE" if dialect.spec.key.startswith("databricks") else "DESCRIBE TABLE"
         assert w.rows(f"{ddl} {w.name(appended)}")
-        if dialect.key.startswith("databricks"):
+        if dialect.spec.key.startswith("databricks"):
             with pytest.raises(SQLAlchemyError):
                 w.execute(f"INSERT INTO {w.name(appended)} (id, row_id) SELECT 4, 4")
 

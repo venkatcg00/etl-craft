@@ -8,10 +8,26 @@ All notable changes are recorded here. The format follows
 
 ### Fixed
 
+- Snowflake renames use the fully qualified destination, keeping Iceberg replacements and their
+  recovery copies in the target schema even when the connection uses a different default schema.
+
+- Databricks identity replacements accept string column collations inherited from the preserved
+  table default, including current `SHOW CREATE TABLE` output. Explicit overrides, changed
+  candidate collations and other business column constraints remain refused before publication.
+
+- `Docs_site.Schedule` uses the same cron validation as pipeline schedules, rejecting invalid
+  ranges and impossible calendar dates; both accept `@yearly` and `@annually`.
+
 - CLI initialization accepts its exact queued run when the server admitted it concurrently,
   without rewriting gate decisions or taking over a different run.
 
 ### Changed
+
+- Shared UTC conversion, enum parsing, credential masking and warehouse column discovery replace
+  duplicated helpers. Email TLS modes accept case-insensitive values. Warehouse session setup
+  closes cursors on failure and retains PostgreSQL's commit and Iceberg extension setup.
+  Engine dialects own metadata trigger refresh; migration policy markers replace filename checks
+  without changing existing SQL bytes or checksums.
 
 - Service operations take pipeline codes directly and build inspection documents from stored rows
   without intermediate summary models or duplicate reads. Run and mark calls share their audit

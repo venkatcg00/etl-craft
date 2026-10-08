@@ -31,6 +31,7 @@ class SnowflakeWarehouse(WarehouseDialect):
     spec = warehouse_by_key("snowflake")
     replace_strategy: ReplaceStrategy = "create_or_replace"
     identifier_case = "upper"
+    qualified_rename = True
     surrogate_key: SurrogateKey = "identity"
     identity_in_create = True
     enforces_primary_keys = False
@@ -148,16 +149,10 @@ class SnowflakeWarehouse(WarehouseDialect):
             model += "." + "0" * scale
         return f"TO_CHAR(CAST({value} AS {kind}), '{model}')"
 
-    def on_connect(self, dbapi_connection: Any, profile: ConnectionProfile, secret: str) -> None:
-        """Pin every new warehouse session to UTC."""
-        cursor = dbapi_connection.cursor()
-        try:
-            cursor.execute(
-                "ALTER SESSION SET TIMEZONE = 'UTC', "
-                "TIMESTAMP_OUTPUT_FORMAT = 'YYYY-MM-DD\"T\"HH24:MI:SS.FF6'"
-            )
-        finally:
-            cursor.close()
+    session_sql = (
+        "ALTER SESSION SET TIMEZONE = 'UTC', "
+        "TIMESTAMP_OUTPUT_FORMAT = 'YYYY-MM-DD\"T\"HH24:MI:SS.FF6'"
+    )
 
     def replacement_ddl(
         self,

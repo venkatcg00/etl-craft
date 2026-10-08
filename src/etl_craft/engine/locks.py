@@ -33,5 +33,10 @@ CLONE = EngineLock("clone", 8_241_008)
 def target(name: str) -> EngineLock:
     """Serialize target mutations and hash-contract publication across processes."""
     normalized = name.lower()
-    key = int.from_bytes(blake2b(normalized.encode(), digest_size=8).digest(), "big", signed=True)
+    key = advisory_key(normalized)
     return EngineLock(f"target-{key & ((1 << 64) - 1):016x}", key)
+
+
+def advisory_key(name: str) -> int:
+    """Hash an exact lock namespace to PostgreSQL's signed 64-bit advisory key."""
+    return int.from_bytes(blake2b(name.encode(), digest_size=8).digest(), "big", signed=True)

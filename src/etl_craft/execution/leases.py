@@ -55,12 +55,6 @@ def owner_id() -> str:
     return f"{socket.gethostname()}:{os.getpid()}:{birth}:{uuid4().hex[:8]}"
 
 
-def as_utc(value: object) -> datetime:
-    """Read an Engine DB timestamp as an aware UTC instant."""
-    result = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
-    return result.replace(tzinfo=UTC) if result.tzinfo is None else result.astimezone(UTC)
-
-
 @dataclass(frozen=True)
 class RunSupervisor:
     """A run's exact owner and the cancellation shared by its wave tasks."""

@@ -101,3 +101,27 @@ def test_unreadable_delta_metadata_is_refused(properties):
     }
     with pytest.raises(HandlerError, match="cannot read table properties"):
         for_key("databricks").existing_table_format(conn, "cat.s.t")
+
+
+@pytest.mark.parametrize(
+    "key, keyword",
+    [
+        ("snowflake", "ALTER TABLE"),
+        ("snowflake_iceberg", "ALTER ICEBERG TABLE"),
+    ],
+)
+def test_snowflake_rename_keeps_the_explicit_destination_namespace(key, keyword):
+    conn = Mock()
+    session = Session(
+        conn,
+        for_key(key),
+        catalog="active",
+        action="CREATE_TABLE",
+        target_object="other.schema.target",
+        task_run_id=1,
+        params={},
+    )
+    session.rename("other.schema.candidate", "other.schema.target")
+    assert str(conn.execute.call_args.args[0]) == (
+        f"{keyword} other.schema.candidate RENAME TO other.schema.target"
+    )

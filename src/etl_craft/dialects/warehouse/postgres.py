@@ -53,13 +53,11 @@ class PostgresWarehouse(WarehouseDialect):
         """Use ISO dates even when DateStyle differs."""
         return f"TO_CHAR({value}, 'YYYY-MM-DD')"
 
+    session_sql = "SET TimeZone = 'UTC'"
+
     def on_connect(self, dbapi_connection: Any, profile: ConnectionProfile, secret: str) -> None:
-        """Pin every new warehouse session to UTC."""
-        cursor = dbapi_connection.cursor()
-        try:
-            cursor.execute("SET TimeZone = 'UTC'")
-        finally:
-            cursor.close()
+        """Pin UTC and commit the setting before PostgreSQL's first task transaction."""
+        super().on_connect(dbapi_connection, profile, secret)
         dbapi_connection.commit()
 
     def prepare_update_stage(self, stage: str, keys: tuple[str, ...]) -> tuple[str, ...]:

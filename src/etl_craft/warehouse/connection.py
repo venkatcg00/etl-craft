@@ -164,7 +164,7 @@ def is_in_memory(config: ConnectorConfig) -> bool:
         url = parse_warehouse_url(config.warehouse.active.jdbc_url)
     except ConfigurationError:
         return False
-    return dialect.key == "duckdb" and url.path == ":memory:"
+    return dialect.spec.key == "duckdb" and url.path == ":memory:"
 
 
 @contextmanager

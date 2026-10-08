@@ -64,6 +64,10 @@ class EngineDialect(ABC):
         otherwise it raises ``LockTimeoutError`` once that time has passed.
         """
 
+    @abstractmethod
+    def refresh_metadata_triggers(self, conn: Connection) -> None:
+        """Install metadata capture and write guards for the current table definitions."""
+
     def schema_problem(self, conn: Connection, schema: str) -> str | None:
         """Return why the Engine schema cannot be used, or ``None``.
 

@@ -15,9 +15,10 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.core.actor import current_actor
 from etl_craft.core.errors import StaleTransitionError
+from etl_craft.core.time import as_utc
 from etl_craft.engine import transitions
 from etl_craft.engine.queries import statement
-from etl_craft.execution.leases import LEASE_SECONDS, as_utc, process_start
+from etl_craft.execution.leases import LEASE_SECONDS, process_start
 
 logger = logging.getLogger(__name__)
 
