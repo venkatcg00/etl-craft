@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from sqlalchemy import Boolean
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.actor import current_actor
@@ -84,18 +85,10 @@ def record_intervention(
 def fetch_task_rows(conn: Connection, pipeline_run_id: int) -> list[TaskRow]:
     """Return every task row under ``pipeline_run_id``, by task code."""
     return [
-        TaskRow(
-            int(row.task_run_id),
-            int(row.task_id),
-            row.task_code,
-            row.status,
-            row.error_message,
-            bool(row.marked),
-            bool(row.has_rule_runs),
-            row.consumed_by,
-        )
+        TaskRow(**row._mapping)
         for row in conn.execute(
-            statement(conn, "run_task_rows"), {"pipeline_run_id": pipeline_run_id}
+            statement(conn, "run_task_rows").columns(marked=Boolean, has_rule_runs=Boolean),
+            {"pipeline_run_id": pipeline_run_id},
         )
     ]
 
@@ -105,19 +98,7 @@ def fetch_interventions(
 ) -> list[Intervention]:
     """Return the changes to the runs of ``pipeline_id`` from ``first_run_id`` on, oldest first."""
     return [
-        Intervention(
-            int(row.intervention_id),
-            int(row.pipeline_run_id),
-            row.task_code,
-            row.action,
-            row.from_status,
-            row.to_status,
-            None if row.target_count is None else int(row.target_count),
-            row.previous_message,
-            row.reason,
-            row.requested_by,
-            row.requested_at,
-        )
+        Intervention(**row._mapping)
         for row in conn.execute(
             statement(conn, "run_interventions"),
             {"pipeline_id": pipeline_id, "first_run_id": first_run_id},

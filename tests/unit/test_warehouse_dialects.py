@@ -1,6 +1,7 @@
 """Warehouse dialects and connections without a warehouse: registry, SQL fragments, auth."""
 
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 from sqlalchemy.engine import URL
@@ -9,11 +10,10 @@ from etl_craft.config import (
     CloningConfig,
     ConnectionProfile,
     ConnectionSection,
-    ConnectorConfig,
-    SourceConfig,
+    parse_config,
 )
 from etl_craft.config.targets import parse_warehouse_url
-from etl_craft.core.enums import Mode, TableFormat
+from etl_craft.core.enums import TableFormat
 from etl_craft.core.errors import ConfigurationError, HandlerError
 from etl_craft.dialects import credentials
 from etl_craft.dialects.warehouse import all_dialects, for_key, resolve
@@ -32,15 +32,50 @@ def profile(auth_mode, jdbc_url, user="etl", **extra):
     return ConnectionProfile("WAREHOUSE", "dev", jdbc_url, user, auth_mode, extra)
 
 
-def config_for(warehouse_profile, table_format=TableFormat.NATIVE):
-    engine = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:e.db", "", "none")
-    return ConnectorConfig(
-        mode=Mode.LOCAL,
-        source=SourceConfig(type="environment"),
-        engine=ConnectionSection("dev", {"dev": engine}),
-        warehouse=ConnectionSection("dev", {"dev": warehouse_profile}),
-        warehouse_table_format=table_format,
+def config_for(
+    warehouse_profile, table_format=TableFormat.NATIVE, *, path=Path("/tmp/craft-connector.yml")
+):
+    return parse_config(
+        {
+            "Secrets": {"Source_type": "environment"},
+            "Orchestration": {"Mode": "local"},
+            "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:e.db", "schema": "main"}},
+            "Warehouse": {
+                **(
+                    {"Name": "DuckDB"}
+                    if warehouse_profile.jdbc_url.startswith("jdbc:duckdb:")
+                    else {}
+                ),
+                "Table_format": table_format,
+                "dev": {
+                    "jdbc_url": warehouse_profile.jdbc_url,
+                    "user": warehouse_profile.user,
+                    "auth_mode": warehouse_profile.auth_mode,
+                    "secret": warehouse_profile.extra.get(
+                        "secret_var", "ETL_CRAFT_DIALECT_TEST_SECRET"
+                    ),
+                    **(
+                        {"catalog": "iceberg"}
+                        if table_format == TableFormat.ICEBERG
+                        and warehouse_profile.jdbc_url.startswith("jdbc:duckdb:")
+                        else {}
+                    ),
+                    "schema": "analytics" if warehouse_profile.jdbc_url == TRINO else "main",
+                    **{
+                        key: value
+                        for key, value in warehouse_profile.extra.items()
+                        if key != "secret_var"
+                    },
+                },
+            },
+        },
+        path,
     )
+
+
+@pytest.fixture(autouse=True)
+def configured_secret(monkeypatch):
+    monkeypatch.setenv("ETL_CRAFT_DIALECT_TEST_SECRET", "test-secret")
 
 
 @pytest.fixture
@@ -74,7 +109,6 @@ def connect(auth_mode, jdbc_url, secret="", table_format=TableFormat.NATIVE, **k
     warehouse = profile(auth_mode, jdbc_url, **kwargs)
     url = parse_warehouse_url(jdbc_url)
     dialect = resolve(url.dialect, table_format)
-    dialect.check_profile(warehouse)
     return connection.warehouse_creator(dialect, warehouse, secret, url)()
 
 
@@ -293,18 +327,21 @@ def test_snowflake_iceberg_mirrors_need_both_cloning_settings():
         dialect.mirror_table_ddl("m", "id INT", replace(cloning, base_location="c'"))
 
 
-# Checking a profile before connecting
+# Profile validation belongs to configuration parsing.
 
 
-def test_check_profile_refuses_modes_and_missing_fields():
-    with pytest.raises(ConfigurationError, match="not available for a DuckDB warehouse"):
-        for_key("duckdb").check_profile(profile("key_file", "jdbc:duckdb:w.duckdb", key_file="k"))
-    with pytest.raises(ConfigurationError, match="requires a `key_file:` path"):
-        for_key("snowflake").check_profile(profile("key_file", SNOWFLAKE))
-    with pytest.raises(ConfigurationError, match="requires a `region:` value"):
-        for_key("postgres").check_profile(profile("sts", POSTGRES))
-    with pytest.raises(ConfigurationError, match="needs a `user`"):
-        resolve("mysql", "native").check_profile(profile("token", "jdbc:mysql://h/db", user=""))
+@pytest.mark.parametrize(
+    ("warehouse", "error"),
+    [
+        (profile("key_file", "jdbc:duckdb:w.duckdb", key_file="k"), "DuckDB warehouse takes"),
+        (profile("key_file", SNOWFLAKE), "needs key_file"),
+        (profile("sts", POSTGRES), "needs region"),
+        (profile("token", "jdbc:mysql://h/db", user=""), "needs user"),
+    ],
+)
+def test_config_refuses_modes_and_missing_auth_fields(tmp_path, warehouse, error):
+    with pytest.raises(ConfigurationError, match=error):
+        config_for(warehouse, path=tmp_path / "craft-connector.yml")
 
 
 def test_an_unsupported_mode_is_refused_when_presenting():
@@ -462,8 +499,8 @@ def test_a_minted_credential_recycles_pooled_connections(monkeypatch):
         engine.dispose()
 
 
-def test_building_checks_the_profile_first():
-    with pytest.raises(ConfigurationError, match="requires a `region:`"):
+def test_parsing_checks_the_profile_first():
+    with pytest.raises(ConfigurationError, match="needs region"):
         connection.build_warehouse_engine(config_for(profile("sts", POSTGRES)))
 
 
@@ -486,7 +523,14 @@ def test_no_warehouse_section():
     ],
 )
 def test_single_writer_and_in_memory(jdbc_url, table_format, single_writer, in_memory):
-    config = config_for(profile("none", jdbc_url), table_format)
+    mode = "password" if jdbc_url == POSTGRES else "none"
+    config = config_for(
+        profile(mode, "jdbc:duckdb:" if jdbc_url == "nonsense" else jdbc_url), table_format
+    )
+    if jdbc_url == "nonsense":
+        config = replace(
+            config, warehouse=ConnectionSection("dev", {"dev": profile("none", jdbc_url)})
+        )
     assert connection.is_single_writer(config) is single_writer
     assert connection.is_in_memory(config) is in_memory
 
@@ -496,7 +540,7 @@ def test_only_trino_has_a_catalog_to_verify():
         class dialect:  # noqa: N801 - mimics Engine.dialect
             name = "postgresql"
 
-    config = config_for(profile("none", POSTGRES))
+    config = config_for(profile("password", POSTGRES))
     assert connection.verify_iceberg_catalog(config, Engine()) is None
 
 
@@ -580,9 +624,12 @@ def test_verify_iceberg_catalog_without_a_catalog_or_when_the_check_fails():
         def connect(self):
             raise OperationalError("SELECT", {}, Exception("unreachable"))
 
-    no_catalog = config_for(profile("none", "jdbc:trino://t:8080/"))
+    no_catalog = replace(
+        config_for(profile("sso", TRINO)),
+        warehouse=ConnectionSection("dev", {"dev": profile("sso", "jdbc:trino://t:8080/")}),
+    )
     assert connection.verify_iceberg_catalog(no_catalog, Trino()) is None
-    problem = connection.verify_iceberg_catalog(config_for(profile("none", TRINO)), Trino())
+    problem = connection.verify_iceberg_catalog(config_for(profile("sso", TRINO)), Trino())
     assert problem.startswith("could not check whether catalog 'iceberg' is an Iceberg catalog")
 
 

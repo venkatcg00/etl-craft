@@ -1,7 +1,7 @@
 -- The latest :limit runs of every active pipeline, newest first.
 SELECT p.PIPELINE_CODE AS pipeline_code, r.PIPELINE_RUN_ID AS pipeline_run_id,
-       r.STATUS AS status, r.RUN_DATE AS run_date, r.BACKFILL AS backfill,
-       r.START_DATE AS start_date, r.END_DATE AS end_date, r.SLA_STATUS AS sla_status, r.STARTED_BY AS started_by,
+       r.STATUS AS status, r.RUN_DATE AS run_date, (r.BACKFILL = 'Y') AS backfill,
+       r.START_DATE AS "start", r.END_DATE AS "end", r.SLA_STATUS AS sla_status, r.STARTED_BY AS started_by,
        r.STARTED_BY_KIND AS started_by_kind, r.ENDED_BY AS ended_by,
        r.ENDED_BY_KIND AS ended_by_kind
 FROM (

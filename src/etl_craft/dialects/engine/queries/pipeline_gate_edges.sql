@@ -1,6 +1,6 @@
 -- The active pipeline dependencies of :pipeline_id.
 SELECT d.PIPELINE_DEPENDENCY_ID AS pipeline_dependency_id,
-       d.DEPENDS_ON_PIPELINE_ID AS depends_on_pipeline_id, d.DEPENDENCY_TYPE AS dependency_type, d.CONSUME_REPAIRS AS consume_repairs,
+       d.DEPENDS_ON_PIPELINE_ID AS depends_on_pipeline_id, d.DEPENDENCY_TYPE AS dependency_type, (d.CONSUME_REPAIRS = 'Y') AS consume_repairs,
        p.PIPELINE_CODE AS depends_on_pipeline_code
 FROM CFG_PIPELINE_DEPENDENCY d
 JOIN CFG_PIPELINES p ON p.PIPELINE_ID = d.DEPENDS_ON_PIPELINE_ID

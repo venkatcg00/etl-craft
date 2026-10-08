@@ -256,7 +256,7 @@ class TrackedGate:
         satisfied are bypassed; under ``off`` none is checked and all are bypassed.
         """
         with engine.connect() as conn:
-            edges = fetch_cross_pipeline_task_edges(conn, task_id, include_repairs=True)
+            edges = fetch_cross_pipeline_task_edges(conn, task_id)
         if self.policy == GatePolicy.OFF:
             return CrossPipelineCheck(
                 needed,
@@ -362,7 +362,7 @@ def check_pipeline_dependencies(
     """
     clock = clock or Clock()
     with engine.connect() as conn:
-        edges = fetch_pipeline_dependency_edges(conn, pipeline_id, include_repairs=True)
+        edges = fetch_pipeline_dependency_edges(conn, pipeline_id)
     if policy == GatePolicy.OFF:
         return PipelineGateResult(
             decisions=tuple(

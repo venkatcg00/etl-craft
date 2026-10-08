@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import psycopg
@@ -18,11 +18,9 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.config import (
     ConnectionProfile,
-    ConnectionSection,
     ConnectorConfig,
-    SourceConfig,
+    parse_config,
 )
-from etl_craft.core.enums import Mode
 from etl_craft.dialects.engine import EngineDialect, build_engine, for_engine
 from fixtures.services import POSTGRES_PASSWORD, POSTGRES_USER, require
 
@@ -40,12 +38,29 @@ class EngineDb:
 
 def engine_config(profile: ConnectionProfile, config_path: Path | None = None) -> ConnectorConfig:
     """Return a config whose Engine section is ``profile``."""
-    return ConnectorConfig(
-        mode=Mode.LOCAL,
-        source=SourceConfig(type="environment"),
-        engine=ConnectionSection(profile.name, {profile.name: profile}),
-        config_path=config_path,
+    config = parse_config(
+        {
+            "Secrets": {"Source_type": "environment"},
+            "Orchestration": {"Mode": "local"},
+            "Engine": {
+                profile.name: {
+                    "jdbc_url": profile.jdbc_url,
+                    "user": profile.user,
+                    "auth_mode": profile.auth_mode,
+                    "schema": profile.schema
+                    or ("main" if profile.jdbc_url.startswith("jdbc:sqlite:") else "public"),
+                    **(
+                        {"secret": profile.extra["secret_var"]}
+                        if "secret_var" in profile.extra
+                        else {}
+                    ),
+                    **{key: value for key, value in profile.extra.items() if key != "secret_var"},
+                },
+            },
+        },
+        config_path or Path("craft-connector.yml"),
     )
+    return replace(config, config_path=config_path)
 
 
 def apply_schema(engine: Engine) -> int:

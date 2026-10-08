@@ -2,6 +2,7 @@
 
 from sqlalchemy import text
 
+from etl_craft.core.counts import Counts
 from etl_craft.engine import runlog, transitions
 
 
@@ -94,8 +95,7 @@ def task_run(
             conn,
             binding.task_run_id,
             status=status,
-            target_count=target_count,
-            rows_written=rows_written,
+            counts=Counts(target_count=target_count, rows_written=rows_written),
         )
     return binding.task_run_id
 

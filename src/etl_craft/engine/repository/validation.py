@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from sqlalchemy import Boolean
 from sqlalchemy.engine import Connection
 
 from etl_craft.engine.queries import statement
@@ -28,12 +29,7 @@ class ActiveTask:
 
 def fetch_active_tasks(conn: Connection) -> list[ActiveTask]:
     """Return every active task of an active pipeline, by pipeline and task code."""
-    return [
-        ActiveTask(
-            r.task_id, r.pipeline_id, r.pipeline_code, r.task_code, r.handler, r.refresh_type
-        )
-        for r in conn.execute(statement(conn, "active_tasks"))
-    ]
+    return [ActiveTask(**r._mapping) for r in conn.execute(statement(conn, "active_tasks"))]
 
 
 def fetch_pipeline_parameters(conn: Connection) -> list[tuple[str, object]]:
@@ -76,20 +72,12 @@ class DependencyEdge:
 def fetch_task_dependency_edges(conn: Connection) -> list[DependencyEdge]:
     """Return every active dependency of an active task of an active pipeline."""
     return [
-        DependencyEdge(
-            r.pipeline_code,
-            r.task_code,
-            r.dependency_type,
-            r.written_pipeline_id,
-            r.depends_on_task_id,
-            r.depends_on_task_code,
-            r.depends_on_handler,
-            r.depends_on_task_active == "Y",
-            r.depends_on_pipeline_id,
-            r.depends_on_pipeline_code,
-            r.depends_on_pipeline_active == "Y",
+        DependencyEdge(**r._mapping)
+        for r in conn.execute(
+            statement(conn, "active_task_dependency_edges").columns(
+                depends_on_task_active=Boolean, depends_on_pipeline_active=Boolean
+            )
         )
-        for r in conn.execute(statement(conn, "active_task_dependency_edges"))
     ]
 
 
@@ -106,11 +94,10 @@ class PipelineEdge:
 def fetch_pipeline_edges(conn: Connection) -> list[PipelineEdge]:
     """Return every active dependency of an active pipeline, upstream active or not."""
     return [
-        PipelineEdge(
-            r.pipeline_code,
-            r.depends_on_pipeline_code,
-            r.dependency_type,
-            r.depends_on_pipeline_active == "Y",
+        PipelineEdge(**r._mapping)
+        for r in conn.execute(
+            statement(conn, "active_pipeline_dependency_edges").columns(
+                depends_on_pipeline_active=Boolean
+            )
         )
-        for r in conn.execute(statement(conn, "active_pipeline_dependency_edges"))
     ]

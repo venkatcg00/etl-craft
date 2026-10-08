@@ -20,6 +20,7 @@ from etl_craft.config import (
     EmailProfile,
     load_config,
 )
+from etl_craft.core.counts import Counts
 from etl_craft.core.enums import Mode, RunStatus
 from etl_craft.core.errors import (
     ConnectionTestError,
@@ -279,7 +280,9 @@ def test_a_run_is_not_ended_while_another_process_runs_one_of_its_tasks(config, 
 
     # The other process finishes extract; the next run goes on and ends the run.
     with engine.begin() as conn:
-        transitions.finish_task_run(conn, elsewhere, status=RunStatus.SUCCESS, target_count=1)
+        transitions.finish_task_run(
+            conn, elsewhere, status=RunStatus.SUCCESS, counts=Counts(target_count=1)
+        )
     done = run_pipeline(engine, config, "P", child=CHILD, clock=NO_WAIT)
     assert done.pipeline_run_id == run
     assert done.status == RunStatus.FAILED  # broken fails, as in every run of P

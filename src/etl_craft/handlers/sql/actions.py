@@ -34,7 +34,7 @@ import contextlib
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy.engine import Engine
 
@@ -379,7 +379,7 @@ def _changed_keys(session: Session, stage: str, merge_key: tuple[str, ...], cond
     key once even when its target has history.
     """
     changed = session.scratch("changed_keys")
-    key_match = " AND ".join(f"t.{k} = s.{k}" for k in merge_key)
+    key_match = _key_match(merge_key)
     keys = ", ".join(f"s.{k}" for k in merge_key)
     session.create_scratch(
         changed,
@@ -402,7 +402,7 @@ def scd1_merge(session: Session, action: ActionContext) -> HandlerResult:
     keys = {key.lower() for key in task.merge_key}
     non_key = [column for column in stage_columns if column.lower() not in keys]
     target = session.target
-    key_match = " AND ".join(f"t.{k} = s.{k}" for k in task.merge_key)
+    key_match = _key_match(task.merge_key)
 
     def kept_hash(alias: str) -> str:
         return session.hash(
@@ -480,7 +480,7 @@ def scd2_merge(session: Session, action: ActionContext) -> HandlerResult:
     stage, source = _merge_stage(session, action, SqlAction.SCD2_MERGE)
     stage_columns = [name for name, _ in session.columns(stage)]
     target = session.target
-    key_match = " AND ".join(f"t.{k} = s.{k}" for k in task.merge_key)
+    key_match = _key_match(task.merge_key)
 
     changed = _changed_keys(
         session,
@@ -520,7 +520,7 @@ def scd2_merge(session: Session, action: ActionContext) -> HandlerResult:
         "'Y'{row_id_values} "
     )
     row_id_columns, row_id_values = session.row_id_insert_parts()
-    stage_changed = " AND ".join(f"s.{k} = ck.{k}" for k in task.merge_key)
+    stage_changed = _key_match(task.merge_key, "s", "ck")
     session.run(
         insert_head.format(row_id_columns=row_id_columns, row_id_values=row_id_values)
         + f"FROM {stage} s WHERE EXISTS (SELECT 1 FROM {changed} ck WHERE {stage_changed})",
@@ -611,7 +611,7 @@ def delete_rows(session: Session, action: ActionContext) -> HandlerResult:
                 "SETUP_TABLE task for it, add the columns, or set HARD_DELETE=true"
             )
         check_identity_types(session)
-    key_match = " AND ".join(f"t.{k} = s.{k}" for k in task.merge_key)
+    key_match = _key_match(task.merge_key)
     # A soft delete leaves rows already flagged as they were, with their first UPDATE_DATE.
     live = "" if task.hard_delete else " AND (t.DELETE_FLAG IS NULL OR t.DELETE_FLAG <> 'Y')"
     delete_count = session.count(
@@ -620,7 +620,7 @@ def delete_rows(session: Session, action: ActionContext) -> HandlerResult:
         step="rows to delete",
     )
     mutation, q = session.mutation_target()
-    match = " AND ".join(f"{q}.{k} = s.{k}" for k in task.merge_key)
+    match = _key_match(task.merge_key, q)
     if task.hard_delete:
         session.run(
             f"DELETE FROM {mutation} WHERE EXISTS (SELECT 1 FROM {stage} s WHERE {match})",
@@ -652,6 +652,5 @@ ACTIONS: dict[SqlAction, Action] = {
 }
 
 
-def utc_now() -> datetime:
-    """Return the time audit columns are stamped with."""
-    return datetime.now(UTC)
+def _key_match(keys: tuple[str, ...], target: str = "t", source: str = "s") -> str:
+    return " AND ".join(f"{target}.{key} = {source}.{key}" for key in keys)

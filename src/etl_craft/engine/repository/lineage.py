@@ -23,7 +23,7 @@ class SqlTaskRef:
 def fetch_sql_tasks(conn: Connection) -> list[SqlTaskRef]:
     """Return every active SQL task, by pipeline and task code."""
     rows = conn.execute(statement(conn, "sql_tasks"))
-    return [SqlTaskRef(r.task_id, r.pipeline_code, r.task_code) for r in rows]
+    return [SqlTaskRef(**r._mapping) for r in rows]
 
 
 @dataclass(frozen=True)
@@ -42,12 +42,7 @@ def fetch_task_lineage(conn: Connection, task_id: int, source_sql_hash: str) -> 
     rows = conn.execute(
         statement(conn, "task_lineage"), {"task_id": task_id, "source_sql_hash": source_sql_hash}
     )
-    return [
-        StoredEdge(
-            r.target_object, r.target_column, r.source_object, r.source_column, r.transformation
-        )
-        for r in rows
-    ]
+    return [StoredEdge(**r._mapping) for r in rows]
 
 
 def store_task_lineage(

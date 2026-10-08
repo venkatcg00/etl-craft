@@ -11,7 +11,8 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 
 from etl_craft.core.actor import SYSTEM_ACTOR, Actor, current_actor
-from etl_craft.core.enums import FINISHED_RUN_STATUSES, Mode, RunStatus, SlaStatus
+from etl_craft.core.counts import NO_COUNTS, Counts
+from etl_craft.core.enums import FINISHED_RUN_STATUSES, RunStatus, SlaStatus
 from etl_craft.core.errors import RunStateError, StaleTransitionError
 from etl_craft.core.faults import fault_point
 from etl_craft.core.time import as_utc
@@ -37,7 +38,7 @@ def create_active_run(
     and ``backfill`` marks it part of a backfill.
     """
     kind = trigger_kind or ("BACKFILL" if backfill else "MANUAL")
-    if kind not in {"MANUAL", "BACKFILL", "STAND_IN"} or (backfill and kind != "BACKFILL"):
+    if backfill and kind != "BACKFILL":
         raise RunStateError(
             f"pipeline_id={pipeline_id}: trigger_kind={kind!r}, backfill={backfill!r}; "
             "expected MANUAL, BACKFILL or STAND_IN, with BACKFILL for a backfill run. "
@@ -73,40 +74,25 @@ def end_run_if(conn: Connection, pipeline_run_id: int, from_status: str, status:
         return False
 
 
-def resolve_run_for_task(
+def resolve_run(
     conn: Connection,
     pipeline_id: int,
     *,
     force: bool = False,
-    mode: Mode = Mode.LOCAL,
+    orchestrated: bool = False,
     reason: str = "task requested under an ended run",
     selector: runlog.RunSelector = runlog.ACTIVE_RUN,
 ) -> tuple[int, str | None]:
-    """Bind to the selected run, reopening an explicitly selected ended run with force."""
+    """Bind to the exact selected run; force or an orchestrator may reopen it."""
     selected = runlog.select_run(conn, pipeline_id, selector)
     if selected.status == RunStatus.IN_PROGRESS:
         return selected.pipeline_run_id, None
-    if not force or selected.status == RunStatus.CANCELLED:
+    if not orchestrated and (not force or selected.status == RunStatus.CANCELLED):
         raise RunStateError(
             f"pipeline_id={pipeline_id}: pipeline_run_id={selected.pipeline_run_id} "
             f"is {selected.status}; start a new run with --init-only, or use --force "
             "with an explicit run identity for an ended, non-cancelled run"
         )
-    reopen_run(conn, selected.pipeline_run_id, current_actor(), reason=reason)
-    return selected.pipeline_run_id, selected.status
-
-
-def resolve_run_for_orchestrator(
-    conn: Connection,
-    pipeline_id: int,
-    *,
-    reason: str = "orchestrator requested a task under an ended run",
-    selector: runlog.RunSelector = runlog.ACTIVE_RUN,
-) -> tuple[int, str | None]:
-    """Bind to the selected run, reopening that exact run after an orchestrator clear."""
-    selected = runlog.select_run(conn, pipeline_id, selector)
-    if selected.status == RunStatus.IN_PROGRESS:
-        return selected.pipeline_run_id, None
     reopen_run(conn, selected.pipeline_run_id, current_actor(), reason=reason)
     return selected.pipeline_run_id, selected.status
 
@@ -143,12 +129,7 @@ def finish_task_run(
     task_run_id: int,
     *,
     status: str,
-    source_count: int | None = None,
-    target_count: int | None = None,
-    insert_count: int | None = None,
-    update_count: int | None = None,
-    delete_count: int | None = None,
-    rows_written: int | None = None,
+    counts: Counts = NO_COUNTS,
     error_message: str | None = None,
     task_log: str | None = None,
     attempt_id: int | None = None,
@@ -166,12 +147,7 @@ def finish_task_run(
             status,
             current_actor(),
             owner=owner,
-            source_count=source_count,
-            target_count=target_count,
-            insert_count=insert_count,
-            update_count=update_count,
-            delete_count=delete_count,
-            rows_written=rows_written,
+            counts=counts,
             error_message=error_message,
             task_log=task_log,
             offset=offset,
@@ -184,12 +160,7 @@ def finish_task_run(
                 "task_run_id": task_run_id,
                 "status": status,
                 "now": datetime.now(UTC),
-                "source_count": source_count,
-                "target_count": target_count,
-                "insert_count": insert_count,
-                "update_count": update_count,
-                "delete_count": delete_count,
-                "rows_written": rows_written,
+                **counts.parameters(),
                 "error_message": error_message,
                 "task_log": task_log,
             },
@@ -296,11 +267,6 @@ def mark_task_run(
         raise _stale(conn, "task", task_run_id, "existing summary; no active attempt", None)
 
 
-def mark_pipeline_run(conn: Connection, pipeline_run_id: int, status: str) -> None:
-    """Set a run's status as an operator marked it, ending it now if it had not ended."""
-    mark_run(conn, pipeline_run_id, status, current_actor())
-
-
 def cancel_task_run(conn: Connection, task_run_id: int, error_message: str) -> bool:
     """End an ``IN-PROGRESS`` task row ``CANCELLED``; return whether it was still running."""
     active = active_attempt(conn, task_run_id)
@@ -314,11 +280,10 @@ def cancel_task_run(conn: Connection, task_run_id: int, error_message: str) -> b
     return bool(result.rowcount)
 
 
-def cancel_pipeline_run(conn: Connection, pipeline_run_id: int) -> bool:
+def cancel_pipeline_run(conn: Connection, pipeline_run_id: int) -> None:
     """Cancel an active run on request; refuse a changed status or owner."""
     row = conn.execute(statement(conn, "run_lease"), {"row_id": pipeline_run_id}).one()
     finish_run(conn, pipeline_run_id, "CANCELLED", current_actor(), owner=row.owner_id)
-    return True
 
 
 def delete_skipped_task_run(conn: Connection, task_run_id: int) -> None:
@@ -636,12 +601,7 @@ def _end_attempt(
     owner: str | None,
     status: str,
     *,
-    source_count: int | None = None,
-    target_count: int | None = None,
-    insert_count: int | None = None,
-    update_count: int | None = None,
-    delete_count: int | None = None,
-    rows_written: int | None = None,
+    counts: Counts = NO_COUNTS,
     error_message: str | None = None,
     task_log: str | None = None,
     exit_code: int | None = None,
@@ -652,12 +612,7 @@ def _end_attempt(
             "row_id": attempt_id,
             "owner": owner,
             "status": status,
-            "source_count": source_count,
-            "target_count": target_count,
-            "insert_count": insert_count,
-            "update_count": update_count,
-            "delete_count": delete_count,
-            "rows_written": rows_written,
+            **counts.parameters(),
             "error_message": error_message,
             "task_log": task_log,
             "exit_code": exit_code,
@@ -677,12 +632,7 @@ def finish_attempt(
     actor: Actor,
     *,
     owner: str,
-    source_count: int | None = None,
-    target_count: int | None = None,
-    insert_count: int | None = None,
-    update_count: int | None = None,
-    delete_count: int | None = None,
-    rows_written: int | None = None,
+    counts: Counts = NO_COUNTS,
     error_message: str | None = None,
     task_log: str | None = None,
     exit_code: int | None = None,
@@ -700,12 +650,7 @@ def finish_attempt(
             "CLAIMED or RUNNING",
             owner,
             status,
-            source_count=source_count,
-            target_count=target_count,
-            insert_count=insert_count,
-            update_count=update_count,
-            delete_count=delete_count,
-            rows_written=rows_written,
+            counts=counts,
             error_message=error_message,
             task_log=task_log,
             exit_code=exit_code,

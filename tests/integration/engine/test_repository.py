@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import text
 
 from etl_craft.core.actor import current_actor
+from etl_craft.core.counts import Counts
 from etl_craft.core.enums import RunStatus, SlaStatus
 from etl_craft.core.errors import MetadataError, RunStateError
 from etl_craft.core.graph import TaskEdge, TaskRunState, build_graph
@@ -264,6 +265,17 @@ def test_dependency_edges_for_the_gates(seeded):
             )
         ]
         assert dependencies.fetch_cross_pipeline_task_edges(conn, ids["rules"]) == []
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE CFG_PIPELINE_DEPENDENCY SET CONSUME_REPAIRS = 'N'"))
+        conn.execute(text("UPDATE CFG_TASK_DEPENDENCY SET CONSUME_REPAIRS = 'N'"))
+        assert (
+            dependencies.fetch_pipeline_dependency_edges(conn, ids["alpha"])[0].consume_repairs
+            is False
+        )
+        assert (
+            dependencies.fetch_cross_pipeline_task_edges(conn, ids["load"])[0].consume_repairs
+            is False
+        )
 
 
 def test_business_rules(seeded):
@@ -297,7 +309,7 @@ def test_a_run_is_found_or_started(seeded):
     with engine.begin() as conn:
         assert start_run(conn, ids["alpha"]) == run_id
         assert runlog.fetch_pipeline_run_status(conn, run_id) == RunStatus.IN_PROGRESS
-        assert transitions.resolve_run_for_task(conn, ids["alpha"]) == (run_id, None)
+        assert transitions.resolve_run(conn, ids["alpha"]) == (run_id, None)
 
 
 def test_concurrent_starts_share_one_run(seeded):
@@ -324,7 +336,7 @@ def test_concurrent_starts_share_one_run(seeded):
 def test_a_single_task_needs_a_run_to_bind_to(seeded):
     engine, ids = seeded
     with engine.begin() as conn, pytest.raises(RunStateError, match="matched 0 runs"):
-        transitions.resolve_run_for_task(conn, ids["alpha"])
+        transitions.resolve_run(conn, ids["alpha"])
 
 
 def test_an_ended_run_is_reopened_only_with_force(seeded):
@@ -334,13 +346,11 @@ def test_an_ended_run_is_reopened_only_with_force(seeded):
         transitions.finalize_pipeline_run(conn, run_id, RunStatus.SUCCESS)
     with engine.begin() as conn:
         with pytest.raises(RunStateError, match="matched 0 runs"):
-            transitions.resolve_run_for_task(conn, ids["alpha"], force=True)
+            transitions.resolve_run(conn, ids["alpha"], force=True)
         selector = runlog.RunSelector(run_id=run_id)
         with pytest.raises(RunStateError, match="is SUCCESS"):
-            transitions.resolve_run_for_task(conn, ids["alpha"], selector=selector)
-        assert transitions.resolve_run_for_task(
-            conn, ids["alpha"], force=True, selector=selector
-        ) == (
+            transitions.resolve_run(conn, ids["alpha"], selector=selector)
+        assert transitions.resolve_run(conn, ids["alpha"], force=True, selector=selector) == (
             run_id,
             "SUCCESS",
         )
@@ -369,8 +379,7 @@ def test_a_task_run_row_is_bound_once_and_retried_in_place(seeded):
             RunStatus.FAILED,
             current_actor(),
             owner="retry-test",
-            source_count=10,
-            target_count=7,
+            counts=Counts(source_count=10, target_count=7),
             error_message="boom",
             task_log="tail",
         )
@@ -429,7 +438,7 @@ def test_run_state_and_statuses(seeded):
         run_id = start_run(conn, ids["alpha"])
         binding = transitions.find_or_create_task_run(conn, ids["extract"], run_id)
         transitions.finish_task_run(
-            conn, binding.task_run_id, status=RunStatus.SUCCESS, target_count=5
+            conn, binding.task_run_id, status=RunStatus.SUCCESS, counts=Counts(target_count=5)
         )
         state = runlog.fetch_run_state(conn, run_id, [ids["extract"], ids["load"]])
         assert state == {ids["extract"]: TaskRunState(RunStatus.SUCCESS, 5)}
@@ -550,7 +559,7 @@ def test_force_cannot_reopen_a_cancelled_run(seeded):
         transitions.finalize_pipeline_run(conn, run, "CANCELLED")
     with engine.begin() as conn:
         with pytest.raises(RunStateError, match=r"CANCELLED.*start a new run.*init-only"):
-            transitions.resolve_run_for_task(
+            transitions.resolve_run(
                 conn, ids["alpha"], force=True, selector=runlog.RunSelector(run_id=run)
             )
         assert runlog.fetch_pipeline_run_status(conn, run) == "CANCELLED"

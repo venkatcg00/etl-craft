@@ -62,7 +62,6 @@ def build_warehouse_engine(config: ConnectorConfig, **engine_kwargs: Any) -> Eng
     """
     profile = _active_profile(config)
     dialect = warehouse_dialect(config)
-    dialect.check_profile(profile)
     url = parse_warehouse_url(profile.jdbc_url)
     secret = profile_secret(config, profile)
     connect = warehouse_creator(dialect, profile, secret, url)

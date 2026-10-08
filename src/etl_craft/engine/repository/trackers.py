@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
+from sqlalchemy import Boolean
 from sqlalchemy.engine import Connection
 
 from etl_craft.engine.queries import statement
@@ -35,7 +36,7 @@ def fetch_latest_pipeline_run(conn: Connection, pipeline_id: int) -> LatestRun |
     row = conn.execute(
         statement(conn, "latest_scheduled_pipeline_run"), {"pipeline_id": pipeline_id}
     ).one_or_none()
-    return None if row is None else LatestRun(row.pipeline_run_id, row.status, row.start_date)
+    return None if row is None else LatestRun(**row._mapping)
 
 
 def fetch_latest_task_run(conn: Connection, task_id: int) -> LatestRun | None:
@@ -43,7 +44,7 @@ def fetch_latest_task_run(conn: Connection, task_id: int) -> LatestRun | None:
     row = conn.execute(
         statement(conn, "latest_scheduled_task_run"), {"task_id": task_id}
     ).one_or_none()
-    return None if row is None else LatestRun(row.task_run_id, row.status, row.start_date)
+    return None if row is None else LatestRun(**row._mapping)
 
 
 def fetch_latest_finished_pipeline_run(
@@ -54,30 +55,18 @@ def fetch_latest_finished_pipeline_run(
     A pipeline run has data when any of its tasks reported a positive target count.
     """
     row = conn.execute(
-        statement(conn, "latest_finished_pipeline_run"),
+        statement(conn, "latest_finished_pipeline_run").columns(has_data=Boolean),
         {"pipeline_id": pipeline_id, "ended_by": ended_by},
     ).one_or_none()
-    return (
-        None
-        if row is None
-        else FinishedRun(
-            row.run_id, row.status, bool(row.has_data), row.revision, row.pipeline_run_id
-        )
-    )
+    return None if row is None else FinishedRun(**row._mapping)
 
 
 def fetch_latest_finished_task_run(conn: Connection, task_id: int) -> FinishedRun | None:
     """Return the latest finished row of ``task_id``, or ``None``."""
     row = conn.execute(
-        statement(conn, "latest_finished_task_run"), {"task_id": task_id}
+        statement(conn, "latest_finished_task_run").columns(has_data=Boolean), {"task_id": task_id}
     ).one_or_none()
-    return (
-        None
-        if row is None
-        else FinishedRun(
-            row.run_id, row.status, bool(row.has_data), row.revision, row.pipeline_run_id
-        )
-    )
+    return None if row is None else FinishedRun(**row._mapping)
 
 
 def fetch_average_pipeline_seconds(conn: Connection, pipeline_id: int) -> float | None:
@@ -106,7 +95,7 @@ class ConsumedRun:
 
 def _last_consumed(conn: Connection, query: str, dependency_id: int) -> ConsumedRun | None:
     row = conn.execute(statement(conn, query), {"dependency_id": dependency_id}).one_or_none()
-    return None if row is None else ConsumedRun(row.last_consumed, row.revision)
+    return None if row is None else ConsumedRun(**row._mapping)
 
 
 def fetch_pipeline_last_consumed(

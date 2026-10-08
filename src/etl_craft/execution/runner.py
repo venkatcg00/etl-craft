@@ -159,8 +159,8 @@ def run_task(
     ``RunStateError`` when there is no run to bind to.
     """
     with engine.connect() as conn:
-        reconcile_pipeline = resolve_pipeline_id(conn, pipeline_code)
-    reconcile(engine, pipeline_id=reconcile_pipeline)
+        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+    reconcile(engine, pipeline_id=pipeline_id)
     if override is not None:
         option = "--rerun" if override.rerun else "--ignore-dependencies"
         check_override(config, option, override.reason)
@@ -174,26 +174,28 @@ def run_task(
                 f"recorded. `etl-craft resume --pipeline_code {pipeline_code}` lets it run again"
             )
     if override is not None:
-        return _run_overridden(engine, config, pipeline_code, task_code, override, child, selector)
+        return _run_overridden(
+            engine, config, pipeline_code, pipeline_id, task_code, override, child, selector
+        )
     if force and config.mode == Mode.REMOTE:
         raise RunRefusedError(
             "--force is only allowed in local mode; in remote mode run --task_code already runs "
             "the task whenever the orchestrator says, so there is nothing to override"
         )
     if config.mode == Mode.REMOTE:
-        return _run_for_orchestrator(engine, config, pipeline_code, task_code, child, selector)
+        return _run_for_orchestrator(
+            engine, config, pipeline_code, pipeline_id, task_code, child, selector
+        )
     gate = gate or TrackedGate(
         policy=config.dependency_gates, wait_seconds=config.limits.gate_wait_minutes * 60
     )
     with engine.connect() as conn:
-        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         task_id = resolve_task_id(conn, pipeline_id, task_code)
     with engine.begin() as conn:
-        pipeline_run_id, reopened = transitions.resolve_run_for_task(
+        pipeline_run_id, reopened = transitions.resolve_run(
             conn,
             pipeline_id,
             force=force,
-            mode=config.mode,
             reason=f"--force: {task_code} runs again under the ended run",
             selector=selector,
         )
@@ -235,6 +237,7 @@ def _run_overridden(
     engine: Engine,
     config: ConnectorConfig,
     pipeline_code: str,
+    pipeline_id: int,
     task_code: str,
     override: Override,
     child: ChildOptions | None,
@@ -242,19 +245,16 @@ def _run_overridden(
 ) -> TaskOutcome:
     """Run the task past the checks the override names, and record it."""
     with engine.begin() as conn:
-        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         task_id = resolve_task_id(conn, pipeline_id, task_code)
         if override.rerun:
             # Decide before reopening anything, so a refused rerun changes nothing.
             pipeline_run_id = runlog.select_run(conn, pipeline_id, selector).pipeline_run_id
         else:
-            pipeline_run_id, _ = transitions.resolve_run_for_task(
-                conn, pipeline_id, mode=config.mode, selector=selector
-            )
+            pipeline_run_id, _ = transitions.resolve_run(conn, pipeline_id, selector=selector)
         status = runlog.fetch_task_run_status(conn, task_id, pipeline_run_id)
         if override.rerun and status != RunStatus.IN_PROGRESS:
-            pipeline_run_id, _ = transitions.resolve_run_for_orchestrator(
-                conn, pipeline_id, reason=override.reason, selector=selector
+            pipeline_run_id, _ = transitions.resolve_run(
+                conn, pipeline_id, orchestrated=True, reason=override.reason, selector=selector
             )
     if status == RunStatus.IN_PROGRESS:
         return _skipped(
@@ -301,16 +301,20 @@ def _run_for_orchestrator(
     engine: Engine,
     config: ConnectorConfig,
     pipeline_code: str,
+    pipeline_id: int,
     task_code: str,
     child: ChildOptions | None,
     selector: runlog.RunSelector,
 ) -> TaskOutcome:
     """Run the task as the orchestrator said, under the run it resolves; remote mode."""
     with engine.begin() as conn:
-        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         task_id = resolve_task_id(conn, pipeline_id, task_code)
-        pipeline_run_id, reopened = transitions.resolve_run_for_orchestrator(
-            conn, pipeline_id, selector=selector
+        pipeline_run_id, reopened = transitions.resolve_run(
+            conn,
+            pipeline_id,
+            orchestrated=True,
+            reason="orchestrator requested a task under an ended run",
+            selector=selector,
         )
         status = runlog.fetch_task_run_status(conn, task_id, pipeline_run_id)
     if reopened is not None:
