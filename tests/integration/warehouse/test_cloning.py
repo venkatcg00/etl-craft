@@ -3,13 +3,16 @@
 import json
 import logging
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import text
 
 from etl_craft.config import CloningConfig
+from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import CloningScope
 from etl_craft.core.errors import CloningError, ConfigurationError
+from etl_craft.engine import transitions
 from etl_craft.execution.pipeline import finalize_active_run
 from etl_craft.services.cloning import clone, run_hooks
 from fixtures.metadata import add_pipeline, add_task
@@ -107,3 +110,27 @@ def test_a_failed_clone_names_the_table_and_leaves_the_run_as_it_ended(sql_world
     assert ended.status == "SUCCESS"
     assert "the on_finalized hook failed; the run's outcome is unchanged" in caplog.text
     assert "t_missing_schema" in caplog.text
+
+
+def test_attempt_retryability_is_cloned_as_boolean(sql_world):
+    world = sql_world
+    with world.engine_db.begin() as conn:
+        task = add_task(conn, world.pipeline_id, "typed_attempt")
+        summary = transitions.find_or_create_task_run(conn, task, world.pipeline_run_id).task_run_id
+        for retryable in (False, True):
+            attempt = transitions.queue_attempt(conn, summary, current_actor())
+            transitions.claim_attempt(
+                conn,
+                attempt,
+                current_actor(),
+                owner="typed-worker",
+                lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+            )
+            transitions.finish_attempt(
+                conn, attempt, "FAILED", current_actor(), owner="typed-worker", retryable=retryable
+            )
+    clone(world.engine_db, cloning(world, CloningScope.AUD))
+    assert world.rows(
+        f"SELECT attempt_number, retryable FROM {world.name('AUD_TASK_ATTEMPTS')} "
+        "ORDER BY attempt_number"
+    ) == [(1, False), (2, True)]
