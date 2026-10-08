@@ -293,12 +293,12 @@ def _remote_pipeline_dag(
     on other pipelines, then those on other pipelines' tasks, each before its task. A task with
     no other upstream step waits for the sensors on other pipelines, or for ``__init__``.
     """
-    require_supported(conn, config, pipeline_code)
     pipeline_id = resolve_pipeline_id(conn, pipeline_code)
     data = fetch_pipeline_graph(conn, pipeline_id)
     codes = fetch_task_codes(conn, pipeline_id)
     for code in codes.values():
         _require_code("TASK_CODE", code)
+    require_supported(conn, config, pipeline_code)
     detail = fetch_pipeline_detail(conn, pipeline_id)
     build_graph(data.tasks, data.same_pipeline_edges)
     zone = detail.schedule_timezone if detail.schedule_timezone is not None else config.timezone

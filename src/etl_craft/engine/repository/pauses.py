@@ -30,13 +30,13 @@ def fetch_open_pause(conn: Connection, pipeline_id: int) -> Pause | None:
     row = conn.execute(
         statement(conn, "open_pipeline_pause"), {"pipeline_id": pipeline_id}
     ).one_or_none()
-    return None if row is None else Pause(row.paused_at, row.paused_by, row.reason)
+    return None if row is None else Pause(**row._mapping)
 
 
 def fetch_open_pauses(conn: Connection) -> dict[str, Pause]:
     """Return every paused pipeline's open pause, by pipeline code."""
     return {
-        row.pipeline_code: Pause(row.paused_at, row.paused_by, row.reason, row.pipeline_code)
+        row.pipeline_code: Pause(**row._mapping)
         for row in conn.execute(statement(conn, "open_pipeline_pauses"))
     }
 

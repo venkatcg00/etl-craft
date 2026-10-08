@@ -138,31 +138,6 @@ class WarehouseDialect:
 
     # Connecting
 
-    def check_profile(self, profile: ConnectionProfile) -> None:
-        """Raise ``ConfigurationError`` unless ``profile`` can authenticate here."""
-        mode = profile.auth_mode
-        label = self.spec.display_name or self.spec.key
-        if mode not in self.spec.auth_fields:
-            raise ConfigurationError(
-                f"auth_mode {mode!r} is not available for a {label} warehouse — use one of "
-                f"{sorted(self.spec.auth_modes)}"
-            )
-        for name in self.spec.auth_fields[mode]:
-            if name in {"user", "secret"} or profile.extra.get(name):
-                continue
-            noun = "path" if name.endswith("_file") else "value"
-            raise ConfigurationError(
-                f"profile {profile.name!r}: auth_mode={mode} requires a `{name}:` {noun} in the "
-                "profile — a private key or credential itself is never stored in "
-                "craft-connector.yml"
-            )
-        if (
-            mode in {AuthMode.TOKEN, AuthMode.OAUTH}
-            and self.bearer_needs_user
-            and not (profile.user or self.token_username)
-        ):
-            raise ConfigurationError(self._bearer_user_message(mode))
-
     def present(self, profile: ConnectionProfile, secret: str, url: WarehouseUrl) -> Presented:
         """Return how one new connection authenticates by ``profile.auth_mode``.
 

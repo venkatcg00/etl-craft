@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import text
 
 from etl_craft.core.actor import current_actor
+from etl_craft.core.counts import Counts
 from etl_craft.core.errors import RunStateError, StaleTransitionError
 from etl_craft.core.time import as_utc
 from etl_craft.engine import runlog
@@ -95,7 +96,7 @@ def test_reconciliation_fences_dead_owner_and_retry(engine_db):
                 "SUCCESS",
                 current_actor(),
                 owner=owner,
-                target_count=99,
+                counts=Counts(target_count=99),
                 task_log="zombie",
             )
         result = runlog.fetch_task_run_result(conn, summary)

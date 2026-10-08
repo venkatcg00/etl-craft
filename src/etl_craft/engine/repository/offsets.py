@@ -21,7 +21,7 @@ class StoredOffset:
 def fetch_task_offset(conn: Connection, task_id: int) -> StoredOffset | None:
     """Return the offset ``task_id`` stored, or ``None`` before its first successful run."""
     row = conn.execute(statement(conn, "task_offset"), {"task_id": task_id}).one_or_none()
-    return None if row is None else StoredOffset(row.offset_type, row.offset_value)
+    return None if row is None else StoredOffset(**row._mapping)
 
 
 def save_task_offset(conn: Connection, task_id: int, offset: StoredOffset) -> None:

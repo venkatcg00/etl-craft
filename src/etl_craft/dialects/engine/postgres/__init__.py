@@ -45,12 +45,6 @@ class PostgresEngineDialect(EngineDialect):
         """
         from etl_craft.config import profile_secret
 
-        if profile.auth_mode not in POSTGRES_AUTH_FIELDS:
-            raise ConfigurationError(
-                f"auth_mode {profile.auth_mode!r} is not valid for a PostgreSQL Engine DB — "
-                f"use one of {sorted(POSTGRES_AUTH_FIELDS)}"
-            )
-        require_auth_fields(profile, POSTGRES_AUTH_FIELDS[profile.auth_mode])
         url = parse_postgres_url(profile.jdbc_url)
         creator = postgres_creator(profile, profile_secret(config, profile), url)
         engine_kwargs.setdefault("pool_pre_ping", True)
@@ -117,21 +111,6 @@ def parse_postgres_url(jdbc_url: str) -> JdbcUrl:
             f"not a recognized jdbc:postgresql://host[:port]/database URL: {jdbc_url!r}"
         )
     return url
-
-
-def require_auth_fields(profile: ConnectionProfile, fields: tuple[str, ...]) -> None:
-    """Raise ``ConfigurationError`` unless ``profile`` has every field its auth mode needs.
-
-    ``user`` and ``secret`` are checked by the loader; this covers the auth mode's own fields.
-    """
-    for name in fields:
-        if name in {"user", "secret"}:
-            continue
-        if not profile.extra.get(name):
-            raise ConfigurationError(
-                f"profile {profile.name!r}: auth_mode={profile.auth_mode} requires a "
-                f"`{name}:` value in the profile"
-            )
 
 
 def psycopg_auth_kwargs(

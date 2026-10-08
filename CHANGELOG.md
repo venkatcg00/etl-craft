@@ -23,6 +23,12 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- Task completion passes one frozen count record through the handler and guarded transitions.
+  Run selection and pipeline graph loading share their existing rules; dependency readers always
+  return the stored repair policy. Direct query-to-record mappings preserve Boolean JSON values.
+  Authentication fields are checked once by configuration parsing before connections are built.
+  Python lifecycle callers use `resolve_run` and `counts=Counts(...)` for task completion.
+
 - Shared UTC conversion, enum parsing, credential masking and warehouse column discovery replace
   duplicated helpers. Email TLS modes accept case-insensitive values. Warehouse session setup
   closes cursors on failure and retains PostgreSQL's commit and Iceberg extension setup.

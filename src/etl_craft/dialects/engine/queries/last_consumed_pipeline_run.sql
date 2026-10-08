@@ -1,5 +1,5 @@
 -- The upstream run :dependency_id, a pipeline dependency, last consumed: its latest log row.
-SELECT CONSUMED_PIPELINE_RUN_ID AS last_consumed, CONSUMED_REVISION AS revision
+SELECT CONSUMED_PIPELINE_RUN_ID AS run_id, CONSUMED_REVISION AS revision
 FROM AUD_DEPENDENCY_CONSUMPTION
 WHERE PIPELINE_DEPENDENCY_ID = :dependency_id
 ORDER BY CONSUMPTION_ID DESC

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 
+from sqlalchemy import Boolean
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.errors import MetadataError
@@ -77,23 +78,14 @@ class PipelineDependencyEdge:
 
 
 def fetch_pipeline_dependency_edges(
-    conn: Connection, pipeline_id: int, *, include_repairs: bool = False
+    conn: Connection, pipeline_id: int
 ) -> list[PipelineDependencyEdge]:
     """Return the active dependencies of ``pipeline_id`` on other pipelines."""
     rows = conn.execute(
-        statement(conn, "pipeline_gate_edges" if include_repairs else "pipeline_dependency_edges"),
+        statement(conn, "pipeline_gate_edges").columns(consume_repairs=Boolean),
         {"pipeline_id": pipeline_id},
     )
-    return [
-        PipelineDependencyEdge(
-            row.pipeline_dependency_id,
-            row.depends_on_pipeline_id,
-            row.dependency_type,
-            row.depends_on_pipeline_code,
-            row.consume_repairs == "Y" if include_repairs else True,
-        )
-        for row in rows
-    ]
+    return [PipelineDependencyEdge(**row._mapping) for row in rows]
 
 
 @dataclass(frozen=True)
@@ -112,25 +104,10 @@ class CrossPipelineTaskEdge:
     consume_repairs: bool = True
 
 
-def fetch_cross_pipeline_task_edges(
-    conn: Connection, task_id: int, *, include_repairs: bool = False
-) -> list[CrossPipelineTaskEdge]:
+def fetch_cross_pipeline_task_edges(conn: Connection, task_id: int) -> list[CrossPipelineTaskEdge]:
     """Return the active dependencies of ``task_id`` on tasks in other pipelines."""
     rows = conn.execute(
-        statement(
-            conn, "task_gate_edges" if include_repairs else "task_cross_pipeline_dependencies"
-        ),
+        statement(conn, "task_gate_edges").columns(consume_repairs=Boolean),
         {"task_id": task_id},
     )
-    return [
-        CrossPipelineTaskEdge(
-            row.task_dependency_id,
-            row.pipeline_id,
-            row.depends_on_pipeline_id,
-            row.depends_on_task_id,
-            row.dependency_type,
-            row.depends_on_label,
-            row.consume_repairs == "Y" if include_repairs else True,
-        )
-        for row in rows
-    ]
+    return [CrossPipelineTaskEdge(**row._mapping) for row in rows]

@@ -25,9 +25,7 @@ def fetch_publication(conn: Connection) -> Publication | None:
     row = conn.execute(statement(conn, "latest_docs_publication")).first()
     if row is None:
         return None
-    return Publication(
-        int(row.docs_publication_id), row.published_url, row.first_published, row.last_published
-    )
+    return Publication(**row._mapping)
 
 
 def record_publication(conn: Connection, url: str) -> None:

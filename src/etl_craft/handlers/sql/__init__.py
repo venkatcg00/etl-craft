@@ -10,6 +10,7 @@ warehouse's transaction or publication strategy (``actions``), with every statem
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 
 from sqlalchemy.engine import Engine
 
@@ -21,7 +22,7 @@ from etl_craft.dialects.warehouse import WarehouseDialect, resolve
 from etl_craft.engine import locks
 from etl_craft.engine.repository.hash_versions import clear_hash_version, save_hash_version
 from etl_craft.handlers.registry import HandlerResult, TaskContext
-from etl_craft.handlers.sql.actions import ACTIONS, ActionContext, utc_now
+from etl_craft.handlers.sql.actions import ACTIONS, ActionContext
 from etl_craft.handlers.sql.session import Session
 from etl_craft.handlers.sql.spec import read_sql_task
 from etl_craft.warehouse.connection import open_warehouse
@@ -68,7 +69,7 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
                 context=context,
                 engine_db=engine_db,
                 user=config.warehouse.active.user or "",
-                now=utc_now(),
+                now=datetime.now(UTC),
             )
             try:
                 if (

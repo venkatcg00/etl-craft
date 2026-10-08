@@ -29,18 +29,7 @@ class BusinessRule:
 def fetch_business_rules_for_task(conn: Connection, task_id: int) -> list[BusinessRule]:
     """Return the active business rules of ``task_id``, in the order they run."""
     rows = conn.execute(statement(conn, "business_rules_for_task"), {"task_id": task_id})
-    return [
-        BusinessRule(
-            business_rule_id=row.business_rule_id,
-            business_rule_name=row.business_rule_name,
-            business_rule_sql=row.business_rule_sql,
-            business_rule_type=row.business_rule_type,
-            business_rule_key_column=row.business_rule_key_column,
-            target_table=row.target_table,
-            sequence_number=row.sequence_number,
-        )
-        for row in rows
-    ]
+    return [BusinessRule(**row._mapping) for row in rows]
 
 
 @dataclass(frozen=True)

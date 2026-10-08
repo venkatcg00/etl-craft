@@ -39,9 +39,9 @@ from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from types import TracebackType
-from typing import TypeVar
+from typing import Required, TypedDict, TypeVar, Unpack
 
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import current_actor
@@ -166,37 +166,28 @@ def default_hooks(config: ConnectorConfig, engine: Engine) -> RunHooks:
     return RunHooks(on_sla_lapse=email_the_lapse)
 
 
+class _PipelineOptions(TypedDict, total=False):
+    force: bool
+    clock: Clock | None
+    child: ChildOptions | None
+    hooks: RunHooks | None
+    run_date: date | None
+    backfill: str | None
+    selector: runlog.RunSelector
+    stop_dispatch: threading.Event | None
+    graph_data: PipelineGraphData | None
+
+
 def run_pipeline(
     engine: Engine,
     config: ConnectorConfig,
     pipeline_code: str,
-    *,
-    force: bool = False,
-    clock: Clock | None = None,
-    child: ChildOptions | None = None,
-    hooks: RunHooks | None = None,
-    run_date: date | None = None,
-    backfill: str | None = None,
-    selector: runlog.RunSelector = runlog.ACTIVE_RUN,
-    stop_dispatch: threading.Event | None = None,
-    graph_data: PipelineGraphData | None = None,
+    **kwargs: Unpack[_PipelineOptions],
 ) -> PipelineOutcome:
     """Run the cooperative local scheduler in the foreground until it settles."""
-    steps = pipeline_steps(
-        engine,
-        config,
-        pipeline_code,
-        force=force,
-        clock=clock,
-        child=child,
-        hooks=hooks,
-        run_date=run_date,
-        backfill=backfill,
-        selector=selector,
-        stop_dispatch=stop_dispatch,
-        graph_data=graph_data,
+    return _drive(
+        pipeline_steps(engine, config, pipeline_code, **kwargs), kwargs.get("clock") or Clock()
     )
-    return _drive(steps, clock or Clock())
 
 
 def _drive(steps: Generator[float, None, T], clock: Clock) -> T:
@@ -274,10 +265,9 @@ def pipeline_steps(
         if skip_reason is not None:
             return _skipped_run(pipeline_code, pipeline_run_id, skip_reason, hooks)
         with engine.connect() as conn:
-            if graph_data is None:
-                graph_data = fetch_pipeline_graph(conn, pipeline_id)
-            task_codes = fetch_task_codes(conn, pipeline_id)
-        graph = build_graph(graph_data.tasks, graph_data.same_pipeline_edges)
+            detail, graph, task_codes = _load_pipeline(
+                conn, pipeline_id, detail=detail, graph_data=graph_data
+            )
         scheduler = Scheduler(
             engine,
             config,
@@ -541,10 +531,7 @@ def finalize_active_run(
                 f"{pipeline_code}: run_id={pipeline_run_id} is {selected.status}; "
                 "expected IN-PROGRESS to finalize"
             )
-        detail = fetch_pipeline_detail(conn, pipeline_id)
-        graph_data = fetch_pipeline_graph(conn, pipeline_id)
-        task_codes = fetch_task_codes(conn, pipeline_id)
-    graph = build_graph(graph_data.tasks, graph_data.same_pipeline_edges)
+        detail, graph, task_codes = _load_pipeline(conn, pipeline_id)
     with log_context(pipeline=pipeline_code, pipeline_run_id=pipeline_run_id):
         return _finalize(
             engine,
@@ -591,10 +578,7 @@ def rerun_task(
             runlog.fetch_task_run_status(conn, task_id, pipeline_run_id) == RunStatus.FAILED
         )
         selector = runlog.RunSelector(run_id=pipeline_run_id)
-        detail = fetch_pipeline_detail(conn, pipeline_id)
-        graph_data = fetch_pipeline_graph(conn, pipeline_id)
-        task_codes = fetch_task_codes(conn, pipeline_id)
-    graph = build_graph(graph_data.tasks, graph_data.same_pipeline_edges)
+        detail, graph, task_codes = _load_pipeline(conn, pipeline_id)
     override = Override(reason, rerun=True)
     first = run_task(
         engine, config, pipeline_code, task_code, child=child, override=override, selector=selector
@@ -682,14 +666,10 @@ def force_task(
         engine, config, pipeline_code, task_code, force=True, child=child, selector=selector
     )
     with engine.connect() as conn:
-        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         run_id = selected.pipeline_run_id
         if outcome.reopened is None:
             return PipelineOutcome(outcome.status, outcome.message, run_id)
-        detail = fetch_pipeline_detail(conn, pipeline_id)
-        graph_data = fetch_pipeline_graph(conn, pipeline_id)
-        task_codes = fetch_task_codes(conn, pipeline_id)
-    graph = build_graph(graph_data.tasks, graph_data.same_pipeline_edges)
+        detail, graph, task_codes = _load_pipeline(conn, pipeline_id)
     return _end_reopened(
         engine,
         pipeline_code,
@@ -744,6 +724,23 @@ def _end_reopened(
     return replace(ended, message=f"{ended.message} ({summary})")
 
 
+def _load_pipeline(
+    conn: Connection,
+    pipeline_id: int,
+    *,
+    detail: PipelineDetail | None = None,
+    graph_data: PipelineGraphData | None = None,
+) -> tuple[PipelineDetail, DependencyGraph, dict[int, str]]:
+    """Load one pipeline's details, dependency graph and active task codes."""
+    detail = detail or fetch_pipeline_detail(conn, pipeline_id)
+    data = graph_data or fetch_pipeline_graph(conn, pipeline_id)
+    return (
+        detail,
+        build_graph(data.tasks, data.same_pipeline_edges),
+        fetch_task_codes(conn, pipeline_id),
+    )
+
+
 def _prepare(
     engine: Engine, config: ConnectorConfig, pipeline_code: str
 ) -> tuple[int, PipelineDetail]:
@@ -757,33 +754,26 @@ def _prepare(
     return pipeline_id, detail
 
 
+class _StartOptions(TypedDict, total=False):
+    check_gate: Required[bool]
+    run_date: date | None
+    backfill: str | None
+    remote: bool
+    selector: runlog.RunSelector
+
+
 def _start_run(
     engine: Engine,
     config: ConnectorConfig,
     pipeline_code: str,
     pipeline_id: int,
     clock: Clock,
-    *,
-    check_gate: bool,
-    run_date: date | None = None,
-    backfill: str | None = None,
-    remote: bool = False,
-    selector: runlog.RunSelector = runlog.ACTIVE_RUN,
+    **kwargs: Unpack[_StartOptions],
 ) -> tuple[int, str | None]:
     """Initialize or resume a run, driving the shared gate admission in the foreground."""
     return _drive(
         _start_steps(
-            engine,
-            config,
-            pipeline_code,
-            pipeline_id,
-            clock,
-            check_gate=check_gate,
-            run_date=run_date,
-            backfill=backfill,
-            remote=remote,
-            selector=selector,
-            initialize_only=True,
+            engine, config, pipeline_code, pipeline_id, clock, **kwargs, initialize_only=True
         ),
         clock,
     )

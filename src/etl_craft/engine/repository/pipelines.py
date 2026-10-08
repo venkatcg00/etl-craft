@@ -66,30 +66,20 @@ def fetch_pipeline_detail(conn: Connection, pipeline_id: int) -> PipelineDetail:
     ``PIPELINE_PARAMETERS`` is JSON: PostgreSQL returns it decoded, SQLite as text.
     """
     row = conn.execute(statement(conn, "pipeline_detail"), {"pipeline_id": pipeline_id}).one()
-    params: Any = row.pipeline_parameters or {}
+    values = dict(row._mapping)
+    params: Any = values.pop("pipeline_parameters") or {}
     if isinstance(params, str):
         params = json.loads(params)
-    created = None if row.create_date is None else as_utc(row.create_date)
-    return PipelineDetail(
-        pipeline_code=row.pipeline_code,
-        pipeline_name=row.pipeline_name,
-        description=row.description,
-        run_schedule=row.run_schedule,
-        sla_in_hours=float(row.sla_in_hours) if row.sla_in_hours is not None else None,
-        refresh_type=row.refresh_type,
-        created_by=row.created_by,
-        create_date=created,
-        schedule_timezone=row.schedule_timezone,
-        schedule_start_date=None
+    values["create_date"] = None if row.create_date is None else as_utc(row.create_date)
+    values["sla_in_hours"] = None if row.sla_in_hours is None else float(row.sla_in_hours)
+    values["schedule_start_date"] = (
+        None
         if row.schedule_start_date is None
-        else date.fromisoformat(str(row.schedule_start_date)),
-        catchup=params.get("CATCHUP"),
-        tags=params.get("TAGS"),
-        retries=params.get("RETRIES"),
-        retry_delay_minutes=params.get("RETRY_DELAY_MINUTES"),
-        depends_on_past=params.get("DEPENDS_ON_PAST"),
-        email_on_failure=params.get("EMAIL_ON_FAILURE"),
-        email_recipients=params.get("EMAIL_RECIPIENTS"),
+        else date.fromisoformat(str(row.schedule_start_date))
+    )
+    return PipelineDetail(
+        **values,
+        **{name.lower(): params.get(name) for name in PIPELINE_PARAMETER_KINDS},
     )
 
 

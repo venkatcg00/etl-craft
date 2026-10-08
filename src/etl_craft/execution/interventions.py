@@ -182,7 +182,7 @@ def mark_run(
             raise UsageError(
                 f"{pipeline_code}: pipeline_run_id={run_id} is already {status}; nothing to mark"
             )
-        transitions.mark_pipeline_run(conn, run_id, status)
+        transitions.mark_run(conn, run_id, status, current_actor())
         record.record_intervention(
             conn,
             pipeline_id=pipeline_id,
@@ -247,7 +247,7 @@ def record_stand_in_run(
                 error_message=f"stand-in run recorded {status} by {who}: {reason}",
                 target_count=rows,
             )
-        transitions.mark_pipeline_run(conn, run_id, status)
+        transitions.mark_run(conn, run_id, status, current_actor())
         record.record_intervention(
             conn,
             pipeline_id=pipeline_id,

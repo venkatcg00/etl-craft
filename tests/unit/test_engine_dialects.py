@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from etl_craft.config import ConnectionProfile
+from etl_craft.config import ConnectionProfile, parse_config
 from etl_craft.core.errors import ConfigurationError
 from etl_craft.dialects.engine import all_dialects, build_engine, for_jdbc_url, for_name
 from etl_craft.dialects.engine import sqlite as sqlite_dialect
@@ -185,7 +185,7 @@ def test_an_in_memory_sqlite_engine_db_is_refused(jdbc_url):
 
 def test_sqlite_needs_no_authentication(tmp_path):
     profile = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:e.db", "u", "password")
-    with pytest.raises(ConfigurationError, match="auth_mode must be 'none'"):
+    with pytest.raises(ConfigurationError, match="sqlite Engine DB takes"):
         build_engine(engine_config(profile, tmp_path / "craft-connector.yml"))
 
 
@@ -353,11 +353,26 @@ def test_an_unknown_auth_mode_is_refused():
         psycopg_auth_kwargs("kerberos", user="u", secret="", extra={}, host="h", port=1)
 
 
-def test_build_engine_checks_the_auth_mode_and_its_fields(tmp_path):
-    with pytest.raises(ConfigurationError, match="not valid for a PostgreSQL Engine DB"):
-        build_engine(engine_config(profile("none")))
-    with pytest.raises(ConfigurationError, match="requires a `region:`"):
-        build_engine(engine_config(profile("sts")))
+@pytest.mark.parametrize(
+    ("mode", "error"), [("none", "postgresql Engine DB takes"), ("sts", "needs region")]
+)
+def test_config_checks_engine_auth_mode_and_fields(tmp_path, mode, error):
+    with pytest.raises(ConfigurationError, match=error):
+        parse_config(
+            {
+                "Secrets": {"Source_type": "environment"},
+                "Orchestration": {"Mode": "local"},
+                "Engine": {
+                    "dev": {
+                        "jdbc_url": "jdbc:postgresql://db/etl",
+                        "schema": "public",
+                        "user": "etl",
+                        "auth_mode": mode,
+                    }
+                },
+            },
+            tmp_path / "craft-connector.yml",
+        )
 
 
 def test_a_minted_credential_recycles_pooled_connections():

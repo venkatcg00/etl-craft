@@ -33,17 +33,7 @@ def fetch_task_statuses_for_run(
         statement(conn, "task_statuses_for_run"),
         {"pipeline_id": pipeline_id, "pipeline_run_id": pipeline_run_id},
     )
-    return [
-        TaskStatus(
-            task_id=row.task_id,
-            task_code=row.task_code,
-            handler=row.handler,
-            status=row.status or PENDING,
-            error_message=row.error_message,
-            attempt_count=row.attempt_count,
-        )
-        for row in rows
-    ]
+    return [TaskStatus(**row._mapping) for row in rows]
 
 
 @dataclass(frozen=True)
@@ -63,4 +53,4 @@ def fetch_latest_pipeline_run(conn: Connection, pipeline_id: int) -> LatestPipel
     ).one_or_none()
     if row is None:
         return None
-    return LatestPipelineRun(row.pipeline_run_id, row.status, row.start_date, row.end_date)
+    return LatestPipelineRun(**row._mapping)

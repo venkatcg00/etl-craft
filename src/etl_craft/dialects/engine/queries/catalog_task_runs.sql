@@ -1,6 +1,6 @@
 -- The latest :limit runs of every active task of an active pipeline, newest first.
 SELECT r.TASK_ID AS task_id, r.PIPELINE_RUN_ID AS pipeline_run_id, r.STATUS AS status,
-       r.ATTEMPT_COUNT AS attempts, r.START_DATE AS start_date, r.END_DATE AS end_date,
+       r.ATTEMPT_COUNT AS attempts, r.START_DATE AS "start", r.END_DATE AS "end",
        r.SOURCE_COUNT AS source_count, r.TARGET_COUNT AS target_count,
        r.INSERT_COUNT AS insert_count, r.UPDATE_COUNT AS update_count,
        r.DELETE_COUNT AS delete_count, r.ERROR_MESSAGE AS error_message

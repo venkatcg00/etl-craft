@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from etl_craft.core.actor import Actor, ActorKind
+from etl_craft.core.counts import Counts
 from etl_craft.core.errors import StaleTransitionError
 from etl_craft.engine import runlog
 from etl_craft.engine import transitions as tr
@@ -74,12 +75,14 @@ def apply(conn, operation, attempt, *, owner=OWNER):
             "SUCCESS",
             ACTOR,
             owner=owner,
-            source_count=10,
-            target_count=9,
-            insert_count=7,
-            update_count=2,
-            delete_count=1,
-            rows_written=9,
+            counts=Counts(
+                source_count=10,
+                target_count=9,
+                insert_count=7,
+                update_count=2,
+                delete_count=1,
+                rows_written=9,
+            ),
             task_log="values",
             exit_code=0,
         )
@@ -383,7 +386,9 @@ def test_cancelled_attempt_cannot_overwrite_an_operator_mark(engine_db):
             conn, task, status="SUCCESS", error_message="loaded by hand", target_count=12
         )
         with pytest.raises(StaleTransitionError):
-            tr.finish_attempt(conn, attempt, "SUCCESS", ACTOR, owner=OWNER, target_count=1)
+            tr.finish_attempt(
+                conn, attempt, "SUCCESS", ACTOR, owner=OWNER, counts=Counts(target_count=1)
+            )
         with pytest.raises(StaleTransitionError):
             tr.set_task_log(conn, task, attempt, OWNER, "old process output")
         assert conn.execute(

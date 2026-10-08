@@ -111,12 +111,9 @@ def test_no_selector_never_reopens_an_ended_run(engine_db):
         pipeline = add_pipeline(conn, "P")
         run_id = transitions.create_run(conn, pipeline, SYSTEM_ACTOR, run_key="ended")
         transitions.finish_run(conn, run_id, "SUCCESS", SYSTEM_ACTOR)
-        for resolver in [
-            transitions.resolve_run_for_task,
-            transitions.resolve_run_for_orchestrator,
-        ]:
+        for orchestrated in (False, True):
             with pytest.raises(RunStateError, match="matched 0 runs"):
-                resolver(conn, pipeline)
+                transitions.resolve_run(conn, pipeline, orchestrated=orchestrated)
         assert (
             runlog.select_run(conn, pipeline, runlog.RunSelector(run_key="ended")).status
             == "SUCCESS"

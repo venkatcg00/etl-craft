@@ -16,6 +16,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
+from etl_craft.core.counts import Counts
 from etl_craft.core.errors import HandlerError
 from etl_craft.engine.repository.offsets import StoredOffset
 
@@ -48,7 +49,7 @@ class TaskContext:
 
 
 @dataclass(frozen=True)
-class HandlerResult:
+class HandlerResult(Counts):
     """The counts a handler reports for ``AUD_TASK_RUN_LOG``, and any named values.
 
     ``variables`` are the values a task reports by name (an ingestion script's declared return
@@ -56,21 +57,9 @@ class HandlerResult:
     together with the attempt's SUCCESS outcome, rather than by the handler.
     """
 
-    source_count: int | None = None
-    target_count: int | None = None
-    insert_count: int | None = None
-    update_count: int | None = None
-    delete_count: int | None = None
+    rows_written: int | None = field(default=None, init=False)
     variables: Mapping[str, object] = field(default_factory=dict)
     offset: StoredOffset | None = None
-
-    @property
-    def rows_written(self) -> int | None:
-        """The rows inserted, updated and deleted; ``None`` when the handler reported none."""
-        counts = [self.insert_count, self.update_count, self.delete_count]
-        if all(count is None for count in counts):
-            return None
-        return sum(count or 0 for count in counts)
 
 
 def format_task_log(result: HandlerResult) -> str | None:

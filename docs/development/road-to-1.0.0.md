@@ -102,7 +102,7 @@ item's text, or work done early under another item.
 | S4.I.1 Delete code only tests call | Done | #118 | Removed unused helpers, lifecycle shortcuts and gate consumption wrappers |
 | S4.I.2 Service operations surface | Done | #119 | Direct views, pipeline codes and one audit path per request |
 | S4.I.3 Write each helper once | Done | #120 | Shared UTC, enum, cron, credential, warehouse and migration helpers |
-| S4.I.4 | Not started | | Complete before S4.E |
+| S4.I.4 Thinner engine and execution plumbing | Done | #121 | Shared counts, run selection, graph loading and direct row mappings |
 | S4.E and later | Not started | | |
 
 ### Handover notes
@@ -110,6 +110,13 @@ item's text, or work done early under another item.
 What a person picking up the work needs that the code and the item texts do not say.
 
 **Choices that differ from the item text.**
+
+- S4.I.4 uses SQLAlchemy Boolean result conversion on shared queries so SQLite returns Python
+  booleans rather than integers in operation JSON. Nested catalog records retain their explicit
+  assembly; date, time and numeric normalization remain at the reader boundary. Handler results
+  inherit the frozen count record and recompute write totals when copied with changed counts.
+  Remote DAG generation validates task codes before querying newer capability fields, retaining
+  the rename diagnostic on legacy schemas. Test connection configurations use `parse_config`.
 
 - S4.I.3 keeps existing migration SQL bytes immutable so stored checksums remain valid.
   `dialects/engine/migration-markers.toml` supplies their policy markers; new ENGINE migrations

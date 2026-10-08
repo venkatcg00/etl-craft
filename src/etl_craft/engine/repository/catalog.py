@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 
+from sqlalchemy import Boolean
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.time import as_utc
@@ -121,20 +122,7 @@ def fetch_catalog_tasks(conn: Connection) -> list[TaskRow]:
 
 def fetch_catalog_rules(conn: Connection) -> list[RuleRow]:
     """Return every active business rule of an active task."""
-    return [
-        RuleRow(
-            r.business_rule_id,
-            r.business_rule_name,
-            r.business_rule_type,
-            r.business_rule_sql,
-            r.key_column,
-            r.target_table,
-            int(r.sequence_number),
-            r.pipeline_code,
-            r.task_code,
-        )
-        for r in conn.execute(statement(conn, "catalog_rules"))
-    ]
+    return [RuleRow(**r._mapping) for r in conn.execute(statement(conn, "catalog_rules"))]
 
 
 def fetch_documentation_versions(conn: Connection) -> dict[int, int]:
@@ -206,60 +194,28 @@ class Consumption:
 def fetch_pipeline_runs(conn: Connection, limit: int = RUN_HISTORY) -> dict[str, list[RunSummary]]:
     """Return the latest ``limit`` runs of every active pipeline, by code, newest first."""
     runs: dict[str, list[RunSummary]] = {}
-    for r in conn.execute(statement(conn, "catalog_pipeline_runs"), {"limit": limit}):
-        runs.setdefault(r.pipeline_code, []).append(
-            RunSummary(
-                int(r.pipeline_run_id),
-                r.status,
-                None if r.run_date is None else as_date(r.run_date),
-                r.backfill == "Y",
-                r.start_date,
-                r.end_date,
-                r.sla_status,
-                r.started_by,
-                r.started_by_kind,
-                r.ended_by,
-                r.ended_by_kind,
-            )
-        )
+    query = statement(conn, "catalog_pipeline_runs").columns(backfill=Boolean)
+    for row in conn.execute(query, {"limit": limit}):
+        values = dict(row._mapping)
+        code = values.pop("pipeline_code")
+        values["run_date"] = None if row.run_date is None else as_date(row.run_date)
+        runs.setdefault(code, []).append(RunSummary(**values))
     return runs
 
 
 def fetch_task_runs(conn: Connection, limit: int = RUN_HISTORY) -> dict[int, list[TaskRunSummary]]:
     """Return the latest ``limit`` runs of every active task, by task id, newest first."""
     runs: dict[int, list[TaskRunSummary]] = {}
-    for r in conn.execute(statement(conn, "catalog_task_runs"), {"limit": limit}):
-        runs.setdefault(int(r.task_id), []).append(
-            TaskRunSummary(
-                int(r.pipeline_run_id),
-                r.status,
-                int(r.attempts),
-                r.start_date,
-                r.end_date,
-                r.source_count,
-                r.target_count,
-                r.insert_count,
-                r.update_count,
-                r.delete_count,
-                r.error_message,
-            )
-        )
+    for row in conn.execute(statement(conn, "catalog_task_runs"), {"limit": limit}):
+        values = dict(row._mapping)
+        task_id = values.pop("task_id")
+        runs.setdefault(task_id, []).append(TaskRunSummary(**values))
     return runs
 
 
 def fetch_consumption(conn: Connection) -> list[Consumption]:
     """Return every logged consumption by a known downstream run, oldest first."""
-    return [
-        Consumption(
-            r.pipeline_code,
-            int(r.pipeline_run_id),
-            r.task_code,
-            r.upstream_pipeline,
-            int(r.upstream_run_id),
-            r.upstream_task,
-        )
-        for r in conn.execute(statement(conn, "catalog_consumption"))
-    ]
+    return [Consumption(**r._mapping) for r in conn.execute(statement(conn, "catalog_consumption"))]
 
 
 def _seconds(start: datetime | None, end: datetime | None) -> float | None:

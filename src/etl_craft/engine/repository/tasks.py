@@ -48,13 +48,7 @@ class TaskExecutionDetail:
 def fetch_task_execution_detail(conn: Connection, task_id: int) -> TaskExecutionDetail:
     """Return what running ``task_id`` needs; the task must exist."""
     row = conn.execute(statement(conn, "task_execution_detail"), {"task_id": task_id}).one()
-    return TaskExecutionDetail(
-        handler=row.handler,
-        task_code=row.task_code,
-        pipeline_id=row.pipeline_id,
-        pipeline_code=row.pipeline_code,
-        refresh_type=row.refresh_type,
-    )
+    return TaskExecutionDetail(**row._mapping)
 
 
 def fetch_task_parameters(conn: Connection, task_id: int) -> dict[str, str]:
@@ -80,7 +74,7 @@ def fetch_target_tasks(
         statement(conn, "target_tasks"),
         {"pipeline_id": pipeline_id, "task_id": task_id, "target_object": target_object},
     )
-    return [TargetTask(row.task_id, row.task_code, row.sql_action) for row in rows]
+    return [TargetTask(**row._mapping) for row in rows]
 
 
 @dataclass(frozen=True)
@@ -98,9 +92,4 @@ def fetch_failure_watch_messages(conn: Connection, task_id: int) -> list[Failure
     another pipeline with no run in common.
     """
     rows = conn.execute(statement(conn, "failure_watch_messages"), {"task_id": task_id})
-    return [
-        FailureWatchMessage(
-            depends_on_task_code=row.depends_on_task_code, error_message=row.error_message
-        )
-        for row in rows
-    ]
+    return [FailureWatchMessage(**row._mapping) for row in rows]
