@@ -42,6 +42,7 @@ from etl_craft.core.enums import (
 )
 from etl_craft.core.errors import (
     ConfigurationError,
+    EtlCraftError,
     RunRefusedError,
     UsageError,
 )
@@ -70,6 +71,7 @@ from etl_craft.execution.interventions import (
 )
 from etl_craft.execution.limits import task_timeout_seconds
 from etl_craft.execution.reconcile import reconcile
+from etl_craft.execution.retries import refresh_retries, task_retry_policy
 from etl_craft.execution.supervisor import (
     KILL_GRACE_SECONDS,
     ChildResult,
@@ -149,6 +151,7 @@ def run_task(
     override: Override | None = None,
     selector: runlog.RunSelector = runlog.ACTIVE_RUN,
     admission: CrossPipelineCheck | None = None,
+    automatic_retries: bool = True,
 ) -> TaskOutcome:
     """Run one task under its pipeline's active run and return how it ended.
 
@@ -217,6 +220,17 @@ def run_task(
                 cross.bypassed,
                 task_id=task_id,
             )
+    if automatic_retries:
+        waiting, _ = refresh_retries(engine, config, pipeline_run_id, {task_id})
+        if task_id in waiting and not _wait_retry(
+            engine, pipeline_run_id, pipeline_code, waiting[task_id], gate, child
+        ):
+            return TaskOutcome(
+                RunStatus.CANCELLED
+                if run_cancelled(engine, pipeline_run_id)
+                else RunStatus.IN_PROGRESS,
+                f"{task_code}: retry was not started",
+            )
     outcome = _run_attempt(
         engine,
         config,
@@ -228,9 +242,52 @@ def run_task(
         child,
         decisions=decisions,
     )
+    while automatic_retries and outcome.status == RunStatus.FAILED:
+        waiting, _ = refresh_retries(engine, config, pipeline_run_id, {task_id})
+        if task_id not in waiting:
+            break
+        if not _wait_retry(engine, pipeline_run_id, pipeline_code, waiting[task_id], gate, child):
+            return TaskOutcome(
+                RunStatus.CANCELLED
+                if run_cancelled(engine, pipeline_run_id)
+                else RunStatus.IN_PROGRESS,
+                f"{task_code}: retry was not started",
+                outcome.task_run_id,
+            )
+        outcome = _run_attempt(
+            engine,
+            config,
+            task_id,
+            task_code,
+            pipeline_code,
+            pipeline_run_id,
+            force,
+            child,
+            decisions=decisions,
+        )
     if reopened is not None:
         return replace(outcome, reopened=reopened)
     return outcome
+
+
+def _wait_retry(
+    engine: Engine,
+    pipeline_run_id: int,
+    pipeline_code: str,
+    due: datetime,
+    gate: TrackedGate,
+    child: ChildOptions | None,
+) -> bool:
+    """Wait outside a worker pool; interruption leaves the delayed attempt durable."""
+    while True:
+        if (child is not None and child.cancel is not None and child.cancel.is_set()) or (
+            run_cancelled(engine, pipeline_run_id) or open_pause(engine, pipeline_code) is not None
+        ):
+            return False
+        remaining = (due - gate.clock.now()).total_seconds()
+        if remaining <= 0:
+            return True
+        gate.clock.sleep(min(0.5, remaining))
 
 
 def _run_overridden(
@@ -376,6 +433,17 @@ def _preflight(
         status = runlog.fetch_task_run_status(conn, task_id, pipeline_run_id)
         run_status = runlog.fetch_pipeline_run_status(conn, pipeline_run_id)
         backfill = runlog.fetch_run_kind(conn, pipeline_run_id).backfill
+        queued = (
+            conn.execute(statement(conn, "retry_attempts"), {"pipeline_run_id": pipeline_run_id})
+            .mappings()
+            .all()
+        )
+        queued_here = any(
+            row["task_id"] == task_id
+            and row["status"] == "QUEUED"
+            and row["not_before"] is not None
+            for row in queued
+        )
         graph_data = fetch_pipeline_graph(conn, pipeline_id)
         run_state = runlog.fetch_run_state(
             conn, pipeline_run_id, [task.task_id for task in graph_data.tasks]
@@ -384,7 +452,7 @@ def _preflight(
         return _skipped(
             f"{task_code}: already {status} under pipeline_run_id={pipeline_run_id}"
         ), NO_CROSS
-    if status == RunStatus.IN_PROGRESS:
+    if status == RunStatus.IN_PROGRESS and not queued_here:
         return _skipped(
             f"{task_code}: already IN-PROGRESS under pipeline_run_id={pipeline_run_id}; not "
             "starting it twice"
@@ -542,10 +610,16 @@ def _run_attempt(
     with engine.connect() as conn:
         params = fetch_task_parameters(conn, task_id)
     timeout = task_timeout_seconds(params, config)
+    task_retry_policy(params, config)
     fault_point("runner.after_timeout")
     with engine.begin() as conn:
         binding = transitions.find_or_create_task_run(conn, task_id, pipeline_run_id)
-        attempt_id = transitions.queue_attempt(conn, binding.task_run_id, current_actor())
+        active = transitions.active_attempt(conn, binding.task_run_id)
+        attempt_id = (
+            active.attempt_id
+            if active is not None and active.status == "QUEUED"
+            else transitions.queue_attempt(conn, binding.task_run_id, current_actor())
+        )
         owner = leases.owner_id()
         transitions.claim_attempt(
             conn,
@@ -603,7 +677,15 @@ def _fail_after_bind(
             active = transitions.active_attempt(conn, task_run_id)
             if active is not None and active.attempt_id == attempt_id and active.owner == owner:
                 transitions.finish_attempt(
-                    conn, attempt_id, "FAILED", current_actor(), owner=owner, error_message=message
+                    conn,
+                    attempt_id,
+                    "FAILED",
+                    current_actor(),
+                    owner=owner,
+                    error_message=message,
+                    retryable=error.retryable
+                    if isinstance(error, EtlCraftError)
+                    else not isinstance(error, KeyboardInterrupt),
                 )
                 logger.error("%s: FAILED — %s", task_code, message)
     except Exception:

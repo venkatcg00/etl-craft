@@ -21,9 +21,9 @@ from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, CursorResult
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import DataError, IntegrityError, ProgrammingError, SQLAlchemyError
 
-from etl_craft.core.errors import HandlerError
+from etl_craft.core.errors import HandlerError, SqlGuardError
 from etl_craft.core.text import qualify, split_object_ref
 from etl_craft.dialects.warehouse import WarehouseDialect
 
@@ -105,7 +105,12 @@ class Session:
         """Say which step on which target failed, with the database's own first line."""
         cause = getattr(error, "orig", None) or error
         detail = str(cause).strip().splitlines()[0] if str(cause).strip() else repr(cause)
-        return HandlerError(
+        error_type = (
+            SqlGuardError
+            if isinstance(error, (DataError, IntegrityError, ProgrammingError))
+            else HandlerError
+        )
+        return error_type(
             f"{self.action} {self.target}: {step} failed: {type(cause).__name__}: {detail}"
         )
 
@@ -203,7 +208,7 @@ class Session:
         types = self.hash_types(self.target)
         missing = [column for column in columns if column.lower() not in types]
         if missing:
-            raise HandlerError(f"{self.target} lacks compare columns {', '.join(missing)}")
+            raise SqlGuardError(f"{self.target} lacks compare columns {', '.join(missing)}")
         return self.dialect.hash_expression(values, [types[column.lower()] for column in columns])
 
     def target_columns(self) -> list[tuple[str, str]]:
@@ -259,7 +264,7 @@ class Session:
         except SQLAlchemyError as error:
             raise self._failure("read the existing table format", error) from error
         if existing != self.dialect.spec.table_format:
-            raise HandlerError(
+            raise SqlGuardError(
                 f"{self.action} {self.target}: existing table format is {existing}, "
                 f"but this task resolves to {self.dialect.spec.table_format}; set TABLE_FORMAT="
                 f"{existing} or use a different TARGET_OBJECT. Migrate formats explicitly"

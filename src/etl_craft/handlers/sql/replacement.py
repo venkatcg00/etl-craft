@@ -4,7 +4,7 @@ import contextlib
 import logging
 from collections.abc import Iterator
 
-from etl_craft.core.errors import HandlerError
+from etl_craft.core.errors import SqlGuardError
 from etl_craft.core.faults import fault_point
 from etl_craft.handlers.sql.session import Session
 
@@ -42,7 +42,7 @@ def promote(session: Session, candidate: str, *, existing: bool) -> None:
             elif not existing:
                 session.drop(session.target)
         except Exception as restore_error:
-            raise HandlerError(
+            raise SqlGuardError(
                 f"{session.target}: replacement failed and restoration failed; "
                 f"the original table is retained at {keep}. Restore it before retrying"
             ) from restore_error
@@ -67,7 +67,7 @@ def recover_overwrite(session: Session) -> Iterator[None]:
                 step="restore original rows",
             )
         except Exception as restore_error:
-            raise HandlerError(
+            raise SqlGuardError(
                 f"{session.target}: overwrite failed and restoration failed; "
                 f"original rows are retained at {keep}. Restore them before retrying"
             ) from restore_error

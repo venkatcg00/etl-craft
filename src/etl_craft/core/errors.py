@@ -37,11 +37,13 @@ class ExitCode(IntEnum):
     REMOTE_UNSUPPORTED = 18
     INJECTED_FAULT = 19
     STALE_TRANSITION = 20
+    SQL_GUARD = 21
 
 
 class EtlCraftError(Exception):
     """Base class of every error etl-craft raises; each subclass has its own exit status."""
 
+    retryable: ClassVar[bool] = True
     exit_code: ClassVar[ExitCode] = ExitCode.UNEXPECTED
 
 
@@ -52,36 +54,42 @@ class ConfigurationError(EtlCraftError):
     matching dialect, and an Engine DB that cannot be reached.
     """
 
+    retryable = False
     exit_code = ExitCode.CONFIGURATION
 
 
 class UsageError(EtlCraftError):
     """The command line arguments are invalid."""
 
+    retryable = False
     exit_code = ExitCode.USAGE
 
 
 class MetadataError(EtlCraftError):
     """A pipeline or task code does not resolve to an active ``CFG_`` row."""
 
+    retryable = False
     exit_code = ExitCode.METADATA
 
 
 class GraphError(EtlCraftError):
     """The task or pipeline dependency graph is invalid."""
 
+    retryable = False
     exit_code = ExitCode.GRAPH
 
 
 class RunStateError(EtlCraftError):
     """The run log is in a state the requested run cannot proceed from."""
 
+    retryable = False
     exit_code = ExitCode.RUN_STATE
 
 
 class RunRefusedError(EtlCraftError):
     """The run is not allowed in the configured mode, for example ``--force`` in remote mode."""
 
+    retryable = False
     exit_code = ExitCode.RUN_REFUSED
 
 
@@ -124,6 +132,7 @@ class CloningError(EtlCraftError):
 class RemoteUnsupportedError(EtlCraftError):
     """A pipeline has rules a remote orchestrator does not support; the message names each."""
 
+    retryable = False
     exit_code = ExitCode.REMOTE_UNSUPPORTED
 
 
@@ -136,4 +145,12 @@ class InjectedFaultError(EtlCraftError):
 class StaleTransitionError(EtlCraftError):
     """A lifecycle write lost its status or owner guard; refresh the row before retrying."""
 
+    retryable = False
     exit_code = ExitCode.STALE_TRANSITION
+
+
+class SqlGuardError(HandlerError):
+    """SQL input or target state must be corrected before another attempt can succeed."""
+
+    retryable = False
+    exit_code = ExitCode.SQL_GUARD

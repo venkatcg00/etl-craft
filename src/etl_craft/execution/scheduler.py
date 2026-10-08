@@ -19,6 +19,7 @@ from etl_craft.core.graph import DependencyGraph, TaskRunState
 from etl_craft.engine import runlog
 from etl_craft.execution import leases
 from etl_craft.execution.gates import Clock, CrossPipelineCheck, TrackedGate, check_gate
+from etl_craft.execution.retries import refresh_retries
 from etl_craft.execution.runner import (
     ChildOptions,
     TaskOutcome,
@@ -85,12 +86,25 @@ class Scheduler:
             or self.paused()
         ):
             return not self.jobs
+        retries, exhausted = refresh_retries(
+            self.engine,
+            self.config,
+            self.pipeline_run_id,
+            set(self.graph.task_ids) - self.jobs.keys(),
+        )
+        if not self.force:
+            self.attempted.update(exhausted)
+        for task_id in retries:
+            if task_id not in self.jobs:
+                self.attempted.discard(task_id)
+                self.completed.discard(task_id)
         skipped = [] if self.force else self.settle(self.failures_final)
         if self.failures_final:
             self.after_failure.extend(skipped)
         with self.engine.connect() as conn:
             state = runlog.fetch_run_state(conn, self.pipeline_run_id, self.graph.task_ids)
             backfill = runlog.fetch_run_kind(conn, self.pipeline_run_id).backfill
+        state.update({t: TaskRunState(status="IN-PROGRESS") for t in self.jobs})
         pending = [
             t
             for t in self.graph.task_ids
@@ -106,10 +120,16 @@ class Scheduler:
                 )
             ]
             if self.force
-            else [t for t in self.graph.ready(state) if t in pending]
+            else [
+                t
+                for t in self.graph.ready({**state, **{t: TaskRunState() for t in retries}})
+                if t in pending
+            ]
         )
-        waiting: list[datetime] = []
+        waiting = [due for due in retries.values() if due > self.clock.now()]
         for task_id in ready:
+            if task_id in retries and retries[task_id] > self.clock.now():
+                continue
             if len(self.jobs) >= self.config.limits.max_parallel_tasks:
                 break
             admission = CrossPipelineCheck(0) if not self.force else None
@@ -147,6 +167,7 @@ class Scheduler:
                     self.completed.add(task_id)
                     continue
             self.attempted.add(task_id)
+            self.failures_final = False
             logger.info("%s: dispatch %s", self.pipeline_code, self.task_codes[task_id])
             # ponytail: per-run submission cap; bound the shared queue if deployments outgrow it.
             self.jobs[task_id] = self.pool.submit(
@@ -175,6 +196,7 @@ class Scheduler:
                 self.pipeline_code,
                 self.task_codes[task_id],
                 force=self.force,
+                automatic_retries=False,
                 gate=self.gate,
                 child=self.child,
                 admission=admission,

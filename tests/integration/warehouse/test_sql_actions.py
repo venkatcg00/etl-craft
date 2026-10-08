@@ -509,8 +509,11 @@ def test_a_null_merge_key_is_refused_before_the_target_changes(customers, action
     if action == "DELETE_ROWS":
         source = "SELECT CAST(NULL AS INTEGER) AS id UNION ALL SELECT 1"
         params = {"TARGET_OBJECT": "customers", "MERGE_KEY": "id"}
-    with pytest.raises(HandlerError, match=r"returns 1 row\(s\) with a NULL in MERGE_KEY \(id\)"):
+    with pytest.raises(
+        HandlerError, match=r"returns 1 row\(s\) with a NULL in MERGE_KEY \(id\)"
+    ) as failure:
         w.run("null_key", SQL_ACTION=action, SOURCE_SQL=source, **params)
+    assert not failure.value.retryable
     assert sorted_rows(w, f"SELECT id, city, delete_flag FROM {w.name('customers')}") == [
         (1, "Oslo", "N")
     ]

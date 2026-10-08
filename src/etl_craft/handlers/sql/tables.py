@@ -24,7 +24,7 @@ import re
 from collections.abc import Sequence
 
 from etl_craft.core.enums import SqlAction
-from etl_craft.core.errors import HandlerError
+from etl_craft.core.errors import SqlGuardError
 from etl_craft.core.text import as_subquery
 from etl_craft.handlers.sql.session import ROW_ID_COLUMN, Session
 
@@ -87,7 +87,7 @@ def build_stage(session: Session, select_sql: str, *, empty: bool = False) -> st
 
 
 def check_stage_columns(session: Session, stage: str) -> None:
-    """Refuse a SELECT whose columns the engine cannot write; ``HandlerError`` naming them.
+    """Refuse a SELECT whose columns the engine cannot write; ``SqlGuardError`` naming them.
 
     A column etl-craft writes itself (``ENGINE_COLUMNS``), as a ``SELECT *`` over a table the
     engine wrote returns, would clash with the engine's own value. A column whose name needs
@@ -98,7 +98,7 @@ def check_stage_columns(session: Session, stage: str) -> None:
     names = [name for name, _ in session.columns(stage)]
     reserved = [name for name in names if name.lower() in ENGINE_COLUMNS]
     if reserved:
-        raise HandlerError(
+        raise SqlGuardError(
             f"{session.action} {session.target}: the SELECT returns {', '.join(reserved)}, which "
             "etl-craft writes itself; list the columns you need instead of `*`, or alias them"
         )
@@ -110,7 +110,7 @@ def check_stage_columns(session: Session, stage: str) -> None:
         if not _PLAIN_IDENTIFIER.fullmatch(name) or (folded is not None and name != folded(name))
     ]
     if quoted:
-        raise HandlerError(
+        raise SqlGuardError(
             f"{session.action} {session.target}: the SELECT returns "
             f"{', '.join(repr(name) for name in quoted)}, which need(s) quoting; alias each to a "
             f"plain name, for example `AS {_plain(quoted[0])}`"
@@ -196,10 +196,10 @@ def add_row_id(session: Session) -> None:
 
 
 def require_target(session: Session) -> list[tuple[str, str]]:
-    """Return the target's columns; ``HandlerError`` naming the remedy when it does not exist."""
+    """Return the target's columns; ``SqlGuardError`` naming the remedy when it does not exist."""
     columns = session.target_columns()
     if not columns:
-        raise HandlerError(
+        raise SqlGuardError(
             f"{session.action}: the target {session.target} does not exist. Only CREATE_TABLE "
             "and SETUP_TABLE create tables: add a SETUP_TABLE task for it that runs first, or "
             "create it with the columns and audit columns this action writes"
@@ -215,7 +215,7 @@ def check_target_audit(session: Session, action: str) -> list[tuple[str, str]]:
     have = {name.lower() for name, _ in target_columns}
     missing_audit = [column for column in required if column.lower() not in have]
     if missing_audit:
-        raise HandlerError(
+        raise SqlGuardError(
             f"{session.target} exists but lacks {', '.join(missing_audit)}, which "
             f"SQL_ACTION={action} maintains; run a SETUP_TABLE task for it, or add the columns. "
             "SCHEMA_EVOLUTION adds only the SELECT's own columns"
@@ -236,7 +236,7 @@ def check_or_evolve(session: Session, stage: str, action: str, *, schema_evoluti
     business_set = {name.lower() for name in business}
     missing = [name for name in business if name.lower() not in stage_set]
     if missing:
-        raise HandlerError(
+        raise SqlGuardError(
             f"{session.target} has column(s) {', '.join(missing)} that the SELECT no longer "
             "returns; columns are never dropped, so return them (NULL if need be)"
         )
@@ -247,7 +247,7 @@ def check_or_evolve(session: Session, stage: str, action: str, *, schema_evoluti
             source_type = stage_types[name.lower()]
             target_type = target_types[name.lower()]
             if not session.dialect.same_column_type(source_type, target_type):
-                raise HandlerError(
+                raise SqlGuardError(
                     f"{session.target}.{name}: SCHEMA_EVOLUTION cannot change the existing type "
                     f"{target_type} to the SELECT's type {source_type}; cast the SELECT to "
                     "the target type or migrate the column explicitly"
@@ -258,7 +258,7 @@ def check_or_evolve(session: Session, stage: str, action: str, *, schema_evoluti
     if not new:
         return
     if not schema_evolution:
-        raise HandlerError(
+        raise SqlGuardError(
             f"the SELECT returns new column(s) {', '.join(new)} that {session.target} does not "
             "have; set SCHEMA_EVOLUTION=true to add them"
         )
@@ -273,7 +273,7 @@ def evolve(session: Session, columns: list[tuple[str, str]]) -> None:
     for name, data_type in columns:
         problem = session.dialect.column_addition_problem(data_type)
         if problem:
-            raise HandlerError(f"{session.target}.{name}: {problem}")
+            raise SqlGuardError(f"{session.target}.{name}: {problem}")
     for name, data_type in columns:
         session.run(
             f"{session.dialect.alter_table_keyword()} {session.target} "
@@ -291,7 +291,7 @@ def refuse_null_keys(session: Session, stage: str, merge_key: tuple[str, ...]) -
     nulls = " OR ".join(f"{key} IS NULL" for key in merge_key)
     count = session.count(f"SELECT COUNT(*) FROM {stage} WHERE {nulls}", step="NULL merge keys")
     if count:
-        raise HandlerError(
+        raise SqlGuardError(
             f"{session.action} {session.target}: the SELECT returns {count} row(s) with a NULL "
             f"in MERGE_KEY ({', '.join(merge_key)}); every key column must be set: filter those "
             "rows out or COALESCE the key"
@@ -319,7 +319,7 @@ def dedupe(session: Session, stage: str, merge_key: tuple[str, ...], order: str 
         examples = "; ".join(
             _describe_key(merge_key, row[:-1]) + f" ({row[-1]} rows)" for row in sample
         )
-        raise HandlerError(
+        raise SqlGuardError(
             f"the SELECT returns {count} MERGE_KEY value(s) ({keys}) more than once, "
             f"for example {examples}; a merge needs one row per key. Return one, or set "
             "MERGE_DEDUPE_ORDER (for example 'updated_at DESC') to choose which row is kept"
@@ -336,7 +336,7 @@ def dedupe(session: Session, stage: str, merge_key: tuple[str, ...], order: str 
     if ties:
         sample = session.run(f"{tied} ORDER BY {keys} LIMIT 5", step="examples of ties").all()
         examples = "; ".join(_describe_key(merge_key, row) for row in sample)
-        raise HandlerError(
+        raise SqlGuardError(
             f"MERGE_DEDUPE_ORDER ({order}) leaves ties between different rows for {ties} "
             f"key(s), for example {examples}; add a column to the order that breaks the tie"
         )
@@ -371,7 +371,7 @@ def check_identity_types(session: Session, columns: tuple[str, ...] = IDENTITY_C
     for column in columns:
         kind = types[column.lower()]
         if not session.dialect.is_bigint_type(kind):
-            raise HandlerError(
+            raise SqlGuardError(
                 f"{session.target}.{column} has type {kind}; expected BIGINT. "
                 "Migrate this column explicitly before writing or upgrading"
             )

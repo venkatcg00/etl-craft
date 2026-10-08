@@ -1,7 +1,7 @@
 UPDATE AUD_TASK_ATTEMPTS SET STATUS = :status, ENDED_AT = :now,
 SOURCE_COUNT = :source_count, TARGET_COUNT = :target_count, INSERT_COUNT = :insert_count,
 UPDATE_COUNT = :update_count, DELETE_COUNT = :delete_count, ROWS_WRITTEN = :rows_written,
-ERROR_MESSAGE = :error_message, TASK_LOG = :task_log, EXIT_CODE = :exit_code
+ERROR_MESSAGE = :error_message, TASK_LOG = :task_log, EXIT_CODE = :exit_code, RETRYABLE = :retryable
 WHERE ATTEMPT_ID = :row_id AND STATUS IN ('CLAIMED','RUNNING') AND OWNER_ID = :owner
 AND LEASE_EXPIRES_AT > :now
 RETURNING TASK_RUN_ID AS task_run_id

@@ -47,6 +47,7 @@ from etl_craft.engine.repository.validation import (
 )
 from etl_craft.execution.limits import task_timeout_seconds
 from etl_craft.execution.remote import unsupported_rules
+from etl_craft.execution.retries import task_retry_policy
 from etl_craft.handlers import email_alert, python_scripts
 from etl_craft.handlers.business_rules import check_rule
 from etl_craft.handlers.registry import COMMON_PARAMETERS, TaskContext
@@ -316,6 +317,7 @@ def _task(
         report.fail(where, _code_problem("TASK_CODE", task.task_code))
     try:
         task_timeout_seconds(params, config)
+        task_retry_policy(params, config)
     except EtlCraftError as error:
         report.fail(where, str(error))
     known = KNOWN_PARAMETERS.get(task.handler)

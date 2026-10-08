@@ -10,7 +10,7 @@ import signal
 import sys
 import time
 
-from etl_craft.core.errors import HandlerError
+from etl_craft.core.errors import HandlerError, SqlGuardError
 from etl_craft.execution import child
 from etl_craft.handlers.registry import HANDLERS, HandlerResult
 
@@ -29,6 +29,12 @@ def handler(context, engine):
         return HandlerResult(source_count=10, target_count=9, insert_count=7)
     if behaviour == "variables":
         return HandlerResult(target_count=5, variables={"INGESTION_COUNT": 5, "OFFSET": "42"})
+    if behaviour == "retry":
+        if context.attempt <= 2:
+            raise HandlerError("temporary source failure")
+        return HandlerResult(target_count=1)
+    if behaviour == "guard":
+        raise SqlGuardError("NULL merge key; correct source rows")
     if behaviour == "fail":
         raise HandlerError("the source file is missing")
     if behaviour == "raise":

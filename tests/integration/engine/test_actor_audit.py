@@ -294,6 +294,7 @@ def test_guarded_upgrade_rolls_back_with_the_ledger(empty_engine_db, monkeypatch
         "0014_overseers.sql",
         "0015_schedules.sql",
         "0016_gate_waits.sql",
+        "0017_retries.sql",
     ]
 
 

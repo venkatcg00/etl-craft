@@ -56,6 +56,11 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Local automatic task retries with persisted due times and budgets, capped exponential backoff,
+  retryability recorded by the child, and fenced claims. Delayed attempts consume no worker slots;
+  cancelled attempts and SQL guards never retry. Remote retries remain owned by the orchestrator.
+  Upgrade the Engine DB with migration `0017_retries`.
+
 - Ready-task scheduling shared by the local CLI and server: each completion releases ready
   downstream work immediately. Gate waits persist deadlines and look counts in `AUD_GATE_WAITS`
   without holding task workers, and survive restarts. Upgrade with migration `0016_gate_waits`.

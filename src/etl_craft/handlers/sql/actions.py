@@ -39,7 +39,7 @@ from datetime import datetime
 from sqlalchemy.engine import Engine
 
 from etl_craft.core.enums import RunStatus, SqlAction
-from etl_craft.core.errors import HandlerError
+from etl_craft.core.errors import SqlGuardError
 from etl_craft.core.faults import fault_point
 from etl_craft.engine.repository.hash_versions import fetch_hash_version
 from etl_craft.engine.repository.tasks import TargetTask, fetch_target_tasks
@@ -144,14 +144,14 @@ def create_table(session: Session, action: ActionContext) -> HandlerResult:
         session.run(ddl, step="atomically replace the target")
     elif strategy == "copy_and_restore":
         if existing and any(session.params.get(k) for k in ("EXTERNAL_LOCATION", "BASE_LOCATION")):
-            raise HandlerError(
+            raise SqlGuardError(
                 f"{session.target}: cannot safely stage replacement at its existing storage path; "
                 "use OVERWRITE_TABLE to keep the table definition"
             )
         candidate = session.scratch("replace", persistent=True)
         session.create_table_as(candidate, select_sql, step="prepare the complete replacement")
         if not computed:
-            raise HandlerError(
+            raise SqlGuardError(
                 f"{session.target}: safe replacement requires a declared ROW_ID strategy"
             )
         if existing:
@@ -206,7 +206,7 @@ def setup_table(session: Session, action: ActionContext) -> HandlerResult:
 
 
 def writer_action(setup_for: str | None, others: list[TargetTask], target: str) -> str:
-    """Return the action whose audit columns a SETUP_TABLE target gets; ``HandlerError`` if unclear.
+    """Return the writer whose audit columns a SETUP_TABLE target gets.
 
     ``others`` are the pipeline's other tasks on the target.
     """
@@ -216,20 +216,20 @@ def writer_action(setup_for: str | None, others: list[TargetTask], target: str) 
     if setup_for is not None:
         clashing = [a for a in found if AUDIT_COLUMNS[a] != AUDIT_COLUMNS[setup_for]]
         if clashing:
-            raise HandlerError(
+            raise SqlGuardError(
                 f"SETUP_FOR={setup_for}, but tasks in this pipeline write {target} as {listed}, "
                 "which need other audit columns"
             )
         return setup_for
     audit_sets = {AUDIT_COLUMNS[a] for a in found}
     if len(audit_sets) > 1:
-        raise HandlerError(
+        raise SqlGuardError(
             f"tasks in this pipeline write {target} with actions that need different audit "
             f"columns ({listed}); a table has one set, so give it one writing action, or set "
             "SETUP_FOR to the one it is for"
         )
     if not found:
-        raise HandlerError(
+        raise SqlGuardError(
             f"no task in this pipeline writes {target}, so SETUP_TABLE cannot tell which audit "
             "columns it needs; set SETUP_FOR to the action that writes it: "
             f"{', '.join(AUDIT_COLUMNS)}"
@@ -358,7 +358,7 @@ def _merge_stage(session: Session, action: ActionContext, kind: SqlAction) -> tu
     with action.engine_db.connect() as conn:
         version = fetch_hash_version(conn, session.target)
     if version != 2:
-        raise HandlerError(
+        raise SqlGuardError(
             f"{session.target} has hash version {version or 'unknown'}; "
             f"run `etl-craft rehash --target {session.target_object}` before merging"
         )
@@ -564,13 +564,13 @@ def drop_table(session: Session, action: ActionContext) -> HandlerResult:
             else None
         )
     if creator is None:
-        raise HandlerError(
+        raise SqlGuardError(
             f"DROP_TABLE refused for {target_object}: no other active task in this pipeline "
             "creates it with SQL_ACTION=CREATE_TABLE, and DROP_TABLE removes only tables its "
             "own pipeline creates"
         )
     if status != RunStatus.SUCCESS:
-        raise HandlerError(
+        raise SqlGuardError(
             f"DROP_TABLE refused for {target_object}: the task that creates it "
             f"({creator.task_code}) is {status or 'not run'} under pipeline_run_id="
             f"{context.pipeline_run_id}, not SUCCESS; make the drop depend on it"
@@ -606,7 +606,7 @@ def delete_rows(session: Session, action: ActionContext) -> HandlerResult:
             if c.lower() not in have
         ]
         if missing:
-            raise HandlerError(
+            raise SqlGuardError(
                 f"{target} lacks {', '.join(missing)}, which a soft DELETE_ROWS sets; run a "
                 "SETUP_TABLE task for it, add the columns, or set HARD_DELETE=true"
             )

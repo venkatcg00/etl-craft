@@ -103,7 +103,8 @@ item's text, or work done early under another item.
 | S4.I.2 Service operations surface | Done | #119 | Direct views, pipeline codes and one audit path per request |
 | S4.I.3 Write each helper once | Done | #120 | Shared UTC, enum, cron, credential, warehouse and migration helpers |
 | S4.I.4 Thinner engine and execution plumbing | Done | #121 | Shared counts, run selection, graph loading and direct row mappings |
-| S4.E and later | Not started | | |
+| S4.E Retries | Done | #122 | Persisted due times, fenced claims and retryability |
+| S4.F and later | Not started | | |
 
 ### Handover notes
 
@@ -1643,8 +1644,8 @@ Branch: `feat/cli-status-explain`.
   5. Exit codes: `ExitCode.INCOMPLETE` when a command left a run unfinished (paused mid-run, a
      backfill stopped by a pause, a pipeline run left for another process) and
      `ExitCode.WAITING` when `run --task_code` recorded nothing because dependencies aren't met
-     yet. Assign the next unused exit codes when implementing these outcomes; 20 already
-     belongs to STALE_TRANSITION. A paused pipeline that started nothing keeps exit 0, as documented. Record this as a
+     yet. Assign the next unused exit codes when implementing these outcomes; 20 belongs to
+     STALE_TRANSITION and 21 to SQL_GUARD. A paused pipeline that started nothing keeps exit 0, as documented. Record this as a
      behaviour change in `CHANGELOG.md` and `docs/reference/exit-codes.md`.
 - *Tests.* An `explain` golden test per state (not run, waiting on a gate, blocked by a failure,
   unsatisfiable, retry scheduled, paused, succeeded, skipped); JSON schema tests. Parser construction

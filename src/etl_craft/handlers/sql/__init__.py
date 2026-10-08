@@ -16,7 +16,7 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.config.targets import active_catalog, parse_warehouse_url
 from etl_craft.core.enums import SqlAction, TableFormat, enum_value
-from etl_craft.core.errors import ConfigurationError, HandlerError
+from etl_craft.core.errors import ConfigurationError, SqlGuardError
 from etl_craft.core.text import qualify
 from etl_craft.dialects.warehouse import WarehouseDialect, resolve
 from etl_craft.engine import locks
@@ -41,7 +41,7 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
         context.task_params
     ) or dialect.task_storage_problem(context.task_params)
     if problem is not None:
-        raise HandlerError(problem)
+        raise SqlGuardError(problem)
     catalog = active_catalog(config)
     logger.info(
         "%s %s from %s on %s",
@@ -108,12 +108,12 @@ def task_dialect(context: TaskContext) -> WarehouseDialect:
     table_format = enum_value(
         TableFormat,
         written or default,
-        HandlerError(f"TABLE_FORMAT={written!r} is not one of {', '.join(TableFormat)}"),
+        SqlGuardError(f"TABLE_FORMAT={written!r} is not one of {', '.join(TableFormat)}"),
     )
     url = parse_warehouse_url(config.warehouse.active.jdbc_url)
     dialect = resolve(url.dialect, table_format)
     if not dialect.spec.per_task_format and table_format != default:
-        raise HandlerError(
+        raise SqlGuardError(
             f"on {dialect.spec.display_name} the table format is fixed by the connection "
             f"(Warehouse.Table_format={default}); TABLE_FORMAT={written} cannot change it"
         )
