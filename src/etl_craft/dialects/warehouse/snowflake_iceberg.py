@@ -10,7 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from etl_craft.config.auth import warehouse_by_key
-from etl_craft.core.errors import ConfigurationError, HandlerError
+from etl_craft.core.errors import ConfigurationError, SqlGuardError
 from etl_craft.core.text import is_safe_identifier
 from etl_craft.dialects.warehouse.base import ReplaceStrategy, SurrogateKey
 from etl_craft.dialects.warehouse.snowflake import SnowflakeWarehouse
@@ -57,7 +57,7 @@ class SnowflakeIcebergWarehouse(SnowflakeWarehouse):
         if (volume and volume[1] != SNOWFLAKE_MANAGED_VOLUME) or re.search(
             r"CLUSTER BY|NOT NULL|PRIMARY KEY|UNIQUE|COMMENT\s+'", ddl, re.IGNORECASE
         ):
-            raise HandlerError(
+            raise SqlGuardError(
                 f"{target}: CTAS cannot preserve storage, clustering or column metadata; "
                 "use OVERWRITE_TABLE"
             )
@@ -76,7 +76,7 @@ class SnowflakeIcebergWarehouse(SnowflakeWarehouse):
             query, {"schema": schema, "table": candidate.split(".")[-1]}
         ).scalar_one()
         if actual != comment:
-            raise HandlerError(f"{target}: replacement comment did not match; use OVERWRITE_TABLE")
+            raise SqlGuardError(f"{target}: replacement comment did not match; use OVERWRITE_TABLE")
 
     def backup_table(self, conn: Connection, backup: str, target: str) -> None:
         """Keep recovery rows in a native table, independent of an Iceberg base location."""
@@ -88,13 +88,13 @@ class SnowflakeIcebergWarehouse(SnowflakeWarehouse):
         """Run CREATE ICEBERG TABLE, format version 2, on the task's volume or Snowflake's."""
         problem = self.task_storage_problem(params)
         if problem:
-            raise HandlerError(problem)
+            raise SqlGuardError(problem)
         external_volume = _task_volume(params)
         catalog = _task_catalog(params)
         base_location = (params.get("BASE_LOCATION") or "").strip()
         for value, name in ((external_volume, "EXTERNAL_VOLUME"), (base_location, "BASE_LOCATION")):
             if "'" in value:
-                raise HandlerError(
+                raise SqlGuardError(
                     f"CFG_TASK_PARAMETERS.{name} must not contain a quote: {value!r}"
                 )
         location_clause = (

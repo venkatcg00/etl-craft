@@ -11,7 +11,7 @@ from sqlalchemy.engine import Connection
 
 from etl_craft.config.auth import warehouse_by_key
 from etl_craft.core.enums import AuthMode, TableFormat
-from etl_craft.core.errors import HandlerError
+from etl_craft.core.errors import SqlGuardError
 from etl_craft.dialects.warehouse.base import (
     Presented,
     ReplaceStrategy,
@@ -90,7 +90,7 @@ class SnowflakeWarehouse(WarehouseDialect):
             ).scalar_one()
         ).upper()
         if flag not in {"YES", "NO"}:
-            raise HandlerError(f"{target}: cannot determine table format from IS_ICEBERG={flag!r}")
+            raise SqlGuardError(f"{target}: cannot determine table format from IS_ICEBERG={flag!r}")
         return TableFormat.ICEBERG if flag == "YES" else TableFormat.NATIVE
 
     def row_id_generated(self, conn: Connection, target: str) -> bool:

@@ -11,7 +11,7 @@ from sqlalchemy.engine import Connection
 from etl_craft.config.auth import warehouse_by_key
 from etl_craft.config.targets import attached_catalog_name
 from etl_craft.core.enums import AuthMode
-from etl_craft.core.errors import ConfigurationError, HandlerError
+from etl_craft.core.errors import ConfigurationError, SqlGuardError
 from etl_craft.dialects.warehouse.base import Presented, ReplaceStrategy, SurrogateKey
 from etl_craft.dialects.warehouse.duckdb import DuckDBWarehouse
 
@@ -128,7 +128,7 @@ class DuckDBIcebergWarehouse(DuckDBWarehouse):
             or metadata["format-version"] != 2
             or any(f.get("doc") or f["required"] for f in schema["fields"])
         ):
-            raise HandlerError(
+            raise SqlGuardError(
                 f"{target}: CTAS cannot preserve partitioning, sort order or column metadata; "
                 "use OVERWRITE_TABLE"
             )
@@ -149,7 +149,7 @@ class DuckDBIcebergWarehouse(DuckDBWarehouse):
             ).all()
         }
         if any(actual.get(k) != v for k, v in properties.items()):
-            raise HandlerError(
+            raise SqlGuardError(
                 f"{target}: replacement properties did not match; use OVERWRITE_TABLE"
             )
 

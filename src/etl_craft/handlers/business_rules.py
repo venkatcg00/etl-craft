@@ -44,7 +44,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config.targets import active_catalog
-from etl_craft.core.errors import ConfigurationError, HandlerError
+from etl_craft.core.errors import ConfigurationError, HandlerError, SqlGuardError
 from etl_craft.core.text import (
     as_subquery,
     is_safe_identifier,
@@ -126,26 +126,26 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
 
 
 def check_rule(rule: BusinessRule, catalog: str) -> _Rule:
-    """Check a rule's definition before any rule runs; ``HandlerError`` naming what is wrong."""
+    """Check a rule's definition before any rule runs; ``SqlGuardError`` naming what is wrong."""
     name = f"business rule {rule.business_rule_name!r} (BUSINESS_RULE_ID={rule.business_rule_id})"
     if not is_safe_identifier(rule.business_rule_key_column):
-        raise HandlerError(
+        raise SqlGuardError(
             f"{name}: BUSINESS_RULE_KEY_COLUMN={rule.business_rule_key_column!r} is not a plain "
             "column name"
         )
     try:
         split_object_ref(rule.target_table, param_name="TARGET_TABLE")
     except HandlerError as error:
-        raise HandlerError(f"{name}: {error}") from error
+        raise SqlGuardError(f"{name}: {error}") from error
     statements = split_statements(rule.business_rule_sql)
     if len(statements) != 1:
-        raise HandlerError(
+        raise SqlGuardError(
             f"{name}: BUSINESS_RULE_SQL must be one correlated SELECT; it holds "
             f"{len(statements)} statements"
         )
     problem = read_only_problem(statements[0])
     if problem is not None:
-        raise HandlerError(f"{name}: BUSINESS_RULE_SQL must be a read-only SELECT; it {problem}")
+        raise SqlGuardError(f"{name}: BUSINESS_RULE_SQL must be a read-only SELECT; it {problem}")
     return _Rule(rule, qualify(rule.target_table, catalog))
 
 
