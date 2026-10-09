@@ -9,11 +9,9 @@ from etl_craft.config.loader import load_config, parse_config
 from etl_craft.config.model import (
     CloningConfig,
     ConnectionProfile,
-    ConnectionSection,
     ConnectorConfig,
     DagDefaults,
     DocsSiteConfig,
-    EmailConfig,
     EmailProfile,
     ExecutionLimits,
     SettingSource,
@@ -24,11 +22,9 @@ from etl_craft.config.resolve import profile_needs_secret, profile_secret, resol
 __all__ = [
     "CloningConfig",
     "ConnectionProfile",
-    "ConnectionSection",
     "ConnectorConfig",
     "DagDefaults",
     "DocsSiteConfig",
-    "EmailConfig",
     "EmailProfile",
     "ExecutionLimits",
     "SettingSource",

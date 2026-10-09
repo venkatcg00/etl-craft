@@ -275,7 +275,7 @@ def test_the_email_relay(mode, tmp_path, monkeypatch, tls_relay):
         "host": smtp.host,
         "port": smtp.port,
         "from_address": "etl@example.com",
-        "use_tls": False,
+        "tls_mode": "none",
         "auth_mode": mode,
     }
     if mode == "password":
@@ -283,7 +283,6 @@ def test_the_email_relay(mode, tmp_path, monkeypatch, tls_relay):
         email |= {
             "user": "etl@example.com",
             "secret": "ETL_CRAFT_MATRIX_EMAIL_SECRET",
-            "use_tls": True,
             "tls_mode": "starttls",
             "ca_file": str(smtp.ca_file),
         }

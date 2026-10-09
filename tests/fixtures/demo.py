@@ -141,7 +141,7 @@ class Demo:
                     "port": smtp.port,
                     "from_address": "etl-craft@example.com",
                     "from_name": "Support Insights",
-                    "use_tls": False,
+                    "tls_mode": "none",
                 },
             },
             "Engine": {"dev": self._engine_profile()},

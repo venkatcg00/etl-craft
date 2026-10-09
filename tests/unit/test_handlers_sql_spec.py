@@ -2,7 +2,7 @@
 
 import pytest
 
-from etl_craft.config import ConnectionProfile, ConnectionSection, ConnectorConfig, SourceConfig
+from etl_craft.config import ConnectionProfile, ConnectorConfig, SourceConfig
 from etl_craft.core.enums import Mode, SqlAction
 from etl_craft.core.errors import HandlerError, MetadataError
 from etl_craft.handlers.registry import TaskContext
@@ -23,7 +23,7 @@ def context(project, refresh_type="INCREMENTAL", **params):
     config = ConnectorConfig(
         mode=Mode.LOCAL,
         source=SourceConfig(type="environment"),
-        engine=ConnectionSection("dev", {"dev": engine}),
+        engine=engine,
         config_path=project / "craft-connector.yml",
     )
     return TaskContext(

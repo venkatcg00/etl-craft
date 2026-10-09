@@ -24,7 +24,7 @@ from etl_craft.services.operations import runs
 config = load_config(Path("craft-connector.yml"))
 engine = engine_db(config)
 try:
-    check_reachable(engine, config.engine.active.schema)
+    check_reachable(engine, config.engine.schema)
     ctx = OperationContext(engine, config, resolve_actor())
     done = runs.initialize_run(
         ctx,

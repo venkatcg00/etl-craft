@@ -2,7 +2,6 @@ import pytest
 
 from etl_craft.config import (
     ConnectionProfile,
-    ConnectionSection,
     ConnectorConfig,
     ExecutionLimits,
     SourceConfig,
@@ -18,9 +17,7 @@ pytestmark = pytest.mark.unit
 CONFIG = ConnectorConfig(
     mode=Mode.LOCAL,
     source=SourceConfig("environment"),
-    engine=ConnectionSection(
-        "d", {"d": ConnectionProfile("ENGINE", "d", "jdbc:sqlite:e", "", "none")}
-    ),
+    engine=ConnectionProfile("ENGINE", "d", "jdbc:sqlite:e", "", "none"),
     limits=ExecutionLimits(task_timeout_seconds=600),
 )
 

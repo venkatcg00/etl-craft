@@ -44,7 +44,7 @@ def _active_profile(config: ConnectorConfig) -> ConnectionProfile:
         raise ConfigurationError(
             "no Warehouse section configured in craft-connector.yml — nothing to connect to"
         )
-    return config.warehouse.active
+    return config.warehouse
 
 
 def warehouse_dialect(config: ConnectorConfig) -> WarehouseDialect:
@@ -160,7 +160,7 @@ def is_in_memory(config: ConnectorConfig) -> bool:
         return False
     try:
         dialect = warehouse_dialect(config)
-        url = parse_warehouse_url(config.warehouse.active.jdbc_url)
+        url = parse_warehouse_url(config.warehouse.jdbc_url)
     except ConfigurationError:
         return False
     return dialect.spec.key == "duckdb" and url.path == ":memory:"
@@ -225,7 +225,7 @@ def verify_iceberg_catalog(config: ConnectorConfig, warehouse_engine: Engine) ->
     """
     if warehouse_engine.dialect.name != "trino" or config.warehouse is None:
         return None
-    catalog = parse_warehouse_url(config.warehouse.active.jdbc_url).catalog
+    catalog = parse_warehouse_url(config.warehouse.jdbc_url).catalog
     if not catalog:
         return None
     try:

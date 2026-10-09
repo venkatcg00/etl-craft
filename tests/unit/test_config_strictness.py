@@ -56,7 +56,7 @@ def test_blank_secrets_are_refused_at_load_and_connection(tmp_path, monkeypatch,
     config = load_config(path)
     monkeypatch.setenv("ETL_CRAFT_ENGINE_SECRET", value)
     with pytest.raises(ConfigurationError, match=r"ETL_CRAFT_ENGINE_SECRET.*empty"):
-        profile_secret(config, config.engine.active)
+        profile_secret(config, config.engine)
 
 
 @pytest.mark.parametrize(
@@ -120,7 +120,7 @@ def test_symlink_config_uses_link_folder_for_secrets_and_all_project_paths(tmp_p
     assert config.project_dir == link
     assert config.source.path == str(link / ".env")
     assert config.log_dir == link / "logs"
-    assert resolve_sqlite_path(config.engine.active.jdbc_url, config.config_path) == str(
+    assert resolve_sqlite_path(config.engine.jdbc_url, config.config_path) == str(
         link / "engine.db"
     )
 
@@ -140,7 +140,7 @@ def test_auth_and_url_paths_are_absolute_from_config_directory(tmp_path, monkeyp
         },
     )
     monkeypatch.chdir(tmp_path.parent)
-    profile = load_config(path).engine.active
+    profile = load_config(path).engine
     assert profile.extra["cert_file"] == str(tmp_path / "certs/client.pem")
     assert profile.extra["key_file"] == str(tmp_path / "certs/key.pem")
     from etl_craft.core.text import parse_jdbc_url
@@ -161,7 +161,7 @@ def test_env_bom_export_and_missing_secret_suggestions(tmp_path, monkeypatch):
     )
     env = tmp_path / ".env"
     env.write_text("\ufeffexport ETL_CRAFT_ENGINE_SECRET=valid\n", encoding="utf-8")
-    assert profile_secret(load_config(path), load_config(path).engine.active) == "valid"
+    assert profile_secret(load_config(path), load_config(path).engine) == "valid"
     env.write_text("export ETL_CRAFT_ENGINE_SECRETT=valid\n", encoding="utf-8")
     with pytest.raises(ConfigurationError, match="ETL_CRAFT_ENGINE_SECRETT"):
         load_config(path)
@@ -187,7 +187,7 @@ def test_iceberg_storage_secret_is_a_name_in_config(tmp_path, monkeypatch):
     )
     config = load_config(path)
     assert "never-keep-me" not in repr(config)
-    assert config.warehouse.active.extra["s3_secret"] == "LAKE_S3_SECRET"
+    assert config.warehouse.extra["s3_secret"] == "LAKE_S3_SECRET"
 
 
 @pytest.mark.parametrize("key", ["sslrootcert", "sslcert", "sslkey", "private_key_file"])
@@ -235,7 +235,6 @@ def test_database_ports_are_bounded(url, port):
 def test_logged_engine_urls_drop_credential_query_values(tmp_path, monkeypatch):
     from dataclasses import replace
 
-    from etl_craft.config.model import ConnectionSection
     from etl_craft.engine.connection import engine_db
     from etl_craft.warehouse.connection import build_warehouse_engine
 
@@ -254,11 +253,10 @@ def test_logged_engine_urls_drop_credential_query_values(tmp_path, monkeypatch):
     )
     config = load_config(path)
     profile = replace(
-        config.engine.active,
+        config.engine,
         jdbc_url="jdbc:postgresql://localhost/db?password=never-log-me&api_key=never-log-me&sslmode=require",
     )
-    section = ConnectionSection("dev", {"dev": profile})
-    config = replace(config, engine=section, warehouse=section)
+    config = replace(config, engine=profile, warehouse=profile)
     for engine in (engine_db(config), build_warehouse_engine(config)):
         try:
             assert "never-log-me" not in repr(engine.url)
@@ -283,7 +281,7 @@ def test_relative_sendmail_executable_is_project_relative(tmp_path, monkeypatch)
     )
     monkeypatch.chdir(tmp_path.parent)
     config = load_config(path)
-    assert config.email.active.sendmail_path == str(tmp_path / "bin/sendmail")
+    assert config.email.sendmail_path == str(tmp_path / "bin/sendmail")
     (check,) = _files(config)
     assert check.status is Status.FAIL
     assert str(tmp_path / "bin/sendmail") in check.detail

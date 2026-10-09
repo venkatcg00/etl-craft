@@ -316,9 +316,7 @@ def walk_table_format_checks(w):
         )
         before = w.rows(f"SELECT * FROM {w.name(target)}")
         for requested in (actual, opposite):
-            dialect = resolve(
-                parse_warehouse_url(w.config.warehouse.active.jdbc_url).dialect, requested
-            )
+            dialect = resolve(parse_warehouse_url(w.config.warehouse.jdbc_url).dialect, requested)
             with w.warehouse.connect() as conn:
                 assert dialect.existing_table_format(conn, w.name(target)) == actual
         for action in (

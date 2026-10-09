@@ -10,9 +10,7 @@ import pytest
 
 from etl_craft.config import (
     ConnectionProfile,
-    ConnectionSection,
     ConnectorConfig,
-    EmailConfig,
     EmailProfile,
     SourceConfig,
 )
@@ -28,8 +26,8 @@ def config(**kwargs):
     return ConnectorConfig(
         mode="local",
         source=SourceConfig(type="environment"),
-        engine=ConnectionSection("dev", {"dev": engine}),
-        email=EmailConfig("dev", {"dev": profile}),
+        engine=engine,
+        email=profile,
     )
 
 
@@ -53,7 +51,7 @@ def test_partial_recipient_refusal_is_a_warning(smtp, caplog):
     smtp.send_message.return_value = {"bad@example.com": (550, b"no such recipient")}
     with caplog.at_level(logging.WARNING):
         warning = mail.send_email(
-            config(use_tls=False), ["bad@example.com", "ops@example.com"], "subject", "body"
+            config(tls_mode="none"), ["bad@example.com", "ops@example.com"], "subject", "body"
         )
     assert "bad@example.com" in warning and "550" in warning
     assert "no such recipient" in warning
@@ -65,13 +63,13 @@ def test_total_recipient_refusal_fails(smtp):
         {"bad@example.com": (550, b"no such recipient")}
     )
     with pytest.raises(HandlerError, match=r"smtp\.example\.com:587 failed at send.*550"):
-        mail.send_email(config(use_tls=False), ["bad@example.com"], "subject", "body")
+        mail.send_email(config(tls_mode="none"), ["bad@example.com"], "subject", "body")
 
 
 def test_a_header_error_names_the_transport(smtp):
     broken = config()
-    profile = replace(broken.email.active, from_name="ETL\r\nBcc: attacker@example.com")
-    broken = replace(broken, email=EmailConfig("dev", {"dev": profile}))
+    profile = replace(broken.email, from_name="ETL\r\nBcc: attacker@example.com")
+    broken = replace(broken, email=profile)
     with pytest.raises(HandlerError, match=r"smtp\.example\.com:587 failed at build headers"):
         mail.send_email(broken, ["ops@example.com"], "subject", "body")
     smtp.send_message.assert_not_called()
@@ -88,6 +86,6 @@ def test_a_header_error_names_the_transport(smtp):
     ],
 )
 def test_subjects_are_one_safe_line(smtp, written, expected):
-    mail.send_email(config(use_tls=False), ["ops@example.com"], written, "body")
+    mail.send_email(config(tls_mode="none"), ["ops@example.com"], written, "body")
     message = smtp.send_message.call_args.args[0]
     assert str(message["Subject"]) == expected

@@ -1,7 +1,7 @@
 import pytest
 
 from etl_craft.config import auth
-from etl_craft.core.enums import AuthMode, TableFormat
+from etl_craft.core.enums import AuthMode
 from etl_craft.core.errors import ConfigurationError
 
 pytestmark = pytest.mark.unit
@@ -65,7 +65,6 @@ def test_the_postgres_warehouse_authenticates_like_the_engine_db():
 def test_warehouse_spec(name, table_format, key):
     spec = auth.warehouse_spec(name, table_format)
     assert spec.key == key
-    assert spec.known
 
 
 def test_postgres_has_no_iceberg_tables():
@@ -73,11 +72,9 @@ def test_postgres_has_no_iceberg_tables():
         auth.warehouse_spec("postgresql", "iceberg")
 
 
-def test_a_database_without_a_dialect_is_a_plain_ansi_warehouse():
-    spec = auth.warehouse_spec("oracle", "native")
-    assert (spec.key, spec.display_name, spec.known) == ("oracle", "oracle", False)
-    assert spec.table_format is TableFormat.NATIVE
-    assert spec.auth_modes == {"none", "password", "token"}
+def test_a_database_without_a_dialect_is_refused():
+    with pytest.raises(ConfigurationError, match="'oracle' is not a supported warehouse"):
+        auth.warehouse_spec("oracle", "native")
 
 
 def test_warehouse_names_select_registered_dialects():

@@ -74,7 +74,7 @@ def restore_logging():
 @pytest.fixture
 def project(engine_db, tmp_path):
     """A project with a DuckDB warehouse, scripts in ingestion_scripts/, and task P.load."""
-    profile = engine_db.config.engine.active
+    profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
     block = {"jdbc_url": profile.jdbc_url, "schema": schema}
     if profile.auth_mode != "none":

@@ -2,14 +2,13 @@
 
 from dataclasses import replace
 
-from etl_craft.config import ConnectionSection
 from etl_craft.execution.connections import probe_warehouse
 from etl_craft.warehouse.connection import warehouse_schema_problem
 
 
 def with_schema(world, schema):
-    profile = replace(world.config.warehouse.active, schema=schema)
-    return replace(world.config, warehouse=ConnectionSection("dev", {"dev": profile}))
+    profile = replace(world.config.warehouse, schema=schema)
+    return replace(world.config, warehouse=profile)
 
 
 def test_an_existing_schema_passes_and_a_missing_one_is_named(sql_world):

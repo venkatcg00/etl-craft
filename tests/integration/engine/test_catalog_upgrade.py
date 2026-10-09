@@ -28,7 +28,7 @@ def test_full_catalog_matches_fresh_initialization(empty_engine_db, release, tmp
     if folder == "postgres":
         with db.engine.begin() as conn:
             conn.execute(text("CREATE SCHEMA fresh"))
-        profile = replace(db.config.engine.active, schema="fresh")
+        profile = replace(db.config.engine, schema="fresh")
         fresh = build_engine(engine_config(profile))
     else:
         directory = tmp_path / "fresh"

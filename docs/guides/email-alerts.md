@@ -27,8 +27,6 @@ to use system trust. `doctor` shows the mode and trust source and checks the TLS
 logging in. Password and OAuth authentication require `starttls` or `ssl`; `none` is refused with
 either login mode.
 
-The existing `use_tls` setting remains supported: `true` means `starttls`, and `false` means `none`.
-Prefer `tls_mode` for new profiles; conflicting `tls_mode` and `use_tls` settings are refused.
 With `sendmail`, TLS and login settings are refused because the host's mail system owns delivery.
 
 ## The alert task

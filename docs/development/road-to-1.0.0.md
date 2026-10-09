@@ -107,7 +107,8 @@ item's text, or work done early under another item.
 | S4.F Status and explain | Done | #123 | Read-only snapshots, shared JSON and explicit unfinished outcomes |
 | S4.G HTTP API | Done | #124 | Bearer roles, exact run identities and shared operation documents |
 | S4.H Versioned YAML and Airflow factory | Done | #125 | Validated version 1 exports and isolated Airflow contracts |
-| S4.I.5 and later | Not started | | |
+| S4.I.5 Configuration shapes 1.0 does not need | Done | #126 | Selected profiles stored directly, `tls_mode` only, unsupported warehouses refused |
+| S4.I.6 and later | Not started | | |
 
 ### Handover notes
 
@@ -119,6 +120,10 @@ S4.G passed the full local checks, installed-wheel matrix and all Databricks and
 acceptance tests.
 S4.H passed the full local checks, installed-wheel matrix and factory contracts on Airflow
 2.11.0 and 3.3.2. Cloud warehouse execution is unchanged by S4.H.
+S4.I.5 passed the full local checks, the installed-wheel matrix and all Databricks acceptance
+tests. The Snowflake run stopped after 17 of 22 tests, all passing, when the workstation ran out
+of memory; S4.I.5 changes no Snowflake code, and the four local warehouses run every path it
+touches.
 
 **Choices that differ from the item text.**
 

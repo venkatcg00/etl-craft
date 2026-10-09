@@ -137,7 +137,7 @@ def test_rehash_command_validates_dry_run_then_upgrades(sql_world, capsys):
         MERGE_KEY="id",
         MERGE_COMPARE_COLUMNS="name",
     )
-    profile = w.config.warehouse.active
+    profile = w.config.warehouse
     fields = {
         "jdbc_url": profile.jdbc_url,
         "schema": profile.schema,

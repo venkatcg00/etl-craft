@@ -138,7 +138,7 @@ def _files(config: ConnectorConfig) -> list[Check]:
     for label, section in (("Engine DB", config.engine), ("Warehouse", config.warehouse)):
         if section is None:
             continue
-        profile = section.active
+        profile = section
         for key in ("key_file", "cert_file", "private_key_file"):
             if profile.extra.get(key):
                 paths.append((f"{label} {key}", str(profile.extra[key])))
@@ -146,7 +146,7 @@ def _files(config: ConnectorConfig) -> list[Check]:
             if key.lower() in {"sslrootcert", "sslcert", "sslkey", "private_key_file"}:
                 paths.append((f"{label} {key}", value))
     if config.email is not None:
-        email = config.email.active
+        email = config.email
         if email.ca_file is not None:
             paths.append(("Email ca_file", str(email.ca_file)))
         if email.transport == "sendmail":
@@ -189,7 +189,7 @@ def _auth(label: str, auth_mode: str, verified: frozenset[str], target: str) -> 
 
 
 def _engine(config: ConnectorConfig, *, engine_state: bool) -> list[Check]:
-    profile = config.engine.active
+    profile = config.engine
     spec = engine_for_jdbc_url(profile.jdbc_url)
     checks = _secret(config, "Engine DB", profile)
     checks += _auth("Engine DB", profile.auth_mode, spec.verified_auth_modes, spec.display_name)
@@ -249,7 +249,7 @@ def _engine_state(config: ConnectorConfig, engine: Engine) -> list[Check]:
     if engine.dialect.name == "postgresql":
         for table, role, privilege in extra_write_grants(engine):
             quoted_role = '"' + role.replace('"', '""') + '"' if role != "PUBLIC" else role
-            schema = config.engine.active.schema or "public"
+            schema = config.engine.schema or "public"
             qualified = '"' + schema.replace('"', '""') + '"."' + table.replace('"', '""') + '"'
             checks.append(
                 fail(
@@ -278,7 +278,7 @@ def _warehouse(config: ConnectorConfig, *, queue_on_engine_db: bool) -> list[Che
     """
     if config.warehouse is None:
         return [ok("Warehouse", "no Warehouse section: only SQL and BUSINESS_RULES tasks need one")]
-    profile = config.warehouse.active
+    profile = config.warehouse
     checks = _secret(config, "Warehouse", profile)
     if name := profile.extra.get("s3_secret"):
         try:
@@ -339,7 +339,7 @@ def _warehouse(config: ConnectorConfig, *, queue_on_engine_db: bool) -> list[Che
 def _email(config: ConnectorConfig) -> list[Check]:
     if config.email is None:
         return [ok("Email", "no Email settings: only EMAIL_ALERT tasks and SLA emails need them")]
-    profile = config.email.active
+    profile = config.email
     if profile.transport == "sendmail":
         problem = probe_email_relay(config)
         if problem:
@@ -353,7 +353,7 @@ def _email(config: ConnectorConfig) -> list[Check]:
     checks.append(
         ok(
             "Email TLS",
-            f"tls_mode={profile.effective_tls_mode}, ca_file={profile.ca_file or 'system trust'}",
+            f"tls_mode={profile.tls_mode}, ca_file={profile.ca_file or 'system trust'}",
         )
     )
     problem = probe_email_relay(config)
@@ -374,7 +374,7 @@ def _cloning(config: ConnectorConfig) -> list[Check]:
     return [
         ok(
             "Cloning",
-            f"scope {cloning.scope}: after each run, into schema {config.warehouse.active.schema}",
+            f"scope {cloning.scope}: after each run, into schema {config.warehouse.schema}",
         )
     ]
 

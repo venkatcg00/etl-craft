@@ -76,7 +76,7 @@ def send_email(
             "no Email settings in craft-connector.yml; sending email needs Orchestration's Email "
             "block with the relay's host, port and from address"
         )
-    profile = config.email.active
+    profile = config.email
     subject = safe_subject(subject)
     relay = f"{profile.host}:{profile.port}"
     destination = (
@@ -101,7 +101,7 @@ def send_email(
             return None
         step = "connect"
         with open_smtp(profile, timeout=SMTP_TIMEOUT_SECONDS) as server:
-            if profile.effective_tls_mode == "starttls":
+            if profile.tls_mode == "starttls":
                 step = "start TLS"
                 server.starttls(context=tls_context(profile))
             step = "log in"
@@ -140,7 +140,7 @@ def safe_subject(subject: str) -> str:
 
 def email_tls_problem(profile: EmailProfile) -> str | None:
     """Return unsafe or unusable TLS settings, naming the profile and the remedy."""
-    mode = profile.effective_tls_mode
+    mode = profile.tls_mode
     if mode not in {"none", "starttls", "ssl"}:
         return f"Email profile {profile.name!r} has tls_mode={mode!r}; use none, starttls or ssl"
     if mode == "none" and profile.auth_mode != AuthMode.NONE:
@@ -168,7 +168,7 @@ def open_smtp(profile: EmailProfile, *, timeout: float) -> smtplib.SMTP:
     problem = email_tls_problem(profile)
     if problem:
         raise HandlerError(problem)
-    if profile.effective_tls_mode == "ssl":
+    if profile.tls_mode == "ssl":
         return smtplib.SMTP_SSL(
             profile.host, profile.port, timeout=timeout, context=tls_context(profile)
         )

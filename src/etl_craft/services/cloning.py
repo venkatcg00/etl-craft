@@ -94,7 +94,7 @@ def cloning_problem(config: ConnectorConfig) -> str | None:
 
 def _own_schema_problem(config: ConnectorConfig) -> str | None:
     assert config.warehouse is not None
-    engine_profile, warehouse_profile = config.engine.active, config.warehouse.active
+    engine_profile, warehouse_profile = config.engine, config.warehouse
     if not engine_profile.jdbc_url.startswith("jdbc:postgresql:"):
         return None
     warehouse_url = parse_warehouse_url(warehouse_profile.jdbc_url)
@@ -130,7 +130,7 @@ def clone(engine: Engine, config: ConnectorConfig) -> list[ClonedTable]:
     assert config.warehouse is not None
     dialect = warehouse_dialect(config)
     catalog = active_catalog(config)
-    schema = config.warehouse.active.schema
+    schema = config.warehouse.schema
     cloned: list[ClonedTable] = []
     with locks.CLONE.hold(engine), open_warehouse(config, engine) as warehouse:
         for table, columns in _engine_tables(engine, config, PREFIXES[cloning.scope]):
@@ -163,7 +163,7 @@ def _engine_tables(
     engine: Engine, config: ConnectorConfig, prefixes: tuple[str, ...]
 ) -> list[tuple[str, list[tuple[str, TypeEngine[Any]]]]]:
     """Return each Engine DB table the prefixes name, upper case, with its columns in order."""
-    schema = config.engine.active.schema or None
+    schema = config.engine.schema or None
     inspector = inspect(engine)
     found = []
     for name in sorted(inspector.get_table_names(schema=schema), key=str.upper):

@@ -32,7 +32,7 @@ def restore_logger():
 @pytest.fixture
 def project(engine_db, tmp_path, monkeypatch):
     """A project with a DuckDB warehouse, email, a SQL file and an ingestion script."""
-    profile = engine_db.config.engine.active
+    profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
     block = {"jdbc_url": profile.jdbc_url, "schema": schema}
     if profile.auth_mode != "none":
@@ -464,11 +464,10 @@ def test_target_formats_are_compared_across_pipelines_and_qualified_names(
 ):
     engine, config, _ = project
     profile = replace(
-        config.warehouse.active,
+        config.warehouse,
         jdbc_url="jdbc:snowflake://account.snowflakecomputing.com/?db=analytics",
     )
-    section = replace(config.warehouse, profiles={config.warehouse.active_profile: profile})
-    config = replace(config, warehouse=section, warehouse_table_format=default)
+    config = replace(config, warehouse=profile, warehouse_table_format=default)
     with engine.begin() as conn:
         p = add_pipeline(conn, "A")
         q = add_pipeline(conn, "B")

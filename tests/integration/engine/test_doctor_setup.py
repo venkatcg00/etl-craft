@@ -7,7 +7,7 @@ from dataclasses import replace
 import pytest
 
 from etl_craft.cli import main
-from etl_craft.config import ConnectionProfile, ConnectionSection, EmailConfig, EmailProfile
+from etl_craft.config import ConnectionProfile, EmailProfile
 from etl_craft.config.model import SettingSource
 from etl_craft.core.enums import Mode
 from etl_craft.core.errors import ExitCode
@@ -35,12 +35,12 @@ def config(empty_engine_db, tmp_path, monkeypatch):
     warehouse = ConnectionProfile(
         "WAREHOUSE", "dev", f"jdbc:duckdb:{tmp_path / 'wh.duckdb'}", "", "none", schema="main"
     )
-    email = EmailProfile("EMAIL", "dev", relay.host, relay.port, "etl@example.com", use_tls=False)
+    email = EmailProfile("EMAIL", "dev", relay.host, relay.port, "etl@example.com", tls_mode="none")
     return replace(
         empty_engine_db.config,
         config_path=tmp_path / "craft-connector.yml",
-        warehouse=ConnectionSection("dev", {"dev": warehouse}),
-        email=EmailConfig("dev", {"dev": email}),
+        warehouse=warehouse,
+        email=email,
     )
 
 
@@ -86,8 +86,8 @@ def test_a_project_migration_is_pending_until_setup_applies_it(config, tmp_path)
 
 
 def test_setup_changes_nothing_when_a_check_fails(config, empty_engine_db):
-    warehouse = replace(config.warehouse.active, schema="missing")
-    broken = replace(config, warehouse=ConnectionSection("dev", {"dev": warehouse}))
+    warehouse = replace(config.warehouse, schema="missing")
+    broken = replace(config, warehouse=warehouse)
     result = setup(broken)
     assert result.failed and failed(result.checks) == ["Warehouse connection"]
     assert "missing" in found(result.checks)["Warehouse connection"][1]
@@ -96,13 +96,13 @@ def test_setup_changes_nothing_when_a_check_fails(config, empty_engine_db):
 
 
 def test_every_problem_is_reported_not_only_the_first(config):
-    email = replace(config.email.active, port=1)
+    email = replace(config.email, port=1)
     warehouse = ConnectionProfile("WAREHOUSE", "dev", "jdbc:duckdb:", "", "none", schema="main")
     broken = replace(
         config,
         mode=Mode.REMOTE,
-        warehouse=ConnectionSection("dev", {"dev": warehouse}),
-        email=EmailConfig("dev", {"dev": email}),
+        warehouse=warehouse,
+        email=email,
         settings=(SettingSource("Engine.dev.user", "ETL_USER"),),
     )
     checks = run_checks(broken)
@@ -110,17 +110,17 @@ def test_every_problem_is_reported_not_only_the_first(config):
     assert "an in-memory DuckDB warehouse" in found(checks)["Warehouse"][1]
     warnings = [c for c in checks if c.status is Status.WARN]
     assert warnings[0].detail.startswith("Engine.dev.user is 'ETL_USER': no variable")
-    if config.engine.active.jdbc_url.startswith("jdbc:sqlite"):
+    if config.engine.jdbc_url.startswith("jdbc:sqlite"):
         assert "in remote mode" in found(checks)["Engine DB kind"][1]
 
 
 def test_an_engine_db_that_cannot_be_reached_is_one_failed_check(config):
-    engine = config.engine.active
+    engine = config.engine
     if not engine.jdbc_url.startswith("jdbc:postgresql"):
         engine = replace(engine, jdbc_url="jdbc:sqlite:/nonexistent/dir/engine.db")
     else:
         engine = replace(engine, schema="missing")
-    broken = replace(config, engine=ConnectionSection(engine.name, {engine.name: engine}))
+    broken = replace(config, engine=engine)
     checks = found(run_checks(broken))
     assert [name for name, (status, _) in checks.items() if status is Status.FAIL] == [
         "Engine DB connection"
@@ -133,23 +133,23 @@ def test_an_engine_db_that_cannot_be_reached_is_one_failed_check(config):
 def test_email_secrets_auth_and_sendmail(config, monkeypatch):
     monkeypatch.delenv("ETL_CRAFT_TEST_UNSET_SECRET", raising=False)
     oauth = replace(
-        config.email.active,
+        config.email,
         auth_mode="oauth",
         user="etl@example.com",
         extra={"secret_var": "ETL_CRAFT_TEST_UNSET_SECRET"},
     )
-    checks = found(run_checks(replace(config, email=EmailConfig("dev", {"dev": oauth}))))
+    checks = found(run_checks(replace(config, email=oauth)))
     assert checks["Email secret"][0] is Status.FAIL
     assert "ETL_CRAFT_TEST_UNSET_SECRET" in checks["Email secret"][1]
     assert checks["Email auth"][0] is Status.WARN
     assert checks["Email TLS"][0] is Status.FAIL
     assert "auth_mode=oauth" in checks["Email TLS"][1]
 
-    program = replace(config.email.active, transport="sendmail", sendmail_path=sys.executable)
-    checks = found(run_checks(replace(config, email=EmailConfig("dev", {"dev": program}))))
+    program = replace(config.email, transport="sendmail", sendmail_path=sys.executable)
+    checks = found(run_checks(replace(config, email=program)))
     assert checks["Email"] == (Status.OK, f"sendmail at {sys.executable}, from etl@example.com")
     missing = replace(program, sendmail_path=str(config.project_dir / "no-sendmail"))
-    checks = found(run_checks(replace(config, email=EmailConfig("dev", {"dev": missing}))))
+    checks = found(run_checks(replace(config, email=missing)))
     assert checks["Email"][0] is Status.FAIL and "does not exist" in checks["Email"][1]
 
 

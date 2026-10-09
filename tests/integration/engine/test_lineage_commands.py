@@ -25,7 +25,7 @@ def restore_logger():
 @pytest.fixture
 def project(engine_db, tmp_path, monkeypatch):
     """INGEST stages raw orders, SALES converts them, MART sums them; one task cannot be traced."""
-    profile = engine_db.config.engine.active
+    profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
     block = {"jdbc_url": profile.jdbc_url, "schema": schema}
     if profile.auth_mode != "none":

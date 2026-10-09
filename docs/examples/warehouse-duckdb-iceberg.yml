@@ -49,7 +49,7 @@ Orchestration:
       from_address: EMAIL_FROM         # variable
       auth_mode: EMAIL_AUTH_MODE       # variable
       user: EMAIL_USER                 # variable
-      use_tls: EMAIL_USE_TLS           # variable
+      tls_mode: EMAIL_TLS_MODE         # variable — starttls | ssl | none
       secret: EMAIL_SECRET             # variable, required: a secret is never used as written
   uat:
     Global_dag: false                  # value
@@ -66,7 +66,7 @@ Orchestration:
       from_address: EMAIL_FROM         # variable
       auth_mode: EMAIL_AUTH_MODE       # variable
       user: EMAIL_USER                 # variable
-      use_tls: EMAIL_USE_TLS           # variable
+      tls_mode: EMAIL_TLS_MODE         # variable — starttls | ssl | none
       secret: EMAIL_SECRET             # variable, required: a secret is never used as written
   prod:
     Global_dag: true                   # value
@@ -84,7 +84,7 @@ Orchestration:
       from_address: EMAIL_FROM         # variable
       auth_mode: EMAIL_AUTH_MODE       # variable
       user: EMAIL_USER                 # variable
-      use_tls: EMAIL_USE_TLS           # variable
+      tls_mode: EMAIL_TLS_MODE         # variable — starttls | ssl | none
       secret: EMAIL_SECRET             # variable, required: a secret is never used as written
 
 Engine:

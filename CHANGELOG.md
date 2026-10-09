@@ -23,6 +23,19 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- `ConnectorConfig.engine`, `.warehouse` and `.email` hold the selected profile itself; the
+  `ConnectionSection` and `EmailConfig` wrappers and their `.active` and `.active_profile` are
+  removed. Python callers read `config.engine.schema` and `config.engine.name` directly.
+
+- `Orchestration.Email.use_tls` is removed; set `tls_mode` (`starttls`, the default, `ssl` or
+  `none`). A file that still sets `use_tls` is refused as an unknown key.
+
+- A warehouse URL without its own dialect (such as `jdbc:mysql:` or `jdbc:oracle:`) is refused,
+  naming the supported warehouses, rather than treated as a plain ANSI warehouse.
+
+- An earlier `craft-connector.yml` layout is refused by the existing unknown-section and
+  unknown-profile checks, which name the expected sections, rather than by a dedicated message.
+
 - Run commands exit 22 when work remains unfinished and 23 when a single task recorded nothing
   because its dependencies are not met. A paused pipeline that starts nothing and an orchestrator
   `--init-only` step retain exit 0; a stopped backfill exits 22 unless it failed or was cancelled.

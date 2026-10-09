@@ -18,7 +18,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from etl_craft.config import ConnectionProfile, ConnectionSection, ConnectorConfig, SourceConfig
+from etl_craft.config import ConnectionProfile, ConnectorConfig, SourceConfig
 from etl_craft.core.enums import Mode
 from etl_craft.engine import transitions
 from etl_craft.handlers import sql
@@ -163,8 +163,8 @@ def _config(tmp_path: Path, profile: ConnectionProfile) -> ConnectorConfig:
     return ConnectorConfig(
         mode=Mode.LOCAL,
         source=SourceConfig(type="environment"),
-        engine=ConnectionSection("dev", {"dev": engine}),
-        warehouse=ConnectionSection("dev", {"dev": profile}),
+        engine=engine,
+        warehouse=profile,
         config_path=project / "craft-connector.yml",
     )
 
@@ -249,8 +249,8 @@ def sql_world(
         )
     # From here on the profile names its schema, as a real one does.
     warehouse.dispose()
-    profile = replace(config.warehouse.active, schema=schema)
-    config = replace(config, warehouse=ConnectionSection("dev", {"dev": profile}))
+    profile = replace(config.warehouse, schema=schema)
+    config = replace(config, warehouse=profile)
     warehouse = build_warehouse_engine(config)
     world = SqlWorld(kind, config, engine_db, warehouse, catalog, schema, pipeline_id, run_id)
     try:

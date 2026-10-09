@@ -30,7 +30,7 @@ def restore_logger():
 @pytest.fixture
 def bound(engine_db, tmp_path):
     """A config file, a task T with parameter X=1, and its row bound under a run."""
-    profile = engine_db.config.engine.active
+    profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
     block = {"jdbc_url": profile.jdbc_url, "schema": schema}
     if profile.auth_mode != "none":
