@@ -104,12 +104,19 @@ item's text, or work done early under another item.
 | S4.I.3 Write each helper once | Done | #120 | Shared UTC, enum, cron, credential, warehouse and migration helpers |
 | S4.I.4 Thinner engine and execution plumbing | Done | #121 | Shared counts, run selection, graph loading and direct row mappings |
 | S4.E Retries | Done | #122 | Persisted due times, fenced claims and retryability |
-| S4.F Status and explain | In progress | | Read-only snapshots, shared JSON and explicit unfinished outcomes; Databricks acceptance blocked by warehouse startup |
+| S4.F Status and explain | Done | #123 | Read-only snapshots, shared JSON and explicit unfinished outcomes |
 | S4.G and later | Not started | | |
 
 ### Handover notes
 
 What a person picking up the work needs that the code and the item texts do not say.
+
+**Acceptance availability.**
+
+S4.F passed the full local checks, installed-wheel matrix and all Snowflake acceptance tests.
+Databricks acceptance remains unverified: the Free Edition warehouse is stopped and its start
+endpoint returns HTTP 400 before SQL execution. Databricks acceptance is still required for
+release certification when compute is available.
 
 **Choices that differ from the item text.**
 
