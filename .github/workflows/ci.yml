@@ -145,9 +145,9 @@ jobs:
       matrix:
         airflow-version: ["2.11.0", "3.3.2"]
     env:
-      AIRFLOW_HOME: ${{ runner.temp }}/airflow
+      AIRFLOW_HOME: /tmp/etl-craft-airflow
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-      ETL_CRAFT_AIRFLOW_CONTRACTS: ${{ runner.temp }}/airflow-contracts
+      ETL_CRAFT_AIRFLOW_CONTRACTS: /tmp/etl-craft-airflow-contracts
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
