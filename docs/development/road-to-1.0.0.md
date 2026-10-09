@@ -106,7 +106,8 @@ item's text, or work done early under another item.
 | S4.E Retries | Done | #122 | Persisted due times, fenced claims and retryability |
 | S4.F Status and explain | Done | #123 | Read-only snapshots, shared JSON and explicit unfinished outcomes |
 | S4.G HTTP API | Done | #124 | Bearer roles, exact run identities and shared operation documents |
-| S4.H and later | Not started | | |
+| S4.H Versioned YAML and Airflow factory | Done | #125 | Validated version 1 exports and isolated Airflow contracts |
+| S4.I.5 and later | Not started | | |
 
 ### Handover notes
 
@@ -116,6 +117,8 @@ What a person picking up the work needs that the code and the item texts do not 
 
 S4.G passed the full local checks, installed-wheel matrix and all Databricks and Snowflake
 acceptance tests.
+S4.H passed the full local checks, installed-wheel matrix and factory contracts on Airflow
+2.11.0 and 3.3.2. Cloud warehouse execution is unchanged by S4.H.
 
 **Choices that differ from the item text.**
 

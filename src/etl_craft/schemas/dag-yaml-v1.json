@@ -1,0 +1,333 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "etl-craft DAG YAML version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "etl_craft_yaml_version",
+    "dag_id"
+  ],
+  "properties": {
+    "etl_craft_yaml_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "dag_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "schedule": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "start_date": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "timezone": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sla_hours": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "refresh_type": {
+      "type": "string",
+      "minLength": 1
+    },
+    "catchup": {
+      "type": "boolean"
+    },
+    "max_active_runs": {
+      "type": "integer",
+      "const": 1
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "default_args": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "owner": {
+          "type": "string",
+          "minLength": 1
+        },
+        "retries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "retry_delay_minutes": {
+          "type": "number",
+          "minimum": 0
+        },
+        "depends_on_past": {
+          "type": "boolean"
+        },
+        "email_on_failure": {
+          "type": "boolean"
+        },
+        "email": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "tasks": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "depends_on",
+          "trigger_rule"
+        ],
+        "properties": {
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          },
+          "trigger_rule": {
+            "enum": [
+              "all_success",
+              "all_failed",
+              "all_done",
+              "one_success",
+              "one_failed",
+              "one_done"
+            ]
+          },
+          "bash_command": {
+            "type": "string",
+            "minLength": 1
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "append_env": {
+            "type": "boolean"
+          },
+          "sensor": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "external_dag_id",
+              "external_task_id",
+              "allowed_states",
+              "failed_states"
+            ],
+            "properties": {
+              "external_dag_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "external_task_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "allowed_states": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "failed_states": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              }
+            }
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "bash_command"
+            ],
+            "not": {
+              "required": [
+                "sensor"
+              ]
+            }
+          },
+          {
+            "required": [
+              "sensor"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "bash_command"
+                  ]
+                },
+                {
+                  "required": [
+                    "env"
+                  ]
+                },
+                {
+                  "required": [
+                    "append_env"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "pipelines": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "trigger_dag_id",
+          "depends_on",
+          "trigger_rule"
+        ],
+        "properties": {
+          "trigger_dag_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          },
+          "trigger_rule": {
+            "enum": [
+              "all_success",
+              "all_failed",
+              "all_done",
+              "one_success",
+              "one_failed",
+              "one_done"
+            ]
+          }
+        }
+      }
+    },
+    "pipeline_dependencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "depends_on_pipeline",
+          "dependency_type"
+        ],
+        "properties": {
+          "depends_on_pipeline": {
+            "type": "string",
+            "minLength": 1
+          },
+          "dependency_type": {
+            "enum": [
+              "SUCCESS",
+              "FAILURE",
+              "ALWAYS",
+              "HAS_DATA"
+            ]
+          }
+        }
+      }
+    },
+    "cross_pipeline_task_dependencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "task",
+          "depends_on_pipeline",
+          "depends_on_task",
+          "dependency_type"
+        ],
+        "properties": {
+          "task": {
+            "type": "string",
+            "minLength": 1
+          },
+          "depends_on_pipeline": {
+            "type": "string",
+            "minLength": 1
+          },
+          "depends_on_task": {
+            "type": "string",
+            "minLength": 1
+          },
+          "dependency_type": {
+            "enum": [
+              "SUCCESS",
+              "FAILURE",
+              "ALWAYS",
+              "HAS_DATA"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "tasks"
+      ],
+      "not": {
+        "required": [
+          "pipelines"
+        ]
+      }
+    },
+    {
+      "required": [
+        "pipelines"
+      ],
+      "not": {
+        "required": [
+          "tasks"
+        ]
+      }
+    }
+  ]
+}

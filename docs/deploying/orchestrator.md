@@ -11,7 +11,41 @@ etl-craft generate-yml --global --output dags/global.yml     # with Global_dag: 
 ```
 
 Without `--output` the YAML is written to standard output. Convert it into your orchestrator's own
-DAG format; the YAML is the same whatever you run it on.
+DAG format; the YAML is the same whatever you run it on. Each export starts with
+`etl_craft_yaml_version: 1` and is validated against the packaged
+[JSON Schema](../reference/dag-yaml-v1.json) before it is written.
+
+## Airflow DAG factory
+
+The separate `etl-craft-airflow` distribution turns these exports into real Airflow DAGs.
+Install it in your Airflow environment from `integrations/airflow`; keep the engine executable
+in the worker's ETL environment and put it on PATH. The factory does not import etl-craft.
+It supports the tested Airflow 2.11.x and 3.3.x lines; see its
+[installation instructions](https://github.com/venkatcg00/etl-craft/tree/main/integrations/airflow).
+
+In a Python DAG module beside the `etl_craft_yaml` folder:
+
+```python
+from pathlib import Path
+import pendulum
+from etl_craft_airflow import load_dags
+
+globals().update(
+    load_dags(
+        Path(__file__).parent / "etl_craft_yaml",
+        start_date=pendulum.datetime(2026, 1, 1, tz="UTC"),
+    )
+)
+```
+
+Choose your deployment's start date; a metadata start date takes precedence. The factory
+preserves commands, actor environment, trigger rules, sensors, schedule, timezone and retries.
+It refuses unknown versions, malformed exports, missing dependencies, cycles and duplicate DAG
+ids. Treat YAML as trusted workflow code: its Bash commands execute on workers.
+
+The global DAG uses `TriggerDagRunOperator` and waits for each child result. A retried or cleared
+trigger clears the child with that exact run id and logical date. Give manually triggered global
+DAGs an explicit logical date. Pipeline SLA enforcement stays with etl-craft.
 
 ## Run identity and Airflow version
 

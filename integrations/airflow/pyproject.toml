@@ -1,0 +1,22 @@
+[project]
+name = "etl-craft-airflow"
+version = "0.1.0"
+description = "Airflow DAG factory for versioned etl-craft YAML"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "venkatcg00", email = "venkatcg0@gmail.com" }]
+dependencies = ["jsonschema>=4.23", "packaging>=24", "pendulum>=3,<4", "pyyaml>=6.0.3"]
+
+[project.optional-dependencies]
+airflow2 = ["apache-airflow>=2.11,<2.12"]
+airflow3 = ["apache-airflow>=3.3,<3.4", "apache-airflow-providers-standard>=1.9,<2"]
+
+[build-system]
+requires = ["uv_build>=0.12.17,<0.13"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["unit: operator construction without services"]

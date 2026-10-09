@@ -381,3 +381,18 @@ def test_remote_generation_accepts_supported_airflow_ranges(version):
     from etl_craft.services.generate_yml import require_airflow_run_templates
 
     require_airflow_run_templates(version)
+
+
+@pytest.mark.unit
+def test_yaml_has_a_version_and_rejects_invalid_export_shapes():
+    from etl_craft.services.generate_yml import to_yaml
+
+    dag = {
+        "dag_id": "test",
+        "tasks": {"run": {"bash_command": "true", "depends_on": [], "trigger_rule": "all_success"}},
+    }
+    assert yaml.safe_load(to_yaml(dag))["etl_craft_yaml_version"] == 1
+    assert "etl_craft_yaml_version" not in dag
+    dag["tasks"]["run"]["trigger_rule"] = "unknown"
+    with pytest.raises(ConfigurationError, match="generated YAML"):
+        to_yaml(dag)

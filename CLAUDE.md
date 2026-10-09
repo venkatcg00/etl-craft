@@ -25,6 +25,8 @@ make docs            # documentation site, strict build into site/ (make docs-se
 
 Before opening a pull request, finish the full local `make check docs` run and all relevant
 service and live-cloud acceptance tests. Do not open the PR while these checks are still running.
+When changing GitHub Actions workflows, run `actionlint` locally before pushing; Python tests
+do not validate GitHub expression contexts.
 Build the current wheel and source distribution together, then run the installed-wheel demos
 across all four local warehouses with
 `ETL_CRAFT_TEST_WHEEL` pointing to that wheel and `ETL_CRAFT_REQUIRE_SERVICES=1`. The regular

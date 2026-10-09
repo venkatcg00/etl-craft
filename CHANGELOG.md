@@ -60,6 +60,10 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Generated DAG YAML carries version 1 and validates against its packaged JSON Schema. A separate
+  `etl-craft-airflow` distribution loads pipeline, global and docs exports as real Airflow DAGs
+  on Airflow 2.11.x and 3.3.x, preserving their commands, actor identity, graph and trigger rules.
+
 - Optional authenticated HTTP API and OpenAPI contract, served with the local overseer;
   print-once bearer tokens with viewer, operator and admin roles and immediate revocation.
 
