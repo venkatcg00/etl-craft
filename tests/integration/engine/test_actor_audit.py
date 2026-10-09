@@ -239,7 +239,7 @@ def test_plain_connections_cannot_mutate_any_protected_table(engine_db):
             dbname=engine_db.engine.url.database,
             user=POSTGRES_USER,
             password=POSTGRES_PASSWORD,
-            options=f"-c search_path={engine_db.config.engine.active.schema or 'public'}",
+            options=f"-c search_path={engine_db.config.engine.schema or 'public'}",
         )
         expected = "written only by etl-craft"
         error = psycopg.Error
@@ -357,7 +357,7 @@ def test_cli_actor_requests_and_read_only_audit(engine_db, tmp_path, monkeypatch
 
     from etl_craft.cli import main
 
-    profile = engine_db.config.engine.active
+    profile = engine_db.config.engine
     jdbc = profile.jdbc_url
     if profile.auth_mode == "none":
         jdbc = "jdbc:sqlite:" + engine_db.engine.url.database
@@ -496,7 +496,7 @@ def test_project_created_tables_keep_guards_and_capture(engine_db, tmp_path):
             user=POSTGRES_USER,
             password=POSTGRES_PASSWORD,
         )
-        plain.execute(f'SET search_path TO "{engine_db.config.engine.active.schema or "public"}"')
+        plain.execute(f'SET search_path TO "{engine_db.config.engine.schema or "public"}"')
         plain.commit()
         error = psycopg.Error
         expected = "written only by etl-craft"

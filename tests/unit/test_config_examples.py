@@ -57,7 +57,7 @@ VALUES = {
     "EMAIL_FROM": "etl@example.com",
     "EMAIL_AUTH_MODE": "password",
     "EMAIL_USER": "etl",
-    "EMAIL_USE_TLS": "true",
+    "EMAIL_TLS_MODE": "starttls",
     "EMAIL_SECRET": "s",
     # Authentication fields (docs/examples/auth-*.yml).
     "ENGINE_CERT_FILE": "/keys/engine.crt",
@@ -226,23 +226,23 @@ def test_every_example_loads_for_every_profile(clean_environment, tmp_path, name
 
     config = load_config(path)
 
-    assert engine_for_jdbc_url(config.engine.active.jdbc_url).name == expected.engine
+    assert engine_for_jdbc_url(config.engine.jdbc_url).name == expected.engine
     assert config.mode == expected.mode
     if expected.auth_section == "Orchestration":
-        assert config.email is not None and config.email.active.auth_mode == profile
+        assert config.email is not None and config.email.auth_mode == profile
         return
     if expected.auth_section == "Warehouse":
-        assert config.warehouse is not None and config.warehouse.active.auth_mode == profile
+        assert config.warehouse is not None and config.warehouse.auth_mode == profile
     else:
-        assert config.engine.active.name == profile
-    assert config.warehouse is not None and config.warehouse.active.name == profile
+        assert config.engine.name == profile
+    assert config.warehouse is not None and config.warehouse.name == profile
     assert active_warehouse(config).key == expected.warehouse
     assert config.warehouse_table_format == expected.table_format
     # Every example names a catalog qualify() can build three-part names with.
     assert active_catalog(config)
     # The Postgres auth example sets the Engine DB's login the same way.
     if name == "auth-postgres.yml":
-        assert config.engine.active.auth_mode == profile
+        assert config.engine.auth_mode == profile
 
 
 def test_allow_schedule_and_email_follow_the_profile(clean_environment):
@@ -263,7 +263,7 @@ def test_allow_schedule_and_email_follow_the_profile(clean_environment):
     assert prod.dag_defaults.global_dag is True
     assert prod.dag_defaults.email_on_failure is True
     assert prod.dag_defaults.email_recipients == ["data-alerts@example.com"]
-    assert prod.email is not None and prod.email.active.port == 587
+    assert prod.email is not None and prod.email.port == 587
 
 
 def test_the_secrets_file_example_reads_only_its_file(clean_environment):
@@ -271,9 +271,9 @@ def test_the_secrets_file_example_reads_only_its_file(clean_environment):
     # comes from secrets-file.env.
     config = load_config(EXAMPLES / "secrets-file.yml")
     assert config.source.type == "file"
-    assert config.engine.active.name == "dev"
-    assert config.engine.active.user == "etl_craft"
-    assert config.engine.active.secret_var == "ENGINE_SECRET"
+    assert config.engine.name == "dev"
+    assert config.engine.user == "etl_craft"
+    assert config.engine.secret_var == "ENGINE_SECRET"
 
 
 def test_cloning_example_follows_the_profile(clean_environment):
@@ -292,3 +292,9 @@ def test_cloning_example_follows_the_profile(clean_environment):
         "uat": (True, "cfg"),
         "prod": (True, "all"),
     }
+
+
+def test_the_demo_project_config_loads(clean_environment):
+    # The installed-wheel demos copy examples/demo; its file must load as the loader stands.
+    config = load_config(EXAMPLES.parents[1] / "examples" / "demo" / "craft-connector.yml")
+    assert config.email is not None and config.email.tls_mode == "none"

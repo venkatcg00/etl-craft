@@ -10,7 +10,7 @@ import yaml
 from sqlalchemy import text
 
 from etl_craft.cli import main
-from etl_craft.config import CloningConfig, ConnectionProfile, ConnectionSection
+from etl_craft.config import CloningConfig, ConnectionProfile
 from etl_craft.core.enums import CloningScope
 from etl_craft.core.errors import ExitCode
 from etl_craft.services.cloning import cloning_problem
@@ -28,7 +28,7 @@ def restore_logger():
 
 
 def write_config(engine_db, root, cloning):
-    profile = engine_db.config.engine.active
+    profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
     block = {"jdbc_url": profile.jdbc_url, "schema": schema}
     if profile.auth_mode != "none":
@@ -85,7 +85,7 @@ def test_the_command_says_when_cloning_is_off(engine_db, project, capsys, clonin
 
 @pytest.mark.engine_postgres
 def test_cloning_refuses_the_engine_dbs_own_schema(postgres_database):
-    engine = replace(postgres_database.config.engine.active, schema="public")
+    engine = replace(postgres_database.config.engine, schema="public")
     warehouse = ConnectionProfile(
         "WAREHOUSE",
         "dev",
@@ -97,8 +97,8 @@ def test_cloning_refuses_the_engine_dbs_own_schema(postgres_database):
     )
     config = replace(
         postgres_database.config,
-        engine=ConnectionSection("dev", {"dev": engine}),
-        warehouse=ConnectionSection("dev", {"dev": warehouse}),
+        engine=engine,
+        warehouse=warehouse,
         cloning=CloningConfig(enabled=True, scope=CloningScope.ALL),
     )
     problem = cloning_problem(config)
@@ -108,7 +108,4 @@ def test_cloning_refuses_the_engine_dbs_own_schema(postgres_database):
     checks = {c.name: c for c in run_checks(config)}
     assert checks["Cloning"].status is Status.FAIL
     elsewhere = replace(warehouse, schema="mirror")
-    assert (
-        cloning_problem(replace(config, warehouse=ConnectionSection("dev", {"dev": elsewhere})))
-        is None
-    )
+    assert cloning_problem(replace(config, warehouse=elsewhere)) is None

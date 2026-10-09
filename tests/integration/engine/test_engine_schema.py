@@ -13,7 +13,7 @@ from fixtures.engine_db import engine_config, sqlite_engine_db
 
 
 def with_schema(db, schema):
-    profile = replace(db.config.engine.active, schema=schema)
+    profile = replace(db.config.engine, schema=schema)
     return build_engine(engine_config(profile, db.config.config_path))
 
 

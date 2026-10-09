@@ -23,10 +23,10 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 def _run(args: argparse.Namespace, out: Output) -> int:
     config = load_command_config(args)
     if args.print_grants:
-        if not config.engine.active.jdbc_url.startswith("jdbc:postgresql:"):
+        if not config.engine.jdbc_url.startswith("jdbc:postgresql:"):
             out.line("SQLite uses file permissions; restrict the database file to its owner.")
         else:
-            out.line(grants_sql(config.engine.active.schema or "public"))
+            out.line(grants_sql(config.engine.schema or "public"))
         return ExitCode.SUCCESS
     result = setup(config)
     if report(out, result.checks):

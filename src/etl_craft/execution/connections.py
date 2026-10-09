@@ -67,12 +67,12 @@ def probe_email_relay(config: ConnectorConfig) -> str | None:
     """
     if config.email is None:
         return None
-    profile = config.email.active
+    profile = config.email
     if profile.transport == "sendmail":
         return sendmail_problem(profile)
     try:
         with open_smtp(profile, timeout=SMTP_TEST_TIMEOUT_SECONDS) as relay:
-            if profile.effective_tls_mode == "starttls":
+            if profile.tls_mode == "starttls":
                 relay.starttls(context=tls_context(profile))
             relay.noop()
     except (smtplib.SMTPException, OSError, EtlCraftError, ValueError) as error:

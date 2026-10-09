@@ -68,7 +68,7 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
                 task=task,
                 context=context,
                 engine_db=engine_db,
-                user=config.warehouse.active.user or "",
+                user=config.warehouse.user or "",
                 now=datetime.now(UTC),
             )
             try:
@@ -110,7 +110,7 @@ def task_dialect(context: TaskContext) -> WarehouseDialect:
         written or default,
         SqlGuardError(f"TABLE_FORMAT={written!r} is not one of {', '.join(TableFormat)}"),
     )
-    url = parse_warehouse_url(config.warehouse.active.jdbc_url)
+    url = parse_warehouse_url(config.warehouse.jdbc_url)
     dialect = resolve(url.dialect, table_format)
     if not dialect.spec.per_task_format and table_format != default:
         raise SqlGuardError(

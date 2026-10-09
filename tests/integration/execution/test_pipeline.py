@@ -15,8 +15,6 @@ from sqlalchemy import text
 from etl_craft.cli import main as cli_main
 from etl_craft.config import (
     ConnectionProfile,
-    ConnectionSection,
-    EmailConfig,
     EmailProfile,
     load_config,
 )
@@ -71,7 +69,7 @@ def restore_logger():
 @pytest.fixture
 def config(engine_db, tmp_path):
     """A craft-connector.yml naming the test Engine DB, loaded."""
-    profile = engine_db.config.engine.active
+    profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
     block = {"jdbc_url": profile.jdbc_url, "schema": schema}
     if profile.auth_mode != "none":
@@ -477,7 +475,7 @@ def test_a_failed_warehouse_connection_test_starts_no_run(config, pipeline, monk
         schema="public",
         extra={"secret_var": "ETL_CRAFT_TEST_CONNECTION_PASSWORD"},
     )
-    config = replace(config, warehouse=ConnectionSection("down", {"down": profile}))
+    config = replace(config, warehouse=profile)
     with pytest.raises(ConnectionTestError, match="warehouse:"):
         run_pipeline(engine, config, "P", child=CHILD)
     with engine.connect() as conn:
@@ -523,8 +521,8 @@ def test_a_relay_outage_does_not_prevent_data_tasks_from_running(config, engine_
         data = add_task(conn, pipeline_id, "data", BEHAVIOUR="succeed")
         notify = add_task(conn, pipeline_id, "notify", "EMAIL_ALERT", BEHAVIOUR="fail")
         add_dependency(conn, pipeline_id, notify, data, "ALWAYS")
-    profile = EmailProfile("EMAIL", "down", "127.0.0.1", 1, "etl@example.com", use_tls=False)
-    broken = replace(config, email=EmailConfig("down", {"down": profile}))
+    profile = EmailProfile("EMAIL", "down", "127.0.0.1", 1, "etl@example.com", tls_mode="none")
+    broken = replace(config, email=profile)
     outcome = run_pipeline(engine, broken, "MAIL", child=CHILD)
     assert outcome.status == RunStatus.SUCCESS
     assert "email relay" in caplog.text and "127.0.0.1:1" in caplog.text

@@ -44,7 +44,7 @@ def test_databricks(tmp_path, table_format, key):
     require_variables("DATABRICKS", DATABRICKS_VARS)
     fields = {name.lower(): f"ETL_CRAFT_TEST_DATABRICKS_{name}" for name in DATABRICKS_VARS}
     config = write_config(tmp_path, "Databricks", fields, table_format)
-    assert config.warehouse.active.auth_mode == "token"
+    assert config.warehouse.auth_mode == "token"
     schema = os.environ["ETL_CRAFT_TEST_DATABRICKS_SCHEMA"]
     assert create_read_drop(config, schema) == key
 
@@ -58,7 +58,7 @@ def test_snowflake(tmp_path, table_format, key):
     require_variables("SNOWFLAKE", SNOWFLAKE_VARS)
     fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
     config = write_config(tmp_path, "Snowflake", fields, table_format)
-    assert config.warehouse.active.auth_mode == "token"
+    assert config.warehouse.auth_mode == "token"
     schema = os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"]
     assert create_read_drop(config, schema) == key
 

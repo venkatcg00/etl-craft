@@ -132,7 +132,7 @@ def test_upgrade_command_validates_then_adds_and_records_requests(sql_world, cap
     w = sql_world
     create_legacy_append_target(w, "cli_load")
     w.task("load", SQL_ACTION="APPEND_TABLE", TARGET_OBJECT="cli_load", SOURCE_SQL="SELECT 1 AS id")
-    profile = w.config.warehouse.active
+    profile = w.config.warehouse
     fields = {
         "jdbc_url": profile.jdbc_url,
         "schema": profile.schema,

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from functools import cache
 
-from etl_craft.config.auth import WarehouseSpec, warehouse_spec
-from etl_craft.dialects.warehouse.base import SurrogateKey, WarehouseDialect
+from etl_craft.config.auth import warehouse_spec
+from etl_craft.dialects.warehouse.base import WarehouseDialect
 from etl_craft.dialects.warehouse.databricks import DatabricksWarehouse
 from etl_craft.dialects.warehouse.databricks_iceberg import DatabricksIcebergWarehouse
 from etl_craft.dialects.warehouse.duckdb import DuckDBWarehouse
@@ -14,16 +14,6 @@ from etl_craft.dialects.warehouse.postgres import PostgresWarehouse
 from etl_craft.dialects.warehouse.snowflake import SnowflakeWarehouse
 from etl_craft.dialects.warehouse.snowflake_iceberg import SnowflakeIcebergWarehouse
 from etl_craft.dialects.warehouse.trino_iceberg import TrinoIcebergWarehouse
-
-
-class GenericWarehouse(WarehouseDialect):
-    """A database without a dialect of its own, treated as a plain ANSI warehouse.
-
-    It is assumed to have neither identity columns nor enforced primary keys.
-    """
-
-    surrogate_key: SurrogateKey = "computed"
-    enforces_primary_keys = False
 
 
 @cache
@@ -53,9 +43,6 @@ def resolve(sqlalchemy_name: str, table_format: str) -> WarehouseDialect:
     """Choose the dialect for a connection's SQLAlchemy name and a table format.
 
     Trino is Iceberg whichever format is asked for, because its catalog decides; PostgreSQL has
-    no Iceberg tables (``ConfigurationError``).
+    no Iceberg tables; an unsupported database is a ``ConfigurationError``.
     """
-    spec: WarehouseSpec = warehouse_spec(sqlalchemy_name, table_format)
-    if not spec.known:
-        return GenericWarehouse(spec)
-    return for_key(spec.key)
+    return for_key(warehouse_spec(sqlalchemy_name, table_format).key)

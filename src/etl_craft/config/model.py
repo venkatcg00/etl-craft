@@ -73,19 +73,6 @@ class ConnectionProfile:
 
 
 @dataclass(frozen=True)
-class ConnectionSection:
-    """A connection section's selected profile."""
-
-    active_profile: str
-    profiles: dict[str, ConnectionProfile]
-
-    @property
-    def active(self) -> ConnectionProfile:
-        """The selected profile."""
-        return self.profiles[self.active_profile]
-
-
-@dataclass(frozen=True)
 class SourceConfig:
     """Where the variables the file names are read from: the environment, or a ``.env`` file."""
 
@@ -145,36 +132,17 @@ class EmailProfile:
     from_address: str
     auth_mode: str = AuthMode.NONE
     user: str | None = None
-    use_tls: bool = True
     extra: dict[str, Any] = field(default_factory=dict)
     transport: str = "smtp"
     sendmail_path: str = DEFAULT_SENDMAIL_PATH
     from_name: str = ""
-    tls_mode: str | None = None
+    tls_mode: str = "starttls"
     ca_file: Path | None = None
-
-    @property
-    def effective_tls_mode(self) -> str:
-        """The selected TLS mode, with ``use_tls`` supplying the default when unset."""
-        return self.tls_mode or ("starttls" if self.use_tls else "none")
 
     @property
     def secret_var(self) -> str:
         """The variable holding the relay password or OAuth client secret."""
         return _secret_var(self.section, self.name, self.extra)
-
-
-@dataclass(frozen=True)
-class EmailConfig:
-    """The Email block of the selected Orchestration profile."""
-
-    active_profile: str
-    profiles: dict[str, EmailProfile]
-
-    @property
-    def active(self) -> EmailProfile:
-        """The selected profile."""
-        return self.profiles[self.active_profile]
 
 
 @dataclass(frozen=True)
@@ -233,13 +201,13 @@ class ConnectorConfig:
 
     mode: Mode
     source: SourceConfig
-    engine: ConnectionSection
+    engine: ConnectionProfile
     cloning: CloningConfig = field(default_factory=CloningConfig)
     docs_site: DocsSiteConfig = field(default_factory=DocsSiteConfig)
-    warehouse: ConnectionSection | None = None
+    warehouse: ConnectionProfile | None = None
     warehouse_table_format: TableFormat = TableFormat.NATIVE
     dag_defaults: DagDefaults = field(default_factory=DagDefaults)
-    email: EmailConfig | None = None
+    email: EmailProfile | None = None
     limits: ExecutionLimits = field(default_factory=ExecutionLimits)
     config_path: Path | None = None
     api_address: str = "127.0.0.1:8730"

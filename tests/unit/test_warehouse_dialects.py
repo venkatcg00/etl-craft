@@ -9,7 +9,6 @@ from sqlalchemy.engine import URL
 from etl_craft.config import (
     CloningConfig,
     ConnectionProfile,
-    ConnectionSection,
     parse_config,
 )
 from etl_craft.config.targets import parse_warehouse_url
@@ -17,7 +16,6 @@ from etl_craft.core.enums import TableFormat
 from etl_craft.core.errors import ConfigurationError, HandlerError
 from etl_craft.dialects import credentials
 from etl_craft.dialects.warehouse import all_dialects, for_key, resolve
-from etl_craft.dialects.warehouse.registry import GenericWarehouse
 from etl_craft.warehouse import connection
 
 pytestmark = pytest.mark.unit
@@ -132,14 +130,11 @@ def test_resolve(name, table_format, key):
     assert resolve(name, table_format).spec.key == key
 
 
-def test_a_database_without_a_dialect_is_generic_ansi():
-    dialect = resolve("oracle", "native")
-    assert isinstance(dialect, GenericWarehouse)
-    assert (dialect.spec.key, dialect.surrogate_key, dialect.enforces_primary_keys) == (
-        "oracle",
-        "computed",
-        False,
-    )
+def test_a_database_without_a_dialect_is_refused_naming_the_supported_ones():
+    with pytest.raises(
+        ConfigurationError, match=r"'oracle' is not a supported warehouse; .*DuckDB"
+    ):
+        resolve("oracle", "native")
 
 
 def test_postgres_has_no_iceberg_dialect():
@@ -337,7 +332,7 @@ def test_snowflake_iceberg_mirrors_need_both_cloning_settings():
         (profile("key_file", "jdbc:duckdb:w.duckdb", key_file="k"), "DuckDB warehouse takes"),
         (profile("key_file", SNOWFLAKE), "needs key_file"),
         (profile("sts", POSTGRES), "needs region"),
-        (profile("token", "jdbc:mysql://h/db", user=""), "needs user"),
+        (profile("token", POSTGRES, user=""), "needs user"),
     ],
 )
 def test_config_refuses_modes_and_missing_auth_fields(tmp_path, warehouse, error):
@@ -346,22 +341,14 @@ def test_config_refuses_modes_and_missing_auth_fields(tmp_path, warehouse, error
 
 
 def test_an_unsupported_mode_is_refused_when_presenting():
-    with pytest.raises(ConfigurationError, match="not available for a mysql warehouse"):
-        resolve("mysql", "native").present(
-            profile("sso", "jdbc:mysql://h/db"), "", parse_warehouse_url("jdbc:mysql://h/db")
-        )
+    duckdb = "jdbc:duckdb:w.duckdb"
+    with pytest.raises(ConfigurationError, match="not available for a DuckDB warehouse"):
+        resolve("duckdb", "native").present(profile("sso", duckdb), "", parse_warehouse_url(duckdb))
     with pytest.raises(ConfigurationError, match="needs a `user`"):
-        resolve("mysql", "native").present_bearer("t", None)
+        resolve("postgresql", "native").present_bearer("t", None)
 
 
 # What each connection hands the driver
-
-
-def test_password_goes_into_the_connection_url_only(captured):
-    connect("password", "jdbc:mysql://myhost:3306/mydb", "s3cr3t")
-    url = captured["url"]
-    assert (url.drivername, url.username, url.password) == ("mysql+pymysql", "etl", "s3cr3t")
-    assert (url.host, url.port, url.database) == ("myhost", 3306, "mydb")
 
 
 def test_a_databricks_token_is_sent_as_the_literal_user_token(captured):
@@ -529,9 +516,7 @@ def test_single_writer_and_in_memory(jdbc_url, table_format, single_writer, in_m
         profile(mode, "jdbc:duckdb:" if jdbc_url == "nonsense" else jdbc_url), table_format
     )
     if jdbc_url == "nonsense":
-        config = replace(
-            config, warehouse=ConnectionSection("dev", {"dev": profile("none", jdbc_url)})
-        )
+        config = replace(config, warehouse=profile("none", jdbc_url))
     assert connection.is_single_writer(config) is single_writer
     assert connection.is_in_memory(config) is in_memory
 
@@ -627,7 +612,7 @@ def test_verify_iceberg_catalog_without_a_catalog_or_when_the_check_fails():
 
     no_catalog = replace(
         config_for(profile("sso", TRINO)),
-        warehouse=ConnectionSection("dev", {"dev": profile("sso", "jdbc:trino://t:8080/")}),
+        warehouse=profile("sso", "jdbc:trino://t:8080/"),
     )
     assert connection.verify_iceberg_catalog(no_catalog, Trino()) is None
     problem = connection.verify_iceberg_catalog(config_for(profile("sso", TRINO)), Trino())

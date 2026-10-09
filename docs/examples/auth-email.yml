@@ -30,14 +30,14 @@ Orchestration:
       host: EMAIL_HOST                 # variable
       port: EMAIL_PORT                 # variable
       from_address: EMAIL_FROM         # variable
-      use_tls: EMAIL_USE_TLS           # variable
+      tls_mode: EMAIL_TLS_MODE         # variable — starttls | ssl | none
       auth_mode: none                  # value
   password:
     Email:
       host: EMAIL_HOST                 # variable
       port: EMAIL_PORT                 # variable
       from_address: EMAIL_FROM         # variable
-      use_tls: EMAIL_USE_TLS           # variable
+      tls_mode: EMAIL_TLS_MODE         # variable — starttls | ssl | none
       auth_mode: password              # value
       user: EMAIL_USER                 # variable
       secret: EMAIL_SECRET             # variable, required: a secret is never used as written
@@ -46,7 +46,7 @@ Orchestration:
       host: EMAIL_HOST                 # variable
       port: EMAIL_PORT                 # variable
       from_address: EMAIL_FROM         # variable
-      use_tls: EMAIL_USE_TLS           # variable
+      tls_mode: EMAIL_TLS_MODE         # variable — starttls | ssl | none
       auth_mode: oauth                 # value
       user: EMAIL_USER                 # variable
       client_id: EMAIL_CLIENT_ID       # variable

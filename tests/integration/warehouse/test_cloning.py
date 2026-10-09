@@ -101,10 +101,8 @@ def test_a_clone_runs_when_a_run_ends(sql_world):
 
 def test_a_failed_clone_names_the_table_and_leaves_the_run_as_it_ended(sql_world, caplog):
     world = sql_world
-    profile = replace(world.config.warehouse.active, schema="t_missing_schema")
-    config = replace(
-        cloning(world), warehouse=replace(world.config.warehouse, profiles={"dev": profile})
-    )
+    profile = replace(world.config.warehouse, schema="t_missing_schema")
+    config = replace(cloning(world), warehouse=profile)
     # DuckDB over Iceberg finds the schema missing as it connects; the others at the first table.
     with pytest.raises((CloningError, ConfigurationError), match="t_missing_schema"):
         clone(world.engine_db, config)

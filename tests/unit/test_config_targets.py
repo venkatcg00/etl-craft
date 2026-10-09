@@ -2,7 +2,6 @@ import pytest
 
 from etl_craft.config.model import (
     ConnectionProfile,
-    ConnectionSection,
     ConnectorConfig,
     SourceConfig,
 )
@@ -27,11 +26,6 @@ def test_a_postgres_url_selects_psycopg():
     assert parse_warehouse_url("jdbc:postgresql://myhost/mydb") == WarehouseUrl(
         dialect="postgresql+psycopg", host="myhost", port=None, database="mydb", catalog="mydb"
     )
-
-
-def test_a_mysql_url_selects_pymysql_and_keeps_its_query():
-    url = parse_warehouse_url("jdbc:mysql://myhost:3306/mydb?useSSL=true")
-    assert (url.dialect, url.port, url.query) == ("mysql+pymysql", 3306, {"useSSL": "true"})
 
 
 def test_an_unmapped_scheme_is_its_own_dialect():
@@ -238,11 +232,11 @@ def config_for(
     warehouse = None
     if jdbc_url is not None:
         profile = ConnectionProfile("WAREHOUSE", "dev", jdbc_url, "", "none", extra=extra)
-        warehouse = ConnectionSection("dev", {"dev": profile})
+        warehouse = profile
     return ConnectorConfig(
         mode=Mode.LOCAL,
         source=SourceConfig(type="environment"),
-        engine=ConnectionSection("dev", {"dev": engine}),
+        engine=engine,
         warehouse=warehouse,
         warehouse_table_format=table_format,
     )

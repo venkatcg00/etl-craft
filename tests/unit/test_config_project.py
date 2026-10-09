@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from etl_craft.config import ConnectionProfile, ConnectionSection, ConnectorConfig, SourceConfig
+from etl_craft.config import ConnectionProfile, ConnectorConfig, SourceConfig
 from etl_craft.config.project import ingestion_script, sql_file
 from etl_craft.core.enums import Mode
 from etl_craft.core.errors import MetadataError
@@ -17,7 +17,7 @@ def project_config(tmp_path, config_path=True):
     return ConnectorConfig(
         mode=Mode.LOCAL,
         source=SourceConfig(type="environment"),
-        engine=ConnectionSection("dev", {"dev": engine}),
+        engine=engine,
         config_path=tmp_path / "etl-craft" / "craft-connector.yml" if config_path else None,
     )
 

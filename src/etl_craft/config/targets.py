@@ -19,7 +19,7 @@ from etl_craft.core.errors import ConfigurationError
 from etl_craft.core.text import is_safe_identifier, jdbc_scheme, parse_jdbc_url
 
 # SQLAlchemy dialect names, with their driver, for schemes that differ from the scheme itself.
-_SQLALCHEMY_DIALECTS = {"postgresql": "postgresql+psycopg", "mysql": "mysql+pymysql"}
+_SQLALCHEMY_DIALECTS = {"postgresql": "postgresql+psycopg"}
 
 _DUCKDB_URL = re.compile(r"^jdbc:duckdb:(?P<path>.*)$")
 _DATABRICKS_URL = re.compile(
@@ -252,7 +252,7 @@ def active_warehouse(config: ConnectorConfig) -> WarehouseSpec:
     """Return the dialect the active warehouse profile and the default table format select."""
     if config.warehouse is None:
         raise ConfigurationError("no Warehouse section configured in craft-connector.yml")
-    url = parse_warehouse_url(config.warehouse.active.jdbc_url)
+    url = parse_warehouse_url(config.warehouse.jdbc_url)
     return warehouse_spec(url.dialect, config.warehouse_table_format)
 
 
@@ -265,7 +265,7 @@ def active_catalog(config: ConnectorConfig) -> str:
     """
     spec = active_warehouse(config)
     assert config.warehouse is not None
-    profile = config.warehouse.active
+    profile = config.warehouse
     if spec.key == "duckdb_iceberg":
         return attached_catalog_name(profile.extra)
     catalog = parse_warehouse_url(profile.jdbc_url).catalog

@@ -53,8 +53,8 @@ def write_config(tmp_path: Path, contents: str) -> Path:
 def test_resolve_secret_from_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("ETL_CRAFT_POSTGRES_DEV_SECRET", "s3cr3t")
     config = load_config(write_config(tmp_path, VALID_YAML))
-    assert resolve_secret(config, config.engine.active) == "s3cr3t"
-    assert profile_secret(config, config.engine.active) == "s3cr3t"
+    assert resolve_secret(config, config.engine) == "s3cr3t"
+    assert profile_secret(config, config.engine) == "s3cr3t"
 
 
 def test_a_secret_is_checked_at_load_and_again_when_resolved(tmp_path, monkeypatch):
@@ -65,7 +65,7 @@ def test_a_secret_is_checked_at_load_and_again_when_resolved(tmp_path, monkeypat
     config = load_config(write_config(tmp_path, VALID_YAML))
     monkeypatch.delenv("ETL_CRAFT_POSTGRES_DEV_SECRET")
     with pytest.raises(ConfigurationError, match=r"ETL_CRAFT_POSTGRES_DEV_SECRET.*not set"):
-        resolve_secret(config, config.engine.active)
+        resolve_secret(config, config.engine)
 
 
 def test_a_secret_can_name_any_variable(tmp_path, monkeypatch):
@@ -74,7 +74,7 @@ def test_a_secret_can_name_any_variable(tmp_path, monkeypatch):
     )
     monkeypatch.setenv("MY_CUSTOM_SECRET", "hunter2")
     config = load_config(write_config(tmp_path, overridden))
-    assert resolve_secret(config, config.engine.active) == "hunter2"
+    assert resolve_secret(config, config.engine) == "hunter2"
 
 
 def test_resolve_secret_from_a_file_source(tmp_path):
@@ -88,7 +88,7 @@ def test_resolve_secret_from_a_file_source(tmp_path):
         f"Secrets:\n  Source_type: file\n  Path: {env_file}\n",
     )
     config = load_config(write_config(tmp_path, file_source_yaml))
-    assert resolve_secret(config, config.engine.active) == "filesecret"
+    assert resolve_secret(config, config.engine) == "filesecret"
 
 
 def test_the_file_source_path_is_relative_to_the_config_file(tmp_path, monkeypatch):
@@ -107,7 +107,7 @@ def test_the_file_source_path_is_relative_to_the_config_file(tmp_path, monkeypat
     monkeypatch.chdir(tmp_path)
     config = load_config(connector)
     assert config.source.path == str(secrets)
-    assert resolve_secret(config, config.engine.active) == "filesecret"
+    assert resolve_secret(config, config.engine) == "filesecret"
 
 
 def test_read_secrets_file_errors(tmp_path):
@@ -136,8 +136,8 @@ def test_profile_needs_secret(auth_mode, extra, needs):
 
 def test_a_profile_without_a_secret_resolves_to_empty(tmp_path):
     config = load_config(write_config(tmp_path, VALID_YAML.split("  dev:")[0] + SQLITE_ENGINE))
-    assert profile_secret(config, config.engine.active) == ""
-    assert config.engine.active.secret_var == "ETL_CRAFT_ENGINE_DEV_SECRET"
+    assert profile_secret(config, config.engine) == ""
+    assert config.engine.secret_var == "ETL_CRAFT_ENGINE_DEV_SECRET"
 
 
 @pytest.mark.parametrize(

@@ -77,6 +77,9 @@ def start_run(conn, pipeline_id, *, run_date=None, backfill=False):
     if existing is not None:
         return existing
     created = transitions.create_active_run(conn, pipeline_id, run_date=run_date, backfill=backfill)
+    if created is None:
+        # Another session created the run between the read and the insert.
+        created = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
     assert created is not None
     return created
 

@@ -64,7 +64,7 @@ def build_engine(
     config: ConnectorConfig, profile: ConnectionProfile | None = None, **engine_kwargs: Any
 ) -> Engine:
     """Build a SQLAlchemy engine for ``profile``, by default the active Engine profile."""
-    profile = profile or config.engine.active
+    profile = profile or config.engine
     engine = for_jdbc_url(profile.jdbc_url).build_engine(config, profile, **engine_kwargs)
     mark_connections(engine)
     return engine

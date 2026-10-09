@@ -31,7 +31,7 @@ def restore_logger():
 @pytest.fixture
 def project(engine_db, tmp_path, monkeypatch):
     """Pipelines UP and SALES, with dependencies of every kind and two runs of SALES."""
-    profile = engine_db.config.engine.active
+    profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
     block = {"jdbc_url": profile.jdbc_url, "schema": schema}
     if profile.auth_mode != "none":

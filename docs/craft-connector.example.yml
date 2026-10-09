@@ -94,8 +94,7 @@ Orchestration:
       from_name: ETL Craft             # value — optional: the name shown with from_address
       auth_mode: EMAIL_AUTH_MODE       # variable — none | password | oauth
       user: EMAIL_USER                 # variable
-      use_tls: EMAIL_USE_TLS           # variable
-      # tls_mode: starttls             # value — starttls | ssl | none; replaces use_tls
+      tls_mode: EMAIL_TLS_MODE         # variable — starttls | ssl | none
       # ca_file: EMAIL_CA_FILE         # variable — optional CA certificate, relative to this file
       secret: EMAIL_SECRET             # variable, required: a secret is never used as written
       # client_id: EMAIL_CLIENT_ID     # variable — with auth_mode oauth (SMTP XOAUTH2): the app's
@@ -118,7 +117,7 @@ Orchestration:
       from_address: EMAIL_FROM         # variable
       auth_mode: EMAIL_AUTH_MODE       # variable
       user: EMAIL_USER                 # variable
-      use_tls: EMAIL_USE_TLS           # variable
+      tls_mode: EMAIL_TLS_MODE         # variable — starttls | ssl | none
       secret: EMAIL_SECRET             # variable, required: a secret is never used as written
   prod:
     Mode: remote                       # value
@@ -138,7 +137,7 @@ Orchestration:
       from_address: EMAIL_FROM         # variable
       auth_mode: EMAIL_AUTH_MODE       # variable
       user: EMAIL_USER                 # variable
-      use_tls: EMAIL_USE_TLS           # variable
+      tls_mode: EMAIL_TLS_MODE         # variable — starttls | ssl | none
       secret: EMAIL_SECRET             # variable, required: a secret is never used as written
 
 Engine:

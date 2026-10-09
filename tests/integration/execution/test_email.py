@@ -15,7 +15,7 @@ import pytest
 import yaml
 from sqlalchemy import text
 
-from etl_craft.config import EmailConfig, EmailProfile, ExecutionLimits, load_config
+from etl_craft.config import EmailProfile, ExecutionLimits, load_config
 from etl_craft.core.errors import HandlerError
 from etl_craft.engine import transitions
 from etl_craft.execution.connections import probe_email_relay
@@ -30,9 +30,9 @@ from fixtures.services import POSTGRES_DB, POSTGRES_PASSWORD, POSTGRES_USER, req
 
 def relay_config(config, host, port):
     profile = EmailProfile(
-        "EMAIL", "dev", host, port, "etl@example.com", use_tls=False, from_name="ETL Craft"
+        "EMAIL", "dev", host, port, "etl@example.com", tls_mode="none", from_name="ETL Craft"
     )
-    return replace(config, email=EmailConfig("dev", {"dev": profile}))
+    return replace(config, email=profile)
 
 
 @pytest.fixture
@@ -170,7 +170,7 @@ def test_recipient_refusal_is_recorded_on_the_alert_attempt(
     engine_db, tls_relay, tmp_path, recipients, status, delivered, monkeypatch
 ):
     relay = tls_relay(refused={"bad@example.com"})
-    profile = engine_db.config.engine.active
+    profile = engine_db.config.engine
     block = {
         "jdbc_url": profile.jdbc_url,
         "schema": "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main",
@@ -316,7 +316,7 @@ def sendmail_config(config, tmp_path, code=0):
         sendmail_path=str(program),
         from_name="ETL Craft",
     )
-    return replace(config, email=EmailConfig("dev", {"dev": profile})), out
+    return replace(config, email=profile), out
 
 
 def test_an_alert_through_sendmail(engine_db, pipeline, tmp_path):
@@ -337,8 +337,8 @@ def test_a_failing_or_missing_sendmail_is_named(engine_db, pipeline, tmp_path):
     params = {"EMAIL_TO": "a@example.com", "EMAIL_SUBJECT": "x", "EMAIL_BODY": "y"}
     with pytest.raises(HandlerError, match=r"sendmail exited 75"):
         alert(engine, config, ids, **params)
-    missing = replace(config.email.active, sendmail_path=str(tmp_path / "no_such_sendmail"))
-    gone = replace(config, email=EmailConfig("dev", {"dev": missing}))
+    missing = replace(config.email, sendmail_path=str(tmp_path / "no_such_sendmail"))
+    gone = replace(config, email=missing)
     with pytest.raises(HandlerError, match=r"the sendmail program .* does not exist"):
         alert(engine, gone, ids, **params)
     assert "does not exist; install one, or set sendmail_path" in probe_email_relay(gone)

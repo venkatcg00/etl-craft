@@ -150,7 +150,7 @@ def test_ngrok_problems_say_what_to_do_and_never_show_the_token(
 
 def test_the_command(engine_db, site, tmp_path, monkeypatch, capsys):
     root = engine_db.config.config_path.parent if engine_db.config.config_path else tmp_path
-    profile = engine_db.config.engine.active
+    profile = engine_db.config.engine
     lines = [
         "Secrets:",
         "  Source_type: environment",

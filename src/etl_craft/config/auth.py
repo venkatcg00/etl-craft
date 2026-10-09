@@ -14,7 +14,7 @@ untested, which ``doctor`` reports.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from etl_craft.core.enums import AuthMode, TableFormat
 from etl_craft.core.errors import ConfigurationError
@@ -110,14 +110,6 @@ def engine_for_jdbc_url(jdbc_url: str) -> EngineSpec:
     )
 
 
-GENERIC_AUTH_FIELDS: AuthFields = {
-    "none": (),
-    "password": ("user", "secret"),
-    "token": ("user", "secret"),
-}
-"""What a warehouse without its own dialect accepts."""
-
-
 @dataclass(frozen=True)
 class WarehouseSpec:
     """One warehouse dialect: a database and the table format it writes.
@@ -132,12 +124,11 @@ class WarehouseSpec:
     display_name: str
     sqlalchemy_name: str
     table_format: TableFormat
-    auth_fields: AuthFields = field(default_factory=lambda: dict(GENERIC_AUTH_FIELDS))
+    auth_fields: AuthFields
     verified_auth_modes: frozenset[str] = frozenset()
     preferred_fields: tuple[str, ...] = ()
     profile_fields: tuple[str, ...] = ()
     per_task_format: bool = True
-    known: bool = True
 
     @property
     def auth_modes(self) -> frozenset[str]:
@@ -282,8 +273,8 @@ def warehouse_spec(sqlalchemy_name: str, table_format: str) -> WarehouseSpec:
     """Choose the warehouse dialect for a connection's SQLAlchemy name and a table format.
 
     Trino is Iceberg whichever format is asked for, because its catalog decides. PostgreSQL has
-    no Iceberg tables, so asking for them is a ``ConfigurationError``. A database with no
-    dialect of its own is treated as a plain ANSI warehouse (``known`` is false).
+    no Iceberg tables, so asking for them is a ``ConfigurationError``, as is a database with
+    no dialect of its own.
     """
     name = sqlalchemy_name.split("+", 1)[0]
     if name == "trino":
@@ -296,12 +287,10 @@ def warehouse_spec(sqlalchemy_name: str, table_format: str) -> WarehouseSpec:
     for spec in WAREHOUSES:
         if spec.sqlalchemy_name == name and spec.table_format == table_format:
             return spec
-    return WarehouseSpec(
-        key=name,
-        display_name=name,
-        sqlalchemy_name=name,
-        table_format=TableFormat(table_format),
-        known=False,
+    supported = sorted({spec.display_name for spec in WAREHOUSES})
+    raise ConfigurationError(
+        f"{name!r} is not a supported warehouse; the supported warehouses are "
+        f"{', '.join(supported)}"
     )
 
 

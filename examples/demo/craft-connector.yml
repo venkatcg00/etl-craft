@@ -17,7 +17,7 @@ Orchestration:
     port: 51025                        # value — Mailpit's SMTP port
     from_address: etl-craft@example.com  # value
     from_name: Support Insights        # value
-    use_tls: false                     # value
+    tls_mode: none                     # value
 
 Engine:
   dev:

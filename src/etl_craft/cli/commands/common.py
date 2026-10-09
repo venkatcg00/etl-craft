@@ -47,7 +47,7 @@ def connect_engine_db(config: ConnectorConfig) -> Engine:
     """Build the Engine DB engine and check it, and its schema, can be used."""
     engine = engine_db(config)
     try:
-        check_reachable(engine, config.engine.active.schema)
+        check_reachable(engine, config.engine.schema)
     except BaseException:
         engine.dispose()
         raise

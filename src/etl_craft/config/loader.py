@@ -40,11 +40,9 @@ from etl_craft.config.model import (
     EXAMPLE_PATH,
     CloningConfig,
     ConnectionProfile,
-    ConnectionSection,
     ConnectorConfig,
     DagDefaults,
     DocsSiteConfig,
-    EmailConfig,
     EmailProfile,
     ExecutionLimits,
     SourceConfig,
@@ -72,9 +70,6 @@ from etl_craft.core.text import SECRET_KEYS, is_env_name, is_safe_identifier
 SECTIONS = ("Secrets", "Orchestration", "Engine", "Warehouse", "Cloning", "Docs_site")
 """The top-level sections, in the order the file must present them."""
 
-_EARLIER_LAYOUT_SECTIONS = frozenset(
-    {"Execution", "Source", "Postgres", "Dag_defaults", "Email", "Orchestrator"}
-)
 _SOURCE_TYPES = ("environment", "file")
 
 _ORCHESTRATION_KEYS = frozenset(
@@ -103,7 +98,7 @@ _ORCHESTRATION_KEYS = frozenset(
     }
 )
 _EMAIL_KEYS = frozenset(
-    {"host", "port", "from_address", "auth_mode", "user", "use_tls", "secret", "scope"}
+    {"host", "port", "from_address", "auth_mode", "user", "secret", "scope"}
     | {"client_id", "token_url", "transport", "sendmail_path", "from_name", "tls_mode", "ca_file"}
 )
 _SMTP_ONLY_EMAIL_KEYS = frozenset(
@@ -292,9 +287,7 @@ def parse_config(raw: Any, path: Path) -> ConnectorConfig:
         try:
             active_catalog(config)
         except ConfigurationError as error:
-            raise ConfigurationError(
-                f"{path}: Warehouse.{warehouse.active_profile}: {error}"
-            ) from error
+            raise ConfigurationError(f"{path}: Warehouse.{warehouse.name}: {error}") from error
     return config
 
 
@@ -318,19 +311,9 @@ def _relative_to_config(written: str, path: Path) -> Path:
 
 
 def _check_layout(raw: Any, path: Path) -> None:
-    """Refuse a non-mapping, an earlier layout, unknown sections and sections out of order."""
+    """Refuse a non-mapping, unknown sections and sections out of order."""
     if not isinstance(raw, dict):
         raise ConfigurationError(f"{path}: craft-connector.yml must contain a top-level mapping")
-    earlier = sorted(_EARLIER_LAYOUT_SECTIONS.intersection(raw))
-    if not earlier and any(isinstance(v, dict) and "Variables" in v for v in raw.values()):
-        earlier = ["Variables blocks"]
-    if earlier:
-        raise ConfigurationError(
-            f"{path}: this is an earlier craft-connector.yml layout ({', '.join(earlier)}). "
-            "The current file has Secrets, Orchestration (with the DAG defaults and Email "
-            "inside it), Engine, Warehouse and Cloning, each with one block per profile — "
-            f"see {EXAMPLE_PATH}"
-        )
     unknown = sorted(set(raw) - set(SECTIONS))
     if unknown:
         raise ConfigurationError(
@@ -684,7 +667,7 @@ def _parse_dag_defaults(settings: _Profiled, path: Path) -> DagDefaults:
     )
 
 
-def _parse_email(orchestration: _Profiled, path: Path, resolver: Resolver) -> EmailConfig | None:
+def _parse_email(orchestration: _Profiled, path: Path, resolver: Resolver) -> EmailProfile | None:
     block = orchestration.settings.get("Email")
     if block is None:
         return None
@@ -710,7 +693,7 @@ def _parse_email(orchestration: _Profiled, path: Path, resolver: Resolver) -> Em
                 f"{path}: {where} sends through sendmail, so {', '.join(smtp_only)} would be "
                 "ignored; remove them, or set transport: smtp"
             )
-        sendmail = EmailProfile(
+        return EmailProfile(
             section="EMAIL",
             name=name,
             host="",
@@ -722,7 +705,6 @@ def _parse_email(orchestration: _Profiled, path: Path, resolver: Resolver) -> Em
                 _relative_to_config(fields.value("sendmail_path") or DEFAULT_SENDMAIL_PATH, path)
             ),
         )
-        return EmailConfig(active_profile=name, profiles={name: sendmail})
     if "sendmail_path" in block:
         raise ConfigurationError(
             f"{path}: {where}.sendmail_path applies only with transport: sendmail"
@@ -745,8 +727,7 @@ def _parse_email(orchestration: _Profiled, path: Path, resolver: Resolver) -> Em
         )
     user = fields.value("user") or ""
     extra = _auth_extra(fields, auth_mode, EMAIL_AUTH_FIELDS[auth_mode], user=user)
-    use_tls = _parse_bool(fields.value("use_tls"), f"{where}.use_tls", path, default=True)
-    tls_mode = fields.value("tls_mode") or ("starttls" if use_tls else "none")
+    tls_mode = fields.value("tls_mode") or "starttls"
     tls_mode = enum_value(
         TlsMode,
         tls_mode,
@@ -755,18 +736,13 @@ def _parse_email(orchestration: _Profiled, path: Path, resolver: Resolver) -> Em
             f"none, starttls, ssl{fields.hint('tls_mode')}"
         ),
     )
-    if "tls_mode" in block and "use_tls" in block and use_tls != (tls_mode != "none"):
-        raise ConfigurationError(
-            f"{path}: {where}.tls_mode={tls_mode!r} conflicts with use_tls={use_tls}; "
-            "remove use_tls when setting tls_mode"
-        )
     ca_file = fields.value("ca_file")
     if ca_file and tls_mode == "none":
         raise ConfigurationError(
             f"{path}: {where}.ca_file={ca_file!r} would be ignored with tls_mode=none; "
             "set tls_mode to starttls or ssl, or remove ca_file"
         )
-    profile = EmailProfile(
+    return EmailProfile(
         section="EMAIL",
         name=name,
         host=fields.value("host", required=True) or "",
@@ -774,13 +750,11 @@ def _parse_email(orchestration: _Profiled, path: Path, resolver: Resolver) -> Em
         from_address=fields.value("from_address", required=True) or "",
         auth_mode=auth_mode,
         user=user or None,
-        use_tls=tls_mode != "none",
         extra=extra,
         from_name=fields.value("from_name") or "",
         tls_mode=tls_mode,
         ca_file=_relative_to_config(ca_file, path) if ca_file else None,
     )
-    return EmailConfig(active_profile=name, profiles={name: profile})
 
 
 # Engine
@@ -788,7 +762,7 @@ def _parse_email(orchestration: _Profiled, path: Path, resolver: Resolver) -> Em
 
 def _parse_engine(
     raw: dict[str, Any], global_profile: str | None, path: Path, resolver: Resolver
-) -> ConnectionSection:
+) -> ConnectionProfile:
     selected = _connection_block("Engine", raw, global_profile, path, resolver)
     assert selected is not None  # the Engine section is required
     profiled, block = selected
@@ -825,7 +799,7 @@ def _parse_engine(
         if auth_mode != AuthMode.NONE
         else {}
     )
-    profile = ConnectionProfile(
+    return ConnectionProfile(
         section="ENGINE",
         name=profiled.profile or "",
         jdbc_url=jdbc_url,
@@ -834,7 +808,6 @@ def _parse_engine(
         extra=extra,
         schema=_schema(fields),
     )
-    return ConnectionSection(active_profile=profile.name, profiles={profile.name: profile})
 
 
 # Warehouse
@@ -842,7 +815,7 @@ def _parse_engine(
 
 def _parse_warehouse(
     raw: dict[str, Any], global_profile: str | None, path: Path, resolver: Resolver
-) -> tuple[ConnectionSection | None, TableFormat]:
+) -> tuple[ConnectionProfile | None, TableFormat]:
     selected = _connection_block("Warehouse", raw, global_profile, path, resolver)
     if selected is None:
         return None, TableFormat.NATIVE
@@ -883,8 +856,7 @@ def _parse_warehouse(
         )
     else:
         profile = _jdbc_url_profile(fields, profiled, declared, expected_dialect, table_format)
-    section = ConnectionSection(active_profile=profile.name, profiles={profile.name: profile})
-    return section, table_format
+    return profile, table_format
 
 
 def _preferred_shape_profile(

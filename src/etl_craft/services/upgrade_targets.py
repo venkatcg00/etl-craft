@@ -117,7 +117,7 @@ def upgrade_targets(
                 actual = dialect.existing_table_format(conn, qualified)
                 if actual is not None:
                     dialect = resolve(
-                        parse_warehouse_url(config.warehouse.active.jdbc_url).dialect, actual
+                        parse_warehouse_url(config.warehouse.jdbc_url).dialect, actual
                     )
             session = Session(
                 conn,

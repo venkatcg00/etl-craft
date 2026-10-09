@@ -106,11 +106,6 @@ class WarehouseDialect:
     # Whether a bearer token (token, oauth) is sent under a username.
     bearer_needs_user: bool = True
 
-    def __init__(self, spec: WarehouseSpec | None = None) -> None:
-        """Use ``spec`` instead of the class's own, for a warehouse without its own dialect."""
-        if spec is not None:
-            self.spec = spec
-
     def identity_table_ddl(self, target: str, columns: str, params: Mapping[str, str]) -> str:
         """Create an empty table with the supplied columns and a generated ROW_ID."""
         raise NotImplementedError(f"{self.spec.key} does not declare identity columns in CREATE")

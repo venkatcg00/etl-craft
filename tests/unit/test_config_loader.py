@@ -55,11 +55,11 @@ def _minimal(**sections) -> dict:
 def test_the_shipped_example_loads_for_dev_with_nothing_set():
     config = load_config(EXAMPLE)
     assert config.mode == "local"
-    assert config.engine.active.jdbc_url == "jdbc:sqlite:etl-craft-engine.db"
-    assert config.engine.active.auth_mode == "none"
+    assert config.engine.jdbc_url == "jdbc:sqlite:etl-craft-engine.db"
+    assert config.engine.auth_mode == "none"
     assert config.warehouse is not None
     # A relative DuckDB file is found beside the config file.
-    assert config.warehouse.active.jdbc_url == f"jdbc:duckdb:{EXAMPLE.parent / 'warehouse.duckdb'}"
+    assert config.warehouse.jdbc_url == f"jdbc:duckdb:{EXAMPLE.parent / 'warehouse.duckdb'}"
     assert config.warehouse_table_format == "native"
     assert config.dag_defaults.allow_schedule is False
     assert config.email is None
@@ -79,8 +79,8 @@ def test_email_tls_modes_and_relative_ca_files(tmp_path, mode, monkeypatch):
         raw["Orchestration"]["Email"]["ca_file"] = "certs/ca.pem"
     path = _write(tmp_path, raw)
     monkeypatch.chdir(tmp_path.parent)
-    profile = load_config(path).email.active
-    assert profile.effective_tls_mode == mode
+    profile = load_config(path).email
+    assert profile.tls_mode == mode
     assert profile.ca_file == (tmp_path / "certs/ca.pem" if mode != "none" else None)
 
 
@@ -97,24 +97,22 @@ def test_unknown_email_tls_modes_are_refused(tmp_path, mode):
         load_config(_write(tmp_path, raw))
 
 
-@pytest.mark.parametrize("use_tls", [True, False])
-def test_the_email_tls_boolean_supplies_the_mode(tmp_path, use_tls):
+def test_email_tls_defaults_to_starttls_and_use_tls_is_refused(tmp_path):
     raw = _minimal()
     raw["Orchestration"]["Email"] = {
         "host": "smtp.example.com",
         "port": 587,
         "from_address": "etl@example.com",
-        "use_tls": use_tls,
     }
-    assert load_config(_write(tmp_path, raw)).email.active.effective_tls_mode == (
-        "starttls" if use_tls else "none"
-    )
+    assert load_config(_write(tmp_path, raw)).email.tls_mode == "starttls"
+    raw["Orchestration"]["Email"]["use_tls"] = False
+    with pytest.raises(ConfigurationError, match="use_tls"):
+        load_config(_write(tmp_path, raw))
 
 
 @pytest.mark.parametrize(
     ("extra", "message"),
     [
-        ({"tls_mode": "ssl", "use_tls": False}, "conflicts with use_tls=False"),
         ({"tls_mode": "none", "ca_file": "ca.pem"}, "would be ignored"),
         ({"transport": "sendmail", "tls_mode": "ssl"}, "tls_mode would be ignored"),
     ],
@@ -149,7 +147,7 @@ def test_the_shipped_example_prod_profile_overrides_and_resolves(tmp_path, monke
         "EMAIL_FROM": "etl@example.com",
         "EMAIL_AUTH_MODE": "password",
         "EMAIL_USER": "etl",
-        "EMAIL_USE_TLS": "true",
+        "EMAIL_TLS_MODE": "starttls",
         # Secrets must be set for the selected profile; their values are
         # never read back into the config object.
         "ENGINE_SECRET": "x",
@@ -160,12 +158,12 @@ def test_the_shipped_example_prod_profile_overrides_and_resolves(tmp_path, monke
     config = load_config(example)
     # A profile block overrides the section's own settings, Mode included.
     assert config.mode == "remote"
-    assert config.engine.active.secret_var == "ENGINE_SECRET"
-    assert config.warehouse is not None and config.warehouse.active.user == "wh"
+    assert config.engine.secret_var == "ENGINE_SECRET"
+    assert config.warehouse is not None and config.warehouse.user == "wh"
     assert config.email is not None
-    assert config.email.active.host == "smtp.internal"
-    assert config.email.active.port == 587
-    assert config.email.active.secret_var == "EMAIL_SECRET"
+    assert config.email.host == "smtp.internal"
+    assert config.email.port == 587
+    assert config.email.secret_var == "EMAIL_SECRET"
     assert config.dag_defaults.email_recipients == ["data-alerts@example.com"]
     assert config.cloning.enabled is True and config.cloning.scope == "all"
 
@@ -182,14 +180,14 @@ def test_profile_selection_order(tmp_path, monkeypatch):
     )
     path = _write(tmp_path, raw)
     # The section's own Profile beats Secrets.Profile.
-    assert load_config(path).engine.active.jdbc_url == "jdbc:sqlite:uat.db"
+    assert load_config(path).engine.jdbc_url == "jdbc:sqlite:uat.db"
     # Nothing outside the file switches it: a Profile names a variable when that is wanted.
     monkeypatch.setenv("ETL_CRAFT_PROFILE", "prod")
     monkeypatch.setenv("ETL_CRAFT_ENGINE_PROFILE", "prod")
-    assert load_config(path).engine.active.jdbc_url == "jdbc:sqlite:uat.db"
+    assert load_config(path).engine.jdbc_url == "jdbc:sqlite:uat.db"
     # Without its own Profile, a section takes Secrets.Profile.
     del raw["Engine"]["Profile"]
-    assert load_config(_write(tmp_path, raw)).engine.active.jdbc_url == "jdbc:sqlite:sit.db"
+    assert load_config(_write(tmp_path, raw)).engine.jdbc_url == "jdbc:sqlite:sit.db"
 
 
 def test_a_profile_can_name_a_variable(tmp_path, monkeypatch):
@@ -203,7 +201,7 @@ def test_a_profile_can_name_a_variable(tmp_path, monkeypatch):
     path = _write(tmp_path, raw)
     monkeypatch.setenv("ACTIVE_PROFILE", "prod")
     config = load_config(path)
-    assert config.engine.active.jdbc_url == "jdbc:sqlite:prod.db"
+    assert config.engine.jdbc_url == "jdbc:sqlite:prod.db"
     assert SettingSource("Secrets.Profile", "ACTIVE_PROFILE", "ACTIVE_PROFILE") in config.settings
     # Unset, the text itself is the profile -- which does not exist, and the
     # error says the variable was missing rather than leaving it to guesswork.
@@ -278,7 +276,7 @@ def test_the_source_itself_can_come_from_the_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("ENGINE_URL", "jdbc:sqlite:from-environment.db")
     config = load_config(_write(tmp_path, raw))
     assert config.source.type == "file"
-    assert config.engine.active.jdbc_url == "jdbc:sqlite:from-file.db"
+    assert config.engine.jdbc_url == "jdbc:sqlite:from-file.db"
 
 
 def test_a_secret_is_never_taken_as_written(tmp_path):
@@ -316,7 +314,7 @@ def test_tier_scoped_variables_win_over_the_plain_name(tmp_path, monkeypatch):
     monkeypatch.setenv("ENGINE_USER", "etl")
     monkeypatch.setenv("ENGINE_AUTH_MODE", "password")
     monkeypatch.setenv("ENGINE_PROD_SECRET", "p")
-    engine = load_config(_write(tmp_path, raw)).engine.active
+    engine = load_config(_write(tmp_path, raw)).engine
     assert engine.jdbc_url == "jdbc:postgresql://prod/etl"
     assert engine.secret_var == "ENGINE_PROD_SECRET"
 
@@ -343,7 +341,7 @@ def test_values_come_from_a_secrets_file_relative_to_the_config(tmp_path):
     config = load_config(_write(tmp_path, raw))
     assert config.source.type == "file"
     assert config.warehouse is not None
-    assert config.warehouse.active.user == "analyst"
+    assert config.warehouse.user == "analyst"
 
 
 def test_a_literal_jdbc_url_is_accepted_but_a_literal_secret_is_not(tmp_path, monkeypatch):
@@ -391,12 +389,12 @@ def test_a_secret_variable_that_is_not_set_is_a_load_time_error(tmp_path, monkey
     ):
         load_config(path)
     monkeypatch.setenv("ENGINE_SECRET", "x")
-    assert load_config(path).engine.active.secret_var == "ENGINE_SECRET"
+    assert load_config(path).engine.secret_var == "ENGINE_SECRET"
 
     # Only the selected profile's secrets are checked: dev needs none of them.
     monkeypatch.delenv("ENGINE_SECRET")
     raw["Secrets"]["Profile"] = "dev"
-    assert load_config(_write(tmp_path, raw)).engine.active.auth_mode == "none"
+    assert load_config(_write(tmp_path, raw)).engine.auth_mode == "none"
 
     # The same rule for a secrets file, and for token and s3_secret fields.
     (tmp_path / "s.env").write_text("DBX_URL=jdbc:databricks://h:443/default\n", encoding="utf-8")
@@ -431,14 +429,16 @@ def test_a_secret_variable_that_is_not_set_is_a_load_time_error(tmp_path, monkey
         load_config(_write(tmp_path, iceberg))
 
 
-def test_the_earlier_layouts_are_refused_with_a_pointer(tmp_path):
+def test_unknown_sections_and_profiles_are_refused_naming_the_expected_ones(tmp_path):
     legacy = {"Execution": {"Mode": "local"}, "Source": {"Type": "environment"}}
-    with pytest.raises(ConfigurationError, match=r"earlier craft-connector\.yml layout"):
+    with pytest.raises(ConfigurationError, match=r"unknown top-level section\(s\) \['Execution'"):
         load_config(_write(tmp_path, legacy))
     variables = _minimal(
         Engine={"Profile": "dev", "Variables": {"jdbc_url": "X", "schema": "main"}}
     )
-    with pytest.raises(ConfigurationError, match="Variables blocks"):
+    with pytest.raises(
+        ConfigurationError, match=r"Engine has no profile 'dev' \(it has \['Variables'\]\)"
+    ):
         load_config(_write(tmp_path, variables))
 
 
@@ -614,7 +614,7 @@ def test_every_auth_mode_loads_with_its_fields(tmp_path, monkeypatch):
             raw = _minimal(Warehouse={"Name": name, "dev": block})
             config = load_config(_write(tmp_path, raw))
             assert config.warehouse is not None
-            assert config.warehouse.active.auth_mode == mode
+            assert config.warehouse.auth_mode == mode
             loaded += 1
     assert loaded == 18
 
@@ -642,7 +642,7 @@ def test_databricks_token_fields_build_a_credential_free_url(tmp_path, monkeypat
     )
     config = load_config(_write(tmp_path, raw))
     assert config.warehouse is not None
-    profile = config.warehouse.active
+    profile = config.warehouse
     assert profile.auth_mode == "token"
     assert profile.secret_var == "DBX_TOKEN"
     assert "dapi-leaked" not in profile.jdbc_url
@@ -687,7 +687,7 @@ def test_duckdb_iceberg_profile_carries_its_catalog_fields(tmp_path, monkeypatch
     )
     config = load_config(_write(tmp_path, raw))
     assert config.warehouse is not None
-    assert config.warehouse.active.extra == {
+    assert config.warehouse.extra == {
         "catalog": "lake",
         "catalog_uri": "http://localhost:58181",
         "iceberg_warehouse": "s3://warehouse/",
@@ -742,7 +742,7 @@ def test_engine_and_warehouse_profiles_name_their_schema(tmp_path, monkeypatch):
         },
     )
     config = load_config(_write(tmp_path, raw))
-    assert (config.engine.active.schema, config.warehouse.active.schema) == ("etl_meta", "sales")
+    assert (config.engine.schema, config.warehouse.schema) == ("etl_meta", "sales")
 
 
 @pytest.mark.parametrize(
@@ -809,14 +809,11 @@ def test_a_relative_duckdb_file_is_found_beside_the_config(tmp_path):
     project.mkdir()
     raw = _minimal(Warehouse={"dev": {"jdbc_url": "jdbc:duckdb:data/wh.duckdb", "schema": "main"}})
     config = load_config(_write(project, raw))
-    assert config.warehouse.active.jdbc_url == f"jdbc:duckdb:{project / 'data' / 'wh.duckdb'}"
+    assert config.warehouse.jdbc_url == f"jdbc:duckdb:{project / 'data' / 'wh.duckdb'}"
     absolute = _minimal(
         Warehouse={"dev": {"jdbc_url": "jdbc:duckdb:/srv/wh.duckdb", "schema": "main"}}
     )
-    assert (
-        load_config(_write(project, absolute)).warehouse.active.jdbc_url
-        == "jdbc:duckdb:/srv/wh.duckdb"
-    )
+    assert load_config(_write(project, absolute)).warehouse.jdbc_url == "jdbc:duckdb:/srv/wh.duckdb"
 
 
 def test_email_through_sendmail(tmp_path):
@@ -826,7 +823,7 @@ def test_email_through_sendmail(tmp_path):
         "from_address": "etl@example.com",
         "from_name": "ETL Craft",
     }
-    email = load_config(_write(tmp_path, raw)).email.active
+    email = load_config(_write(tmp_path, raw)).email
     assert (email.transport, email.sendmail_path, email.from_address, email.from_name) == (
         "sendmail",
         "/usr/sbin/sendmail",
@@ -952,5 +949,5 @@ def test_email_and_orchestration_enum_settings_ignore_case_and_surrounding_space
     )
     config = load_config(_write(tmp_path, raw))
     assert config.mode == "local"
-    assert config.email.active.transport == "smtp"
-    assert config.email.active.effective_tls_mode == "ssl"
+    assert config.email.transport == "smtp"
+    assert config.email.tls_mode == "ssl"

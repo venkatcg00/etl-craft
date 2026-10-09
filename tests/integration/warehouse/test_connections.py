@@ -7,7 +7,7 @@ from dataclasses import replace
 import pytest
 from sqlalchemy import text
 
-from etl_craft.config import ConnectionProfile, ConnectionSection, ConnectorConfig, SourceConfig
+from etl_craft.config import ConnectionProfile, ConnectorConfig, SourceConfig
 from etl_craft.core.enums import Mode, TableFormat
 from etl_craft.core.errors import LockTimeoutError
 from etl_craft.warehouse.connection import (
@@ -38,8 +38,8 @@ def warehouse_config(jdbc_url, auth_mode="none", table_format=TableFormat.NATIVE
     return ConnectorConfig(
         mode=Mode.LOCAL,
         source=SourceConfig(type="environment"),
-        engine=ConnectionSection("dev", {"dev": engine}),
-        warehouse=ConnectionSection("dev", {"dev": warehouse}),
+        engine=engine,
+        warehouse=warehouse,
         warehouse_table_format=table_format,
     )
 
@@ -168,21 +168,17 @@ def test_trino_writes_and_reads_an_iceberg_table(trino_config):
 @pytest.mark.warehouse_trino_iceberg
 def test_a_trino_catalog_that_is_not_iceberg_is_reported(trino_config):
     trino = service("trino")
-    active = trino_config.warehouse.active
+    active = trino_config.warehouse
     config = replace(
         trino_config,
-        warehouse=ConnectionSection(
-            "dev", {"dev": replace(active, jdbc_url=f"jdbc:trino://{trino.address}/system/runtime")}
-        ),
+        warehouse=replace(active, jdbc_url=f"jdbc:trino://{trino.address}/system/runtime"),
     )
     engine = build_warehouse_engine(config)
     try:
         assert "not an Iceberg catalog" in verify_iceberg_catalog(config, engine)
         missing = replace(
             config,
-            warehouse=ConnectionSection(
-                "dev", {"dev": replace(active, jdbc_url=f"jdbc:trino://{trino.address}/nope/x")}
-            ),
+            warehouse=replace(active, jdbc_url=f"jdbc:trino://{trino.address}/nope/x"),
         )
         assert "does not exist" in verify_iceberg_catalog(missing, engine)
     finally:
@@ -271,20 +267,16 @@ def test_duckdb_attaches_the_iceberg_catalog_with_oauth(monkeypatch):
 @pytest.mark.warehouse_duckdb_iceberg
 def test_duckdb_iceberg_settings_are_checked_before_attaching():
     config = duckdb_iceberg_config()
-    active = config.warehouse.active
+    active = config.warehouse
     broken = replace(active, extra={**active.extra, "catalog_uri": ""})
-    engine = build_warehouse_engine(
-        replace(config, warehouse=ConnectionSection("dev", {"dev": broken}))
-    )
+    engine = build_warehouse_engine(replace(config, warehouse=broken))
     try:
         with pytest.raises(Exception, match="needs catalog_uri"):
             engine.connect()
     finally:
         engine.dispose()
     quoted = replace(active, extra={**active.extra, "s3_region": "us'east"})
-    engine = build_warehouse_engine(
-        replace(config, warehouse=ConnectionSection("dev", {"dev": quoted}))
-    )
+    engine = build_warehouse_engine(replace(config, warehouse=quoted))
     try:
         with pytest.raises(Exception, match="must not contain a quote"):
             engine.connect()

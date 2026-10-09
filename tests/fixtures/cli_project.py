@@ -143,7 +143,7 @@ class CliProject:
 @pytest.fixture
 def cli_project(empty_engine_db, tmp_path):
     db = empty_engine_db
-    profile = db.config.engine.active
+    profile = db.config.engine
     block = {
         "jdbc_url": profile.jdbc_url,
         "schema": "public" if profile.auth_mode != "none" else "main",
