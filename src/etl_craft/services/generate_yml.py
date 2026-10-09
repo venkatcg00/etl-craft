@@ -24,10 +24,12 @@ defaults, then a built-in default.
 from __future__ import annotations
 
 import json
+from importlib.resources import files
 from shlex import join
 from typing import Any, TypeVar
 
 import yaml
+from jsonschema import Draft202012Validator, FormatChecker, ValidationError
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 from sqlalchemy.engine import Connection
@@ -508,4 +510,11 @@ def docs_dag(config: ConnectorConfig) -> dict[str, Any]:
 def to_yaml(dag: dict[str, Any], mode: Mode = Mode.LOCAL) -> str:
     """Return a DAG as YAML, under the header that says how to read it in ``mode``."""
     header = REMOTE_HEADER if mode == Mode.REMOTE else HEADER
-    return header + yaml.safe_dump(dag, sort_keys=False, default_flow_style=False)
+    document = {"etl_craft_yaml_version": 1, **dag}
+    schema = json.loads(files("etl_craft").joinpath("schemas/dag-yaml-v1.json").read_text())
+    try:
+        Draft202012Validator(schema, format_checker=FormatChecker()).validate(document)
+    except ValidationError as error:
+        path = ".".join(str(part) for part in error.absolute_path) or "DAG"
+        raise ConfigurationError(f"generated YAML at {path}: {error.message}") from None
+    return header + yaml.safe_dump(document, sort_keys=False, default_flow_style=False)

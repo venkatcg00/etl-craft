@@ -136,3 +136,32 @@ jobs:
       - name: Stop the local services
         if: always()
         run: make services-down
+
+  airflow:
+    name: Airflow contract (${{ matrix.airflow-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        airflow-version: ["2.11.0", "3.3.2"]
+    env:
+      AIRFLOW_HOME: ${{ runner.temp }}/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      ETL_CRAFT_AIRFLOW_CONTRACTS: ${{ runner.temp }}/airflow-contracts
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Install engine test dependencies
+        run: uv sync --locked --all-groups --python 3.11
+      - name: Export every demo pipeline
+        run: uv run python scripts/export_airflow_contracts.py "$ETL_CRAFT_AIRFLOW_CONTRACTS"
+      - name: Install factory with real Airflow in an isolated environment
+        run: |
+          uv venv "$RUNNER_TEMP/airflow-venv" --python 3.11
+          uv pip install --python "$RUNNER_TEMP/airflow-venv/bin/python" \
+            "apache-airflow==${{ matrix.airflow-version }}" pytest ./integrations/airflow
+      - name: Validate operator graphs, commands and refused exports
+        run: >-
+          "$RUNNER_TEMP/airflow-venv/bin/python" -m pytest -q integrations/airflow/tests

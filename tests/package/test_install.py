@@ -22,6 +22,7 @@ pytestmark = [pytest.mark.package, pytest.mark.timeout(900)]
 SHIPPED = (
     "etl_craft/__init__.py",
     "etl_craft/py.typed",
+    "etl_craft/schemas/dag-yaml-v1.json",
     "etl_craft/cli/__init__.py",
     "etl_craft/dialects/engine/postgres/schema.sql",
     "etl_craft/dialects/engine/sqlite/schema.sql",
@@ -32,9 +33,13 @@ SHIPPED = (
 
 CHECK = """
 import sys
+import json
+from importlib.resources import files
 import etl_craft
 from etl_craft.dialects.engine import all_dialects
 assert etl_craft.__version__ == sys.argv[1], etl_craft.__version__
+schema = json.loads(files("etl_craft").joinpath("schemas/dag-yaml-v1.json").read_text())
+assert schema["properties"]["etl_craft_yaml_version"]["const"] == 1
 for dialect in all_dialects():
     assert "CREATE TABLE CFG_PIPELINES" in dialect.schema_path().read_text(encoding="utf-8")
     assert dialect.query("existing_tables")

@@ -106,7 +106,8 @@ item's text, or work done early under another item.
 | S4.E Retries | Done | #122 | Persisted due times, fenced claims and retryability |
 | S4.F Status and explain | Done | #123 | Read-only snapshots, shared JSON and explicit unfinished outcomes |
 | S4.G HTTP API | Done | #124 | Bearer roles, exact run identities and shared operation documents |
-| S4.H and later | Not started | | |
+| S4.H Versioned YAML and Airflow factory | In progress | | Validated version 1 exports and isolated Airflow contracts |
+| S4.I.5 and later | Not started | | |
 
 ### Handover notes
 
