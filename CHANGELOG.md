@@ -8,6 +8,10 @@ All notable changes are recorded here. The format follows
 
 ### Fixed
 
+- `lineage`, `generate-docs` and other column-lineage readers work with sqlglot 30.22, whose
+  `lineage()` requires a schema argument; etl-craft passes an empty one, as before. The lock
+  file moves to sqlglot 30.22.0.
+
 - Snowflake renames use the fully qualified destination, keeping Iceberg replacements and their
   recovery copies in the target schema even when the connection uses a different default schema.
 
