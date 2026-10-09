@@ -105,7 +105,8 @@ item's text, or work done early under another item.
 | S4.I.4 Thinner engine and execution plumbing | Done | #121 | Shared counts, run selection, graph loading and direct row mappings |
 | S4.E Retries | Done | #122 | Persisted due times, fenced claims and retryability |
 | S4.F Status and explain | Done | #123 | Read-only snapshots, shared JSON and explicit unfinished outcomes |
-| S4.G and later | Not started | | |
+| S4.G HTTP API | Done | #124 | Bearer roles, exact run identities and shared operation documents |
+| S4.H and later | Not started | | |
 
 ### Handover notes
 
@@ -113,10 +114,8 @@ What a person picking up the work needs that the code and the item texts do not 
 
 **Acceptance availability.**
 
-S4.F passed the full local checks, installed-wheel matrix and all Snowflake acceptance tests.
-Databricks acceptance remains unverified: the Free Edition warehouse is stopped and its start
-endpoint returns HTTP 400 before SQL execution. Databricks acceptance is still required for
-release certification when compute is available.
+S4.G passed the full local checks, installed-wheel matrix and all Databricks and Snowflake
+acceptance tests.
 
 **Choices that differ from the item text.**
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import signal
 import threading
+from importlib.util import find_spec
 from types import FrameType
 
 from etl_craft.cli.commands.common import Command, command_context
@@ -28,7 +29,12 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     }
     try:
         with command_context(args) as ctx:
-            serve(ctx, stop)
+            if find_spec("fastapi") is None or find_spec("uvicorn") is None:
+                serve(ctx, stop)
+            else:
+                from etl_craft.api.server import serve_http
+
+                serve_http(ctx, stop)
     finally:
         for number, handler in previous.items():
             signal.signal(number, handler)

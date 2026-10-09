@@ -103,16 +103,21 @@ def task_document(conn: Connection, row: RowMapping) -> TaskRunView:
         statement(conn, "operation_attempts").columns(retryable=Boolean),
         {"task_run_id": values["task_run_id"]},
     ):
-        captured = dict(attempt._mapping)
-        for key in (
-            "lease_expires_at",
-            "heartbeat_at",
-            "queued_at",
-            "claimed_at",
-            "started_at",
-            "ended_at",
-            "not_before",
-        ):
-            captured[key] = timestamp(captured[key])
-        attempts.append(AttemptView(**captured))
+        attempts.append(attempt_document(attempt._mapping))
     return TaskRunView(**values, attempts=tuple(attempts))
+
+
+def attempt_document(row: RowMapping) -> AttemptView:
+    """Normalize the same attempt document for task inspection and direct API reads."""
+    captured = dict(row)
+    for key in (
+        "lease_expires_at",
+        "heartbeat_at",
+        "queued_at",
+        "claimed_at",
+        "started_at",
+        "ended_at",
+        "not_before",
+    ):
+        captured[key] = timestamp(captured[key])
+    return AttemptView(**captured)

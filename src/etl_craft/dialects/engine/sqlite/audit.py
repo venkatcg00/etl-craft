@@ -23,15 +23,20 @@ def refresh_metadata_triggers(conn: Connection) -> None:
     now = "(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00')"
     for row in tables:
         table = row.name
-        if table.upper().startswith("AUD_"):
-            literal = table.replace("'", "''")
+        if table.upper().startswith("AUD_") or table.upper() == "CFG_API_TOKENS":
+            kind = "API tokens" if table.upper() == "CFG_API_TOKENS" else "audit rows"
+            remedy = (
+                "use etl-craft token"
+                if table.upper() == "CFG_API_TOKENS"
+                else "use etl-craft run, mark or cancel"
+            )
             for operation in ("INSERT", "UPDATE", "DELETE"):
                 guard = f"trg_actor_guard_{table.lower()}_{operation.lower()}"
                 conn.exec_driver_sql(
                     f"CREATE TRIGGER IF NOT EXISTS {_quote(guard)} BEFORE {operation} "
                     f"ON {_quote(table)} BEGIN SELECT CASE WHEN etl_craft_actor() IS NULL "
-                    "THEN RAISE(ABORT, 'audit rows are written only by etl-craft; "
-                    "use etl-craft run, mark or cancel') END; END"
+                    f"THEN RAISE(ABORT, '{kind} are written only by etl-craft; "
+                    f"{remedy}') END; END"
                 )
             continue
         columns = conn.exec_driver_sql(f"PRAGMA table_info({_quote(table)})").all()

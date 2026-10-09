@@ -3,26 +3,41 @@
   "suite": "cloud-snowflake",
   "marker": "cloud_snowflake",
   "package_version": "0.2.0",
-  "commit": "63e1c6d20f046abd9a2621bfb245e1243d72d916",
+  "commit": "cca64df6c1659a8b8d24fa0d666b15978de63529",
   "dirty": false,
-  "wheel_sha256": "af68c44fe524cf9f8d336997ff077014be2f8b52fb5050696213294a7fdecf83",
+  "wheel_sha256": "e7cc8a8dd4d5107614a37ee432cfd24c0bf7dfab7ee0df110af61565d5c57283",
   "python": "3.11.16",
-  "platform": "Linux-7.2.7-1-cachyos-x86_64-with-glibc2.44",
+  "platform": "Linux-7.2.9-1-cachyos-x86_64-with-glibc2.44",
   "platform_key": "linux",
   "collected": [
     "tests/acceptance/cloud/test_cloud_cloning.py::test_a_mirror_gains_columns_on_snowflake",
     "tests/acceptance/cloud/test_cloud_connections.py::test_snowflake[iceberg-snowflake_iceberg]",
     "tests/acceptance/cloud/test_cloud_connections.py::test_snowflake[native-snowflake]",
+    "tests/acceptance/cloud/test_cloud_connections.py::test_snowflake_iceberg_rename_keeps_a_nondefault_schema",
     "tests/acceptance/cloud/test_cloud_demo.py::test_the_demo_on_snowflake[snowflake]",
     "tests/acceptance/cloud/test_cloud_demo.py::test_the_demo_on_snowflake[snowflake_iceberg]",
+    "tests/acceptance/cloud/test_cloud_hash_contract.py::test_cloud_hash_matches_the_canonical_golden_digest[SNOWFLAKE]",
+    "tests/acceptance/cloud/test_cloud_hash_contract.py::test_cloud_typed_target_rehash_and_unchanged_merge[SNOWFLAKE]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_append_retries_on_snowflake[iceberg]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_append_retries_on_snowflake[native]",
     "tests/acceptance/cloud/test_cloud_sql_actions.py::test_every_action_on_snowflake[iceberg]",
-    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_every_action_on_snowflake[native]"
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_every_action_on_snowflake[native]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_identity_inputs_on_snowflake[iceberg]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_identity_inputs_on_snowflake[native]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_ingestion_upgrade_on_snowflake[iceberg]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_ingestion_upgrade_on_snowflake[native]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_row_id_generation_on_snowflake[iceberg]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_row_id_generation_on_snowflake[native]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_schema_evolution_on_snowflake[iceberg]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_schema_evolution_on_snowflake[native]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_table_formats_on_snowflake[iceberg]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_table_formats_on_snowflake[native]"
   ],
-  "started_at": "2026-10-04T14:18:45+00:00",
-  "finished_at": "2026-10-04T14:44:56+00:00",
+  "started_at": "2026-10-09T07:48:18+00:00",
+  "finished_at": "2026-10-09T09:15:32+00:00",
   "exit_status": 0,
   "counts": {
-    "passed": 7,
+    "passed": 22,
     "skipped": 0,
     "xfailed": 0,
     "xpassed": 0,
@@ -33,37 +48,112 @@
     {
       "nodeid": "tests/acceptance/cloud/test_cloud_cloning.py::test_a_mirror_gains_columns_on_snowflake",
       "outcome": "passed",
-      "duration": 25.365
+      "duration": 33.849
     },
     {
       "nodeid": "tests/acceptance/cloud/test_cloud_connections.py::test_snowflake[iceberg-snowflake_iceberg]",
       "outcome": "passed",
-      "duration": 9.979
+      "duration": 10.752
     },
     {
       "nodeid": "tests/acceptance/cloud/test_cloud_connections.py::test_snowflake[native-snowflake]",
       "outcome": "passed",
-      "duration": 7.996
+      "duration": 9.213
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_connections.py::test_snowflake_iceberg_rename_keeps_a_nondefault_schema",
+      "outcome": "passed",
+      "duration": 11.895
     },
     {
       "nodeid": "tests/acceptance/cloud/test_cloud_demo.py::test_the_demo_on_snowflake[snowflake]",
       "outcome": "passed",
-      "duration": 678.67
+      "duration": 990.826
     },
     {
       "nodeid": "tests/acceptance/cloud/test_cloud_demo.py::test_the_demo_on_snowflake[snowflake_iceberg]",
       "outcome": "passed",
-      "duration": 371.016
+      "duration": 454.79
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_hash_contract.py::test_cloud_hash_matches_the_canonical_golden_digest[SNOWFLAKE]",
+      "outcome": "passed",
+      "duration": 8.888
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_hash_contract.py::test_cloud_typed_target_rehash_and_unchanged_merge[SNOWFLAKE]",
+      "outcome": "passed",
+      "duration": 105.952
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_append_retries_on_snowflake[iceberg]",
+      "outcome": "passed",
+      "duration": 251.366
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_append_retries_on_snowflake[native]",
+      "outcome": "passed",
+      "duration": 236.13
     },
     {
       "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_every_action_on_snowflake[iceberg]",
       "outcome": "passed",
-      "duration": 244.427
+      "duration": 890.278
     },
     {
       "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_every_action_on_snowflake[native]",
       "outcome": "passed",
-      "duration": 232.001
+      "duration": 833.195
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_identity_inputs_on_snowflake[iceberg]",
+      "outcome": "passed",
+      "duration": 27.972
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_identity_inputs_on_snowflake[native]",
+      "outcome": "passed",
+      "duration": 27.574
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_ingestion_upgrade_on_snowflake[iceberg]",
+      "outcome": "passed",
+      "duration": 40.141
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_ingestion_upgrade_on_snowflake[native]",
+      "outcome": "passed",
+      "duration": 40.124
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_row_id_generation_on_snowflake[iceberg]",
+      "outcome": "passed",
+      "duration": 166.811
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_row_id_generation_on_snowflake[native]",
+      "outcome": "passed",
+      "duration": 189.44
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_schema_evolution_on_snowflake[iceberg]",
+      "outcome": "passed",
+      "duration": 286.5
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_schema_evolution_on_snowflake[native]",
+      "outcome": "passed",
+      "duration": 280.673
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_table_formats_on_snowflake[iceberg]",
+      "outcome": "passed",
+      "duration": 166.261
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_table_formats_on_snowflake[native]",
+      "outcome": "passed",
+      "duration": 170.332
     }
   ]
 }

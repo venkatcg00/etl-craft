@@ -229,6 +229,7 @@ def test_a_failed_metadata_rebuild_rolls_back_and_restores_connection_settings(
         "0015_schedules.sql",
         "0016_gate_waits.sql",
         "0017_retries.sql",
+        "0018_api_tokens.sql",
     ]
 
 

@@ -205,7 +205,8 @@ def schema_page() -> str:
         "",
         "Every table and column of the Engine DB, generated from the PostgreSQL schema etl-craft "
         "creates; the SQLite schema has the same tables and columns, in the same order, with "
-        "SQLite's types. Your team writes the `CFG_` tables; etl-craft writes only the `AUD_` "
+        "SQLite's types. Your team writes pipeline metadata in the `CFG_` tables; "
+        "etl-craft manages API tokens, the `AUD_` "
         "tables and `SCHEMA_MIGRATIONS`. See [Pipelines and tasks]"
         "(../guides/pipelines-and-tasks.md) and [The Engine DB](../connectors/engine-db.md).",
         "",

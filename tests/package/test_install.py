@@ -68,9 +68,17 @@ def test_the_wheel_holds_the_package_files_and_the_licence():
     assert any(name.endswith("licenses/LICENSE") for name in names)
 
 
-@pytest.mark.parametrize("installer", ["pip", "uv"])
-@pytest.mark.parametrize("kind", ["wheel", "sdist"])
-def test_it_installs_and_runs(tmp_path, installer, kind):
+@pytest.mark.parametrize(
+    "kind,installer,extra",
+    [
+        ("wheel", "pip", None),
+        ("wheel", "uv", None),
+        ("sdist", "pip", None),
+        ("sdist", "uv", None),
+        ("wheel", "uv", "server"),
+    ],
+)
+def test_it_installs_and_runs(tmp_path, installer, kind, extra):
     artifact = _artifact(kind)
     version = _artifact("wheel").name.split("-")[1]
     venv = tmp_path / "venv"
@@ -82,7 +90,12 @@ def test_it_installs_and_runs(tmp_path, installer, kind):
         assert uv, "uv is not on PATH"
         subprocess.run([uv, "venv", "--quiet", "--python", sys.executable, str(venv)], check=True)
         install = [uv, "pip", "install", "--quiet", "--python", str(_bin(venv, "python"))]
-    subprocess.run([*install, str(artifact)], check=True, timeout=600, cwd=tmp_path)
+    subprocess.run(
+        [*install, str(artifact) + (f"[{extra}]" if extra else "")],
+        check=True,
+        timeout=600,
+        cwd=tmp_path,
+    )
 
     def run(*argv: str) -> str:
         return subprocess.run(
@@ -94,3 +107,10 @@ def test_it_installs_and_runs(tmp_path, installer, kind):
         f"etl-craft {version}"
     )
     run(str(_bin(venv, "python")), "-c", CHECK, version)
+
+    if extra == "server":
+        run(
+            str(_bin(venv, "python")),
+            "-c",
+            "import fastapi, uvicorn; from etl_craft.api.app import create_app",
+        )

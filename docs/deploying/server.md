@@ -4,6 +4,9 @@
 It uses the same task handlers, ready-task dispatch, gates, leases, cancellation guards, SLA checks
 and finalization hooks as foreground `etl-craft run`.
 
+With the optional `etl-craft[server]` extra, it also serves the [authenticated HTTP API](http-api.md)
+at `Orchestration.Api_address` (default `127.0.0.1:8730`).
+
 ## Starting and submitting work
 
 Initialize or upgrade the [Engine DB](engine-db.md), configure `Orchestration.Mode: local`,

@@ -42,6 +42,7 @@ Each package imports only the packages below it. `lint-imports` enforces this.
 | Package | Responsibility |
 |---|---|
 | `cli` | argparse commands, output, exit codes |
+| `api` | optional FastAPI routes, bearer authorization and HTTP server lifecycle |
 | `overseer` | leadership, active-run working set, local supervision and shutdown |
 | `services` | actor-scoped operations, doctor, setup, validate, cloning, DAG YAML, lineage, docs site |
 | `execution` | task runner, process supervisor, ready-task scheduler, run lifecycle, cross-pipeline gates |

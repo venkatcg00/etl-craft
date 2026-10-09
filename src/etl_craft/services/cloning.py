@@ -167,7 +167,7 @@ def _engine_tables(
     inspector = inspect(engine)
     found = []
     for name in sorted(inspector.get_table_names(schema=schema), key=str.upper):
-        if name.upper().startswith(prefixes):
+        if name.upper().startswith(prefixes) and name.upper() != "CFG_API_TOKENS":
             columns = inspector.get_columns(name, schema=schema)
             found.append((name.upper(), [(str(c["name"]).upper(), c["type"]) for c in columns]))
     return found

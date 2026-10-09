@@ -3,11 +3,11 @@
   "suite": "cloud-databricks",
   "marker": "cloud_databricks",
   "package_version": "0.2.0",
-  "commit": "63e1c6d20f046abd9a2621bfb245e1243d72d916",
+  "commit": "cca64df6c1659a8b8d24fa0d666b15978de63529",
   "dirty": false,
-  "wheel_sha256": "af68c44fe524cf9f8d336997ff077014be2f8b52fb5050696213294a7fdecf83",
+  "wheel_sha256": "e7cc8a8dd4d5107614a37ee432cfd24c0bf7dfab7ee0df110af61565d5c57283",
   "python": "3.11.16",
-  "platform": "Linux-7.2.7-1-cachyos-x86_64-with-glibc2.44",
+  "platform": "Linux-7.2.9-1-cachyos-x86_64-with-glibc2.44",
   "platform_key": "linux",
   "collected": [
     "tests/acceptance/cloud/test_cloud_cloning.py::test_a_mirror_gains_columns_on_databricks[iceberg]",
@@ -16,14 +16,28 @@
     "tests/acceptance/cloud/test_cloud_connections.py::test_databricks[native-databricks]",
     "tests/acceptance/cloud/test_cloud_demo.py::test_the_demo_on_databricks[databricks]",
     "tests/acceptance/cloud/test_cloud_demo.py::test_the_demo_on_databricks[databricks_iceberg]",
+    "tests/acceptance/cloud/test_cloud_hash_contract.py::test_cloud_hash_matches_the_canonical_golden_digest[DATABRICKS]",
+    "tests/acceptance/cloud/test_cloud_hash_contract.py::test_cloud_typed_target_rehash_and_unchanged_merge[DATABRICKS]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_append_retries_on_databricks[iceberg]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_append_retries_on_databricks[native]",
     "tests/acceptance/cloud/test_cloud_sql_actions.py::test_every_action_on_databricks[iceberg]",
-    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_every_action_on_databricks[native]"
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_every_action_on_databricks[native]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_identity_inputs_on_databricks[iceberg]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_identity_inputs_on_databricks[native]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_ingestion_upgrade_on_databricks[iceberg]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_ingestion_upgrade_on_databricks[native]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_row_id_generation_on_databricks[iceberg]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_row_id_generation_on_databricks[native]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_schema_evolution_on_databricks[iceberg]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_schema_evolution_on_databricks[native]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_table_formats_on_databricks[iceberg]",
+    "tests/acceptance/cloud/test_cloud_sql_actions.py::test_table_formats_on_databricks[native]"
   ],
-  "started_at": "2026-10-04T14:18:45+00:00",
-  "finished_at": "2026-10-04T14:49:59+00:00",
+  "started_at": "2026-10-09T06:23:04+00:00",
+  "finished_at": "2026-10-09T07:48:15+00:00",
   "exit_status": 0,
   "counts": {
-    "passed": 8,
+    "passed": 22,
     "skipped": 0,
     "xfailed": 0,
     "xpassed": 0,
@@ -34,42 +48,112 @@
     {
       "nodeid": "tests/acceptance/cloud/test_cloud_cloning.py::test_a_mirror_gains_columns_on_databricks[iceberg]",
       "outcome": "passed",
-      "duration": 29.605
+      "duration": 37.994
     },
     {
       "nodeid": "tests/acceptance/cloud/test_cloud_cloning.py::test_a_mirror_gains_columns_on_databricks[native]",
       "outcome": "passed",
-      "duration": 55.708
+      "duration": 64.792
     },
     {
       "nodeid": "tests/acceptance/cloud/test_cloud_connections.py::test_databricks[iceberg-databricks_iceberg]",
       "outcome": "passed",
-      "duration": 8.292
+      "duration": 10.241
     },
     {
       "nodeid": "tests/acceptance/cloud/test_cloud_connections.py::test_databricks[native-databricks]",
       "outcome": "passed",
-      "duration": 5.837
+      "duration": 7.162
     },
     {
       "nodeid": "tests/acceptance/cloud/test_cloud_demo.py::test_the_demo_on_databricks[databricks]",
       "outcome": "passed",
-      "duration": 704.914
+      "duration": 966.966
     },
     {
       "nodeid": "tests/acceptance/cloud/test_cloud_demo.py::test_the_demo_on_databricks[databricks_iceberg]",
       "outcome": "passed",
-      "duration": 640.816
+      "duration": 882.836
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_hash_contract.py::test_cloud_hash_matches_the_canonical_golden_digest[DATABRICKS]",
+      "outcome": "passed",
+      "duration": 3.161
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_hash_contract.py::test_cloud_typed_target_rehash_and_unchanged_merge[DATABRICKS]",
+      "outcome": "passed",
+      "duration": 89.814
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_append_retries_on_databricks[iceberg]",
+      "outcome": "passed",
+      "duration": 191.678
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_append_retries_on_databricks[native]",
+      "outcome": "passed",
+      "duration": 186.176
     },
     {
       "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_every_action_on_databricks[iceberg]",
       "outcome": "passed",
-      "duration": 213.573
+      "duration": 723.748
     },
     {
       "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_every_action_on_databricks[native]",
       "outcome": "passed",
-      "duration": 213.364
+      "duration": 736.339
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_identity_inputs_on_databricks[iceberg]",
+      "outcome": "passed",
+      "duration": 25.97
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_identity_inputs_on_databricks[native]",
+      "outcome": "passed",
+      "duration": 26.906
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_ingestion_upgrade_on_databricks[iceberg]",
+      "outcome": "passed",
+      "duration": 21.608
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_ingestion_upgrade_on_databricks[native]",
+      "outcome": "passed",
+      "duration": 21.153
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_row_id_generation_on_databricks[iceberg]",
+      "outcome": "passed",
+      "duration": 174.289
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_row_id_generation_on_databricks[native]",
+      "outcome": "passed",
+      "duration": 170.809
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_schema_evolution_on_databricks[iceberg]",
+      "outcome": "passed",
+      "duration": 258.258
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_schema_evolution_on_databricks[native]",
+      "outcome": "passed",
+      "duration": 256.695
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_table_formats_on_databricks[iceberg]",
+      "outcome": "passed",
+      "duration": 126.567
+    },
+    {
+      "nodeid": "tests/acceptance/cloud/test_cloud_sql_actions.py::test_table_formats_on_databricks[native]",
+      "outcome": "passed",
+      "duration": 126.368
     }
   ]
 }

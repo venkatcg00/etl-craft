@@ -60,6 +60,9 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Optional authenticated HTTP API and OpenAPI contract, served with the local overseer;
+  print-once bearer tokens with viewer, operator and admin roles and immediate revocation.
+
 - Read-only `status` and `explain` commands with exact run selection, task summaries, dependency
   reasons, persisted waits and retry schedules. JSON output now covers inspection, `validate`,
   `doctor` and `lineage` through the shared service serializer.

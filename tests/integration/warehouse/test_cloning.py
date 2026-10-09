@@ -25,7 +25,11 @@ def cloning(world, scope=CloningScope.ALL):
 def engine_tables(world, prefixes=("CFG_", "AUD_")):
     with world.engine_db.connect() as conn:
         names = conn.execute(text("SELECT name FROM sqlite_master WHERE type = 'table'")).scalars()
-        return sorted(n.upper() for n in names if n.upper().startswith(prefixes))
+        return sorted(
+            n.upper()
+            for n in names
+            if n.upper().startswith(prefixes) and n.upper() != "CFG_API_TOKENS"
+        )
 
 
 def count(world, table):
@@ -43,6 +47,7 @@ def test_every_table_is_mirrored_and_replaced_on_the_next_clone(sql_world):
     config = cloning(world)
     first = clone(world.engine_db, config)
     assert [t.table for t in first] == engine_tables(world)
+    assert "CFG_API_TOKENS" not in {t.table for t in first}
     assert all(t.created for t in first)
     assert {t.mirror for t in first} == {world.name(t.table) for t in first}
     assert {t.table: t.rows for t in first}["CFG_TASK_PARAMETERS"] == 1

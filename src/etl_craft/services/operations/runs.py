@@ -26,10 +26,13 @@ def trigger_run(
     run_date: date | None = None,
     reason: str | None = None,
     force: bool = False,
+    init_only: bool = False,
     selector: RunSelector = ACTIVE_RUN,
 ) -> OperationResult:
     """Run or resume a pipeline and return its exact stored state."""
-    request = RunRequest(pipeline_code, run_date=run_date, force=force, selector=selector)
+    request = RunRequest(
+        pipeline_code, run_date=run_date, force=force, init_only=init_only, selector=selector
+    )
     with operation(ctx, "run", {**request.arguments(), "reason": reason}):
         return _execute(ctx, request)
 

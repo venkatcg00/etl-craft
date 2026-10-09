@@ -34,6 +34,7 @@ exclude_docs: |
   gen_ref_pages.py
   gen_cli_page.py
   gen_reference_pages.py
+  gen_openapi.py
 
 markdown_extensions:
   - admonition
@@ -64,6 +65,7 @@ plugins:
         - docs/gen_ref_pages.py
         - docs/gen_cli_page.py
         - docs/gen_reference_pages.py
+        - docs/gen_openapi.py
   - literate-nav:
       nav_file: SUMMARY.md
   - section-index
@@ -118,6 +120,7 @@ nav:
       - The project directory: deploying/project-layout.md
       - Local mode: deploying/local-mode.md
       - Local server: deploying/server.md
+      - HTTP API: deploying/http-api.md
       - Running under an orchestrator: deploying/orchestrator.md
       - Checking a deployment, doctor and setup: deploying/doctor-and-setup.md
       - Engine DB setup and upgrades: deploying/engine-db.md

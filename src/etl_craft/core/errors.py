@@ -40,6 +40,7 @@ class ExitCode(IntEnum):
     SQL_GUARD = 21
     INCOMPLETE = 22
     WAITING = 23
+    RESOURCE_NOT_FOUND = 24
 
 
 class EtlCraftError(Exception):
@@ -156,3 +157,10 @@ class SqlGuardError(HandlerError):
 
     retryable = False
     exit_code = ExitCode.SQL_GUARD
+
+
+class ResourceNotFoundError(EtlCraftError):
+    """An exact execution resource or its log is unavailable."""
+
+    retryable = False
+    exit_code = ExitCode.RESOURCE_NOT_FOUND

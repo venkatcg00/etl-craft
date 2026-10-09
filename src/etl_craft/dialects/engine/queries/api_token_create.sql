@@ -1,0 +1,3 @@
+INSERT INTO CFG_API_TOKENS (NAME, TOKEN_SHA256, ROLE, CREATED_BY, CREATED_AT, EXPIRES_AT)
+VALUES (:name, :digest, :role, :actor, :now, :expires_at)
+RETURNING TOKEN_ID AS token_id

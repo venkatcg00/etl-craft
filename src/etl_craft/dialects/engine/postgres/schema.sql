@@ -703,3 +703,23 @@ CREATE TRIGGER trg_actor_guard_aud_gate_waits BEFORE INSERT OR UPDATE OR DELETE
 ON AUD_GATE_WAITS FOR EACH ROW EXECUTE FUNCTION etl_craft_guard();
 CREATE TRIGGER trg_truncate_aud_gate_waits BEFORE TRUNCATE ON AUD_GATE_WAITS
 FOR EACH STATEMENT EXECUTE FUNCTION etl_craft_guard();
+
+-- Opaque API credentials: SHA-256 hashes, roles and expiry; token values are never stored or cloned.
+CREATE TABLE CFG_API_TOKENS (
+    TOKEN_ID BIGSERIAL PRIMARY KEY,
+    NAME VARCHAR(128) NOT NULL,
+    TOKEN_SHA256 VARCHAR(64) NOT NULL UNIQUE,
+    ROLE VARCHAR(16) NOT NULL CHECK (ROLE IN ('viewer', 'operator', 'admin')),
+    PROJECT_ID BIGINT,
+    CREATED_BY VARCHAR(128) NOT NULL,
+    CREATED_AT TIMESTAMP NOT NULL,
+    EXPIRES_AT TIMESTAMP,
+    REVOKED_AT TIMESTAMP
+);
+
+CREATE TRIGGER trg_actor_guard_cfg_api_tokens BEFORE INSERT OR UPDATE OR DELETE ON CFG_API_TOKENS
+FOR EACH ROW EXECUTE FUNCTION etl_craft_guard();
+CREATE TRIGGER trg_truncate_cfg_api_tokens BEFORE TRUNCATE ON CFG_API_TOKENS
+FOR EACH STATEMENT EXECUTE FUNCTION etl_craft_guard();
+
+COMMENT ON TABLE CFG_API_TOKENS IS 'Opaque API credentials: SHA-256 hashes, roles and expiry; token values are never stored or cloned.';
