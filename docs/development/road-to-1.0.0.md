@@ -104,7 +104,7 @@ item's text, or work done early under another item.
 | S4.I.3 Write each helper once | Done | #120 | Shared UTC, enum, cron, credential, warehouse and migration helpers |
 | S4.I.4 Thinner engine and execution plumbing | Done | #121 | Shared counts, run selection, graph loading and direct row mappings |
 | S4.E Retries | Done | #122 | Persisted due times, fenced claims and retryability |
-| S4.F Status and explain | Done | #123 | Read-only snapshots, shared JSON and explicit unfinished outcomes |
+| S4.F Status and explain | In progress | | Read-only snapshots, shared JSON and explicit unfinished outcomes; Databricks acceptance blocked by warehouse startup |
 | S4.G and later | Not started | | |
 
 ### Handover notes
