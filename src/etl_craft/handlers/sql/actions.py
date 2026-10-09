@@ -305,42 +305,33 @@ def overwrite_table(session: Session, action: ActionContext) -> HandlerResult:
 def append_table(session: Session, action: ActionContext) -> HandlerResult:
     """Replace this task run's appended batch, retaining rows from other loads.
 
-    TASK_RUN_ID makes retries converge after an insert committed without its task outcome. Legacy
-    targets without it append normally and warn that retries can duplicate rows.
+    TASK_RUN_ID makes retries converge after an insert committed without its task outcome, so a
+    target without it is refused before anything is staged, naming the command that adds it.
     """
+    present = {name.lower() for name, _ in require_target(session)}
+    if "task_run_id" not in present:
+        raise SqlGuardError(
+            f"{session.target} has no TASK_RUN_ID column, so retrying an append could duplicate "
+            "rows; add it with `etl-craft upgrade-targets --action APPEND_TABLE --target "
+            f"{session.target_object}`"
+        )
+    check_identity_types(session, tuple(c for c in IDENTITY_COLUMNS if c.lower() in present))
     stage = build_stage(session, action.select_sql)
     source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
-    target = require_target(session)
-    retry_safe = any(name.lower() == "task_run_id" for name, _ in target)
-    if retry_safe:
-        present = {name.lower() for name, _ in target}
-        check_identity_types(session, tuple(c for c in IDENTITY_COLUMNS if c.lower() in present))
-        session.run(
-            f"DELETE FROM {session.target} WHERE TASK_RUN_ID = :task_run_id",
-            {"task_run_id": action.context.task_run_id},
-            step="clear this task run's previous append",
-        )
-        fault_point("sql.append.after_delete")
-    else:
-        logger.warning(
-            "%s lacks TASK_RUN_ID; retrying this append can duplicate rows. "
-            "Run etl-craft upgrade-targets --action APPEND_TABLE --target %s",
-            session.target,
-            session.target_object,
-        )
+    session.run(
+        f"DELETE FROM {session.target} WHERE TASK_RUN_ID = :task_run_id",
+        {"task_run_id": action.context.task_run_id},
+        step="clear this task run's previous append",
+    )
+    fault_point("sql.append.after_delete")
     columns = ", ".join(name for name, _ in session.columns(stage))
     row_id_columns, row_id_values = session.row_id_insert_parts()
-    pipeline_column = (
-        ", PIPELINE_ID" if any(name.lower() == "pipeline_id" for name, _ in target) else ""
-    )
+    pipeline_column = ", PIPELINE_ID" if "pipeline_id" in present else ""
     pipeline_value = ", :pipeline_id" if pipeline_column else ""
-    task_run_column = ", TASK_RUN_ID" if retry_safe else ""
-    task_run_value = ", :task_run_id" if retry_safe else ""
     session.run(
         f"INSERT INTO {session.target} "
-        f"({columns}, PIPELINE_RUN_ID, CREATE_DATE"
-        f"{pipeline_column}{task_run_column}{row_id_columns}) "
-        f"SELECT {columns}, :pipeline_run_id, :now{pipeline_value}{task_run_value}{row_id_values} "
+        f"({columns}, PIPELINE_RUN_ID, CREATE_DATE, TASK_RUN_ID{pipeline_column}{row_id_columns}) "
+        f"SELECT {columns}, :pipeline_run_id, :now, :task_run_id{pipeline_value}{row_id_values} "
         f"FROM {stage}",
         action.stamp,
         step="append the SELECT's rows",

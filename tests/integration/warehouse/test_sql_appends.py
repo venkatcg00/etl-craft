@@ -1,6 +1,5 @@
 """Append loads converge after exceptions and process loss on all local warehouses."""
 
-import logging
 import multiprocessing
 
 import pytest
@@ -20,10 +19,8 @@ def test_append_retries_replace_only_their_task_run(sql_world):
     check_append_retries(sql_world, "retry_events")
 
 
-def test_legacy_appends_warn_and_upgrade_without_assigning_history(sql_world, caplog):
-    with caplog.at_level(logging.WARNING):
-        check_legacy_upgrade(sql_world, "legacy_events")
-    assert len([r for r in caplog.records if "lacks TASK_RUN_ID" in r.message]) == 2
+def test_legacy_appends_are_refused_until_upgraded_without_assigning_history(sql_world):
+    check_legacy_upgrade(sql_world, "legacy_events")
 
 
 def test_killed_append_converges_when_retried(sql_world):
