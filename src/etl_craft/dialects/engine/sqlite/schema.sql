@@ -951,6 +951,7 @@ BEGIN
     SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'audit rows are written only by etl-craft; use etl-craft run, mark or cancel') END;
 END;
 
+-- Opaque API credentials: SHA-256 hashes, roles and expiry; token values are never stored or cloned.
 CREATE TABLE CFG_API_TOKENS (
     TOKEN_ID INTEGER PRIMARY KEY AUTOINCREMENT,
     NAME VARCHAR(128) NOT NULL,

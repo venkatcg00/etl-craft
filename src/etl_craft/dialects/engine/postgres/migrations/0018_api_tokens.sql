@@ -9,3 +9,5 @@ CREATE TABLE CFG_API_TOKENS (
     EXPIRES_AT TIMESTAMP,
     REVOKED_AT TIMESTAMP
 );
+
+COMMENT ON TABLE CFG_API_TOKENS IS 'Opaque API credentials: SHA-256 hashes, roles and expiry; token values are never stored or cloned.';
