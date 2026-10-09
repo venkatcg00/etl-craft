@@ -258,7 +258,7 @@ def walk_row_id_generation(w):
             w.execute(
                 f"CREATE TABLE {w.name(legacy)} AS SELECT CAST(1 AS BIGINT) AS id, "
                 "CAST(1 AS BIGINT) AS pipeline_run_id, CURRENT_TIMESTAMP AS create_date, "
-                "CAST(7 AS BIGINT) AS row_id"
+                "CAST(NULL AS BIGINT) AS task_run_id, CAST(7 AS BIGINT) AS row_id"
             )
             w.run(
                 legacy,

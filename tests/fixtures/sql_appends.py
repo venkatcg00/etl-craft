@@ -2,7 +2,7 @@
 
 import pytest
 
-from etl_craft.core.errors import InjectedFaultError
+from etl_craft.core.errors import InjectedFaultError, SqlGuardError
 from etl_craft.services.upgrade_targets import upgrade_targets
 from etl_craft.warehouse.connection import warehouse_dialect
 
@@ -36,8 +36,13 @@ def check_append_retries(w, target):
     assert sorted(w.rows(f"SELECT id FROM {w.name(target)}")) == [(1,), (2,), (3,), (10,)]
 
 
-def create_legacy_append_target(w, target):
-    """Build the pre-TASK_RUN_ID append shape, retaining each warehouse's ROW_ID strategy."""
+def create_legacy_append_target(w, target, loads=0):
+    """Build the pre-TASK_RUN_ID append shape, retaining each warehouse's ROW_ID strategy.
+
+    ``loads`` rows of ``id`` 1 stand for appends made before the target had TASK_RUN_ID.
+    """
+    from datetime import UTC, datetime
+
     from etl_craft.handlers.sql.session import Session
     from etl_craft.handlers.sql.tables import build_stage, create_target_shape
 
@@ -54,20 +59,32 @@ def create_legacy_append_target(w, target):
         try:
             stage = build_stage(session, "SELECT CAST(1 AS BIGINT) AS id", empty=True)
             create_target_shape(session, stage, ("CREATE_DATE",))
+            if loads:
+                rows = " UNION ALL ".join(["SELECT CAST(1 AS BIGINT) AS id"] * loads)
+                history = build_stage(session, rows)
+                row_id_columns, row_id_values = session.row_id_insert_parts()
+                session.run(
+                    f"INSERT INTO {session.target} (id, PIPELINE_RUN_ID, CREATE_DATE"
+                    f"{row_id_columns}) SELECT id, 0, :now{row_id_values} FROM {history}",
+                    {"now": datetime.now(UTC)},
+                    step="seed earlier appends",
+                )
         finally:
             session.sweep()
 
 
 def check_legacy_upgrade(w, target):
-    """A legacy load remains unassigned; adding TASK_RUN_ID enables future retries."""
-    create_legacy_append_target(w, target)
+    """Appends refuse a target without TASK_RUN_ID; upgrading keeps earlier loads unassigned."""
+    create_legacy_append_target(w, target, loads=2)
     params = {
         "SQL_ACTION": "APPEND_TABLE",
         "TARGET_OBJECT": target,
         "SOURCE_SQL": "SELECT CAST(1 AS BIGINT) AS id",
     }
-    w.run("legacy_append", **params)
-    w.run("legacy_append", **params)
+    with pytest.raises(
+        SqlGuardError, match=r"no TASK_RUN_ID column.*upgrade-targets --action APPEND_TABLE"
+    ):
+        w.run("legacy_append", **params)
     assert w.rows(f"SELECT COUNT(*) FROM {w.name(target)}") == [(2,)]
     before = w.rows(f"SELECT * FROM {w.name(target)}")
     before_names = w.columns(target)

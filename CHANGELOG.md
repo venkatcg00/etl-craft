@@ -8,6 +8,10 @@ All notable changes are recorded here. The format follows
 
 ### Fixed
 
+- `lineage`, `generate-docs` and other column-lineage readers work with sqlglot 30.22, whose
+  `lineage()` requires a schema argument; etl-craft passes an empty one, as before. The lock
+  file moves to sqlglot 30.22.0.
+
 - Snowflake renames use the fully qualified destination, keeping Iceberg replacements and their
   recovery copies in the target schema even when the connection uses a different default schema.
 
@@ -32,6 +36,11 @@ All notable changes are recorded here. The format follows
 
 - A warehouse URL without its own dialect (such as `jdbc:mysql:` or `jdbc:oracle:`) is refused,
   naming the supported warehouses, rather than treated as a plain ANSI warehouse.
+
+- `APPEND_TABLE` refuses a target without `TASK_RUN_ID` before staging anything, naming
+  `etl-craft upgrade-targets --action APPEND_TABLE --target <table>`, rather than appending with a
+  warning that a retry can duplicate rows. Rows appended before the upgrade keep a NULL
+  `TASK_RUN_ID` and are never replaced.
 
 - An earlier `craft-connector.yml` layout is refused by the existing unknown-section and
   unknown-profile checks, which name the expected sections, rather than by a dedicated message.
