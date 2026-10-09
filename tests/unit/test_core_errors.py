@@ -7,6 +7,7 @@ from etl_craft.core.graph import CycleError, SelfDependencyError, UnknownTaskErr
 pytestmark = pytest.mark.unit
 
 EXIT_CODES = {
+    errors.ResourceNotFoundError: ExitCode.RESOURCE_NOT_FOUND,
     errors.EtlCraftError: ExitCode.UNEXPECTED,
     errors.ConfigurationError: ExitCode.CONFIGURATION,
     errors.UsageError: ExitCode.USAGE,
@@ -63,6 +64,7 @@ def test_the_exit_codes():
         ("SQL_GUARD", 21),
         ("INCOMPLETE", 22),
         ("WAITING", 23),
+        ("RESOURCE_NOT_FOUND", 24),
     ]
 
 

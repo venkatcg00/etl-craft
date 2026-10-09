@@ -37,7 +37,7 @@ def refresh_metadata_triggers(conn: Connection) -> None:
                     f"CREATE TRIGGER {quote(trigger)} BEFORE {event} ON {quote(table)} "
                     f"FOR EACH {level} EXECUTE FUNCTION {function}"
                 )
-        if not table.upper().startswith("CFG_"):
+        if not table.upper().startswith("CFG_") or table.upper() == "CFG_API_TOKENS":
             continue
         columns = conn.execute(
             text(

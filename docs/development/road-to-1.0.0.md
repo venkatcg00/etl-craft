@@ -105,7 +105,8 @@ item's text, or work done early under another item.
 | S4.I.4 Thinner engine and execution plumbing | Done | #121 | Shared counts, run selection, graph loading and direct row mappings |
 | S4.E Retries | Done | #122 | Persisted due times, fenced claims and retryability |
 | S4.F Status and explain | Done | #123 | Read-only snapshots, shared JSON and explicit unfinished outcomes |
-| S4.G and later | Not started | | |
+| S4.G HTTP API | In progress | | Bearer roles, exact run identities and shared operation documents |
+| S4.H and later | Not started | | |
 
 ### Handover notes
 

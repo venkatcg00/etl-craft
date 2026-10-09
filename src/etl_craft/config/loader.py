@@ -79,6 +79,7 @@ _SOURCE_TYPES = ("environment", "file")
 
 _ORCHESTRATION_KEYS = frozenset(
     {
+        "Api_address",
         "Mode",
         "Name",
         "Log_dir",
@@ -262,8 +263,14 @@ def parse_config(raw: Any, path: Path) -> ConnectorConfig:
     cloning = _parse_cloning(raw, global_profile, path, resolver)
     docs_site = _parse_docs_site(raw, global_profile, path, resolver)
 
+    from etl_craft.config.model import parse_api_address
+
+    api_address = orchestration.text("Api_address")
+    api_address = "127.0.0.1:8730" if api_address is None else api_address
+    parse_api_address(api_address)
     config = ConnectorConfig(
         mode=mode,
+        api_address=api_address,
         timezone=project_timezone,
         source=source,
         engine=engine,

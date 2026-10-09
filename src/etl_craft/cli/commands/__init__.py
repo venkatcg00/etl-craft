@@ -25,6 +25,7 @@ from etl_craft.cli.commands import (
     setup,
     status,
     steps,
+    token,
     upgrade_targets,
     validate,
 )
@@ -33,6 +34,7 @@ from etl_craft.cli.commands.common import Command as Command
 COMMANDS: tuple[Command, ...] = (
     run.COMMAND,
     server.COMMAND,
+    token.COMMAND,
     mark.COMMAND,
     cancel.COMMAND,
     reconcile.COMMAND,

@@ -950,3 +950,30 @@ CREATE TRIGGER trg_actor_guard_aud_gate_waits_delete BEFORE DELETE ON AUD_GATE_W
 BEGIN
     SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'audit rows are written only by etl-craft; use etl-craft run, mark or cancel') END;
 END;
+
+CREATE TABLE CFG_API_TOKENS (
+    TOKEN_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+    NAME VARCHAR(128) NOT NULL,
+    TOKEN_SHA256 VARCHAR(64) NOT NULL UNIQUE,
+    ROLE VARCHAR(16) NOT NULL CHECK (ROLE IN ('viewer', 'operator', 'admin')),
+    PROJECT_ID BIGINT,
+    CREATED_BY VARCHAR(128) NOT NULL,
+    CREATED_AT TIMESTAMP NOT NULL,
+    EXPIRES_AT TIMESTAMP,
+    REVOKED_AT TIMESTAMP
+);
+
+CREATE TRIGGER trg_actor_guard_cfg_api_tokens_insert BEFORE INSERT ON CFG_API_TOKENS
+BEGIN
+    SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'API tokens are written only by etl-craft; use etl-craft token') END;
+END;
+
+CREATE TRIGGER trg_actor_guard_cfg_api_tokens_update BEFORE UPDATE ON CFG_API_TOKENS
+BEGIN
+    SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'API tokens are written only by etl-craft; use etl-craft token') END;
+END;
+
+CREATE TRIGGER trg_actor_guard_cfg_api_tokens_delete BEFORE DELETE ON CFG_API_TOKENS
+BEGIN
+    SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'API tokens are written only by etl-craft; use etl-craft token') END;
+END;

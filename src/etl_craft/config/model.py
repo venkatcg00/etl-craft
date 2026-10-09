@@ -10,8 +10,10 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from etl_craft.core.enums import AuthMode, CloningScope, GatePolicy, Mode, TableFormat
+from etl_craft.core.errors import ConfigurationError
 
 CONFIG_FILENAME = "craft-connector.yml"
 PROJECT_DIRNAME = "etl-craft"
@@ -240,6 +242,7 @@ class ConnectorConfig:
     email: EmailConfig | None = None
     limits: ExecutionLimits = field(default_factory=ExecutionLimits)
     config_path: Path | None = None
+    api_address: str = "127.0.0.1:8730"
     timezone: str = "UTC"
     orchestrator_name: str | None = None
     dependency_gates: GatePolicy = GatePolicy.ENFORCE
@@ -274,3 +277,26 @@ def _secret_var(section: str, name: str, extra: dict[str, Any]) -> str:
     if override:
         return str(override)
     return f"ETL_CRAFT_{section}_{name}_SECRET".upper()
+
+
+def parse_api_address(value: str) -> tuple[str, int]:
+    """Validate a host and port, including bracketed IPv6 and ephemeral port zero."""
+    try:
+        address = urlsplit("tcp://" + value)
+        host, port = address.hostname, address.port
+        if (
+            not host
+            or port is None
+            or address.username is not None
+            or address.password is not None
+            or address.path
+            or address.query
+            or address.fragment
+            or not re.fullmatch(r"[a-zA-Z0-9.:%_-]+", host)
+        ):
+            raise ValueError(value)
+    except ValueError as error:
+        raise ConfigurationError(
+            f"Orchestration.Api_address={value!r}; expected host:port, such as 127.0.0.1:8730"
+        ) from error
+    return host, port

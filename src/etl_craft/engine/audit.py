@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 MUTATING_COMMANDS = frozenset(
     {
+        "token create",
+        "token revoke",
         "run",
         "server",
         "mark",
