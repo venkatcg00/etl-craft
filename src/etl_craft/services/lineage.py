@@ -122,7 +122,8 @@ def extract(
         inner = projection.unalias() if isinstance(projection, exp.Alias) else projection
         transformation = COPY if isinstance(inner, exp.Column) else inner.sql(dialect=dialect)
         try:
-            node = sqlglot_lineage(column, tree, dialect=dialect)
+            # No table schemas are known: lineage comes from the SELECT alone.
+            node = sqlglot_lineage(column, tree, {}, dialect=dialect)
         except (SqlglotError, KeyError, ValueError) as error:
             raise MetadataError(f"column {column!r} could not be traced: {error}") from error
         sources = sorted(
