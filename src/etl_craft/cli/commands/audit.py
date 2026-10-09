@@ -58,5 +58,8 @@ def _run(args: argparse.Namespace, out: Output) -> int:
 
 
 COMMAND = Command(
-    "audit", "Show command requests and metadata changes with their actors.", _configure, _run
+    "audit",
+    "Show command requests and metadata changes with their actors.",
+    configure=_configure,
+    run=_run,
 )

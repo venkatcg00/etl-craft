@@ -50,6 +50,7 @@ def result(
     task_run_id: int | None = None,
     task_code: str | None = None,
     pipeline_id: int | None = None,
+    waiting: bool = False,
 ) -> OperationResult:
     """Read one consistent result; a task's returned id determines its pipeline run."""
     with read_snapshot(ctx.engine) as conn:
@@ -77,4 +78,4 @@ def result(
                 task_id=resolve_task_id(conn, pipeline_id, task_code),
             )
         run = None if pipeline_run_id is None else run_view(conn, pipeline_id, pipeline_run_id)
-    return OperationResult(status, message, pipeline_id, pipeline_code, run, task)
+    return OperationResult(status, message, pipeline_id, pipeline_code, run, task, waiting=waiting)

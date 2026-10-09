@@ -71,7 +71,8 @@ def build_parser(commands: Sequence[Command] = COMMANDS) -> argparse.ArgumentPar
             subparser = subparsers.add_parser(
                 command.name, help=command.help, description=command.help, parents=[shared]
             )
-            command.configure(subparser)
+            if command.configure is not None:
+                command.configure(subparser)
             subparser.set_defaults(handler=command.run)
     return parser
 

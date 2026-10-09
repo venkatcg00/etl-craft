@@ -67,6 +67,8 @@ class AttemptView:
     log_path: str | None
     requested_by: str | None
     requested_by_kind: str | None
+    not_before: datetime | None
+    retryable: bool
 
 
 @dataclass(frozen=True)
@@ -123,6 +125,7 @@ class OperationResult:
     run: RunView | None = None
     task: TaskRunView | None = None
     pipeline: PipelineView | None = None
+    waiting: bool = False
 
 
 @dataclass(frozen=True)

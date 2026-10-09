@@ -31,4 +31,6 @@ def command(verb: Literal["pause", "resume"]) -> Command:
         "pause": "Stop a pipeline from running until it is resumed; local mode.",
         "resume": "Let a paused pipeline run again; local mode.",
     }[verb]
-    return Command(verb, help_text, partial(_configure, verb=verb), partial(_run, verb=verb))
+    return Command(
+        verb, help_text, run=partial(_run, verb=verb), configure=partial(_configure, verb=verb)
+    )

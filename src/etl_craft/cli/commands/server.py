@@ -35,4 +35,4 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     return ExitCode.SUCCESS
 
 
-COMMAND = Command("server", "supervise active local pipeline runs", _configure, _run)
+COMMAND = Command("server", "supervise active local pipeline runs", run=_run, configure=_configure)

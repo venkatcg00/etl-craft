@@ -192,6 +192,7 @@ def _execute(ctx: OperationContext, request: RunRequest) -> OperationResult:
             task.status,
             task.message,
             task_run_id=task.task_run_id,
+            waiting=task.waiting,
             pipeline_id=pipeline_id,
         )
     if request.skip:

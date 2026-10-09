@@ -32,8 +32,8 @@ class Command:
 
     name: str
     help: str
-    configure: Callable[[argparse.ArgumentParser], None]
     run: Callable[[argparse.Namespace, Output], int]
+    configure: Callable[[argparse.ArgumentParser], None] | None = None
 
 
 def load_command_config(args: argparse.Namespace) -> ConnectorConfig:

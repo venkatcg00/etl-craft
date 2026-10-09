@@ -21,6 +21,7 @@ from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import ExitCode
 from etl_craft.engine.runlog import RunSelector
 from etl_craft.services.operations import runs
+from etl_craft.services.operations.models import BackfillView
 from etl_craft.services.operations.requests import RunRequest
 
 
@@ -106,11 +107,15 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     with command_context(args) as ctx, _terminate_as_interrupt():
         done = runs.execute_run(ctx, request)
     out.result(done, args.output_format)
-    return (
-        ExitCode.FAILURE
-        if done.status in (RunStatus.FAILED, RunStatus.CANCELLED)
-        else ExitCode.SUCCESS
-    )
+    if done.status in (RunStatus.FAILED, RunStatus.CANCELLED):
+        return ExitCode.FAILURE
+    if isinstance(done, BackfillView):
+        return ExitCode.INCOMPLETE if done.stopped is not None else ExitCode.SUCCESS
+    if done.waiting:
+        return ExitCode.WAITING
+    if done.status == RunStatus.IN_PROGRESS and not args.init_only:
+        return ExitCode.INCOMPLETE
+    return ExitCode.SUCCESS
 
 
 @contextmanager

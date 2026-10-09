@@ -133,7 +133,8 @@ etl-craft resume --pipeline_code SALES_DAILY --reason "the migration is done"
 While a pipeline is paused, `etl-craft run` starts nothing of it (whole runs, single tasks and
 `--init-only` alike): it says the pipeline is paused, by whom and why, and exits `0`, so a
 scheduler that keeps calling it raises no alarm. A run in progress when the pipeline is paused
-lets its running tasks finish, starts no more, and stays `IN-PROGRESS`; after `resume`, the next
+lets its running tasks finish, starts no more, and stays `IN-PROGRESS`; the interrupted run
+command exits `22` (`INCOMPLETE`). After `resume`, the next
 `run --pipeline_code` goes on with it. `etl-craft list` and the catalog show every paused
 pipeline, and `AUD_PIPELINE_PAUSES` keeps every pause with who paused and resumed it, when and
 why.

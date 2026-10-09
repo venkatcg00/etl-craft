@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime
 
+from sqlalchemy import Boolean
 from sqlalchemy.engine import Connection, RowMapping
 
 from etl_craft.core.errors import RunStateError, UsageError
@@ -99,7 +100,8 @@ def task_document(conn: Connection, row: RowMapping) -> TaskRunView:
     values["end_date"] = timestamp(values["end_date"])
     attempts = []
     for attempt in conn.execute(
-        statement(conn, "operation_attempts"), {"task_run_id": values["task_run_id"]}
+        statement(conn, "operation_attempts").columns(retryable=Boolean),
+        {"task_run_id": values["task_run_id"]},
     ):
         captured = dict(attempt._mapping)
         for key in (
@@ -109,6 +111,7 @@ def task_document(conn: Connection, row: RowMapping) -> TaskRunView:
             "claimed_at",
             "started_at",
             "ended_at",
+            "not_before",
         ):
             captured[key] = timestamp(captured[key])
         attempts.append(AttemptView(**captured))

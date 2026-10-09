@@ -7,7 +7,7 @@ error class has its own status; every error etl-craft raises on purpose belongs 
 
 | Status | Name | Meaning |
 |---|---|---|
-| `0` | `SUCCESS` | The command succeeded. `etl-craft run` exits `0` when the pipeline or task ends `SUCCESS` or `SKIPPED`. |
+| `0` | `SUCCESS` | The command succeeded. `etl-craft run` exits `0` when the pipeline or task ends `SUCCESS` or records `SKIPPED`; a paused pipeline that starts nothing retains exit 0. |
 | `1` | `FAILURE` | The work ran and did not succeed: a task or pipeline ended `FAILED` or `CANCELLED`, `validate` found problems, or a `doctor` check failed. |
 | `2` | `USAGE` | The command line arguments are invalid (`UsageError`, or `argparse` itself). |
 | `3` | `CONFIGURATION` | `craft-connector.yml` is missing or invalid, a secret variable is unset, a connection target has no matching dialect, or the Engine DB cannot be reached (`ConfigurationError`). |
@@ -29,3 +29,5 @@ error class has its own status; every error etl-craft raises on purpose belongs 
 | `19` | `INJECTED_FAULT` | A development fault was deliberately injected (`InjectedFaultError`). |
 | `20` | `STALE_TRANSITION` | A run or attempt changed status or owner before this write, or another active attempt won admission (`StaleTransitionError`). Read its history and refresh the row before retrying. |
 | `21` | `SQL_GUARD` | Correct the SQL input or target state before retrying (`SqlGuardError`). |
+| `22` | `INCOMPLETE` | The run was left unfinished, including a pause during a run, an interrupted backfill or work owned by another process. `--init-only` deliberately initializes a run and retains exit 0. |
+| `23` | `WAITING` | A single-task run recorded nothing because its dependencies are not met yet. Run it again once the upstreams satisfy its condition. |

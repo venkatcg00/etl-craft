@@ -38,6 +38,8 @@ class ExitCode(IntEnum):
     INJECTED_FAULT = 19
     STALE_TRANSITION = 20
     SQL_GUARD = 21
+    INCOMPLETE = 22
+    WAITING = 23
 
 
 class EtlCraftError(Exception):

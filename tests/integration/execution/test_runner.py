@@ -264,7 +264,7 @@ def test_a_task_in_progress_is_not_started_twice(project):
     with engine.begin() as conn:
         transitions.find_or_create_task_run(conn, ids["ok"], ids["run"])
     outcome = run(project, "ok")
-    assert outcome.status == RunStatus.SKIPPED
+    assert outcome.status == RunStatus.IN_PROGRESS
     assert "already IN-PROGRESS" in outcome.message
 
 
