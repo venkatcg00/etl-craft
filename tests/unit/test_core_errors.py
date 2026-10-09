@@ -61,6 +61,8 @@ def test_the_exit_codes():
         ("INJECTED_FAULT", 19),
         ("STALE_TRANSITION", 20),
         ("SQL_GUARD", 21),
+        ("INCOMPLETE", 22),
+        ("WAITING", 23),
     ]
 
 
@@ -78,7 +80,9 @@ def test_every_error_class_is_covered_and_has_its_own_code():
     codes = [cls.exit_code for cls in classes]
     assert len(codes) == len(set(codes)), "two error classes share an exit code"
     # No error class claims the statuses reserved for outcomes.
-    assert not {ExitCode.SUCCESS, ExitCode.FAILURE} & set(codes)
+    assert not {ExitCode.SUCCESS, ExitCode.FAILURE, ExitCode.INCOMPLETE, ExitCode.WAITING} & set(
+        codes
+    )
 
 
 def test_an_instance_reports_its_class_code():

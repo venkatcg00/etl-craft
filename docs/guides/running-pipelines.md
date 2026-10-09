@@ -113,3 +113,12 @@ run ends. A run's `STATUS` does not change either way: a late run still did its 
 
 With `Orchestration.Enforce_sla: true`, a breach also sends an SLA email through the `Email`
 settings, once per run.
+
+## Unfinished commands
+
+A whole-run command that leaves its run unfinished exits `22` (`INCOMPLETE`), including a
+pause during execution or work owned by another process. A stopped backfill also exits `22`
+unless its stopping outcome failed or was cancelled (exit `1`). A paused pipeline that starts
+nothing retains exit `0`, as does `--init-only`, which deliberately initializes a run for later
+steps. Dependency waits that record nothing in `run --task_code` exit `23` (`WAITING`).
+Use [`status` and `explain`](inspecting.md) to inspect the selected run before resuming it.

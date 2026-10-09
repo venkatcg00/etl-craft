@@ -106,7 +106,7 @@ def test_duplicate_task_delivery_executes_one_attempt(cli_project, remote):
     try:
         project.wait_for("SELECT STATUS FROM AUD_TASK_ATTEMPTS", expected="RUNNING", timeout=30)
         second = project.start(*arguments)
-        assert second.wait() == (ExitCode.STALE_TRANSITION if remote else ExitCode.SUCCESS), (
+        assert second.wait() == (ExitCode.STALE_TRANSITION if remote else ExitCode.INCOMPLETE), (
             second.output
         )
         assert "already IN-PROGRESS" in second.output

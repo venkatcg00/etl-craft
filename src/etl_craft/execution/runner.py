@@ -100,6 +100,7 @@ class TaskOutcome:
     message: str
     task_run_id: int | None = None
     reopened: str | None = None
+    waiting: bool = False
 
 
 @dataclass(frozen=True)
@@ -453,9 +454,10 @@ def _preflight(
             f"{task_code}: already {status} under pipeline_run_id={pipeline_run_id}"
         ), NO_CROSS
     if status == RunStatus.IN_PROGRESS and not queued_here:
-        return _skipped(
+        return TaskOutcome(
+            RunStatus.IN_PROGRESS,
             f"{task_code}: already IN-PROGRESS under pipeline_run_id={pipeline_run_id}; not "
-            "starting it twice"
+            "starting it twice",
         ), NO_CROSS
     if run_status == RunStatus.SKIPPED:
         reason = f"pipeline_run_id={pipeline_run_id} is itself SKIPPED"
@@ -484,12 +486,14 @@ def _preflight(
             return _record_skipped(
                 engine, task_id, pipeline_run_id, task_code, reasons, decisions=cross.decisions
             ), NO_CROSS
-        return _skipped(f"{task_code}: {reasons}, and {unready}; nothing recorded"), NO_CROSS
+        return _skipped(
+            f"{task_code}: {reasons}, and {unready}; nothing recorded", waiting=True
+        ), NO_CROSS
     if task_id in graph.unsatisfiable(run_state):
         never = _describe_unready(graph, task_id, pipeline_run_id, can_never=True)
         return _record_skipped(engine, task_id, pipeline_run_id, task_code, never), NO_CROSS
     waiting = f"{task_code}: {unready}; nothing recorded, run it again once they are"
-    return _skipped(waiting), NO_CROSS
+    return _skipped(waiting, waiting=True), NO_CROSS
 
 
 BACKFILL_ASSUMED = frozenset(
@@ -518,8 +522,8 @@ def _backfill_cross_check(engine: Engine, task_id: int, needed: int) -> CrossPip
     return CrossPipelineCheck(min(needed, assumed), reasons)
 
 
-def _skipped(message: str) -> TaskOutcome:
-    return TaskOutcome(RunStatus.SKIPPED, message)
+def _skipped(message: str, *, waiting: bool = False) -> TaskOutcome:
+    return TaskOutcome(RunStatus.SKIPPED, message, waiting=waiting)
 
 
 def _upstream_pending(graph: DependencyGraph, task_id: int, run_state: RunState) -> bool:

@@ -54,6 +54,6 @@ def _run(args: argparse.Namespace, out: Output) -> int:
 COMMAND = Command(
     "upgrade-targets",
     "Add pipeline and task-run identities to existing targets.",
-    _configure,
-    _run,
+    configure=_configure,
+    run=_run,
 )

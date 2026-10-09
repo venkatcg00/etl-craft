@@ -23,6 +23,10 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- Run commands exit 22 when work remains unfinished and 23 when a single task recorded nothing
+  because its dependencies are not met. A paused pipeline that starts nothing and an orchestrator
+  `--init-only` step retain exit 0; a stopped backfill exits 22 unless it failed or was cancelled.
+
 - Task completion passes one frozen count record through the handler and guarded transitions.
   Run selection and pipeline graph loading share their existing rules; dependency readers always
   return the stored repair policy. Direct query-to-record mappings preserve Boolean JSON values.
@@ -55,6 +59,10 @@ All notable changes are recorded here. The format follows
   `PIPELINE_ID_FILTER` to `$$pipeline_run_id_filter` and `PIPELINE_RUN_ID_FILTER`.
 
 ### Added
+
+- Read-only `status` and `explain` commands with exact run selection, task summaries, dependency
+  reasons, persisted waits and retry schedules. JSON output now covers inspection, `validate`,
+  `doctor` and `lineage` through the shared service serializer.
 
 - Local automatic task retries with persisted due times and budgets, capped exponential backoff,
   retryability recorded by the child, and fenced claims. Delayed attempts consume no worker slots;

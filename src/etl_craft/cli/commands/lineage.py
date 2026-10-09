@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import argparse
 
-from etl_craft.cli.commands.common import Command, connect_engine_db, load_command_config
+from etl_craft.cli.commands.common import Command, command_context, configure_output
 from etl_craft.cli.output import Output
-from etl_craft.config.targets import active_catalog
-from etl_craft.core.errors import ExitCode, UsageError
-from etl_craft.services.lineage import COPY, Edge, LineageGraph, TaskLineage, collect, table_name
+from etl_craft.core.errors import ExitCode
+from etl_craft.services.lineage import COPY, Edge, TaskLineage
+from etl_craft.services.operations.diagnostics import trace_lineage
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
+    configure_output(parser)
     parser.add_argument("--table", help="schema.table (or database.schema.table) to trace")
     parser.add_argument("--column", help="one column of --table to trace")
     direction = parser.add_mutually_exclusive_group()
@@ -27,32 +28,50 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    if args.column and not args.table:
-        raise UsageError("--column needs --table")
-    if args.depth is not None and args.depth < 1:
-        raise UsageError(f"--depth must be 1 or more, got {args.depth}")
-    config = load_command_config(args)
-    engine = connect_engine_db(config)
-    try:
-        lineages = collect(engine, config, refresh=args.refresh)
-    finally:
-        engine.dispose()
-    graph = LineageGraph.of(lineages)
-    if args.table is None:
-        _summary(lineages, out)
-    else:
-        catalog = active_catalog(config) if config.warehouse is not None else None
-        table = table_name(args.table.split("."), catalog)
-        up = not args.downstream
-        down = not args.upstream
-        if args.column:
-            _column(graph, table, args.column.lower(), up, down, args.depth, out)
+    with command_context(args) as ctx:
+        done = trace_lineage(
+            ctx,
+            table=args.table,
+            column=args.column,
+            upstream=not args.downstream,
+            downstream=not args.upstream,
+            depth=args.depth,
+            refresh=args.refresh,
+        )
+
+    def render() -> None:
+        if done.table is None:
+            _summary(list(done.lineages), out)
+        elif done.column is None:
+            out.line(done.table)
+            for enabled, label, paths in (
+                (done.upstream, "upstream", done.upstream_tables),
+                (done.downstream, "downstream", done.downstream_tables),
+            ):
+                if enabled:
+                    out.line(f"  {label}:")
+                    if not paths:
+                        out.line("    (none)")
+                    for level, other, task in paths:
+                        out.line(f"    {'  ' * (level - 1)}{other}  ({task})")
         else:
-            _table(graph, table, up, down, out)
-    failed = [lineage for lineage in lineages if lineage.error]
-    if failed and args.table is not None:
-        out.line(f"({len(failed)} SQL task(s) could not be traced; run lineage without --table)")
-    return ExitCode.FAILURE if args.strict and failed else ExitCode.SUCCESS
+            out.line(f"{done.table}.{done.column}")
+            for level, edge in done.upstream_columns:
+                source = (
+                    f"{edge.source_object}.{edge.source_column}"
+                    if edge.source_object
+                    else "(no source)"
+                )
+                out.line(f"  {'  ' * (level - 1)}<- {source}  [{_how(edge)}]  ({edge.task})")
+            for level, edge in done.downstream_columns:
+                target = f"{edge.target_object}.{edge.target_column}"
+                out.line(f"  {'  ' * (level - 1)}-> {target}  [{_how(edge)}]  ({edge.task})")
+        failed = sum(1 for item in done.lineages if item.error)
+        if failed and done.table is not None:
+            out.line(f"({failed} SQL task(s) could not be traced; run lineage without --table)")
+
+    out.result(done, args.output_format, text=render)
+    return ExitCode.FAILURE if args.strict and done.failed else ExitCode.SUCCESS
 
 
 def _summary(lineages: list[TaskLineage], out: Output) -> None:
@@ -70,50 +89,8 @@ def _summary(lineages: list[TaskLineage], out: Output) -> None:
             out.line(f"not traced: {lineage.task}: {lineage.error}")
 
 
-def _table(graph: LineageGraph, table: str, up: bool, down: bool, out: Output) -> None:
-    out.line(table)
-    if up:
-        out.line("  upstream:")
-        found = graph.upstream_tables(table)
-        if not found:
-            out.line("    (none)")
-        for level, other, task in found:
-            out.line(f"    {'  ' * (level - 1)}{other}  ({task})")
-    if down:
-        out.line("  downstream:")
-        found = graph.downstream_tables(table)
-        if not found:
-            out.line("    (none)")
-        for level, other, task in found:
-            out.line(f"    {'  ' * (level - 1)}{other}  ({task})")
-
-
 def _how(edge: Edge) -> str:
     return "copy" if edge.transformation == COPY else edge.transformation
-
-
-def _column(
-    graph: LineageGraph,
-    table: str,
-    column: str,
-    up: bool,
-    down: bool,
-    depth: int | None,
-    out: Output,
-) -> None:
-    known = graph.columns(table)
-    if column not in known:
-        hint = f"; its traced columns: {', '.join(known)}" if known else ""
-        raise UsageError(f"no lineage mentions {table}.{column}{hint}")
-    out.line(f"{table}.{column}")
-    if up:
-        for level, e in graph.upstream(table, column, depth):
-            source = f"{e.source_object}.{e.source_column}" if e.source_object else "(no source)"
-            out.line(f"  {'  ' * (level - 1)}<- {source}  [{_how(e)}]  ({e.task})")
-    if down:
-        for level, e in graph.downstream(table, column, depth):
-            target = f"{e.target_object}.{e.target_column}"
-            out.line(f"  {'  ' * (level - 1)}-> {target}  [{_how(e)}]  ({e.task})")
 
 
 COMMAND = Command(

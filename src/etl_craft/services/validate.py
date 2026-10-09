@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
+from typing import ClassVar
 
 from sqlalchemy.engine import Connection, Engine
 
@@ -86,6 +87,7 @@ class Finding:
 class Report:
     """What ``validate`` checked and found."""
 
+    SCHEMA: ClassVar[str] = "etl-craft/validation/1"
     pipelines: int = 0
     tasks: int = 0
     findings: list[Finding] = field(default_factory=list)

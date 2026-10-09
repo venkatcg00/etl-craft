@@ -117,3 +117,20 @@ The serializer returns a fresh dictionary.
 
 The [Python API reference](../api/etl_craft/services/operations/index.md) lists the functions,
 context, requests and result fields.
+
+## Execution inspection and diagnostics
+
+`operations.status.pipeline_status(ctx, code, selector=...)` returns `StatusView`;
+`explain_task(ctx, code, task_code, selector=...)` returns `Explanation`. The pure
+`explain(snapshot)` function computes the same explanation from a captured `TaskSnapshot`.
+These reads never modify run or admission state.
+
+`operations.diagnostics.validate_metadata(ctx, code)` returns the validation report;
+`check_configuration(config)` returns `DoctorView`, including unreachable-service findings;
+`trace_lineage(ctx, table=..., column=..., upstream=True, downstream=True, depth=..., refresh=False)`
+returns `LineageView`. Lineage retains its existing metadata cache behavior. All these documents
+use `to_json` and a versioned `schema` identifier, matching CLI `--format json` output.
+
+Run results include `waiting=True` when a single-task command recorded nothing because
+its dependencies were not met. That call exits 23; unfinished executions exit 22. Initializing
+a run with `--init-only` retains exit 0 for orchestrator first steps.

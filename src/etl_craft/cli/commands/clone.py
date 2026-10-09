@@ -10,10 +10,6 @@ from etl_craft.core.errors import ConfigurationError
 from etl_craft.services.cloning import clone
 
 
-def _configure(parser: argparse.ArgumentParser) -> None:
-    del parser
-
-
 def _run(args: argparse.Namespace, out: Output) -> int:
     config = load_command_config(args)
     if not config.cloning.enabled:
@@ -37,6 +33,5 @@ def _run(args: argparse.Namespace, out: Output) -> int:
 COMMAND = Command(
     name="clone",
     help="Copy the Engine DB tables Cloning.Scope names into the warehouse schema now.",
-    configure=_configure,
     run=_run,
 )

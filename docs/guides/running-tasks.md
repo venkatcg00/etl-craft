@@ -12,11 +12,11 @@ when none or several exist and lists candidates. A completed run is never select
 The whole-pipeline runner passes its selected run to every task. Use
 `history --pipeline_code SALES --all` to find completed run ids.
 
-In local mode, the task does not run, and the command exits `0`, when:
+In local mode, the task does not run when:
 
-- it already ended `SUCCESS` or `SKIPPED` under this run: a retry never repeats finished work;
-- it is `IN-PROGRESS` under this run: it is never started twice;
-- its dependencies are not met yet: nothing is recorded, so run it again once they are.
+- it already ended `SUCCESS` or `SKIPPED` under this run: a retry never repeats finished work (exit `0`);
+- it is `IN-PROGRESS` under this run: it is never started twice (exit `22`, `INCOMPLETE`);
+- its dependencies are not met yet: nothing is recorded, so run it again once they are (exit `23`, `WAITING`).
 
 A task whose dependencies can never be met under this run, such as a `FAILURE` dependency on a task
 that succeeded, is recorded `SKIPPED`, as is one whose
