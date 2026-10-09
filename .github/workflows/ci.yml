@@ -161,7 +161,12 @@ jobs:
         run: |
           uv venv "$RUNNER_TEMP/airflow-venv" --python 3.11
           uv pip install --python "$RUNNER_TEMP/airflow-venv/bin/python" \
-            "apache-airflow==${{ matrix.airflow-version }}" pytest ./integrations/airflow
+            "apache-airflow==${{ matrix.airflow-version }}" pytest mypy \
+            types-pyyaml types-jsonschema ./integrations/airflow
       - name: Validate operator graphs, commands and refused exports
         run: >-
           "$RUNNER_TEMP/airflow-venv/bin/python" -m pytest -q integrations/airflow/tests
+      - name: Type-check the isolated factory
+        run: >-
+          "$RUNNER_TEMP/airflow-venv/bin/python" -m mypy --strict
+          --follow-imports=skip --ignore-missing-imports integrations/airflow/src

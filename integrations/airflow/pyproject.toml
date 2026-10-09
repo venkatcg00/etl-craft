@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "venkatcg00", email = "venkatcg0@gmail.com" }]
-dependencies = ["jsonschema>=4.23", "packaging>=24", "pyyaml>=6.0.3"]
+dependencies = ["jsonschema>=4.23", "packaging>=24", "pendulum>=3,<4", "pyyaml>=6.0.3"]
 
 [project.optional-dependencies]
 airflow2 = ["apache-airflow>=2.11,<2.12"]
