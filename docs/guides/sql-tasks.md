@@ -338,8 +338,9 @@ each statement, a failure between them can leave the batch absent until its retr
 `ROW_ID` values may change when a batch is replaced; they are internal keys, not stable source
 identities. Writers outside etl-craft do not participate in the target lock.
 
-Existing targets without `TASK_RUN_ID` keep appending and log a warning on every append because a
-retry can duplicate rows. Upgrade existing configured SQL and ingestion targets:
+An append refuses a target without `TASK_RUN_ID`, because a retry could duplicate rows; the
+error names the command that adds the column. Upgrade existing configured SQL and ingestion
+targets:
 
 ```bash
 etl-craft upgrade-targets --dry-run
