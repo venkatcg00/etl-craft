@@ -7,7 +7,8 @@ The credentials are read from ``--env-file`` (default ``.env.acceptance``, gitig
 whole. The wheel is built unless ``--wheel`` names one. Each suite (default: every suite marked
 ``where = "local"``) runs through ``run_suite.py`` and writes its evidence, test ids and
 outcomes only, never a value from the file. A suite whose credentials are missing fails rather
-than skipping.
+than skipping. The suites run at the same time: each uses its own warehouse and evidence file,
+and writes its pytest output to ``dist/acceptance/<suite>.log``.
 """
 
 from __future__ import annotations
@@ -60,14 +61,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     wheel = args.wheel.resolve() if args.wheel else build_wheel(REPO_ROOT / "dist" / "acceptance")
 
     env = {**os.environ, **values, "ETL_CRAFT_REQUIRE_SERVICES": "1"}
-    failed = []
+    logs = REPO_ROOT / "dist" / "acceptance"
+    logs.mkdir(parents=True, exist_ok=True)
+    running = []
     for name in chosen:
         command = [sys.executable, str(REPO_ROOT / "scripts" / "run_suite.py"), name]
         command += ["--wheel", str(wheel)]
-        if subprocess.run(command, cwd=REPO_ROOT, env=env, check=False).returncode != 0:
-            failed.append(name)
+        log = logs / f"{name}.log"
+        print(f"{name}: running, output in {log}", flush=True)
+        with log.open("w", encoding="utf-8") as output:
+            process = subprocess.Popen(
+                command, cwd=REPO_ROOT, env=env, stdout=output, stderr=subprocess.STDOUT
+            )
+        running.append((name, process))
+    failed = [name for name, process in running if process.wait() != 0]
     if failed:
-        print(f"failed: {', '.join(failed)}", file=sys.stderr)
+        print(f"failed: {', '.join(failed)}; see {logs}/<suite>.log", file=sys.stderr)
         return 1
     print(f"passed: {', '.join(chosen)}")
     return 0
