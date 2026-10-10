@@ -113,6 +113,7 @@ item's text, or work done early under another item.
 | S5.B The local provider | Done | #133 | Attempts run through the local pool, with slots per kind |
 | SQL views | Done | #139 | `CREATE_VIEW`, a ninth SQL action, with secure views where the warehouse has them |
 | Configuration files | Done | #140 | `etl-craft config plan`, `apply` and `export`: one CSV file per `CFG_` table, merged by key |
+| SQL checks with sqlglot | Done | #141 | Parse-tree checks of SELECTs and rule SQL in the warehouse's dialect; `validate` warns on SQL sqlglot cannot read |
 | 0.4 gate; S5.C and later | Not started | | |
 
 ### Handover notes
@@ -140,8 +141,13 @@ Snowflake, the view tests: a view granted to a role, replaced, and its grant lis
 secure view on Snowflake.
 Configuration files passed the full local checks and the installed-wheel matrix; they change no
 warehouse code, so no cloud suite ran.
+SQL checks with sqlglot passed the full local checks, the installed-wheel matrix and the
+every-action tests on Databricks and Snowflake.
 
 **Choices that differ from the item text.**
+
+- SQL checks with sqlglot fall back to the word-level check for SQL sqlglot cannot parse, and
+  `validate` warns about such SQL rather than failing: the warehouse decides what is valid.
 
 - Configuration files are not a roadmap item: the project keeps one CSV file per `CFG_` table,
   and `etl-craft config apply` merges them by key, with `ACTIVE_FLAG` switching rows off and on and
