@@ -114,7 +114,7 @@ item's text, or work done early under another item.
 | SQL views | Done | #139 | `CREATE_VIEW`, a ninth SQL action, with secure views where the warehouse has them |
 | Configuration files | Done | #140 | `etl-craft config plan`, `apply` and `export`: one CSV file per `CFG_` table, merged by key |
 | SQL checks with sqlglot | Done | #141 | Parse-tree checks of SELECTs and rule SQL in the warehouse's dialect; `validate` warns on SQL sqlglot cannot read |
-| 0.4 gate; S5.C and later | Not started | | |
+| 0.4 gate; S5.K to S5.N, then S5.C and later | Not started | | |
 
 ### Handover notes
 
@@ -492,6 +492,9 @@ flowchart LR
    and a restart reconciles without an operator.
 8. Ingestion scripts belong to the team. etl-craft owns how they are loaded, what they receive, how
    their outcome and offset are recorded, and signalling the process group it started.
+9. Every load is auditable from the Engine DB alone: who started it, what it read (its watermark
+   range, the event that started it), what it wrote, what it set aside and why. A feature that moves
+   data without recording that is not finished.
 
 ### Non-goals for 1.0.0
 
@@ -528,7 +531,7 @@ flowchart LR
 | 0.2.0 | Stabilize: ship pause, backfill, consumption log and catalog history with every fix that needs no new ownership model | S2.A to S2.L | A regression test per fixed defect; every required suite green on the release commit, cloud included |
 | 0.3 | Identity: run and attempt ids everywhere, attempt ledger, leases, fenced writes, recorded gate decisions, actors on every action and engine-only Engine DB writes, data contract v2 | S3.A to S3.I (S3.I right after S3.A) | The chaos suite passes on SQLite and PostgreSQL |
 | 0.4 | Overseer: `etl-craft server`, schedules with time zones, ready-set dispatch, retries, `status`, `explain`, JSON, HTTP API, versioned YAML | S4.A to S4.H | The demo runs a week with no cron or Airflow; `kill -9` of the overseer loses and doubles nothing |
-| 0.5 | Cluster: pool interface, worker agents, project namespaces in one Engine DB, connection budget, managed PostgreSQL | S5.A to S5.J | Pool contract tests pass for both providers; many projects share one Engine DB |
+| 0.5 | Operational basics, then the cluster: row-level rejects, SQL watermarks, event waits, source definitions and schema-aware lineage; pool interface, worker agents, project namespaces in one Engine DB, connection budget, managed PostgreSQL | S5.A to S5.N (S5.K to S5.N right after S5.B) | Pool contract tests pass for both providers; many projects share one Engine DB |
 | 0.6 | At load: retention, bounded catalog, incremental cloning, metrics, backup and restore, benchmark | S6.A to S6.G | A sustained-load benchmark stays within its stated budgets; a restore is tested |
 | 0.7 to 0.9 | UI and finish: web UI, authentication and roles, redaction, webhooks, secrets providers, packaging, compatibility policy, soak | S7.A to S7.J | A month-long soak of a real deployment passes |
 | 1.0.0 release candidates | The Support Insights example rebuilt on etl-craft, configured through CI, with its Superset dashboards | S8.A to S8.G | Every pipeline of the example runs and every chart of both dashboards renders correct data |
@@ -1966,6 +1969,126 @@ Once it owns local submission, delete the executor lifecycle and child-dispatch 
 `execution.scheduler`; keep one local execution path behind the provider. Do not retain the current
 direct executor path as a fallback: the local provider is the fallback.
 
+### S5.K Row-level rejects
+
+Branch: `feat/sql-rejects`. Built right after S5.B, before S5.C.
+
+- *Problem.* A row the target cannot take fails the whole SQL task: a value that does not cast to
+  the target column's type, a NULL merge key, or a merge key the SELECT returns twice without
+  `MERGE_DEDUPE_ORDER`. Business rules flag rows only after a load succeeded. A messy source needs
+  its bad rows set aside, each with its reason, while the rest load, until there are too many.
+- *Where.* `handlers/sql/actions.py` (the writers), `handlers/sql/session.py` (staging),
+  `dialects/warehouse/` (a safe cast per warehouse), the run and attempt logs.
+- *Change.*
+  1. `REJECT_LIMIT` on a SQL task: the most rows, or `N%` of the rows the SELECT returns, the task
+     may set aside. Unset, any bad row fails the task, as it does now.
+  2. For `APPEND_TABLE`, `OVERWRITE_TABLE`, `SCD1_MERGE` and `SCD2_MERGE`, whose existing target
+     fixes the column types, the stage checks every row before the write: each column casts to its
+     target type (`TRY_CAST`, `try_cast`, or `pg_input_is_valid` on PostgreSQL 16 and later), merge
+     keys are not NULL, and keys are unique unless `MERGE_DEDUPE_ORDER` orders them. The target's
+     declared types decide; nothing is inferred.
+  3. Rows that fail move to `<target>__rejects` in the target's schema, which the engine creates as
+     it creates its recovery tables: the target's columns as text, plus `TASK_RUN_ID`,
+     `REJECT_REASON` and `REJECT_COLUMN`. They are written with the load, in one transaction where
+     the warehouse has them; a retry of the task run replaces its own rejects only.
+  4. `REJECT_COUNT` joins the task run and attempt logs, the task summary, `status`, `explain` and
+     the catalog. Over `REJECT_LIMIT`, the task writes nothing and fails, naming the count, the
+     limit and the first reasons.
+- *Tests.* On each local warehouse, a batch with a bad date, an over-long text, a NULL key and a
+  duplicate key loads its good rows and sets aside exactly those four, with their reasons; a batch
+  over the limit writes nothing; without `REJECT_LIMIT` it fails as before; a retry replaces only its
+  own rejects.
+- *Done when.* A messy batch loads its good rows on every warehouse, every rejected row is in
+  `<target>__rejects` with its reason and task run, and the counts are in the run log.
+
+### S5.L Watermarks for SQL tasks
+
+Branch: `feat/sql-watermarks`. After S5.K.
+
+- *Problem.* An incremental SQL task reads only rows its own pipeline's runs wrote
+  (`$$pipeline_run_id_filter`). A task reading a source table etl-craft did not write cannot read
+  only what changed since its last success: ingestion scripts have offsets
+  (`AUD_TASK_OFFSET_TRACKER`), SQL tasks do not.
+- *Where.* `handlers/sql/spec.py` (tokens), the offset tracker and the atomic attempt ending,
+  `execution/interventions.py`.
+- *Change.*
+  1. `WATERMARK_COLUMN` names a column of the SELECT; `WATERMARK_TYPE` is `NUMBER`, `TEXT` or
+     `TIMESTAMP`, as offsets are; `WATERMARK_START` is the value before the first run.
+  2. The SELECT reads `$$watermark`, replaced by the last committed high-water mark as a literal of
+     that type; the stage records the greatest `WATERMARK_COLUMN` it holds.
+  3. A successful attempt commits the new watermark together with its outcome, as an ingestion
+     script's offset is; a failed attempt keeps the old one, so its retry reads the same range. An
+     empty batch keeps it too.
+  4. Each task run records the range it read, `WATERMARK_FROM` and `WATERMARK_TO`; `explain` and
+     the catalog show it.
+  5. `etl-craft mark --watermark VALUE` sets it back, as a recorded intervention, to reload a range;
+     merges keep the reload free of duplicates.
+- *Tests.* Two batches load once each; a failed run does not advance the watermark and its retry
+  rereads the range; a reset reloads without duplicates through a merge; ranges are in the run log on
+  both Engine DBs.
+- *Done when.* A SQL task loads a source incrementally without a script, and every run's range can
+  be read from the Engine DB.
+
+### S5.M Event waits
+
+Branch: `feat/execution-event-waits`. After S5.L.
+
+- *Problem.* A pipeline starts on its schedule or after another pipeline. When a source drops a
+  file, or fills a table, at a time nobody knows, a team polls from a script or starts runs by hand.
+- *Where.* `handlers/` (a new handler), the gate-wait machinery in `execution/`, `services/validate.py`.
+- *Change.*
+  1. A task with `HANDLER = 'EVENT_WAIT'` waits until its condition holds: `EVENT_FILE`, a glob
+     under a project-relative or absolute path, matches a file no successful run has consumed and
+     that has not grown for `EVENT_SETTLE_SECONDS`; or `EVENT_SQL`, a read-only query on the
+     warehouse, returns a row.
+  2. It waits as a gate does: durably, in `AUD_GATE_WAITS`, holding no worker slot, until
+     `EVENT_TIMEOUT_MINUTES`; then it fails, or with `EVENT_ON_TIMEOUT = SKIP` ends `SKIPPED` and
+     its dependents follow their dependency types.
+  3. What satisfied it is recorded with the task run: each file with its size and modification
+     time, or the probe's first row. Downstream SQL and scripts read the files through
+     `$$event_files`, and a file a run consumed is not matched again.
+  4. A frequent schedule with `OVERLAP_POLICY = SKIP` and an event wait at the head of a pipeline
+     makes the pipeline event-driven without a sensor service.
+- *Tests.* A file that appears mid-wait releases the downstream tasks; a growing file waits to
+  settle; a consumed file is not matched twice; a timeout fails or skips as configured; an overseer
+  restart resumes the wait; the evidence is in the run log.
+- *Done when.* A pipeline waiting for a file or a table row runs without an external sensor, and
+  its run log says what started it.
+
+### S5.N Source definitions and schema-aware lineage
+
+Branch: `feat/services-lineage-schemas`. After S5.M.
+
+- *Problem.* Lineage cannot trace a `SELECT *`, or a column without a table prefix in a SELECT
+  that reads more than one table: sqlglot is given no schema, so it can neither expand the star
+  nor tell which table a bare column comes from. Reading the warehouse's `information_schema` is
+  no answer: lineage runs in CI, in new environments and before a pipeline's tables exist, and must
+  give the same answer everywhere.
+- *Where.* `services/lineage.py` (`extract`, `collect`), the catalog's lineage graphs, the
+  configuration files, `services/validate.py`.
+- *Change.*
+  1. Lineage reads metadata only. A table an active SQL task writes takes its columns from that
+     task's own traced output, in dependency order, so an upstream target is known before a
+     downstream SELECT reads it.
+  2. A table etl-craft does not write, an external source or a table an ingestion script lands,
+     takes its columns from source definitions: `CFG_SOURCE_COLUMNS` (`TABLE_NAME`,
+     `COLUMN_NAME`, `DATA_TYPE`, `COLUMN_POSITION`, `ACTIVE_FLAG`), kept as `source_columns.csv`
+     among the configuration files, as a repository keeps source definitions.
+  3. The combined schema goes to sqlglot, which expands `*` and qualifies bare columns before
+     tracing. A column neither traced nor defined stays reported with its reason, naming the table;
+     `--strict` still fails on it.
+  4. `validate` compares the definitions with the warehouse where the table exists, and names each
+     column the warehouse adds, lacks or types differently: schema drift, before a run meets it.
+     A table that does not exist yet is not compared.
+  5. `etl-craft config export` writes `source_columns.csv` from `information_schema` for the tables
+     that exist, so definitions are seeded rather than typed.
+- *Tests.* Without a warehouse connection: a `SELECT *` over an upstream target and over a defined
+  source traces every column, and a bare column in a join resolves to its table. With one, on each
+  local warehouse: an added, a dropped and a retyped source column are each reported by
+  `validate`, and export seeds definitions that load back without a change.
+- *Done when.* The demo, and later Support Insights, trace every SQL task with no warehouse
+  connection, and `validate` names source drift.
+
 ### S5.C The PostgreSQL queue and the worker agent
 
 Branch: `feat/pools-worker`. Files: new `worker/` package (layer beside `overseer`),
@@ -2573,6 +2696,27 @@ In the example repository's `.github/workflows/`:
    A headless browser loads both dashboards and finds no chart in an error state.
 6. Catalog: `etl-craft generate-docs` builds, and every pipeline's lineage reaches
    `dm.customer_support_fact`.
+
+### S8.H Messy sources
+
+The generators break their data on purpose, as real source systems do, and each break has an
+etl-craft feature that handles it and a check in S8.F that proves it. Support Insights runs only
+once every feature below exists; a break with no handling feature is a gap to build first.
+
+| The source | etl-craft handles it with | The check |
+|---|---|---|
+| replays a batch, or sends a key twice | merges with `MERGE_DEDUPE_ORDER`; retry-safe appends | rows equal the distinct source records |
+| sends records late or out of order | SCD2 history; S5.L watermarks with `WATERMARK_LAG` | a late row lands once, in the right version |
+| adds, drops or retypes a column | S5.N source definitions: `validate` names the drift; `SCHEMA_EVOLUTION` takes added columns | `validate` reports the change before the run; the run then succeeds, or fails naming the column |
+| sends values that do not fit: bad dates, text in numbers, over-long text, NULL keys | S5.K rejects with `REJECT_LIMIT` | the injected bad rows, and only those, are in `__rejects` with reasons |
+| sends wrong encodings or stray whitespace | business rules (`REJECT`, `INCOMPLETE`, `REPORT`) | the flags equal the injected count |
+| references keys that do not exist | business rules | each orphan is flagged |
+| deletes rows without telling | `DELETE_ROWS`, soft and hard | the deleted keys are flagged or removed |
+| sends an empty or truncated batch, or a sudden spike | `HAS_DATA` dependencies; rules on counts | downstream tasks skip, and an alert says why |
+| drops a file at an unknown time | S5.M event waits | the run starts when the file settles, once per file |
+| fails mid-transfer, or times out | retries, leases, `LOST` reconciliation | after a kill and a retry, no row is doubled or missing |
+| sends timestamps without zones, or across a DST change | typed `CAST` to the declared type; UTC audit times | run dates and event times match the generator's truth |
+| resends corrected history | backfills and reopened runs; `CONSUME_REPAIRS` | the mart reflects the correction once |
 
 ### S8.G The release gate
 
