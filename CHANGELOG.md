@@ -37,6 +37,11 @@ All notable changes are recorded here. The format follows
 - A warehouse URL without its own dialect (such as `jdbc:mysql:` or `jdbc:oracle:`) is refused,
   naming the supported warehouses, rather than treated as a plain ANSI warehouse.
 
+- etl-craft no longer depends on `packaging`. `generate-yml --airflow-version` accepts one
+  numeric release (`2.2.0`) or comma-separated constraints of numeric releases (`>=2.2,<3`,
+  `~=2.3`, `==2.10.*`); pre-release, post-release and epoch versions are refused. The
+  process-control and file-lock code is POSIX only, matching the supported Linux and macOS.
+
 - `APPEND_TABLE` refuses a target without `TASK_RUN_ID` before staging anything, naming
   `etl-craft upgrade-targets --action APPEND_TABLE --target <table>`, rather than appending with a
   warning that a retry can duplicate rows. Rows appended before the upgrade keep a NULL

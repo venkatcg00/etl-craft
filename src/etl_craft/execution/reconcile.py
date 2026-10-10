@@ -39,14 +39,9 @@ def stop_process(pid: int, birth: str, *, grace_seconds: float = 10) -> None:
         process = psutil.Process(pid)
         known = {child.pid: process_start(child.pid) for child in process.children(recursive=True)}
         known[pid] = birth
-        if os.name == "posix":
-            if os.getpgid(pid) != pid or process_start(pid) != birth:
-                return
-            os.killpg(pid, signal.SIGTERM)
-        else:
-            for child_pid, started in known.items():
-                if started is not None and process_start(child_pid) == started:
-                    psutil.Process(child_pid).terminate()
+        if os.getpgid(pid) != pid or process_start(pid) != birth:
+            return
+        os.killpg(pid, signal.SIGTERM)
         deadline = time.monotonic() + grace_seconds
         while time.monotonic() < deadline:
             if not any(

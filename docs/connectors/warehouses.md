@@ -13,6 +13,9 @@ What the engine creates there depends on the warehouse and the table format:
 | Databricks | Delta tables | Delta tables with UniForm, readable as Iceberg | `etl-craft[databricks]` |
 | Snowflake | ordinary tables | Iceberg tables | `etl-craft[snowflake]` |
 
+PostgreSQL and DuckDB need no extra. DuckDB is the default local warehouse of the quick start
+and the demo, so its SQLAlchemy dialect is installed with etl-craft itself.
+
 `etl-craft[databricks]` keeps SQLAlchemy below 2.1: the Databricks connector returns rows
 that SQLAlchemy 2.1 does not accept. Every other warehouse runs on SQLAlchemy 2.0 and 2.1.
 

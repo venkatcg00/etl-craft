@@ -11,7 +11,6 @@ import logging
 import os
 import signal
 import subprocess
-import sys
 import tempfile
 import threading
 import time
@@ -106,8 +105,7 @@ def run_child(
             stderr=subprocess.STDOUT,
             env=None if spec.env is None else dict(spec.env),
             cwd=spec.cwd,
-            start_new_session=sys.platform != "win32",
-            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+            start_new_session=True,
         )
         logger.debug("started pid %s: %s", process.pid, " ".join(spec.argv))
         timed_out = cancelled = False
@@ -195,35 +193,24 @@ def _signal_name(number: int) -> str:
         return str(number)
 
 
-if sys.platform == "win32":  # pragma: no cover - exercised on Windows only
+def _stop_group(process: subprocess.Popen[bytes], grace_seconds: float) -> None:
+    """Stop the child's whole process group: SIGTERM, then SIGKILL after the grace period.
 
-    def _stop_group(process: subprocess.Popen[bytes], grace_seconds: float) -> None:
-        process.terminate()
-        try:
-            process.wait(timeout=grace_seconds)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
+    The group id is the child's pid. It stays taken while any process in the group lives,
+    so the final SIGKILL reaches only what the child started, or nothing.
+    """
+    _signal_group(process.pid, signal.SIGTERM)
+    try:
+        process.wait(timeout=grace_seconds)
+    except subprocess.TimeoutExpired:
+        _signal_group(process.pid, signal.SIGKILL)
+        process.wait()
+    else:
+        _signal_group(process.pid, signal.SIGKILL)
 
-else:
 
-    def _stop_group(process: subprocess.Popen[bytes], grace_seconds: float) -> None:
-        """Stop the child's whole process group: SIGTERM, then SIGKILL after the grace period.
-
-        The group id is the child's pid. It stays taken while any process in the group lives,
-        so the final SIGKILL reaches only what the child started, or nothing.
-        """
-        _signal_group(process.pid, signal.SIGTERM)
-        try:
-            process.wait(timeout=grace_seconds)
-        except subprocess.TimeoutExpired:
-            _signal_group(process.pid, signal.SIGKILL)
-            process.wait()
-        else:
-            _signal_group(process.pid, signal.SIGKILL)
-
-    def _signal_group(pgid: int, sig: signal.Signals) -> None:
-        # ProcessLookupError: the group is gone. PermissionError: macOS reports a group of
-        # zombies this way, and a group owned by another user is not ours to signal.
-        with suppress(ProcessLookupError, PermissionError):
-            os.killpg(pgid, sig)
+def _signal_group(pgid: int, sig: signal.Signals) -> None:
+    # ProcessLookupError: the group is gone. PermissionError: macOS reports a group of
+    # zombies this way, and a group owned by another user is not ours to signal.
+    with suppress(ProcessLookupError, PermissionError):
+        os.killpg(pgid, sig)

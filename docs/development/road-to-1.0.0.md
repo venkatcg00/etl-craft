@@ -108,7 +108,8 @@ item's text, or work done early under another item.
 | S4.G HTTP API | Done | #124 | Bearer roles, exact run identities and shared operation documents |
 | S4.H Versioned YAML and Airflow factory | Done | #125 | Validated version 1 exports and isolated Airflow contracts |
 | S4.I.5 Configuration shapes 1.0 does not need | Done | #126, #127 | Selected profiles stored directly, `tls_mode` only, unsupported warehouses refused, appends require `TASK_RUN_ID` |
-| S4.I.6 and later | Not started | | |
+| S4.I.6 Platform and dependency surface | Done | #131 | POSIX-only process control, no `packaging` dependency, DuckDB recorded as the core dialect |
+| 0.4 gate, then S5.A and later | Not started | | |
 
 ### Handover notes
 
@@ -125,8 +126,15 @@ tests. The Snowflake run stopped after 17 of 22 tests, all passing, when the wor
 of memory; S4.I.5 changes no Snowflake code, and the four local warehouses run every path it
 touches. Its `APPEND_TABLE` change (#127) passed the full local checks, the installed-wheel matrix
 and the cloud append and `ROW_ID` tests on Databricks and Snowflake.
+S4.I.6 passed the full local checks and the installed-wheel matrix; it changes no warehouse code,
+so no cloud suite ran.
 
 **Choices that differ from the item text.**
+
+- S4.I.6 also removes the non-POSIX branch of `execution/reconcile.stop_process` and the Windows
+  virtual-environment paths in test helpers; the release gate keeps `win32` as an evidence
+  platform key. DuckDB stays a core dependency, recorded in Appendix B, rather than moving to an
+  extra. `generate-yml --airflow-version` accepts numeric releases only.
 
 - S4.I.4 uses SQLAlchemy Boolean result conversion on shared queries so SQLite returns Python
   booleans rather than integers in operation JSON. Nested catalog records retain their explicit
@@ -2671,6 +2679,7 @@ change it only by updating this table and the documentation together.
 | "Exactly once" | Not promised across warehouse and script side effects. Promised: one execution per attempt id, stale updates rejected, uncertain outcomes recorded as `LOST`, and documented retry behaviour per action | S3.B, S3.D, S3.G.7 |
 | Process per task | Kept, on workers and on the local provider, for isolation; revisit only if measured worker memory demands it | S5.B, S6.G |
 | Engine DBs | One PostgreSQL Engine DB for every project; separate databases only for hard isolation | S5.G |
+| DuckDB's SQLAlchemy dialect | A core dependency, the one exception to optional warehouse extras: DuckDB is the default local warehouse of the quick start, the demo and the tests, so `pip install etl-craft` runs a whole local deployment. Engine code never imports it; SQLAlchemy loads it from the `duckdb:` URL | S4.I.6 |
 
 ## Appendix C: Glossary
 

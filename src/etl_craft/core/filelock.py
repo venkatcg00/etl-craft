@@ -6,7 +6,7 @@ crashed process never leaves a stale lock behind.
 
 from __future__ import annotations
 
-import sys
+import fcntl
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -40,30 +40,13 @@ def file_lock(path: str | Path, wait_seconds: float = 0) -> Iterator[None]:
         handle.close()
 
 
-if sys.platform == "win32":  # pragma: no cover - exercised on Windows only
-    import msvcrt
+def _try_lock(handle: IO[bytes]) -> bool:
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return False
+    return True
 
-    def _try_lock(handle: IO[bytes]) -> bool:
-        handle.seek(0)
-        try:
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-        except OSError:
-            return False
-        return True
 
-    def _unlock(handle: IO[bytes]) -> None:
-        handle.seek(0)
-        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-
-else:
-    import fcntl
-
-    def _try_lock(handle: IO[bytes]) -> bool:
-        try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            return False
-        return True
-
-    def _unlock(handle: IO[bytes]) -> None:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+def _unlock(handle: IO[bytes]) -> None:
+    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)

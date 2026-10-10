@@ -91,8 +91,7 @@ def installed_cli(installer: str, root: Path, extras: str = "trino") -> Path:
 
 
 def _venv_bin(venv: Path, name: str) -> Path:
-    folder = venv / ("Scripts" if os.name == "nt" else "bin")
-    return folder / (f"{name}.exe" if os.name == "nt" else name)
+    return venv / "bin" / name
 
 
 @dataclass

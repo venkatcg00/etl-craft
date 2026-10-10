@@ -24,14 +24,13 @@ defaults, then a built-in default.
 from __future__ import annotations
 
 import json
+import re
 from importlib.resources import files
 from shlex import join
 from typing import Any, TypeVar
 
 import yaml
 from jsonschema import Draft202012Validator, FormatChecker, ValidationError
-from packaging.specifiers import InvalidSpecifier, SpecifierSet
-from packaging.version import InvalidVersion, Version
 from sqlalchemy.engine import Connection
 
 from etl_craft.config import ConnectorConfig
@@ -375,20 +374,30 @@ def _remote_command(code: str, *arguments: str, zone: str = "UTC") -> str:
     return _command(code, *arguments, "--run-key", RUN_KEY_TEMPLATE, "--run-date", logical_date)
 
 
+_CONSTRAINT = re.compile(r"(~=|==|!=|<=|>=|<|>)\s*([0-9]+(?:\.[0-9]+)*)(?:\.\*)?")
+
+
+def _release(version: str) -> tuple[int, ...]:
+    """Return a numeric release as integers without trailing zeros: 2.2 equals 2.2.0."""
+    parts = [int(part) for part in version.split(".")]
+    while parts and parts[-1] == 0:
+        parts.pop()
+    return tuple(parts)
+
+
 def require_airflow_run_templates(version_range: str) -> None:
-    """Require a declared version floor supporting run identity and data-interval templates."""
-    minimum = Version("2.2.0")
-    try:
-        spec = SpecifierSet(
-            version_range if any(c in version_range for c in "<>=!~") else "==" + version_range
-        )
-        safe_floor = any(
-            constraint.operator in {">=", ">", "~=", "=="}
-            and Version(constraint.version.removesuffix(".*")) >= minimum
-            for constraint in spec
-        )
-    except (InvalidSpecifier, InvalidVersion):
-        safe_floor = False
+    """Require a declared version floor supporting run identity and data-interval templates.
+
+    The range is one numeric release (``2.2.0``) or comma-separated constraints of numeric
+    releases (``>=2.2,<3``, ``~=2.3``, ``==2.10.*``); anything else is refused.
+    """
+    written = version_range if any(c in version_range for c in "<>=!~") else "==" + version_range
+    constraints = [_CONSTRAINT.fullmatch(part.strip()) for part in written.split(",")]
+    safe_floor = all(constraints) and any(
+        match.group(1) in {">=", ">", "~=", "=="} and _release(match.group(2)) >= _release("2.2.0")
+        for match in constraints
+        if match
+    )
     if not safe_floor:
         raise ConfigurationError(
             f"Airflow version range {version_range!r} has no supported minimum; "
