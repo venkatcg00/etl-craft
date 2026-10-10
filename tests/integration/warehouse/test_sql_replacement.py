@@ -3,6 +3,7 @@
 import pytest
 
 from fixtures.sql_replacement import check_replacement_failure
+from fixtures.sql_warehouse import warehouses
 
 
 @pytest.mark.parametrize("action", ["CREATE_TABLE", "OVERWRITE_TABLE"])
@@ -10,14 +11,13 @@ def test_replacement_faults_and_write_errors_retain_the_original(sql_world, acti
     check_replacement_failure(sql_world, "daily", action)
 
 
+@warehouses("duckdb_iceberg")
 @pytest.mark.parametrize("action", ["CREATE_TABLE", "OVERWRITE_TABLE"])
 def test_failed_restore_leaves_a_durable_backup(sql_world, action, monkeypatch):
     from etl_craft.core.errors import HandlerError
     from etl_craft.handlers.sql.session import Session
 
     w = sql_world
-    if w.kind != "duckdb_iceberg":
-        pytest.skip("durable recovery applies to the copy-and-restore warehouse")
     if action == "OVERWRITE_TABLE":
         w.setup("daily", "SELECT 1 AS id", action)
     params = {"SQL_ACTION": action, "TARGET_OBJECT": "daily"}
@@ -47,14 +47,14 @@ def test_failed_restore_leaves_a_durable_backup(sql_world, action, monkeypatch):
     assert w.rows(f"SELECT * FROM {w.name(keep[0])}") == before
 
 
+@warehouses("trino_iceberg", "duckdb_iceberg")
 def test_cleanup_failure_cannot_undo_nontransactional_publication(sql_world, monkeypatch):
     from etl_craft.core.errors import HandlerError
     from etl_craft.handlers.sql.session import Session
     from etl_craft.warehouse.connection import warehouse_dialect
 
     w = sql_world
-    if warehouse_dialect(w.config).replace_strategy == "transactional":
-        pytest.skip("cleanup remains inside the transaction on native warehouses")
+    assert warehouse_dialect(w.config).replace_strategy != "transactional"
     params = {"SQL_ACTION": "CREATE_TABLE", "TARGET_OBJECT": "daily"}
     w.run("daily", SOURCE_SQL="SELECT 1 AS id", **params)
     original = Session.drop
@@ -71,6 +71,7 @@ def test_cleanup_failure_cannot_undo_nontransactional_publication(sql_world, mon
     assert w.rows(f"SELECT id FROM {w.name('daily')}") == [(2,)]
 
 
+@warehouses("trino_iceberg", "duckdb_iceberg")
 @pytest.mark.parametrize("action", ["CREATE_TABLE", "OVERWRITE_TABLE"])
 def test_partitioned_iceberg_replacement_preserves_or_refuses(sql_world, action):
     from sqlalchemy import create_engine, text
@@ -80,8 +81,6 @@ def test_partitioned_iceberg_replacement_preserves_or_refuses(sql_world, action)
     from fixtures.sql_replacement import definition
 
     w = sql_world
-    if w.kind not in {"trino_iceberg", "duckdb_iceberg"}:
-        pytest.skip("partition specifications belong to the Iceberg catalog")
     if action == "OVERWRITE_TABLE":
         w.setup("daily", "SELECT 1 AS id", action)
     params = {"SQL_ACTION": action, "TARGET_OBJECT": "daily"}
@@ -113,13 +112,12 @@ def test_partitioned_iceberg_replacement_preserves_or_refuses(sql_world, action)
         engine.dispose()
 
 
+@warehouses("duckdb", "postgres")
 def test_transactional_cleanup_failure_rolls_back_replacement(sql_world, monkeypatch):
     from etl_craft.core.errors import HandlerError
     from etl_craft.handlers.sql.session import Session
 
     w = sql_world
-    if w.kind not in {"duckdb", "postgres"}:
-        pytest.skip("native warehouses include cleanup in the publication transaction")
     params = {"SQL_ACTION": "CREATE_TABLE", "TARGET_OBJECT": "daily"}
     w.run("daily", SOURCE_SQL="SELECT 1 AS id", **params)
     original = Session.drop

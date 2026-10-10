@@ -2,6 +2,8 @@
 
 ``sql_world`` is parametrized over DuckDB (a file, no services), PostgreSQL, Trino over Iceberg
 and DuckDB over Iceberg; each case carries its suite marker and works in a schema of its own.
+``@warehouses(...)`` narrows a test to the warehouses it applies to: release suites refuse
+skipped tests, so a case that does not apply to a warehouse is never collected for it.
 ``SqlWorld.task(...)`` adds a SQL task to pipeline P and returns the ``TaskContext`` a task
 process would build for it.
 """
@@ -175,14 +177,25 @@ def _profile(
     return ConnectionProfile("WAREHOUSE", "dev", jdbc_url, user, auth_mode, dict(extra))
 
 
-@pytest.fixture(
-    params=[
-        pytest.param("duckdb", marks=pytest.mark.warehouse_duckdb),
-        pytest.param("postgres", marks=pytest.mark.warehouse_postgres),
-        pytest.param("trino_iceberg", marks=pytest.mark.warehouse_trino_iceberg),
-        pytest.param("duckdb_iceberg", marks=pytest.mark.warehouse_duckdb_iceberg),
-    ]
+WAREHOUSES = (
+    pytest.param("duckdb", marks=pytest.mark.warehouse_duckdb),
+    pytest.param("postgres", marks=pytest.mark.warehouse_postgres),
+    pytest.param("trino_iceberg", marks=pytest.mark.warehouse_trino_iceberg),
+    pytest.param("duckdb_iceberg", marks=pytest.mark.warehouse_duckdb_iceberg),
 )
+
+
+def warehouses(*kinds: str) -> pytest.MarkDecorator:
+    """Parametrize ``sql_world`` with ``kinds`` only, each with its suite marker."""
+    known = [param.values[0] for param in WAREHOUSES]
+    unknown = sorted(set(kinds) - set(known))
+    if unknown:
+        raise ValueError(f"unknown warehouses {unknown}; use {known}")
+    chosen = [param for param in WAREHOUSES if param.values[0] in kinds]
+    return pytest.mark.parametrize("sql_world", chosen, indirect=True)
+
+
+@pytest.fixture(params=WAREHOUSES)
 def sql_world(
     request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[SqlWorld]:
