@@ -33,8 +33,10 @@ worker pool. Ready tasks are dispatched after each completion; automatic retries
 subsequent roadmap item. To run under Airflow or another orchestrator, use
 [remote mode](orchestrator.md); `server` refuses that mode.
 
-`Max_parallel_tasks` bounds the server's shared task worker pool. Cooperative pipeline
-supervision and pending gate checks do not use those slots. Runs still owned by another foreground process are left with that
+`Max_parallel_tasks` bounds the server's local pool, which every run it supervises shares;
+`Local_ingestion_slots` and `Local_warehouse_slots` split it by kind (see
+[running pipelines](../guides/running-pipelines.md)). Cooperative pipeline supervision and
+pending gate checks do not use those slots. Runs still owned by another foreground process are left with that
 process. Paused or inactive pipelines receive no dispatch; resuming a pipeline allows its
 active run to continue.
 

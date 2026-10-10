@@ -170,7 +170,10 @@ class ExecutionLimits:
     """Deployment-wide limits: a task's time limit, parallel tasks, SLA alerts and gate waits.
 
     ``task_timeout_seconds`` of 0 means no limit. ``gate_wait_minutes`` is how long a
-    cross-pipeline gate waits for a running upstream, 0 for not at all.
+    cross-pipeline gate waits for a running upstream, 0 for not at all. The local pool runs at
+    most ``max_parallel_tasks`` task processes, of which at most ``local_ingestion_slots`` run
+    Python ingestion scripts and ``local_warehouse_slots`` run everything else; unset, each kind
+    may use all of ``max_parallel_tasks``.
 
     Every run of a pipeline with ``SLA_IN_HOURS`` is marked ``MET`` or ``BREACHED``. With
     ``enforce_sla`` on, a run that misses its SLA also sends an SLA email, through the Email
@@ -182,6 +185,8 @@ class ExecutionLimits:
     enforce_sla: bool = False
     gate_wait_minutes: int = DEFAULT_GATE_WAIT_MINUTES
     shutdown_grace_seconds: int = 60
+    local_ingestion_slots: int | None = None
+    local_warehouse_slots: int | None = None
 
 
 @dataclass(frozen=True)

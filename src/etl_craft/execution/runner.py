@@ -56,7 +56,11 @@ from etl_craft.engine.repository.dependencies import (
     fetch_pipeline_graph,
 )
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
-from etl_craft.engine.repository.tasks import fetch_task_parameters, resolve_task_id
+from etl_craft.engine.repository.tasks import (
+    fetch_task_execution_detail,
+    fetch_task_parameters,
+    resolve_task_id,
+)
 from etl_craft.engine.retry import retrying
 from etl_craft.execution import leases
 from etl_craft.execution.gates import (
@@ -70,6 +74,7 @@ from etl_craft.execution.interventions import (
     record_gate_bypass,
 )
 from etl_craft.execution.limits import task_timeout_seconds
+from etl_craft.execution.pools import AttemptSpec
 from etl_craft.execution.reconcile import reconcile
 from etl_craft.execution.retries import refresh_retries, task_retry_policy
 from etl_craft.execution.supervisor import (
@@ -601,18 +606,44 @@ def _run_attempt(
     rerun: bool = False,
     decisions: tuple[trackers.GateDecision, ...] = (),
 ) -> TaskOutcome:
-    """Bind and start an attempt, run it in its own process, and record how it ended.
+    """Admit an attempt and run it in the foreground; see ``execute_attempt``."""
+    spec = admit_attempt(
+        engine,
+        config,
+        task_id,
+        task_code,
+        pipeline_code,
+        pipeline_run_id,
+        force,
+        rerun=rerun,
+        decisions=decisions,
+    )
+    return execute_attempt(engine, config, spec, child or ChildOptions())
+
+
+def admit_attempt(
+    engine: Engine,
+    config: ConnectorConfig,
+    task_id: int,
+    task_code: str,
+    pipeline_code: str,
+    pipeline_run_id: int,
+    force: bool,
+    *,
+    rerun: bool = False,
+    decisions: tuple[trackers.GateDecision, ...] = (),
+) -> AttemptSpec:
+    """Check the task's settings, then bind its task run and queue an attempt to run.
 
     Whatever can be checked before binding is checked first, so a bad setting fails without
-    touching the task's row. Anything that fails after binding (the log folder, starting the
-    process, an interrupt) records the attempt ``FAILED`` with the cause, unless the task process
-    recorded an outcome first, and is then raised.
+    touching the task's row. An attempt an earlier admission queued and nobody claimed is reused.
+    The gate decisions that admitted the task are recorded with the attempt.
     """
-    child = child or ChildOptions()
     if config.config_path is None:
         raise ConfigurationError("a task process needs the craft-connector.yml it was loaded from")
     with engine.connect() as conn:
         params = fetch_task_parameters(conn, task_id)
+        handler = fetch_task_execution_detail(conn, task_id).handler
     timeout = task_timeout_seconds(params, config)
     task_retry_policy(params, config)
     fault_point("runner.after_timeout")
@@ -624,39 +655,65 @@ def _run_attempt(
             if active is not None and active.status == "QUEUED"
             else transitions.queue_attempt(conn, binding.task_run_id, current_actor())
         )
-        owner = leases.owner_id()
-        transitions.claim_attempt(
-            conn,
-            attempt_id,
-            current_actor(),
-            owner=owner,
-            lease_expires_at=datetime.now(UTC) + timedelta(seconds=leases.LEASE_SECONDS),
-            host=socket.gethostname(),
-        )
         trackers.record_decisions(conn, pipeline_run_id, decisions, attempt_id=attempt_id)
         active = transitions.active_attempt(conn, binding.task_run_id)
         assert active is not None
-        attempt = active.attempt_number
+    return AttemptSpec(
+        attempt_id=attempt_id,
+        attempt_number=active.attempt_number,
+        task_run_id=binding.task_run_id,
+        pipeline_run_id=pipeline_run_id,
+        pipeline_code=pipeline_code,
+        task_code=task_code,
+        handler=handler,
+        timeout_seconds=timeout,
+        lease_seconds=leases.LEASE_SECONDS,
+        force=force,
+        rerun=rerun,
+    )
+
+
+def execute_attempt(
+    engine: Engine, config: ConnectorConfig, spec: AttemptSpec, child: ChildOptions
+) -> TaskOutcome:
+    """Claim an admitted attempt, run it in its own process, and record how it ended.
+
+    This is the one way a task process starts on this host: in the foreground for
+    ``run --task_code``, and on the local pool's threads for everything else. Anything that fails
+    after the claim (the log folder, starting the process, an interrupt) records the attempt
+    ``FAILED`` with the cause, unless the task process recorded an outcome first, and is then
+    raised.
+    """
+    owner = leases.owner_id()
+    with engine.begin() as conn:
+        transitions.claim_attempt(
+            conn,
+            spec.attempt_id,
+            current_actor(),
+            owner=owner,
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=spec.lease_seconds),
+            host=socket.gethostname(),
+        )
     try:
         fault_point("runner.after_bind")
         return _start_and_record(
             engine,
             config,
-            binding.task_run_id,
-            attempt,
-            timeout,
-            task_code,
-            pipeline_code,
-            pipeline_run_id,
-            force,
+            spec.task_run_id,
+            spec.attempt_number,
+            spec.timeout_seconds,
+            spec.task_code,
+            spec.pipeline_code,
+            spec.pipeline_run_id,
+            spec.force,
             child,
-            rerun=rerun,
-            attempt_id=attempt_id,
+            rerun=spec.rerun,
+            attempt_id=spec.attempt_id,
             owner=owner,
         )
     except BaseException as error:
         _fail_after_bind(
-            engine, binding.task_run_id, task_code, error, attempt_id=attempt_id, owner=owner
+            engine, spec.task_run_id, spec.task_code, error, attempt_id=spec.attempt_id, owner=owner
         )
         raise
 
