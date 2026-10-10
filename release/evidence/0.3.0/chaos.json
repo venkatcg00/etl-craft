@@ -1,0 +1,621 @@
+{
+  "schema": 2,
+  "suite": "chaos",
+  "marker": "chaos",
+  "package_version": "0.3.0",
+  "commit": "9517c3068592b5daaeff0b5e25e4a3496dcbdc3c",
+  "dirty": false,
+  "wheel_sha256": null,
+  "python": "3.11.16",
+  "platform": "Linux-7.2.9-1-cachyos-x86_64-with-glibc2.44",
+  "platform_key": "linux",
+  "collected": [
+    "tests/integration/engine/test_transitions.py::test_cancelled_attempt_cannot_overwrite_an_operator_mark[postgresql]",
+    "tests/integration/engine/test_transitions.py::test_cancelled_attempt_cannot_overwrite_an_operator_mark[sqlite]",
+    "tests/integration/engine/test_transitions.py::test_operator_cancel_refuses_a_run_that_finished_after_its_read[postgresql]",
+    "tests/integration/engine/test_transitions.py::test_operator_cancel_refuses_a_run_that_finished_after_its_read[sqlite]",
+    "tests/integration/engine/test_transitions.py::test_operator_mark_refuses_an_attempt_admitted_after_its_read[postgresql]",
+    "tests/integration/engine/test_transitions.py::test_operator_mark_refuses_an_attempt_admitted_after_its_read[sqlite]",
+    "tests/integration/engine/test_transitions.py::test_stale_attempt_cannot_advance_its_offset[postgresql]",
+    "tests/integration/engine/test_transitions.py::test_stale_attempt_cannot_advance_its_offset[sqlite]",
+    "tests/integration/execution/test_admission.py::test_simultaneous_initializers_leave_one_active_run[postgresql]",
+    "tests/integration/execution/test_admission.py::test_simultaneous_initializers_leave_one_active_run[sqlite]",
+    "tests/integration/execution/test_chaos.py::test_duplicate_task_delivery_executes_one_attempt[postgresql-False]",
+    "tests/integration/execution/test_chaos.py::test_duplicate_task_delivery_executes_one_attempt[postgresql-True]",
+    "tests/integration/execution/test_chaos.py::test_duplicate_task_delivery_executes_one_attempt[sqlite-False]",
+    "tests/integration/execution/test_chaos.py::test_duplicate_task_delivery_executes_one_attempt[sqlite-True]",
+    "tests/integration/execution/test_chaos.py::test_late_remote_finalize_leaves_the_newer_run_untouched[postgresql]",
+    "tests/integration/execution/test_chaos.py::test_late_remote_finalize_leaves_the_newer_run_untouched[sqlite]",
+    "tests/integration/execution/test_chaos.py::test_parent_hard_exit_at_startup_reconciles_before_retry[postgresql-pipeline.after_insert]",
+    "tests/integration/execution/test_chaos.py::test_parent_hard_exit_at_startup_reconciles_before_retry[postgresql-runner.after_bind]",
+    "tests/integration/execution/test_chaos.py::test_parent_hard_exit_at_startup_reconciles_before_retry[postgresql-runner.after_timeout]",
+    "tests/integration/execution/test_chaos.py::test_parent_hard_exit_at_startup_reconciles_before_retry[postgresql-supervisor.after_mkdir]",
+    "tests/integration/execution/test_chaos.py::test_parent_hard_exit_at_startup_reconciles_before_retry[postgresql-supervisor.after_popen]",
+    "tests/integration/execution/test_chaos.py::test_parent_hard_exit_at_startup_reconciles_before_retry[sqlite-pipeline.after_insert]",
+    "tests/integration/execution/test_chaos.py::test_parent_hard_exit_at_startup_reconciles_before_retry[sqlite-runner.after_bind]",
+    "tests/integration/execution/test_chaos.py::test_parent_hard_exit_at_startup_reconciles_before_retry[sqlite-runner.after_timeout]",
+    "tests/integration/execution/test_chaos.py::test_parent_hard_exit_at_startup_reconciles_before_retry[sqlite-supervisor.after_mkdir]",
+    "tests/integration/execution/test_chaos.py::test_parent_hard_exit_at_startup_reconciles_before_retry[sqlite-supervisor.after_popen]",
+    "tests/integration/execution/test_chaos.py::test_postgres_outage_fences_the_supervisor_and_recovers[postgresql]",
+    "tests/integration/execution/test_chaos.py::test_three_pipeline_callers_waiting_on_a_repair_admit_one_supervisor[postgresql]",
+    "tests/integration/execution/test_chaos.py::test_three_pipeline_callers_waiting_on_a_repair_admit_one_supervisor[sqlite]",
+    "tests/integration/execution/test_cli_lifecycle.py::test_a_child_failure_after_recording_success_keeps_the_recorded_outcome[postgresql-:kill]",
+    "tests/integration/execution/test_cli_lifecycle.py::test_a_child_failure_after_recording_success_keeps_the_recorded_outcome[postgresql-]",
+    "tests/integration/execution/test_cli_lifecycle.py::test_a_child_failure_after_recording_success_keeps_the_recorded_outcome[sqlite-:kill]",
+    "tests/integration/execution/test_cli_lifecycle.py::test_a_child_failure_after_recording_success_keeps_the_recorded_outcome[sqlite-]",
+    "tests/integration/execution/test_cli_lifecycle.py::test_a_fault_after_binding_records_failure_and_allows_retry[postgresql-runner.after_bind]",
+    "tests/integration/execution/test_cli_lifecycle.py::test_a_fault_after_binding_records_failure_and_allows_retry[postgresql-supervisor.after_mkdir]",
+    "tests/integration/execution/test_cli_lifecycle.py::test_a_fault_after_binding_records_failure_and_allows_retry[postgresql-supervisor.after_popen]",
+    "tests/integration/execution/test_cli_lifecycle.py::test_a_fault_after_binding_records_failure_and_allows_retry[sqlite-runner.after_bind]",
+    "tests/integration/execution/test_cli_lifecycle.py::test_a_fault_after_binding_records_failure_and_allows_retry[sqlite-supervisor.after_mkdir]",
+    "tests/integration/execution/test_cli_lifecycle.py::test_a_fault_after_binding_records_failure_and_allows_retry[sqlite-supervisor.after_popen]",
+    "tests/integration/execution/test_explicit_runs.py::test_clearing_an_older_dag_run_keeps_its_key_and_date[postgresql-False]",
+    "tests/integration/execution/test_explicit_runs.py::test_clearing_an_older_dag_run_keeps_its_key_and_date[postgresql-True]",
+    "tests/integration/execution/test_explicit_runs.py::test_clearing_an_older_dag_run_keeps_its_key_and_date[sqlite-False]",
+    "tests/integration/execution/test_explicit_runs.py::test_clearing_an_older_dag_run_keeps_its_key_and_date[sqlite-True]",
+    "tests/integration/execution/test_gate_decisions.py::test_a_child_crashing_after_commit_keeps_the_complete_success[postgresql]",
+    "tests/integration/execution/test_gate_decisions.py::test_a_child_crashing_after_commit_keeps_the_complete_success[sqlite]",
+    "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[postgresql-False-attempt.after_consumption]",
+    "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[postgresql-False-attempt.after_status]",
+    "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[postgresql-False-attempt.before_summary]",
+    "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[postgresql-False-runner.before_consumption]",
+    "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[postgresql-False-script.after_offset]",
+    "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[postgresql-True-attempt.after_consumption]",
+    "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[postgresql-True-attempt.after_status]",
+    "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[postgresql-True-attempt.before_summary]",
+    "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[postgresql-True-runner.before_consumption]",
+    "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[postgresql-True-script.after_offset]",
+    "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[sqlite-False-attempt.after_consumption]",
+    "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[sqlite-False-attempt.after_status]",
+    "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[sqlite-False-attempt.before_summary]",
+    "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[sqlite-False-runner.before_consumption]",
+    "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[sqlite-False-script.after_offset]",
+    "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[sqlite-True-attempt.after_consumption]",
+    "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[sqlite-True-attempt.after_status]",
+    "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[sqlite-True-attempt.before_summary]",
+    "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[sqlite-True-runner.before_consumption]",
+    "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[sqlite-True-script.after_offset]",
+    "tests/integration/execution/test_gate_decisions.py::test_run_ending_and_consumption_roll_back_together[postgresql-False-pipeline.after_consumption]",
+    "tests/integration/execution/test_gate_decisions.py::test_run_ending_and_consumption_roll_back_together[postgresql-False-pipeline.before_consumption]",
+    "tests/integration/execution/test_gate_decisions.py::test_run_ending_and_consumption_roll_back_together[postgresql-True-pipeline.after_consumption]",
+    "tests/integration/execution/test_gate_decisions.py::test_run_ending_and_consumption_roll_back_together[postgresql-True-pipeline.before_consumption]",
+    "tests/integration/execution/test_gate_decisions.py::test_run_ending_and_consumption_roll_back_together[sqlite-False-pipeline.after_consumption]",
+    "tests/integration/execution/test_gate_decisions.py::test_run_ending_and_consumption_roll_back_together[sqlite-False-pipeline.before_consumption]",
+    "tests/integration/execution/test_gate_decisions.py::test_run_ending_and_consumption_roll_back_together[sqlite-True-pipeline.after_consumption]",
+    "tests/integration/execution/test_gate_decisions.py::test_run_ending_and_consumption_roll_back_together[sqlite-True-pipeline.before_consumption]",
+    "tests/integration/execution/test_gate_decisions.py::test_task_consumes_its_claim_snapshot_after_upstream_repairs[postgresql]",
+    "tests/integration/execution/test_gate_decisions.py::test_task_consumes_its_claim_snapshot_after_upstream_repairs[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_backfill_does_not_take_over_a_scheduled_run[postgresql]",
+    "tests/integration/execution/test_interventions.py::test_a_backfill_does_not_take_over_a_scheduled_run[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_backfill_stops_when_another_run_starts_between_dates[postgresql]",
+    "tests/integration/execution/test_interventions.py::test_a_backfill_stops_when_another_run_starts_between_dates[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_plain_run_does_not_take_over_a_backfills_run[postgresql]",
+    "tests/integration/execution/test_interventions.py::test_a_plain_run_does_not_take_over_a_backfills_run[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_rerun_of_a_task_still_running_leaves_its_ended_run_alone[postgresql]",
+    "tests/integration/execution/test_interventions.py::test_a_rerun_of_a_task_still_running_leaves_its_ended_run_alone[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_a_run_paused_while_it_runs_stops_starting_tasks_and_goes_on_once_resumed[postgresql]",
+    "tests/integration/execution/test_interventions.py::test_a_run_paused_while_it_runs_stops_starting_tasks_and_goes_on_once_resumed[sqlite]",
+    "tests/integration/execution/test_interventions.py::test_cancel_stops_a_running_run[postgresql]",
+    "tests/integration/execution/test_interventions.py::test_cancel_stops_a_running_run[sqlite]",
+    "tests/integration/execution/test_leases.py::test_child_sigkill_is_failed_by_live_parent[postgresql]",
+    "tests/integration/execution/test_leases.py::test_child_sigkill_is_failed_by_live_parent[sqlite]",
+    "tests/integration/execution/test_leases.py::test_concurrent_reconciliation_waits_for_verified_child_to_stop[postgresql]",
+    "tests/integration/execution/test_leases.py::test_concurrent_reconciliation_waits_for_verified_child_to_stop[sqlite]",
+    "tests/integration/execution/test_leases.py::test_expired_owner_cannot_finish_or_renew_before_reconciliation[postgresql]",
+    "tests/integration/execution/test_leases.py::test_expired_owner_cannot_finish_or_renew_before_reconciliation[sqlite]",
+    "tests/integration/execution/test_leases.py::test_parent_sigkill_reconciles_and_retries_real_child[postgresql]",
+    "tests/integration/execution/test_leases.py::test_parent_sigkill_reconciles_and_retries_real_child[sqlite]",
+    "tests/integration/execution/test_leases.py::test_reconciliation_fences_dead_owner_and_retry[postgresql]",
+    "tests/integration/execution/test_leases.py::test_reconciliation_fences_dead_owner_and_retry[sqlite]",
+    "tests/integration/overseer/test_server.py::test_killed_server_reconciles_before_retrying_exact_task_run[postgresql]",
+    "tests/integration/overseer/test_server.py::test_killed_server_reconciles_before_retrying_exact_task_run[sqlite]"
+  ],
+  "started_at": "2026-10-10T09:49:53+00:00",
+  "finished_at": "2026-10-10T09:53:33+00:00",
+  "exit_status": 0,
+  "counts": {
+    "passed": 99,
+    "skipped": 0,
+    "xfailed": 0,
+    "xpassed": 0,
+    "failed": 0,
+    "error": 0
+  },
+  "tests": [
+    {
+      "nodeid": "tests/integration/engine/test_transitions.py::test_cancelled_attempt_cannot_overwrite_an_operator_mark[postgresql]",
+      "outcome": "passed",
+      "duration": 0.305
+    },
+    {
+      "nodeid": "tests/integration/engine/test_transitions.py::test_cancelled_attempt_cannot_overwrite_an_operator_mark[sqlite]",
+      "outcome": "passed",
+      "duration": 0.046
+    },
+    {
+      "nodeid": "tests/integration/engine/test_transitions.py::test_operator_cancel_refuses_a_run_that_finished_after_its_read[postgresql]",
+      "outcome": "passed",
+      "duration": 0.269
+    },
+    {
+      "nodeid": "tests/integration/engine/test_transitions.py::test_operator_cancel_refuses_a_run_that_finished_after_its_read[sqlite]",
+      "outcome": "passed",
+      "duration": 0.036
+    },
+    {
+      "nodeid": "tests/integration/engine/test_transitions.py::test_operator_mark_refuses_an_attempt_admitted_after_its_read[postgresql]",
+      "outcome": "passed",
+      "duration": 0.336
+    },
+    {
+      "nodeid": "tests/integration/engine/test_transitions.py::test_operator_mark_refuses_an_attempt_admitted_after_its_read[sqlite]",
+      "outcome": "passed",
+      "duration": 0.039
+    },
+    {
+      "nodeid": "tests/integration/engine/test_transitions.py::test_stale_attempt_cannot_advance_its_offset[postgresql]",
+      "outcome": "passed",
+      "duration": 0.243
+    },
+    {
+      "nodeid": "tests/integration/engine/test_transitions.py::test_stale_attempt_cannot_advance_its_offset[sqlite]",
+      "outcome": "passed",
+      "duration": 0.036
+    },
+    {
+      "nodeid": "tests/integration/execution/test_admission.py::test_simultaneous_initializers_leave_one_active_run[postgresql]",
+      "outcome": "passed",
+      "duration": 0.264
+    },
+    {
+      "nodeid": "tests/integration/execution/test_admission.py::test_simultaneous_initializers_leave_one_active_run[sqlite]",
+      "outcome": "passed",
+      "duration": 0.047
+    },
+    {
+      "nodeid": "tests/integration/execution/test_chaos.py::test_duplicate_task_delivery_executes_one_attempt[postgresql-False]",
+      "outcome": "passed",
+      "duration": 3.513
+    },
+    {
+      "nodeid": "tests/integration/execution/test_chaos.py::test_duplicate_task_delivery_executes_one_attempt[postgresql-True]",
+      "outcome": "passed",
+      "duration": 3.557
+    },
+    {
+      "nodeid": "tests/integration/execution/test_chaos.py::test_duplicate_task_delivery_executes_one_attempt[sqlite-False]",
+      "outcome": "passed",
+      "duration": 2.741
+    },
+    {
+      "nodeid": "tests/integration/execution/test_chaos.py::test_duplicate_task_delivery_executes_one_attempt[sqlite-True]",
+      "outcome": "passed",
+      "duration": 2.721
+    },
+    {
+      "nodeid": "tests/integration/execution/test_chaos.py::test_late_remote_finalize_leaves_the_newer_run_untouched[postgresql]",
+      "outcome": "passed",
+      "duration": 4.011
+    },
+    {
+      "nodeid": "tests/integration/execution/test_chaos.py::test_late_remote_finalize_leaves_the_newer_run_untouched[sqlite]",
+      "outcome": "passed",
+      "duration": 3.109
+    },
+    {
+      "nodeid": "tests/integration/execution/test_chaos.py::test_parent_hard_exit_at_startup_reconciles_before_retry[postgresql-pipeline.after_insert]",
+      "outcome": "passed",
+      "duration": 2.822
+    },
+    {
+      "nodeid": "tests/integration/execution/test_chaos.py::test_parent_hard_exit_at_startup_reconciles_before_retry[postgresql-runner.after_bind]",
+      "outcome": "passed",
+      "duration": 2.702
+    },
+    {
+      "nodeid": "tests/integration/execution/test_chaos.py::test_parent_hard_exit_at_startup_reconciles_before_retry[postgresql-runner.after_timeout]",
+      "outcome": "passed",
+      "duration": 2.663
+    },
+    {
+      "nodeid": "tests/integration/execution/test_chaos.py::test_parent_hard_exit_at_startup_reconciles_before_retry[postgresql-supervisor.after_mkdir]",
+      "outcome": "passed",
+      "duration": 2.721
+    },
+    {
+      "nodeid": "tests/integration/execution/test_chaos.py::test_parent_hard_exit_at_startup_reconciles_before_retry[postgresql-supervisor.after_popen]",
+      "outcome": "passed",
+      "duration": 2.649
+    },
+    {
+      "nodeid": "tests/integration/execution/test_chaos.py::test_parent_hard_exit_at_startup_reconciles_before_retry[sqlite-pipeline.after_insert]",
+      "outcome": "passed",
+      "duration": 2.202
+    },
+    {
+      "nodeid": "tests/integration/execution/test_chaos.py::test_parent_hard_exit_at_startup_reconciles_before_retry[sqlite-runner.after_bind]",
+      "outcome": "passed",
+      "duration": 2.174
+    },
+    {
+      "nodeid": "tests/integration/execution/test_chaos.py::test_parent_hard_exit_at_startup_reconciles_before_retry[sqlite-runner.after_timeout]",
+      "outcome": "passed",
+      "duration": 2.126
+    },
+    {
+      "nodeid": "tests/integration/execution/test_chaos.py::test_parent_hard_exit_at_startup_reconciles_before_retry[sqlite-supervisor.after_mkdir]",
+      "outcome": "passed",
+      "duration": 2.178
+    },
+    {
+      "nodeid": "tests/integration/execution/test_chaos.py::test_parent_hard_exit_at_startup_reconciles_before_retry[sqlite-supervisor.after_popen]",
+      "outcome": "passed",
+      "duration": 2.184
+    },
+    {
+      "nodeid": "tests/integration/execution/test_chaos.py::test_postgres_outage_fences_the_supervisor_and_recovers[postgresql]",
+      "outcome": "passed",
+      "duration": 7.283
+    },
+    {
+      "nodeid": "tests/integration/execution/test_chaos.py::test_three_pipeline_callers_waiting_on_a_repair_admit_one_supervisor[postgresql]",
+      "outcome": "passed",
+      "duration": 1.681
+    },
+    {
+      "nodeid": "tests/integration/execution/test_chaos.py::test_three_pipeline_callers_waiting_on_a_repair_admit_one_supervisor[sqlite]",
+      "outcome": "passed",
+      "duration": 1.247
+    },
+    {
+      "nodeid": "tests/integration/execution/test_cli_lifecycle.py::test_a_child_failure_after_recording_success_keeps_the_recorded_outcome[postgresql-:kill]",
+      "outcome": "passed",
+      "duration": 1.835
+    },
+    {
+      "nodeid": "tests/integration/execution/test_cli_lifecycle.py::test_a_child_failure_after_recording_success_keeps_the_recorded_outcome[postgresql-]",
+      "outcome": "passed",
+      "duration": 1.847
+    },
+    {
+      "nodeid": "tests/integration/execution/test_cli_lifecycle.py::test_a_child_failure_after_recording_success_keeps_the_recorded_outcome[sqlite-:kill]",
+      "outcome": "passed",
+      "duration": 1.296
+    },
+    {
+      "nodeid": "tests/integration/execution/test_cli_lifecycle.py::test_a_child_failure_after_recording_success_keeps_the_recorded_outcome[sqlite-]",
+      "outcome": "passed",
+      "duration": 1.456
+    },
+    {
+      "nodeid": "tests/integration/execution/test_cli_lifecycle.py::test_a_fault_after_binding_records_failure_and_allows_retry[postgresql-runner.after_bind]",
+      "outcome": "passed",
+      "duration": 2.899
+    },
+    {
+      "nodeid": "tests/integration/execution/test_cli_lifecycle.py::test_a_fault_after_binding_records_failure_and_allows_retry[postgresql-supervisor.after_mkdir]",
+      "outcome": "passed",
+      "duration": 2.695
+    },
+    {
+      "nodeid": "tests/integration/execution/test_cli_lifecycle.py::test_a_fault_after_binding_records_failure_and_allows_retry[postgresql-supervisor.after_popen]",
+      "outcome": "passed",
+      "duration": 2.853
+    },
+    {
+      "nodeid": "tests/integration/execution/test_cli_lifecycle.py::test_a_fault_after_binding_records_failure_and_allows_retry[sqlite-runner.after_bind]",
+      "outcome": "passed",
+      "duration": 2.174
+    },
+    {
+      "nodeid": "tests/integration/execution/test_cli_lifecycle.py::test_a_fault_after_binding_records_failure_and_allows_retry[sqlite-supervisor.after_mkdir]",
+      "outcome": "passed",
+      "duration": 2.173
+    },
+    {
+      "nodeid": "tests/integration/execution/test_cli_lifecycle.py::test_a_fault_after_binding_records_failure_and_allows_retry[sqlite-supervisor.after_popen]",
+      "outcome": "passed",
+      "duration": 2.123
+    },
+    {
+      "nodeid": "tests/integration/execution/test_explicit_runs.py::test_clearing_an_older_dag_run_keeps_its_key_and_date[postgresql-False]",
+      "outcome": "passed",
+      "duration": 7.486
+    },
+    {
+      "nodeid": "tests/integration/execution/test_explicit_runs.py::test_clearing_an_older_dag_run_keeps_its_key_and_date[postgresql-True]",
+      "outcome": "passed",
+      "duration": 7.902
+    },
+    {
+      "nodeid": "tests/integration/execution/test_explicit_runs.py::test_clearing_an_older_dag_run_keeps_its_key_and_date[sqlite-False]",
+      "outcome": "passed",
+      "duration": 5.903
+    },
+    {
+      "nodeid": "tests/integration/execution/test_explicit_runs.py::test_clearing_an_older_dag_run_keeps_its_key_and_date[sqlite-True]",
+      "outcome": "passed",
+      "duration": 6.567
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_a_child_crashing_after_commit_keeps_the_complete_success[postgresql]",
+      "outcome": "passed",
+      "duration": 2.352
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_a_child_crashing_after_commit_keeps_the_complete_success[sqlite]",
+      "outcome": "passed",
+      "duration": 1.661
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[postgresql-False-attempt.after_consumption]",
+      "outcome": "passed",
+      "duration": 3.266
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[postgresql-False-attempt.after_status]",
+      "outcome": "passed",
+      "duration": 3.25
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[postgresql-False-attempt.before_summary]",
+      "outcome": "passed",
+      "duration": 3.288
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[postgresql-False-runner.before_consumption]",
+      "outcome": "passed",
+      "duration": 3.213
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[postgresql-False-script.after_offset]",
+      "outcome": "passed",
+      "duration": 3.171
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[postgresql-True-attempt.after_consumption]",
+      "outcome": "passed",
+      "duration": 3.215
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[postgresql-True-attempt.after_status]",
+      "outcome": "passed",
+      "duration": 3.313
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[postgresql-True-attempt.before_summary]",
+      "outcome": "passed",
+      "duration": 3.229
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[postgresql-True-runner.before_consumption]",
+      "outcome": "passed",
+      "duration": 3.17
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[postgresql-True-script.after_offset]",
+      "outcome": "passed",
+      "duration": 3.257
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[sqlite-False-attempt.after_consumption]",
+      "outcome": "passed",
+      "duration": 2.494
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[sqlite-False-attempt.after_status]",
+      "outcome": "passed",
+      "duration": 2.385
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[sqlite-False-attempt.before_summary]",
+      "outcome": "passed",
+      "duration": 2.589
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[sqlite-False-runner.before_consumption]",
+      "outcome": "passed",
+      "duration": 2.435
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[sqlite-False-script.after_offset]",
+      "outcome": "passed",
+      "duration": 2.487
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[sqlite-True-attempt.after_consumption]",
+      "outcome": "passed",
+      "duration": 2.433
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[sqlite-True-attempt.after_status]",
+      "outcome": "passed",
+      "duration": 2.432
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[sqlite-True-attempt.before_summary]",
+      "outcome": "passed",
+      "duration": 2.434
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[sqlite-True-runner.before_consumption]",
+      "outcome": "passed",
+      "duration": 2.436
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_attempt_success_offset_and_consumption_roll_back_together[sqlite-True-script.after_offset]",
+      "outcome": "passed",
+      "duration": 2.486
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_run_ending_and_consumption_roll_back_together[postgresql-False-pipeline.after_consumption]",
+      "outcome": "passed",
+      "duration": 2.393
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_run_ending_and_consumption_roll_back_together[postgresql-False-pipeline.before_consumption]",
+      "outcome": "passed",
+      "duration": 2.414
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_run_ending_and_consumption_roll_back_together[postgresql-True-pipeline.after_consumption]",
+      "outcome": "passed",
+      "duration": 2.509
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_run_ending_and_consumption_roll_back_together[postgresql-True-pipeline.before_consumption]",
+      "outcome": "passed",
+      "duration": 2.45
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_run_ending_and_consumption_roll_back_together[sqlite-False-pipeline.after_consumption]",
+      "outcome": "passed",
+      "duration": 1.719
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_run_ending_and_consumption_roll_back_together[sqlite-False-pipeline.before_consumption]",
+      "outcome": "passed",
+      "duration": 1.875
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_run_ending_and_consumption_roll_back_together[sqlite-True-pipeline.after_consumption]",
+      "outcome": "passed",
+      "duration": 1.666
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_run_ending_and_consumption_roll_back_together[sqlite-True-pipeline.before_consumption]",
+      "outcome": "passed",
+      "duration": 1.667
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_task_consumes_its_claim_snapshot_after_upstream_repairs[postgresql]",
+      "outcome": "passed",
+      "duration": 1.847
+    },
+    {
+      "nodeid": "tests/integration/execution/test_gate_decisions.py::test_task_consumes_its_claim_snapshot_after_upstream_repairs[sqlite]",
+      "outcome": "passed",
+      "duration": 1.251
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_backfill_does_not_take_over_a_scheduled_run[postgresql]",
+      "outcome": "passed",
+      "duration": 0.256
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_backfill_does_not_take_over_a_scheduled_run[sqlite]",
+      "outcome": "passed",
+      "duration": 0.038
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_backfill_stops_when_another_run_starts_between_dates[postgresql]",
+      "outcome": "passed",
+      "duration": 1.157
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_backfill_stops_when_another_run_starts_between_dates[sqlite]",
+      "outcome": "passed",
+      "duration": 0.685
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_plain_run_does_not_take_over_a_backfills_run[postgresql]",
+      "outcome": "passed",
+      "duration": 0.247
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_plain_run_does_not_take_over_a_backfills_run[sqlite]",
+      "outcome": "passed",
+      "duration": 0.041
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_rerun_of_a_task_still_running_leaves_its_ended_run_alone[postgresql]",
+      "outcome": "passed",
+      "duration": 1.295
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_rerun_of_a_task_still_running_leaves_its_ended_run_alone[sqlite]",
+      "outcome": "passed",
+      "duration": 0.81
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_run_paused_while_it_runs_stops_starting_tasks_and_goes_on_once_resumed[postgresql]",
+      "outcome": "passed",
+      "duration": 3.226
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_a_run_paused_while_it_runs_stops_starting_tasks_and_goes_on_once_resumed[sqlite]",
+      "outcome": "passed",
+      "duration": 2.611
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_cancel_stops_a_running_run[postgresql]",
+      "outcome": "passed",
+      "duration": 0.613
+    },
+    {
+      "nodeid": "tests/integration/execution/test_interventions.py::test_cancel_stops_a_running_run[sqlite]",
+      "outcome": "passed",
+      "duration": 0.36
+    },
+    {
+      "nodeid": "tests/integration/execution/test_leases.py::test_child_sigkill_is_failed_by_live_parent[postgresql]",
+      "outcome": "passed",
+      "duration": 3.236
+    },
+    {
+      "nodeid": "tests/integration/execution/test_leases.py::test_child_sigkill_is_failed_by_live_parent[sqlite]",
+      "outcome": "passed",
+      "duration": 2.6
+    },
+    {
+      "nodeid": "tests/integration/execution/test_leases.py::test_concurrent_reconciliation_waits_for_verified_child_to_stop[postgresql]",
+      "outcome": "passed",
+      "duration": 0.371
+    },
+    {
+      "nodeid": "tests/integration/execution/test_leases.py::test_concurrent_reconciliation_waits_for_verified_child_to_stop[sqlite]",
+      "outcome": "passed",
+      "duration": 0.149
+    },
+    {
+      "nodeid": "tests/integration/execution/test_leases.py::test_expired_owner_cannot_finish_or_renew_before_reconciliation[postgresql]",
+      "outcome": "passed",
+      "duration": 0.258
+    },
+    {
+      "nodeid": "tests/integration/execution/test_leases.py::test_expired_owner_cannot_finish_or_renew_before_reconciliation[sqlite]",
+      "outcome": "passed",
+      "duration": 0.038
+    },
+    {
+      "nodeid": "tests/integration/execution/test_leases.py::test_parent_sigkill_reconciles_and_retries_real_child[postgresql]",
+      "outcome": "passed",
+      "duration": 3.027
+    },
+    {
+      "nodeid": "tests/integration/execution/test_leases.py::test_parent_sigkill_reconciles_and_retries_real_child[sqlite]",
+      "outcome": "passed",
+      "duration": 2.252
+    },
+    {
+      "nodeid": "tests/integration/execution/test_leases.py::test_reconciliation_fences_dead_owner_and_retry[postgresql]",
+      "outcome": "passed",
+      "duration": 0.269
+    },
+    {
+      "nodeid": "tests/integration/execution/test_leases.py::test_reconciliation_fences_dead_owner_and_retry[sqlite]",
+      "outcome": "passed",
+      "duration": 0.044
+    },
+    {
+      "nodeid": "tests/integration/overseer/test_server.py::test_killed_server_reconciles_before_retrying_exact_task_run[postgresql]",
+      "outcome": "passed",
+      "duration": 5.813
+    },
+    {
+      "nodeid": "tests/integration/overseer/test_server.py::test_killed_server_reconciles_before_retrying_exact_task_run[sqlite]",
+      "outcome": "passed",
+      "duration": 3.959
+    }
+  ]
+}
