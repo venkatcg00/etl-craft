@@ -58,8 +58,30 @@ class CliProcess:
             return self.process.wait(timeout=timeout)
         except subprocess.TimeoutExpired as error:
             raise AssertionError(
-                f"CLI pid {self.process.pid} timed out; output:\n{self.output}"
+                f"CLI pid {self.process.pid} timed out; output:\n{self.output}\n{self.diagnosis()}"
             ) from error
+
+    def diagnosis(self):
+        """The command's process tree and the end of each attempt log, for a timeout's message."""
+        import psutil
+
+        lines = ["process tree:"]
+        try:
+            root = psutil.Process(self.process.pid)
+            project = Path(root.cwd())
+            tree = [root, *root.children(recursive=True)]
+        except psutil.Error as error:
+            return f"process tree unavailable: {error}"
+        for proc in tree:
+            try:
+                group = os.getpgid(proc.pid)
+                lines.append(f"  pid {proc.pid} pgid {group} {proc.status()}: {proc.cmdline()}")
+            except (psutil.Error, OSError) as error:
+                lines.append(f"  pid {proc.pid}: {error}")
+        for log in sorted(project.glob("logs/**/*.log")):
+            tail = log.read_text(errors="replace")[-2000:]
+            lines.append(f"--- {log.relative_to(project)} (last 2000 characters):\n{tail}")
+        return "\n".join(lines)
 
     def descendants(self):
         """Remember descendant birth times so cleanup cannot signal a reused pid."""

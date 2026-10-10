@@ -8,6 +8,11 @@ All notable changes are recorded here. The format follows
 
 ### Fixed
 
+- `etl-craft run` acts on Ctrl-C, `SIGTERM` and `SIGHUP` at its next safe point between Engine DB
+  transactions, or at once while it waits. A signal that landed inside a transaction's cleanup
+  could return a SQLite connection to the pool with its write lock held, so stopping the run's
+  tasks waited out the 60-second busy timeout. A second signal still stops the command at once.
+
 - `lineage`, `generate-docs` and other column-lineage readers work with sqlglot 30.22, whose
   `lineage()` requires a schema argument; etl-craft passes an empty one, as before. The lock
   file moves to sqlglot 30.22.0.

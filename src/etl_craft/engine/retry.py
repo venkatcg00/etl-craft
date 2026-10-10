@@ -8,11 +8,12 @@ last attempt's error, is raised as it is.
 from __future__ import annotations
 
 import logging
-import time
 from collections.abc import Callable, Sequence
 from typing import TypeVar
 
 from sqlalchemy.exc import InterfaceError, OperationalError
+
+from etl_craft.core import interrupts
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ def retrying(
     call: Callable[[], T],
     *,
     delays: Sequence[float] = RETRY_DELAYS_SECONDS,
-    sleep: Callable[[float], None] = time.sleep,
+    sleep: Callable[[float], None] = interrupts.sleep,
 ) -> T:
     """Return ``call()``, retrying after each delay while the database can't be reached.
 
