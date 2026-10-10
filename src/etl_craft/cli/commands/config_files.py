@@ -24,13 +24,22 @@ def _directory(parser: argparse.ArgumentParser) -> None:
 
 def _configure(parser: argparse.ArgumentParser) -> None:
     verbs = parser.add_subparsers(dest="config_verb", required=True)
+    # Without abbreviations, --config after a verb is refused rather than read as --config-dir.
     _directory(
         verbs.add_parser(
-            "plan", help="show what apply would change and validate it, changing nothing"
+            "plan",
+            help="show what apply would change and validate it, changing nothing",
+            allow_abbrev=False,
         )
     )
-    _directory(verbs.add_parser("apply", help="make the CFG_ tables match the config files"))
-    export = verbs.add_parser("export", help="write the active CFG_ rows as config files")
+    _directory(
+        verbs.add_parser(
+            "apply", help="make the CFG_ tables match the config files", allow_abbrev=False
+        )
+    )
+    export = verbs.add_parser(
+        "export", help="write the CFG_ rows as config files", allow_abbrev=False
+    )
     _directory(export)
     export.add_argument(
         "--force", action="store_true", help="overwrite config files that already exist"

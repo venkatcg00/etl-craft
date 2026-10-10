@@ -4,7 +4,8 @@ from datetime import date
 
 import pytest
 
-from etl_craft.core.errors import MetadataFileError
+from etl_craft.cli import main
+from etl_craft.core.errors import ExitCode, MetadataFileError
 from etl_craft.engine.repository.config_rows import TABLES
 from etl_craft.services.config_files import cell, read_config_files
 
@@ -199,3 +200,11 @@ def test_every_file_holds_its_table_with_active_flag_last():
 )
 def test_values_are_written_as_the_files_hold_them(value, written):
     assert cell(value) == written
+
+
+@pytest.mark.parametrize("verb", ["plan", "apply", "export"])
+def test_the_config_option_after_a_verb_is_refused_not_taken_for_the_folder(verb, capsys):
+    with pytest.raises(SystemExit) as stopped:
+        main(["config", verb, "--config", "elsewhere/craft-connector.yml"])
+    assert stopped.value.code == ExitCode.USAGE
+    assert "unrecognized arguments: --config" in capsys.readouterr().err
