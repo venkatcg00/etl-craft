@@ -58,6 +58,28 @@ PostgreSQL, after the evidence check passes. It runs on release branches or manu
 keeping repeated stress checks out of pull-request CI. Each iteration uploads its JUnit results;
 any failure stops that dialect's job.
 
+## The soak
+
+Release 0.4's gate runs the demo for seven days under `etl-craft server`, with no cron or
+Airflow, while the server is killed with SIGKILL at random times. `scripts/soak.py` prepares and
+runs it against a built wheel:
+
+```bash
+python scripts/soak.py setup ~/etl-craft-soak/0.4.0 --wheel dist/etl_craft-0.4.0-py3-none-any.whl
+~/etl-craft-soak/0.4.0/venv/bin/python scripts/soak.py run ~/etl-craft-soak/0.4.0 --days 7
+~/etl-craft-soak/0.4.0/venv/bin/python scripts/soak.py check ~/etl-craft-soak/0.4.0
+```
+
+`setup` installs the wheel into its own environment, copies `examples/demo`, and schedules
+`CLIENT_ALPHA`, `CLIENT_BETA` and `SUPPORT_DM` every 15 minutes. `run` kills the server every 20
+to 180 minutes, starts it again, and appends a check to `report.jsonl` every half hour; started
+again after an interruption, it continues until the same end. Run it where it outlives your
+session, for example `systemd-run --user --unit etl-craft-soak -- systemd-inhibit --what=sleep
+...`. The final check, in `soak-result.json`, passes when every due tick has exactly one run, no
+run stays unfinished or fails unexpectedly, no task run succeeds twice, every append target holds
+exactly the rows each task run inserted, and `etl-craft explain` answers for every task state the
+soak reached. Mailpit (`make services-up`) receives the demo's alerts.
+
 ## Checking the gate
 
 ```bash
