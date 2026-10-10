@@ -27,9 +27,6 @@ jobs:
     name: newest dependencies
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    env:
-      ETL_CRAFT_REQUIRE_SERVICES: "1"
-      ETL_CRAFT_E2E_WAREHOUSE: duckdb
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
@@ -40,17 +37,26 @@ jobs:
           uv export --all-groups --no-hashes --no-emit-project > "$RUNNER_TEMP/newest.txt"
       - name: Releases newer than uv.lock
         run: diff "$RUNNER_TEMP/locked.txt" "$RUNNER_TEMP/newest.txt" || true
+      # The unit tests include checks that a missing service is skipped, so they run without
+      # ETL_CRAFT_REQUIRE_SERVICES; the service steps set it.
       - name: Unit tests
         run: uv run pytest -q -m unit
       - name: Start the local services
         run: make services-up
       - name: Engine DB tests on SQLite and PostgreSQL
+        env:
+          ETL_CRAFT_REQUIRE_SERVICES: "1"
         run: uv run pytest -q -m "engine_sqlite or engine_postgres"
       - name: Warehouse tests on every local warehouse
+        env:
+          ETL_CRAFT_REQUIRE_SERVICES: "1"
         run: >-
           uv run pytest -q -m "warehouse_postgres or warehouse_duckdb or
           warehouse_duckdb_iceberg or warehouse_trino_iceberg"
       - name: The demo from the wheel, installed with pip and with uv
+        env:
+          ETL_CRAFT_REQUIRE_SERVICES: "1"
+          ETL_CRAFT_E2E_WAREHOUSE: duckdb
         run: |
           uv build --wheel --out-dir dist
           export ETL_CRAFT_TEST_WHEEL="$(ls "$PWD"/dist/*.whl)"
