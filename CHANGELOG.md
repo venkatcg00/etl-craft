@@ -53,6 +53,9 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- Run-condition and self-dependency errors name the task by its code, such as `task publish
+  requires 5 satisfied dependencies but only has 2`, rather than by its id.
+
 - `ConnectorConfig.engine`, `.warehouse` and `.email` hold the selected profile itself; the
   `ConnectionSection` and `EmailConfig` wrappers and their `.active` and `.active_profile` are
   removed. Python callers read `config.engine.schema` and `config.engine.name` directly.

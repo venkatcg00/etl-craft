@@ -1,0 +1,13 @@
+PIPELINE_CODE,TASK_CODE,BUSINESS_RULE_NAME,SEQUENCE_NUMBER,BUSINESS_RULE_TYPE,BUSINESS_RULE_KEY_COLUMN,TARGET_TABLE,BUSINESS_RULE_SQL,ACTIVE_FLAG
+SALES_DAILY,check_orders,closed customer,1,REJECT,ROW_ID,sales.orders_uk,SELECT 1 FROM sales.customers c WHERE c.customer_id = t.customer_id AND c.status = 'closed',Y
+SALES_DAILY,check_orders,large order this run,2,REJECT,ROW_ID,sales.orders_uk,SELECT 1 FROM sales.customers c WHERE c.customer_id = t.customer_id AND t.amount > c.credit_limit AND t.PIPELINE_RUN_ID = :pipeline_run_id,Y
+SALES_DAILY,check_orders,missing amount,1,INCOMPLETE,ROW_ID,sales.orders_uk,SELECT 1 FROM sales.customers c WHERE c.customer_id = t.customer_id AND t.amount IS NULL,Y
+SALES_DAILY,check_orders,test customer,1,REPORT,ROW_ID,sales.orders_uk,SELECT 1 FROM sales.customers c WHERE c.customer_id = t.customer_id AND c.name LIKE 'TEST%',Y
+SALES_DAILY_EU,check_orders,closed customer,1,REJECT,ROW_ID,sales.orders_eu,SELECT 1 FROM sales.customers c WHERE c.customer_id = t.customer_id AND c.status = 'closed',Y
+SALES_DAILY_EU,check_orders,large order this run,2,REPORT,ROW_ID,sales.orders_eu,SELECT 1 FROM sales.customers c WHERE c.customer_id = t.customer_id AND t.amount > c.credit_limit AND t.PIPELINE_RUN_ID = :pipeline_run_id,Y
+SALES_DAILY_EU,check_orders,missing amount,1,INCOMPLETE,ROW_ID,sales.orders_eu,SELECT 1 FROM sales.customers c WHERE c.customer_id = t.customer_id AND t.amount IS NULL,Y
+SALES_DAILY_EU,check_orders,test customer,1,REPORT,ROW_ID,sales.orders_eu,SELECT 1 FROM sales.customers c WHERE c.customer_id = t.customer_id AND c.name LIKE 'TEST%',Y
+SALES_DAILY_US,check_orders,closed customer,1,REJECT,ROW_ID,sales.orders_us,SELECT 1 FROM sales.customers c WHERE c.customer_id = t.customer_id AND c.status = 'closed',N
+SALES_DAILY_US,check_orders,large order this run,2,REPORT,ROW_ID,sales.orders_us,SELECT 1 FROM sales.customers c WHERE c.customer_id = t.customer_id AND t.amount > c.credit_limit AND t.PIPELINE_RUN_ID = :pipeline_run_id,N
+SALES_DAILY_US,check_orders,missing amount,1,INCOMPLETE,ROW_ID,sales.orders_us,SELECT 1 FROM sales.customers c WHERE c.customer_id = t.customer_id AND t.amount IS NULL,N
+SALES_DAILY_US,check_orders,test customer,1,REPORT,ROW_ID,sales.orders_us,SELECT 1 FROM sales.customers c WHERE c.customer_id = t.customer_id AND c.name LIKE 'TEST%',N

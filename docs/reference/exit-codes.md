@@ -32,3 +32,4 @@ error class has its own status; every error etl-craft raises on purpose belongs 
 | `22` | `INCOMPLETE` | The run was left unfinished, including a pause during a run, an interrupted backfill or work owned by another process. `--init-only` deliberately initializes a run and retains exit 0. |
 | `23` | `WAITING` | A single-task run recorded nothing because its dependencies are not met yet. Run it again once the upstreams satisfy its condition. |
 | `24` | `RESOURCE_NOT_FOUND` | An exact execution resource or attempt log is unavailable. |
+| `25` | `METADATA_FILE` | A file in the project's `config/` folder cannot be read, or its rows cannot be loaded; the message names the file, line, column and value. |

@@ -48,7 +48,7 @@ Each package imports only the packages below it. `lint-imports` enforces this.
 | `cli` | argparse commands, output, exit codes |
 | `api` | optional FastAPI routes, bearer authorization and HTTP server lifecycle |
 | `overseer` | leadership, active-run working set, local supervision and shutdown |
-| `services` | actor-scoped operations, doctor, setup, validate, cloning, DAG YAML, lineage, docs site |
+| `services` | actor-scoped operations, doctor, setup, validate, config files, cloning, DAG YAML, lineage, docs site |
 | `execution` | task runner, process supervisor, ready-task scheduler, run lifecycle, cross-pipeline gates |
 | `handlers` | SQL actions, business rules, Python ingestion scripts, email alerts |
 | `engine` / `warehouse` | Engine DB access and warehouse access (siblings, independent) |
@@ -88,14 +88,17 @@ Each package imports only the packages below it. `lint-imports` enforces this.
   imported by engine code; DuckDB's, the default local warehouse, is the one core dependency.
 - `craft-connector.yml` is written by the team and only read by the engine. Secrets are always
   variable names, never values. Its directory is the project directory (`etl-craft/`), holding
-  `sql_files/`, `ingestion_scripts/`, `migrations/` and `logs/`; relative paths start there.
+  `sql_files/`, `ingestion_scripts/`, `config/`, `migrations/` and `logs/`; relative paths start
+  there.
 - A failure is not always bad. When metadata, files, connections or data are not what the
   engine expects, fail rather than guess or work around it, and make the failure easy to debug:
   name the exact object, the value found, what was expected and the remedy, and record it in the
   audit tables and the attempt's log.
 
 - Every write to the Engine DB goes through etl-craft and names its actor; the Engine DB
-  refuses any other. Metadata edits use project migrations; audit history is append-only.
+  refuses any other. Metadata edits use the project's config files (`config/`, one CSV file per
+  `CFG_` table, merged by key with `etl-craft config apply`) or project migrations; audit
+  history is append-only and audit tables take no outside writes.
 
 ## Conventions
 

@@ -125,10 +125,11 @@ environment sets those names to its own values. When one shell or `.env` file ha
 several tiers at once, a profile-specific name (`WAREHOUSE_PROD_SECRET`) is used over the plain
 one for that profile.
 
-## Configuration uploads
+## Pipelines
 
-`migrations/` holds example project migrations that upload pipelines into the Engine DB: a new
-pipeline, a pipeline that waits on another, copies of a pipeline, changes in place, a step added
-between two others, and retiring rows. [Uploading configuration](../guides/uploading-configuration.md)
-explains each one. `tests/integration/engine/test_config_upload_examples.py` applies them in
-order on SQLite and PostgreSQL and validates the result after each.
+`config/` holds [configuration files](../guides/configuration-files.md) for an example sales
+project, one CSV file per `CFG_` table: copy the folder into your project and change the rows.
+`migrations/` holds the same configuration written as
+[configuration migrations](../guides/configuration-migrations.md), one file per kind of change.
+`config/` is exactly what `etl-craft config export` writes once the migrations are applied, and
+the tests check both on SQLite and PostgreSQL.

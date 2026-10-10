@@ -34,6 +34,7 @@ MUTATING_COMMANDS = frozenset(
         "pause",
         "resume",
         "migrate",
+        "config apply",
         "setup",
         "init-db",
         "clone",

@@ -1,9 +1,14 @@
-# Uploading configuration
+# Configuration migrations
 
-Pipelines, tasks, parameters, dependencies and business rules are rows in the Engine DB's `CFG_`
-tables. A team uploads them as a project migration: a SQL file in the project's `migrations/`
-folder, which `etl-craft migrate` applies once. This page is the template for every kind of
-upload. Each example below is a file in
+[Configuration files](configuration-files.md) are the usual way to keep pipelines in the Engine
+DB. A project migration writes the same `CFG_` rows with SQL instead: a file in the project's
+`migrations/` folder, which `etl-craft migrate` applies once. Use migrations when a change is
+easier to say in SQL than in rows, such as copying a pipeline for a list of regions, and for
+the project's own tables. Keep a `CFG_` table in one place: `etl-craft config apply` retires
+active rows its files do not hold, so a project that keeps configuration files adds rows there,
+not in migrations.
+
+Each example below is a file in
 [`docs/examples/migrations/`](https://github.com/venkatcg00/etl-craft/tree/main/docs/examples/migrations),
 and the test suite applies them in order on SQLite and PostgreSQL, running `validate` after each.
 
@@ -153,56 +158,7 @@ task under the same code, whose history starts afresh.
 --8<-- "docs/examples/migrations/0006_retire_and_reuse.sql"
 ```
 
-## Keeping metadata in CSV files
-
-etl-craft reads only migrations, so a team that keeps its metadata in CSV files or spreadsheets
-generates the migration from them. One file per table, with codes in place of ids, maps each row
-to one `VALUES` row of the matching statement in the examples:
-
-| File | Columns | Statement |
-|---|---|---|
-| `pipelines.csv` | `PIPELINE_CODE`, `PIPELINE_NAME`, `DESCRIPTION`, `REFRESH_TYPE`, `RUN_SCHEDULE`, `SCHEDULE_TIMEZONE`, `CATCHUP`, `MAX_CATCHUP_RUNS`, `OVERLAP_POLICY`, `SCHEDULE_START_DATE`, `SLA_IN_HOURS`, `PIPELINE_PARAMETERS` | pipelines, in `0001` |
-| `tasks.csv` | `PIPELINE_CODE`, `TASK_CODE`, `TASK_TYPE`, `HANDLER`, `RUN_CONDITION`, `RUN_CONDITION_COUNT` | tasks, in `0001` |
-| `task_parameters.csv` | `PIPELINE_CODE`, `TASK_CODE`, `PARAMETER_NAME`, `PARAMETER_VALUE` | task parameters, in `0001` |
-| `task_dependencies.csv` | `PIPELINE_CODE`, `TASK_CODE`, `DEPENDS_ON_PIPELINE_CODE`, `DEPENDS_ON_TASK_CODE`, `DEPENDENCY_TYPE` | task dependencies, in `0001` |
-| `pipeline_dependencies.csv` | `PIPELINE_CODE`, `DEPENDS_ON_PIPELINE_CODE`, `DEPENDENCY_TYPE`, `CONSUME_REPAIRS` | pipeline dependencies, in `0002` |
-| `business_rules.csv` | `PIPELINE_CODE`, `TASK_CODE`, `BUSINESS_RULE_NAME`, `SEQUENCE_NUMBER`, `BUSINESS_RULE_TYPE`, `BUSINESS_RULE_KEY_COLUMN`, `TARGET_TABLE`, `BUSINESS_RULE_SQL` | business rules, in `0001` |
-
-For example, these rows of `tasks.csv`:
-
-```text
-PIPELINE_CODE,TASK_CODE,TASK_TYPE,HANDLER,RUN_CONDITION,RUN_CONDITION_COUNT
-SALES_DAILY,fetch_orders,INGESTION,PYTHON,,
-SALES_DAILY,on_failure,ETL,EMAIL_ALERT,ANY,
-```
-
-become these rows of the tasks statement:
-
-```sql
-    ('SALES_DAILY', 'fetch_orders', 'INGESTION', 'PYTHON', NULL, NULL),
-    ('SALES_DAILY', 'on_failure', 'ETL', 'EMAIL_ALERT', 'ANY', NULL)
-```
-
-The generator:
-
-- writes the statements in the examples' order, and only for the files that have rows;
-- writes each cell as a SQL literal: an empty cell as `NULL`, text in single quotes with each
-  quote inside it doubled, numbers as they are;
-- writes a new numbered file for each upload, and never rewrites one already applied.
-
-The CSV files can hold either of two things:
-
-- **Changes.** Each upload's files hold only new rows, as `INSERT` statements; changes and
-  retirements are written by hand, as in [Changes in place](#changes-in-place) and
-  [Retiring rows](#retiring-rows).
-- **The whole configuration.** The files always hold every active row. The generator compares
-  them with the files of the last upload applied (from version control) by each row's key, and
-  writes a new key as an `INSERT`, a changed row as an `UPDATE` found by its key, and a key that
-  disappeared as a retirement. The keys are the codes that identify a row: the pipeline code;
-  the pipeline and task codes; those and the parameter name; both ends of a dependency; the
-  pipeline and task codes and the rule name.
-
-## When an upload fails
+## When a migration fails
 
 The file changed nothing; correct it and run `migrate` again. A file that failed was never
 applied, so it can still be edited.

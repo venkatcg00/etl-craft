@@ -62,6 +62,12 @@ class TaskNode:
     run_condition: str | None = None
     run_condition_count: int | None = None
     cross_pipeline_edge_count: int = 0
+    task_code: str | None = None
+
+    @property
+    def label(self) -> str:
+        """``task load_orders`` when the code is known, else ``task_id=12``."""
+        return f"task {self.task_code}" if self.task_code else f"task_id={self.task_id}"
 
 
 @dataclass(frozen=True)
@@ -345,7 +351,8 @@ def build_graph(tasks: Sequence[TaskNode], edges: Sequence[TaskEdge]) -> Depende
                 f"edge references unknown depends_on_task_id={edge.depends_on_task_id}"
             )
         if edge.task_id == edge.depends_on_task_id:
-            raise SelfDependencyError(f"task_id={edge.task_id} depends on itself")
+            label = next(t.label for t in tasks if t.task_id == edge.task_id)
+            raise SelfDependencyError(f"{label} depends on itself")
         edge_count[edge.task_id] += 1
 
     for task in tasks:
@@ -360,29 +367,25 @@ def _check_run_condition(task: TaskNode, total_edges: int) -> None:
     """Raise ``GraphError`` unless the task's run condition and count fit together."""
     if task.run_condition is None:
         if task.run_condition_count is not None:
-            raise GraphError(
-                f"task_id={task.task_id} sets run_condition_count with no run_condition"
-            )
+            raise GraphError(f"{task.label} sets run_condition_count with no run_condition")
         return
     if task.run_condition not in {member.value for member in RunCondition}:
-        raise GraphError(
-            f"task_id={task.task_id} has unknown run_condition: {task.run_condition!r}"
-        )
+        raise GraphError(f"{task.label} has unknown run_condition: {task.run_condition!r}")
     if task.run_condition != RunCondition.N:
         if task.run_condition_count is not None:
             raise GraphError(
-                f"task_id={task.task_id} sets run_condition_count with "
+                f"{task.label} sets run_condition_count with "
                 f"run_condition={task.run_condition!r}, which ignores it"
             )
         return
     if task.run_condition_count is None or task.run_condition_count < 1:
         raise GraphError(
-            f"task_id={task.task_id} has run_condition='N' but "
+            f"{task.label} has run_condition='N' but "
             f"run_condition_count={task.run_condition_count!r}"
         )
     if task.run_condition_count > total_edges:
         raise GraphError(
-            f"task_id={task.task_id} requires {task.run_condition_count} satisfied "
+            f"{task.label} requires {task.run_condition_count} satisfied "
             f"dependencies but only has {total_edges} — it could never run"
         )
 
