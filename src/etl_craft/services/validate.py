@@ -54,6 +54,7 @@ from etl_craft.handlers.business_rules import check_rule
 from etl_craft.handlers.registry import COMMON_PARAMETERS, TaskContext
 from etl_craft.handlers.sql import task_dialect
 from etl_craft.handlers.sql.actions import writer_action
+from etl_craft.handlers.sql.analysis import read_query
 from etl_craft.handlers.sql.spec import PARAMETERS as SQL_PARAMETERS
 from etl_craft.handlers.sql.spec import WRITERS, read_sql_task
 from etl_craft.handlers.sql.tables import ENGINE_COLUMNS
@@ -342,6 +343,34 @@ def _task(
             report.fail(where, problem)
     except EtlCraftError as error:
         report.fail(where, str(error))
+    for warning in _unread_sql(conn, context):
+        report.warn(where, warning)
+
+
+def _unread_sql(conn: Connection, context: TaskContext) -> list[str]:
+    """Name each SELECT of the task that sqlglot cannot read in the warehouse's dialect."""
+    if context.config.warehouse is None:
+        return []
+    dialect, _ = dialect_and_catalog(context.config)
+    found: list[tuple[str, str]] = []
+    if context.handler == Handler.SQL:
+        try:
+            spec = read_sql_task(context)
+        except EtlCraftError:
+            return []
+        if spec.select_sql is not None:
+            found.append((spec.source, spec.select_sql))
+    elif context.handler == Handler.BUSINESS_RULES:
+        found = [
+            (f"business rule {rule.business_rule_name!r}", rule.business_rule_sql)
+            for rule in fetch_business_rules_for_task(conn, context.task_id)
+        ]
+    return [
+        f"{where}: sqlglot cannot read it as {dialect or 'standard'} SQL ({reading.unparsed}); "
+        "the warehouse decides when the task runs, and column lineage cannot trace it"
+        for where, sql in found
+        if (reading := read_query(sql, dialect)).unparsed is not None
+    ]
 
 
 def _context(config: ConnectorConfig, task: ActiveTask, params: Mapping[str, str]) -> TaskContext:
@@ -451,7 +480,7 @@ def _business_rules(conn: Connection, context: TaskContext, data: _Metadata) -> 
     problems: list[str] = []
     for rule in rules:
         try:
-            check_rule(rule, catalog)
+            check_rule(rule, catalog, dialect_and_catalog(config)[0])
         except EtlCraftError as error:
             problems.append(str(error))
             continue

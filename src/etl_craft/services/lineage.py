@@ -52,18 +52,6 @@ COPY = "copy"
 
 SQLGLOT_VERSION = version("sqlglot")
 
-SQLGLOT_DIALECTS = {
-    "postgres": "postgres",
-    "duckdb": "duckdb",
-    "duckdb_iceberg": "duckdb",
-    "trino_iceberg": "trino",
-    "databricks": "databricks",
-    "databricks_iceberg": "databricks",
-    "snowflake": "snowflake",
-    "snowflake_iceberg": "snowflake",
-}
-"""The sqlglot dialect each warehouse dialect's SQL is parsed in."""
-
 
 @dataclass(frozen=True)
 class Edge:
@@ -249,7 +237,7 @@ def dialect_and_catalog(config: ConnectorConfig) -> tuple[str | None, str | None
     """Return the sqlglot dialect and the catalog of the active warehouse; ``None`` without one."""
     if config.warehouse is None:
         return None, None
-    return SQLGLOT_DIALECTS.get(warehouse_dialect(config).spec.key), active_catalog(config)
+    return warehouse_dialect(config).sqlglot_dialect, active_catalog(config)
 
 
 def _edge(stored: StoredEdge, task: str) -> Edge:

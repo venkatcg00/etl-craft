@@ -44,13 +44,14 @@ from etl_craft.core.text import (
     is_safe_identifier,
     is_safe_object_ref,
     is_safe_order_term,
-    read_only_problem,
     split_statements,
     substitute_task_tokens,
     suggest,
 )
 from etl_craft.dialects.warehouse.base import STORAGE_PARAMETERS
 from etl_craft.handlers.registry import TaskContext
+from etl_craft.handlers.sql.analysis import read_only_problem
+from etl_craft.warehouse.connection import warehouse_dialect
 
 MERGES = frozenset({SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE})
 WRITERS = frozenset(
@@ -283,7 +284,8 @@ def resolve_select(
             f"{source} must hold exactly one SELECT; it holds {len(statements)} statements"
         )
     select_sql = statements[0]
-    problem = read_only_problem(select_sql)
+    dialect = warehouse_dialect(config).sqlglot_dialect if config.warehouse is not None else None
+    problem = read_only_problem(select_sql, dialect)
     if problem is not None:
         raise SqlGuardError(
             f"{source} must be a read-only SELECT (the engine writes the target itself); it "

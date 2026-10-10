@@ -532,3 +532,30 @@ def test_validate_rejects_invalid_retry_parameters(project, parameters):
         add_task(conn, pipeline, "load", handler="PYTHON", PYTHON_SCRIPT="load.py", **parameters)
     report = validate(engine, config)
     assert any("CFG_TASK_PARAMETERS." in check.message for check in report.findings)
+
+
+def test_sql_sqlglot_cannot_read_is_a_warning_naming_the_line_and_column(project):
+    engine, config, root = project
+    (root / "sql_files" / "orders.sql").write_text(
+        "SELECT id,\n       amount FROM raw.orders WHERE", "utf-8"
+    )
+    with engine.begin() as conn:
+        p = good_pipeline(conn)
+        rules = conn.execute(
+            text("SELECT TASK_ID AS task_id FROM CFG_TASKS WHERE TASK_CODE = 'rules'")
+        ).scalar_one()
+        add_rule(conn, p, rules, "unfinished", sql="SELECT 1 FROM sales.limits l WHERE")
+
+    report = validate(engine, config)
+
+    assert not report.failed
+    warnings = {where: message for where, status, message in found(report) if status is Status.WARN}
+    assert warnings["SALES.setup"].startswith(
+        "SOURCE_SQL_FILE='orders.sql': sqlglot cannot read it as duckdb SQL (line 2, column "
+    )
+    assert warnings["SALES.setup"].endswith(
+        "); the warehouse decides when the task runs, and column lineage cannot trace it"
+    )
+    assert warnings["SALES.rules"].startswith(
+        "business rule 'unfinished': sqlglot cannot read it as duckdb SQL (line 1, column "
+    )

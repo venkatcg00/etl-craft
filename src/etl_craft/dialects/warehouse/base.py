@@ -75,6 +75,8 @@ class WarehouseDialect:
     # The STORAGE_PARAMETERS a task may set on this warehouse and table format.
     storage_parameters: frozenset[str] = frozenset()
 
+    # The sqlglot dialect this warehouse's SQL is read in, for lineage and the SQL checks.
+    sqlglot_dialect: str | None = None
     # How CREATE VIEW marks a secure view: Snowflake's SECURE keyword, PostgreSQL's
     # security_barrier option, or not at all.
     secure_view: Literal["keyword", "security_barrier"] | None = None
