@@ -1,10 +1,15 @@
 """Reading SQL with sqlglot: one read-only query passes, any write is named, and SQL sqlglot
 cannot parse falls back to the word-level check."""
 
+import re
+from pathlib import Path
+
 import pytest
 
 from etl_craft.core import text
-from etl_craft.handlers.sql.analysis import read_only_problem, read_query
+from etl_craft.handlers.sql.analysis import Reading, read_only_problem, read_query
+
+DEMO_SQL = sorted((Path(__file__).parents[2] / "examples" / "demo" / "sql_files").glob("*.sql"))
 
 pytestmark = pytest.mark.unit
 
@@ -72,3 +77,25 @@ def test_each_warehouse_dialect_reads_its_own_syntax():
         read_only_problem("SELECT id FROM sales.orders TABLESAMPLE (10 PERCENT)", "databricks")
         is None
     )
+
+
+@pytest.mark.parametrize("dialect", ["duckdb", "postgres", "trino", "snowflake", "databricks"])
+def test_the_demo_sql_reads_as_read_only_queries_in_every_warehouse_dialect(dialect):
+    assert DEMO_SQL
+    for path in DEMO_SQL:
+        raw = path.read_text("utf-8")
+
+        def uses(token, raw=raw):
+            return re.search(rf"\$\${token}\b", raw) is not None
+
+        sql = text.substitute_task_tokens(
+            raw,
+            pipeline_run_id=7,
+            refresh_type="INCREMENTAL",
+            pipeline_run_id_substitution=uses("pipeline_run_id"),
+            filter_enabled=uses("pipeline_run_id_filter"),
+            pipeline_id_substitution=uses("pipeline_id"),
+            task_run_id_substitution=uses("task_run_id"),
+            run_date_substitution=uses("run_date"),
+        )
+        assert read_query(sql, dialect) == Reading(), path.name

@@ -42,6 +42,12 @@ All notable changes are recorded here. The format follows
 - Run-condition and self-dependency errors name the task by its code, such as `task publish
   requires 5 satisfied dependencies but only has 2`, rather than by its id.
 
+- The read-only check of a SQL task's SELECT, from a file or inline, and of business-rule SQL
+  reads the statement with sqlglot in the warehouse's dialect: it refuses anything that is not a
+  query or that writes anywhere in its tree, such as a `DELETE` inside a `WITH`, and accepts
+  columns named like statements, such as `copy`. SQL sqlglot cannot parse is checked word by
+  word as before, and `validate` warns about it with the line and column where parsing stopped.
+
 ## [0.3.0] - 2026-10-10
 
 ### Fixed
@@ -70,12 +76,6 @@ All notable changes are recorded here. The format follows
   without rewriting gate decisions or taking over a different run.
 
 ### Changed
-
-- The read-only check of a SQL task's SELECT, from a file or inline, and of business-rule SQL
-  reads the statement with sqlglot in the warehouse's dialect: it refuses anything that is not a
-  query or that writes anywhere in its tree, such as a `DELETE` inside a `WITH`, and accepts
-  columns named like statements, such as `copy`. SQL sqlglot cannot parse is checked word by
-  word as before, and `validate` warns about it with the line and column where parsing stopped.
 
 - `ConnectorConfig.engine`, `.warehouse` and `.email` hold the selected profile itself; the
   `ConnectionSection` and `EmailConfig` wrappers and their `.active` and `.active_profile` are
