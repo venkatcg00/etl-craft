@@ -15,8 +15,9 @@ from sqlalchemy.exc import DBAPIError
 
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.enums import TableFormat
+from etl_craft.core.errors import HandlerError
 from etl_craft.handlers import business_rules
-from etl_craft.warehouse.connection import build_warehouse_engine
+from etl_craft.warehouse.connection import build_warehouse_engine, warehouse_dialect
 from fixtures.cloud import DATABRICKS_VARS, SNOWFLAKE_VARS, require_variables, write_config
 from fixtures.engine_db import apply_schema, sqlite_engine_db
 from fixtures.metadata import add_pipeline, insert, start_run
@@ -212,6 +213,84 @@ def test_every_action_on_snowflake(tmp_path, table_format):
     fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
     schema = os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"]
     walk_every_action(cloud_world(tmp_path, "Snowflake", fields, table_format, schema))
+
+
+def walk_views(w):
+    """A view is built, replaced with its grants kept, made secure where the warehouse can, and
+    never put in place of a table."""
+    suffix = uuid.uuid4().hex[:8]
+    orders, view, secure = (f"etl_craft_{base}_{suffix}" for base in ("vorders", "view", "secure"))
+    snowflake = warehouse_dialect(w.config).spec.key.startswith("snowflake")
+    grantee = "ROLE PUBLIC" if snowflake else "`account users`"
+    try:
+        w.run(
+            "orders",
+            SQL_ACTION="CREATE_TABLE",
+            TARGET_OBJECT=orders,
+            SOURCE_SQL="SELECT 1 AS id UNION ALL SELECT 2 AS id",
+        )
+        params = {"SQL_ACTION": "CREATE_VIEW", "TARGET_OBJECT": view}
+        w.run("view", SOURCE_SQL=f"SELECT id FROM {w.name(orders)} WHERE id > 1", **params)
+        assert w.rows(f"SELECT id FROM {w.name(view)}") == [(2,)]
+        w.execute(f"GRANT SELECT ON VIEW {w.name(view)} TO {grantee}")
+
+        w.run("view", SOURCE_SQL=f"SELECT id, id * 10 AS tens FROM {w.name(orders)}", **params)
+        assert sorted(w.rows(f"SELECT id, tens FROM {w.name(view)}")) == [(1, 10), (2, 20)]
+        with w.warehouse.connect() as conn:
+            grants = [
+                {key.lower().replace("_", ""): value for key, value in row.items()}
+                for row in conn.execute(text(f"SHOW GRANTS ON VIEW {w.name(view)}")).mappings()
+            ]
+        if snowflake:
+            assert any(g["privilege"] == "SELECT" and g["granteename"] == "PUBLIC" for g in grants)
+        else:
+            assert any(
+                g["principal"] == "account users" and g["actiontype"] == "SELECT" for g in grants
+            ), grants
+
+        with pytest.raises(HandlerError, match="CREATE_VIEW replaces only views"):
+            w.run("on_table", SQL_ACTION="CREATE_VIEW", TARGET_OBJECT=orders, SOURCE_SQL="SELECT 1")
+        assert len(w.rows(f"SELECT id FROM {w.name(orders)}")) == 2
+
+        secured = {
+            "SQL_ACTION": "CREATE_VIEW",
+            "TARGET_OBJECT": secure,
+            "SOURCE_SQL": f"SELECT id FROM {w.name(orders)}",
+            "SECURE_VIEW": "true",
+        }
+        if snowflake:
+            w.run("secure", **secured)
+            with w.warehouse.connect() as conn:
+                shown = conn.execute(
+                    text(f"SHOW VIEWS LIKE '{secure.upper()}' IN SCHEMA {w.catalog}.{w.schema}")
+                ).mappings()
+                assert [str(row["is_secure"]).lower() for row in shown] == ["true"]
+        else:
+            with pytest.raises(HandlerError, match="has no secure views"):
+                w.run("secure", **secured)
+    finally:
+        with w.warehouse.begin() as conn:
+            for name in (view, secure):
+                conn.execute(text(f"DROP VIEW IF EXISTS {w.name(name)}"))
+            conn.execute(text(f"DROP TABLE IF EXISTS {w.name(orders)}"))
+        w.warehouse.dispose()
+        w.engine_db.dispose()
+
+
+@pytest.mark.cloud_databricks
+def test_views_on_databricks(tmp_path):
+    require_variables("DATABRICKS", DATABRICKS_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_DATABRICKS_{name}" for name in DATABRICKS_VARS}
+    schema = os.environ["ETL_CRAFT_TEST_DATABRICKS_SCHEMA"]
+    walk_views(cloud_world(tmp_path, "Databricks", fields, TableFormat.NATIVE, schema))
+
+
+@pytest.mark.cloud_snowflake
+def test_views_on_snowflake(tmp_path):
+    require_variables("SNOWFLAKE", SNOWFLAKE_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
+    schema = os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"]
+    walk_views(cloud_world(tmp_path, "Snowflake", fields, TableFormat.NATIVE, schema))
 
 
 def walk_schema_evolution(w):

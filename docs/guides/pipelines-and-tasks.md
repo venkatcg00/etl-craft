@@ -63,7 +63,7 @@ writes five pipelines this way, and runs as written on SQLite and PostgreSQL.
 
 | `HANDLER` | Runs | Guide |
 |---|---|---|
-| `SQL` | one read-only SELECT, wrapped by the engine in one of eight write actions | [SQL tasks](sql-tasks.md) |
+| `SQL` | one read-only SELECT, wrapped by the engine in one of nine actions | [SQL tasks](sql-tasks.md) |
 | `PYTHON` | an ingestion script from `ingestion_scripts/` | [Ingestion scripts](ingestion-scripts.md) |
 | `BUSINESS_RULES` | the task's rows of `CFG_BUSINESS_RULES`, flagging the rows that break them | [Business rules](business-rules.md) |
 | `EMAIL_ALERT` | an email about the run so far | [Email alerts](email-alerts.md) |

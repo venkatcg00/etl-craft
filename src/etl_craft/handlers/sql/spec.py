@@ -3,7 +3,7 @@
 Every mistake in a task's definition fails the task here with the parameter, its value and the
 remedy, so no action ever starts on a half-valid definition.
 
-- ``SQL_ACTION``: one of the eight actions.
+- ``SQL_ACTION``: one of the nine actions.
 - ``TARGET_OBJECT``: ``schema.table``, in the active warehouse profile's database, or
   ``database.schema.table``.
 - ``SOURCE_SQL`` or ``SOURCE_SQL_FILE`` (every action but ``DROP_TABLE``): the read-only
@@ -24,6 +24,9 @@ remedy, so no action ever starts on a half-valid definition.
   ``DELETE_FLAG='Y'``.
 - ``SETUP_FOR`` (``SETUP_TABLE``): the action that writes the table, whose audit columns it
   gets; needed when no other task in the pipeline writes it.
+- ``SECURE_VIEW`` (``CREATE_VIEW``): ``true`` creates a secure view where the warehouse has
+  them (Snowflake's ``SECURE``, PostgreSQL's ``security_barrier``). A view stores no data, so
+  it takes no ``TABLE_FORMAT`` or storage parameter.
 """
 
 from __future__ import annotations
@@ -67,6 +70,7 @@ FLAGS: dict[str, frozenset[SqlAction]] = {
     "SCHEMA_EVOLUTION": frozenset({SqlAction.OVERWRITE_TABLE, *MERGES}),
     "PRESERVE_TARGET": frozenset({SqlAction.SCD1_MERGE}),
     "HARD_DELETE": frozenset({SqlAction.DELETE_ROWS}),
+    "SECURE_VIEW": frozenset({SqlAction.CREATE_VIEW}),
 }
 
 PARAMETERS = frozenset(
@@ -111,6 +115,7 @@ class SqlTask:
     preserve_target: bool = False
     hard_delete: bool = False
     setup_for: SqlAction | None = None
+    secure_view: bool = False
 
 
 def read_sql_task(context: TaskContext) -> SqlTask:
@@ -127,6 +132,13 @@ def read_sql_task(context: TaskContext) -> SqlTask:
             "profile's is used"
         )
     flags = {name: _flag(params, name, action, applies) for name, applies in FLAGS.items()}
+    if action == SqlAction.CREATE_VIEW:
+        stored = [name for name in ("TABLE_FORMAT", *STORAGE_PARAMETERS) if params.get(name)]
+        if stored:
+            raise SqlGuardError(
+                f"SQL_ACTION=CREATE_VIEW takes no {stored[0]}: a view stores no data; "
+                "remove the parameter"
+            )
 
     select_sql, source = None, "none"
     if action == SqlAction.DROP_TABLE:
@@ -174,6 +186,7 @@ def read_sql_task(context: TaskContext) -> SqlTask:
         preserve_target=flags["PRESERVE_TARGET"],
         hard_delete=flags["HARD_DELETE"],
         setup_for=setup_for,
+        secure_view=flags["SECURE_VIEW"],
     )
 
 

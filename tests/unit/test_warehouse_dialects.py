@@ -766,3 +766,44 @@ def test_failed_session_setup_closes_the_cursor_without_committing(key):
         for_key(key).on_connect(conn, None, "")
     conn.cursor.return_value.close.assert_called_once()
     conn.commit.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("key", "secure", "exists", "statement"),
+    [
+        ("postgres", False, True, "CREATE OR REPLACE VIEW s.v AS SELECT 1"),
+        (
+            "postgres",
+            True,
+            True,
+            "CREATE OR REPLACE VIEW s.v WITH (security_barrier = true) AS SELECT 1",
+        ),
+        ("duckdb", False, False, "CREATE OR REPLACE VIEW s.v AS SELECT 1"),
+        ("trino_iceberg", False, True, "CREATE OR REPLACE VIEW s.v AS SELECT 1"),
+        ("snowflake", False, True, "CREATE OR REPLACE VIEW s.v COPY GRANTS AS SELECT 1"),
+        (
+            "snowflake_iceberg",
+            True,
+            False,
+            "CREATE OR REPLACE SECURE VIEW s.v COPY GRANTS AS SELECT 1",
+        ),
+        ("databricks", False, False, "CREATE VIEW s.v AS SELECT 1"),
+        ("databricks_iceberg", False, True, "ALTER VIEW s.v AS SELECT 1"),
+    ],
+)
+def test_a_view_is_replaced_with_its_grants_kept(key, secure, exists, statement):
+    assert for_key(key).view_ddl("s.v", "SELECT 1", secure=secure, exists=exists) == statement
+
+
+@pytest.mark.parametrize(
+    ("key", "secure", "refusal"),
+    [
+        ("duckdb_iceberg", False, "DuckDB.*cannot create views.*use OVERWRITE_TABLE"),
+        ("duckdb", True, "has no secure views; set SECURE_VIEW to false"),
+        ("trino_iceberg", True, "has no secure views"),
+        ("databricks", True, "has no secure views"),
+    ],
+)
+def test_a_view_the_warehouse_cannot_create_is_refused(key, secure, refusal):
+    with pytest.raises(HandlerError, match=refusal):
+        for_key(key).view_ddl("s.v", "SELECT 1", secure=secure, exists=False)

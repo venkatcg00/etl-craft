@@ -111,6 +111,7 @@ item's text, or work done early under another item.
 | S4.I.6 Platform and dependency surface | Done | #131 | POSIX-only process control, no `packaging` dependency, DuckDB recorded as the core dialect |
 | S5.A The pool interface | Done | #133 | `AttemptSpec`, `Pool` and the pool rules |
 | S5.B The local provider | Done | #133 | Attempts run through the local pool, with slots per kind |
+| SQL views | Done | #PRNUM | `CREATE_VIEW`, a ninth SQL action, with secure views where the warehouse has them |
 | 0.4 gate; S5.C and later | Not started | | |
 
 ### Handover notes
@@ -2699,6 +2700,7 @@ change it only by updating this table and the documentation together.
 | "Exactly once" | Not promised across warehouse and script side effects. Promised: one execution per attempt id, stale updates rejected, uncertain outcomes recorded as `LOST`, and documented retry behaviour per action | S3.B, S3.D, S3.G.7 |
 | Process per task | Kept, on workers and on the local provider, for isolation; revisit only if measured worker memory demands it | S5.B, S6.G |
 | Engine DBs | One PostgreSQL Engine DB for every project; separate databases only for hard isolation | S5.G |
+| Views | `CREATE_VIEW` replaces only views, never a table; a secure view is created only where the warehouse has one (Snowflake, PostgreSQL), and refused elsewhere rather than created as an ordinary view | SQL views |
 | DuckDB's SQLAlchemy dialect | A core dependency, the one exception to optional warehouse extras: DuckDB is the default local warehouse of the quick start, the demo and the tests, so `pip install etl-craft` runs a whole local deployment. Engine code never imports it; SQLAlchemy loads it from the `duckdb:` URL | S4.I.6 |
 
 ## Appendix C: Glossary

@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 class PostgresWarehouse(WarehouseDialect):
     """PostgreSQL, native tables."""
 
+    secure_view = "security_barrier"
+
     spec = warehouse_by_key("postgres")
     replace_strategy: ReplaceStrategy = "transactional"
     identifier_case = "lower"

@@ -24,6 +24,7 @@ EXPECTED = {
         "SCD2_MERGE",
         "DROP_TABLE",
         "DELETE_ROWS",
+        "CREATE_VIEW",
     },
     enums.EmailFlavour: {"FAILED", "COMPLETED_WITH_ERRORS", "SUCCESS"},
     enums.EmailTransport: {"smtp", "sendmail"},

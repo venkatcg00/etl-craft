@@ -160,6 +160,28 @@ def test_drop_table_takes_no_select(project):
             },
             "MERGE_DEDUPE_ORDER='lower\\(a\\) DESC': 'lower\\(a\\) DESC' is not",
         ),
+        (
+            {**BASE, "SOURCE_SQL": "SELECT 1", "SECURE_VIEW": "true"},
+            "SECURE_VIEW applies only to CREATE_VIEW, not SQL_ACTION=OVERWRITE_TABLE",
+        ),
+        (
+            {
+                "SQL_ACTION": "CREATE_VIEW",
+                "TARGET_OBJECT": "s.v",
+                "SOURCE_SQL": "SELECT 1",
+                "TABLE_FORMAT": "iceberg",
+            },
+            "CREATE_VIEW takes no TABLE_FORMAT: a view stores no data",
+        ),
+        (
+            {
+                "SQL_ACTION": "CREATE_VIEW",
+                "TARGET_OBJECT": "s.v",
+                "SOURCE_SQL": "SELECT 1",
+                "EXTERNAL_VOLUME": "lake",
+            },
+            "CREATE_VIEW takes no EXTERNAL_VOLUME: a view stores no data",
+        ),
     ],
 )
 def test_definition_mistakes_fail_with_the_remedy(project, params, message):
@@ -220,4 +242,21 @@ def test_execution_identity_tokens_have_distinct_named_values(project):
     )
     assert (
         task.select_sql == "SELECT 1 AS definition_id, 42 AS execution_id, 7 AS task_execution_id"
+    )
+
+
+def test_a_view_reads_its_select_and_whether_it_is_secure(project):
+    task = read_sql_task(
+        context(
+            project,
+            SQL_ACTION="CREATE_VIEW",
+            TARGET_OBJECT="s.v",
+            SOURCE_SQL="SELECT 1 AS id",
+            SECURE_VIEW="true",
+        )
+    )
+    assert (task.action, task.select_sql, task.secure_view) == (
+        "CREATE_VIEW",
+        "SELECT 1 AS id",
+        True,
     )

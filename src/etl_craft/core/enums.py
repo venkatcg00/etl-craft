@@ -126,6 +126,7 @@ class SqlAction(StrEnum):
     SCD2_MERGE = "SCD2_MERGE"
     DROP_TABLE = "DROP_TABLE"
     DELETE_ROWS = "DELETE_ROWS"
+    CREATE_VIEW = "CREATE_VIEW"
 
 
 class EmailFlavour(StrEnum):

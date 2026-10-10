@@ -42,7 +42,7 @@ def upgrade_targets(
     dry_run: bool = False,
 ) -> list[UpgradeResult]:
     """Upgrade configured targets under their mutation locks; preserve historical rows."""
-    actions = {str(kind) for kind in SqlAction} - {SqlAction.DROP_TABLE}
+    actions = {str(kind) for kind in SqlAction} - {SqlAction.DROP_TABLE, SqlAction.CREATE_VIEW}
     if action is not None and action not in actions:
         raise HandlerError(f"upgrade-targets does not support --action {action}")
     if config.warehouse is None:

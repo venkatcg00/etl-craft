@@ -1,4 +1,4 @@
-"""The eight SQL actions. Each wraps the task's SELECT in the writes it stands for.
+"""The nine SQL actions. Each wraps the task's SELECT in the writes it stands for.
 
 - ``CREATE_TABLE`` replaces the target from the staged SELECT with rollback or recovery.
 - ``SETUP_TABLE`` creates the target, empty, from the SELECT's shape plus the audit columns of
@@ -631,6 +631,24 @@ def delete_rows(session: Session, action: ActionContext) -> HandlerResult:
     return HandlerResult(source_count=source, delete_count=delete_count)
 
 
+def create_view(session: Session, action: ActionContext) -> HandlerResult:
+    """Create or replace the target as a view over the SELECT; never replace a table.
+
+    A view stores no rows, so nothing is counted.
+    """
+    kind = session.target_relation_type()
+    if kind is not None and kind != "VIEW":
+        raise SqlGuardError(
+            f"CREATE_VIEW {session.target}: a {kind.lower()} of that name exists, and "
+            "CREATE_VIEW replaces only views; choose another TARGET_OBJECT or drop the table"
+        )
+    ddl = session.dialect.view_ddl(
+        session.target, action.select_sql, secure=action.task.secure_view, exists=kind == "VIEW"
+    )
+    session.run(ddl, step="create or replace the view")
+    return HandlerResult()
+
+
 ACTIONS: dict[SqlAction, Action] = {
     SqlAction.CREATE_TABLE: create_table,
     SqlAction.SETUP_TABLE: setup_table,
@@ -640,6 +658,7 @@ ACTIONS: dict[SqlAction, Action] = {
     SqlAction.SCD2_MERGE: scd2_merge,
     SqlAction.DROP_TABLE: drop_table,
     SqlAction.DELETE_ROWS: delete_rows,
+    SqlAction.CREATE_VIEW: create_view,
 }
 
 

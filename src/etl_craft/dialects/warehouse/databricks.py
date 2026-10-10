@@ -41,6 +41,7 @@ class DatabricksWarehouse(WarehouseDialect):
     enforces_primary_keys = False
     string_type = "STRING"
     token_username = "token"
+    view_replacement = "alter"
 
     def identity_table_ddl(self, target: str, columns: str, params: Mapping[str, str]) -> str:
         """Declare Delta's identity before any rows are inserted."""

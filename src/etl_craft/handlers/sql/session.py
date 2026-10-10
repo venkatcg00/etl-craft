@@ -211,6 +211,12 @@ class Session:
             raise SqlGuardError(f"{self.target} lacks compare columns {', '.join(missing)}")
         return self.dialect.hash_expression(values, [types[column.lower()] for column in columns])
 
+    def target_relation_type(self) -> str | None:
+        """Return the target's information_schema table type, such as VIEW; None when absent."""
+        query, parameters = self.dialect.relation_type_query(self.target)
+        row = self.run(query, parameters, step=f"read what {self.target} is").first()
+        return None if row is None else str(row[0]).upper()
+
     def target_columns(self) -> list[tuple[str, str]]:
         """Return the target's columns; empty when it does not exist."""
         return self.columns(self.target)

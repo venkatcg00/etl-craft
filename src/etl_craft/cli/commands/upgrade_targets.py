@@ -12,7 +12,11 @@ from etl_craft.services.upgrade_targets import upgrade_targets
 def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--action",
-        choices=[str(kind) for kind in SqlAction if kind != SqlAction.DROP_TABLE],
+        choices=[
+            str(kind)
+            for kind in SqlAction
+            if kind not in {SqlAction.DROP_TABLE, SqlAction.CREATE_VIEW}
+        ],
         help="filter by SQL action; defaults to configured SQL and ingestion targets",
     )
     parser.add_argument(

@@ -36,6 +36,8 @@ class SnowflakeWarehouse(WarehouseDialect):
     identity_in_create = True
     enforces_primary_keys = False
     key_file_connect_args = ("private_key_file", "private_key_file_pwd")
+    secure_view = "keyword"
+    view_replacement = "copy_grants"
 
     def identity_table_ddl(self, target: str, columns: str, params: Mapping[str, str]) -> str:
         """Use an ordered native identity; inserts omit the managed key."""
