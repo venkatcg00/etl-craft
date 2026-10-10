@@ -10,6 +10,10 @@ In local mode this runs every active task under one pipeline run. Each completio
 newly ready tasks immediately; a slow independent task does not hold back another branch.
 At most `Orchestration.Max_parallel_tasks` tasks run at once (8 unless set), each in its own
 process with the same logs, time limits and outcomes as [`run --task_code`](running-tasks.md).
+`Orchestration.Local_ingestion_slots` caps how many of them run Python ingestion scripts, and
+`Orchestration.Local_warehouse_slots` how many run SQL, business-rule and alert tasks; unset,
+either kind may use every slot. A task waits for a free slot of its own kind, while tasks of the
+other kind keep starting.
 Cross-pipeline gate waits persist their deadline and next look without holding a worker slot.
 
 ```
@@ -67,7 +71,9 @@ recorded gate budget.
 
 Pressing Ctrl-C, or sending the process `SIGTERM` or `SIGHUP`, stops every running task's
 process. The command stops at its next safe point, between Engine DB transactions, so an
-interrupted transaction never leaves the Engine DB locked; a second signal stops it at once.
+interrupted transaction never leaves the Engine DB locked. A second signal while the first still
+waits for a safe point stops it at once; one that arrives while the command is stopping its tasks
+takes effect when they have stopped.
 Those tasks are recorded `FAILED`, and the run stays `IN-PROGRESS` so the next run
 resumes it. The same holds for `run --task_code`, `--rerun` and `--backfill`. `SIGKILL` cannot be
 caught: the next run reconciles expired leases, records orphaned attempts `LOST`, stops

@@ -11,7 +11,8 @@ All notable changes are recorded here. The format follows
 - `etl-craft run` acts on Ctrl-C, `SIGTERM` and `SIGHUP` at its next safe point between Engine DB
   transactions, or at once while it waits. A signal that landed inside a transaction's cleanup
   could return a SQLite connection to the pool with its write lock held, so stopping the run's
-  tasks waited out the 60-second busy timeout. A second signal still stops the command at once.
+  tasks waited out the 60-second busy timeout. A second signal while the first still waits for a
+  safe point stops the command at once.
 
 - `lineage`, `generate-docs` and other column-lineage readers work with sqlglot 30.22, whose
   `lineage()` requires a schema argument; etl-craft passes an empty one, as before. The lock
@@ -94,6 +95,13 @@ All notable changes are recorded here. The format follows
   `PIPELINE_ID_FILTER` to `$$pipeline_run_id_filter` and `PIPELINE_RUN_ID_FILTER`.
 
 ### Added
+
+- Task processes run through a pool: whole-pipeline runs and the server admit each attempt and
+  submit it to the local pool, which runs it on this host; `run --task_code` runs its one attempt
+  in the foreground the same way. New
+  `Orchestration.Local_ingestion_slots` and `Local_warehouse_slots` cap how many Python ingestion
+  tasks and how many SQL, business-rule and alert tasks run at once, within
+  `Max_parallel_tasks`; unset, either kind may use every slot, as before.
 
 - Generated DAG YAML carries version 1 and validates against its packaged JSON Schema. A separate
   `etl-craft-airflow` distribution loads pipeline, global and docs exports as real Airflow DAGs

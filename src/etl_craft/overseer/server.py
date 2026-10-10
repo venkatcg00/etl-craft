@@ -7,8 +7,7 @@ import logging
 import threading
 import time
 from collections.abc import Generator
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -22,6 +21,7 @@ from etl_craft.engine.repository import overseers
 from etl_craft.engine.repository.dependencies import PipelineGraphData, fetch_pipeline_graph
 from etl_craft.engine.runlog import RunSelector, fetch_pipeline_run_status
 from etl_craft.execution import pipeline
+from etl_craft.execution.pools.local import LocalPool
 from etl_craft.execution.reconcile import reconcile
 from etl_craft.overseer.leadership import leadership
 from etl_craft.overseer.schedules import Schedules
@@ -88,19 +88,12 @@ def serve(ctx: OperationContext, stop: threading.Event) -> None:
     next_heartbeat = 0.0
     quiesce = stop
     jobs: dict[
-        int,
-        tuple[
-            Generator[float, None, pipeline.PipelineOutcome],
-            contextvars.Context,
-            threading.Event,
-        ],
+        int, tuple[Generator[float, None, pipeline.PipelineOutcome], contextvars.Context]
     ] = {}
-    pool = ThreadPoolExecutor(
-        ctx.config.limits.max_parallel_tasks, thread_name_prefix="etl-craft-task"
-    )
+    pool = LocalPool(ctx.engine, ctx.config, child=ctx.child)
 
     def advance(run_id: int) -> None:
-        steps, context, _ = jobs[run_id]
+        steps, context = jobs[run_id]
         try:
             context.run(next, steps)
         except StopIteration as done:
@@ -140,27 +133,26 @@ def serve(ctx: OperationContext, stop: threading.Event) -> None:
                             )
                         if owner is not None:
                             continue
-                        cancel = threading.Event()
                         steps = pipeline.pipeline_steps(
                             ctx.engine,
                             ctx.config,
                             run.pipeline_code,
                             selector=RunSelector(run_id=run.pipeline_run_id),
                             backfill="overseer resumes backfill" if run.backfill else None,
-                            child=replace(ctx.child, cancel=cancel),
+                            child=ctx.child,
                             hooks=run_hooks(ctx.config, ctx.engine),
                             stop_dispatch=quiesce,
                             graph_data=run.graph_data,
                             pool=pool,
                         )
-                        jobs[run.pipeline_run_id] = (steps, contextvars.copy_context(), cancel)
+                        jobs[run.pipeline_run_id] = (steps, contextvars.copy_context())
                         advance(run.pipeline_run_id)
                     leader.wait(stop)
             finally:
                 quiesce.set()
                 deadline = time.monotonic() + ctx.config.limits.shutdown_grace_seconds
                 # Queued admissions have no child or lease to drain.
-                for run_id, (steps, context, _) in list(jobs.items()):
+                for run_id, (steps, context) in list(jobs.items()):
                     with ctx.engine.connect() as conn:
                         status = fetch_pipeline_run_status(conn, run_id)
                     if status == "QUEUED":
@@ -171,11 +163,9 @@ def serve(ctx: OperationContext, stop: threading.Event) -> None:
                         advance(run_id)
                     if jobs:
                         time.sleep(0.1)
-                for _, _, cancel in jobs.values():
-                    cancel.set()
-                for steps, context, _ in jobs.values():
+                for steps, context in jobs.values():
                     context.run(steps.close)
-                pool.shutdown(wait=True, cancel_futures=True)
+                pool.close()
                 overseers.heartbeat(ctx.engine, overseer_id, stopped=True)
                 logger.info("overseer_id=%s: server stopped", overseer_id)
     except SQLAlchemyError as error:
@@ -183,4 +173,4 @@ def serve(ctx: OperationContext, stop: threading.Event) -> None:
             f"server lost its Engine DB connection: {error}; restore it and restart server"
         ) from error
     finally:
-        pool.shutdown(wait=True, cancel_futures=True)
+        pool.close()

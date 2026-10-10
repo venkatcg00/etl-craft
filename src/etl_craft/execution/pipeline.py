@@ -34,7 +34,6 @@ import contextvars
 import logging
 import threading
 from collections.abc import Callable, Generator, Sequence
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
@@ -88,6 +87,7 @@ from etl_craft.execution.interventions import (
     record_gate_bypass,
     reset_engine_skipped,
 )
+from etl_craft.execution.pools import Pool
 from etl_craft.execution.reconcile import reconcile
 from etl_craft.execution.remote import require_supported
 from etl_craft.execution.runner import (
@@ -222,7 +222,7 @@ def pipeline_steps(
     selector: runlog.RunSelector = runlog.ACTIVE_RUN,
     stop_dispatch: threading.Event | None = None,
     graph_data: PipelineGraphData | None = None,
-    pool: ThreadPoolExecutor | None = None,
+    pool: Pool | None = None,
 ) -> Generator[float, None, PipelineOutcome]:
     """Advance ready tasks of ``pipeline_code`` cooperatively; local mode only.
 

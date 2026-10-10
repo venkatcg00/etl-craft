@@ -81,6 +81,8 @@ _ORCHESTRATION_KEYS = frozenset(
         "Task_timeout_seconds",
         "Max_parallel_tasks",
         "Shutdown_grace_seconds",
+        "Local_ingestion_slots",
+        "Local_warehouse_slots",
         "Timezone",
         "Enforce_sla",
         "Gate_wait_minutes",
@@ -649,6 +651,12 @@ def _parse_limits(settings: _Profiled, path: Path) -> ExecutionLimits:
         enforce_sla=_flag(settings, "Enforce_sla", False, path),
         gate_wait_minutes=_whole_number(
             settings, "Gate_wait_minutes", defaults.gate_wait_minutes, path
+        ),
+        local_ingestion_slots=_whole_number(
+            settings, "Local_ingestion_slots", None, path, minimum=1
+        ),
+        local_warehouse_slots=_whole_number(
+            settings, "Local_warehouse_slots", None, path, minimum=1
         ),
     )
 

@@ -1,12 +1,10 @@
-"""Cooperative ready-task dispatch; gate waits never enter the worker pool."""
+"""Cooperative ready-task dispatch; gate waits never enter the pool."""
 
 from __future__ import annotations
 
-import contextvars
 import logging
+import time
 from collections.abc import Callable
-from concurrent.futures import Future, ThreadPoolExecutor, wait
-from dataclasses import replace
 from datetime import datetime
 
 from sqlalchemy.engine import Engine
@@ -17,22 +15,22 @@ from etl_craft.core.enums import SETTLED_STATUSES
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.graph import DependencyGraph, TaskRunState
 from etl_craft.engine import runlog
+from etl_craft.engine.repository import trackers
+from etl_craft.engine.repository.tasks import fetch_task_execution_detail
 from etl_craft.execution import leases
 from etl_craft.execution.gates import Clock, CrossPipelineCheck, TrackedGate, check_gate
+from etl_craft.execution.interventions import record_gate_bypass
+from etl_craft.execution.pools import ExecutionHandle, HandleState, Pool, slot_kind
+from etl_craft.execution.pools.local import LocalPool
+from etl_craft.execution.reconcile import reconcile
 from etl_craft.execution.retries import refresh_retries
-from etl_craft.execution.runner import (
-    ChildOptions,
-    TaskOutcome,
-    _preflight,
-    run_cancelled,
-    run_task,
-)
+from etl_craft.execution.runner import ChildOptions, _preflight, admit_attempt, run_cancelled
 
 logger = logging.getLogger(__name__)
 
 
 class Scheduler:
-    """Advance one run without sleeping; start workers only after gate admission."""
+    """Advance one run without sleeping; submit attempts to the pool only after admission."""
 
     def __init__(
         self,
@@ -47,25 +45,27 @@ class Scheduler:
         force: bool,
         clock: Clock,
         child: ChildOptions,
-        pool: ThreadPoolExecutor | None,
+        pool: Pool | None,
         paused: Callable[[], bool],
         settle: Callable[[bool], list[int]],
     ) -> None:
-        """Keep run state and an executor; no threads start until a task is admitted."""
+        """Keep run state; a pool of its own is made when none is given."""
         self.engine, self.config = engine, config
         self.pipeline_code, self.pipeline_id = pipeline_code, pipeline_id
         self.pipeline_run_id, self.task_codes, self.graph = pipeline_run_id, task_codes, graph
         self.force, self.clock, self.paused, self.settle = force, clock, paused, settle
         self.cancel = leases.run_cancel()
-        self.child = replace(child, cancel=self.cancel)
+        self.grace_seconds = child.kill_grace_seconds
         self.gate = TrackedGate(
             clock, config.dependency_gates, config.limits.gate_wait_minutes * 60
         )
-        self.own_pool = pool is None
-        self.pool = pool or ThreadPoolExecutor(
-            config.limits.max_parallel_tasks, thread_name_prefix="etl-craft-task"
-        )
-        self.jobs: dict[int, Future[TaskOutcome | None]] = {}
+        self.own_pool: LocalPool | None = None
+        if pool is None:
+            self.own_pool = LocalPool(engine, config, child=child)
+            pool = self.own_pool
+        self.pool: Pool = pool
+        self.handlers: dict[int, str] = {}
+        self.jobs: dict[int, ExecutionHandle] = {}
         self.attempted: set[int] = set()
         self.completed: set[int] = set()
         self.failures_final = False
@@ -75,11 +75,9 @@ class Scheduler:
 
     def step(self) -> bool:
         """Harvest completions, recompute readiness and dispatch; return true when settled."""
-        for task_id, future in list(self.jobs.items()):
-            if future.done():
-                del self.jobs[task_id]
-                future.result()
-                self.completed.add(task_id)
+        self._harvest()
+        if self.cancel.is_set():
+            self._stop_running()
         if (
             self.cancel.is_set()
             or run_cancelled(self.engine, self.pipeline_run_id)
@@ -130,9 +128,10 @@ class Scheduler:
         for task_id in ready:
             if task_id in retries and retries[task_id] > self.clock.now():
                 continue
-            if len(self.jobs) >= self.config.limits.max_parallel_tasks:
-                break
+            if self.pool.capacity().free[slot_kind(self._handler(task_id))] == 0:
+                continue
             admission = CrossPipelineCheck(0) if not self.force else None
+            decisions: tuple[trackers.GateDecision, ...] = ()
             if not self.force:
                 needed = self.graph.required_edge_count(task_id) - self.graph.satisfied_edge_count(
                     task_id, state, 0
@@ -153,7 +152,7 @@ class Scheduler:
                         continue
                     assert isinstance(result.check, CrossPipelineCheck)
                     admission = result.check
-                blocked, _ = _preflight(
+                blocked, cross = _preflight(
                     self.engine,
                     self.gate,
                     self.pipeline_id,
@@ -166,13 +165,20 @@ class Scheduler:
                     self.attempted.add(task_id)
                     self.completed.add(task_id)
                     continue
+                decisions = cross.decisions
+                if cross.bypassed:
+                    record_gate_bypass(
+                        self.engine,
+                        self.pipeline_id,
+                        self.pipeline_run_id,
+                        self.config.dependency_gates,
+                        cross.bypassed,
+                        task_id=task_id,
+                    )
             self.attempted.add(task_id)
             self.failures_final = False
             logger.info("%s: dispatch %s", self.pipeline_code, self.task_codes[task_id])
-            # ponytail: per-run submission cap; bound the shared queue if deployments outgrow it.
-            self.jobs[task_id] = self.pool.submit(
-                contextvars.copy_context().run, self._run_one, task_id, admission
-            )
+            self._dispatch(task_id, decisions)
         self.next_check_at = min(waiting) if waiting else None
         if self.jobs or waiting:
             return False
@@ -186,33 +192,62 @@ class Scheduler:
         self.never_ready = pending
         return True
 
-    def _run_one(self, task_id: int, admission: CrossPipelineCheck | None) -> TaskOutcome | None:
-        if self.cancel.is_set() or self.paused():
-            return None
+    def _handler(self, task_id: int) -> str:
+        if task_id not in self.handlers:
+            with self.engine.connect() as conn:
+                self.handlers[task_id] = fetch_task_execution_detail(conn, task_id).handler
+        return self.handlers[task_id]
+
+    def _dispatch(self, task_id: int, decisions: tuple[trackers.GateDecision, ...]) -> None:
+        """Admit the task's attempt and submit it; a task that cannot be admitted is logged."""
+        code = self.task_codes[task_id]
         try:
-            return run_task(
+            reconcile(self.engine, pipeline_id=self.pipeline_id)
+            spec = admit_attempt(
                 self.engine,
                 self.config,
+                task_id,
+                code,
                 self.pipeline_code,
-                self.task_codes[task_id],
-                force=self.force,
-                automatic_retries=False,
-                gate=self.gate,
-                child=self.child,
-                admission=admission,
-                selector=runlog.RunSelector(run_id=self.pipeline_run_id),
+                self.pipeline_run_id,
+                self.force,
+                decisions=decisions,
             )
         except (EtlCraftError, OSError, SQLAlchemyError) as error:
-            logger.error(
-                "%s: could not run: %s: %s", self.task_codes[task_id], type(error).__name__, error
-            )
-            return None
+            logger.error("%s: could not run: %s: %s", code, type(error).__name__, error)
+            self.completed.add(task_id)
+            return
+        self.jobs[task_id] = self.pool.submit(spec)
+
+    def _harvest(self) -> None:
+        """Take the outcome of every ended attempt; an unexpected error is raised."""
+        for task_id, handle in list(self.jobs.items()):
+            status = self.pool.status(handle)
+            if status.state is HandleState.RUNNING:
+                continue
+            del self.jobs[task_id]
+            self.completed.add(task_id)
+            if isinstance(status.error, (EtlCraftError, OSError, SQLAlchemyError)):
+                logger.error(
+                    "%s: could not run: %s: %s",
+                    self.task_codes[task_id],
+                    type(status.error).__name__,
+                    status.error,
+                )
+            elif status.error is not None:
+                raise status.error
+
+    def _stop_running(self) -> None:
+        for handle in self.jobs.values():
+            self.pool.cancel(handle, self.grace_seconds)
 
     def close(self, *, interrupted: bool = False) -> None:
-        """Stop children on interruption, then join workers before releasing run ownership."""
+        """Stop the run's task processes on interruption, then wait for every attempt to end."""
         if interrupted:
             self.cancel.set()
-        if self.own_pool:
-            self.pool.shutdown(wait=True, cancel_futures=True)
-        else:
-            wait(list(self.jobs.values()))
+            self._stop_running()
+        while any(self.pool.status(h).state is HandleState.RUNNING for h in self.jobs.values()):
+            time.sleep(0.05)
+        self.jobs.clear()
+        if self.own_pool is not None:
+            self.own_pool.close()

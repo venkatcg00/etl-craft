@@ -50,6 +50,9 @@ Orchestration:
   Timezone: UTC                  # default logical date for manual runs and schedules
   Shutdown_grace_seconds: 60           # value — server waits before stopping local work
   Max_parallel_tasks: 8                # value
+  # Local_ingestion_slots: 2           # value — optional: at most this many Python ingestion
+  #                                    # tasks at once; unset, they may use every slot
+  # Local_warehouse_slots: 6           # value — optional: the same for SQL, rule and alert tasks
   Gate_wait_minutes: 60                # value — how long a run waits for a running upstream
                                        # pipeline or task it depends on; 0: judge at once
   Enforce_sla: false                   # value — true: send an SLA email (Email below) when a
