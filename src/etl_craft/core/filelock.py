@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import IO
 
+from etl_craft.core import interrupts
 from etl_craft.core.errors import LockTimeoutError
 
 POLL_SECONDS = 0.05
@@ -31,7 +32,7 @@ def file_lock(path: str | Path, wait_seconds: float = 0) -> Iterator[None]:
         while not _try_lock(handle):
             if deadline is not None and time.monotonic() >= deadline:
                 raise LockTimeoutError(f"timed out after {wait_seconds}s waiting for {path}")
-            time.sleep(POLL_SECONDS)
+            interrupts.sleep(POLL_SECONDS)
         try:
             yield
         finally:

@@ -4,11 +4,7 @@ from __future__ import annotations
 
 import argparse
 import signal
-import threading
-from collections.abc import Iterator
-from contextlib import contextmanager
 from datetime import date
-from types import FrameType
 
 from etl_craft.cli.commands.common import (
     Command,
@@ -17,6 +13,7 @@ from etl_craft.cli.commands.common import (
     configure_run_selector,
 )
 from etl_craft.cli.output import Output
+from etl_craft.core import interrupts
 from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import ExitCode
 from etl_craft.engine.runlog import RunSelector
@@ -104,7 +101,11 @@ def _run(args: argparse.Namespace, out: Output) -> int:
         backfill=args.backfill,
         reason=args.reason,
     )
-    with command_context(args) as ctx, _terminate_as_interrupt():
+    # Ctrl-C, SIGTERM and SIGHUP stop the run at its next safe point: its task processes are
+    # stopped and their attempts recorded. SIGKILL cannot be caught: its task processes are left
+    # running, their rows IN-PROGRESS until their leases expire and reconciliation releases them.
+    stopping = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+    with command_context(args) as ctx, interrupts.deferred(*stopping):
         done = runs.execute_run(ctx, request)
     out.result(done, args.output_format)
     if done.status in (RunStatus.FAILED, RunStatus.CANCELLED):
@@ -116,26 +117,6 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     if done.status == RunStatus.IN_PROGRESS and not args.init_only:
         return ExitCode.INCOMPLETE
     return ExitCode.SUCCESS
-
-
-@contextmanager
-def _terminate_as_interrupt() -> Iterator[None]:
-    """Treat SIGTERM and SIGHUP like Ctrl-C, on every kind of run.
-
-    The task processes the command started are then stopped and their attempts recorded. A
-    SIGKILL cannot be caught: its task processes are left running, and their rows
-    ``IN-PROGRESS`` until their leases expire and reconciliation releases them.
-    """
-    if threading.current_thread() is not threading.main_thread():
-        yield
-        return
-    caught = [signal.SIGTERM] + ([signal.SIGHUP] if hasattr(signal, "SIGHUP") else [])
-    previous = {sig: signal.signal(sig, _raise_interrupt) for sig in caught}
-    try:
-        yield
-    finally:
-        for sig, handler in previous.items():
-            signal.signal(sig, handler)
 
 
 def _date(text: str) -> date:
@@ -150,10 +131,6 @@ def _date_range(text: str) -> tuple[date, date]:
     if not separator:
         raise argparse.ArgumentTypeError(f"{text!r} is not FROM:TO, such as 2026-09-01:2026-09-07")
     return _date(first), _date(last)
-
-
-def _raise_interrupt(signum: int, frame: FrameType | None) -> None:
-    raise KeyboardInterrupt(signal.Signals(signum).name)
 
 
 COMMAND = Command(

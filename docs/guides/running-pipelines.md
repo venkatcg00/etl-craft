@@ -66,7 +66,9 @@ tasks get another attempt. An admitted run does not check the pipeline's depende
 recorded gate budget.
 
 Pressing Ctrl-C, or sending the process `SIGTERM` or `SIGHUP`, stops every running task's
-process. Those tasks are recorded `FAILED`, and the run stays `IN-PROGRESS` so the next run
+process. The command stops at its next safe point, between Engine DB transactions, so an
+interrupted transaction never leaves the Engine DB locked; a second signal stops it at once.
+Those tasks are recorded `FAILED`, and the run stays `IN-PROGRESS` so the next run
 resumes it. The same holds for `run --task_code`, `--rerun` and `--backfill`. `SIGKILL` cannot be
 caught: the next run reconciles expired leases, records orphaned attempts `LOST`, stops
 verified local children and retries failed tasks. `etl-craft reconcile` also requests recovery.

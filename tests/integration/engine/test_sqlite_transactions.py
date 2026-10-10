@@ -1,10 +1,14 @@
 """A transaction on the SQLite Engine DB is all or nothing, savepoints and DDL included."""
 
+import os
+import signal
+import sqlite3
 import threading
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import event, text
 
+from etl_craft.core import interrupts
 from fixtures.engine_db import apply_schema, sqlite_engine_db
 from fixtures.metadata import start_run
 
@@ -99,3 +103,32 @@ def test_transactions_that_read_then_write_wait_for_each_other(engine):
         thread.join(timeout=60)
     assert errors == []
     assert run_count(engine) == 4
+
+
+def test_a_signal_during_transaction_cleanup_waits_and_leaves_the_engine_db_writable(engine):
+    # Raised at once inside the rollback, the KeyboardInterrupt would return the connection to
+    # the pool with BEGIN IMMEDIATE still open, and every later write would wait for the lock.
+    delivered = []
+
+    def deliver(conn):
+        if not delivered:
+            delivered.append(True)
+            os.kill(os.getpid(), signal.SIGTERM)
+
+    event.listen(engine, "rollback", deliver)
+    try:
+        with (
+            pytest.raises(KeyboardInterrupt, match="SIGTERM"),
+            interrupts.deferred(signal.SIGTERM),
+            engine.connect() as conn,
+        ):
+            conn.execute(text("SELECT 1"))
+    finally:
+        event.remove(engine, "rollback", deliver)
+    assert delivered
+    other = sqlite3.connect(engine.url.database, timeout=0.5, isolation_level=None)
+    try:
+        other.execute("BEGIN IMMEDIATE")
+        other.execute("ROLLBACK")
+    finally:
+        other.close()

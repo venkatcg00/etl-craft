@@ -30,7 +30,6 @@ satisfied their dependency are consumed.
 from __future__ import annotations
 
 import logging
-import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -39,6 +38,7 @@ from typing import TypeVar
 
 from sqlalchemy.engine import Engine
 
+from etl_craft.core import interrupts
 from etl_craft.core.enums import TERMINAL_STATUSES, DependencyType, GatePolicy, RunStatus
 from etl_craft.core.errors import GraphError
 from etl_craft.core.time import as_utc
@@ -81,7 +81,7 @@ def _utc_now() -> datetime:
 class Clock:
     """How a check sleeps and reads the time; tests replace both."""
 
-    sleep: Callable[[float], None] = time.sleep
+    sleep: Callable[[float], None] = interrupts.sleep
     now: Callable[[], datetime] = _utc_now
 
 

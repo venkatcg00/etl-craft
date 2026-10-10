@@ -44,6 +44,7 @@ from typing import Required, TypedDict, TypeVar, Unpack
 from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.config import ConnectorConfig
+from etl_craft.core import interrupts
 from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import (
     SETTLED_STATUSES,
@@ -191,9 +192,13 @@ def run_pipeline(
 
 
 def _drive(steps: Generator[float, None, T], clock: Clock) -> T:
-    """Wait only in the foreground supervisor; workers never wait on gate deadlines."""
+    """Wait only in the foreground supervisor; workers never wait on gate deadlines.
+
+    A signal held while a step worked is raised between steps, so it never interrupts one.
+    """
     try:
         while True:
+            interrupts.checkpoint()
             try:
                 delay = next(steps)
             except StopIteration as done:

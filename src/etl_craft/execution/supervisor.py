@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
 
+from etl_craft.core import interrupts
 from etl_craft.core.faults import fault_point
 
 logger = logging.getLogger(__name__)
@@ -98,6 +99,7 @@ def run_child(
     with _output_file(spec.log_path) as output:
         start_offset = output.tell()
         started = time.monotonic()
+        interrupts.checkpoint()
         process = subprocess.Popen(
             spec.argv,
             stdin=subprocess.DEVNULL,
@@ -148,7 +150,8 @@ def _wait(
     Raises ``subprocess.TimeoutExpired`` when ``timeout`` passes first.
     """
     if cancel is None:
-        process.wait(timeout=timeout)
+        with interrupts.interruptible():
+            process.wait(timeout=timeout)
         return False
     deadline = None if timeout is None else time.monotonic() + timeout
     while not cancel.is_set():
@@ -159,7 +162,8 @@ def _wait(
                 raise subprocess.TimeoutExpired(process.args, timeout or 0)
             step = min(step, remaining)
         try:
-            process.wait(timeout=step)
+            with interrupts.interruptible():
+                process.wait(timeout=step)
             return False
         except subprocess.TimeoutExpired:
             continue
