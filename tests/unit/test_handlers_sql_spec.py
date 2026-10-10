@@ -120,7 +120,7 @@ def test_drop_table_takes_no_select(project):
         ),
         (
             {**BASE, "SOURCE_SQL": "DELETE FROM s.t"},
-            "SOURCE_SQL must be a read-only SELECT .* starts with 'DELETE'",
+            "SOURCE_SQL must be a read-only SELECT .* is not a query but DELETE",
         ),
         ({**BASE, "SOURCE_SQL": "SELECT 1", "SCHEMA_EVOLUTION": "yes"}, "must be true or false"),
         (

@@ -40,8 +40,8 @@ Your team writes the `CFG_` rows; the account etl-craft runs as only needs to re
 
 ## What a SQL task can do
 
-A SQL task supplies one read-only `SELECT`. The engine checks it (one statement, a read), and
-wraps it in one of nine actions that it owns, so a task's SQL cannot write, drop or grant
+A SQL task supplies one read-only `SELECT`. The engine checks it (one statement, a query, with
+no write anywhere in its parse tree), and wraps it in one of nine actions that it owns, so a task's SQL cannot write, drop or grant
 anything by itself. Ingestion scripts are Python run by your team, with the account's rights:
 review them like any code that runs in production.
 

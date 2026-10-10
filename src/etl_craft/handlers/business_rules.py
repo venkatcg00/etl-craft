@@ -49,7 +49,6 @@ from etl_craft.core.text import (
     as_subquery,
     is_safe_identifier,
     qualify,
-    read_only_problem,
     split_object_ref,
     split_statements,
 )
@@ -63,6 +62,7 @@ from etl_craft.engine.repository.business_rules import (
     flag_rule_keys,
 )
 from etl_craft.handlers.registry import HandlerResult, TaskContext
+from etl_craft.handlers.sql.analysis import read_only_problem
 from etl_craft.warehouse.connection import open_warehouse, warehouse_dialect
 
 logger = logging.getLogger(__name__)
@@ -105,7 +105,8 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
             "CFG_BUSINESS_RULES"
         )
     catalog = active_catalog(config)
-    checked = [check_rule(rule, catalog) for rule in rules]
+    sqlglot_dialect = warehouse_dialect(config).sqlglot_dialect
+    checked = [check_rule(rule, catalog, sqlglot_dialect) for rule in rules]
     scope = "1=1" if context.force else f"t.PIPELINE_RUN_ID = {int(context.pipeline_run_id)}"
     string_type = warehouse_dialect(config).string_type
     logger.info(
@@ -125,8 +126,11 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
     return HandlerResult(insert_count=flagged, update_count=cleared)
 
 
-def check_rule(rule: BusinessRule, catalog: str) -> _Rule:
-    """Check a rule's definition before any rule runs; ``SqlGuardError`` naming what is wrong."""
+def check_rule(rule: BusinessRule, catalog: str, dialect: str | None = None) -> _Rule:
+    """Check a rule's definition before any rule runs; ``SqlGuardError`` naming what is wrong.
+
+    ``dialect`` is the warehouse's sqlglot dialect the rule's SQL is read in.
+    """
     name = f"business rule {rule.business_rule_name!r} (BUSINESS_RULE_ID={rule.business_rule_id})"
     if not is_safe_identifier(rule.business_rule_key_column):
         raise SqlGuardError(
@@ -143,7 +147,7 @@ def check_rule(rule: BusinessRule, catalog: str) -> _Rule:
             f"{name}: BUSINESS_RULE_SQL must be one correlated SELECT; it holds "
             f"{len(statements)} statements"
         )
-    problem = read_only_problem(statements[0])
+    problem = read_only_problem(statements[0], dialect)
     if problem is not None:
         raise SqlGuardError(f"{name}: BUSINESS_RULE_SQL must be a read-only SELECT; it {problem}")
     return _Rule(rule, qualify(rule.target_table, catalog))

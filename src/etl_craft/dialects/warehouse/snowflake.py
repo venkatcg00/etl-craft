@@ -29,6 +29,7 @@ class SnowflakeWarehouse(WarehouseDialect):
     """Snowflake, ordinary tables."""
 
     spec = warehouse_by_key("snowflake")
+    sqlglot_dialect = "snowflake"
     replace_strategy: ReplaceStrategy = "create_or_replace"
     identifier_case = "upper"
     qualified_rename = True

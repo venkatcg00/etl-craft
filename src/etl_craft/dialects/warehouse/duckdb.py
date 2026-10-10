@@ -16,6 +16,7 @@ class DuckDBWarehouse(WarehouseDialect):
     """
 
     spec = warehouse_by_key("duckdb")
+    sqlglot_dialect = "duckdb"
     replace_strategy: ReplaceStrategy = "transactional"
     surrogate_key: SurrogateKey = "sequence"
     single_writer = True

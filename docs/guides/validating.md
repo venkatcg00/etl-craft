@@ -43,7 +43,10 @@ A `WARN` works, but deserves a look:
   nearest names. `PYTHON` tasks are not checked, since a script may read any parameter of its
   own;
 - an alert that depends on a task through `SUCCESS` or `HAS_DATA` while it sends on `FAILED` or
-  `COMPLETED_WITH_ERRORS`: when that task fails, the alert is skipped and sends nothing.
+  `COMPLETED_WITH_ERRORS`: when that task fails, the alert is skipped and sends nothing;
+- a SQL task's SELECT, from a file or inline, or a business rule's SQL, that sqlglot cannot read
+  in the warehouse's dialect, with the line and column where it stopped. The warehouse decides
+  whether it is valid when the task runs, and column lineage cannot trace it.
 
 `validate` does not connect to the warehouse or the email relay; [`doctor`](../deploying/doctor-and-setup.md)
 does. Column lineage is checked by [`lineage --strict`](lineage.md).

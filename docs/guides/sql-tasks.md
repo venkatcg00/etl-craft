@@ -22,6 +22,14 @@ Set exactly one of them. The SELECT must be a single read-only statement (`SELEC
 `TABLE` or `VALUES`); comments and a trailing `;` are fine. A task holds exactly one query: do
 lookups and aggregations inside it, with CTEs or subqueries, not as statements of their own.
 
+The engine reads the SQL, from a file or inline, with sqlglot in the warehouse's dialect, and
+refuses it when it is not a query or anything in it writes, such as an `INSERT`, or a `DELETE`
+inside a `WITH`; a column named `copy` or `grant_date` is fine. When sqlglot cannot parse the
+SQL, the engine checks it word by word instead (it must start with `SELECT`, `WITH`, `TABLE` or
+`VALUES` and hold no word such as `DELETE` or `DROP` outside comments and string literals), and
+the warehouse decides whether the SQL is valid. [`validate`](validating.md) warns about such SQL,
+with the line and column where sqlglot stopped.
+
 The columns the SELECT returns are checked before the target is touched, and the task fails,
 naming them, when:
 

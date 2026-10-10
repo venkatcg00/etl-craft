@@ -28,6 +28,7 @@ class TrinoIcebergWarehouse(WarehouseDialect):
     """Trino, Iceberg catalog: no temporary tables, no alias on UPDATE or DELETE targets."""
 
     spec = warehouse_by_key("trino_iceberg")
+    sqlglot_dialect = "trino"
     replace_strategy: ReplaceStrategy = "create_or_replace"
     overwrite_uses_ctas = True
     hash_metadata_columns = (
