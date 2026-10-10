@@ -1,0 +1,135 @@
+{
+  "schema": 2,
+  "suite": "e2e-pip",
+  "marker": "e2e_pip",
+  "package_version": "0.3.0",
+  "commit": "9517c3068592b5daaeff0b5e25e4a3496dcbdc3c",
+  "dirty": false,
+  "wheel_sha256": "630e76810ada862cfad0bcbf0bb9b292eb89752ed9d904c7fe1a5f9303ac4432",
+  "python": "3.11.16",
+  "platform": "Linux-7.2.9-1-cachyos-x86_64-with-glibc2.44",
+  "platform_key": "linux",
+  "collected": [
+    "tests/e2e/test_demo.py::test_the_demo_runs_locally[pip-postgres-duckdb]",
+    "tests/e2e/test_demo.py::test_the_demo_runs_locally[pip-postgres-duckdb_iceberg]",
+    "tests/e2e/test_demo.py::test_the_demo_runs_locally[pip-postgres-postgres]",
+    "tests/e2e/test_demo.py::test_the_demo_runs_locally[pip-postgres-trino_iceberg]",
+    "tests/e2e/test_demo.py::test_the_demo_runs_locally[pip-sqlite-duckdb]",
+    "tests/e2e/test_demo.py::test_the_demo_runs_locally[pip-sqlite-duckdb_iceberg]",
+    "tests/e2e/test_demo.py::test_the_demo_runs_locally[pip-sqlite-postgres]",
+    "tests/e2e/test_demo.py::test_the_demo_runs_locally[pip-sqlite-trino_iceberg]",
+    "tests/e2e/test_demo.py::test_the_demo_runs_under_an_orchestrator[pip-postgres-duckdb]",
+    "tests/e2e/test_demo.py::test_the_demo_runs_under_an_orchestrator[pip-postgres-duckdb_iceberg]",
+    "tests/e2e/test_demo.py::test_the_demo_runs_under_an_orchestrator[pip-postgres-postgres]",
+    "tests/e2e/test_demo.py::test_the_demo_runs_under_an_orchestrator[pip-postgres-trino_iceberg]",
+    "tests/e2e/test_demo.py::test_the_demo_runs_under_an_orchestrator[pip-sqlite-duckdb]",
+    "tests/e2e/test_demo.py::test_the_demo_runs_under_an_orchestrator[pip-sqlite-duckdb_iceberg]",
+    "tests/e2e/test_demo.py::test_the_demo_runs_under_an_orchestrator[pip-sqlite-postgres]",
+    "tests/e2e/test_demo.py::test_the_demo_runs_under_an_orchestrator[pip-sqlite-trino_iceberg]",
+    "tests/e2e/test_quick_start.py::test_the_page_runs_the_whole_demo",
+    "tests/e2e/test_quick_start.py::test_the_quick_start_runs_as_written"
+  ],
+  "started_at": "2026-10-10T09:55:11+00:00",
+  "finished_at": "2026-10-10T10:09:10+00:00",
+  "exit_status": 0,
+  "counts": {
+    "passed": 18,
+    "skipped": 0,
+    "xfailed": 0,
+    "xpassed": 0,
+    "failed": 0,
+    "error": 0
+  },
+  "tests": [
+    {
+      "nodeid": "tests/e2e/test_demo.py::test_the_demo_runs_locally[pip-postgres-duckdb]",
+      "outcome": "passed",
+      "duration": 43.47
+    },
+    {
+      "nodeid": "tests/e2e/test_demo.py::test_the_demo_runs_locally[pip-postgres-duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 70.112
+    },
+    {
+      "nodeid": "tests/e2e/test_demo.py::test_the_demo_runs_locally[pip-postgres-postgres]",
+      "outcome": "passed",
+      "duration": 35.79
+    },
+    {
+      "nodeid": "tests/e2e/test_demo.py::test_the_demo_runs_locally[pip-postgres-trino_iceberg]",
+      "outcome": "passed",
+      "duration": 110.336
+    },
+    {
+      "nodeid": "tests/e2e/test_demo.py::test_the_demo_runs_locally[pip-sqlite-duckdb]",
+      "outcome": "passed",
+      "duration": 46.146
+    },
+    {
+      "nodeid": "tests/e2e/test_demo.py::test_the_demo_runs_locally[pip-sqlite-duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 62.781
+    },
+    {
+      "nodeid": "tests/e2e/test_demo.py::test_the_demo_runs_locally[pip-sqlite-postgres]",
+      "outcome": "passed",
+      "duration": 30.445
+    },
+    {
+      "nodeid": "tests/e2e/test_demo.py::test_the_demo_runs_locally[pip-sqlite-trino_iceberg]",
+      "outcome": "passed",
+      "duration": 103.698
+    },
+    {
+      "nodeid": "tests/e2e/test_demo.py::test_the_demo_runs_under_an_orchestrator[pip-postgres-duckdb]",
+      "outcome": "passed",
+      "duration": 33.753
+    },
+    {
+      "nodeid": "tests/e2e/test_demo.py::test_the_demo_runs_under_an_orchestrator[pip-postgres-duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 42.224
+    },
+    {
+      "nodeid": "tests/e2e/test_demo.py::test_the_demo_runs_under_an_orchestrator[pip-postgres-postgres]",
+      "outcome": "passed",
+      "duration": 31.252
+    },
+    {
+      "nodeid": "tests/e2e/test_demo.py::test_the_demo_runs_under_an_orchestrator[pip-postgres-trino_iceberg]",
+      "outcome": "passed",
+      "duration": 56.392
+    },
+    {
+      "nodeid": "tests/e2e/test_demo.py::test_the_demo_runs_under_an_orchestrator[pip-sqlite-duckdb]",
+      "outcome": "passed",
+      "duration": 28.147
+    },
+    {
+      "nodeid": "tests/e2e/test_demo.py::test_the_demo_runs_under_an_orchestrator[pip-sqlite-duckdb_iceberg]",
+      "outcome": "passed",
+      "duration": 36.873
+    },
+    {
+      "nodeid": "tests/e2e/test_demo.py::test_the_demo_runs_under_an_orchestrator[pip-sqlite-postgres]",
+      "outcome": "passed",
+      "duration": 26.7
+    },
+    {
+      "nodeid": "tests/e2e/test_demo.py::test_the_demo_runs_under_an_orchestrator[pip-sqlite-trino_iceberg]",
+      "outcome": "passed",
+      "duration": 49.032
+    },
+    {
+      "nodeid": "tests/e2e/test_quick_start.py::test_the_page_runs_the_whole_demo",
+      "outcome": "passed",
+      "duration": 0.002
+    },
+    {
+      "nodeid": "tests/e2e/test_quick_start.py::test_the_quick_start_runs_as_written",
+      "outcome": "passed",
+      "duration": 30.147
+    }
+  ]
+}

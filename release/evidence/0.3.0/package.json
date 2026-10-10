@@ -1,0 +1,63 @@
+{
+  "schema": 2,
+  "suite": "package",
+  "marker": "package",
+  "package_version": "0.3.0",
+  "commit": "9517c3068592b5daaeff0b5e25e4a3496dcbdc3c",
+  "dirty": false,
+  "wheel_sha256": "630e76810ada862cfad0bcbf0bb9b292eb89752ed9d904c7fe1a5f9303ac4432",
+  "python": "3.11.16",
+  "platform": "Linux-7.2.9-1-cachyos-x86_64-with-glibc2.44",
+  "platform_key": "linux",
+  "collected": [
+    "tests/package/test_install.py::test_it_installs_and_runs[sdist-pip-None]",
+    "tests/package/test_install.py::test_it_installs_and_runs[sdist-uv-None]",
+    "tests/package/test_install.py::test_it_installs_and_runs[wheel-pip-None]",
+    "tests/package/test_install.py::test_it_installs_and_runs[wheel-uv-None]",
+    "tests/package/test_install.py::test_it_installs_and_runs[wheel-uv-server]",
+    "tests/package/test_install.py::test_the_wheel_holds_the_package_files_and_the_licence"
+  ],
+  "started_at": "2026-10-10T09:53:34+00:00",
+  "finished_at": "2026-10-10T09:54:01+00:00",
+  "exit_status": 0,
+  "counts": {
+    "passed": 6,
+    "skipped": 0,
+    "xfailed": 0,
+    "xpassed": 0,
+    "failed": 0,
+    "error": 0
+  },
+  "tests": [
+    {
+      "nodeid": "tests/package/test_install.py::test_it_installs_and_runs[sdist-pip-None]",
+      "outcome": "passed",
+      "duration": 9.738
+    },
+    {
+      "nodeid": "tests/package/test_install.py::test_it_installs_and_runs[sdist-uv-None]",
+      "outcome": "passed",
+      "duration": 1.88
+    },
+    {
+      "nodeid": "tests/package/test_install.py::test_it_installs_and_runs[wheel-pip-None]",
+      "outcome": "passed",
+      "duration": 9.625
+    },
+    {
+      "nodeid": "tests/package/test_install.py::test_it_installs_and_runs[wheel-uv-None]",
+      "outcome": "passed",
+      "duration": 2.16
+    },
+    {
+      "nodeid": "tests/package/test_install.py::test_it_installs_and_runs[wheel-uv-server]",
+      "outcome": "passed",
+      "duration": 2.954
+    },
+    {
+      "nodeid": "tests/package/test_install.py::test_the_wheel_holds_the_package_files_and_the_licence",
+      "outcome": "passed",
+      "duration": 0.002
+    }
+  ]
+}

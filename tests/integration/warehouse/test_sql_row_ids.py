@@ -10,17 +10,17 @@ from etl_craft.handlers.sql.session import Session
 from fixtures.engine_db import apply_schema
 from fixtures.metadata import add_pipeline, start_run
 from fixtures.sql_row_ids import check_row_id_generation, run_paused_append
+from fixtures.sql_warehouse import warehouses
 
 
 def test_generated_row_ids_survive_writes_and_evolution(sql_world):
     check_row_id_generation(sql_world, "numbered")
 
 
+@warehouses("trino_iceberg")
 @pytest.mark.parametrize("engine_kind", ["sqlite", "postgresql"])
 def test_concurrent_appends_keep_row_ids_unique_across_processes(sql_world, request, engine_kind):
     w = sql_world
-    if w.kind != "trino_iceberg":
-        pytest.skip("Trino supports separate task processes sharing one Iceberg target")
     if engine_kind == "postgresql":
         db = request.getfixturevalue("postgres_database")
         apply_schema(db.engine)
@@ -80,10 +80,9 @@ def test_concurrent_appends_keep_row_ids_unique_across_processes(sql_world, requ
         results.close()
 
 
+@warehouses("trino_iceberg", "duckdb_iceberg")
 def test_failed_computed_allocation_releases_the_target_lock(sql_world, monkeypatch):
     w = sql_world
-    if w.kind not in {"trino_iceberg", "duckdb_iceberg"}:
-        pytest.skip("computed generators allocate from the current maximum")
     w.setup("events", "SELECT 1 AS id", "APPEND_TABLE")
     original = Session.count
 

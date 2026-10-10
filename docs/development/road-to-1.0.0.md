@@ -136,6 +136,12 @@ no cloud suite ran.
 
 **Choices that differ from the item text.**
 
+- 0.3.0 was cut from #132, after S4.I.6, rather than at the end of S3: it carries the S3
+  identity work and the S4 overseer items, which the release overview places in 0.4. Pools (S5.A,
+  S5.B) are not in it. 0.4.0 follows the seven-day soak, the 0.4 gate, from `main`. Before the
+  release, warehouse tests that skipped themselves where they do not apply now run only on the
+  warehouses they apply to, since the release gate refuses skipped tests.
+
 - S5.A and S5.B land together, so the interface arrives with its first implementation.
   `AttemptSpec` carries what the local pool uses, plus `attempt_number`, `force` and `rerun`,
   which the task process needs; `project_code`, `bundle_id` and `config_sha256` arrive with S5.G,

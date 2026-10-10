@@ -6,6 +6,17 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Task processes run through a pool: whole-pipeline runs and the server admit each attempt and
+  submit it to the local pool, which runs it on this host; `run --task_code` runs its one attempt
+  in the foreground the same way. New
+  `Orchestration.Local_ingestion_slots` and `Local_warehouse_slots` cap how many Python ingestion
+  tasks and how many SQL, business-rule and alert tasks run at once, within
+  `Max_parallel_tasks`; unset, either kind may use every slot, as before.
+
+## [0.3.0] - 2026-10-10
+
 ### Fixed
 
 - `etl-craft run` acts on Ctrl-C, `SIGTERM` and `SIGHUP` at its next safe point between Engine DB
@@ -95,13 +106,6 @@ All notable changes are recorded here. The format follows
   `PIPELINE_ID_FILTER` to `$$pipeline_run_id_filter` and `PIPELINE_RUN_ID_FILTER`.
 
 ### Added
-
-- Task processes run through a pool: whole-pipeline runs and the server admit each attempt and
-  submit it to the local pool, which runs it on this host; `run --task_code` runs its one attempt
-  in the foreground the same way. New
-  `Orchestration.Local_ingestion_slots` and `Local_warehouse_slots` cap how many Python ingestion
-  tasks and how many SQL, business-rule and alert tasks run at once, within
-  `Max_parallel_tasks`; unset, either kind may use every slot, as before.
 
 - Generated DAG YAML carries version 1 and validates against its packaged JSON Schema. A separate
   `etl-craft-airflow` distribution loads pipeline, global and docs exports as real Airflow DAGs
@@ -230,6 +234,13 @@ All notable changes are recorded here. The format follows
 - The catalog's search builds links only from the site's own relative pages: a result whose path
   is not one falls back to the home page, and the page's way back to the site root must be made
   of `../` steps.
+
+### Verified
+
+- All 15 required release suites passed from clean commit `9517c30`, with 3,269 passing
+  test outcomes and no skips. The built wheel was exercised by pip, uv, package checks and
+  the complete Databricks and Snowflake suites, including both table formats. The evidence
+  and artifact checksums are in `release/evidence/0.3.0/`.
 
 ## [0.2.0] - 2026-10-04
 
@@ -471,6 +482,7 @@ evidence.
   to end, locally verifiable authentication modes, and the demo's warehouse work on Databricks
   and Snowflake. The evidence is in `release/evidence/0.1.0/`.
 
-[Unreleased]: https://github.com/venkatcg00/etl-craft/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/venkatcg00/etl-craft/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/venkatcg00/etl-craft/releases/tag/v0.3.0
 [0.2.0]: https://github.com/venkatcg00/etl-craft/releases/tag/v0.2.0
 [0.1.0]: https://github.com/venkatcg00/etl-craft/releases/tag/v0.1.0

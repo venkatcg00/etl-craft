@@ -1,0 +1,609 @@
+{
+  "schema": 2,
+  "suite": "warehouse-postgres",
+  "marker": "warehouse_postgres",
+  "package_version": "0.3.0",
+  "commit": "9517c3068592b5daaeff0b5e25e4a3496dcbdc3c",
+  "dirty": false,
+  "wheel_sha256": null,
+  "python": "3.11.16",
+  "platform": "Linux-7.2.9-1-cachyos-x86_64-with-glibc2.44",
+  "platform_key": "linux",
+  "collected": [
+    "tests/integration/warehouse/test_business_rules.py::test_a_bad_rule_stops_the_task_before_any_rule_runs[postgres-changes0-BUSINESS_RULE_KEY_COLUMN='order id' is not a plain column name]",
+    "tests/integration/warehouse/test_business_rules.py::test_a_bad_rule_stops_the_task_before_any_rule_runs[postgres-changes1-BUSINESS_RULE_SQL must be a read-only SELECT]",
+    "tests/integration/warehouse/test_business_rules.py::test_a_bad_rule_stops_the_task_before_any_rule_runs[postgres-changes2-must be one correlated SELECT; it holds 2 statements]",
+    "tests/integration/warehouse/test_business_rules.py::test_a_failing_rule_fails_the_task_after_its_wave_finishes[postgres]",
+    "tests/integration/warehouse/test_business_rules.py::test_a_flag_is_cleared_when_its_key_is_gone_from_the_table[postgres]",
+    "tests/integration/warehouse/test_business_rules.py::test_a_task_without_rules_fails[postgres]",
+    "tests/integration/warehouse/test_business_rules.py::test_only_the_active_version_of_a_versioned_table_is_judged[postgres]",
+    "tests/integration/warehouse/test_business_rules.py::test_rule_sql_endings_work_when_flagging_and_clearing[postgres- -- the last line is a comment]",
+    "tests/integration/warehouse/test_business_rules.py::test_rule_sql_endings_work_when_flagging_and_clearing[postgres-;\\n-- and a comment]",
+    "tests/integration/warehouse/test_business_rules.py::test_rule_sql_endings_work_when_flagging_and_clearing[postgres-;]",
+    "tests/integration/warehouse/test_business_rules.py::test_rules_flag_breaking_rows_and_a_rerun_or_a_forced_run_clears_fixed_ones[postgres]",
+    "tests/integration/warehouse/test_business_rules.py::test_rules_receive_pipeline_and_task_run_identities[postgres]",
+    "tests/integration/warehouse/test_cloning.py::test_a_clone_runs_when_a_run_ends[postgres]",
+    "tests/integration/warehouse/test_cloning.py::test_a_failed_clone_names_the_table_and_leaves_the_run_as_it_ended[postgres]",
+    "tests/integration/warehouse/test_cloning.py::test_a_mirror_gains_new_columns_and_keeps_old_ones[postgres]",
+    "tests/integration/warehouse/test_cloning.py::test_attempt_retryability_is_cloned_as_boolean[postgres]",
+    "tests/integration/warehouse/test_cloning.py::test_every_table_is_mirrored_and_replaced_on_the_next_clone[postgres]",
+    "tests/integration/warehouse/test_connections.py::test_a_postgres_warehouse_with_a_password",
+    "tests/integration/warehouse/test_hash_contract.py::test_floating_compare_columns_are_refused_before_target_writes[postgres]",
+    "tests/integration/warehouse/test_hash_contract.py::test_golden_canonical_hash_and_session_timezone[postgres]",
+    "tests/integration/warehouse/test_hash_contract.py::test_missing_or_ambiguous_rehash_contract_is_refused[postgres]",
+    "tests/integration/warehouse/test_hash_contract.py::test_null_empty_and_separator_values_have_distinct_hashes[postgres]",
+    "tests/integration/warehouse/test_hash_contract.py::test_rehash_command_validates_dry_run_then_upgrades[postgres]",
+    "tests/integration/warehouse/test_hash_contract.py::test_rehash_upgrades_every_row_then_unchanged_merge_does_nothing[postgres-SCD1_MERGE]",
+    "tests/integration/warehouse/test_hash_contract.py::test_rehash_upgrades_every_row_then_unchanged_merge_does_nothing[postgres-SCD2_MERGE]",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_column_name_that_needs_quoting_is_refused[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_failing_statement_names_its_step_and_leaves_no_scratch_tables[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_null_merge_key_is_refused_before_the_target_changes[postgres-DELETE_ROWS]",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_null_merge_key_is_refused_before_the_target_changes[postgres-SCD1_MERGE]",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_null_merge_key_is_refused_before_the_target_changes[postgres-SCD2_MERGE]",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_runtime_cast_failure_preserves_every_target_row[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_select_may_end_in_a_semicolon_or_a_comment[postgres- -- the last line is a comment]",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_select_may_end_in_a_semicolon_or_a_comment[postgres-;\\n-- and a comment]",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_select_may_end_in_a_semicolon_or_a_comment[postgres-;]",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_select_names_its_tables_as_schema_table[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_select_returning_engine_columns_is_refused[postgres-APPEND_TABLE]",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_select_returning_engine_columns_is_refused[postgres-CREATE_TABLE]",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_select_returning_engine_columns_is_refused[postgres-DELETE_ROWS]",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_select_returning_engine_columns_is_refused[postgres-OVERWRITE_TABLE]",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_select_returning_engine_columns_is_refused[postgres-SCD1_MERGE]",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_select_returning_engine_columns_is_refused[postgres-SCD2_MERGE]",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_select_returning_engine_columns_is_refused[postgres-SETUP_TABLE]",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_soft_delete_leaves_rows_already_deleted_alone[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_soft_deleted_key_comes_back_when_the_select_returns_it[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_soft_deleted_scd2_key_gets_a_live_version[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_sql_file_with_pipeline_run_id_filter_reads_this_runs_rows[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_storage_location_is_used_where_it_applies_and_refused_elsewhere[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_target_may_name_its_database[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_a_target_missing_audit_columns_is_refused[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_append_table_adds_rows_on_every_run[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_create_table_stamps_the_run_and_numbers_the_rows[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_delete_rows_soft_and_hard[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_drop_table_needs_this_pipelines_create_table_to_have_run[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_duplicate_merge_keys_fail_unless_an_order_chooses[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_format_mismatch_fails_before_staging_or_mutating[postgres-CREATE_TABLE]",
+    "tests/integration/warehouse/test_sql_actions.py::test_format_mismatch_fails_before_staging_or_mutating[postgres-OVERWRITE_TABLE]",
+    "tests/integration/warehouse/test_sql_actions.py::test_format_mismatch_fails_before_staging_or_mutating[postgres-SCD1_MERGE]",
+    "tests/integration/warehouse/test_sql_actions.py::test_format_mismatch_fails_before_staging_or_mutating[postgres-SCD2_MERGE]",
+    "tests/integration/warehouse/test_sql_actions.py::test_format_mismatch_fails_before_staging_or_mutating[postgres-SETUP_TABLE]",
+    "tests/integration/warehouse/test_sql_actions.py::test_joined_merge_matches_composite_keys_and_preserves_other_rows[postgres-SCD1_MERGE]",
+    "tests/integration/warehouse/test_sql_actions.py::test_joined_merge_matches_composite_keys_and_preserves_other_rows[postgres-SCD2_MERGE]",
+    "tests/integration/warehouse/test_sql_actions.py::test_overwrite_table_needs_its_target_then_replaces_the_rows[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_rows_written_counts_what_changed_not_what_the_target_holds[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_run_date_reads_the_rows_of_the_date_the_run_runs_as_of[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_scd1_merge_inserts_updates_and_leaves_unchanged_rows[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_scd1_preserve_target_keeps_values_where_the_source_is_null[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_scd2_merge_keeps_history[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_schema_checks_and_evolution[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_setup_table_refuses_writers_that_need_different_audit_columns[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_setup_table_takes_the_audit_columns_of_the_real_writer[postgres]",
+    "tests/integration/warehouse/test_sql_actions.py::test_ties_in_the_dedupe_order_are_refused_unless_the_rows_are_the_same[postgres]",
+    "tests/integration/warehouse/test_sql_appends.py::test_append_retries_replace_only_their_task_run[postgres]",
+    "tests/integration/warehouse/test_sql_appends.py::test_empty_retry_removes_its_old_batch[postgres]",
+    "tests/integration/warehouse/test_sql_appends.py::test_every_sql_writer_records_pipeline_and_task_run_identities[postgres-APPEND_TABLE]",
+    "tests/integration/warehouse/test_sql_appends.py::test_every_sql_writer_records_pipeline_and_task_run_identities[postgres-CREATE_TABLE]",
+    "tests/integration/warehouse/test_sql_appends.py::test_every_sql_writer_records_pipeline_and_task_run_identities[postgres-OVERWRITE_TABLE]",
+    "tests/integration/warehouse/test_sql_appends.py::test_every_sql_writer_records_pipeline_and_task_run_identities[postgres-SCD1_MERGE]",
+    "tests/integration/warehouse/test_sql_appends.py::test_every_sql_writer_records_pipeline_and_task_run_identities[postgres-SCD2_MERGE]",
+    "tests/integration/warehouse/test_sql_appends.py::test_invalid_task_run_id_is_refused_before_replacing_a_batch[postgres]",
+    "tests/integration/warehouse/test_sql_appends.py::test_killed_append_converges_when_retried[postgres]",
+    "tests/integration/warehouse/test_sql_appends.py::test_legacy_appends_are_refused_until_upgraded_without_assigning_history[postgres]",
+    "tests/integration/warehouse/test_sql_appends.py::test_sql_input_identities_match_target_provenance[postgres]",
+    "tests/integration/warehouse/test_sql_appends.py::test_upgrade_command_validates_then_adds_and_records_requests[postgres]",
+    "tests/integration/warehouse/test_sql_appends.py::test_upgrade_deduplicates_qualified_targets_and_refuses_format_conflicts[postgres]",
+    "tests/integration/warehouse/test_sql_appends.py::test_upgrade_includes_ingestion_targets_without_a_sql_row_id[postgres]",
+    "tests/integration/warehouse/test_sql_appends.py::test_upgrade_requires_an_active_append_writer[postgres]",
+    "tests/integration/warehouse/test_sql_evolution.py::test_evolution_retains_full_types_rows_and_keys[postgres]",
+    "tests/integration/warehouse/test_sql_evolution.py::test_full_column_type_retains_modifiers_and_names_missing_column[postgres]",
+    "tests/integration/warehouse/test_sql_evolution.py::test_interrupted_evolution_preserves_rows_and_retry_completes[postgres]",
+    "tests/integration/warehouse/test_sql_evolution.py::test_postgres_evolution_preserves_dependent_view_index_comments_and_identity[postgres]",
+    "tests/integration/warehouse/test_sql_replacement.py::test_replacement_faults_and_write_errors_retain_the_original[postgres-CREATE_TABLE]",
+    "tests/integration/warehouse/test_sql_replacement.py::test_replacement_faults_and_write_errors_retain_the_original[postgres-OVERWRITE_TABLE]",
+    "tests/integration/warehouse/test_sql_replacement.py::test_replacement_uses_target_schema_instead_of_connection_default[postgres]",
+    "tests/integration/warehouse/test_sql_replacement.py::test_transactional_cleanup_failure_rolls_back_replacement[postgres]",
+    "tests/integration/warehouse/test_sql_row_ids.py::test_generated_row_ids_survive_writes_and_evolution[postgres]",
+    "tests/integration/warehouse/test_sql_update_performance.py::test_scd1_updates_100000_changed_rows_in_under_30_seconds[postgres]",
+    "tests/integration/warehouse/test_warehouse_schema.py::test_an_existing_schema_passes_and_a_missing_one_is_named[postgres]"
+  ],
+  "started_at": "2026-10-10T09:44:59+00:00",
+  "finished_at": "2026-10-10T09:45:18+00:00",
+  "exit_status": 0,
+  "counts": {
+    "passed": 97,
+    "skipped": 0,
+    "xfailed": 0,
+    "xpassed": 0,
+    "failed": 0,
+    "error": 0
+  },
+  "tests": [
+    {
+      "nodeid": "tests/integration/warehouse/test_business_rules.py::test_a_bad_rule_stops_the_task_before_any_rule_runs[postgres-changes0-BUSINESS_RULE_KEY_COLUMN='order id' is not a plain column name]",
+      "outcome": "passed",
+      "duration": 0.086
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_business_rules.py::test_a_bad_rule_stops_the_task_before_any_rule_runs[postgres-changes1-BUSINESS_RULE_SQL must be a read-only SELECT]",
+      "outcome": "passed",
+      "duration": 0.087
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_business_rules.py::test_a_bad_rule_stops_the_task_before_any_rule_runs[postgres-changes2-must be one correlated SELECT; it holds 2 statements]",
+      "outcome": "passed",
+      "duration": 0.088
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_business_rules.py::test_a_failing_rule_fails_the_task_after_its_wave_finishes[postgres]",
+      "outcome": "passed",
+      "duration": 0.157
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_business_rules.py::test_a_flag_is_cleared_when_its_key_is_gone_from_the_table[postgres]",
+      "outcome": "passed",
+      "duration": 0.115
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_business_rules.py::test_a_task_without_rules_fails[postgres]",
+      "outcome": "passed",
+      "duration": 0.085
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_business_rules.py::test_only_the_active_version_of_a_versioned_table_is_judged[postgres]",
+      "outcome": "passed",
+      "duration": 0.173
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_business_rules.py::test_rule_sql_endings_work_when_flagging_and_clearing[postgres- -- the last line is a comment]",
+      "outcome": "passed",
+      "duration": 0.113
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_business_rules.py::test_rule_sql_endings_work_when_flagging_and_clearing[postgres-;\\n-- and a comment]",
+      "outcome": "passed",
+      "duration": 0.112
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_business_rules.py::test_rule_sql_endings_work_when_flagging_and_clearing[postgres-;]",
+      "outcome": "passed",
+      "duration": 0.115
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_business_rules.py::test_rules_flag_breaking_rows_and_a_rerun_or_a_forced_run_clears_fixed_ones[postgres]",
+      "outcome": "passed",
+      "duration": 0.2
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_business_rules.py::test_rules_receive_pipeline_and_task_run_identities[postgres]",
+      "outcome": "passed",
+      "duration": 0.132
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_cloning.py::test_a_clone_runs_when_a_run_ends[postgres]",
+      "outcome": "passed",
+      "duration": 0.152
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_cloning.py::test_a_failed_clone_names_the_table_and_leaves_the_run_as_it_ended[postgres]",
+      "outcome": "passed",
+      "duration": 0.096
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_cloning.py::test_a_mirror_gains_new_columns_and_keeps_old_ones[postgres]",
+      "outcome": "passed",
+      "duration": 0.163
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_cloning.py::test_attempt_retryability_is_cloned_as_boolean[postgres]",
+      "outcome": "passed",
+      "duration": 0.156
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_cloning.py::test_every_table_is_mirrored_and_replaced_on_the_next_clone[postgres]",
+      "outcome": "passed",
+      "duration": 0.305
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_connections.py::test_a_postgres_warehouse_with_a_password",
+      "outcome": "passed",
+      "duration": 0.009
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_hash_contract.py::test_floating_compare_columns_are_refused_before_target_writes[postgres]",
+      "outcome": "passed",
+      "duration": 0.114
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_hash_contract.py::test_golden_canonical_hash_and_session_timezone[postgres]",
+      "outcome": "passed",
+      "duration": 0.056
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_hash_contract.py::test_missing_or_ambiguous_rehash_contract_is_refused[postgres]",
+      "outcome": "passed",
+      "duration": 0.1
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_hash_contract.py::test_null_empty_and_separator_values_have_distinct_hashes[postgres]",
+      "outcome": "passed",
+      "duration": 0.058
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_hash_contract.py::test_rehash_command_validates_dry_run_then_upgrades[postgres]",
+      "outcome": "passed",
+      "duration": 0.193
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_hash_contract.py::test_rehash_upgrades_every_row_then_unchanged_merge_does_nothing[postgres-SCD1_MERGE]",
+      "outcome": "passed",
+      "duration": 0.223
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_hash_contract.py::test_rehash_upgrades_every_row_then_unchanged_merge_does_nothing[postgres-SCD2_MERGE]",
+      "outcome": "passed",
+      "duration": 0.266
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_column_name_that_needs_quoting_is_refused[postgres]",
+      "outcome": "passed",
+      "duration": 0.093
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_failing_statement_names_its_step_and_leaves_no_scratch_tables[postgres]",
+      "outcome": "passed",
+      "duration": 0.074
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_null_merge_key_is_refused_before_the_target_changes[postgres-DELETE_ROWS]",
+      "outcome": "passed",
+      "duration": 0.173
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_null_merge_key_is_refused_before_the_target_changes[postgres-SCD1_MERGE]",
+      "outcome": "passed",
+      "duration": 0.18
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_null_merge_key_is_refused_before_the_target_changes[postgres-SCD2_MERGE]",
+      "outcome": "passed",
+      "duration": 0.189
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_runtime_cast_failure_preserves_every_target_row[postgres]",
+      "outcome": "passed",
+      "duration": 0.221
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_select_may_end_in_a_semicolon_or_a_comment[postgres- -- the last line is a comment]",
+      "outcome": "passed",
+      "duration": 0.121
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_select_may_end_in_a_semicolon_or_a_comment[postgres-;\\n-- and a comment]",
+      "outcome": "passed",
+      "duration": 0.122
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_select_may_end_in_a_semicolon_or_a_comment[postgres-;]",
+      "outcome": "passed",
+      "duration": 0.119
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_select_names_its_tables_as_schema_table[postgres]",
+      "outcome": "passed",
+      "duration": 0.091
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_select_returning_engine_columns_is_refused[postgres-APPEND_TABLE]",
+      "outcome": "passed",
+      "duration": 0.153
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_select_returning_engine_columns_is_refused[postgres-CREATE_TABLE]",
+      "outcome": "passed",
+      "duration": 0.149
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_select_returning_engine_columns_is_refused[postgres-DELETE_ROWS]",
+      "outcome": "passed",
+      "duration": 0.143
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_select_returning_engine_columns_is_refused[postgres-OVERWRITE_TABLE]",
+      "outcome": "passed",
+      "duration": 0.164
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_select_returning_engine_columns_is_refused[postgres-SCD1_MERGE]",
+      "outcome": "passed",
+      "duration": 0.158
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_select_returning_engine_columns_is_refused[postgres-SCD2_MERGE]",
+      "outcome": "passed",
+      "duration": 0.152
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_select_returning_engine_columns_is_refused[postgres-SETUP_TABLE]",
+      "outcome": "passed",
+      "duration": 0.169
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_soft_delete_leaves_rows_already_deleted_alone[postgres]",
+      "outcome": "passed",
+      "duration": 0.206
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_soft_deleted_key_comes_back_when_the_select_returns_it[postgres]",
+      "outcome": "passed",
+      "duration": 0.236
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_soft_deleted_scd2_key_gets_a_live_version[postgres]",
+      "outcome": "passed",
+      "duration": 0.239
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_sql_file_with_pipeline_run_id_filter_reads_this_runs_rows[postgres]",
+      "outcome": "passed",
+      "duration": 0.158
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_storage_location_is_used_where_it_applies_and_refused_elsewhere[postgres]",
+      "outcome": "passed",
+      "duration": 0.062
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_target_may_name_its_database[postgres]",
+      "outcome": "passed",
+      "duration": 0.143
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_a_target_missing_audit_columns_is_refused[postgres]",
+      "outcome": "passed",
+      "duration": 0.076
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_append_table_adds_rows_on_every_run[postgres]",
+      "outcome": "passed",
+      "duration": 0.211
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_create_table_stamps_the_run_and_numbers_the_rows[postgres]",
+      "outcome": "passed",
+      "duration": 0.097
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_delete_rows_soft_and_hard[postgres]",
+      "outcome": "passed",
+      "duration": 0.225
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_drop_table_needs_this_pipelines_create_table_to_have_run[postgres]",
+      "outcome": "passed",
+      "duration": 0.162
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_duplicate_merge_keys_fail_unless_an_order_chooses[postgres]",
+      "outcome": "passed",
+      "duration": 0.19
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_format_mismatch_fails_before_staging_or_mutating[postgres-CREATE_TABLE]",
+      "outcome": "passed",
+      "duration": 0.104
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_format_mismatch_fails_before_staging_or_mutating[postgres-OVERWRITE_TABLE]",
+      "outcome": "passed",
+      "duration": 0.103
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_format_mismatch_fails_before_staging_or_mutating[postgres-SCD1_MERGE]",
+      "outcome": "passed",
+      "duration": 0.104
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_format_mismatch_fails_before_staging_or_mutating[postgres-SCD2_MERGE]",
+      "outcome": "passed",
+      "duration": 0.105
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_format_mismatch_fails_before_staging_or_mutating[postgres-SETUP_TABLE]",
+      "outcome": "passed",
+      "duration": 0.104
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_joined_merge_matches_composite_keys_and_preserves_other_rows[postgres-SCD1_MERGE]",
+      "outcome": "passed",
+      "duration": 0.285
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_joined_merge_matches_composite_keys_and_preserves_other_rows[postgres-SCD2_MERGE]",
+      "outcome": "passed",
+      "duration": 0.271
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_overwrite_table_needs_its_target_then_replaces_the_rows[postgres]",
+      "outcome": "passed",
+      "duration": 0.192
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_rows_written_counts_what_changed_not_what_the_target_holds[postgres]",
+      "outcome": "passed",
+      "duration": 0.349
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_run_date_reads_the_rows_of_the_date_the_run_runs_as_of[postgres]",
+      "outcome": "passed",
+      "duration": 0.09
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_scd1_merge_inserts_updates_and_leaves_unchanged_rows[postgres]",
+      "outcome": "passed",
+      "duration": 0.256
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_scd1_preserve_target_keeps_values_where_the_source_is_null[postgres]",
+      "outcome": "passed",
+      "duration": 0.276
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_scd2_merge_keeps_history[postgres]",
+      "outcome": "passed",
+      "duration": 0.268
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_schema_checks_and_evolution[postgres]",
+      "outcome": "passed",
+      "duration": 0.218
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_setup_table_refuses_writers_that_need_different_audit_columns[postgres]",
+      "outcome": "passed",
+      "duration": 0.099
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_setup_table_takes_the_audit_columns_of_the_real_writer[postgres]",
+      "outcome": "passed",
+      "duration": 0.196
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_actions.py::test_ties_in_the_dedupe_order_are_refused_unless_the_rows_are_the_same[postgres]",
+      "outcome": "passed",
+      "duration": 0.185
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_appends.py::test_append_retries_replace_only_their_task_run[postgres]",
+      "outcome": "passed",
+      "duration": 0.261
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_appends.py::test_empty_retry_removes_its_old_batch[postgres]",
+      "outcome": "passed",
+      "duration": 0.147
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_appends.py::test_every_sql_writer_records_pipeline_and_task_run_identities[postgres-APPEND_TABLE]",
+      "outcome": "passed",
+      "duration": 0.148
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_appends.py::test_every_sql_writer_records_pipeline_and_task_run_identities[postgres-CREATE_TABLE]",
+      "outcome": "passed",
+      "duration": 0.123
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_appends.py::test_every_sql_writer_records_pipeline_and_task_run_identities[postgres-OVERWRITE_TABLE]",
+      "outcome": "passed",
+      "duration": 0.163
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_appends.py::test_every_sql_writer_records_pipeline_and_task_run_identities[postgres-SCD1_MERGE]",
+      "outcome": "passed",
+      "duration": 0.232
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_appends.py::test_every_sql_writer_records_pipeline_and_task_run_identities[postgres-SCD2_MERGE]",
+      "outcome": "passed",
+      "duration": 0.241
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_appends.py::test_invalid_task_run_id_is_refused_before_replacing_a_batch[postgres]",
+      "outcome": "passed",
+      "duration": 0.108
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_appends.py::test_killed_append_converges_when_retried[postgres]",
+      "outcome": "passed",
+      "duration": 0.502
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_appends.py::test_legacy_appends_are_refused_until_upgraded_without_assigning_history[postgres]",
+      "outcome": "passed",
+      "duration": 0.207
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_appends.py::test_sql_input_identities_match_target_provenance[postgres]",
+      "outcome": "passed",
+      "duration": 0.095
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_appends.py::test_upgrade_command_validates_then_adds_and_records_requests[postgres]",
+      "outcome": "passed",
+      "duration": 0.15
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_appends.py::test_upgrade_deduplicates_qualified_targets_and_refuses_format_conflicts[postgres]",
+      "outcome": "passed",
+      "duration": 0.089
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_appends.py::test_upgrade_includes_ingestion_targets_without_a_sql_row_id[postgres]",
+      "outcome": "passed",
+      "duration": 0.092
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_appends.py::test_upgrade_requires_an_active_append_writer[postgres]",
+      "outcome": "passed",
+      "duration": 0.073
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_evolution.py::test_evolution_retains_full_types_rows_and_keys[postgres]",
+      "outcome": "passed",
+      "duration": 0.35
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_evolution.py::test_full_column_type_retains_modifiers_and_names_missing_column[postgres]",
+      "outcome": "passed",
+      "duration": 0.087
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_evolution.py::test_interrupted_evolution_preserves_rows_and_retry_completes[postgres]",
+      "outcome": "passed",
+      "duration": 0.244
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_evolution.py::test_postgres_evolution_preserves_dependent_view_index_comments_and_identity[postgres]",
+      "outcome": "passed",
+      "duration": 0.263
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_replacement.py::test_replacement_faults_and_write_errors_retain_the_original[postgres-CREATE_TABLE]",
+      "outcome": "passed",
+      "duration": 0.217
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_replacement.py::test_replacement_faults_and_write_errors_retain_the_original[postgres-OVERWRITE_TABLE]",
+      "outcome": "passed",
+      "duration": 0.298
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_replacement.py::test_replacement_uses_target_schema_instead_of_connection_default[postgres]",
+      "outcome": "passed",
+      "duration": 0.159
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_replacement.py::test_transactional_cleanup_failure_rolls_back_replacement[postgres]",
+      "outcome": "passed",
+      "duration": 0.123
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_row_ids.py::test_generated_row_ids_survive_writes_and_evolution[postgres]",
+      "outcome": "passed",
+      "duration": 0.328
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_sql_update_performance.py::test_scd1_updates_100000_changed_rows_in_under_30_seconds[postgres]",
+      "outcome": "passed",
+      "duration": 2.042
+    },
+    {
+      "nodeid": "tests/integration/warehouse/test_warehouse_schema.py::test_an_existing_schema_passes_and_a_missing_one_is_named[postgres]",
+      "outcome": "passed",
+      "duration": 0.076
+    }
+  ]
+}
