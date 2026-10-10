@@ -70,6 +70,9 @@ All notable changes are recorded here. The format follows
   attempt queue/claim/finish path and atomic dependency consumption; test scene setup stays
   in fixtures. No configuration, schema or command behavior changes.
 
+- A Nightly workflow tests the newest release of every dependency, so an upstream release that
+  breaks etl-craft fails there rather than on an unrelated pull request.
+
 - CI validates pull requests without repeating after merge. Twenty consecutive chaos passes per
   Engine DB run in release validation after the evidence check, rather than on every PR.
 

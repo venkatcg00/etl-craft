@@ -35,7 +35,9 @@ but does not run the pipeline demos.
 
 Pull-request CI runs once per revision and does not repeat after merge. Keep repeated chaos and
 other expensive stress gates in release validation; ordinary regression cases still run once
-with the regular suite. Documentation deployment runs after merge.
+with the regular suite. Documentation deployment runs after merge. The Nightly workflow runs the
+tests and the wheel demo against the newest release of every dependency; a red nightly run on a
+green `main` means an upstream release broke something.
 
 ## Layers
 
