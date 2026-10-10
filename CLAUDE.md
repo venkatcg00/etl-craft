@@ -75,10 +75,11 @@ Each package imports only the packages below it. `lint-imports` enforces this.
   recorded task-dependency consumption together. Pipeline endings commit status, SLA and
   recorded pipeline-dependency consumption together; finalization hooks run after commit.
 - Order comes from `CFG_TASK_DEPENDENCY` and `CFG_PIPELINE_DEPENDENCY` rows, never from code.
-- SQL tasks supply exactly one read-only SELECT; the engine wraps it in one of eight actions
+- SQL tasks supply exactly one read-only SELECT; the engine wraps it in one of nine actions
   (`CREATE_TABLE`, `SETUP_TABLE`, `OVERWRITE_TABLE`, `APPEND_TABLE`, `SCD1_MERGE`, `SCD2_MERGE`,
-  `DROP_TABLE`, `DELETE_ROWS`) and owns every write. Only `CREATE_TABLE` and `SETUP_TABLE`
-  create tables; the others fail when their target is missing.
+  `DROP_TABLE`, `DELETE_ROWS`, `CREATE_VIEW`) and owns every write. Only `CREATE_TABLE` and
+  `SETUP_TABLE` create tables, and `CREATE_VIEW` creates or replaces views but never a table;
+  the others fail when their target is missing.
 - Merge hashes use typed, NULL-tagged, length-prefixed values and UTC timestamps. Fresh merge
   targets publish hash version 2 after creation; existing targets need `etl-craft rehash` before
   merging. Never publish a hash version before its warehouse update commits. Target mutations

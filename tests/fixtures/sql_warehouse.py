@@ -280,12 +280,14 @@ def _drop_schema(world: SqlWorld) -> None:
         return
     # Names as stored: an Iceberg catalog matches them case-sensitively.
     rows = world.rows(
-        "SELECT table_name FROM information_schema.tables WHERE lower(table_schema) = "
+        "SELECT table_name, table_type FROM information_schema.tables WHERE lower(table_schema) = "
         "lower(:schema)",
         schema=world.schema,
     )
-    for (table,) in rows:
-        world.execute(f"DROP TABLE IF EXISTS {world.name(str(table))}")
+    # Views first: they may select from the tables.
+    for table, kind in sorted(rows, key=lambda row: str(row[1]).upper() != "VIEW"):
+        keyword = "VIEW" if str(kind).upper() == "VIEW" else "TABLE"
+        world.execute(f"DROP {keyword} IF EXISTS {world.name(str(table))}")
     if world.kind == "duckdb":
         world.execute(f"DROP SCHEMA IF EXISTS {world.catalog}.{world.schema} CASCADE")
     else:

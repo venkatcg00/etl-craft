@@ -28,6 +28,8 @@ class DuckDBIcebergWarehouse(DuckDBWarehouse):
     catalog, not a local file, so writers are not serialized.
     """
 
+    views = False
+
     spec = warehouse_by_key("duckdb_iceberg")
     replace_strategy: ReplaceStrategy = "copy_and_restore"
     single_writer = False

@@ -298,6 +298,7 @@ def test_guarded_upgrade_rolls_back_with_the_ledger(empty_engine_db, monkeypatch
         "0016_gate_waits.sql",
         "0017_retries.sql",
         "0018_api_tokens.sql",
+        "0019_target_view_statement.sql",
     ]
 
 

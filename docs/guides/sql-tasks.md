@@ -1,7 +1,7 @@
 # SQL tasks
 
 A task with `HANDLER = 'SQL'` supplies a read-only SELECT and names what to do with its rows. The
-engine wraps the SELECT in one of eight actions and performs every write itself. The task's
+engine wraps the SELECT in one of nine actions and performs every write itself. The task's
 settings are rows in `CFG_TASK_PARAMETERS`.
 
 ## The SELECT
@@ -83,6 +83,21 @@ active `Warehouse` profile's database, so the same rows work in every environmen
 | `SCD2_MERGE` | closes the active version of each changed key (`ACTIVE_FLAG = 'N'`) and inserts a new active one | an existing target, `MERGE_KEY`, `MERGE_COMPARE_COLUMNS` |
 | `DROP_TABLE` | drops the target if it exists, once this pipeline's `CREATE_TABLE` task for it has succeeded in the run; a target already gone is not an error | no SELECT |
 | `DELETE_ROWS` | flags the target rows whose `MERGE_KEY` the SELECT returns (`DELETE_FLAG = 'Y'`), or deletes them with `HARD_DELETE = true` | an existing target, `MERGE_KEY` |
+| `CREATE_VIEW` | creates or replaces the target as a view over the SELECT; refuses when a table has that name | no table of that name |
+
+### Views
+
+`CREATE_VIEW` keeps the SELECT as a view, so readers always see current data and nothing is
+copied. A run creates the view, or replaces it when the statement it would run changed: the
+SELECT, from its file or inline with its tokens replaced, or `SECURE_VIEW`. Otherwise the view
+is left as it is, with its locks, grants and policies untouched; etl-craft records each view's
+statement in `AUD_TARGET_VIEW_STATEMENT`, and a view dropped by hand is created again. A view
+records no row counts. A view has no audit columns,
+no table format and no storage, so `TABLE_FORMAT` and the storage parameters fail the task.
+PostgreSQL replaces a view only when its existing columns keep their names, order and types
+(new columns may follow them); otherwise the task fails with PostgreSQL's reason. DuckDB over
+an Iceberg catalog cannot create views there, so the task fails; keep the result as a table with
+`OVERWRITE_TABLE`.
 
 ### Replacement failures and table properties
 
@@ -116,8 +131,8 @@ remains successful if scratch or backup cleanup fails; the warning names the tab
 
 ### Creating tables
 
-Only `CREATE_TABLE` and `SETUP_TABLE` create tables. Every other action needs its target to exist,
-and fails with the remedy when it does not. Give each table a `SETUP_TABLE` task that runs before
+Only `CREATE_TABLE` and `SETUP_TABLE` create tables, and `CREATE_VIEW` creates views. Every other
+action needs its target to exist, and fails with the remedy when it does not. Give each table a `SETUP_TABLE` task that runs before
 its writers, or create the table yourself with the columns below.
 
 `SETUP_TABLE` works out the audit columns from the other SQL tasks in the pipeline with the same
@@ -184,6 +199,7 @@ updates so the planner has current stage statistics.
 | `SCHEMA_EVOLUTION` | `OVERWRITE_TABLE` and the merges | `true` appends nullable columns the SELECT returns but the target lacks, with their complete types |
 | `PRESERVE_TARGET` | `SCD1_MERGE` | `true` keeps the target's value where the SELECT returns NULL |
 | `HARD_DELETE` | `DELETE_ROWS` | `true` deletes rows instead of flagging them |
+| `SECURE_VIEW` | `CREATE_VIEW` | `true` creates a secure view: `SECURE` on Snowflake, `security_barrier` on PostgreSQL; other warehouses have none, and the task fails |
 | `TABLE_FORMAT` | all | `native` or `iceberg`, for this task's target, where the warehouse lets a task choose |
 | `EXTERNAL_LOCATION` | tables it creates, on Databricks and Trino (Iceberg) | where the table's files live, such as `s3://lake/sales/orders` |
 | `EXTERNAL_VOLUME`, `BASE_LOCATION` | tables it creates, on Snowflake Iceberg | the customer volume and the path in it; set both, or neither for Snowflake-managed storage |

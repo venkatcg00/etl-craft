@@ -29,7 +29,7 @@ something other than what the metadata says.
 | `PIPELINE_PARAMETERS` | a value has the wrong type, such as `"RETRIES": "3"` |
 | A pipeline's graph | a cycle, a self-dependency, a run condition its dependencies cannot meet, or a dependency on an inactive task |
 | Pipeline dependencies | a cycle between pipelines, or a dependency on an inactive pipeline |
-| Task dependencies | a dependency on an inactive task or pipeline elsewhere; `DEPENDS_ON_PIPELINE_ID` naming a pipeline the upstream task is not in; a `HAS_DATA` dependency on a task that never reports target rows (`BUSINESS_RULES`, `EMAIL_ALERT`, and the SQL actions `SETUP_TABLE`, `DROP_TABLE` and `DELETE_ROWS`) |
+| Task dependencies | a dependency on an inactive task or pipeline elsewhere; `DEPENDS_ON_PIPELINE_ID` naming a pipeline the upstream task is not in; a `HAS_DATA` dependency on a task that never reports target rows (`BUSINESS_RULES`, `EMAIL_ALERT`, and the SQL actions `SETUP_TABLE`, `DROP_TABLE`, `DELETE_ROWS` and `CREATE_VIEW`) |
 | `SQL` tasks | everything the task checks before it starts: the action, the target, exactly one read-only SELECT (inline, or a file that exists), the pipeline-id tokens, the merge parameters, `TABLE_FORMAT`, storage parameters the warehouse would ignore, and which audit columns a `SETUP_TABLE` target gets |
 | `BUSINESS_RULES` tasks | no active rule; a rule's key column, target table or SQL; a rule keyed on `ROW_ID` of a table a `CREATE_TABLE` or `OVERWRITE_TABLE` task rebuilds, since its flags could never be cleared |
 | `PYTHON` tasks | `SCRIPT_NAME` missing or outside `ingestion_scripts/`, `INPUT_PARAMS` not a JSON object, or a script with a syntax error, no top-level `run`, an `async` `run`, or a `run` that takes more than the task |

@@ -72,7 +72,7 @@ orchestrators must supply their own stable run key and logical date to all three
 | The orchestrator decides | etl-craft keeps |
 |---|---|
 | when a pipeline runs, and which of its tasks run and when | the run each task binds to, and one `IN-PROGRESS` run per pipeline |
-| run conditions and dependency types, as trigger rules | every write, through the eight SQL actions |
+| run conditions and dependency types, as trigger rules | every write, through the nine SQL actions |
 | dependencies on other pipelines and their tasks, as sensors | time limits, connections and secrets |
 | retries, and running a task again after it is cleared | the audit of every attempt, its log and its counts |
 

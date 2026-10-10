@@ -75,6 +75,15 @@ class WarehouseDialect:
     # The STORAGE_PARAMETERS a task may set on this warehouse and table format.
     storage_parameters: frozenset[str] = frozenset()
 
+    # How CREATE VIEW marks a secure view: Snowflake's SECURE keyword, PostgreSQL's
+    # security_barrier option, or not at all.
+    secure_view: Literal["keyword", "security_barrier"] | None = None
+    # Whether CREATE VIEW works where this dialect's tables live.
+    views: bool = True
+    # How a view is replaced with its grants kept: CREATE OR REPLACE keeps them here; Snowflake
+    # keeps them only with COPY GRANTS, and Databricks only when the view is altered in place.
+    view_replacement: Literal["or_replace", "copy_grants", "alter"] = "or_replace"
+
     # Whether CREATE TEMPORARY TABLE exists and behaves. Trino has none; Databricks refuses
     # DROP on a name it shares with a temporary table.
     temporary_tables: bool = True
@@ -283,6 +292,45 @@ class WarehouseDialect:
     def cloning_storage_problem(self, cloning: CloningConfig) -> str | None:
         """Return why cloning cannot create mirrors here as configured, or ``None``."""
         return None
+
+    def view_ddl(self, qualified_name: str, select_sql: str, *, secure: bool, exists: bool) -> str:
+        """Return the statement that creates or replaces the view over ``select_sql``.
+
+        ``exists`` says whether the view is there already; replacing it keeps its grants.
+        """
+        if not self.views:
+            raise SqlGuardError(
+                f"CREATE_VIEW {qualified_name}: {self.spec.display_name} cannot create views "
+                "where its tables live; use OVERWRITE_TABLE to keep the result as a table"
+            )
+        if secure and self.secure_view is None:
+            raise SqlGuardError(
+                f"CREATE_VIEW {qualified_name}: {self.spec.display_name} has no secure views; "
+                "set SECURE_VIEW to false or remove it"
+            )
+        if self.view_replacement == "alter":
+            verb = "ALTER VIEW" if exists else "CREATE VIEW"
+            return f"{verb} {qualified_name} AS {select_sql}"
+        if secure and self.secure_view == "security_barrier":
+            return (
+                f"CREATE OR REPLACE VIEW {qualified_name} WITH (security_barrier = true) "
+                f"AS {select_sql}"
+            )
+        secure_keyword = "SECURE " if secure else ""
+        grants = " COPY GRANTS" if self.view_replacement == "copy_grants" else ""
+        return f"CREATE OR REPLACE {secure_keyword}VIEW {qualified_name}{grants} AS {select_sql}"
+
+    def relation_type_query(self, table: str) -> tuple[str, dict[str, str | None]]:
+        """Read information_schema's table type for a schema- or catalog-qualified name."""
+        parts = table.split(".")
+        where = "lower(table_name) = lower(:table) AND lower(table_schema) = lower(:schema)"
+        catalog = parts[0] if len(parts) == 3 else None
+        if catalog is not None:
+            where += " AND lower(table_catalog) = lower(:catalog)"
+        return (
+            f"SELECT table_type FROM information_schema.tables WHERE {where}",
+            {"table": parts[-1], "schema": parts[-2], "catalog": catalog},
+        )
 
     def alter_table_keyword(self) -> str:
         """Return the keyword that alters a table this dialect created."""

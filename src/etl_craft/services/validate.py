@@ -369,7 +369,7 @@ def _target_formats(config: ConnectorConfig, data: _Metadata, report: Report) ->
         except EtlCraftError:
             # Each task's definition check reports invalid parameters separately.
             continue
-        if spec.action == SqlAction.DROP_TABLE:
+        if spec.action in {SqlAction.DROP_TABLE, SqlAction.CREATE_VIEW}:
             continue
         target = qualify(spec.target_object, catalog).lower()
         targets.setdefault(target, []).append((task.label, dialect.spec.table_format))
@@ -399,6 +399,18 @@ def _sql(conn: Connection, context: TaskContext, data: _Metadata) -> list[str]:
     if spec.action == SqlAction.SETUP_TABLE:
         others = fetch_target_tasks(conn, context.pipeline_id, context.task_id, spec.target_object)
         writer_action(spec.setup_for, others, spec.target_object)
+    if spec.action == SqlAction.CREATE_VIEW:
+        if not dialect.views:
+            return [
+                f"{dialect.spec.display_name} cannot create views where its tables live; "
+                "use OVERWRITE_TABLE to keep the result as a table"
+            ]
+        if spec.secure_view and dialect.secure_view is None:
+            return [
+                f"SECURE_VIEW: {dialect.spec.display_name} has no secure views; set it to "
+                "false or remove it"
+            ]
+        return []
     if spec.select_sql is not None:
         sqlglot_dialect, _ = dialect_and_catalog(context.config)
         names = output_columns(spec.select_sql, dialect=sqlglot_dialect) or []
