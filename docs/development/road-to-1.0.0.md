@@ -109,7 +109,9 @@ item's text, or work done early under another item.
 | S4.H Versioned YAML and Airflow factory | Done | #125 | Validated version 1 exports and isolated Airflow contracts |
 | S4.I.5 Configuration shapes 1.0 does not need | Done | #126, #127 | Selected profiles stored directly, `tls_mode` only, unsupported warehouses refused, appends require `TASK_RUN_ID` |
 | S4.I.6 Platform and dependency surface | Done | #131 | POSIX-only process control, no `packaging` dependency, DuckDB recorded as the core dialect |
-| 0.4 gate, then S5.A and later | Not started | | |
+| S5.A The pool interface | Done | #133 | `AttemptSpec`, `Pool` and the pool rules |
+| S5.B The local provider | Done | #133 | Attempts run through the local pool, with slots per kind |
+| 0.4 gate; S5.C and later | Not started | | |
 
 ### Handover notes
 
@@ -128,8 +130,20 @@ touches. Its `APPEND_TABLE` change (#127) passed the full local checks, the inst
 and the cloud append and `ROW_ID` tests on Databricks and Snowflake.
 S4.I.6 passed the full local checks and the installed-wheel matrix; it changes no warehouse code,
 so no cloud suite ran.
+S5.A and S5.B passed the full local checks, the installed-wheel matrix, ten consecutive runs of
+the pool and dispatch tests and three of the chaos and retry tests; no warehouse code changed, so
+no cloud suite ran.
 
 **Choices that differ from the item text.**
+
+- S5.A and S5.B land together, so the interface arrives with its first implementation.
+  `AttemptSpec` carries what the local pool uses, plus `attempt_number`, `force` and `rerun`,
+  which the task process needs; `project_code`, `bundle_id` and `config_sha256` arrive with S5.G,
+  S5.F and S5.C, which use them. The pool claims each admitted attempt, as S5.C's workers will.
+  `run --task_code` runs its one attempt in the foreground through `execute_attempt`, the function
+  the local pool runs on its threads. `LocalPool.cancel` stops a task process with the grace its
+  `ChildOptions` set at submit. `Local_ingestion_slots` and `Local_warehouse_slots` default to
+  `Max_parallel_tasks`, so nothing changes unless they are set.
 
 - S4.I.6 also removes the non-POSIX branch of `execution/reconcile.stop_process` and the Windows
   virtual-environment paths in test helpers; the release gate keeps `win32` as an evidence

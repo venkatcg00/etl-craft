@@ -951,3 +951,15 @@ def test_email_and_orchestration_enum_settings_ignore_case_and_surrounding_space
     assert config.mode == "local"
     assert config.email.transport == "smtp"
     assert config.email.tls_mode == "ssl"
+
+
+def test_local_slots_per_kind_are_optional_whole_numbers(tmp_path):
+    unset = load_config(_write(tmp_path, _minimal())).limits
+    assert (unset.local_ingestion_slots, unset.local_warehouse_slots) == (None, None)
+    raw = _minimal()
+    raw["Orchestration"] |= {"Local_ingestion_slots": 2, "Local_warehouse_slots": 6}
+    limits = load_config(_write(tmp_path, raw)).limits
+    assert (limits.local_ingestion_slots, limits.local_warehouse_slots) == (2, 6)
+    raw["Orchestration"]["Local_ingestion_slots"] = 0
+    with pytest.raises(ConfigurationError, match="Local_ingestion_slots"):
+        load_config(_write(tmp_path, raw))
