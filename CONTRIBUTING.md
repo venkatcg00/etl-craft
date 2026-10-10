@@ -124,6 +124,10 @@ ETL_CRAFT_REQUIRE_SERVICES=1 uv run pytest -q -m "chaos and engine_postgres"
 ```
 
 Pull requests run the normal regression checks once; the CI workflow does not repeat after merge.
+Pull requests test the dependencies in `uv.lock`. The Nightly workflow resolves the newest release
+of every dependency instead, prints the ones newer than the lock, and runs the unit, Engine DB and
+local warehouse tests and the wheel demo against them. It runs each night, on manual dispatch, and
+on a pull request that changes it.
 The Release gate workflow requires twenty consecutive chaos passes per Engine DB on release
 branches or manual dispatch, after the evidence check passes. An iteration stops at its first
 failure and fails the job; every completed iteration has an uploaded JUnit report. The PostgreSQL
