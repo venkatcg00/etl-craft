@@ -748,7 +748,6 @@ source = { editable = "." }
 dependencies = [
     { name = "duckdb-engine" },
     { name = "jsonschema" },
-    { name = "packaging" },
     { name = "psutil" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pyyaml" },
@@ -815,7 +814,6 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.115" },
     { name = "jsonschema", specifier = ">=4.23" },
     { name = "ngrok", marker = "extra == 'publish'", specifier = ">=1.4" },
-    { name = "packaging", specifier = ">=24.0" },
     { name = "psutil", specifier = ">=6.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.6" },
     { name = "pydantic", marker = "extra == 'server'", specifier = ">=2" },

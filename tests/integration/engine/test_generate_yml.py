@@ -367,7 +367,9 @@ def test_the_docs_dag_writes_the_catalog_again_on_its_schedule(engine_db):
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("version", ["1.10.15", ">=1.10,<3", "<2.2", "", "wat", ">=2.2rc1"])
+@pytest.mark.parametrize(
+    "version", ["1.10.15", ">=1.10,<3", "<2.2", "", "wat", ">=2.2rc1", "2.2.0.post1", "2.2.0,<3"]
+)
 def test_remote_generation_refuses_unsupported_airflow_ranges(version):
     from etl_craft.services.generate_yml import require_airflow_run_templates
 
@@ -376,7 +378,9 @@ def test_remote_generation_refuses_unsupported_airflow_ranges(version):
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("version", ["2.2.0", ">=2.2,<3", "~=2.3", "==2.10.*", ">=3"])
+@pytest.mark.parametrize(
+    "version", ["2.2.0", ">=2.2,<3", "~=2.3", "==2.10.*", ">=3", ">= 2.2.0", "2.2"]
+)
 def test_remote_generation_accepts_supported_airflow_ranges(version):
     from etl_craft.services.generate_yml import require_airflow_run_templates
 

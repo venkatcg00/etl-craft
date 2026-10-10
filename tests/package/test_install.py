@@ -63,8 +63,7 @@ def _artifact(kind: str) -> Path:
 
 
 def _bin(venv: Path, name: str) -> Path:
-    folder = venv / ("Scripts" if os.name == "nt" else "bin")
-    return folder / (f"{name}.exe" if os.name == "nt" else name)
+    return venv / "bin" / name
 
 
 def test_the_wheel_holds_the_package_files_and_the_licence():

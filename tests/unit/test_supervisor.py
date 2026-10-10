@@ -11,8 +11,6 @@ from etl_craft.execution.supervisor import ChildResult, ChildSpec, run_child
 
 pytestmark = pytest.mark.unit
 
-posix_only = pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
-
 
 def python(code: str, **kwargs) -> ChildSpec:
     return ChildSpec(argv=(sys.executable, "-c", code), **kwargs)
@@ -55,7 +53,6 @@ def test_a_failing_child_keeps_its_exit_code_and_stderr():
     assert "boom" in result.output_tail
 
 
-@posix_only
 def test_a_child_killed_by_a_signal_reports_the_signal():
     result = run_child(python("import os, signal; os.kill(os.getpid(), signal.SIGKILL)"))
     assert result.returncode == -signal.SIGKILL
@@ -83,7 +80,6 @@ def test_a_child_past_its_time_limit_is_stopped():
     assert result.output_tail == "started\n"
 
 
-@posix_only
 def test_a_child_that_ignores_sigterm_is_killed_after_the_grace_period():
     code = (
         "import signal, time\n"
@@ -96,7 +92,6 @@ def test_a_child_that_ignores_sigterm_is_killed_after_the_grace_period():
     assert result.returncode == -signal.SIGKILL
 
 
-@posix_only
 def test_a_timeout_stops_everything_the_child_started(tmp_path):
     pid_file = tmp_path / "grandchild.pid"
     code = (
@@ -149,7 +144,6 @@ def test_the_child_reads_no_input():
     assert result.output_tail == "''\n"
 
 
-@posix_only
 def test_the_child_leads_its_own_session():
     result = run_child(python("import os; print(os.getsid(0) == os.getpid())"))
     assert result.output_tail == "True\n"

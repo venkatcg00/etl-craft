@@ -84,7 +84,7 @@ Each package imports only the packages below it. `lint-imports` enforces this.
   merging. Never publish a hash version before its warehouse update commits. Target mutations
   and rehashing hold the same Engine DB target lock.
 - One warehouse per deployment. Third-party SQLAlchemy dialects are optional extras and never
-  imported by engine code.
+  imported by engine code; DuckDB's, the default local warehouse, is the one core dependency.
 - `craft-connector.yml` is written by the team and only read by the engine. Secrets are always
   variable names, never values. Its directory is the project directory (`etl-craft/`), holding
   `sql_files/`, `ingestion_scripts/`, `migrations/` and `logs/`; relative paths start there.
