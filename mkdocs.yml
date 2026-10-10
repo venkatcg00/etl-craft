@@ -104,6 +104,7 @@ nav:
   - Guides:
       - guides/index.md
       - Pipelines and tasks: guides/pipelines-and-tasks.md
+      - Uploading configuration: guides/uploading-configuration.md
       - Dependencies and run conditions: guides/dependencies.md
       - SQL tasks: guides/sql-tasks.md
       - Business rules: guides/business-rules.md

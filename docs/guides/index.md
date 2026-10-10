@@ -4,6 +4,8 @@ How to model and run pipelines with etl-craft.
 
 - [Pipelines and tasks](pipelines-and-tasks.md): the `CFG_` rows a pipeline is made of, the task
   handlers, and the settings every task shares.
+- [Uploading configuration](uploading-configuration.md): uploading `CFG_` rows as project
+  migrations, with an example of each kind of change, CSV files, and what a failed upload means.
 - [Dependencies and run conditions](dependencies.md): dependency types, `ALL`, `ANY` and `N`
   conditions, waves, and which tasks run, wait or are skipped.
 - [SQL tasks](sql-tasks.md): the SELECT, inline or from `sql_files/`, the pipeline-id tokens,

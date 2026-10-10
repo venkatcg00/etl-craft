@@ -2712,6 +2712,7 @@ change it only by updating this table and the documentation together.
 | Process per task | Kept, on workers and on the local provider, for isolation; revisit only if measured worker memory demands it | S5.B, S6.G |
 | Engine DBs | One PostgreSQL Engine DB for every project; separate databases only for hard isolation | S5.G |
 | Views | `CREATE_VIEW` replaces only views, never a table; a secure view is created only where the warehouse has one (Snowflake, PostgreSQL), and refused elsewhere rather than created as an ordinary view | SQL views |
+| Authoring pipelines | SQL files plus explicit `CFG_` rows, uploaded as project migrations and applied by `etl-craft migrate`. No dbt models or Jinja, and no template language beyond `$$`. Teams that keep metadata in CSV generate migrations from it; etl-craft adds no CSV loader, since plain connections cannot write the Engine DB | Non-goals; Uploading configuration guide |
 | DuckDB's SQLAlchemy dialect | A core dependency, the one exception to optional warehouse extras: DuckDB is the default local warehouse of the quick start, the demo and the tests, so `pip install etl-craft` runs a whole local deployment. Engine code never imports it; SQLAlchemy loads it from the `duckdb:` URL | S4.I.6 |
 
 ## Appendix C: Glossary

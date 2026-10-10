@@ -3,7 +3,9 @@
 A pipeline is rows in the Engine DB's `CFG_` tables, authored by your team in project SQL
 migrations and applied with `etl-craft migrate`. Review the migration like code, then check the
 rows with [`validate`](validating.md). Plain SQL connections cannot edit these rows; each
-change records its actor and before/after values. See [Engine DB setup and upgrades](../deploying/engine-db.md).
+change records its actor and before/after values. [Uploading configuration](uploading-configuration.md)
+has an example migration for each kind of change; see also
+[Engine DB setup and upgrades](../deploying/engine-db.md).
 
 ```mermaid
 flowchart LR
