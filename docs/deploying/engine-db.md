@@ -149,8 +149,10 @@ table becomes available.
 
 Every `CFG_` row change records its actor, before and after JSON, operation and row key in
 `AUD_METADATA_CHANGES`. Project migrations include their filename and capture added columns;
-project-created `CFG_` and `AUD_` tables receive write guards as their DDL runs. Make metadata
-changes in a new project migration and run `etl-craft migrate`.
+`etl-craft config apply` records `config@<revision>` of the files it applied. Project-created
+`CFG_` and `AUD_` tables receive write guards as their DDL runs. Make metadata changes in the
+project's [configuration files](../guides/configuration-files.md) and run
+`etl-craft config apply`, or in a new project migration and run `etl-craft migrate`.
 
 A plain connection cannot write `CFG_` or `AUD_` tables. PostgreSQL requires the engine's
 transaction-local actor marker, including for `TRUNCATE`. SQLite requires functions registered

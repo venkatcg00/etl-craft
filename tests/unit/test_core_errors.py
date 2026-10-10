@@ -8,6 +8,7 @@ pytestmark = pytest.mark.unit
 
 EXIT_CODES = {
     errors.ResourceNotFoundError: ExitCode.RESOURCE_NOT_FOUND,
+    errors.MetadataFileError: ExitCode.METADATA_FILE,
     errors.EtlCraftError: ExitCode.UNEXPECTED,
     errors.ConfigurationError: ExitCode.CONFIGURATION,
     errors.UsageError: ExitCode.USAGE,
@@ -65,6 +66,7 @@ def test_the_exit_codes():
         ("INCOMPLETE", 22),
         ("WAITING", 23),
         ("RESOURCE_NOT_FOUND", 24),
+        ("METADATA_FILE", 25),
     ]
 
 

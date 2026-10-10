@@ -1,0 +1,5 @@
+PIPELINE_CODE,PIPELINE_NAME,DESCRIPTION,REFRESH_TYPE,RUN_SCHEDULE,SCHEDULE_TIMEZONE,SCHEDULE_START_DATE,CATCHUP,MAX_CATCHUP_RUNS,OVERLAP_POLICY,SLA_IN_HOURS,PIPELINE_PARAMETERS,ACTIVE_FLAG
+SALES_DAILY,"Daily sales, UK","Fetches the day's UK orders, loads them and checks them.",INCREMENTAL,0 5 * * 1-5,Europe/London,2026-11-01,Y,3,SKIP,1.5,"{""TAGS"": [""sales"", ""daily""], ""EMAIL_RECIPIENTS"": [""sales-data@example.com"", ""sales-leads@example.com""]}",Y
+SALES_DAILY_EU,"Daily sales, EU","Fetches the day's EU orders, loads them and checks them.",INCREMENTAL,0 6 * * *,Europe/Berlin,2026-11-01,Y,3,QUEUE,2,"{""TAGS"": [""sales""], ""EMAIL_RECIPIENTS"": [""sales-data@example.com""]}",Y
+SALES_DAILY_US,"Daily sales, US","Fetches the day's US orders, loads them and checks them.",INCREMENTAL,0 6 * * *,America/New_York,2026-11-01,Y,3,QUEUE,2,"{""TAGS"": [""sales""], ""EMAIL_RECIPIENTS"": [""sales-data@example.com""]}",N
+SALES_MART,Sales mart,"Daily, regional and customer totals of the checked orders.",FULL,30 6 * * *,Europe/London,,N,1,SKIP,,,Y

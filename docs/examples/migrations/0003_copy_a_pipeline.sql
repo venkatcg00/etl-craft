@@ -1,0 +1,97 @@
+-- Copies of a pipeline. SALES_DAILY_EU and SALES_DAILY_US repeat SALES_DAILY for their regions,
+-- and every pipeline that waits on SALES_DAILY waits on them too.
+--
+-- A temporary table lists the copies and what differs; each statement reads it, so another copy
+-- is another row. Text naming the region is rewritten with REPLACE on its exact spellings ('_uk'
+-- and '"uk"') only, so other text containing "uk" stays as it is.
+
+CREATE TEMPORARY TABLE pipeline_copies (
+    SOURCE_CODE       VARCHAR(128) NOT NULL,
+    PIPELINE_CODE     VARCHAR(128) NOT NULL,
+    PIPELINE_NAME     VARCHAR(200) NOT NULL,
+    REGION            VARCHAR(8) NOT NULL,
+    SCHEDULE_TIMEZONE VARCHAR(64) NOT NULL
+);
+
+INSERT INTO pipeline_copies (SOURCE_CODE, PIPELINE_CODE, PIPELINE_NAME, REGION, SCHEDULE_TIMEZONE)
+VALUES
+    ('SALES_DAILY', 'SALES_DAILY_EU', 'Daily sales, EU', 'eu', 'Europe/Berlin'),
+    ('SALES_DAILY', 'SALES_DAILY_US', 'Daily sales, US', 'us', 'America/New_York');
+
+-- The pipelines. A source code with no active row leaves REFRESH_TYPE NULL, which stops the file.
+INSERT INTO CFG_PIPELINES (PIPELINE_CODE, PIPELINE_NAME, DESCRIPTION, REFRESH_TYPE, RUN_SCHEDULE,
+                           SCHEDULE_TIMEZONE, CATCHUP, MAX_CATCHUP_RUNS, OVERLAP_POLICY,
+                           SCHEDULE_START_DATE, SLA_IN_HOURS, PIPELINE_PARAMETERS)
+SELECT c.PIPELINE_CODE, c.PIPELINE_NAME, REPLACE(s.DESCRIPTION, ' UK ', ' ' || UPPER(c.REGION) || ' '),
+       s.REFRESH_TYPE, s.RUN_SCHEDULE, c.SCHEDULE_TIMEZONE, s.CATCHUP, s.MAX_CATCHUP_RUNS,
+       s.OVERLAP_POLICY, s.SCHEDULE_START_DATE, s.SLA_IN_HOURS, s.PIPELINE_PARAMETERS
+FROM pipeline_copies c
+LEFT JOIN CFG_PIPELINES s ON s.PIPELINE_CODE = c.SOURCE_CODE AND s.ACTIVE_FLAG = 'Y';
+
+-- Their tasks, under the same codes.
+INSERT INTO CFG_TASKS (PIPELINE_ID, TASK_CODE, TASK_TYPE, HANDLER, RUN_CONDITION,
+                       RUN_CONDITION_COUNT)
+SELECT n.PIPELINE_ID, st.TASK_CODE, st.TASK_TYPE, st.HANDLER, st.RUN_CONDITION,
+       st.RUN_CONDITION_COUNT
+FROM pipeline_copies c
+JOIN CFG_PIPELINES s ON s.PIPELINE_CODE = c.SOURCE_CODE AND s.ACTIVE_FLAG = 'Y'
+JOIN CFG_PIPELINES n ON n.PIPELINE_CODE = c.PIPELINE_CODE AND n.ACTIVE_FLAG = 'Y'
+JOIN CFG_TASKS st ON st.PIPELINE_ID = s.PIPELINE_ID AND st.ACTIVE_FLAG = 'Y';
+
+-- Their parameters, with the region rewritten.
+INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE)
+SELECT nt.TASK_ID, sp.PARAMETER_NAME,
+       REPLACE(REPLACE(sp.PARAMETER_VALUE, '_uk', '_' || c.REGION), '"uk"', '"' || c.REGION || '"')
+FROM pipeline_copies c
+JOIN CFG_PIPELINES s ON s.PIPELINE_CODE = c.SOURCE_CODE AND s.ACTIVE_FLAG = 'Y'
+JOIN CFG_PIPELINES n ON n.PIPELINE_CODE = c.PIPELINE_CODE AND n.ACTIVE_FLAG = 'Y'
+JOIN CFG_TASKS st ON st.PIPELINE_ID = s.PIPELINE_ID AND st.ACTIVE_FLAG = 'Y'
+JOIN CFG_TASKS nt ON nt.PIPELINE_ID = n.PIPELINE_ID AND nt.TASK_CODE = st.TASK_CODE
+                 AND nt.ACTIVE_FLAG = 'Y'
+JOIN CFG_TASK_PARAMETERS sp ON sp.TASK_ID = st.TASK_ID AND sp.ACTIVE_FLAG = 'Y';
+
+-- Their dependencies inside the pipeline, matched by task code. A dependency on another
+-- pipeline's task keeps that upstream: copy those rows with DEPENDS_ON_PIPELINE_ID and
+-- DEPENDS_ON_TASK_ID as they are.
+INSERT INTO CFG_TASK_DEPENDENCY (PIPELINE_ID, TASK_ID, DEPENDS_ON_PIPELINE_ID, DEPENDS_ON_TASK_ID,
+                                 DEPENDENCY_TYPE, CONSUME_REPAIRS)
+SELECT n.PIPELINE_ID, nt.TASK_ID, n.PIPELINE_ID, nu.TASK_ID, d.DEPENDENCY_TYPE, d.CONSUME_REPAIRS
+FROM pipeline_copies c
+JOIN CFG_PIPELINES s ON s.PIPELINE_CODE = c.SOURCE_CODE AND s.ACTIVE_FLAG = 'Y'
+JOIN CFG_PIPELINES n ON n.PIPELINE_CODE = c.PIPELINE_CODE AND n.ACTIVE_FLAG = 'Y'
+JOIN CFG_TASK_DEPENDENCY d ON d.PIPELINE_ID = s.PIPELINE_ID AND d.ACTIVE_FLAG = 'Y'
+                          AND COALESCE(d.DEPENDS_ON_PIPELINE_ID, d.PIPELINE_ID) = s.PIPELINE_ID
+JOIN CFG_TASKS st ON st.TASK_ID = d.TASK_ID AND st.ACTIVE_FLAG = 'Y'
+JOIN CFG_TASKS su ON su.TASK_ID = d.DEPENDS_ON_TASK_ID AND su.ACTIVE_FLAG = 'Y'
+JOIN CFG_TASKS nt ON nt.PIPELINE_ID = n.PIPELINE_ID AND nt.TASK_CODE = st.TASK_CODE
+                 AND nt.ACTIVE_FLAG = 'Y'
+JOIN CFG_TASKS nu ON nu.PIPELINE_ID = n.PIPELINE_ID AND nu.TASK_CODE = su.TASK_CODE
+                 AND nu.ACTIVE_FLAG = 'Y';
+
+-- Their business rules, checking the region's table.
+INSERT INTO CFG_BUSINESS_RULES (PIPELINE_ID, TASK_ID, BUSINESS_RULE_NAME, SEQUENCE_NUMBER,
+                                BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE,
+                                BUSINESS_RULE_SQL)
+SELECT n.PIPELINE_ID, nt.TASK_ID, r.BUSINESS_RULE_NAME, r.SEQUENCE_NUMBER, r.BUSINESS_RULE_TYPE,
+       r.BUSINESS_RULE_KEY_COLUMN, REPLACE(r.TARGET_TABLE, '_uk', '_' || c.REGION),
+       REPLACE(r.BUSINESS_RULE_SQL, '_uk', '_' || c.REGION)
+FROM pipeline_copies c
+JOIN CFG_PIPELINES s ON s.PIPELINE_CODE = c.SOURCE_CODE AND s.ACTIVE_FLAG = 'Y'
+JOIN CFG_PIPELINES n ON n.PIPELINE_CODE = c.PIPELINE_CODE AND n.ACTIVE_FLAG = 'Y'
+JOIN CFG_BUSINESS_RULES r ON r.PIPELINE_ID = s.PIPELINE_ID AND r.ACTIVE_FLAG = 'Y'
+JOIN CFG_TASKS st ON st.TASK_ID = r.TASK_ID AND st.ACTIVE_FLAG = 'Y'
+JOIN CFG_TASKS nt ON nt.PIPELINE_ID = n.PIPELINE_ID AND nt.TASK_CODE = st.TASK_CODE
+                 AND nt.ACTIVE_FLAG = 'Y';
+
+-- Every pipeline that waits on the source waits on each copy too. Copy the pipelines the source
+-- waits on the same way, from the rows whose PIPELINE_ID is the source's.
+INSERT INTO CFG_PIPELINE_DEPENDENCY (PIPELINE_ID, DEPENDS_ON_PIPELINE_ID, DEPENDENCY_TYPE,
+                                     CONSUME_REPAIRS)
+SELECT d.PIPELINE_ID, n.PIPELINE_ID, d.DEPENDENCY_TYPE, d.CONSUME_REPAIRS
+FROM pipeline_copies c
+JOIN CFG_PIPELINES s ON s.PIPELINE_CODE = c.SOURCE_CODE AND s.ACTIVE_FLAG = 'Y'
+JOIN CFG_PIPELINES n ON n.PIPELINE_CODE = c.PIPELINE_CODE AND n.ACTIVE_FLAG = 'Y'
+JOIN CFG_PIPELINE_DEPENDENCY d ON d.DEPENDS_ON_PIPELINE_ID = s.PIPELINE_ID
+                              AND d.ACTIVE_FLAG = 'Y';
+
+DROP TABLE pipeline_copies;

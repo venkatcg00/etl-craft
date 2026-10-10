@@ -112,6 +112,7 @@ item's text, or work done early under another item.
 | S5.A The pool interface | Done | #133 | `AttemptSpec`, `Pool` and the pool rules |
 | S5.B The local provider | Done | #133 | Attempts run through the local pool, with slots per kind |
 | SQL views | Done | #139 | `CREATE_VIEW`, a ninth SQL action, with secure views where the warehouse has them |
+| Configuration files | Done | #140 | `etl-craft config plan`, `apply` and `export`: one CSV file per `CFG_` table, merged by key |
 | 0.4 gate; S5.C and later | Not started | | |
 
 ### Handover notes
@@ -137,8 +138,15 @@ no cloud suite ran.
 SQL views passed the full local checks, the installed-wheel matrix and, on Databricks and
 Snowflake, the view tests: a view granted to a role, replaced, and its grant listed again, and a
 secure view on Snowflake.
+Configuration files passed the full local checks and the installed-wheel matrix; they change no
+warehouse code, so no cloud suite ran.
 
 **Choices that differ from the item text.**
+
+- Configuration files are not a roadmap item: the project keeps one CSV file per `CFG_` table,
+  and `etl-craft config apply` merges them by key, with `ACTIVE_FLAG` switching rows off and on and
+  ids kept. The files hold the whole configuration, so an active row they no longer hold is
+  retired. Graph errors now name tasks by code.
 
 - SQL views keep a replaced view's grants: `COPY GRANTS` on Snowflake and `ALTER VIEW` on
   Databricks, whose `CREATE OR REPLACE` drops them. `SECURE_VIEW` is refused where the warehouse
@@ -2712,6 +2720,7 @@ change it only by updating this table and the documentation together.
 | Process per task | Kept, on workers and on the local provider, for isolation; revisit only if measured worker memory demands it | S5.B, S6.G |
 | Engine DBs | One PostgreSQL Engine DB for every project; separate databases only for hard isolation | S5.G |
 | Views | `CREATE_VIEW` replaces only views, never a table; a secure view is created only where the warehouse has one (Snowflake, PostgreSQL), and refused elsewhere rather than created as an ordinary view | SQL views |
+| Authoring pipelines | SQL files plus explicit `CFG_` rows, kept as one CSV file per `CFG_` table in `config/` and merged by key with `etl-craft config apply`; `ACTIVE_FLAG` switches rows off and on, and rows keep their ids. Project migrations write the same rows with SQL. No dbt models or Jinja, and no template language beyond `$$` | Non-goals; Configuration files guide |
 | DuckDB's SQLAlchemy dialect | A core dependency, the one exception to optional warehouse extras: DuckDB is the default local warehouse of the quick start, the demo and the tests, so `pip install etl-craft` runs a whole local deployment. Engine code never imports it; SQLAlchemy loads it from the `duckdb:` URL | S4.I.6 |
 
 ## Appendix C: Glossary

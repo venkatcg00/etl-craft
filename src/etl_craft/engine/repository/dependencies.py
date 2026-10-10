@@ -58,6 +58,7 @@ def fetch_pipeline_graph(conn: Connection, pipeline_id: int) -> PipelineGraphDat
             run_condition=row.run_condition,
             run_condition_count=row.run_condition_count,
             cross_pipeline_edge_count=cross.get(row.task_id, 0),
+            task_code=row.task_code,
         )
         for row in conn.execute(
             statement(conn, "pipeline_graph_tasks"), {"pipeline_id": pipeline_id}

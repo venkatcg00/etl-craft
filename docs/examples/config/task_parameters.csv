@@ -1,0 +1,81 @@
+PIPELINE_CODE,TASK_CODE,PARAMETER_NAME,PARAMETER_VALUE,ACTIVE_FLAG
+SALES_DAILY,alert,EMAIL_BODY,Run $$pipeline_run_id ended $$status.,Y
+SALES_DAILY,alert,EMAIL_SUBJECT,$$pipeline_code: $$status,Y
+SALES_DAILY,alert,EMAIL_TO,sales-data@example.com|sales-leads@example.com,Y
+SALES_DAILY,fetch_orders,INPUT_PARAMS,"{""region"": ""uk"", ""days"": 1}",Y
+SALES_DAILY,fetch_orders,RETRIES,2,Y
+SALES_DAILY,fetch_orders,RETRY_DELAY_SECONDS,300,N
+SALES_DAILY,fetch_orders,SCRIPT_NAME,sales/fetch_orders.py,Y
+SALES_DAILY,fetch_orders,SOURCE_OBJECT,Order service API,Y
+SALES_DAILY,fetch_orders,TARGET_OBJECT,lnd.orders_uk,Y
+SALES_DAILY,fetch_orders,TASK_TIMEOUT_SECONDS,1800,Y
+SALES_DAILY,load_orders,DOCUMENTATION,Appends the day's orders to the region's table.,Y
+SALES_DAILY,load_orders,RETRIES,1,Y
+SALES_DAILY,load_orders,SOURCE_SQL_FILE,sales/orders_uk.sql,Y
+SALES_DAILY,load_orders,SQL_ACTION,APPEND_TABLE,Y
+SALES_DAILY,load_orders,TARGET_OBJECT,sales.orders_uk,Y
+SALES_DAILY,on_failure,EMAIL_BODY,Run $$pipeline_run_id failed: $$error_message,Y
+SALES_DAILY,on_failure,EMAIL_ON_STATUS,FAILED,Y
+SALES_DAILY,on_failure,EMAIL_SUBJECT,$$pipeline_code: a step failed,Y
+SALES_DAILY,on_failure,EMAIL_TO,sales-oncall@example.com,Y
+SALES_DAILY,setup_orders,SOURCE_SQL_FILE,sales/orders_uk.sql,Y
+SALES_DAILY,setup_orders,SQL_ACTION,SETUP_TABLE,Y
+SALES_DAILY,setup_orders,TARGET_OBJECT,sales.orders_uk,Y
+SALES_DAILY,validate_feed,INPUT_PARAMS,"{""table"": ""lnd.orders_uk"", ""min_rows"": 1}",Y
+SALES_DAILY,validate_feed,SCRIPT_NAME,sales/validate_feed.py,Y
+SALES_DAILY_EU,alert,EMAIL_BODY,Run $$pipeline_run_id ended $$status.,Y
+SALES_DAILY_EU,alert,EMAIL_SUBJECT,$$pipeline_code: $$status,Y
+SALES_DAILY_EU,alert,EMAIL_TO,sales-data@example.com|sales-leads@example.com,Y
+SALES_DAILY_EU,fetch_orders,INPUT_PARAMS,"{""region"": ""eu"", ""days"": 1}",Y
+SALES_DAILY_EU,fetch_orders,RETRIES,2,Y
+SALES_DAILY_EU,fetch_orders,RETRY_DELAY_SECONDS,300,Y
+SALES_DAILY_EU,fetch_orders,SCRIPT_NAME,sales/fetch_orders.py,Y
+SALES_DAILY_EU,fetch_orders,SOURCE_OBJECT,Order service API,Y
+SALES_DAILY_EU,fetch_orders,TARGET_OBJECT,lnd.orders_eu,Y
+SALES_DAILY_EU,fetch_orders,TASK_TIMEOUT_SECONDS,1800,Y
+SALES_DAILY_EU,load_orders,DOCUMENTATION,Appends the day's orders to the region's table.,Y
+SALES_DAILY_EU,load_orders,SOURCE_SQL_FILE,sales/orders_eu.sql,Y
+SALES_DAILY_EU,load_orders,SQL_ACTION,APPEND_TABLE,Y
+SALES_DAILY_EU,load_orders,TARGET_OBJECT,sales.orders_eu,Y
+SALES_DAILY_EU,on_failure,EMAIL_BODY,Run $$pipeline_run_id failed: $$error_message,Y
+SALES_DAILY_EU,on_failure,EMAIL_ON_STATUS,FAILED,Y
+SALES_DAILY_EU,on_failure,EMAIL_SUBJECT,$$pipeline_code: a step failed,Y
+SALES_DAILY_EU,on_failure,EMAIL_TO,sales-oncall@example.com,Y
+SALES_DAILY_EU,setup_orders,SOURCE_SQL_FILE,sales/orders_eu.sql,Y
+SALES_DAILY_EU,setup_orders,SQL_ACTION,SETUP_TABLE,Y
+SALES_DAILY_EU,setup_orders,TARGET_OBJECT,sales.orders_eu,Y
+SALES_DAILY_US,alert,EMAIL_BODY,Run $$pipeline_run_id ended $$status.,N
+SALES_DAILY_US,alert,EMAIL_SUBJECT,$$pipeline_code: $$status,N
+SALES_DAILY_US,alert,EMAIL_TO,sales-data@example.com|sales-leads@example.com,N
+SALES_DAILY_US,fetch_orders,INPUT_PARAMS,"{""region"": ""us"", ""days"": 1}",N
+SALES_DAILY_US,fetch_orders,RETRIES,2,N
+SALES_DAILY_US,fetch_orders,RETRY_DELAY_SECONDS,300,N
+SALES_DAILY_US,fetch_orders,SCRIPT_NAME,sales/fetch_orders.py,N
+SALES_DAILY_US,fetch_orders,SOURCE_OBJECT,Order service API,N
+SALES_DAILY_US,fetch_orders,TARGET_OBJECT,lnd.orders_us,N
+SALES_DAILY_US,fetch_orders,TASK_TIMEOUT_SECONDS,1800,N
+SALES_DAILY_US,load_orders,DOCUMENTATION,Appends the day's orders to the region's table.,N
+SALES_DAILY_US,load_orders,SOURCE_SQL_FILE,sales/orders_us.sql,N
+SALES_DAILY_US,load_orders,SQL_ACTION,APPEND_TABLE,N
+SALES_DAILY_US,load_orders,TARGET_OBJECT,sales.orders_us,N
+SALES_DAILY_US,on_failure,EMAIL_BODY,Run $$pipeline_run_id failed: $$error_message,N
+SALES_DAILY_US,on_failure,EMAIL_ON_STATUS,FAILED,N
+SALES_DAILY_US,on_failure,EMAIL_SUBJECT,$$pipeline_code: a step failed,N
+SALES_DAILY_US,on_failure,EMAIL_TO,sales-oncall@example.com,N
+SALES_DAILY_US,setup_orders,SOURCE_SQL_FILE,sales/orders_us.sql,N
+SALES_DAILY_US,setup_orders,SQL_ACTION,SETUP_TABLE,N
+SALES_DAILY_US,setup_orders,TARGET_OBJECT,sales.orders_us,N
+SALES_MART,alert,EMAIL_BODY,Run $$pipeline_run_id ended $$status.,Y
+SALES_MART,alert,EMAIL_SUBJECT,$$pipeline_code: $$status,Y
+SALES_MART,alert,EMAIL_TO,sales-data@example.com,Y
+SALES_MART,customer_totals,SOURCE_SQL,"SELECT customer_id, SUM(amount) AS total_amount FROM sales.orders_uk GROUP BY customer_id",N
+SALES_MART,customer_totals,SQL_ACTION,CREATE_TABLE,N
+SALES_MART,customer_totals,TARGET_OBJECT,mart.customer_totals,N
+SALES_MART,daily_totals,SOURCE_SQL,"SELECT CAST(ordered_at AS DATE) AS order_date, SUM(amount) AS total_amount FROM sales.orders_uk GROUP BY CAST(ordered_at AS DATE)",Y
+SALES_MART,daily_totals,SQL_ACTION,CREATE_TABLE,Y
+SALES_MART,daily_totals,TARGET_OBJECT,mart.daily_totals,Y
+SALES_MART,publish,INPUT_PARAMS,"{""partner"": ""acme""}",Y
+SALES_MART,publish,SCRIPT_NAME,sales/publish_to_partner.py,Y
+SALES_MART,totals_by_region,SOURCE_SQL,"SELECT 'uk' AS region, SUM(amount) AS total_amount FROM sales.orders_uk",Y
+SALES_MART,totals_by_region,SQL_ACTION,CREATE_TABLE,Y
+SALES_MART,totals_by_region,TARGET_OBJECT,mart.region_totals,Y

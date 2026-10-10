@@ -12,8 +12,10 @@ etl-craft/
 │   └── sales/orders.sql
 ├── ingestion_scripts/      # Python ingestion scripts that PYTHON tasks name
 │   └── load_orders.py
+├── config/                 # pipelines as CSV files, one per CFG_ table, for `etl-craft config apply`
+│   └── pipelines.csv, tasks.csv, task_parameters.csv, ...
 ├── migrations/             # your own Engine DB migrations, applied by `etl-craft migrate`
-│   └── 0001_add_sales_pipelines.sql
+│   └── 0001_add_sales_tables.sql
 └── logs/                   # one log file per task attempt (Orchestration.Log_dir)
 ```
 
@@ -44,6 +46,11 @@ message that names the parameter, the value and the folder, and suggests close m
 ```
 SOURCE_SQL_FILE='sales/order.sql': no such file /srv/etl/etl-craft/sql_files/sales/order.sql — did you mean: sales/orders.sql
 ```
+
+## Configuration files
+
+`etl-craft config apply` merges the CSV files in `config/` into the Engine DB's `CFG_` tables.
+See [Configuration files](../guides/configuration-files.md).
 
 ## Project migrations
 

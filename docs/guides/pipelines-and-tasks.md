@@ -1,9 +1,12 @@
 # Pipelines and tasks
 
-A pipeline is rows in the Engine DB's `CFG_` tables, authored by your team in project SQL
-migrations and applied with `etl-craft migrate`. Review the migration like code, then check the
-rows with [`validate`](validating.md). Plain SQL connections cannot edit these rows; each
-change records its actor and before/after values. See [Engine DB setup and upgrades](../deploying/engine-db.md).
+A pipeline is rows in the Engine DB's `CFG_` tables. Your team keeps them in
+[configuration files](configuration-files.md), one CSV file per table, and
+`etl-craft config apply` merges them into the Engine DB; [configuration
+migrations](configuration-migrations.md) write the same rows with SQL. Review the change like
+code, then check the rows with [`validate`](validating.md). Plain SQL connections cannot edit
+these rows; each change records its actor and before/after values. See also
+[Engine DB setup and upgrades](../deploying/engine-db.md).
 
 ```mermaid
 flowchart LR

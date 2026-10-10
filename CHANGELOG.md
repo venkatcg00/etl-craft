@@ -16,6 +16,19 @@ All notable changes are recorded here. The format follows
   `validate` reports both refusals before a run. A view is replaced only when the statement that
   makes it changes, so an unchanged view keeps its locks, grants and policies. Upgrade the Engine
   DB with migration `0019_target_view_statement`.
+- Configuration files: a project keeps its pipelines as CSV files in `config/`, one per `CFG_`
+  table, each row with an `ACTIVE_FLAG`. `etl-craft config apply` merges them into the Engine DB
+  by key in one transaction: it inserts new rows, updates changed rows in place (keeping their
+  ids and history), retires rows flagged `N` or no longer in the files, and reactivates retired
+  rows flagged `Y` again. `validate` checks the result in the same transaction, and a
+  configuration it fails is not applied. `config plan` shows the changes and the findings
+  without making them, and `config export` writes the Engine DB's rows as files. Every change
+  is audited with its actor and `config@<revision>`. A file problem exits with the new status 25
+  (`METADATA_FILE`), naming the file, line, column, value and what was expected.
+
+- Guides to configuration files and to configuration migrations, with a complete example
+  `config/` folder and an example migration for each kind of change, both tested on SQLite and
+  PostgreSQL.
 
 - Task processes run through a pool: whole-pipeline runs and the server admit each attempt and
   submit it to the local pool, which runs it on this host; `run --task_code` runs its one attempt
@@ -23,6 +36,11 @@ All notable changes are recorded here. The format follows
   `Orchestration.Local_ingestion_slots` and `Local_warehouse_slots` cap how many Python ingestion
   tasks and how many SQL, business-rule and alert tasks run at once, within
   `Max_parallel_tasks`; unset, either kind may use every slot, as before.
+
+### Changed
+
+- Run-condition and self-dependency errors name the task by its code, such as `task publish
+  requires 5 satisfied dependencies but only has 2`, rather than by its id.
 
 ## [0.3.0] - 2026-10-10
 

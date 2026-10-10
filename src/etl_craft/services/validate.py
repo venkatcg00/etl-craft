@@ -121,44 +121,51 @@ class _Metadata:
 def validate(engine: Engine, config: ConnectorConfig, pipeline_code: str | None = None) -> Report:
     """Check every active pipeline, or only ``pipeline_code``; return every finding."""
     with engine.connect() as conn:
-        if pipeline_code is not None:
-            resolve_pipeline_id(conn, pipeline_code)
-        tasks = fetch_active_tasks(conn)
-        pipeline_parameters = fetch_pipeline_parameters(conn)
-        data = _Metadata(
-            tasks=tasks,
-            params={task.task_id: fetch_task_parameters(conn, task.task_id) for task in tasks},
-            edges=fetch_task_dependency_edges(conn),
-            pipeline_edges=fetch_pipeline_edges(conn),
-            pipeline_parameters=pipeline_parameters,
-            pipeline_codes=[code for code, _ in pipeline_parameters],
+        return validate_on(conn, config, pipeline_code)
+
+
+def validate_on(
+    conn: Connection, config: ConnectorConfig, pipeline_code: str | None = None
+) -> Report:
+    """``validate`` on an open connection, including any changes it has not committed yet."""
+    if pipeline_code is not None:
+        resolve_pipeline_id(conn, pipeline_code)
+    tasks = fetch_active_tasks(conn)
+    pipeline_parameters = fetch_pipeline_parameters(conn)
+    data = _Metadata(
+        tasks=tasks,
+        params={task.task_id: fetch_task_parameters(conn, task.task_id) for task in tasks},
+        edges=fetch_task_dependency_edges(conn),
+        pipeline_edges=fetch_pipeline_edges(conn),
+        pipeline_parameters=pipeline_parameters,
+        pipeline_codes=[code for code, _ in pipeline_parameters],
+    )
+    report = Report()
+    for schedule in conn.execute(statement(conn, "overseer_schedules")):
+        zone = (
+            schedule.schedule_timezone
+            if schedule.schedule_timezone is not None
+            else config.timezone
         )
-        report = Report()
-        for schedule in conn.execute(statement(conn, "overseer_schedules")):
-            zone = (
-                schedule.schedule_timezone
-                if schedule.schedule_timezone is not None
-                else config.timezone
-            )
-            for column, value, check in (
-                ("SCHEDULE_TIMEZONE", zone, timezone),
-                ("RUN_SCHEDULE", schedule.run_schedule, parse),
-                ("SCHEDULE_START_DATE", schedule.schedule_start_date, date.fromisoformat),
-            ):
-                if value is None:
-                    continue
-                try:
-                    check(str(value))
-                except (EtlCraftError, ValueError) as error:
-                    report.fail(
-                        schedule.pipeline_code,
-                        f"{column}={value!r}: {error}; correct this pipeline's schedule settings",
-                    )
-        _pipelines(conn, config, data, report)
-        _dependencies(data, report)
-        _target_formats(config, data, report)
-        for task in data.tasks:
-            _task(conn, config, data, task, report)
+        for column, value, check in (
+            ("SCHEDULE_TIMEZONE", zone, timezone),
+            ("RUN_SCHEDULE", schedule.run_schedule, parse),
+            ("SCHEDULE_START_DATE", schedule.schedule_start_date, date.fromisoformat),
+        ):
+            if value is None:
+                continue
+            try:
+                check(str(value))
+            except (EtlCraftError, ValueError) as error:
+                report.fail(
+                    schedule.pipeline_code,
+                    f"{column}={value!r}: {error}; correct this pipeline's schedule settings",
+                )
+    _pipelines(conn, config, data, report)
+    _dependencies(data, report)
+    _target_formats(config, data, report)
+    for task in data.tasks:
+        _task(conn, config, data, task, report)
 
     def mine(where: str) -> bool:
         return pipeline_code is None or where.split(".", 1)[0] == pipeline_code

@@ -41,6 +41,7 @@ class ExitCode(IntEnum):
     INCOMPLETE = 22
     WAITING = 23
     RESOURCE_NOT_FOUND = 24
+    METADATA_FILE = 25
 
 
 class EtlCraftError(Exception):
@@ -164,3 +165,13 @@ class ResourceNotFoundError(EtlCraftError):
 
     retryable = False
     exit_code = ExitCode.RESOURCE_NOT_FOUND
+
+
+class MetadataFileError(EtlCraftError):
+    """A file in the project's ``config/`` folder cannot be read, or its rows cannot be loaded.
+
+    The message names the file, the line and column, the value found and what was expected.
+    """
+
+    retryable = False
+    exit_code = ExitCode.METADATA_FILE

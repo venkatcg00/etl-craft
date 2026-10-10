@@ -4,6 +4,7 @@ from etl_craft.cli.commands import (
     audit,
     cancel,
     clone,
+    config_files,
     docs_version,
     doctor,
     explain,
@@ -60,4 +61,5 @@ COMMANDS: tuple[Command, ...] = (
     setup.COMMAND,
     init_db.COMMAND,
     migrate.COMMAND,
+    config_files.COMMAND,
 )
