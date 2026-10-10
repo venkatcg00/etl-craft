@@ -4,6 +4,7 @@ import pytest
 
 from etl_craft.core.errors import HandlerError
 from etl_craft.warehouse.connection import warehouse_dialect
+from fixtures.sql_warehouse import warehouses
 
 
 @pytest.fixture
@@ -58,3 +59,38 @@ def test_a_secure_view_where_the_warehouse_has_them_and_a_refusal_where_it_does_
     w.run("secure", **params)
     options = w.rows("SELECT reloptions FROM pg_class WHERE relname = 'secure_orders'")
     assert "security_barrier=true" in options[0][0]
+
+
+@warehouses("duckdb", "postgres", "trino_iceberg")
+def test_a_view_is_replaced_only_when_its_statement_changes(orders, monkeypatch):
+    from etl_craft.handlers.sql.session import Session
+
+    w = orders
+    steps = []
+    original = Session.run
+
+    def recording(session, sql, params=None, *, step):
+        steps.append(step)
+        return original(session, sql, params, step=step)
+
+    monkeypatch.setattr(Session, "run", recording)
+    view = {"SQL_ACTION": "CREATE_VIEW", "TARGET_OBJECT": "named_orders"}
+    first = f"SELECT id FROM {w.name('orders')} WHERE id > 1"
+    both = f"SELECT id, name FROM {w.name('orders')}"
+    replaced = "create or replace the view"
+
+    def run(select):
+        steps.clear()
+        w.run("view", SOURCE_SQL=select, **view)
+        return replaced in steps
+
+    assert run(first)
+    assert not run(first)
+    assert w.rows(f"SELECT id FROM {w.name('named_orders')}") == [(2,)]
+    assert run(both)
+    w.execute(f"DROP VIEW {w.name('named_orders')}")
+    assert run(both)
+    assert sorted(w.rows(f"SELECT id, name FROM {w.name('named_orders')}")) == [
+        (1, "a"),
+        (2, "b"),
+    ]

@@ -13,7 +13,9 @@ All notable changes are recorded here. The format follows
   true` makes it a secure view: `SECURE` on Snowflake, `security_barrier` on PostgreSQL; other
   warehouses fail the task. A view takes no `TABLE_FORMAT` or storage parameter, and DuckDB over
   an Iceberg catalog, which cannot create views there, fails the task with the remedy.
-  `validate` reports both refusals before a run.
+  `validate` reports both refusals before a run. A view is replaced only when the statement that
+  makes it changes, so an unchanged view keeps its locks, grants and policies. Upgrade the Engine
+  DB with migration `0019_target_view_statement`.
 
 - Task processes run through a pool: whole-pipeline runs and the server admit each attempt and
   submit it to the local pool, which runs it on this host; `run --task_code` runs its one attempt

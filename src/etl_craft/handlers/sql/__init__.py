@@ -20,7 +20,11 @@ from etl_craft.core.errors import ConfigurationError, SqlGuardError
 from etl_craft.core.text import qualify
 from etl_craft.dialects.warehouse import WarehouseDialect, resolve
 from etl_craft.engine import locks
-from etl_craft.engine.repository.hash_versions import clear_hash_version, save_hash_version
+from etl_craft.engine.repository.hash_versions import (
+    clear_hash_version,
+    save_hash_version,
+    save_view_statement,
+)
 from etl_craft.handlers.registry import HandlerResult, TaskContext
 from etl_craft.handlers.sql.actions import ACTIONS, ActionContext
 from etl_craft.handlers.sql.session import Session
@@ -92,6 +96,8 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
                 clear_hash_version(conn, session.target)
             if session.publish_hash_version is not None:
                 save_hash_version(conn, session.target, session.publish_hash_version)
+            if session.publish_view_statement is not None:
+                save_view_statement(conn, session.target, session.publish_view_statement)
     return result
 
 

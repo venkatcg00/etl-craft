@@ -143,7 +143,10 @@ secure view on Snowflake.
 - SQL views keep a replaced view's grants: `COPY GRANTS` on Snowflake and `ALTER VIEW` on
   Databricks, whose `CREATE OR REPLACE` drops them. `SECURE_VIEW` is refused where the warehouse
   has no secure views rather than creating an ordinary view, and DuckDB over an Iceberg catalog
-  refuses `CREATE_VIEW`.
+  refuses `CREATE_VIEW`. A view is replaced only when the hash of the statement that makes it
+  changes, recorded per target in `AUD_TARGET_VIEW_STATEMENT` after the warehouse commits, like
+  hash versions; config timestamps would miss edits to SQL files and `$$` tokens. A view changed
+  by hand is not detected; one dropped by hand is created again.
 
 - 0.3.0 was cut from #132, after S4.I.6, rather than at the end of S3: it carries the S3
   identity work and the S4 overseer items, which the release overview places in 0.4. Pools (S5.A,

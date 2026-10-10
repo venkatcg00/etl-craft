@@ -88,7 +88,11 @@ active `Warehouse` profile's database, so the same rows work in every environmen
 ### Views
 
 `CREATE_VIEW` keeps the SELECT as a view, so readers always see current data and nothing is
-copied. Each run creates or replaces it, and records no row counts. A view has no audit columns,
+copied. A run creates the view, or replaces it when the statement it would run changed: the
+SELECT, from its file or inline with its tokens replaced, or `SECURE_VIEW`. Otherwise the view
+is left as it is, with its locks, grants and policies untouched; etl-craft records each view's
+statement in `AUD_TARGET_VIEW_STATEMENT`, and a view dropped by hand is created again. A view
+records no row counts. A view has no audit columns,
 no table format and no storage, so `TABLE_FORMAT` and the storage parameters fail the task.
 PostgreSQL replaces a view only when its existing columns keep their names, order and types
 (new columns may follow them); otherwise the task fails with PostgreSQL's reason. DuckDB over

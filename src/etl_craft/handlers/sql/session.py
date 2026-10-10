@@ -62,6 +62,7 @@ class Session:
         self.token = secrets.token_hex(3)
         self.publish_hash_version: int | None = None
         self.clear_hash_version = False
+        self.publish_view_statement: str | None = None
 
     # Statements
 

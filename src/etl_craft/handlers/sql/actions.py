@@ -41,7 +41,8 @@ from sqlalchemy.engine import Engine
 from etl_craft.core.enums import RunStatus, SqlAction
 from etl_craft.core.errors import SqlGuardError
 from etl_craft.core.faults import fault_point
-from etl_craft.engine.repository.hash_versions import fetch_hash_version
+from etl_craft.core.text import sha256_hex
+from etl_craft.engine.repository.hash_versions import fetch_hash_version, fetch_view_statement
 from etl_craft.engine.repository.tasks import TargetTask, fetch_target_tasks
 from etl_craft.engine.runlog import fetch_task_run_status
 from etl_craft.handlers.registry import HandlerResult, TaskContext
@@ -632,9 +633,10 @@ def delete_rows(session: Session, action: ActionContext) -> HandlerResult:
 
 
 def create_view(session: Session, action: ActionContext) -> HandlerResult:
-    """Create or replace the target as a view over the SELECT; never replace a table.
+    """Create the target as a view over the SELECT, or replace it when its statement changed.
 
-    A view stores no rows, so nothing is counted.
+    A view still made by the statement this task would run is left as it is, so its locks,
+    grants and policies are not touched. A table is never replaced, and nothing is counted.
     """
     kind = session.target_relation_type()
     if kind is not None and kind != "VIEW":
@@ -642,10 +644,23 @@ def create_view(session: Session, action: ActionContext) -> HandlerResult:
             f"CREATE_VIEW {session.target}: a {kind.lower()} of that name exists, and "
             "CREATE_VIEW replaces only views; choose another TARGET_OBJECT or drop the table"
         )
+    secure = action.task.secure_view
+    # The replace form names the definition: Databricks words only a new view differently.
+    wanted = sha256_hex(
+        session.dialect.view_ddl(
+            session.target, action.select_sql, secure=secure, exists=True
+        ).encode()
+    )
+    if kind == "VIEW":
+        with action.engine_db.connect() as conn:
+            if fetch_view_statement(conn, session.target) == wanted:
+                logger.info("%s already holds this statement; view kept", session.target)
+                return HandlerResult()
     ddl = session.dialect.view_ddl(
-        session.target, action.select_sql, secure=action.task.secure_view, exists=kind == "VIEW"
+        session.target, action.select_sql, secure=secure, exists=kind == "VIEW"
     )
     session.run(ddl, step="create or replace the view")
+    session.publish_view_statement = wanted
     return HandlerResult()
 
 

@@ -536,6 +536,13 @@ CREATE TABLE AUD_TARGET_HASH_VERSION (
     RECOMPUTED_AT TIMESTAMPTZ NOT NULL
 );
 
+-- The statement that made each CREATE_VIEW target, published after the warehouse committed it.
+CREATE TABLE AUD_TARGET_VIEW_STATEMENT (
+    TARGET_OBJECT VARCHAR PRIMARY KEY,
+    STATEMENT_SHA256 VARCHAR(64) NOT NULL,
+    RECORDED_AT TIMESTAMPTZ NOT NULL
+);
+
 -- Require the transaction marker before changing protected rows or truncating a table.
 CREATE OR REPLACE FUNCTION etl_craft_guard() RETURNS trigger AS $$
 BEGIN
@@ -656,6 +663,8 @@ CREATE TRIGGER trg_attribute_aud_pipeline_pauses BEFORE INSERT OR UPDATE ON AUD_
 
 CREATE TRIGGER trg_actor_guard_aud_target_hash_version BEFORE INSERT OR UPDATE OR DELETE ON AUD_TARGET_HASH_VERSION FOR EACH ROW EXECUTE FUNCTION etl_craft_guard();
 CREATE TRIGGER trg_truncate_aud_target_hash_version BEFORE TRUNCATE ON AUD_TARGET_HASH_VERSION FOR EACH STATEMENT EXECUTE FUNCTION etl_craft_guard();
+CREATE TRIGGER trg_actor_guard_aud_target_view_statement BEFORE INSERT OR UPDATE OR DELETE ON AUD_TARGET_VIEW_STATEMENT FOR EACH ROW EXECUTE FUNCTION etl_craft_guard();
+CREATE TRIGGER trg_truncate_aud_target_view_statement BEFORE TRUNCATE ON AUD_TARGET_VIEW_STATEMENT FOR EACH STATEMENT EXECUTE FUNCTION etl_craft_guard();
 
 -- Overseer process history; the session lock is the source of leadership.
 CREATE TABLE AUD_OVERSEERS (
