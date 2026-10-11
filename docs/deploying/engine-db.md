@@ -147,10 +147,51 @@ names are masked before recording. Read-only commands, including `audit`, make n
 For an empty or older database, initialization or migration records its request after the audit
 table becomes available.
 
-Every `CFG_` row change records its actor, before and after JSON, operation and row key in
-`AUD_METADATA_CHANGES`. Project migrations include their filename and capture added columns;
-`etl-craft config apply` records `config@<revision>` of the files it applied. Project-created
-`CFG_` and `AUD_` tables receive write guards as their DDL runs. Make metadata changes in the
+### Configuration history
+
+Every change to a `CFG_` row is a version in that table's history table, `AUD_<table>_HISTORY`
+(`AUD_CFG_PIPELINES_HISTORY`, `AUD_CFG_TASKS_HISTORY` and so on), in the slowly changing
+dimension type 4 pattern: the `CFG_` table holds the current rows, the history table every
+version. A version holds every column of the row, typed as in the `CFG_` table: its values
+after an insert or update, or its values when deleted. With them are:
+
+| Column | Holds |
+|---|---|
+| `CHANGE_ID` | the change's place in the order of every change, across the tables |
+| `VALID_FROM`, `VALID_TO` | when the version held: from its change until the next one; `VALID_TO` is 9999-12-31 while it still holds, and a deletion's version holds for no time at all |
+| `CURRENT_FLAG` | `Y` for the version that holds now; `N` for the rest and for a deletion |
+| `OPERATION` | `INSERT`, `UPDATE` or `DELETE` |
+| `ACTOR`, `ACTOR_KIND` | who made the change |
+| `MIGRATION` | the project migration's filename, or `config@<revision>` for `etl-craft config apply` |
+
+A version never changes, except that the next change closes it: its `VALID_TO` is set and its
+`CURRENT_FLAG` becomes `N`. The Engine DB refuses every other update and every delete, except by
+retention. Plain SQL answers what a row held and when:
+
+```sql
+-- The SALES_MART pipeline as it stood on the morning of 1 October
+SELECT RUN_SCHEDULE, SLA_IN_HOURS, ACTIVE_FLAG, ACTOR, MIGRATION
+FROM AUD_CFG_PIPELINES_HISTORY
+WHERE PIPELINE_CODE = 'SALES_MART'
+  AND VALID_FROM <= '2026-10-01 08:00:00+00' AND '2026-10-01 08:00:00+00' < VALID_TO;
+
+-- Every version of it, oldest first
+SELECT VALID_FROM, VALID_TO, OPERATION, ACTOR, RUN_SCHEDULE, SLA_IN_HOURS
+FROM AUD_CFG_PIPELINES_HISTORY
+WHERE PIPELINE_CODE = 'SALES_MART'
+ORDER BY CHANGE_ID;
+```
+
+Changes to runs are kept apart from these. `AUD_RUN_INTERVENTIONS` records every change an
+operator makes to a run (a task or run marked, cancelled, reopened, reset or rerun, a stand-in
+run, a gate bypassed) with the status it held before, and `AUD_ACTIONS` records every command
+that changes anything, from the command line or the API, with its actor and arguments.
+
+`AUD_METADATA_CHANGES` is a view over the history tables: one row per change, with the row's
+values before and after as JSON, which `etl-craft audit` reads. A column a project migration adds
+to a `CFG_` table is added to its history table as the migration runs, and a project-created
+`CFG_` table gets a history table of its own. Project-created `CFG_` and `AUD_` tables receive
+write guards as their DDL runs. Make metadata changes in the
 project's [configuration files](../guides/configuration-files.md) and run
 `etl-craft config apply`, or in a new project migration and run `etl-craft migrate`.
 

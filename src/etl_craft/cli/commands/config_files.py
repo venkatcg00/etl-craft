@@ -44,6 +44,12 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     export.add_argument(
         "--force", action="store_true", help="overwrite config files that already exist"
     )
+    export.add_argument(
+        "--as-of",
+        metavar="WHEN",
+        help="the rows as they stood at a pipeline_run_id's start or an ISO 8601 time "
+        "(UTC unless it names a zone), rebuilt from the change history",
+    )
 
 
 def _render(out: Output, done: ConfigSync, verb: str) -> None:
@@ -73,12 +79,13 @@ def _render(out: Output, done: ConfigSync, verb: str) -> None:
 def _run(args: argparse.Namespace, out: Output) -> int:
     with command_context(args) as ctx:
         if args.config_verb == "export":
-            written = export_config(ctx, args.config_dir, overwrite=args.force)
+            written = export_config(ctx, args.config_dir, overwrite=args.force, as_of=args.as_of)
             if args.output_format == "json":
                 out.document(written)
             else:
                 counts = ", ".join(f"{name} {count}" for name, count in written.rows.items())
-                out.line(f"wrote {written.directory}: {counts} row(s)")
+                when = f" as of {written.as_of}" if written.as_of else ""
+                out.line(f"wrote {written.directory}{when}: {counts} row(s)")
             return ExitCode.SUCCESS
         if args.config_verb == "plan":
             done = plan_config(ctx, args.config_dir)

@@ -115,6 +115,7 @@ item's text, or work done early under another item.
 | Configuration files | Done | #140 | `etl-craft config plan`, `apply` and `export`: one CSV file per `CFG_` table, merged by key |
 | SQL checks with sqlglot | Done | #141 | Parse-tree checks of SELECTs and rule SQL in the warehouse's dialect; `validate` warns on SQL sqlglot cannot read |
 | S5.K Row-level rejects | Done | #143 | `REJECT_LIMIT` sets aside rows the target cannot take in `<target>__rejects`; `REJECT_COUNT` in the run logs |
+| Configuration history | Done | #144 | A typed SCD type 4 history table per `CFG_` table, `AUD_METADATA_CHANGES` a view over them, and `config export --as-of` |
 | 0.4 gate; S5.L to S5.N, then S5.C and later | Not started | | |
 
 ### Handover notes
@@ -146,8 +147,20 @@ SQL checks with sqlglot passed the full local checks, the installed-wheel matrix
 every-action tests on Databricks and Snowflake.
 S5.K passed the full local checks, the installed-wheel matrix and the reject tests on
 Databricks and Snowflake, native and Iceberg.
+Configuration history passed the full local checks and the installed-wheel matrix; it changes no
+warehouse code, so no cloud suite ran.
 
 **Choices that differ from the item text.**
+
+- Configuration history is not a roadmap item. Each `CFG_` table has a typed history table in
+  the SCD type 4 pattern, with `VALID_FROM`, `VALID_TO` and `CURRENT_FLAG` (not `ACTIVE_FLAG`,
+  which the `CFG_` tables have already). A version changes only when the next one closes it,
+  the one exception to append-only audit history. `AUD_METADATA_CHANGES`, which held the same
+  changes as JSON, is now a view over them; the upgrade moves its rows across. `rehash`, which
+  recorded nothing in `AUD_ACTIONS`, now does, and a test keeps every command either audited or
+  read-only. A row created before 0.2.0 recorded changes
+  keeps no values from before its first recorded change. Retention (S6.A) keeps every kind of
+  row forever unless its period is set.
 
 - S5.K, without `MERGE_DEDUPE_ORDER`, sets aside every row of a merge key returned more than
   once, since which one should win is the author's call; with it, the order keeps one row per key
@@ -2253,8 +2266,10 @@ bounded, the catalog builds in time, cloning doesn't stall runs, and operators c
 
 Branch: `feat/engine-retention`.
 
-- New `Retention` config section: `Run_history_days` (default 400), `Attempt_log_days` (default 90),
-  `Consumption_days` (default 400), `Interventions_days` (never, by default).
+- New `Retention` config section: `Run_history_days`, `Attempt_log_days`, `Consumption_days`,
+  `Interventions_days` and `Config_history_days`. An unset period keeps those rows forever: a
+  team that wants a bounded Engine DB sets the periods it needs, and can replay its configuration
+  from its config files in git.
 - `etl-craft purge [--dry-run] [--project P]`, also run daily by the overseer at a quiet hour
   (`Retention.Daily_at`, project time zone). Deletes in batches of 10,000 rows per transaction,
   oldest first: attempts, then task runs, then runs past their retention, keeping any row that a

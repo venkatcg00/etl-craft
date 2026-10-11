@@ -31,6 +31,7 @@ MUTATING_COMMANDS = frozenset(
         "cancel",
         "reconcile",
         "upgrade-targets",
+        "rehash",
         "pause",
         "resume",
         "migrate",
@@ -140,7 +141,10 @@ def register_engine(engine: Engine) -> None:
 @contextmanager
 def command_request(command: str, arguments: Mapping[str, Any]) -> Iterator[None]:
     """Record state-changing command requests; read-only commands make no audit writes."""
-    if command not in MUTATING_COMMANDS or (command == "docs-version" and arguments.get("check")):
+    checking = (command == "docs-version" and arguments.get("check")) or (
+        command == "rehash" and arguments.get("dry_run")
+    )
+    if command not in MUTATING_COMMANDS or checking:
         yield
         return
     existing = _request.get()

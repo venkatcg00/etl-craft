@@ -122,8 +122,11 @@ def schema_columns(path: Path) -> dict[str, list[str]]:
 def test_both_schemas_define_the_same_tables_and_columns_in_order():
     postgres = schema_columns(POSTGRES.schema_path())
     sqlite = schema_columns(SQLITE.schema_path())
-    assert len(postgres) == 27
+    assert len(postgres) == 32
+    assert "AUD_METADATA_CHANGES" not in postgres
     assert {
+        "AUD_CFG_PIPELINES_HISTORY",
+        "AUD_CFG_BUSINESS_RULES_HISTORY",
         "AUD_TASK_ATTEMPTS",
         "AUD_GATE_DECISIONS",
         "AUD_TARGET_HASH_VERSION",

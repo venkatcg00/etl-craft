@@ -31,7 +31,7 @@ through `etl-craft config apply`, which records who changed what.
 
 | Command | Does |
 |---|---|
-| `etl-craft config export` | writes the Engine DB's rows as the six files: the starting point for a project whose pipelines are in the Engine DB already. It refuses to overwrite files there unless given `--force` |
+| `etl-craft config export` | writes the Engine DB's rows as the six files: the starting point for a project whose pipelines are in the Engine DB already. It refuses to overwrite files there unless given `--force`. With `--as-of`, it writes the rows as they stood at a moment instead (see [Configuration as of a moment](#configuration-as-of-a-moment)) |
 | `etl-craft config plan` | shows what `apply` would change and runs [`validate`](validating.md) on the result, then rolls it all back. Exits 1 when `validate` fails |
 | `etl-craft config apply` | makes the changes, in one transaction, unless `validate` fails the result: then it changes nothing and exits 1 |
 
@@ -92,9 +92,10 @@ switched off too.
 
 Everything happens in one transaction, which also holds the lock `migrate` takes. `validate`
 checks the result inside that transaction, so a configuration it fails never reaches the
-tables. Every change is recorded in `AUD_METADATA_CHANGES` with its actor, its values before and
-after, and `config@<revision>`, the first twelve characters of the files' SHA-256; `etl-craft
-audit` shows them.
+tables. Every change is recorded as a version in the table's history (see
+[Configuration history](../deploying/engine-db.md#configuration-history)), with its actor and
+`config@<revision>`, the first twelve characters of the files' SHA-256; `etl-craft audit`
+shows them.
 
 ## The files
 
@@ -127,6 +128,22 @@ Each handler's guide lists its task parameters. Values are written as follows:
 
 A row may name only pipelines and tasks its project's files hold: a task's pipeline must be in
 `pipelines.csv`, and both tasks of a dependency in `tasks.csv`, whatever their flags.
+
+## Configuration as of a moment
+
+`etl-craft config export --as-of WHEN` writes the six files as the rows stood at `WHEN`, rebuilt
+from the configuration history. `WHEN` is a `pipeline_run_id`, meaning the moment that run
+started, or an ISO 8601 time such as `2026-10-11T08:00:00Z`; a time without a zone is UTC. Export
+it beside the project's files and compare, to see what a run ran with or what changed since:
+
+```bash
+etl-craft config export --as-of 412 --config-dir /tmp/config-412
+diff -r /tmp/config-412 config/
+```
+
+A moment before the history begins, a run id that does not exist, and a time that is not ISO 8601
+are refused. So is a row created before the Engine DB recorded changes, before 0.2.0, and changed
+since: its values before that change were never recorded.
 
 ## Deploying
 

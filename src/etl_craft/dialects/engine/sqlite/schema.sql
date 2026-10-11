@@ -490,22 +490,189 @@ CREATE TABLE AUD_ACTIONS (
 );
 CREATE INDEX ix_actions_pipeline ON AUD_ACTIONS (PIPELINE_ID, STARTED_AT);
 
--- Every metadata row change with its before/after values and the project migration that made it.
-CREATE TABLE AUD_METADATA_CHANGES (
-    CHANGE_ID INTEGER PRIMARY KEY AUTOINCREMENT,
-    CHANGED_AT TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    ACTOR VARCHAR NOT NULL,
-    ACTOR_KIND VARCHAR NOT NULL,
-    TABLE_NAME VARCHAR NOT NULL,
-    ROW_KEY VARCHAR NOT NULL,
-    OPERATION VARCHAR NOT NULL,
-    BEFORE_JSON TEXT,
-    AFTER_JSON TEXT,
-    MIGRATION VARCHAR,
-    CONSTRAINT ck_metadata_operation CHECK (OPERATION IN ('INSERT','UPDATE','DELETE')),
-    CONSTRAINT ck_metadata_actor_kind CHECK (ACTOR_KIND IN ('HUMAN','SCHEDULE','ORCHESTRATOR','WORKER','SYSTEM'))
+-- Every version of a CFG_PIPELINES row, valid from VALID_FROM until VALID_TO (the far future while it
+-- is the current one, CURRENT_FLAG 'Y'): its values after each insert and update, and its
+-- values when deleted, with who changed it and the project migration that did.
+CREATE TABLE AUD_CFG_PIPELINES_HISTORY (
+    CHANGE_ID    BIGINT PRIMARY KEY,
+    VALID_FROM   TIMESTAMP NOT NULL,
+    VALID_TO     TIMESTAMP NOT NULL,
+    CURRENT_FLAG VARCHAR(1) NOT NULL,
+    OPERATION    VARCHAR NOT NULL,
+    ACTOR        VARCHAR NOT NULL,
+    ACTOR_KIND   VARCHAR NOT NULL,
+    MIGRATION    VARCHAR,
+    PIPELINE_ID BIGINT,
+    PIPELINE_CODE VARCHAR,
+    PIPELINE_NAME VARCHAR,
+    DESCRIPTION VARCHAR,
+    RUN_SCHEDULE VARCHAR,
+    SLA_IN_HOURS NUMERIC,
+    REFRESH_TYPE VARCHAR,
+    ACTIVE_FLAG VARCHAR,
+    PIPELINE_PARAMETERS TEXT,
+    CREATED_BY VARCHAR,
+    CREATE_DATE TIMESTAMP,
+    UPDATED_BY VARCHAR,
+    UPDATED_DATE TIMESTAMP,
+    SCHEDULE_TIMEZONE VARCHAR,
+    CATCHUP VARCHAR(1),
+    MAX_CATCHUP_RUNS INT,
+    OVERLAP_POLICY VARCHAR,
+    SCHEDULE_START_DATE DATE,
+    CONSTRAINT ck_aud_cfg_pipelines_history_operation CHECK (OPERATION IN ('INSERT','UPDATE','DELETE')),
+    CONSTRAINT ck_aud_cfg_pipelines_history_current CHECK (CURRENT_FLAG IN ('Y','N'))
 );
-CREATE INDEX ix_metadata_changes_table ON AUD_METADATA_CHANGES (TABLE_NAME, CHANGED_AT);
+CREATE INDEX ix_aud_cfg_pipelines_history_row ON AUD_CFG_PIPELINES_HISTORY (PIPELINE_ID, CHANGE_ID);
+CREATE INDEX ix_aud_cfg_pipelines_history_current ON AUD_CFG_PIPELINES_HISTORY (PIPELINE_ID) WHERE CURRENT_FLAG = 'Y';
+
+-- Every version of a CFG_PIPELINE_DEPENDENCY row, valid from VALID_FROM until VALID_TO (the far future while it
+-- is the current one, CURRENT_FLAG 'Y'): its values after each insert and update, and its
+-- values when deleted, with who changed it and the project migration that did.
+CREATE TABLE AUD_CFG_PIPELINE_DEPENDENCY_HISTORY (
+    CHANGE_ID    BIGINT PRIMARY KEY,
+    VALID_FROM   TIMESTAMP NOT NULL,
+    VALID_TO     TIMESTAMP NOT NULL,
+    CURRENT_FLAG VARCHAR(1) NOT NULL,
+    OPERATION    VARCHAR NOT NULL,
+    ACTOR        VARCHAR NOT NULL,
+    ACTOR_KIND   VARCHAR NOT NULL,
+    MIGRATION    VARCHAR,
+    PIPELINE_DEPENDENCY_ID BIGINT,
+    PIPELINE_ID BIGINT,
+    DEPENDS_ON_PIPELINE_ID BIGINT,
+    DEPENDENCY_TYPE VARCHAR,
+    ACTIVE_FLAG VARCHAR,
+    CREATED_BY VARCHAR,
+    CREATE_DATE TIMESTAMP,
+    UPDATED_BY VARCHAR,
+    UPDATED_DATE TIMESTAMP,
+    CONSUME_REPAIRS VARCHAR(1),
+    CONSTRAINT ck_aud_cfg_pipeline_dependency_history_operation CHECK (OPERATION IN ('INSERT','UPDATE','DELETE')),
+    CONSTRAINT ck_aud_cfg_pipeline_dependency_history_current CHECK (CURRENT_FLAG IN ('Y','N'))
+);
+CREATE INDEX ix_aud_cfg_pipeline_dependency_history_row ON AUD_CFG_PIPELINE_DEPENDENCY_HISTORY (PIPELINE_DEPENDENCY_ID, CHANGE_ID);
+CREATE INDEX ix_aud_cfg_pipeline_dependency_history_current ON AUD_CFG_PIPELINE_DEPENDENCY_HISTORY (PIPELINE_DEPENDENCY_ID) WHERE CURRENT_FLAG = 'Y';
+
+-- Every version of a CFG_TASKS row, valid from VALID_FROM until VALID_TO (the far future while it
+-- is the current one, CURRENT_FLAG 'Y'): its values after each insert and update, and its
+-- values when deleted, with who changed it and the project migration that did.
+CREATE TABLE AUD_CFG_TASKS_HISTORY (
+    CHANGE_ID    BIGINT PRIMARY KEY,
+    VALID_FROM   TIMESTAMP NOT NULL,
+    VALID_TO     TIMESTAMP NOT NULL,
+    CURRENT_FLAG VARCHAR(1) NOT NULL,
+    OPERATION    VARCHAR NOT NULL,
+    ACTOR        VARCHAR NOT NULL,
+    ACTOR_KIND   VARCHAR NOT NULL,
+    MIGRATION    VARCHAR,
+    TASK_ID BIGINT,
+    TASK_CODE VARCHAR,
+    TASK_TYPE VARCHAR,
+    PIPELINE_ID BIGINT,
+    HANDLER VARCHAR,
+    RUN_CONDITION VARCHAR,
+    RUN_CONDITION_COUNT INT,
+    ACTIVE_FLAG VARCHAR,
+    CREATED_BY VARCHAR,
+    CREATE_DATE TIMESTAMP,
+    UPDATED_BY VARCHAR,
+    UPDATED_DATE TIMESTAMP,
+    CONSTRAINT ck_aud_cfg_tasks_history_operation CHECK (OPERATION IN ('INSERT','UPDATE','DELETE')),
+    CONSTRAINT ck_aud_cfg_tasks_history_current CHECK (CURRENT_FLAG IN ('Y','N'))
+);
+CREATE INDEX ix_aud_cfg_tasks_history_row ON AUD_CFG_TASKS_HISTORY (TASK_ID, CHANGE_ID);
+CREATE INDEX ix_aud_cfg_tasks_history_current ON AUD_CFG_TASKS_HISTORY (TASK_ID) WHERE CURRENT_FLAG = 'Y';
+
+-- Every version of a CFG_TASK_DEPENDENCY row, valid from VALID_FROM until VALID_TO (the far future while it
+-- is the current one, CURRENT_FLAG 'Y'): its values after each insert and update, and its
+-- values when deleted, with who changed it and the project migration that did.
+CREATE TABLE AUD_CFG_TASK_DEPENDENCY_HISTORY (
+    CHANGE_ID    BIGINT PRIMARY KEY,
+    VALID_FROM   TIMESTAMP NOT NULL,
+    VALID_TO     TIMESTAMP NOT NULL,
+    CURRENT_FLAG VARCHAR(1) NOT NULL,
+    OPERATION    VARCHAR NOT NULL,
+    ACTOR        VARCHAR NOT NULL,
+    ACTOR_KIND   VARCHAR NOT NULL,
+    MIGRATION    VARCHAR,
+    TASK_DEPENDENCY_ID BIGINT,
+    PIPELINE_ID BIGINT,
+    TASK_ID BIGINT,
+    DEPENDS_ON_PIPELINE_ID BIGINT,
+    DEPENDS_ON_TASK_ID BIGINT,
+    DEPENDENCY_TYPE VARCHAR,
+    ACTIVE_FLAG VARCHAR,
+    CREATED_BY VARCHAR,
+    CREATE_DATE TIMESTAMP,
+    UPDATED_BY VARCHAR,
+    UPDATED_DATE TIMESTAMP,
+    CONSUME_REPAIRS VARCHAR(1),
+    CONSTRAINT ck_aud_cfg_task_dependency_history_operation CHECK (OPERATION IN ('INSERT','UPDATE','DELETE')),
+    CONSTRAINT ck_aud_cfg_task_dependency_history_current CHECK (CURRENT_FLAG IN ('Y','N'))
+);
+CREATE INDEX ix_aud_cfg_task_dependency_history_row ON AUD_CFG_TASK_DEPENDENCY_HISTORY (TASK_DEPENDENCY_ID, CHANGE_ID);
+CREATE INDEX ix_aud_cfg_task_dependency_history_current ON AUD_CFG_TASK_DEPENDENCY_HISTORY (TASK_DEPENDENCY_ID) WHERE CURRENT_FLAG = 'Y';
+
+-- Every version of a CFG_TASK_PARAMETERS row, valid from VALID_FROM until VALID_TO (the far future while it
+-- is the current one, CURRENT_FLAG 'Y'): its values after each insert and update, and its
+-- values when deleted, with who changed it and the project migration that did.
+CREATE TABLE AUD_CFG_TASK_PARAMETERS_HISTORY (
+    CHANGE_ID    BIGINT PRIMARY KEY,
+    VALID_FROM   TIMESTAMP NOT NULL,
+    VALID_TO     TIMESTAMP NOT NULL,
+    CURRENT_FLAG VARCHAR(1) NOT NULL,
+    OPERATION    VARCHAR NOT NULL,
+    ACTOR        VARCHAR NOT NULL,
+    ACTOR_KIND   VARCHAR NOT NULL,
+    MIGRATION    VARCHAR,
+    TASK_PARAMETER_ID BIGINT,
+    TASK_ID BIGINT,
+    PARAMETER_NAME VARCHAR,
+    PARAMETER_VALUE VARCHAR,
+    ACTIVE_FLAG VARCHAR,
+    CREATED_BY VARCHAR,
+    CREATE_DATE TIMESTAMP,
+    UPDATED_BY VARCHAR,
+    UPDATED_DATE TIMESTAMP,
+    CONSTRAINT ck_aud_cfg_task_parameters_history_operation CHECK (OPERATION IN ('INSERT','UPDATE','DELETE')),
+    CONSTRAINT ck_aud_cfg_task_parameters_history_current CHECK (CURRENT_FLAG IN ('Y','N'))
+);
+CREATE INDEX ix_aud_cfg_task_parameters_history_row ON AUD_CFG_TASK_PARAMETERS_HISTORY (TASK_PARAMETER_ID, CHANGE_ID);
+CREATE INDEX ix_aud_cfg_task_parameters_history_current ON AUD_CFG_TASK_PARAMETERS_HISTORY (TASK_PARAMETER_ID) WHERE CURRENT_FLAG = 'Y';
+
+-- Every version of a CFG_BUSINESS_RULES row, valid from VALID_FROM until VALID_TO (the far future while it
+-- is the current one, CURRENT_FLAG 'Y'): its values after each insert and update, and its
+-- values when deleted, with who changed it and the project migration that did.
+CREATE TABLE AUD_CFG_BUSINESS_RULES_HISTORY (
+    CHANGE_ID    BIGINT PRIMARY KEY,
+    VALID_FROM   TIMESTAMP NOT NULL,
+    VALID_TO     TIMESTAMP NOT NULL,
+    CURRENT_FLAG VARCHAR(1) NOT NULL,
+    OPERATION    VARCHAR NOT NULL,
+    ACTOR        VARCHAR NOT NULL,
+    ACTOR_KIND   VARCHAR NOT NULL,
+    MIGRATION    VARCHAR,
+    BUSINESS_RULE_ID BIGINT,
+    BUSINESS_RULE_NAME VARCHAR,
+    PIPELINE_ID BIGINT,
+    TASK_ID BIGINT,
+    BUSINESS_RULE_SQL VARCHAR,
+    BUSINESS_RULE_TYPE VARCHAR,
+    BUSINESS_RULE_KEY_COLUMN VARCHAR,
+    TARGET_TABLE VARCHAR,
+    SEQUENCE_NUMBER BIGINT,
+    ACTIVE_FLAG VARCHAR,
+    CREATED_BY VARCHAR,
+    CREATE_DATE TIMESTAMP,
+    UPDATED_BY VARCHAR,
+    UPDATED_DATE TIMESTAMP,
+    CONSTRAINT ck_aud_cfg_business_rules_history_operation CHECK (OPERATION IN ('INSERT','UPDATE','DELETE')),
+    CONSTRAINT ck_aud_cfg_business_rules_history_current CHECK (CURRENT_FLAG IN ('Y','N'))
+);
+CREATE INDEX ix_aud_cfg_business_rules_history_row ON AUD_CFG_BUSINESS_RULES_HISTORY (BUSINESS_RULE_ID, CHANGE_ID);
+CREATE INDEX ix_aud_cfg_business_rules_history_current ON AUD_CFG_BUSINESS_RULES_HISTORY (BUSINESS_RULE_ID) WHERE CURRENT_FLAG = 'Y';
+
 -- The canonical hash version published after a target warehouse update commits.
 CREATE TABLE AUD_TARGET_HASH_VERSION (
     TARGET_OBJECT VARCHAR PRIMARY KEY,
@@ -775,110 +942,6 @@ BEGIN
     SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'AUD_ACTIONS is written only by etl-craft; use etl-craft mark, cancel or run, or a project migration (etl-craft migrate)') END;
     SELECT CASE WHEN etl_craft_purpose() <> 'retention' THEN RAISE(ABORT, 'AUD_ACTIONS immutable history; use a new action or etl-craft retention') END;
 END;
-CREATE TRIGGER trg_actor_guard_aud_metadata_changes_insert BEFORE INSERT ON AUD_METADATA_CHANGES
-BEGIN
-    SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'AUD_METADATA_CHANGES is written only by etl-craft; use etl-craft mark, cancel or run, or a project migration (etl-craft migrate)') END;
-END;
-CREATE TRIGGER trg_actor_guard_aud_metadata_changes_update BEFORE UPDATE ON AUD_METADATA_CHANGES
-BEGIN
-    SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'AUD_METADATA_CHANGES is written only by etl-craft; use etl-craft mark, cancel or run, or a project migration (etl-craft migrate)') END;
-    SELECT CASE WHEN etl_craft_purpose() <> 'retention' THEN RAISE(ABORT, 'AUD_METADATA_CHANGES immutable history; use a new action or etl-craft retention') END;
-END;
-CREATE TRIGGER trg_actor_guard_aud_metadata_changes_delete BEFORE DELETE ON AUD_METADATA_CHANGES
-BEGIN
-    SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'AUD_METADATA_CHANGES is written only by etl-craft; use etl-craft mark, cancel or run, or a project migration (etl-craft migrate)') END;
-    SELECT CASE WHEN etl_craft_purpose() <> 'retention' THEN RAISE(ABORT, 'AUD_METADATA_CHANGES immutable history; use a new action or etl-craft retention') END;
-END;
-CREATE TRIGGER trg_audit_cfg_pipelines_insert AFTER INSERT ON CFG_PIPELINES
-BEGIN
-    UPDATE CFG_PIPELINES SET CREATED_BY=etl_craft_actor(), CREATE_DATE=(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'), UPDATED_BY=etl_craft_actor(), UPDATED_DATE=(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00') WHERE PIPELINE_ID=NEW.PIPELINE_ID;
-    INSERT INTO AUD_METADATA_CHANGES (ACTOR, ACTOR_KIND, TABLE_NAME, ROW_KEY, OPERATION, BEFORE_JSON, AFTER_JSON, MIGRATION) VALUES (etl_craft_actor(), etl_craft_actor_kind(), 'CFG_PIPELINES', CAST(NEW.PIPELINE_ID AS TEXT), 'INSERT', NULL, (SELECT json_object('pipeline_id', row.PIPELINE_ID, 'pipeline_code', row.PIPELINE_CODE, 'pipeline_name', row.PIPELINE_NAME, 'description', row.DESCRIPTION, 'run_schedule', row.RUN_SCHEDULE, 'sla_in_hours', row.SLA_IN_HOURS, 'refresh_type', row.REFRESH_TYPE, 'active_flag', row.ACTIVE_FLAG, 'pipeline_parameters', row.PIPELINE_PARAMETERS, 'created_by', row.CREATED_BY, 'create_date', row.CREATE_DATE, 'updated_by', row.UPDATED_BY, 'updated_date', row.UPDATED_DATE) FROM CFG_PIPELINES row WHERE row.PIPELINE_ID=NEW.PIPELINE_ID), NULLIF(etl_craft_migration(), ''));
-    SELECT etl_craft_exit_insert('CFG_PIPELINES');
-END;
-CREATE TRIGGER trg_audit_cfg_pipelines_update AFTER UPDATE ON CFG_PIPELINES
-BEGIN
-    UPDATE CFG_PIPELINES SET CREATED_BY=OLD.CREATED_BY, CREATE_DATE=OLD.CREATE_DATE, UPDATED_BY=etl_craft_actor(), UPDATED_DATE=(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00') WHERE PIPELINE_ID=NEW.PIPELINE_ID AND NOT etl_craft_inserting('CFG_PIPELINES');
-    INSERT INTO AUD_METADATA_CHANGES (ACTOR, ACTOR_KIND, TABLE_NAME, ROW_KEY, OPERATION, BEFORE_JSON, AFTER_JSON, MIGRATION) SELECT etl_craft_actor(), etl_craft_actor_kind(), 'CFG_PIPELINES', CAST(NEW.PIPELINE_ID AS TEXT), 'UPDATE', json_object('pipeline_id', OLD.PIPELINE_ID, 'pipeline_code', OLD.PIPELINE_CODE, 'pipeline_name', OLD.PIPELINE_NAME, 'description', OLD.DESCRIPTION, 'run_schedule', OLD.RUN_SCHEDULE, 'sla_in_hours', OLD.SLA_IN_HOURS, 'refresh_type', OLD.REFRESH_TYPE, 'active_flag', OLD.ACTIVE_FLAG, 'pipeline_parameters', OLD.PIPELINE_PARAMETERS, 'created_by', OLD.CREATED_BY, 'create_date', OLD.CREATE_DATE, 'updated_by', OLD.UPDATED_BY, 'updated_date', OLD.UPDATED_DATE), (SELECT json_object('pipeline_id', row.PIPELINE_ID, 'pipeline_code', row.PIPELINE_CODE, 'pipeline_name', row.PIPELINE_NAME, 'description', row.DESCRIPTION, 'run_schedule', row.RUN_SCHEDULE, 'sla_in_hours', row.SLA_IN_HOURS, 'refresh_type', row.REFRESH_TYPE, 'active_flag', row.ACTIVE_FLAG, 'pipeline_parameters', row.PIPELINE_PARAMETERS, 'created_by', row.CREATED_BY, 'create_date', row.CREATE_DATE, 'updated_by', row.UPDATED_BY, 'updated_date', row.UPDATED_DATE) FROM CFG_PIPELINES row WHERE row.PIPELINE_ID=NEW.PIPELINE_ID), NULLIF(etl_craft_migration(), '') WHERE (NEW.PIPELINE_ID IS NOT OLD.PIPELINE_ID OR NEW.PIPELINE_CODE IS NOT OLD.PIPELINE_CODE OR NEW.PIPELINE_NAME IS NOT OLD.PIPELINE_NAME OR NEW.DESCRIPTION IS NOT OLD.DESCRIPTION OR NEW.RUN_SCHEDULE IS NOT OLD.RUN_SCHEDULE OR NEW.SLA_IN_HOURS IS NOT OLD.SLA_IN_HOURS OR NEW.REFRESH_TYPE IS NOT OLD.REFRESH_TYPE OR NEW.ACTIVE_FLAG IS NOT OLD.ACTIVE_FLAG OR NEW.PIPELINE_PARAMETERS IS NOT OLD.PIPELINE_PARAMETERS) AND NOT etl_craft_inserting('CFG_PIPELINES');
-END;
-CREATE TRIGGER trg_audit_cfg_pipelines_delete AFTER DELETE ON CFG_PIPELINES
-BEGIN
-    INSERT INTO AUD_METADATA_CHANGES (ACTOR, ACTOR_KIND, TABLE_NAME, ROW_KEY, OPERATION, BEFORE_JSON, AFTER_JSON, MIGRATION) VALUES (etl_craft_actor(), etl_craft_actor_kind(), 'CFG_PIPELINES', CAST(OLD.PIPELINE_ID AS TEXT), 'DELETE', json_object('pipeline_id', OLD.PIPELINE_ID, 'pipeline_code', OLD.PIPELINE_CODE, 'pipeline_name', OLD.PIPELINE_NAME, 'description', OLD.DESCRIPTION, 'run_schedule', OLD.RUN_SCHEDULE, 'sla_in_hours', OLD.SLA_IN_HOURS, 'refresh_type', OLD.REFRESH_TYPE, 'active_flag', OLD.ACTIVE_FLAG, 'pipeline_parameters', OLD.PIPELINE_PARAMETERS, 'created_by', OLD.CREATED_BY, 'create_date', OLD.CREATE_DATE, 'updated_by', OLD.UPDATED_BY, 'updated_date', OLD.UPDATED_DATE), NULL, NULLIF(etl_craft_migration(), ''));
-END;
-CREATE TRIGGER trg_audit_cfg_pipeline_dependency_insert AFTER INSERT ON CFG_PIPELINE_DEPENDENCY
-BEGIN
-    UPDATE CFG_PIPELINE_DEPENDENCY SET CREATED_BY=etl_craft_actor(), CREATE_DATE=(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'), UPDATED_BY=etl_craft_actor(), UPDATED_DATE=(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00') WHERE PIPELINE_DEPENDENCY_ID=NEW.PIPELINE_DEPENDENCY_ID;
-    INSERT INTO AUD_METADATA_CHANGES (ACTOR, ACTOR_KIND, TABLE_NAME, ROW_KEY, OPERATION, BEFORE_JSON, AFTER_JSON, MIGRATION) VALUES (etl_craft_actor(), etl_craft_actor_kind(), 'CFG_PIPELINE_DEPENDENCY', CAST(NEW.PIPELINE_DEPENDENCY_ID AS TEXT), 'INSERT', NULL, (SELECT json_object('pipeline_dependency_id', row.PIPELINE_DEPENDENCY_ID, 'pipeline_id', row.PIPELINE_ID, 'depends_on_pipeline_id', row.DEPENDS_ON_PIPELINE_ID, 'dependency_type', row.DEPENDENCY_TYPE, 'active_flag', row.ACTIVE_FLAG, 'created_by', row.CREATED_BY, 'create_date', row.CREATE_DATE, 'updated_by', row.UPDATED_BY, 'updated_date', row.UPDATED_DATE, 'consume_repairs', row.CONSUME_REPAIRS) FROM CFG_PIPELINE_DEPENDENCY row WHERE row.PIPELINE_DEPENDENCY_ID=NEW.PIPELINE_DEPENDENCY_ID), NULLIF(etl_craft_migration(), ''));
-    SELECT etl_craft_exit_insert('CFG_PIPELINE_DEPENDENCY');
-END;
-CREATE TRIGGER trg_audit_cfg_pipeline_dependency_update AFTER UPDATE ON CFG_PIPELINE_DEPENDENCY
-BEGIN
-    UPDATE CFG_PIPELINE_DEPENDENCY SET CREATED_BY=OLD.CREATED_BY, CREATE_DATE=OLD.CREATE_DATE, UPDATED_BY=etl_craft_actor(), UPDATED_DATE=(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00') WHERE PIPELINE_DEPENDENCY_ID=NEW.PIPELINE_DEPENDENCY_ID AND NOT etl_craft_inserting('CFG_PIPELINE_DEPENDENCY');
-    INSERT INTO AUD_METADATA_CHANGES (ACTOR, ACTOR_KIND, TABLE_NAME, ROW_KEY, OPERATION, BEFORE_JSON, AFTER_JSON, MIGRATION) SELECT etl_craft_actor(), etl_craft_actor_kind(), 'CFG_PIPELINE_DEPENDENCY', CAST(NEW.PIPELINE_DEPENDENCY_ID AS TEXT), 'UPDATE', json_object('pipeline_dependency_id', OLD.PIPELINE_DEPENDENCY_ID, 'pipeline_id', OLD.PIPELINE_ID, 'depends_on_pipeline_id', OLD.DEPENDS_ON_PIPELINE_ID, 'dependency_type', OLD.DEPENDENCY_TYPE, 'active_flag', OLD.ACTIVE_FLAG, 'created_by', OLD.CREATED_BY, 'create_date', OLD.CREATE_DATE, 'updated_by', OLD.UPDATED_BY, 'updated_date', OLD.UPDATED_DATE, 'consume_repairs', OLD.CONSUME_REPAIRS), (SELECT json_object('pipeline_dependency_id', row.PIPELINE_DEPENDENCY_ID, 'pipeline_id', row.PIPELINE_ID, 'depends_on_pipeline_id', row.DEPENDS_ON_PIPELINE_ID, 'dependency_type', row.DEPENDENCY_TYPE, 'active_flag', row.ACTIVE_FLAG, 'created_by', row.CREATED_BY, 'create_date', row.CREATE_DATE, 'updated_by', row.UPDATED_BY, 'updated_date', row.UPDATED_DATE, 'consume_repairs', row.CONSUME_REPAIRS) FROM CFG_PIPELINE_DEPENDENCY row WHERE row.PIPELINE_DEPENDENCY_ID=NEW.PIPELINE_DEPENDENCY_ID), NULLIF(etl_craft_migration(), '') WHERE (NEW.PIPELINE_DEPENDENCY_ID IS NOT OLD.PIPELINE_DEPENDENCY_ID OR NEW.PIPELINE_ID IS NOT OLD.PIPELINE_ID OR NEW.DEPENDS_ON_PIPELINE_ID IS NOT OLD.DEPENDS_ON_PIPELINE_ID OR NEW.DEPENDENCY_TYPE IS NOT OLD.DEPENDENCY_TYPE OR NEW.ACTIVE_FLAG IS NOT OLD.ACTIVE_FLAG OR NEW.CONSUME_REPAIRS IS NOT OLD.CONSUME_REPAIRS) AND NOT etl_craft_inserting('CFG_PIPELINE_DEPENDENCY');
-END;
-CREATE TRIGGER trg_audit_cfg_pipeline_dependency_delete AFTER DELETE ON CFG_PIPELINE_DEPENDENCY
-BEGIN
-    INSERT INTO AUD_METADATA_CHANGES (ACTOR, ACTOR_KIND, TABLE_NAME, ROW_KEY, OPERATION, BEFORE_JSON, AFTER_JSON, MIGRATION) VALUES (etl_craft_actor(), etl_craft_actor_kind(), 'CFG_PIPELINE_DEPENDENCY', CAST(OLD.PIPELINE_DEPENDENCY_ID AS TEXT), 'DELETE', json_object('pipeline_dependency_id', OLD.PIPELINE_DEPENDENCY_ID, 'pipeline_id', OLD.PIPELINE_ID, 'depends_on_pipeline_id', OLD.DEPENDS_ON_PIPELINE_ID, 'dependency_type', OLD.DEPENDENCY_TYPE, 'active_flag', OLD.ACTIVE_FLAG, 'created_by', OLD.CREATED_BY, 'create_date', OLD.CREATE_DATE, 'updated_by', OLD.UPDATED_BY, 'updated_date', OLD.UPDATED_DATE, 'consume_repairs', OLD.CONSUME_REPAIRS), NULL, NULLIF(etl_craft_migration(), ''));
-END;
-CREATE TRIGGER trg_audit_cfg_tasks_insert AFTER INSERT ON CFG_TASKS
-BEGIN
-    UPDATE CFG_TASKS SET CREATED_BY=etl_craft_actor(), CREATE_DATE=(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'), UPDATED_BY=etl_craft_actor(), UPDATED_DATE=(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00') WHERE TASK_ID=NEW.TASK_ID;
-    INSERT INTO AUD_METADATA_CHANGES (ACTOR, ACTOR_KIND, TABLE_NAME, ROW_KEY, OPERATION, BEFORE_JSON, AFTER_JSON, MIGRATION) VALUES (etl_craft_actor(), etl_craft_actor_kind(), 'CFG_TASKS', CAST(NEW.TASK_ID AS TEXT), 'INSERT', NULL, (SELECT json_object('task_id', row.TASK_ID, 'task_code', row.TASK_CODE, 'task_type', row.TASK_TYPE, 'pipeline_id', row.PIPELINE_ID, 'handler', row.HANDLER, 'run_condition', row.RUN_CONDITION, 'run_condition_count', row.RUN_CONDITION_COUNT, 'active_flag', row.ACTIVE_FLAG, 'created_by', row.CREATED_BY, 'create_date', row.CREATE_DATE, 'updated_by', row.UPDATED_BY, 'updated_date', row.UPDATED_DATE) FROM CFG_TASKS row WHERE row.TASK_ID=NEW.TASK_ID), NULLIF(etl_craft_migration(), ''));
-    SELECT etl_craft_exit_insert('CFG_TASKS');
-END;
-CREATE TRIGGER trg_audit_cfg_tasks_update AFTER UPDATE ON CFG_TASKS
-BEGIN
-    UPDATE CFG_TASKS SET CREATED_BY=OLD.CREATED_BY, CREATE_DATE=OLD.CREATE_DATE, UPDATED_BY=etl_craft_actor(), UPDATED_DATE=(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00') WHERE TASK_ID=NEW.TASK_ID AND NOT etl_craft_inserting('CFG_TASKS');
-    INSERT INTO AUD_METADATA_CHANGES (ACTOR, ACTOR_KIND, TABLE_NAME, ROW_KEY, OPERATION, BEFORE_JSON, AFTER_JSON, MIGRATION) SELECT etl_craft_actor(), etl_craft_actor_kind(), 'CFG_TASKS', CAST(NEW.TASK_ID AS TEXT), 'UPDATE', json_object('task_id', OLD.TASK_ID, 'task_code', OLD.TASK_CODE, 'task_type', OLD.TASK_TYPE, 'pipeline_id', OLD.PIPELINE_ID, 'handler', OLD.HANDLER, 'run_condition', OLD.RUN_CONDITION, 'run_condition_count', OLD.RUN_CONDITION_COUNT, 'active_flag', OLD.ACTIVE_FLAG, 'created_by', OLD.CREATED_BY, 'create_date', OLD.CREATE_DATE, 'updated_by', OLD.UPDATED_BY, 'updated_date', OLD.UPDATED_DATE), (SELECT json_object('task_id', row.TASK_ID, 'task_code', row.TASK_CODE, 'task_type', row.TASK_TYPE, 'pipeline_id', row.PIPELINE_ID, 'handler', row.HANDLER, 'run_condition', row.RUN_CONDITION, 'run_condition_count', row.RUN_CONDITION_COUNT, 'active_flag', row.ACTIVE_FLAG, 'created_by', row.CREATED_BY, 'create_date', row.CREATE_DATE, 'updated_by', row.UPDATED_BY, 'updated_date', row.UPDATED_DATE) FROM CFG_TASKS row WHERE row.TASK_ID=NEW.TASK_ID), NULLIF(etl_craft_migration(), '') WHERE (NEW.TASK_ID IS NOT OLD.TASK_ID OR NEW.TASK_CODE IS NOT OLD.TASK_CODE OR NEW.TASK_TYPE IS NOT OLD.TASK_TYPE OR NEW.PIPELINE_ID IS NOT OLD.PIPELINE_ID OR NEW.HANDLER IS NOT OLD.HANDLER OR NEW.RUN_CONDITION IS NOT OLD.RUN_CONDITION OR NEW.RUN_CONDITION_COUNT IS NOT OLD.RUN_CONDITION_COUNT OR NEW.ACTIVE_FLAG IS NOT OLD.ACTIVE_FLAG) AND NOT etl_craft_inserting('CFG_TASKS');
-END;
-CREATE TRIGGER trg_audit_cfg_tasks_delete AFTER DELETE ON CFG_TASKS
-BEGIN
-    INSERT INTO AUD_METADATA_CHANGES (ACTOR, ACTOR_KIND, TABLE_NAME, ROW_KEY, OPERATION, BEFORE_JSON, AFTER_JSON, MIGRATION) VALUES (etl_craft_actor(), etl_craft_actor_kind(), 'CFG_TASKS', CAST(OLD.TASK_ID AS TEXT), 'DELETE', json_object('task_id', OLD.TASK_ID, 'task_code', OLD.TASK_CODE, 'task_type', OLD.TASK_TYPE, 'pipeline_id', OLD.PIPELINE_ID, 'handler', OLD.HANDLER, 'run_condition', OLD.RUN_CONDITION, 'run_condition_count', OLD.RUN_CONDITION_COUNT, 'active_flag', OLD.ACTIVE_FLAG, 'created_by', OLD.CREATED_BY, 'create_date', OLD.CREATE_DATE, 'updated_by', OLD.UPDATED_BY, 'updated_date', OLD.UPDATED_DATE), NULL, NULLIF(etl_craft_migration(), ''));
-END;
-CREATE TRIGGER trg_audit_cfg_task_dependency_insert AFTER INSERT ON CFG_TASK_DEPENDENCY
-BEGIN
-    UPDATE CFG_TASK_DEPENDENCY SET CREATED_BY=etl_craft_actor(), CREATE_DATE=(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'), UPDATED_BY=etl_craft_actor(), UPDATED_DATE=(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'), DEPENDS_ON_PIPELINE_ID=COALESCE(NEW.DEPENDS_ON_PIPELINE_ID, NEW.PIPELINE_ID) WHERE TASK_DEPENDENCY_ID=NEW.TASK_DEPENDENCY_ID;
-    INSERT INTO AUD_METADATA_CHANGES (ACTOR, ACTOR_KIND, TABLE_NAME, ROW_KEY, OPERATION, BEFORE_JSON, AFTER_JSON, MIGRATION) VALUES (etl_craft_actor(), etl_craft_actor_kind(), 'CFG_TASK_DEPENDENCY', CAST(NEW.TASK_DEPENDENCY_ID AS TEXT), 'INSERT', NULL, (SELECT json_object('task_dependency_id', row.TASK_DEPENDENCY_ID, 'pipeline_id', row.PIPELINE_ID, 'task_id', row.TASK_ID, 'depends_on_pipeline_id', row.DEPENDS_ON_PIPELINE_ID, 'depends_on_task_id', row.DEPENDS_ON_TASK_ID, 'dependency_type', row.DEPENDENCY_TYPE, 'active_flag', row.ACTIVE_FLAG, 'created_by', row.CREATED_BY, 'create_date', row.CREATE_DATE, 'updated_by', row.UPDATED_BY, 'updated_date', row.UPDATED_DATE, 'consume_repairs', row.CONSUME_REPAIRS) FROM CFG_TASK_DEPENDENCY row WHERE row.TASK_DEPENDENCY_ID=NEW.TASK_DEPENDENCY_ID), NULLIF(etl_craft_migration(), ''));
-    SELECT etl_craft_exit_insert('CFG_TASK_DEPENDENCY');
-END;
-CREATE TRIGGER trg_audit_cfg_task_dependency_update AFTER UPDATE ON CFG_TASK_DEPENDENCY
-BEGIN
-    UPDATE CFG_TASK_DEPENDENCY SET CREATED_BY=OLD.CREATED_BY, CREATE_DATE=OLD.CREATE_DATE, UPDATED_BY=etl_craft_actor(), UPDATED_DATE=(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'), DEPENDS_ON_PIPELINE_ID=COALESCE(NEW.DEPENDS_ON_PIPELINE_ID, NEW.PIPELINE_ID) WHERE TASK_DEPENDENCY_ID=NEW.TASK_DEPENDENCY_ID AND NOT etl_craft_inserting('CFG_TASK_DEPENDENCY');
-    INSERT INTO AUD_METADATA_CHANGES (ACTOR, ACTOR_KIND, TABLE_NAME, ROW_KEY, OPERATION, BEFORE_JSON, AFTER_JSON, MIGRATION) SELECT etl_craft_actor(), etl_craft_actor_kind(), 'CFG_TASK_DEPENDENCY', CAST(NEW.TASK_DEPENDENCY_ID AS TEXT), 'UPDATE', json_object('task_dependency_id', OLD.TASK_DEPENDENCY_ID, 'pipeline_id', OLD.PIPELINE_ID, 'task_id', OLD.TASK_ID, 'depends_on_pipeline_id', OLD.DEPENDS_ON_PIPELINE_ID, 'depends_on_task_id', OLD.DEPENDS_ON_TASK_ID, 'dependency_type', OLD.DEPENDENCY_TYPE, 'active_flag', OLD.ACTIVE_FLAG, 'created_by', OLD.CREATED_BY, 'create_date', OLD.CREATE_DATE, 'updated_by', OLD.UPDATED_BY, 'updated_date', OLD.UPDATED_DATE, 'consume_repairs', OLD.CONSUME_REPAIRS), (SELECT json_object('task_dependency_id', row.TASK_DEPENDENCY_ID, 'pipeline_id', row.PIPELINE_ID, 'task_id', row.TASK_ID, 'depends_on_pipeline_id', row.DEPENDS_ON_PIPELINE_ID, 'depends_on_task_id', row.DEPENDS_ON_TASK_ID, 'dependency_type', row.DEPENDENCY_TYPE, 'active_flag', row.ACTIVE_FLAG, 'created_by', row.CREATED_BY, 'create_date', row.CREATE_DATE, 'updated_by', row.UPDATED_BY, 'updated_date', row.UPDATED_DATE, 'consume_repairs', row.CONSUME_REPAIRS) FROM CFG_TASK_DEPENDENCY row WHERE row.TASK_DEPENDENCY_ID=NEW.TASK_DEPENDENCY_ID), NULLIF(etl_craft_migration(), '') WHERE (NEW.TASK_DEPENDENCY_ID IS NOT OLD.TASK_DEPENDENCY_ID OR NEW.PIPELINE_ID IS NOT OLD.PIPELINE_ID OR NEW.TASK_ID IS NOT OLD.TASK_ID OR NEW.DEPENDS_ON_PIPELINE_ID IS NOT OLD.DEPENDS_ON_PIPELINE_ID OR NEW.DEPENDS_ON_TASK_ID IS NOT OLD.DEPENDS_ON_TASK_ID OR NEW.DEPENDENCY_TYPE IS NOT OLD.DEPENDENCY_TYPE OR NEW.ACTIVE_FLAG IS NOT OLD.ACTIVE_FLAG OR NEW.CONSUME_REPAIRS IS NOT OLD.CONSUME_REPAIRS) AND NOT etl_craft_inserting('CFG_TASK_DEPENDENCY');
-END;
-CREATE TRIGGER trg_audit_cfg_task_dependency_delete AFTER DELETE ON CFG_TASK_DEPENDENCY
-BEGIN
-    INSERT INTO AUD_METADATA_CHANGES (ACTOR, ACTOR_KIND, TABLE_NAME, ROW_KEY, OPERATION, BEFORE_JSON, AFTER_JSON, MIGRATION) VALUES (etl_craft_actor(), etl_craft_actor_kind(), 'CFG_TASK_DEPENDENCY', CAST(OLD.TASK_DEPENDENCY_ID AS TEXT), 'DELETE', json_object('task_dependency_id', OLD.TASK_DEPENDENCY_ID, 'pipeline_id', OLD.PIPELINE_ID, 'task_id', OLD.TASK_ID, 'depends_on_pipeline_id', OLD.DEPENDS_ON_PIPELINE_ID, 'depends_on_task_id', OLD.DEPENDS_ON_TASK_ID, 'dependency_type', OLD.DEPENDENCY_TYPE, 'active_flag', OLD.ACTIVE_FLAG, 'created_by', OLD.CREATED_BY, 'create_date', OLD.CREATE_DATE, 'updated_by', OLD.UPDATED_BY, 'updated_date', OLD.UPDATED_DATE, 'consume_repairs', OLD.CONSUME_REPAIRS), NULL, NULLIF(etl_craft_migration(), ''));
-END;
-CREATE TRIGGER trg_audit_cfg_task_parameters_insert AFTER INSERT ON CFG_TASK_PARAMETERS
-BEGIN
-    UPDATE CFG_TASK_PARAMETERS SET CREATED_BY=etl_craft_actor(), CREATE_DATE=(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'), UPDATED_BY=etl_craft_actor(), UPDATED_DATE=(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00') WHERE TASK_PARAMETER_ID=NEW.TASK_PARAMETER_ID;
-    INSERT INTO AUD_METADATA_CHANGES (ACTOR, ACTOR_KIND, TABLE_NAME, ROW_KEY, OPERATION, BEFORE_JSON, AFTER_JSON, MIGRATION) VALUES (etl_craft_actor(), etl_craft_actor_kind(), 'CFG_TASK_PARAMETERS', CAST(NEW.TASK_PARAMETER_ID AS TEXT), 'INSERT', NULL, (SELECT json_object('task_parameter_id', row.TASK_PARAMETER_ID, 'task_id', row.TASK_ID, 'parameter_name', row.PARAMETER_NAME, 'parameter_value', row.PARAMETER_VALUE, 'active_flag', row.ACTIVE_FLAG, 'created_by', row.CREATED_BY, 'create_date', row.CREATE_DATE, 'updated_by', row.UPDATED_BY, 'updated_date', row.UPDATED_DATE) FROM CFG_TASK_PARAMETERS row WHERE row.TASK_PARAMETER_ID=NEW.TASK_PARAMETER_ID), NULLIF(etl_craft_migration(), ''));
-    SELECT etl_craft_exit_insert('CFG_TASK_PARAMETERS');
-END;
-CREATE TRIGGER trg_audit_cfg_task_parameters_update AFTER UPDATE ON CFG_TASK_PARAMETERS
-BEGIN
-    UPDATE CFG_TASK_PARAMETERS SET CREATED_BY=OLD.CREATED_BY, CREATE_DATE=OLD.CREATE_DATE, UPDATED_BY=etl_craft_actor(), UPDATED_DATE=(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00') WHERE TASK_PARAMETER_ID=NEW.TASK_PARAMETER_ID AND NOT etl_craft_inserting('CFG_TASK_PARAMETERS');
-    INSERT INTO AUD_METADATA_CHANGES (ACTOR, ACTOR_KIND, TABLE_NAME, ROW_KEY, OPERATION, BEFORE_JSON, AFTER_JSON, MIGRATION) SELECT etl_craft_actor(), etl_craft_actor_kind(), 'CFG_TASK_PARAMETERS', CAST(NEW.TASK_PARAMETER_ID AS TEXT), 'UPDATE', json_object('task_parameter_id', OLD.TASK_PARAMETER_ID, 'task_id', OLD.TASK_ID, 'parameter_name', OLD.PARAMETER_NAME, 'parameter_value', OLD.PARAMETER_VALUE, 'active_flag', OLD.ACTIVE_FLAG, 'created_by', OLD.CREATED_BY, 'create_date', OLD.CREATE_DATE, 'updated_by', OLD.UPDATED_BY, 'updated_date', OLD.UPDATED_DATE), (SELECT json_object('task_parameter_id', row.TASK_PARAMETER_ID, 'task_id', row.TASK_ID, 'parameter_name', row.PARAMETER_NAME, 'parameter_value', row.PARAMETER_VALUE, 'active_flag', row.ACTIVE_FLAG, 'created_by', row.CREATED_BY, 'create_date', row.CREATE_DATE, 'updated_by', row.UPDATED_BY, 'updated_date', row.UPDATED_DATE) FROM CFG_TASK_PARAMETERS row WHERE row.TASK_PARAMETER_ID=NEW.TASK_PARAMETER_ID), NULLIF(etl_craft_migration(), '') WHERE (NEW.TASK_PARAMETER_ID IS NOT OLD.TASK_PARAMETER_ID OR NEW.TASK_ID IS NOT OLD.TASK_ID OR NEW.PARAMETER_NAME IS NOT OLD.PARAMETER_NAME OR NEW.PARAMETER_VALUE IS NOT OLD.PARAMETER_VALUE OR NEW.ACTIVE_FLAG IS NOT OLD.ACTIVE_FLAG) AND NOT etl_craft_inserting('CFG_TASK_PARAMETERS');
-END;
-CREATE TRIGGER trg_audit_cfg_task_parameters_delete AFTER DELETE ON CFG_TASK_PARAMETERS
-BEGIN
-    INSERT INTO AUD_METADATA_CHANGES (ACTOR, ACTOR_KIND, TABLE_NAME, ROW_KEY, OPERATION, BEFORE_JSON, AFTER_JSON, MIGRATION) VALUES (etl_craft_actor(), etl_craft_actor_kind(), 'CFG_TASK_PARAMETERS', CAST(OLD.TASK_PARAMETER_ID AS TEXT), 'DELETE', json_object('task_parameter_id', OLD.TASK_PARAMETER_ID, 'task_id', OLD.TASK_ID, 'parameter_name', OLD.PARAMETER_NAME, 'parameter_value', OLD.PARAMETER_VALUE, 'active_flag', OLD.ACTIVE_FLAG, 'created_by', OLD.CREATED_BY, 'create_date', OLD.CREATE_DATE, 'updated_by', OLD.UPDATED_BY, 'updated_date', OLD.UPDATED_DATE), NULL, NULLIF(etl_craft_migration(), ''));
-END;
-CREATE TRIGGER trg_audit_cfg_business_rules_insert AFTER INSERT ON CFG_BUSINESS_RULES
-BEGIN
-    UPDATE CFG_BUSINESS_RULES SET CREATED_BY=etl_craft_actor(), CREATE_DATE=(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'), UPDATED_BY=etl_craft_actor(), UPDATED_DATE=(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00') WHERE BUSINESS_RULE_ID=NEW.BUSINESS_RULE_ID;
-    INSERT INTO AUD_METADATA_CHANGES (ACTOR, ACTOR_KIND, TABLE_NAME, ROW_KEY, OPERATION, BEFORE_JSON, AFTER_JSON, MIGRATION) VALUES (etl_craft_actor(), etl_craft_actor_kind(), 'CFG_BUSINESS_RULES', CAST(NEW.BUSINESS_RULE_ID AS TEXT), 'INSERT', NULL, (SELECT json_object('business_rule_id', row.BUSINESS_RULE_ID, 'business_rule_name', row.BUSINESS_RULE_NAME, 'pipeline_id', row.PIPELINE_ID, 'task_id', row.TASK_ID, 'business_rule_sql', row.BUSINESS_RULE_SQL, 'business_rule_type', row.BUSINESS_RULE_TYPE, 'business_rule_key_column', row.BUSINESS_RULE_KEY_COLUMN, 'target_table', row.TARGET_TABLE, 'sequence_number', row.SEQUENCE_NUMBER, 'active_flag', row.ACTIVE_FLAG, 'created_by', row.CREATED_BY, 'create_date', row.CREATE_DATE, 'updated_by', row.UPDATED_BY, 'updated_date', row.UPDATED_DATE) FROM CFG_BUSINESS_RULES row WHERE row.BUSINESS_RULE_ID=NEW.BUSINESS_RULE_ID), NULLIF(etl_craft_migration(), ''));
-    SELECT etl_craft_exit_insert('CFG_BUSINESS_RULES');
-END;
-CREATE TRIGGER trg_audit_cfg_business_rules_update AFTER UPDATE ON CFG_BUSINESS_RULES
-BEGIN
-    UPDATE CFG_BUSINESS_RULES SET CREATED_BY=OLD.CREATED_BY, CREATE_DATE=OLD.CREATE_DATE, UPDATED_BY=etl_craft_actor(), UPDATED_DATE=(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00') WHERE BUSINESS_RULE_ID=NEW.BUSINESS_RULE_ID AND NOT etl_craft_inserting('CFG_BUSINESS_RULES');
-    INSERT INTO AUD_METADATA_CHANGES (ACTOR, ACTOR_KIND, TABLE_NAME, ROW_KEY, OPERATION, BEFORE_JSON, AFTER_JSON, MIGRATION) SELECT etl_craft_actor(), etl_craft_actor_kind(), 'CFG_BUSINESS_RULES', CAST(NEW.BUSINESS_RULE_ID AS TEXT), 'UPDATE', json_object('business_rule_id', OLD.BUSINESS_RULE_ID, 'business_rule_name', OLD.BUSINESS_RULE_NAME, 'pipeline_id', OLD.PIPELINE_ID, 'task_id', OLD.TASK_ID, 'business_rule_sql', OLD.BUSINESS_RULE_SQL, 'business_rule_type', OLD.BUSINESS_RULE_TYPE, 'business_rule_key_column', OLD.BUSINESS_RULE_KEY_COLUMN, 'target_table', OLD.TARGET_TABLE, 'sequence_number', OLD.SEQUENCE_NUMBER, 'active_flag', OLD.ACTIVE_FLAG, 'created_by', OLD.CREATED_BY, 'create_date', OLD.CREATE_DATE, 'updated_by', OLD.UPDATED_BY, 'updated_date', OLD.UPDATED_DATE), (SELECT json_object('business_rule_id', row.BUSINESS_RULE_ID, 'business_rule_name', row.BUSINESS_RULE_NAME, 'pipeline_id', row.PIPELINE_ID, 'task_id', row.TASK_ID, 'business_rule_sql', row.BUSINESS_RULE_SQL, 'business_rule_type', row.BUSINESS_RULE_TYPE, 'business_rule_key_column', row.BUSINESS_RULE_KEY_COLUMN, 'target_table', row.TARGET_TABLE, 'sequence_number', row.SEQUENCE_NUMBER, 'active_flag', row.ACTIVE_FLAG, 'created_by', row.CREATED_BY, 'create_date', row.CREATE_DATE, 'updated_by', row.UPDATED_BY, 'updated_date', row.UPDATED_DATE) FROM CFG_BUSINESS_RULES row WHERE row.BUSINESS_RULE_ID=NEW.BUSINESS_RULE_ID), NULLIF(etl_craft_migration(), '') WHERE (NEW.BUSINESS_RULE_ID IS NOT OLD.BUSINESS_RULE_ID OR NEW.BUSINESS_RULE_NAME IS NOT OLD.BUSINESS_RULE_NAME OR NEW.PIPELINE_ID IS NOT OLD.PIPELINE_ID OR NEW.TASK_ID IS NOT OLD.TASK_ID OR NEW.BUSINESS_RULE_SQL IS NOT OLD.BUSINESS_RULE_SQL OR NEW.BUSINESS_RULE_TYPE IS NOT OLD.BUSINESS_RULE_TYPE OR NEW.BUSINESS_RULE_KEY_COLUMN IS NOT OLD.BUSINESS_RULE_KEY_COLUMN OR NEW.TARGET_TABLE IS NOT OLD.TARGET_TABLE OR NEW.SEQUENCE_NUMBER IS NOT OLD.SEQUENCE_NUMBER OR NEW.ACTIVE_FLAG IS NOT OLD.ACTIVE_FLAG) AND NOT etl_craft_inserting('CFG_BUSINESS_RULES');
-END;
-CREATE TRIGGER trg_audit_cfg_business_rules_delete AFTER DELETE ON CFG_BUSINESS_RULES
-BEGIN
-    INSERT INTO AUD_METADATA_CHANGES (ACTOR, ACTOR_KIND, TABLE_NAME, ROW_KEY, OPERATION, BEFORE_JSON, AFTER_JSON, MIGRATION) VALUES (etl_craft_actor(), etl_craft_actor_kind(), 'CFG_BUSINESS_RULES', CAST(OLD.BUSINESS_RULE_ID AS TEXT), 'DELETE', json_object('business_rule_id', OLD.BUSINESS_RULE_ID, 'business_rule_name', OLD.BUSINESS_RULE_NAME, 'pipeline_id', OLD.PIPELINE_ID, 'task_id', OLD.TASK_ID, 'business_rule_sql', OLD.BUSINESS_RULE_SQL, 'business_rule_type', OLD.BUSINESS_RULE_TYPE, 'business_rule_key_column', OLD.BUSINESS_RULE_KEY_COLUMN, 'target_table', OLD.TARGET_TABLE, 'sequence_number', OLD.SEQUENCE_NUMBER, 'active_flag', OLD.ACTIVE_FLAG, 'created_by', OLD.CREATED_BY, 'create_date', OLD.CREATE_DATE, 'updated_by', OLD.UPDATED_BY, 'updated_date', OLD.UPDATED_DATE), NULL, NULLIF(etl_craft_migration(), ''));
-END;
 
 -- The run log is mutable; stamp its inserting actor before the transaction commits.
 CREATE TRIGGER trg_attribute_run_insert AFTER INSERT ON AUD_PIPELINES_RUN_LOG
@@ -1001,3 +1064,8 @@ CREATE TRIGGER trg_actor_guard_cfg_api_tokens_delete BEFORE DELETE ON CFG_API_TO
 BEGIN
     SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'API tokens are written only by etl-craft; use etl-craft token') END;
 END;
+
+
+-- The CFG_ change-history triggers and the AUD_METADATA_CHANGES view over the history tables are
+-- installed by the dialect's refresh_metadata_triggers, which every schema install and migration
+-- runs, from the tables' current columns.
