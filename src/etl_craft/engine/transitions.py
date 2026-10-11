@@ -414,6 +414,11 @@ def admit_run(conn: Connection, pipeline_run_id: int, actor: Actor) -> None:
         ) from error
 
 
+def lock_active_run(conn: Connection, pipeline_run_id: int) -> None:
+    """Serialize an event check's commit with cancellation, requiring an active run."""
+    _guard(conn, "lock_active_run", "run", pipeline_run_id, "IN-PROGRESS", None, {})
+
+
 def start_run(
     conn: Connection, pipeline_run_id: int, actor: Actor, *, owner: str, lease_expires_at: datetime
 ) -> None:

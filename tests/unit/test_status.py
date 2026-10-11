@@ -50,6 +50,7 @@ def snapshot(ctx):
     "state,action",
     [
         ("not run", "An available supervisor can start this ready task."),
+        ("waiting on an event", "Wait for the configured file or warehouse row."),
         ("waiting on a gate", "Wait for enough upstream dependencies to be satisfied."),
         ("blocked by failure", "Repair or retry the failed upstream to satisfy the dependencies."),
         ("unsatisfiable", "Repair the upstream outcome or dependency before rerunning."),
@@ -66,6 +67,20 @@ def test_explanation_goldens(snapshot, state, action):
             captured,
             gate_waits=(
                 GateWaitView(None, NOW, NOW + timedelta(seconds=1), 1, NOW + timedelta(minutes=5)),
+            ),
+        )
+    elif state == "waiting on an event":
+        captured = replace(
+            captured,
+            gate_waits=(
+                GateWaitView(
+                    captured.task_id,
+                    NOW,
+                    NOW + timedelta(seconds=1),
+                    0,
+                    NOW + timedelta(minutes=5),
+                    "EVENT",
+                ),
             ),
         )
     elif state == "blocked by failure":

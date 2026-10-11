@@ -8,6 +8,15 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Local `EVENT_WAIT` tasks wait durably for settled, unconsumed files or a read-only warehouse
+  query returning a row, without worker slots. Timeouts fail or skip, and evidence and file
+  consumption commit with success. Downstream SQL reads `$$event_files`; Python scripts receive
+  `task.event_files` and can use the token in `INPUT_PARAMS`. Single-task runs return `WAITING`;
+  remote mode refuses these local scheduling waits. Indefinite deadlines and native file
+  notifications support long waits with configurable fallback scans and SQL probe intervals.
+  Engine DB migration `0023_event_waits.sql` adds immutable evidence/consumption and separates
+  event and dependency waits.
+
 - SQL tasks can read source changes with `WATERMARK_COLUMN`, `WATERMARK_TYPE`,
   `WATERMARK_START` and `$$watermark`. The staged high-water mark commits with a successful
   attempt; failures, empty batches and backfills keep the stored value. Each run and attempt

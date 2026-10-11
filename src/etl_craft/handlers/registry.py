@@ -48,6 +48,7 @@ class TaskContext:
     backfill: bool = False
     attempt_id: int | None = None
     owner: str | None = None
+    event_files: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

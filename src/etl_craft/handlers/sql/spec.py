@@ -42,6 +42,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 
+from sqlglot import exp
+
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.project import sql_file
 from etl_craft.core.enums import SqlAction
@@ -192,6 +194,7 @@ def read_sql_task(context: TaskContext, stored: StoredOffset | None = None) -> S
             refresh_type=context.refresh_type,
             run_date=context.run_date,
             stored=stored,
+            event_files=context.event_files,
         )
 
     merge_key: tuple[str, ...] = ()
@@ -281,6 +284,7 @@ def resolve_select(
     pipeline_id: int = 0,
     task_run_id: int = 0,
     stored: StoredOffset | None = None,
+    event_files: tuple[str, ...] = (),
 ) -> tuple[str, str]:
     """Return a SQL task's SELECT, inline or from its file, with the tokens replaced.
 
@@ -325,6 +329,18 @@ def resolve_select(
         run_date=run_date,
         run_date_substitution=parse_flag(params, "RUN_DATE_SUBSTITUTION"),
         watermark_literal=watermark.literal(config) if watermark is not None else None,
+        event_files_literal=", ".join(
+            exp.Literal.string(path)
+            .sql(
+                dialect=warehouse_dialect(config).sqlglot_dialect
+                if config.warehouse is not None
+                else None
+            )
+            .replace(":", "\\:")
+            for path in event_files
+        )
+        if pipeline_run_id
+        else None,
     )
     statements = split_statements(substituted)
     if len(statements) != 1:

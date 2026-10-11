@@ -82,3 +82,9 @@ typed offset store with `WATERMARK_COLUMN`, `WATERMARK_TYPE`, `WATERMARK_START` 
 `$$watermark`; [the SQL watermark example](../../docs/examples/sql-watermark.md) shows the
 parameters and a merge reload. The demo's existing SQL tasks keep their pipeline-run filters
 because their sources are already written by etl-craft.
+
+## File deliveries
+
+Load `metadata/event_waits.sql` separately to try a scheduled local event wait before a CSV
+script. See [the file-delivery example](../../docs/examples/event-wait.md) for the commands;
+[Event waits](../../docs/guides/event-waits.md) describes settling, consumption and timeouts.

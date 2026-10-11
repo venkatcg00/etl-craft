@@ -134,3 +134,9 @@ The task fails with a message that names the script and the problem when:
 
 The task's time limit covers the script: a script still running when it passes is stopped, and the
 task is recorded `FAILED`.
+
+## Files from event waits
+
+A downstream script receives `task.event_files` from successful file waits under its exact
+pipeline run. A top-level `INPUT_PARAMS` value `"$$event_files"` becomes a list of those paths.
+See [Event waits](event-waits.md) for settling, evidence and consumption.

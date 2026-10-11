@@ -181,6 +181,7 @@ class ScriptTask:
     logger: logging.Logger
     run_date: date = field(default_factory=lambda: datetime.now(UTC).date())
     backfill: bool = False
+    event_files: tuple[str, ...] = ()
 
     def table(self, name: str) -> str:
         """Return ``schema.table`` as its full name in the active warehouse database.

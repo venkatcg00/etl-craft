@@ -1,0 +1,1 @@
+INSERT INTO AUD_EVENT_FILES (TASK_ID,FILE_PATH,TASK_RUN_ID) VALUES (:task_id,:file_path,:task_run_id)

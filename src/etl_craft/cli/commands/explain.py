@@ -53,7 +53,7 @@ def _run(args: argparse.Namespace, out: Output) -> int:
         for wait in done.gate_waits:
             out.line(
                 f"gate task_id={wait.task_id} next_check_at={wait.next_check_at} "
-                f"wait_until={wait.wait_until} looks={wait.looks}"
+                f"wait_until={wait.wait_until or 'indefinite'} looks={wait.looks}"
             )
         if done.retry_at is not None:
             out.line(f"retry_at={done.retry_at.isoformat()}")

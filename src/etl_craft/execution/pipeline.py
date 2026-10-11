@@ -301,6 +301,8 @@ def pipeline_steps(
                         if scheduler.jobs or scheduler.next_check_at is None
                         else max(0.0, (scheduler.next_check_at - clock.now()).total_seconds())
                     )
+                    if any(event.next_check_at for event in scheduler.event_due.values()):
+                        delay = min(1.0, delay)
                     yield delay
         except BaseException:
             scheduler.close(interrupted=True)

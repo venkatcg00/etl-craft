@@ -56,7 +56,10 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
             "SCRIPT_NAME is required for HANDLER=PYTHON: a .py file under ingestion_scripts/"
         )
     path = ingestion_script(context.config, name)
-    input_params = parse_input_params(params.get("INPUT_PARAMS"))
+    input_params = {
+        name: list(context.event_files) if value == "$$event_files" else value
+        for name, value in parse_input_params(params.get("INPUT_PARAMS")).items()
+    }
     with engine_db.connect() as conn:
         stored = fetch_task_offset(conn, context.task_id)
     offset = (
@@ -81,6 +84,7 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
         logger=logging.getLogger(f"{SCRIPT_LOGGER}.{context.task_code}"),
         run_date=context.run_date,
         backfill=context.backfill,
+        event_files=context.event_files,
     )
     logger.info(
         "running %s from offset %s with input params %s",

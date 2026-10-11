@@ -117,6 +117,7 @@ nav:
       - Lineage and documentation versions: guides/lineage.md
       - The catalog site: guides/catalog.md
       - Running a pipeline: guides/running-pipelines.md
+      - Event waits: guides/event-waits.md
       - Running a task and reading its logs: guides/running-tasks.md
       - "Stepping in: mark, cancel, pause, backfill, rerun and bypasses": guides/run-control.md
   - Deploying:
@@ -137,6 +138,7 @@ nav:
       - Warehouses: connectors/warehouses.md
       - Authentication: connectors/authentication.md
       - craft-connector.yml examples: examples/README.md
+      - File delivery event: examples/event-wait.md
       - SQL source watermark: examples/sql-watermark.md
   - Reference:
       - reference/index.md
