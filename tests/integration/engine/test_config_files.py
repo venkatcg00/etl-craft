@@ -8,6 +8,8 @@ as files, and each test edits those files the way a team would.
 import csv
 import json
 import shutil
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -21,6 +23,7 @@ from etl_craft.services.config_files import (
     read_config_files,
     sync_config,
 )
+from fixtures.metadata import start_run
 
 ALICE = Actor("github:alice", ActorKind.HUMAN)
 EXAMPLE = Path(__file__).parents[3] / "docs" / "examples" / "config"
@@ -463,3 +466,43 @@ def test_the_example_folder_loads_into_a_new_engine_db(metadata_project):
 def test_an_engine_db_without_tables_is_refused_with_the_remedy(empty_engine_db, tmp_path):
     with pytest.raises(EngineDbError, match=r"no CFG_PIPELINES, .* run `etl-craft setup`"):
         export_config(empty_engine_db.engine, tmp_path / "config")
+
+
+def files(folder):
+    return {path.name: path.read_text("utf-8") for path in sorted(folder.glob("*.csv"))}
+
+
+def test_export_as_of_a_time_or_a_run_writes_the_rows_that_stood_then(exported, tmp_path, capsys):
+    then = files(exported.config_dir)
+    pipeline = min(row[0] for row in exported.rows("SELECT PIPELINE_ID FROM CFG_PIPELINES"))
+    with exported.engine.begin() as conn:
+        run = start_run(conn, pipeline)
+    moment = datetime.now(UTC)
+    time.sleep(0.05)
+    code = next(csv.DictReader((exported.config_dir / "pipelines.csv").open()))["PIPELINE_CODE"]
+    for path in exported.config_dir.glob("*.csv"):
+        edit(path, without(code))
+    edit(
+        exported.config_dir / "pipelines.csv",
+        lambda rows: [{**row, "SLA_IN_HOURS": "7"} for row in rows],
+    )
+    assert sync(exported).changes
+    for when, folder in ((moment.isoformat(), "at-time"), (str(run), "at-run")):
+        argv = ["config", "export", "--config-dir", str(tmp_path / folder), "--as-of", when]
+        assert main(argv) == ExitCode.SUCCESS
+        assert " as of " in capsys.readouterr().out
+        assert files(tmp_path / folder) == then
+    export_config(exported.engine, tmp_path / "now")
+    assert files(tmp_path / "now") != then
+
+
+def test_export_as_of_refuses_what_the_history_cannot_tell(metadata_project, tmp_path, capsys):
+    metadata_project.load_examples("0002")
+    folder = str(tmp_path / "past")
+    for when, code, message in (
+        ("soon", ExitCode.USAGE, "is neither a pipeline_run_id nor an ISO 8601 time"),
+        ("999999", ExitCode.RESOURCE_NOT_FOUND, "no pipeline run has pipeline_run_id 999999"),
+        ("2000-01-01T00:00:00Z", ExitCode.METADATA, "the Engine DB records config changes from"),
+    ):
+        assert main(["config", "export", "--config-dir", folder, "--as-of", when]) == code
+        assert message in capsys.readouterr().err

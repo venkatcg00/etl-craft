@@ -98,7 +98,8 @@ Each package imports only the packages below it. `lint-imports` enforces this.
 - Every write to the Engine DB goes through etl-craft and names its actor; the Engine DB
   refuses any other. Metadata edits use the project's config files (`config/`, one CSV file per
   `CFG_` table, merged by key with `etl-craft config apply`) or project migrations; audit
-  history is append-only and audit tables take no outside writes.
+  history is append-only (a configuration history version is only closed, once, by the next
+  one) and audit tables take no outside writes.
 
 ## Conventions
 

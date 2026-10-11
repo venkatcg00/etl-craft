@@ -1,13 +1,54 @@
-"""Protect project-created metadata and audit tables in the Engine DB schema."""
+"""Protect project-created metadata and audit tables in the Engine DB schema.
+
+``etl_craft_metadata_change`` keeps every change to a ``CFG_`` row as a version in its typed
+history table, ``AUD_<table>_HISTORY``, valid from ``VALID_FROM`` until ``VALID_TO``; the next
+change closes the current one, and nothing else in a version changes. ``AUD_METADATA_CHANGES``
+is a view over those tables giving each change's before and after values as JSON.
+
+An Engine DB from before the history tables kept changes as JSON rows in an
+``AUD_METADATA_CHANGES`` table instead; the first refresh after migration 0021 moves those rows
+into the history tables and replaces the table with the view.
+"""
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
+CHANGE_COLUMNS = (
+    "change_id",
+    "valid_from",
+    "valid_to",
+    "current_flag",
+    "operation",
+    "actor",
+    "actor_kind",
+    "migration",
+)
+
+
+def history_table(table: str) -> str:
+    """Return the history table of ``CFG_`` table ``table``."""
+    return f"aud_{table.lower()}_history"
+
+
+def _kind(conn: Connection, name: str) -> str | None:
+    """Return the relation kind of ``name`` in the current schema: ``r`` table, ``v`` view."""
+    value = conn.execute(
+        text(
+            "SELECT c.relkind AS kind FROM pg_class c JOIN pg_namespace n "
+            "ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND c.relname=:name"
+        ),
+        {"name": name},
+    ).scalar()
+    return None if value is None else str(value)
+
 
 def refresh_metadata_triggers(conn: Connection) -> None:
     """Install guards and metadata capture on project tables using reserved prefixes."""
-    if conn.execute(text("SELECT to_regclass('aud_metadata_changes') AS name")).scalar() is None:
+    history = _kind(conn, history_table("CFG_PIPELINES")) == "r"
+    log = _kind(conn, "aud_metadata_changes") == "r"
+    if not history and not log:
         return
+    configs: list[str] = []
     rows = conn.execute(
         text(
             "SELECT c.relname AS name, c.oid AS id FROM pg_class c "
@@ -39,6 +80,7 @@ def refresh_metadata_triggers(conn: Connection) -> None:
                 )
         if not table.upper().startswith("CFG_") or table.upper() == "CFG_API_TOKENS":
             continue
+        configs.append(table)
         columns = conn.execute(
             text(
                 "SELECT attname AS name, attnum AS position FROM pg_attribute "
@@ -76,3 +118,108 @@ def refresh_metadata_triggers(conn: Connection) -> None:
                 f"CREATE TRIGGER {quote(trigger)} BEFORE INSERT OR UPDATE ON {quote(table)} "
                 "FOR EACH ROW EXECUTE FUNCTION trg_set_audit_columns()"
             )
+    if not history:
+        return
+    # Sorted, so a migrated Engine DB gets the same view as a new one.
+    configs.sort()
+    for table in configs:
+        _ensure_history(conn, table)
+    if log:
+        for table in configs:
+            name = quote(history_table(table))
+            literal = table.upper().replace("'", "''")
+            conn.exec_driver_sql(
+                f"INSERT INTO {name} SELECT r.* FROM (SELECT c.*, CASE WHEN c.operation = "
+                "'DELETE' THEN c.changed_at ELSE COALESCE(LEAD(c.changed_at) OVER w, "
+                "'9999-12-31 23:59:59+00'::timestamptz) END AS valid_to, CASE WHEN c.operation "
+                "<> 'DELETE' AND LEAD(c.change_id) OVER w IS NULL THEN 'Y' ELSE 'N' END "
+                f"AS current_flag FROM aud_metadata_changes c WHERE c.table_name = '{literal}' "
+                "WINDOW w AS (PARTITION BY c.row_key ORDER BY c.change_id)) c, "
+                f"jsonb_populate_record(NULL::{name}, COALESCE(c.after_json, c.before_json) "
+                "|| jsonb_build_object('change_id', c.change_id, 'valid_from', c.changed_at, "
+                "'valid_to', c.valid_to, 'current_flag', c.current_flag, 'operation', "
+                "c.operation, 'actor', c.actor, 'actor_kind', c.actor_kind, 'migration', "
+                "c.migration)) r ORDER BY c.change_id"
+            )
+        conn.execute(
+            text(
+                "SELECT setval('etl_craft_change_id', COALESCE((SELECT MAX(change_id) "
+                "FROM aud_metadata_changes), 0) + 1, false)"
+            )
+        )
+        conn.exec_driver_sql("DROP TABLE aud_metadata_changes")
+    _change_view(conn, configs)
+
+
+def _columns(conn: Connection, table: str) -> list[tuple[str, str]]:
+    """Return (name, complete type) for each column of ``table``, in order."""
+    rows = conn.execute(
+        text(
+            "SELECT attname AS name, format_type(atttypid, atttypmod) AS type FROM pg_attribute "
+            "WHERE attrelid=CAST(:name AS regclass) AND attnum>0 AND NOT attisdropped "
+            "ORDER BY attnum"
+        ),
+        {"name": table},
+    ).all()
+    return [(str(row.name), str(row.type)) for row in rows]
+
+
+def _ensure_history(conn: Connection, table: str) -> None:
+    """Create ``table``'s history table, or add the columns ``table`` has gained since."""
+    quote = conn.dialect.identifier_preparer.quote
+    history = history_table(table)
+    columns = _columns(conn, table)
+    if _kind(conn, history) is None:
+        listed = ", ".join(f"{quote(name)} {kind}" for name, kind in columns)
+        conn.exec_driver_sql(
+            f"CREATE TABLE {quote(history)} (CHANGE_ID BIGINT PRIMARY KEY, VALID_FROM "
+            "TIMESTAMPTZ NOT NULL, VALID_TO TIMESTAMPTZ NOT NULL, CURRENT_FLAG VARCHAR(1) "
+            "NOT NULL, OPERATION VARCHAR NOT NULL, ACTOR VARCHAR NOT NULL, ACTOR_KIND VARCHAR "
+            f"NOT NULL, MIGRATION VARCHAR, {listed})"
+        )
+        for prefix, event, level in (
+            ("trg_actor_guard_", "INSERT OR UPDATE OR DELETE", "ROW"),
+            ("trg_truncate_", "TRUNCATE", "STATEMENT"),
+        ):
+            conn.exec_driver_sql(
+                f"CREATE TRIGGER {quote(prefix + history)} BEFORE {event} ON {quote(history)} "
+                f"FOR EACH {level} EXECUTE FUNCTION etl_craft_guard()"
+            )
+        return
+    present = {name for name, _ in _columns(conn, history)}
+    for name, kind in columns:
+        if name not in present:
+            conn.exec_driver_sql(f"ALTER TABLE {quote(history)} ADD COLUMN {quote(name)} {kind}")
+
+
+def _change_view(conn: Connection, configs: list[str]) -> None:
+    """Make ``AUD_METADATA_CHANGES`` the changes of every history table, as JSON."""
+    quote = conn.dialect.identifier_preparer.quote
+    conn.exec_driver_sql("DROP VIEW IF EXISTS aud_metadata_changes")
+    dropped = ", ".join(f"'{name}'" for name in CHANGE_COLUMNS)
+    parts = []
+    for table in configs:
+        key = quote(_primary(conn, table) or _columns(conn, table)[0][0])
+        parts.append(
+            "SELECT change_id, valid_from AS changed_at, actor, actor_kind, "
+            f"CAST('{table.upper()}' AS VARCHAR) AS table_name, CAST({key} AS VARCHAR) AS row_key, "
+            "operation, CASE operation WHEN 'INSERT' THEN NULL WHEN 'DELETE' THEN v "
+            f"ELSE LAG(v) OVER (PARTITION BY {key} ORDER BY change_id) END AS before_json, "
+            "CASE WHEN operation = 'DELETE' THEN NULL ELSE v END AS after_json, migration "
+            f"FROM (SELECT h.*, to_jsonb(h) - ARRAY[{dropped}] AS v "
+            f"FROM {quote(history_table(table))} h) h"
+        )
+    conn.exec_driver_sql(f"CREATE VIEW aud_metadata_changes AS {' UNION ALL '.join(parts)}")
+
+
+def _primary(conn: Connection, table: str) -> str | None:
+    value = conn.execute(
+        text(
+            "SELECT a.attname AS name FROM pg_index i JOIN pg_attribute a "
+            "ON a.attrelid=i.indrelid AND a.attnum=ANY(i.indkey) "
+            "WHERE i.indrelid=CAST(:name AS regclass) AND i.indisprimary "
+            "ORDER BY a.attnum LIMIT 1"
+        ),
+        {"name": table},
+    ).scalar()
+    return None if value is None else str(value)

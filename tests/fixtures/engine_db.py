@@ -64,12 +64,17 @@ def engine_config(profile: ConnectionProfile, config_path: Path | None = None) -
 
 
 def apply_schema(engine: Engine) -> int:
-    """Apply the dialect's packaged schema in one transaction; return the statement count."""
+    """Apply the dialect's packaged schema in one transaction, as ``init-db`` does.
+
+    Return the statement count. The change triggers and the ``AUD_METADATA_CHANGES`` view come
+    from the trigger refresh, which ``init-db`` runs after the schema.
+    """
     dialect = for_engine(engine)
     statements = dialect.split_statements(dialect.schema_path().read_text(encoding="utf-8"))
     with engine.begin() as conn:
         for statement in statements:
             conn.exec_driver_sql(statement)
+        dialect.refresh_metadata_triggers(conn)
     return len(statements)
 
 

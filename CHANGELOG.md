@@ -27,6 +27,13 @@ All notable changes are recorded here. The format follows
   `SKIP_REJECTS_OVER_LIMIT = true`. `REJECT_COUNT` is recorded with each task run and attempt
   and shown by `status`, `explain`, `history` and the catalog. On PostgreSQL it needs version
   16 or later. Upgrade the Engine DB with migration `0020_reject_count`.
+- Configuration history: each `CFG_` table has a history table, `AUD_<table>_HISTORY`, holding
+  every version of its rows with every column typed as in the table, `VALID_FROM` and `VALID_TO`
+  (9999-12-31 while current), `CURRENT_FLAG`, and who changed it under which migration or
+  `config@<revision>`. A version never changes except to be closed by the next one.
+  `etl-craft config export --as-of <pipeline_run_id or ISO time>` writes the config files as the
+  rows stood then. Upgrade the Engine DB with migration `0021_config_history`, which moves the
+  existing change records into the history tables.
 - Configuration files: a project keeps its pipelines as CSV files in `config/`, one per `CFG_`
   table, each row with an `ACTIVE_FLAG`. `etl-craft config apply` merges them into the Engine DB
   by key in one transaction: it inserts new rows, updates changed rows in place (keeping their
@@ -49,6 +56,14 @@ All notable changes are recorded here. The format follows
   `Max_parallel_tasks`; unset, either kind may use every slot, as before.
 
 ### Changed
+
+- `etl-craft rehash` records its request in `AUD_ACTIONS`, as every other command that changes
+  something does; `--dry-run` writes nothing and records nothing.
+
+- `AUD_METADATA_CHANGES` is a view over the configuration history tables rather than a table: the
+  same columns, one row per change with its values before and after as JSON, as `etl-craft audit`
+  shows them. On SQLite it now records a change to a pipeline's schedule columns, which a new
+  SQLite Engine DB did not.
 
 - Run-condition and self-dependency errors name the task by its code, such as `task publish
   requires 5 satisfied dependencies but only has 2`, rather than by its id.

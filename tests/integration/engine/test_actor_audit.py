@@ -122,7 +122,7 @@ def test_project_changes_record_before_after_actor_and_migration(engine_db, tmp_
         pytest.raises(DBAPIError, match=r"immutable|append-only"),
         engine_db.engine.begin() as conn,
     ):
-        conn.execute(text("DELETE FROM AUD_METADATA_CHANGES"))
+        conn.execute(text("DELETE FROM AUD_CFG_PIPELINES_HISTORY"))
 
 
 def seeded_tables(db):
@@ -300,6 +300,7 @@ def test_guarded_upgrade_rolls_back_with_the_ledger(empty_engine_db, monkeypatch
         "0018_api_tokens.sql",
         "0019_target_view_statement.sql",
         "0020_reject_count.sql",
+        "0021_config_history.sql",
     ]
 
 
@@ -488,7 +489,8 @@ def test_project_created_tables_keep_guards_and_capture(engine_db, tmp_path):
     if engine_db.engine.dialect.name == "sqlite":
         plain = sqlite3.connect(engine_db.engine.url.database)
         error = sqlite3.DatabaseError
-        expected = "etl_craft_actor"
+        # A connection without etl-craft has none of its SQL functions, so the triggers fail.
+        expected = "no such function: etl_craft_"
     else:
         service = require("postgres")
         plain = psycopg.connect(

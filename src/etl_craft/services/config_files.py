@@ -27,7 +27,7 @@ import re
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import ClassVar, Literal
@@ -40,6 +40,7 @@ from etl_craft.core.errors import EngineDbError, MetadataFileError
 from etl_craft.core.text import is_metadata_code
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine import locks
+from etl_craft.engine.repository.config_history import config_as_of
 from etl_craft.engine.repository.config_rows import (
     ACTIVE_FLAG,
     BUSINESS_RULES,
@@ -126,11 +127,15 @@ class ConfigSync:
 
 @dataclass(frozen=True)
 class ConfigExport:
-    """The config files written from the current ``CFG_`` rows, with each file's row count."""
+    """The config files written from the ``CFG_`` rows, with each file's row count.
+
+    ``as_of`` is the moment they were rebuilt for, or ``None`` for the rows as they are now.
+    """
 
     SCHEMA: ClassVar[str] = "etl-craft/config-export/1"
     directory: str
     rows: dict[str, int] = field(default_factory=dict)
+    as_of: str | None = None
 
 
 def config_directory(config: ConnectorConfig, directory: Path | None = None) -> Path:
@@ -528,10 +533,13 @@ def sync_config(
     )
 
 
-def export_config(engine: Engine, directory: Path, *, overwrite: bool = False) -> ConfigExport:
+def export_config(
+    engine: Engine, directory: Path, *, overwrite: bool = False, as_of: datetime | None = None
+) -> ConfigExport:
     """Write each key's current ``CFG_`` row, active or not, as the six config files.
 
-    Rows are sorted by key. Existing files are kept unless ``overwrite`` is set.
+    With ``as_of``, the rows are those that stood then, rebuilt from the change history. Rows
+    are sorted by key. Existing files are kept unless ``overwrite`` is set.
     """
     _require_tables(engine)
     existing = [table.file for table in TABLES if (directory / table.file).exists()]
@@ -542,7 +550,11 @@ def export_config(engine: Engine, directory: Path, *, overwrite: bool = False) -
         )
     current: dict[str, dict[Key, StoredRow]] = {}
     current_ids: dict[str, set[int]] = {}
-    with engine.connect() as conn:
+    source = engine
+    if as_of is not None:
+        with engine.connect() as conn:
+            source = config_as_of(conn, as_of)
+    with source.connect() as conn:
         for table in TABLES:
             current[table.file], _ = _current(table, read_rows(conn, table), current_ids)
             current_ids[table.file] = {row.row_id for row in current[table.file].values()}
@@ -561,4 +573,6 @@ def export_config(engine: Engine, directory: Path, *, overwrite: bool = False) -
             writer.writerow([cell(values[column.name]) for column in table.columns])
         (directory / table.file).write_text(buffer.getvalue(), encoding="utf-8")
         counts[table.file] = len(rows)
-    return ConfigExport(str(directory), counts)
+    if as_of is not None:
+        source.dispose()
+    return ConfigExport(str(directory), counts, None if as_of is None else as_of.isoformat())
