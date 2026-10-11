@@ -304,3 +304,91 @@ def test_skip_rejects_over_limit_needs_a_reject_limit(project):
         read_sql_task(context(project, **params))
     task = read_sql_task(context(project, **params, REJECT_LIMIT="1"))
     assert task.skip_rejects_over_limit
+
+
+@pytest.mark.parametrize(
+    ("kind", "start", "literal"),
+    [
+        ("NUMBER", "1.25", "1.25"),
+        ("TEXT", "O'Reilly", "'O''Reilly'"),
+        ("TEXT", "", "''"),
+        ("TIMESTAMP", "2026-01-01T12:00:00", "TIMESTAMP '2026-01-01 12:00:00'"),
+    ],
+)
+def test_watermark_tokens_are_typed_and_protected(project, kind, start, literal):
+    task = read_sql_task(
+        context(
+            project,
+            SQL_ACTION="APPEND_TABLE",
+            TARGET_OBJECT="sales.orders",
+            SOURCE_SQL=(
+                "SELECT changed FROM raw.orders WHERE changed > $$watermark -- $$watermark\n"
+            ),
+            WATERMARK_COLUMN="changed",
+            WATERMARK_TYPE=kind,
+            WATERMARK_START=start,
+        )
+    )
+    assert f"changed > {literal}" in task.select_sql
+    assert "-- $$watermark" in task.select_sql
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"WATERMARK_COLUMN": "id"},
+        {"WATERMARK_COLUMN": None, "WATERMARK_TYPE": "NUMBER", "WATERMARK_START": "0"},
+        {"WATERMARK_COLUMN": "id", "WATERMARK_TYPE": None, "WATERMARK_START": "0"},
+        {"WATERMARK_COLUMN": "id", "WATERMARK_TYPE": "NUMBER", "WATERMARK_START": None},
+        {"WATERMARK_COLUMN": "id; DELETE", "WATERMARK_TYPE": "NUMBER", "WATERMARK_START": "0"},
+        {"WATERMARK_COLUMN": "id", "WATERMARK_TYPE": "NUMBER", "WATERMARK_START": "NaN"},
+        {"WATERMARK_COLUMN": "id", "WATERMARK_TYPE": "NUMBER", "WATERMARK_START": "bad"},
+        {"WATERMARK_COLUMN": "id", "WATERMARK_TYPE": "DATE", "WATERMARK_START": "2026-01-01"},
+    ],
+)
+def test_bad_watermark_definitions_fail_before_the_warehouse(project, params):
+    with pytest.raises(HandlerError, match=r"watermark|WATERMARK"):
+        read_sql_task(
+            context(
+                project,
+                SQL_ACTION="APPEND_TABLE",
+                TARGET_OBJECT="sales.orders",
+                SOURCE_SQL="SELECT id FROM raw.orders WHERE id > $$watermark",
+                **params,
+            )
+        )
+
+
+def test_watermark_needs_an_incremental_action_and_a_token(project):
+    params = {"WATERMARK_COLUMN": "id", "WATERMARK_TYPE": "NUMBER", "WATERMARK_START": "0"}
+    with pytest.raises(HandlerError, match="does not apply"):
+        read_sql_task(
+            context(project, SOURCE_SQL="SELECT id WHERE id > $$watermark", **BASE, **params)
+        )
+    with pytest.raises(HandlerError, match="no \\$\\$watermark"):
+        read_sql_task(
+            context(
+                project,
+                SQL_ACTION="APPEND_TABLE",
+                TARGET_OBJECT="sales.orders",
+                SOURCE_SQL="SELECT 1 AS id",
+                **params,
+            )
+        )
+
+
+def test_a_stored_watermark_replaces_the_start_and_keeps_its_type(project):
+    from etl_craft.engine.repository.offsets import StoredOffset
+
+    ctx = context(
+        project,
+        SQL_ACTION="APPEND_TABLE",
+        TARGET_OBJECT="sales.orders",
+        SOURCE_SQL="SELECT id FROM raw.orders WHERE id > $$watermark",
+        WATERMARK_COLUMN="id",
+        WATERMARK_TYPE="NUMBER",
+        WATERMARK_START="0",
+    )
+    assert "id > 12.5" in read_sql_task(ctx, StoredOffset("NUMBER", "12.5")).select_sql
+    with pytest.raises(HandlerError, match="stored offset"):
+        read_sql_task(ctx, StoredOffset("TEXT", "12.5"))

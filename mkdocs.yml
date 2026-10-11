@@ -137,6 +137,7 @@ nav:
       - Warehouses: connectors/warehouses.md
       - Authentication: connectors/authentication.md
       - craft-connector.yml examples: examples/README.md
+      - SQL source watermark: examples/sql-watermark.md
   - Reference:
       - reference/index.md
       - Command line: reference/cli.md

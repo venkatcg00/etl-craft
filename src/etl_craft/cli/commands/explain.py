@@ -40,6 +40,8 @@ def _run(args: argparse.Namespace, out: Output) -> int:
                 else ""
             )
         )
+        if done.task is not None and done.task.watermark_from is not None:
+            out.line(f"watermark={done.task.watermark_from} -> {done.task.watermark_to}")
         if done.pipeline.paused is not None:
             out.line(done.pipeline.paused.describe())
         out.line(f"run_condition={done.run_condition} required_count={done.required_count}")

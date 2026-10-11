@@ -26,6 +26,7 @@ from sqlalchemy.exc import DataError, IntegrityError, ProgrammingError, SQLAlche
 from etl_craft.core.errors import HandlerError, SqlGuardError
 from etl_craft.core.text import qualify, split_object_ref
 from etl_craft.dialects.warehouse import WarehouseDialect
+from etl_craft.engine.repository.offsets import StoredOffset
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,7 @@ class Session:
         self.publish_hash_version: int | None = None
         self.clear_hash_version = False
         self.publish_view_statement: str | None = None
+        self.watermark_to: StoredOffset | None = None
         # An error whose work so far is committed before it is raised: rows set aside over
         # REJECT_LIMIT, while the target is left unwritten.
         self.failure_to_commit: SqlGuardError | None = None

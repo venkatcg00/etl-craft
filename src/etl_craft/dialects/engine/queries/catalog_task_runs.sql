@@ -4,6 +4,7 @@ SELECT r.TASK_ID AS task_id, r.PIPELINE_RUN_ID AS pipeline_run_id, r.STATUS AS s
        r.SOURCE_COUNT AS source_count, r.TARGET_COUNT AS target_count,
        r.INSERT_COUNT AS insert_count, r.UPDATE_COUNT AS update_count,
        r.DELETE_COUNT AS delete_count, r.REJECT_COUNT AS reject_count,
+       r.WATERMARK_FROM AS watermark_from, r.WATERMARK_TO AS watermark_to,
        r.ERROR_MESSAGE AS error_message
 FROM (
     SELECT l.*, ROW_NUMBER() OVER (PARTITION BY l.TASK_ID ORDER BY l.TASK_RUN_ID DESC) AS rn

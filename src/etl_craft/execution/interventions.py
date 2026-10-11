@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.config import ConnectorConfig
+from etl_craft.config.targets import active_catalog
 from etl_craft.core.actor import Actor, current_actor
 from etl_craft.core.enums import (
     FINISHED_RUN_STATUSES,
@@ -41,12 +42,23 @@ from etl_craft.core.enums import (
     RunStatus,
 )
 from etl_craft.core.errors import RunRefusedError, RunStateError, UsageError
-from etl_craft.engine import runlog, transitions
+from etl_craft.core.text import qualify
+from etl_craft.engine import locks, runlog, transitions
+from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import interventions as record
 from etl_craft.engine.repository import pauses
+from etl_craft.engine.repository.offsets import StoredOffset, fetch_task_offset, save_task_offset
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
-from etl_craft.engine.repository.tasks import resolve_task_id
+from etl_craft.engine.repository.tasks import (
+    fetch_task_execution_detail,
+    fetch_task_parameters,
+    resolve_task_id,
+)
 from etl_craft.execution.reconcile import reconcile
+from etl_craft.handlers.registry import TaskContext
+from etl_craft.handlers.sql.spec import read_sql_task
+from etl_craft.handlers.sql.watermarks import read_watermark
+from etl_craft.scripting import Offset
 
 logger = logging.getLogger(__name__)
 
@@ -584,3 +596,89 @@ def _reset_skipped(
         transitions.delete_skipped_task_run(conn, row.task_run_id)
         reset.append(row.task_code)
     return reset, kept
+
+
+def reset_watermark(
+    engine: Engine,
+    config: ConnectorConfig,
+    pipeline_code: str,
+    task_code: str,
+    value: str,
+    reason: str,
+    *,
+    selector: runlog.RunSelector = runlog.ACTIVE_RUN,
+) -> Intervened:
+    """Set a SQL task's typed offset, recording the before and after values as an intervention."""
+    _check(config, "mark --watermark", reason, None, None)
+    with engine.connect() as conn:
+        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+        task_id = resolve_task_id(conn, pipeline_id, task_code)
+        detail = fetch_task_execution_detail(conn, task_id)
+        params = fetch_task_parameters(conn, task_id)
+        active = conn.execute(
+            statement(conn, "watermark_active_attempts"), {"task_id": task_id}
+        ).scalar_one()
+    if active:
+        raise RunRefusedError(
+            f"{pipeline_code}.{task_code} has {active} active attempt(s); wait for them "
+            "to end or cancel and reconcile before resetting its watermark"
+        )
+    if detail.handler != "SQL":
+        raise UsageError(
+            f"{pipeline_code}.{task_code} has HANDLER={detail.handler}; "
+            "--watermark needs a SQL task"
+        )
+    task = read_sql_task(
+        TaskContext(
+            config,
+            pipeline_id,
+            pipeline_code,
+            task_id,
+            task_code,
+            0,
+            0,
+            0,
+            "SQL",
+            detail.refresh_type,
+            params,
+        )
+    )
+    if task.watermark is None:
+        raise UsageError(
+            f"{pipeline_code}.{task_code} has no WATERMARK_COLUMN; "
+            "define a SQL watermark before resetting it"
+        )
+    wanted = Offset(value, task.watermark.start.datatype)
+    with (
+        locks.target(qualify(task.target_object, active_catalog(config))).hold(engine),
+        engine.begin() as conn,
+    ):
+        selected = runlog.select_run(conn, pipeline_id, selector)
+        active = conn.execute(
+            statement(conn, "watermark_active_attempts"), {"task_id": task_id}
+        ).scalar_one()
+        if active:
+            raise RunRefusedError(
+                f"{pipeline_code}.{task_code} has {active} active attempt(s); wait for them "
+                "to end or cancel and reconcile before resetting its watermark"
+            )
+        before = fetch_task_offset(conn, task_id)
+        checked = read_watermark(params, before)
+        assert checked is not None
+        save_task_offset(conn, task_id, StoredOffset(wanted.datatype, wanted.stored()))
+        message = (
+            f"{pipeline_code}.{task_code}: watermark {checked.start.stored()} "
+            f"-> {wanted.stored()} ({wanted.datatype})"
+        )
+        record.record_intervention(
+            conn,
+            pipeline_id=pipeline_id,
+            pipeline_run_id=selected.pipeline_run_id,
+            task_id=task_id,
+            action=InterventionAction.MARK,
+            previous_message=message,
+            reason=reason,
+            requested_by=current_actor().name,
+        )
+    logger.warning("%s (by %s: %s)", message, current_actor().name, reason)
+    return Intervened(message, selected.pipeline_run_id)

@@ -1,4 +1,4 @@
-"""``etl-craft mark``: set a task or a run's status by hand, with a reason; local mode."""
+"""``etl-craft mark``: set a status or reset a SQL watermark, with a reason; local mode."""
 
 from __future__ import annotations
 
@@ -22,9 +22,9 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     configure_run_selector(parser)
     parser.add_argument("--pipeline_code", required=True, help="the pipeline whose run to mark")
     parser.add_argument("--task_code", help="mark this task of the run; without it, the run itself")
-    parser.add_argument(
-        "--status", required=True, choices=[str(s) for s in MARKABLE_STATUSES], help="the status"
-    )
+    change = parser.add_mutually_exclusive_group(required=True)
+    change.add_argument("--status", choices=[str(s) for s in MARKABLE_STATUSES], help="the status")
+    change.add_argument("--watermark", help="reset a SQL task watermark to this typed value")
     parser.add_argument("--reason", required=True, help="why; recorded with the change")
     parser.add_argument(
         "--rows",
@@ -58,6 +58,7 @@ def _run(args: argparse.Namespace, out: Output) -> int:
             args.reason,
             task_code=args.task_code,
             rows=args.rows,
+            watermark=args.watermark,
             stale=args.stale,
             new_run=args.new_run,
             selector=RunSelector(args.run_id, args.run_key),
@@ -68,7 +69,7 @@ def _run(args: argparse.Namespace, out: Output) -> int:
 
 COMMAND = Command(
     name="mark",
-    help="Mark a task or a run SUCCESS, FAILED or SKIPPED, or record a stand-in run; local mode.",
+    help="Mark a status, record a stand-in run or reset a SQL watermark; local mode.",
     configure=_configure,
     run=_run,
 )

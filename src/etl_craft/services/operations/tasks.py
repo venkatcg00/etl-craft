@@ -80,10 +80,11 @@ def mark_task(
     ctx: OperationContext,
     pipeline_code: str,
     task_code: str,
-    status: str,
+    status: str | None,
     reason: str,
     *,
     rows: int | None = None,
+    watermark: str | None = None,
     stale: bool = False,
     selector: RunSelector = ACTIVE_RUN,
 ) -> OperationResult:
@@ -95,6 +96,7 @@ def mark_task(
         reason,
         task_code=task_code,
         rows=rows,
+        watermark=watermark,
         stale=stale,
         selector=selector,
     )

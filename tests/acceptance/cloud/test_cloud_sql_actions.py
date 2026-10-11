@@ -28,6 +28,7 @@ from fixtures.sql_rejects import check_rejects
 from fixtures.sql_replacement import check_replacement_failure
 from fixtures.sql_row_ids import check_row_id_generation
 from fixtures.sql_warehouse import SqlWorld
+from fixtures.sql_watermarks import check_watermark_literals, check_watermarks
 
 # Some forty statements against a remote warehouse, one to three seconds each, cold start aside.
 pytestmark = pytest.mark.timeout(1200)
@@ -640,6 +641,94 @@ def test_ingestion_upgrade_on_snowflake(tmp_path, table_format):
     require_variables("SNOWFLAKE", SNOWFLAKE_VARS)
     fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
     walk_ingestion_upgrade(
+        cloud_world(
+            tmp_path,
+            "Snowflake",
+            fields,
+            table_format,
+            os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"],
+        )
+    )
+
+
+def walk_watermarks(w):
+    """Incremental SQL batches commit their positions and retain failed ranges."""
+    target = f"etl_craft_watermark_{uuid.uuid4().hex[:8]}"
+    try:
+        check_watermarks(w, target)
+    finally:
+        for name in (target,):
+            w.execute(f"DROP TABLE IF EXISTS {w.name(name)}")
+        w.warehouse.dispose()
+        w.engine_db.dispose()
+
+
+@pytest.mark.cloud_databricks
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_watermarks_on_databricks(tmp_path, table_format):
+    require_variables("DATABRICKS", DATABRICKS_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_DATABRICKS_{name}" for name in DATABRICKS_VARS}
+    walk_watermarks(
+        cloud_world(
+            tmp_path,
+            "Databricks",
+            fields,
+            table_format,
+            os.environ["ETL_CRAFT_TEST_DATABRICKS_SCHEMA"],
+        )
+    )
+
+
+@pytest.mark.cloud_snowflake
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_watermarks_on_snowflake(tmp_path, table_format):
+    require_variables("SNOWFLAKE", SNOWFLAKE_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
+    walk_watermarks(
+        cloud_world(
+            tmp_path,
+            "Snowflake",
+            fields,
+            table_format,
+            os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"],
+        )
+    )
+
+
+def walk_watermark_literals(w):
+    """TEXT and TIMESTAMP positions are rendered as typed warehouse literals."""
+    target = f"etl_craft_watermark_literal_{uuid.uuid4().hex[:8]}"
+    try:
+        check_watermark_literals(w, target)
+    finally:
+        for name in (target, target + "_ts"):
+            w.execute(f"DROP TABLE IF EXISTS {w.name(name)}")
+        w.warehouse.dispose()
+        w.engine_db.dispose()
+
+
+@pytest.mark.cloud_databricks
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_watermark_literals_on_databricks(tmp_path, table_format):
+    require_variables("DATABRICKS", DATABRICKS_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_DATABRICKS_{name}" for name in DATABRICKS_VARS}
+    walk_watermark_literals(
+        cloud_world(
+            tmp_path,
+            "Databricks",
+            fields,
+            table_format,
+            os.environ["ETL_CRAFT_TEST_DATABRICKS_SCHEMA"],
+        )
+    )
+
+
+@pytest.mark.cloud_snowflake
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_watermark_literals_on_snowflake(tmp_path, table_format):
+    require_variables("SNOWFLAKE", SNOWFLAKE_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
+    walk_watermark_literals(
         cloud_world(
             tmp_path,
             "Snowflake",

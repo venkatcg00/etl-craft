@@ -732,7 +732,7 @@ class _Writer:
             ]
         )
         tasks = _table(
-            ["Task", "Status", "Attempts", "Took", "Counts", "Message"],
+            ["Task", "Status", "Attempts", "Took", "Counts", "Watermark", "Message"],
             (
                 [
                     self._task_link(label),
@@ -740,6 +740,11 @@ class _Writer:
                     str(task_run.attempts),
                     _e(_duration(task_run.seconds)),
                     _e(_counts(task_run)),
+                    _e(
+                        f"{task_run.watermark_from} → {task_run.watermark_to}"
+                        if task_run.watermark_from is not None
+                        else ""
+                    ),
                     _e(task_run.error_message),
                 ]
                 for label in p.tasks
@@ -794,7 +799,7 @@ class _Writer:
             "Rows written",
         )
         rows = _table(
-            ["Run", "Status", "Attempts", "Took", "Counts", "Message"],
+            ["Run", "Status", "Attempts", "Took", "Counts", "Watermark", "Message"],
             (
                 [
                     self._run_link(r.pipeline_run_id, task.row.pipeline_code),
@@ -802,6 +807,11 @@ class _Writer:
                     str(r.attempts),
                     _e(_duration(r.seconds)),
                     _e(_counts(r)),
+                    _e(
+                        f"{r.watermark_from} → {r.watermark_to}"
+                        if r.watermark_from is not None
+                        else ""
+                    ),
                     _e(r.error_message),
                 ]
                 for r in task.runs

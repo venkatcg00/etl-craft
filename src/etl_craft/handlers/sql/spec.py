@@ -56,8 +56,10 @@ from etl_craft.core.text import (
     suggest,
 )
 from etl_craft.dialects.warehouse.base import STORAGE_PARAMETERS
+from etl_craft.engine.repository.offsets import StoredOffset
 from etl_craft.handlers.registry import TaskContext
 from etl_craft.handlers.sql.analysis import read_only_problem
+from etl_craft.handlers.sql.watermarks import Watermark, read_watermark
 from etl_craft.warehouse.connection import warehouse_dialect
 
 MERGES = frozenset({SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE})
@@ -101,6 +103,9 @@ PARAMETERS = frozenset(
         "SETUP_FOR",
         "TABLE_FORMAT",
         "REJECT_LIMIT",
+        "WATERMARK_COLUMN",
+        "WATERMARK_TYPE",
+        "WATERMARK_START",
         *FLAGS,
         *STORAGE_PARAMETERS,
     }
@@ -146,12 +151,14 @@ class SqlTask:
     secure_view: bool = False
     reject_limit: RejectLimit | None = None
     skip_rejects_over_limit: bool = False
+    watermark: Watermark | None = None
 
 
-def read_sql_task(context: TaskContext) -> SqlTask:
+def read_sql_task(context: TaskContext, stored: StoredOffset | None = None) -> SqlTask:
     """Read and check the SQL task's parameters; ``SqlGuardError`` or ``MetadataError`` if wrong."""
     params = context.task_params
     action = _action(params)
+    watermark = read_watermark(params, stored)
     target = (params.get("TARGET_OBJECT") or "").strip()
     if not target:
         raise SqlGuardError(f"TARGET_OBJECT is required for SQL_ACTION={action}")
@@ -163,10 +170,10 @@ def read_sql_task(context: TaskContext) -> SqlTask:
         )
     flags = {name: _flag(params, name, action, applies) for name, applies in FLAGS.items()}
     if action == SqlAction.CREATE_VIEW:
-        stored = [name for name in ("TABLE_FORMAT", *STORAGE_PARAMETERS) if params.get(name)]
-        if stored:
+        storage = [name for name in ("TABLE_FORMAT", *STORAGE_PARAMETERS) if params.get(name)]
+        if storage:
             raise SqlGuardError(
-                f"SQL_ACTION=CREATE_VIEW takes no {stored[0]}: a view stores no data; "
+                f"SQL_ACTION=CREATE_VIEW takes no {storage[0]}: a view stores no data; "
                 "remove the parameter"
             )
 
@@ -184,6 +191,7 @@ def read_sql_task(context: TaskContext) -> SqlTask:
             task_run_id=context.task_run_id,
             refresh_type=context.refresh_type,
             run_date=context.run_date,
+            stored=stored,
         )
 
     merge_key: tuple[str, ...] = ()
@@ -224,6 +232,7 @@ def read_sql_task(context: TaskContext) -> SqlTask:
         secure_view=flags["SECURE_VIEW"],
         reject_limit=reject_limit,
         skip_rejects_over_limit=flags["SKIP_REJECTS_OVER_LIMIT"],
+        watermark=watermark,
     )
 
 
@@ -271,6 +280,7 @@ def resolve_select(
     run_date: date = LINEAGE_RUN_DATE,
     pipeline_id: int = 0,
     task_run_id: int = 0,
+    stored: StoredOffset | None = None,
 ) -> tuple[str, str]:
     """Return a SQL task's SELECT, inline or from its file, with the tokens replaced.
 
@@ -300,6 +310,7 @@ def resolve_select(
             "SOURCE_SQL_FILE naming a file under sql_files/"
         )
     # Tokens first: a ``$$`` would otherwise read as a dollar-quoted string when splitting.
+    watermark = read_watermark(params, stored)
     substituted = substitute_task_tokens(
         raw,
         pipeline_run_id=pipeline_run_id,
@@ -313,6 +324,7 @@ def resolve_select(
         source=source,
         run_date=run_date,
         run_date_substitution=parse_flag(params, "RUN_DATE_SUBSTITUTION"),
+        watermark_literal=watermark.literal(config) if watermark is not None else None,
     )
     statements = split_statements(substituted)
     if len(statements) != 1:

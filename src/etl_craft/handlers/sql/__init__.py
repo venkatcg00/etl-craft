@@ -10,6 +10,7 @@ warehouse's transaction or publication strategy (``actions``), with every statem
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from sqlalchemy.engine import Engine
@@ -25,6 +26,7 @@ from etl_craft.engine.repository.hash_versions import (
     save_hash_version,
     save_view_statement,
 )
+from etl_craft.engine.repository.offsets import fetch_task_offset
 from etl_craft.handlers.registry import HandlerResult, TaskContext
 from etl_craft.handlers.sql.actions import ACTIONS, ActionContext
 from etl_craft.handlers.sql.session import Session
@@ -58,6 +60,10 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
     # Hold through warehouse commit: a computed ROW_ID base must include the previous insert.
     # Generated keys still share mutation ordering with replacement and hash upgrades.
     with locks.target(qualify(task.target_object, catalog)).hold(engine_db):
+        if task.watermark is not None:
+            with engine_db.connect() as conn:
+                stored = None if context.backfill else fetch_task_offset(conn, context.task_id)
+            task = read_sql_task(context, stored)
         with open_warehouse(config, engine_db) as warehouse, warehouse.begin() as conn:
             session = Session(
                 conn,
@@ -106,7 +112,7 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
                 save_hash_version(conn, session.target, session.publish_hash_version)
             if session.publish_view_statement is not None:
                 save_view_statement(conn, session.target, session.publish_view_statement)
-    return result
+    return replace(result, offset=session.watermark_to) if task.watermark is not None else result
 
 
 def task_dialect(context: TaskContext) -> WarehouseDialect:

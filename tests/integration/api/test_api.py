@@ -118,6 +118,11 @@ def test_every_write_route_enforces_role_and_passes_actor_to_service(api, role, 
             {"status": "SUCCESS", "reason": "test"},
         ),
         (
+            f"/api/v1/runs/{run}/tasks/T/mark",
+            "etl_craft.services.operations.tasks.mark_task",
+            {"watermark": "0", "reason": "reload"},
+        ),
+        (
             f"/api/v1/runs/{run}/tasks/T/rerun",
             "etl_craft.services.operations.tasks.rerun_task",
             {"reason": "test"},
@@ -375,3 +380,56 @@ def test_tokens_work_after_released_schema_upgrade(empty_engine_db, tmp_path, mo
     created = tokens.create_token(ctx, "upgraded", "viewer", "1d")
     assert tokens.authenticate(ctx, created.token).name == "upgraded"
     assert apply_pending_migrations(db.engine) == []
+
+
+def test_watermark_reset_validates_and_audits_the_api_actor(api):
+    from etl_craft.config import ConnectionProfile
+    from etl_craft.engine.repository.offsets import fetch_task_offset
+
+    ctx, client, creds, run, attempt = api
+    config = replace(
+        ctx.config,
+        warehouse=ConnectionProfile(
+            "WAREHOUSE", "local", "jdbc:duckdb:warehouse.duckdb", "", "none"
+        ),
+    )
+    client = TestClient(create_app(replace(ctx, config=config)))
+    with ctx.engine.begin() as conn:
+        task = conn.execute(text("SELECT TASK_ID FROM CFG_TASKS WHERE TASK_CODE='T'")).scalar_one()
+        for name, value in {
+            "SQL_ACTION": "APPEND_TABLE",
+            "TARGET_OBJECT": "s.events",
+            "SOURCE_SQL": "SELECT id FROM raw.events WHERE id > $$watermark",
+            "WATERMARK_COLUMN": "id",
+            "WATERMARK_TYPE": "NUMBER",
+            "WATERMARK_START": "0",
+        }.items():
+            conn.execute(
+                text(
+                    "INSERT INTO CFG_TASK_PARAMETERS(TASK_ID, PARAMETER_NAME, PARAMETER_VALUE) "
+                    "VALUES (:task, :name, :value)"
+                ),
+                {"task": task, "name": name, "value": value},
+            )
+    path = f"/api/v1/runs/{run}/tasks/T/mark"
+    h = headers(creds["operator"])
+    for body in (
+        {"reason": "reset"},
+        {"status": "SUCCESS", "watermark": "1", "reason": "reset"},
+        {"watermark": "1", "rows": 1, "reason": "reset"},
+    ):
+        assert client.post(path, json=body, headers=h).status_code == 400
+    assert (
+        client.post(path, json={"watermark": "1", "reason": "reset"}, headers=h).status_code == 409
+    )
+    with ctx.engine.begin() as conn:
+        transitions.cancel_attempt(conn, attempt, current_actor(), error_message="cancelled")
+    response = client.post(path, json={"watermark": "1", "reason": "reset"}, headers=h)
+    assert response.status_code == 200, response.text
+    with ctx.engine.connect() as conn:
+        assert fetch_task_offset(conn, task).offset_value == "1"
+        intervention = conn.execute(
+            text("SELECT REQUESTED_BY, REASON FROM AUD_RUN_INTERVENTIONS WHERE TASK_ID=:task"),
+            {"task": task},
+        ).one()
+        assert tuple(intervention) == ("operator", "reset")

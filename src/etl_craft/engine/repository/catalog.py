@@ -175,6 +175,8 @@ class TaskRunSummary:
     delete_count: int | None
     reject_count: int | None
     error_message: str | None
+    watermark_from: str | None = None
+    watermark_to: str | None = None
 
     @property
     def seconds(self) -> float | None:
