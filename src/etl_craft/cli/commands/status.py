@@ -39,13 +39,15 @@ def _run(args: argparse.Namespace, out: Output) -> int:
         )
         if done.pipeline.paused is not None:
             out.line(done.pipeline.paused.describe())
-        out.rows([("TASK", "STATUS", "ATTEMPTS", "ROWS_WRITTEN", "DURATION_SECONDS", "ERROR")])
+        headers = ("TASK", "STATUS", "ATTEMPTS", "ROWS_WRITTEN", "REJECTED", "DURATION_SECONDS")
+        out.rows([(*headers, "ERROR")])
         out.rows(
             (
                 t.task_code,
                 t.status or "NOT RUN",
                 t.attempts,
                 t.rows_written,
+                t.reject_count,
                 t.duration_seconds,
                 t.error,
             )

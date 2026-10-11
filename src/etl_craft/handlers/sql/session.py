@@ -102,6 +102,19 @@ class Session:
             raise self._failure(step, error) from error
         logger.info("%s (%.2fs)", step, time.monotonic() - started)
 
+    def create_side_table(self, name: str, select_sql: str, *, step: str) -> None:
+        """Create table ``name`` from ``select_sql`` as recovery tables are made.
+
+        It takes the dialect's own table format, never the target's storage settings.
+        """
+        logger.debug("%s: CREATE TABLE %s AS %s", step, name, select_sql)
+        try:
+            self.dialect.backup_table(self.conn, name, f"({select_sql}) etl_src")
+        except SQLAlchemyError as error:
+            logger.error("%s failed; the SELECT was:\n%s", step, select_sql)
+            raise self._failure(step, error) from error
+        logger.info("%s", step)
+
     def _failure(self, step: str, error: SQLAlchemyError) -> HandlerError:
         """Say which step on which target failed, with the database's own first line."""
         cause = getattr(error, "orig", None) or error

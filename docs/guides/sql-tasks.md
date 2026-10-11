@@ -198,11 +198,54 @@ where SCD1 source values are NULL and hashes the values actually stored; unchang
 their audit fields. PostgreSQL indexes the stage's merge keys and runs `ANALYZE` before joined
 updates so the planner has current stage statistics.
 
+### Rows set aside
+
+A messy source need not fail the whole load. With `REJECT_LIMIT`, `APPEND_TABLE`,
+`OVERWRITE_TABLE` and the merges check every row the SELECT returns before writing anything, and
+set aside each row the target cannot take, for the first reason it meets:
+
+1. a NULL in a `MERGE_KEY` column;
+2. a value that does not fit its target column's declared type: it does not cast (`TRY_CAST`;
+   `pg_input_is_valid` on PostgreSQL, which needs PostgreSQL 16 or later), or its text is
+   longer than the column's declared length;
+3. a merge key that another row also has, when no `MERGE_DEDUPE_ORDER` chooses between them:
+   every row of that key is set aside, since which one should win is yours to say.
+
+The target's declared types decide; nothing is inferred. A column the target does not have yet
+(`SCHEMA_EVOLUTION`) is not checked. The rows that fit load, cast to the target's types, and the
+rest go to `<target>__rejects` in the target's schema:
+
+| Column | Holds |
+|---|---|
+| the SELECT's columns | each value as text, as the SELECT returned it |
+| `TASK_RUN_ID` | the task run that set the row aside |
+| `REJECT_REASON` | why, such as `does not cast to DATE` or `NULL in MERGE_KEY` |
+| `REJECT_COLUMN` | the column that failed; the key columns for a duplicate key |
+
+The engine creates the table the first time a row is set aside, as it creates its recovery
+tables, and adds a column when the SELECT returns a new one. An attempt replaces its task run's
+earlier rejects, so a retry never doubles them. `REJECT_COUNT` is recorded with the task run and
+each attempt, and shown by `status`, `explain`, `history` and the catalog.
+
+`REJECT_LIMIT` is a number of rows, such as `100`, or a share of the rows the SELECT returns, such
+as `0.5%`. When more rows than that do not fit, the task writes nothing and fails, naming the
+count, the limit and the most common reasons. Without `REJECT_LIMIT`, a row that does not fit
+fails the task as before.
+
+```sql
+-- Rows set aside by the latest run of a task
+SELECT REJECT_COLUMN, REJECT_REASON, COUNT(*) AS rows_set_aside
+FROM sales.orders__rejects
+WHERE TASK_RUN_ID = 412
+GROUP BY REJECT_COLUMN, REJECT_REASON;
+```
+
 ### Optional parameters
 
 | Parameter | Applies to | Effect |
 |---|---|---|
 | `MERGE_DEDUPE_ORDER` | the merges | when the SELECT returns a merge key more than once, keep the first row in this order, such as `updated_at DESC`; without it, duplicate keys fail the task. An order that ties between rows that differ fails the task too: add a column that breaks the tie |
+| `REJECT_LIMIT` | `APPEND_TABLE`, `OVERWRITE_TABLE` and the merges | the most rows, such as `100`, or the share of the SELECT's rows, such as `0.5%`, set aside in `<target>__rejects` rather than failing the task; see [Rows set aside](#rows-set-aside) |
 | `SETUP_FOR` | `SETUP_TABLE` | the action whose audit columns the table gets: `CREATE_TABLE`, `OVERWRITE_TABLE`, `APPEND_TABLE`, `SCD1_MERGE` or `SCD2_MERGE` |
 | `SCHEMA_EVOLUTION` | `OVERWRITE_TABLE` and the merges | `true` appends nullable columns the SELECT returns but the target lacks, with their complete types |
 | `PRESERVE_TARGET` | `SCD1_MERGE` | `true` keeps the target's value where the SELECT returns NULL |

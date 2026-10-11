@@ -63,6 +63,7 @@ class AttemptView:
     update_count: int | None
     delete_count: int | None
     rows_written: int | None
+    reject_count: int | None
     error_message: str | None
     log_path: str | None
     requested_by: str | None
@@ -91,6 +92,7 @@ class TaskRunView:
     update_count: int | None
     delete_count: int | None
     rows_written: int | None
+    reject_count: int | None
     error_message: str | None
     attempts: tuple[AttemptView, ...]
 

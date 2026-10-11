@@ -260,3 +260,39 @@ def test_a_view_reads_its_select_and_whether_it_is_secure(project):
         "SELECT 1 AS id",
         True,
     )
+
+
+@pytest.mark.parametrize(
+    ("written", "shown", "allowed"),
+    [
+        ("0", "0", 0),
+        (" 25 ", "25", 25),
+        ("10%", "10%", 9),
+        ("0.5 %", "0.5%", 0),
+        ("100%", "100%", 99),
+    ],
+)
+def test_a_reject_limit_is_rows_or_a_share_of_the_select(project, written, shown, allowed):
+    task = read_sql_task(context(project, **BASE, SOURCE_SQL="SELECT 1", REJECT_LIMIT=written))
+    assert task.reject_limit is not None
+    assert (str(task.reject_limit), task.reject_limit.rows(99)) == (shown, allowed)
+    assert read_sql_task(context(project, **BASE, SOURCE_SQL="SELECT 1")).reject_limit is None
+
+
+@pytest.mark.parametrize("written", ["-1", "1.5", "ten", "101%", "nan%", "%"])
+def test_a_reject_limit_that_is_not_rows_or_a_percentage_is_refused(project, written):
+    with pytest.raises(HandlerError, match=r"must be a whole number of rows, such as 100, or a"):
+        read_sql_task(context(project, **BASE, SOURCE_SQL="SELECT 1", REJECT_LIMIT=written))
+
+
+def test_a_reject_limit_applies_only_to_writes_into_an_existing_target(project):
+    with pytest.raises(HandlerError, match=r"REJECT_LIMIT applies only to APPEND_TABLE, "):
+        read_sql_task(
+            context(
+                project,
+                SQL_ACTION="CREATE_TABLE",
+                TARGET_OBJECT="s.t",
+                SOURCE_SQL="SELECT 1",
+                REJECT_LIMIT="5",
+            )
+        )

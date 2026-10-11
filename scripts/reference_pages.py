@@ -17,7 +17,7 @@ from etl_craft.config.loader import settings_by_section
 from etl_craft.dialects.warehouse.base import STORAGE_PARAMETERS
 from etl_craft.handlers import email_alert, python_scripts
 from etl_craft.handlers.registry import COMMON_PARAMETERS
-from etl_craft.handlers.sql.spec import FLAGS
+from etl_craft.handlers.sql.spec import FLAGS, SCREENED
 from etl_craft.handlers.sql.spec import PARAMETERS as SQL_PARAMETERS
 
 REPO = Path(__file__).resolve().parents[1]
@@ -85,6 +85,8 @@ def handler_parameters() -> dict[str, list[tuple[str, str]]]:
     for name in sorted(SQL_PARAMETERS):
         if name in FLAGS:
             applies = ", ".join(f"`{action}`" for action in sorted(FLAGS[name]))
+        elif name == "REJECT_LIMIT":
+            applies = ", ".join(f"`{action}`" for action in sorted(SCREENED))
         elif name in STORAGE_PARAMETERS:
             applies = "where the table's files live"
         else:

@@ -114,7 +114,8 @@ item's text, or work done early under another item.
 | SQL views | Done | #139 | `CREATE_VIEW`, a ninth SQL action, with secure views where the warehouse has them |
 | Configuration files | Done | #140 | `etl-craft config plan`, `apply` and `export`: one CSV file per `CFG_` table, merged by key |
 | SQL checks with sqlglot | Done | #141 | Parse-tree checks of SELECTs and rule SQL in the warehouse's dialect; `validate` warns on SQL sqlglot cannot read |
-| 0.4 gate; S5.K to S5.N, then S5.C and later | Not started | | |
+| S5.K Row-level rejects | Done | #143 | `REJECT_LIMIT` sets aside rows the target cannot take in `<target>__rejects`; `REJECT_COUNT` in the run logs |
+| 0.4 gate; S5.L to S5.N, then S5.C and later | Not started | | |
 
 ### Handover notes
 
@@ -143,8 +144,18 @@ Configuration files passed the full local checks and the installed-wheel matrix;
 warehouse code, so no cloud suite ran.
 SQL checks with sqlglot passed the full local checks, the installed-wheel matrix and the
 every-action tests on Databricks and Snowflake.
+S5.K passed the full local checks, the installed-wheel matrix and the reject tests on
+Databricks and Snowflake, native and Iceberg.
 
 **Choices that differ from the item text.**
+
+- S5.K sets aside every row of a merge key returned more than once, since which one should win
+  is the author's call; a duplicate is counted among the rows that pass the other checks, so a
+  key whose other copy has a bad value still loads. The rejects table holds the SELECT's
+  columns, not the target's audit columns, which a rejected row never had. Over the limit the
+  task writes nothing, rejects included. Besides the cast, the check measures text against a
+  declared length, since some warehouses' casts truncate. `NOT NULL` constraints are not
+  checked: the item does not name them, and the targets the engine creates have none.
 
 - SQL checks with sqlglot fall back to the word-level check for SQL sqlglot cannot parse, and
   `validate` warns about such SQL rather than failing: the warehouse decides what is valid.

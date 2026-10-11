@@ -247,6 +247,7 @@ def _counts(run: LastRun | TaskRunSummary) -> str:
         ("inserted", run.insert_count),
         ("updated", run.update_count),
         ("deleted", run.delete_count),
+        ("rejected", run.reject_count),
     ]
     return ", ".join(f"{name} {value:,}" for name, value in counts if value is not None)
 

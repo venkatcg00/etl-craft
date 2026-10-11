@@ -24,6 +24,7 @@ from fixtures.metadata import add_pipeline, insert, start_run
 from fixtures.sql_appends import check_append_retries, check_identity_inputs, check_legacy_upgrade
 from fixtures.sql_evolution import check_evolution, check_interrupted_evolution
 from fixtures.sql_merges import check_composite_merge
+from fixtures.sql_rejects import check_rejects
 from fixtures.sql_replacement import check_replacement_failure
 from fixtures.sql_row_ids import check_row_id_generation
 from fixtures.sql_warehouse import SqlWorld
@@ -573,6 +574,36 @@ def test_identity_inputs_on_snowflake(tmp_path, table_format):
             os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"],
         )
     )
+
+
+def walk_rejects(w):
+    """A messy merge loads its good rows and sets the rest aside; over the limit, nothing."""
+    target = f"etl_craft_rejects_{uuid.uuid4().hex[:8]}"
+    try:
+        check_rejects(w, target)
+    finally:
+        for name in (target, target + "__rejects"):
+            w.execute(f"DROP TABLE IF EXISTS {w.name(name)}")
+        w.warehouse.dispose()
+        w.engine_db.dispose()
+
+
+@pytest.mark.cloud_databricks
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_rejects_on_databricks(tmp_path, table_format):
+    require_variables("DATABRICKS", DATABRICKS_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_DATABRICKS_{name}" for name in DATABRICKS_VARS}
+    schema = os.environ["ETL_CRAFT_TEST_DATABRICKS_SCHEMA"]
+    walk_rejects(cloud_world(tmp_path, "Databricks", fields, table_format, schema))
+
+
+@pytest.mark.cloud_snowflake
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_rejects_on_snowflake(tmp_path, table_format):
+    require_variables("SNOWFLAKE", SNOWFLAKE_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
+    schema = os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"]
+    walk_rejects(cloud_world(tmp_path, "Snowflake", fields, table_format, schema))
 
 
 def walk_ingestion_upgrade(w):

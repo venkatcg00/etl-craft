@@ -174,6 +174,7 @@ class TaskStatusView:
     status: str | None
     attempts: int
     rows_written: int | None
+    reject_count: int | None
     duration_seconds: float | None
     error: str | None
     explanation: Explanation
@@ -432,6 +433,7 @@ def pipeline_status(
                 task.status if task is not None else None,
                 task.attempt_count if task is not None else 0,
                 task.rows_written if task is not None else None,
+                task.reject_count if task is not None else None,
                 _duration(task.start_date, task.end_date, now) if task is not None else None,
                 task.error_message.splitlines()[0]
                 if task is not None and task.error_message

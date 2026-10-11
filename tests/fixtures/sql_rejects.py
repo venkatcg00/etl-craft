@@ -1,0 +1,66 @@
+"""REJECT_LIMIT assertions shared by the local and cloud warehouse suites."""
+
+from datetime import date
+
+import pytest
+
+from etl_craft.core.errors import HandlerError
+
+SHAPE = "SELECT CAST(1 AS BIGINT) AS id, CAST(NULL AS DATE) AS order_date, 'Pune' AS city"
+"""A target's shape: a key, a date and a text column."""
+
+MESSY = (
+    "SELECT CAST(1 AS BIGINT) AS id, '2026-01-31' AS order_date, 'Pune' AS city "
+    "UNION ALL SELECT 2, '2026-02-30', 'Delhi' "
+    "UNION ALL SELECT NULL, '2026-01-01', 'Agra' "
+    "UNION ALL SELECT 3, '2026-01-02', 'Goa' "
+    "UNION ALL SELECT 3, '2026-01-03', 'Goa' "
+    "UNION ALL SELECT 4, '2026-01-04', 'Leh'"
+)
+"""Two good rows, a bad date, a NULL key and a key returned twice."""
+
+MERGE = {"MERGE_KEY": "id", "MERGE_COMPARE_COLUMNS": "order_date|city"}
+
+
+def set_aside(w, target):
+    """Return ``<target>__rejects`` as (id, order_date, column, reason, task run), lower case."""
+    rows = w.rows(
+        "SELECT id, order_date, REJECT_COLUMN, REJECT_REASON, TASK_RUN_ID "
+        f"FROM {w.name(target + '__rejects')}"
+    )
+    return sorted(
+        ((row[0], row[1], row[2].lower(), row[3].lower(), row[4]) for row in rows), key=str
+    )
+
+
+def loaded(w, target):
+    """Return the target's rows as (id, order_date, city)."""
+    return sorted(w.rows(f"SELECT id, order_date, city FROM {w.name(target)}"), key=str)
+
+
+def check_rejects(w, target, merge="SCD1_MERGE"):
+    """Over the limit nothing is written; within it the good rows load and the rest wait aside."""
+    params = {**MERGE, "SQL_ACTION": merge, "TARGET_OBJECT": target}
+    w.setup(target, SHAPE, merge)
+    with pytest.raises(
+        HandlerError,
+        match=r"4 of 6 row\(s\) do not fit, more than REJECT_LIMIT=3 allows \(3\), so nothing",
+    ):
+        w.run("load", **params, SOURCE_SQL=MESSY, REJECT_LIMIT="3")
+    assert loaded(w, target) == []
+    assert target + "__rejects" not in w.tables()
+
+    result = w.run("load", **params, SOURCE_SQL=MESSY, REJECT_LIMIT="67%")
+    assert (result.source_count, result.insert_count, result.reject_count) == (6, 2, 4)
+    assert loaded(w, target) == [(1, date(2026, 1, 31), "Pune"), (4, date(2026, 1, 4), "Leh")]
+    run = w.task("load").task_run_id
+    assert set_aside(w, target) == [
+        ("2", "2026-02-30", "order_date", "does not cast to date", run),
+        ("3", "2026-01-02", "id", "merge_key returned more than once", run),
+        ("3", "2026-01-03", "id", "merge_key returned more than once", run),
+        (None, "2026-01-01", "id", "null in merge_key", run),
+    ]
+
+    retry = "SELECT CAST(2 AS BIGINT) AS id, '2026-02-30' AS order_date, 'Delhi' AS city"
+    assert w.run("load", **params, SOURCE_SQL=retry, REJECT_LIMIT="1").reject_count == 1
+    assert set_aside(w, target) == [("2", "2026-02-30", "order_date", "does not cast to date", run)]

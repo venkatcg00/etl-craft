@@ -27,10 +27,14 @@ remedy, so no action ever starts on a half-valid definition.
 - ``SECURE_VIEW`` (``CREATE_VIEW``): ``true`` creates a secure view where the warehouse has
   them (Snowflake's ``SECURE``, PostgreSQL's ``security_barrier``). A view stores no data, so
   it takes no ``TABLE_FORMAT`` or storage parameter.
+- ``REJECT_LIMIT`` (``APPEND_TABLE``, ``OVERWRITE_TABLE`` and the merges): the most rows, or
+  ``N%`` of the rows the SELECT returns, set aside in ``<target>__rejects`` rather than failing
+  the task (see ``rejects``).
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
@@ -65,6 +69,8 @@ WRITERS = frozenset(
 )
 """The actions that write rows into their target, and so have audit columns of their own."""
 KEYED = MERGES | {SqlAction.DELETE_ROWS}
+SCREENED = MERGES | {SqlAction.APPEND_TABLE, SqlAction.OVERWRITE_TABLE}
+"""The actions that take ``REJECT_LIMIT``: they write into a target whose types already exist."""
 
 # Each yes/no parameter, and the actions it applies to.
 FLAGS: dict[str, frozenset[SqlAction]] = {
@@ -90,11 +96,28 @@ PARAMETERS = frozenset(
         "MERGE_DEDUPE_ORDER",
         "SETUP_FOR",
         "TABLE_FORMAT",
+        "REJECT_LIMIT",
         *FLAGS,
         *STORAGE_PARAMETERS,
     }
 )
 """The task parameters a SQL task reads."""
+
+
+@dataclass(frozen=True)
+class RejectLimit:
+    """``REJECT_LIMIT``: at most ``value`` rows, or ``value`` percent of them."""
+
+    value: float
+    percent: bool
+
+    def rows(self, source: int) -> int:
+        """Return how many of ``source`` rows may be set aside."""
+        return int(source * self.value / 100) if self.percent else int(self.value)
+
+    def __str__(self) -> str:
+        """Return the limit as written: ``100`` or ``0.5%``."""
+        return f"{self.value:g}%" if self.percent else f"{self.value:g}"
 
 
 @dataclass(frozen=True)
@@ -117,6 +140,7 @@ class SqlTask:
     hard_delete: bool = False
     setup_for: SqlAction | None = None
     secure_view: bool = False
+    reject_limit: RejectLimit | None = None
 
 
 def read_sql_task(context: TaskContext) -> SqlTask:
@@ -174,6 +198,7 @@ def read_sql_task(context: TaskContext) -> SqlTask:
     if action not in KEYED and params.get("MERGE_KEY"):
         raise SqlGuardError(f"MERGE_KEY does not apply to SQL_ACTION={action}")
     setup_for = _setup_for(params.get("SETUP_FOR"), action)
+    reject_limit = _reject_limit(params.get("REJECT_LIMIT"), action)
 
     return SqlTask(
         action=action,
@@ -188,6 +213,7 @@ def read_sql_task(context: TaskContext) -> SqlTask:
         hard_delete=flags["HARD_DELETE"],
         setup_for=setup_for,
         secure_view=flags["SECURE_VIEW"],
+        reject_limit=reject_limit,
     )
 
 
@@ -332,3 +358,25 @@ def _dedupe_order(value: str | None) -> str | None:
             "'column [ASC|DESC] [NULLS FIRST|LAST]'"
         )
     return ", ".join(terms)
+
+
+def _reject_limit(value: str | None, action: SqlAction) -> RejectLimit | None:
+    if value is None or not value.strip():
+        return None
+    if action not in SCREENED:
+        raise SqlGuardError(
+            f"REJECT_LIMIT applies only to {', '.join(sorted(SCREENED))}, not SQL_ACTION={action}"
+        )
+    written = value.strip()
+    percent = written.endswith("%")
+    number = written.removesuffix("%").strip()
+    try:
+        parsed = float(number) if percent else int(number)
+    except ValueError:
+        parsed = -1
+    if not 0 <= parsed <= (100 if percent else math.inf):
+        raise SqlGuardError(
+            f"REJECT_LIMIT={value!r} must be a whole number of rows, such as 100, or a percentage "
+            "of the rows the SELECT returns from 0% to 100%, such as 0.5%"
+        )
+    return RejectLimit(parsed, percent)
