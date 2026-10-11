@@ -34,6 +34,11 @@ def _run(args: argparse.Namespace, out: Output) -> int:
             f"pipeline_run_id={done.run.pipeline_run_id} status={done.run.status} "
             f"task_status={done.task.status if done.task else 'NOT RUN'} "
             f"attempts={done.task.attempt_count if done.task else 0}"
+            + (
+                f" rejected={done.task.reject_count}"
+                if done.task and done.task.reject_count
+                else ""
+            )
         )
         if done.pipeline.paused is not None:
             out.line(done.pipeline.paused.describe())

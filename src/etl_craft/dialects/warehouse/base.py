@@ -43,6 +43,9 @@ AUDIT_COLUMN_TYPES: dict[str, str] = {
 }
 """The DDL type of each engine-managed audit column, used to create a column with no rows."""
 
+_DECLARED_LENGTH = re.compile(r"(?:n?var)?char(?:acter)?(?: varying)?\s*\((\d+)\)", re.IGNORECASE)
+"""A character type with a declared length, such as ``VARCHAR(10)`` or ``character(3)``."""
+
 
 @dataclass(frozen=True)
 class Presented:
@@ -388,6 +391,26 @@ class WarehouseDialect:
     def evolution_column_type(self, data_type: str) -> str:
         """Return the full stage type in the target table format's DDL representation."""
         return data_type
+
+    safe_cast = "TRY_CAST"
+    """How ``reject_checks`` tests a cast without failing, named in its step's log line."""
+
+    def reject_checks(self, value: str, kind: str) -> list[tuple[str, str]]:
+        """Return each condition under which a non-NULL ``value`` cannot go into type ``kind``.
+
+        Each comes with its reason, for ``REJECT_LIMIT``: the cast fails, or the text is longer
+        than a declared length, which some casts would truncate rather than refuse.
+        """
+        checks = [(f"{self.safe_cast}({value} AS {kind}) IS NULL", f"does not cast to {kind}")]
+        length = _DECLARED_LENGTH.fullmatch(kind.strip())
+        if length is not None:
+            checks.append(
+                (
+                    f"LENGTH(CAST({value} AS {self.string_type})) > {length[1]}",
+                    f"is longer than {length[1]} characters",
+                )
+            )
+        return checks
 
     def is_bigint_type(self, data_type: str) -> bool:
         """Whether a stored column has the signed BIGINT type used for task-run ids."""

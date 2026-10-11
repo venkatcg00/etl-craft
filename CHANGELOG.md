@@ -16,6 +16,17 @@ All notable changes are recorded here. The format follows
   `validate` reports both refusals before a run. A view is replaced only when the statement that
   makes it changes, so an unchanged view keeps its locks, grants and policies. Upgrade the Engine
   DB with migration `0019_target_view_statement`.
+- `REJECT_LIMIT` on `APPEND_TABLE`, `OVERWRITE_TABLE` and the merges sets aside the rows the
+  target cannot take rather than failing the task: a NULL merge key, a NULL in a `NOT NULL`
+  column, a value that does not cast to its column's declared type or is longer than its
+  declared length, or a merge key returned more than once without `MERGE_DEDUPE_ORDER`. They go
+  to `<target>__rejects` with their values as text, the run's audit columns, `REJECT_REASON` and
+  `REJECT_COLUMN`, and the other rows load cast to the target's types. The limit is a row count
+  or a percentage of the SELECT's rows; over it, the target is not written and the task fails
+  naming the most common reasons, with the rows still set aside unless
+  `SKIP_REJECTS_OVER_LIMIT = true`. `REJECT_COUNT` is recorded with each task run and attempt
+  and shown by `status`, `explain`, `history` and the catalog. On PostgreSQL it needs version
+  16 or later. Upgrade the Engine DB with migration `0020_reject_count`.
 - Configuration files: a project keeps its pipelines as CSV files in `config/`, one per `CFG_`
   table, each row with an `ACTIVE_FLAG`. `etl-craft config apply` merges them into the Engine DB
   by key in one transaction: it inserts new rows, updates changed rows in place (keeping their

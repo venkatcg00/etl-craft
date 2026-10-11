@@ -51,6 +51,18 @@ class PostgresWarehouse(WarehouseDialect):
         )
         return f"TO_CHAR({utc}, 'YYYY-MM-DD\"T\"HH24:MI:SS.US')"
 
+    safe_cast = "pg_input_is_valid (PostgreSQL 16 and later)"
+
+    def reject_checks(self, value: str, kind: str) -> list[tuple[str, str]]:
+        """Ask the type's own input function, which refuses an over-long text as well."""
+        literal = kind.replace("'", "''")
+        return [
+            (
+                f"NOT pg_input_is_valid(CAST({value} AS TEXT), '{literal}')",
+                f"does not cast to {kind}",
+            )
+        ]
+
     def date_text(self, value: str) -> str:
         """Use ISO dates even when DateStyle differs."""
         return f"TO_CHAR({value}, 'YYYY-MM-DD')"

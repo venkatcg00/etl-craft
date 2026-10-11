@@ -40,6 +40,10 @@ class SnowflakeWarehouse(WarehouseDialect):
     secure_view = "keyword"
     view_replacement = "copy_grants"
 
+    def reject_checks(self, value: str, kind: str) -> list[tuple[str, str]]:
+        """Cast the value to text first: Snowflake's TRY_CAST reads text only."""
+        return super().reject_checks(f"CAST({value} AS VARCHAR)", kind)
+
     def identity_table_ddl(self, target: str, columns: str, params: Mapping[str, str]) -> str:
         """Use an ordered native identity; inserts omit the managed key."""
         return (

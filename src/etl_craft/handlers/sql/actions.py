@@ -46,6 +46,7 @@ from etl_craft.engine.repository.hash_versions import fetch_hash_version, fetch_
 from etl_craft.engine.repository.tasks import TargetTask, fetch_target_tasks
 from etl_craft.engine.runlog import fetch_task_run_status
 from etl_craft.handlers.registry import HandlerResult, TaskContext
+from etl_craft.handlers.sql.rejects import screen
 from etl_craft.handlers.sql.replacement import cleanup, promote, recover_overwrite
 from etl_craft.handlers.sql.session import Session
 from etl_craft.handlers.sql.spec import SqlTask
@@ -242,6 +243,8 @@ def overwrite_table(session: Session, action: ActionContext) -> HandlerResult:
     """Empty the target and insert the SELECT's rows."""
     stage = build_stage(session, action.select_sql)
     source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
+    stage, rejected = screen(session, stage, action.task, source, action.stamp)
+    written = source - (rejected or 0)
     strategy = session.dialect.replace_strategy
     check_or_evolve(
         session, stage, SqlAction.OVERWRITE_TABLE, schema_evolution=action.task.schema_evolution
@@ -300,7 +303,9 @@ def overwrite_table(session: Session, action: ActionContext) -> HandlerResult:
             )
             fault_point("sql.replace.after_publish")
     cleanup(session, stage)
-    return HandlerResult(source_count=source, target_count=source, insert_count=source)
+    return HandlerResult(
+        source_count=source, target_count=written, insert_count=written, reject_count=rejected
+    )
 
 
 def append_table(session: Session, action: ActionContext) -> HandlerResult:
@@ -319,6 +324,7 @@ def append_table(session: Session, action: ActionContext) -> HandlerResult:
     check_identity_types(session, tuple(c for c in IDENTITY_COLUMNS if c.lower() in present))
     stage = build_stage(session, action.select_sql)
     source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
+    stage, rejected = screen(session, stage, action.task, source, action.stamp)
     session.run(
         f"DELETE FROM {session.target} WHERE TASK_RUN_ID = :task_run_id",
         {"task_run_id": action.context.task_run_id},
@@ -340,11 +346,21 @@ def append_table(session: Session, action: ActionContext) -> HandlerResult:
     fault_point("sql.append.after_insert")
     session.drop(stage)
     target_count = session.count(f"SELECT COUNT(*) FROM {session.target}", step="target rows")
-    return HandlerResult(source_count=source, target_count=target_count, insert_count=source)
+    return HandlerResult(
+        source_count=source,
+        target_count=target_count,
+        insert_count=source - (rejected or 0),
+        reject_count=rejected,
+    )
 
 
-def _merge_stage(session: Session, action: ActionContext, kind: SqlAction) -> tuple[str, int]:
-    """Stage, de-duplicate, check and hash the SELECT for a merge; return (stage, source rows)."""
+def _merge_stage(
+    session: Session, action: ActionContext, kind: SqlAction
+) -> tuple[str, int, int | None]:
+    """Stage, screen, de-duplicate, check and hash the SELECT for a merge.
+
+    Return the stage, the source rows and the rows set aside.
+    """
     task = action.task
     check_target_audit(session, kind)
     with action.engine_db.connect() as conn:
@@ -356,12 +372,13 @@ def _merge_stage(session: Session, action: ActionContext, kind: SqlAction) -> tu
         )
     stage = build_stage(session, action.select_sql)
     source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
+    stage, rejected = screen(session, stage, task, source, action.stamp)
     refuse_null_keys(session, stage, task.merge_key)
     stage = dedupe(session, stage, task.merge_key, task.dedupe_order)
     check_or_evolve(session, stage, kind, schema_evolution=task.schema_evolution)
     add_hash_key(session, stage, task.merge_compare_columns)
     session.prepare_update_stage(stage, task.merge_key)
-    return stage, source
+    return stage, source, rejected
 
 
 def _changed_keys(session: Session, stage: str, merge_key: tuple[str, ...], condition: str) -> str:
@@ -389,7 +406,7 @@ def scd1_merge(session: Session, action: ActionContext) -> HandlerResult:
     taken over the values actually kept.
     """
     task = action.task
-    stage, source = _merge_stage(session, action, SqlAction.SCD1_MERGE)
+    stage, source, rejected = _merge_stage(session, action, SqlAction.SCD1_MERGE)
     stage_columns = [name for name, _ in session.columns(stage)]
     keys = {key.lower() for key in task.merge_key}
     non_key = [column for column in stage_columns if column.lower() not in keys]
@@ -459,6 +476,7 @@ def scd1_merge(session: Session, action: ActionContext) -> HandlerResult:
         target_count=target_count,
         insert_count=insert_count,
         update_count=update_count,
+        reject_count=rejected,
     )
 
 
@@ -469,7 +487,7 @@ def scd2_merge(session: Session, action: ActionContext) -> HandlerResult:
     one inserted, so a rerun converges.
     """
     task = action.task
-    stage, source = _merge_stage(session, action, SqlAction.SCD2_MERGE)
+    stage, source, rejected = _merge_stage(session, action, SqlAction.SCD2_MERGE)
     stage_columns = [name for name, _ in session.columns(stage)]
     target = session.target
     key_match = _key_match(task.merge_key)
@@ -537,6 +555,7 @@ def scd2_merge(session: Session, action: ActionContext) -> HandlerResult:
         target_count=target_count,
         insert_count=closed + new,
         update_count=closed,
+        reject_count=rejected,
     )
 
 

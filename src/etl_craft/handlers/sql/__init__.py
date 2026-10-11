@@ -75,6 +75,7 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
                 user=config.warehouse.user or "",
                 now=datetime.now(UTC),
             )
+            failure = None
             try:
                 if (
                     task.action
@@ -89,8 +90,15 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
                 ):
                     session.check_target_format()
                 result = ACTIONS[task.action](session, action)
+            except SqlGuardError as error:
+                if error is not session.failure_to_commit:
+                    raise
+                # The target is untouched; commit what was set aside, then fail.
+                failure = error
             finally:
                 session.sweep()
+        if failure is not None:
+            raise failure
         with engine_db.begin() as conn:
             if session.clear_hash_version:
                 clear_hash_version(conn, session.target)

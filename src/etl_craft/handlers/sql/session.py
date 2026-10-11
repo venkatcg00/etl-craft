@@ -63,6 +63,9 @@ class Session:
         self.publish_hash_version: int | None = None
         self.clear_hash_version = False
         self.publish_view_statement: str | None = None
+        # An error whose work so far is committed before it is raised: rows set aside over
+        # REJECT_LIMIT, while the target is left unwritten.
+        self.failure_to_commit: SqlGuardError | None = None
 
     # Statements
 
@@ -101,6 +104,19 @@ class Session:
             logger.error("%s failed; the SELECT was:\n%s", step, select_sql)
             raise self._failure(step, error) from error
         logger.info("%s (%.2fs)", step, time.monotonic() - started)
+
+    def create_side_table(self, name: str, select_sql: str, *, step: str) -> None:
+        """Create table ``name`` from ``select_sql`` as recovery tables are made.
+
+        It takes the dialect's own table format, never the target's storage settings.
+        """
+        logger.debug("%s: CREATE TABLE %s AS %s", step, name, select_sql)
+        try:
+            self.dialect.backup_table(self.conn, name, f"({select_sql}) etl_src")
+        except SQLAlchemyError as error:
+            logger.error("%s failed; the SELECT was:\n%s", step, select_sql)
+            raise self._failure(step, error) from error
+        logger.info("%s", step)
 
     def _failure(self, step: str, error: SQLAlchemyError) -> HandlerError:
         """Say which step on which target failed, with the database's own first line."""
@@ -217,6 +233,14 @@ class Session:
         query, parameters = self.dialect.relation_type_query(self.target)
         row = self.run(query, parameters, step=f"read what {self.target} is").first()
         return None if row is None else str(row[0]).upper()
+
+    def not_null_columns(self, name: str) -> set[str]:
+        """Return the lower-case names of table ``name``'s columns declared ``NOT NULL``."""
+        query, parameters = self.dialect.column_metadata_query(
+            self.conn, name, "column_name, is_nullable"
+        )
+        rows = self.run(query, parameters, step=f"read which columns of {name} take no NULL").all()
+        return {str(row[0]).lower() for row in rows if str(row[1]).upper() in {"NO", "FALSE"}}
 
     def target_columns(self) -> list[tuple[str, str]]:
         """Return the target's columns; empty when it does not exist."""

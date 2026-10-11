@@ -153,12 +153,13 @@ def run_handler(engine: Engine, context: TaskContext) -> int:
         )
     fault_point("child.after_outcome")
     logger.info(
-        "task succeeded: source %s, target %s, inserted %s, updated %s, deleted %s",
+        "task succeeded: source %s, target %s, inserted %s, updated %s, deleted %s, rejected %s",
         result.source_count,
         result.target_count,
         result.insert_count,
         result.update_count,
         result.delete_count,
+        result.reject_count,
     )
     return ExitCode.SUCCESS
 
