@@ -23,13 +23,15 @@ def test_over_the_limit_the_most_common_reasons_are_named(sql_world):
     with pytest.raises(
         HandlerError,
         match=(
-            r"4 of 6 row\(s\) do not fit, more than REJECT_LIMIT=50% allows \(3\), so nothing "
-            r"was written\. Most common: id MERGE_KEY returned more than once \(2 rows\); id NULL "
-            r"in MERGE_KEY \(1 rows\); order_date does not cast to "
+            r"4 of 6 row\(s\) do not fit, more than REJECT_LIMIT=50% allows \(3\), so the "
+            r"target was not written; the rows are in .*orders__rejects\. Most common: id "
+            r"MERGE_KEY returned more than once \(2 rows\); id NULL in MERGE_KEY \(1 rows\); "
+            r"order_date does not cast to "
         ),
     ):
         w.run("load", **ORDERS, SOURCE_SQL=MESSY, REJECT_LIMIT="50%")
     assert loaded(w, "orders") == []
+    assert len(set_aside(w, "orders")) == 4
 
 
 def test_with_a_dedupe_order_duplicate_keys_load_their_first_row(sql_world):
@@ -47,6 +49,18 @@ def test_with_a_dedupe_order_duplicate_keys_load_their_first_row(sql_world):
         "does not cast to date",
         "null in merge_key",
     ]
+
+
+def test_skip_rejects_over_limit_writes_nothing_over_the_limit(sql_world):
+    w = sql_world
+    w.setup("orders", SHAPE, "SCD1_MERGE")
+    params = {**ORDERS, "SOURCE_SQL": MESSY, "SKIP_REJECTS_OVER_LIMIT": "true"}
+    with pytest.raises(HandlerError, match=r"allows \(3\), so nothing was written\. Most common"):
+        w.run("load", **params, REJECT_LIMIT="3")
+    assert loaded(w, "orders") == []
+    assert "orders__rejects" not in w.tables()
+    assert w.run("load", **params, REJECT_LIMIT="4").reject_count == 4
+    assert len(set_aside(w, "orders")) == 4
 
 
 def test_without_a_limit_a_row_that_does_not_fit_fails_the_task(sql_world):
@@ -113,6 +127,22 @@ def test_a_new_column_in_the_select_is_added_to_the_rejects_table(sql_world):
         SOURCE_SQL="SELECT 2 AS id, 'y' AS order_date, 'Goa' AS city, 'west' AS region",
     )
     assert w.rows(f"SELECT region FROM {w.name('orders__rejects')}") == [("west",)]
+
+
+@warehouses("duckdb", "postgres")
+def test_a_null_in_a_not_null_column_is_set_aside(sql_world):
+    w = sql_world
+    w.setup("orders", SHAPE, "APPEND_TABLE")
+    w.execute(f"ALTER TABLE {w.name('orders')} ALTER COLUMN city SET NOT NULL")
+    source = (
+        "SELECT CAST(1 AS BIGINT) AS id, '2026-01-31' AS order_date, 'Pune' AS city "
+        "UNION ALL SELECT 2, '2026-02-01', NULL"
+    )
+    params = {"SQL_ACTION": "APPEND_TABLE", "TARGET_OBJECT": "orders", "REJECT_LIMIT": "1"}
+    assert w.run("load", **params, SOURCE_SQL=source).reject_count == 1
+    assert loaded(w, "orders") == [(1, date(2026, 1, 31), "Pune")]
+    run = w.task("load").task_run_id
+    assert set_aside(w, "orders") == [("2", "2026-02-01", "city", "null in a not null column", run)]
 
 
 @warehouses("postgres")

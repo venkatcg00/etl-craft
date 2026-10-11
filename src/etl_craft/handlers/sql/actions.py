@@ -243,7 +243,7 @@ def overwrite_table(session: Session, action: ActionContext) -> HandlerResult:
     """Empty the target and insert the SELECT's rows."""
     stage = build_stage(session, action.select_sql)
     source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
-    stage, rejected = screen(session, stage, action.task, source)
+    stage, rejected = screen(session, stage, action.task, source, action.stamp)
     written = source - (rejected or 0)
     strategy = session.dialect.replace_strategy
     check_or_evolve(
@@ -324,7 +324,7 @@ def append_table(session: Session, action: ActionContext) -> HandlerResult:
     check_identity_types(session, tuple(c for c in IDENTITY_COLUMNS if c.lower() in present))
     stage = build_stage(session, action.select_sql)
     source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
-    stage, rejected = screen(session, stage, action.task, source)
+    stage, rejected = screen(session, stage, action.task, source, action.stamp)
     session.run(
         f"DELETE FROM {session.target} WHERE TASK_RUN_ID = :task_run_id",
         {"task_run_id": action.context.task_run_id},
@@ -372,7 +372,7 @@ def _merge_stage(
         )
     stage = build_stage(session, action.select_sql)
     source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
-    stage, rejected = screen(session, stage, task, source)
+    stage, rejected = screen(session, stage, task, source, action.stamp)
     refuse_null_keys(session, stage, task.merge_key)
     stage = dedupe(session, stage, task.merge_key, task.dedupe_order)
     check_or_evolve(session, stage, kind, schema_evolution=task.schema_evolution)

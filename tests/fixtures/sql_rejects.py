@@ -38,28 +38,49 @@ def loaded(w, target):
     return sorted(w.rows(f"SELECT id, order_date, city FROM {w.name(target)}"), key=str)
 
 
+REJECTS_COLUMNS = [
+    "id",
+    "order_date",
+    "city",
+    "pipeline_run_id",
+    "pipeline_id",
+    "task_run_id",
+    "create_date",
+    "created_by",
+    "reject_reason",
+    "reject_column",
+]
+
+
 def check_rejects(w, target, merge="SCD1_MERGE"):
-    """Over the limit nothing is written; within it the good rows load and the rest wait aside."""
+    """The rows that do not fit always wait aside; the good ones load only within the limit."""
     params = {**MERGE, "SQL_ACTION": merge, "TARGET_OBJECT": target}
     w.setup(target, SHAPE, merge)
     with pytest.raises(
         HandlerError,
-        match=r"4 of 6 row\(s\) do not fit, more than REJECT_LIMIT=3 allows \(3\), so nothing",
+        match=r"4 of 6 row\(s\) do not fit, more than REJECT_LIMIT=3 allows \(3\), so the target",
     ):
         w.run("load", **params, SOURCE_SQL=MESSY, REJECT_LIMIT="3")
     assert loaded(w, target) == []
-    assert target + "__rejects" not in w.tables()
-
-    result = w.run("load", **params, SOURCE_SQL=MESSY, REJECT_LIMIT="67%")
-    assert (result.source_count, result.insert_count, result.reject_count) == (6, 2, 4)
-    assert loaded(w, target) == [(1, date(2026, 1, 31), "Pune"), (4, date(2026, 1, 4), "Leh")]
     run = w.task("load").task_run_id
-    assert set_aside(w, target) == [
+    messy = [
         ("2", "2026-02-30", "order_date", "does not cast to date", run),
         ("3", "2026-01-02", "id", "merge_key returned more than once", run),
         ("3", "2026-01-03", "id", "merge_key returned more than once", run),
         (None, "2026-01-01", "id", "null in merge_key", run),
     ]
+    assert set_aside(w, target) == messy
+    assert w.columns(target + "__rejects") == REJECTS_COLUMNS
+
+    result = w.run("load", **params, SOURCE_SQL=MESSY, REJECT_LIMIT="67%")
+    assert (result.source_count, result.insert_count, result.reject_count) == (6, 2, 4)
+    assert loaded(w, target) == [(1, date(2026, 1, 31), "Pune"), (4, date(2026, 1, 4), "Leh")]
+    assert set_aside(w, target) == messy
+    stamped = w.rows(
+        "SELECT DISTINCT pipeline_run_id, pipeline_id, create_date IS NOT NULL "
+        f"FROM {w.name(target + '__rejects')}"
+    )
+    assert stamped == [(w.pipeline_run_id, w.pipeline_id, True)]
 
     retry = "SELECT CAST(2 AS BIGINT) AS id, '2026-02-30' AS order_date, 'Delhi' AS city"
     assert w.run("load", **params, SOURCE_SQL=retry, REJECT_LIMIT="1").reject_count == 1

@@ -30,6 +30,9 @@ remedy, so no action ever starts on a half-valid definition.
 - ``REJECT_LIMIT`` (``APPEND_TABLE``, ``OVERWRITE_TABLE`` and the merges): the most rows, or
   ``N%`` of the rows the SELECT returns, set aside in ``<target>__rejects`` rather than failing
   the task (see ``rejects``).
+- ``SKIP_REJECTS_OVER_LIMIT`` (with ``REJECT_LIMIT``): ``true`` writes nothing at all when more
+  rows do not fit than the limit allows; otherwise those rows are still set aside. The task fails
+  either way.
 """
 
 from __future__ import annotations
@@ -78,6 +81,7 @@ FLAGS: dict[str, frozenset[SqlAction]] = {
     "PRESERVE_TARGET": frozenset({SqlAction.SCD1_MERGE}),
     "HARD_DELETE": frozenset({SqlAction.DELETE_ROWS}),
     "SECURE_VIEW": frozenset({SqlAction.CREATE_VIEW}),
+    "SKIP_REJECTS_OVER_LIMIT": SCREENED,
 }
 
 PARAMETERS = frozenset(
@@ -141,6 +145,7 @@ class SqlTask:
     setup_for: SqlAction | None = None
     secure_view: bool = False
     reject_limit: RejectLimit | None = None
+    skip_rejects_over_limit: bool = False
 
 
 def read_sql_task(context: TaskContext) -> SqlTask:
@@ -199,6 +204,10 @@ def read_sql_task(context: TaskContext) -> SqlTask:
         raise SqlGuardError(f"MERGE_KEY does not apply to SQL_ACTION={action}")
     setup_for = _setup_for(params.get("SETUP_FOR"), action)
     reject_limit = _reject_limit(params.get("REJECT_LIMIT"), action)
+    if flags["SKIP_REJECTS_OVER_LIMIT"] and reject_limit is None:
+        raise SqlGuardError(
+            "SKIP_REJECTS_OVER_LIMIT applies only with REJECT_LIMIT: set the limit, or remove it"
+        )
 
     return SqlTask(
         action=action,
@@ -214,6 +223,7 @@ def read_sql_task(context: TaskContext) -> SqlTask:
         setup_for=setup_for,
         secure_view=flags["SECURE_VIEW"],
         reject_limit=reject_limit,
+        skip_rejects_over_limit=flags["SKIP_REJECTS_OVER_LIMIT"],
     )
 
 

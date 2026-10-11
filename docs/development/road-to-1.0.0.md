@@ -152,11 +152,11 @@ Databricks and Snowflake, native and Iceberg.
 - S5.K, without `MERGE_DEDUPE_ORDER`, sets aside every row of a merge key returned more than
   once, since which one should win is the author's call; with it, the order keeps one row per key
   and none is set aside. A duplicate is counted among the rows that pass the other checks, so a
-  key whose other copy has a bad value still loads. The rejects table holds the SELECT's
-  columns, not the target's audit columns, which a rejected row never had. Over the limit the
-  task writes nothing, rejects included. Besides the cast, the check measures text against a
-  declared length, since some warehouses' casts truncate. `NOT NULL` constraints are not
-  checked: the item does not name them, and the targets the engine creates have none.
+  key whose other copy has a bad value still loads. The rejects table holds the SELECT's columns
+  as text and the run's audit columns. Over the limit the target is not written, but the rows
+  are still set aside, committed although the task fails; `SKIP_REJECTS_OVER_LIMIT` writes
+  nothing instead. Besides the cast, the check measures text against a declared length, since
+  some warehouses' casts truncate, and refuses a NULL in a `NOT NULL` column.
 
 - SQL checks with sqlglot fall back to the word-level check for SQL sqlglot cannot parse, and
   `validate` warns about such SQL rather than failing: the warehouse decides what is valid.

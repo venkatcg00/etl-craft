@@ -296,3 +296,11 @@ def test_a_reject_limit_applies_only_to_writes_into_an_existing_target(project):
                 REJECT_LIMIT="5",
             )
         )
+
+
+def test_skip_rejects_over_limit_needs_a_reject_limit(project):
+    params = {**BASE, "SOURCE_SQL": "SELECT 1", "SKIP_REJECTS_OVER_LIMIT": "true"}
+    with pytest.raises(HandlerError, match=r"SKIP_REJECTS_OVER_LIMIT applies only with REJECT_LI"):
+        read_sql_task(context(project, **params))
+    task = read_sql_task(context(project, **params, REJECT_LIMIT="1"))
+    assert task.skip_rejects_over_limit
