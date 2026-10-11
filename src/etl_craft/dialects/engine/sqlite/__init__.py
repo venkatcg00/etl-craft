@@ -143,7 +143,11 @@ class SqliteEngineDialect(EngineDialect):
                     ).all()
                     yield conn
                     for row in saved:
-                        conn.exec_driver_sql(row.sql)
+                        # Trigger refresh recreates managed history triggers before restoration.
+                        if not conn.exec_driver_sql(
+                            "SELECT 1 FROM sqlite_schema WHERE name=?", (row.name,)
+                        ).first():
+                            conn.exec_driver_sql(row.sql)
                     broken = conn.exec_driver_sql("PRAGMA foreign_key_check").all()
                     if broken:
                         raise MigrationError(

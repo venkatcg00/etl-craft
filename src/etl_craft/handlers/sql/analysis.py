@@ -17,6 +17,7 @@ from etl_craft.core import text
 
 WRITES: tuple[type[exp.Expression], ...] = (
     exp.Insert,
+    exp.Into,
     exp.Update,
     exp.Delete,
     exp.Merge,

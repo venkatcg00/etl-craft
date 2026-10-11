@@ -61,7 +61,8 @@ class GateWaitView:
     first_check_at: datetime
     next_check_at: datetime | None
     looks: int
-    wait_until: datetime
+    wait_until: datetime | None
+    wait_kind: str = "DEPENDENCY"
 
 
 @dataclass(frozen=True)
@@ -133,6 +134,8 @@ def explain(snapshot: TaskSnapshot) -> Explanation:
             "blocked by failure",
             "Repair or retry the failed upstream to satisfy the dependencies.",
         )
+    elif any(w.wait_kind == "EVENT" and w.next_check_at for w in snapshot.gate_waits):
+        state, action = "waiting on an event", "Wait for the configured file or warehouse row."
     elif (
         met < snapshot.required_count
         or any(w.next_check_at for w in snapshot.gate_waits)
@@ -229,7 +232,8 @@ def _snapshots(
             as_utc(r.first_check_at),
             timestamp(r.next_check_at),
             r.looks,
-            as_utc(r.wait_until),
+            timestamp(r.wait_until),
+            r.wait_kind,
         )
         for r in conn.execute(
             statement(conn, "inspection_gate_waits"), {"pipeline_run_id": run.pipeline_run_id}

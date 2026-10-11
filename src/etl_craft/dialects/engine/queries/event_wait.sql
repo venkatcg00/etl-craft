@@ -1,0 +1,1 @@
+SELECT FIRST_CHECK_AT AS first_check_at, NEXT_CHECK_AT AS next_check_at, WAIT_UNTIL AS wait_until, EVENT_OBSERVATIONS AS observations FROM AUD_GATE_WAITS WHERE PIPELINE_RUN_ID=:pipeline_run_id AND TASK_ID=:task_id AND WAIT_KIND='EVENT'

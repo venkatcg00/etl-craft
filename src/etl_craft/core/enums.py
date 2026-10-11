@@ -97,6 +97,7 @@ class Handler(StrEnum):
     SQL = "SQL"
     BUSINESS_RULES = "BUSINESS_RULES"
     EMAIL_ALERT = "EMAIL_ALERT"
+    EVENT_WAIT = "EVENT_WAIT"
 
 
 class RunCondition(StrEnum):

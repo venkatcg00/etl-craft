@@ -92,7 +92,7 @@ CREATE TABLE CFG_TASKS (
     UPDATED_DATE         TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
     CONSTRAINT ck_tasks_code CHECK (TASK_CODE GLOB '[A-Za-z]*' AND TASK_CODE NOT GLOB '*[^A-Za-z0-9_]*' AND length(TASK_CODE) <= 128 AND instr(TASK_CODE, char(0)) = 0),
     CONSTRAINT ck_tasks_task_type     CHECK (TASK_TYPE IN ('INGESTION','ETL')),
-    CONSTRAINT ck_tasks_handler       CHECK (HANDLER IN ('PYTHON','SQL','BUSINESS_RULES','EMAIL_ALERT')),
+    CONSTRAINT ck_tasks_handler       CHECK (HANDLER IN ('PYTHON','SQL','BUSINESS_RULES','EMAIL_ALERT','EVENT_WAIT')),
     CONSTRAINT ck_tasks_active_flag   CHECK (ACTIVE_FLAG IN ('Y','N')),
     CONSTRAINT ck_tasks_run_condition CHECK (RUN_CONDITION IS NULL OR RUN_CONDITION IN ('ALL','ANY','N')),
     CONSTRAINT ck_tasks_run_condition_count CHECK (
@@ -1023,11 +1023,14 @@ CREATE TABLE AUD_GATE_WAITS (
     FIRST_CHECK_AT TIMESTAMP NOT NULL,
     NEXT_CHECK_AT TIMESTAMP,
     LOOKS INT NOT NULL,
-    WAIT_UNTIL TIMESTAMP NOT NULL,
+    WAIT_UNTIL TIMESTAMP,
+    WAIT_KIND VARCHAR NOT NULL DEFAULT 'DEPENDENCY' CHECK (WAIT_KIND IN ('DEPENDENCY','EVENT')),
+    EVENT_OBSERVATIONS TEXT,
+    CONSTRAINT ck_gate_wait_deadline CHECK (WAIT_KIND = 'EVENT' OR WAIT_UNTIL IS NOT NULL),
     CONSTRAINT ck_gate_wait_task CHECK (TASK_ID IS NULL OR TASK_ID > 0),
     CONSTRAINT ck_gate_wait_looks CHECK (LOOKS >= 0 AND LOOKS <= 30)
 );
-CREATE UNIQUE INDEX ux_gate_wait ON AUD_GATE_WAITS (PIPELINE_RUN_ID, COALESCE(TASK_ID,0));
+CREATE UNIQUE INDEX ux_gate_wait ON AUD_GATE_WAITS (PIPELINE_RUN_ID, COALESCE(TASK_ID,0), WAIT_KIND);
 CREATE TRIGGER trg_actor_guard_aud_gate_waits_insert BEFORE INSERT ON AUD_GATE_WAITS
 BEGIN
     SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'audit rows are written only by etl-craft; use etl-craft run, mark or cancel') END;
@@ -1073,3 +1076,44 @@ END;
 -- The CFG_ change-history triggers and the AUD_METADATA_CHANGES view over the history tables are
 -- installed by the dialect's refresh_metadata_triggers, which every schema install and migration
 -- runs, from the tables' current columns.
+
+-- Immutable triggering evidence for one successful event task run.
+CREATE TABLE AUD_TASK_EVENTS (
+    TASK_RUN_ID BIGINT PRIMARY KEY REFERENCES AUD_TASK_RUN_LOG(TASK_RUN_ID),
+    EVIDENCE TEXT NOT NULL
+);
+-- Canonical paths already consumed by an event task, preventing repeat delivery.
+CREATE TABLE AUD_EVENT_FILES (
+    TASK_ID BIGINT NOT NULL REFERENCES CFG_TASKS(TASK_ID),
+    FILE_PATH TEXT NOT NULL,
+    TASK_RUN_ID BIGINT NOT NULL REFERENCES AUD_TASK_EVENTS(TASK_RUN_ID),
+    CONSTRAINT pk_event_files PRIMARY KEY (TASK_ID, FILE_PATH)
+);
+CREATE TRIGGER trg_actor_guard_aud_task_events_insert BEFORE INSERT ON AUD_TASK_EVENTS
+BEGIN
+    SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'AUD_TASK_EVENTS is written only by etl-craft') END;
+END;
+CREATE TRIGGER trg_actor_guard_aud_task_events_update BEFORE UPDATE ON AUD_TASK_EVENTS
+BEGIN
+    SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'AUD_TASK_EVENTS is written only by etl-craft') END;
+    SELECT CASE WHEN etl_craft_purpose() <> 'retention' THEN RAISE(ABORT, 'AUD_TASK_EVENTS immutable history; use a new action or etl-craft retention') END;
+END;
+CREATE TRIGGER trg_actor_guard_aud_task_events_delete BEFORE DELETE ON AUD_TASK_EVENTS
+BEGIN
+    SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'AUD_TASK_EVENTS is written only by etl-craft') END;
+    SELECT CASE WHEN etl_craft_purpose() <> 'retention' THEN RAISE(ABORT, 'AUD_TASK_EVENTS immutable history; use a new action or etl-craft retention') END;
+END;
+CREATE TRIGGER trg_actor_guard_aud_event_files_insert BEFORE INSERT ON AUD_EVENT_FILES
+BEGIN
+    SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'AUD_EVENT_FILES is written only by etl-craft') END;
+END;
+CREATE TRIGGER trg_actor_guard_aud_event_files_update BEFORE UPDATE ON AUD_EVENT_FILES
+BEGIN
+    SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'AUD_EVENT_FILES is written only by etl-craft') END;
+    SELECT CASE WHEN etl_craft_purpose() <> 'retention' THEN RAISE(ABORT, 'AUD_EVENT_FILES immutable history; use a new action or etl-craft retention') END;
+END;
+CREATE TRIGGER trg_actor_guard_aud_event_files_delete BEFORE DELETE ON AUD_EVENT_FILES
+BEGIN
+    SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'AUD_EVENT_FILES is written only by etl-craft') END;
+    SELECT CASE WHEN etl_craft_purpose() <> 'retention' THEN RAISE(ABORT, 'AUD_EVENT_FILES immutable history; use a new action or etl-craft retention') END;
+END;

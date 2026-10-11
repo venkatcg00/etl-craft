@@ -16,6 +16,7 @@ GUIDE_FILES = {
     "SQL": "sql-tasks.md",
     "PYTHON": "ingestion-scripts.md",
     "EMAIL_ALERT": "email-alerts.md",
+    "EVENT_WAIT": "event-waits.md",
 }
 SCHEMAS = pages.REPO / "src" / "etl_craft" / "dialects" / "engine"
 

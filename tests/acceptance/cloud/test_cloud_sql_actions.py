@@ -737,3 +737,48 @@ def test_watermark_literals_on_snowflake(tmp_path, table_format):
             os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"],
         )
     )
+
+
+def walk_events(w):
+    """Read-only warehouse event waits and portable file literals."""
+    from fixtures.event_waits import check_event_queries
+
+    target = f"etl_craft_event_{uuid.uuid4().hex[:8]}"
+    try:
+        check_event_queries(w, target)
+    finally:
+        w.execute(f"DROP TABLE IF EXISTS {w.name(target)}")
+        w.warehouse.dispose()
+        w.engine_db.dispose()
+
+
+@pytest.mark.cloud_databricks
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_event_waits_on_databricks(tmp_path, table_format):
+    require_variables("DATABRICKS", DATABRICKS_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_DATABRICKS_{name}" for name in DATABRICKS_VARS}
+    walk_events(
+        cloud_world(
+            tmp_path,
+            "Databricks",
+            fields,
+            table_format,
+            os.environ["ETL_CRAFT_TEST_DATABRICKS_SCHEMA"],
+        )
+    )
+
+
+@pytest.mark.cloud_snowflake
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_event_waits_on_snowflake(tmp_path, table_format):
+    require_variables("SNOWFLAKE", SNOWFLAKE_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
+    walk_events(
+        cloud_world(
+            tmp_path,
+            "Snowflake",
+            fields,
+            table_format,
+            os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"],
+        )
+    )

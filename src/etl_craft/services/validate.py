@@ -49,7 +49,7 @@ from etl_craft.engine.repository.validation import (
 from etl_craft.execution.limits import task_timeout_seconds
 from etl_craft.execution.remote import unsupported_rules
 from etl_craft.execution.retries import task_retry_policy
-from etl_craft.handlers import email_alert, python_scripts
+from etl_craft.handlers import email_alert, event_wait, python_scripts
 from etl_craft.handlers.business_rules import check_rule
 from etl_craft.handlers.registry import COMMON_PARAMETERS, TaskContext
 from etl_craft.handlers.sql import task_dialect
@@ -68,6 +68,7 @@ FULL_REPLACE = frozenset({SqlAction.CREATE_TABLE, SqlAction.OVERWRITE_TABLE})
 """The SQL actions that rebuild every row of their target, and so every ``ROW_ID``."""
 
 KNOWN_PARAMETERS: dict[str, frozenset[str]] = {
+    Handler.EVENT_WAIT: event_wait.PARAMETERS,
     Handler.SQL: SQL_PARAMETERS,
     Handler.BUSINESS_RULES: frozenset(),
     Handler.EMAIL_ALERT: email_alert.PARAMETERS,
@@ -266,7 +267,7 @@ def _no_rows_reason(task: ActiveTask, params: Mapping[str, str]) -> str | None:
         if action and action not in ROWS_REPORTED:
             return f"is a {action} task and reports no target rows"
         return None
-    if task.handler in (Handler.BUSINESS_RULES, Handler.EMAIL_ALERT):
+    if task.handler in (Handler.BUSINESS_RULES, Handler.EMAIL_ALERT, Handler.EVENT_WAIT):
         return f"is a {task.handler} task and reports no target rows"
     return None
 
@@ -513,7 +514,13 @@ def _email_alert(conn: Connection, context: TaskContext, data: _Metadata) -> lis
     return problems
 
 
+def _event_wait(conn: Connection, context: TaskContext, data: _Metadata) -> list[str]:
+    event_wait.read_event(context.config, context.task_params)
+    return []
+
+
 CHECKS: dict[str, Callable[[Connection, TaskContext, _Metadata], list[str]]] = {
+    Handler.EVENT_WAIT: _event_wait,
     Handler.SQL: _sql,
     Handler.BUSINESS_RULES: _business_rules,
     Handler.PYTHON: _python,

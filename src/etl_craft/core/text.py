@@ -304,6 +304,7 @@ def substitute_task_tokens(
     pipeline_id_substitution: bool = False,
     task_run_id_substitution: bool = False,
     watermark_literal: str | None = None,
+    event_files_literal: str | None = None,
 ) -> str:
     """Replace execution-identity and run-date tokens, each only when its switch is on.
 
@@ -313,6 +314,7 @@ def substitute_task_tokens(
     - ``$$pipeline_run_id_filter`` becomes ``pipeline_run_id = <id>``, or ``1=1`` for a ``FULL``
       refresh or when ``force_all`` asks for every row, when ``filter_enabled`` is on (the
       task's ``PIPELINE_RUN_ID_FILTER``).
+    - ``$$event_files`` becomes escaped SQL file literals from successful event waits.
     - ``$$watermark`` becomes the supplied typed SQL literal, when ``watermark_literal``
       is present; SQL task definitions supply it from the checked offset.
     - ``$$run_date`` becomes the date the run runs as of, as ``DATE 'YYYY-MM-DD'``, when
@@ -330,6 +332,11 @@ def substitute_task_tokens(
         if not protected
         for match in TOKEN.finditer(part)
     }
+    if "event_files" in found and event_files_literal == "":
+        raise HandlerError(
+            f"{source} uses $$event_files, but this run has no successful file EVENT_WAIT; "
+            "add a SUCCESS dependency on the file wait before reading its files"
+        )
     known = {
         PIPELINE_ID_TOKEN[2:]: pipeline_id_substitution,
         PIPELINE_RUN_ID_TOKEN[2:]: pipeline_run_id_substitution,
@@ -337,6 +344,7 @@ def substitute_task_tokens(
         PIPELINE_RUN_ID_FILTER_TOKEN[2:]: filter_enabled,
         RUN_DATE_TOKEN[2:]: run_date_substitution,
         "watermark": watermark_literal is not None,
+        "event_files": "event_files" in found,
     }
     switch = {
         PIPELINE_ID_TOKEN[2:]: "PIPELINE_ID_SUBSTITUTION",
@@ -345,6 +353,7 @@ def substitute_task_tokens(
         PIPELINE_RUN_ID_FILTER_TOKEN[2:]: "PIPELINE_RUN_ID_FILTER",
         RUN_DATE_TOKEN[2:]: "RUN_DATE_SUBSTITUTION",
         "watermark": "WATERMARK_COLUMN, WATERMARK_TYPE and WATERMARK_START",
+        "event_files": "a successful EVENT_WAIT in this run",
     }
     unknown = sorted(found - known.keys())
     if unknown:
@@ -372,6 +381,7 @@ def substitute_task_tokens(
         PIPELINE_RUN_ID_FILTER_TOKEN[2:]: "1=1" if full else f"pipeline_run_id = {run_id}",
         RUN_DATE_TOKEN[2:]: f"DATE '{run_date.isoformat()}'",
         "watermark": watermark_literal or "NULL",
+        "event_files": event_files_literal or "NULL",
     }
     return "".join(
         part if protected else TOKEN.sub(lambda match: replacements[match.group(1)], part)

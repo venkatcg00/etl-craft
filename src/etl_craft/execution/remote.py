@@ -37,7 +37,7 @@ from etl_craft.engine.repository.dependencies import (
     fetch_pipeline_graph,
 )
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
-from etl_craft.engine.repository.tasks import fetch_task_codes
+from etl_craft.engine.repository.tasks import fetch_task_codes, fetch_task_execution_detail
 
 LOCAL_MODE_REMEDY = (
     "or run it in local mode (Orchestration.Mode: local), where etl-craft applies it"
@@ -91,6 +91,15 @@ def unsupported_rules(
     found: list[UnsupportedRule] = []
     for task in sorted(data.tasks, key=lambda t: codes[t.task_id]):
         where = f"{pipeline_code}.{codes[task.task_id]}"
+        if fetch_task_execution_detail(conn, task.task_id).handler == "EVENT_WAIT":
+            found.append(
+                UnsupportedRule(
+                    where,
+                    "HANDLER = 'EVENT_WAIT'",
+                    "Durable event waits are scheduled without workers in local mode; "
+                    f"{LOCAL_MODE_REMEDY}.",
+                )
+            )
         if task.run_condition == RunCondition.N:
             found.append(
                 UnsupportedRule(

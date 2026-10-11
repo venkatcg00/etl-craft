@@ -1,0 +1,1 @@
+INSERT INTO AUD_TASK_EVENTS (TASK_RUN_ID,EVIDENCE) VALUES (:task_run_id,:evidence)

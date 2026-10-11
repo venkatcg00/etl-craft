@@ -753,6 +753,7 @@ dependencies = [
     { name = "pyyaml" },
     { name = "sqlalchemy" },
     { name = "sqlglot" },
+    { name = "watchdog" },
 ]
 
 [package.optional-dependencies]
@@ -824,6 +825,7 @@ requires-dist = [
     { name = "sqlglot", specifier = ">=26" },
     { name = "trino", extras = ["sqlalchemy"], marker = "extra == 'trino'", specifier = ">=0.330" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.35" },
+    { name = "watchdog", specifier = ">=6" },
 ]
 provides-extras = ["server", "aws", "databricks", "publish", "snowflake", "trino"]
 

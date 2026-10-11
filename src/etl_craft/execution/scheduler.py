@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import contextvars
 import logging
+import threading
 import time
 from collections.abc import Callable
-from datetime import datetime
+from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import datetime, timedelta
 
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
@@ -16,8 +19,10 @@ from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.graph import DependencyGraph, TaskRunState
 from etl_craft.engine import runlog
 from etl_craft.engine.repository import trackers
-from etl_craft.engine.repository.tasks import fetch_task_execution_detail
+from etl_craft.engine.repository.tasks import fetch_task_execution_detail, fetch_task_parameters
 from etl_craft.execution import leases
+from etl_craft.execution.events import EventCheck, check_event
+from etl_craft.execution.file_events import FileEvents
 from etl_craft.execution.gates import Clock, CrossPipelineCheck, TrackedGate, check_gate
 from etl_craft.execution.interventions import record_gate_bypass
 from etl_craft.execution.pools import ExecutionHandle, HandleState, Pool, slot_kind
@@ -66,6 +71,12 @@ class Scheduler:
         self.pool: Pool = pool
         self.handlers: dict[int, str] = {}
         self.jobs: dict[int, ExecutionHandle] = {}
+        self.event_stop = threading.Event()
+        self.sql_events: dict[int, bool] = {}
+        self.event_due: dict[int, EventCheck] = {}
+        self.file_events = FileEvents()
+        self.event_checks: dict[int, Future[EventCheck]] = {}
+        self.event_executor: ThreadPoolExecutor | None = None
         self.attempted: set[int] = set()
         self.completed: set[int] = set()
         self.failures_final = False
@@ -84,6 +95,15 @@ class Scheduler:
             or self.paused()
         ):
             return not self.jobs
+        if (
+            not self.jobs
+            and self.event_due
+            and not self.event_checks
+            and self.next_check_at is not None
+            and self.clock.now() < self.next_check_at
+            and not self.file_events.pending()
+        ):
+            return False
         retries, exhausted = refresh_retries(
             self.engine,
             self.config,
@@ -128,7 +148,10 @@ class Scheduler:
         for task_id in ready:
             if task_id in retries and retries[task_id] > self.clock.now():
                 continue
-            if self.pool.capacity().free[slot_kind(self._handler(task_id))] == 0:
+            if (
+                self._handler(task_id) != "EVENT_WAIT"
+                and self.pool.capacity().free[slot_kind(self._handler(task_id))] == 0
+            ):
                 continue
             admission = CrossPipelineCheck(0) if not self.force else None
             decisions: tuple[trackers.GateDecision, ...] = ()
@@ -175,6 +198,14 @@ class Scheduler:
                         cross.bypassed,
                         task_id=task_id,
                     )
+            if self._handler(task_id) == "EVENT_WAIT":
+                event = self._event_check(task_id, decisions)
+                if event.next_check_at is not None:
+                    waiting.append(event.next_check_at)
+                    continue
+                self.attempted.add(task_id)
+                self.completed.add(task_id)
+                continue
             self.attempted.add(task_id)
             self.failures_final = False
             logger.info("%s: dispatch %s", self.pipeline_code, self.task_codes[task_id])
@@ -191,6 +222,63 @@ class Scheduler:
             return False
         self.never_ready = pending
         return True
+
+    def _event_check(
+        self, task_id: int, decisions: tuple[trackers.GateDecision, ...]
+    ) -> EventCheck:
+        first = task_id not in self.sql_events
+        if first:
+            with self.engine.connect() as conn:
+                params = fetch_task_parameters(conn, task_id)
+            self.sql_events[task_id] = bool(params.get("EVENT_SQL"))
+            if params.get("EVENT_FILE") and "\x00" not in params["EVENT_FILE"]:
+                self.file_events.watch(task_id, params["EVENT_FILE"], self.config.project_dir)
+        changed = self.file_events.changed(task_id)
+        previous = self.event_due.get(task_id)
+        if (
+            previous
+            and previous.next_check_at
+            and self.clock.now() < previous.next_check_at
+            and not changed
+        ):
+            return previous
+        if not self.sql_events[task_id]:
+            result = check_event(
+                self.engine,
+                self.config,
+                self.pipeline_run_id,
+                task_id,
+                self.clock.now(),
+                decisions=decisions,
+                force_check=first or changed,
+            )
+            self.event_due[task_id] = result
+            if result.next_check_at is None:
+                self.file_events.remove(task_id)
+            return result
+        future = self.event_checks.get(task_id)
+        if future is not None and future.done():
+            del self.event_checks[task_id]
+            result = future.result()
+            self.event_due[task_id] = result
+            return result
+        if future is None:
+            if self.event_executor is None:
+                self.event_executor = ThreadPoolExecutor(
+                    max_workers=len(self.graph.task_ids), thread_name_prefix="etl-craft-event"
+                )
+            self.event_checks[task_id] = self.event_executor.submit(
+                contextvars.copy_context().run,
+                check_event,
+                self.engine,
+                self.config,
+                self.pipeline_run_id,
+                task_id,
+                self.clock.now(),
+                decisions=decisions,
+                cancel=self.event_stop,
+            )
+        return EventCheck(self.clock.now() + timedelta(seconds=0.1))
 
     def _handler(self, task_id: int) -> str:
         if task_id not in self.handlers:
@@ -238,6 +326,7 @@ class Scheduler:
                 raise status.error
 
     def _stop_running(self) -> None:
+        self.event_stop.set()
         for handle in self.jobs.values():
             self.pool.cancel(handle, self.grace_seconds)
 
@@ -249,5 +338,9 @@ class Scheduler:
         while any(self.pool.status(h).state is HandleState.RUNNING for h in self.jobs.values()):
             time.sleep(0.05)
         self.jobs.clear()
+        self.file_events.close()
+        if self.event_executor is not None:
+            self.event_stop.set()
+            self.event_executor.shutdown(wait=True, cancel_futures=True)
         if self.own_pool is not None:
             self.own_pool.close()

@@ -118,7 +118,8 @@ item's text, or work done early under another item.
 | Configuration history | Done | #144 | A typed SCD type 4 history table per `CFG_` table, `AUD_METADATA_CHANGES` a view over them, and `config export --as-of` |
 | 0.4 gate | In progress | | Seven-day soak of the frozen candidate ends 17 October 2026 at 08:01 UTC; release remains gated |
 | S5.L SQL watermarks | Done | #145 | Typed source positions, atomic success offsets, attempt/run ranges and audited resets |
-| S5.M to S5.N, then S5.C and later | Not started | | |
+| S5.M Event waits | Done | #146 | Durable file/query waits, indefinite deadlines, native file hints, evidence and downstream file tokens |
+| S5.N, then S5.C and later | Not started | | |
 
 ### Handover notes
 
@@ -155,8 +156,33 @@ S5.L passed the full local checks, installed-wheel matrix, Python 3.12/3.13 unit
 twenty consecutive runs of the fencing/reset guards and tagged 0.3.0 upgrades on both Engine
 DBs. Its watermark batch/retry and TEXT/TIMESTAMP literal tests passed on Databricks and
 Snowflake, native and Iceberg. The 0.4 soak continues on its separate frozen deployment.
+S5.M passed the full local checks (3,454 tests, 88 expected skips, 94% coverage), strict docs,
+384 focused tests, the 27-case installed-wheel matrix, Python 3.12/3.13 unit suites (1,567 each),
+and tagged 0.3.0 upgrades on both Engine DBs. Twenty consecutive rounds of concurrency, rollback,
+cancellation, idle notification and orphan-probe guards passed (200 cases). Warehouse-row events
+and file literals passed on Databricks and Snowflake, native and Iceberg (four cases), including
+indefinite deadlines. The separate frozen 0.4 soak is unchanged.
 
 **Choices that differ from the item text.**
+
+- S5.M continues while the frozen 0.4 soak runs; its deployment is unchanged. Event waits run
+  cooperatively in local mode; remote validation and DAG generation refuse them because a
+  remote deferrable sensor is outside this item. A task command checks once and returns WAITING,
+  while the pipeline runner and overseer resume the durable wait. File consumption is scoped
+  to the event task's TASK_ID and canonical path; overwriting a consumed filename does not
+  create another delivery. Settling observes unchanged size and modification time for a full
+  interval, including files already old at the first check. SQL receives escaped file literals;
+  scripts receive `task.event_files` or a top-level `INPUT_PARAMS` token. A completed event keeps
+  its original evidence on an explicit rerun rather than claiming another delivery under the
+  same task-run identity. Timeout/probe failures do not reset their budget through automatic
+  retries. SQL probes use fresh, cancellable interpreters outside the cooperative scheduler,
+  capped at thirty seconds or the remaining event budget. A stopped probe leaves the event
+  waiting until its original deadline; a zero budget allows no SQL connection wait. Query rows
+  are evidence only, not consumed; authors scope their probe to new work.
+  `EVENT_TIMEOUT_MINUTES=NONE` persists an indefinite wait. File notification hints bring
+  forward checks; settling timers and configurable `EVENT_POLL_SECONDS` (default 60 seconds)
+  recover missed hints and control SQL query frequency. Neither uses task worker slots; existing
+  supervisor health/cancellation checks still run. Notification receivers are outside this item.
 
 - S5.L proceeds while the frozen 0.4 candidate's seven-day soak runs, as requested; that
   deployment is unchanged and does not contain S5.L. Watermarks apply to `APPEND_TABLE`,

@@ -63,6 +63,7 @@ from etl_craft.engine.repository.tasks import (
 )
 from etl_craft.engine.retry import retrying
 from etl_craft.execution import leases
+from etl_craft.execution.events import check_event
 from etl_craft.execution.gates import (
     CrossPipelineCheck,
     TrackedGate,
@@ -607,6 +608,18 @@ def _run_attempt(
     decisions: tuple[trackers.GateDecision, ...] = (),
 ) -> TaskOutcome:
     """Admit an attempt and run it in the foreground; see ``execute_attempt``."""
+    with engine.connect() as conn:
+        handler = fetch_task_execution_detail(conn, task_id).handler
+    if handler == "EVENT_WAIT":
+        result = check_event(
+            engine, config, pipeline_run_id, task_id, datetime.now(UTC), decisions=decisions
+        )
+        return TaskOutcome(
+            RunStatus(result.status or "IN-PROGRESS"),
+            result.message,
+            result.task_run_id,
+            waiting=result.next_check_at is not None,
+        )
     spec = admit_attempt(
         engine,
         config,

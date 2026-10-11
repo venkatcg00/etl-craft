@@ -145,6 +145,9 @@ def seeded_tables(db):
             "depends_on_task_id": t2,
             "pipeline_run_id": r1,
             "task_run_id": task_run,
+            "file_path": "/test/event.csv",
+            "evidence": '{"files":[]}',
+            "wait_until": datetime.now(UTC),
             "pipeline_dependency_id": dependency,
             "consumed_pipeline_run_id": r2,
             "selected_pipeline_run_id": r2,
@@ -186,7 +189,10 @@ def seeded_tables(db):
                 if (
                     column.get("identity")
                     or column.get("autoincrement")
-                    or (column.get("primary_key") and lower not in {"task_id", "target_object"})
+                    or (
+                        column.get("primary_key")
+                        and lower not in {"task_id", "target_object", "file_path", "task_run_id"}
+                    )
                 ):
                     continue
                 if (
@@ -302,6 +308,7 @@ def test_guarded_upgrade_rolls_back_with_the_ledger(empty_engine_db, monkeypatch
         "0020_reject_count.sql",
         "0021_config_history.sql",
         "0022_watermarks.sql",
+        "0023_event_waits.sql",
     ]
 
 
@@ -518,6 +525,8 @@ def test_terminal_attempts_and_append_only_rows_are_immutable(engine_db):
     tables = seeded_tables(engine_db)
     protected = {
         "AUD_TASK_ATTEMPTS",
+        "AUD_TASK_EVENTS",
+        "AUD_EVENT_FILES",
         "AUD_RUN_INTERVENTIONS",
         "AUD_GATE_DECISIONS",
         "AUD_DEPENDENCY_CONSUMPTION",
