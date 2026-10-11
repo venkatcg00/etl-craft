@@ -22,6 +22,7 @@ import threading
 from collections.abc import Sequence
 from contextlib import suppress
 from contextvars import ContextVar
+from dataclasses import replace
 from pathlib import Path
 from types import FrameType
 from typing import NoReturn
@@ -128,6 +129,8 @@ def _run_bound(engine: Engine, config: ConnectorConfig, args: argparse.Namespace
 def run_handler(engine: Engine, context: TaskContext) -> int:
     """Run ``context``'s handler and record its outcome on the task's row."""
     identity = _identity.get()
+    if identity is not None:
+        context = replace(context, attempt_id=identity[0], owner=identity[1])
     logger.info("running the %s handler", context.handler)
     try:
         result = resolve_handler(context.handler)(context, engine)

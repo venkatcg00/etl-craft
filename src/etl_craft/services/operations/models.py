@@ -64,6 +64,8 @@ class AttemptView:
     delete_count: int | None
     rows_written: int | None
     reject_count: int | None
+    watermark_from: str | None
+    watermark_to: str | None
     error_message: str | None
     log_path: str | None
     requested_by: str | None
@@ -93,6 +95,8 @@ class TaskRunView:
     delete_count: int | None
     rows_written: int | None
     reject_count: int | None
+    watermark_from: str | None
+    watermark_to: str | None
     error_message: str | None
     attempts: tuple[AttemptView, ...]
 

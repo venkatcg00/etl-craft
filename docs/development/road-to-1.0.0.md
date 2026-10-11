@@ -116,7 +116,9 @@ item's text, or work done early under another item.
 | SQL checks with sqlglot | Done | #141 | Parse-tree checks of SELECTs and rule SQL in the warehouse's dialect; `validate` warns on SQL sqlglot cannot read |
 | S5.K Row-level rejects | Done | #143 | `REJECT_LIMIT` sets aside rows the target cannot take in `<target>__rejects`; `REJECT_COUNT` in the run logs |
 | Configuration history | Done | #144 | A typed SCD type 4 history table per `CFG_` table, `AUD_METADATA_CHANGES` a view over them, and `config export --as-of` |
-| 0.4 gate; S5.L to S5.N, then S5.C and later | Not started | | |
+| 0.4 gate | In progress | | Seven-day soak of the frozen candidate ends 17 October 2026 at 08:01 UTC; release remains gated |
+| S5.L SQL watermarks | Done | #145 | Typed source positions, atomic success offsets, attempt/run ranges and audited resets |
+| S5.M to S5.N, then S5.C and later | Not started | | |
 
 ### Handover notes
 
@@ -149,8 +151,21 @@ S5.K passed the full local checks, the installed-wheel matrix and the reject tes
 Databricks and Snowflake, native and Iceberg.
 Configuration history passed the full local checks and the installed-wheel matrix; it changes no
 warehouse code, so no cloud suite ran.
+S5.L passed the full local checks, installed-wheel matrix, Python 3.12/3.13 unit suites,
+twenty consecutive runs of the fencing/reset guards and tagged 0.3.0 upgrades on both Engine
+DBs. Its watermark batch/retry and TEXT/TIMESTAMP literal tests passed on Databricks and
+Snowflake, native and Iceberg. The 0.4 soak continues on its separate frozen deployment.
 
 **Choices that differ from the item text.**
+
+- S5.L proceeds while the frozen 0.4 candidate's seven-day soak runs, as requested; that
+  deployment is unchanged and does not contain S5.L. Watermarks apply to `APPEND_TABLE`,
+  `SCD1_MERGE`, `SCD2_MERGE` and `DELETE_ROWS`; replacing a target with an incremental batch
+  would discard its earlier rows. The staged maximum is measured before rejects and
+  deduplication, in the warehouse's ordering, and never moves backwards. Backfills read
+  `WATERMARK_START` without changing the scheduled position. Resetting uses the existing `MARK`
+  intervention, records both typed positions and requires a reason; it refuses active attempts
+  and leaves run status and historical ranges alone. Start a new run or rerun to reload.
 
 - Configuration history is not a roadmap item. Each `CFG_` table has a typed history table in
   the SCD type 4 pattern, with `VALID_FROM`, `VALID_TO` and `CURRENT_FLAG` (not `ACTIVE_FLAG`,

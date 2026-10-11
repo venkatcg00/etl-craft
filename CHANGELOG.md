@@ -8,6 +8,14 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- SQL tasks can read source changes with `WATERMARK_COLUMN`, `WATERMARK_TYPE`,
+  `WATERMARK_START` and `$$watermark`. The staged high-water mark commits with a successful
+  attempt; failures, empty batches and backfills keep the stored value. Each run and attempt
+  records `WATERMARK_FROM` and `WATERMARK_TO`, shown by explain and the catalog.
+  `mark --watermark VALUE --reason ...` resets a SQL task's position under an exact run identity,
+  with actor and before/after values recorded; the HTTP mark endpoint accepts the same reset.
+  Upgrade the Engine DB with migration `0022_watermarks`.
+
 - `SQL_ACTION=CREATE_VIEW` creates or replaces the target as a view over the task's SELECT, and
   refuses when a table has that name. Replacing a view keeps the grants on it. `SECURE_VIEW =
   true` makes it a secure view: `SECURE` on Snowflake, `security_barrier` on PostgreSQL; other

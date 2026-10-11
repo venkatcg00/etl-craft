@@ -912,3 +912,34 @@ def release_run_lease(conn: Connection, run_id: int, *, owner: str, expired: boo
         statement(conn, query), {"row_id": run_id, "owner": owner, "now": datetime.now(UTC)}
     )
     return result.rowcount == 1
+
+
+def record_watermark_range(
+    conn: Connection,
+    task_run_id: int,
+    watermark_from: str,
+    watermark_to: str,
+    *,
+    attempt_id: int | None = None,
+    owner: str | None = None,
+) -> None:
+    """Record a staged range only on the live owned attempt, preserving failed ranges."""
+    params = {
+        "row_id": attempt_id,
+        "task_run_id": task_run_id,
+        "owner": owner,
+        "now": datetime.now(UTC),
+        "watermark_from": watermark_from,
+        "watermark_to": watermark_to,
+    }
+    with conn.begin_nested():
+        query = (
+            "transition_record_watermark"
+            if attempt_id is not None
+            else "transition_record_task_watermark"
+        )
+        changed = conn.execute(statement(conn, query), params)
+        if changed.rowcount != 1:
+            raise _stale(conn, "task", task_run_id, "live owned attempt for watermark range", owner)
+        if attempt_id is not None:
+            _sync_summary(conn, attempt_id)

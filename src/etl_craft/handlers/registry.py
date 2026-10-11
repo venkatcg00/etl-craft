@@ -46,6 +46,8 @@ class TaskContext:
     rerun: bool = False
     run_date: date = field(default_factory=lambda: datetime.now(UTC).date())
     backfill: bool = False
+    attempt_id: int | None = None
+    owner: str | None = None
 
 
 @dataclass(frozen=True)

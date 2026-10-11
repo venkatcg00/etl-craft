@@ -74,3 +74,11 @@ The end-to-end tests run this demo from the built wheel installed with pip, on S
 PostgreSQL Engine DBs and on PostgreSQL, DuckDB, DuckDB over Iceberg and Trino warehouses, in
 local mode and under a simulated orchestrator; and installed with uv, on SQLite and DuckDB
 (`tests/e2e/test_demo.py`).
+
+## SQL sources with watermarks
+
+The client feeds demonstrate Python offsets. A SQL source outside etl-craft can use the same
+typed offset store with `WATERMARK_COLUMN`, `WATERMARK_TYPE`, `WATERMARK_START` and
+`$$watermark`; [the SQL watermark example](../../docs/examples/sql-watermark.md) shows the
+parameters and a merge reload. The demo's existing SQL tasks keep their pipeline-run filters
+because their sources are already written by etl-craft.

@@ -75,6 +75,54 @@ is literal text and does not require a substitution switch. Tokens inside dollar
 strings are also preserved; tagged delimiters such as `$literal$...$literal$` distinguish
 literal bodies from adjacent bare substitution tokens.
 
+## SQL watermarks
+
+For a source table outside etl-craft, an incremental `APPEND_TABLE`, `SCD1_MERGE`,
+`SCD2_MERGE` or `DELETE_ROWS` task can track its own position. Set these three parameters:
+
+| Parameter | Meaning |
+| --- | --- |
+| `WATERMARK_COLUMN` | A plain column name returned by the SELECT; its greatest value is the next position. |
+| `WATERMARK_TYPE` | `NUMBER`, `TEXT` or `TIMESTAMP`, matching that column's type. |
+| `WATERMARK_START` | The typed lower bound before the first successful run. An empty TEXT start is valid. |
+
+```sql
+SELECT event_id, changed_at, payload
+FROM source.events
+WHERE changed_at > $$watermark
+```
+
+With `WATERMARK_COLUMN=changed_at`, `WATERMARK_TYPE=TIMESTAMP` and
+`WATERMARK_START=2026-01-01T00:00:00`, the token becomes a timestamp literal. After a
+successful load, it becomes the last committed position from `AUD_TASK_OFFSET_TRACKER`.
+The SELECT must contain the token outside strings and comments. Its column must be non-NULL,
+and timestamp values should use the source column's timezone. The warehouse compares and
+orders values using its own timestamp and collation rules. Numbers must be exact
+integers or decimals; cast floating-point columns to DECIMAL in the SELECT.
+
+The SELECT is staged once. Its maximum is measured before deduplication and row rejects:
+accepted and set-aside rows have both been handled. The new position commits atomically with
+SUCCESS and dependency consumption. A failed attempt keeps the old position, so a retry reads
+the same range. An empty batch keeps it, and a lower maximum never moves it backwards.
+Backfills read from `WATERMARK_START` and record their range, but do not change the scheduled
+position. A FULL refresh does not disable an explicitly configured watermark.
+
+`WATERMARK_FROM` and `WATERMARK_TO` record the lower bound and staged high-water mark on the
+task run and each attempt, including failed writes after staging. `explain` and the catalog
+show these values. They are bounds on the returned batch; the engine does not add an upper
+predicate to the author's SELECT. A task that fails before a range can be measured has no
+recorded range.
+
+Choose a column whose values advance for every change. A strict `>` predicate does not catch
+late rows below the committed position, or a new row equal to it. Use an inclusive predicate
+and a merge when repeated boundary rows need to be read again. `OVERWRITE_TABLE` and
+`CREATE_TABLE` cannot use a watermark: replacing the whole target with an incremental batch
+would discard earlier rows.
+
+To reload an earlier range, use [mark --watermark](run-control.md#reset-a-sql-watermark).
+A merge reloads without inserting duplicate keys; an append reset can repeat rows from earlier
+successful task runs. See [the parameter and SQL example](../examples/sql-watermark.md).
+
 ## The actions
 
 `SQL_ACTION` names the action and `TARGET_OBJECT` the table: `schema.table`, written in the

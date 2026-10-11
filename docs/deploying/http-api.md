@@ -56,7 +56,7 @@ A disconnected client does not cancel committed work; inspect its exact run befo
 | GET | `/runs/{id}`, `/runs/{id}/tasks` | Exact run and configured task states |
 | GET | `/runs/{id}/tasks/{task}/explain` | Task code; shared explanation document |
 | POST | `/runs/{id}/cancel` | Nonblank `reason` |
-| POST | `/runs/{id}/tasks/{task}/mark` | `status`, `reason`; optional `rows`, `stale` |
+| POST | `/runs/{id}/tasks/{task}/mark` | `reason` and either `status` or `watermark`; optional `rows`, `stale` for a status mark |
 | POST | `/runs/{id}/tasks/{task}/rerun` | `reason`; optional `with_downstream` |
 | GET | `/attempts/{id}` | Stored attempt document |
 | GET | `/attempts/{id}/log?offset=0` | Log bytes from a nonnegative byte offset |
@@ -76,3 +76,8 @@ error class, message and CLI exit code.
 The interactive contract is at `/api/v1/docs`; `/api/v1/openapi.json` supplies the machine-readable
 contract. These two documentation endpoints are public and contain no deployment data or
 credentials. The documentation build also publishes the [generated OpenAPI contract](../reference/openapi.json).
+
+A task watermark reset uses `{"watermark":"0","reason":"reload corrected source"}` on the
+mark endpoint. It has the same type validation and live-attempt refusal as the CLI; the run id
+in the URL identifies its intervention record. Task and attempt documents include nullable
+`watermark_from` and `watermark_to` fields.

@@ -64,6 +64,7 @@ from etl_craft.handlers.sql.tables import (
     refuse_null_keys,
     require_target,
 )
+from etl_craft.handlers.sql.watermarks import record_range
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,13 @@ class ActionContext:
         assert self.task.select_sql is not None
         return self.task.select_sql
 
+    def build_stage(self, session: Session, *, empty: bool = False) -> str:
+        """Stage the SELECT once and record its watermark before any target mutation."""
+        stage = build_stage(session, self.select_sql, empty=empty)
+        if self.task.watermark is not None:
+            record_range(session, stage, self.task.watermark, self.context, self.engine_db)
+        return stage
+
     @property
     def stamp(self) -> dict[str, object]:
         """The values the audit columns are stamped with."""
@@ -101,7 +109,7 @@ Action = Callable[[Session, ActionContext], HandlerResult]
 
 def create_table(session: Session, action: ActionContext) -> HandlerResult:
     """Replace the target with the SELECT's rows, stamped with the run id."""
-    stage = build_stage(session, action.select_sql)
+    stage = action.build_stage(session)
     source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
     existing = bool(session.target_columns())
     strategy = session.dialect.replace_strategy
@@ -198,7 +206,7 @@ def setup_table(session: Session, action: ActionContext) -> HandlerResult:
             conn, action.context.pipeline_id, action.context.task_id, action.task.target_object
         )
     writer = writer_action(action.task.setup_for, others, action.task.target_object)
-    stage = build_stage(session, action.select_sql, empty=True)
+    stage = action.build_stage(session, empty=True)
     create_target_shape(session, stage, AUDIT_COLUMNS[writer])
     session.drop(stage)
     if writer in {SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE}:
@@ -241,7 +249,7 @@ def writer_action(setup_for: str | None, others: list[TargetTask], target: str) 
 
 def overwrite_table(session: Session, action: ActionContext) -> HandlerResult:
     """Empty the target and insert the SELECT's rows."""
-    stage = build_stage(session, action.select_sql)
+    stage = action.build_stage(session)
     source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
     stage, rejected = screen(session, stage, action.task, source, action.stamp)
     written = source - (rejected or 0)
@@ -322,7 +330,7 @@ def append_table(session: Session, action: ActionContext) -> HandlerResult:
             f"{session.target_object}`"
         )
     check_identity_types(session, tuple(c for c in IDENTITY_COLUMNS if c.lower() in present))
-    stage = build_stage(session, action.select_sql)
+    stage = action.build_stage(session)
     source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
     stage, rejected = screen(session, stage, action.task, source, action.stamp)
     session.run(
@@ -370,7 +378,7 @@ def _merge_stage(
             f"{session.target} has hash version {version or 'unknown'}; "
             f"run `etl-craft rehash --target {session.target_object}` before merging"
         )
-    stage = build_stage(session, action.select_sql)
+    stage = action.build_stage(session)
     source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
     stage, rejected = screen(session, stage, task, source, action.stamp)
     refuse_null_keys(session, stage, task.merge_key)
@@ -597,7 +605,7 @@ def drop_table(session: Session, action: ActionContext) -> HandlerResult:
 def delete_rows(session: Session, action: ActionContext) -> HandlerResult:
     """Delete, or flag ``DELETE_FLAG='Y'``, the target rows whose merge key the SELECT returns."""
     task = action.task
-    stage = build_stage(session, action.select_sql)
+    stage = action.build_stage(session)
     source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
     target = session.target
     require_target(session)

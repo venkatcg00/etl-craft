@@ -1,0 +1,3 @@
+UPDATE AUD_TASK_ATTEMPTS SET WATERMARK_FROM = :watermark_from, WATERMARK_TO = :watermark_to
+WHERE ATTEMPT_ID = :row_id AND TASK_RUN_ID = :task_run_id
+AND STATUS = 'RUNNING' AND OWNER_ID = :owner AND LEASE_EXPIRES_AT > :now

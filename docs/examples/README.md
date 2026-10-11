@@ -133,3 +133,6 @@ project, one CSV file per `CFG_` table: copy the folder into your project and ch
 [configuration migrations](../guides/configuration-migrations.md), one file per kind of change.
 `config/` is exactly what `etl-craft config export` writes once the migrations are applied, and
 the tests check both on SQLite and PostgreSQL.
+
+[SQL source watermark](sql-watermark.md) shows an incremental external-source merge and an
+audited reload.

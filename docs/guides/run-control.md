@@ -85,6 +85,28 @@ etl-craft mark --pipeline_code SALES_DAILY --run-id 42 --task_code load_orders -
     --rows 1200 --reason "1200 rows loaded by hand"
 ```
 
+## Reset a SQL watermark
+
+```bash
+etl-craft mark --pipeline_code SALES --task_code events --run-id 42 \
+  --watermark '2026-01-01T00:00:00' --reason 'reload corrected source history'
+```
+
+The task must be a SQL task with `WATERMARK_COLUMN`, `WATERMARK_TYPE` and `WATERMARK_START`.
+The value is checked against that type. Select an exact existing run with `--run-id` or
+`--run-key`, or the single active run, for the intervention record. This resets the task's
+position for its next execution; it changes no status or past range. To rerun an already
+successful task, use `run --rerun --task_code ... --run-id ... --reason ...` afterwards.
+
+The request needs a reason and cannot combine `--watermark` with `--status`, `--rows`,
+`--stale` or `--new-run`. Queued, claimed and running attempts refuse the reset until they end
+or are cancelled and reconciled. The target lock serializes resets with SQL reads and writes.
+`AUD_RUN_INTERVENTIONS` records the actor, reason and old/new typed positions as a `MARK`;
+`AUD_ACTIONS` records the full request. Backfills do not change the stored position.
+
+Merges can reload without duplicate keys. Resetting an append can append a row already written
+by a different task run: use a merge when reloading earlier successful batches.
+
 ## Mark a run
 
 Without `--task_code`, `mark` sets the run itself, ending it now if it had not ended:

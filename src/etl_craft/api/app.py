@@ -55,7 +55,8 @@ class Backfill(Reason):
 class Mark(Reason):
     """One task's requested state and optional written row count."""
 
-    status: str
+    status: str | None = None
+    watermark: str | None = None
     rows: int | None = Field(default=None, ge=0)
     stale: bool = False
 
@@ -234,6 +235,7 @@ def create_app(ctx: OperationContext) -> FastAPI:
                 body.status,
                 body.reason,
                 rows=body.rows,
+                watermark=body.watermark,
                 stale=body.stale,
                 selector=RunSelector(run_id=run_id),
             )

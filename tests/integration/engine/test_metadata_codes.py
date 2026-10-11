@@ -233,6 +233,7 @@ def test_a_failed_metadata_rebuild_rolls_back_and_restores_connection_settings(
         "0019_target_view_statement.sql",
         "0020_reject_count.sql",
         "0021_config_history.sql",
+        "0022_watermarks.sql",
     ]
 
 

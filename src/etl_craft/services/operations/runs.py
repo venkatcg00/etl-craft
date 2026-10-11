@@ -272,16 +272,23 @@ def _execute(ctx: OperationContext, request: RunRequest) -> OperationResult:
 def mark(
     ctx: OperationContext,
     pipeline_code: str,
-    status: str,
+    status: str | None,
     reason: str,
     *,
     task_code: str | None = None,
     rows: int | None = None,
+    watermark: str | None = None,
     stale: bool = False,
     new_run: bool = False,
     selector: RunSelector = ACTIVE_RUN,
 ) -> OperationResult:
     """Mark a task, a run, or a new stand-in run with one request audit."""
+    if (status is None) == (watermark is None):
+        raise UsageError("mark needs exactly one of --status or --watermark")
+    if watermark is not None and (not task_code or rows is not None or stale or new_run):
+        raise UsageError(
+            "--watermark needs --task_code, without --status, --rows, --stale or --new-run"
+        )
     if stale and (not task_code or new_run):
         raise UsageError("--stale marks one task: pass --task_code, without --new-run")
     if new_run and (selector.run_id is not None or selector.run_key is not None):
@@ -295,13 +302,26 @@ def mark(
             "reason": reason,
             "task_code": task_code,
             "rows": rows,
+            "watermark": watermark,
             "stale": stale,
             "new_run": new_run,
             "run_id": selector.run_id,
             "run_key": selector.run_key,
         },
     ):
-        if new_run:
+        if watermark is not None:
+            assert task_code is not None
+            done = interventions.reset_watermark(
+                ctx.engine,
+                ctx.config,
+                pipeline_code,
+                task_code,
+                watermark,
+                reason,
+                selector=selector,
+            )
+        elif new_run:
+            assert status is not None
             done = interventions.record_stand_in_run(
                 ctx.engine,
                 ctx.config,
@@ -312,6 +332,7 @@ def mark(
                 rows=rows,
             )
         elif task_code is not None:
+            assert status is not None
             done = interventions.mark_task(
                 ctx.engine,
                 ctx.config,
@@ -324,6 +345,7 @@ def mark(
                 selector=selector,
             )
         else:
+            assert status is not None
             done = interventions.mark_run(
                 ctx.engine, ctx.config, pipeline_code, status, reason, selector=selector
             )
