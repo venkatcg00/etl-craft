@@ -149,8 +149,9 @@ Databricks and Snowflake, native and Iceberg.
 
 **Choices that differ from the item text.**
 
-- S5.K sets aside every row of a merge key returned more than once, since which one should win
-  is the author's call; a duplicate is counted among the rows that pass the other checks, so a
+- S5.K, without `MERGE_DEDUPE_ORDER`, sets aside every row of a merge key returned more than
+  once, since which one should win is the author's call; with it, the order keeps one row per key
+  and none is set aside. A duplicate is counted among the rows that pass the other checks, so a
   key whose other copy has a bad value still loads. The rejects table holds the SELECT's
   columns, not the target's audit columns, which a rejected row never had. Over the limit the
   task writes nothing, rejects included. Besides the cast, the check measures text against a
