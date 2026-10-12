@@ -1,13 +1,11 @@
 """Warehouse drift and repository source seeding on every local warehouse."""
 
-from sqlalchemy import text
-
 from etl_craft.services.catalog import build_catalog
 from etl_craft.services.catalog_site import write_site
 from etl_craft.services.config_files import export_config, read_config_files, sync_config
 from etl_craft.services.source_columns import warehouse_columns
 from etl_craft.services.validate import validate
-from fixtures.metadata import add_task
+from fixtures.metadata import add_source_column, add_task
 
 
 def test_export_seeds_sources_and_validate_names_all_drift(sql_world, tmp_path):
@@ -27,10 +25,10 @@ def test_export_seeds_sources_and_validate_names_all_drift(sql_world, tmp_path):
         )
     folder = tmp_path / "seed"
     result = export_config(world.engine_db, folder, config=world.config)
-    assert result.rows["source_columns.csv"] == 3
+    assert result.rows["columns.csv"] == 3
     loaded = sync_config(world.engine_db, world.config, read_config_files(folder), apply=True)
     assert not loaded.failed
-    assert len([change for change in loaded.changes if change.file == "source_columns.csv"]) == 3
+    assert len([change for change in loaded.changes if change.file == "columns.csv"]) == 3
     export_config(world.engine_db, folder, config=world.config, overwrite=True)
     assert not sync_config(
         world.engine_db, world.config, read_config_files(folder), apply=False
@@ -64,13 +62,7 @@ def test_export_seeds_sources_and_validate_names_all_drift(sql_world, tmp_path):
     with world.warehouse.connect() as conn:
         assert warehouse_columns(conn, world.config, f"{world.schema}.future_source") == []
     with world.engine_db.begin() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO CFG_SOURCE_COLUMNS "
-                "(TABLE_NAME,COLUMN_NAME,DATA_TYPE,COLUMN_POSITION) VALUES (:table,'id','INT',1)"
-            ),
-            {"table": f"{world.schema}.future_source"},
-        )
+        add_source_column(conn, f"{world.schema}.future_source", "id", "INT", 1)
     assert not any(
         finding.where.endswith(".future_source")
         for finding in validate(world.engine_db, world.config).findings
@@ -97,3 +89,43 @@ def test_catalog_finds_sql_target_gaps_without_flagging_audit_columns(sql_world)
     assert len(table.warehouse_findings) == 2
     assert any("lacks documented column removed" in message for message in table.warehouse_findings)
     assert any("adds undocumented column extra" in message for message in table.warehouse_findings)
+
+
+def test_declared_nullability_and_kind_are_compared_with_deployed_structure(sql_world, tmp_path):
+    from sqlalchemy import text
+
+    world = sql_world
+    source = f"{world.schema}.nullable_source"
+    world.execute(f"CREATE TABLE {world.name('nullable_source')} (id INTEGER)")
+    with world.engine_db.begin() as conn:
+        add_task(
+            conn,
+            world.pipeline_id,
+            "reader",
+            SQL_ACTION="CREATE_TABLE",
+            TARGET_OBJECT=f"{world.schema}.output",
+            SOURCE_SQL=f"SELECT id FROM {source}",
+        )
+    folder = tmp_path / "contracts"
+    export_config(world.engine_db, folder, config=world.config)
+    assert sync_config(world.engine_db, world.config, read_config_files(folder), apply=True).applied
+    with world.engine_db.begin() as conn:
+        conn.execute(text("UPDATE CFG_COLUMNS SET IS_NULLABLE='N' WHERE COLUMN_NAME='id'"))
+        conn.execute(
+            text("UPDATE CFG_TABLES SET OBJECT_KIND='VIEW' WHERE TABLE_NAME='nullable_source'")
+        )
+    findings = [
+        finding.message
+        for finding in validate(world.engine_db, world.config).findings
+        if finding.where == f"source {source}"
+    ]
+    assert len(findings) == 2
+    assert any("nullability Y, declared N" in message for message in findings)
+    assert any("object kind TABLE, declared VIEW" in message for message in findings)
+    table = build_catalog(world.engine_db, world.config, with_warehouse=True).tables[source]
+    assert (table.declared_kind, table.warehouse_kind) == ("VIEW", "TABLE")
+    assert (table.columns["id"].declared_nullable, table.columns["id"].warehouse_nullable) == (
+        "N",
+        "Y",
+    )
+    assert len(table.warehouse_findings) == 2

@@ -5,7 +5,7 @@ from sqlalchemy import text
 from etl_craft.services.catalog import build_catalog
 from etl_craft.services.config_files import export_config, read_config_files, sync_config
 from etl_craft.services.lineage import collect
-from fixtures.metadata import add_pipeline, add_task
+from fixtures.metadata import add_pipeline, add_source_column, add_task
 
 
 def test_upstream_stars_join_resolution_and_schema_cache(engine_db, tmp_path, monkeypatch):
@@ -28,13 +28,8 @@ def test_upstream_stars_join_resolution_and_schema_cache(engine_db, tmp_path, mo
             TARGET_OBJECT="stage.orders",
             SOURCE_SQL="SELECT * FROM raw.orders",
         )
-        conn.execute(
-            text(
-                "INSERT INTO CFG_SOURCE_COLUMNS "
-                "(TABLE_NAME,COLUMN_NAME,DATA_TYPE,COLUMN_POSITION) VALUES "
-                "('raw.orders','z','INT',1),('raw.orders','a','INT',2)"
-            )
-        )
+        add_source_column(conn, "raw.orders", "z", "INT", 1)
+        add_source_column(conn, "raw.orders", "a", "INT", 2)
 
     def no_warehouse(*args, **kwargs):
         raise AssertionError("lineage must stay offline")
@@ -47,13 +42,7 @@ def test_upstream_stars_join_resolution_and_schema_cache(engine_db, tmp_path, mo
     assert all(result.cached for result in collect(db.engine, db.config))
     assert [edge.target_column for edge in collect(db.engine, db.config)[0].edges] == ["z", "a"]
     with db.engine.begin() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO CFG_SOURCE_COLUMNS "
-                "(TABLE_NAME,COLUMN_NAME,DATA_TYPE,COLUMN_POSITION) VALUES "
-                "('raw.orders','new_column','TEXT',3)"
-            )
-        )
+        add_source_column(conn, "raw.orders", "new_column", "TEXT", 3)
     changed = collect(db.engine, db.config)
     assert all(not result.cached for result in changed)
     assert [edge.target_column for edge in changed[0].edges] == ["z", "a", "new_column"]
@@ -63,12 +52,13 @@ def test_upstream_stars_join_resolution_and_schema_cache(engine_db, tmp_path, mo
     folder = tmp_path / "export"
     export_config(db.engine, folder)
     assert not sync_config(db.engine, db.config, read_config_files(folder), apply=False).changes
-    (folder / "source_columns.csv").unlink()
+    (folder / "columns.csv").unlink()
+    (folder / "tables.csv").unlink()
     assert not sync_config(db.engine, db.config, read_config_files(folder), apply=True).changes
     with db.engine.connect() as conn:
         assert (
             conn.execute(
-                text("SELECT COUNT(*) FROM CFG_SOURCE_COLUMNS WHERE ACTIVE_FLAG='Y'")
+                text("SELECT COUNT(*) FROM CFG_COLUMNS WHERE ACTIVE_FLAG='Y'")
             ).scalar_one()
             == 3
         )
@@ -123,16 +113,12 @@ def test_source_config_reorders_and_records_history(engine_db, tmp_path):
 
     db = engine_db
     with db.engine.begin() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO CFG_SOURCE_COLUMNS (TABLE_NAME,COLUMN_NAME,DATA_TYPE,COLUMN_POSITION) "
-                "VALUES ('raw.orders','id','INT',1),('raw.orders','name','TEXT',2)"
-            )
-        )
+        add_source_column(conn, "raw.orders", "id", "INT", 1)
+        add_source_column(conn, "raw.orders", "name", "TEXT", 2)
     moment = datetime.now(UTC)
     directory = tmp_path / "config"
     export_config(db.engine, directory)
-    path = directory / "source_columns.csv"
+    path = directory / "columns.csv"
     rows = list(csv.DictReader(path.open()))
     for row in rows:
         row["COLUMN_POSITION"] = "2" if row["COLUMN_NAME"] == "id" else "1"
@@ -145,22 +131,16 @@ def test_source_config_reorders_and_records_history(engine_db, tmp_path):
     with db.engine.connect() as conn:
         assert conn.execute(
             text(
-                "SELECT COLUMN_NAME FROM CFG_SOURCE_COLUMNS WHERE ACTIVE_FLAG='Y' "
-                "ORDER BY COLUMN_POSITION"
+                "SELECT COLUMN_NAME FROM CFG_COLUMNS WHERE ACTIVE_FLAG='Y' ORDER BY COLUMN_POSITION"
             )
         ).scalars().all() == ["name", "id"]
-        assert (
-            conn.execute(text("SELECT COUNT(*) FROM AUD_CFG_SOURCE_COLUMNS_HISTORY")).scalar_one()
-            == 6
-        )
+        assert conn.execute(text("SELECT COUNT(*) FROM AUD_CFG_COLUMNS_HISTORY")).scalar_one() == 6
     historical = tmp_path / "historical"
     export_config(db.engine, historical, as_of=moment, config=db.config)
-    past = list(csv.DictReader((historical / "source_columns.csv").open()))
+    past = list(csv.DictReader((historical / "columns.csv").open()))
     assert {row["COLUMN_NAME"]: row["COLUMN_POSITION"] for row in past} == {"id": "1", "name": "2"}
     with db.engine.begin() as conn:
-        conn.execute(
-            text("UPDATE CFG_SOURCE_COLUMNS SET DATA_TYPE='not a type' WHERE COLUMN_NAME='id'")
-        )
+        conn.execute(text("UPDATE CFG_COLUMNS SET DATA_TYPE='not a type' WHERE COLUMN_NAME='id'"))
         assert any(
             "DATA_TYPE" in finding.message for finding in validate_on(conn, db.config).findings
         )
@@ -208,12 +188,7 @@ def test_catalog_reports_unavailable_warehouse_without_losing_definitions(engine
     from etl_craft.core.errors import MetadataError
 
     with engine_db.engine.begin() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO CFG_SOURCE_COLUMNS (TABLE_NAME,COLUMN_NAME,DATA_TYPE,COLUMN_POSITION) "
-                "VALUES ('raw.orders','id','INT',1)"
-            )
-        )
+        add_source_column(conn, "raw.orders", "id", "INT", 1)
 
     @contextmanager
     def unavailable(*args, **kwargs):

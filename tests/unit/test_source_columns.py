@@ -13,9 +13,11 @@ pytestmark = pytest.mark.unit
 def test_warehouse_ordinals_are_normalized_to_positive_positions(monkeypatch):
     dialect = Mock()
     dialect.column_metadata_query.return_value = ("SELECT column_name, ordinal_position", {})
+    dialect.relation_type_query.return_value = ("SELECT table_type", {})
     dialect.full_column_types.return_value = {"z": "BIGINT", "a": "VARCHAR"}
     conn = Mock()
-    conn.execute.return_value.all.return_value = [("z", 0), ("a", 1)]
+    conn.execute.return_value.all.return_value = [("z", 0, "YES"), ("a", 1, "NO")]
+    conn.execute.return_value.scalar_one_or_none.return_value = "BASE TABLE"
     monkeypatch.setattr(
         "etl_craft.services.source_columns.warehouse_dialect", lambda config: dialect
     )
@@ -23,8 +25,8 @@ def test_warehouse_ordinals_are_normalized_to_positive_positions(monkeypatch):
         "etl_craft.services.source_columns.active_catalog", lambda config: "analytics"
     )
     assert warehouse_columns(conn, Mock(), "raw.orders") == [
-        SourceColumn("raw.orders", "z", "BIGINT", 1),
-        SourceColumn("raw.orders", "a", "VARCHAR", 2),
+        SourceColumn("raw.orders", "z", "BIGINT", 1, "Y", "TABLE"),
+        SourceColumn("raw.orders", "a", "VARCHAR", 2, "N", "TABLE"),
     ]
 
 
@@ -63,3 +65,15 @@ def test_type_aliases_and_explicit_sizes(dialect, declared, deployed, matches):
         dialect,
     )
     assert bool(found) is not matches
+
+
+@pytest.mark.parametrize("actual", ["Y", None])
+def test_declared_nullability_and_kind_include_unavailable_observations(actual):
+    findings = drift(
+        [SourceColumn("raw.orders", "id", "INT", 1, "N", "TABLE")],
+        [SourceColumn("raw.orders", "id", "INT", 1, actual, "VIEW")],
+        "duckdb",
+    )
+    assert len(findings) == 2
+    assert any(f"nullability {actual or 'unavailable'}" in message for message in findings)
+    assert any("object kind VIEW, declared TABLE" in message for message in findings)

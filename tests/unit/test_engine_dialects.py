@@ -122,10 +122,12 @@ def schema_columns(path: Path) -> dict[str, list[str]]:
 def test_both_schemas_define_the_same_tables_and_columns_in_order():
     postgres = schema_columns(POSTGRES.schema_path())
     sqlite = schema_columns(SQLITE.schema_path())
-    assert len(postgres) == 37
+    assert len(postgres) == 41
     assert "AUD_METADATA_CHANGES" not in postgres
     assert {
-        "CFG_SOURCE_COLUMNS",
+        "CFG_TABLES",
+        "CFG_COLUMNS",
+        "AUD_SOURCE_COLUMNS_BASELINE",
         "AUD_CFG_API_TOKENS_HISTORY",
         "AUD_CFG_SOURCE_COLUMNS_HISTORY",
         "AUD_CFG_PIPELINES_HISTORY",

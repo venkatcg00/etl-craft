@@ -44,28 +44,41 @@ not traced: their SQL, if any, is inside the script.
 
 Lineage uses metadata only, including in CI and before warehouse tables exist. In dependency
 order, it learns an active SQL task's target columns from that task's traced SELECT. External
-sources and tables landed by Python scripts take their columns from `CFG_SOURCE_COLUMNS`.
+sources and tables landed by Python scripts take their columns from `CFG_COLUMNS`, joined to their `CFG_TABLES` parent.
 The catalog uses the same definitions and shows their declared types without `--with-warehouse`.
 
-Keep these definitions in `config/source_columns.csv`:
+Keep object contracts in `config/tables.csv`:
 
 ```csv
-TABLE_NAME,COLUMN_NAME,DATA_TYPE,COLUMN_POSITION,ACTIVE_FLAG
-raw.orders,id,BIGINT,1,Y
-raw.orders,amount,"DECIMAL(12,2)",2,Y
-ref.rates,id,BIGINT,1,Y
-ref.rates,rate,"DECIMAL(12,2)",2,Y
+CATALOG_NAME,SCHEMA_NAME,TABLE_NAME,OBJECT_KIND,ACTIVE_FLAG
+,raw,orders,TABLE,Y
+,ref,rates,TABLE,Y
 ```
 
-`TABLE_NAME` is `schema.table` or `database.schema.table`; names are unquoted identifiers.
+Keep their declared columns in `config/columns.csv`:
+
+```csv
+CATALOG_NAME,SCHEMA_NAME,TABLE_NAME,COLUMN_NAME,DATA_TYPE,COLUMN_POSITION,IS_NULLABLE,ACTIVE_FLAG
+,raw,orders,id,BIGINT,1,,Y
+,raw,orders,amount,"DECIMAL(12,2)",2,,Y
+,ref,rates,id,BIGINT,1,,Y
+,ref,rates,rate,"DECIMAL(12,2)",2,,Y
+```
+
+Catalog absence is an empty CSV cell/SQL NULL, never a made-up catalog name. Components are
+separate values. Current source tracing retains its unquoted identifier requirement; the
+remaining object-reference conversion in S5.O.2b widens quoting support across consumers.
 `DATA_TYPE` is a type in the warehouse's SQL dialect. Equivalent SQL type names are normalized.
 String lengths and timestamp precisions are checked when explicitly declared; omitted ones
 are not asserted. Snowflake's generic `TIMESTAMP` alias does not assert an account-dependent
 timezone mapping; use `TIMESTAMP_NTZ`, `TIMESTAMP_LTZ` or `TIMESTAMP_TZ` to check it.
+`OBJECT_KIND` and `IS_NULLABLE` are optional declared expectations; warehouse comparisons
+report mismatches or unavailable observations when these are declared. Export seeds known
+kinds and nullability and keeps existing expectations when an observation is unavailable.
 Positions are positive and distinct per
 active table, and determine star expansion order. Definitions participate in config apply,
 retirement, actor auditing and `config export --as-of`, like the other config rows. Older projects
-can omit the file: applying their other files leaves existing source definitions unchanged.
+can omit both files: applying their other files leaves existing source definitions unchanged.
 An empty file with its header explicitly retires the active definitions.
 
 After applying these rows, `SELECT * FROM raw.orders` traces both columns, and

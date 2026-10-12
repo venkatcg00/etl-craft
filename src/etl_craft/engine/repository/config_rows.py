@@ -3,8 +3,8 @@
 Rows are identified as the files identify them, by codes and never by ids: a pipeline by its
 code, a task by its pipeline's code and its own, a parameter by its task and name, a dependency
 by both of its ends and its type, and a business rule by its task and name. Pipeline, task,
-parameter, dependency and rule keys reserve their identity even when inactive; source-column
-keys currently remain unique among active rows. Every file also has an ``ACTIVE_FLAG`` column.
+parameter, dependency and rule keys reserve their identity even when inactive; table and column
+keys also reserve their identity. Every file also has an ``ACTIVE_FLAG`` column.
 
 ``read_rows`` returns every row of a table, active or not, with the ids of the rows it hangs
 off; ``insert_row``, ``update_row`` and ``retire_row`` change one row each, and refuse to change
@@ -96,7 +96,10 @@ class ConfigTable:
 
     def label(self, values: Mapping[str, Value]) -> str:
         """Name a row by its key, such as ``SALES.load_orders`` for a task."""
-        return self.label_format.format(**{name: values[name] for name in self.key})
+        pattern = self.label_format
+        if "CATALOG_NAME" in self.key and values["CATALOG_NAME"] is None:
+            pattern = pattern.replace("{CATALOG_NAME}.", "")
+        return pattern.format(**{name: values[name] for name in self.key})
 
 
 @dataclass(frozen=True)
@@ -337,27 +340,51 @@ BUSINESS_RULES = ConfigTable(
     ),
 )
 
-SOURCE_COLUMNS = ConfigTable(
-    file="source_columns.csv",
-    table="CFG_SOURCE_COLUMNS",
-    id_column="SOURCE_COLUMN_ID",
-    key=("TABLE_NAME", "COLUMN_NAME"),
+OBJECT_TABLES = ConfigTable(
+    file="tables.csv",
+    table="CFG_TABLES",
+    id_column="TABLE_ID",
+    key=("CATALOG_NAME", "SCHEMA_NAME", "TABLE_NAME"),
     columns=(
+        Column("CATALOG_NAME"),
+        Column("SCHEMA_NAME", required=True),
+        Column("TABLE_NAME", required=True),
+        Column("OBJECT_KIND", "choice", choices=("TABLE", "VIEW")),
+        ACTIVE_FLAG,
+    ),
+    stored=("CATALOG_NAME", "SCHEMA_NAME", "TABLE_NAME", "OBJECT_KIND"),
+    parents=(),
+    links=(),
+    label_format="{CATALOG_NAME}.{SCHEMA_NAME}.{TABLE_NAME}",
+    read_sql="SELECT TABLE_ID AS row_id, ACTIVE_FLAG AS active_flag, 'Y' AS well_formed, "
+    "CATALOG_NAME AS catalog_name, SCHEMA_NAME AS schema_name, TABLE_NAME AS table_name, "
+    "OBJECT_KIND AS object_kind FROM CFG_TABLES",
+)
+
+SOURCE_COLUMNS = ConfigTable(
+    file="columns.csv",
+    table="CFG_COLUMNS",
+    id_column="COLUMN_ID",
+    key=("CATALOG_NAME", "SCHEMA_NAME", "TABLE_NAME", "COLUMN_NAME"),
+    columns=(
+        Column("CATALOG_NAME"),
+        Column("SCHEMA_NAME", required=True),
         Column("TABLE_NAME", required=True),
         Column("COLUMN_NAME", required=True),
         Column("DATA_TYPE", required=True),
         Column("COLUMN_POSITION", "int", required=True, minimum=1),
+        Column("IS_NULLABLE", "choice", choices=YES_NO),
         ACTIVE_FLAG,
     ),
-    stored=("TABLE_NAME", "COLUMN_NAME", "DATA_TYPE", "COLUMN_POSITION"),
-    parents=(),
-    links=(),
-    label_format="{TABLE_NAME}.{COLUMN_NAME}",
-    read_sql=(
-        "SELECT SOURCE_COLUMN_ID AS row_id, ACTIVE_FLAG AS active_flag, 'Y' AS well_formed, "
-        "TABLE_NAME AS table_name, COLUMN_NAME AS column_name, DATA_TYPE AS data_type, "
-        "COLUMN_POSITION AS column_position FROM CFG_SOURCE_COLUMNS"
-    ),
+    stored=("COLUMN_NAME", "DATA_TYPE", "COLUMN_POSITION", "IS_NULLABLE"),
+    parents=(("table_id", "tables.csv"),),
+    links=("TABLE_ID",),
+    label_format="{CATALOG_NAME}.{SCHEMA_NAME}.{TABLE_NAME}.{COLUMN_NAME}",
+    read_sql="SELECT c.COLUMN_ID AS row_id, c.ACTIVE_FLAG AS active_flag, 'Y' AS well_formed, "
+    "c.TABLE_ID AS table_id, t.CATALOG_NAME AS catalog_name, t.SCHEMA_NAME AS schema_name, "
+    "t.TABLE_NAME AS table_name, c.COLUMN_NAME AS column_name, c.DATA_TYPE AS data_type, "
+    "c.COLUMN_POSITION AS column_position, c.IS_NULLABLE AS is_nullable "
+    "FROM CFG_COLUMNS c JOIN CFG_TABLES t ON t.TABLE_ID=c.TABLE_ID",
 )
 
 TABLES = (
@@ -367,6 +394,7 @@ TABLES = (
     TASK_DEPENDENCIES,
     PIPELINE_DEPENDENCIES,
     BUSINESS_RULES,
+    OBJECT_TABLES,
     SOURCE_COLUMNS,
 )
 """Every config file's table, parents before the rows that hang off them."""
@@ -405,8 +433,7 @@ def read_rows(conn: Connection, table: ConfigTable) -> list[StoredRow]:
             if column is not ACTIVE_FLAG
         }
         if table is SOURCE_COLUMNS:
-            for name in ("TABLE_NAME", "COLUMN_NAME"):
-                values[name] = str(values[name]).lower()
+            values["COLUMN_NAME"] = str(values["COLUMN_NAME"]).lower()
         rows.append(
             StoredRow(
                 int(row["row_id"]),

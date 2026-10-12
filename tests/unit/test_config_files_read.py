@@ -180,7 +180,8 @@ def test_every_file_holds_its_table_with_active_flag_last():
         "task_dependencies.csv",
         "pipeline_dependencies.csv",
         "business_rules.csv",
-        "source_columns.csv",
+        "tables.csv",
+        "columns.csv",
     ]
     assert all(table.columns[-1].name == "ACTIVE_FLAG" for table in TABLES)
     assert all(set(table.key) <= {column.name for column in table.columns} for table in TABLES)
@@ -211,20 +212,27 @@ def test_the_config_option_after_a_verb_is_refused_not_taken_for_the_folder(verb
     assert "unrecognized arguments: --config" in capsys.readouterr().err
 
 
+def test_legacy_source_file_requires_explicit_conversion(tmp_path):
+    folder(tmp_path)
+    (tmp_path / "source_columns.csv").write_text("TABLE_NAME,COLUMN_NAME\nraw.orders,id\n")
+    with pytest.raises(MetadataFileError, match="retired source layout"):
+        read_config_files(tmp_path)
+
+
 @pytest.mark.parametrize(
     ("rows", "message"),
     [
-        ("raw.orders,id,INT,0,Y\n", "0 is less than 1"),
-        ("raw.orders,id,INT,1,Y\nRAW.ORDERS,ID,INT,2,Y\n", "both hold raw.orders.id"),
-        ("raw.orders,id,INT,1,Y\nraw.orders,name,TEXT,1,Y\n", "COLUMN_POSITION=1 twice"),
-        ("orders,id,INT,1,Y\n", "expected schema.table or database.schema.table"),
-        ("raw.orders,bad-name,INT,1,Y\n", "expected an unquoted SQL identifier"),
+        ("raw,orders,id,INT,0,Y\n", "0 is less than 1"),
+        ("raw,orders,id,INT,1,Y\nraw,orders,id,INT,2,Y\n", "both hold raw.orders.id"),
+        ("raw,orders,id,INT,1,Y\nraw,orders,name,TEXT,1,Y\n", "COLUMN_POSITION"),
+        ("raw,missing,id,INT,1,Y\n", "table raw.missing is not in tables.csv"),
     ],
 )
-def test_source_file_names_bad_definitions(tmp_path, rows, message):
+def test_column_file_names_bad_definitions(tmp_path, rows, message):
     folder(tmp_path)
-    (tmp_path / "source_columns.csv").write_text(
-        "TABLE_NAME,COLUMN_NAME,DATA_TYPE,COLUMN_POSITION,ACTIVE_FLAG\n" + rows
+    (tmp_path / "tables.csv").write_text("SCHEMA_NAME,TABLE_NAME\nraw,orders\n")
+    (tmp_path / "columns.csv").write_text(
+        "SCHEMA_NAME,TABLE_NAME,COLUMN_NAME,DATA_TYPE,COLUMN_POSITION,ACTIVE_FLAG\n" + rows
     )
     with pytest.raises(MetadataFileError, match=message):
         read_config_files(tmp_path)

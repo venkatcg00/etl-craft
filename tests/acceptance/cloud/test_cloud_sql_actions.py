@@ -840,7 +840,7 @@ def walk_source_definitions(w, folder):
             SOURCE_SQL=f"SELECT id FROM {source}",
         )
         exported = export_config(w.engine_db, folder, config=w.config)
-        assert exported.rows["source_columns.csv"] >= 2
+        assert exported.rows["columns.csv"] >= 2
         done = sync_config(w.engine_db, w.config, read_config_files(folder), apply=True)
         assert not done.failed
         export_config(w.engine_db, folder, config=w.config, overwrite=True)
@@ -848,28 +848,20 @@ def walk_source_definitions(w, folder):
             w.engine_db, w.config, read_config_files(folder), apply=False
         ).changes
         with w.engine_db.begin() as conn:
-            conn.execute(
-                text("UPDATE CFG_SOURCE_COLUMNS SET DATA_TYPE='BIGINT' WHERE COLUMN_NAME='id'")
-            )
+            conn.execute(text("UPDATE CFG_COLUMNS SET DATA_TYPE='BIGINT' WHERE COLUMN_NAME='id'"))
         assert not [
             finding
             for finding in validate(w.engine_db, w.config).findings
             if finding.where.startswith("source ")
         ]
         with w.engine_db.begin() as conn:
-            conn.execute(
-                text("UPDATE CFG_SOURCE_COLUMNS SET ACTIVE_FLAG='N' WHERE COLUMN_NAME='removed'")
-            )
-            conn.execute(
-                text("UPDATE CFG_SOURCE_COLUMNS SET DATA_TYPE='VARCHAR' WHERE COLUMN_NAME='id'")
-            )
+            conn.execute(text("UPDATE CFG_COLUMNS SET ACTIVE_FLAG='N' WHERE COLUMN_NAME='removed'"))
+            conn.execute(text("UPDATE CFG_COLUMNS SET DATA_TYPE='VARCHAR' WHERE COLUMN_NAME='id'"))
             conn.execute(
                 text(
-                    "INSERT INTO CFG_SOURCE_COLUMNS "
-                    "(TABLE_NAME,COLUMN_NAME,DATA_TYPE,COLUMN_POSITION) "
-                    "VALUES (:table,'missing','INT',100)"
-                ),
-                {"table": source},
+                    "INSERT INTO CFG_COLUMNS (TABLE_ID,COLUMN_NAME,DATA_TYPE,COLUMN_POSITION) "
+                    "SELECT TABLE_ID,'missing','INT',100 FROM CFG_COLUMNS WHERE COLUMN_NAME='id'"
+                )
             )
         findings = [
             finding.message

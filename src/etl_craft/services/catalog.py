@@ -66,7 +66,7 @@ from etl_craft.engine.repository.validation import (
 )
 from etl_craft.handlers.sql.tables import ENGINE_COLUMNS
 from etl_craft.services.lineage import Edge, TaskLineage, collect, table_name
-from etl_craft.services.source_columns import drift
+from etl_craft.services.source_columns import drift, nullable, warehouse_kind
 from etl_craft.warehouse.connection import open_warehouse, warehouse_dialect
 
 logger = logging.getLogger(__name__)
@@ -84,6 +84,8 @@ class Column:
     comment: str | None = None
     declared_type: str | None = None
     warehouse_type: str | None = None
+    declared_nullable: str | None = None
+    warehouse_nullable: str | None = None
 
 
 @dataclass
@@ -98,6 +100,8 @@ class TableAsset:
     in_warehouse: bool = False
     warehouse_checked: bool = False
     warehouse_findings: list[str] = field(default_factory=list)
+    declared_kind: str | None = None
+    warehouse_kind: str | None = None
 
     @property
     def external(self) -> bool:
@@ -314,6 +318,8 @@ def build_catalog(
         table.columns.setdefault(column, Column(column))
         table.columns[column].data_type = definition.data_type
         table.columns[column].declared_type = definition.data_type
+        table.columns[column].declared_nullable = definition.is_nullable
+        table.declared_kind = definition.object_kind
     _writers_order_first(catalog)
     for edge in pipeline_edges:
         if edge.pipeline_code in catalog.pipelines:
@@ -449,6 +455,7 @@ def _add_warehouse_columns(catalog: Catalog, engine: Engine, config: ConnectorCo
                     if found and any(column.declared_type for column in known.values())
                     else {}
                 )
+                kind = warehouse_kind(conn, config, table.name) if found else None
             except (SQLAlchemyError, EtlCraftError) as error:
                 logger.warning("could not read the columns of %s: %s", table.name, error)
                 table.warehouse_findings.append(f"comparison unavailable: {error}")
@@ -469,17 +476,34 @@ def _add_warehouse_columns(catalog: Catalog, engine: Engine, config: ConnectorCo
                     _comment(row),
                     known[column].declared_type if column in known else None,
                     full_types.get(column) or str(row.get("data_type") or "") or None,
+                    known[column].declared_nullable if column in known else None,
+                    nullable(row.get("is_nullable")),
                 )
             for column, value in known.items():
                 table.columns.setdefault(column, value)
+            table.warehouse_kind = kind
             definitions = [
-                SourceColumn(table.name, column.name, column.declared_type, index)
+                SourceColumn(
+                    table.name,
+                    column.name,
+                    column.declared_type,
+                    index,
+                    column.declared_nullable,
+                    table.declared_kind,
+                )
                 for index, column in enumerate(known.values(), 1)
                 if column.declared_type
             ]
             if definitions:
                 actual = [
-                    SourceColumn(table.name, column.name, column.warehouse_type, index)
+                    SourceColumn(
+                        table.name,
+                        column.name,
+                        column.warehouse_type,
+                        index,
+                        column.warehouse_nullable,
+                        table.warehouse_kind,
+                    )
                     for index, column in enumerate(table.columns.values(), 1)
                     if column.warehouse_type
                 ]
@@ -490,7 +514,7 @@ def _add_warehouse_columns(catalog: Catalog, engine: Engine, config: ConnectorCo
                     )
                 except (SqlglotError, ValueError) as error:
                     table.warehouse_findings.append(
-                        f"type comparison unavailable: {error}; correct source_columns.csv"
+                        f"type comparison unavailable: {error}; correct columns.csv"
                     )
             else:
                 present = {str(row["column_name"]).lower() for row in found}

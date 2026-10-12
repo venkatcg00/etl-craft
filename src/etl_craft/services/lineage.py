@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from importlib.metadata import version
 
 import sqlglot
@@ -139,7 +139,7 @@ def extract(
             tables = ", ".join(referenced_tables(select_sql, dialect=dialect, catalog=catalog))
             raise MetadataError(
                 f"columns from {tables} could not be resolved: {error}; define missing source "
-                f"columns in source_columns.csv"
+                f"columns in columns.csv"
             ) from error
     source_names = ", ".join(referenced_tables(select_sql, dialect=dialect, catalog=catalog))
     edges: list[Edge] = []
@@ -148,7 +148,7 @@ def extract(
         if not column or isinstance(projection, exp.Star) or column == "*":
             raise MetadataError(
                 "SELECT * cannot be traced without knowing the table's columns "
-                f"({source_names}); define them in source_columns.csv or list them"
+                f"({source_names}); define them in columns.csv or list them"
             )
         inner = originals.get(column.lower(), projection.unalias())
         transformation = COPY if isinstance(inner, exp.Column) else inner.sql(dialect=dialect)
@@ -163,7 +163,7 @@ def extract(
             raise MetadataError(
                 f"column {column!r} from "
                 f"{referenced_tables(select_sql, dialect=dialect, catalog=catalog)} could not "
-                f"be resolved; define its source columns in source_columns.csv"
+                f"be resolved; define its source columns in columns.csv"
             )
         sources = sorted(
             {
@@ -357,7 +357,17 @@ def collect(
                 if source in invalid:
                     raise MetadataError(f"source {source}: {invalid[source]}")
             used_schemas = {source: schemas[source] for source in sources if source in schemas}
-            key = lineage_key(select_sql, target, dialect, catalog, used_schemas)
+            contract = [
+                asdict(column)
+                for column in defined
+                if table_name(column.table_name.split("."), catalog) in used_schemas
+            ]
+            key = sha256_hex(
+                (
+                    lineage_key(select_sql, target, dialect, catalog, used_schemas)
+                    + json.dumps(contract, sort_keys=True)
+                ).encode()
+            )
             with engine.connect() as conn:
                 stored = [] if refresh else fetch_task_lineage(conn, ref.task_id, key)
             if stored:

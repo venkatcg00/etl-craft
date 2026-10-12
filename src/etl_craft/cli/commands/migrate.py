@@ -8,6 +8,7 @@ from pathlib import Path
 from etl_craft.cli.commands.common import Command, connect_engine_db, load_command_config
 from etl_craft.cli.output import Output
 from etl_craft.engine.migrations import apply_pending_migrations
+from etl_craft.services.lineage import dialect_and_catalog
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -24,8 +25,13 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     config = load_command_config(args)
     engine = connect_engine_db(config)
     try:
+        dialect, catalog = dialect_and_catalog(config)
         applied = apply_pending_migrations(
-            engine, args.migrations_dir, project_default=config.migrations_dir
+            engine,
+            args.migrations_dir,
+            project_default=config.migrations_dir,
+            catalog=catalog,
+            warehouse_dialect=dialect,
         )
     finally:
         engine.dispose()

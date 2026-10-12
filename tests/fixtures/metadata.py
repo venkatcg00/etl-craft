@@ -112,3 +112,34 @@ def upstream_run(conn, pipeline_id, task_statuses, status="SUCCESS"):
     if status != "IN-PROGRESS":
         finish_run(conn, run_id, status)
     return run_id, rows
+
+
+def add_source_column(conn, table, column, data_type, position):
+    """Declare a column under one scoped table contract."""
+    from etl_craft.engine.repository.normalization import object_identity
+
+    catalog, schema, name = object_identity(table, None, None)
+    params = {"catalog": catalog, "schema": schema, "table": name}
+    table_id = conn.execute(
+        text(
+            "SELECT TABLE_ID AS table_id FROM CFG_TABLES WHERE SCHEMA_NAME=:schema "
+            "AND TABLE_NAME=:table AND (CATALOG_NAME=:catalog OR "
+            "(CATALOG_NAME IS NULL AND :catalog IS NULL))"
+        ),
+        params,
+    ).scalar_one_or_none()
+    if table_id is None:
+        table_id = conn.execute(
+            text(
+                "INSERT INTO CFG_TABLES (CATALOG_NAME, SCHEMA_NAME, TABLE_NAME) "
+                "VALUES (:catalog, :schema, :table) RETURNING TABLE_ID AS table_id"
+            ),
+            params,
+        ).scalar_one()
+    return conn.execute(
+        text(
+            "INSERT INTO CFG_COLUMNS (TABLE_ID, COLUMN_NAME, DATA_TYPE, COLUMN_POSITION) "
+            "VALUES (:table_id, :column, :type, :position) RETURNING COLUMN_ID AS column_id"
+        ),
+        {"table_id": table_id, "column": column, "type": data_type, "position": position},
+    ).scalar_one()

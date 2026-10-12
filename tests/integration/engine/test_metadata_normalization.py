@@ -218,7 +218,10 @@ def test_identity_migration_preserves_rows_and_their_history(legacy_identity_db)
             text("SELECT * FROM AUD_CFG_PIPELINES_HISTORY ORDER BY CHANGE_ID")
         ).all()
         row = conn.execute(text("SELECT * FROM CFG_PIPELINES")).one()
-    assert apply_pending_migrations(db.engine) == ["0027_config_identities.sql"]
+    assert apply_pending_migrations(db.engine) == [
+        "0027_config_identities.sql",
+        "0028_source_contracts.sql",
+    ]
     with db.engine.connect() as conn:
         assert conn.execute(text("SELECT * FROM CFG_PIPELINES")).one() == row
         assert (

@@ -3,14 +3,14 @@
 This is the corrective design following source definitions, before worker-agent work resumes.
 S5.O.1 implements the SCD lifecycle and legacy upgrades. S5.O.2a enforces common config fields
 and safe token history. Stable pipeline, task, parameter, dependency and rule identities now
-include inactive rows. The normalized object schema, coloured gap indicators and dashboard
-remain planned. The frozen 0.4 soak deployment remains unchanged.
+include inactive rows. Scoped table/column source contracts are implemented; task/rule target FKs,
+ordered merge columns, historical endpoint conversion, coloured gaps and dashboards remain planned. The frozen 0.4 soak deployment remains unchanged.
 
 ## Evidence and current gaps
 
 | Area | Current implementation | Required correction |
 | --- | --- | --- |
-| Source metadata | `CFG_SOURCE_COLUMNS` repeats a dotted `TABLE_NAME` on every column; no parent table FK | Separate table contracts and their column contracts; split object name components |
+| Source metadata | `CFG_TABLES` holds separate components; `CFG_COLUMNS.TABLE_ID` is the parent FK, with all-row name identity and active ordinal uniqueness | Source conversion complete; task/rule target and historical endpoint conversion remains S5.O.2b |
 | Config audit fields | Core config fields are mandatory; project config DDL requires a single PK, typed non-null base fields and valid active values | Common base contract implemented in S5.O.2a; scoped identity/FK normalization remains S5.O.2b |
 | API tokens | Common actor/date/active fields and safe typed history, retaining expiry and revocation; hashes remain excluded | S5.O.2a implemented; upgrade the Engine DB before using it |
 | Object references | Rule targets, lineage endpoints and target state use combined names; task target is a parameter string | Replace persisted object identity with relational references and separate identifier components |
@@ -35,7 +35,14 @@ task/rule targets. It is read-only: existing metadata and immutable history rema
 Object findings are warnings while the legacy object schema remains supported. Engine migration
 0027 refuses duplicate pipeline/task/parameter/dependency/rule keys transactionally and enforces
 all-row uniqueness for those identities. It preserves the rows and existing audit versions.
-The object normalization migration must refuse unresolved ambiguity before writing any converted rows; this diagnostic alone is
+Engine migration 0028 converts source contracts and refuses ambiguity before any pending migration.
+It preserves column IDs/stamps, untouched legacy typed history and an immutable conversion
+baseline for historical reconstruction. Ordinal uniqueness applies to active columns because
+ordinal is an attribute that retirement releases, while column identity remains reserved.
+Source tracing retains its existing unquoted-name boundary until the remaining object consumers
+are converted. Task/rule FKs, ordered merge identifiers and recorded audit endpoints remain pending;
+the source conversion does not complete S5.O.2b. Subsequent object normalization must refuse
+unresolved ambiguity before writing any converted rows; this diagnostic alone is
 not the relational migration or its completion gate.
 
 | Persisted value | Classification | Conversion and affected readers/writers |

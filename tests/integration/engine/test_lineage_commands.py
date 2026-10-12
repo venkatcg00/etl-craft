@@ -10,7 +10,7 @@ from etl_craft.cli import main
 from etl_craft.config import load_config
 from etl_craft.core.errors import ExitCode
 from etl_craft.services.lineage import collect
-from fixtures.metadata import add_pipeline, add_task
+from fixtures.metadata import add_pipeline, add_source_column, add_task
 
 
 @pytest.fixture(autouse=True)
@@ -92,14 +92,7 @@ def project(engine_db, tmp_path, monkeypatch):
         add_task(conn, mart, "cleanup", SQL_ACTION="DROP_TABLE", TARGET_OBJECT="mart.everything")
     with engine.begin() as conn:
         for position, column in enumerate(("id", "amt", "currency"), 1):
-            conn.execute(
-                text(
-                    "INSERT INTO CFG_SOURCE_COLUMNS "
-                    "(TABLE_NAME,COLUMN_NAME,DATA_TYPE,COLUMN_POSITION) VALUES "
-                    "('raw.orders',:column,'VARCHAR',:position)"
-                ),
-                {"column": column, "position": position},
-            )
+            add_source_column(conn, "raw.orders", column, "VARCHAR", position)
     return engine, load_config(root / "craft-connector.yml")
 
 
@@ -117,7 +110,7 @@ def test_the_summary_lists_every_task_and_what_cannot_be_traced(project, capsys)
         "MART.daily\tmart.daily\t1\tsales.orders",
         "SALES.convert\tsales.orders\t2\tref.rates, staging.orders",
         "not traced: MART.copy_all: SELECT * cannot be traced without knowing the table's "
-        "columns (ref.rates, sales.orders); define them in source_columns.csv or list them",
+        "columns (ref.rates, sales.orders); define them in columns.csv or list them",
     ]
     assert main(["lineage", "--strict"]) == ExitCode.FAILURE
 

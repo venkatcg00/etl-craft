@@ -155,7 +155,13 @@ def refresh_metadata_triggers(conn: Connection) -> None:
             )
         )
         conn.exec_driver_sql("DROP TABLE aud_metadata_changes")
-    _change_view(conn, configs)
+    histories = configs + (
+        ["cfg_source_columns"]
+        if _kind(conn, history_table("cfg_source_columns")) == "r"
+        and _kind(conn, "cfg_source_columns") is None
+        else []
+    )
+    _change_view(conn, histories)
 
 
 def _columns(conn: Connection, table: str) -> list[tuple[str, str]]:
@@ -210,7 +216,11 @@ def _change_view(conn: Connection, configs: list[str]) -> None:
     dropped = ", ".join(f"'{name}'" for name in CHANGE_COLUMNS)
     parts = []
     for table in configs:
-        key = quote(_primary(conn, table) or _columns(conn, table)[0][0])
+        key = quote(
+            "source_column_id"
+            if table == "cfg_source_columns" and _kind(conn, table) is None
+            else (_primary(conn, table) or _columns(conn, table)[0][0])
+        )
         parts.append(
             "SELECT change_id, valid_from AS changed_at, actor, actor_kind, "
             f"CAST('{table.upper()}' AS VARCHAR) AS table_name, CAST({key} AS VARCHAR) AS row_key, "
