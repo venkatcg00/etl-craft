@@ -22,5 +22,6 @@ SALES_DAILY_US,on_failure,SALES_DAILY_US,fetch_orders,FAILURE,Y,N
 SALES_DAILY_US,on_failure,SALES_DAILY_US,load_orders,FAILURE,Y,N
 SALES_MART,alert,SALES_MART,publish,ALWAYS,Y,Y
 SALES_MART,customer_totals,SALES_DAILY,load_orders,HAS_DATA,Y,N
+SALES_MART,publish,SALES_MART,customer_totals,SUCCESS,Y,N
 SALES_MART,publish,SALES_MART,daily_totals,SUCCESS,Y,Y
 SALES_MART,publish,SALES_MART,totals_by_region,SUCCESS,Y,Y

@@ -78,10 +78,7 @@ def exported(metadata_project):
 def test_exported_files_load_back_without_a_change(exported):
     done = sync(exported, apply=False)
     assert (done.changes, done.failed) == ((), False)
-    assert len(done.findings) == 1
-    assert done.findings[0].where == "metadata normalization"
-    assert "CFG_TASKS identity" in done.findings[0].message
-    assert "'publish'" in done.findings[0].message
+    assert done.findings == ()
 
     header = (exported.config_dir / "tasks.csv").read_text("utf-8").splitlines()[0]
     assert header == (
@@ -295,10 +292,7 @@ def test_a_configuration_that_validate_fails_is_not_applied(exported):
 
     assert (done.applied, done.failed) == (False, True)
     assert [change.row for change in done.changes] == ["SALES_MART.publish"]
-    readiness = [f for f in done.findings if f.where == "metadata normalization"]
-    assert len(readiness) == 1
-    assert "CFG_TASKS identity" in readiness[0].message
-    assert [(f.where, f.message) for f in done.findings if f not in readiness] == [
+    assert [(f.where, f.message) for f in done.findings] == [
         (
             "SALES_MART",
             "task publish requires 5 satisfied dependencies but only has 2 — it could never run",

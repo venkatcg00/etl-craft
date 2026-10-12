@@ -122,7 +122,7 @@ item's text, or work done early under another item.
 | S5.N Source definitions and schema-aware lineage | Done | #147 | Offline star/join tracing, audited source definitions, seeding and documented/deployed schema comparison |
 | S5.O.1 SCD lifecycle invariants | Done | #148 | Common SCD flags, current-row soft deletes and legacy active-state upgrades |
 | S5.O.2a Common config contract | Done | #149 | Mandatory core/custom CFG audit fields and keys, safe token lifecycle history and lossless upgrades |
-| S5.O.2b Normalized object contracts | In progress | #150 | Read-only identity readiness checks; table/column schema and migrations remain next |
+| S5.O.2b Normalized object contracts | In progress | #150, #151 | Readiness and stable config identities; table/column schema and reference migrations remain next |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
 | S5.P Project documentation gap UI | Planned | | Coloured column warnings, lineage gaps and project summary |
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
@@ -143,6 +143,16 @@ S5.O.2b for object normalization and then the UI items. The frozen 0.4
 soak is unchanged.
 
 **Acceptance availability.**
+
+S5.O.2b stable identities passed the full local gate: 3,599 passed, 96 expected skips,
+94.22% coverage in 27m59s; strict docs built in 8.13s. Python 3.12/3.13 each passed
+1,611 unit tests (24.39s / 23.73s). Final focused identity/object checks passed 54 cases
+in 15.49s, including both Engine DBs and preflight before any pending migration on released
+0.1.0/0.2.0 schemas. The actual tagged 0.3.0 upgrade passed on SQLite/PostgreSQL (2 cases).
+The wheel and source distribution built together; installed-package validation passed all
+27 cases without skips across the four local warehouses and both Engine DBs in 18m04s. Warehouse SQL generation,
+cloud dialects, Airflow and workflows are unchanged; no additional cloud suite was needed.
+The separate frozen 0.4 soak deployment is unchanged.
 
 S5.O.2b readiness passed the full local gate: 3,567 passed, 96 expected skips, 94.22% coverage
 in 27m40s; strict documentation built in 8.44s. Python 3.12 and 3.13 each passed 1,611 unit
@@ -219,9 +229,15 @@ The separate frozen 0.4 soak deployment is unchanged.
   reports their IDs and resolved source aliases before enforcing all-row identities. The
   relational schema, reference conversion and historical migration remain unfinished; this
   diagnostic must not be counted as completing S5.O.2b.
-  Continue the schema work from `main` on `feat/metadata-normalization-schema`; the readiness
-  branch is retained after merge. The legacy retire-and-reuse example remains byte-for-byte
-  unchanged and now has an explicitly tested readiness warning. Child identities are scoped
+  The next schema slice on `feat/metadata-normalization-schema` enforces all-row identities
+  for pipelines, tasks, parameters, dependencies and rules through migration 0027. Its guard
+  reports every conflicting ID before any pending migration and repeats inside 0027 before
+  index changes, leaving rows/history untouched when legacy identities need repair.
+  Source object identities remain pending with the table/column conversion. The legacy
+  retire-and-reuse example is retained byte-for-byte in `docs/examples/legacy-migrations/`;
+  the current example reactivates the same task and dependency IDs. Applied project migration
+  files must never be renamed or replaced. Continue table/column and reference conversion
+  from `main` on `feat/metadata-object-contracts`; retain both prior branches after merge. Child identities are scoped
   by stable parent IDs, and the query reads only identity fields so unrelated inactive
   settings cannot break the diagnostic.
 
@@ -2341,6 +2357,44 @@ contract when S5.C lands. S7.A.2 exposes these operations in the workflow-monito
 Branch: `feat/pools-worker`. Files: new `worker/` package (layer beside `overseer`),
 `cli/commands/worker.py`, migration for worker tables.
 
+- *Provider selection.* Select local or cluster execution explicitly, separately from
+  `Orchestration.Mode`, which identifies who schedules tasks (engine or external orchestrator).
+  Preserve local execution as the default. Do not infer a cluster from PostgreSQL, CPU count,
+  host names or the arrival of worker heartbeats: a single-machine deployment may use PostgreSQL,
+  and registered workers may share a host. Cluster execution requires PostgreSQL and uses worker
+  registration, pools, slot capacity and leases to dispatch. With no eligible workers, keep
+  attempts queued with a visible reason; never silently execute them on the overseer host.
+  Startup validation and `doctor` must distinguish the selected provider from worker availability.
+  Test local execution on PostgreSQL, explicit cluster execution with workers on the same host,
+  invalid cluster selection on SQLite and zero-worker queuing without local fallback.
+- *Resource discovery.* Local execution and each worker discover their usable CPU and memory
+  allocation at startup, using the existing `psutil` dependency and platform limits. Honor CPU
+  affinity and effective container/cgroup CPU and memory ceilings, including inherited limits;
+  raw host CPU count and RAM are not the worker's allocation. Record the resource scope, measured
+  allocation and configured ceilings in the worker registry, with explicit unavailable reasons.
+  Refresh available capacity and resource pressure with the existing heartbeat, not a separate
+  busy polling loop. Use conservative automatic slot sizing when limits are not supplied;
+  configured limits remain ceilings, and reserve resources for the OS and overseer.
+  The overseer discovers eligible compute through healthy registered workers and keeps each
+  worker's capacity separate: a cluster's summed memory cannot satisfy a task that fits nowhere.
+  Use one agent per unpartitioned resource scope by default; multiple agents on the same host
+  must share reservation accounting or have verified disjoint allocations, so CPU/RAM are never
+  counted twice. Withdraw expired or draining workers from available capacity.
+  Advertise CPU/memory allocation, reserved/free capacity and supported slot kinds; distinguish
+  those measurements from configured task slots in `status`, `doctor` and the worker/pool UI.
+  Reuse the pool capacity/claim mechanism; task resource reservations must be atomic with claims
+  and released on terminal outcomes or fenced lease expiry. CPU-heavy ingestion and warehouse
+  queries need different budgets: warehouse query concurrency remains bounded by warehouse
+  limits even when worker CPUs are free. Tasks with unknown requirements use conservative
+  defaults and explicit overrides, not an assumed one-CPU-per-task rule.
+  Test a large single host, several smaller workers, container limits below host capacity,
+  overlapping same-host agents, stale measurements, worker joins/departures, reservation races
+  and a task that exceeds every worker's capacity. Missing measurements must remain visible.
+  Distribute independent ready tasks as whole attempts. SQL execution, data partitioning, shuffles
+  and skew handling belong to the selected warehouse/runtime, including Databricks; etl-craft
+  must not split SQL, build a distributed dataframe engine or rebalance its data. Python scripts
+  execute as whole tasks unless their own runtime implements parallelism. Worker CPU/RAM capacity
+  governs local task-process placement; warehouse capacity governs SQL query admission separately.
 - *Schema.* `AUD_WORKERS (WORKER_ID, POOL, HOST, VERSION, INGESTION_SLOTS, WAREHOUSE_SLOTS, STARTED_AT, HEARTBEAT_AT, STATUS)`
   with `STATUS` in `ACTIVE`, `DRAINING`, `GONE`. `AUD_TASK_ATTEMPTS` gains `POOL`, `SLOT_KIND`,
   `PRIORITY`, `CANCEL_REQUESTED_AT`, `CANCEL_ACKNOWLEDGED_AT`.

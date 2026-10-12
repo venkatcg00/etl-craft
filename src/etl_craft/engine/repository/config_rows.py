@@ -2,8 +2,9 @@
 
 Rows are identified as the files identify them, by codes and never by ids: a pipeline by its
 code, a task by its pipeline's code and its own, a parameter by its task and name, a dependency
-by both of its ends and its type, and a business rule by its task and name. Each key is one of
-the Engine DB's unique indexes on active rows. Every file also has an ``ACTIVE_FLAG`` column.
+by both of its ends and its type, and a business rule by its task and name. Pipeline, task,
+parameter, dependency and rule keys reserve their identity even when inactive; source-column
+keys currently remain unique among active rows. Every file also has an ``ACTIVE_FLAG`` column.
 
 ``read_rows`` returns every row of a table, active or not, with the ids of the rows it hangs
 off; ``insert_row``, ``update_row`` and ``retire_row`` change one row each, and refuse to change

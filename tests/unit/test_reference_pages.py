@@ -78,7 +78,7 @@ def test_the_schema_page_shows_types_allowed_values_and_unique_keys():
     assert "| `CONFIG_SHA256` | `VARCHAR(64)` |" in page
     assert "| `CONSUME_REPAIRS` | `VARCHAR(1)` | no | `'Y'` | `Y`, `N` |" in page
     assert "| `REFRESH_TYPE` | `VARCHAR` | no |  | `FULL`, `INCREMENTAL` |" in page
-    assert "Unique: `PIPELINE_CODE where ACTIVE_FLAG = 'Y'`." in page
+    assert "Unique: `PIPELINE_CODE`." in page
     assert "| `ACTIVE_FLAG` | `VARCHAR` | no | `'Y'` | `Y`, `N` |" in page
 
 
