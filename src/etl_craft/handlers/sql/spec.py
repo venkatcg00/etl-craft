@@ -21,7 +21,7 @@ remedy, so no action ever starts on a half-valid definition.
   to the target.
 - ``PRESERVE_TARGET`` (``SCD1_MERGE``): ``true`` keeps a target value where the source is NULL.
 - ``HARD_DELETE`` (``DELETE_ROWS``): ``true`` deletes rows; otherwise they get
-  ``DELETE_FLAG='Y'``.
+  ``DELETE_FLAG='Y'`` and ``ACTIVE_FLAG='N'``; closed versions stay unchanged.
 - ``SETUP_FOR`` (``SETUP_TABLE``): the action that writes the table, whose audit columns it
   gets; needed when no other task in the pipeline writes it.
 - ``SECURE_VIEW`` (``CREATE_VIEW``): ``true`` creates a secure view where the warehouse has

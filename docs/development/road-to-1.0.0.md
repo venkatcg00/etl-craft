@@ -120,11 +120,23 @@ item's text, or work done early under another item.
 | S5.L SQL watermarks | Done | #145 | Typed source positions, atomic success offsets, attempt/run ranges and audited resets |
 | S5.M Event waits | Done | #146 | Durable file/query waits, indefinite deadlines, native file hints, evidence and downstream file tokens |
 | S5.N Source definitions and schema-aware lineage | Done | #147 | Offline star/join tracing, audited source definitions, seeding and documented/deployed schema comparison |
+| S5.O.1 SCD lifecycle invariants | Done | #148 | Common SCD flags, current-row soft deletes and legacy active-state upgrades |
+| S5.O.2 Normalized metadata and config invariants | Planned; next | | Table/column contracts and common config audit fields; see the corrective design |
+| S5.P Project documentation gap UI | Planned | | Coloured column warnings, lineage gaps and project summary |
 | S5.C and later | Not started | | |
 
 ### Handover notes
 
 What a person picking up the work needs that the code and the item texts do not say.
+
+**Priority correction after S5.N.** Build S5.O and S5.P before S5.C. The
+[metadata and pipeline UI design](metadata-and-ui.md) records the schema gaps, normalized
+table/column contracts with separate catalog/schema/name components, migration scope, common config/audit rules, SCD1/SCD2
+lifecycle semantics, per-column warning states and built-in operational dashboard panels.
+S5.N's merged dotted-name source table is an intermediate implementation to replace, not the
+final metadata model. S7.A.1 delivers Pipeline Insights without team-specific dashboards.
+S5.O.1 completes SCD lifecycle rules; S5.O.2 and the UI items remain planned. The frozen 0.4
+soak is unchanged.
 
 **Acceptance availability.**
 
@@ -172,7 +184,24 @@ catalog SQL-target gaps passed on every local warehouse. Databricks and Snowflak
 Iceberg, passed live source seeding, type aliases and deployment comparisons (four cases).
 The separate frozen 0.4 soak is unchanged.
 
+S5.O.1 passed the full local gate (3,523 tests, 96 expected skips, 94.19% coverage; 25m47s),
+strict docs, Python 3.12/3.13 unit suites (1,594 each), and the 27-case installed-wheel/sdist
+matrix (17m54s, no skips). Final lifecycle/upgrade cases passed on all four local warehouse
+variants (24 cases), and the merge-conflict query passed on SQLite/PostgreSQL (two additional
+cases). Databricks and Snowflake, native and Iceberg, passed lifecycle and legacy upgrades:
+three cases in the main cloud run and the corrected Snowflake Iceberg case in a focused rerun.
+The separate frozen 0.4 soak remains unchanged and healthy.
+
 **Choices that differ from the item text.**
+
+- S5.O ships in two independently validated slices: S5.O.1 corrects SCD lifecycle behaviour;
+  S5.O.2 handles relational metadata and common config constraints. S5.O.1 adds no Engine DB
+  tables or migrations. The existing locked `upgrade-targets` command backfills SCD1 active
+  flags and deactivates legacy active/deleted SCD2 versions without changing their stamps.
+  Unknown SCD1 deletion state refuses the upgrade. Snowflake Iceberg column additions use the
+  existing dialect type conversion. Historical damage from earlier soft deletes requires
+  independent evidence; future soft deletes preserve closed history. Opposite merge writers
+  are refused across active pipelines and qualified aliases before warehouse writes.
 
 - S5.N continues while the frozen 0.4 soak runs; that deployment is unchanged. Older projects
   may omit `source_columns.csv`; applying their other files preserves source definitions.
@@ -2182,6 +2211,39 @@ Branch: `feat/services-lineage-schemas`. After S5.M.
 - *Done when.* The demo, and later Support Insights, trace every SQL task with no warehouse
   connection, and `validate` names source drift.
 
+### S5.O Normalized metadata and lifecycle invariants
+
+After S5.N, before S5.C. Ship as two independently validated changes:
+S5.O.1 (`feat/scd-lifecycle`) completes merge flags, soft-delete/history preservation and legacy
+SCD1 target upgrades; S5.O.2 (`feat/metadata-normalization`) completes the relational config
+contract and migrations. Completing S5.O.1 does not complete the metadata correction.
+
+- *Problem.* Dotted source object names have no parent table relationship, config audit fields
+  vary between tables, and SCD1 has no active flag.
+- *Where.* Both Engine DB dialects and migrations, repositories, actor/history triggers,
+  config import/export, task/rule object references, lineage, SQL handlers and demo metadata.
+- *Change.* Implement the relational contract, mandatory config base fields, atomic migration
+  and SCD lifecycle rules in the [corrective design](metadata-and-ui.md).
+- *Tests.* Fresh/released-schema upgrades, FK/key/audit constraints, rollback, history/as-of,
+  config round trips, identity conflicts and SCD update/delete/revival on supported warehouses.
+- *Done when.* All config tables satisfy the base contract, object identities use relational
+  components, old metadata/history converts without loss, and both SCD actions enforce flags.
+
+### S5.P Project documentation gap UI
+
+Branch: `feat/catalog-gap-ui`. After S5.O, before S5.C.
+
+- *Problem.* Textual drift findings do not identify column gaps visually or summarize their
+  impact across a project.
+- *Where.* Catalog/comparison services, generated site templates, CSS, lineage SVG and API views.
+- *Change.* Implement the gap states and UI elements in the
+  [corrective design](metadata-and-ui.md): summary page, coloured column rows with warning
+  symbols/text, declared/deployed values, graph warnings, timestamps and affected-task links.
+- *Tests.* Added/missing/retyped columns, missing objects, engine-managed columns, failed checks,
+  offline generation, lineage reasons, escaping, keyboard navigation and accessible indicators.
+- *Done when.* Generated project documentation visibly identifies both directions of schema
+  drift and lineage gaps, and never represents an unavailable comparison as healthy.
+
 ### S5.C The PostgreSQL queue and the worker agent
 
 Branch: `feat/pools-worker`. Files: new `worker/` package (layer beside `overseer`),
@@ -2435,6 +2497,12 @@ of real use proves it.
 ### S7.A Web UI
 
 Branch: `feat/ui-*`, one per area. Served by `etl-craft server`.
+
+**S7.A.1 Pipeline Insights is required.** Implement the built-in operational dashboard panels,
+filters, metric definitions and drill-down in the [metadata and pipeline UI design](metadata-and-ui.md).
+Use the same service calculations in generated documentation snapshots and the live UI; verify
+Support Insights operational metric parity in S8.D/S8.F. Teams must not need to create a separate
+dashboard to see these engine metrics.
 
 - *Technology.* Server-rendered pages (Jinja2 templates, the catalog's existing CSS and assets) with
   htmx for live parts, so the UI needs no separate JavaScript build and uses the same service layer

@@ -648,7 +648,9 @@ def test_a_soft_deleted_key_comes_back_when_the_select_returns_it(customers):
     )
     back = w.run("load", SQL_ACTION="SCD1_MERGE", SOURCE_SQL=row, **SCD)
     assert (back.update_count, back.insert_count) == (1, 0)
-    assert w.rows(f"SELECT name, delete_flag FROM {w.name('customers')}") == [("a", "N")]
+    assert w.rows(f"SELECT name, delete_flag, active_flag FROM {w.name('customers')}") == [
+        ("a", "N", "Y")
+    ]
 
 
 def test_a_soft_deleted_scd2_key_gets_a_live_version(customers):
@@ -664,7 +666,7 @@ def test_a_soft_deleted_scd2_key_gets_a_live_version(customers):
         SOURCE_SQL="SELECT 1 AS id",
     )
     back = w.run("load", SOURCE_SQL=row, **params)
-    assert (back.update_count, back.insert_count) == (1, 1)
+    assert (back.update_count, back.insert_count) == (0, 1)
     assert sorted_rows(w, f"SELECT active_flag, delete_flag FROM {w.name('customers')}") == [
         ("N", "Y"),
         ("Y", "N"),

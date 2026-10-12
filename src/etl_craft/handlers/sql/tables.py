@@ -43,6 +43,7 @@ AUDIT_COLUMNS: dict[str, tuple[str, ...]] = {
         "UPDATE_DATE",
         "UPDATED_BY",
         "DELETE_FLAG",
+        "ACTIVE_FLAG",
     ),
     SqlAction.SCD2_MERGE: (
         "PIPELINE_ID",
@@ -217,7 +218,8 @@ def check_target_audit(session: Session, action: str) -> list[tuple[str, str]]:
     if missing_audit:
         raise SqlGuardError(
             f"{session.target} exists but lacks {', '.join(missing_audit)}, which "
-            f"SQL_ACTION={action} maintains; run a SETUP_TABLE task for it, or add the columns. "
+            f"SQL_ACTION={action} maintains; use upgrade-targets for an existing legacy "
+            "target, or add the columns with an explicit migration. "
             "SCHEMA_EVOLUTION adds only the SELECT's own columns"
         )
     check_identity_types(session)

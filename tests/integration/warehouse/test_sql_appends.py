@@ -168,13 +168,16 @@ def test_upgrade_command_validates_then_adds_and_records_requests(sql_world, cap
         f"{w.schema}.cli_load",
     ]
     assert main([*args, "--dry-run"]) == 0
-    assert "would add nullable PIPELINE_ID BIGINT, TASK_RUN_ID BIGINT" in capsys.readouterr().out
+    assert (
+        "would upgrade audit columns; additions: PIPELINE_ID, TASK_RUN_ID"
+        in capsys.readouterr().out
+    )
     assert "task_run_id" not in w.columns("cli_load")
     assert main(args) == 0
-    assert "historical rows retain NULL" in capsys.readouterr().out
+    assert "upgraded audit columns; additions: PIPELINE_ID, TASK_RUN_ID" in capsys.readouterr().out
     assert "task_run_id" in w.columns("cli_load")
     assert main(args) == 0
-    assert "identity columns already exist" in capsys.readouterr().out
+    assert "audit columns already upgraded" in capsys.readouterr().out
     from sqlalchemy import text
 
     with w.engine_db.connect() as conn:
@@ -227,7 +230,10 @@ def test_every_sql_writer_records_pipeline_and_task_run_identities(sql_world, ac
         )
         sql.run(deleted, w.engine_db)
         assert set(
-            w.rows(f"SELECT pipeline_id, pipeline_run_id, task_run_id FROM {w.name('identities')}")
+            w.rows(
+                f"SELECT pipeline_id, pipeline_run_id, task_run_id FROM {w.name('identities')} "
+                "WHERE delete_flag = 'Y'"
+            )
         ) == {(deleted.pipeline_id, deleted.pipeline_run_id, deleted.task_run_id)}
 
 

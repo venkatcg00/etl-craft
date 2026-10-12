@@ -77,6 +77,22 @@ def fetch_target_tasks(
     return [TargetTask(**row._mapping) for row in rows]
 
 
+def conflicting_merge_action(
+    conn: Connection, task_id: int, target_object: str, sql_action: str
+) -> str | None:
+    """Find an active opposite merge writer, including other pipelines and target aliases."""
+    found = conn.execute(
+        statement(conn, "conflicting_merge_action"),
+        {
+            "task_id": task_id,
+            "target_object": target_object.lower(),
+            "relative_target": target_object.split(".", 1)[1].lower(),
+            "sql_action": sql_action,
+        },
+    ).scalar_one_or_none()
+    return str(found) if found is not None else None
+
+
 @dataclass(frozen=True)
 class FailureWatchMessage:
     """A task watched through a FAILURE dependency, with its latest error message."""

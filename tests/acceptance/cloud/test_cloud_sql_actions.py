@@ -21,6 +21,7 @@ from etl_craft.warehouse.connection import build_warehouse_engine, warehouse_dia
 from fixtures.cloud import DATABRICKS_VARS, SNOWFLAKE_VARS, require_variables, write_config
 from fixtures.engine_db import apply_schema, sqlite_engine_db
 from fixtures.metadata import add_pipeline, insert, start_run
+from fixtures.scd_lifecycle import check_scd1_upgrade, check_scd_lifecycle
 from fixtures.sql_appends import check_append_retries, check_identity_inputs, check_legacy_upgrade
 from fixtures.sql_evolution import check_evolution, check_interrupted_evolution
 from fixtures.sql_merges import check_composite_merge
@@ -206,6 +207,34 @@ def test_every_action_on_databricks(tmp_path, table_format):
     fields = {name.lower(): f"ETL_CRAFT_TEST_DATABRICKS_{name}" for name in DATABRICKS_VARS}
     schema = os.environ["ETL_CRAFT_TEST_DATABRICKS_SCHEMA"]
     walk_every_action(cloud_world(tmp_path, "Databricks", fields, table_format, schema))
+
+
+@pytest.mark.parametrize(
+    "name,variables",
+    [
+        pytest.param("Databricks", DATABRICKS_VARS, marks=pytest.mark.cloud_databricks),
+        pytest.param("Snowflake", SNOWFLAKE_VARS, marks=pytest.mark.cloud_snowflake),
+    ],
+)
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_scd_lifecycle_and_upgrade(tmp_path, name, variables, table_format):
+    prefix = name.upper()
+    require_variables(prefix, variables)
+    fields = {key.lower(): f"ETL_CRAFT_TEST_{prefix}_{key}" for key in variables}
+    schema = os.environ[f"ETL_CRAFT_TEST_{prefix}_SCHEMA"]
+    w = cloud_world(tmp_path, name, fields, table_format, schema)
+    suffix = uuid.uuid4().hex[:8]
+    targets = [f"etl_lifecycle_{kind}_{suffix}" for kind in ("scd1", "scd2", "upgrade")]
+    try:
+        check_scd_lifecycle(w, targets[0], "SCD1_MERGE")
+        check_scd_lifecycle(w, targets[1], "SCD2_MERGE")
+        check_scd1_upgrade(w, targets[2])
+    finally:
+        for target in targets:
+            with w.warehouse.begin() as conn:
+                conn.execute(text(f"DROP TABLE IF EXISTS {w.name(target)}"))
+        w.warehouse.dispose()
+        w.engine_db.dispose()
 
 
 @pytest.mark.cloud_snowflake

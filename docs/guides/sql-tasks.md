@@ -202,8 +202,12 @@ action. Its SELECT only gives the shape; `SELECT ... WHERE 1 = 0` is fine.
 differs from the target's. Every merge key column must be set: a row with a NULL in one would
 match no target row, so the merges and `DELETE_ROWS` fail on it, with the count. A key that
 `DELETE_ROWS` flagged deleted comes back when a merge's SELECT returns it again: `SCD1_MERGE`
-updates it with `DELETE_FLAG = 'N'`, and `SCD2_MERGE` closes the flagged version and inserts a
-live one. A soft `DELETE_ROWS` leaves rows already flagged as they were.
+updates it with `DELETE_FLAG = 'N'` and `ACTIVE_FLAG = 'Y'`; `SCD2_MERGE` inserts a new live
+version. A soft `DELETE_ROWS` sets `DELETE_FLAG = 'Y'` and `ACTIVE_FLAG = 'N'` on current live
+rows only. It leaves already deleted rows and closed SCD2 history unchanged, including their
+audit stamps. Reviving an inactive deleted SCD2 key counts as one insert and no version closure.
+Both SCD actions preserve creation stamps and stamp updates; unchanged input writes nothing.
+SCD1 and SCD2 must not share a target, even though their audit column sets match.
 
 ### Change hash version 2
 
@@ -346,8 +350,7 @@ After the SELECT's own columns, every table the engine creates has:
 | `PIPELINE_ID`, `PIPELINE_RUN_ID`, `TASK_RUN_ID` | every action |
 | `UPDATE_DATE` | `OVERWRITE_TABLE` |
 | `CREATE_DATE` | `APPEND_TABLE` |
-| `HASH_KEY`, `CREATE_DATE`, `CREATED_BY`, `UPDATE_DATE`, `UPDATED_BY`, `DELETE_FLAG` | `SCD1_MERGE` |
-| the `SCD1_MERGE` columns and `ACTIVE_FLAG` | `SCD2_MERGE` |
+| `HASH_KEY`, `CREATE_DATE`, `CREATED_BY`, `UPDATE_DATE`, `UPDATED_BY`, `DELETE_FLAG`, `ACTIVE_FLAG` | `SCD1_MERGE`, `SCD2_MERGE` |
 | `ROW_ID` | every action; a generated key that business rules refer to |
 
 `PIPELINE_ID` identifies the pipeline definition, `PIPELINE_RUN_ID` its execution, and
@@ -482,3 +485,18 @@ columns. Each target is
 upgraded separately, so rerun the command if an error interrupts a multi-target upgrade. A dry run
 validates targets and prints additions without changing the warehouse; its request is still
 recorded in `AUD_ACTIONS`.
+
+Legacy SCD1 targets also need `ACTIVE_FLAG`. The same command adds it and derives `Y` for
+`DELETE_FLAG = 'N'` and `N` for `DELETE_FLAG = 'Y'`, preserving all existing audit stamps and
+row identities. NULL or invalid deletion state fails before any additions; correct it from
+known evidence first. An interrupted upgrade can be rerun to fill only NULL active flags.
+Targets configured for both SCD1 and SCD2 are refused before upgrade. For one SCD1 target:
+
+```bash
+etl-craft upgrade-targets --action SCD1_MERGE --target sales.customers --dry-run
+etl-craft upgrade-targets --action SCD1_MERGE --target sales.customers
+```
+
+The command also deactivates legacy SCD2 versions with both `ACTIVE_FLAG = 'Y'` and
+`DELETE_FLAG = 'Y'`, preserving their deletion stamps. It cannot reconstruct history that an
+older soft delete already marked deleted; repairing those rows needs independent evidence.
