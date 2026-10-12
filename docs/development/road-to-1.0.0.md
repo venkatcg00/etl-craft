@@ -122,7 +122,7 @@ item's text, or work done early under another item.
 | S5.N Source definitions and schema-aware lineage | Done | #147 | Offline star/join tracing, audited source definitions, seeding and documented/deployed schema comparison |
 | S5.O.1 SCD lifecycle invariants | Done | #148 | Common SCD flags, current-row soft deletes and legacy active-state upgrades |
 | S5.O.2a Common config contract | Done | #149 | Mandatory core/custom CFG audit fields and keys, safe token lifecycle history and lossless upgrades |
-| S5.O.2b Normalized object contracts | Planned; next | | Table/column contracts, relational references and identity invariants |
+| S5.O.2b Normalized object contracts | In progress | #150 | Read-only identity readiness checks; table/column schema and migrations remain next |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
 | S5.P Project documentation gap UI | Planned | | Coloured column warnings, lineage gaps and project summary |
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
@@ -143,6 +143,15 @@ S5.O.2b for object normalization and then the UI items. The frozen 0.4
 soak is unchanged.
 
 **Acceptance availability.**
+
+S5.O.2b readiness passed the full local gate: 3,567 passed, 96 expected skips, 94.22% coverage
+in 27m40s; strict documentation built in 8.44s. Python 3.12 and 3.13 each passed 1,611 unit
+tests (24.92s / 24.69s). The current wheel and source distribution built together; installed
+package validation passed 27 cases without skips across all four local warehouses in 18m03s.
+The focused identity/config/source checks passed 102 cases in 25.11s. Warehouse SQL generation,
+cloud dialects, Airflow and workflows are unchanged, so their additional suites were not needed.
+Use disk-backed scratch/TMPDIR on this workstation: its 7.5GB `/tmp` tmpfs filled during an
+earlier run. Keep `PYTEST_ADDOPTS` unset: release-evidence tests reject environment overrides.
 
 S4.G passed the full local checks, installed-wheel matrix and all Databricks and Snowflake
 acceptance tests.
@@ -204,6 +213,17 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- S5.O.2b starts with read-only readiness diagnostics and an explicit persisted-identity
+  inventory. The legacy indexes allow active/inactive duplicates; deployment validation now
+  reports their IDs and resolved source aliases before enforcing all-row identities. The
+  relational schema, reference conversion and historical migration remain unfinished; this
+  diagnostic must not be counted as completing S5.O.2b.
+  Continue the schema work from `main` on `feat/metadata-normalization-schema`; the readiness
+  branch is retained after merge. The legacy retire-and-reuse example remains byte-for-byte
+  unchanged and now has an explicitly tested readiness warning. Child identities are scoped
+  by stable parent IDs, and the query reads only identity fields so unrelated inactive
+  settings cannot break the diagnostic.
 
 - S5.O.2a completes the mandatory base fields and single non-null key for core and custom
   Engine DB config tables, with safe token history; S5.O.2b retains object/FK normalization

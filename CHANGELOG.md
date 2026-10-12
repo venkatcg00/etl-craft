@@ -8,6 +8,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Deployment-wide `validate` and config plan/apply validation now warn about legacy metadata
+  that cannot convert unambiguously to normalized contracts: duplicate active/inactive keys,
+  resolved source-column/ordinal collisions and invalid task/rule object references. Findings
+  name row IDs, active flags and the repair needed. The check is read-only and respects
+  warehouse identifier case rules and quoted dots; pipeline-scoped validation stays scoped.
+
 - Every core and project `CFG_` table now requires one primary key, mandatory creation/update
   actors and UTC timestamps, and an active flag accepting only `Y`/`N`. Engine migrations
   `0025`/`0026` preserve IDs, creation records, credential hashes and existing history while

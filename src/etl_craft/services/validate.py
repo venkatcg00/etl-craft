@@ -33,6 +33,7 @@ from etl_craft.core.text import is_metadata_code, qualify, suggest
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.business_rules import fetch_business_rules_for_task
 from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
+from etl_craft.engine.repository.normalization import normalization_problems
 from etl_craft.engine.repository.pipelines import (
     PIPELINE_PARAMETER_KINDS,
     pipeline_parameter_problems,
@@ -167,7 +168,10 @@ def validate_on(
         pipeline_codes=[code for code, _ in pipeline_parameters],
     )
     report = Report()
-    dialect, _ = dialect_and_catalog(config)
+    dialect, catalog = dialect_and_catalog(config)
+    if pipeline_code is None:
+        for readiness_problem in normalization_problems(conn, catalog=catalog, dialect=dialect):
+            report.warn("metadata normalization", readiness_problem)
     for definition in fetch_source_columns(conn):
         problem = definition_problem(definition, dialect)
         if problem:
