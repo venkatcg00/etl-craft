@@ -8,6 +8,13 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- SCD1 targets now carry `ACTIVE_FLAG` alongside creation/update actors and dates and
+  `DELETE_FLAG`. `upgrade-targets` derives legacy SCD1 active state from known deletion flags
+  under the target lock, with a dry run and repeatable backfill that preserves historical stamps.
+  It also deactivates legacy active/deleted SCD2 versions without rewriting their stamps.
+  Soft deletes deactivate current live rows and leave closed SCD2 history unchanged. Revival
+  restores SCD1 in place or inserts a new SCD2 version. Mixed SCD1/SCD2 target contracts are refused.
+
 - Source definitions in `CFG_SOURCE_COLUMNS` / `source_columns.csv` let lineage expand stars
   and resolve bare join columns without a warehouse connection. Upstream SQL targets supply
   their traced output schemas, and schema edits invalidate cached lineage. Config export seeds

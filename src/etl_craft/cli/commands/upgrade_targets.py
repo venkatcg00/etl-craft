@@ -1,4 +1,4 @@
-"""``upgrade-targets``: add execution identities without changing historical rows."""
+"""``upgrade-targets``: add execution identities and correct legacy SCD active state."""
 
 import argparse
 
@@ -43,21 +43,21 @@ def _run(args: argparse.Namespace, out: Output) -> int:
         out.line("No active configured targets to upgrade")
     for result in results:
         if not result.changed:
-            out.line(f"{result.target}: identity columns already exist")
+            out.line(f"{result.target}: audit columns already upgraded")
         elif result.dry_run:
-            columns = ", ".join(f"{name} BIGINT" for name in result.columns)
-            out.line(f"{result.target}: would add nullable {columns}")
+            columns = ", ".join(result.columns) or "none"
+            out.line(f"{result.target}: would upgrade audit columns; additions: {columns}")
             assert result.sql is not None
             out.line(result.sql)
         else:
-            columns = ", ".join(f"{name} BIGINT" for name in result.columns)
-            out.line(f"{result.target}: added nullable {columns}; historical rows retain NULL")
+            columns = ", ".join(result.columns) or "none"
+            out.line(f"{result.target}: upgraded audit columns; additions: {columns}")
     return ExitCode.SUCCESS
 
 
 COMMAND = Command(
     "upgrade-targets",
-    "Add pipeline and task-run identities to existing targets.",
+    "Upgrade execution identities and legacy SCD active state on existing targets.",
     configure=_configure,
     run=_run,
 )

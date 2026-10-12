@@ -27,6 +27,7 @@ from etl_craft.engine.repository.hash_versions import (
     save_view_statement,
 )
 from etl_craft.engine.repository.offsets import fetch_task_offset
+from etl_craft.engine.repository.tasks import conflicting_merge_action
 from etl_craft.handlers.registry import HandlerResult, TaskContext
 from etl_craft.handlers.sql.actions import ACTIONS, ActionContext
 from etl_craft.handlers.sql.session import Session
@@ -60,6 +61,16 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
     # Hold through warehouse commit: a computed ROW_ID base must include the previous insert.
     # Generated keys still share mutation ordering with replacement and hash upgrades.
     with locks.target(qualify(task.target_object, catalog)).hold(engine_db):
+        if task.action in {SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE}:
+            with engine_db.connect() as conn:
+                other = conflicting_merge_action(
+                    conn, context.task_id, qualify(task.target_object, catalog), task.action
+                )
+            if other is not None:
+                raise SqlGuardError(
+                    f"{task.target_object}: {task.action} conflicts with an active {other} writer; "
+                    "give the target one merge action before running"
+                )
         if task.watermark is not None:
             with engine_db.connect() as conn:
                 stored = None if context.backfill else fetch_task_offset(conn, context.task_id)

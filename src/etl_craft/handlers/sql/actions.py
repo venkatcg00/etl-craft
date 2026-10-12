@@ -13,8 +13,8 @@
   (``DELETE_FLAG='N'``), changed or not. A NULL in a merge key column fails the task.
 - ``DROP_TABLE`` drops the target if it exists, once this pipeline's ``CREATE_TABLE`` task for
   it has succeeded in the run.
-- ``DELETE_ROWS`` deletes, or flags ``DELETE_FLAG='Y'``, the target rows whose merge key the
-  SELECT returns; rows already flagged are left as they are.
+- ``DELETE_ROWS`` hard deletes matching keys, or sets ``DELETE_FLAG='Y'`` and
+  ``ACTIVE_FLAG='N'`` on matching current live rows; closed history is left unchanged.
 
 Only ``CREATE_TABLE`` and ``SETUP_TABLE`` create tables; every other action fails, naming the
 remedy, when its target does not exist.
@@ -223,6 +223,12 @@ def writer_action(setup_for: str | None, others: list[TargetTask], target: str) 
     writers = [task for task in others if task.sql_action in AUDIT_COLUMNS]
     found = sorted({task.sql_action for task in writers})
     listed = ", ".join(f"{task.task_code} ({task.sql_action})" for task in writers)
+    merges = {SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE}
+    if merges.issubset(set(found) | {setup_for}):
+        raise SqlGuardError(
+            f"{target}: SCD1_MERGE and SCD2_MERGE have different row lifecycles; "
+            "give the target one merge action"
+        )
     if setup_for is not None:
         clashing = [a for a in found if AUDIT_COLUMNS[a] != AUDIT_COLUMNS[setup_for]]
         if clashing:
@@ -453,6 +459,7 @@ def scd1_merge(session: Session, action: ActionContext) -> HandlerResult:
         UPDATE_DATE=":now",
         UPDATED_BY=":updated_by",
         DELETE_FLAG="'N'",
+        ACTIVE_FLAG="'Y'",
     )
     session.run(
         session.dialect.update_from_stage(target, stage, task.merge_key, assignments, condition),
@@ -469,10 +476,10 @@ def scd1_merge(session: Session, action: ActionContext) -> HandlerResult:
     session.run(
         f"INSERT INTO {target} ({columns}, PIPELINE_RUN_ID, PIPELINE_ID, TASK_RUN_ID, "
         f"CREATE_DATE, CREATED_BY, "
-        f"UPDATE_DATE, UPDATED_BY, DELETE_FLAG{row_id_columns}) "
+        f"UPDATE_DATE, UPDATED_BY, DELETE_FLAG, ACTIVE_FLAG{row_id_columns}) "
         f"SELECT {columns}, :pipeline_run_id, :pipeline_id, :task_run_id, "
         f":now, :updated_by, :now, :updated_by, "
-        f"'N'{row_id_values} FROM {stage} s WHERE {new_keys}",
+        f"'N', 'Y'{row_id_values} FROM {stage} s WHERE {new_keys}",
         action.stamp,
         step="insert new rows",
     )
@@ -603,7 +610,7 @@ def drop_table(session: Session, action: ActionContext) -> HandlerResult:
 
 
 def delete_rows(session: Session, action: ActionContext) -> HandlerResult:
-    """Delete, or flag ``DELETE_FLAG='Y'``, the target rows whose merge key the SELECT returns."""
+    """Hard delete matching keys, or deactivate and flag their current live rows."""
     task = action.task
     stage = action.build_stage(session)
     source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
@@ -619,6 +626,7 @@ def delete_rows(session: Session, action: ActionContext) -> HandlerResult:
                 "PIPELINE_ID",
                 "TASK_RUN_ID",
                 "DELETE_FLAG",
+                "ACTIVE_FLAG",
                 "UPDATE_DATE",
                 "UPDATED_BY",
             )
@@ -632,7 +640,7 @@ def delete_rows(session: Session, action: ActionContext) -> HandlerResult:
         check_identity_types(session)
     key_match = _key_match(task.merge_key)
     # A soft delete leaves rows already flagged as they were, with their first UPDATE_DATE.
-    live = "" if task.hard_delete else " AND (t.DELETE_FLAG IS NULL OR t.DELETE_FLAG <> 'Y')"
+    live = "" if task.hard_delete else " AND t.ACTIVE_FLAG = 'Y' AND t.DELETE_FLAG = 'N'"
     delete_count = session.count(
         f"SELECT COUNT(*) FROM {target} t WHERE EXISTS (SELECT 1 FROM {stage} s WHERE {key_match})"
         f"{live}",
@@ -647,11 +655,11 @@ def delete_rows(session: Session, action: ActionContext) -> HandlerResult:
         )
     else:
         session.run(
-            f"UPDATE {mutation} SET DELETE_FLAG = 'Y', UPDATE_DATE = :now, "
+            f"UPDATE {mutation} SET DELETE_FLAG = 'Y', ACTIVE_FLAG = 'N', UPDATE_DATE = :now, "
             f"PIPELINE_RUN_ID = :pipeline_run_id, PIPELINE_ID = :pipeline_id, "
             f"TASK_RUN_ID = :task_run_id, "
             f"UPDATED_BY = :updated_by WHERE EXISTS (SELECT 1 FROM {stage} s WHERE {match}) "
-            f"AND ({q}.DELETE_FLAG IS NULL OR {q}.DELETE_FLAG <> 'Y')",
+            f"AND {q}.ACTIVE_FLAG = 'Y' AND {q}.DELETE_FLAG = 'N'",
             action.stamp,
             step="flag the rows deleted",
         )

@@ -1,4 +1,4 @@
-"""Add nullable pipeline and task-run identities to configured SQL and ingestion targets."""
+"""Upgrade configured targets' execution identities and legacy SCD active state."""
 
 from __future__ import annotations
 
@@ -53,6 +53,7 @@ def upgrade_targets(
         split_object_ref(target)
         selected = qualify(target, catalog).lower()
     contracts: dict[str, list[tuple[str, str, WarehouseDialect, bool]]] = {}
+    merge_actions: dict[str, set[str]] = {}
     targets = set()
     with engine.connect() as conn:
         for task in fetch_active_tasks(conn):
@@ -76,6 +77,9 @@ def upgrade_targets(
             key = qualified.lower()
             if selected is not None and key != selected:
                 continue
+            merge = params.get("SETUP_FOR", "").strip().upper() if kind == "SETUP_TABLE" else kind
+            if merge in {SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE}:
+                merge_actions.setdefault(key, set()).add(merge)
             context = TaskContext(
                 config=config,
                 pipeline_id=task.pipeline_id,
@@ -97,6 +101,11 @@ def upgrade_targets(
     if selected is not None and selected not in targets:
         raise HandlerError(f"{target}: no active {action or 'SQL'} task writes this target")
     for key in sorted(targets):
+        if len(merge_actions.get(key, set())) > 1:
+            raise HandlerError(
+                f"{key}: SCD1_MERGE and SCD2_MERGE have different row lifecycles; "
+                "give the target one merge action before upgrading"
+            )
         writers = [writer for writer in contracts[key] if writer[3]]
         if len({dialect.spec.table_format for _, _, dialect, _ in writers}) > 1:
             names = ", ".join(f"{label} ({d.spec.table_format})" for _, label, d, _ in writers)
@@ -143,13 +152,68 @@ def upgrade_targets(
                 f"{dialect.alter_table_keyword()} {qualified} ADD COLUMN {column} BIGINT"
                 for column in additions
             ]
+            scd1 = merge_actions.get(key) == {SqlAction.SCD1_MERGE}
+            backfill = False
+            if scd1:
+                if "delete_flag" not in columns:
+                    raise HandlerError(
+                        f"{qualified}: SCD1 active-state upgrade needs DELETE_FLAG; "
+                        "migrate the legacy deletion state explicitly before upgrading"
+                    )
+                invalid = session.count(
+                    f"SELECT COUNT(*) FROM {qualified} WHERE DELETE_FLAG IS NULL "
+                    "OR DELETE_FLAG NOT IN ('Y', 'N')",
+                    step="validate legacy SCD1 deletion state",
+                )
+                if invalid:
+                    raise HandlerError(
+                        f"{qualified}: {invalid} row(s) have NULL or invalid DELETE_FLAG; "
+                        "set each to Y or N from known deletion evidence before upgrading"
+                    )
+                if "active_flag" not in columns:
+                    additions.append("ACTIVE_FLAG")
+                    statements.append(
+                        f"{dialect.alter_table_keyword()} {qualified} ADD COLUMN ACTIVE_FLAG "
+                        f"{dialect.evolution_column_type(dialect.audit_column_type('ACTIVE_FLAG'))}"
+                    )
+                    backfill = True
+                else:
+                    backfill = bool(
+                        session.count(
+                            f"SELECT COUNT(*) FROM {qualified} WHERE ACTIVE_FLAG IS NULL",
+                            step="unfinished SCD1 active-state upgrade",
+                        )
+                    )
+                if backfill:
+                    statements.append(
+                        f"UPDATE {qualified} SET ACTIVE_FLAG = CASE WHEN DELETE_FLAG = 'Y' "
+                        "THEN 'N' ELSE 'Y' END WHERE ACTIVE_FLAG IS NULL"
+                    )
+            elif merge_actions.get(key) == {SqlAction.SCD2_MERGE}:
+                if not {"active_flag", "delete_flag"}.issubset(columns):
+                    raise HandlerError(
+                        f"{qualified}: SCD2 state needs ACTIVE_FLAG and DELETE_FLAG; "
+                        "migrate the legacy version state explicitly before upgrading"
+                    )
+                backfill = bool(
+                    session.count(
+                        f"SELECT COUNT(*) FROM {qualified} "
+                        "WHERE ACTIVE_FLAG = 'Y' AND DELETE_FLAG = 'Y'",
+                        step="legacy active soft-deleted SCD2 versions",
+                    )
+                )
+                if backfill:
+                    statements.append(
+                        f"UPDATE {qualified} SET ACTIVE_FLAG = 'N' "
+                        "WHERE ACTIVE_FLAG = 'Y' AND DELETE_FLAG = 'Y'"
+                    )
             if not dry_run:
-                for column, sql in zip(additions, statements, strict=True):
-                    session.run(sql, step=f"add nullable {column}")
+                for sql in statements:
+                    session.run(sql, step="upgrade target audit columns")
             results.append(
                 UpgradeResult(
                     qualified,
-                    bool(additions),
+                    bool(additions) or backfill,
                     dry_run,
                     "\n".join(statements) or None,
                     tuple(additions),
