@@ -43,7 +43,9 @@ def export_config(
     target = config_files.config_directory(ctx.config, directory)
     moment = None if as_of is None else _moment(ctx, as_of)
     with acting_as(ctx.actor):
-        return config_files.export_config(ctx.engine, target, overwrite=overwrite, as_of=moment)
+        return config_files.export_config(
+            ctx.engine, target, overwrite=overwrite, as_of=moment, config=ctx.config
+        )
 
 
 def _moment(ctx: OperationContext, as_of: str) -> datetime:

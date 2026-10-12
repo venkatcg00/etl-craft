@@ -336,6 +336,29 @@ BUSINESS_RULES = ConfigTable(
     ),
 )
 
+SOURCE_COLUMNS = ConfigTable(
+    file="source_columns.csv",
+    table="CFG_SOURCE_COLUMNS",
+    id_column="SOURCE_COLUMN_ID",
+    key=("TABLE_NAME", "COLUMN_NAME"),
+    columns=(
+        Column("TABLE_NAME", required=True),
+        Column("COLUMN_NAME", required=True),
+        Column("DATA_TYPE", required=True),
+        Column("COLUMN_POSITION", "int", required=True, minimum=1),
+        ACTIVE_FLAG,
+    ),
+    stored=("TABLE_NAME", "COLUMN_NAME", "DATA_TYPE", "COLUMN_POSITION"),
+    parents=(),
+    links=(),
+    label_format="{TABLE_NAME}.{COLUMN_NAME}",
+    read_sql=(
+        "SELECT SOURCE_COLUMN_ID AS row_id, ACTIVE_FLAG AS active_flag, 'Y' AS well_formed, "
+        "TABLE_NAME AS table_name, COLUMN_NAME AS column_name, DATA_TYPE AS data_type, "
+        "COLUMN_POSITION AS column_position FROM CFG_SOURCE_COLUMNS"
+    ),
+)
+
 TABLES = (
     PIPELINES,
     TASKS,
@@ -343,6 +366,7 @@ TABLES = (
     TASK_DEPENDENCIES,
     PIPELINE_DEPENDENCIES,
     BUSINESS_RULES,
+    SOURCE_COLUMNS,
 )
 """Every config file's table, parents before the rows that hang off them."""
 
@@ -379,6 +403,9 @@ def read_rows(conn: Connection, table: ConfigTable) -> list[StoredRow]:
             for column in table.columns
             if column is not ACTIVE_FLAG
         }
+        if table is SOURCE_COLUMNS:
+            for name in ("TABLE_NAME", "COLUMN_NAME"):
+                values[name] = str(values[name]).lower()
         rows.append(
             StoredRow(
                 int(row["row_id"]),

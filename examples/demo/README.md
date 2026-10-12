@@ -46,7 +46,8 @@ add a new project migration instead of editing an applied seed. The optional rem
 seed is added after the main seed.
 
 The emails arrive in Mailpit at <http://localhost:58025>. `etl-craft history`, `graph`, `steps`
-and `lineage` show what ran.
+and `lineage` show what ran. `etl-craft lineage --strict` also traces every SQL task before
+the warehouse tables exist, using the script-landed source shapes in the seed metadata.
 
 ## Under an orchestrator
 
@@ -63,7 +64,7 @@ metadata/remote_mode.sql`) to turn them into rules an orchestrator applies.
 | Path | Holds |
 |---|---|
 | `craft-connector.yml` | SQLite Engine DB, DuckDB warehouse, Mailpit, cloning into `aud` |
-| `metadata/support_insights.sql` | the pipelines, tasks, parameters, dependencies and rules, as `CFG_` rows; runs as written on SQLite and PostgreSQL |
+| `metadata/support_insights.sql` | source-column definitions and the pipelines, tasks, parameters, dependencies and rules, as `CFG_` rows; runs as written on SQLite and PostgreSQL |
 | `metadata/remote_mode.sql` | the changes remote mode needs, loaded after `support_insights.sql` |
 | `ingestion_scripts/` | the scripts that land each source, plus a flaky feed and a slow task |
 | `sql_files/` | the SELECTs the SQL tasks wrap in their actions |

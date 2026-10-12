@@ -32,7 +32,7 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--with-warehouse",
         action="store_true",
-        help="add column types and comments from the warehouse",
+        help="compare documented columns with the warehouse and add deployed types and comments",
     )
 
 
@@ -48,6 +48,9 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     if args.strict and catalog.untraced:
         out.line(f"generate-docs: nothing written; {len(catalog.untraced)} task(s) not traced")
         return ExitCode.FAILURE
+    for table in catalog.tables.values():
+        for finding in table.warehouse_findings:
+            out.line(f"warehouse comparison: {table.name}: {finding}")
     folder = args.output or config.docs_site.output or config.project_dir / DEFAULT_FOLDER
     site = write_site(catalog, config, folder)
     out.line(f"generate-docs: wrote {site.pages} page(s) to {site.folder}")

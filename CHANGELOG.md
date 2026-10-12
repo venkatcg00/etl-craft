@@ -8,6 +8,13 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Source definitions in `CFG_SOURCE_COLUMNS` / `source_columns.csv` let lineage expand stars
+  and resolve bare join columns without a warehouse connection. Upstream SQL targets supply
+  their traced output schemas, and schema edits invalidate cached lineage. Config export seeds
+  existing external and script-landed tables; historical exports remain offline. Validation
+  reports source schema drift. Catalogs built with `--with-warehouse` preserve declared types,
+  show deployed types and report column gaps or unavailable comparisons. Migration `0024_source_columns.sql` adds the actor-audited table.
+
 - Local `EVENT_WAIT` tasks wait durably for settled, unconsumed files or a read-only warehouse
   query returning a row, without worker slots. Timeouts fail or skip, and evidence and file
   consumption commit with success. Downstream SQL reads `$$event_files`; Python scripts receive

@@ -120,7 +120,7 @@ def project(engine_db, tmp_path, monkeypatch):
             "copy_all",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="mart.everything",
-            SOURCE_SQL="SELECT * FROM sales.orders",
+            SOURCE_SQL="SELECT * FROM sales.orders o JOIN ref.rates r ON o.id = r.id",
         )
         add_pipeline_dependency(conn, mart, sales)
         add_dependency(conn, ingest, stage, pull)
@@ -137,6 +137,16 @@ def project(engine_db, tmp_path, monkeypatch):
             r=run_id,
         )
         transitions.finalize_pipeline_run(conn, run_id, "SUCCESS")
+    with engine.begin() as conn:
+        for position, column in enumerate(("id", "amt", "currency"), 1):
+            conn.execute(
+                text(
+                    "INSERT INTO CFG_SOURCE_COLUMNS "
+                    "(TABLE_NAME,COLUMN_NAME,DATA_TYPE,COLUMN_POSITION) VALUES "
+                    "('raw.orders',:column,'VARCHAR',:position)"
+                ),
+                {"column": column, "position": position},
+            )
     return engine, load_config(root / "craft-connector.yml"), root
 
 
@@ -203,6 +213,7 @@ def test_a_tables_graph_runs_to_the_first_source_and_the_last_consumer(project):
     assert {(s, t) for s, t, _ in drawing.table_edges} == {
         ("external:crm api", "raw.orders"),
         ("sales.orders", "mart.everything"),
+        ("ref.rates", "mart.everything"),
     }
     # Every box sits inside the drawing, a level to a column, left to right.
     xs = {node.level: node.x for node in drawing.nodes.values()}

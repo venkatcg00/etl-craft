@@ -1,0 +1,99 @@
+"""Warehouse drift and repository source seeding on every local warehouse."""
+
+from sqlalchemy import text
+
+from etl_craft.services.catalog import build_catalog
+from etl_craft.services.catalog_site import write_site
+from etl_craft.services.config_files import export_config, read_config_files, sync_config
+from etl_craft.services.source_columns import warehouse_columns
+from etl_craft.services.validate import validate
+from fixtures.metadata import add_task
+
+
+def test_export_seeds_sources_and_validate_names_all_drift(sql_world, tmp_path):
+    world = sql_world
+    source = f"{world.schema}.source_feed"
+    world.execute(
+        f"CREATE TABLE {world.name('source_feed')} (id INTEGER, amount INTEGER, removed INTEGER)"
+    )
+    with world.engine_db.begin() as conn:
+        add_task(
+            conn,
+            world.pipeline_id,
+            "source_reader",
+            SQL_ACTION="CREATE_TABLE",
+            TARGET_OBJECT=f"{world.schema}.output",
+            SOURCE_SQL=f"SELECT id FROM {source}",
+        )
+    folder = tmp_path / "seed"
+    result = export_config(world.engine_db, folder, config=world.config)
+    assert result.rows["source_columns.csv"] == 3
+    loaded = sync_config(world.engine_db, world.config, read_config_files(folder), apply=True)
+    assert not loaded.failed
+    assert len([change for change in loaded.changes if change.file == "source_columns.csv"]) == 3
+    export_config(world.engine_db, folder, config=world.config, overwrite=True)
+    assert not sync_config(
+        world.engine_db, world.config, read_config_files(folder), apply=False
+    ).changes
+    report = validate(world.engine_db, world.config)
+    assert not [finding for finding in report.findings if finding.where.startswith("source ")]
+    world.execute(f"ALTER TABLE {world.name('source_feed')} ADD COLUMN extra INTEGER")
+    world.execute(f"ALTER TABLE {world.name('source_feed')} DROP COLUMN removed")
+    world.execute(
+        f"ALTER TABLE {world.name('source_feed')} ALTER COLUMN amount SET DATA TYPE BIGINT"
+    )
+    findings = [
+        finding.message
+        for finding in validate(world.engine_db, world.config).findings
+        if finding.where == f"source {source}"
+    ]
+    assert len(findings) == 3
+    assert any("adds column extra" in message for message in findings)
+    assert any("lacks column removed" in message for message in findings)
+    assert any("amount has warehouse type" in message for message in findings)
+    catalog = build_catalog(world.engine_db, world.config, with_warehouse=True)
+    table = catalog.tables[source]
+    assert table.warehouse_checked and table.in_warehouse
+    assert len(table.warehouse_findings) == 3
+    assert table.columns["amount"].declared_type != table.columns["amount"].warehouse_type
+    write_site(catalog, world.config, tmp_path / "catalog")
+    html = (tmp_path / "catalog" / "tables" / f"{source}.html").read_text()
+    assert "Declared type" in html and "Deployed type" in html
+    assert "warehouse adds column extra" in html and "warehouse lacks column removed" in html
+
+    with world.warehouse.connect() as conn:
+        assert warehouse_columns(conn, world.config, f"{world.schema}.future_source") == []
+    with world.engine_db.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO CFG_SOURCE_COLUMNS "
+                "(TABLE_NAME,COLUMN_NAME,DATA_TYPE,COLUMN_POSITION) VALUES (:table,'id','INT',1)"
+            ),
+            {"table": f"{world.schema}.future_source"},
+        )
+    assert not any(
+        finding.where.endswith(".future_source")
+        for finding in validate(world.engine_db, world.config).findings
+    )
+
+
+def test_catalog_finds_sql_target_gaps_without_flagging_audit_columns(sql_world):
+    world = sql_world
+    world.run(
+        "documented_target",
+        SQL_ACTION="CREATE_TABLE",
+        TARGET_OBJECT="documented",
+        SOURCE_SQL="SELECT 1 AS id, 2 AS removed",
+    )
+    world.execute(f"DROP TABLE {world.name('documented')}")
+    world.execute(
+        f"CREATE TABLE {world.name('documented')} "
+        "(id INTEGER, extra INTEGER, row_id BIGINT, pipeline_id BIGINT, "
+        "pipeline_run_id BIGINT, task_run_id BIGINT)"
+    )
+    table = build_catalog(world.engine_db, world.config, with_warehouse=True).tables[
+        f"{world.schema}.documented"
+    ]
+    assert len(table.warehouse_findings) == 2
+    assert any("lacks documented column removed" in message for message in table.warehouse_findings)
+    assert any("adds undocumented column extra" in message for message in table.warehouse_findings)

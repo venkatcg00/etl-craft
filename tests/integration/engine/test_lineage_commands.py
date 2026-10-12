@@ -87,9 +87,19 @@ def project(engine_db, tmp_path, monkeypatch):
             "copy_all",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="mart.everything",
-            SOURCE_SQL="SELECT * FROM sales.orders",
+            SOURCE_SQL="SELECT * FROM sales.orders o JOIN ref.rates r ON o.id = r.id",
         )
         add_task(conn, mart, "cleanup", SQL_ACTION="DROP_TABLE", TARGET_OBJECT="mart.everything")
+    with engine.begin() as conn:
+        for position, column in enumerate(("id", "amt", "currency"), 1):
+            conn.execute(
+                text(
+                    "INSERT INTO CFG_SOURCE_COLUMNS "
+                    "(TABLE_NAME,COLUMN_NAME,DATA_TYPE,COLUMN_POSITION) VALUES "
+                    "('raw.orders',:column,'VARCHAR',:position)"
+                ),
+                {"column": column, "position": position},
+            )
     return engine, load_config(root / "craft-connector.yml")
 
 
@@ -107,7 +117,7 @@ def test_the_summary_lists_every_task_and_what_cannot_be_traced(project, capsys)
         "MART.daily\tmart.daily\t1\tsales.orders",
         "SALES.convert\tsales.orders\t2\tref.rates, staging.orders",
         "not traced: MART.copy_all: SELECT * cannot be traced without knowing the table's "
-        "columns; list them",
+        "columns (ref.rates, sales.orders); define them in source_columns.csv or list them",
     ]
     assert main(["lineage", "--strict"]) == ExitCode.FAILURE
 

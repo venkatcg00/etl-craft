@@ -976,10 +976,24 @@ class _Writer:
                     if run
                     else "",
                 ),
-                ("In the warehouse", "yes" if table.in_warehouse else ""),
+                (
+                    "In the warehouse",
+                    "yes"
+                    if table.in_warehouse
+                    else "no"
+                    if table.warehouse_checked
+                    else "not checked",
+                ),
             ]
         )
-        return f"{facts}{self._columns(table)}{self._graph(name)}"
+        comparison = ""
+        if table.warehouse_findings:
+            comparison = (
+                "<h2>Warehouse comparison</h2><ul>"
+                + "".join(f"<li>{_e(message)}</li>" for message in table.warehouse_findings)
+                + "</ul>"
+            )
+        return f"{facts}{comparison}{self._columns(table)}{self._graph(name)}"
 
     def _columns(self, table: TableAsset) -> str:
         sources: dict[str, list[str]] = {}
@@ -994,12 +1008,25 @@ class _Writer:
             how = "" if e.transformation == COPY else f" <code>{_e(e.transformation)}</code>"
             sources.setdefault(e.target_column, []).append(f"{origin}{how} ({_e(e.task)})")
         typed = any(c.data_type for c in table.columns.values())
-        headers = ["Column", *(["Type", "Comment"] if typed else []), "Made from"]
+        compared = table.warehouse_checked and any(
+            column.declared_type for column in table.columns.values()
+        )
+        type_headers = (
+            ["Declared type", "Deployed type", "Comment"] if compared else ["Type", "Comment"]
+        )
+        headers = ["Column", *(type_headers if typed else []), "Made from"]
         rows = []
         for column in table.columns.values():
             cells = [f'<a href="#col={_e(column.name)}" title="Trace it">{_e(column.name)}</a>']
             if typed:
-                cells += [_e(column.data_type), _e(column.comment)]
+                if compared:
+                    cells += [
+                        _e(column.declared_type) or "not defined",
+                        _e(column.warehouse_type) or "missing",
+                        _e(column.comment),
+                    ]
+                else:
+                    cells += [_e(column.data_type), _e(column.comment)]
             cells.append("<br>".join(sources.get(column.name, [])))
             rows.append(cells)
         return "<h2>Columns</h2>" + _table(headers, rows, "No columns known yet.")

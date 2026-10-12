@@ -16,12 +16,14 @@ source, the edges join into one graph, which ``LineageGraph`` walks upstream to 
 and downstream to the last consumers, across pipelines.
 
 Lineage is stored per task in ``AUD_COLUMN_LINEAGE`` with a hash of the SELECT, target and
-dialect, and worked out again only when one of them changes. SQL that cannot be traced, such as
+dialect and source schemas, and worked out again only when they change. SQL that cannot be
+traced, such as
 ``SELECT *`` over a table whose columns are not known, is reported with the reason.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from importlib.metadata import version
@@ -31,6 +33,8 @@ from sqlalchemy.engine import Engine
 from sqlglot import exp
 from sqlglot.errors import SqlglotError
 from sqlglot.lineage import lineage as sqlglot_lineage
+from sqlglot.optimizer.qualify import qualify as qualify_columns
+from sqlglot.schema import MappingSchema
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.targets import active_catalog
@@ -43,8 +47,11 @@ from etl_craft.engine.repository.lineage import (
     fetch_task_lineage,
     store_task_lineage,
 )
+from etl_craft.engine.repository.source_columns import fetch_source_columns
 from etl_craft.engine.repository.tasks import fetch_task_parameters
+from etl_craft.engine.repository.validation import fetch_task_dependency_edges
 from etl_craft.handlers.sql.spec import resolve_select
+from etl_craft.services.source_columns import definition_problem
 from etl_craft.warehouse.connection import warehouse_dialect
 
 COPY = "copy"
@@ -90,7 +97,12 @@ def table_name(parts: Iterable[str], catalog: str | None) -> str:
 
 
 def extract(
-    select_sql: str, target_object: str, *, dialect: str | None, catalog: str | None = None
+    select_sql: str,
+    target_object: str,
+    *,
+    dialect: str | None,
+    catalog: str | None = None,
+    schemas: Mapping[str, Mapping[str, str]] | None = None,
 ) -> list[Edge]:
     """Trace each column of ``select_sql`` to its sources; ``MetadataError`` when it cannot."""
     try:
@@ -100,24 +112,72 @@ def extract(
     if not isinstance(tree, exp.Query):
         raise MetadataError("the statement is not a SELECT")
     target = table_name(target_object.split("."), catalog)
+    originals = {
+        projection.alias_or_name.lower(): projection.unalias().copy() for projection in tree.selects
+    }
+    schema = MappingSchema(dialect=dialect)
+    if schemas:
+        for name, columns in schemas.items():
+            parts = name.split(".")
+            parts = [catalog or "__etl_craft", *parts] if len(parts) == 2 else parts
+            parts = (
+                [catalog or "__etl_craft", "__unqualified", *parts] if len(parts) == 1 else parts
+            )
+            schema.add_table(".".join(parts), dict(columns))
+    if schemas:
+        try:
+            tree = qualify_columns(
+                tree,
+                dialect=dialect,
+                schema=schema,
+                catalog=catalog or "__etl_craft",
+                db="__unqualified",
+                quote_identifiers=False,
+                identify=False,
+            )
+        except (SqlglotError, KeyError, ValueError) as error:
+            tables = ", ".join(referenced_tables(select_sql, dialect=dialect, catalog=catalog))
+            raise MetadataError(
+                f"columns from {tables} could not be resolved: {error}; define missing source "
+                f"columns in source_columns.csv"
+            ) from error
+    source_names = ", ".join(referenced_tables(select_sql, dialect=dialect, catalog=catalog))
     edges: list[Edge] = []
     for projection in tree.selects:
         column = projection.alias_or_name
         if not column or isinstance(projection, exp.Star) or column == "*":
             raise MetadataError(
-                "SELECT * cannot be traced without knowing the table's columns; list them"
+                "SELECT * cannot be traced without knowing the table's columns "
+                f"({source_names}); define them in source_columns.csv or list them"
             )
-        inner = projection.unalias() if isinstance(projection, exp.Alias) else projection
+        inner = originals.get(column.lower(), projection.unalias())
         transformation = COPY if isinstance(inner, exp.Column) else inner.sql(dialect=dialect)
         try:
-            # No table schemas are known: lineage comes from the SELECT alone.
-            node = sqlglot_lineage(column, tree, {}, dialect=dialect)
+            node = sqlglot_lineage(column, tree, schema, dialect=dialect)
         except (SqlglotError, KeyError, ValueError) as error:
             raise MetadataError(f"column {column!r} could not be traced: {error}") from error
+        if any(
+            not leaf.downstream and isinstance(leaf.expression, exp.Placeholder)
+            for leaf in node.walk()
+        ):
+            raise MetadataError(
+                f"column {column!r} from "
+                f"{referenced_tables(select_sql, dialect=dialect, catalog=catalog)} could not "
+                f"be resolved; define its source columns in source_columns.csv"
+            )
         sources = sorted(
             {
                 (
-                    table_name((leaf.source.catalog, leaf.source.db, leaf.source.name), catalog),
+                    table_name(
+                        (
+                            ""
+                            if leaf.source.catalog.lower() == "__etl_craft"
+                            else leaf.source.catalog,
+                            "" if leaf.source.db.lower() == "__unqualified" else leaf.source.db,
+                            leaf.source.name,
+                        ),
+                        catalog,
+                    ),
                     leaf.name.rsplit(".", 1)[-1].lower(),
                 )
                 for leaf in node.walk()
@@ -171,12 +231,26 @@ def referenced_tables(
 
 
 def lineage_key(
-    select_sql: str, target_object: str, dialect: str | None, catalog: str | None = None
+    select_sql: str,
+    target_object: str,
+    dialect: str | None,
+    catalog: str | None = None,
+    schemas: Mapping[str, Mapping[str, str]] | None = None,
 ) -> str:
     """Hash what a task's lineage is worked out from; any change means working it out again."""
     return sha256_hex(
         "\0".join(
-            (select_sql, target_object, dialect or "", catalog or "", SQLGLOT_VERSION)
+            (
+                select_sql,
+                target_object,
+                dialect or "",
+                catalog or "",
+                SQLGLOT_VERSION,
+                json.dumps(
+                    {name: list(columns.items()) for name, columns in (schemas or {}).items()},
+                    sort_keys=True,
+                ),
+            )
         ).encode()
     )
 
@@ -191,8 +265,77 @@ def collect(
     dialect, catalog = dialect_and_catalog(config)
     with engine.connect() as conn:
         tasks = [(ref, fetch_task_parameters(conn, ref.task_id)) for ref in fetch_sql_tasks(conn)]
-    results: list[TaskLineage] = []
+        defined = fetch_source_columns(conn)
+        dependencies = fetch_task_dependency_edges(conn)
+    schemas: dict[str, dict[str, str]] = {}
+    invalid: dict[str, str] = {}
+    for column in defined:
+        name = table_name(column.table_name.split("."), catalog)
+        problem = definition_problem(column, dialect)
+        if problem:
+            invalid[name] = problem
+            continue
+        schemas.setdefault(table_name(column.table_name.split("."), catalog), {})[
+            column.column_name.lower()
+        ] = column.data_type
+    writers: dict[str, set[int]] = {}
+    reads: dict[int, tuple[str, ...]] = {}
     for ref, params in tasks:
+        action = (params.get("SQL_ACTION") or "").upper()
+        target = (params.get("TARGET_OBJECT") or "").strip()
+        if target and action not in (SqlAction.DROP_TABLE, SqlAction.DELETE_ROWS):
+            writers.setdefault(table_name(target.split("."), catalog), set()).add(ref.task_id)
+        try:
+            sql, _ = resolve_select(
+                config, params, pipeline_run_id=0, refresh_type=RefreshType.FULL
+            )
+            reads[ref.task_id] = referenced_tables(sql, dialect=dialect, catalog=catalog)
+        except EtlCraftError:
+            reads[ref.task_id] = ()
+    # A managed target is inferred from its writers, never from a stale source definition.
+    for target in writers:
+        schemas.pop(target, None)
+    labels = {f"{ref.pipeline_code}.{ref.task_code}": ref.task_id for ref, _ in tasks}
+    targets = {
+        ref.task_id: table_name((params.get("TARGET_OBJECT") or "").strip().split("."), catalog)
+        for ref, params in tasks
+    }
+    creators = {
+        ref.task_id
+        for ref, params in tasks
+        if (params.get("SQL_ACTION") or "").upper()
+        in (SqlAction.CREATE_TABLE, SqlAction.SETUP_TABLE, SqlAction.CREATE_VIEW)
+    }
+    before = {
+        ref.task_id: {
+            writer
+            for source in reads[ref.task_id]
+            for writer in writers.get(source, ())
+            if writer != ref.task_id and (source != targets[ref.task_id] or writer in creators)
+        }
+        for ref, _ in tasks
+    }
+    for dependency in dependencies:
+        task_id = labels.get(dependency.label)
+        if (
+            task_id is not None
+            and dependency.depends_on_task_id in before
+            and dependency.depends_on_task_id != task_id
+        ):
+            before[task_id].add(dependency.depends_on_task_id)
+    ordered = []
+    remaining = list(tasks)
+    processed: set[int] = set()
+    while remaining:
+        ready = [(ref, params) for ref, params in remaining if before[ref.task_id] <= processed]
+        if not ready:
+            break
+        ordered.extend(ready)
+        processed.update(ref.task_id for ref, _ in ready)
+        remaining = [(ref, params) for ref, params in remaining if ref.task_id not in processed]
+    ordered.extend(remaining)
+    results: list[TaskLineage] = []
+    for ref, params in ordered:
         name = f"{ref.pipeline_code}.{ref.task_code}"
         if (params.get("SQL_ACTION") or "").upper() == SqlAction.DROP_TABLE:
             continue
@@ -205,12 +348,25 @@ def collect(
             sources = referenced_tables(select_sql, dialect=dialect, catalog=catalog)
             if not target:
                 raise MetadataError("the task has no TARGET_OBJECT")
-            key = lineage_key(select_sql, target, dialect, catalog)
+            if ref.task_id not in processed:
+                raise MetadataError(
+                    f"{target}: lineage dependency cycle between SQL writers; correct task "
+                    f"dependencies and source/target references"
+                )
+            for source in sources:
+                if source in invalid:
+                    raise MetadataError(f"source {source}: {invalid[source]}")
+            used_schemas = {source: schemas[source] for source in sources if source in schemas}
+            key = lineage_key(select_sql, target, dialect, catalog, used_schemas)
             with engine.connect() as conn:
                 stored = [] if refresh else fetch_task_lineage(conn, ref.task_id, key)
             if stored:
                 edges = [_edge(e, name) for e in stored]
                 results.append(TaskLineage(name, target, edges, cached=True, sources=sources))
+                if (params.get("SQL_ACTION") or "").upper() != SqlAction.DELETE_ROWS:
+                    schemas[table_name(target.split("."), catalog)] = dict.fromkeys(
+                        (e.target_column for e in edges), "UNKNOWN"
+                    )
                 continue
             edges = [
                 Edge(
@@ -221,16 +377,22 @@ def collect(
                     e.transformation,
                     name,
                 )
-                for e in extract(select_sql, target, dialect=dialect, catalog=catalog)
+                for e in extract(
+                    select_sql, target, dialect=dialect, catalog=catalog, schemas=used_schemas
+                )
             ]
         except EtlCraftError as error:
             results.append(TaskLineage(name, target or None, [], error=str(error), sources=sources))
             continue
+        if (params.get("SQL_ACTION") or "").upper() != SqlAction.DELETE_ROWS:
+            schemas[table_name(target.split("."), catalog)] = dict.fromkeys(
+                (e.target_column for e in edges), "UNKNOWN"
+            )
         if record:
             with engine.begin() as conn:
                 store_task_lineage(conn, ref.task_id, key, [_stored(e) for e in edges])
         results.append(TaskLineage(name, target, edges, sources=sources))
-    return results
+    return sorted(results, key=lambda result: result.task)
 
 
 def dialect_and_catalog(config: ConnectorConfig) -> tuple[str | None, str | None]:

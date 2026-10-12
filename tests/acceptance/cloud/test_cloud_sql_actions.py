@@ -782,3 +782,113 @@ def test_event_waits_on_snowflake(tmp_path, table_format):
             os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"],
         )
     )
+
+
+def walk_source_definitions(w, folder):
+    """Seed live source shapes and detect column drift without running a consumer."""
+    from etl_craft.services.catalog import build_catalog
+    from etl_craft.services.config_files import export_config, read_config_files, sync_config
+    from etl_craft.services.validate import validate
+
+    target = f"etl_craft_source_{uuid.uuid4().hex[:8]}"
+    source = f"{w.schema}.{target}".lower()
+    try:
+        w.run(
+            "land_source",
+            SQL_ACTION="CREATE_TABLE",
+            TARGET_OBJECT=target,
+            SOURCE_SQL="SELECT CAST(1 AS BIGINT) AS id, CAST(2 AS BIGINT) AS removed",
+        )
+        with w.engine_db.begin() as conn:
+            conn.execute(
+                text("UPDATE CFG_TASKS SET ACTIVE_FLAG='N' WHERE TASK_ID=:id"),
+                {"id": w.tasks["land_source"]},
+            )
+        w.task(
+            "source_reader",
+            SQL_ACTION="CREATE_TABLE",
+            TARGET_OBJECT=target + "_consumer",
+            SOURCE_SQL=f"SELECT id FROM {source}",
+        )
+        exported = export_config(w.engine_db, folder, config=w.config)
+        assert exported.rows["source_columns.csv"] >= 2
+        done = sync_config(w.engine_db, w.config, read_config_files(folder), apply=True)
+        assert not done.failed
+        export_config(w.engine_db, folder, config=w.config, overwrite=True)
+        assert not sync_config(
+            w.engine_db, w.config, read_config_files(folder), apply=False
+        ).changes
+        with w.engine_db.begin() as conn:
+            conn.execute(
+                text("UPDATE CFG_SOURCE_COLUMNS SET DATA_TYPE='BIGINT' WHERE COLUMN_NAME='id'")
+            )
+        assert not [
+            finding
+            for finding in validate(w.engine_db, w.config).findings
+            if finding.where.startswith("source ")
+        ]
+        with w.engine_db.begin() as conn:
+            conn.execute(
+                text("UPDATE CFG_SOURCE_COLUMNS SET ACTIVE_FLAG='N' WHERE COLUMN_NAME='removed'")
+            )
+            conn.execute(
+                text("UPDATE CFG_SOURCE_COLUMNS SET DATA_TYPE='VARCHAR' WHERE COLUMN_NAME='id'")
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO CFG_SOURCE_COLUMNS "
+                    "(TABLE_NAME,COLUMN_NAME,DATA_TYPE,COLUMN_POSITION) "
+                    "VALUES (:table,'missing','INT',100)"
+                ),
+                {"table": source},
+            )
+        findings = [
+            finding.message
+            for finding in validate(w.engine_db, w.config).findings
+            if finding.where == f"source {source}"
+        ]
+        assert any("adds column removed" in message for message in findings)
+        assert any("lacks column missing" in message for message in findings)
+        assert any("id has warehouse type" in message for message in findings)
+        compared = build_catalog(w.engine_db, w.config, with_warehouse=True).tables[source]
+        assert compared.warehouse_checked and len(compared.warehouse_findings) == 3
+        assert compared.columns["id"].declared_type == "VARCHAR"
+        assert compared.columns["id"].warehouse_type != "VARCHAR"
+    finally:
+        w.execute(f"DROP TABLE IF EXISTS {w.name(target)}")
+        w.warehouse.dispose()
+        w.engine_db.dispose()
+
+
+@pytest.mark.cloud_databricks
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_source_definitions_on_databricks(tmp_path, table_format):
+    require_variables("DATABRICKS", DATABRICKS_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_DATABRICKS_{name}" for name in DATABRICKS_VARS}
+    walk_source_definitions(
+        cloud_world(
+            tmp_path,
+            "Databricks",
+            fields,
+            table_format,
+            os.environ["ETL_CRAFT_TEST_DATABRICKS_SCHEMA"],
+        ),
+        tmp_path / "export",
+    )
+
+
+@pytest.mark.cloud_snowflake
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_source_definitions_on_snowflake(tmp_path, table_format):
+    require_variables("SNOWFLAKE", SNOWFLAKE_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
+    walk_source_definitions(
+        cloud_world(
+            tmp_path,
+            "Snowflake",
+            fields,
+            table_format,
+            os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"],
+        ),
+        tmp_path / "export",
+    )
