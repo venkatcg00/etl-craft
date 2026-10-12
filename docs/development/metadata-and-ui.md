@@ -25,6 +25,37 @@ etl-craft; its customer interaction charts remain business-specific example dash
 
 ## Relational metadata contract
 
+### Legacy identity inventory and readiness
+
+The deployment-wide `validate` check reports duplicate natural keys across active and inactive
+rows in every CSV-backed config table, resolved source-column/position collisions and malformed
+task/rule targets. It is read-only: existing metadata and immutable history remain intact.
+Findings are warnings while the legacy schema remains supported. The normalization migration
+must refuse unresolved ambiguity before writing any converted rows; this diagnostic alone is
+not the relational migration or its completion gate.
+
+| Persisted value | Classification | Conversion and affected readers/writers |
+| --- | --- | --- |
+| `CFG_SOURCE_COLUMNS.TABLE_NAME` | Object identity repeated per column | `CFG_TABLES` parent and `CFG_COLUMNS.TABLE_ID`; source repository, CSV round trips, seed export, validation and catalog/lineage schema cache |
+| Task parameter `TARGET_OBJECT` | Task's target object identity | FK on the existing task; config import/export, task parameter consumers, same-target/conflicting-writer queries, SQL and script handlers |
+| `CFG_BUSINESS_RULES.TARGET_TABLE` | Rule's target object identity | FK on the existing rule; config files, rule execution/validation and rule-result target attribution |
+| Task `MERGE_KEY` / `MERGE_COMPARE_COLUMNS` | Ordered identifier lists | Ordered child rows, preserving order and validating distinct names; SQL task reader, hashing and config round trips |
+| Task `MERGE_DEDUPE_ORDER` | Ordered terms with direction/null ordering | Preserve each term's identifier, direction and null ordering; do not split it as an object name |
+| `AUD_COLUMN_LINEAGE.SOURCE_OBJECT` / `TARGET_OBJECT` | Evidence at computation time | Separate endpoint components with the original task, SQL/config hash and timestamp; migration must preserve the old evidence's identity rather than resolve it against today's catalog |
+| `AUD_BUSINESS_RULES_RESULTS.TARGET_TABLE` | Historical rule-result attribution | Separate recorded target components; current rule edits must not rewrite past results |
+| `AUD_TARGET_HASH_VERSION.TARGET_OBJECT` / `AUD_TARGET_VIEW_STATEMENT.TARGET_OBJECT` | Published state for a warehouse target | Separate full target identity, preserving published versions/hashes and timestamps; rehash, view replacement and publication readers/writers |
+| Config typed histories and `AUD_METADATA_CHANGES` projection | Immutable old configuration versions | Preserve every version and validity interval; historical exports must rebuild matching table/column parents, including old names and inactive contracts |
+| Target advisory/file lock names | Derived opaque lock keys | Derive from the canonical resolved identity; never treat the generated lock name as catalog/schema/table metadata |
+| SQL text, script/SQL file paths, offsets, event file URIs, JSON dictionaries, migration names and content hashes | SQL expressions or opaque values | Keep their current semantics; dots and delimiters alone do not identify a relational field |
+
+The parser recognizes two or three SQL identifier components, including quoted dots, and uses
+the configured warehouse dialect's case rules. Missing catalog remains `NULL` without a
+configured catalog. With one, relative and explicit references to that catalog compare as one
+identity. Readiness does not widen the current handlers' accepted target syntax. Source-column
+comparisons use original stored spelling rather than the legacy CSV reader's lowercase copy.
+
+### Required normalized schema
+
 Use ordinary relational table/column contracts, without mirroring the warehouse's entire
 information schema. `information_schema` is authoritative for deployed structure; configuration
 is authoritative for declared expectations, ownership and engine behaviour. The intentional

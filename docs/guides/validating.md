@@ -18,6 +18,25 @@ checked 4 pipeline(s) and 23 task(s): 2 failed, 1 warning(s)
 can gate a deployment or a pull request that changes the metadata. Warnings do not change the
 exit status.
 
+Deployment-wide validation also reports `metadata normalization` warnings before the relational
+contract upgrade. It checks active and inactive config keys, source-column identities and
+positions, and task/rule target references. A source written as `raw.orders` and another as
+`analytics.raw.orders` resolve to the same object when `analytics` is the configured catalog.
+Warehouse case rules distinguish or fold quoted names as the dialect requires; a quoted dot
+belongs to one identifier component. This readiness parser does not enable quoted targets in
+the current execution handlers.
+
+Each conflict names the row IDs and active flags. Assign distinct identities and repair their
+dependent references before upgrading. Setting a duplicate inactive is insufficient: inactive
+rows must reserve their identities in the normalized contract. These warnings do not edit rows
+or history, choose a surviving duplicate, or prevent currently supported legacy runs. SQL
+expressions, file paths and JSON parameters are not interpreted as object names.
+`--pipeline_code` omits these deployment-wide checks. The same warnings appear in `config plan`
+and `config apply` because those commands validate the resulting deployment configuration.
+The legacy `0006_retire_and_reuse.sql` example deliberately reuses the retired `publish` task
+code and therefore produces a readiness warning. It still runs on the legacy schema; give
+the retired task a distinct code and repair references before the normalized upgrade.
+
 ## What it checks
 
 A `FAIL` is something that would fail a run, hold it up for ever, or make it quietly do

@@ -1,7 +1,7 @@
 """The configuration uploads in docs/examples/migrations/, applied in order on both Engine DBs.
 
 Each file is a project migration a team copies. Every one must apply as written, leave metadata
-that ``validate`` passes without a finding, and stop the upload, changing nothing, when a code it
+that ``validate`` passes, and stop the upload, changing nothing, when a code it
 names has no active row.
 """
 
@@ -28,7 +28,13 @@ def test_every_example_applies_in_order_and_validates(metadata_project):
         shutil.copy(example, migrations)
         assert apply_pending_migrations(engine, migrations) == [example.name]
         report = validate(engine, config)
-        assert report.findings == [], example.name
+        if example.name.startswith("0006"):
+            assert len(report.findings) == 1
+            assert report.findings[0].where == "metadata normalization"
+            assert "CFG_TASKS identity" in report.findings[0].message
+            assert "'publish'" in report.findings[0].message
+        else:
+            assert report.findings == [], example.name
         checked.append((report.pipelines, report.tasks))
     assert checked == [(1, 6), (2, 11), (4, 23), (4, 23), (4, 24), (3, 17)]
 
