@@ -24,17 +24,22 @@ def test_every_example_applies_in_order_and_validates(metadata_project):
     examples = sorted(EXAMPLES.glob("*.sql"))
     assert [path.name[:4] for path in examples] == ["0001", "0002", "0003", "0004", "0005", "0006"]
     checked = []
+    publish_id = None
     for example in examples:
         shutil.copy(example, migrations)
         assert apply_pending_migrations(engine, migrations) == [example.name]
         report = validate(engine, config)
-        if example.name.startswith("0006"):
-            assert len(report.findings) == 1
-            assert report.findings[0].where == "metadata normalization"
-            assert "CFG_TASKS identity" in report.findings[0].message
-            assert "'publish'" in report.findings[0].message
-        else:
-            assert report.findings == [], example.name
+        assert report.findings == [], example.name
+        if example.name.startswith(("0002", "0006")):
+            current_id = metadata_project.rows(
+                "SELECT t.TASK_ID FROM CFG_TASKS t JOIN CFG_PIPELINES p "
+                "ON p.PIPELINE_ID=t.PIPELINE_ID WHERE p.PIPELINE_CODE='SALES_MART' "
+                "AND t.TASK_CODE='publish'"
+            )[0][0]
+            if publish_id is None:
+                publish_id = current_id
+            else:
+                assert current_id == publish_id
         checked.append((report.pipelines, report.tasks))
     assert checked == [(1, 6), (2, 11), (4, 23), (4, 23), (4, 24), (3, 17)]
 
@@ -104,6 +109,20 @@ def test_every_example_applies_in_order_and_validates(metadata_project):
         "GROUP BY MIGRATION ORDER BY 1",
     )
     assert [name for name, _ in changes] == [path.name for path in examples]
+
+
+def test_legacy_retire_and_reuse_is_refused_atomically(metadata_project):
+    metadata_project.load_examples("0005")
+    before = metadata_project.rows("SELECT COUNT(*) FROM AUD_METADATA_CHANGES")
+    tasks = metadata_project.rows("SELECT TASK_ID,ACTIVE_FLAG FROM CFG_TASKS ORDER BY TASK_ID")
+    legacy = EXAMPLES.parent / "legacy-migrations" / "0006_retire_and_reuse.sql"
+    shutil.copy(legacy, metadata_project.migrations)
+    with pytest.raises(MigrationError, match=r"0006_retire_and_reuse\.sql"):
+        apply_pending_migrations(metadata_project.engine, metadata_project.migrations)
+    assert metadata_project.rows("SELECT COUNT(*) FROM AUD_METADATA_CHANGES") == before
+    assert (
+        metadata_project.rows("SELECT TASK_ID,ACTIVE_FLAG FROM CFG_TASKS ORDER BY TASK_ID") == tasks
+    )
 
 
 @pytest.mark.parametrize("example", ["0001_new_pipeline.sql", "0004_change_values.sql"])

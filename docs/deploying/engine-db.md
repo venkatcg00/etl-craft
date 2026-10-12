@@ -44,7 +44,8 @@ Keep your project migrations directory for every later run, since `migrate` need
 Packaged ENGINE migrations declare special policies with SQL header comments:
 `-- etl-craft: rebuild-metadata` enables SQLite's guarded metadata rebuild, and
 `-- etl-craft: check-metadata-codes` validates existing codes before applying pending migrations.
-The packaged `migration-markers.toml` supplies these markers for existing files without changing
+`-- etl-craft: check-metadata-identities` checks stable config keys before applying any pending
+migration and again inside the identity migration transaction before changing indexes. The packaged `migration-markers.toml` supplies these markers for existing files without changing
 any SQL bytes or stored checksums. These internal markers are refused in PROJECT migrations.
 
 Name project files `NNNN_short_description.sql` so they sort in the order they must apply. Each

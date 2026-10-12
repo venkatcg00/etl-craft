@@ -1,8 +1,10 @@
 # Metadata integrity and built-in pipeline insights
 
 This is the corrective design following source definitions, before worker-agent work resumes.
-S5.O.1 implements the SCD lifecycle and legacy upgrades. S5.O.2a enforces common config fields and safe token history. The normalized object schema,
-coloured gap indicators and dashboard remain planned. The frozen 0.4 soak deployment remains unchanged.
+S5.O.1 implements the SCD lifecycle and legacy upgrades. S5.O.2a enforces common config fields
+and safe token history. Stable pipeline, task, parameter, dependency and rule identities now
+include inactive rows. The normalized object schema, coloured gap indicators and dashboard
+remain planned. The frozen 0.4 soak deployment remains unchanged.
 
 ## Evidence and current gaps
 
@@ -30,8 +32,10 @@ etl-craft; its customer interaction charts remain business-specific example dash
 The deployment-wide `validate` check reports duplicate natural keys across active and inactive
 rows in every CSV-backed config table, resolved source-column/position collisions and malformed
 task/rule targets. It is read-only: existing metadata and immutable history remain intact.
-Findings are warnings while the legacy schema remains supported. The normalization migration
-must refuse unresolved ambiguity before writing any converted rows; this diagnostic alone is
+Object findings are warnings while the legacy object schema remains supported. Engine migration
+0027 refuses duplicate pipeline/task/parameter/dependency/rule keys transactionally and enforces
+all-row uniqueness for those identities. It preserves the rows and existing audit versions.
+The object normalization migration must refuse unresolved ambiguity before writing any converted rows; this diagnostic alone is
 not the relational migration or its completion gate.
 
 | Persisted value | Classification | Conversion and affected readers/writers |

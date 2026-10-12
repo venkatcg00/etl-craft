@@ -8,6 +8,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Pipeline, task, parameter, dependency and rule identities now remain unique when retired.
+  Engine migration `0027_config_identities.sql` refuses ambiguous legacy keys before changing
+  constraints and preserves existing row IDs, timestamps and typed history. Reactivate an
+  existing row to use its identity again; the configuration examples demonstrate this, with
+  the original retire-and-reuse SQL retained unchanged for already-applied projects.
+
 - Deployment-wide `validate` and config plan/apply validation now warn about legacy metadata
   that cannot convert unambiguously to normalized contracts: duplicate active/inactive keys,
   resolved source-column/ordinal collisions and invalid task/rule object references. Findings

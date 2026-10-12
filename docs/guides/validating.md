@@ -33,9 +33,9 @@ or history, choose a surviving duplicate, or prevent currently supported legacy 
 expressions, file paths and JSON parameters are not interpreted as object names.
 `--pipeline_code` omits these deployment-wide checks. The same warnings appear in `config plan`
 and `config apply` because those commands validate the resulting deployment configuration.
-The legacy `0006_retire_and_reuse.sql` example deliberately reuses the retired `publish` task
-code and therefore produces a readiness warning. It still runs on the legacy schema; give
-the retired task a distinct code and repair references before the normalized upgrade.
+The archived legacy `0006_retire_and_reuse.sql` example deliberately reuses the retired `publish` task
+code and therefore produces a readiness warning. It runs only before Engine migration 0027; give
+the retired task a distinct code and repair references before the identity upgrade. The current example reactivates the existing task instead.
 
 ## What it checks
 

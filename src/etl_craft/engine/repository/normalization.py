@@ -8,8 +8,6 @@ from sqlglot import exp, parse_one
 from sqlglot.errors import SqlglotError
 from sqlglot.optimizer.normalize_identifiers import normalize_identifiers
 
-from etl_craft.engine.repository.config_rows import SOURCE_COLUMNS, TABLES
-
 ObjectIdentity = tuple[str | None, str, str]
 
 
@@ -41,46 +39,37 @@ def normalization_problems(
     conn: Connection, *, catalog: str | None, dialect: str | None
 ) -> list[str]:
     """Report ambiguous legacy rows without changing their data or history."""
-    problems: list[str] = []
-    for table in TABLES:
-        keys: dict[tuple[object, ...], list[str]] = defaultdict(list)
-        positions: dict[tuple[object, ...], list[str]] = defaultdict(list)
-        parents = tuple(name for name, _ in table.parents)
-        stored_keys = tuple(name.lower() for name in table.key if name in table.stored)
-        names = ("row_id", "active_flag", *parents, *stored_keys)
-        if table is SOURCE_COLUMNS:
-            names += ("column_position",)
-        # Do not decode unrelated settings: even an inactive row can contain an invalid date.
-        rows = conn.execute(
-            text(f"SELECT {', '.join(names)} FROM ({table.read_sql}) AS config_identity")
-        ).mappings()
-        for row in rows:
-            label = f"{table.id_column}={row['row_id']} ACTIVE_FLAG={row['active_flag']}"
-            key: tuple[object, ...] = (
-                *(row[name] for name in parents),
-                *(row[name] for name in stored_keys),
-            )
-            if table is SOURCE_COLUMNS:
-                try:
-                    identity = object_identity(str(row["table_name"]), catalog, dialect)
-                except ValueError as error:
-                    problems.append(f"{table.table} {label}: {error}")
-                    continue
-                column = normalize_identifiers(
-                    exp.to_identifier(str(row["column_name"])), dialect=dialect
-                ).name
-                key = (*identity, column)
-                positions[(*identity, row["column_position"])].append(label)
-            keys[key].append(label)
-        for kind, groups in (("identity", keys), ("column position", positions)):
-            for key, labels in groups.items():
-                if len(labels) > 1:
-                    problems.append(
-                        f"{table.table} {kind} {key!r} has multiple rows: {', '.join(labels)}; "
-                        "assign distinct identities and repair dependent references before "
-                        "normalization; inactive rows also reserve their identity, so "
-                        "deactivating a duplicate does not resolve it"
-                    )
+    problems = config_identity_problems(conn)
+    keys: dict[tuple[object, ...], list[str]] = defaultdict(list)
+    positions: dict[tuple[object, ...], list[str]] = defaultdict(list)
+    rows = conn.execute(
+        text(
+            "SELECT SOURCE_COLUMN_ID AS row_id, ACTIVE_FLAG AS active_flag, "
+            "TABLE_NAME AS table_name, COLUMN_NAME AS column_name, "
+            "COLUMN_POSITION AS column_position FROM CFG_SOURCE_COLUMNS"
+        )
+    ).mappings()
+    for row in rows:
+        label = f"SOURCE_COLUMN_ID={row['row_id']} ACTIVE_FLAG={row['active_flag']}"
+        try:
+            identity = object_identity(str(row["table_name"]), catalog, dialect)
+        except ValueError as error:
+            problems.append(f"CFG_SOURCE_COLUMNS {label}: {error}")
+            continue
+        column = normalize_identifiers(
+            exp.to_identifier(str(row["column_name"])), dialect=dialect
+        ).name
+        keys[(*identity, column)].append(label)
+        positions[(*identity, row["column_position"])].append(label)
+    for kind, groups in (("identity", keys), ("column position", positions)):
+        for key, labels in groups.items():
+            if len(labels) > 1:
+                problems.append(
+                    f"CFG_SOURCE_COLUMNS {kind} {key!r} has multiple rows: {', '.join(labels)}; "
+                    "assign distinct identities and repair dependent references before "
+                    "normalization; inactive rows also reserve their identity, so "
+                    "deactivating a duplicate does not resolve it"
+                )
     references = conn.execute(
         text(
             "SELECT 'CFG_TASK_PARAMETERS' AS table_name, TASK_PARAMETER_ID AS row_id, "
@@ -100,4 +89,45 @@ def normalization_problems(
                 f"{reference.table_name} id={reference.row_id} ACTIVE_FLAG={reference.active_flag} "
                 f"{reference.field_name}: {error}"
             )
+    return problems
+
+
+def config_identity_problems(conn: Connection) -> list[str]:
+    """Report duplicate config keys that do not depend on warehouse identifier rules."""
+    problems: list[str] = []
+    # These physical keys exist before any pending migration, unlike current CSV projections.
+    identities = (
+        ("CFG_PIPELINES", "PIPELINE_ID", ("PIPELINE_CODE",)),
+        ("CFG_TASKS", "TASK_ID", ("PIPELINE_ID", "TASK_CODE")),
+        ("CFG_TASK_PARAMETERS", "TASK_PARAMETER_ID", ("TASK_ID", "PARAMETER_NAME")),
+        (
+            "CFG_PIPELINE_DEPENDENCY",
+            "PIPELINE_DEPENDENCY_ID",
+            ("PIPELINE_ID", "DEPENDS_ON_PIPELINE_ID", "DEPENDENCY_TYPE"),
+        ),
+        (
+            "CFG_TASK_DEPENDENCY",
+            "TASK_DEPENDENCY_ID",
+            ("TASK_ID", "DEPENDS_ON_TASK_ID", "DEPENDENCY_TYPE"),
+        ),
+        ("CFG_BUSINESS_RULES", "BUSINESS_RULE_ID", ("TASK_ID", "BUSINESS_RULE_NAME")),
+    )
+    for table, id_column, columns in identities:
+        groups: dict[tuple[object, ...], list[str]] = defaultdict(list)
+        selected = (
+            f"{id_column} AS row_id",
+            "ACTIVE_FLAG AS active_flag",
+            *(f"{name} AS {name.lower()}" for name in columns),
+        )
+        for row in conn.execute(text(f"SELECT {', '.join(selected)} FROM {table}")).mappings():
+            key = tuple(row[name.lower()] for name in columns)
+            groups[key].append(f"{id_column}={row['row_id']} ACTIVE_FLAG={row['active_flag']}")
+        for key, labels in groups.items():
+            if len(labels) > 1:
+                problems.append(
+                    f"{table} identity {key!r} has multiple rows: {', '.join(labels)}; "
+                    "assign distinct identities and repair dependent references before "
+                    "normalization; inactive rows also reserve their identity, so "
+                    "deactivating a duplicate does not resolve it"
+                )
     return problems

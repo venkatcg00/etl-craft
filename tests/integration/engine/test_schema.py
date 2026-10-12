@@ -175,7 +175,7 @@ def test_run_condition_and_count(seeded, condition, count, accepted):
         refused(db, statement, **params)
 
 
-def test_a_retired_code_can_be_reused_but_not_two_active_ones(seeded):
+def test_a_retired_identity_is_reactivated_in_place(seeded):
     db, ids = seeded
     insert = (
         "INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) "
@@ -183,7 +183,8 @@ def test_a_retired_code_can_be_reused_but_not_two_active_ones(seeded):
     )
     run(db, insert, p=ids["a"])
     run(db, "UPDATE CFG_TASKS SET ACTIVE_FLAG = 'N' WHERE TASK_CODE = 'reuse_me'")
-    run(db, insert, p=ids["a"])
+    refused(db, insert, p=ids["a"])
+    run(db, "UPDATE CFG_TASKS SET ACTIVE_FLAG = 'Y' WHERE TASK_CODE = 'reuse_me'")
     refused(db, insert, p=ids["a"])
     # The same code in another pipeline is a different task.
     run(db, insert, p=ids["b"])

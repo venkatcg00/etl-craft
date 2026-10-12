@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 MIGRATIONS_DIR_ENV_VAR = "ETL_CRAFT_MIGRATIONS_DIR"
 ENGINE = "ENGINE"
 PROJECT = "PROJECT"
-MARKERS = frozenset({"rebuild-metadata", "check-metadata-codes"})
+MARKERS = frozenset({"rebuild-metadata", "check-metadata-codes", "check-metadata-identities"})
 PACKAGED_MARKERS = Path(__file__).parents[1] / "dialects/engine/migration-markers.toml"
 
 
@@ -181,6 +181,8 @@ def _apply(engine: Engine, migration: MigrationFile) -> None:
             if migration.source == ENGINE and "rebuild-metadata" in migration.markers
             else None,
         ) as conn:
+            if "check-metadata-identities" in migration.markers:
+                _check_metadata_identities(conn)
             statements = dialect.split_statements(migration.sql)
             if migration.source == PROJECT:
                 for sql in statements:
@@ -235,6 +237,14 @@ def _check_metadata_codes(conn: Connection) -> None:
         )
 
 
+def _check_metadata_identities(conn: Connection) -> None:
+    from etl_craft.engine.repository.normalization import config_identity_problems
+
+    problems = config_identity_problems(conn)
+    if problems:
+        raise MigrationError("config identity migration cannot run: " + "; ".join(problems))
+
+
 def apply_pending_migrations(
     engine: Engine,
     project_dir: Path | str | None = None,
@@ -256,6 +266,15 @@ def apply_pending_migrations(
         with engine.connect() as conn:
             ledger = _load_ledger(conn)
         verify_ledger(ledger, streams)
+        if any(
+            file.source == ENGINE
+            and "check-metadata-identities" in file.markers
+            and (file.source, file.version) not in ledger
+            for stream in streams
+            for file in stream.files
+        ):
+            with engine.connect() as conn:
+                _check_metadata_identities(conn)
         if any(
             file.source == ENGINE
             and "check-metadata-codes" in file.markers

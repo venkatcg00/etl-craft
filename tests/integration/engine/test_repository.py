@@ -97,15 +97,16 @@ def seeded(engine_db):
         ids["upstream"] = add_task(conn, ids["beta"], "publish")
         conn.execute(
             text(
-                "UPDATE CFG_TASK_PARAMETERS SET ACTIVE_FLAG = 'N' "
+                "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE = 'extract_v2.py' "
                 "WHERE TASK_ID = :t AND PARAMETER_NAME = 'SCRIPT_NAME'"
             ),
             {"t": ids["extract"]},
         )
         conn.execute(
             text(
-                "INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE) "
-                "VALUES (:t, 'SCRIPT_NAME', 'extract_v2.py')"
+                "INSERT INTO CFG_TASK_PARAMETERS "
+                "(TASK_ID, PARAMETER_NAME, PARAMETER_VALUE, ACTIVE_FLAG) "
+                "VALUES (:t, 'OBSOLETE_SETTING', 'extract.py', 'N')"
             ),
             {"t": ids["extract"]},
         )
@@ -177,7 +178,7 @@ def test_task_details_and_parameters(seeded):
             "PL_ALPHA",
         )
         assert (detail.pipeline_id, detail.refresh_type) == (ids["alpha"], "INCREMENTAL")
-        # Only active parameters, so a replaced value is the one read.
+        # Only active parameters, including the value updated in place.
         assert tasks.fetch_task_parameters(conn, ids["extract"]) == {"SCRIPT_NAME": "extract_v2.py"}
 
 

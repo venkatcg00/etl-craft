@@ -83,9 +83,11 @@ For each row of a file, `apply`:
 An active row that no file holds any more is retired too. Keep a row in its file with `N`
 rather than deleting it: the change is clearer in review, and setting it back to `Y` restores it.
 
-A key's row is its active row, or else the last one retired. When a pipeline or task was retired
-and created again under the same code, the rows of the earlier one are history, and `apply`
-leaves them as they are.
+Pipeline, task, parameter, dependency and rule keys retain one row across retirement and
+reactivation. Source-column keys currently select the active row, or the last one retired.
+Legacy deployments could create a replacement row under a retired code; migration 0027
+requires those ambiguous identities to be repaired before upgrading. Existing audit versions
+remain immutable.
 
 Flags apply row by row. Setting a pipeline's `ACTIVE_FLAG` to `N` switches the whole pipeline
 off: its tasks keep their own flags, and etl-craft ignores them while the pipeline is inactive.

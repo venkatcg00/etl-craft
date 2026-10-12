@@ -65,7 +65,7 @@ with a project migration (etl-craft migrate)`.
   order a pipeline runs in. An `UPDATE` whose codes match nothing changes nothing, so a file that
   updates rows first checks every code it uses (see [Changes in place](#changes-in-place)).
 - **Retire rows; never delete them.** Set `ACTIVE_FLAG = 'N'`. Run history refers to rows by
-  id, and etl-craft reads only active rows. A retired code can be used again.
+  id, and etl-craft reads only active rows. A retired code still belongs to its row: reactivate that row to preserve its ID and history.
 - **The same rows in every environment.** What differs between development, test and production
   (connections, schemas, credentials) belongs in `craft-connector.yml` profiles, not in `CFG_`
   rows.
@@ -119,7 +119,7 @@ Each example builds on the ones before it.
 | `0003_copy_a_pipeline.sql` | [Copies of a pipeline](#copies-of-a-pipeline) | new pipelines copied from one, for a list of regions, with the values that differ rewritten; the pipelines downstream of the original wait on the copies too |
 | `0004_change_values.sql` | [Changes in place](#changes-in-place) | a schedule, an SLA, `PIPELINE_PARAMETERS`, one parameter on several pipelines, a dependency type, a run condition, a business rule, a task's code |
 | `0005_add_a_step.sql` | [A step between two others](#a-step-between-two-others) | a task inserted into an existing order, a parameter added and one retired |
-| `0006_retire_and_reuse.sql` | [Retiring rows](#retiring-rows) | tasks and a whole pipeline retired with everything that refers to them, and a retired code used for a new task |
+| `0006_retire_and_reactivate.sql` | [Retiring rows](#retiring-rows) | tasks and a whole pipeline retired with their dependants, then a task reactivated with its original ID |
 
 ### A new pipeline
 
@@ -181,11 +181,12 @@ failures of, every task they report on; `validate` reports an alert that does no
 Retiring a task also retires its parameters, its business rules, its dependencies and the
 dependencies on it; retiring a pipeline retires its tasks that way, and the pipeline
 dependencies both ways. A task that waited on a retired one starts without it from then on, so
-review what waited on it. A retired code is free: the example replaces `publish` with a new
-task under the same code, whose history starts afresh.
+review what waited on it. A retired code remains reserved. The example reactivates `publish` with the same task ID,
+updates its script setting, and reactivates its existing dependency rows. Run and configuration
+history continue to refer to the original task.
 
 ```sql
---8<-- "docs/examples/migrations/0006_retire_and_reuse.sql"
+--8<-- "docs/examples/migrations/0006_retire_and_reactivate.sql"
 ```
 
 ## When a migration fails
@@ -197,7 +198,7 @@ applied, so it can still be edited.
 |---|---|
 | `NOT NULL constraint failed: CFG_TASK_PARAMETERS.TASK_ID` (SQLite), `null value in column "task_id" of relation "cfg_task_parameters" violates not-null constraint` (PostgreSQL) | a code in that statement has no active row: misspelt, retired, or written by a later statement or file |
 | `NOT NULL constraint failed: codes_in_use.ID`, or `Failing row contains (SALES_DAILY.load_order, null)` on PostgreSQL | a code the file updates has no active row |
-| `UNIQUE constraint failed: CFG_PIPELINES.PIPELINE_CODE`, or `duplicate key value violates unique constraint "ux_pipelines_code_active"` | the code is already active: choose another, or retire the active row first |
+| `UNIQUE constraint failed: CFG_PIPELINES.PIPELINE_CODE`, or `duplicate key value violates unique constraint "ux_pipelines_code_identity"` | the code already belongs to an active or retired row: choose a different identity, or update/reactivate the existing row |
 | `CHECK constraint failed: ck_tasks_run_condition_count`, or `violates check constraint "ck_tasks_run_condition_count"` | `RUN_CONDITION = 'N'` without a `RUN_CONDITION_COUNT`, or a count without `N` |
 | `applied project migration '0001_new_pipeline.sql' has changed since it was applied` | an applied file was edited: restore it from version control, and put the change in a new file |
 | `applied project migration '0002_dependent_pipeline.sql' is missing from '.../migrations'` | an applied file was removed or renamed: restore it |
@@ -205,3 +206,20 @@ applied, so it can still be edited.
 A file can apply cleanly and still describe a pipeline that cannot run, such as a script that
 does not exist or a dependency cycle. `etl-craft validate` finds those; see
 [Validating pipelines](validating.md).
+
+## Upgrading legacy identities
+
+Engine migration `0027_config_identities.sql` reserves pipeline, task, parameter, dependency and
+rule keys across active and inactive rows. It refuses duplicate identities before changing any
+index, naming every conflicting row ID and active flag. The same preflight runs before any
+pending Engine migration, leaving the original schema and ledger available for a repair. Assign distinct keys and repair their
+references through an actor-scoped project migration using the previous installed package
+version, then retry the Engine migration with the new package. ENGINE migrations run before
+PROJECT migrations, so adding a repair only to the pending project stream cannot bypass this guard. No row
+is selected, merged or deleted automatically. Source table/column normalization remains pending.
+
+The original [retire-and-reuse example](../examples/legacy-migrations/0006_retire_and_reuse.sql)
+is retained unchanged for deployments that already applied it. Keep applied project files in
+place with their original bytes and names; do not replace them with the reactivation example.
+That legacy example creates a duplicate `publish` identity and cannot be newly applied after
+0027. For a fresh project use the reactivation example above.

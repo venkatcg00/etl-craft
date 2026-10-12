@@ -313,6 +313,7 @@ def test_guarded_upgrade_rolls_back_with_the_ledger(empty_engine_db, monkeypatch
         "0024_source_columns.sql",
         "0025_token_audit_names.sql",
         "0026_config_base_contract.sql",
+        "0027_config_identities.sql",
     ]
 
 
