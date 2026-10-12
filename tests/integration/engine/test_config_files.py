@@ -47,7 +47,7 @@ def without(*codes):
         return [
             row
             for row in rows
-            if row["PIPELINE_CODE"] not in codes
+            if row.get("PIPELINE_CODE") not in codes
             and row.get("DEPENDS_ON_PIPELINE_CODE") not in codes
         ]
 
@@ -507,3 +507,36 @@ def test_export_as_of_refuses_what_the_history_cannot_tell(metadata_project, tmp
     ):
         assert main(["config", "export", "--config-dir", folder, "--as-of", when]) == code
         assert message in capsys.readouterr().err
+
+
+def test_rule_target_edit_updates_fk_keeps_id_and_rolls_back_plan(exported):
+    before = exported.rows(
+        "SELECT BUSINESS_RULE_ID,TARGET_TABLE_ID FROM CFG_BUSINESS_RULES ORDER BY BUSINESS_RULE_ID"
+    )
+    edit(
+        exported.config_dir / "business_rules.csv",
+        lambda rows: [
+            row | {"TABLE_NAME": "orders_eu"} if row["PIPELINE_CODE"] == "SALES_DAILY" else row
+            for row in rows
+        ],
+    )
+    plan = sync(exported, apply=False)
+    assert not plan.failed
+    assert any(
+        change.file == "business_rules.csv" and change.operation == "update"
+        for change in plan.changes
+    )
+    assert (
+        exported.rows(
+            "SELECT BUSINESS_RULE_ID,TARGET_TABLE_ID FROM CFG_BUSINESS_RULES "
+            "ORDER BY BUSINESS_RULE_ID"
+        )
+        == before
+    )
+    done = sync(exported)
+    assert done.applied and not done.failed
+    after = exported.rows(
+        "SELECT BUSINESS_RULE_ID,TARGET_TABLE_ID FROM CFG_BUSINESS_RULES ORDER BY BUSINESS_RULE_ID"
+    )
+    assert [row[0] for row in after] == [row[0] for row in before]
+    assert after != before

@@ -114,9 +114,9 @@ Each example builds on the ones before it.
 
 | File | Strategy | What it shows |
 |---|---|---|
-| `0001_new_pipeline.sql` | [A new pipeline](#a-new-pipeline) | every `CFG_` table a pipeline uses: a schedule with catch-up and overlap settings, a task of each handler, shared and handler parameters, the four dependency types, an alert on failure, business rules in two waves |
+| `0001_new_pipeline_contracts.sql` | [A new pipeline](#a-new-pipeline) | every `CFG_` table a pipeline uses: a schedule with catch-up and overlap settings, a task of each handler, shared and handler parameters, the four dependency types, an alert on failure, business rules in two waves |
 | `0002_dependent_pipeline.sql` | [A pipeline that waits on another](#a-pipeline-that-waits-on-another) | a pipeline dependency, a task waiting on a task in another pipeline, a run condition of `N`, an inline SELECT |
-| `0003_copy_a_pipeline.sql` | [Copies of a pipeline](#copies-of-a-pipeline) | new pipelines copied from one, for a list of regions, with the values that differ rewritten; the pipelines downstream of the original wait on the copies too |
+| `0003_copy_a_pipeline_contracts.sql` | [Copies of a pipeline](#copies-of-a-pipeline) | new pipelines copied from one, for a list of regions, with the values that differ rewritten; the pipelines downstream of the original wait on the copies too |
 | `0004_change_values.sql` | [Changes in place](#changes-in-place) | a schedule, an SLA, `PIPELINE_PARAMETERS`, one parameter on several pipelines, a dependency type, a run condition, a business rule, a task's code |
 | `0005_add_a_step.sql` | [A step between two others](#a-step-between-two-others) | a task inserted into an existing order, a parameter added and one retired |
 | `0006_retire_and_reactivate.sql` | [Retiring rows](#retiring-rows) | tasks and a whole pipeline retired with their dependants, then a task reactivated with its original ID |
@@ -129,7 +129,7 @@ rules. The columns are described in [Pipelines and tasks](pipelines-and-tasks.md
 guide lists its parameters.
 
 ```sql
---8<-- "docs/examples/migrations/0001_new_pipeline.sql"
+--8<-- "docs/examples/migrations/0001_new_pipeline_contracts.sql"
 ```
 
 ### A pipeline that waits on another
@@ -152,7 +152,7 @@ copies with `validate`, and their values with `etl-craft audit --pipeline_code S
 which lists every row the upload inserted.
 
 ```sql
---8<-- "docs/examples/migrations/0003_copy_a_pipeline.sql"
+--8<-- "docs/examples/migrations/0003_copy_a_pipeline_contracts.sql"
 ```
 
 ### Changes in place
@@ -200,7 +200,7 @@ applied, so it can still be edited.
 | `NOT NULL constraint failed: codes_in_use.ID`, or `Failing row contains (SALES_DAILY.load_order, null)` on PostgreSQL | a code the file updates has no active row |
 | `UNIQUE constraint failed: CFG_PIPELINES.PIPELINE_CODE`, or `duplicate key value violates unique constraint "ux_pipelines_code_identity"` | the code already belongs to an active or retired row: choose a different identity, or update/reactivate the existing row |
 | `CHECK constraint failed: ck_tasks_run_condition_count`, or `violates check constraint "ck_tasks_run_condition_count"` | `RUN_CONDITION = 'N'` without a `RUN_CONDITION_COUNT`, or a count without `N` |
-| `applied project migration '0001_new_pipeline.sql' has changed since it was applied` | an applied file was edited: restore it from version control, and put the change in a new file |
+| `applied project migration '0001_new_pipeline_contracts.sql' has changed since it was applied` | an applied file was edited: restore it from version control, and put the change in a new file |
 | `applied project migration '0002_dependent_pipeline.sql' is missing from '.../migrations'` | an applied file was removed or renamed: restore it |
 
 A file can apply cleanly and still describe a pipeline that cannot run, such as a script that

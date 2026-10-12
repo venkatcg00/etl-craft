@@ -15,7 +15,7 @@ from etl_craft.engine.repository.business_rules import (
     finish_rule_run,
     flag_rule_keys,
 )
-from fixtures.metadata import add_pipeline, add_task, insert, start_run, task_run
+from fixtures.metadata import add_pipeline, add_table, add_task, insert, start_run, task_run
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 BEFORE = NOW - timedelta(days=1)
@@ -32,13 +32,14 @@ def seed_flags(db, count):
             rule_id = insert(
                 conn,
                 "INSERT INTO CFG_BUSINESS_RULES (BUSINESS_RULE_NAME, PIPELINE_ID, TASK_ID, "
-                "BUSINESS_RULE_SQL, BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE, "
+                "BUSINESS_RULE_SQL, BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE_ID, "
                 "SEQUENCE_NUMBER) VALUES (:name, :pipeline, :task, 'SELECT 1', 'REJECT', "
-                "'ROW_ID', 'sales.orders', 1)",
+                "'ROW_ID', :target, 1)",
                 "BUSINESS_RULE_ID",
                 name=name,
                 pipeline=pipeline,
                 task=task,
+                target=add_table(conn, "sales.orders"),
             )
             rule = BusinessRule(rule_id, name, "SELECT 1", "REJECT", "ROW_ID", "sales.orders", 1)
             binding = begin_rule_run(conn, rule_id, task_run_id, BEFORE)

@@ -114,7 +114,7 @@ def upstream_run(conn, pipeline_id, task_statuses, status="SUCCESS"):
     return run_id, rows
 
 
-def add_source_column(conn, table, column, data_type, position):
+def add_table(conn, table):
     """Declare a column under one scoped table contract."""
     from etl_craft.engine.repository.normalization import object_identity
 
@@ -136,6 +136,12 @@ def add_source_column(conn, table, column, data_type, position):
             ),
             params,
         ).scalar_one()
+    return table_id
+
+
+def add_source_column(conn, table, column, data_type, position):
+    """Declare a column under one scoped table contract."""
+    table_id = add_table(conn, table)
     return conn.execute(
         text(
             "INSERT INTO CFG_COLUMNS (TABLE_ID, COLUMN_NAME, DATA_TYPE, COLUMN_POSITION) "

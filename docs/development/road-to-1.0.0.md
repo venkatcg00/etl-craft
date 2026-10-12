@@ -122,7 +122,7 @@ item's text, or work done early under another item.
 | S5.N Source definitions and schema-aware lineage | Done | #147 | Offline star/join tracing, audited source definitions, seeding and documented/deployed schema comparison |
 | S5.O.1 SCD lifecycle invariants | Done | #148 | Common SCD flags, current-row soft deletes and legacy active-state upgrades |
 | S5.O.2a Common config contract | Done | #149 | Mandatory core/custom CFG audit fields and keys, safe token lifecycle history and lossless upgrades |
-| S5.O.2b Normalized object contracts | In progress | #150, #151, #152 | Readiness, stable identities and normalized source contracts; target/reference conversion remains pending |
+| S5.O.2b Normalized object contracts | In progress | #150, #151, #152, #153 | Readiness, stable identities, source contracts and rule target FKs; task/reference conversion remains pending |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
 | S5.P Project documentation gap UI | Planned | | Coloured column warnings, lineage gaps and project summary |
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
@@ -260,6 +260,25 @@ The separate frozen 0.4 soak deployment is unchanged.
   local warehouses on both Engine DBs, pip/uv installs and the server extra. Focused
   contract/history/counter/rollback and deployed drift checks passed (64 cases).
   No Airflow or workflow code changed. The frozen 0.4 soak remains untouched.
+
+- Rule target conversion continues S5.O.2b on `feat/metadata-target-contracts` (#153):
+  `CFG_BUSINESS_RULES.TARGET_TABLE_ID` references the existing scoped table registry; rule
+  CSVs name separate catalog/schema/table components. Conversion retains IDs, stamps,
+  counters and earlier target evidence, with transactional refusal of unsupported legacy
+  names/custom data. Current targets resolve once; historical exports use original names.
+  New tutorial files use the FK and original applied SQL remains archived unchanged.
+  Task target FKs, ordered merge terms and recorded audit endpoints remain pending; this
+  slice does not finish S5.O.2b. Continue task target conversion from `main` on
+  `feat/metadata-task-targets`; retain this branch after merge.
+  Acceptance availability: full `make check docs` passed (3,655 tests, 96 expected skips,
+  94.20% coverage, 29m50s); strict docs built in 8.15s. Python 3.12/3.13 each passed
+  1,613 unit tests (24.82s / 23.96s). Databricks native/UniForm and Snowflake native/Iceberg
+  every-action acceptance passed all four cases (53m06s, no skips). The rebuilt wheel/sdist
+  matrix passed all 27 cases (18m29s, no skips), across four local warehouses on both
+  Engine DBs, pip/uv installs and the server extra. Final focused contract/catalog/schema
+  reference checks passed 239 cases; released upgrade checks passed four more.
+  No Airflow or workflow files changed.
+  The frozen 0.4 deployment remains untouched.
 
 - S5.O.2a completes the mandatory base fields and single non-null key for core and custom
   Engine DB config tables, with safe token history; S5.O.2b retains object/FK normalization

@@ -24,12 +24,16 @@ class BusinessRule:
     business_rule_key_column: str
     target_table: str
     sequence_number: int
+    target_active: bool = True
 
 
 def fetch_business_rules_for_task(conn: Connection, task_id: int) -> list[BusinessRule]:
     """Return the active business rules of ``task_id``, in the order they run."""
     rows = conn.execute(statement(conn, "business_rules_for_task"), {"task_id": task_id})
-    return [BusinessRule(**row._mapping) for row in rows]
+    return [
+        BusinessRule(**(dict(row._mapping) | {"target_active": row.target_active == "Y"}))
+        for row in rows
+    ]
 
 
 @dataclass(frozen=True)

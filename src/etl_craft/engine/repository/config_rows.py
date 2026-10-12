@@ -88,7 +88,11 @@ class ConfigTable:
     @property
     def updated(self) -> tuple[str, ...]:
         """The stored columns outside the key, which an update sets."""
-        return tuple(name for name in self.stored if name not in self.key)
+        return tuple(
+            name
+            for name in (*self.stored, *(OBJECT_TABLES.key if self is BUSINESS_RULES else ()))
+            if name not in self.key
+        )
 
     def column(self, name: str) -> Column:
         """Return the column ``name``."""
@@ -312,7 +316,9 @@ BUSINESS_RULES = ConfigTable(
             choices=("INCOMPLETE", "REJECT", "REPORT"),
         ),
         Column("BUSINESS_RULE_KEY_COLUMN", required=True),
-        Column("TARGET_TABLE", required=True),
+        Column("CATALOG_NAME"),
+        Column("SCHEMA_NAME", required=True),
+        Column("TABLE_NAME", required=True),
         Column("BUSINESS_RULE_SQL", required=True),
         ACTIVE_FLAG,
     ),
@@ -321,22 +327,24 @@ BUSINESS_RULES = ConfigTable(
         "SEQUENCE_NUMBER",
         "BUSINESS_RULE_TYPE",
         "BUSINESS_RULE_KEY_COLUMN",
-        "TARGET_TABLE",
         "BUSINESS_RULE_SQL",
     ),
-    parents=(("task_id", "tasks.csv"),),
-    links=("PIPELINE_ID", "TASK_ID"),
+    parents=(("task_id", "tasks.csv"), ("table_id", "tables.csv")),
+    links=("PIPELINE_ID", "TASK_ID", "TARGET_TABLE_ID"),
     label_format="{PIPELINE_CODE}.{TASK_CODE} rule {BUSINESS_RULE_NAME!r}",
     read_sql=(
         "SELECT r.BUSINESS_RULE_ID AS row_id, r.ACTIVE_FLAG AS active_flag, "
         "CASE WHEN r.PIPELINE_ID = t.PIPELINE_ID THEN 'Y' ELSE 'N' END AS well_formed, "
-        "r.TASK_ID AS task_id, p.PIPELINE_CODE AS pipeline_code, t.TASK_CODE AS task_code, "
+        "r.TASK_ID AS task_id, r.TARGET_TABLE_ID AS table_id, "
+        "p.PIPELINE_CODE AS pipeline_code, t.TASK_CODE AS task_code, "
         "r.BUSINESS_RULE_NAME AS business_rule_name, r.SEQUENCE_NUMBER AS sequence_number, "
         "r.BUSINESS_RULE_TYPE AS business_rule_type, "
         "r.BUSINESS_RULE_KEY_COLUMN AS business_rule_key_column, "
-        "r.TARGET_TABLE AS target_table, r.BUSINESS_RULE_SQL AS business_rule_sql "
+        "o.CATALOG_NAME AS catalog_name, o.SCHEMA_NAME AS schema_name, "
+        "o.TABLE_NAME AS table_name, r.BUSINESS_RULE_SQL AS business_rule_sql "
         "FROM CFG_BUSINESS_RULES r JOIN CFG_TASKS t ON t.TASK_ID = r.TASK_ID "
-        "JOIN CFG_PIPELINES p ON p.PIPELINE_ID = t.PIPELINE_ID"
+        "JOIN CFG_PIPELINES p ON p.PIPELINE_ID = t.PIPELINE_ID "
+        "JOIN CFG_TABLES o ON o.TABLE_ID=r.TARGET_TABLE_ID"
     ),
 )
 
@@ -393,8 +401,8 @@ TABLES = (
     TASK_PARAMETERS,
     TASK_DEPENDENCIES,
     PIPELINE_DEPENDENCIES,
-    BUSINESS_RULES,
     OBJECT_TABLES,
+    BUSINESS_RULES,
     SOURCE_COLUMNS,
 )
 """Every config file's table, parents before the rows that hang off them."""
@@ -485,17 +493,26 @@ def insert_row(
 
 
 def update_row(
-    conn: Connection, table: ConfigTable, row_id: int, values: Mapping[str, Value]
+    conn: Connection,
+    table: ConfigTable,
+    row_id: int,
+    values: Mapping[str, Value],
+    links: Mapping[str, int] | None = None,
 ) -> None:
     """Set the stored columns outside the key of row ``row_id``, and make it active."""
-    names = table.updated
+    names = (
+        *tuple(name for name in table.stored if name not in table.key),
+        *(("TARGET_TABLE_ID",) if table is BUSINESS_RULES else ()),
+    )
     assignments = ", ".join([*(f"{name} = :{name}" for name in names), "ACTIVE_FLAG = 'Y'"])
     statement = _bound(
         table,
         f"UPDATE {table.table} SET {assignments} WHERE {table.id_column} = :row_id",
         (*names, "row_id"),
     )
-    params = {name: values[name] for name in names} | {"row_id": row_id}
+    params = {
+        name: (links or {})[name] if name == "TARGET_TABLE_ID" else values[name] for name in names
+    } | {"row_id": row_id}
     _write(conn, statement, params, f"updating {table.label(values)} in {table.table}")
 
 

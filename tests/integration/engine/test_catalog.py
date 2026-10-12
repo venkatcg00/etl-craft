@@ -21,6 +21,7 @@ from fixtures.metadata import (
     add_pipeline,
     add_pipeline_dependency,
     add_source_column,
+    add_table,
     add_task,
     start_run,
 )
@@ -99,12 +100,13 @@ def project(engine_db, tmp_path, monkeypatch):
         insert_row(
             conn,
             "INSERT INTO CFG_BUSINESS_RULES (BUSINESS_RULE_NAME, PIPELINE_ID, TASK_ID, "
-            "BUSINESS_RULE_SQL, BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE, "
+            "BUSINESS_RULE_SQL, BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE_ID, "
             "SEQUENCE_NUMBER) VALUES ('negative usd', :p, :t, 'SELECT 1 WHERE t.amount_usd < 0', "
-            "'REJECT', 'id', 'sales.orders', 1)",
+            "'REJECT', 'id', :target, 1)",
             "BUSINESS_RULE_ID",
             p=sales,
             t=rules,
+            target=add_table(conn, "sales.orders"),
         )
         mart = add_pipeline(conn, "MART")
         add_task(

@@ -125,7 +125,7 @@ def test_legacy_retire_and_reuse_is_refused_atomically(metadata_project):
     )
 
 
-@pytest.mark.parametrize("example", ["0001_new_pipeline.sql", "0004_change_values.sql"])
+@pytest.mark.parametrize("example", ["0001_new_pipeline_contracts.sql", "0004_change_values.sql"])
 def test_a_code_with_no_active_row_stops_the_upload(metadata_project, example):
     engine, migrations = metadata_project.engine, metadata_project.migrations
     for earlier in sorted(EXAMPLES.glob("*.sql")):

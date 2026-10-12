@@ -12,6 +12,7 @@ from etl_craft.services.config_files import cell, read_config_files
 pytestmark = pytest.mark.unit
 
 GOOD = {
+    "tables.csv": "CATALOG_NAME,SCHEMA_NAME,TABLE_NAME\n,sales,orders\n",
     "pipelines.csv": "PIPELINE_CODE,PIPELINE_NAME,REFRESH_TYPE,SLA_IN_HOURS,PIPELINE_PARAMETERS\n"
     'SALES,Sales,FULL,1.5,"{""TAGS"": [""sales""]}"\n'
     "MART,Mart,FULL,,\n",
@@ -28,8 +29,8 @@ GOOD = {
     "pipeline_dependencies.csv": "PIPELINE_CODE,DEPENDS_ON_PIPELINE_CODE,DEPENDENCY_TYPE\n"
     "MART,SALES,SUCCESS\n",
     "business_rules.csv": "PIPELINE_CODE,TASK_CODE,BUSINESS_RULE_NAME,SEQUENCE_NUMBER,"
-    "BUSINESS_RULE_TYPE,BUSINESS_RULE_KEY_COLUMN,TARGET_TABLE,BUSINESS_RULE_SQL\n"
-    "SALES,check,closed,1,REJECT,ROW_ID,sales.orders,"
+    "BUSINESS_RULE_TYPE,BUSINESS_RULE_KEY_COLUMN,CATALOG_NAME,SCHEMA_NAME,TABLE_NAME,BUSINESS_RULE_SQL\n"
+    "SALES,check,closed,1,REJECT,ROW_ID,,sales,orders,"
     "\"SELECT 1 FROM sales.customers c WHERE c.id = t.customer_id AND c.status = 'closed'\"\n",
 }
 
@@ -179,8 +180,8 @@ def test_every_file_holds_its_table_with_active_flag_last():
         "task_parameters.csv",
         "task_dependencies.csv",
         "pipeline_dependencies.csv",
-        "business_rules.csv",
         "tables.csv",
+        "business_rules.csv",
         "columns.csv",
     ]
     assert all(table.columns[-1].name == "ACTIVE_FLAG" for table in TABLES)

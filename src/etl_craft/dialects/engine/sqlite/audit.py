@@ -363,6 +363,12 @@ def _change_view(conn: Connection, configs: list[str]) -> None:
                 if name.upper() not in CHANGE_COLUMNS
             ]
         primary = next((name for name, _, pk in columns if pk), columns[0][0])
+        if table.upper() == "CFG_BUSINESS_RULES":
+            columns = [
+                (name, kind, pk)
+                for name, kind, pk in _columns(conn, history)
+                if name.upper() not in CHANGE_COLUMNS
+            ]
         values = (
             "json_object("
             + ", ".join(f"'{name.lower()}', {_quote(name)}" for name, _, _ in columns)

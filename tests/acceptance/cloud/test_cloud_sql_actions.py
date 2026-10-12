@@ -20,7 +20,7 @@ from etl_craft.handlers import business_rules
 from etl_craft.warehouse.connection import build_warehouse_engine, warehouse_dialect
 from fixtures.cloud import DATABRICKS_VARS, SNOWFLAKE_VARS, require_variables, write_config
 from fixtures.engine_db import apply_schema, sqlite_engine_db
-from fixtures.metadata import add_pipeline, insert, start_run
+from fixtures.metadata import add_pipeline, add_table, insert, start_run
 from fixtures.scd_lifecycle import check_scd1_upgrade, check_scd_lifecycle
 from fixtures.sql_appends import check_append_retries, check_identity_inputs, check_legacy_upgrade
 from fixtures.sql_evolution import check_evolution, check_interrupted_evolution
@@ -147,7 +147,7 @@ def walk_every_action(w):
             insert(
                 conn,
                 "INSERT INTO CFG_BUSINESS_RULES (BUSINESS_RULE_NAME, PIPELINE_ID, TASK_ID, "
-                "BUSINESS_RULE_SQL, BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE, "
+                "BUSINESS_RULE_SQL, BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE_ID, "
                 "SEQUENCE_NUMBER) VALUES ('has_order', :p, :t, :rule_sql, 'REPORT', 'id', "
                 ":target, 1)",
                 "BUSINESS_RULE_ID",
@@ -157,7 +157,7 @@ def walk_every_action(w):
                 f"AND :pipeline_id = {w.pipeline_id} "
                 f"AND :pipeline_run_id = {w.pipeline_run_id} "
                 f"AND :task_run_id = {rule_context.task_run_id}",
-                target=f"{w.schema}.{names['customers']}",
+                target=add_table(conn, f"{w.schema}.{names['customers']}"),
             )
         rules = business_rules.run(
             replace(w.task("rules"), handler="BUSINESS_RULES", force=True), w.engine_db

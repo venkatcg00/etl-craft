@@ -116,6 +116,10 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- Business rules reference scoped table contracts through `TARGET_TABLE_ID`. Config files
+  hold separate catalog/schema/table fields; migration 0029 preserves rule IDs, stamps,
+  counters and historical target names. Export and adapt legacy rule CSVs after upgrading.
+
 - `etl-craft rehash` records its request in `AUD_ACTIONS`, as every other command that changes
   something does; `--dry-run` writes nothing and records nothing.
 

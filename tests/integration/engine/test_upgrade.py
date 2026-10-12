@@ -29,6 +29,8 @@ def declared(schema: str) -> dict[str, list[str]]:
             if re.match(r"^\s+[A-Z_][A-Z_0-9]*\s", line)
             and line.split()[0] not in {"CONSTRAINT", "CHECK", "OR", "AND"}
         ]
+    for table, column in re.findall(r"ALTER TABLE (\w+) DROP COLUMN (\w+);", schema):
+        tables[table.lower()].remove(column.lower())
     return tables
 
 

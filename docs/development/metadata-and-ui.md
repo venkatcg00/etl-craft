@@ -3,17 +3,17 @@
 This is the corrective design following source definitions, before worker-agent work resumes.
 S5.O.1 implements the SCD lifecycle and legacy upgrades. S5.O.2a enforces common config fields
 and safe token history. Stable pipeline, task, parameter, dependency and rule identities now
-include inactive rows. Scoped table/column source contracts are implemented; task/rule target FKs,
+include inactive rows. Scoped table/column source contracts are implemented; task target FKs,
 ordered merge columns, historical endpoint conversion, coloured gaps and dashboards remain planned. The frozen 0.4 soak deployment remains unchanged.
 
 ## Evidence and current gaps
 
 | Area | Current implementation | Required correction |
 | --- | --- | --- |
-| Source metadata | `CFG_TABLES` holds separate components; `CFG_COLUMNS.TABLE_ID` is the parent FK, with all-row name identity and active ordinal uniqueness | Source conversion complete; task/rule target and historical endpoint conversion remains S5.O.2b |
+| Source metadata | `CFG_TABLES` holds separate components; `CFG_COLUMNS.TABLE_ID` is the parent FK, with all-row name identity and active ordinal uniqueness | Source and rule target conversion complete; task target and historical endpoint conversion remains S5.O.2b |
 | Config audit fields | Core config fields are mandatory; project config DDL requires a single PK, typed non-null base fields and valid active values | Common base contract implemented in S5.O.2a; scoped identity/FK normalization remains S5.O.2b |
 | API tokens | Common actor/date/active fields and safe typed history, retaining expiry and revocation; hashes remain excluded | S5.O.2a implemented; upgrade the Engine DB before using it |
-| Object references | Rule targets, lineage endpoints and target state use combined names; task target is a parameter string | Replace persisted object identity with relational references and separate identifier components |
+| Object references | Rule targets use `CFG_TABLES` FKs; lineage endpoints and target state still use combined names; task target remains a parameter string | Replace persisted object identity with relational references and separate identifier components |
 | SCD targets | Both merge actions have creation/update actors and dates and active/deleted flags; soft deletes preserve closed history | S5.O.1 complete; upgrade legacy targets before using the new lifecycle |
 | Generated documentation | Optional warehouse comparison reports textual column/type gaps; untraced tasks have reasons | Add structured gap states, row colours, warning symbols and project-wide gap navigation |
 | Dashboard | Catalog has recent-run KPIs; no built-in pipeline metrics dashboard | Provide shared services and built-in panels in generated docs and the live UI |
@@ -49,7 +49,7 @@ not the relational migration or its completion gate.
 | --- | --- | --- |
 | `CFG_SOURCE_COLUMNS.TABLE_NAME` | Object identity repeated per column | `CFG_TABLES` parent and `CFG_COLUMNS.TABLE_ID`; source repository, CSV round trips, seed export, validation and catalog/lineage schema cache |
 | Task parameter `TARGET_OBJECT` | Task's target object identity | FK on the existing task; config import/export, task parameter consumers, same-target/conflicting-writer queries, SQL and script handlers |
-| `CFG_BUSINESS_RULES.TARGET_TABLE` | Rule's target object identity | FK on the existing rule; config files, rule execution/validation and rule-result target attribution |
+| `CFG_BUSINESS_RULES.TARGET_TABLE_ID` | Rule's target object identity | Implemented FK on the existing rule; component CSV references and handler-boundary rendering. Recorded rule-result endpoint conversion remains pending |
 | Task `MERGE_KEY` / `MERGE_COMPARE_COLUMNS` | Ordered identifier lists | Ordered child rows, preserving order and validating distinct names; SQL task reader, hashing and config round trips |
 | Task `MERGE_DEDUPE_ORDER` | Ordered terms with direction/null ordering | Preserve each term's identifier, direction and null ordering; do not split it as an object name |
 | `AUD_COLUMN_LINEAGE.SOURCE_OBJECT` / `TARGET_OBJECT` | Evidence at computation time | Separate endpoint components with the original task, SQL/config hash and timestamp; migration must preserve the old evidence's identity rather than resolve it against today's catalog |

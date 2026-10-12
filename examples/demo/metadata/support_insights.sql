@@ -218,11 +218,14 @@ FROM CFG_PIPELINES p
 JOIN CFG_PIPELINES u ON u.PIPELINE_CODE IN ('CLIENT_ALPHA', 'CLIENT_BETA')
 WHERE p.PIPELINE_CODE = 'SUPPORT_DM';
 
+INSERT INTO CFG_TABLES (SCHEMA_NAME,TABLE_NAME) VALUES ('dm','support_fact');
+
 -- The support fact's checks: two in the first wave, one in the second.
 INSERT INTO CFG_BUSINESS_RULES (BUSINESS_RULE_NAME, PIPELINE_ID, TASK_ID, BUSINESS_RULE_SQL,
-                                BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE,
+                                BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE_ID,
                                 SEQUENCE_NUMBER)
-SELECT v.column1, t.PIPELINE_ID, t.TASK_ID, v.column2, v.column3, 'fact_key', 'dm.support_fact',
+SELECT v.column1, t.PIPELINE_ID, t.TASK_ID, v.column2, v.column3, 'fact_key',
+       (SELECT TABLE_ID FROM CFG_TABLES WHERE SCHEMA_NAME='dm' AND TABLE_NAME='support_fact'),
        CAST(v.column4 AS INTEGER)
 FROM (VALUES
     ('unknown agent',

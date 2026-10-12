@@ -73,15 +73,21 @@ def normalization_problems(
                         "normalization; inactive rows also reserve their identity, so "
                         "deactivating a duplicate does not resolve it"
                     )
+    rules_name = "cfg_business_rules" if conn.dialect.name == "postgresql" else "CFG_BUSINESS_RULES"
+    rule_fields = {column["name"].upper() for column in inspect(conn).get_columns(rules_name)}
+    rule_sql = (
+        " UNION ALL SELECT 'CFG_BUSINESS_RULES' AS table_name, BUSINESS_RULE_ID AS row_id, "
+        "'TARGET_TABLE' AS field_name, TARGET_TABLE AS object_name, ACTIVE_FLAG AS active_flag "
+        "FROM CFG_BUSINESS_RULES"
+        if "TARGET_TABLE" in rule_fields
+        else ""
+    )
     references = conn.execute(
         text(
             "SELECT 'CFG_TASK_PARAMETERS' AS table_name, TASK_PARAMETER_ID AS row_id, "
             "PARAMETER_NAME AS field_name, PARAMETER_VALUE AS object_name, "
             "ACTIVE_FLAG AS active_flag "
-            "FROM CFG_TASK_PARAMETERS WHERE PARAMETER_NAME='TARGET_OBJECT' "
-            "UNION ALL SELECT 'CFG_BUSINESS_RULES' AS table_name, BUSINESS_RULE_ID AS row_id, "
-            "'TARGET_TABLE' AS field_name, TARGET_TABLE AS object_name, ACTIVE_FLAG AS active_flag "
-            "FROM CFG_BUSINESS_RULES"
+            "FROM CFG_TASK_PARAMETERS WHERE PARAMETER_NAME='TARGET_OBJECT' " + rule_sql
         )
     )
     for reference in references:

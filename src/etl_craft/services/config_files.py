@@ -182,9 +182,11 @@ def read_config_files(directory: Path) -> ConfigFiles:
             continue
         digest.update(table.file.encode() + b"\0" + payload + b"\0")
         rows[table.file] = _read_table(table, path, payload, problems)
-    if SOURCE_COLUMNS.file in rows and OBJECT_TABLES.file not in rows:
+    if (
+        SOURCE_COLUMNS.file in rows or rows.get(BUSINESS_RULES.file)
+    ) and OBJECT_TABLES.file not in rows:
         problems.append(
-            "columns.csv requires tables.csv, even when empty; export both contract files"
+            "columns.csv and business-rule targets require tables.csv; export the contract files"
         )
     if not problems:
         _check_references(rows, problems)
@@ -329,7 +331,7 @@ def _parse(column: Column, cell: str) -> Value:
 
 
 def _row_problem(table: ConfigTable, values: dict[str, Value]) -> str | None:
-    if table in (OBJECT_TABLES, SOURCE_COLUMNS):
+    if table in (OBJECT_TABLES, SOURCE_COLUMNS, BUSINESS_RULES):
         for name in ("CATALOG_NAME", "SCHEMA_NAME", "TABLE_NAME", "COLUMN_NAME"):
             if name not in values or values[name] is None:
                 continue
@@ -399,6 +401,8 @@ def _ends(table: ConfigTable, values: Mapping[str, Value]) -> list[tuple[str, Ke
     ends: list[tuple[str, Key]] = [("task", (values["PIPELINE_CODE"], values["TASK_CODE"]))]
     if table is TASK_DEPENDENCIES:
         ends.append(("task", (values["DEPENDS_ON_PIPELINE_CODE"], values["DEPENDS_ON_TASK_CODE"])))
+    if table is BUSINESS_RULES:
+        ends.append(("table", tuple(values[name] for name in OBJECT_TABLES.key)))
     return ends
 
 
@@ -477,7 +481,11 @@ def _links(
             "DEPENDS_ON_PIPELINE_ID": found[1].parents[0],
             "DEPENDS_ON_TASK_ID": found[1].row_id,
         }
-    return {"PIPELINE_ID": found[0].parents[0], "TASK_ID": found[0].row_id}
+    return {
+        "PIPELINE_ID": found[0].parents[0],
+        "TASK_ID": found[0].row_id,
+        "TARGET_TABLE_ID": found[1].row_id,
+    }
 
 
 def _require_tables(engine: Engine) -> None:
@@ -512,6 +520,9 @@ def _merge(conn: Connection, files: ConfigFiles) -> list[Change]:
     current_ids: dict[str, set[int]] = {}
     for table in TABLES:
         if table.file not in files.rows:
+            if table is OBJECT_TABLES:
+                current[table.file], _ = _current(table, read_rows(conn, table), current_ids)
+                current_ids[table.file] = {row.row_id for row in current[table.file].values()}
             continue
         stored, malformed = _current(table, read_rows(conn, table), current_ids)
         wanted = files.rows[table.file]
@@ -554,13 +565,17 @@ def _merge(conn: Connection, files: ConfigFiles) -> list[Change]:
                 if existing.values[name] != file_row.values[name]
             )
             if not existing.active:
-                update_row(conn, table, existing.row_id, file_row.values)
+                update_row(
+                    conn, table, existing.row_id, file_row.values, _links(table, file_row, current)
+                )
                 flag = ColumnChange(ACTIVE_FLAG.name, "N", "Y")
                 changes.append(
                     Change(table.file, table.table, "reactivate", label, (flag, *differ))
                 )
             elif differ:
-                update_row(conn, table, existing.row_id, file_row.values)
+                update_row(
+                    conn, table, existing.row_id, file_row.values, _links(table, file_row, current)
+                )
                 changes.append(Change(table.file, table.table, "update", label, differ))
         current[table.file], _ = _current(table, read_rows(conn, table), current_ids)
         current_ids[table.file] = {row.row_id for row in current[table.file].values()}
@@ -573,7 +588,7 @@ def _resolved_files(files: ConfigFiles, config: ConnectorConfig) -> ConfigFiles:
 
     dialect, catalog = dialect_and_catalog(config)
     resolved = dict(files.rows)
-    for table in (OBJECT_TABLES, SOURCE_COLUMNS):
+    for table in (OBJECT_TABLES, SOURCE_COLUMNS, BUSINESS_RULES):
         if table.file not in resolved:
             continue
         rows: dict[Key, FileRow] = {}
@@ -688,10 +703,10 @@ def export_config(
             table.file: {
                 key: FileRow(row.row_id, row.values) for key, row in current[table.file].items()
             }
-            for table in (OBJECT_TABLES, SOURCE_COLUMNS)
+            for table in (OBJECT_TABLES, SOURCE_COLUMNS, BUSINESS_RULES)
         }
         resolved = _resolved_files(ConfigFiles(directory, "", metadata_rows), config)
-        for table in (OBJECT_TABLES, SOURCE_COLUMNS):
+        for table in (OBJECT_TABLES, SOURCE_COLUMNS, BUSINESS_RULES):
             original = {row.row_id: row for row in current[table.file].values()}
             current[table.file] = {
                 key: StoredRow(

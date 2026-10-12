@@ -46,7 +46,12 @@ class MetadataProject:
         for example in sorted(EXAMPLES.glob("*.sql")):
             if example.name[: len(last)] <= last:
                 shutil.copy(example, self.migrations)
-        return apply_pending_migrations(self.engine, self.migrations)
+        from etl_craft.services.lineage import dialect_and_catalog
+
+        dialect, catalog = dialect_and_catalog(self.config)
+        return apply_pending_migrations(
+            self.engine, self.migrations, catalog=catalog, warehouse_dialect=dialect
+        )
 
     def rows(self, sql: str, **params: object) -> list[tuple[object, ...]]:
         with self.engine.connect() as conn:

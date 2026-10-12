@@ -11,11 +11,17 @@ Each rule is a row of `CFG_BUSINESS_RULES` for the task:
 | Column | Holds |
 |---|---|
 | `BUSINESS_RULE_NAME` | a name, used in logs and messages |
-| `TARGET_TABLE` | the table checked: `schema.table` in the active warehouse database, or `database.schema.table` |
+| `TARGET_TABLE_ID` | the checked table’s `CFG_TABLES.TABLE_ID`; config files name its separate catalog, schema and table |
 | `BUSINESS_RULE_KEY_COLUMN` | the column that identifies a row, usually `ROW_ID` |
 | `BUSINESS_RULE_SQL` | a `SELECT` that returns a row when the table's row `t` breaks the rule |
 | `BUSINESS_RULE_TYPE` | `INCOMPLETE`, `REJECT` or `REPORT`, copied onto each flag |
 | `SEQUENCE_NUMBER` | the wave the rule runs in |
+
+Declare only project objects that need a contract in `CFG_TABLES`; this does not copy the
+warehouse information schema. A rule’s target contract must be active. An empty catalog in
+config files resolves against the configured warehouse when applying current metadata.
+Execution derives the qualified target from the referenced contract. Later target edits do
+not change previously recorded rule-result targets or earlier configuration versions.
 
 `BUSINESS_RULE_SQL` refers to the checked row as `t`. For example, to flag orders whose customer
 is inactive:
