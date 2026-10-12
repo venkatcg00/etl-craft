@@ -137,6 +137,7 @@ def seeded_tables(db):
         r2 = transitions.create_active_run(conn, p2)
         task_run = transitions.find_or_create_task_run(conn, t1, r1).task_run_id
         values = {
+            "column_position": 1,
             "role": "viewer",
             "token_sha256": "0" * 64,
             "pipeline_id": p1,
@@ -309,6 +310,7 @@ def test_guarded_upgrade_rolls_back_with_the_ledger(empty_engine_db, monkeypatch
         "0021_config_history.sql",
         "0022_watermarks.sql",
         "0023_event_waits.sql",
+        "0024_source_columns.sql",
     ]
 
 

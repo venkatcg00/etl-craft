@@ -1,7 +1,7 @@
 """The project's config files: one CSV file per ``CFG_`` table, loaded into the Engine DB.
 
 The files in ``config/`` are the whole configuration, inactive rows included: each row has an
-``ACTIVE_FLAG``. ``read_config_files`` reads and checks all six. ``sync_config`` merges them by
+``ACTIVE_FLAG``. ``read_config_files`` reads and checks every file. ``sync_config`` merges them by
 key, in one transaction:
 
 - a row the Engine DB lacks, flagged ``Y``, is inserted;
@@ -37,7 +37,7 @@ from sqlalchemy.engine import Connection, Engine
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import migration as current_migration
 from etl_craft.core.errors import EngineDbError, MetadataFileError
-from etl_craft.core.text import is_metadata_code
+from etl_craft.core.text import is_metadata_code, is_safe_identifier, is_safe_object_ref
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine import locks
 from etl_craft.engine.repository.config_history import config_as_of
@@ -46,6 +46,7 @@ from etl_craft.engine.repository.config_rows import (
     BUSINESS_RULES,
     PIPELINE_DEPENDENCIES,
     PIPELINES,
+    SOURCE_COLUMNS,
     TABLES,
     TASK_DEPENDENCIES,
     TASK_PARAMETERS,
@@ -61,6 +62,7 @@ from etl_craft.engine.repository.config_rows import (
     update_row,
 )
 from etl_craft.services.doctor import Status
+from etl_craft.services.source_columns import seed_sources
 from etl_craft.services.validate import Finding, validate_on
 
 logger = logging.getLogger(__name__)
@@ -83,7 +85,7 @@ class FileRow:
 
 @dataclass(frozen=True)
 class ConfigFiles:
-    """The six config files, read and checked, with the revision of their content."""
+    """The config files, read and checked, with the revision of their content."""
 
     directory: Path
     revision: str
@@ -144,9 +146,10 @@ def config_directory(config: ConnectorConfig, directory: Path | None = None) -> 
 
 
 def read_config_files(directory: Path) -> ConfigFiles:
-    """Read and check the six config files; raise ``MetadataFileError`` naming every problem.
+    """Read and check the config files; raise ``MetadataFileError`` naming every problem.
 
-    Every file must exist; a file with only its header row holds no rows.
+    The six pipeline/task files must exist; source_columns.csv can be omitted to leave its
+    definitions unchanged. A file with only its header row holds no rows.
     """
     if not directory.is_dir():
         raise MetadataFileError(
@@ -161,6 +164,8 @@ def read_config_files(directory: Path) -> ConfigFiles:
         try:
             payload = path.read_bytes()
         except FileNotFoundError:
+            if table is SOURCE_COLUMNS:
+                continue
             problems.append(
                 f"{path} is missing: every config file must exist, even with only its header "
                 f"row ({','.join(column.name for column in table.columns)})"
@@ -244,6 +249,18 @@ def _read_table(
             )
             continue
         rows[key] = FileRow(line, values)
+    if table is SOURCE_COLUMNS:
+        positions: dict[tuple[Value, Value], FileRow] = {}
+        for row in rows.values():
+            if not row.active:
+                continue
+            key = (row.values["TABLE_NAME"], row.values["COLUMN_POSITION"])
+            if key in positions:
+                problems.append(
+                    f"{path} lines {positions[key].line} and {row.line}: {key[0]} has "
+                    f"COLUMN_POSITION={key[1]} twice; give each active column a distinct position"
+                )
+            positions[key] = row
     return rows
 
 
@@ -298,6 +315,18 @@ def _parse(column: Column, cell: str) -> Value:
 
 
 def _row_problem(table: ConfigTable, values: dict[str, Value]) -> str | None:
+    if table is SOURCE_COLUMNS:
+        for name in ("TABLE_NAME", "COLUMN_NAME"):
+            value = str(values[name])
+            check = is_safe_object_ref if name == "TABLE_NAME" else is_safe_identifier
+            if not check(value):
+                expected = (
+                    "schema.table or database.schema.table"
+                    if name == "TABLE_NAME"
+                    else "an unquoted SQL identifier"
+                )
+                return f"{name}={value!r}: expected {expected}; correct the source definition"
+            values[name] = value.lower()
     if table is TASKS:
         condition, count = values["RUN_CONDITION"], values["RUN_CONDITION_COUNT"]
         if condition == "N" and count is None:
@@ -335,7 +364,7 @@ def _check_references(rows: dict[str, dict[Key, FileRow]], problems: list[str]) 
 
 def _ends(table: ConfigTable, values: Mapping[str, Value]) -> list[tuple[str, Key]]:
     """Return the pipelines and tasks a row names, by code."""
-    if table is PIPELINES:
+    if table in (PIPELINES, SOURCE_COLUMNS):
         return []
     if table is TASKS:
         return [("pipeline", (values["PIPELINE_CODE"],))]
@@ -408,7 +437,7 @@ def _links(
                 f"set the {kind}'s ACTIVE_FLAG to Y, or this row's to N"
             )
         found.append(parent)
-    if table is PIPELINES:
+    if table in (PIPELINES, SOURCE_COLUMNS):
         return {}
     if table is TASKS:
         return {"PIPELINE_ID": found[0].row_id}
@@ -458,7 +487,19 @@ def _merge(conn: Connection, files: ConfigFiles) -> list[Change]:
     current_ids: dict[str, set[int]] = {}
     for table in TABLES:
         stored, malformed = _current(table, read_rows(conn, table), current_ids)
+        if table.file not in files.rows:
+            continue
         wanted = files.rows[table.file]
+        if table is SOURCE_COLUMNS:
+            for key, row in stored.items():
+                desired = wanted.get(key)
+                if (
+                    row.active
+                    and desired is not None
+                    and desired.active
+                    and row.values["COLUMN_POSITION"] != desired.values["COLUMN_POSITION"]
+                ):
+                    retire_row(conn, table, row.row_id, table.label(row.values))
 
         def retire(row: StoredRow, reason: str, table: ConfigTable = table) -> None:
             label = table.label(row.values)
@@ -534,9 +575,14 @@ def sync_config(
 
 
 def export_config(
-    engine: Engine, directory: Path, *, overwrite: bool = False, as_of: datetime | None = None
+    engine: Engine,
+    directory: Path,
+    *,
+    overwrite: bool = False,
+    as_of: datetime | None = None,
+    config: ConnectorConfig | None = None,
 ) -> ConfigExport:
-    """Write each key's current ``CFG_`` row, active or not, as the six config files.
+    """Write each key's current ``CFG_`` row, active or not, as the config files.
 
     With ``as_of``, the rows are those that stood then, rebuilt from the change history. Rows
     are sorted by key. Existing files are kept unless ``overwrite`` is set.
@@ -558,6 +604,21 @@ def export_config(
         for table in TABLES:
             current[table.file], _ = _current(table, read_rows(conn, table), current_ids)
             current_ids[table.file] = {row.row_id for row in current[table.file].values()}
+    if config is not None and as_of is None:
+        seeded = seed_sources(engine, config)
+        # Preserve inactive rows while replacing active definitions with current warehouse shapes.
+        current[SOURCE_COLUMNS.file] = {
+            key: row for key, row in current[SOURCE_COLUMNS.file].items() if not row.active
+        }
+        for index, column in enumerate(seeded):
+            values: dict[str, Value] = {
+                "TABLE_NAME": column.table_name,
+                "COLUMN_NAME": column.column_name,
+                "DATA_TYPE": column.data_type,
+                "COLUMN_POSITION": column.column_position,
+            }
+            key = (column.table_name, column.column_name)
+            current[SOURCE_COLUMNS.file][key] = StoredRow(index, True, (), True, values)
     directory.mkdir(parents=True, exist_ok=True)
     counts: dict[str, int] = {}
     for table in TABLES:

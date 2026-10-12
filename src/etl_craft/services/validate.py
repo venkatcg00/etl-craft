@@ -3,8 +3,9 @@
 A run finds a mistake in a task's definition only when it reaches that task, and some mistakes
 not even then: an alert that runs before the tasks it reports on, or a ``HAS_DATA`` dependency
 on a task that never reports rows. ``validate`` reads the Engine DB and the project's files, and
-checks each active pipeline and task with the same code a run uses. It connects to nothing else
-and runs nothing: SQL is read and checked, ingestion scripts are parsed, not imported.
+checks each active pipeline and task with the same code a run uses. It runs no tasks: SQL is
+read and checked, ingestion scripts are parsed, not imported. Active source definitions are
+compared with existing warehouse tables by the standalone validate command.
 
 Each finding is a ``FAIL`` (a run would fail, hang or silently do something else) or a ``WARN``
 (it works, but look at this, such as a parameter no handler reads). In remote mode, every rule
@@ -19,6 +20,7 @@ from datetime import date
 from typing import ClassVar
 
 from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.project import ingestion_script
@@ -36,6 +38,7 @@ from etl_craft.engine.repository.pipelines import (
     pipeline_parameter_problems,
     resolve_pipeline_id,
 )
+from etl_craft.engine.repository.source_columns import SourceColumn, fetch_source_columns
 from etl_craft.engine.repository.tasks import fetch_target_tasks, fetch_task_parameters
 from etl_craft.engine.repository.validation import (
     ActiveTask,
@@ -60,6 +63,8 @@ from etl_craft.handlers.sql.spec import WRITERS, read_sql_task
 from etl_craft.handlers.sql.tables import ENGINE_COLUMNS
 from etl_craft.services.doctor import Status
 from etl_craft.services.lineage import dialect_and_catalog, output_columns, table_name
+from etl_craft.services.source_columns import definition_problem, drift, warehouse_columns
+from etl_craft.warehouse.connection import open_warehouse
 
 ROWS_REPORTED = frozenset(WRITERS)
 """The SQL actions that report the rows in their target, which a ``HAS_DATA`` edge needs."""
@@ -123,7 +128,26 @@ class _Metadata:
 def validate(engine: Engine, config: ConnectorConfig, pipeline_code: str | None = None) -> Report:
     """Check every active pipeline, or only ``pipeline_code``; return every finding."""
     with engine.connect() as conn:
-        return validate_on(conn, config, pipeline_code)
+        report = validate_on(conn, config, pipeline_code)
+        definitions = fetch_source_columns(conn)
+    dialect, catalog = dialect_and_catalog(config)
+    grouped: dict[str, list[SourceColumn]] = {}
+    for column in definitions:
+        if definition_problem(column, dialect) is None:
+            grouped.setdefault(table_name(column.table_name.split("."), catalog), []).append(column)
+    if config.warehouse is not None and grouped:
+        try:
+            with open_warehouse(config, engine) as warehouse, warehouse.connect() as conn:
+                for table, columns in grouped.items():
+                    for message in drift(columns, warehouse_columns(conn, config, table), dialect):
+                        report.fail(f"source {table}", f"schema drift: {message}")
+        except (EtlCraftError, SQLAlchemyError) as error:
+            report.fail(
+                "source definitions",
+                f"could not compare source definitions with the warehouse: {error}; restore "
+                f"the warehouse connection and run validate again",
+            )
+    return report
 
 
 def validate_on(
@@ -143,6 +167,11 @@ def validate_on(
         pipeline_codes=[code for code, _ in pipeline_parameters],
     )
     report = Report()
+    dialect, _ = dialect_and_catalog(config)
+    for definition in fetch_source_columns(conn):
+        problem = definition_problem(definition, dialect)
+        if problem:
+            report.fail(f"source {definition.table_name}.{definition.column_name}", problem)
     for schedule in conn.execute(statement(conn, "overseer_schedules")):
         zone = (
             schedule.schedule_timezone
@@ -172,7 +201,7 @@ def validate_on(
     def mine(where: str) -> bool:
         return pipeline_code is None or where.split(".", 1)[0] == pipeline_code
 
-    report.findings = [f for f in report.findings if mine(f.where)]
+    report.findings = [f for f in report.findings if mine(f.where) or f.where.startswith("source ")]
     report.pipelines = sum(1 for code in data.pipeline_codes if mine(code))
     report.tasks = sum(1 for task in data.tasks if mine(task.label))
     return report

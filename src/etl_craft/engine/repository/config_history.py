@@ -4,7 +4,7 @@ Each ``AUD_<table>_HISTORY`` holds every version of a ``CFG_`` row, valid from `
 until ``VALID_TO``. A row's state at a moment is the version valid then; a row with versions but
 none valid then did not exist. A row with no version at all has not changed since the Engine DB
 began recording, and stands as it is now. The rows go into an in-memory SQLite database holding
-the six tables, so they are read exactly as the live ones are.
+the configuration tables, so they are read exactly as the live ones are.
 """
 
 from __future__ import annotations

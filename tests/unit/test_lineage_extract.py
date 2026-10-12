@@ -95,3 +95,54 @@ def test_cache_key_changes_with_catalog_and_parser_version(monkeypatch):
     assert key != lineage.lineage_key("SELECT x FROM sales.t", "sales.out", "postgres", "two")
     monkeypatch.setattr(lineage, "SQLGLOT_VERSION", "different")
     assert key != lineage.lineage_key("SELECT x FROM sales.t", "sales.out", "postgres", "one")
+
+
+@pytest.mark.parametrize("dialect", ["duckdb", "postgres", "trino", "snowflake", "databricks"])
+def test_defined_stars_and_bare_join_columns(dialect):
+    schemas = {
+        "raw.orders": {"id": "BIGINT", "amount": "DECIMAL(12,2)"},
+        "ref.rates": {"id": "BIGINT", "rate": "DECIMAL(12,2)"},
+    }
+    star = extract(
+        "SELECT * FROM analytics.raw.orders",
+        "mart.orders",
+        dialect=dialect,
+        catalog="analytics",
+        schemas=schemas,
+    )
+    assert [(edge.target_column, edge.source_object, edge.source_column) for edge in star] == [
+        ("id", "raw.orders", "id"),
+        ("amount", "raw.orders", "amount"),
+    ]
+    join = extract(
+        "SELECT amount * rate AS value FROM raw.orders o JOIN ref.rates r ON o.id = r.id",
+        "mart.values",
+        dialect=dialect,
+        catalog="analytics",
+        schemas=schemas,
+    )
+    assert [(edge.source_object, edge.source_column) for edge in join] == [
+        ("raw.orders", "amount"),
+        ("ref.rates", "rate"),
+    ]
+    assert {edge.transformation for edge in join} == {"amount * rate"}
+    offline = extract("SELECT * FROM raw.orders", "mart.orders", dialect=dialect, schemas=schemas)
+    assert {edge.source_object for edge in offline} == {"raw.orders"}
+    with pytest.raises(MetadataError, match=r"raw.orders.*ref.rates.*could not be resolved"):
+        extract(
+            "SELECT id FROM raw.orders o JOIN ref.rates r ON o.id = r.id",
+            "mart.bad",
+            dialect=dialect,
+            catalog="analytics",
+            schemas=schemas,
+        )
+
+
+def test_schema_order_changes_cache_key():
+    from etl_craft.services.lineage import lineage_key
+
+    first = {"raw.orders": {"a": "INT", "b": "INT"}}
+    second = {"raw.orders": {"b": "INT", "a": "INT"}}
+    assert lineage_key("SELECT * FROM raw.orders", "s.t", "duckdb", schemas=first) != lineage_key(
+        "SELECT * FROM raw.orders", "s.t", "duckdb", schemas=second
+    )

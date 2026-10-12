@@ -48,5 +48,8 @@ A `WARN` works, but deserves a look:
   in the warehouse's dialect, with the line and column where it stopped. The warehouse decides
   whether it is valid when the task runs, and column lineage cannot trace it.
 
-`validate` does not connect to the warehouse or the email relay; [`doctor`](../deploying/doctor-and-setup.md)
-does. Column lineage is checked by [`lineage --strict`](lineage.md).
+`validate` compares active [source definitions](lineage.md#source-definitions-and-stars) with
+warehouse tables that exist, reporting added, missing and differently typed columns. Tables
+that do not yet exist are skipped. With no active definitions it stays metadata-only; it never
+connects to the email relay. [`doctor`](../deploying/doctor-and-setup.md) checks connections.
+Column lineage is checked by [`lineage --strict`](lineage.md).

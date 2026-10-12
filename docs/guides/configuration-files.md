@@ -14,7 +14,8 @@ etl-craft/
 │   ├── task_parameters.csv        CFG_TASK_PARAMETERS
 │   ├── task_dependencies.csv      CFG_TASK_DEPENDENCY
 │   ├── pipeline_dependencies.csv  CFG_PIPELINE_DEPENDENCY
-│   └── business_rules.csv         CFG_BUSINESS_RULES
+│   ├── business_rules.csv         CFG_BUSINESS_RULES
+│   └── source_columns.csv         CFG_SOURCE_COLUMNS
 ├── sql_files/
 └── ingestion_scripts/
 ```
@@ -31,7 +32,7 @@ through `etl-craft config apply`, which records who changed what.
 
 | Command | Does |
 |---|---|
-| `etl-craft config export` | writes the Engine DB's rows as the six files: the starting point for a project whose pipelines are in the Engine DB already. It refuses to overwrite files there unless given `--force`. With `--as-of`, it writes the rows as they stood at a moment instead (see [Configuration as of a moment](#configuration-as-of-a-moment)) |
+| `etl-craft config export` | writes the Engine DB's rows as config files: the starting point for a project whose pipelines are in the Engine DB already. It refuses to overwrite files there unless given `--force`. It also seeds [source definitions](lineage.md#source-definitions-and-stars) from existing warehouse tables. With `--as-of`, it writes the rows as they stood at a moment instead (see [Configuration as of a moment](#configuration-as-of-a-moment)) |
 | `etl-craft config plan` | shows what `apply` would change and runs [`validate`](validating.md) on the result, then rolls it all back. Exits 1 when `validate` fails |
 | `etl-craft config apply` | makes the changes, in one transaction, unless `validate` fails the result: then it changes nothing and exits 1 |
 
@@ -69,6 +70,7 @@ development, test and production.
 | `task_dependencies.csv` | `PIPELINE_CODE`, `TASK_CODE`, `DEPENDS_ON_PIPELINE_CODE`, `DEPENDS_ON_TASK_CODE`, `DEPENDENCY_TYPE` |
 | `pipeline_dependencies.csv` | `PIPELINE_CODE`, `DEPENDS_ON_PIPELINE_CODE`, `DEPENDENCY_TYPE` |
 | `business_rules.csv` | `PIPELINE_CODE`, `TASK_CODE`, `BUSINESS_RULE_NAME` |
+| `source_columns.csv` | `TABLE_NAME`, `COLUMN_NAME` |
 
 For each row of a file, `apply`:
 

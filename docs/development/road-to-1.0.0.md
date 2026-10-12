@@ -119,7 +119,8 @@ item's text, or work done early under another item.
 | 0.4 gate | In progress | | Seven-day soak of the frozen candidate ends 17 October 2026 at 08:01 UTC; release remains gated |
 | S5.L SQL watermarks | Done | #145 | Typed source positions, atomic success offsets, attempt/run ranges and audited resets |
 | S5.M Event waits | Done | #146 | Durable file/query waits, indefinite deadlines, native file hints, evidence and downstream file tokens |
-| S5.N, then S5.C and later | Not started | | |
+| S5.N Source definitions and schema-aware lineage | Done | #147 | Offline star/join tracing, audited source definitions, seeding and documented/deployed schema comparison |
+| S5.C and later | Not started | | |
 
 ### Handover notes
 
@@ -162,8 +163,34 @@ and tagged 0.3.0 upgrades on both Engine DBs. Twenty consecutive rounds of concu
 cancellation, idle notification and orphan-probe guards passed (200 cases). Warehouse-row events
 and file literals passed on Databricks and Snowflake, native and Iceberg (four cases), including
 indefinite deadlines. The separate frozen 0.4 soak is unchanged.
+S5.N passed the full local checks (3,498 tests, 92 expected skips, 94% coverage), strict docs,
+the 27-case installed-wheel/sdist matrix, Python 3.12/3.13 unit suites (1,593 each), and tagged
+0.3.0 upgrades on SQLite/PostgreSQL. Source definitions, star expansion, joins, cache changes,
+reordering and historical export passed on both Engine DBs. The complete demo traces without a
+warehouse connection. Added, missing and retyped source columns, export/apply round trips, and
+catalog SQL-target gaps passed on every local warehouse. Databricks and Snowflake, native and
+Iceberg, passed live source seeding, type aliases and deployment comparisons (four cases).
+The separate frozen 0.4 soak is unchanged.
 
 **Choices that differ from the item text.**
+
+- S5.N continues while the frozen 0.4 soak runs; that deployment is unchanged. Older projects
+  may omit `source_columns.csv`; applying their other files preserves source definitions.
+  A header-only source file retires its active definitions. Source names are unquoted SQL
+  identifiers, and table names include a schema. Export normalizes warehouse column ordering
+  to positive positions even when a driver reports zero-based ordinals. Standalone validation
+  compares source definitions with the warehouse; config plan/apply keep transaction validation
+  offline. Historical exports also remain metadata-only. Inferred SQL schemas use traced output
+  column names rather than querying deployed targets. Self-reading mutations use established
+  creation tasks rather than waiting on later writers of the same table. Cached edges retain
+  projection order, and ordered source columns/types participate in cache keys.
+  As requested, `generate-docs --with-warehouse` also finds documented/deployed gaps, retains
+  declared types alongside deployed types, and reports missing tables or unavailable comparisons
+  while keeping the metadata catalog. Source types and SQL target column names are compared;
+  undeclared target types are not guessed. Engine audit columns are allowed on SQL targets.
+  `--strict` continues to govern unresolved lineage, and `validate` fails source drift. SQL type
+  aliases are normalized; lengths and timestamp precisions are asserted only when declared.
+  Snowflake's generic timestamp alias does not assert an account-dependent timezone mapping.
 
 - S5.M continues while the frozen 0.4 soak runs; its deployment is unchanged. Event waits run
   cooperatively in local mode; remote validation and DAG generation refuse them because a

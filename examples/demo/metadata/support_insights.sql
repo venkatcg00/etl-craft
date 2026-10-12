@@ -237,3 +237,34 @@ FROM (VALUES
 ) v
 JOIN CFG_PIPELINES p ON p.PIPELINE_CODE = 'SUPPORT_DM'
 JOIN CFG_TASKS t ON t.PIPELINE_ID = p.PIPELINE_ID AND t.TASK_CODE = 'quality';
+
+-- Source shapes the ingestion scripts land, available before the first run.
+INSERT INTO CFG_SOURCE_COLUMNS (TABLE_NAME, COLUMN_NAME, DATA_TYPE, COLUMN_POSITION) VALUES
+    ('lnd.client_alpha', 'interaction_id', 'BIGINT', 1),
+    ('lnd.client_alpha', 'agent_code', 'VARCHAR(100)', 2),
+    ('lnd.client_alpha', 'support_area', 'VARCHAR(100)', 3),
+    ('lnd.client_alpha', 'contact_date', 'VARCHAR(100)', 4),
+    ('lnd.client_alpha', 'status', 'VARCHAR(100)', 5),
+    ('lnd.client_alpha', 'duration_seconds', 'VARCHAR(100)', 6),
+    ('lnd.client_alpha', 'rating', 'VARCHAR(100)', 7),
+    ('lnd.client_alpha', 'pipeline_run_id', 'BIGINT', 8),
+    ('lnd.client_alpha', 'pipeline_id', 'BIGINT', 9),
+    ('lnd.client_alpha', 'task_run_id', 'BIGINT', 10),
+    ('lnd.client_beta', 'support_identifier', 'BIGINT', 1),
+    ('lnd.client_beta', 'agent', 'VARCHAR(100)', 2),
+    ('lnd.client_beta', 'regarding', 'VARCHAR(100)', 3),
+    ('lnd.client_beta', 'event_time', 'TIMESTAMP', 4),
+    ('lnd.client_beta', 'status', 'VARCHAR(100)', 5),
+    ('lnd.client_beta', 'handle_time', 'BIGINT', 6),
+    ('lnd.client_beta', 'score', 'BIGINT', 7),
+    ('lnd.client_beta', 'pipeline_run_id', 'BIGINT', 8),
+    ('lnd.client_beta', 'pipeline_id', 'BIGINT', 9),
+    ('lnd.client_beta', 'task_run_id', 'BIGINT', 10),
+    ('lnd.agents', 'agent_code', 'VARCHAR(100)', 1),
+    ('lnd.agents', 'agent_name', 'VARCHAR(100)', 2),
+    ('lnd.agents', 'team', 'VARCHAR(100)', 3),
+    ('lnd.agents', 'email', 'VARCHAR(100)', 4),
+    ('lnd.agents', 'left_company', 'VARCHAR(100)', 5),
+    ('lnd.agents', 'pipeline_run_id', 'BIGINT', 6),
+    ('lnd.agents', 'pipeline_id', 'BIGINT', 7),
+    ('lnd.agents', 'task_run_id', 'BIGINT', 8);

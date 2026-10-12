@@ -7,7 +7,7 @@ table and column from its first sources to its last consumers, across tasks and 
 ```bash
 etl-craft generate-docs                      # into catalog/ in the project directory
 etl-craft generate-docs --output /srv/docs   # anywhere else
-etl-craft generate-docs --with-warehouse     # add column types and comments from the warehouse
+etl-craft generate-docs --with-warehouse     # compare documented and deployed schemas, add types and comments
 etl-craft generate-docs --strict             # write nothing if any SQL task cannot be traced
 ```
 
@@ -218,3 +218,17 @@ etl-craft publish-docs --local-only --host 0.0.0.0 --port 8080   # to the local 
 directory. It writes only a folder that is new, empty, or one it wrote before, which it marks with
 a `.etl-craft-catalog` file; that folder is replaced whole, so pages for removed tasks and tables
 go too. A folder holding anything else is refused.
+
+## Comparing documentation with the deployment
+
+`etl-craft generate-docs --with-warehouse` reports gaps in its output and each table's
+**Warehouse comparison** section. Source definitions retain their **Declared type** beside the
+**Deployed type**; missing columns and columns without definitions stay visible. It compares
+complete source definitions for added, missing and differently typed columns, and traced SQL
+targets for missing or undocumented columns. Engine-generated audit columns do not count as
+undocumented additions to SQL targets. Types that are not declared are not guessed.
+
+A table that does not exist is labelled not deployed. An unavailable connection or metadata
+query is reported as a comparison that could not run, with the metadata catalog retained.
+Without the flag, the catalog stays offline. `--strict` continues to govern unresolved column
+lineage; use `etl-craft validate` to fail on source schema drift.
