@@ -149,10 +149,25 @@ table becomes available.
 
 ### Configuration history
 
+All `CFG_` tables require one primary-key column and non-null `CREATED_BY`, `CREATE_DATE`,
+`UPDATED_BY`, `UPDATED_DATE` and `ACTIVE_FLAG`. Actor/date types and the `Y`/`N` active values
+are checked for project tables too. Migration `0026_config_base_contract.sql` makes the core
+fields mandatory. Existing creation/update values and IDs are preserved; missing historical
+attribution is labelled `etl-craft-migration-0026`, with the migration time for missing dates.
+Only changed rows get a new history version. Token update fields begin at the upgrade and
+revoked tokens become inactive; earlier token history is not invented.
+
+Stop running Engine DB writers during this schema upgrade and resume them after migration
+succeeds. Before upgrading, bring custom `CFG_` tables into this contract using the previous etl-craft
+version. The upgrade refuses incomplete custom tables rather than guessing their key or types.
+On SQLite, extra columns on rebuilt core config tables are refused before rebuilding; move
+their values into project tables first. Migrations are transactional per file: `0025` may
+commit its safe token date rename before a refused `0026`, and retry resumes at `0026`.
+
 Every change to a `CFG_` row is a version in that table's history table, `AUD_<table>_HISTORY`
 (`AUD_CFG_PIPELINES_HISTORY`, `AUD_CFG_TASKS_HISTORY` and so on), in the slowly changing
 dimension type 4 pattern: the `CFG_` table holds the current rows, the history table every
-version. A version holds every column of the row, typed as in the `CFG_` table: its values
+version. A version holds each non-secret column of the row, typed as in the `CFG_` table: its values
 after an insert or update, or its values when deleted. With them are:
 
 | Column | Holds |

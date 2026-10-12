@@ -8,6 +8,13 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Every core and project `CFG_` table now requires one primary key, mandatory creation/update
+  actors and UTC timestamps, and an active flag accepting only `Y`/`N`. Engine migrations
+  `0025`/`0026` preserve IDs, creation records, credential hashes and existing history while
+  filling missing audit fields. Token storage uses `CREATE_DATE`, records safe typed lifecycle
+  history without credential hashes, and refuses inactive tokens immediately. Public token JSON
+  keeps `created_at`. Existing custom config tables must meet the base contract before upgrading.
+
 - SCD1 targets now carry `ACTIVE_FLAG` alongside creation/update actors and dates and
   `DELETE_FLAG`. `upgrade-targets` derives legacy SCD1 active state from known deletion flags
   under the target lock, with a dry run and repeatable backfill that preserves historical stamps.

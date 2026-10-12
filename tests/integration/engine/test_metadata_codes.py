@@ -236,6 +236,8 @@ def test_a_failed_metadata_rebuild_rolls_back_and_restores_connection_settings(
         "0022_watermarks.sql",
         "0023_event_waits.sql",
         "0024_source_columns.sql",
+        "0025_token_audit_names.sql",
+        "0026_config_base_contract.sql",
     ]
 
 

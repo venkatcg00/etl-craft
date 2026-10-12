@@ -121,21 +121,25 @@ item's text, or work done early under another item.
 | S5.M Event waits | Done | #146 | Durable file/query waits, indefinite deadlines, native file hints, evidence and downstream file tokens |
 | S5.N Source definitions and schema-aware lineage | Done | #147 | Offline star/join tracing, audited source definitions, seeding and documented/deployed schema comparison |
 | S5.O.1 SCD lifecycle invariants | Done | #148 | Common SCD flags, current-row soft deletes and legacy active-state upgrades |
-| S5.O.2 Normalized metadata and config invariants | Planned; next | | Table/column contracts and common config audit fields; see the corrective design |
+| S5.O.2a Common config contract | Done | #149 | Mandatory core/custom CFG audit fields and keys, safe token lifecycle history and lossless upgrades |
+| S5.O.2b Normalized object contracts | Planned; next | | Table/column contracts, relational references and identity invariants |
+| S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
 | S5.P Project documentation gap UI | Planned | | Coloured column warnings, lineage gaps and project summary |
+| S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
 | S5.C and later | Not started | | |
 
 ### Handover notes
 
 What a person picking up the work needs that the code and the item texts do not say.
 
-**Priority correction after S5.N.** Build S5.O and S5.P before S5.C. The
+**Priority correction after S5.N.** Build S5.O, S5.P and S5.Q before S5.C. The
 [metadata and pipeline UI design](metadata-and-ui.md) records the schema gaps, normalized
 table/column contracts with separate catalog/schema/name components, migration scope, common config/audit rules, SCD1/SCD2
 lifecycle semantics, per-column warning states and built-in operational dashboard panels.
 S5.N's merged dotted-name source table is an intermediate implementation to replace, not the
 final metadata model. S7.A.1 delivers Pipeline Insights without team-specific dashboards.
-S5.O.1 completes SCD lifecycle rules; S5.O.2 and the UI items remain planned. The frozen 0.4
+S5.O.1 completes SCD lifecycle rules; S5.O.2a delivers the common config contract, followed by
+S5.O.2b for object normalization and then the UI items. The frozen 0.4
 soak is unchanged.
 
 **Acceptance availability.**
@@ -192,10 +196,33 @@ cases). Databricks and Snowflake, native and Iceberg, passed lifecycle and legac
 three cases in the main cloud run and the corrected Snowflake Iceberg case in a focused rerun.
 The separate frozen 0.4 soak remains unchanged and healthy.
 
+S5.O.2a passed the full local gate (3,543 tests, 96 expected skips, 94.21% coverage; 27m15s),
+strict docs, Python 3.12/3.13 unit suites (1,594 each), tagged 0.3.0 schema upgrades on both
+Engine DBs, and the 27-case installed-wheel/sdist matrix (17m47s, no skips). Contract, token
+rotation/provenance, migration rollback, identity counters and full fresh/upgraded catalog
+checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite was needed.
+The separate frozen 0.4 soak deployment is unchanged.
+
 **Choices that differ from the item text.**
 
-- S5.O ships in two independently validated slices: S5.O.1 corrects SCD lifecycle behaviour;
-  S5.O.2 handles relational metadata and common config constraints. S5.O.1 adds no Engine DB
+- S5.O.2a completes the mandatory base fields and single non-null key for core and custom
+  Engine DB config tables, with safe token history; S5.O.2b retains object/FK normalization
+  and natural-identity invariants. Missing historical attribution is labelled rather than
+  guessed, existing values and unchanged history remain intact, and custom config tables
+  must meet the contract before upgrade. Token JSON retains `created_at` while storage uses
+  `CREATE_DATE`. The two migrations commit independently; a refused base-contract migration
+  resumes after the safe token date rename. No information-schema mirror was added.
+- Ordinary warehouse business tables may omit actor fields; protected SCD tables retain
+  accurate actors and independent column provenance. S5.O.3 plans automatic human-insert
+  row locks and human-update value locks. System writes create no locks and respect existing
+  human locks; authorized human edits retain protection until explicit unlock.
+- S5.Q and S7.A.2 plan PowerCenter-style scoped operator controls and a refusal audit, rather
+  than limiting the UI to current API routes or Airflow-shaped operations. These controls and
+  human data locks are planned, not implemented by S5.O.2a.
+
+- S5.O ships in independently validated slices: S5.O.1 corrects SCD lifecycle behaviour;
+  S5.O.2a handles common config constraints and safe token lifecycle history; S5.O.2b handles
+  relational metadata and identity constraints. S5.O.1 adds no Engine DB
   tables or migrations. The existing locked `upgrade-targets` command backfills SCD1 active
   flags and deactivates legacy active/deleted SCD2 versions without changing their stamps.
   Unknown SCD1 deletion state refuses the upgrade. Snowflake Iceberg column additions use the
@@ -2213,10 +2240,12 @@ Branch: `feat/services-lineage-schemas`. After S5.M.
 
 ### S5.O Normalized metadata and lifecycle invariants
 
-After S5.N, before S5.C. Ship as two independently validated changes:
+After S5.N, before S5.C. Ship as independently validated changes:
 S5.O.1 (`feat/scd-lifecycle`) completes merge flags, soft-delete/history preservation and legacy
-SCD1 target upgrades; S5.O.2 (`feat/metadata-normalization`) completes the relational config
-contract and migrations. Completing S5.O.1 does not complete the metadata correction.
+SCD1 target upgrades; S5.O.2a (`feat/config-base-contract`) enforces common config fields and
+safe token history; S5.O.2b (`feat/metadata-normalization`) completes relational object contracts
+and identity migrations; S5.O.3 (`feat/scd-human-overrides`) adds human-only protection, accurate SCD actors
+and optional ordinary business-table actors. Completing S5.O.1 does not complete the metadata correction.
 
 - *Problem.* Dotted source object names have no parent table relationship, config audit fields
   vary between tables, and SCD1 has no active flag.
@@ -2228,6 +2257,28 @@ contract and migrations. Completing S5.O.1 does not complete the metadata correc
   config round trips, identity conflicts and SCD update/delete/revival on supported warehouses.
 - *Done when.* All config tables satisfy the base contract, object identities use relational
   components, old metadata/history converts without loss, and both SCD actions enforce flags.
+
+### S5.O.3 SCD human override protection
+
+Branch: `feat/scd-human-overrides`. After S5.O.2b, before S5.P.
+
+- *Problem.* Project business tables may be written by etl-craft, ERP integrations and people
+  uploading/editing values. Actor columns alone do not identify protected manual values, and
+  an ETL merge must not overwrite them.
+- *Change.* Allow optional actors on ordinary project-owned warehouse tables; retain accurate
+  `CREATED_BY`/`UPDATED_BY` on protected SCD tables and independent column provenance. Implement the row/column lock policy in the
+  [corrective design](metadata-and-ui.md#project-business-tables-and-human-overrides), only for
+  SCD1/SCD2. Human inserts protect the row; human updates protect changed business values.
+  System writes never create locks, but respect existing human locks. Authorized users can
+  edit locked values or explicitly unlock them; ETL preserves
+  active locks across versions and deletion/revival. Expose shared services/API for provenance,
+  edits and unlocks; S7.A adds the corresponding live UI controls.
+- *Tests.* Optional actor columns, multiple writer identities, upload/edit/unlock permissions,
+  concurrent ETL and manual changes, effective hashes/counts, SCD1/SCD2 history, deletion,
+  version continuity, rollback/recovery and unsupported writer/warehouse outcomes.
+- *Done when.* ETL cannot overwrite protected manual rows/values; permitted user edits and
+  unlocks are accurately audited, SCD history is preserved, and optional ordinary-table actors
+  do not weaken protected-SCD attribution or protection.
 
 ### S5.P Project documentation gap UI
 
@@ -2243,6 +2294,27 @@ Branch: `feat/catalog-gap-ui`. After S5.O, before S5.C.
   offline generation, lineage reasons, escaping, keyboard navigation and accessible indicators.
 - *Done when.* Generated project documentation visibly identifies both directions of schema
   drift and lineage gaps, and never represents an unavailable comparison as healthy.
+
+### S5.Q Scoped operator controls
+
+Branch: `feat/operator-controls`. After S5.P, before S5.C; extend the remote-worker control
+contract when S5.C lands. S7.A.2 exposes these operations in the workflow-monitor UI.
+
+- *Problem.* Operators need independent pipeline and task controls. Current service/API gaps
+  and whole-pipeline/remote-mode restrictions must not dictate an Airflow-shaped UI.
+- *Change.* Implement the scoped action and restriction-review matrix in the
+  [operator control design](metadata-and-ui.md#powercenter-style-operator-controls): individual
+  pipeline pause/resume, task-only execution and holds, run/task stop versus abort, recovery
+  versus restart, start from a selected task, dependency overrides and selected bulk actions.
+  Review one-active-run and flag-combination restrictions; support independent manual contexts
+  where targets/checkpoints/consumption can be isolated. Share capabilities and durable action
+  status across services, CLI, API and UI, preserving ownership, history and human data locks.
+- *Tests.* Scope isolation, action/state/handler capabilities, permissions, repeated requests,
+  concurrent controls, stale state, worker/query acknowledgement, recovery/checkpoints,
+  restart durability, consumption/repair evidence and local/remote execution contracts.
+- *Done when.* An operator can control the selected pipeline or task independently, see the
+  actual outcome and an actionable reason for any remaining limitation, without losing audit
+  history or unintentionally affecting other work.
 
 ### S5.C The PostgreSQL queue and the worker agent
 
@@ -2504,6 +2576,13 @@ Use the same service calculations in generated documentation snapshots and the l
 Support Insights operational metric parity in S8.D/S8.F. Teams must not need to create a separate
 dashboard to see these engine metrics.
 
+**S7.A.2 Workflow Monitor controls are required.** Use PowerCenter as the operator interaction
+reference. Implement S5.Q's scoped action/capability matrix in pipeline lists, run detail and
+DAG task menus: independent pipeline pause/resume, Run task only, Run from here, task holds,
+stop/abort, recover/restart, explicit overrides and selected bulk actions. Show precise scope,
+state and completion acknowledgement; do not inherit unnecessary Airflow or CLI flag
+restrictions. Browser tests must exercise the operations, not merely check visible buttons.
+
 - *Technology.* Server-rendered pages (Jinja2 templates, the catalog's existing CSS and assets) with
   htmx for live parts, so the UI needs no separate JavaScript build and uses the same service layer
   as the API. Graphs reuse the catalog's SVG rendering.
@@ -2513,7 +2592,7 @@ dashboard to see these engine metrics.
     coloured by the selected run's task statuses.
   - Runs: a grid of runs × tasks (status per cell), filters by status, kind and date.
   - Run detail: tasks with attempts, rows, durations, errors; per task the `explain` panel; actions
-    allowed by the user's role (cancel, mark, rerun, rerun with downstream, pause).
+    allowed by the user's role through the complete S7.A.2 action/capability matrix.
   - Attempt: live log tail, exit code, owner, host.
   - Backfills: start (pipeline, dates, reason), progress, stop.
   - Interventions: every recorded change with who, when and why.
