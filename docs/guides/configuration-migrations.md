@@ -78,6 +78,36 @@ with a project migration (etl-craft migrate)`.
   `LEFT JOIN`, scalar subqueries, `||`, `REPLACE`, `UPPER`, `CAST`, and temporary tables
   dropped at the end of the file.
 
+## Project configuration tables
+
+Every project table whose name starts with `CFG_` must declare one non-null primary-key column and
+`CREATED_BY`, `CREATE_DATE`, `UPDATED_BY`, `UPDATED_DATE`, `ACTIVE_FLAG`, all `NOT NULL`.
+Actors and active flags use text types; dates use `TIMESTAMP` on SQLite and `TIMESTAMPTZ`
+on PostgreSQL. Include defaults on SQLite so inserts can omit the fields; etl-craft replaces
+these placeholders with the actor and UTC timestamp. PostgreSQL's before-insert trigger stamps
+them before constraints run. Updates preserve creation fields and stamp the update fields.
+An active flag outside `Y`/`N` fails the transaction.
+
+For example, use this definition on SQLite (replace the date type with `TIMESTAMPTZ` on
+PostgreSQL):
+
+```sql
+CREATE TABLE CFG_CHANNELS (
+    CHANNEL_ID INTEGER PRIMARY KEY,
+    CHANNEL_CODE VARCHAR NOT NULL UNIQUE,
+    ACTIVE_FLAG VARCHAR NOT NULL DEFAULT 'Y' CHECK (ACTIVE_FLAG IN ('Y','N')),
+    CREATED_BY VARCHAR NOT NULL DEFAULT 'etl-craft',
+    CREATE_DATE TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UPDATED_BY VARCHAR NOT NULL DEFAULT 'etl-craft',
+    UPDATED_DATE TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+INSERT INTO CFG_CHANNELS (CHANNEL_ID, CHANNEL_CODE) VALUES (1, 'EMAIL');
+```
+
+Incomplete config DDL is refused before later statements execute, and the file rolls back.
+Audit tables follow their event or lifecycle purpose; they do not need these mutable config
+fields merely because their names start with `AUD_`.
+
 ## The examples
 
 Each example builds on the ones before it.

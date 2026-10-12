@@ -13,6 +13,8 @@ into the history tables and replaces the table with the view.
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
+from etl_craft.dialects.engine.metadata import config_base_enabled, require_config_base
+
 CHANGE_COLUMNS = (
     "change_id",
     "valid_from",
@@ -58,6 +60,7 @@ def refresh_metadata_triggers(conn: Connection) -> None:
         )
     ).all()
     quote = conn.dialect.identifier_preparer.quote
+    enforce_base = config_base_enabled(conn)
     for row in rows:
         table = row.name
         triggers = set(
@@ -78,8 +81,12 @@ def refresh_metadata_triggers(conn: Connection) -> None:
                     f"CREATE TRIGGER {quote(trigger)} BEFORE {event} ON {quote(table)} "
                     f"FOR EACH {level} EXECUTE FUNCTION {function}"
                 )
-        if not table.upper().startswith("CFG_") or table.upper() == "CFG_API_TOKENS":
+        if not table.upper().startswith("CFG_") or (
+            not history and table.upper() == "CFG_API_TOKENS"
+        ):
             continue
+        if enforce_base:
+            require_config_base(conn, table)
         configs.append(table)
         columns = conn.execute(
             text(
@@ -161,7 +168,11 @@ def _columns(conn: Connection, table: str) -> list[tuple[str, str]]:
         ),
         {"name": table},
     ).all()
-    return [(str(row.name), str(row.type)) for row in rows]
+    return [
+        (str(row.name), str(row.type))
+        for row in rows
+        if not (table.lower() == "cfg_api_tokens" and row.name == "token_sha256")
+    ]
 
 
 def _ensure_history(conn: Connection, table: str) -> None:

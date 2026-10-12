@@ -30,10 +30,10 @@ CREATE TABLE CFG_PIPELINES (
     REFRESH_TYPE         VARCHAR NOT NULL,
     ACTIVE_FLAG          VARCHAR NOT NULL DEFAULT 'Y',
     PIPELINE_PARAMETERS  TEXT,
-    CREATED_BY           VARCHAR DEFAULT 'etl-craft',
-    CREATE_DATE          TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    UPDATED_BY           VARCHAR DEFAULT 'etl-craft',
-    UPDATED_DATE         TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
+    CREATED_BY           VARCHAR NOT NULL DEFAULT 'etl-craft',
+    CREATE_DATE          TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
+    UPDATED_BY           VARCHAR NOT NULL DEFAULT 'etl-craft',
+    UPDATED_DATE         TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
     SCHEDULE_TIMEZONE VARCHAR,
     CATCHUP VARCHAR(1) NOT NULL DEFAULT 'N' CONSTRAINT ck_schedule_catchup CHECK (CATCHUP IN ('Y','N')),
     MAX_CATCHUP_RUNS INT NOT NULL DEFAULT 1 CONSTRAINT ck_schedule_catchup_runs CHECK (MAX_CATCHUP_RUNS > 0 AND typeof(MAX_CATCHUP_RUNS) = 'integer'),
@@ -59,10 +59,10 @@ CREATE TABLE CFG_PIPELINE_DEPENDENCY (
     DEPENDS_ON_PIPELINE_ID  BIGINT NOT NULL REFERENCES CFG_PIPELINES(PIPELINE_ID),
     DEPENDENCY_TYPE         VARCHAR NOT NULL,
     ACTIVE_FLAG             VARCHAR NOT NULL DEFAULT 'Y',
-    CREATED_BY              VARCHAR DEFAULT 'etl-craft',
-    CREATE_DATE             TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    UPDATED_BY              VARCHAR DEFAULT 'etl-craft',
-    UPDATED_DATE            TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
+    CREATED_BY              VARCHAR NOT NULL DEFAULT 'etl-craft',
+    CREATE_DATE             TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
+    UPDATED_BY              VARCHAR NOT NULL DEFAULT 'etl-craft',
+    UPDATED_DATE            TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
     CONSUME_REPAIRS         VARCHAR(1) NOT NULL DEFAULT 'Y' CONSTRAINT ck_pipedep_consume_repairs CHECK (CONSUME_REPAIRS IN ('Y','N')),
     CONSTRAINT ck_pipedep_type        CHECK (DEPENDENCY_TYPE IN ('SUCCESS','FAILURE','ALWAYS','HAS_DATA')),
     CONSTRAINT ck_pipedep_active_flag CHECK (ACTIVE_FLAG IN ('Y','N')),
@@ -86,10 +86,10 @@ CREATE TABLE CFG_TASKS (
     RUN_CONDITION        VARCHAR,
     RUN_CONDITION_COUNT  INT,
     ACTIVE_FLAG          VARCHAR NOT NULL DEFAULT 'Y',
-    CREATED_BY           VARCHAR DEFAULT 'etl-craft',
-    CREATE_DATE          TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    UPDATED_BY           VARCHAR DEFAULT 'etl-craft',
-    UPDATED_DATE         TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
+    CREATED_BY           VARCHAR NOT NULL DEFAULT 'etl-craft',
+    CREATE_DATE          TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
+    UPDATED_BY           VARCHAR NOT NULL DEFAULT 'etl-craft',
+    UPDATED_DATE         TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
     CONSTRAINT ck_tasks_code CHECK (TASK_CODE GLOB '[A-Za-z]*' AND TASK_CODE NOT GLOB '*[^A-Za-z0-9_]*' AND length(TASK_CODE) <= 128 AND instr(TASK_CODE, char(0)) = 0),
     CONSTRAINT ck_tasks_task_type     CHECK (TASK_TYPE IN ('INGESTION','ETL')),
     CONSTRAINT ck_tasks_handler       CHECK (HANDLER IN ('PYTHON','SQL','BUSINESS_RULES','EMAIL_ALERT','EVENT_WAIT')),
@@ -116,10 +116,10 @@ CREATE TABLE CFG_TASK_DEPENDENCY (
     DEPENDS_ON_TASK_ID      BIGINT NOT NULL REFERENCES CFG_TASKS(TASK_ID),
     DEPENDENCY_TYPE         VARCHAR NOT NULL,
     ACTIVE_FLAG             VARCHAR NOT NULL DEFAULT 'Y',
-    CREATED_BY              VARCHAR DEFAULT 'etl-craft',
-    CREATE_DATE             TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    UPDATED_BY              VARCHAR DEFAULT 'etl-craft',
-    UPDATED_DATE            TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
+    CREATED_BY              VARCHAR NOT NULL DEFAULT 'etl-craft',
+    CREATE_DATE             TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
+    UPDATED_BY              VARCHAR NOT NULL DEFAULT 'etl-craft',
+    UPDATED_DATE            TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
     CONSUME_REPAIRS         VARCHAR(1) NOT NULL DEFAULT 'Y' CONSTRAINT ck_taskdep_consume_repairs CHECK (CONSUME_REPAIRS IN ('Y','N')),
     CONSTRAINT ck_taskdep_type        CHECK (DEPENDENCY_TYPE IN ('SUCCESS','FAILURE','ALWAYS','HAS_DATA')),
     CONSTRAINT ck_taskdep_active_flag CHECK (ACTIVE_FLAG IN ('Y','N')),
@@ -147,10 +147,10 @@ CREATE TABLE CFG_TASK_PARAMETERS (
     PARAMETER_NAME     VARCHAR NOT NULL,
     PARAMETER_VALUE    VARCHAR,
     ACTIVE_FLAG        VARCHAR NOT NULL DEFAULT 'Y',
-    CREATED_BY         VARCHAR DEFAULT 'etl-craft',
-    CREATE_DATE        TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    UPDATED_BY         VARCHAR DEFAULT 'etl-craft',
-    UPDATED_DATE       TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
+    CREATED_BY         VARCHAR NOT NULL DEFAULT 'etl-craft',
+    CREATE_DATE        TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
+    UPDATED_BY         VARCHAR NOT NULL DEFAULT 'etl-craft',
+    UPDATED_DATE       TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
     CONSTRAINT ck_taskparameters_active_flag CHECK (ACTIVE_FLAG IN ('Y','N'))
 );
 
@@ -172,10 +172,10 @@ CREATE TABLE CFG_BUSINESS_RULES (
     TARGET_TABLE              VARCHAR NOT NULL,
     SEQUENCE_NUMBER           BIGINT NOT NULL,
     ACTIVE_FLAG               VARCHAR NOT NULL DEFAULT 'Y',
-    CREATED_BY                VARCHAR DEFAULT 'etl-craft',
-    CREATE_DATE               TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    UPDATED_BY                VARCHAR DEFAULT 'etl-craft',
-    UPDATED_DATE              TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
+    CREATED_BY                VARCHAR NOT NULL DEFAULT 'etl-craft',
+    CREATE_DATE               TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
+    UPDATED_BY                VARCHAR NOT NULL DEFAULT 'etl-craft',
+    UPDATED_DATE              TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
     CONSTRAINT ck_br_type        CHECK (BUSINESS_RULE_TYPE IN ('INCOMPLETE','REJECT','REPORT')),
     CONSTRAINT ck_br_active_flag CHECK (ACTIVE_FLAG IN ('Y','N'))
 );
@@ -1051,10 +1051,13 @@ CREATE TABLE CFG_API_TOKENS (
     TOKEN_SHA256 VARCHAR(64) NOT NULL UNIQUE,
     ROLE VARCHAR(16) NOT NULL CHECK (ROLE IN ('viewer', 'operator', 'admin')),
     PROJECT_ID BIGINT,
-    CREATED_BY VARCHAR(128) NOT NULL,
-    CREATED_AT TIMESTAMP NOT NULL,
+    CREATED_BY VARCHAR(128) NOT NULL DEFAULT 'etl-craft',
+    CREATE_DATE TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
     EXPIRES_AT TIMESTAMP,
-    REVOKED_AT TIMESTAMP
+    REVOKED_AT TIMESTAMP,
+    ACTIVE_FLAG VARCHAR(1) NOT NULL DEFAULT 'Y' CHECK (ACTIVE_FLAG IN ('Y','N')),
+    UPDATED_BY VARCHAR(128) NOT NULL DEFAULT 'etl-craft',
+    UPDATED_DATE TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00')
 );
 
 CREATE TRIGGER trg_actor_guard_cfg_api_tokens_insert BEFORE INSERT ON CFG_API_TOKENS
@@ -1126,10 +1129,10 @@ CREATE TABLE CFG_SOURCE_COLUMNS (
     DATA_TYPE VARCHAR NOT NULL,
     COLUMN_POSITION INTEGER NOT NULL CONSTRAINT ck_source_column_position CHECK (COLUMN_POSITION > 0 AND typeof(COLUMN_POSITION) = 'integer'),
     ACTIVE_FLAG VARCHAR NOT NULL DEFAULT 'Y' CONSTRAINT ck_source_column_active CHECK (ACTIVE_FLAG IN ('Y','N')),
-    CREATED_BY VARCHAR,
-    CREATE_DATE TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    UPDATED_BY VARCHAR,
-    UPDATED_DATE TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00')
+    CREATED_BY VARCHAR NOT NULL DEFAULT 'etl-craft',
+    CREATE_DATE TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
+    UPDATED_BY VARCHAR NOT NULL DEFAULT 'etl-craft',
+    UPDATED_DATE TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00')
 );
 CREATE UNIQUE INDEX ux_source_column_active ON CFG_SOURCE_COLUMNS (lower(TABLE_NAME), lower(COLUMN_NAME)) WHERE ACTIVE_FLAG = 'Y';
 CREATE UNIQUE INDEX ux_source_position_active ON CFG_SOURCE_COLUMNS (lower(TABLE_NAME), COLUMN_POSITION) WHERE ACTIVE_FLAG = 'Y';
@@ -1159,3 +1162,30 @@ CREATE TABLE AUD_CFG_SOURCE_COLUMNS_HISTORY (
 );
 CREATE INDEX ix_aud_cfg_source_columns_history_row ON AUD_CFG_SOURCE_COLUMNS_HISTORY (SOURCE_COLUMN_ID, CHANGE_ID);
 CREATE INDEX ix_aud_cfg_source_columns_history_current ON AUD_CFG_SOURCE_COLUMNS_HISTORY (SOURCE_COLUMN_ID) WHERE CURRENT_FLAG = 'Y';
+
+-- Safe API token lifecycle versions with creation/update attribution; credential hashes are excluded.
+CREATE TABLE AUD_CFG_API_TOKENS_HISTORY (
+    CHANGE_ID BIGINT PRIMARY KEY,
+    VALID_FROM TIMESTAMP NOT NULL,
+    VALID_TO TIMESTAMP NOT NULL,
+    CURRENT_FLAG VARCHAR(1) NOT NULL,
+    OPERATION VARCHAR NOT NULL,
+    ACTOR VARCHAR NOT NULL,
+    ACTOR_KIND VARCHAR NOT NULL,
+    MIGRATION VARCHAR,
+    TOKEN_ID BIGINT,
+    NAME VARCHAR(128),
+    ROLE VARCHAR(16),
+    PROJECT_ID BIGINT,
+    CREATED_BY VARCHAR(128),
+    CREATE_DATE TIMESTAMP,
+    EXPIRES_AT TIMESTAMP,
+    REVOKED_AT TIMESTAMP,
+    ACTIVE_FLAG VARCHAR(1),
+    UPDATED_BY VARCHAR(128),
+    UPDATED_DATE TIMESTAMP
+);
+
+CREATE INDEX ix_aud_cfg_api_tokens_history_row ON AUD_CFG_API_TOKENS_HISTORY (TOKEN_ID, CHANGE_ID);
+
+CREATE INDEX ix_aud_cfg_api_tokens_history_current ON AUD_CFG_API_TOKENS_HISTORY (TOKEN_ID) WHERE CURRENT_FLAG='Y';

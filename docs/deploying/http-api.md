@@ -28,7 +28,12 @@ Every resource endpoint, including health, requires `Authorization: Bearer <toke
 `viewer` can read, `operator` can also trigger, cancel, pause, resume, mark, rerun and backfill,
 and `admin` can also create, list and revoke tokens through `/api/v1/tokens`.
 Token values and hashes are absent from token listings and audit arguments. The token table
-is excluded from metadata snapshots and warehouse cloning.
+is excluded from metadata snapshots and warehouse cloning. Safe lifecycle versions live in
+`AUD_CFG_API_TOKENS_HISTORY` and appear in `AUD_METADATA_CHANGES`; these contain no token
+value or hash. Revocation sets `ACTIVE_FLAG='N'`; inactive credentials also fail authentication,
+even without a revocation timestamp. Storage uses the common `CREATE_DATE` and update fields;
+the public token document retains `created_at`. Run `etl-craft migrate` before using the new
+version against an existing Engine DB.
 
 ## Calling operations
 

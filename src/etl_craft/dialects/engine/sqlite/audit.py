@@ -19,6 +19,8 @@ from collections.abc import Callable
 
 from sqlalchemy.engine import Connection
 
+from etl_craft.dialects.engine.metadata import config_base_enabled, require_config_base
+
 NOW = "(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00')"
 STAMPS = {"CREATED_BY", "CREATE_DATE", "UPDATED_BY", "UPDATED_DATE"}
 CHANGE_COLUMNS = (
@@ -56,7 +58,11 @@ def _exists(conn: Connection, name: str, kind: str = "table") -> bool:
 def _columns(conn: Connection, table: str) -> list[tuple[str, str, bool]]:
     """Return (name, declared type, is primary key) for each column of ``table``."""
     rows = conn.exec_driver_sql(f"PRAGMA table_info({_quote(table)})").all()
-    return [(row.name, row.type or "TEXT", bool(row.pk)) for row in rows]
+    return [
+        (row.name, row.type or "TEXT", bool(row.pk))
+        for row in rows
+        if not (table.upper() == "CFG_API_TOKENS" and row.name.upper() == "TOKEN_SHA256")
+    ]
 
 
 def refresh_metadata_triggers(conn: Connection) -> None:
@@ -82,8 +88,11 @@ def refresh_metadata_triggers(conn: Connection) -> None:
     configs = sorted(
         table
         for table in tables
-        if table.upper().startswith("CFG_") and table.upper() != "CFG_API_TOKENS"
+        if table.upper().startswith("CFG_") and (history or table.upper() != "CFG_API_TOKENS")
     )
+    if config_base_enabled(conn):
+        for table in configs:
+            require_config_base(conn, table)
     if not history:
         for table in configs:
             _change_triggers(conn, table, _log_capture(table))
@@ -277,6 +286,8 @@ def _change_triggers(conn: Connection, table: str, capture: Capture) -> None:
     names = [name for name, _, _ in columns]
     primary = next((name for name, _, pk in columns if pk), names[0])
     regular = [name for name in names if name.upper() not in STAMPS]
+    if table.upper() == "CFG_API_TOKENS":
+        regular.append("TOKEN_SHA256")
     changed = " OR ".join(f"NEW.{_quote(name)} IS NOT OLD.{_quote(name)}" for name in regular)
     literal = table.upper().replace("'", "''")
     not_inserting = f"NOT etl_craft_inserting('{literal}')"
@@ -309,11 +320,18 @@ def _change_triggers(conn: Connection, table: str, capture: Capture) -> None:
         )
         guard_name = f"trg_actor_guard_{table.lower()}_{operation.lower()}"
         enter = f"SELECT etl_craft_enter_insert('{literal}');" if operation == "INSERT" else ""
+        flag = (
+            "SELECT CASE WHEN NEW.ACTIVE_FLAG IS NULL OR NEW.ACTIVE_FLAG NOT IN ('Y','N') "
+            f"THEN RAISE(ABORT, '{literal}.ACTIVE_FLAG expects Y or N') END;"
+            if operation != "DELETE" and "ACTIVE_FLAG" in {name.upper() for name in names}
+            else ""
+        )
+        conn.exec_driver_sql(f"DROP TRIGGER IF EXISTS {_quote(guard_name)}")
         conn.exec_driver_sql(
-            f"CREATE TRIGGER IF NOT EXISTS {_quote(guard_name)} "
+            f"CREATE TRIGGER {_quote(guard_name)} "
             f"BEFORE {operation} ON {_quote(table)} BEGIN SELECT CASE WHEN "
             "etl_craft_actor() IS NULL THEN RAISE(ABORT, 'metadata is written only by "
-            f"etl-craft; use a project migration (etl-craft migrate)') END; {enter} END"
+            f"etl-craft; use a project migration (etl-craft migrate)') END; {flag} {enter} END"
         )
 
 

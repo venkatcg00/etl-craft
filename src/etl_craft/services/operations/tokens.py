@@ -85,7 +85,7 @@ def create_token(
         operation(ctx, "token create", {"name": name, "role": role, "expires": expires}),
         ctx.engine.begin() as conn,
     ):
-        token_id = conn.execute(
+        conn.execute(
             statement(conn, "api_token_create"),
             {
                 "name": name,
@@ -96,9 +96,12 @@ def create_token(
                 "expires_at": expires_at,
             },
         ).scalar_one()
-    return CreatedToken(
-        token, TokenView(token_id, name, role, None, ctx.actor.name, now, expires_at, None)
-    )
+        metadata = _view(
+            conn.execute(statement(conn, "api_token_find"), {"digest": sha256_hex(token.encode())})
+            .one()
+            ._mapping
+        )
+    return CreatedToken(token, metadata)
 
 
 def list_tokens(ctx: OperationContext) -> TokensView:

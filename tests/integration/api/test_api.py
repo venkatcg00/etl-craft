@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import inspect as sql_inspect
 from sqlalchemy import text
 
 from etl_craft.api.app import create_app
@@ -265,12 +266,28 @@ def test_run_history_cursor_is_bounded_and_exact(api):
 def test_token_metadata_does_not_capture_hash_or_accept_project_scope(api):
     ctx, client, creds, _run, _attempt = api
     with ctx.engine.begin() as conn:
-        assert (
+        changes = (
             conn.execute(
-                text("SELECT COUNT(*) FROM AUD_METADATA_CHANGES WHERE TABLE_NAME='CFG_API_TOKENS'")
-            ).scalar_one()
-            == 0
+                text(
+                    "SELECT AFTER_JSON FROM AUD_METADATA_CHANGES WHERE TABLE_NAME='CFG_API_TOKENS'"
+                )
+            )
+            .scalars()
+            .all()
         )
+        assert changes
+        for change in changes:
+            assert "token_sha256" not in str(change).lower()
+            for credential in creds.values():
+                assert credential.token not in str(change)
+        assert "TOKEN_SHA256" not in {
+            column["name"].upper()
+            for column in sql_inspect(conn).get_columns(
+                "aud_cfg_api_tokens_history"
+                if conn.dialect.name == "postgresql"
+                else "AUD_CFG_API_TOKENS_HISTORY"
+            )
+        }
         conn.execute(
             text("UPDATE CFG_API_TOKENS SET PROJECT_ID=1 WHERE TOKEN_ID=:id"),
             {"id": creds["viewer"].metadata.token_id},
