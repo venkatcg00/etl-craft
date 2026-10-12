@@ -20,6 +20,7 @@ from fixtures.metadata import (
     add_dependency,
     add_pipeline,
     add_pipeline_dependency,
+    add_source_column,
     add_task,
     start_run,
 )
@@ -139,14 +140,7 @@ def project(engine_db, tmp_path, monkeypatch):
         transitions.finalize_pipeline_run(conn, run_id, "SUCCESS")
     with engine.begin() as conn:
         for position, column in enumerate(("id", "amt", "currency"), 1):
-            conn.execute(
-                text(
-                    "INSERT INTO CFG_SOURCE_COLUMNS "
-                    "(TABLE_NAME,COLUMN_NAME,DATA_TYPE,COLUMN_POSITION) VALUES "
-                    "('raw.orders',:column,'VARCHAR',:position)"
-                ),
-                {"column": column, "position": position},
-            )
+            add_source_column(conn, "raw.orders", column, "VARCHAR", position)
     return engine, load_config(root / "craft-connector.yml"), root
 
 

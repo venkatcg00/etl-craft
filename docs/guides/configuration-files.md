@@ -15,7 +15,8 @@ etl-craft/
 │   ├── task_dependencies.csv      CFG_TASK_DEPENDENCY
 │   ├── pipeline_dependencies.csv  CFG_PIPELINE_DEPENDENCY
 │   ├── business_rules.csv         CFG_BUSINESS_RULES
-│   └── source_columns.csv         CFG_SOURCE_COLUMNS
+│   ├── tables.csv                 CFG_TABLES
+│   └── columns.csv                CFG_COLUMNS
 ├── sql_files/
 └── ingestion_scripts/
 ```
@@ -70,7 +71,8 @@ development, test and production.
 | `task_dependencies.csv` | `PIPELINE_CODE`, `TASK_CODE`, `DEPENDS_ON_PIPELINE_CODE`, `DEPENDS_ON_TASK_CODE`, `DEPENDENCY_TYPE` |
 | `pipeline_dependencies.csv` | `PIPELINE_CODE`, `DEPENDS_ON_PIPELINE_CODE`, `DEPENDENCY_TYPE` |
 | `business_rules.csv` | `PIPELINE_CODE`, `TASK_CODE`, `BUSINESS_RULE_NAME` |
-| `source_columns.csv` | `TABLE_NAME`, `COLUMN_NAME` |
+| `tables.csv` | `CATALOG_NAME`, `SCHEMA_NAME`, `TABLE_NAME` |
+| `columns.csv` | `CATALOG_NAME`, `SCHEMA_NAME`, `TABLE_NAME`, `COLUMN_NAME` |
 
 For each row of a file, `apply`:
 
@@ -83,8 +85,9 @@ For each row of a file, `apply`:
 An active row that no file holds any more is retired too. Keep a row in its file with `N`
 rather than deleting it: the change is clearer in review, and setting it back to `Y` restores it.
 
-Pipeline, task, parameter, dependency and rule keys retain one row across retirement and
-reactivation. Source-column keys currently select the active row, or the last one retired.
+All configuration keys retain one row across retirement and reactivation. Column ordinals
+are unique among active columns of a table; retiring a column releases its ordinal, while
+its name and ID remain reserved.
 Legacy deployments could create a replacement row under a retired code; migration 0027
 requires those ambiguous identities to be repaired before upgrading. Existing audit versions
 remain immutable.
@@ -117,6 +120,9 @@ be left out of the header, which gives every row their default.
 | `pipeline_dependencies.csv` | **`PIPELINE_CODE`**, **`DEPENDS_ON_PIPELINE_CODE`**, **`DEPENDENCY_TYPE`**, `CONSUME_REPAIRS`, `ACTIVE_FLAG` | `CONSUME_REPAIRS` `Y` |
 | `business_rules.csv` | **`PIPELINE_CODE`**, **`TASK_CODE`**, **`BUSINESS_RULE_NAME`**, **`SEQUENCE_NUMBER`**, **`BUSINESS_RULE_TYPE`**, **`BUSINESS_RULE_KEY_COLUMN`**, **`TARGET_TABLE`**, **`BUSINESS_RULE_SQL`**, `ACTIVE_FLAG` | |
 
+| `tables.csv` | `CATALOG_NAME`, **`SCHEMA_NAME`**, **`TABLE_NAME`**, `OBJECT_KIND`, `ACTIVE_FLAG` | Empty catalog means absent; empty kind means undeclared |
+| `columns.csv` | `CATALOG_NAME`, **`SCHEMA_NAME`**, **`TABLE_NAME`**, **`COLUMN_NAME`**, **`DATA_TYPE`**, **`COLUMN_POSITION`**, `IS_NULLABLE`, `ACTIVE_FLAG` | Empty nullability means undeclared |
+
 Every file's `ACTIVE_FLAG` defaults to `Y`. The columns mean what they mean in the tables:
 see [Pipelines and tasks](pipelines-and-tasks.md),
 [Dependencies and run conditions](dependencies.md) and [Business rules](business-rules.md).
@@ -132,10 +138,34 @@ Each handler's guide lists its task parameters. Values are written as follows:
 
 A row may name only pipelines and tasks its project's files hold: a task's pipeline must be in
 `pipelines.csv`, and both tasks of a dependency in `tasks.csv`, whatever their flags.
+A column names its parent in `tables.csv`; active columns require an active parent.
+Table and column files may be omitted to preserve the existing contracts. A header-only
+column file retires its active columns. Retire those columns before retiring their parent.
+`OBJECT_KIND` accepts `TABLE`/`VIEW`; `IS_NULLABLE` accepts `Y`/`N`. Components are stored
+separately, and column rows hold a `TABLE_ID` foreign key rather than a repeated object name.
+
+### Upgrading source contracts
+
+Migration `0028_source_contracts.sql` converts existing source rows to the two contract tables.
+It retains column IDs and audit stamps, leaves typed legacy history unchanged and keeps the
+source rows at conversion time in immutable `AUD_SOURCE_COLUMNS_BASELINE` evidence. These
+audit tables reconstruct historical exports; they are not another writable source contract.
+The configured warehouse catalog resolves relative current names once. Historical exports
+retain catalog absence in earlier evidence and never infer today's catalog. Unknown object
+kind and nullability remain undeclared.
+
+Duplicates, malformed legacy names and custom source columns/indexes/triggers/dependents stop
+the upgrade before any pending migration changes the schema or ledger. Repair them using the
+previous installed package. Already-applied project SQL must remain byte-for-byte unchanged;
+move legacy source writes from pending project SQL to `CFG_TABLES`/`CFG_COLUMNS`.
+
+Move an old `source_columns.csv` out of the config folder and export after upgrading, then
+reapply your edits to `tables.csv` and `columns.csv`. Config apply explicitly refuses the old
+file so it cannot silently ignore those edits.
 
 ## Configuration as of a moment
 
-`etl-craft config export --as-of WHEN` writes the six files as the rows stood at `WHEN`, rebuilt
+`etl-craft config export --as-of WHEN` writes the config files as the rows stood at `WHEN`, rebuilt
 from the configuration history. `WHEN` is a `pipeline_run_id`, meaning the moment that run
 started, or an ISO 8601 time such as `2026-10-11T08:00:00Z`; a time without a zone is UTC. Export
 it beside the project's files and compare, to see what a run ran with or what changed since:

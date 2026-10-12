@@ -45,6 +45,25 @@ def definition_problem(column: SourceColumn, dialect: str | None) -> str | None:
     return None
 
 
+def nullable(value: object) -> str | None:
+    """Normalize the warehouse's nullability without asserting an unavailable value."""
+    return {"YES": "Y", "TRUE": "Y", "NO": "N", "FALSE": "N"}.get(str(value).upper())
+
+
+def warehouse_kind(conn: Connection, config: ConnectorConfig, table: str) -> str | None:
+    """Classify the warehouse's relation kind through its existing metadata query."""
+    query, params = warehouse_dialect(config).relation_type_query(
+        qualify(table, active_catalog(config))
+    )
+    value = conn.execute(text(query), params).scalar_one_or_none()
+    name = str(value).upper().replace("_", " ")
+    if name.endswith("VIEW"):
+        return "VIEW"
+    if name.endswith("TABLE") or name in ("MANAGED", "EXTERNAL"):
+        return "TABLE"
+    return None
+
+
 def warehouse_columns(conn: Connection, config: ConnectorConfig, table: str) -> list[SourceColumn]:
     """Read an existing table's columns in order, including full declared SQL types."""
     if not is_safe_object_ref(table):
@@ -54,13 +73,23 @@ def warehouse_columns(conn: Connection, config: ConnectorConfig, table: str) -> 
         )
     dialect = warehouse_dialect(config)
     qualified = qualify(table, active_catalog(config))
-    query, params = dialect.column_metadata_query(conn, qualified, "column_name, ordinal_position")
+    query, params = dialect.column_metadata_query(
+        conn, qualified, "column_name, ordinal_position, is_nullable"
+    )
     rows = conn.execute(text(query), params).all()
     if not rows:
         return []
     types = dialect.full_column_types(conn, qualified)
+    kind = warehouse_kind(conn, config, table)
     return [
-        SourceColumn(table.lower(), str(row[0]).lower(), types[str(row[0]).lower()], position)
+        SourceColumn(
+            table.lower(),
+            str(row[0]).lower(),
+            types[str(row[0]).lower()],
+            position,
+            nullable(row[2]),
+            kind,
+        )
         for position, row in enumerate(rows, 1)
     ]
 
@@ -122,21 +151,35 @@ def drift(
     if not found:
         return []
     messages = [
-        f"warehouse adds column {name} ({found[name].data_type}); add it to source_columns.csv"
+        f"warehouse adds column {name} ({found[name].data_type}); add it to columns.csv"
         for name in sorted(found.keys() - expected.keys())
     ]
     messages += [
         f"warehouse lacks column {name} ({expected[name].data_type}); restore it or update "
-        f"source_columns.csv"
+        f"columns.csv"
         for name in sorted(expected.keys() - found.keys())
     ]
     for name in sorted(expected.keys() & found.keys()):
+        declared, deployed = expected[name].is_nullable, found[name].is_nullable
+        if declared is not None and declared != deployed:
+            messages.append(
+                f"column {name} has warehouse nullability {deployed or 'unavailable'}, "
+                f"declared {declared}; restore its constraint or update columns.csv"
+            )
         before, after = expected[name].data_type, found[name].data_type
         if not _same_type(before, after, dialect):
             messages.append(
                 f"column {name} has warehouse type {after}, defined as {before}; restore its "
-                f"type or update source_columns.csv"
+                f"type or update columns.csv"
             )
+    for column in expected.values():
+        actual_column = next(iter(found.values()))
+        if column.object_kind is not None and column.object_kind != actual_column.object_kind:
+            messages.append(
+                f"warehouse object kind {actual_column.object_kind or 'unavailable'}, "
+                f"declared {column.object_kind}; restore the object or update tables.csv"
+            )
+            break
     return messages
 
 

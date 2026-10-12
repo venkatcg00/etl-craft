@@ -2,7 +2,7 @@
 
 from collections import defaultdict
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Connection
 from sqlglot import exp, parse_one
 from sqlglot.errors import SqlglotError
@@ -40,36 +40,39 @@ def normalization_problems(
 ) -> list[str]:
     """Report ambiguous legacy rows without changing their data or history."""
     problems = config_identity_problems(conn)
-    keys: dict[tuple[object, ...], list[str]] = defaultdict(list)
-    positions: dict[tuple[object, ...], list[str]] = defaultdict(list)
-    rows = conn.execute(
-        text(
-            "SELECT SOURCE_COLUMN_ID AS row_id, ACTIVE_FLAG AS active_flag, "
-            "TABLE_NAME AS table_name, COLUMN_NAME AS column_name, "
-            "COLUMN_POSITION AS column_position FROM CFG_SOURCE_COLUMNS"
-        )
-    ).mappings()
-    for row in rows:
-        label = f"SOURCE_COLUMN_ID={row['row_id']} ACTIVE_FLAG={row['active_flag']}"
-        try:
-            identity = object_identity(str(row["table_name"]), catalog, dialect)
-        except ValueError as error:
-            problems.append(f"CFG_SOURCE_COLUMNS {label}: {error}")
-            continue
-        column = normalize_identifiers(
-            exp.to_identifier(str(row["column_name"])), dialect=dialect
-        ).name
-        keys[(*identity, column)].append(label)
-        positions[(*identity, row["column_position"])].append(label)
-    for kind, groups in (("identity", keys), ("column position", positions)):
-        for key, labels in groups.items():
-            if len(labels) > 1:
-                problems.append(
-                    f"CFG_SOURCE_COLUMNS {kind} {key!r} has multiple rows: {', '.join(labels)}; "
-                    "assign distinct identities and repair dependent references before "
-                    "normalization; inactive rows also reserve their identity, so "
-                    "deactivating a duplicate does not resolve it"
-                )
+    legacy = "cfg_source_columns" if conn.dialect.name == "postgresql" else "CFG_SOURCE_COLUMNS"
+    if inspect(conn).has_table(legacy):
+        keys: dict[tuple[object, ...], list[str]] = defaultdict(list)
+        positions: dict[tuple[object, ...], list[str]] = defaultdict(list)
+        rows = conn.execute(
+            text(
+                "SELECT SOURCE_COLUMN_ID AS row_id, ACTIVE_FLAG AS active_flag, "
+                "TABLE_NAME AS table_name, COLUMN_NAME AS column_name, "
+                "COLUMN_POSITION AS column_position FROM CFG_SOURCE_COLUMNS"
+            )
+        ).mappings()
+        for row in rows:
+            label = f"SOURCE_COLUMN_ID={row['row_id']} ACTIVE_FLAG={row['active_flag']}"
+            try:
+                identity = object_identity(str(row["table_name"]), catalog, dialect)
+            except ValueError as error:
+                problems.append(f"CFG_SOURCE_COLUMNS {label}: {error}")
+                continue
+            column = normalize_identifiers(
+                exp.to_identifier(str(row["column_name"])), dialect=dialect
+            ).name
+            keys[(*identity, column)].append(label)
+            positions[(*identity, row["column_position"])].append(label)
+        for kind, groups in (("identity", keys), ("column position", positions)):
+            for key, labels in groups.items():
+                if len(labels) > 1:
+                    problems.append(
+                        f"CFG_SOURCE_COLUMNS {kind} {key!r} has multiple rows: "
+                        f"{', '.join(labels)}; "
+                        "assign distinct identities and repair dependent references before "
+                        "normalization; inactive rows also reserve their identity, so "
+                        "deactivating a duplicate does not resolve it"
+                    )
     references = conn.execute(
         text(
             "SELECT 'CFG_TASK_PARAMETERS' AS table_name, TASK_PARAMETER_ID AS row_id, "

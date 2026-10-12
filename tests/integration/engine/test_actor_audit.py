@@ -127,6 +127,21 @@ def test_project_changes_record_before_after_actor_and_migration(engine_db, tmp_
 
 def seeded_tables(db):
     engine = db.engine
+    from etl_craft.core.actor import purpose
+
+    token = purpose.set("retention")
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO AUD_SOURCE_COLUMNS_BASELINE (SOURCE_COLUMN_ID,TABLE_NAME, "
+                    "COLUMN_NAME,DATA_TYPE,COLUMN_POSITION,CREATED_BY,CREATE_DATE,UPDATED_BY, "
+                    "UPDATED_DATE) VALUES (1,'raw.orders','id','INT',1,'test',CURRENT_TIMESTAMP, "
+                    "'test',CURRENT_TIMESTAMP)"
+                )
+            )
+    finally:
+        purpose.reset(token)
     with engine.begin() as conn:
         p1 = add_pipeline(conn, "DOWN")
         p2 = add_pipeline(conn, "UP")
@@ -138,6 +153,9 @@ def seeded_tables(db):
         task_run = transitions.find_or_create_task_run(conn, t1, r1).task_run_id
         values = {
             "column_position": 1,
+            "operation": "INSERT",
+            "current_flag": "Y",
+            "table_id": 1,
             "role": "viewer",
             "token_sha256": "0" * 64,
             "pipeline_id": p1,
@@ -314,6 +332,7 @@ def test_guarded_upgrade_rolls_back_with_the_ledger(empty_engine_db, monkeypatch
         "0025_token_audit_names.sql",
         "0026_config_base_contract.sql",
         "0027_config_identities.sql",
+        "0028_source_contracts.sql",
     ]
 
 

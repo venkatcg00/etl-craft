@@ -239,6 +239,7 @@ def test_a_failed_metadata_rebuild_rolls_back_and_restores_connection_settings(
         "0025_token_audit_names.sql",
         "0026_config_base_contract.sql",
         "0027_config_identities.sql",
+        "0028_source_contracts.sql",
     ]
 
 

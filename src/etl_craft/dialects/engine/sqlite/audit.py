@@ -102,10 +102,18 @@ def refresh_metadata_triggers(conn: Connection) -> None:
         _history_guards(conn, history_table(table))
     if log:
         _move_log(conn, configs)
+    histories = configs + (
+        ["CFG_SOURCE_COLUMNS"]
+        if _exists(conn, history_table("CFG_SOURCE_COLUMNS"))
+        and not _exists(conn, "CFG_SOURCE_COLUMNS")
+        else []
+    )
+    for table in histories:
+        _history_guards(conn, history_table(table))
     next_id = (
         "(SELECT COALESCE(MAX(m), 0) + 1 FROM ("
         + " UNION ALL ".join(
-            f"SELECT MAX(CHANGE_ID) AS m FROM {_quote(history_table(table))}" for table in configs
+            f"SELECT MAX(CHANGE_ID) AS m FROM {_quote(history_table(table))}" for table in histories
         )
         + "))"
     )
@@ -113,7 +121,7 @@ def refresh_metadata_triggers(conn: Connection) -> None:
         _change_triggers(conn, table, _history_capture(table, next_id))
     if log:
         conn.exec_driver_sql("DROP TABLE AUD_METADATA_CHANGES")
-    _change_view(conn, configs)
+    _change_view(conn, histories)
 
 
 def _guard_writes(conn: Connection, table: str) -> None:
@@ -126,11 +134,17 @@ def _guard_writes(conn: Connection, table: str) -> None:
     )
     for operation in ("INSERT", "UPDATE", "DELETE"):
         guard = f"trg_actor_guard_{table.lower()}_{operation.lower()}"
+        immutable = (
+            "SELECT CASE WHEN etl_craft_purpose() <> 'retention' THEN RAISE(ABORT, "
+            "'source conversion baseline is immutable') END;"
+            if table.upper() == "AUD_SOURCE_COLUMNS_BASELINE"
+            else ""
+        )
         conn.exec_driver_sql(
             f"CREATE TRIGGER IF NOT EXISTS {_quote(guard)} BEFORE {operation} "
             f"ON {_quote(table)} BEGIN SELECT CASE WHEN etl_craft_actor() IS NULL "
             f"THEN RAISE(ABORT, '{kind} are written only by etl-craft; "
-            f"{remedy}') END; END"
+            f"{remedy}') END; {immutable} END"
         )
 
 
@@ -342,6 +356,12 @@ def _change_view(conn: Connection, configs: list[str]) -> None:
     for table in configs:
         history = history_table(table)
         columns = _columns(conn, table)
+        if not columns and table == "CFG_SOURCE_COLUMNS":
+            columns = [
+                (name, kind, name.upper() == "SOURCE_COLUMN_ID")
+                for name, kind, _ in _columns(conn, history)
+                if name.upper() not in CHANGE_COLUMNS
+            ]
         primary = next((name for name, _, pk in columns if pk), columns[0][0])
         values = (
             "json_object("

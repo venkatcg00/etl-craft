@@ -37,13 +37,14 @@ from sqlalchemy.engine import Connection, Engine
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import migration as current_migration
 from etl_craft.core.errors import EngineDbError, MetadataFileError
-from etl_craft.core.text import is_metadata_code, is_safe_identifier, is_safe_object_ref
+from etl_craft.core.text import is_metadata_code, is_safe_identifier
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine import locks
 from etl_craft.engine.repository.config_history import config_as_of
 from etl_craft.engine.repository.config_rows import (
     ACTIVE_FLAG,
     BUSINESS_RULES,
+    OBJECT_TABLES,
     PIPELINE_DEPENDENCIES,
     PIPELINES,
     SOURCE_COLUMNS,
@@ -148,8 +149,8 @@ def config_directory(config: ConnectorConfig, directory: Path | None = None) -> 
 def read_config_files(directory: Path) -> ConfigFiles:
     """Read and check the config files; raise ``MetadataFileError`` naming every problem.
 
-    The six pipeline/task files must exist; source_columns.csv can be omitted to leave its
-    definitions unchanged. A file with only its header row holds no rows.
+    The six pipeline/task files must exist; tables.csv and columns.csv may be omitted
+    together to leave their contracts unchanged. A file with only its header row holds no rows.
     """
     if not directory.is_dir():
         raise MetadataFileError(
@@ -159,12 +160,17 @@ def read_config_files(directory: Path) -> ConfigFiles:
     digest = hashlib.sha256()
     rows: dict[str, dict[Key, FileRow]] = {}
     problems: list[str] = []
+    if (directory / "source_columns.csv").exists():
+        problems.append(
+            "source_columns.csv uses the retired source layout; export the upgraded "
+            "Engine DB to tables.csv and columns.csv and apply edits to those files"
+        )
     for table in TABLES:
         path = directory / table.file
         try:
             payload = path.read_bytes()
         except FileNotFoundError:
-            if table is SOURCE_COLUMNS:
+            if table in (SOURCE_COLUMNS, OBJECT_TABLES):
                 continue
             problems.append(
                 f"{path} is missing: every config file must exist, even with only its header "
@@ -176,6 +182,10 @@ def read_config_files(directory: Path) -> ConfigFiles:
             continue
         digest.update(table.file.encode() + b"\0" + payload + b"\0")
         rows[table.file] = _read_table(table, path, payload, problems)
+    if SOURCE_COLUMNS.file in rows and OBJECT_TABLES.file not in rows:
+        problems.append(
+            "columns.csv requires tables.csv, even when empty; export both contract files"
+        )
     if not problems:
         _check_references(rows, problems)
     if problems:
@@ -250,15 +260,19 @@ def _read_table(
             continue
         rows[key] = FileRow(line, values)
     if table is SOURCE_COLUMNS:
-        positions: dict[tuple[Value, Value], FileRow] = {}
+        positions: dict[Key, FileRow] = {}
         for row in rows.values():
             if not row.active:
                 continue
-            key = (row.values["TABLE_NAME"], row.values["COLUMN_POSITION"])
+            key = tuple(
+                row.values[name]
+                for name in ("CATALOG_NAME", "SCHEMA_NAME", "TABLE_NAME", "COLUMN_POSITION")
+            )
             if key in positions:
                 problems.append(
-                    f"{path} lines {positions[key].line} and {row.line}: {key[0]} has "
-                    f"COLUMN_POSITION={key[1]} twice; give each active column a distinct position"
+                    f"{path} lines {positions[key].line} and {row.line}: "
+                    f"{'.'.join(str(part) for part in key[:-1] if part is not None)} has "
+                    f"COLUMN_POSITION={key[-1]} twice; give each active column a distinct position"
                 )
             positions[key] = row
     return rows
@@ -315,18 +329,13 @@ def _parse(column: Column, cell: str) -> Value:
 
 
 def _row_problem(table: ConfigTable, values: dict[str, Value]) -> str | None:
-    if table is SOURCE_COLUMNS:
-        for name in ("TABLE_NAME", "COLUMN_NAME"):
+    if table in (OBJECT_TABLES, SOURCE_COLUMNS):
+        for name in ("CATALOG_NAME", "SCHEMA_NAME", "TABLE_NAME", "COLUMN_NAME"):
+            if name not in values or values[name] is None:
+                continue
             value = str(values[name])
-            check = is_safe_object_ref if name == "TABLE_NAME" else is_safe_identifier
-            if not check(value):
-                expected = (
-                    "schema.table or database.schema.table"
-                    if name == "TABLE_NAME"
-                    else "an unquoted SQL identifier"
-                )
-                return f"{name}={value!r}: expected {expected}; correct the source definition"
-            values[name] = value.lower()
+            if not is_safe_identifier(value):
+                return f"{name}={value!r}: expected a separate unquoted SQL identifier"
     if table is TASKS:
         condition, count = values["RUN_CONDITION"], values["RUN_CONDITION_COUNT"]
         if condition == "N" and count is None:
@@ -350,13 +359,25 @@ def _check_references(rows: dict[str, dict[Key, FileRow]], problems: list[str]) 
     """Report every row that names a pipeline or task the files do not hold."""
     pipelines = set(rows[PIPELINES.file])
     tasks = set(rows[TASKS.file])
-    for table in (TASKS, TASK_PARAMETERS, TASK_DEPENDENCIES, PIPELINE_DEPENDENCIES, BUSINESS_RULES):
-        for row in rows[table.file].values():
+    tables = set(rows.get(OBJECT_TABLES.file, {}))
+    for table in (
+        TASKS,
+        TASK_PARAMETERS,
+        TASK_DEPENDENCIES,
+        PIPELINE_DEPENDENCIES,
+        BUSINESS_RULES,
+        SOURCE_COLUMNS,
+    ):
+        for row in rows.get(table.file, {}).values():
             for kind, end in _ends(table, row.values):
-                holder = pipelines if kind == "pipeline" else tasks
+                holder = {"pipeline": pipelines, "task": tasks, "table": tables}[kind]
                 if end not in holder:
-                    named = ".".join(str(code) for code in end)
-                    file = PIPELINES.file if kind == "pipeline" else TASKS.file
+                    named = ".".join(str(code) for code in end if code is not None)
+                    file = {
+                        "pipeline": PIPELINES.file,
+                        "task": TASKS.file,
+                        "table": OBJECT_TABLES.file,
+                    }[kind]
                     problems.append(
                         f"{table.file} line {row.line}: {kind} {named} is not in {file}"
                     )
@@ -364,8 +385,10 @@ def _check_references(rows: dict[str, dict[Key, FileRow]], problems: list[str]) 
 
 def _ends(table: ConfigTable, values: Mapping[str, Value]) -> list[tuple[str, Key]]:
     """Return the pipelines and tasks a row names, by code."""
-    if table in (PIPELINES, SOURCE_COLUMNS):
+    if table in (PIPELINES, OBJECT_TABLES):
         return []
+    if table is SOURCE_COLUMNS:
+        return [("table", tuple(values[name] for name in OBJECT_TABLES.key))]
     if table is TASKS:
         return [("pipeline", (values["PIPELINE_CODE"],))]
     if table is PIPELINE_DEPENDENCIES:
@@ -427,18 +450,20 @@ def _links(
     """Return the ids an insert of ``file_row`` sets, from the current pipelines and tasks."""
     found: list[StoredRow] = []
     for kind, end in _ends(table, file_row.values):
-        file = PIPELINES.file if kind == "pipeline" else TASKS.file
+        file = {"pipeline": PIPELINES.file, "task": TASKS.file, "table": OBJECT_TABLES.file}[kind]
         parent = current[file].get(end)
         if parent is None:
-            named = ".".join(str(code) for code in end)
+            named = ".".join(str(code) for code in end if code is not None)
             raise MetadataFileError(
                 f"{table.file} line {file_row.line}: {table.label(file_row.values)} is active, "
                 f"but {kind} {named} has no row in the Engine DB and is inactive in {file}; "
                 f"set the {kind}'s ACTIVE_FLAG to Y, or this row's to N"
             )
         found.append(parent)
-    if table in (PIPELINES, SOURCE_COLUMNS):
+    if table in (PIPELINES, OBJECT_TABLES):
         return {}
+    if table is SOURCE_COLUMNS:
+        return {"TABLE_ID": found[0].row_id}
     if table is TASKS:
         return {"PIPELINE_ID": found[0].row_id}
     if table is TASK_PARAMETERS:
@@ -486,9 +511,9 @@ def _merge(conn: Connection, files: ConfigFiles) -> list[Change]:
     current: dict[str, dict[Key, StoredRow]] = {}
     current_ids: dict[str, set[int]] = {}
     for table in TABLES:
-        stored, malformed = _current(table, read_rows(conn, table), current_ids)
         if table.file not in files.rows:
             continue
+        stored, malformed = _current(table, read_rows(conn, table), current_ids)
         wanted = files.rows[table.file]
         if table is SOURCE_COLUMNS:
             for key, row in stored.items():
@@ -542,6 +567,38 @@ def _merge(conn: Connection, files: ConfigFiles) -> list[Change]:
     return changes
 
 
+def _resolved_files(files: ConfigFiles, config: ConnectorConfig) -> ConfigFiles:
+    from etl_craft.engine.repository.source_contracts import resolve_source_identity
+    from etl_craft.services.lineage import dialect_and_catalog
+
+    dialect, catalog = dialect_and_catalog(config)
+    resolved = dict(files.rows)
+    for table in (OBJECT_TABLES, SOURCE_COLUMNS):
+        if table.file not in resolved:
+            continue
+        rows: dict[Key, FileRow] = {}
+        for row in resolved[table.file].values():
+            identity = resolve_source_identity(
+                str(row.values["CATALOG_NAME"]) if row.values["CATALOG_NAME"] is not None else None,
+                str(row.values["SCHEMA_NAME"]),
+                str(row.values["TABLE_NAME"]),
+                catalog,
+                dialect,
+            )
+            values = row.values | dict(zip(OBJECT_TABLES.key, identity, strict=True))
+            if table is SOURCE_COLUMNS:
+                values["COLUMN_NAME"] = str(values["COLUMN_NAME"]).lower()
+            key = tuple(values[name] for name in table.key)
+            if key in rows:
+                raise MetadataFileError(
+                    f"{table.file} lines {rows[key].line} and {row.line} resolve to "
+                    f"{table.label(values)}; keep one identity, including inactive rows"
+                )
+            rows[key] = FileRow(row.line, values)
+        resolved[table.file] = rows
+    return ConfigFiles(files.directory, files.revision, resolved)
+
+
 def sync_config(
     engine: Engine, config: ConnectorConfig, files: ConfigFiles, *, apply: bool
 ) -> ConfigSync:
@@ -551,13 +608,35 @@ def sync_config(
     committed.
     """
     _require_tables(engine)
+    files = _resolved_files(files, config)
     changes: list[Change] = []
     findings: tuple[Finding, ...] = ()
     applied = False
     with locks.MIGRATE.hold(engine), _labelled(files.revision):
         try:
             with engine.begin() as conn:
-                changes = _merge(conn, files)
+                from etl_craft.engine.repository.source_contracts import resolve_project_sources
+                from etl_craft.services.lineage import dialect_and_catalog
+
+                dialect, catalog = dialect_and_catalog(config)
+                for before, after in resolve_project_sources(conn, catalog, dialect):
+                    values = dict(zip(OBJECT_TABLES.key, after, strict=True))
+                    changes.append(
+                        Change(
+                            OBJECT_TABLES.file,
+                            OBJECT_TABLES.table,
+                            "update",
+                            OBJECT_TABLES.label(values),
+                            tuple(
+                                ColumnChange(name, cell(old), cell(new))
+                                for name, old, new in zip(
+                                    OBJECT_TABLES.key, before, after, strict=True
+                                )
+                                if old != new
+                            ),
+                        )
+                    )
+                changes.extend(_merge(conn, files))
                 findings = tuple(validate_on(conn, config).findings)
                 if not apply or any(f.status is Status.FAIL for f in findings):
                     raise _RollBackError
@@ -605,20 +684,63 @@ def export_config(
             current[table.file], _ = _current(table, read_rows(conn, table), current_ids)
             current_ids[table.file] = {row.row_id for row in current[table.file].values()}
     if config is not None and as_of is None:
+        metadata_rows = {
+            table.file: {
+                key: FileRow(row.row_id, row.values) for key, row in current[table.file].items()
+            }
+            for table in (OBJECT_TABLES, SOURCE_COLUMNS)
+        }
+        resolved = _resolved_files(ConfigFiles(directory, "", metadata_rows), config)
+        for table in (OBJECT_TABLES, SOURCE_COLUMNS):
+            original = {row.row_id: row for row in current[table.file].values()}
+            current[table.file] = {
+                key: StoredRow(
+                    row.line,
+                    original[row.line].active,
+                    original[row.line].parents,
+                    True,
+                    row.values,
+                )
+                for key, row in resolved.rows[table.file].items()
+            }
         seeded = seed_sources(engine, config)
         # Preserve inactive rows while replacing active definitions with current warehouse shapes.
+        declared = current[SOURCE_COLUMNS.file]
         current[SOURCE_COLUMNS.file] = {
             key: row for key, row in current[SOURCE_COLUMNS.file].items() if not row.active
         }
+        from etl_craft.engine.repository.normalization import object_identity
+        from etl_craft.services.lineage import dialect_and_catalog
+
+        dialect, catalog = dialect_and_catalog(config)
         for index, column in enumerate(seeded):
-            values: dict[str, Value] = {
-                "TABLE_NAME": column.table_name,
+            identity = object_identity(column.table_name, catalog, dialect)
+            names: dict[str, Value] = dict(zip(OBJECT_TABLES.key, identity, strict=True))
+            parent = current[OBJECT_TABLES.file].get(identity)
+            if parent is None:
+                parent = StoredRow(
+                    index, True, (), True, names | {"OBJECT_KIND": column.object_kind}
+                )
+            parent = StoredRow(
+                parent.row_id,
+                True,
+                parent.parents,
+                True,
+                parent.values | {"OBJECT_KIND": column.object_kind or parent.values["OBJECT_KIND"]},
+            )
+            current[OBJECT_TABLES.file][identity] = parent
+            key = (*identity, column.column_name)
+            previous = declared.get(key)
+            values: dict[str, Value] = names | {
                 "COLUMN_NAME": column.column_name,
                 "DATA_TYPE": column.data_type,
                 "COLUMN_POSITION": column.column_position,
+                "IS_NULLABLE": column.is_nullable
+                or (previous.values["IS_NULLABLE"] if previous else None),
             }
-            key = (column.table_name, column.column_name)
-            current[SOURCE_COLUMNS.file][key] = StoredRow(index, True, (), True, values)
+            current[SOURCE_COLUMNS.file][key] = StoredRow(
+                index, True, (parent.row_id,), True, values
+            )
     directory.mkdir(parents=True, exist_ok=True)
     counts: dict[str, int] = {}
     for table in TABLES:

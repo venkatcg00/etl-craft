@@ -122,7 +122,7 @@ item's text, or work done early under another item.
 | S5.N Source definitions and schema-aware lineage | Done | #147 | Offline star/join tracing, audited source definitions, seeding and documented/deployed schema comparison |
 | S5.O.1 SCD lifecycle invariants | Done | #148 | Common SCD flags, current-row soft deletes and legacy active-state upgrades |
 | S5.O.2a Common config contract | Done | #149 | Mandatory core/custom CFG audit fields and keys, safe token lifecycle history and lossless upgrades |
-| S5.O.2b Normalized object contracts | In progress | #150, #151 | Readiness and stable config identities; table/column schema and reference migrations remain next |
+| S5.O.2b Normalized object contracts | In progress | #150, #151, #152 | Readiness, stable identities and normalized source contracts; target/reference conversion remains pending |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
 | S5.P Project documentation gap UI | Planned | | Coloured column warnings, lineage gaps and project summary |
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
@@ -240,6 +240,26 @@ The separate frozen 0.4 soak deployment is unchanged.
   from `main` on `feat/metadata-object-contracts`; retain both prior branches after merge. Child identities are scoped
   by stable parent IDs, and the query reads only identity fields so unrelated inactive
   settings cannot break the diagnostic.
+
+- Source contract conversion continues S5.O.2b on `feat/metadata-object-contracts` (#152):
+  `CFG_TABLES` and `CFG_COLUMNS` replace the flat writable source table; exports use
+  `tables.csv`/`columns.csv`. Migration 0028 preserves source IDs/stamps, legacy typed versions
+  and immutable conversion snapshots, refusing conflicts and project schema objects before any
+  pending upgrade. Active ordinals are unique; inactive column names still reserve their IDs,
+  but retirement releases an ordinal because position is an attribute, not identity.
+  Historical reconstruction uses original evidence with no current-catalog inference. Legacy
+  source CSVs need explicit export/edit conversion, and pending project SQL must use the new
+  tables. Already-applied project migration files remain unchanged. Source consumers keep their
+  unquoted-name boundary. Task/rule target FKs, ordered merge terms and recorded endpoint
+  conversion remain pending: this source slice does not finish S5.O.2b. Continue those from
+  `main` on `feat/metadata-target-contracts`; keep the source branch after merge.
+  Acceptance availability: full `make check docs` passed (3,631 tests, 96 expected skips,
+  94.19% coverage, 29m30s); Python 3.12/3.13 each passed 1,613 unit tests. Databricks and
+  Snowflake native/Iceberg source-contract acceptance passed all four cases (5m08s, no skips).
+  The installed-wheel/sdist matrix passed all 27 cases (19m15s, no skips), covering four
+  local warehouses on both Engine DBs, pip/uv installs and the server extra. Focused
+  contract/history/counter/rollback and deployed drift checks passed (64 cases).
+  No Airflow or workflow code changed. The frozen 0.4 soak remains untouched.
 
 - S5.O.2a completes the mandatory base fields and single non-null key for core and custom
   Engine DB config tables, with safe token history; S5.O.2b retains object/FK normalization

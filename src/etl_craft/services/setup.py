@@ -20,6 +20,7 @@ from etl_craft.engine.connection import engine_db
 from etl_craft.engine.migrations import apply_pending_migrations
 from etl_craft.engine.schema import existing_engine_tables, init_db
 from etl_craft.services.doctor import Check, Status, run_checks
+from etl_craft.services.lineage import dialect_and_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,13 @@ def setup(config: ConnectorConfig) -> SetupResult:
         if created:
             init_db(engine)
             logger.info("created the Engine DB tables")
-        applied = apply_pending_migrations(engine, project_default=config.migrations_dir)
+        dialect, catalog = dialect_and_catalog(config)
+        applied = apply_pending_migrations(
+            engine,
+            project_default=config.migrations_dir,
+            catalog=catalog,
+            warehouse_dialect=dialect,
+        )
     finally:
         engine.dispose()
     return SetupResult(checks, created_tables=created, applied_migrations=applied)

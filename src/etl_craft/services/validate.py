@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import ClassVar
 
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -172,6 +173,20 @@ def validate_on(
     if pipeline_code is None:
         for readiness_problem in normalization_problems(conn, catalog=catalog, dialect=dialect):
             report.warn("metadata normalization", readiness_problem)
+    table = "cfg_columns" if conn.dialect.name == "postgresql" else "CFG_COLUMNS"
+    if inspect(conn).has_table(table):
+        for row in conn.execute(
+            text(
+                "SELECT c.COLUMN_ID AS column_id, t.TABLE_ID AS table_id FROM CFG_COLUMNS c "
+                "JOIN CFG_TABLES t ON t.TABLE_ID=c.TABLE_ID "
+                "WHERE c.ACTIVE_FLAG='Y' AND t.ACTIVE_FLAG='N'"
+            )
+        ):
+            report.fail(
+                "source contract",
+                f"COLUMN_ID={row.column_id} is active under inactive "
+                f"TABLE_ID={row.table_id}; retire its columns or reactivate the table",
+            )
     for definition in fetch_source_columns(conn):
         problem = definition_problem(definition, dialect)
         if problem:

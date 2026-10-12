@@ -8,6 +8,15 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Source definitions now use scoped `CFG_TABLES` and `CFG_COLUMNS` contracts, separate
+  catalog/schema/table components, stable column identities and parent foreign keys. Config
+  export/apply uses `tables.csv` and `columns.csv`; the old source file is explicitly refused.
+  Migration `0028` preserves IDs, audit stamps, legacy history and historical exports, and
+  refuses ambiguous rows or custom source schema objects before changing any pending schema.
+  Existing deployed structure remains queried from the warehouse rather than copied wholesale.
+  Optional declared object kind and nullability are seeded and checked against deployed
+  structure, with differences included in generated documentation.
+
 - Pipeline, task, parameter, dependency and rule identities now remain unique when retired.
   Engine migration `0027_config_identities.sql` refuses ambiguous legacy keys before changing
   constraints and preserves existing row IDs, timestamps and typed history. Reactivate an

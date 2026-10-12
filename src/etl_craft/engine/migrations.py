@@ -32,7 +32,14 @@ logger = logging.getLogger(__name__)
 MIGRATIONS_DIR_ENV_VAR = "ETL_CRAFT_MIGRATIONS_DIR"
 ENGINE = "ENGINE"
 PROJECT = "PROJECT"
-MARKERS = frozenset({"rebuild-metadata", "check-metadata-codes", "check-metadata-identities"})
+MARKERS = frozenset(
+    {
+        "rebuild-metadata",
+        "check-metadata-codes",
+        "check-metadata-identities",
+        "convert-source-contracts",
+    }
+)
 PACKAGED_MARKERS = Path(__file__).parents[1] / "dialects/engine/migration-markers.toml"
 
 
@@ -171,7 +178,13 @@ def _record(conn: Connection, migration: MigrationFile) -> None:
     )
 
 
-def _apply(engine: Engine, migration: MigrationFile) -> None:
+def _apply(
+    engine: Engine,
+    migration: MigrationFile,
+    *,
+    catalog: str | None = None,
+    warehouse_dialect: str | None = None,
+) -> None:
     dialect = for_engine(engine)
     token = current_migration.set(migration.version if migration.source == PROJECT else "")
     try:
@@ -183,14 +196,30 @@ def _apply(engine: Engine, migration: MigrationFile) -> None:
         ) as conn:
             if "check-metadata-identities" in migration.markers:
                 _check_metadata_identities(conn)
+            sources = None
+            if "convert-source-contracts" in migration.markers:
+                from etl_craft.engine.repository.source_contracts import legacy_sources
+
+                sources = legacy_sources(conn, catalog, warehouse_dialect)
             statements = dialect.split_statements(migration.sql)
             if migration.source == PROJECT:
                 for sql in statements:
                     run_script(conn, [sql])
                     if re.search(r"\b(?:ALTER|CREATE)\s+TABLE\b", sql, re.IGNORECASE):
                         dialect.refresh_metadata_triggers(conn)
+                from etl_craft.engine.repository.source_contracts import resolve_project_sources
+
+                resolve_project_sources(conn, catalog, warehouse_dialect)
             else:
+                final_statements = []
+                if sources is not None and conn.dialect.name == "postgresql":
+                    statements, final_statements = statements[:-3], statements[-3:]
                 run_script(conn, statements)
+                if sources is not None:
+                    from etl_craft.engine.repository.source_contracts import convert_sources
+
+                    convert_sources(conn, sources)
+                    run_script(conn, final_statements)
                 dialect.refresh_metadata_triggers(conn)
             _record(conn, migration)
     except Exception as error:
@@ -251,6 +280,8 @@ def apply_pending_migrations(
     *,
     project_default: Path | None = None,
     wait_seconds: float = 0,
+    catalog: str | None = None,
+    warehouse_dialect: str | None = None,
 ) -> list[str]:
     """Apply every pending ENGINE, then PROJECT, migration; return the filenames applied.
 
@@ -284,11 +315,20 @@ def apply_pending_migrations(
         ):
             with engine.connect() as conn:
                 _check_metadata_codes(conn)
+        if any(
+            "convert-source-contracts" in file.markers and (file.source, file.version) not in ledger
+            for stream in streams
+            for file in stream.files
+        ):
+            from etl_craft.engine.repository.source_contracts import legacy_sources
+
+            with engine.connect() as conn:
+                legacy_sources(conn, catalog, warehouse_dialect)
         for stream in streams:
             for migration in stream.files:
                 if (migration.source, migration.version) in ledger:
                     continue
-                _apply(engine, migration)
+                _apply(engine, migration, catalog=catalog, warehouse_dialect=warehouse_dialect)
                 logger.info("applied %s migration %s", migration.source, migration.version)
                 applied.append(migration.version)
     return applied

@@ -209,6 +209,7 @@ def test_upgrade_preserves_tokens_creation_history_and_rolls_back(empty_engine_d
         assert migrations.apply_pending_migrations(db.engine) == [
             "0026_config_base_contract.sql",
             "0027_config_identities.sql",
+            "0028_source_contracts.sql",
         ]
     ctx = OperationContext(db.engine, db.config, BOB)
     assert tokens.authenticate(ctx, "old-token")
