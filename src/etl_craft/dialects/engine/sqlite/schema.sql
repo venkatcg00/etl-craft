@@ -157,7 +157,7 @@ CREATE UNIQUE INDEX ux_taskparameters_name_identity
 
 
 
--- A BUSINESS_RULES task's rules: a correlated SELECT that finds the rows of TARGET_TABLE that
+-- A BUSINESS_RULES task's rules: a correlated SELECT that finds rows of the referenced target that
 -- break it, and what a failing row gets flagged as.
 CREATE TABLE CFG_BUSINESS_RULES (
     BUSINESS_RULE_ID          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -167,13 +167,13 @@ CREATE TABLE CFG_BUSINESS_RULES (
     BUSINESS_RULE_SQL         VARCHAR NOT NULL,
     BUSINESS_RULE_TYPE        VARCHAR NOT NULL,
     BUSINESS_RULE_KEY_COLUMN  VARCHAR NOT NULL,
-    TARGET_TABLE              VARCHAR NOT NULL,
     SEQUENCE_NUMBER           BIGINT NOT NULL,
     ACTIVE_FLAG               VARCHAR NOT NULL DEFAULT 'Y',
     CREATED_BY                VARCHAR NOT NULL DEFAULT 'etl-craft',
     CREATE_DATE               TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
     UPDATED_BY                VARCHAR NOT NULL DEFAULT 'etl-craft',
     UPDATED_DATE              TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
+    TARGET_TABLE_ID           BIGINT NOT NULL REFERENCES CFG_TABLES(TABLE_ID),
     CONSTRAINT ck_br_type        CHECK (BUSINESS_RULE_TYPE IN ('INCOMPLETE','REJECT','REPORT')),
     CONSTRAINT ck_br_active_flag CHECK (ACTIVE_FLAG IN ('Y','N'))
 );
@@ -669,6 +669,7 @@ CREATE TABLE AUD_CFG_BUSINESS_RULES_HISTORY (
     CREATE_DATE TIMESTAMP,
     UPDATED_BY VARCHAR,
     UPDATED_DATE TIMESTAMP,
+    TARGET_TABLE_ID BIGINT,
     CONSTRAINT ck_aud_cfg_business_rules_history_operation CHECK (OPERATION IN ('INSERT','UPDATE','DELETE')),
     CONSTRAINT ck_aud_cfg_business_rules_history_current CHECK (CURRENT_FLAG IN ('Y','N'))
 );

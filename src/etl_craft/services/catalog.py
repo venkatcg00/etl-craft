@@ -4,7 +4,7 @@
 ``services.lineage``), then joins them into assets:
 
 - a **table** for each SQL task's ``TARGET_OBJECT``, each table a SELECT reads, each business
-  rule's ``TARGET_TABLE``, and each ingestion script's ``TARGET_OBJECT``; with its columns, the
+  rule's referenced target, and each ingestion script's ``TARGET_OBJECT``; with its columns, the
   tasks that write and read it, the rules on it, and its writers' latest run;
 - a **task** for each active task, with its parameters, documentation, lineage and latest run;
 - a **pipeline**, a **business rule** and an **ingestion script** page each.

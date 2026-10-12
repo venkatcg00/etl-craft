@@ -118,7 +118,7 @@ be left out of the header, which gives every row their default.
 | `task_parameters.csv` | **`PIPELINE_CODE`**, **`TASK_CODE`**, **`PARAMETER_NAME`**, `PARAMETER_VALUE`, `ACTIVE_FLAG` | |
 | `task_dependencies.csv` | **`PIPELINE_CODE`**, **`TASK_CODE`**, **`DEPENDS_ON_PIPELINE_CODE`**, **`DEPENDS_ON_TASK_CODE`**, **`DEPENDENCY_TYPE`**, `CONSUME_REPAIRS`, `ACTIVE_FLAG` | `CONSUME_REPAIRS` `Y` |
 | `pipeline_dependencies.csv` | **`PIPELINE_CODE`**, **`DEPENDS_ON_PIPELINE_CODE`**, **`DEPENDENCY_TYPE`**, `CONSUME_REPAIRS`, `ACTIVE_FLAG` | `CONSUME_REPAIRS` `Y` |
-| `business_rules.csv` | **`PIPELINE_CODE`**, **`TASK_CODE`**, **`BUSINESS_RULE_NAME`**, **`SEQUENCE_NUMBER`**, **`BUSINESS_RULE_TYPE`**, **`BUSINESS_RULE_KEY_COLUMN`**, **`TARGET_TABLE`**, **`BUSINESS_RULE_SQL`**, `ACTIVE_FLAG` | |
+| `business_rules.csv` | **`PIPELINE_CODE`**, **`TASK_CODE`**, **`BUSINESS_RULE_NAME`**, **`SEQUENCE_NUMBER`**, **`BUSINESS_RULE_TYPE`**, **`BUSINESS_RULE_KEY_COLUMN`**, `CATALOG_NAME`, **`SCHEMA_NAME`**, **`TABLE_NAME`**, **`BUSINESS_RULE_SQL`**, `ACTIVE_FLAG` | |
 
 | `tables.csv` | `CATALOG_NAME`, **`SCHEMA_NAME`**, **`TABLE_NAME`**, `OBJECT_KIND`, `ACTIVE_FLAG` | Empty catalog means absent; empty kind means undeclared |
 | `columns.csv` | `CATALOG_NAME`, **`SCHEMA_NAME`**, **`TABLE_NAME`**, **`COLUMN_NAME`**, **`DATA_TYPE`**, **`COLUMN_POSITION`**, `IS_NULLABLE`, `ACTIVE_FLAG` | Empty nullability means undeclared |
@@ -138,11 +138,12 @@ Each handler's guide lists its task parameters. Values are written as follows:
 
 A row may name only pipelines and tasks its project's files hold: a task's pipeline must be in
 `pipelines.csv`, and both tasks of a dependency in `tasks.csv`, whatever their flags.
-A column names its parent in `tables.csv`; active columns require an active parent.
-Table and column files may be omitted to preserve the existing contracts. A header-only
+A column or business-rule target names its parent in `tables.csv`; active columns require an active parent.
+Table and column files may be omitted when no file references them, preserving existing contracts. A header-only
 column file retires its active columns. Retire those columns before retiring their parent.
 `OBJECT_KIND` accepts `TABLE`/`VIEW`; `IS_NULLABLE` accepts `Y`/`N`. Components are stored
-separately, and column rows hold a `TABLE_ID` foreign key rather than a repeated object name.
+separately, and column rows hold a `TABLE_ID` foreign key rather than a repeated object name. Rules use
+`TARGET_TABLE_ID` on the existing rule row; changing the target keeps the rule ID.
 
 ### Upgrading source contracts
 
@@ -209,3 +210,19 @@ table in one place: `apply` retires active rows its files do not hold, so in a p
 configuration files, a row a migration adds is retired by the next `apply` unless the files hold
 it too. Migrations stay the way to create and change the project's own tables, and the Engine
 DB's schema is upgraded by `etl-craft migrate`.
+
+### Upgrading rule targets
+
+Migration `0029_rule_target_contracts.sql` converts rule `TARGET_TABLE` strings to
+`TARGET_TABLE_ID`, reusing existing scoped contracts and resolving current catalog aliases
+once. It preserves rule IDs, audit stamps, counters and earlier typed versions. The conversion
+version retains the original target string as historical evidence; future config writes store
+only the FK. Historical exports rebuild the old components without today’s catalog inference.
+Rule-result records keep their recorded target until the later audit endpoint conversion.
+
+Invalid legacy identifiers and custom columns or target-dependent schema objects stop the
+upgrade with a repair instruction. Export after upgrading and reapply edits to the separate
+catalog/schema/table fields in `business_rules.csv` and `tables.csv`. Old CSV headers are
+rejected. Pending project SQL must write `TARGET_TABLE_ID`; already-applied migration files
+must remain unchanged. Original tutorial files are retained under `legacy-migrations/`, and
+new projects use the current `*_contracts.sql` examples.

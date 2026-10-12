@@ -43,11 +43,14 @@ def config_as_of(conn: Connection, as_of: datetime) -> Engine:
     scratch = create_engine("sqlite://", poolclass=StaticPool)
     try:
         with scratch.begin() as out:
+            legacy_rules = []
             for table in TABLES:
                 key = table.id_column.lower()
                 current = _rows(conn, f"SELECT * FROM {table.table}")
                 columns = list(current[0]) if current else _names(conn, table.table)
                 rows = _at(current, versions[table.table], key, table.table, as_of)
+                if table.table == "CFG_BUSINESS_RULES":
+                    legacy_rules = [row for row in rows if row.get("target_table_id") is None]
                 out.execute(text(f"CREATE TABLE {table.table} ({', '.join(columns)})"))
                 if rows:
                     out.execute(
@@ -115,6 +118,44 @@ def config_as_of(conn: Connection, as_of: datetime) -> Engine:
                         "'Y' ELSE 'N' END"
                     )
                 )
+            from etl_craft.engine.repository.normalization import object_identity
+
+            for row in legacy_rules:
+                try:
+                    identity = object_identity(str(row["target_table"]), None, None)
+                except ValueError as error:
+                    raise MetadataError(
+                        f"cannot rebuild BUSINESS_RULE_ID={row['business_rule_id']} as of "
+                        f"{as_of.isoformat()}: {error}; inspect its retained target history"
+                    ) from error
+                params = dict(zip(("catalog", "schema", "table"), identity, strict=True))
+                rule_table_id = out.execute(
+                    text(
+                        "SELECT TABLE_ID AS rule_table_id FROM CFG_TABLES "
+                        "WHERE SCHEMA_NAME=:schema "
+                        "AND TABLE_NAME=:table AND (CATALOG_NAME=:catalog OR "
+                        "(CATALOG_NAME IS NULL AND :catalog IS NULL))"
+                    ),
+                    params,
+                ).scalar_one_or_none()
+                if rule_table_id is None:
+                    rule_table_id = out.execute(
+                        text("SELECT COALESCE(MAX(TABLE_ID),0)+1 AS rule_table_id FROM CFG_TABLES")
+                    ).scalar_one()
+                    out.execute(
+                        text(
+                            "INSERT INTO CFG_TABLES (TABLE_ID,CATALOG_NAME,SCHEMA_NAME,TABLE_NAME,"
+                            "ACTIVE_FLAG) VALUES (:id,:catalog,:schema,:table,:active)"
+                        ),
+                        params | {"id": rule_table_id, "active": "Y"},
+                    )
+                out.execute(
+                    text(
+                        "UPDATE CFG_BUSINESS_RULES SET TARGET_TABLE_ID=:target "
+                        "WHERE BUSINESS_RULE_ID=:id"
+                    ),
+                    {"target": rule_table_id, "id": row["business_rule_id"]},
+                )
     except Exception:
         scratch.dispose()
         raise
@@ -136,6 +177,10 @@ def _at(
         for row_id, version in first.items()
         if row_id not in valid
         and version["operation"] != "INSERT"
+        and not (
+            table == "CFG_BUSINESS_RULES"
+            and version.get("migration") == "engine/0029_rule_target_contracts.sql"
+        )
         and as_of < as_utc(version["valid_from"])
     ]
     if unknown:
@@ -145,7 +190,15 @@ def _at(
             "recorded changes and changed later, so their values then are unknown; "
             "choose a time after their first recorded change"
         )
-    rows = list(valid.values()) + [row for row in current if str(row[key]) not in first]
+    baselines = [
+        version | {"target_table_id": None}
+        for row_id, version in first.items()
+        if row_id not in valid
+        and as_of < as_utc(version["valid_from"])
+        and table == "CFG_BUSINESS_RULES"
+        and version.get("migration") == "engine/0029_rule_target_contracts.sql"
+    ]
+    rows = list(valid.values()) + baselines + [row for row in current if str(row[key]) not in first]
     return rows
 
 

@@ -182,7 +182,7 @@ CREATE TRIGGER trg_audit_cfg_task_parameters
     FOR EACH ROW EXECUTE FUNCTION trg_set_audit_columns();
 COMMENT ON TABLE CFG_TASK_PARAMETERS IS 'A task''s settings as name and value pairs (SQL_ACTION, TARGET_OBJECT, SOURCE_SQL, ...). Which names each handler reads is documented in the task parameter reference.';
 
--- A BUSINESS_RULES task's rules: a correlated SELECT that finds the rows of TARGET_TABLE that
+-- A BUSINESS_RULES task's rules: a correlated SELECT that finds rows of the referenced target that
 -- break it, and what a failing row gets flagged as.
 CREATE TABLE CFG_BUSINESS_RULES (
     BUSINESS_RULE_ID          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -199,6 +199,7 @@ CREATE TABLE CFG_BUSINESS_RULES (
     CREATE_DATE               TIMESTAMPTZ NOT NULL,
     UPDATED_BY                VARCHAR NOT NULL,
     UPDATED_DATE              TIMESTAMPTZ NOT NULL,
+    TARGET_TABLE_ID           BIGINT NOT NULL,
     CONSTRAINT ck_br_type        CHECK (BUSINESS_RULE_TYPE IN ('INCOMPLETE','REJECT','REPORT')),
     CONSTRAINT ck_br_active_flag CHECK (ACTIVE_FLAG IN ('Y','N'))
 );
@@ -208,7 +209,7 @@ CREATE INDEX ix_br_pipeline ON CFG_BUSINESS_RULES (PIPELINE_ID);
 CREATE TRIGGER trg_audit_cfg_business_rules
     BEFORE INSERT OR UPDATE ON CFG_BUSINESS_RULES
     FOR EACH ROW EXECUTE FUNCTION trg_set_audit_columns();
-COMMENT ON TABLE CFG_BUSINESS_RULES IS 'Checks a BUSINESS_RULES task runs against a warehouse table. TARGET_TABLE must have a single-column primary key, named by BUSINESS_RULE_KEY_COLUMN; `validate` checks it in the warehouse.';
+COMMENT ON TABLE CFG_BUSINESS_RULES IS 'Checks a BUSINESS_RULES task runs against a warehouse table. The referenced target must have a single-column primary key, named by BUSINESS_RULE_KEY_COLUMN; `validate` checks it in the warehouse.';
 
 -- One row per pipeline run: its status, when it ran, whether it met its SLA, the date it ran
 -- as of (RUN_DATE, the SQL tasks' $$run_date), and whether it was part of a backfill.
@@ -699,6 +700,7 @@ CREATE TABLE AUD_CFG_BUSINESS_RULES_HISTORY (
     CREATE_DATE TIMESTAMPTZ,
     UPDATED_BY VARCHAR,
     UPDATED_DATE TIMESTAMPTZ,
+    TARGET_TABLE_ID BIGINT,
     CONSTRAINT ck_aud_cfg_business_rules_history_operation CHECK (OPERATION IN ('INSERT','UPDATE','DELETE')),
     CONSTRAINT ck_aud_cfg_business_rules_history_current CHECK (CURRENT_FLAG IN ('Y','N'))
 );
@@ -983,6 +985,8 @@ CREATE TABLE CFG_TABLES (
     CONSTRAINT ck_tables_name CHECK (length(TABLE_NAME) > 0),
     CONSTRAINT ck_tables_kind CHECK (OBJECT_KIND IS NULL OR OBJECT_KIND IN ('TABLE','VIEW'))
 );
+ALTER TABLE CFG_BUSINESS_RULES ADD FOREIGN KEY (TARGET_TABLE_ID) REFERENCES CFG_TABLES(TABLE_ID);
+ALTER TABLE CFG_BUSINESS_RULES DROP COLUMN TARGET_TABLE;
 CREATE UNIQUE INDEX ux_tables_catalog_identity ON CFG_TABLES (CATALOG_NAME, SCHEMA_NAME, TABLE_NAME) WHERE CATALOG_NAME IS NOT NULL;
 CREATE UNIQUE INDEX ux_tables_no_catalog_identity ON CFG_TABLES (SCHEMA_NAME, TABLE_NAME) WHERE CATALOG_NAME IS NULL;
 

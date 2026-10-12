@@ -14,7 +14,13 @@ from etl_craft.core.enums import Mode
 from etl_craft.core.errors import ExitCode, MetadataError
 from etl_craft.services.doctor import Status
 from etl_craft.services.validate import validate
-from fixtures.metadata import add_dependency, add_pipeline, add_pipeline_dependency, add_task
+from fixtures.metadata import (
+    add_dependency,
+    add_pipeline,
+    add_pipeline_dependency,
+    add_table,
+    add_task,
+)
 from fixtures.metadata import insert as insert_row
 
 GOOD_SCRIPT = "def run(task):\n    return None\n"
@@ -64,7 +70,7 @@ def add_rule(conn, pipeline, task, name, *, key="id", target="sales.orders", sql
     return insert_row(
         conn,
         "INSERT INTO CFG_BUSINESS_RULES (BUSINESS_RULE_NAME, PIPELINE_ID, TASK_ID, "
-        "BUSINESS_RULE_SQL, BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE, "
+        "BUSINESS_RULE_SQL, BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE_ID, "
         "SEQUENCE_NUMBER) VALUES (:name, :p, :t, :rule_sql, 'REJECT', :key, :target, 1)",
         "BUSINESS_RULE_ID",
         name=name,
@@ -72,7 +78,7 @@ def add_rule(conn, pipeline, task, name, *, key="id", target="sales.orders", sql
         t=task,
         rule_sql=sql or "SELECT 1 WHERE t.amount < 0",
         key=key,
-        target=target,
+        target=add_table(conn, target),
     )
 
 

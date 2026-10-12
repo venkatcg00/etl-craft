@@ -143,8 +143,8 @@ IDENTITY_ROWS = (
     (
         "CFG_BUSINESS_RULES",
         "PIPELINE_ID,TASK_ID,BUSINESS_RULE_NAME,SEQUENCE_NUMBER,BUSINESS_RULE_TYPE,"
-        "BUSINESS_RULE_KEY_COLUMN,TARGET_TABLE,BUSINESS_RULE_SQL",
-        ":pipeline,:task,'identity',1,'REPORT','id','raw.orders','SELECT 1'",
+        "BUSINESS_RULE_KEY_COLUMN,TARGET_TABLE_ID,BUSINESS_RULE_SQL",
+        ":pipeline,:task,'identity',1,'REPORT','id',:target,'SELECT 1'",
     ),
 )
 
@@ -156,7 +156,23 @@ def identity_insert(conn, table, columns, values):
     upstream = add_pipeline(conn, "Q")
     task = add_task(conn, pipeline, "first")
     other = add_task(conn, pipeline, "second")
-    params = {"pipeline": pipeline, "upstream": upstream, "task": task, "other": other}
+    from fixtures.metadata import add_table
+
+    params = {
+        "pipeline": pipeline,
+        "upstream": upstream,
+        "task": task,
+        "other": other,
+    }
+    if table == "CFG_BUSINESS_RULES":
+        from sqlalchemy import inspect
+
+        name = "cfg_tables" if conn.dialect.name == "postgresql" else "CFG_TABLES"
+        if inspect(conn).has_table(name):
+            params["target"] = add_table(conn, "raw.orders")
+        else:
+            columns = columns.replace("TARGET_TABLE_ID", "TARGET_TABLE")
+            values = values.replace(":target", "'raw.orders'")
     insert = text(f"INSERT INTO {table} ({columns}) VALUES ({values})")
     conn.execute(insert, params)
     conn.execute(text(f"UPDATE {table} SET ACTIVE_FLAG='N'"))
@@ -221,6 +237,7 @@ def test_identity_migration_preserves_rows_and_their_history(legacy_identity_db)
     assert apply_pending_migrations(db.engine) == [
         "0027_config_identities.sql",
         "0028_source_contracts.sql",
+        "0029_rule_target_contracts.sql",
     ]
     with db.engine.connect() as conn:
         assert conn.execute(text("SELECT * FROM CFG_PIPELINES")).one() == row

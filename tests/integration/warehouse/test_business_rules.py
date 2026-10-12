@@ -7,7 +7,7 @@ from sqlalchemy import text
 
 from etl_craft.core.errors import HandlerError
 from etl_craft.handlers import business_rules
-from fixtures.metadata import insert
+from fixtures.metadata import add_table, insert
 
 
 @pytest.fixture
@@ -34,7 +34,7 @@ def add_rule(w, name, sql, *, sequence=1, key="order_id", rule_type="REJECT"):
         return insert(
             conn,
             "INSERT INTO CFG_BUSINESS_RULES (BUSINESS_RULE_NAME, PIPELINE_ID, TASK_ID, "
-            "BUSINESS_RULE_SQL, BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE, "
+            "BUSINESS_RULE_SQL, BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE_ID, "
             "SEQUENCE_NUMBER) VALUES (:name, :p, :t, :rule_sql, :type, :key, :target, :seq)",
             "BUSINESS_RULE_ID",
             name=name,
@@ -43,7 +43,7 @@ def add_rule(w, name, sql, *, sequence=1, key="order_id", rule_type="REJECT"):
             rule_sql=sql,
             type=rule_type,
             key=key,
-            target=f"{w.schema}.orders",
+            target=add_table(conn, f"{w.schema}.orders"),
             seq=sequence,
         )
 

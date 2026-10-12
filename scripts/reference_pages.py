@@ -195,6 +195,10 @@ def schema_tables(schema: Path = SCHEMA) -> list[Table]:
                     col.allowed = [v.strip().strip("'") for v in values.split(",")]
         tables.append(table)
     by_name = {table.name: table for table in tables}
+    for table_name, column in re.findall(r"ALTER TABLE (\w+) DROP COLUMN (\w+);", text):
+        if table_name in by_name:
+            table = by_name[table_name]
+            table.columns = [value for value in table.columns if value.name != column]
     for name, columns, where in _UNIQUE_INDEX.findall(text):
         if name in by_name:
             key = ", ".join(c.strip() for c in columns.split(","))

@@ -13,6 +13,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from etl_craft.engine.queries import statement
 from fixtures.engine_db import apply_schema
+from fixtures.metadata import add_table
 
 TABLES = (
     "cfg_pipelines",
@@ -266,12 +267,22 @@ def test_refresh_type_and_business_rule_type_lists(seeded):
     )
     rule = (
         "INSERT INTO CFG_BUSINESS_RULES (BUSINESS_RULE_NAME, PIPELINE_ID, TASK_ID, "
-        "BUSINESS_RULE_SQL, BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE, "
-        "SEQUENCE_NUMBER) VALUES (:name, :p, :t, 'SELECT 1', :type, 'id', 'public.t', 1)"
+        "BUSINESS_RULE_SQL, BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE_ID, "
+        "SEQUENCE_NUMBER) VALUES (:name, :p, :t, 'SELECT 1', :type, 'id', :target, 1)"
     )
+    with db.engine.begin() as conn:
+        target = add_table(conn, "public.t")
     for rule_type in ("INCOMPLETE", "REJECT", "REPORT"):
-        run(db, rule, name=rule_type.lower(), p=ids["a"], t=ids["load"], type=rule_type)
-    refused(db, rule, name="bogus", p=ids["a"], t=ids["load"], type="BOGUS")
+        run(
+            db,
+            rule,
+            name=rule_type.lower(),
+            p=ids["a"],
+            t=ids["load"],
+            type=rule_type,
+            target=target,
+        )
+    refused(db, rule, name="bogus", p=ids["a"], t=ids["load"], type="BOGUS", target=target)
 
 
 def test_pipeline_parameters_hold_json(seeded):

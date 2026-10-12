@@ -38,6 +38,7 @@ MARKERS = frozenset(
         "check-metadata-codes",
         "check-metadata-identities",
         "convert-source-contracts",
+        "convert-rule-targets",
     }
 )
 PACKAGED_MARKERS = Path(__file__).parents[1] / "dialects/engine/migration-markers.toml"
@@ -201,6 +202,11 @@ def _apply(
                 from etl_craft.engine.repository.source_contracts import legacy_sources
 
                 sources = legacy_sources(conn, catalog, warehouse_dialect)
+            rules = None
+            if "convert-rule-targets" in migration.markers:
+                from etl_craft.engine.repository.rule_targets import legacy_rule_targets
+
+                rules = legacy_rule_targets(conn, catalog, warehouse_dialect)
             statements = dialect.split_statements(migration.sql)
             if migration.source == PROJECT:
                 for sql in statements:
@@ -211,6 +217,12 @@ def _apply(
 
                 resolve_project_sources(conn, catalog, warehouse_dialect)
             else:
+                if rules is not None:
+                    from etl_craft.engine.repository.rule_targets import convert_rule_targets
+
+                    run_script(conn, statements[:2])
+                    convert_rule_targets(conn, rules, catalog, warehouse_dialect)
+                    statements = statements[2:]
                 final_statements = []
                 if sources is not None and conn.dialect.name == "postgresql":
                     statements, final_statements = statements[:-3], statements[-3:]
@@ -324,6 +336,15 @@ def apply_pending_migrations(
 
             with engine.connect() as conn:
                 legacy_sources(conn, catalog, warehouse_dialect)
+        if any(
+            "convert-rule-targets" in file.markers and (file.source, file.version) not in ledger
+            for stream in streams
+            for file in stream.files
+        ):
+            from etl_craft.engine.repository.rule_targets import legacy_rule_targets
+
+            with engine.connect() as conn:
+                legacy_rule_targets(conn, catalog, warehouse_dialect)
         for stream in streams:
             for migration in stream.files:
                 if (migration.source, migration.version) in ledger:

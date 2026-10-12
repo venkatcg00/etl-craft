@@ -116,6 +116,10 @@ def schema_columns(path: Path) -> dict[str, list[str]]:
             if first and first.isupper() and first not in {"CONSTRAINT", "CHECK", "OR", "AND"}:
                 columns.append(first)
         tables[match[1]] = columns
+    for table, column in re.findall(
+        r"ALTER TABLE (\w+) DROP COLUMN (\w+);", path.read_text("utf-8")
+    ):
+        tables[table].remove(column)
     return tables
 
 

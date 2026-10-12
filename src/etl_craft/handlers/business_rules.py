@@ -132,6 +132,11 @@ def check_rule(rule: BusinessRule, catalog: str, dialect: str | None = None) -> 
     ``dialect`` is the warehouse's sqlglot dialect the rule's SQL is read in.
     """
     name = f"business rule {rule.business_rule_name!r} (BUSINESS_RULE_ID={rule.business_rule_id})"
+    if not rule.target_active:
+        raise SqlGuardError(
+            f"{name}: target contract {rule.target_table!r} has ACTIVE_FLAG=N; "
+            "reactivate its CFG_TABLES row or deactivate this rule"
+        )
     if not is_safe_identifier(rule.business_rule_key_column):
         raise SqlGuardError(
             f"{name}: BUSINESS_RULE_KEY_COLUMN={rule.business_rule_key_column!r} is not a plain "

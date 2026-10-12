@@ -13,7 +13,7 @@ from etl_craft.core.errors import MetadataError, RunStateError
 from etl_craft.core.graph import TaskEdge, TaskRunState, build_graph
 from etl_craft.engine import runlog, transitions
 from etl_craft.engine.repository import business_rules, dependencies, pipelines, runs, tasks
-from fixtures.metadata import start_run
+from fixtures.metadata import add_table, start_run
 
 
 def insert(conn, sql, id_column, **params):
@@ -130,10 +130,16 @@ def seeded(engine_db):
                 text(
                     "INSERT INTO CFG_BUSINESS_RULES (BUSINESS_RULE_NAME, PIPELINE_ID, TASK_ID, "
                     "BUSINESS_RULE_SQL, BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, "
-                    "TARGET_TABLE, SEQUENCE_NUMBER) "
-                    "VALUES (:name, :p, :t, 'SELECT 1', 'REJECT', 'id', 'core.dim', :seq)"
+                    "TARGET_TABLE_ID, SEQUENCE_NUMBER) "
+                    "VALUES (:name, :p, :t, 'SELECT 1', 'REJECT', 'id', :target, :seq)"
                 ),
-                {"name": name, "p": a, "t": ids["rules"], "seq": sequence},
+                {
+                    "name": name,
+                    "p": a,
+                    "t": ids["rules"],
+                    "seq": sequence,
+                    "target": add_table(conn, "core.dim"),
+                },
             )
     return engine_db.engine, ids
 

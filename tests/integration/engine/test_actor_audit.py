@@ -151,11 +151,15 @@ def seeded_tables(db):
         r1 = transitions.create_active_run(conn, p1)
         r2 = transitions.create_active_run(conn, p2)
         task_run = transitions.find_or_create_task_run(conn, t1, r1).task_run_id
+        from fixtures.metadata import add_table
+
+        contract = add_table(conn, "warehouse.s.t")
         values = {
+            "target_table_id": contract,
             "column_position": 1,
             "operation": "INSERT",
             "current_flag": "Y",
-            "table_id": 1,
+            "table_id": contract,
             "role": "viewer",
             "token_sha256": "0" * 64,
             "pipeline_id": p1,
@@ -333,6 +337,7 @@ def test_guarded_upgrade_rolls_back_with_the_ledger(empty_engine_db, monkeypatch
         "0026_config_base_contract.sql",
         "0027_config_identities.sql",
         "0028_source_contracts.sql",
+        "0029_rule_target_contracts.sql",
     ]
 
 
