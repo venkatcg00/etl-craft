@@ -198,3 +198,10 @@ class TlsMode(StrEnum):
     NONE = "none"
     STARTTLS = "starttls"
     SSL = "ssl"
+
+
+class ActiveFlag(StrEnum):
+    """The Y/N flag of a current or active record."""
+
+    YES = "Y"
+    NO = "N"

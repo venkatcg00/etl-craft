@@ -39,7 +39,6 @@
       "src/etl_craft/handlers/sql/spec.py": 3,
       "src/etl_craft/services/cloning.py": 1,
       "src/etl_craft/services/docs_publish.py": 1,
-      "src/etl_craft/services/operations/diagnostics.py": 1,
       "src/etl_craft/services/operations/results.py": 3,
       "src/etl_craft/services/operations/runs.py": 5,
       "src/etl_craft/services/operations/status.py": 3,
@@ -198,7 +197,7 @@
       "src/etl_craft/engine/transitions.py": 150,
       "src/etl_craft/execution/pipeline.py": 513,
       "src/etl_craft/execution/runner.py": 196,
-      "src/etl_craft/services/catalog_site.py": 352,
+      "src/etl_craft/services/catalog_site.py": 344,
       "src/etl_craft/services/config_files.py": 15
     },
     "no-cover": {

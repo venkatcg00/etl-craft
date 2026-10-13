@@ -16,7 +16,6 @@ more than a day old.
 from __future__ import annotations
 
 import hashlib
-import html
 import json
 import re
 import shutil
@@ -42,9 +41,12 @@ from etl_craft.services.catalog import (
 from etl_craft.services.catalog_graph import (
     dag_drawing,
     lineage_drawing,
+    lineage_history,
     render_dag_svg,
     render_svg,
 )
+from etl_craft.services.catalog_html import escape as _e
+from etl_craft.services.catalog_html import render_table as _table
 from etl_craft.services.lineage import COPY
 
 MARKER = ".etl-craft-catalog"
@@ -210,10 +212,6 @@ def _rate(kpis: RunKpis) -> str:
     return "" if rate is None else f"{rate:.0%} of {kpis.finished}"
 
 
-def _e(value: object) -> str:
-    return html.escape("" if value is None else str(value), quote=True)
-
-
 def _when(value: datetime | None) -> str:
     return value.strftime("%Y-%m-%d %H:%M:%S %Z").strip() if value is not None else ""
 
@@ -225,14 +223,6 @@ def _status(value: str | None) -> str:
 def _facts(pairs: Iterable[tuple[str, str]]) -> str:
     rows = "".join(f"<dt>{_e(k)}</dt><dd>{v}</dd>" for k, v in pairs if v)
     return f'<dl class="facts">{rows}</dl>' if rows else ""
-
-
-def _table(headers: Sequence[str], rows: Iterable[Sequence[str]], empty: str) -> str:
-    body = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in row) + "</tr>" for row in rows)
-    if not body:
-        return f'<p class="note">{_e(empty)}</p>'
-    head = "".join(f"<th>{_e(h)}</th>" for h in headers)
-    return f'<div class="scroll"><table class="list"><tr>{head}</tr>{body}</table></div>'
 
 
 def _anchor(*parts: str) -> str:
@@ -993,7 +983,9 @@ class _Writer:
                 + "".join(f"<li>{_e(message)}</li>" for message in table.warehouse_findings)
                 + "</ul>"
             )
-        return f"{facts}{comparison}{self._columns(table)}{self._graph(name)}"
+        return (
+            f"{facts}{comparison}{self._columns(table)}{self._graph(name)}{lineage_history(table)}"
+        )
 
     def _columns(self, table: TableAsset) -> str:
         sources: dict[str, list[str]] = {}

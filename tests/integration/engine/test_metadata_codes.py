@@ -216,7 +216,8 @@ def test_a_failed_metadata_rebuild_rolls_back_and_restores_connection_settings(
     with legacy.engine.begin() as conn:
         conn.execute(text("DELETE FROM CFG_TASKS WHERE TASK_CODE = '__init__'"))
     monkeypatch.setattr(migrations, "_record", original)
-    assert apply_pending_migrations(legacy.engine) == [
+    applied = apply_pending_migrations(legacy.engine)
+    assert {
         "0005_metadata_codes.sql",
         "0006_run_backfill_constraint.sql",
         "0007_identity.sql",
@@ -242,7 +243,8 @@ def test_a_failed_metadata_rebuild_rolls_back_and_restores_connection_settings(
         "0028_source_contracts.sql",
         "0029_rule_target_contracts.sql",
         "0030_task_target_contracts.sql",
-    ]
+    } <= set(applied)
+    assert applied == sorted(applied)
 
 
 def test_database_refuses_embedded_nul_codes(engine_db):

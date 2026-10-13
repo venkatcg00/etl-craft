@@ -24,7 +24,9 @@ import html
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from etl_craft.services.catalog import Catalog
+from etl_craft.core.enums import ActiveFlag
+from etl_craft.services.catalog import Catalog, TableAsset
+from etl_craft.services.catalog_html import escape, render_table
 from etl_craft.services.lineage import COPY, Edge
 
 NODE_WIDTH = 260
@@ -463,3 +465,50 @@ def render_dag_svg(
         parts.append("</g>")
     parts.append("</svg>")
     return "".join(parts)
+
+
+def lineage_history(table: TableAsset) -> str:
+    """Render the current version and the column-source changes in table history."""
+    if not table.lineage_history:
+        return "<h2>Lineage history</h2><p>No lineage versions recorded for this table.</p>"
+    current = next(
+        (v for v, _, _ in table.lineage_history if v.current_flag == ActiveFlag.YES), None
+    )
+    summary = (
+        f"Current lineage version {current.version_number}, valid from "
+        f"{escape(current.valid_from.isoformat())}."
+        if current
+        else "No current lineage version."
+    )
+    rows = []
+    for version, added, removed in reversed(table.lineage_history):
+        changes = []
+        for label, edges in (("Added", added), ("Removed", removed)):
+            changes.append(
+                label
+                + ": "
+                + (
+                    "<br>".join(
+                        f"{escape(e.target_column)} ← "
+                        f"{escape(e.source_object or '(no source)')}."
+                        f"{escape(e.source_column or '')} "
+                        f"[{escape(e.transformation)}] ({escape(e.task)})"
+                        for e in edges
+                    )
+                    or "none"
+                )
+            )
+        until = (
+            "current" if version.current_flag == ActiveFlag.YES else version.valid_to.isoformat()
+        )
+        rows.append(
+            [
+                str(version.version_number),
+                escape(version.valid_from.isoformat()),
+                escape(until),
+                "<br>".join(changes),
+            ]
+        )
+    return f"<h2>Lineage history</h2><p>{summary}</p>" + render_table(
+        ["Version", "Valid from", "Valid to", "Column source changes"], rows, ""
+    )

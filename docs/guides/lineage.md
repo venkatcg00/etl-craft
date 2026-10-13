@@ -40,6 +40,40 @@ target, source column names/types/order, warehouse dialect, active catalog or in
 version changed; `--refresh` works every task out again. Ingestion scripts are
 not traced: their SQL, if any, is inside the script.
 
+## Table lineage versions
+
+Every recording combines the edges of active SQL writers per target table. Changed edges open
+one new version and close the previous one in the same transaction. Recomputing identical edges
+or upgrading sqlglot adds no version. Retiring the last writer closes the current version.
+Validity begins when lineage is computed, independently of when pipelines run.
+
+```bash
+etl-craft lineage --as-of 2026-10-13T08:00:00Z
+etl-craft lineage --as-of 123                         # that pipeline run's start time
+etl-craft lineage --table sales.orders --version 5
+etl-craft lineage --table sales.orders --column amount_usd --version 5 --upstream
+```
+
+`--as-of` accepts the same run ID or ISO 8601 time as `config export --as-of`; a time without
+a timezone means UTC. `--version` requires `--table` because each table has its own numbering.
+It selects that table's version and reads the rest of the graph at the time that version began.
+The selectors are mutually exclusive and cannot be combined with `--refresh`. Historical reads
+use retained version edges, never today's SQL, source contracts or task cache. A time before
+history starts fails with the earliest recorded time; an unknown table version fails with its
+number and the remedy. Version 5 remains readable after version 1000 becomes current.
+
+Table pages show the current version and its opening time, followed by earlier versions with
+validity intervals and added/removed column sources. Tables never traced have an explicit
+no-versions message. Writing tasks retain their stable IDs; displayed task labels use their
+current metadata names.
+
+Upgrade the Engine DB with `etl-craft migrate` before using these commands. Plain-SQL migration
+`0031_lineage_versions.sql` replaces the derived cache with separate catalog/schema/table
+components and creates `AUD_LINEAGE_VERSIONS` and `AUD_LINEAGE_VERSION_EDGES`, guarded against
+outside writes and rewriting history. It discards old cached rows, which were never history.
+History begins with version 1 at the first computation after the upgrade; earlier lineage
+cannot be reconstructed from this cache.
+
 ## Source definitions and stars
 
 Lineage uses metadata only, including in CI and before warehouse tables exist. In dependency

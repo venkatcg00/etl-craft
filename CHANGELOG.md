@@ -8,6 +8,15 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Table lineage history records a new version only when combined writer edges change.
+  Catalog table pages show current and historical versions with added/removed column sources.
+  `lineage --as-of TIME` reads stored graphs; `lineage --table schema.table --version NUMBER`
+  selects a table's version and the graph at its opening time. Historical reads never parse
+  current SQL. Migration `0031` is plain SQL in both Engine DBs: it resets the derived task
+  cache to separate endpoint components and starts history at the first post-upgrade computation.
+  No older lineage can be recovered from the discarded cache. No config files or parameters change.
+
+
 - Task targets now reference the existing scoped `CFG_TABLES` contract through
   `CFG_TASKS.TARGET_TABLE_ID`; config files use separate target components in `tasks.csv`.
   `TARGET_OBJECT` is derived for handlers and scripts and is refused as a writable parameter.

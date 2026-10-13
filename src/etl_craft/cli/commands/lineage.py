@@ -13,6 +13,17 @@ from etl_craft.services.operations.diagnostics import trace_lineage
 
 def _configure(parser: argparse.ArgumentParser) -> None:
     configure_output(parser)
+    history = parser.add_mutually_exclusive_group()
+    history.add_argument(
+        "--as-of",
+        metavar="TIME",
+        help="stored lineage at a run's start or ISO 8601 time (UTC unless zoned)",
+    )
+    history.add_argument(
+        "--version",
+        type=int,
+        help="stored version of --table; trace the graph when that version began",
+    )
     parser.add_argument("--table", help="schema.table (or database.schema.table) to trace")
     parser.add_argument("--column", help="one column of --table to trace")
     direction = parser.add_mutually_exclusive_group()
@@ -37,6 +48,8 @@ def _run(args: argparse.Namespace, out: Output) -> int:
             downstream=not args.upstream,
             depth=args.depth,
             refresh=args.refresh,
+            as_of=args.as_of,
+            version=args.version,
         )
 
     def render() -> None:

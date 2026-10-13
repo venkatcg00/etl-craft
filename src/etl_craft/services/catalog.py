@@ -57,6 +57,11 @@ from etl_craft.engine.repository.catalog import (
     fetch_task_runs,
 )
 from etl_craft.engine.repository.interventions import Intervention, fetch_interventions
+from etl_craft.engine.repository.lineage import (
+    LineageVersion,
+    fetch_lineage_versions,
+    fetch_version_edges,
+)
 from etl_craft.engine.repository.pauses import Pause, fetch_open_pauses
 from etl_craft.engine.repository.source_columns import SourceColumn, fetch_source_columns
 from etl_craft.engine.repository.tasks import fetch_task_parameters
@@ -65,7 +70,7 @@ from etl_craft.engine.repository.validation import (
     fetch_task_dependency_edges,
 )
 from etl_craft.handlers.sql.tables import ENGINE_COLUMNS
-from etl_craft.services.lineage import Edge, TaskLineage, collect, table_name
+from etl_craft.services.lineage import Edge, TaskLineage, collect, stored_edge, table_name
 from etl_craft.services.source_columns import drift, nullable, warehouse_kind
 from etl_craft.warehouse.connection import open_warehouse, warehouse_dialect
 
@@ -102,6 +107,9 @@ class TableAsset:
     warehouse_findings: list[str] = field(default_factory=list)
     declared_kind: str | None = None
     warehouse_kind: str | None = None
+    lineage_history: list[tuple[LineageVersion, list[Edge], list[Edge]]] = field(
+        default_factory=list
+    )
 
     @property
     def external(self) -> bool:
@@ -242,7 +250,7 @@ class Catalog:
         return [task for task in self.tasks.values() if task.lineage_error is not None]
 
 
-def build_catalog(
+def _build_catalog(
     engine: Engine, config: ConnectorConfig, *, with_warehouse: bool = False
 ) -> Catalog:
     """Read the Engine DB and return the catalog; lineage is stored as ``lineage`` stores it."""
@@ -589,3 +597,57 @@ def latest_run(runs: Iterable[LastRun | None]) -> LastRun | None:
     """Return the run that ended last, or ``None`` when none has."""
     finished = [run for run in runs if run is not None and run.end is not None]
     return max(finished, key=lambda run: as_utc(run.end), default=None)
+
+
+def _lineage_history(catalog: Catalog, engine: Engine) -> None:
+    """Attach table versions and edge additions/removals using one history read."""
+    with engine.connect() as conn:
+        versions = fetch_lineage_versions(conn)
+        edges = fetch_version_edges(conn, None)
+    by_version: dict[int, set[Edge]] = {}
+    for edge in edges:
+        by_version.setdefault(edge.lineage_version_id, set()).add(
+            stored_edge(edge, edge.task, catalog.database)
+        )
+    previous: dict[str, set[Edge]] = {}
+    for version in versions:
+        name = table_name(
+            (version.catalog_name or "", version.schema_name, version.table_name), catalog.database
+        )
+        current = by_version.get(version.lineage_version_id, set())
+        before = previous.get(name, set())
+        _table(catalog, name).lineage_history.append(
+            (
+                version,
+                sorted(
+                    current - before,
+                    key=lambda e: (
+                        e.target_column,
+                        e.source_object or "",
+                        e.source_column or "",
+                        e.task,
+                        e.transformation,
+                    ),
+                ),
+                sorted(
+                    before - current,
+                    key=lambda e: (
+                        e.target_column,
+                        e.source_object or "",
+                        e.source_column or "",
+                        e.task,
+                        e.transformation,
+                    ),
+                ),
+            )
+        )
+        previous[name] = current
+
+
+def build_catalog(
+    engine: Engine, config: ConnectorConfig, *, with_warehouse: bool = False
+) -> Catalog:
+    """Build current assets and attach their recorded lineage histories."""
+    catalog = _build_catalog(engine, config, with_warehouse=with_warehouse)
+    _lineage_history(catalog, engine)
+    return catalog

@@ -123,7 +123,7 @@ item's text, or work done early under another item.
 | S5.N Source definitions and schema-aware lineage | Done | #147 | Offline star/join tracing, audited source definitions, seeding and documented/deployed schema comparison |
 | S5.O.1 SCD lifecycle invariants | Done | #148 | Common SCD flags, current-row soft deletes and legacy active-state upgrades |
 | S5.O.2a Common config contract | Done | #149 | Mandatory core/custom CFG audit fields and keys, safe token lifecycle history and lossless upgrades |
-| S5.O.2b Normalized object contracts | In progress | #150, #151, #152, #153, #154, #160 | Merge column lists reject repeats and retain parameter storage; remaining: versioned lineage (slice 2), then target state after S5.R item 3 (slice 3) |
+| S5.O.2b Normalized object contracts | In progress | #150, #151, #152, #153, #154, #160, #162 | Merge column lists retain parameter storage; lineage versions use component endpoints with historical CLI/catalog reads; target state follows S5.R item 3 after the soak |
 | S5.R Consolidate before the cluster | Planned | | Behaviour-preserving: one query path for Engine DB SQL, data-driven migration markers, enums and `core` errors throughout, shorter functions |
 | S5.S Accounts, login and roles | Planned | | Registered user and service accounts, password and SSO login, tokens for services, a role check on every action, no implicit actor, local installations that operate a server |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
@@ -154,6 +154,12 @@ conversion registers as data instead of a new branch in the migration runner, th
 S5.R.
 
 **Acceptance availability.**
+
+S5.O.2b slice 2 passed the full local gate, strict docs, Python 3.12/3.13 unit suites,
+twenty consecutive lineage publication race rounds on both Engine DBs, released-schema and
+pre-slice upgrades, and the installed-wheel/sdist matrix on all four local warehouses.
+Warehouse SQL generation, cloud dialects, Airflow and workflows are unchanged; their additional
+suites were not needed. The frozen 0.4 soak and the old stash remain untouched.
 
 S5.O.2b stable identities passed the full local gate: 3,599 passed, 96 expected skips,
 94.22% coverage in 27m59s; strict docs built in 8.13s. Python 3.12/3.13 each passed
@@ -234,6 +240,14 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- S5.O.2b slice 2 adds `lineage --table schema.table --version NUMBER` at the owner's request,
+  alongside `--as-of`. Versions are local to each target table; selecting one reads the graph
+  at that version's opening time. The two selectors are mutually exclusive, and history reads
+  cannot refresh computation. Displayed writer labels use current metadata names while stored
+  writer IDs remain stable. The migration discards the derived cache without a conversion
+  marker or Python step; history begins at the first post-upgrade computation. Slice 3 remains
+  pending until S5.R item 3 after the frozen soak ends.
 
 - S5.O.2b slice 1 (`feat/sql-merge-columns`, #160) refuses repeated key/compare names through
   the SQL task reader and `validate`, using case-insensitive comparison without changing order

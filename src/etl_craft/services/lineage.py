@@ -25,7 +25,9 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from importlib.metadata import version
 
 import sqlglot
@@ -41,10 +43,14 @@ from etl_craft.config.targets import active_catalog
 from etl_craft.core.enums import RefreshType, SqlAction
 from etl_craft.core.errors import EtlCraftError, MetadataError
 from etl_craft.core.text import sha256_hex
+from etl_craft.engine.locks import EngineLock, advisory_key
 from etl_craft.engine.repository.lineage import (
     StoredEdge,
+    fetch_lineage_versions,
     fetch_sql_tasks,
     fetch_task_lineage,
+    fetch_version_edges,
+    record_lineage_versions,
     store_task_lineage,
 )
 from etl_craft.engine.repository.source_columns import fetch_source_columns
@@ -255,7 +261,7 @@ def lineage_key(
     )
 
 
-def collect(
+def _collect(
     engine: Engine, config: ConnectorConfig, *, refresh: bool = False, record: bool = True
 ) -> list[TaskLineage]:
     """Return the lineage of every active SQL task, working out and storing what changed.
@@ -371,7 +377,7 @@ def collect(
             with engine.connect() as conn:
                 stored = [] if refresh else fetch_task_lineage(conn, ref.task_id, key)
             if stored:
-                edges = [_edge(e, name) for e in stored]
+                edges = [stored_edge(e, name, catalog) for e in stored]
                 results.append(TaskLineage(name, target, edges, cached=True, sources=sources))
                 if (params.get("SQL_ACTION") or "").upper() != SqlAction.DELETE_ROWS:
                     schemas[table_name(target.split("."), catalog)] = dict.fromkeys(
@@ -400,7 +406,7 @@ def collect(
             )
         if record:
             with engine.begin() as conn:
-                store_task_lineage(conn, ref.task_id, key, [_stored(e) for e in edges])
+                store_task_lineage(conn, ref.task_id, key, [cache_edge(e, catalog) for e in edges])
         results.append(TaskLineage(name, target, edges, sources=sources))
     return sorted(results, key=lambda result: result.task)
 
@@ -412,25 +418,92 @@ def dialect_and_catalog(config: ConnectorConfig) -> tuple[str | None, str | None
     return warehouse_dialect(config).sqlglot_dialect, active_catalog(config)
 
 
-def _edge(stored: StoredEdge, task: str) -> Edge:
+def collect(
+    engine: Engine, config: ConnectorConfig, *, refresh: bool = False, record: bool = True
+) -> list[TaskLineage]:
+    """Compute task lineage and publish table versions once under the recording lock."""
+    lock = EngineLock("lineage", advisory_key("lineage"))
+    with lock.hold(engine) if record else nullcontext():
+        results = _collect(engine, config, refresh=refresh, record=record)
+        if record:
+            _, catalog = dialect_and_catalog(config)
+            with engine.begin() as conn:
+                record_lineage_versions(conn, catalog.lower() if catalog else None)
+        return results
+
+
+def stored_edge(stored: StoredEdge, task: str, catalog: str | None) -> Edge:
+    """Render stored endpoint components using the graph's display convention."""
+    target = table_name(
+        (stored.target_catalog_name or "", stored.target_schema_name, stored.target_table_name),
+        catalog,
+    )
+    source = (
+        None
+        if stored.source_table_name is None
+        else table_name(
+            (
+                stored.source_catalog_name or "",
+                stored.source_schema_name or "",
+                stored.source_table_name,
+            ),
+            catalog,
+        )
+    )
     return Edge(
-        stored.target_object,
-        stored.target_column,
-        stored.source_object,
-        stored.source_column,
-        stored.transformation,
-        task,
+        target, stored.target_column, source, stored.source_column, stored.transformation, task
     )
 
 
-def _stored(edge: Edge) -> StoredEdge:
+def cache_edge(edge: Edge, catalog: str | None) -> StoredEdge:
+    """Store the existing tracer's plain identifiers as explicit components."""
+    target = edge.target_object.split(".")
+    source = edge.source_object.split(".") if edge.source_object else []
     return StoredEdge(
-        edge.target_object,
+        target[0] if len(target) == 3 else catalog.lower() if catalog else None,
+        target[-2],
+        target[-1],
         edge.target_column,
-        edge.source_object,
+        source[0]
+        if len(source) == 3
+        else catalog.lower()
+        if catalog and len(source) == 2
+        else None,
+        source[-2] if len(source) >= 2 else None,
+        source[-1] if source else None,
         edge.source_column,
         edge.transformation,
     )
+
+
+def historical_lineage(
+    engine: Engine, config: ConnectorConfig, moment: datetime
+) -> list[TaskLineage]:
+    """Read the versions valid at a UTC instant; never parse SQL or update the cache."""
+    _, catalog = dialect_and_catalog(config)
+    with engine.connect() as conn:
+        versions = fetch_lineage_versions(conn)
+        earliest = min((v.valid_from for v in versions), default=None)
+        if earliest is None or moment < earliest:
+            start = earliest.isoformat() if earliest else "no versions recorded yet"
+            raise MetadataError(
+                f"cannot read lineage as of {moment.isoformat()}: earliest recorded time is "
+                f"{start}; choose a time at or after it, or compute lineage first"
+            )
+        grouped: dict[str, list[Edge]] = {}
+        for v in versions:
+            if v.valid_from <= moment < v.valid_to:
+                for e in fetch_version_edges(conn, v.lineage_version_id):
+                    grouped.setdefault(e.task, []).append(stored_edge(e, e.task, catalog))
+    return [
+        TaskLineage(
+            task,
+            edges[0].target_object,
+            edges,
+            sources=tuple(sorted({e.source_object for e in edges if e.source_object})),
+        )
+        for task, edges in sorted(grouped.items())
+    ]
 
 
 @dataclass

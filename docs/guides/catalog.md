@@ -232,3 +232,11 @@ A table that does not exist is labelled not deployed. An unavailable connection 
 query is reported as a comparison that could not run, with the metadata catalog retained.
 Without the flag, the catalog stays offline. `--strict` continues to govern unresolved column
 lineage; use `etl-craft validate` to fail on source schema drift.
+
+## Table lineage history
+
+Each table page shows its current lineage version and validity start, and retains previous
+versions with their intervals and added/removed column sources. A never-traced table says
+that no lineage versions are recorded. The lineage graph continues to show current edges.
+Use `etl-craft lineage --table schema.table --version NUMBER` or `--as-of TIME` to trace a
+stored historical graph; see [lineage versions](lineage.md#table-lineage-versions).

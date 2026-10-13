@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import ClassVar
+from datetime import datetime
+from typing import ClassVar, TypedDict, Unpack
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.actor import acting_as
-from etl_craft.core.errors import UsageError
+from etl_craft.core.errors import ResourceNotFoundError, UsageError
+from etl_craft.engine.repository.lineage import fetch_lineage_versions
 from etl_craft.services import doctor, lineage, validate
+from etl_craft.services.operations.config_files import resolve_as_of
 from etl_craft.services.operations.context import OperationContext
 
 
@@ -51,23 +54,47 @@ class LineageView:
     failed: bool
 
 
-def trace_lineage(
-    ctx: OperationContext,
-    *,
-    table: str | None = None,
-    column: str | None = None,
-    upstream: bool = True,
-    downstream: bool = True,
-    depth: int | None = None,
-    refresh: bool = False,
-) -> LineageView:
+class LineageOptions(TypedDict, total=False):
+    """Keyword selectors shared by the CLI and lineage operation."""
+
+    table: str | None
+    column: str | None
+    upstream: bool
+    downstream: bool
+    depth: int | None
+    refresh: bool
+    as_of: str | None
+    version: int | None
+
+
+def trace_lineage(ctx: OperationContext, **options: Unpack[LineageOptions]) -> LineageView:
     """Collect and select lineage using the same validation for every caller."""
+    unknown = options.keys() - LineageOptions.__annotations__.keys()
+    if unknown:
+        raise UsageError(
+            f"unknown lineage selectors {sorted(unknown)}; use the documented selector names"
+        )
+    table, column = options.get("table"), options.get("column")
+    upstream, downstream = options.get("upstream", True), options.get("downstream", True)
+    depth, refresh = options.get("depth"), options.get("refresh", False)
+    as_of, version = options.get("as_of"), options.get("version")
     if column and not table:
         raise UsageError("--column needs --table")
     if depth is not None and depth < 1:
         raise UsageError(f"--depth must be 1 or more, got {depth}")
+    if as_of is not None and version is not None:
+        raise UsageError("--as-of and --version are mutually exclusive; choose one")
+    if refresh and (as_of is not None or version is not None):
+        raise UsageError("--refresh cannot read history; omit it with --as-of or --version")
+    moment = None if as_of is None else resolve_as_of(ctx, as_of)
+    if version is not None:
+        moment = _version_moment(ctx, table, version)
     with acting_as(ctx.actor):
-        lineages = tuple(lineage.collect(ctx.engine, ctx.config, refresh=refresh))
+        lineages = tuple(
+            lineage.collect(ctx.engine, ctx.config, refresh=refresh)
+            if moment is None
+            else lineage.historical_lineage(ctx.engine, ctx.config, moment)
+        )
     graph = lineage.LineageGraph.of(lineages)
     if table is not None:
         catalog = active_catalog(ctx.config) if ctx.config.warehouse is not None else None
@@ -89,4 +116,30 @@ def trace_lineage(
         upstream,
         downstream,
         any(item.error for item in lineages),
+    )
+
+
+def _version_moment(ctx: OperationContext, table: str | None, version: int) -> datetime:
+    """Select one table's version, then read the graph at its opening time."""
+    if table is None or version < 1:
+        raise UsageError(
+            f"--version needs --table and a positive version number; got table {table!r}, "
+            f"version {version}; choose a table and version"
+        )
+    catalog = active_catalog(ctx.config) if ctx.config.warehouse is not None else None
+    name = lineage.table_name(table.split("."), catalog)
+    with ctx.engine.connect() as conn:
+        versions = fetch_lineage_versions(conn)
+    for item in versions:
+        if (
+            item.version_number == version
+            and lineage.table_name(
+                (item.catalog_name or "", item.schema_name, item.table_name), catalog
+            )
+            == name
+        ):
+            return item.valid_from
+    raise ResourceNotFoundError(
+        f"table {table!r} has no lineage version {version}; "
+        "choose a version listed in its catalog history"
     )
