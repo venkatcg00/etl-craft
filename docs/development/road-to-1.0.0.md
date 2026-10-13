@@ -129,6 +129,7 @@ item's text, or work done early under another item.
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
 | S5.P Project documentation gap UI | Planned | | Coloured column warnings, lineage gaps and project summary |
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
+| S5.T Resource discovery and deployment profiles | Planned | | Opt-in laptop, server and server-with-workers sizing from usable process resources; one discovery module before S5.C |
 | S5.C and later | Not started | | |
 
 ### Handover notes
@@ -151,7 +152,9 @@ S5.O.2b finishes with the three slices in
 stay task parameters rather than becoming child rows. The order is slice 2 (versioned lineage),
 then S5.R item 3 (data-driven migration markers) once the soak ends, then slice 3, whose
 conversion registers as data instead of a new branch in the migration runner, then the rest of
-S5.R.
+S5.R. After S5.S, S5.O.3, S5.P and S5.Q, take S5.T (resource discovery and deployment
+profiles), then S5.C. S5.T supplies the single-machine foundation that workers reuse; it
+does not move worker work ahead of the metadata, account or operator-control corrections.
 
 **Acceptance availability.**
 
@@ -796,6 +799,9 @@ flowchart LR
 
 ### Sizing rules
 
+- [S5.T](#s5t-resource-discovery-and-deployment-profiles) measures usable process resources and
+  applies the team-selected deployment profile before S5.C adds workers. Without a profile,
+  existing installations keep their current sizing behavior.
 - The overseer runs on the largest node, with at least 1.5 times the memory of the largest worker
   class (an 8 GiB worker means a 12 GiB overseer at minimum). This is a floor, not a sufficiency
   guarantee; [S6](#release-06-at-load) measures the real requirement.
@@ -818,7 +824,7 @@ flowchart LR
 | 0.2.0 | Stabilize: ship pause, backfill, consumption log and catalog history with every fix that needs no new ownership model | S2.A to S2.L | A regression test per fixed defect; every required suite green on the release commit, cloud included |
 | 0.3 | Identity: run and attempt ids everywhere, attempt ledger, leases, fenced writes, recorded gate decisions, actors on every action and engine-only Engine DB writes, data contract v2 | S3.A to S3.I (S3.I right after S3.A) | The chaos suite passes on SQLite and PostgreSQL |
 | 0.4 | Overseer: `etl-craft server`, schedules with time zones, ready-set dispatch, retries, `status`, `explain`, JSON, HTTP API, versioned YAML | S4.A to S4.H | The demo runs a week with no cron or Airflow; `kill -9` of the overseer loses and doubles nothing |
-| 0.5 | Operational basics, then the cluster: row-level rejects, SQL watermarks, event waits, source definitions and schema-aware lineage, normalized metadata, accounts, login and roles; pool interface, worker agents, project namespaces in one Engine DB, connection budget, managed PostgreSQL | S5.A to S5.S (S5.K to S5.N right after S5.B; S5.O to S5.S before S5.C) | Pool contract tests pass for both providers; many projects share one Engine DB |
+| 0.5 | Operational basics, then the cluster: row-level rejects, SQL watermarks, event waits, source definitions and schema-aware lineage, normalized metadata, accounts, login and roles; resource discovery and deployment profiles, pool interface, worker agents, project namespaces in one Engine DB, connection budget, managed PostgreSQL | S5.A to S5.T (S5.K to S5.N right after S5.B; S5.O to S5.T before S5.C) | Pool contract tests pass for both providers; many projects share one Engine DB |
 | 0.6 | At load: retention, bounded catalog, incremental cloning, metrics, backup and restore, benchmark | S6.A to S6.G | A sustained-load benchmark stays within its stated budgets; a restore is tested |
 | 0.7 to 0.9 | UI and finish: web UI with its sign-in, stewardship uploads, per-project roles, redaction, webhooks, secrets providers, packaging, compatibility policy, soak | S7.A to S7.M | A month-long soak of a real deployment passes |
 | 1.0.0 release candidates | The Support Insights example rebuilt on etl-craft, configured through CI, with its Superset dashboards | S8.A to S8.G | Every pipeline of the example runs and every chart of both dashboards renders correct data |
@@ -2795,12 +2801,105 @@ contract when S5.C lands. S7.A.2 exposes these operations in the workflow-monito
   actual outcome and an actionable reason for any remaining limitation, without losing audit
   history or unintentionally affecting other work.
 
+### S5.T Resource discovery and deployment profiles
+
+Branch: `feat/resources-profiles`. After S5.Q, before S5.C. Single-machine discovery and
+profile sizing ship here; S5.C wires the same module into worker startup and heartbeats.
+
+- *Problem.* Installation does not explain the CPU and memory a process may actually use or
+  how that allocation should be shared between tasks, the overseer and the API/UI server.
+  Raw host totals overstate container or affinity-limited capacity. Fixed settings neither
+  protect a person sharing a laptop nor use a dedicated host well, and unrelated role defaults
+  can spend the same resources twice.
+- *Where.* One shared `core/resources.py` module using the existing `psutil` dependency;
+  connector model/loader and reference/example configuration; `services/setup.py`,
+  `services/doctor.py`, local pool admission, overseer and API/catalog-server startup;
+  Engine DB connection factories and budget reporting. Later `status` and UI consume the
+  same report; S5.C's worker package calls the same discovery and sizing functions.
+- *Change.*
+  1. **Discover the process allocation.** Measure at setup and every overseer, server and
+     worker start. Measure effective CPU affinity, fractional CPU quotas and usable memory,
+     respecting container/cgroup limits and inherited ancestor limits. Host CPU count and RAM
+     are context, never the allocation when a tighter limit applies. Record the resource scope,
+     each measurement's source, limit and observation time, and unavailable measurements with
+     their reasons. Keep discovery in one module; do not add a dependency or another polling loop.
+  2. **Choose shape explicitly.** The team records optional `Deployment.Profile` in
+     `craft-connector.yml`: `laptop` (shared interactive host), `server` (dedicated host running
+     every role), or `server-workers` (S5.C's explicit cluster). Profile selection is separate
+     from `Orchestration.Mode`, which identifies who schedules work. Laptop/server select
+     local execution; server-workers selects the queue provider and requires PostgreSQL.
+     This is the explicit shape declaration, not a second inferred provider setting. Never
+     infer a cluster from PostgreSQL, CPU count, host names or worker heartbeats. Until S5.C
+     supplies the queue provider, execution with server-workers must report the unavailable
+     capability rather than silently execute locally; its sizing recommendation can still be
+     shown by doctor. S5.C owns enabling that provider and integrating workers.
+  3. **Recommend without changing configuration.** Setup and doctor show observed machine
+     characteristics, a recommended profile, and the settings/sizes it implies. Explain the
+     recommendation and any uncertainty: an unknown shared/dedicated usage defaults to the
+     conservative laptop recommendation, never to an inferred cluster. A cluster recommendation
+     needs the team's declared multi-host intent. The team chooses the profile and writes the
+     file; startup only reads it. Discovery does not edit, rewrite or silently select a profile.
+  4. **Size all roles together.** Derive ingestion and warehouse task slots, API/UI processes
+     and threads, and Engine DB pools from measured usable resources and the selected profile.
+     Laptop reserves a generous, documented CPU/memory share for the person and OS and binds
+     server/UI to loopback. Server uses dedicated-host reserves while retaining room for the
+     overseer and server. Server-workers separates controller and worker role allocations;
+     the controller runs no tasks unless explicitly registered as a worker. Count API/UI
+     resources once when they share a server, and account for separate processes when they do
+     not. One host's roles must not each allocate the entire host. Document per-profile reserve
+     defaults, minimum role footprints and per-kind cost estimates, and expose every binding
+     constraint. Existing overseer sizing floors and S6's measured-load requirements remain.
+  5. **Keep ceilings and budgets.** Explicitly configured parallelism and per-kind slot limits
+     stay ceilings, not requests to exceed measured capacity. The same holds for server process,
+     thread and Engine DB pool ceilings; introduce no additional tuning knobs unless named in
+     a reviewed design. Warehouse-query admission stays bounded by the warehouse's limits and
+     S5.E's pipeline/project/warehouse quotas, regardless of free local CPUs. Apply the S5.H
+     connection-budget contract to the single-machine roles now and reuse that accounting for
+     workers; do not duplicate a pool-budget implementation. Include server processes and their
+     pools in the total. Preserve task `NullPool` use and session connections for ownership
+     locks. Unsafe minimums fail with the role, measured allocation, ceiling and remedy; never
+     round a capacity up past a hard limit. Do not partition SQL or take over warehouse compute.
+  6. **Make uncertainty visible.** Doctor shows the selected or absent profile, every
+     measurement, reserve, derived size, configured ceiling and the reason for the final size.
+     Missing measurements are labelled unavailable, not zero measurements or successful probes.
+     The report names its conservative fallback value and why it applies: one CPU when CPU
+     allocation is unavailable, no automatic task-memory admission when no usable memory bound
+     is known, and at most one server process/thread. Zero derived task capacity queues work
+     with its reason. Refuse startup when known resources cannot support minimum administrative
+     roles. Later status and UI reuse this report rather than inventing different calculations.
+  7. **Upgrade deliberately.** Profile absence preserves existing execution selection,
+     configured/default slots, pools and server behavior. Discovery is then informational;
+     recommendations do not turn on services or resize them. Selecting a profile explicitly
+     opts into derived sizing, with settings still acting as ceilings. Ship the new setting,
+     profile behavior, fallback rules and any deliberate upgrade change in CHANGELOG, guides
+     and examples in the implementation PR. Do not migrate or edit a team's connector file.
+- *Tests.* Through setup/doctor and role startup, with supplied measurements rather than the
+  workstation's capacity: laptop-sized and large hosts; each profile's derived sizes and
+  reserves; CPU affinity and fractional quotas; container and inherited limits below host
+  capacity; missing measurements and their reasons/fallbacks; configured ceilings; insufficient
+  role minimums; aggregate role and connection budgets; localhost laptop bindings; profile
+  absence preserving released behavior. Assert no connector writes and no runtime profile or
+  cluster inference. S5.C tests worker startup/restarts reusing the module, refresh through
+  heartbeats, separate worker capacities, overlapping scopes, joins/departures and claim races.
+- *Done when.*
+  - Setup and each implemented role startup use one resource discovery/sizing module; S5.C's
+    worker integration has one named call path to reuse, not another discovery implementation.
+  - All three profiles have documented, tested sizing policies; execution shape is explicitly
+    selected and unsupported cluster execution fails without a local fallback.
+  - Derived task/server/pool sizes and reserves respect process allocation, configured ceilings,
+    warehouse admission limits and the S5.H connection-budget contract.
+  - Doctor reports every measurement and derived size with provenance, unavailable reasons and
+    stated fallback values; status/UI reuse the same report when their views are implemented.
+  - Existing installations retain behavior without a profile; opting in and its upgrade effects
+    are documented, and the team-owned connector file remains untouched.
+
 ### S5.C The PostgreSQL queue and the worker agent
 
 Branch: `feat/pools-worker`. Files: new `worker/` package (layer beside `overseer`),
 `cli/commands/worker.py`, migration for worker tables.
 
-- *Provider selection.* Select local or cluster execution explicitly, separately from
+- *Provider selection.* Use S5.T's explicitly recorded deployment profile to select local
+  or cluster execution, separately from
   `Orchestration.Mode`, which identifies who schedules tasks (engine or external orchestrator).
   Preserve local execution as the default. Do not infer a cluster from PostgreSQL, CPU count,
   host names or the arrival of worker heartbeats: a single-machine deployment may use PostgreSQL,
@@ -2810,34 +2909,23 @@ Branch: `feat/pools-worker`. Files: new `worker/` package (layer beside `oversee
   Startup validation and `doctor` must distinguish the selected provider from worker availability.
   Test local execution on PostgreSQL, explicit cluster execution with workers on the same host,
   invalid cluster selection on SQLite and zero-worker queuing without local fallback.
-- *Resource discovery.* Local execution and each worker discover their usable CPU and memory
-  allocation at startup, using the existing `psutil` dependency and platform limits. Honor CPU
-  affinity and effective container/cgroup CPU and memory ceilings, including inherited limits;
-  raw host CPU count and RAM are not the worker's allocation. Record the resource scope, measured
-  allocation and configured ceilings in the worker registry, with explicit unavailable reasons.
-  Refresh available capacity and resource pressure with the existing heartbeat, not a separate
-  busy polling loop. Use conservative automatic slot sizing when limits are not supplied;
-  configured limits remain ceilings, and reserve resources for the OS and overseer.
-  The overseer discovers eligible compute through healthy registered workers and keeps each
-  worker's capacity separate: a cluster's summed memory cannot satisfy a task that fits nowhere.
-  Use one agent per unpartitioned resource scope by default; multiple agents on the same host
-  must share reservation accounting or have verified disjoint allocations, so CPU/RAM are never
-  counted twice. Withdraw expired or draining workers from available capacity.
-  Advertise CPU/memory allocation, reserved/free capacity and supported slot kinds; distinguish
-  those measurements from configured task slots in `status`, `doctor` and the worker/pool UI.
-  Reuse the pool capacity/claim mechanism; task resource reservations must be atomic with claims
-  and released on terminal outcomes or fenced lease expiry. CPU-heavy ingestion and warehouse
-  queries need different budgets: warehouse query concurrency remains bounded by warehouse
-  limits even when worker CPUs are free. Tasks with unknown requirements use conservative
-  defaults and explicit overrides, not an assumed one-CPU-per-task rule.
-  Test a large single host, several smaller workers, container limits below host capacity,
-  overlapping same-host agents, stale measurements, worker joins/departures, reservation races
-  and a task that exceeds every worker's capacity. Missing measurements must remain visible.
-  Distribute independent ready tasks as whole attempts. SQL execution, data partitioning, shuffles
-  and skew handling belong to the selected warehouse/runtime, including Databricks; etl-craft
-  must not split SQL, build a distributed dataframe engine or rebalance its data. Python scripts
-  execute as whole tasks unless their own runtime implements parallelism. Worker CPU/RAM capacity
-  governs local task-process placement; warehouse capacity governs SQL query admission separately.
+- *Resource integration and placement.* Reuse S5.T's shared discovery/sizing module at worker
+  startup and restart, and publish its resource scope, effective allocation, configured ceilings,
+  reserves and unavailable reasons in the worker registry. Refresh available capacity and
+  pressure through the existing heartbeat, not a second polling loop. Doctor/status/worker UI
+  use the same resource report. Keep each worker's capacity separate: summed cluster memory
+  cannot satisfy a task that fits nowhere. Use one agent per unpartitioned resource scope by
+  default; multiple agents on a host need shared reservation accounting or verified disjoint
+  allocations so CPU/RAM are never counted twice. Withdraw expired/draining workers from
+  available capacity. Reservations are atomic with claims and released on terminal outcomes
+  or fenced lease expiry. Apply S5.T's per-kind estimates and S5.E's warehouse admission limits;
+  unknown task requirements use conservative defaults and explicit existing overrides.
+  Test several workers, overlapping same-host scopes, stale measurements, joins/departures,
+  reservation races and a task exceeding every worker's capacity, including visible missing
+  measurements. Distribute whole attempts: SQL partitioning, shuffles and skew remain the
+  warehouse/runtime's job, including Databricks. Python scripts remain whole tasks unless their
+  own runtime implements parallelism. Worker resources govern placement; warehouse capacity
+  governs query admission separately.
 - *Schema.* `AUD_WORKERS (WORKER_ID, POOL, HOST, VERSION, INGESTION_SLOTS, WAREHOUSE_SLOTS, STARTED_AT, HEARTBEAT_AT, STATUS)`
   with `STATUS` in `ACTIVE`, `DRAINING`, `GONE`. `AUD_TASK_ATTEMPTS` gains `POOL`, `SLOT_KIND`,
   `PRIORITY`, `CANCEL_REQUESTED_AT`, `CANCEL_ACKNOWLEDGED_AT`.
@@ -2938,11 +3026,13 @@ Branch: `feat/engine-projects`.
 
 ### S5.H The Engine DB connection budget
 
+- Reuse S5.T's role-size report and single-machine accounting; add registered worker
+  contributions and deployment-wide enforcement here. Count API/UI process pools in the total.
 - Every process has one SQLAlchemy engine. Task processes use `NullPool` and open at most one
   connection at a time. Workers use a pool of 2 plus one connection per 8 slots; the overseer a pool
   of `Orchestration.Db_pool_size` (default 10).
-- `doctor` prints the budget: `overseer + workers × (2 + slots/8) + running tasks`, and warns when it
-  exceeds 80% of `max_connections`.
+- `doctor` prints the budget: `overseer + API/UI pools + workers × (2 + slots/8) + running tasks`,
+  and warns when it exceeds 80% of `max_connections`.
 - PgBouncer in transaction mode can front workers and tasks, but advisory locks (the overseer's
   leadership, target locks) need a session connection: the overseer connects directly. Document it.
 
