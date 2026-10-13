@@ -3,23 +3,22 @@
 ## Branches
 
 - `main` is the trunk. Every change reaches it through a pull request with green CI.
-- Cut each branch from `main` and keep it to one item of the
-  [rewrite plan](docs/development/rewrite-plan.md) or one workstream or item of
+- Cut each branch from `main` and keep it to one workstream or item of
   [Road to 1.0.0](docs/development/road-to-1.0.0.md). Name it `<type>/<area>-<topic>`, for example
   `feat/core-graph` or `test/e2e-demo`.
 - Squash-merge. The squash commit message follows
   [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `refactor:`,
   `test:`, `docs:`, `chore:`, `build:`, `ci:`).
 
-## Porting from the previous implementation
+## The rules for every change
 
-Most branches port code from the `archive/iteration-2` tag (`git show archive/iteration-2:<path>`).
-Porting a slice means:
+[AGENTS.md](AGENTS.md) holds the design rules, the architecture, the engineering standards, the
+test rules, the scope of a pull request and the definition of done. People and coding agents
+follow the same file. The procedures it refers to are in `.agents/skills/`: `roadmap-item` takes
+an item from branch to merge, and `pre-pr-checks` is the validation.
 
-1. Move the code into its layer (see [CLAUDE.md](CLAUDE.md) for the layers).
-2. Keep its behaviour. A branch that changes behaviour says so in its pull request.
-3. Rewrite comments and docstrings so they describe what the code does now.
-4. Port the tests that cover the slice, into `tests/unit/` or `tests/integration/<area>/`.
+The previous implementation is kept at the `archive/iteration-2` tag
+(`git show archive/iteration-2:<path>`) for reference.
 
 ## Comments and documentation
 
@@ -28,26 +27,33 @@ They never record history: no decision tags, dates, review item ids or "changed 
 That context belongs in the pull request and the commit message. `make history` enforces this,
 and CI runs it on every pull request.
 
-Before opening a pull request, run the complete `make check docs` suite locally and finish
-relevant service and live-cloud acceptance tests. Fix failures before creating the PR.
-When changing GitHub Actions workflows, run `actionlint` locally before pushing; Python tests
-do not validate GitHub expression contexts.
-Build the current wheel and source distribution together, then run the installed-wheel demos
-across all four local warehouses with
-`ETL_CRAFT_TEST_WHEEL` pointing to that wheel and `ETL_CRAFT_REQUIRE_SERVICES=1`. The regular
-coverage run skips those demos when no wheel is supplied; `make verify-package` checks installation
-but does not run the pipeline demos.
+Before opening a pull request, run the checks in `.agents/skills/pre-pr-checks/SKILL.md`:
+`make check docs`, the suites the change touches against the local services, the
+installed-wheel demos, `actionlint` for workflow changes, and the cloud tests when warehouse SQL
+changes. Fix failures before creating the pull request.
 
 ## Definition of done
 
-A branch is ready to merge when:
+The list is in [AGENTS.md](AGENTS.md#definition-of-done). Every section of the pull request
+template is filled in; "None" is an answer, an empty section is not. Merging into `main`
+publishes the documentation site as the `dev` version on GitHub Pages.
 
-- `make check` passes: ruff lint and format, `mypy --strict`, the layer contracts
-  (`lint-imports`), the history gate, and the tests with coverage of at least 90%.
-- New or ported behaviour has tests at the right level (unit, integration or end-to-end).
-- The documentation page for the feature exists or is updated, and `make docs` builds it
-  without warnings. Merging into `main` publishes the site as the `dev` version on
-  GitHub Pages.
+## Working with coding agents
+
+Codex reads `AGENTS.md`; Claude Code reads `CLAUDE.md`, which imports it. Both load the skills
+in `.agents/skills/`.
+
+- **Brief by item, not by implementation.** "Take roadmap item S5.O.3" lets the agent read the
+  item, its "Done when" and the design rules. Step-by-step implementation instructions bypass
+  that judgement.
+- **Stop-and-ask is intended.** When a request conflicts with a design rule, adds public surface
+  or CI cost the item does not name, or needs more than one pull request, the agent answers with
+  a short design note instead of code. Answer the decision it asks for. To overrule a rule on
+  purpose, say so explicitly; the agent records the deviation in the pull request and the
+  roadmap's Handover notes.
+- **Setup for a cloud agent:** its environment setup runs `make sync`. Docker is usually
+  unavailable there, so the service-backed suites skip locally and run in pull-request CI. The
+  Databricks and Snowflake suites need a local session with credentials.
 
 ## Tests
 

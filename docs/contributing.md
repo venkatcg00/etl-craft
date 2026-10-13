@@ -1,10 +1,12 @@
 # Contributing
 
-The contribution workflow, including the branch rules and the definition of done, is in
-[CONTRIBUTING.md](https://github.com/venkatcg00/etl-craft/blob/main/CONTRIBUTING.md). The
-[rewrite plan](development/rewrite-plan.md) lists the branches that rebuild etl-craft for its
-first release, and their status. [Road to 1.0.0](development/road-to-1.0.0.md) is the build plan
-from 0.1.0 to 1.0.0: every release, work item, test and defect.
+The contribution workflow is in
+[CONTRIBUTING.md](https://github.com/venkatcg00/etl-craft/blob/main/CONTRIBUTING.md), and the
+rules every change follows (design rules, architecture, standards and the definition of done)
+are in [AGENTS.md](https://github.com/venkatcg00/etl-craft/blob/main/AGENTS.md).
+[Road to 1.0.0](development/road-to-1.0.0.md) is the build plan from 0.1.0 to 1.0.0: every
+release, work item, test and defect. The [rewrite plan](development/rewrite-plan.md) records how
+0.1.0 was built.
 
 To build this site locally:
 
@@ -21,7 +23,7 @@ pages:
 
 | Version | Built from | Notes |
 |---|---|---|
-| `dev` | `main` | the default version until the first release |
+| `dev` | `main` | unreleased work; the default only while no release exists |
 | `X.Y` | the newest `vX.Y.Z` tag | one version per release line |
 | `latest` | the newest release line | the default version once a release exists |
 

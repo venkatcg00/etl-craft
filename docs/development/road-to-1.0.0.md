@@ -12,8 +12,9 @@ is listed with its fix in [Appendix A](#appendix-a-defect-traceability).
 
 ## How to use this plan
 
-**Read first.** `CLAUDE.md` (layers, design rules, conventions), `CONTRIBUTING.md` (definition of
-done) and [the rewrite plan](rewrite-plan.md) (how the codebase is organised and tested). The
+**Read first.** `AGENTS.md` (design rules, architecture, engineering standards, when to stop and
+ask, definition of done), `CONTRIBUTING.md` (branches and commits) and
+[the rewrite plan](rewrite-plan.md) (how the codebase is organised and tested). The
 sections [Target architecture](#target-architecture) and
 [The run and attempt state machine](#the-run-and-attempt-state-machine) define the vocabulary used
 everywhere below.
@@ -33,7 +34,7 @@ items (`S2.A.3`). Every item has the same parts:
 Squash-merge by pull request. A release is cut when every workstream in it is merged and its gate
 passes.
 
-**Definition of done for every item** (in addition to `CONTRIBUTING.md`):
+**Definition of done for every item** (the full list is in `AGENTS.md`):
 
 1. The tests named in the item exist, carry their suite marker, and fail on the old code.
 2. `make check` passes, and the suites the item touches pass against the local services
@@ -43,7 +44,7 @@ passes.
 4. Engine DB changes ship as a migration in both `dialects/engine/postgres/migrations/` and
    `dialects/engine/sqlite/migrations/`, the fresh `schema.sql` files are updated to match, and the
    upgrade test passes from every released schema in `tests/fixtures/schemas/`.
-5. New error classes get the next free `ExitCode` (the current last is `STALE_TRANSITION = 20`).
+5. New error classes get the next free `ExitCode`; a test enforces that no two classes share one.
 6. Every failure the item introduces names the object, the value found, what was expected and the
    remedy, and is recorded on the run or attempt it belongs to.
 7. Replacement work deletes the superseded path in the same item. Do not add an interface, factory,
@@ -123,6 +124,7 @@ item's text, or work done early under another item.
 | S5.O.1 SCD lifecycle invariants | Done | #148 | Common SCD flags, current-row soft deletes and legacy active-state upgrades |
 | S5.O.2a Common config contract | Done | #149 | Mandatory core/custom CFG audit fields and keys, safe token lifecycle history and lossless upgrades |
 | S5.O.2b Normalized object contracts | In progress | #150, #151, #152, #153, #154 | Readiness, stable identities, source contracts and task/rule target FKs; ordered merge terms and audit endpoints remain pending |
+| S5.R Consolidate before the cluster | Planned | | Behaviour-preserving: one query path for Engine DB SQL, data-driven migration markers, enums and `core` errors throughout, shorter functions |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
 | S5.P Project documentation gap UI | Planned | | Coloured column warnings, lineage gaps and project summary |
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
@@ -2354,6 +2356,68 @@ and optional ordinary business-table actors. Completing S5.O.1 does not complete
   config round trips, identity conflicts and SCD update/delete/revival on supported warehouses.
 - *Done when.* All config tables satisfy the base contract, object identities use relational
   components, old metadata/history converts without loss, and both SCD actions enforce flags.
+
+### S5.R Consolidate before the cluster
+
+Branch: one per item, `refactor/<area>-<topic>`. After S5.O.2b, and not before the 0.4 soak
+ends; before S5.O.3. No item changes behaviour, so none adds a `CHANGELOG.md` entry.
+
+- *Problem.* Since S4.I, `src/` has grown from about 27,000 to about 35,000 lines, and the
+  quality checks in `make check` record the debt that came with it. Repositories run inline SQL
+  and branch on the Engine DB dialect instead of using the query catalog. Two near-copies
+  convert rule and task targets, migrations wire markers into Python one at a time, status
+  values are written as strings beside their enums, and functions of 150 to 210 lines hold
+  several jobs each. Each item below names the code and what replaces it.
+- *Change.*
+  1. **Engine DB SQL through the query catalog** (`refactor/engine-query-catalog`).
+     `engine/repository/source_contracts.py`, `rule_targets.py`, `task_targets.py` and
+     `config_history.py` run SQL with `text(...)` and choose names with
+     `conn.dialect.name == "postgresql"` (33 such branches outside `dialects/`). Move each
+     statement to `dialects/engine/queries/` (overridden per dialect only where the SQL differs),
+     run it with `engine.queries.statement`, and move dialect differences into
+     `dialects/engine/base.py`.
+  2. **One target-conversion path** (`refactor/engine-target-contracts`). `rule_targets.py` and
+     `task_targets.py` repeat the expected-column sets, the trigger allowlists, the catalog
+     lookup, the `COALESCE(MAX(...),0)+1` id allocation and the conversion recording, and
+     `task_targets` imports helpers from `rule_targets`. Keep one module for the shared
+     contract, with the rule- and task-specific parts as data.
+  3. **Data-driven migration markers** (`refactor/engine-migration-markers`).
+     `engine/migrations.py` branches on each marker in `_apply` and slices statements by
+     position (`statements[:2]`, `[:4]`, `[:-3]`). Register each marker's Python step in one
+     table that the migration runner reads, so that adding a migration that uses an existing
+     marker changes no `.py` file. Add a test that asserts this.
+  4. **Enums and errors** (`refactor/core-enums-errors`).
+     - Replace the string literals of `RunStatus`, `Handler`, `SqlAction` and the other
+       `core.enums` values outside `core/enums.py` with the enums.
+     - Add enums for attempt statuses (`QUEUED`, `CLAIMED`, `RUNNING`, `LOST`, ...) and API roles
+       (`viewer`, `operator`, `admin`).
+     - Replace `ValueError` and `LookupError` raised for conditions a user can cause (most in
+       `services/config_files.py`) with `core.errors` classes.
+  5. **Shorter functions** (`refactor/split-long-functions`). Split by responsibility:
+     - `api/app.py` `create_app` (213 lines);
+     - `services/upgrade_targets.py` `upgrade_targets` (187);
+     - `engine/repository/config_history.py` `config_as_of` (182);
+     - `execution/events.py` `_check_event` (155);
+     - `services/lineage.py` `collect` (148).
+  6. **Helpers written once** (`refactor/core-shared-helpers-2`). Write each of these once in
+     its layer:
+     - identifier quoting, hand-written in `dialects/engine/sqlite/audit.py`,
+       `dialects/warehouse/duckdb_iceberg.py`, `engine/privileges.py` and `services/doctor.py`;
+     - durations, where `engine/repository/catalog.py` `_seconds` and
+       `services/operations/status.py` `_duration` disagree on UTC and negatives;
+     - JDBC URL parsing: `core.text.parse_jdbc_url`, `config.targets.parse_warehouse_url` and
+       `dialects.engine.postgres.parse_postgres_url`;
+     - Y/N flags, compared inline with `== "Y"` in about ten places.
+- *Design question for the owner, not part of this item.* `core.actor.current_actor()` returns
+  the system actor when no actor is set, so a code path that forgets `acting_as` is recorded as
+  etl-craft instead of being refused. Decide whether it should fail before S7.B.
+- *Tests.* No new behaviour, so no new tests beyond those named: the marker test in item 3, and
+  tests moved with the code they cover. Every existing suite passes unchanged on both Engine DBs
+  and the four local warehouses.
+- *Done when.* Each item's pull request states its `src/` line delta and lowers the quality
+  baseline (`scripts/quality-baseline.json`) for the code it touches, with no new entries. No
+  Engine DB SQL text and no `dialect.name` branch remains outside `dialects/` in the modules of
+  items 1 and 2. A new migration with an existing marker needs no Python change.
 
 ### S5.O.3 SCD human override protection
 

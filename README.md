@@ -30,7 +30,7 @@ Requires Python 3.11 or newer. `uv build` builds the wheel and sdist into `dist/
 
 ```bash
 make sync     # create .venv with every dependency group
-make check    # lint, format check, mypy --strict, layer contracts, history gate, tests
+make check    # lint, format check, mypy --strict, layer contracts, history gate, regressions, tests
 make verify-package   # build, then install with pip and uv into clean environments
 make docs     # build the documentation site into site/
 ```
