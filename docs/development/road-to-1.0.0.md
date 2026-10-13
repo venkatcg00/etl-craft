@@ -784,7 +784,7 @@ flowchart LR
 | 0.4 | Overseer: `etl-craft server`, schedules with time zones, ready-set dispatch, retries, `status`, `explain`, JSON, HTTP API, versioned YAML | S4.A to S4.H | The demo runs a week with no cron or Airflow; `kill -9` of the overseer loses and doubles nothing |
 | 0.5 | Operational basics, then the cluster: row-level rejects, SQL watermarks, event waits, source definitions and schema-aware lineage, normalized metadata, accounts, login and roles; pool interface, worker agents, project namespaces in one Engine DB, connection budget, managed PostgreSQL | S5.A to S5.S (S5.K to S5.N right after S5.B; S5.O to S5.S before S5.C) | Pool contract tests pass for both providers; many projects share one Engine DB |
 | 0.6 | At load: retention, bounded catalog, incremental cloning, metrics, backup and restore, benchmark | S6.A to S6.G | A sustained-load benchmark stays within its stated budgets; a restore is tested |
-| 0.7 to 0.9 | UI and finish: web UI with its sign-in, per-project roles, redaction, webhooks, secrets providers, packaging, compatibility policy, soak | S7.A to S7.J | A month-long soak of a real deployment passes |
+| 0.7 to 0.9 | UI and finish: web UI with its sign-in, stewardship uploads, per-project roles, redaction, webhooks, secrets providers, packaging, compatibility policy, soak | S7.A to S7.M | A month-long soak of a real deployment passes |
 | 1.0.0 release candidates | The Support Insights example rebuilt on etl-craft, configured through CI, with its Superset dashboards | S8.A to S8.G | Every pipeline of the example runs and every chart of both dashboards renders correct data |
 | 1.0.0 | Supported contract | | Every item of the [1.0.0 checklist](#100-release-checklist) has evidence |
 
@@ -2506,8 +2506,13 @@ are service accounts.
          `etl-craft` (`SYSTEM`);
        - the overseer and its schedules act as the service account the server signed in with;
        - S5.C's workers act as their own service accounts.
-     - ETL task writes stamp the warehouse's `CREATED_BY` and `UPDATED_BY` with the engine's
-       account, `etl-craft`. S5.O.3 adds the human writers of protected SCD tables.
+     - Every run carries a writer: the account its writes stamp into the warehouse's
+       `CREATED_BY` and `UPDATED_BY`.
+       - ETL writes stamp the engine's account, `etl-craft`. That includes runs a person
+         starts: starting a pipeline is an action, not a data edit
+         ([metadata and UI design](metadata-and-ui.md#project-business-tables-and-human-overrides)).
+       - S7.M sets the writer to the uploader for runs that process a steward's upload.
+       - S5.O.3 adds the human writers of protected SCD tables.
      - Audit rows record the account name and kind. Names recorded before this item stay as
        they are.
 - *Boundary.* Login proves who acts, and the role check decides what they may do.
@@ -2914,8 +2919,83 @@ restrictions. Browser tests must exercise the operations, not merely check visib
   - Metadata: forms to create and edit `CFG_` rows (pipelines, tasks, parameters, dependencies,
     rules); saving runs `validate` for the affected pipeline and refuses invalid changes with its
     messages; every change is attributed to the user.
+  - Uploads (S7.M): the contracts the signed-in steward is assigned to, a file upload, the
+    outcome with rejected rows and reasons, and the upload history.
 - *Tests.* Page tests with the API test client; an end-to-end browser test of the main operator flows
   (Playwright in a separate CI job).
+
+### S7.M Stewardship uploads
+
+Branch: `feat/stewardship-uploads`. Built with the web UI (S7.A), whose Uploads page uses it;
+after S5.S (accounts and roles) and S5.O.3 (protection of human writes).
+
+- *Problem.* Business users supply or correct data that has no other source: reference lists,
+  mappings, targets and manual adjustments. Today they send files to the dev team, who load them
+  by hand. Nobody records who supplied the data, and every correction waits on a developer.
+- *Who owns what.*
+  - The dev team owns each upload contract, meaning the file's columns, types and key, and the
+    pipeline that processes it. Both change only through the project's config files, reviewed
+    like any other change.
+  - Stewards own the data. They upload files to the contracts they are assigned to, and
+    nothing else.
+- *Change.*
+  1. **Upload contracts** (config files; the `developer` role).
+     - `CFG_UPLOAD_CONTRACTS`, with the common config fields from S5.O.2a:
+       - `UPLOAD_CONTRACT_ID` and `CONTRACT_CODE`;
+       - `TABLE_ID`: the landing table's contract in `CFG_TABLES` and `CFG_COLUMNS` (S5.O.2b),
+         which gives the columns, types, nullability and key;
+       - `FILE_FORMAT`: `CSV`; another format is added when a contract needs it;
+       - `PIPELINE_ID`: the pipeline that processes an accepted upload;
+       - `REJECT_LIMIT`: as in S5.K;
+       - `ACTIVE_FLAG`.
+     - `CFG_UPLOAD_STEWARDS` assigns accounts to contracts, and only an admin assigns.
+     - The `steward` role sits between `viewer` and `operator`. An upload needs both the role
+       and an assignment to the contract; no other role implies an assignment.
+  2. **Uploading.** One service sits behind `etl-craft upload --contract C FILE`,
+     `POST /api/v1/uploads` and the S7.A Uploads page.
+     - The uploader must be signed in (S5.S) and assigned to the contract. Otherwise the
+       upload is refused and recorded.
+     - The file is checked against the contract before anything loads: format, header names,
+       required columns, types and key uniqueness within the file.
+       - A structural problem, such as a wrong or missing column or an unreadable file, refuses
+         the whole upload. The message names the column, the value found, what was expected
+         and the remedy.
+       - Rows that fail a type or constraint check go to S5.K's rejects, up to
+         `REJECT_LIMIT`. Over the limit, the upload is refused.
+       - A file identical (same SHA-256) to one already loaded for the contract is refused,
+         naming the earlier upload.
+     - Accepted rows land in the contract's landing table. The contract's pipeline then starts
+       at once, as a run requested by the uploader, with the upload as its input
+       (`$$upload_id` for SQL tasks, `task.upload` for ingestion scripts).
+     - That run's writer is the uploader (S5.S). Every row it inserts or updates in project
+       tables carries the uploader's account in `CREATED_BY` and `UPDATED_BY`, and on
+       protected SCD tables these are human writes under S5.O.3's locks.
+  3. **Record.**
+     - `AUD_UPLOADS` holds:
+       - `UPLOAD_ID`, the contract and the account;
+       - the file name, SHA-256 and size;
+       - the received, accepted and rejected row counts;
+       - `PIPELINE_RUN_ID`;
+       - the status: `REFUSED`, `LOADED`, or `FAILED` with the run's outcome;
+       - the times.
+     - The original file is kept under the project's `uploads/` directory by upload id, for
+       audit and reprocessing. Retention follows S6.A.
+  4. **Feedback.** The uploader sees the outcome, the rejected rows with their reasons, and the
+     run's status, in the CLI output, the API response and the UI page. `etl-craft uploads
+     --contract C` lists the history.
+- *Tests.*
+  - Access: assigned and unassigned accounts; accounts without the `steward` role.
+  - Validation: structural refusals; row rejects and the limit; duplicate files.
+  - Loading: the pipeline run started with the upload as input; a failed run recorded on the
+    upload.
+  - Attribution: the uploader on every written row on all four local warehouses; uploaded rows
+    protected on SCD tables.
+  - The same service through the CLI and the API.
+- *Done when.*
+  - A steward assigned to a contract can upload a file and see it loaded, or refused with
+    reasons, and nobody else can upload to that contract.
+  - Every row an upload writes carries the uploader's account.
+  - The dev team changes contracts and pipelines only through config files.
 
 ### S7.B Users, roles and identities (W10)
 

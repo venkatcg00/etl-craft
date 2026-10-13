@@ -225,7 +225,7 @@ it. Never copy it, and never import another module's `_private` name.
 Follow `.agents/skills/pre-pr-checks/SKILL.md`. In short:
 
 ```bash
-make sync                 # dependencies (run in your environment's setup step)
+make sync                 # dependencies: once, and after uv.lock changes
 make check                # ruff, format, mypy --strict, lint-imports, history, regressions,
                           # quality baseline, tests with coverage >= 90%
 make docs                 # strict documentation build
