@@ -170,6 +170,7 @@ it. Never copy it, and never import another module's `_private` name.
   that records the failure (a child process, the server loop) and says so in a comment.
 - **Small functions.** A function does one thing: split long or branchy functions by
   responsibility, and keep parameter lists short (group related values in a dataclass).
+  `make quality` enforces the limits (see [The quality baseline](#the-quality-baseline)).
 - **Delete what you replace.** Remove the superseded path, its tests and its docs in the same
   pull request.
 - **Logging and output.** Log through `logging` (`etl_craft.<module>` loggers). Only `cli`
@@ -223,7 +224,7 @@ Follow `.agents/skills/pre-pr-checks/SKILL.md`. In short:
 ```bash
 make sync                 # dependencies (run in your environment's setup step)
 make check                # ruff, format, mypy --strict, lint-imports, history, regressions,
-                          # tests with coverage >= 90%
+                          # quality baseline, tests with coverage >= 90%
 make docs                 # strict documentation build
 make services-up          # local PostgreSQL, MinIO, Iceberg REST, Trino, Mailpit (Docker)
 ```
@@ -236,12 +237,37 @@ make services-up          # local PostgreSQL, MinIO, Iceberg REST, Trino, Mailpi
   leave the pull request unmerged for the owner.
 - **Workflows:** a change under `.github/workflows/` needs `uvx --from actionlint-py actionlint`.
 
+### The quality baseline
+
+`scripts/check_quality.py` (`make quality`, part of `make check`) scores every module in
+`src/etl_craft`:
+
+- **Size and complexity** (ruff C901, PLR0912, PLR0913 and PLR0915): functions over 80 lines,
+  modules over 800 lines.
+- **Error handling:** broad `except` clauses that swallow the error, and raised built-in
+  exceptions.
+- **Conventions:** status strings instead of `core.enums`, and Engine DB SQL text or `dialect.name`
+  checks outside the dialects layer.
+- **Suppressions and shortcuts:** `type: ignore`, `noqa`, `pragma: no cover`, `cast`, bare `Any`
+  in signatures, and imports of private names.
+- **Dependencies:** new core dependencies.
+
+`scripts/quality-baseline.json` records today's scores.
+- **A score above the baseline fails.** Fix the code; do not edit the baseline.
+- **A score below the baseline also fails until you run `make quality-baseline`** and commit the
+  file, so the improvement is kept.
+- **Growing the baseline needs the owner.** The PR policy workflow refuses a pull request that
+  grows the baseline unless it carries the `quality-exception` label, which only the owner
+  applies. Never add that label. If a change cannot fit, stop and ask.
+
 ## Opening and merging a pull request
 
 1. **Self-review the diff** as a reviewer would: the design rules, the architecture, the
    engineering standards, the tests, the scope. Fix what you find.
 2. **Fill in every section of `.github/pull_request_template.md`.** "Concerns and deviations"
    and "New public surface and dependencies" say "None" when empty; never leave them out.
+   The PR policy workflow checks the sections and the ticked "Done when" points, and runs
+   again when the description is edited.
 3. **Merge after every check is green**, squash-merging and keeping the branch. Never merge
    with a red, pending or skipped required check. Never rerun a failed job without first reading
    its log and explaining the failure.

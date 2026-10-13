@@ -1,0 +1,46 @@
+name: PR policy
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-policy-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  description:
+    name: description fills in the template
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check the pull request description
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: python3 scripts/check_pr_body.py
+
+  quality-growth:
+    name: quality baseline does not grow
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fetch the base branch
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: git fetch --no-tags --depth=1 origin "$BASE_REF"
+      - name: Compare the baseline with the base branch's
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          # Only the owner applies this label; it lets one pull request grow the baseline.
+          ALLOW_GROWTH: ${{ contains(github.event.pull_request.labels.*.name, 'quality-exception') }}
+        run: |
+          args=(--compare-to "origin/$BASE_REF")
+          if [ "$ALLOW_GROWTH" = "true" ]; then
+            args+=(--allow-growth)
+          fi
+          python3 scripts/check_quality.py "${args[@]}"

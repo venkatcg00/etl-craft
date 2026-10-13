@@ -100,13 +100,16 @@ after it is green.
   - **Validation:** per suite, the counts, coverage, duration and anything that could not run
   - **Handover**
 
+  The PR policy workflow checks the sections and the "Done when" ticks; edit the description to
+  fix it.
+
 ## 7. CI and merge
 
 - Every push starts pull-request CI again. Watch it: `gh pr checks <n> --watch --fail-fast`.
 - On a failure, read the log first (`gh run view <run-id> --log-failed`). Find the cause, fix
   it, rerun the matching local step and push. Rerun a job only for a cause outside the change,
   and say which.
-- When every check is green, `gh pr merge <n> --squash`. Never pass `--delete-branch`; every
+- When every check, including the PR policy workflow, is green, `gh pr merge <n> --squash`. Never pass `--delete-branch`; every
   branch is kept. Leave the pull request unmerged, with the reason in it, when a required suite
   could not run (`AGENTS.md`, "Validation").
 - Afterwards, run `git switch main && git pull --ff-only`, and confirm the Docs deployment

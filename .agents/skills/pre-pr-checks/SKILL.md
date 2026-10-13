@@ -69,7 +69,11 @@ make check docs > "$SCRATCH/check.log" 2>&1; echo "exit $?"
 - `lint-imports`;
 - the history gate;
 - the regression map;
+- the quality baseline (`make quality`);
 - the tests with coverage of at least 90%.
+
+When the quality baseline fails, fix the code; after an improvement, run
+`make quality-baseline` and commit the file (`AGENTS.md`, "The quality baseline").
 
 `make docs` builds the site strictly.
 
