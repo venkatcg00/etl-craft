@@ -123,7 +123,7 @@ item's text, or work done early under another item.
 | S5.N Source definitions and schema-aware lineage | Done | #147 | Offline star/join tracing, audited source definitions, seeding and documented/deployed schema comparison |
 | S5.O.1 SCD lifecycle invariants | Done | #148 | Common SCD flags, current-row soft deletes and legacy active-state upgrades |
 | S5.O.2a Common config contract | Done | #149 | Mandatory core/custom CFG audit fields and keys, safe token lifecycle history and lossless upgrades |
-| S5.O.2b Normalized object contracts | In progress | #150, #151, #152, #153, #154 | Readiness, stable identities, source contracts and task/rule target FKs; ordered merge terms and audit endpoints remain pending |
+| S5.O.2b Normalized object contracts | In progress | #150, #151, #152, #153, #154 | Readiness, stable identities, source contracts and task/rule target FKs; remaining: merge column lists, lineage endpoints, target state (three slices) |
 | S5.R Consolidate before the cluster | Planned | | Behaviour-preserving: one query path for Engine DB SQL, data-driven migration markers, enums and `core` errors throughout, shorter functions |
 | S5.S Accounts, login and roles | Planned | | Registered user and service accounts, password and SSO login, tokens for services, a role check on every action, no implicit actor, local installations that operate a server |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
@@ -146,6 +146,9 @@ S5.O.2b for object normalization and then the UI items. The frozen 0.4
 soak is unchanged.
 S5.R and then S5.S come after S5.O.2b and before S5.O.3: S5.O.3's human-only locks and S5.Q's
 operator controls need proven people and roles, and S5.C's workers are service accounts.
+S5.O.2b finishes with the three slices in
+[S5.O.2b Remaining object identities](#s5o2b-remaining-object-identities). Merge column lists
+stay task parameters rather than becoming child rows.
 
 **Acceptance availability.**
 
@@ -2359,6 +2362,72 @@ and optional ordinary business-table actors. Completing S5.O.1 does not complete
   config round trips, identity conflicts and SCD update/delete/revival on supported warehouses.
 - *Done when.* All config tables satisfy the base contract, object identities use relational
   components, old metadata/history converts without loss, and both SCD actions enforce flags.
+
+### S5.O.2b Remaining object identities
+
+Branch: one per slice below, in order, each one pull request. After the task target conversion
+(#154), before S5.R. These three slices finish S5.O.2b; nothing else belongs to it.
+
+- *Problem.* Source, rule-target and task-target identities are relational, but the audit and
+  state tables still store an object as one combined name:
+  - `AUD_COLUMN_LINEAGE.SOURCE_OBJECT` and `TARGET_OBJECT`;
+  - `AUD_BUSINESS_RULES_RESULTS.TARGET_TABLE`;
+  - `AUD_TARGET_HASH_VERSION.TARGET_OBJECT` and `AUD_TARGET_VIEW_STATEMENT.TARGET_OBJECT`, both
+    keyed by the lowercased name.
+
+  `engine.locks.target` hashes the same lowercased name, so one target spelled with and without
+  the configured catalog takes two different locks. Separately, a merge column list accepts the
+  same column twice.
+- *Change.*
+  1. **Merge column lists** (`feat/sql-merge-columns`).
+     - `MERGE_KEY` and `MERGE_COMPARE_COLUMNS` stay ordered, `|`-separated task parameters. They
+       name columns of the task's own output, not objects, so they get no table.
+     - The SQL task reader (`handlers/sql/spec.py`), and through it `validate`, refuses a name
+       given twice in one list, compared case-insensitively as every supported warehouse treats
+       unquoted names. The message names the task, the parameter, the column and the remedy.
+     - An existing target whose compare list repeats a name needs a documented path to remove
+       the repeat without unchanged rows being seen as changed.
+     - No new table, CSV column or migration.
+  2. **Lineage evidence endpoints** (`feat/metadata-lineage-endpoints`).
+     - `AUD_COLUMN_LINEAGE` stores the source and the target as separate catalog, schema and
+       table components, through a new migration in both dialects.
+     - Existing rows convert from their recorded spelling with the identifier rules in the
+       [corrective design](metadata-and-ui.md#legacy-identity-inventory-and-readiness), never
+       resolved against today's catalog.
+     - A recorded name that cannot be split refuses the upgrade before any change, naming the
+       row id and the value.
+     - The lineage service, the catalog and the generated documentation read the components.
+  3. **Target state and rule results** (`feat/metadata-target-state`).
+     - `AUD_TARGET_HASH_VERSION` and `AUD_TARGET_VIEW_STATEMENT` are keyed by the separate
+       components of the resolved target.
+     - `AUD_BUSINESS_RULES_RESULTS` records the target's components as they were when the
+       result was recorded; later rule edits do not rewrite them.
+     - `engine.locks.target` derives the lock from the canonical resolved identity.
+     - Published hash versions, view statements and their timestamps convert unchanged. A name
+       that cannot be split refuses the upgrade as in slice 2.
+- *Not part of this item.*
+  - Quoted identifiers in handler targets: handlers keep accepting plain identifiers only, as
+    the corrective design states.
+  - A table of merge columns.
+- *Tests.*
+  - Slice 1:
+    - a repeated name in each list fails with its message, including through `validate`;
+    - an existing merge task keeps its column order and its stored hashes.
+  - Slices 2 and 3:
+    - upgrades from every released schema in `tests/fixtures/schemas/` and from the schema
+      before the slice keep every row and timestamp, on SQLite and PostgreSQL;
+    - an unsplittable recorded name refuses the upgrade with nothing changed;
+    - lineage, catalog and documentation output for the demo project are the same before and
+      after the upgrade;
+    - rehash, view replacement and rule results behave as before;
+    - one target written with and without the configured catalog takes one lock.
+- *Done when.*
+  - Each slice's tests pass, and each slice is one pull request.
+  - No Engine DB table except the typed config histories stores a combined object name. Every
+    object identity in the design's inventory is a foreign key or separate components, on fresh
+    and upgraded Engine DBs of both dialects. A schema test finds no `SOURCE_OBJECT`,
+    `TARGET_OBJECT` or `TARGET_TABLE` column outside those histories.
+  - No config file, CSV column or task parameter changes.
 
 ### S5.R Consolidate before the cluster
 
