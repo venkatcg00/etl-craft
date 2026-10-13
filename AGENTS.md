@@ -173,6 +173,9 @@ it. Never copy it, and never import another module's `_private` name.
   `make quality` enforces the limits (see [The quality baseline](#the-quality-baseline)).
 - **Delete what you replace.** Remove the superseded path, its tests and its docs in the same
   pull request.
+- **Actors are set on purpose.** Every action runs under `core.actor.acting_as` with the actor
+  that requested it; the engine's own work (finalizing, reconciling, retries) sets the system
+  actor explicitly. Never rely on `current_actor()` falling back to the system actor.
 - **Logging and output.** Log through `logging` (`etl_craft.<module>` loggers). Only `cli`
   prints.
 - **Raw SQL** aliases every selected column in lowercase: SQLite and PostgreSQL disagree on the
@@ -222,7 +225,7 @@ it. Never copy it, and never import another module's `_private` name.
 Follow `.agents/skills/pre-pr-checks/SKILL.md`. In short:
 
 ```bash
-make sync                 # dependencies (run in your environment's setup step)
+make sync                 # dependencies: once, and after uv.lock changes
 make check                # ruff, format, mypy --strict, lint-imports, history, regressions,
                           # quality baseline, tests with coverage >= 90%
 make docs                 # strict documentation build

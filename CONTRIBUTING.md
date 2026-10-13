@@ -62,9 +62,14 @@ in `.agents/skills/`.
   a short design note instead of code. Answer the decision it asks for. To overrule a rule on
   purpose, say so explicitly; the agent records the deviation in the pull request and the
   roadmap's Handover notes.
-- **Setup for a cloud agent:** its environment setup runs `make sync`. Docker is usually
-  unavailable there, so the service-backed suites skip locally and run in pull-request CI. The
-  Databricks and Snowflake suites need a local session with credentials.
+- **Agents run in your checkout.** Codex and Claude Code work in this repository on your
+  machine, so they use its `.venv` and services:
+  - `make sync` once, and again after `uv.lock` changes;
+  - `make services-up` for the service-backed suites;
+  - `.env.acceptance` for the Databricks and Snowflake suites.
+
+  With those in place they can run every step of `.agents/skills/pre-pr-checks/SKILL.md`
+  before opening a pull request.
 
 ## Tests
 

@@ -125,6 +125,7 @@ item's text, or work done early under another item.
 | S5.O.2a Common config contract | Done | #149 | Mandatory core/custom CFG audit fields and keys, safe token lifecycle history and lossless upgrades |
 | S5.O.2b Normalized object contracts | In progress | #150, #151, #152, #153, #154 | Readiness, stable identities, source contracts and task/rule target FKs; ordered merge terms and audit endpoints remain pending |
 | S5.R Consolidate before the cluster | Planned | | Behaviour-preserving: one query path for Engine DB SQL, data-driven migration markers, enums and `core` errors throughout, shorter functions |
+| S5.S Accounts, login and roles | Planned | | Registered user and service accounts, password and SSO login, tokens for services, a role check on every action, no implicit actor |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
 | S5.P Project documentation gap UI | Planned | | Coloured column warnings, lineage gaps and project summary |
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
@@ -143,6 +144,8 @@ final metadata model. S7.A.1 delivers Pipeline Insights without team-specific da
 S5.O.1 completes SCD lifecycle rules; S5.O.2a delivers the common config contract, followed by
 S5.O.2b for object normalization and then the UI items. The frozen 0.4
 soak is unchanged.
+S5.R and then S5.S come after S5.O.2b and before S5.O.3: S5.O.3's human-only locks and S5.Q's
+operator controls need proven people and roles, and S5.C's workers are service accounts.
 
 **Acceptance availability.**
 
@@ -779,9 +782,9 @@ flowchart LR
 | 0.2.0 | Stabilize: ship pause, backfill, consumption log and catalog history with every fix that needs no new ownership model | S2.A to S2.L | A regression test per fixed defect; every required suite green on the release commit, cloud included |
 | 0.3 | Identity: run and attempt ids everywhere, attempt ledger, leases, fenced writes, recorded gate decisions, actors on every action and engine-only Engine DB writes, data contract v2 | S3.A to S3.I (S3.I right after S3.A) | The chaos suite passes on SQLite and PostgreSQL |
 | 0.4 | Overseer: `etl-craft server`, schedules with time zones, ready-set dispatch, retries, `status`, `explain`, JSON, HTTP API, versioned YAML | S4.A to S4.H | The demo runs a week with no cron or Airflow; `kill -9` of the overseer loses and doubles nothing |
-| 0.5 | Operational basics, then the cluster: row-level rejects, SQL watermarks, event waits, source definitions and schema-aware lineage; pool interface, worker agents, project namespaces in one Engine DB, connection budget, managed PostgreSQL | S5.A to S5.N (S5.K to S5.N right after S5.B) | Pool contract tests pass for both providers; many projects share one Engine DB |
+| 0.5 | Operational basics, then the cluster: row-level rejects, SQL watermarks, event waits, source definitions and schema-aware lineage, normalized metadata, accounts, login and roles; pool interface, worker agents, project namespaces in one Engine DB, connection budget, managed PostgreSQL | S5.A to S5.S (S5.K to S5.N right after S5.B; S5.O to S5.S before S5.C) | Pool contract tests pass for both providers; many projects share one Engine DB |
 | 0.6 | At load: retention, bounded catalog, incremental cloning, metrics, backup and restore, benchmark | S6.A to S6.G | A sustained-load benchmark stays within its stated budgets; a restore is tested |
-| 0.7 to 0.9 | UI and finish: web UI, authentication and roles, redaction, webhooks, secrets providers, packaging, compatibility policy, soak | S7.A to S7.J | A month-long soak of a real deployment passes |
+| 0.7 to 0.9 | UI and finish: web UI with its sign-in, stewardship uploads, per-project roles, redaction, webhooks, secrets providers, packaging, compatibility policy, soak | S7.A to S7.M | A month-long soak of a real deployment passes |
 | 1.0.0 release candidates | The Support Insights example rebuilt on etl-craft, configured through CI, with its Superset dashboards | S8.A to S8.G | Every pipeline of the example runs and every chart of both dashboards renders correct data |
 | 1.0.0 | Supported contract | | Every item of the [1.0.0 checklist](#100-release-checklist) has evidence |
 
@@ -2408,9 +2411,8 @@ ends; before S5.O.3. No item changes behaviour, so none adds a `CHANGELOG.md` en
      - JDBC URL parsing: `core.text.parse_jdbc_url`, `config.targets.parse_warehouse_url` and
        `dialects.engine.postgres.parse_postgres_url`;
      - Y/N flags, compared inline with `== "Y"` in about ten places.
-- *Design question for the owner, not part of this item.* `core.actor.current_actor()` returns
-  the system actor when no actor is set, so a code path that forgets `acting_as` is recorded as
-  etl-craft instead of being refused. Decide whether it should fail before S7.B.
+- *Not part of this item.* `core.actor.current_actor()` returns the system actor when no actor
+  is set; S5.S removes that fallback together with the accounts that replace it.
 - *Tests.* No new behaviour, so no new tests beyond those named: the marker test in item 3, and
   tests moved with the code they cover. Every existing suite passes unchanged on both Engine DBs
   and the four local warehouses.
@@ -2418,6 +2420,123 @@ ends; before S5.O.3. No item changes behaviour, so none adds a `CHANGELOG.md` en
   baseline (`scripts/quality-baseline.json`) for the code it touches, with no new entries. No
   Engine DB SQL text and no `dialect.name` branch remains outside `dialects/` in the modules of
   items 1 and 2. A new migration with an existing marker needs no Python change.
+
+### S5.S Accounts, login and roles
+
+Branch: one per item below, `feat/accounts-<topic>`. After S5.R, before S5.O.3. S5.O.3's
+human-only locks and S5.Q's operator controls need proven people and roles, and S5.C's workers
+are service accounts.
+
+- *Problem.* An action's actor is whatever the command claims: `ETL_CRAFT_ACTOR`, or
+  `user@host` when it is unset, with no account behind the name. A call that sets no actor is
+  recorded as the engine itself, because `current_actor()` falls back to `SYSTEM_ACTOR`.
+  Anyone who has the Engine DB settings can run every command; roles exist only for API tokens.
+  ETL writes stamp the warehouse's `CREATED_BY` and `UPDATED_BY` with the warehouse login, which
+  is empty on DuckDB, instead of the engine.
+- *Where.*
+  - Identity: `core/actor.py`, and `cli/__init__.py`, which resolves the actor.
+  - Tokens and roles: `services/operations/tokens.py`, `CFG_API_TOKENS`, and `authorize` in
+    `api/app.py`.
+  - Engine and process actors: `overseer/server.py` and `overseer/schedules.py` (the server's
+    and schedules' actors), `execution/child.py`, and `engine/transitions.py` (engine actions).
+  - ETL writes: `handlers/sql/actions.py` (the warehouse writer stamp).
+  - Schema: both Engine DB dialects and their migrations.
+  - Configuration: a new `Auth` section in `config/`.
+  - Docs: the security and deployment guides.
+- *Change.*
+  1. **Accounts and roles** (`feat/accounts-schema`).
+     - `CFG_ACCOUNTS`, with the common config fields from S5.O.2a:
+       - `ACCOUNT_ID`;
+       - `ACCOUNT_NAME`: unique; the name every audit row records;
+       - `ACCOUNT_KIND`: `USER` or `SERVICE`;
+       - `ROLE`;
+       - `EMAIL`;
+       - `PASSWORD_HASH`: users only, `hashlib.scrypt`; optional for a user who signs in with
+         SSO;
+       - `OIDC_SUBJECT`: optional and unique;
+       - `ACTIVE_FLAG`.
+     - Roles, each including the ones before it:
+       - `viewer`: reads;
+       - `operator`: run controls (`run`, `mark`, `cancel`, `pause`, `resume`, `reconcile`);
+       - `developer`: metadata (`config apply`, project migrations);
+       - `admin`: accounts, tokens, `setup`, `init-db`, engine migrations and `upgrade-targets`.
+
+       Roles hold for the whole deployment until S5.G makes them per project.
+     - Every `CFG_API_TOKENS` row belongs to an account (`ACCOUNT_ID`), and a token has its
+       account's role. The migration turns each existing token into a `SERVICE` account with
+       the same name and role, so token values keep working.
+     - `etl-craft account add | list | set-role | disable | reset-password`, admin only.
+       - Disabling an account stops its tokens and sessions at once.
+       - Accounts are never deleted, so audit rows keep resolving.
+     - `etl-craft setup` on an Engine DB with no account creates the first admin interactively,
+       with a name and password or `--oidc-subject`. `doctor` fails when no active admin
+       exists.
+  2. **Login** (`feat/accounts-login`).
+     - `etl-craft login` signs a user in with a password, or with SSO through the OpenID Connect
+       device authorization flow (`Auth.Oidc_issuer`, `Auth.Oidc_client_id` in
+       `craft-connector.yml`).
+       - SSO only authenticates registered accounts: the provider's subject must match an
+         account's `OIDC_SUBJECT`. Nobody gets access by signing in alone.
+       - The session token is stored in the user's credential file
+         (`~/.config/etl-craft/credentials`, mode 0600, one entry per Engine DB), valid for
+         `Auth.Session_hours` (default 12).
+       - `etl-craft logout` revokes the session, and `etl-craft whoami` prints the account and
+         its role.
+     - Service accounts present a token in `ETL_CRAFT_TOKEN`. This covers CI, Airflow, cron,
+       the overseer and S5.C's workers.
+     - Every command resolves its account once: from `ETL_CRAFT_TOKEN`, then from the stored
+       session. Otherwise it fails with: "no signed-in account for <Engine DB>; run `etl-craft
+       login`, or set ETL_CRAFT_TOKEN for a service account".
+     - `ETL_CRAFT_ACTOR` and `ETL_CRAFT_ACTOR_KIND` are removed, with a `CHANGELOG.md` entry and
+       upgrade notes.
+     - Session tokens are stored as API tokens are: only a SHA-256 hash, never cloned.
+     - In remote mode, a generated Airflow DAG uses a service account's token from an Airflow
+       connection. The Airflow user who triggered the run is recorded with the action, not as
+       its actor.
+  3. **A role check on every action** (`feat/accounts-roles`).
+     - One table maps every service operation to the role it needs. The services layer checks
+       it, so the CLI and the API enforce the same rule; the API's `authorize` reads the same
+       table, and read-only commands need `viewer`.
+     - A refused action names the account, its role, the role required and who can grant it,
+       and is recorded in `AUD_ACTIONS` with the outcome `REFUSED`.
+  4. **No implicit actor** (`refactor/accounts-explicit-actors`).
+     - `current_actor()` raises `ConfigurationError` when nothing set an actor.
+     - The engine's own work sets one on purpose:
+       - finalization, reconciliation, gate skips and retries act as the system account
+         `etl-craft` (`SYSTEM`);
+       - the overseer and its schedules act as the service account the server signed in with;
+       - S5.C's workers act as their own service accounts.
+     - Every run carries a writer: the account its writes stamp into the warehouse's
+       `CREATED_BY` and `UPDATED_BY`.
+       - ETL writes stamp the engine's account, `etl-craft`. That includes runs a person
+         starts: starting a pipeline is an action, not a data edit
+         ([metadata and UI design](metadata-and-ui.md#project-business-tables-and-human-overrides)).
+       - S7.M sets the writer to the uploader for runs that process a steward's upload.
+       - S5.O.3 adds the human writers of protected SCD tables.
+     - Audit rows record the account name and kind. Names recorded before this item stay as
+       they are.
+- *Boundary.* Login proves who acts, and the role check decides what they may do.
+  - Someone holding the Engine DB credentials can still go around the CLI, so the privileges
+    from S3.I.3 remain the boundary: `setup --print-grants` gives people read-only logins, and
+    only the engine's role writes.
+  - A deployment that should not hand those credentials to people runs `etl-craft server`, and
+    people work through the API.
+- *Tests.*
+  - Accounts: the account lifecycle and bootstrap; disabled accounts.
+  - Login: with a password, and with SSO through the device flow against a local test issuer;
+    session expiry, logout and revocation.
+  - Upgrade: tokens are converted on upgrade from every released schema.
+  - Roles: the role of every operation, through the CLI and through the API; refused actions are
+    recorded.
+  - Actors: `current_actor()` fails without an actor; system, schedule and worker actions are
+    recorded under their accounts; ETL writes carry the engine's account on all four local
+    warehouses.
+- *Done when.*
+  - Every action is attributed to a registered, active account that proved itself with a
+    session or a token.
+  - An action the account's role does not allow is refused and recorded.
+  - Nothing is recorded under an actor nobody set on purpose.
+  - ETL writes carry the engine's account.
 
 ### S5.O.3 SCD human override protection
 
@@ -2800,18 +2919,91 @@ restrictions. Browser tests must exercise the operations, not merely check visib
   - Metadata: forms to create and edit `CFG_` rows (pipelines, tasks, parameters, dependencies,
     rules); saving runs `validate` for the affected pipeline and refuses invalid changes with its
     messages; every change is attributed to the user.
+  - Uploads (S7.M): the contracts the signed-in steward is assigned to, a file upload, the
+    outcome with rejected rows and reasons, and the upload history.
 - *Tests.* Page tests with the API test client; an end-to-end browser test of the main operator flows
   (Playwright in a separate CI job).
 
+### S7.M Stewardship uploads
+
+Branch: `feat/stewardship-uploads`. Built with the web UI (S7.A), whose Uploads page uses it;
+after S5.S (accounts and roles) and S5.O.3 (protection of human writes).
+
+- *Problem.* Business users supply or correct data that has no other source: reference lists,
+  mappings, targets and manual adjustments. Today they send files to the dev team, who load them
+  by hand. Nobody records who supplied the data, and every correction waits on a developer.
+- *Who owns what.*
+  - The dev team owns each upload contract, meaning the file's columns, types and key, and the
+    pipeline that processes it. Both change only through the project's config files, reviewed
+    like any other change.
+  - Stewards own the data. They upload files to the contracts they are assigned to, and
+    nothing else.
+- *Change.*
+  1. **Upload contracts** (config files; the `developer` role).
+     - `CFG_UPLOAD_CONTRACTS`, with the common config fields from S5.O.2a:
+       - `UPLOAD_CONTRACT_ID` and `CONTRACT_CODE`;
+       - `TABLE_ID`: the landing table's contract in `CFG_TABLES` and `CFG_COLUMNS` (S5.O.2b),
+         which gives the columns, types, nullability and key;
+       - `FILE_FORMAT`: `CSV`; another format is added when a contract needs it;
+       - `PIPELINE_ID`: the pipeline that processes an accepted upload;
+       - `REJECT_LIMIT`: as in S5.K;
+       - `ACTIVE_FLAG`.
+     - `CFG_UPLOAD_STEWARDS` assigns accounts to contracts, and only an admin assigns.
+     - The `steward` role sits between `viewer` and `operator`. An upload needs both the role
+       and an assignment to the contract; no other role implies an assignment.
+  2. **Uploading.** One service sits behind `etl-craft upload --contract C FILE`,
+     `POST /api/v1/uploads` and the S7.A Uploads page.
+     - The uploader must be signed in (S5.S) and assigned to the contract. Otherwise the
+       upload is refused and recorded.
+     - The file is checked against the contract before anything loads: format, header names,
+       required columns, types and key uniqueness within the file.
+       - A structural problem, such as a wrong or missing column or an unreadable file, refuses
+         the whole upload. The message names the column, the value found, what was expected
+         and the remedy.
+       - Rows that fail a type or constraint check go to S5.K's rejects, up to
+         `REJECT_LIMIT`. Over the limit, the upload is refused.
+       - A file identical (same SHA-256) to one already loaded for the contract is refused,
+         naming the earlier upload.
+     - Accepted rows land in the contract's landing table. The contract's pipeline then starts
+       at once, as a run requested by the uploader, with the upload as its input
+       (`$$upload_id` for SQL tasks, `task.upload` for ingestion scripts).
+     - That run's writer is the uploader (S5.S). Every row it inserts or updates in project
+       tables carries the uploader's account in `CREATED_BY` and `UPDATED_BY`, and on
+       protected SCD tables these are human writes under S5.O.3's locks.
+  3. **Record.**
+     - `AUD_UPLOADS` holds:
+       - `UPLOAD_ID`, the contract and the account;
+       - the file name, SHA-256 and size;
+       - the received, accepted and rejected row counts;
+       - `PIPELINE_RUN_ID`;
+       - the status: `REFUSED`, `LOADED`, or `FAILED` with the run's outcome;
+       - the times.
+     - The original file is kept under the project's `uploads/` directory by upload id, for
+       audit and reprocessing. Retention follows S6.A.
+  4. **Feedback.** The uploader sees the outcome, the rejected rows with their reasons, and the
+     run's status, in the CLI output, the API response and the UI page. `etl-craft uploads
+     --contract C` lists the history.
+- *Tests.*
+  - Access: assigned and unassigned accounts; accounts without the `steward` role.
+  - Validation: structural refusals; row rejects and the limit; duplicate files.
+  - Loading: the pipeline run started with the upload as input; a failed run recorded on the
+    upload.
+  - Attribution: the uploader on every written row on all four local warehouses; uploaded rows
+    protected on SCD tables.
+  - The same service through the CLI and the API.
+- *Done when.*
+  - A steward assigned to a contract can upload a file and see it loaded, or refused with
+    reasons, and nobody else can upload to that contract.
+  - Every row an upload writes carries the uploader's account.
+  - The dev team changes contracts and pipelines only through config files.
+
 ### S7.B Users, roles and identities (W10)
 
-- Users: `CFG_USERS` with password hashes (`hashlib.scrypt`) and optional OpenID Connect login
-  (`Auth.Oidc_issuer`, `Auth.Oidc_client_id`).
-- Roles per project: `viewer`, `operator` (run controls), `developer` (metadata edits), `admin`
-  (users, tokens, pools). API tokens from `S4.G` keep working and get the same roles.
-- Workers authenticate with worker tokens; a worker can only claim attempts of its pool.
-- Every actor (`S3.I`) is the authenticated user, token or worker name; the CLI run directly
-  against the Engine DB stays `ETL_CRAFT_ACTOR` or `user@host` and needs the Engine DB credentials.
+S5.S delivers the accounts, the login, the roles and the role check on every action. S7.B adds:
+
+- The web UI's sign-in, on the same accounts and sessions, with password or SSO.
+- Roles per project once S5.G puts several projects in one Engine DB, with `admin` covering pools.
+- Worker service accounts that can claim only the attempts of their own pool.
 
 ### S7.C Redaction (W13, B49)
 
