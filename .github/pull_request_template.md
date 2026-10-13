@@ -1,22 +1,34 @@
 ## Summary
 
-<!-- What this branch does, in two or three sentences. -->
+<!-- What this change does and why, in two or three sentences. -->
 
-## Plan item
+## Roadmap item
 
-<!-- The branch id and name from docs/development/rewrite-plan.md, for example "B3 feat/core-graph". -->
+<!-- The item id and title from docs/development/road-to-1.0.0.md, for example
+"S5.O.3 SCD human override protection", or "None" for work outside the roadmap. Copy the item's
+"Done when" as a checklist and tick each point this pull request meets: - [x] ... -->
 
-## Ported from
+## Decisions
 
-<!-- Paths under archive/iteration-2, or "new". Note any intended behaviour change. -->
+<!-- The judgement calls you made (structure, naming, test approach) and why. -->
 
-## Testing
+## Concerns and deviations
 
-<!-- The suites and commands you ran, and anything that needs a service or credentials. -->
+<!-- Conflicts with the design rules or the item text, costs, risks, and every way this differs
+from the item text (also recorded in the roadmap's Handover notes). Write "None" if there are
+none. -->
 
-## Checklist
+## New public surface and dependencies
 
-- [ ] `make check` passes
-- [ ] Tests cover the new or ported behaviour
-- [ ] Documentation page added or updated
-- [ ] Plan status updated in docs/development/rewrite-plan.md
+<!-- New or changed commands, flags, craft-connector.yml settings, task parameters, config-file
+columns, Engine DB tables or columns, exit codes and dependencies, each with the second caller
+or the reason it is needed. Write "None" if there are none. -->
+
+## Validation
+
+<!-- Per suite: passed / failed / skipped, coverage, duration. Name each test that fails without
+this change. Say which suites could not run here and why (no Docker, no cloud credentials). -->
+
+## Handover
+
+<!-- What the next item needs to know, or "None". -->
