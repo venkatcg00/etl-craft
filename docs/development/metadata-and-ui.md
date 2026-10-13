@@ -3,17 +3,19 @@
 This is the corrective design following source definitions, before worker-agent work resumes.
 S5.O.1 implements the SCD lifecycle and legacy upgrades. S5.O.2a enforces common config fields
 and safe token history. Stable pipeline, task, parameter, dependency and rule identities now
-include inactive rows. Scoped table/column source contracts are implemented; task target FKs,
-ordered merge columns, historical endpoint conversion, coloured gaps and dashboards remain planned. The frozen 0.4 soak deployment remains unchanged.
+include inactive rows. Scoped table/column source contracts and task/rule target FKs are
+implemented. The repeated merge column check, recorded lineage endpoints and published target
+state finish S5.O.2b in three slices; coloured gaps and dashboards remain planned. The frozen 0.4
+soak deployment remains unchanged.
 
 ## Evidence and current gaps
 
 | Area | Current implementation | Required correction |
 | --- | --- | --- |
-| Source metadata | `CFG_TABLES` holds separate components; `CFG_COLUMNS.TABLE_ID` is the parent FK, with all-row name identity and active ordinal uniqueness | Source and rule target conversion complete; task target and historical endpoint conversion remains S5.O.2b |
+| Source metadata | `CFG_TABLES` holds separate components; `CFG_COLUMNS.TABLE_ID` is the parent FK, with all-row name identity and active ordinal uniqueness | Source, rule target and task target conversion complete; recorded endpoint conversion remains S5.O.2b |
 | Config audit fields | Core config fields are mandatory; project config DDL requires a single PK, typed non-null base fields and valid active values | Common base contract implemented in S5.O.2a; scoped identity/FK normalization remains S5.O.2b |
 | API tokens | Common actor/date/active fields and safe typed history, retaining expiry and revocation; hashes remain excluded | S5.O.2a implemented; upgrade the Engine DB before using it |
-| Object references | Rule targets use `CFG_TABLES` FKs; lineage endpoints and target state still use combined names; task target remains a parameter string | Replace persisted object identity with relational references and separate identifier components |
+| Object references | Rule and task targets use `CFG_TABLES` FKs; lineage endpoints, rule results and target state still use combined names | Replace persisted object identity with relational references and separate identifier components |
 | SCD targets | Both merge actions have creation/update actors and dates and active/deleted flags; soft deletes preserve closed history | S5.O.1 complete; upgrade legacy targets before using the new lifecycle |
 | Generated documentation | Optional warehouse comparison reports textual column/type gaps; untraced tasks have reasons | Add structured gap states, row colours, warning symbols and project-wide gap navigation |
 | Dashboard | Catalog has recent-run KPIs; no built-in pipeline metrics dashboard | Provide shared services and built-in panels in generated docs and the live UI |
@@ -40,8 +42,9 @@ It preserves column IDs/stamps, untouched legacy typed history and an immutable 
 baseline for historical reconstruction. Ordinal uniqueness applies to active columns because
 ordinal is an attribute that retirement releases, while column identity remains reserved.
 Source tracing retains its existing unquoted-name boundary until the remaining object consumers
-are converted. Task/rule FKs, ordered merge identifiers and recorded audit endpoints remain pending;
-the source conversion does not complete S5.O.2b. Subsequent object normalization must refuse
+are converted. Task and rule target FKs are implemented. The repeated merge column check and the
+recorded audit endpoints remain, as the three slices of
+[S5.O.2b](road-to-1.0.0.md#s5o2b-remaining-object-identities). Subsequent object normalization must refuse
 unresolved ambiguity before writing any converted rows; this diagnostic alone is
 not the relational migration or its completion gate.
 
@@ -50,7 +53,7 @@ not the relational migration or its completion gate.
 | `CFG_SOURCE_COLUMNS.TABLE_NAME` | Object identity repeated per column | `CFG_TABLES` parent and `CFG_COLUMNS.TABLE_ID`; source repository, CSV round trips, seed export, validation and catalog/lineage schema cache |
 | Task parameter `TARGET_OBJECT` | Task's target object identity | FK on the existing task; config import/export, task parameter consumers, same-target/conflicting-writer queries, SQL and script handlers |
 | `CFG_BUSINESS_RULES.TARGET_TABLE_ID` | Rule's target object identity | Implemented FK on the existing rule; component CSV references and handler-boundary rendering. Recorded rule-result endpoint conversion remains pending |
-| Task `MERGE_KEY` / `MERGE_COMPARE_COLUMNS` | Ordered identifier lists | Ordered child rows, preserving order and validating distinct names; SQL task reader, hashing and config round trips |
+| Task `MERGE_KEY` / `MERGE_COMPARE_COLUMNS` | Ordered column-name lists of the task's own output, not object identities | Stay ordered task parameter values with no table of their own; the SQL task reader refuses a name given twice. Hashing and config round trips are unchanged |
 | Task `MERGE_DEDUPE_ORDER` | Ordered terms with direction/null ordering | Preserve each term's identifier, direction and null ordering; do not split it as an object name |
 | `AUD_COLUMN_LINEAGE.SOURCE_OBJECT` / `TARGET_OBJECT` | Evidence at computation time | Separate endpoint components with the original task, SQL/config hash and timestamp; migration must preserve the old evidence's identity rather than resolve it against today's catalog |
 | `AUD_BUSINESS_RULES_RESULTS.TARGET_TABLE` | Historical rule-result attribution | Separate recorded target components; current rule edits must not rewrite past results |
@@ -95,8 +98,9 @@ guess an ambiguous two-part/three-part name. Preserve dialect identifier semanti
 ambiguous imports with the original value and correction instructions.
 
 Task target references and rule target references use `TABLE_ID`; parameter dictionaries retain
-JSON values, but object identity is not hidden in JSON. Key lists and dependency relationships
-use ordered child rows rather than delimiter-separated scalars. Inventory all task parameters
+JSON values, but object identity is not hidden in JSON. Dependency relationships are rows.
+Merge column lists name columns of the task's own output rather than objects, so they remain
+ordered task parameters. Inventory all task parameters
 and audit/state tables before migration, classifying SQL expressions, paths and opaque tokens
 separately from composite relational values; dots inside those strings do not make them object
 references. Render qualified SQL identifiers only at the warehouse execution boundary.
