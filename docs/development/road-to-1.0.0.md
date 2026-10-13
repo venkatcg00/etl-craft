@@ -2477,9 +2477,16 @@ are service accounts.
        `craft-connector.yml`).
        - SSO only authenticates registered accounts: the provider's subject must match an
          account's `OIDC_SUBJECT`. Nobody gets access by signing in alone.
-       - The session token is stored in the user's credential file
-         (`~/.config/etl-craft/credentials`, mode 0600, one entry per Engine DB), valid for
-         `Auth.Session_hours` (default 12).
+       - Credentials stay on the server where etl-craft is installed: people sign in there,
+         and a session never leaves that host. The session token is stored in the signed-in
+         person's own credential file on the server: `$XDG_CONFIG_HOME/etl-craft/credentials`,
+         otherwise `~/.config/etl-craft/credentials`.
+         - The file has mode 0600 and one entry per Engine DB.
+         - A session is valid for `Auth.Session_hours` (default 12).
+         - A credential file that other users can read is refused, and the message names the
+           file and the `chmod` that fixes it.
+         - Sessions are never shared between people, and browser sessions (S7.B) are kept on
+           the server.
        - `etl-craft logout` revokes the session, and `etl-craft whoami` prints the account and
          its role.
      - Service accounts present a token in `ETL_CRAFT_TOKEN`. This covers CI, Airflow, cron,
@@ -2944,7 +2951,20 @@ after S5.S (accounts and roles) and S5.O.3 (protection of human writes).
        - `UPLOAD_CONTRACT_ID` and `CONTRACT_CODE`;
        - `TABLE_ID`: the landing table's contract in `CFG_TABLES` and `CFG_COLUMNS` (S5.O.2b),
          which gives the columns, types, nullability and key;
-       - `FILE_FORMAT`: `CSV`; another format is added when a contract needs it;
+       - `FILE_FORMAT`:
+         - `CSV`, comma-separated;
+         - `TXT`, delimited text whose `DELIMITER` the contract names (tab, pipe or another
+           single character);
+         - `XLSX`, an Excel workbook, read from the sheet in `SHEET_NAME`, or the first sheet
+           when it is empty.
+
+         Text files are read as `ENCODING` (default UTF-8), and every format needs a header row
+         whose names match the contract's columns. Macro-enabled workbooks (`.xlsm`) and the
+         legacy `.xls` format are refused. A formula cell is read as the value saved with the
+         workbook, and a cell saved without a value is a validation error naming the sheet and
+         cell. Reading `XLSX` uses `openpyxl` in the optional `excel` extra, not a core
+         dependency. Without the extra, an `XLSX` contract fails `validate` and every upload to
+         it, with the remedy `pip install etl-craft[excel]`;
        - `PIPELINE_ID`: the pipeline that processes an accepted upload;
        - `REJECT_LIMIT`: as in S5.K;
        - `ACTIVE_FLAG`.
@@ -2955,8 +2975,9 @@ after S5.S (accounts and roles) and S5.O.3 (protection of human writes).
      `POST /api/v1/uploads` and the S7.A Uploads page.
      - The uploader must be signed in (S5.S) and assigned to the contract. Otherwise the
        upload is refused and recorded.
-     - The file is checked against the contract before anything loads: format, header names,
-       required columns, types and key uniqueness within the file.
+     - The file is checked against the contract before anything loads: the file type (by
+       content, not only its extension), the header names, required columns, types and key
+       uniqueness within the file.
        - A structural problem, such as a wrong or missing column or an unreadable file, refuses
          the whole upload. The message names the column, the value found, what was expected
          and the remedy.
@@ -2986,6 +3007,10 @@ after S5.S (accounts and roles) and S5.O.3 (protection of human writes).
 - *Tests.*
   - Access: assigned and unassigned accounts; accounts without the `steward` role.
   - Validation: structural refusals; row rejects and the limit; duplicate files.
+  - Formats: CSV, TXT with tab and pipe delimiters, and XLSX on a named and a default sheet;
+    the refused types (`.xls`, `.xlsm`, and a file whose content does not match its type);
+    formula cells with and without saved values; non-UTF-8 encodings; an `XLSX` contract on
+    an install without the `excel` extra.
   - Loading: the pipeline run started with the upload as input; a failed run recorded on the
     upload.
   - Attribution: the uploader on every written row on all four local warehouses; uploaded rows
