@@ -1,4 +1,5 @@
 .PHONY: help sync lint format typecheck imports history test coverage check build verify-package clean regressions \
+	quality quality-baseline \
 	certs services-up services-down services-reset test-harness suite release-gate \
 	docs docs-serve docs-site
 
@@ -36,7 +37,13 @@ coverage: ## Run the test suite with the coverage gate
 regressions: ## Check named regression coverage for stabilization defects
 	$(UV) run python scripts/check_regressions.py
 
-check: lint typecheck imports history regressions coverage ## Everything CI runs on every pull request
+quality: ## Hold src/etl_craft to scripts/quality-baseline.json: nothing new over a limit, nothing worse
+	$(UV) run python scripts/check_quality.py
+
+quality-baseline: ## Rewrite scripts/quality-baseline.json from the code, after an improvement
+	$(UV) run python scripts/check_quality.py --update
+
+check: lint typecheck imports history regressions quality coverage ## Everything CI runs on every pull request
 
 build: ## Build the wheel and sdist into dist/
 	$(UV) build

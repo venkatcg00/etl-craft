@@ -38,6 +38,17 @@ The list is in [AGENTS.md](AGENTS.md#definition-of-done). Every section of the p
 template is filled in; "None" is an answer, an empty section is not. Merging into `main`
 publishes the documentation site as the `dev` version on GitHub Pages.
 
+## The quality baseline
+
+`make quality` (part of `make check`) holds `src/etl_craft` to `scripts/quality-baseline.json`:
+no new function or module over the size and complexity limits, no more swallowed exceptions,
+built-in raises, status strings, Engine DB SQL outside the dialects layer, suppressions or core
+dependencies than the baseline records. After an improvement, run `make quality-baseline` and
+commit the file.
+
+A pull request that grows the baseline fails the PR policy workflow unless it carries the
+`quality-exception` label. Only the owner applies it, for a growth they accept.
+
 ## Working with coding agents
 
 Codex reads `AGENTS.md`; Claude Code reads `CLAUDE.md`, which imports it. Both load the skills

@@ -107,13 +107,16 @@ select = [
     "B",       # bugbear
     "C4",      # comprehensions
     "D",       # docstrings
+    "DTZ",     # timezone-aware datetimes
     "E",       # pycodestyle errors
     "F",       # pyflakes
     "I",       # import order
     "N",       # naming
+    "PGH",     # specific type: ignore and noqa codes
     "PLW1514", # open() without an explicit encoding
     "RUF",     # ruff-specific
     "SIM",     # simplifications
+    "T20",     # print outside the command-line output layer
     "UP",      # pyupgrade
     "W",       # pycodestyle warnings
 ]
@@ -121,10 +124,26 @@ select = [
 [tool.ruff.lint.pydocstyle]
 convention = "pep257"
 
+# Limits for the complexity rules (C901, PLR0912, PLR0913, PLR0915). They are not in `select`:
+# scripts/check_quality.py runs them over src/etl_craft and holds the existing offenders to
+# scripts/quality-baseline.json, so new code cannot cross a limit and old code cannot get worse.
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.lint.pylint]
+max-args = 6
+max-branches = 12
+max-statements = 50
+
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["D"]
-"integrations/**/tests/**" = ["D"]
-"scripts/**" = ["D100", "D103"]
+"tests/**" = ["D", "DTZ", "T20"]
+"integrations/**/tests/**" = ["D", "DTZ"]
+"scripts/**" = ["D100", "D103", "T20"]
+# The demo scripts print progress and keep naive offset timestamps, as user scripts may.
+"examples/**" = ["DTZ", "T20"]
+"src/etl_craft/cli/output.py" = ["T20"]
+# Cron matching builds naive wall-clock times and attaches the zone itself.
+"src/etl_craft/core/cron.py" = ["DTZ001"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -171,6 +190,7 @@ skip_covered = true
 
 [tool.importlinter]
 root_package = "etl_craft"
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Layers: each layer imports only the layers below it"
@@ -188,3 +208,37 @@ layers = [
     "etl_craft.config",
     "etl_craft.core",
 ]
+
+[[tool.importlinter.contracts]]
+name = "The server extra (FastAPI, Pydantic, uvicorn) is imported only by etl_craft.api"
+type = "forbidden"
+source_modules = [
+    "etl_craft.cli",
+    "etl_craft.overseer",
+    "etl_craft.services",
+    "etl_craft.execution",
+    "etl_craft.handlers",
+    "etl_craft.scripting",
+    "etl_craft.engine",
+    "etl_craft.warehouse",
+    "etl_craft.dialects",
+    "etl_craft.config",
+    "etl_craft.core",
+]
+forbidden_modules = ["fastapi", "pydantic", "uvicorn"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "The aws extra (boto3) is imported only by etl_craft.dialects.credentials"
+type = "forbidden"
+source_modules = ["etl_craft"]
+forbidden_modules = ["boto3", "botocore"]
+ignore_imports = ["etl_craft.dialects.credentials -> boto3"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Engine code never imports a third-party warehouse dialect"
+type = "forbidden"
+source_modules = ["etl_craft"]
+forbidden_modules = ["snowflake", "databricks", "trino"]
+allow_indirect_imports = true

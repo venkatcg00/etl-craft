@@ -35,6 +35,8 @@ jobs:
         run: make history
       - name: Regression traceability
         run: make regressions
+      - name: Quality baseline
+        run: make quality
 
   test:
     name: tests (py${{ matrix.python-version }}, ${{ matrix.os }})
