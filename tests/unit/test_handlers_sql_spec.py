@@ -392,3 +392,27 @@ def test_a_stored_watermark_replaces_the_start_and_keeps_its_type(project):
     assert "id > 12.5" in read_sql_task(ctx, StoredOffset("NUMBER", "12.5")).select_sql
     with pytest.raises(HandlerError, match="stored offset"):
         read_sql_task(ctx, StoredOffset("TEXT", "12.5"))
+
+
+@pytest.mark.parametrize("parameter", ["MERGE_KEY", "MERGE_COMPARE_COLUMNS"])
+@pytest.mark.parametrize("value", ["id|id", "id|ID", " id | region | Id "])
+def test_repeated_merge_columns_name_the_task_parameter_column_and_remedy(
+    project, parameter, value
+):
+    params = {
+        "SQL_ACTION": "SCD1_MERGE",
+        "TARGET_OBJECT": "sales.orders",
+        "SOURCE_SQL": "SELECT id, region FROM raw.orders",
+        "MERGE_KEY": "id",
+        "MERGE_COMPARE_COLUMNS": "region",
+    }
+    params[parameter] = value
+    with pytest.raises(HandlerError) as caught:
+        read_sql_task(context(project, **params))
+    message = str(caught.value)
+    assert "P.T" in message
+    assert f"{parameter}={value!r}" in message
+    assert "repeats column" in message
+    assert repr(value.split("|")[-1].strip()) in message
+    assert "keep each column once" in message
+    assert "order" in message

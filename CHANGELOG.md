@@ -123,6 +123,12 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- SQL tasks and `validate` refuse repeated column names in `MERGE_KEY` and
+  `MERGE_COMPARE_COLUMNS`, compared case-insensitively. Errors identify the task, parameter,
+  repeated column and correction. Lists remain ordered task parameters; valid contracts and
+  stored hashes are unchanged. After removing a repeated compare column from an existing
+  target's contract, rehash it before resuming merges to avoid false changes.
+
 - Business rules reference scoped table contracts through `TARGET_TABLE_ID`. Config files
   hold separate catalog/schema/table fields; migration 0029 preserves rule IDs, stamps,
   counters and historical target names. Export and adapt legacy rule CSVs after upgrading.

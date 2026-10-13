@@ -5,8 +5,11 @@ import hashlib
 import pytest
 from sqlalchemy import text
 
+from etl_craft.core.enums import SqlAction
 from etl_craft.core.errors import HandlerError
 from etl_craft.engine.repository.hash_versions import clear_hash_version, fetch_hash_version
+from etl_craft.engine.repository.tasks import fetch_task_parameters
+from etl_craft.handlers import sql
 from etl_craft.services.rehash import rehash
 from etl_craft.warehouse.connection import warehouse_dialect
 from fixtures.hash_contract import golden_sql
@@ -171,3 +174,46 @@ def test_rehash_command_validates_dry_run_then_upgrades(sql_world, capsys):
     assert "would rehash 1 row(s)" in capsys.readouterr().out
     assert main(args) == 0
     assert "rehashed 1 row(s)" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("kind", [SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE])
+def test_correcting_repeated_compare_columns_rehashes_without_changing_business_rows(
+    sql_world, kind
+):
+    w = sql_world
+    source = (
+        "SELECT 1 AS id, CAST('Ann' AS VARCHAR(20)) AS name, CAST('Boston' AS VARCHAR(20)) AS city"
+    )
+    w.setup("people", source, kind)
+    params = {
+        "SQL_ACTION": kind,
+        "TARGET_OBJECT": "people",
+        "SOURCE_SQL": source,
+        "MERGE_KEY": "id",
+        "MERGE_COMPARE_COLUMNS": "city|name",
+    }
+    w.run("merge", **params)
+    original = w.rows(f"SELECT * FROM {w.name('people')} ORDER BY ROW_ID")
+    unchanged = w.run("merge", **params)
+    assert unchanged.insert_count == 0 and unchanged.update_count == 0
+    assert w.rows(f"SELECT * FROM {w.name('people')} ORDER BY ROW_ID") == original
+    with w.engine_db.connect() as conn:
+        stored = fetch_task_parameters(conn, w.tasks["merge"])
+        assert stored["MERGE_KEY"] == "id"
+        assert stored["MERGE_COMPARE_COLUMNS"] == "city|name"
+    duplicate = w.task("merge", **(params | {"MERGE_COMPARE_COLUMNS": "city|name|name"}))
+    expression = warehouse_dialect(w.config).hash_expression(["city", "name", "name"])
+    w.execute(f"UPDATE {w.name('people')} SET HASH_KEY={expression}")
+    legacy = w.rows(f"SELECT * FROM {w.name('people')} ORDER BY ROW_ID")
+    with pytest.raises(HandlerError, match=r"MERGE_COMPARE_COLUMNS=.*repeats column 'name'"):
+        sql.run(duplicate, w.engine_db)
+    assert w.rows(f"SELECT * FROM {w.name('people')} ORDER BY ROW_ID") == legacy
+    w.task("merge", **params)
+    dry = rehash(w.engine_db, w.config, f"{w.schema}.people", dry_run=True)
+    assert dry.rows == 1
+    assert w.rows(f"SELECT * FROM {w.name('people')} ORDER BY ROW_ID") == legacy
+    rehash(w.engine_db, w.config, f"{w.schema}.people")
+    assert w.rows(f"SELECT * FROM {w.name('people')} ORDER BY ROW_ID") == original
+    repaired = w.run("merge", **params)
+    assert repaired.insert_count == 0 and repaired.update_count == 0
+    assert w.rows(f"SELECT * FROM {w.name('people')} ORDER BY ROW_ID") == original

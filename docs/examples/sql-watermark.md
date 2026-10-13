@@ -30,3 +30,8 @@ etl-craft explain --pipeline_code SALES --task_code events --run-id 42
 The merge updates changed payloads and keeps one row per key. The reset and each execution's
 range remain in the audit history. An id watermark sees inserted ids; use a changing timestamp
 when existing source rows can be updated.
+
+Keep each column once in the merge lists. For example, `event_id|EVENT_ID` is a repeated key
+and fails validation. If correcting repeated compare columns on an existing target, follow
+[the rehash procedure](../guides/sql-tasks.md#correcting-an-existing-repeated-compare-column)
+before resuming the pipeline.
