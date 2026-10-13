@@ -565,3 +565,31 @@ def test_sql_sqlglot_cannot_read_is_a_warning_naming_the_line_and_column(project
     assert warnings["SALES.rules"].startswith(
         "business rule 'unfinished': sqlglot cannot read it as duckdb SQL (line 1, column "
     )
+
+
+@pytest.mark.parametrize("parameter", ["MERGE_KEY", "MERGE_COMPARE_COLUMNS"])
+def test_validate_refuses_repeated_merge_columns_with_the_handler_message(project, parameter):
+    engine, config, _ = project
+    params = {
+        "SQL_ACTION": "SCD1_MERGE",
+        "TARGET_OBJECT": "sales.orders",
+        "SOURCE_SQL": "SELECT id, amount FROM staging.orders",
+        "MERGE_KEY": "id",
+        "MERGE_COMPARE_COLUMNS": "amount",
+    }
+    params[parameter] = "id|ID"
+    with engine.begin() as conn:
+        add_task(conn, add_pipeline(conn, "SALES"), "load", **params)
+    report = validate(engine, config)
+    matching = [
+        finding
+        for finding in report.findings
+        if finding.where == "SALES.load"
+        and finding.status == Status.FAIL
+        and parameter in finding.message
+    ]
+    assert report.failed
+    assert len(matching) == 1
+    assert "SALES.load" in matching[0].message
+    assert "repeats column 'ID'" in matching[0].message
+    assert "keep each column once" in matching[0].message

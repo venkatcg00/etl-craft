@@ -199,11 +199,11 @@ def read_sql_task(context: TaskContext, stored: StoredOffset | None = None) -> S
 
     merge_key: tuple[str, ...] = ()
     if action in KEYED:
-        merge_key = _columns(params, "MERGE_KEY", action)
+        merge_key = _columns(params, "MERGE_KEY", action, context)
     compare: tuple[str, ...] = ()
     dedupe_order = None
     if action in MERGES:
-        compare = _columns(params, "MERGE_COMPARE_COLUMNS", action)
+        compare = _columns(params, "MERGE_COMPARE_COLUMNS", action, context)
         dedupe_order = _dedupe_order(params.get("MERGE_DEDUPE_ORDER"))
     else:
         for name in ("MERGE_COMPARE_COLUMNS", "MERGE_DEDUPE_ORDER"):
@@ -358,7 +358,9 @@ def resolve_select(
     return select_sql, source
 
 
-def _columns(params: Mapping[str, str], name: str, action: SqlAction) -> tuple[str, ...]:
+def _columns(
+    params: Mapping[str, str], name: str, action: SqlAction, context: TaskContext
+) -> tuple[str, ...]:
     value = params.get(name) or ""
     columns = tuple(part.strip() for part in value.split("|") if part.strip())
     if not columns:
@@ -368,6 +370,14 @@ def _columns(params: Mapping[str, str], name: str, action: SqlAction) -> tuple[s
         raise SqlGuardError(
             f"{name}={value!r}: {', '.join(repr(b) for b in bad)} is not a plain column name"
         )
+    seen = set()
+    for column in columns:
+        if column.lower() in seen:
+            raise SqlGuardError(
+                f"{context.pipeline_code}.{context.task_code}: {name}={value!r} repeats column "
+                f"{column!r}; keep each column once, preserving the intended order"
+            )
+        seen.add(column.lower())
     return columns
 
 

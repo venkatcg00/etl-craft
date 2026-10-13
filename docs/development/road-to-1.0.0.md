@@ -123,7 +123,7 @@ item's text, or work done early under another item.
 | S5.N Source definitions and schema-aware lineage | Done | #147 | Offline star/join tracing, audited source definitions, seeding and documented/deployed schema comparison |
 | S5.O.1 SCD lifecycle invariants | Done | #148 | Common SCD flags, current-row soft deletes and legacy active-state upgrades |
 | S5.O.2a Common config contract | Done | #149 | Mandatory core/custom CFG audit fields and keys, safe token lifecycle history and lossless upgrades |
-| S5.O.2b Normalized object contracts | In progress | #150, #151, #152, #153, #154 | Readiness, stable identities, source contracts and task/rule target FKs; remaining: merge column lists, lineage endpoints, target state (three slices) |
+| S5.O.2b Normalized object contracts | In progress | #150, #151, #152, #153, #154, #160 | Merge column lists reject repeats and retain parameter storage; remaining: lineage endpoints and target state (slices 2 and 3) |
 | S5.R Consolidate before the cluster | Planned | | Behaviour-preserving: one query path for Engine DB SQL, data-driven migration markers, enums and `core` errors throughout, shorter functions |
 | S5.S Accounts, login and roles | Planned | | Registered user and service accounts, password and SSO login, tokens for services, a role check on every action, no implicit actor, local installations that operate a server |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
@@ -231,6 +231,18 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- S5.O.2b slice 1 (`feat/sql-merge-columns`, #160) refuses repeated key/compare names through
+  the SQL task reader and `validate`, using case-insensitive comparison without changing order
+  or stored parameter values. Corrected legacy compare contracts use the existing `rehash`
+  command before merges resume; unchanged input then preserves rows and SCD2 versions.
+  No table, CSV column, task parameter, migration or dependency was added. Slices 2 and 3 remain
+  pending; this does not complete S5.O.2b. No deviations from the approved slice.
+  Acceptance availability: the full local gate and strict docs passed; Python 3.12/3.13 unit
+  suites and the installed-wheel/sdist matrix passed. Duplicate-list validation passed on both
+  Engine DBs; hash-preserving correction/rehash passed for both SCD actions on all four local
+  warehouses. Databricks and Snowflake typed rehash/unchanged-merge acceptance passed.
+  No Airflow, concurrency or workflow changes; the separate frozen soak remains unchanged.
 
 - S5.O.2b starts with read-only readiness diagnostics and an explicit persisted-identity
   inventory. The legacy indexes allow active/inactive duplicates; deployment validation now

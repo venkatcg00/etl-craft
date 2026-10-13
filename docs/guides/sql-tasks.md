@@ -200,7 +200,13 @@ it, as when another pipeline or a script fills the table: then set `SETUP_FOR` t
 action. Its SELECT only gives the shape; `SELECT ... WHERE 1 = 0` is fine.
 
 `MERGE_KEY` and `MERGE_COMPARE_COLUMNS` are column lists separated by `|`, such as
-`customer_id|region`. A row counts as changed when the MD5 of its compare columns (`HASH_KEY`)
+`customer_id|region`. Each list must name each column once: `customer_id|CUSTOMER_ID` is a
+repeat too, since unquoted column names compare case-insensitively. The error names the task,
+parameter and repeated column; remove the repeated entry while keeping the intended order.
+These settings stay in `CFG_TASK_PARAMETERS` and `task_parameters.csv`. The reader preserves
+valid list order and spelling; it never silently deduplicates or sorts the list.
+
+A row counts as changed when the MD5 of its compare columns (`HASH_KEY`)
 differs from the target's. Every merge key column must be set: a row with a NULL in one would
 match no target row, so the merges and `DELETE_ROWS` fail on it, with the count. A key that
 `DELETE_ROWS` flagged deleted comes back when a merge's SELECT returns it again: `SCD1_MERGE`
@@ -241,6 +247,27 @@ in `AUD_TARGET_HASH_VERSION`. Target locks coordinate SQL writes and rehashing. 
 and Engine DB commit separately: if publication fails after the warehouse update, rerun rehash;
 merges stay refused until the version is recorded. Dropping or replacing a target clears its
 recorded hash version.
+
+### Correcting an existing repeated compare column
+
+Removing a repeated `MERGE_KEY` entry does not change the hash contract. Removing a repeated
+`MERGE_COMPARE_COLUMNS` entry does: old `HASH_KEY` values include that column more than once.
+Fixing the parameter alone would make unchanged rows look changed on the next merge.
+
+1. Pause every pipeline that writes the target and let its active writes finish. Coordinate
+   external writers too; do not resume writes until the correction and rehash are complete.
+2. Remove repeated compare entries from the task parameters, keeping the intended remaining
+   order. All active merge tasks sharing the target must use the same ordered compare list.
+   Apply the configuration and run `etl-craft validate`.
+3. Run `etl-craft rehash --target sales.customers --dry-run`, then the same command without
+   `--dry-run`. Use the same qualified target identity as its writers. Rehash changes only
+   stored hashes, including inactive SCD2 history; it preserves business values and audit
+   fields. Do this even when the target already reports hash version 2.
+4. Resume the pipelines. Unchanged input now leaves rows and SCD2 versions untouched.
+
+For example, correct `name|city|NAME` to `name|city`, then rehash. Do not reorder it to
+`city|name`: ordered compare values define the hash. No schema migration or new config file
+is needed, and existing valid contracts require no rehash.
 
 ### Joined merge updates
 
