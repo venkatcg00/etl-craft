@@ -123,7 +123,7 @@ item's text, or work done early under another item.
 | S5.N Source definitions and schema-aware lineage | Done | #147 | Offline star/join tracing, audited source definitions, seeding and documented/deployed schema comparison |
 | S5.O.1 SCD lifecycle invariants | Done | #148 | Common SCD flags, current-row soft deletes and legacy active-state upgrades |
 | S5.O.2a Common config contract | Done | #149 | Mandatory core/custom CFG audit fields and keys, safe token lifecycle history and lossless upgrades |
-| S5.O.2b Normalized object contracts | In progress | #150, #151, #152, #153, #154, #160 | Merge column lists reject repeats and retain parameter storage; remaining: lineage endpoints and target state (slices 2 and 3) |
+| S5.O.2b Normalized object contracts | In progress | #150, #151, #152, #153, #154, #160 | Merge column lists reject repeats and retain parameter storage; remaining: versioned lineage (slice 2), then target state after S5.R item 3 (slice 3) |
 | S5.R Consolidate before the cluster | Planned | | Behaviour-preserving: one query path for Engine DB SQL, data-driven migration markers, enums and `core` errors throughout, shorter functions |
 | S5.S Accounts, login and roles | Planned | | Registered user and service accounts, password and SSO login, tokens for services, a role check on every action, no implicit actor, local installations that operate a server |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
@@ -148,7 +148,10 @@ S5.R and then S5.S come after S5.O.2b and before S5.O.3: S5.O.3's human-only loc
 operator controls need proven people and roles, and S5.C's workers are service accounts.
 S5.O.2b finishes with the three slices in
 [S5.O.2b Remaining object identities](#s5o2b-remaining-object-identities). Merge column lists
-stay task parameters rather than becoming child rows.
+stay task parameters rather than becoming child rows. The order is slice 2 (versioned lineage),
+then S5.R item 3 (data-driven migration markers) once the soak ends, then slice 3, whose
+conversion registers as data instead of a new branch in the migration runner, then the rest of
+S5.R.
 
 **Acceptance availability.**
 
@@ -2377,8 +2380,9 @@ and optional ordinary business-table actors. Completing S5.O.1 does not complete
 
 ### S5.O.2b Remaining object identities
 
-Branch: one per slice below, in order, each one pull request. After the task target conversion
-(#154), before S5.R. These three slices finish S5.O.2b; nothing else belongs to it.
+Branch: one per slice below, in order, each one pull request. Slices 1 and 2 follow the task
+target conversion (#154); slice 3 follows S5.R item 3. These three slices finish S5.O.2b;
+nothing else belongs to it.
 
 - *Problem.* Source, rule-target and task-target identities are relational, but the audit and
   state tables still store an object as one combined name:
@@ -2388,8 +2392,9 @@ Branch: one per slice below, in order, each one pull request. After the task tar
     keyed by the lowercased name.
 
   `engine.locks.target` hashes the same lowercased name, so one target spelled with and without
-  the configured catalog takes two different locks. Separately, a merge column list accepts the
-  same column twice.
+  the configured catalog takes two different locks. Stored lineage is a per-task cache that each
+  computation rewrites, so nothing records what a table's lineage was before a change.
+  Separately, a merge column list accepts the same column twice.
 - *Change.*
   1. **Merge column lists** (`feat/sql-merge-columns`).
      - `MERGE_KEY` and `MERGE_COMPARE_COLUMNS` stay ordered, `|`-separated task parameters. They
@@ -2400,39 +2405,69 @@ Branch: one per slice below, in order, each one pull request. After the task tar
      - An existing target whose compare list repeats a name needs a documented path to remove
        the repeat without unchanged rows being seen as changed.
      - No new table, CSV column or migration.
-  2. **Lineage evidence endpoints** (`feat/metadata-lineage-endpoints`).
-     - `AUD_COLUMN_LINEAGE` stores the source and the target as separate catalog, schema and
-       table components, through a new migration in both dialects.
-     - Existing rows convert from their recorded spelling with the identifier rules in the
-       [corrective design](metadata-and-ui.md#legacy-identity-inventory-and-readiness), never
-       resolved against today's catalog.
-     - A recorded name that cannot be split refuses the upgrade before any change, naming the
-       row id and the value.
-     - The lineage service, the catalog and the generated documentation read the components.
-  3. **Target state and rule results** (`feat/metadata-target-state`).
+  2. **Versioned lineage with endpoint components** (`feat/metadata-lineage-versions`).
+     - `AUD_COLUMN_LINEAGE` stays the per-task cache of the latest computation, keyed as today
+       by everything lineage is worked out from. Its source and target become separate
+       catalog, schema and table components, named as in `CFG_TABLES`.
+     - Lineage is versioned per target table, in two new tables. Both are append-only apart
+       from closing the previous version, and take no outside writes.
+       - `AUD_LINEAGE_VERSIONS`: one row per version of a target table's lineage, with the
+         target's components, `VERSION_NUMBER`, a hash of the version's edges, and
+         `VALID_FROM`, `VALID_TO` and `CURRENT_FLAG` as in the typed config histories.
+       - `AUD_LINEAGE_VERSION_EDGES`: each version's column edges, with the writing task, the
+         target column, the source components and column, and the transformation.
+     - Wherever lineage is stored today, a table whose combined edges differ from its current
+       version gets a new version, and the current one closes in the same transaction.
+       - A recomputation with the same edges, such as after a sqlglot upgrade, adds no version.
+       - A table that no longer has a writing task has its current version closed.
+       - Two processes recording at once create one version.
+     - `etl-craft lineage --as-of TIME` reads the versions valid at that time and works nothing
+       out. Its time rules match `config export --as-of`. A time before the first version
+       fails, naming the earliest recorded time.
+     - The migration is plain SQL in both dialects, with no migration marker or Python step.
+       - It replaces `AUD_COLUMN_LINEAGE` with the component columns.
+       - It creates the two version tables with their indexes and write guards.
+       - It keeps no cached rows: they were never history. The first computation after the
+         upgrade opens version 1 of each table, from the same SQL and contracts.
+  3. **Target state and rule results** (`feat/metadata-target-state`), after S5.R item 3.
      - `AUD_TARGET_HASH_VERSION` and `AUD_TARGET_VIEW_STATEMENT` are keyed by the separate
        components of the resolved target.
      - `AUD_BUSINESS_RULES_RESULTS` records the target's components as they were when the
        result was recorded; later rule edits do not rewrite them.
      - `engine.locks.target` derives the lock from the canonical resolved identity.
-     - Published hash versions, view statements and their timestamps convert unchanged. A name
-       that cannot be split refuses the upgrade as in slice 2.
+     - Published hash versions, view statements, rule results and their timestamps convert
+       unchanged, from their recorded spelling and never from today's catalog. A name that
+       cannot be split refuses the upgrade before any change, naming the row and the value.
+     - The conversion is a new `convert-target-state` marker whose step registers in S5.R
+       item 3's marker table, so it adds no branch to the migration runner.
 - *Not part of this item.*
   - Quoted identifiers in handler targets: handlers keep accepting plain identifiers only, as
     the corrective design states.
   - A table of merge columns.
+  - Working lineage out during runs: a lineage version is valid from when etl-craft computed
+    it.
 - *Tests.*
   - Slice 1:
     - a repeated name in each list fails with its message, including through `validate`;
     - an existing merge task keeps its column order and its stored hashes.
-  - Slices 2 and 3:
+  - Slice 2:
+    - upgrades from every released schema in `tests/fixtures/schemas/` and from the schema
+      before the slice, on SQLite and PostgreSQL, create the new tables and guards;
+    - after the upgrade, the first computation gives the same lineage, catalog and
+      documentation output for the demo project as before it;
+    - a changed SELECT opens version 2 and closes version 1; the same edges recomputed add no
+      version; a retired writing task closes its table's version;
+    - `--as-of` between two versions returns the earlier graph, and before the first version
+      fails with its message;
+    - concurrent recording creates one version (`tests/fixtures/races.py`);
+    - outside writes to the new tables are refused.
+  - Slice 3:
     - upgrades from every released schema in `tests/fixtures/schemas/` and from the schema
       before the slice keep every row and timestamp, on SQLite and PostgreSQL;
     - an unsplittable recorded name refuses the upgrade with nothing changed;
-    - lineage, catalog and documentation output for the demo project are the same before and
-      after the upgrade;
     - rehash, view replacement and rule results behave as before;
-    - one target written with and without the configured catalog takes one lock.
+    - one target written with and without the configured catalog takes one lock;
+    - the slice leaves `engine/migrations.py` unchanged.
 - *Done when.*
   - Each slice's tests pass, and each slice is one pull request.
   - No Engine DB table except the typed config histories stores a combined object name. Every
@@ -2443,8 +2478,9 @@ Branch: one per slice below, in order, each one pull request. After the task tar
 
 ### S5.R Consolidate before the cluster
 
-Branch: one per item, `refactor/<area>-<topic>`. After S5.O.2b, and not before the 0.4 soak
-ends; before S5.O.3. No item changes behaviour, so none adds a `CHANGELOG.md` entry.
+Branch: one per item, `refactor/<area>-<topic>`. Item 3 comes between S5.O.2b slices 2 and 3;
+the other items come after S5.O.2b. None starts before the 0.4 soak ends, and all come before
+S5.O.3. No item changes behaviour, so none adds a `CHANGELOG.md` entry.
 
 - *Problem.* Since S4.I, `src/` has grown from about 27,000 to about 35,000 lines, and the
   quality checks in `make check` record the debt that came with it. Repositories run inline SQL
@@ -2470,6 +2506,7 @@ ends; before S5.O.3. No item changes behaviour, so none adds a `CHANGELOG.md` en
      position (`statements[:2]`, `[:4]`, `[:-3]`). Register each marker's Python step in one
      table that the migration runner reads, so that adding a migration that uses an existing
      marker changes no `.py` file. Add a test that asserts this.
+     S5.O.2b slice 3's `convert-target-state` step is the first new marker to register there.
   4. **Enums and errors** (`refactor/core-enums-errors`).
      - Replace the string literals of `RunStatus`, `Handler`, `SqlAction` and the other
        `core.enums` values outside `core/enums.py` with the enums.

@@ -4,9 +4,9 @@ This is the corrective design following source definitions, before worker-agent 
 S5.O.1 implements the SCD lifecycle and legacy upgrades. S5.O.2a enforces common config fields
 and safe token history. Stable pipeline, task, parameter, dependency and rule identities now
 include inactive rows. Scoped table/column source contracts and task/rule target FKs are
-implemented. The repeated merge column check, recorded lineage endpoints and published target
-state finish S5.O.2b in three slices; coloured gaps and dashboards remain planned. The frozen 0.4
-soak deployment remains unchanged.
+implemented, and merge column lists refuse repeated names. Versioned lineage with endpoint
+components and the published target state finish S5.O.2b; coloured gaps and dashboards remain
+planned. The frozen 0.4 soak deployment remains unchanged.
 
 ## Evidence and current gaps
 
@@ -55,7 +55,7 @@ not the relational migration or its completion gate.
 | `CFG_BUSINESS_RULES.TARGET_TABLE_ID` | Rule's target object identity | Implemented FK on the existing rule; component CSV references and handler-boundary rendering. Recorded rule-result endpoint conversion remains pending |
 | Task `MERGE_KEY` / `MERGE_COMPARE_COLUMNS` | Ordered column-name lists of the task's own output, not object identities | Stay ordered task parameter values with no table of their own; the SQL task reader refuses a name given twice. Hashing and config round trips are unchanged |
 | Task `MERGE_DEDUPE_ORDER` | Ordered terms with direction/null ordering | Preserve each term's identifier, direction and null ordering; do not split it as an object name |
-| `AUD_COLUMN_LINEAGE.SOURCE_OBJECT` / `TARGET_OBJECT` | Evidence at computation time | Separate endpoint components with the original task, SQL/config hash and timestamp; migration must preserve the old evidence's identity rather than resolve it against today's catalog |
+| `AUD_COLUMN_LINEAGE.SOURCE_OBJECT` / `TARGET_OBJECT` | Per-task cache of the latest computation, rewritten whenever its inputs change; not history | Separate endpoint components. History moves to lineage versions per target table, which start at the upgrade; cached rows are not converted |
 | `AUD_BUSINESS_RULES_RESULTS.TARGET_TABLE` | Historical rule-result attribution | Separate recorded target components; current rule edits must not rewrite past results |
 | `AUD_TARGET_HASH_VERSION.TARGET_OBJECT` / `AUD_TARGET_VIEW_STATEMENT.TARGET_OBJECT` | Published state for a warehouse target | Separate full target identity, preserving published versions/hashes and timestamps; rehash, view replacement and publication readers/writers |
 | Config typed histories and `AUD_METADATA_CHANGES` projection | Immutable old configuration versions | Preserve every version and validity interval; historical exports must rebuild matching table/column parents, including old names and inactive contracts |
@@ -112,10 +112,12 @@ check; identify its timestamp/version and replace stale observations without cha
 declared contract. Each proposed new table must have independently owned data, a concrete
 writer/reader and a requirement that an existing entity or derived query cannot meet.
 
-Historical lineage evidence retains separate source/target catalog, schema, table and column
-names as they were computed, with task, computation time and contract/SQL version. Live joins
-may additionally reference metadata IDs. Later renames or retirement must not rewrite old
-evidence or remove it through cascading deletes. Cache keys use the complete ordered contract.
+Lineage history is versioned per target table. A version holds every column edge into the
+table, with the writing task, the source and target catalog, schema, table and column names as
+they were computed, and its validity interval. A table gets a new version only when its edges
+change. Live joins may additionally reference metadata IDs. Later renames or retirement must
+not rewrite a version or remove it through cascading deletes. The per-task lineage cache is
+separate from this history, and its keys use the complete ordered contract.
 
 ## Common config and audit rules
 
