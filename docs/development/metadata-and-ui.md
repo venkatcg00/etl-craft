@@ -298,7 +298,7 @@ use the configured warehouse connection and read schema metadata only, not busin
 | Project Overview | Run health, SLA misses, waiting/queued work, schema-gap and lineage-gap cards; check time |
 | Pipeline Insights tab | Date/project/pipeline filters, built-in KPI cards, trend charts, task breakdown and latest runs |
 | Schema Gaps tab | Filters by gap kind, object and pipeline; table/column, declared/deployed values, reason and affected tasks |
-| Table detail | Side-by-side column contract/deployment grid, warning row styles, audit fields, upstream/downstream links |
+| Table detail | Side-by-side column contract/deployment grid, warning row styles, audit fields, upstream/downstream links; current lineage version and its history, with the column sources each version added and removed |
 | Lineage tab | Warning nodes and affected edges; selected-column trace, unresolved reason, link to table comparison |
 | Run detail | Attempts, row counts, rejects, wait duration and errors; links back to pipeline trends and table gaps |
 | Metadata editor | Table contracts grouped by catalog/schema, with child column contracts; immutable creation fields, actor/history and validate-on-save |

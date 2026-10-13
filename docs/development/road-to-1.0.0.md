@@ -2424,6 +2424,13 @@ nothing else belongs to it.
      - `etl-craft lineage --as-of TIME` reads the versions valid at that time and works nothing
        out. Its time rules match `config export --as-of`. A time before the first version
        fails, naming the earliest recorded time.
+     - Each project table's page in the catalog site keeps its lineage graph and adds:
+       - the current version number and the time it became valid;
+       - a history of earlier versions, each with its validity and the column sources added
+         and removed compared with the version before it.
+
+       A table that no task writes says that it has no lineage versions, rather than showing
+       an empty history.
      - The migration is plain SQL in both dialects, with no migration marker or Python step.
        - It replaces `AUD_COLUMN_LINEAGE` with the component columns.
        - It creates the two version tables with their indexes and write guards.
@@ -2459,6 +2466,8 @@ nothing else belongs to it.
       version; a retired writing task closes its table's version;
     - `--as-of` between two versions returns the earlier graph, and before the first version
       fails with its message;
+    - a table page shows the current version, each earlier version with the column sources
+      added and removed, and the no-versions message for a table that no task writes;
     - concurrent recording creates one version (`tests/fixtures/races.py`);
     - outside writes to the new tables are refused.
   - Slice 3:
