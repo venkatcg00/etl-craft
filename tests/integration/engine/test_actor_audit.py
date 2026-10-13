@@ -338,6 +338,7 @@ def test_guarded_upgrade_rolls_back_with_the_ledger(empty_engine_db, monkeypatch
         "0027_config_identities.sql",
         "0028_source_contracts.sql",
         "0029_rule_target_contracts.sql",
+        "0030_task_target_contracts.sql",
     ]
 
 

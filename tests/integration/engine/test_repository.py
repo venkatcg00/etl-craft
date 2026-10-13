@@ -13,7 +13,7 @@ from etl_craft.core.errors import MetadataError, RunStateError
 from etl_craft.core.graph import TaskEdge, TaskRunState, build_graph
 from etl_craft.engine import runlog, transitions
 from etl_craft.engine.repository import business_rules, dependencies, pipelines, runs, tasks
-from fixtures.metadata import add_table, start_run
+from fixtures.metadata import add_table, set_task_target, start_run
 
 
 def insert(conn, sql, id_column, **params):
@@ -31,6 +31,9 @@ def add_task(conn, pipeline_id, code, handler="SQL", *, active="Y", **params):
         handler=handler,
         active=active,
     )
+    params = dict(params)
+    if "TARGET_OBJECT" in params:
+        set_task_target(conn, task_id, params.pop("TARGET_OBJECT"))
     for name, value in params.items():
         conn.execute(
             text(
@@ -191,12 +194,12 @@ def test_task_details_and_parameters(seeded):
 def test_the_other_tasks_writing_a_target(seeded):
     engine, ids = seeded
     with engine.connect() as conn:
-        others = tasks.fetch_target_tasks(conn, ids["alpha"], ids["setup"], "core.dim")
+        others = tasks.fetch_target_tasks(conn, ids["alpha"], ids["setup"])
         assert others == [tasks.TargetTask(ids["load"], "load_dim", "SCD1_MERGE")]
-        assert tasks.fetch_target_tasks(conn, ids["alpha"], ids["load"], "core.dim") == [
+        assert tasks.fetch_target_tasks(conn, ids["alpha"], ids["load"]) == [
             tasks.TargetTask(ids["setup"], "setup_dim", "SETUP_TABLE")
         ]
-        assert tasks.fetch_target_tasks(conn, ids["alpha"], ids["setup"], "x.y") == []
+        assert tasks.fetch_target_tasks(conn, ids["alpha"], ids["extract"]) == []
 
 
 def test_pipeline_detail_reads_its_json_parameters(seeded):

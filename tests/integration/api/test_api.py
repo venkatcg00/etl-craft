@@ -413,9 +413,11 @@ def test_watermark_reset_validates_and_audits_the_api_actor(api):
     client = TestClient(create_app(replace(ctx, config=config)))
     with ctx.engine.begin() as conn:
         task = conn.execute(text("SELECT TASK_ID FROM CFG_TASKS WHERE TASK_CODE='T'")).scalar_one()
+        from fixtures.metadata import set_task_target
+
+        set_task_target(conn, task, "s.events")
         for name, value in {
             "SQL_ACTION": "APPEND_TABLE",
-            "TARGET_OBJECT": "s.events",
             "SOURCE_SQL": "SELECT id FROM raw.events WHERE id > $$watermark",
             "WATERMARK_COLUMN": "id",
             "WATERMARK_TYPE": "NUMBER",

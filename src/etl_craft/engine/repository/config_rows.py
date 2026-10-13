@@ -90,7 +90,16 @@ class ConfigTable:
         """The stored columns outside the key, which an update sets."""
         return tuple(
             name
-            for name in (*self.stored, *(OBJECT_TABLES.key if self is BUSINESS_RULES else ()))
+            for name in (
+                *self.stored,
+                *(
+                    OBJECT_TABLES.key
+                    if self is BUSINESS_RULES
+                    else tuple("TARGET_" + name for name in OBJECT_TABLES.key)
+                    if self is TASKS
+                    else ()
+                ),
+            )
             if name not in self.key
         )
 
@@ -117,7 +126,7 @@ class StoredRow:
 
     row_id: int
     active: bool
-    parents: tuple[int, ...]
+    parents: tuple[int | None, ...]
     well_formed: bool
     values: dict[str, Value]
 
@@ -188,18 +197,33 @@ TASKS = ConfigTable(
         Column("HANDLER", "choice", required=True, choices=tuple(kind.value for kind in Handler)),
         Column("RUN_CONDITION", "choice", choices=tuple(kind.value for kind in RunCondition)),
         Column("RUN_CONDITION_COUNT", "int", minimum=1),
+        Column("TARGET_CATALOG_NAME"),
+        Column("TARGET_SCHEMA_NAME"),
+        Column("TARGET_TABLE_NAME"),
+        Column("TARGET_ACTIVE_FLAG", "choice", default="Y", choices=YES_NO),
         ACTIVE_FLAG,
     ),
-    stored=("TASK_CODE", "TASK_TYPE", "HANDLER", "RUN_CONDITION", "RUN_CONDITION_COUNT"),
-    parents=(("pipeline_id", "pipelines.csv"),),
-    links=("PIPELINE_ID",),
+    stored=(
+        "TASK_CODE",
+        "TASK_TYPE",
+        "HANDLER",
+        "RUN_CONDITION",
+        "RUN_CONDITION_COUNT",
+        "TARGET_ACTIVE_FLAG",
+    ),
+    parents=(("pipeline_id", "pipelines.csv"), ("target_table_id", "tables.csv")),
+    links=("PIPELINE_ID", "TARGET_TABLE_ID"),
     label_format="{PIPELINE_CODE}.{TASK_CODE}",
     read_sql=(
         "SELECT t.TASK_ID AS row_id, t.ACTIVE_FLAG AS active_flag, 'Y' AS well_formed, "
         "t.PIPELINE_ID AS pipeline_id, p.PIPELINE_CODE AS pipeline_code, "
         "t.TASK_CODE AS task_code, t.TASK_TYPE AS task_type, t.HANDLER AS handler, "
-        "t.RUN_CONDITION AS run_condition, t.RUN_CONDITION_COUNT AS run_condition_count "
-        "FROM CFG_TASKS t JOIN CFG_PIPELINES p ON p.PIPELINE_ID = t.PIPELINE_ID"
+        "t.RUN_CONDITION AS run_condition, t.RUN_CONDITION_COUNT AS run_condition_count, "
+        "t.TARGET_TABLE_ID AS target_table_id, t.TARGET_ACTIVE_FLAG AS target_active_flag, "
+        "o.CATALOG_NAME AS target_catalog_name, o.SCHEMA_NAME AS target_schema_name, "
+        "o.TABLE_NAME AS target_table_name "
+        "FROM CFG_TASKS t JOIN CFG_PIPELINES p ON p.PIPELINE_ID = t.PIPELINE_ID "
+        "LEFT JOIN CFG_TABLES o ON o.TABLE_ID=t.TARGET_TABLE_ID"
     ),
 )
 
@@ -397,11 +421,11 @@ SOURCE_COLUMNS = ConfigTable(
 
 TABLES = (
     PIPELINES,
+    OBJECT_TABLES,
     TASKS,
     TASK_PARAMETERS,
     TASK_DEPENDENCIES,
     PIPELINE_DEPENDENCIES,
-    OBJECT_TABLES,
     BUSINESS_RULES,
     SOURCE_COLUMNS,
 )
@@ -446,7 +470,9 @@ def read_rows(conn: Connection, table: ConfigTable) -> list[StoredRow]:
             StoredRow(
                 int(row["row_id"]),
                 row["active_flag"] == "Y",
-                tuple(int(row[name]) for name, _ in table.parents),
+                tuple(
+                    int(row[name]) if row[name] is not None else None for name, _ in table.parents
+                ),
                 row["well_formed"] == "Y",
                 values,
             )
@@ -476,7 +502,10 @@ def _write(
 
 
 def insert_row(
-    conn: Connection, table: ConfigTable, values: Mapping[str, Value], links: Mapping[str, int]
+    conn: Connection,
+    table: ConfigTable,
+    values: Mapping[str, Value],
+    links: Mapping[str, int | None],
 ) -> None:
     """Insert one active row: its stored values, and the ids of the rows it hangs off."""
     names = (*table.links, *table.stored)
@@ -497,12 +526,12 @@ def update_row(
     table: ConfigTable,
     row_id: int,
     values: Mapping[str, Value],
-    links: Mapping[str, int] | None = None,
+    links: Mapping[str, int | None] | None = None,
 ) -> None:
     """Set the stored columns outside the key of row ``row_id``, and make it active."""
     names = (
         *tuple(name for name in table.stored if name not in table.key),
-        *(("TARGET_TABLE_ID",) if table is BUSINESS_RULES else ()),
+        *(("TARGET_TABLE_ID",) if table in (BUSINESS_RULES, TASKS) else ()),
     )
     assignments = ", ".join([*(f"{name} = :{name}" for name in names), "ACTIVE_FLAG = 'Y'"])
     statement = _bound(

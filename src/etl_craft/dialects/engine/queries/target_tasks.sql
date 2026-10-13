@@ -1,12 +1,11 @@
--- The other active SQL tasks in :pipeline_id, besides :task_id, whose TARGET_OBJECT is
--- :target_object, with their SQL_ACTION, in task id order.
 SELECT t.TASK_ID AS task_id, t.TASK_CODE AS task_code, a.PARAMETER_VALUE AS sql_action
-FROM CFG_TASK_PARAMETERS target_param
-JOIN CFG_TASKS t ON t.TASK_ID = target_param.TASK_ID
+FROM CFG_TASKS t
+JOIN CFG_TASKS origin ON origin.TASK_ID=:task_id
+JOIN CFG_TABLES o ON o.TABLE_ID=t.TARGET_TABLE_ID AND o.ACTIVE_FLAG='Y'
 JOIN CFG_TASK_PARAMETERS a ON a.TASK_ID = t.TASK_ID AND a.PARAMETER_NAME = 'SQL_ACTION'
 WHERE t.PIPELINE_ID = :pipeline_id AND t.TASK_ID <> :task_id
   AND t.ACTIVE_FLAG = 'Y' AND t.HANDLER = 'SQL'
-  AND target_param.ACTIVE_FLAG = 'Y' AND target_param.PARAMETER_NAME = 'TARGET_OBJECT'
-  AND target_param.PARAMETER_VALUE = :target_object
+  AND t.TARGET_ACTIVE_FLAG='Y' AND origin.TARGET_ACTIVE_FLAG='Y'
+  AND t.TARGET_TABLE_ID=origin.TARGET_TABLE_ID
   AND a.ACTIVE_FLAG = 'Y'
 ORDER BY t.TASK_ID

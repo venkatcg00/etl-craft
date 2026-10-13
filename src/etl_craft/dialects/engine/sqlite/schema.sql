@@ -89,6 +89,8 @@ CREATE TABLE CFG_TASKS (
     CREATE_DATE          TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
     UPDATED_BY           VARCHAR NOT NULL DEFAULT 'etl-craft',
     UPDATED_DATE         TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
+    TARGET_TABLE_ID BIGINT REFERENCES CFG_TABLES(TABLE_ID),
+    TARGET_ACTIVE_FLAG VARCHAR(1) NOT NULL DEFAULT 'Y' CONSTRAINT ck_tasks_target_active CHECK (TARGET_ACTIVE_FLAG IN ('Y','N')),
     CONSTRAINT ck_tasks_code CHECK (TASK_CODE GLOB '[A-Za-z]*' AND TASK_CODE NOT GLOB '*[^A-Za-z0-9_]*' AND length(TASK_CODE) <= 128 AND instr(TASK_CODE, char(0)) = 0),
     CONSTRAINT ck_tasks_task_type     CHECK (TASK_TYPE IN ('INGESTION','ETL')),
     CONSTRAINT ck_tasks_handler       CHECK (HANDLER IN ('PYTHON','SQL','BUSINESS_RULES','EMAIL_ALERT','EVENT_WAIT')),
@@ -101,6 +103,7 @@ CREATE TABLE CFG_TASKS (
     )
 );
 
+CREATE INDEX ix_tasks_target ON CFG_TASKS (TARGET_TABLE_ID) WHERE TARGET_TABLE_ID IS NOT NULL;
 CREATE UNIQUE INDEX ux_tasks_code_identity
     ON CFG_TASKS (PIPELINE_ID, TASK_CODE);
 
@@ -149,6 +152,7 @@ CREATE TABLE CFG_TASK_PARAMETERS (
     CREATE_DATE        TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
     UPDATED_BY         VARCHAR NOT NULL DEFAULT 'etl-craft',
     UPDATED_DATE       TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
+    CONSTRAINT ck_taskparameters_target CHECK (upper(trim(PARAMETER_NAME)) <> 'TARGET_OBJECT'),
     CONSTRAINT ck_taskparameters_active_flag CHECK (ACTIVE_FLAG IN ('Y','N'))
 );
 
@@ -580,6 +584,8 @@ CREATE TABLE AUD_CFG_TASKS_HISTORY (
     CREATE_DATE TIMESTAMP,
     UPDATED_BY VARCHAR,
     UPDATED_DATE TIMESTAMP,
+    TARGET_TABLE_ID BIGINT,
+    TARGET_ACTIVE_FLAG VARCHAR(1),
     CONSTRAINT ck_aud_cfg_tasks_history_operation CHECK (OPERATION IN ('INSERT','UPDATE','DELETE')),
     CONSTRAINT ck_aud_cfg_tasks_history_current CHECK (CURRENT_FLAG IN ('Y','N'))
 );

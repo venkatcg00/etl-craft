@@ -114,7 +114,7 @@ be left out of the header, which gives every row their default.
 | File | Columns (required in bold) | Defaults |
 |---|---|---|
 | `pipelines.csv` | **`PIPELINE_CODE`**, **`PIPELINE_NAME`**, `DESCRIPTION`, **`REFRESH_TYPE`**, `RUN_SCHEDULE`, `SCHEDULE_TIMEZONE`, `SCHEDULE_START_DATE`, `CATCHUP`, `MAX_CATCHUP_RUNS`, `OVERLAP_POLICY`, `SLA_IN_HOURS`, `PIPELINE_PARAMETERS`, `ACTIVE_FLAG` | `CATCHUP` `N`, `MAX_CATCHUP_RUNS` `1`, `OVERLAP_POLICY` `SKIP` |
-| `tasks.csv` | **`PIPELINE_CODE`**, **`TASK_CODE`**, **`TASK_TYPE`**, **`HANDLER`**, `RUN_CONDITION`, `RUN_CONDITION_COUNT`, `ACTIVE_FLAG` | |
+| `tasks.csv` | **`PIPELINE_CODE`**, **`TASK_CODE`**, **`TASK_TYPE`**, **`HANDLER`**, `RUN_CONDITION`, `RUN_CONDITION_COUNT`, `TARGET_CATALOG_NAME`, `TARGET_SCHEMA_NAME`, `TARGET_TABLE_NAME`, `TARGET_ACTIVE_FLAG`, `ACTIVE_FLAG` | `TARGET_ACTIVE_FLAG` `Y` |
 | `task_parameters.csv` | **`PIPELINE_CODE`**, **`TASK_CODE`**, **`PARAMETER_NAME`**, `PARAMETER_VALUE`, `ACTIVE_FLAG` | |
 | `task_dependencies.csv` | **`PIPELINE_CODE`**, **`TASK_CODE`**, **`DEPENDS_ON_PIPELINE_CODE`**, **`DEPENDS_ON_TASK_CODE`**, **`DEPENDENCY_TYPE`**, `CONSUME_REPAIRS`, `ACTIVE_FLAG` | `CONSUME_REPAIRS` `Y` |
 | `pipeline_dependencies.csv` | **`PIPELINE_CODE`**, **`DEPENDS_ON_PIPELINE_CODE`**, **`DEPENDENCY_TYPE`**, `CONSUME_REPAIRS`, `ACTIVE_FLAG` | `CONSUME_REPAIRS` `Y` |
@@ -138,12 +138,26 @@ Each handler's guide lists its task parameters. Values are written as follows:
 
 A row may name only pipelines and tasks its project's files hold: a task's pipeline must be in
 `pipelines.csv`, and both tasks of a dependency in `tasks.csv`, whatever their flags.
-A column or business-rule target names its parent in `tables.csv`; active columns require an active parent.
+A column, task target or business-rule target names its parent in `tables.csv`; active columns require an active parent.
 Table and column files may be omitted when no file references them, preserving existing contracts. A header-only
 column file retires its active columns. Retire those columns before retiring their parent.
 `OBJECT_KIND` accepts `TABLE`/`VIEW`; `IS_NULLABLE` accepts `Y`/`N`. Components are stored
 separately, and column rows hold a `TABLE_ID` foreign key rather than a repeated object name. Rules use
 `TARGET_TABLE_ID` on the existing rule row; changing the target keeps the rule ID.
+
+Task targets live on the task row as an optional `TARGET_TABLE_ID` foreign key. In `tasks.csv`,
+set `TARGET_SCHEMA_NAME` and `TARGET_TABLE_NAME` together, with optional `TARGET_CATALOG_NAME`;
+leave all three empty for a task without a target. `TARGET_ACTIVE_FLAG=N` preserves a disabled
+reference without making it available to handlers. `TARGET_OBJECT` is derived for handlers and
+scripts from the active reference; it cannot be written to `task_parameters.csv`.
+
+Migration `0030_task_target_contracts.sql` moves active and inactive `TARGET_OBJECT` parameters
+onto their task rows, reuses `CFG_TABLES`, and preserves task IDs, actors, timestamps and parameter
+history. Current relative names resolve against the configured catalog once; historical exports
+keep the earlier components. Invalid, duplicate or lookalike parameter names and custom parameter
+columns or task/parameter triggers require repair with the previous package before upgrading.
+Export after migrating, then move edits from old target parameter rows to `tasks.csv`. Keep
+already-applied project migrations unchanged; update pending uploads to use the scoped reference.
 
 ### Upgrading source contracts
 

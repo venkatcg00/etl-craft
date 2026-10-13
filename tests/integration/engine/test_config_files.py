@@ -82,7 +82,8 @@ def test_exported_files_load_back_without_a_change(exported):
 
     header = (exported.config_dir / "tasks.csv").read_text("utf-8").splitlines()[0]
     assert header == (
-        "PIPELINE_CODE,TASK_CODE,TASK_TYPE,HANDLER,RUN_CONDITION,RUN_CONDITION_COUNT,ACTIVE_FLAG"
+        "PIPELINE_CODE,TASK_CODE,TASK_TYPE,HANDLER,RUN_CONDITION,RUN_CONDITION_COUNT,"
+        "TARGET_CATALOG_NAME,TARGET_SCHEMA_NAME,TARGET_TABLE_NAME,TARGET_ACTIVE_FLAG,ACTIVE_FLAG"
     )
     pipelines = {
         row["PIPELINE_CODE"]: row

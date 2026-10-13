@@ -72,6 +72,10 @@ writes five pipelines this way, and runs as written on SQLite and PostgreSQL.
 | `EVENT_WAIT` | a durable file or warehouse-row condition without a worker slot | [Event waits](event-waits.md) |
 | `EMAIL_ALERT` | an email about the run so far | [Email alerts](email-alerts.md) |
 
+A task's optional `TARGET_TABLE_ID` references `CFG_TABLES`. `TARGET_ACTIVE_FLAG` defaults to `Y`;
+`N` preserves the reference while disabling the derived `TARGET_OBJECT` setting. Config files
+use separate `TARGET_CATALOG_NAME`, `TARGET_SCHEMA_NAME` and `TARGET_TABLE_NAME` fields.
+
 ## `CFG_TASK_PARAMETERS`
 
 A task's settings are name and value rows, one per `PARAMETER_NAME` among its active rows. Each
@@ -111,10 +115,15 @@ SELECT v.column1, v.column2, p.PIPELINE_ID, v.column3
 FROM (VALUES ('load_orders', 'ETL', 'SQL'), ('check_orders', 'ETL', 'BUSINESS_RULES')) v
 JOIN CFG_PIPELINES p ON p.PIPELINE_CODE = 'SALES_DAILY' AND p.ACTIVE_FLAG = 'Y';
 
+INSERT INTO CFG_TABLES (SCHEMA_NAME,TABLE_NAME) VALUES ('sales','orders');
+UPDATE CFG_TASKS SET TARGET_TABLE_ID=(SELECT TABLE_ID FROM CFG_TABLES
+    WHERE CATALOG_NAME IS NULL AND SCHEMA_NAME='sales' AND TABLE_NAME='orders')
+WHERE TASK_CODE='load_orders' AND PIPELINE_ID=(SELECT PIPELINE_ID FROM CFG_PIPELINES
+    WHERE PIPELINE_CODE='SALES_DAILY');
+
 INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE)
 SELECT t.TASK_ID, v.column1, v.column2
 FROM (VALUES ('SQL_ACTION', 'OVERWRITE_TABLE'),
-             ('TARGET_OBJECT', 'sales.orders'),
              ('SOURCE_SQL_FILE', 'orders.sql')) v
 JOIN CFG_PIPELINES p ON p.PIPELINE_CODE = 'SALES_DAILY' AND p.ACTIVE_FLAG = 'Y'
 JOIN CFG_TASKS t ON t.PIPELINE_ID = p.PIPELINE_ID AND t.TASK_CODE = 'load_orders'

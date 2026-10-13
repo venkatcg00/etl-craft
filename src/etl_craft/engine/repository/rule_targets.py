@@ -130,27 +130,7 @@ def convert_rule_targets(
 ) -> None:
     """Keep rule IDs/stamps and close each old version once, within the DDL transaction."""
     resolve_project_sources(conn, catalog, dialect)
-    quote = conn.dialect.identifier_preparer.quote
-    name = "cfg_business_rules" if conn.dialect.name == "postgresql" else "CFG_BUSINESS_RULES"
-    if conn.dialect.name == "sqlite":
-        triggers = conn.execute(
-            text("SELECT name AS name FROM sqlite_schema WHERE type='trigger' AND tbl_name=:name"),
-            {"name": name},
-        ).scalars()
-    else:
-        triggers = conn.execute(
-            text(
-                "SELECT tgname AS name FROM pg_trigger "
-                "WHERE tgrelid='cfg_business_rules'::regclass "
-                "AND NOT tgisinternal"
-            )
-        ).scalars()
-    for trigger in list(triggers):
-        if trigger.startswith(("trg_audit_cfg_business_rules", "trg_changes_cfg_business_rules")):
-            suffix = f" ON {name}" if conn.dialect.name == "postgresql" else ""
-            conn.exec_driver_sql(f"DROP TRIGGER {quote(trigger)}{suffix}")
-    now = datetime.now(UTC)
-    actor = current_actor()
+    suspend_config_capture(conn, "CFG_BUSINESS_RULES")
     for row in rows:
         params = dict(zip(("catalog", "schema", "table"), row["identity"], strict=True))
         table_id = conn.execute(
@@ -173,11 +153,49 @@ def convert_rule_targets(
             text("UPDATE CFG_BUSINESS_RULES SET TARGET_TABLE_ID=:table WHERE BUSINESS_RULE_ID=:id"),
             {"table": table_id, "id": row["business_rule_id"]},
         )
+    record_conversion(
+        conn, "CFG_BUSINESS_RULES", "BUSINESS_RULE_ID", "engine/0029_rule_target_contracts.sql"
+    )
+
+
+def suspend_config_capture(conn: Connection, table: str) -> None:
+    """Suspend stamps and version capture while a contract changes representation."""
+    quote = conn.dialect.identifier_preparer.quote
+    name = table.lower() if conn.dialect.name == "postgresql" else table
+    if conn.dialect.name == "sqlite":
+        triggers = conn.execute(
+            text(
+                "SELECT name AS name FROM sqlite_schema WHERE type='trigger' AND "
+                "upper(tbl_name)=upper(:name)"
+            ),
+            {"name": name},
+        ).scalars()
+    else:
+        triggers = conn.execute(
+            text(
+                "SELECT tgname AS name FROM pg_trigger "
+                "WHERE tgrelid=to_regclass(:name) "
+                "AND NOT tgisinternal"
+            ),
+            {"name": name},
+        ).scalars()
+    for trigger in list(triggers):
+        if trigger.startswith((f"trg_audit_{table.lower()}", f"trg_changes_{table.lower()}")):
+            suffix = f" ON {name}" if conn.dialect.name == "postgresql" else ""
+            conn.exec_driver_sql(f"DROP TRIGGER {quote(trigger)}{suffix}")
+
+
+def record_conversion(conn: Connection, table: str, primary: str, migration: str) -> None:
+    """Close current versions and record unchanged stamps with the new representation."""
+    now = datetime.now(UTC)
+    actor = current_actor()
+    quote = conn.dialect.identifier_preparer.quote
+    name = table.lower() if conn.dialect.name == "postgresql" else table
     conn.execute(
         text(
-            "UPDATE AUD_CFG_BUSINESS_RULES_HISTORY SET VALID_TO=:now,CURRENT_FLAG='N' "
-            "WHERE CURRENT_FLAG='Y' AND BUSINESS_RULE_ID IN "
-            "(SELECT BUSINESS_RULE_ID FROM CFG_BUSINESS_RULES)"
+            f"UPDATE AUD_{table}_HISTORY SET VALID_TO=:now,CURRENT_FLAG='N' "
+            f"WHERE CURRENT_FLAG='Y' AND {primary} IN "
+            f"(SELECT {primary} FROM {table})"
         ),
         {"now": now},
     )
@@ -195,13 +213,14 @@ def convert_rule_targets(
     listed = ", ".join(quote(column) for column in names)
     conn.execute(
         text(
-            "INSERT INTO AUD_CFG_BUSINESS_RULES_HISTORY (CHANGE_ID,VALID_FROM,VALID_TO,"
+            f"INSERT INTO AUD_{table}_HISTORY (CHANGE_ID,VALID_FROM,VALID_TO,"
             "CURRENT_FLAG,OPERATION,ACTOR,ACTOR_KIND,MIGRATION,"
-            f"{listed}) SELECT {maximum}+ROW_NUMBER() OVER (ORDER BY BUSINESS_RULE_ID),"
-            ":now,:end,'Y','UPDATE',:actor,:kind,'engine/0029_rule_target_contracts.sql',"
-            f"{listed} FROM CFG_BUSINESS_RULES"
+            f"{listed}) SELECT {maximum}+ROW_NUMBER() OVER (ORDER BY {primary}),"
+            ":now,:end,'Y','UPDATE',:actor,:kind,:migration,"
+            f"{listed} FROM {table}"
         ),
         {
+            "migration": migration,
             "now": now,
             "end": datetime(9999, 12, 31, 23, 59, 59, tzinfo=UTC),
             "actor": actor.name,

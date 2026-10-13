@@ -39,6 +39,7 @@ MARKERS = frozenset(
         "check-metadata-identities",
         "convert-source-contracts",
         "convert-rule-targets",
+        "convert-task-targets",
     }
 )
 PACKAGED_MARKERS = Path(__file__).parents[1] / "dialects/engine/migration-markers.toml"
@@ -187,7 +188,13 @@ def _apply(
     warehouse_dialect: str | None = None,
 ) -> None:
     dialect = for_engine(engine)
-    token = current_migration.set(migration.version if migration.source == PROJECT else "")
+    token = current_migration.set(
+        migration.version
+        if migration.source == PROJECT
+        else f"engine/{migration.version}"
+        if "convert-task-targets" in migration.markers
+        else ""
+    )
     try:
         with dialect.migration_transaction(
             engine,
@@ -207,6 +214,11 @@ def _apply(
                 from etl_craft.engine.repository.rule_targets import legacy_rule_targets
 
                 rules = legacy_rule_targets(conn, catalog, warehouse_dialect)
+            tasks = None
+            if "convert-task-targets" in migration.markers:
+                from etl_craft.engine.repository.task_targets import legacy_task_targets
+
+                tasks = legacy_task_targets(conn, catalog, warehouse_dialect)
             statements = dialect.split_statements(migration.sql)
             if migration.source == PROJECT:
                 for sql in statements:
@@ -223,6 +235,12 @@ def _apply(
                     run_script(conn, statements[:2])
                     convert_rule_targets(conn, rules, catalog, warehouse_dialect)
                     statements = statements[2:]
+                if tasks is not None:
+                    from etl_craft.engine.repository.task_targets import convert_task_targets
+
+                    run_script(conn, statements[:4])
+                    convert_task_targets(conn, tasks, catalog, warehouse_dialect)
+                    statements = statements[4:]
                 final_statements = []
                 if sources is not None and conn.dialect.name == "postgresql":
                     statements, final_statements = statements[:-3], statements[-3:]
@@ -345,6 +363,15 @@ def apply_pending_migrations(
 
             with engine.connect() as conn:
                 legacy_rule_targets(conn, catalog, warehouse_dialect)
+        if any(
+            "convert-task-targets" in file.markers and (file.source, file.version) not in ledger
+            for stream in streams
+            for file in stream.files
+        ):
+            from etl_craft.engine.repository.task_targets import legacy_task_targets
+
+            with engine.connect() as conn:
+                legacy_task_targets(conn, catalog, warehouse_dialect)
         for stream in streams:
             for migration in stream.files:
                 if (migration.source, migration.version) in ledger:

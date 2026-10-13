@@ -63,9 +63,7 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
     with locks.target(qualify(task.target_object, catalog)).hold(engine_db):
         if task.action in {SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE}:
             with engine_db.connect() as conn:
-                other = conflicting_merge_action(
-                    conn, context.task_id, qualify(task.target_object, catalog), task.action
-                )
+                other = conflicting_merge_action(conn, context.task_id, task.action)
             if other is not None:
                 raise SqlGuardError(
                     f"{task.target_object}: {task.action} conflicts with an active {other} writer; "

@@ -176,11 +176,11 @@ def test_duplicate_keys_self_dependencies_and_missing_references_are_named(tmp_p
 def test_every_file_holds_its_table_with_active_flag_last():
     assert [table.file for table in TABLES] == [
         "pipelines.csv",
+        "tables.csv",
         "tasks.csv",
         "task_parameters.csv",
         "task_dependencies.csv",
         "pipeline_dependencies.csv",
-        "tables.csv",
         "business_rules.csv",
         "columns.csv",
     ]
@@ -237,3 +237,24 @@ def test_column_file_names_bad_definitions(tmp_path, rows, message):
     )
     with pytest.raises(MetadataFileError, match=message):
         read_config_files(tmp_path)
+
+
+@pytest.mark.parametrize("components", ["analytics,,orders", ",sales,", ",,orders"])
+def test_partial_task_target_is_refused(tmp_path, components):
+    message = problems(
+        tmp_path,
+        tasks="PIPELINE_CODE,TASK_CODE,TASK_TYPE,HANDLER,TARGET_CATALOG_NAME,TARGET_SCHEMA_NAME,TARGET_TABLE_NAME\n"
+        f"SALES,load,ETL,SQL,{components}\n",
+    )
+    assert "both TARGET_SCHEMA_NAME and TARGET_TABLE_NAME" in message
+
+
+@pytest.mark.parametrize("name", ["TARGET_OBJECT", "target_object", " TARGET_OBJECT "])
+def test_target_parameter_is_refused_even_when_disabled(tmp_path, name):
+    message = problems(
+        tmp_path,
+        task_parameters="PIPELINE_CODE,TASK_CODE,PARAMETER_NAME,PARAMETER_VALUE,ACTIVE_FLAG\n"
+        f"SALES,load,{name},sales.orders,N\n",
+    )
+    assert "TARGET_OBJECT is derived" in message
+    assert "tasks.csv" in message

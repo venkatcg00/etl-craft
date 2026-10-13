@@ -54,7 +54,15 @@ def fetch_task_execution_detail(conn: Connection, task_id: int) -> TaskExecution
 def fetch_task_parameters(conn: Connection, task_id: int) -> dict[str, str]:
     """Map each active parameter name of ``task_id`` to its value."""
     rows = conn.execute(statement(conn, "task_parameters"), {"task_id": task_id})
-    return {row.parameter_name: row.parameter_value for row in rows}
+    params = {}
+    for row in rows:
+        if row.target_active_flag != "Y":
+            raise MetadataError(
+                f"TASK_ID={task_id} target {row.parameter_value}: table contract has "
+                "ACTIVE_FLAG=N; reactivate it or disable the task's target reference"
+            )
+        params[row.parameter_name] = row.parameter_value
+    return params
 
 
 @dataclass(frozen=True)
@@ -66,27 +74,21 @@ class TargetTask:
     sql_action: str
 
 
-def fetch_target_tasks(
-    conn: Connection, pipeline_id: int, task_id: int, target_object: str
-) -> list[TargetTask]:
-    """Return the other active SQL tasks in ``pipeline_id`` writing ``target_object``."""
+def fetch_target_tasks(conn: Connection, pipeline_id: int, task_id: int) -> list[TargetTask]:
+    """Return the other active SQL tasks sharing the stored target of ``task_id``."""
     rows = conn.execute(
         statement(conn, "target_tasks"),
-        {"pipeline_id": pipeline_id, "task_id": task_id, "target_object": target_object},
+        {"pipeline_id": pipeline_id, "task_id": task_id},
     )
     return [TargetTask(**row._mapping) for row in rows]
 
 
-def conflicting_merge_action(
-    conn: Connection, task_id: int, target_object: str, sql_action: str
-) -> str | None:
-    """Find an active opposite merge writer, including other pipelines and target aliases."""
+def conflicting_merge_action(conn: Connection, task_id: int, sql_action: str) -> str | None:
+    """Find an active opposite merge writer sharing this task's target reference."""
     found = conn.execute(
         statement(conn, "conflicting_merge_action"),
         {
             "task_id": task_id,
-            "target_object": target_object.lower(),
-            "relative_target": target_object.split(".", 1)[1].lower(),
             "sql_action": sql_action,
         },
     ).scalar_one_or_none()

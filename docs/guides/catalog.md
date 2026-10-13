@@ -69,7 +69,7 @@ writes (→), the tables it reads (←) and the tables its business rules check 
 a table to open it. The DAG pans and zooms like the lineage graphs.
 
 A table is every SQL task's `TARGET_OBJECT`, every table a SELECT reads (joins and filters
-included), every business rule's `TARGET_TABLE`, and every ingestion script's `TARGET_OBJECT`.
+included), every business rule's target reference, and every ingestion script's `TARGET_OBJECT`.
 Tables are named as [lineage](lineage.md) names them: lower case, without the active warehouse
 database.
 
@@ -122,7 +122,7 @@ A script's code is not read, so a `PYTHON` task says what it moves in two option
 
 | Parameter | Value |
 |---|---|
-| `TARGET_OBJECT` | the table the script writes, `schema.table` or `database.schema.table` |
+| `TARGET_OBJECT` | derived from the task's active table reference, configured through the target components in `tasks.csv` |
 | `SOURCE_OBJECT` | where it reads from, in words: `CRM API`, `s3://landing/orders/` |
 
 The source appears on the graph as an external box, linked to the table.

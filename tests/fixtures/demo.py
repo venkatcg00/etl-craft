@@ -168,7 +168,12 @@ class Demo:
         for path in self.root.rglob("*"):
             if path.suffix in (".sql", ".py") and path.is_file():
                 text_ = path.read_text(encoding="utf-8")
-                path.write_text(pattern.sub(rf"{self.prefix}\1.", text_), encoding="utf-8")
+                text_ = pattern.sub(rf"{self.prefix}\1.", text_)
+                if path.suffix == ".sql":
+                    text_ = re.sub(
+                        r"'(pre_dm|lnd|prs|cdc|ds|dm|aud)'", rf"'{self.prefix}\1'", text_
+                    )
+                path.write_text(text_, encoding="utf-8")
 
     def _engine_profile(self) -> dict[str, Any]:
         if self.engine_kind == "sqlite":

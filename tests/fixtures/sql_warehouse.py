@@ -22,6 +22,7 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectionProfile, ConnectorConfig, SourceConfig
 from etl_craft.core.enums import Mode
+from etl_craft.core.text import qualify
 from etl_craft.engine import transitions
 from etl_craft.handlers import sql
 from etl_craft.handlers.registry import HandlerResult, TaskContext
@@ -96,15 +97,23 @@ class SqlWorld:
         """
         if "TARGET_OBJECT" in params and "." not in params["TARGET_OBJECT"]:
             params["TARGET_OBJECT"] = f"{self.schema}.{params['TARGET_OBJECT']}"
+        stored_params = dict(params)
+        if "TARGET_OBJECT" in stored_params:
+            stored_params["TARGET_OBJECT"] = qualify(stored_params["TARGET_OBJECT"], self.catalog)
         with self.engine_db.begin() as conn:
             if code not in self.tasks:
-                self.tasks[code] = add_task(conn, self.pipeline_id, code, "SQL", **params)
+                self.tasks[code] = add_task(conn, self.pipeline_id, code, "SQL", **stored_params)
             else:
                 conn.execute(
                     text("DELETE FROM CFG_TASK_PARAMETERS WHERE TASK_ID = :t"),
                     {"t": self.tasks[code]},
                 )
+                from fixtures.metadata import set_task_target
+
+                set_task_target(conn, self.tasks[code], stored_params.get("TARGET_OBJECT"))
                 for name, value in params.items():
+                    if name == "TARGET_OBJECT":
+                        continue
                     conn.execute(
                         text(
                             "INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, "

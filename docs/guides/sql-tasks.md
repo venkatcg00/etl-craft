@@ -125,9 +125,11 @@ successful task runs. See [the parameter and SQL example](../examples/sql-waterm
 
 ## The actions
 
-`SQL_ACTION` names the action and `TARGET_OBJECT` the table: `schema.table`, written in the
-active `Warehouse` profile's database, so the same rows work in every environment, or
-`database.schema.table`, written exactly there. A bare table name fails the task.
+`SQL_ACTION` names the action. The task's `TARGET_TABLE_ID` references its target in `CFG_TABLES`;
+config files use separate `TARGET_CATALOG_NAME`, `TARGET_SCHEMA_NAME` and `TARGET_TABLE_NAME`
+fields in `tasks.csv`. A missing catalog resolves once against the active warehouse profile.
+Handlers receive the derived `TARGET_OBJECT` as `catalog.schema.table` or `schema.table` when
+there is no catalog. A bare table name is refused. See [Configuration files](configuration-files.md).
 
 | `SQL_ACTION` | What happens | Also needs |
 |---|---|---|

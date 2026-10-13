@@ -1,7 +1,9 @@
 """Source definitions and upstream schemas trace without a warehouse connection."""
 
+import pytest
 from sqlalchemy import text
 
+from etl_craft.core.errors import MetadataFileError
 from etl_craft.services.catalog import build_catalog
 from etl_craft.services.config_files import export_config, read_config_files, sync_config
 from etl_craft.services.lineage import collect
@@ -53,7 +55,6 @@ def test_upstream_stars_join_resolution_and_schema_cache(engine_db, tmp_path, mo
     export_config(db.engine, folder)
     assert not sync_config(db.engine, db.config, read_config_files(folder), apply=False).changes
     (folder / "columns.csv").unlink()
-    (folder / "tables.csv").unlink()
     assert not sync_config(db.engine, db.config, read_config_files(folder), apply=True).changes
     with db.engine.connect() as conn:
         assert (
@@ -62,6 +63,9 @@ def test_upstream_stars_join_resolution_and_schema_cache(engine_db, tmp_path, mo
             ).scalar_one()
             == 3
         )
+    (folder / "tables.csv").unlink()
+    with pytest.raises(MetadataFileError, match=r"task/rule targets require tables\.csv"):
+        read_config_files(folder)
 
 
 def test_demo_traces_every_task_before_warehouse_exists(engine_db, tmp_path, monkeypatch):

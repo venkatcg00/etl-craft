@@ -482,7 +482,7 @@ def _sql(conn: Connection, context: TaskContext, data: _Metadata) -> list[str]:
     if problem is not None:
         return [problem]
     if spec.action == SqlAction.SETUP_TABLE:
-        others = fetch_target_tasks(conn, context.pipeline_id, context.task_id, spec.target_object)
+        others = fetch_target_tasks(conn, context.pipeline_id, context.task_id)
         writer_action(spec.setup_for, others, spec.target_object)
     if spec.action == SqlAction.CREATE_VIEW:
         if not dialect.views:
