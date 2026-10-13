@@ -91,7 +91,8 @@ def test_duplicate_keys_and_qualified_source_aliases_are_reported_read_only(lega
         assert all(finding.status.value == "WARN" for finding in readiness)
 
 
-def test_inactive_invalid_targets_are_reported_but_sql_and_paths_are_not_parsed(engine_db):
+def test_inactive_invalid_targets_are_reported_but_sql_and_paths_are_not_parsed(legacy_identity_db):
+    engine_db = legacy_identity_db
     from fixtures.metadata import add_task
 
     with engine_db.engine.begin() as conn:
@@ -238,6 +239,7 @@ def test_identity_migration_preserves_rows_and_their_history(legacy_identity_db)
         "0027_config_identities.sql",
         "0028_source_contracts.sql",
         "0029_rule_target_contracts.sql",
+        "0030_task_target_contracts.sql",
     ]
     with db.engine.connect() as conn:
         assert conn.execute(text("SELECT * FROM CFG_PIPELINES")).one() == row

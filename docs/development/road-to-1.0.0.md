@@ -122,7 +122,7 @@ item's text, or work done early under another item.
 | S5.N Source definitions and schema-aware lineage | Done | #147 | Offline star/join tracing, audited source definitions, seeding and documented/deployed schema comparison |
 | S5.O.1 SCD lifecycle invariants | Done | #148 | Common SCD flags, current-row soft deletes and legacy active-state upgrades |
 | S5.O.2a Common config contract | Done | #149 | Mandatory core/custom CFG audit fields and keys, safe token lifecycle history and lossless upgrades |
-| S5.O.2b Normalized object contracts | In progress | #150, #151, #152, #153 | Readiness, stable identities, source contracts and rule target FKs; task/reference conversion remains pending |
+| S5.O.2b Normalized object contracts | In progress | #150, #151, #152, #153, #154 | Readiness, stable identities, source contracts and task/rule target FKs; ordered merge terms and audit endpoints remain pending |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
 | S5.P Project documentation gap UI | Planned | | Coloured column warnings, lineage gaps and project summary |
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
@@ -279,6 +279,28 @@ The separate frozen 0.4 soak deployment is unchanged.
   reference checks passed 239 cases; released upgrade checks passed four more.
   No Airflow or workflow files changed.
   The frozen 0.4 deployment remains untouched.
+
+- Task target conversion continues S5.O.2b on `feat/metadata-task-targets` (#154):
+  `CFG_TASKS.TARGET_TABLE_ID` reuses the scoped registry; task CSVs hold separate target
+  components and `TARGET_ACTIVE_FLAG` preserves disabled target intent. `TARGET_OBJECT` is
+  derived for handlers/scripts and refused as a writable parameter. Conversion retains
+  task IDs/stamps, parameter deletion evidence, counters and historical exports. Writer
+  conflicts compare FKs; rehash uses the shared parameter reader. Original applied tutorial
+  SQL remains archived unchanged under its original filename, with fresh target-aware uploads.
+  Ordered merge terms, recorded audit endpoints and wider quoting remain pending; this
+  slice does not finish S5.O.2b. Retain the branch after merge.
+  Acceptance availability: full `make check docs` passed (3,685 tests, 96 expected skips,
+  94.21% coverage, 30m24s); strict docs built in 8.42s. Python 3.12/3.13 each passed
+  1,619 unit tests (27.77s / 27.18s). Databricks native/UniForm and Snowflake native/Iceberg
+  source-definition/config round-trip/deployed-drift acceptance passed all four cases
+  (5m01s, no skips). The rebuilt wheel/sdist matrix passed all 27 cases (18m43s, no skips),
+  across four local warehouses on both Engine DBs, pip/uv installs and the server extra.
+  Focused caller/schema-catalog checks passed 113 cases; corrected source-lineage and
+  same-target alias checks passed 14 cases. No Airflow or workflow files changed.
+  The frozen 0.4 deployment remains untouched; the read-only soak check is healthy
+  after 41 injected kills and 6,006 successful attempts, with only the expected flaky-feed
+  failure. Its seven-day gate remains due on 17 October at 1:31 pm IST.
+
 
 - S5.O.2a completes the mandatory base fields and single non-null key for core and custom
   Engine DB config tables, with safe token history; S5.O.2b retains object/FK normalization

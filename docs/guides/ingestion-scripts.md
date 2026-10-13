@@ -10,7 +10,7 @@ captures everything it prints and logs, records its counts, and keeps its offset
 |---|---|
 | `SCRIPT_NAME` | the script, a path inside the project's `ingestion_scripts/` folder, such as `crm/customers.py` |
 | `INPUT_PARAMS` | optional: a JSON object the script receives as a dictionary, such as `{"region": "eu", "days": 30}` |
-| `TARGET_OBJECT`, `SOURCE_OBJECT` | optional: the table the script writes and where it reads from, for the [catalog](catalog.md)'s lineage graphs |
+| `SOURCE_OBJECT` | optional: where the script reads from, for the [catalog](catalog.md)'s lineage graphs |
 
 ## The script
 
@@ -140,3 +140,6 @@ task is recorded `FAILED`.
 A downstream script receives `task.event_files` from successful file waits under its exact
 pipeline run. A top-level `INPUT_PARAMS` value `"$$event_files"` becomes a list of those paths.
 See [Event waits](event-waits.md) for settling, evidence and consumption.
+
+Scripts receive optional `TARGET_OBJECT` from the task's active `TARGET_TABLE_ID` reference.
+Set the separate target components in `tasks.csv`; do not write a target parameter row.

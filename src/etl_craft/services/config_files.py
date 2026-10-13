@@ -183,10 +183,14 @@ def read_config_files(directory: Path) -> ConfigFiles:
         digest.update(table.file.encode() + b"\0" + payload + b"\0")
         rows[table.file] = _read_table(table, path, payload, problems)
     if (
-        SOURCE_COLUMNS.file in rows or rows.get(BUSINESS_RULES.file)
+        SOURCE_COLUMNS.file in rows
+        or rows.get(BUSINESS_RULES.file)
+        or any(
+            row.values["TARGET_TABLE_NAME"] is not None for row in rows.get(TASKS.file, {}).values()
+        )
     ) and OBJECT_TABLES.file not in rows:
         problems.append(
-            "columns.csv and business-rule targets require tables.csv; export the contract files"
+            "columns.csv and task/rule targets require tables.csv; export the contract files"
         )
     if not problems:
         _check_references(rows, problems)
@@ -331,14 +335,35 @@ def _parse(column: Column, cell: str) -> Value:
 
 
 def _row_problem(table: ConfigTable, values: dict[str, Value]) -> str | None:
-    if table in (OBJECT_TABLES, SOURCE_COLUMNS, BUSINESS_RULES):
-        for name in ("CATALOG_NAME", "SCHEMA_NAME", "TABLE_NAME", "COLUMN_NAME"):
+    if table in (OBJECT_TABLES, SOURCE_COLUMNS, BUSINESS_RULES, TASKS):
+        names = (
+            ("TARGET_CATALOG_NAME", "TARGET_SCHEMA_NAME", "TARGET_TABLE_NAME")
+            if table is TASKS
+            else ("CATALOG_NAME", "SCHEMA_NAME", "TABLE_NAME", "COLUMN_NAME")
+        )
+        for name in names:
             if name not in values or values[name] is None:
                 continue
             value = str(values[name])
             if not is_safe_identifier(value):
                 return f"{name}={value!r}: expected a separate unquoted SQL identifier"
+    if (
+        table is TASK_PARAMETERS
+        and str(values["PARAMETER_NAME"]).strip().upper() == "TARGET_OBJECT"
+    ):
+        return (
+            "TARGET_OBJECT is derived; set TARGET_CATALOG_NAME, TARGET_SCHEMA_NAME and"
+            " TARGET_TABLE_NAME in tasks.csv"
+        )
     if table is TASKS:
+        schema, target = values["TARGET_SCHEMA_NAME"], values["TARGET_TABLE_NAME"]
+        if (schema is None) != (target is None) or (
+            schema is None and values["TARGET_CATALOG_NAME"] is not None
+        ):
+            return (
+                "a target needs both TARGET_SCHEMA_NAME and TARGET_TABLE_NAME; leave "
+                "all target components empty for a task without one"
+            )
         condition, count = values["RUN_CONDITION"], values["RUN_CONDITION_COUNT"]
         if condition == "N" and count is None:
             return "RUN_CONDITION N needs a RUN_CONDITION_COUNT"
@@ -392,7 +417,11 @@ def _ends(table: ConfigTable, values: Mapping[str, Value]) -> list[tuple[str, Ke
     if table is SOURCE_COLUMNS:
         return [("table", tuple(values[name] for name in OBJECT_TABLES.key))]
     if table is TASKS:
-        return [("pipeline", (values["PIPELINE_CODE"],))]
+        return [("pipeline", (values["PIPELINE_CODE"],))] + (
+            [("table", tuple(values["TARGET_" + name] for name in OBJECT_TABLES.key))]
+            if values["TARGET_TABLE_NAME"] is not None
+            else []
+        )
     if table is PIPELINE_DEPENDENCIES:
         return [
             ("pipeline", (values["PIPELINE_CODE"],)),
@@ -431,7 +460,7 @@ def _current(
     malformed: list[StoredRow] = []
     for row in rows:
         if any(
-            parent not in current_ids[file]
+            parent is not None and parent not in current_ids[file]
             for parent, (_, file) in zip(row.parents, table.parents, strict=True)
         ):
             continue
@@ -450,7 +479,7 @@ def _links(
     table: ConfigTable,
     file_row: FileRow,
     current: Mapping[str, Mapping[Key, StoredRow]],
-) -> dict[str, int]:
+) -> dict[str, int | None]:
     """Return the ids an insert of ``file_row`` sets, from the current pipelines and tasks."""
     found: list[StoredRow] = []
     for kind, end in _ends(table, file_row.values):
@@ -469,7 +498,10 @@ def _links(
     if table is SOURCE_COLUMNS:
         return {"TABLE_ID": found[0].row_id}
     if table is TASKS:
-        return {"PIPELINE_ID": found[0].row_id}
+        return {
+            "PIPELINE_ID": found[0].row_id,
+            "TARGET_TABLE_ID": found[1].row_id if len(found) > 1 else None,
+        }
     if table is TASK_PARAMETERS:
         return {"TASK_ID": found[0].row_id}
     if table is PIPELINE_DEPENDENCIES:
@@ -588,19 +620,26 @@ def _resolved_files(files: ConfigFiles, config: ConnectorConfig) -> ConfigFiles:
 
     dialect, catalog = dialect_and_catalog(config)
     resolved = dict(files.rows)
-    for table in (OBJECT_TABLES, SOURCE_COLUMNS, BUSINESS_RULES):
+    for table in (OBJECT_TABLES, SOURCE_COLUMNS, BUSINESS_RULES, TASKS):
         if table.file not in resolved:
             continue
         rows: dict[Key, FileRow] = {}
         for row in resolved[table.file].values():
-            identity = resolve_source_identity(
-                str(row.values["CATALOG_NAME"]) if row.values["CATALOG_NAME"] is not None else None,
-                str(row.values["SCHEMA_NAME"]),
-                str(row.values["TABLE_NAME"]),
-                catalog,
-                dialect,
+            names = (
+                tuple("TARGET_" + name for name in OBJECT_TABLES.key)
+                if table is TASKS
+                else OBJECT_TABLES.key
             )
-            values = row.values | dict(zip(OBJECT_TABLES.key, identity, strict=True))
+            values = row.values
+            if table is not TASKS or values["TARGET_TABLE_NAME"] is not None:
+                identity = resolve_source_identity(
+                    str(values[names[0]]) if values[names[0]] is not None else None,
+                    str(values[names[1]]),
+                    str(values[names[2]]),
+                    catalog,
+                    dialect,
+                )
+                values = values | dict(zip(names, identity, strict=True))
             if table is SOURCE_COLUMNS:
                 values["COLUMN_NAME"] = str(values["COLUMN_NAME"]).lower()
             key = tuple(values[name] for name in table.key)
@@ -703,10 +742,10 @@ def export_config(
             table.file: {
                 key: FileRow(row.row_id, row.values) for key, row in current[table.file].items()
             }
-            for table in (OBJECT_TABLES, SOURCE_COLUMNS, BUSINESS_RULES)
+            for table in (OBJECT_TABLES, SOURCE_COLUMNS, BUSINESS_RULES, TASKS)
         }
         resolved = _resolved_files(ConfigFiles(directory, "", metadata_rows), config)
-        for table in (OBJECT_TABLES, SOURCE_COLUMNS, BUSINESS_RULES):
+        for table in (OBJECT_TABLES, SOURCE_COLUMNS, BUSINESS_RULES, TASKS):
             original = {row.row_id: row for row in current[table.file].values()}
             current[table.file] = {
                 key: StoredRow(

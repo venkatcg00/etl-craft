@@ -241,6 +241,7 @@ def test_a_failed_metadata_rebuild_rolls_back_and_restores_connection_settings(
         "0027_config_identities.sql",
         "0028_source_contracts.sql",
         "0029_rule_target_contracts.sql",
+        "0030_task_target_contracts.sql",
     ]
 
 

@@ -113,6 +113,8 @@ CREATE TABLE CFG_TASKS (
     CREATE_DATE          TIMESTAMPTZ NOT NULL,
     UPDATED_BY           VARCHAR NOT NULL,
     UPDATED_DATE         TIMESTAMPTZ NOT NULL,
+    TARGET_TABLE_ID BIGINT,
+    TARGET_ACTIVE_FLAG VARCHAR(1) NOT NULL DEFAULT 'Y' CONSTRAINT ck_tasks_target_active CHECK (TARGET_ACTIVE_FLAG IN ('Y','N')),
     CONSTRAINT ck_tasks_code CHECK (TASK_CODE ~ '^[A-Za-z][A-Za-z0-9_]{0,127}$'),
     CONSTRAINT ck_tasks_task_type       CHECK (TASK_TYPE IN ('INGESTION','ETL')),
     CONSTRAINT ck_tasks_handler         CHECK (HANDLER IN ('PYTHON','SQL','BUSINESS_RULES','EMAIL_ALERT','EVENT_WAIT')),
@@ -124,6 +126,7 @@ CREATE TABLE CFG_TASKS (
         OR (RUN_CONDITION IS DISTINCT FROM 'N' AND RUN_CONDITION_COUNT IS NULL)
     )
 );
+CREATE INDEX ix_tasks_target ON CFG_TASKS (TARGET_TABLE_ID) WHERE TARGET_TABLE_ID IS NOT NULL;
 CREATE UNIQUE INDEX ux_tasks_code_identity
     ON CFG_TASKS (PIPELINE_ID, TASK_CODE);
 CREATE TRIGGER trg_audit_cfg_tasks
@@ -173,6 +176,7 @@ CREATE TABLE CFG_TASK_PARAMETERS (
     CREATE_DATE        TIMESTAMPTZ NOT NULL,
     UPDATED_BY         VARCHAR NOT NULL,
     UPDATED_DATE       TIMESTAMPTZ NOT NULL,
+    CONSTRAINT ck_taskparameters_target CHECK (upper(trim(PARAMETER_NAME)) <> 'TARGET_OBJECT'),
     CONSTRAINT ck_taskparameters_active_flag CHECK (ACTIVE_FLAG IN ('Y','N'))
 );
 CREATE UNIQUE INDEX ux_taskparameters_name_identity
@@ -180,7 +184,7 @@ CREATE UNIQUE INDEX ux_taskparameters_name_identity
 CREATE TRIGGER trg_audit_cfg_task_parameters
     BEFORE INSERT OR UPDATE ON CFG_TASK_PARAMETERS
     FOR EACH ROW EXECUTE FUNCTION trg_set_audit_columns();
-COMMENT ON TABLE CFG_TASK_PARAMETERS IS 'A task''s settings as name and value pairs (SQL_ACTION, TARGET_OBJECT, SOURCE_SQL, ...). Which names each handler reads is documented in the task parameter reference.';
+COMMENT ON TABLE CFG_TASK_PARAMETERS IS 'A task''s settings as name and value pairs (SQL_ACTION, SOURCE_SQL, ...); TARGET_OBJECT is derived from the task table reference. Which names each handler reads is documented in the task parameter reference.';
 
 -- A BUSINESS_RULES task's rules: a correlated SELECT that finds rows of the referenced target that
 -- break it, and what a failing row gets flagged as.
@@ -611,6 +615,8 @@ CREATE TABLE AUD_CFG_TASKS_HISTORY (
     CREATE_DATE TIMESTAMPTZ,
     UPDATED_BY VARCHAR,
     UPDATED_DATE TIMESTAMPTZ,
+    TARGET_TABLE_ID BIGINT,
+    TARGET_ACTIVE_FLAG VARCHAR(1),
     CONSTRAINT ck_aud_cfg_tasks_history_operation CHECK (OPERATION IN ('INSERT','UPDATE','DELETE')),
     CONSTRAINT ck_aud_cfg_tasks_history_current CHECK (CURRENT_FLAG IN ('Y','N'))
 );
@@ -985,6 +991,7 @@ CREATE TABLE CFG_TABLES (
     CONSTRAINT ck_tables_name CHECK (length(TABLE_NAME) > 0),
     CONSTRAINT ck_tables_kind CHECK (OBJECT_KIND IS NULL OR OBJECT_KIND IN ('TABLE','VIEW'))
 );
+ALTER TABLE CFG_TASKS ADD FOREIGN KEY (TARGET_TABLE_ID) REFERENCES CFG_TABLES(TABLE_ID);
 ALTER TABLE CFG_BUSINESS_RULES ADD FOREIGN KEY (TARGET_TABLE_ID) REFERENCES CFG_TABLES(TABLE_ID);
 ALTER TABLE CFG_BUSINESS_RULES DROP COLUMN TARGET_TABLE;
 CREATE UNIQUE INDEX ux_tables_catalog_identity ON CFG_TABLES (CATALOG_NAME, SCHEMA_NAME, TABLE_NAME) WHERE CATALOG_NAME IS NOT NULL;

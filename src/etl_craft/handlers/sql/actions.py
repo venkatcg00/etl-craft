@@ -202,9 +202,7 @@ def setup_table(session: Session, action: ActionContext) -> HandlerResult:
         logger.info("%s exists; SETUP_TABLE leaves it as it is", session.target)
         return HandlerResult(source_count=0, target_count=0, insert_count=0)
     with action.engine_db.connect() as conn:
-        others = fetch_target_tasks(
-            conn, action.context.pipeline_id, action.context.task_id, action.task.target_object
-        )
+        others = fetch_target_tasks(conn, action.context.pipeline_id, action.context.task_id)
     writer = writer_action(action.task.setup_for, others, action.task.target_object)
     stage = action.build_stage(session, empty=True)
     create_target_shape(session, stage, AUDIT_COLUMNS[writer])
@@ -582,7 +580,7 @@ def drop_table(session: Session, action: ActionContext) -> HandlerResult:
     context = action.context
     target_object = action.task.target_object
     with action.engine_db.connect() as conn:
-        others = fetch_target_tasks(conn, context.pipeline_id, context.task_id, target_object)
+        others = fetch_target_tasks(conn, context.pipeline_id, context.task_id)
         creator = next((task for task in others if task.sql_action == SqlAction.CREATE_TABLE), None)
         status = (
             fetch_task_run_status(conn, creator.task_id, context.pipeline_run_id)

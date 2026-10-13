@@ -54,7 +54,11 @@ def test_conversion_preserves_ids_stamps_and_old_evidence(legacy_sources_db, tmp
         ).all()
     assert migrations.apply_pending_migrations(
         db.engine, catalog="analytics", warehouse_dialect="duckdb"
-    ) == ["0028_source_contracts.sql", "0029_rule_target_contracts.sql"]
+    ) == [
+        "0028_source_contracts.sql",
+        "0029_rule_target_contracts.sql",
+        "0030_task_target_contracts.sql",
+    ]
     with db.engine.connect() as conn:
         assert not inspect(conn).has_table(
             "CFG_SOURCE_COLUMNS" if conn.dialect.name == "sqlite" else "cfg_source_columns"

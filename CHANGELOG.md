@@ -8,6 +8,13 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Task targets now reference the existing scoped `CFG_TABLES` contract through
+  `CFG_TASKS.TARGET_TABLE_ID`; config files use separate target components in `tasks.csv`.
+  `TARGET_OBJECT` is derived for handlers and scripts and is refused as a writable parameter.
+  Migration `0030` preserves task IDs/stamps, disabled target intent, parameter history and
+  historical exports. Writer conflicts compare table references across pipelines. Export after
+  upgrading and apply target edits to the task file; keep applied project SQL unchanged.
+
 - Source definitions now use scoped `CFG_TABLES` and `CFG_COLUMNS` contracts, separate
   catalog/schema/table components, stable column identities and parent foreign keys. Config
   export/apply uses `tables.csv` and `columns.csv`; the old source file is explicitly refused.

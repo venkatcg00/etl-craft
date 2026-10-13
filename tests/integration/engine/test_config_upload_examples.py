@@ -66,8 +66,13 @@ def test_every_example_applies_in_order_and_validates(metadata_project):
         "FROM CFG_TASK_PARAMETERS x JOIN CFG_TASKS t ON t.TASK_ID = x.TASK_ID "
         "JOIN CFG_PIPELINES p ON p.PIPELINE_ID = t.PIPELINE_ID "
         "WHERE p.PIPELINE_CODE = 'SALES_DAILY_EU' AND p.ACTIVE_FLAG = 'Y' AND x.ACTIVE_FLAG = 'Y' "
-        "AND x.PARAMETER_NAME IN ('INPUT_PARAMS', 'TARGET_OBJECT', 'SOURCE_SQL_FILE', 'EMAIL_TO') "
-        "ORDER BY 1, 2"
+        "AND x.PARAMETER_NAME IN ('INPUT_PARAMS', 'SOURCE_SQL_FILE', 'EMAIL_TO') "
+        "UNION ALL SELECT t.TASK_CODE AS task_code, 'TARGET_OBJECT' AS name, "
+        "o.SCHEMA_NAME || '.' || o.TABLE_NAME AS value FROM CFG_TASKS t "
+        "JOIN CFG_PIPELINES p ON p.PIPELINE_ID=t.PIPELINE_ID "
+        "JOIN CFG_TABLES o ON o.TABLE_ID=t.TARGET_TABLE_ID "
+        "WHERE p.PIPELINE_CODE='SALES_DAILY_EU' AND p.ACTIVE_FLAG='Y' "
+        "AND t.TARGET_ACTIVE_FLAG='Y' ORDER BY 1, 2"
     )
     assert metadata_project.rows(copy) == [
         ("alert", "EMAIL_TO", "sales-data@example.com|sales-leads@example.com"),
@@ -125,7 +130,7 @@ def test_legacy_retire_and_reuse_is_refused_atomically(metadata_project):
     )
 
 
-@pytest.mark.parametrize("example", ["0001_new_pipeline_contracts.sql", "0004_change_values.sql"])
+@pytest.mark.parametrize("example", ["0001_new_pipeline_targets.sql", "0004_change_values.sql"])
 def test_a_code_with_no_active_row_stops_the_upload(metadata_project, example):
     engine, migrations = metadata_project.engine, metadata_project.migrations
     for earlier in sorted(EXAMPLES.glob("*.sql")):

@@ -2,12 +2,13 @@
 
 An external source exposes `source.events(event_id BIGINT, payload VARCHAR)`. Create a merge
 target with a SETUP_TABLE task first, then configure the SQL task with these rows in
-`CFG_TASK_PARAMETERS` (using the task's existing `TASK_ID`):
+`CFG_TASK_PARAMETERS` (using the task's existing `TASK_ID`). Set its target in `tasks.csv`
+with `TARGET_SCHEMA_NAME=mart` and `TARGET_TABLE_NAME=events`, referencing the matching
+`tables.csv` row:
 
 | PARAMETER_NAME | PARAMETER_VALUE |
 | --- | --- |
 | SQL_ACTION | SCD1_MERGE |
-| TARGET_OBJECT | mart.events |
 | SOURCE_SQL | SELECT event_id, payload FROM source.events WHERE event_id > $$watermark |
 | MERGE_KEY | event_id |
 | MERGE_COMPARE_COLUMNS | payload |

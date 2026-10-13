@@ -13,6 +13,7 @@ from etl_craft.core.text import is_safe_identifier, qualify, split_object_ref
 from etl_craft.engine import locks
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.hash_versions import save_hash_version
+from etl_craft.engine.repository.tasks import fetch_task_parameters
 from etl_craft.handlers.sql.session import Session
 from etl_craft.warehouse.connection import open_warehouse, warehouse_dialect
 
@@ -36,10 +37,8 @@ def rehash(
     qualified = qualify(target, catalog)
     with locks.target(qualified).hold(engine):
         with engine.connect() as conn:
-            rows = conn.execute(statement(conn, "rehash_task_parameters")).all()
-        tasks: dict[int, dict[str, str]] = {}
-        for row in rows:
-            tasks.setdefault(row.task_id, {})[row.parameter_name] = row.parameter_value
+            task_ids = conn.execute(statement(conn, "rehash_tasks")).scalars().all()
+            tasks = {task_id: fetch_task_parameters(conn, task_id) for task_id in task_ids}
         contracts = set()
         for params in tasks.values():
             if params.get("SQL_ACTION") not in {"SCD1_MERGE", "SCD2_MERGE"}:

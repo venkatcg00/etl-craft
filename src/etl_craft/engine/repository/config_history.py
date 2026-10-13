@@ -51,6 +51,11 @@ def config_as_of(conn: Connection, as_of: datetime) -> Engine:
                 rows = _at(current, versions[table.table], key, table.table, as_of)
                 if table.table == "CFG_BUSINESS_RULES":
                     legacy_rules = [row for row in rows if row.get("target_table_id") is None]
+                if table.table == "CFG_TASKS":
+                    rows = [
+                        row | {"target_active_flag": row.get("target_active_flag") or "Y"}
+                        for row in rows
+                    ]
                 out.execute(text(f"CREATE TABLE {table.table} ({', '.join(columns)})"))
                 if rows:
                     out.execute(
@@ -156,6 +161,48 @@ def config_as_of(conn: Connection, as_of: datetime) -> Engine:
                     ),
                     {"target": rule_table_id, "id": row["business_rule_id"]},
                 )
+            for row in _rows(
+                out, "SELECT * FROM CFG_TASK_PARAMETERS WHERE PARAMETER_NAME='TARGET_OBJECT'"
+            ):
+                try:
+                    identity = object_identity(str(row["parameter_value"]), None, None)
+                except ValueError as error:
+                    raise MetadataError(
+                        f"cannot rebuild TASK_PARAMETER_ID={row['task_parameter_id']} as of "
+                        f"{as_of.isoformat()}: {error}; inspect its retained target history"
+                    ) from error
+                params = dict(zip(("catalog", "schema", "table"), identity, strict=True))
+                target = out.execute(
+                    text(
+                        "SELECT TABLE_ID AS table_id FROM CFG_TABLES WHERE SCHEMA_NAME=:schema "
+                        "AND TABLE_NAME=:table AND (CATALOG_NAME=:catalog OR "
+                        "(CATALOG_NAME IS NULL AND :catalog IS NULL))"
+                    ),
+                    params,
+                ).scalar_one_or_none()
+                if target is None:
+                    target = out.execute(
+                        text("SELECT COALESCE(MAX(TABLE_ID),0)+1 AS table_id FROM CFG_TABLES")
+                    ).scalar_one()
+                    out.execute(
+                        text(
+                            "INSERT INTO CFG_TABLES "
+                            "(TABLE_ID,CATALOG_NAME,SCHEMA_NAME,TABLE_NAME,ACTIVE_FLAG) "
+                            "VALUES (:id,:catalog,:schema,:table,'Y')"
+                        ),
+                        params | {"id": target},
+                    )
+                out.execute(
+                    text(
+                        "UPDATE CFG_TASKS SET "
+                        "TARGET_TABLE_ID=:target,TARGET_ACTIVE_FLAG=:active WHERE "
+                        "TASK_ID=:id"
+                    ),
+                    {"target": target, "active": row["active_flag"], "id": row["task_id"]},
+                )
+            out.execute(
+                text("DELETE FROM CFG_TASK_PARAMETERS WHERE PARAMETER_NAME='TARGET_OBJECT'")
+            )
     except Exception:
         scratch.dispose()
         raise
@@ -178,8 +225,20 @@ def _at(
         if row_id not in valid
         and version["operation"] != "INSERT"
         and not (
-            table == "CFG_BUSINESS_RULES"
-            and version.get("migration") == "engine/0029_rule_target_contracts.sql"
+            (
+                table == "CFG_BUSINESS_RULES"
+                and version.get("migration") == "engine/0029_rule_target_contracts.sql"
+            )
+            or (
+                table == "CFG_TASKS"
+                and version.get("migration") == "engine/0030_task_target_contracts.sql"
+            )
+            or (
+                table == "CFG_TASK_PARAMETERS"
+                and version.get("migration") == "engine/0030_task_target_contracts.sql"
+                and version.get("parameter_name") == "TARGET_OBJECT"
+                and version["operation"] == "DELETE"
+            )
         )
         and as_of < as_utc(version["valid_from"])
     ]
@@ -190,14 +249,27 @@ def _at(
             "recorded changes and changed later, so their values then are unknown; "
             "choose a time after their first recorded change"
         )
-    baselines = [
-        version | {"target_table_id": None}
-        for row_id, version in first.items()
-        if row_id not in valid
-        and as_of < as_utc(version["valid_from"])
-        and table == "CFG_BUSINESS_RULES"
-        and version.get("migration") == "engine/0029_rule_target_contracts.sql"
-    ]
+    baselines = []
+    for row_id, version in first.items():
+        if row_id in valid or as_of >= as_utc(version["valid_from"]):
+            continue
+        if (
+            table == "CFG_BUSINESS_RULES"
+            and version.get("migration") == "engine/0029_rule_target_contracts.sql"
+        ):
+            baselines.append(version | {"target_table_id": None})
+        elif (
+            table == "CFG_TASKS"
+            and version.get("migration") == "engine/0030_task_target_contracts.sql"
+        ):
+            baselines.append(version | {"target_table_id": None, "target_active_flag": "Y"})
+        elif (
+            table == "CFG_TASK_PARAMETERS"
+            and version.get("migration") == "engine/0030_task_target_contracts.sql"
+            and version.get("parameter_name") == "TARGET_OBJECT"
+            and version["operation"] == "DELETE"
+        ):
+            baselines.append(version)
     rows = list(valid.values()) + baselines + [row for row in current if str(row[key]) not in first]
     return rows
 

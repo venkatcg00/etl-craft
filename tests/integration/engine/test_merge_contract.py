@@ -2,6 +2,7 @@
 
 from sqlalchemy import text
 
+from etl_craft.engine.repository.source_contracts import resolve_project_sources
 from etl_craft.engine.repository.tasks import conflicting_merge_action
 from fixtures.metadata import add_pipeline, add_task
 
@@ -23,7 +24,8 @@ def test_opposite_merge_writer_matches_aliases_but_not_other_catalogs_or_retired
             SQL_ACTION="SCD2_MERGE",
             TARGET_OBJECT="elsewhere.raw.orders",
         )
-        assert conflicting_merge_action(conn, task, "warehouse.raw.orders", "SCD1_MERGE") is None
+        assert conflicting_merge_action(conn, task, "SCD1_MERGE") is None
+        resolve_project_sources(conn, "warehouse", "duckdb")
         add_task(
             conn,
             second,
@@ -32,12 +34,10 @@ def test_opposite_merge_writer_matches_aliases_but_not_other_catalogs_or_retired
             SQL_ACTION="scd2_merge",
             TARGET_OBJECT="WAREHOUSE.raw.orders",
         )
-        assert (
-            conflicting_merge_action(conn, task, "warehouse.raw.orders", "SCD1_MERGE")
-            == "SCD2_MERGE"
-        )
+        resolve_project_sources(conn, "warehouse", "duckdb")
+        assert conflicting_merge_action(conn, task, "SCD1_MERGE") == "SCD2_MERGE"
         conn.execute(
             text("UPDATE CFG_PIPELINES SET ACTIVE_FLAG='N' WHERE PIPELINE_ID=:id"),
             {"id": second},
         )
-        assert conflicting_merge_action(conn, task, "warehouse.raw.orders", "SCD1_MERGE") is None
+        assert conflicting_merge_action(conn, task, "SCD1_MERGE") is None

@@ -1,6 +1,6 @@
 """Rows for tests: pipelines, tasks, dependencies, and finished runs of them."""
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 from etl_craft.core.counts import Counts
 from etl_craft.engine import runlog, transitions
@@ -32,6 +32,14 @@ def add_task(conn, pipeline_id, code, handler="SQL", **params):
         pipeline=pipeline_id,
         handler=handler,
     )
+    params = dict(params)
+    target = params.get("TARGET_OBJECT")
+    task_name = "cfg_tasks" if conn.dialect.name == "postgresql" else "CFG_TASKS"
+    if target is not None and any(
+        column["name"].upper() == "TARGET_TABLE_ID"
+        for column in inspect(conn).get_columns(task_name)
+    ):
+        set_task_target(conn, task_id, params.pop("TARGET_OBJECT"))
     for name, value in params.items():
         conn.execute(
             text(
@@ -149,3 +157,14 @@ def add_source_column(conn, table, column, data_type, position):
         ),
         {"table_id": table_id, "column": column, "type": data_type, "position": position},
     ).scalar_one()
+
+
+def set_task_target(conn, task_id, target):
+    """Set the scoped target of a current task fixture."""
+    conn.execute(
+        text(
+            "UPDATE CFG_TASKS SET TARGET_TABLE_ID=:target, TARGET_ACTIVE_FLAG='Y' WHERE "
+            "TASK_ID=:task"
+        ),
+        {"task": task_id, "target": add_table(conn, target) if target else None},
+    )

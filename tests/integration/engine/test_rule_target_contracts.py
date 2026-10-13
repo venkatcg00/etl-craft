@@ -64,7 +64,7 @@ def test_conversion_reuses_contract_preserves_stamps_history_and_old_names(
     time.sleep(0.01)
     assert migrations.apply_pending_migrations(
         db.engine, catalog="analytics", warehouse_dialect="duckdb"
-    ) == ["0029_rule_target_contracts.sql"]
+    ) == ["0029_rule_target_contracts.sql", "0030_task_target_contracts.sql"]
     with db.engine.connect() as conn:
         columns = [
             column["name"].upper()
