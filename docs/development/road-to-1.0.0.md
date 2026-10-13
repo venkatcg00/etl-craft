@@ -125,7 +125,7 @@ item's text, or work done early under another item.
 | S5.O.2a Common config contract | Done | #149 | Mandatory core/custom CFG audit fields and keys, safe token lifecycle history and lossless upgrades |
 | S5.O.2b Normalized object contracts | In progress | #150, #151, #152, #153, #154 | Readiness, stable identities, source contracts and task/rule target FKs; ordered merge terms and audit endpoints remain pending |
 | S5.R Consolidate before the cluster | Planned | | Behaviour-preserving: one query path for Engine DB SQL, data-driven migration markers, enums and `core` errors throughout, shorter functions |
-| S5.S Accounts, login and roles | Planned | | Registered user and service accounts, password and SSO login, tokens for services, a role check on every action, no implicit actor |
+| S5.S Accounts, login and roles | Planned | | Registered user and service accounts, password and SSO login, tokens for services, a role check on every action, no implicit actor, local installations that operate a server |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
 | S5.P Project documentation gap UI | Planned | | Coloured column warnings, lineage gaps and project summary |
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
@@ -2442,6 +2442,8 @@ are service accounts.
   - ETL writes: `handlers/sql/actions.py` (the warehouse writer stamp).
   - Schema: both Engine DB dialects and their migrations.
   - Configuration: a new `Auth` section in `config/`.
+  - Local installations: a remote transport in `cli/` for the operations, and the sign-in
+    endpoints in `api/`.
   - Docs: the security and deployment guides.
 - *Change.*
   1. **Accounts and roles** (`feat/accounts-schema`).
@@ -2477,10 +2479,12 @@ are service accounts.
        `craft-connector.yml`).
        - SSO only authenticates registered accounts: the provider's subject must match an
          account's `OIDC_SUBJECT`. Nobody gets access by signing in alone.
-       - Credentials stay on the server where etl-craft is installed: people sign in there,
-         and a session never leaves that host. The session token is stored in the signed-in
-         person's own credential file on the server: `$XDG_CONFIG_HOME/etl-craft/credentials`,
-         otherwise `~/.config/etl-craft/credentials`.
+       - The Engine DB and warehouse credentials stay on the server where etl-craft is
+         installed. A person who signs in on the server gets a session token stored in their
+         own credential file there: `$XDG_CONFIG_HOME/etl-craft/credentials`, otherwise
+         `~/.config/etl-craft/credentials`.
+         - A local installation that operates the server holds only its own short-lived tokens
+           (item 5).
          - The file has mode 0600 and one entry per Engine DB.
          - A session is valid for `Auth.Session_hours` (default 12).
          - A credential file that other users can read is refused, and the message names the
@@ -2522,12 +2526,46 @@ are service accounts.
        - S5.O.3 adds the human writers of protected SCD tables.
      - Audit rows record the account name and kind. Names recorded before this item stay as
        they are.
+  5. **Local installations operate a server** (`feat/accounts-remote-cli`).
+     - **Why.** People develop on their own installation, against a local Engine DB and
+       warehouse (SQLite and DuckDB). They connect to a server installation only to operate it.
+       Metadata and SQL reach the server only through its own deployment: config files and
+       project migrations applied on the server, by CI or an admin. They are never pushed from
+       a laptop.
+     - **Sign in.** `etl-craft login --server https://<host>` works like the Salesforce CLI:
+       - the server signs the person in with a password or SSO through the device
+         authorization flow;
+       - it issues an access token (default 1 hour) and a refresh token (default 30 days,
+         `Auth.Refresh_days`);
+       - the local installation stores both in the person's credential file (mode 0600, one
+         entry per server) and renews the access token with the refresh token;
+       - `etl-craft logout`, or disabling the account, revokes the refresh token;
+       - the Engine DB and warehouse credentials never reach the local installation.
+     - **Pick the server.** A command names its server with `--server`, or with
+       `ETL_CRAFT_SERVER` for a session.
+       - Without either, it works on the local project as today.
+       - Anything other than HTTPS is refused, except to `localhost`.
+     - **What works remotely.** The operations the API serves, within the account's role,
+       with the same text and JSON output as on the server:
+       - `status`, `explain` and run history;
+       - attempt logs;
+       - `run` (trigger), `backfill`, `pause`, `resume`, `mark`, `cancel` and `rerun`;
+       - `upload` and `uploads` (S7.M);
+       - `whoami`.
+     - **What does not.** Commands that change metadata or the Engine DB are refused against a
+       server, naming the server-side way to do it: `config apply`, `migrate`, `init-db`,
+       `setup`, `account` and `token`.
+     - **Service accounts** (CI, Airflow) keep using a token in `ETL_CRAFT_TOKEN`, with no
+       refresh step. This matches Salesforce's non-interactive JWT flow.
+     - **The API gains** the sign-in endpoints (device authorization, token, refresh, revoke)
+       and an endpoint for each remote command it does not serve yet.
 - *Boundary.* Login proves who acts, and the role check decides what they may do.
   - Someone holding the Engine DB credentials can still go around the CLI, so the privileges
     from S3.I.3 remain the boundary: `setup --print-grants` gives people read-only logins, and
     only the engine's role writes.
-  - A deployment that should not hand those credentials to people runs `etl-craft server`, and
-    people work through the API.
+  - A deployment that should not hand those credentials to people runs `etl-craft server`.
+    People then operate it from their own local installation (item 5) or through the API, and
+    never hold the Engine DB credentials.
 - *Tests.*
   - Accounts: the account lifecycle and bootstrap; disabled accounts.
   - Login: with a password, and with SSO through the device flow against a local test issuer;
@@ -2538,12 +2576,21 @@ are service accounts.
   - Actors: `current_actor()` fails without an actor; system, schedule and worker actions are
     recorded under their accounts; ETL writes carry the engine's account on all four local
     warehouses.
+  - Local installations:
+    - sign-in with a password and with SSO against a test server;
+    - access-token renewal, refresh-token expiry, logout and an admin disabling the account;
+    - every remote command within and beyond the account's role;
+    - metadata commands refused against a server;
+    - plain HTTP refused except to `localhost`;
+    - no Engine DB or warehouse credential stored locally.
 - *Done when.*
   - Every action is attributed to a registered, active account that proved itself with a
     session or a token.
   - An action the account's role does not allow is refused and recorded.
   - Nothing is recorded under an actor nobody set on purpose.
   - ETL writes carry the engine's account.
+  - A local installation operates a server within the person's role, holding only short-lived,
+    revocable tokens and no Engine DB or warehouse credentials.
 
 ### S5.O.3 SCD human override protection
 
