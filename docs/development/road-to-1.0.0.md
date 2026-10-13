@@ -241,6 +241,10 @@ The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
 
+- S5.O.2b slice 2 history reads currently load all version headers; catalog builds also load
+  all recorded edges, and historical graphs fetch edges per valid version. S6.A retention and
+  bounded-catalog work should filter/bulk-read retained versions without changing their validity
+  or per-table numbering semantics.
 - S5.O.2b slice 2 adds `lineage --table schema.table --version NUMBER` at the owner's request,
   alongside `--as-of`. Versions are local to each target table; selecting one reads the graph
   at that version's opening time. The two selectors are mutually exclusive, and history reads

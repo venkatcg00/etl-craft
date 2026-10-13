@@ -45,6 +45,11 @@ not traced: their SQL, if any, is inside the script.
 Every recording combines the edges of active SQL writers per target table. Changed edges open
 one new version and close the previous one in the same transaction. Recomputing identical edges
 or upgrading sqlglot adds no version. Retiring the last writer closes the current version.
+Publication uses only edges computed or confirmed against their cache key in that collection.
+If any writer of a table cannot be traced, its current version closes and no replacement opens.
+CLI output and the table's catalog page say "history not updated", naming the failed task and
+reason. Earlier edges remain readable for their closed interval but cannot be presented as
+current. Fix the task and compute lineage again to open a new version.
 Validity begins when lineage is computed, independently of when pipelines run.
 
 ```bash

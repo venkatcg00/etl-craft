@@ -41,10 +41,11 @@ from sqlglot.schema import MappingSchema
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.enums import RefreshType, SqlAction
-from etl_craft.core.errors import EtlCraftError, MetadataError
+from etl_craft.core.errors import EtlCraftError, LockTimeoutError, MetadataError
 from etl_craft.core.text import sha256_hex
-from etl_craft.engine.locks import EngineLock, advisory_key
+from etl_craft.engine.locks import LINEAGE
 from etl_craft.engine.repository.lineage import (
+    SqlTaskRef,
     StoredEdge,
     fetch_lineage_versions,
     fetch_sql_tasks,
@@ -261,29 +262,13 @@ def lineage_key(
     )
 
 
-def _collect(
-    engine: Engine, config: ConnectorConfig, *, refresh: bool = False, record: bool = True
-) -> list[TaskLineage]:
-    """Return the lineage of every active SQL task, working out and storing what changed.
-
-    ``refresh`` works everything out again. Without ``record`` nothing is stored.
-    """
+def _ordered_tasks(
+    engine: Engine, config: ConnectorConfig, tasks: list[tuple[SqlTaskRef, dict[str, str]]]
+) -> tuple[list[tuple[SqlTaskRef, dict[str, str]]], set[int], set[str]]:
+    """Order SQL writers by metadata and references, retaining unresolved cycles."""
     dialect, catalog = dialect_and_catalog(config)
     with engine.connect() as conn:
-        tasks = [(ref, fetch_task_parameters(conn, ref.task_id)) for ref in fetch_sql_tasks(conn)]
-        defined = fetch_source_columns(conn)
         dependencies = fetch_task_dependency_edges(conn)
-    schemas: dict[str, dict[str, str]] = {}
-    invalid: dict[str, str] = {}
-    for column in defined:
-        name = table_name(column.table_name.split("."), catalog)
-        problem = definition_problem(column, dialect)
-        if problem:
-            invalid[name] = problem
-            continue
-        schemas.setdefault(table_name(column.table_name.split("."), catalog), {})[
-            column.column_name.lower()
-        ] = column.data_type
     writers: dict[str, set[int]] = {}
     reads: dict[int, tuple[str, ...]] = {}
     for ref, params in tasks:
@@ -298,9 +283,6 @@ def _collect(
             reads[ref.task_id] = referenced_tables(sql, dialect=dialect, catalog=catalog)
         except EtlCraftError:
             reads[ref.task_id] = ()
-    # A managed target is inferred from its writers, never from a stale source definition.
-    for target in writers:
-        schemas.pop(target, None)
     labels = {f"{ref.pipeline_code}.{ref.task_code}": ref.task_id for ref, _ in tasks}
     targets = {
         ref.task_id: table_name((params.get("TARGET_OBJECT") or "").strip().split("."), catalog)
@@ -340,11 +322,46 @@ def _collect(
         processed.update(ref.task_id for ref, _ in ready)
         remaining = [(ref, params) for ref, params in remaining if ref.task_id not in processed]
     ordered.extend(remaining)
+    return ordered, processed, set(writers)
+
+
+def _collect(
+    engine: Engine,
+    config: ConnectorConfig,
+    keys: dict[int, str | None],
+    *,
+    refresh: bool = False,
+    record: bool = True,
+) -> list[TaskLineage]:
+    """Return the lineage of every active SQL task, working out and storing what changed.
+
+    ``refresh`` works everything out again. Without ``record`` nothing is stored.
+    """
+    dialect, catalog = dialect_and_catalog(config)
+    with engine.connect() as conn:
+        tasks = [(ref, fetch_task_parameters(conn, ref.task_id)) for ref in fetch_sql_tasks(conn)]
+        defined = fetch_source_columns(conn)
+    schemas: dict[str, dict[str, str]] = {}
+    invalid: dict[str, str] = {}
+    for column in defined:
+        name = table_name(column.table_name.split("."), catalog)
+        problem = definition_problem(column, dialect)
+        if problem:
+            invalid[name] = problem
+            continue
+        schemas.setdefault(table_name(column.table_name.split("."), catalog), {})[
+            column.column_name.lower()
+        ] = column.data_type
+    ordered, processed, writers = _ordered_tasks(engine, config, tasks)
+    # A managed target is inferred from its writers, never from a stale source definition.
+    for target in writers:
+        schemas.pop(target, None)
     results: list[TaskLineage] = []
     for ref, params in ordered:
         name = f"{ref.pipeline_code}.{ref.task_code}"
         if (params.get("SQL_ACTION") or "").upper() == SqlAction.DROP_TABLE:
             continue
+        keys[ref.task_id] = None
         target = (params.get("TARGET_OBJECT") or "").strip()
         sources: tuple[str, ...] = ()
         try:
@@ -378,6 +395,7 @@ def _collect(
                 stored = [] if refresh else fetch_task_lineage(conn, ref.task_id, key)
             if stored:
                 edges = [stored_edge(e, name, catalog) for e in stored]
+                keys[ref.task_id] = key
                 results.append(TaskLineage(name, target, edges, cached=True, sources=sources))
                 if (params.get("SQL_ACTION") or "").upper() != SqlAction.DELETE_ROWS:
                     schemas[table_name(target.split("."), catalog)] = dict.fromkeys(
@@ -398,7 +416,8 @@ def _collect(
                 )
             ]
         except EtlCraftError as error:
-            results.append(TaskLineage(name, target or None, [], error=str(error), sources=sources))
+            reason = f"history not updated: {error}" if record else str(error)
+            results.append(TaskLineage(name, target or None, [], error=reason, sources=sources))
             continue
         if (params.get("SQL_ACTION") or "").upper() != SqlAction.DELETE_ROWS:
             schemas[table_name(target.split("."), catalog)] = dict.fromkeys(
@@ -407,6 +426,7 @@ def _collect(
         if record:
             with engine.begin() as conn:
                 store_task_lineage(conn, ref.task_id, key, [cache_edge(e, catalog) for e in edges])
+        keys[ref.task_id] = key
         results.append(TaskLineage(name, target, edges, sources=sources))
     return sorted(results, key=lambda result: result.task)
 
@@ -422,14 +442,20 @@ def collect(
     engine: Engine, config: ConnectorConfig, *, refresh: bool = False, record: bool = True
 ) -> list[TaskLineage]:
     """Compute task lineage and publish table versions once under the recording lock."""
-    lock = EngineLock("lineage", advisory_key("lineage"))
-    with lock.hold(engine) if record else nullcontext():
-        results = _collect(engine, config, refresh=refresh, record=record)
-        if record:
-            _, catalog = dialect_and_catalog(config)
-            with engine.begin() as conn:
-                record_lineage_versions(conn, catalog.lower() if catalog else None)
-        return results
+    keys: dict[int, str | None] = {}
+    try:
+        with LINEAGE.hold(engine, wait_seconds=30) if record else nullcontext():
+            results = _collect(engine, config, keys, refresh=refresh, record=record)
+            if record:
+                _, catalog = dialect_and_catalog(config)
+                with engine.begin() as conn:
+                    record_lineage_versions(conn, catalog.lower() if catalog else None, keys)
+            return results
+    except LockTimeoutError as error:
+        raise LockTimeoutError(
+            f"lineage recording lock unavailable: {error}; check the current lineage or docs "
+            "recorder, let it finish or restart it if stuck, then retry"
+        ) from error
 
 
 def stored_edge(stored: StoredEdge, task: str, catalog: str | None) -> Edge:

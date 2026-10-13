@@ -317,8 +317,32 @@ def test_guarded_upgrade_rolls_back_with_the_ledger(empty_engine_db, monkeypatch
     assert snapshot(db.engine) == before
     monkeypatch.setattr(migrations, "_record", original)
     applied = migrations.apply_pending_migrations(db.engine)
-    assert applied[0] == "0008_actors_and_audit_guards.sql"
-    assert "0031_lineage_versions.sql" in applied
+    assert {
+        "0008_actors_and_audit_guards.sql",
+        "0009_preserve_request_actors.sql",
+        "0010_gate_repairs.sql",
+        "0011_target_hash_version.sql",
+        "0013_execution_identity_comment.sql",
+        "0014_overseers.sql",
+        "0015_schedules.sql",
+        "0016_gate_waits.sql",
+        "0017_retries.sql",
+        "0018_api_tokens.sql",
+        "0019_target_view_statement.sql",
+        "0020_reject_count.sql",
+        "0021_config_history.sql",
+        "0022_watermarks.sql",
+        "0023_event_waits.sql",
+        "0024_source_columns.sql",
+        "0025_token_audit_names.sql",
+        "0026_config_base_contract.sql",
+        "0027_config_identities.sql",
+        "0028_source_contracts.sql",
+        "0029_rule_target_contracts.sql",
+        "0030_task_target_contracts.sql",
+        "0031_lineage_versions.sql",
+    } <= set(applied)
+    assert applied == sorted(applied)
     assert migrations.apply_pending_migrations(db.engine) == []
 
 

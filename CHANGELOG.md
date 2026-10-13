@@ -14,6 +14,10 @@ All notable changes are recorded here. The format follows
   selects a table's version and the graph at its opening time. Historical reads never parse
   current SQL. Migration `0031` is plain SQL in both Engine DBs: it resets the derived task
   cache to separate endpoint components and starts history at the first post-upgrade computation.
+  Failed writers close their table's current history without opening a replacement; CLI/catalog
+  output names the task and reason. Publication accepts only this collection's confirmed cache
+  keys. Lineage recording waits at most 30 seconds for its named Engine DB lock and reports the
+  recorder/remedy on timeout. The Python operation takes a frozen `LineageQuery`, validated once.
   No older lineage can be recovered from the discarded cache. No config files or parameters change.
 
 

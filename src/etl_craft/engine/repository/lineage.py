@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 
+from sqlalchemy import BigInteger, String, bindparam
 from sqlalchemy.engine import Connection
+from sqlalchemy.types import TupleType
 
 from etl_craft.core.enums import ActiveFlag
 from etl_craft.core.text import sha256_hex
@@ -129,10 +131,23 @@ def fetch_version_edges(conn: Connection, version_id: int | None) -> list[Histor
     ]
 
 
-def record_lineage_versions(conn: Connection, catalog: str | None) -> None:
+def record_lineage_versions(
+    conn: Connection, catalog: str | None, keys: Mapping[int, str | None]
+) -> None:
     """Publish changed combined edges; the caller holds the lineage recording lock."""
     grouped: dict[tuple[str | None, str, str], list[RecordedEdge]] = defaultdict(list)
-    rows = conn.execute(statement(conn, "lineage_cache_edges"), {"catalog": catalog})
+    query = statement(conn, "lineage_cache_edges").bindparams(
+        bindparam("confirmed_keys", expanding=True, type_=TupleType(BigInteger(), String())),
+        bindparam("failed_tasks", expanding=True),
+    )
+    rows = conn.execute(
+        query,
+        {
+            "catalog": catalog,
+            "confirmed_keys": [(task, key) for task, key in keys.items() if key is not None],
+            "failed_tasks": [task for task, key in keys.items() if key is None],
+        },
+    )
     for row in rows:
         edge = RecordedEdge(**row._mapping)
         grouped[(edge.target_catalog_name, edge.target_schema_name, edge.target_table_name)].append(

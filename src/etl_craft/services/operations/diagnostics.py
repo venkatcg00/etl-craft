@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import ClassVar, TypedDict, Unpack
+from typing import ClassVar
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.targets import active_catalog
@@ -54,44 +54,47 @@ class LineageView:
     failed: bool
 
 
-class LineageOptions(TypedDict, total=False):
-    """Keyword selectors shared by the CLI and lineage operation."""
+@dataclass(frozen=True)
+class LineageQuery:
+    """Related selectors validated before collecting or reading stored lineage."""
 
-    table: str | None
-    column: str | None
-    upstream: bool
-    downstream: bool
-    depth: int | None
-    refresh: bool
-    as_of: str | None
-    version: int | None
+    table: str | None = None
+    column: str | None = None
+    upstream: bool = True
+    downstream: bool = True
+    depth: int | None = None
+    refresh: bool = False
+    as_of: str | None = None
+    version: int | None = None
+
+    def validate(self) -> None:
+        """Reject incompatible selectors before reading or writing the Engine DB."""
+        if self.column and not self.table:
+            raise UsageError("--column needs --table")
+        if self.depth is not None and self.depth < 1:
+            raise UsageError(f"--depth must be 1 or more, got {self.depth}")
+        if self.as_of is not None and self.version is not None:
+            raise UsageError("--as-of and --version are mutually exclusive; choose one")
+        if self.refresh and (self.as_of is not None or self.version is not None):
+            raise UsageError("--refresh cannot read history; omit it with --as-of or --version")
+        if self.version is not None and (self.table is None or self.version < 1):
+            raise UsageError(
+                f"--version needs --table and a positive version number; got table {self.table!r}, "
+                f"version {self.version}; choose a table and version"
+            )
 
 
-def trace_lineage(ctx: OperationContext, **options: Unpack[LineageOptions]) -> LineageView:
+def trace_lineage(ctx: OperationContext, query: LineageQuery) -> LineageView:
     """Collect and select lineage using the same validation for every caller."""
-    unknown = options.keys() - LineageOptions.__annotations__.keys()
-    if unknown:
-        raise UsageError(
-            f"unknown lineage selectors {sorted(unknown)}; use the documented selector names"
-        )
-    table, column = options.get("table"), options.get("column")
-    upstream, downstream = options.get("upstream", True), options.get("downstream", True)
-    depth, refresh = options.get("depth"), options.get("refresh", False)
-    as_of, version = options.get("as_of"), options.get("version")
-    if column and not table:
-        raise UsageError("--column needs --table")
-    if depth is not None and depth < 1:
-        raise UsageError(f"--depth must be 1 or more, got {depth}")
-    if as_of is not None and version is not None:
-        raise UsageError("--as-of and --version are mutually exclusive; choose one")
-    if refresh and (as_of is not None or version is not None):
-        raise UsageError("--refresh cannot read history; omit it with --as-of or --version")
-    moment = None if as_of is None else resolve_as_of(ctx, as_of)
-    if version is not None:
-        moment = _version_moment(ctx, table, version)
+    query.validate()
+    table, column = query.table, query.column
+    upstream, downstream, depth = query.upstream, query.downstream, query.depth
+    moment = None if query.as_of is None else resolve_as_of(ctx, query.as_of)
+    if query.version is not None and query.table is not None:
+        moment = _version_moment(ctx, query.table, query.version)
     with acting_as(ctx.actor):
         lineages = tuple(
-            lineage.collect(ctx.engine, ctx.config, refresh=refresh)
+            lineage.collect(ctx.engine, ctx.config, refresh=query.refresh)
             if moment is None
             else lineage.historical_lineage(ctx.engine, ctx.config, moment)
         )
@@ -119,13 +122,8 @@ def trace_lineage(ctx: OperationContext, **options: Unpack[LineageOptions]) -> L
     )
 
 
-def _version_moment(ctx: OperationContext, table: str | None, version: int) -> datetime:
+def _version_moment(ctx: OperationContext, table: str, version: int) -> datetime:
     """Select one table's version, then read the graph at its opening time."""
-    if table is None or version < 1:
-        raise UsageError(
-            f"--version needs --table and a positive version number; got table {table!r}, "
-            f"version {version}; choose a table and version"
-        )
     catalog = active_catalog(ctx.config) if ctx.config.warehouse is not None else None
     name = lineage.table_name(table.split("."), catalog)
     with ctx.engine.connect() as conn:

@@ -467,10 +467,16 @@ def render_dag_svg(
     return "".join(parts)
 
 
-def lineage_history(table: TableAsset) -> str:
+def lineage_history(table: TableAsset, catalog: Catalog) -> str:
     """Render the current version and the column-source changes in table history."""
+    warnings = "".join(
+        f'<p class="note">{escape(task)}: {escape(catalog.tasks[task].lineage_error)}</p>'
+        for task in table.writers
+        if catalog.tasks[task].lineage_error
+    )
+    heading = "<h2>Lineage history</h2>" + warnings
     if not table.lineage_history:
-        return "<h2>Lineage history</h2><p>No lineage versions recorded for this table.</p>"
+        return heading + "<p>No lineage versions recorded for this table.</p>"
     current = next(
         (v for v, _, _ in table.lineage_history if v.current_flag == ActiveFlag.YES), None
     )
@@ -509,6 +515,8 @@ def lineage_history(table: TableAsset) -> str:
                 "<br>".join(changes),
             ]
         )
-    return f"<h2>Lineage history</h2><p>{summary}</p>" + render_table(
-        ["Version", "Valid from", "Valid to", "Column source changes"], rows, ""
+    return (
+        heading
+        + f"<p>{summary}</p>"
+        + render_table(["Version", "Valid from", "Valid to", "Column source changes"], rows, "")
     )

@@ -983,9 +983,8 @@ class _Writer:
                 + "".join(f"<li>{_e(message)}</li>" for message in table.warehouse_findings)
                 + "</ul>"
             )
-        return (
-            f"{facts}{comparison}{self._columns(table)}{self._graph(name)}{lineage_history(table)}"
-        )
+        history = lineage_history(table, self.catalog)
+        return f"{facts}{comparison}{self._columns(table)}{self._graph(name)}{history}"
 
     def _columns(self, table: TableAsset) -> str:
         sources: dict[str, list[str]] = {}

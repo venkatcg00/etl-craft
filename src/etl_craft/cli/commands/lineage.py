@@ -8,7 +8,7 @@ from etl_craft.cli.commands.common import Command, command_context, configure_ou
 from etl_craft.cli.output import Output
 from etl_craft.core.errors import ExitCode
 from etl_craft.services.lineage import COPY, Edge, TaskLineage
-from etl_craft.services.operations.diagnostics import trace_lineage
+from etl_craft.services.operations.diagnostics import LineageQuery, trace_lineage
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -42,14 +42,16 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     with command_context(args) as ctx:
         done = trace_lineage(
             ctx,
-            table=args.table,
-            column=args.column,
-            upstream=not args.downstream,
-            downstream=not args.upstream,
-            depth=args.depth,
-            refresh=args.refresh,
-            as_of=args.as_of,
-            version=args.version,
+            LineageQuery(
+                table=args.table,
+                column=args.column,
+                upstream=not args.downstream,
+                downstream=not args.upstream,
+                depth=args.depth,
+                refresh=args.refresh,
+                as_of=args.as_of,
+                version=args.version,
+            ),
         )
 
     def render() -> None:
@@ -81,7 +83,9 @@ def _run(args: argparse.Namespace, out: Output) -> int:
                 out.line(f"  {'  ' * (level - 1)}-> {target}  [{_how(edge)}]  ({edge.task})")
         failed = sum(1 for item in done.lineages if item.error)
         if failed and done.table is not None:
-            out.line(f"({failed} SQL task(s) could not be traced; run lineage without --table)")
+            for item in done.lineages:
+                if item.error:
+                    out.line(f"not traced: {item.task}: {item.error}")
 
     out.result(done, args.output_format, text=render)
     return ExitCode.FAILURE if args.strict and done.failed else ExitCode.SUCCESS
