@@ -29,6 +29,9 @@ MIGRATE = EngineLock("migrate", 8_241_007)
 CLONE = EngineLock("clone", 8_241_008)
 """Serializes cloning, so two runs finishing together never write the same mirror at once."""
 
+LINEAGE = EngineLock("lineage", 8_241_009)
+"""Serializes task cache computations and table lineage version publication."""
+
 
 def target(name: str) -> EngineLock:
     """Serialize target mutations and hash-contract publication across processes."""

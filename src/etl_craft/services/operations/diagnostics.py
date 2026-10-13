@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import ClassVar
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.actor import acting_as
-from etl_craft.core.errors import UsageError
+from etl_craft.core.errors import ResourceNotFoundError, UsageError
+from etl_craft.engine.repository.lineage import fetch_lineage_versions
 from etl_craft.services import doctor, lineage, validate
+from etl_craft.services.operations.config_files import resolve_as_of
 from etl_craft.services.operations.context import OperationContext
 
 
@@ -51,23 +54,50 @@ class LineageView:
     failed: bool
 
 
-def trace_lineage(
-    ctx: OperationContext,
-    *,
-    table: str | None = None,
-    column: str | None = None,
-    upstream: bool = True,
-    downstream: bool = True,
-    depth: int | None = None,
-    refresh: bool = False,
-) -> LineageView:
+@dataclass(frozen=True)
+class LineageQuery:
+    """Related selectors validated before collecting or reading stored lineage."""
+
+    table: str | None = None
+    column: str | None = None
+    upstream: bool = True
+    downstream: bool = True
+    depth: int | None = None
+    refresh: bool = False
+    as_of: str | None = None
+    version: int | None = None
+
+    def validate(self) -> None:
+        """Reject incompatible selectors before reading or writing the Engine DB."""
+        if self.column and not self.table:
+            raise UsageError("--column needs --table")
+        if self.depth is not None and self.depth < 1:
+            raise UsageError(f"--depth must be 1 or more, got {self.depth}")
+        if self.as_of is not None and self.version is not None:
+            raise UsageError("--as-of and --version are mutually exclusive; choose one")
+        if self.refresh and (self.as_of is not None or self.version is not None):
+            raise UsageError("--refresh cannot read history; omit it with --as-of or --version")
+        if self.version is not None and (self.table is None or self.version < 1):
+            raise UsageError(
+                f"--version needs --table and a positive version number; got table {self.table!r}, "
+                f"version {self.version}; choose a table and version"
+            )
+
+
+def trace_lineage(ctx: OperationContext, query: LineageQuery) -> LineageView:
     """Collect and select lineage using the same validation for every caller."""
-    if column and not table:
-        raise UsageError("--column needs --table")
-    if depth is not None and depth < 1:
-        raise UsageError(f"--depth must be 1 or more, got {depth}")
+    query.validate()
+    table, column = query.table, query.column
+    upstream, downstream, depth = query.upstream, query.downstream, query.depth
+    moment = None if query.as_of is None else resolve_as_of(ctx, query.as_of)
+    if query.version is not None and query.table is not None:
+        moment = _version_moment(ctx, query.table, query.version)
     with acting_as(ctx.actor):
-        lineages = tuple(lineage.collect(ctx.engine, ctx.config, refresh=refresh))
+        lineages = tuple(
+            lineage.collect(ctx.engine, ctx.config, refresh=query.refresh)
+            if moment is None
+            else lineage.historical_lineage(ctx.engine, ctx.config, moment)
+        )
     graph = lineage.LineageGraph.of(lineages)
     if table is not None:
         catalog = active_catalog(ctx.config) if ctx.config.warehouse is not None else None
@@ -89,4 +119,25 @@ def trace_lineage(
         upstream,
         downstream,
         any(item.error for item in lineages),
+    )
+
+
+def _version_moment(ctx: OperationContext, table: str, version: int) -> datetime:
+    """Select one table's version, then read the graph at its opening time."""
+    catalog = active_catalog(ctx.config) if ctx.config.warehouse is not None else None
+    name = lineage.table_name(table.split("."), catalog)
+    with ctx.engine.connect() as conn:
+        versions = fetch_lineage_versions(conn)
+    for item in versions:
+        if (
+            item.version_number == version
+            and lineage.table_name(
+                (item.catalog_name or "", item.schema_name, item.table_name), catalog
+            )
+            == name
+        ):
+            return item.valid_from
+    raise ResourceNotFoundError(
+        f"table {table!r} has no lineage version {version}; "
+        "choose a version listed in its catalog history"
     )

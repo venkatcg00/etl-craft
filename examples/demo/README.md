@@ -48,6 +48,10 @@ seed is added after the main seed.
 The emails arrive in Mailpit at <http://localhost:58025>. `etl-craft history`, `graph`, `steps`
 and `lineage` show what ran. `etl-craft lineage --strict` also traces every SQL task before
 the warehouse tables exist, using the script-landed source shapes in the seed metadata.
+Each computation records changed table lineage as a version. After the first tracing, use
+`etl-craft lineage --table <schema.table> --version 1` (substitute a target listed by `lineage`)
+or `etl-craft lineage --as-of <ISO-time>` to read retained edges; catalog table pages show
+version history. History begins after upgrading the Engine DB and computing lineage.
 
 ## Under an orchestrator
 

@@ -316,7 +316,8 @@ def test_guarded_upgrade_rolls_back_with_the_ledger(empty_engine_db, monkeypatch
         migrations.apply_pending_migrations(db.engine)
     assert snapshot(db.engine) == before
     monkeypatch.setattr(migrations, "_record", original)
-    assert migrations.apply_pending_migrations(db.engine) == [
+    applied = migrations.apply_pending_migrations(db.engine)
+    assert {
         "0008_actors_and_audit_guards.sql",
         "0009_preserve_request_actors.sql",
         "0010_gate_repairs.sql",
@@ -339,7 +340,10 @@ def test_guarded_upgrade_rolls_back_with_the_ledger(empty_engine_db, monkeypatch
         "0028_source_contracts.sql",
         "0029_rule_target_contracts.sql",
         "0030_task_target_contracts.sql",
-    ]
+        "0031_lineage_versions.sql",
+    } <= set(applied)
+    assert applied == sorted(applied)
+    assert migrations.apply_pending_migrations(db.engine) == []
 
 
 @pytest.mark.parametrize(

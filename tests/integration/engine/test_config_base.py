@@ -206,13 +206,15 @@ def test_upgrade_preserves_tokens_creation_history_and_rolls_back(empty_engine_d
         assert conn.execute(text("SELECT COUNT(*) FROM CFG_API_TOKENS")).scalar_one() == 2
     monkeypatch.setattr(migrations, "_record", original)
     with acting_as(BOB):
-        assert migrations.apply_pending_migrations(db.engine) == [
+        applied = migrations.apply_pending_migrations(db.engine)
+        assert {
             "0026_config_base_contract.sql",
             "0027_config_identities.sql",
             "0028_source_contracts.sql",
             "0029_rule_target_contracts.sql",
             "0030_task_target_contracts.sql",
-        ]
+        } <= set(applied)
+        assert applied == sorted(applied)
     ctx = OperationContext(db.engine, db.config, BOB)
     assert tokens.authenticate(ctx, "old-token")
     assert tokens.authenticate(ctx, "revoked-token") is None

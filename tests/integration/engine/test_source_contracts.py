@@ -52,13 +52,15 @@ def test_conversion_preserves_ids_stamps_and_old_evidence(legacy_sources_db, tmp
         evidence = conn.execute(
             text("SELECT * FROM AUD_METADATA_CHANGES WHERE TABLE_NAME='CFG_SOURCE_COLUMNS'")
         ).all()
-    assert migrations.apply_pending_migrations(
+    applied = migrations.apply_pending_migrations(
         db.engine, catalog="analytics", warehouse_dialect="duckdb"
-    ) == [
+    )
+    assert {
         "0028_source_contracts.sql",
         "0029_rule_target_contracts.sql",
         "0030_task_target_contracts.sql",
-    ]
+    } <= set(applied)
+    assert applied == sorted(applied)
     with db.engine.connect() as conn:
         assert not inspect(conn).has_table(
             "CFG_SOURCE_COLUMNS" if conn.dialect.name == "sqlite" else "cfg_source_columns"

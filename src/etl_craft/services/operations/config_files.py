@@ -41,14 +41,15 @@ def export_config(
     time; a time without a zone is UTC.
     """
     target = config_files.config_directory(ctx.config, directory)
-    moment = None if as_of is None else _moment(ctx, as_of)
+    moment = None if as_of is None else resolve_as_of(ctx, as_of)
     with acting_as(ctx.actor):
         return config_files.export_config(
             ctx.engine, target, overwrite=overwrite, as_of=moment, config=ctx.config
         )
 
 
-def _moment(ctx: OperationContext, as_of: str) -> datetime:
+def resolve_as_of(ctx: OperationContext, as_of: str) -> datetime:
+    """Resolve the shared run-id or ISO timestamp selector to UTC."""
     written = as_of.strip()
     if written.isdigit():
         with ctx.engine.connect() as conn:

@@ -297,7 +297,9 @@ def test_the_command(project, capsys):
     _, _, root = project
     assert main(["generate-docs", "--strict"]) == ExitCode.FAILURE
     out = capsys.readouterr().out.splitlines()
-    assert out[0].startswith("column lineage unavailable: MART.copy_all: SELECT * cannot")
+    assert out[0].startswith(
+        "column lineage unavailable: MART.copy_all: history not updated: SELECT * cannot"
+    )
     assert out[-1] == "generate-docs: nothing written; 1 task(s) not traced"
     assert not (root / "catalog").exists()
     assert main(["generate-docs", "--with-warehouse"]) == ExitCode.SUCCESS

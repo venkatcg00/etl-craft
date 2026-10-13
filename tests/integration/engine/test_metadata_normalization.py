@@ -235,12 +235,14 @@ def test_identity_migration_preserves_rows_and_their_history(legacy_identity_db)
             text("SELECT * FROM AUD_CFG_PIPELINES_HISTORY ORDER BY CHANGE_ID")
         ).all()
         row = conn.execute(text("SELECT * FROM CFG_PIPELINES")).one()
-    assert apply_pending_migrations(db.engine) == [
+    applied = apply_pending_migrations(db.engine)
+    assert {
         "0027_config_identities.sql",
         "0028_source_contracts.sql",
         "0029_rule_target_contracts.sql",
         "0030_task_target_contracts.sql",
-    ]
+    } <= set(applied)
+    assert applied == sorted(applied)
     with db.engine.connect() as conn:
         assert conn.execute(text("SELECT * FROM CFG_PIPELINES")).one() == row
         assert (

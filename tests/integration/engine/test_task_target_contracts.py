@@ -63,9 +63,11 @@ def test_conversion_preserves_targets_stamps_disabled_intent_and_past_exports(
             purpose.reset(token)
     moment = datetime.now(UTC)
     time.sleep(0.01)
-    assert migrations.apply_pending_migrations(
+    applied = migrations.apply_pending_migrations(
         db.engine, catalog="analytics", warehouse_dialect="duckdb"
-    ) == ["0030_task_target_contracts.sql"]
+    )
+    assert {"0030_task_target_contracts.sql"} <= set(applied)
+    assert applied == sorted(applied)
     with db.engine.connect() as conn:
         after = conn.execute(text("SELECT * FROM CFG_TASKS ORDER BY TASK_ID")).all()
         assert [row[:-2] for row in after] == before

@@ -109,7 +109,8 @@ def test_the_summary_lists_every_task_and_what_cannot_be_traced(project, capsys)
         "INGEST.stage\tstaging.orders\t3\traw.orders",
         "MART.daily\tmart.daily\t1\tsales.orders",
         "SALES.convert\tsales.orders\t2\tref.rates, staging.orders",
-        "not traced: MART.copy_all: SELECT * cannot be traced without knowing the table's "
+        "not traced: MART.copy_all: history not updated: SELECT * cannot be traced without "
+        "knowing the table's "
         "columns (ref.rates, sales.orders); define them in columns.csv or list them",
     ]
     assert main(["lineage", "--strict"]) == ExitCode.FAILURE
@@ -126,7 +127,9 @@ def test_a_column_is_traced_to_its_first_sources_and_last_consumers(project, cap
         "  <- staging.orders.amount  [o.amount * r.rate]  (SALES.convert)",
         "    <- raw.orders.amt  [copy]  (INGEST.stage)",
         "  -> mart.daily.total  [SUM(amount_usd)]  (MART.daily)",
-        "(1 SQL task(s) could not be traced; run lineage without --table)",
+        "not traced: MART.copy_all: history not updated: SELECT * cannot be traced without "
+        "knowing the table's columns (ref.rates, sales.orders); define them in columns.csv "
+        "or list them",
     ]
     code, out = run(capsys, "lineage", "--table", "raw.orders", "--downstream")
     assert out.splitlines()[:5] == [
@@ -194,3 +197,386 @@ def test_catalog_and_parser_changes_invalidate_stored_lineage(project, monkeypat
     assert collect(engine, config)[0].cached
     monkeypatch.setattr(lineage, "SQLGLOT_VERSION", "different")
     assert not collect(engine, config)[0].cached
+
+
+@pytest.fixture
+def lineage_clock(monkeypatch):
+    from datetime import UTC, datetime
+
+    class Clock:
+        instant = datetime(2026, 10, 13, 8, tzinfo=UTC)
+
+        def __new__(cls, *args, **kwargs):
+            return datetime(*args, **kwargs)
+
+        @classmethod
+        def now(cls, tz=None):
+            return cls.instant
+
+    monkeypatch.setattr("etl_craft.engine.repository.lineage.datetime", Clock)
+    return Clock
+
+
+def version_rows(engine):
+    with engine.connect() as conn:
+        return (
+            conn.execute(
+                text(
+                    "SELECT TARGET_SCHEMA_NAME AS schema_name, TARGET_TABLE_NAME AS table_name, "
+                    "VERSION_NUMBER AS version_number, "
+                    "VALID_FROM AS valid_from, VALID_TO AS valid_to, CURRENT_FLAG AS current_flag "
+                    "FROM AUD_LINEAGE_VERSIONS ORDER BY LINEAGE_VERSION_ID"
+                )
+            )
+            .mappings()
+            .all()
+        )
+
+
+def change_stage(engine):
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE='SELECT id, amt AS new_amount, "
+                "currency FROM raw.orders' WHERE PARAMETER_NAME='SOURCE_SQL' AND TASK_ID IN "
+                "(SELECT TASK_ID FROM CFG_TASKS WHERE TASK_CODE='stage')"
+            )
+        )
+
+
+def test_table_versions_ignore_cache_recomputation_and_close_on_retirement(
+    project, lineage_clock, monkeypatch
+):
+    from datetime import timedelta
+
+    from etl_craft.core.time import as_utc
+    from etl_craft.services import lineage
+
+    engine, config = project
+    first = collect(engine, config)
+    assert first
+    assert len(version_rows(engine)) == 3
+    monkeypatch.setattr(lineage, "SQLGLOT_VERSION", "changed-parser-version")
+    collect(engine, config, refresh=True)
+    assert len(version_rows(engine)) == 3
+    lineage_clock.instant += timedelta(hours=1)
+    change_stage(engine)
+    collect(engine, config)
+    stages = [r for r in version_rows(engine) if r.table_name == "orders"]
+    stage_versions = [r for r in stages if as_utc(r.valid_from).hour == 8 or r.version_number == 2]
+    assert any(r.version_number == 2 and r.current_flag == "Y" for r in stage_versions)
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE CFG_TASKS SET ACTIVE_FLAG='N' WHERE TASK_CODE='stage'"))
+    lineage_clock.instant += timedelta(hours=1)
+    collect(engine, config)
+    with engine.connect() as conn:
+        current = conn.execute(
+            text(
+                "SELECT COUNT(*) AS total FROM AUD_LINEAGE_VERSIONS "
+                "WHERE TARGET_SCHEMA_NAME='staging' AND CURRENT_FLAG='Y'"
+            )
+        ).scalar_one()
+    assert current == 0
+
+
+def test_history_selectors_read_stored_versions_without_computing(
+    project, lineage_clock, monkeypatch, capsys
+):
+    from datetime import timedelta
+
+    engine, config = project
+    collect(engine, config)
+    first_time = (lineage_clock.instant + timedelta(minutes=30)).isoformat()
+    lineage_clock.instant += timedelta(hours=1)
+    change_stage(engine)
+    collect(engine, config)
+    before = version_rows(engine)
+
+    def no_compute(*args, **kwargs):
+        raise AssertionError("history must not compute lineage")
+
+    monkeypatch.setattr("etl_craft.services.lineage.resolve_select", no_compute)
+    for selector in (
+        ("--as-of", first_time),
+        ("--as-of", "2026-10-13T08:30:00"),
+        ("--as-of", "2026-10-13T14:00:00+05:30"),
+        ("--version", "1"),
+    ):
+        code, out = run(
+            capsys, "lineage", "--table", "staging.orders", "--column", "amount", *selector
+        )
+        assert code == ExitCode.SUCCESS
+        assert "raw.orders.amt" in out
+        assert "new_amount" not in out
+    code, out = run(
+        capsys, "lineage", "--table", "staging.orders", "--column", "new_amount", "--version", "2"
+    )
+    assert code == ExitCode.SUCCESS
+    assert "raw.orders.amt" in out
+    assert version_rows(engine) == before
+
+
+@pytest.mark.parametrize(
+    "arguments,expected",
+    [
+        (
+            ("--as-of", "2026-10-12T00:00:00Z"),
+            "earliest recorded time is 2026-10-13T08:00:00+00:00",
+        ),
+        (("--version", "1"), "--version needs --table"),
+        (("--table", "staging.orders", "--version", "999"), "has no lineage version 999"),
+        (("--table", "staging.orders", "--version", "0"), "positive version number"),
+        (("--as-of", "2026-10-13T08:00:00Z", "--refresh"), "--refresh cannot read history"),
+        (("--as-of", "not-a-time"), "neither a pipeline_run_id nor an ISO 8601 time"),
+    ],
+)
+def test_invalid_lineage_history_selectors_name_the_remedy(
+    project, lineage_clock, capsys, arguments, expected
+):
+    from etl_craft.core.errors import MetadataError, ResourceNotFoundError, UsageError
+
+    engine, config = project
+    collect(engine, config)
+    code = main(["lineage", *arguments])
+    out = capsys.readouterr().err
+    assert code in (MetadataError.exit_code, ResourceNotFoundError.exit_code, UsageError.exit_code)
+    assert expected in out
+
+
+def test_concurrent_collectors_publish_one_table_version(project):
+    from etl_craft.core.actor import Actor, ActorKind, acting_as
+    from fixtures.races import two_at_once
+
+    engine, config = project
+
+    def record():
+        with acting_as(Actor("lineage-test", ActorKind.HUMAN)):
+            return collect(engine, config, refresh=True)
+
+    results = two_at_once(record, record, at="etl_craft.engine.locks.for_engine")
+    assert all(results)
+    rows = version_rows(engine)
+    assert len(rows) == 3
+    assert all(r.version_number == 1 for r in rows)
+
+
+def test_catalog_table_history_lists_versions_and_source_changes(project, lineage_clock, tmp_path):
+    from datetime import timedelta
+
+    from etl_craft.services.catalog import build_catalog
+    from etl_craft.services.catalog_site import table_url, write_site
+
+    engine, config = project
+    collect(engine, config)
+    lineage_clock.instant += timedelta(hours=1)
+    change_stage(engine)
+    site = tmp_path / "history-site"
+    write_site(build_catalog(engine, config), config, site)
+    page = (site / table_url("staging.orders")).read_text()
+    assert "Current lineage version 2" in page
+    assert "2026-10-13T09:00:00+00:00" in page
+    assert "2026-10-13T08:00:00+00:00" in page
+    assert "Added: new_amount" in page
+    assert "Removed: amount" in page
+    source = (site / table_url("raw.orders")).read_text()
+    assert "No lineage versions recorded for this table" in source
+
+
+def test_drop_action_closes_history_and_retargeting_starts_a_new_table_version(project):
+    from fixtures.metadata import add_table
+
+    engine, config = project
+    collect(engine, config)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE='drop_table' "
+                "WHERE PARAMETER_NAME='SQL_ACTION' AND TASK_ID IN "
+                "(SELECT TASK_ID FROM CFG_TASKS WHERE TASK_CODE='stage')"
+            )
+        )
+    collect(engine, config)
+    with engine.connect() as conn:
+        assert (
+            conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM AUD_LINEAGE_VERSIONS "
+                    "WHERE TARGET_SCHEMA_NAME='staging' AND CURRENT_FLAG='Y'"
+                )
+            ).scalar_one()
+            == 0
+        )
+    with engine.begin() as conn:
+        target = add_table(conn, "mart.retargeted")
+        conn.execute(
+            text(
+                "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE='CREATE_TABLE' "
+                "WHERE PARAMETER_NAME='SQL_ACTION' AND TASK_ID IN "
+                "(SELECT TASK_ID FROM CFG_TASKS WHERE TASK_CODE='stage')"
+            )
+        )
+        conn.execute(
+            text("UPDATE CFG_TASKS SET TARGET_TABLE_ID=:target WHERE TASK_CODE='stage'"),
+            {"target": target},
+        )
+    collect(engine, config)
+    with engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT VERSION_NUMBER AS version_number,CURRENT_FLAG AS current_flag "
+                "FROM AUD_LINEAGE_VERSIONS WHERE TARGET_TABLE_NAME='retargeted'"
+            )
+        ).one()
+    assert row.version_number == 1 and row.current_flag == "Y"
+
+
+@pytest.mark.parametrize("another_writer", [False, True])
+def test_failed_writer_closes_current_history_and_reports_the_reason(
+    project, lineage_clock, capsys, tmp_path, another_writer
+):
+    from datetime import timedelta
+
+    from etl_craft.services.catalog import build_catalog
+    from etl_craft.services.catalog_site import table_url, write_site
+
+    engine, config = project
+    if another_writer:
+        with engine.begin() as conn:
+            pipeline = add_pipeline(conn, "OTHER")
+            add_task(
+                conn,
+                pipeline,
+                "also_stage",
+                SQL_ACTION="APPEND_TABLE",
+                TARGET_OBJECT="staging.orders",
+                SOURCE_SQL="SELECT id, amt AS amount, currency FROM raw.orders",
+            )
+    collect(engine, config)
+    lineage_clock.instant += timedelta(hours=1)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE='SELECT * FROM unknown.input' "
+                "WHERE PARAMETER_NAME='SOURCE_SQL' AND TASK_ID IN "
+                "(SELECT TASK_ID FROM CFG_TASKS WHERE TASK_CODE='stage')"
+            )
+        )
+    code, output = run(capsys, "lineage", "--table", "staging.orders")
+    assert code == ExitCode.SUCCESS
+    versions = [v for v in version_rows(engine) if v.schema_name == "staging"]
+    assert len(versions) == 1
+    assert versions[0].current_flag == "N"
+    from etl_craft.core.time import as_utc
+
+    assert as_utc(versions[0].valid_to) == lineage_clock.instant
+    assert "INGEST.stage" in output and "history not updated" in output
+    assert "unknown.input" in output
+    site = tmp_path / "failed-history"
+    write_site(build_catalog(engine, config), config, site)
+    page = (site / table_url("staging.orders")).read_text()
+    assert "INGEST.stage" in page and "history not updated" in page
+    assert "unknown.input" in page
+    assert "No current lineage version" in page
+    assert len([v for v in version_rows(engine) if v.schema_name == "staging"]) == 1
+
+
+def test_publication_ignores_cache_rows_not_confirmed_by_collection(project):
+    engine, config = project
+    collect(engine, config)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO AUD_COLUMN_LINEAGE (TASK_ID,SOURCE_SQL_HASH,TARGET_CATALOG_NAME,"
+                "TARGET_SCHEMA_NAME,TARGET_TABLE_NAME,TARGET_COLUMN,SOURCE_SCHEMA_NAME,"
+                "SOURCE_TABLE_NAME,SOURCE_COLUMN,TRANSFORMATION) "
+                "SELECT TASK_ID,'unconfirmed','analytics','staging','orders','ghost',"
+                "'raw','orders','ghost','copy' FROM CFG_TASKS WHERE TASK_CODE='stage'"
+            )
+        )
+    collect(engine, config)
+    versions = [v for v in version_rows(engine) if v.schema_name == "staging"]
+    assert len(versions) == 1 and versions[0].current_flag == "Y"
+    with engine.connect() as conn:
+        assert (
+            conn.execute(
+                text("SELECT COUNT(*) FROM AUD_LINEAGE_VERSION_EDGES WHERE TARGET_COLUMN='ghost'")
+            ).scalar_one()
+            == 0
+        )
+
+
+def test_lineage_lock_wait_is_bounded_and_names_the_remedy(project, monkeypatch):
+    import threading
+
+    from etl_craft.core.errors import LockTimeoutError
+    from etl_craft.engine.locks import LINEAGE, EngineLock
+
+    engine, config = project
+    held, release = threading.Event(), threading.Event()
+
+    def hold():
+        with LINEAGE.hold(engine):
+            held.set()
+            assert release.wait(10)
+
+    holder = threading.Thread(target=hold)
+    holder.start()
+    assert held.wait(10)
+    original = EngineLock.hold
+    waits = []
+
+    def shortened(lock, engine, wait_seconds=0):
+        waits.append(wait_seconds)
+        return original(lock, engine, wait_seconds=0.1)
+
+    try:
+        monkeypatch.setattr(EngineLock, "hold", shortened)
+        with pytest.raises(LockTimeoutError, match=r"lineage.*recorder.*retry"):
+            collect(engine, config)
+        assert waits == [30]
+        assert version_rows(engine) == []
+    finally:
+        release.set()
+        holder.join(10)
+    assert not holder.is_alive()
+
+
+def test_python_lineage_query_validates_before_collecting(project):
+    from etl_craft.core.actor import Actor, ActorKind
+    from etl_craft.core.errors import UsageError
+    from etl_craft.services.operations.context import OperationContext
+    from etl_craft.services.operations.diagnostics import LineageQuery, trace_lineage
+
+    engine, config = project
+    ctx = OperationContext(engine, config, Actor("lineage-test", ActorKind.HUMAN))
+    with pytest.raises(UsageError, match="mutually exclusive"):
+        trace_lineage(ctx, LineageQuery(as_of="2026-10-13T08:00:00Z", version=1))
+    assert version_rows(engine) == []
+    done = trace_lineage(ctx, LineageQuery(table="staging.orders"))
+    assert done.table == "staging.orders" and done.upstream_tables
+
+
+def test_failed_collection_without_confirmed_keys_closes_history(engine_db):
+    db = engine_db
+    with db.engine.begin() as conn:
+        pipeline = add_pipeline(conn, "P")
+        add_task(
+            conn,
+            pipeline,
+            "load",
+            SQL_ACTION="CREATE_TABLE",
+            TARGET_OBJECT="stage.output",
+            SOURCE_SQL="SELECT id FROM raw.input",
+        )
+    collect(db.engine, db.config)
+    with db.engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE='SELECT * FROM unknown.input' "
+                "WHERE PARAMETER_NAME='SOURCE_SQL'"
+            )
+        )
+    result = collect(db.engine, db.config)
+    assert "history not updated" in result[0].error
+    versions = version_rows(db.engine)
+    assert len(versions) == 1 and versions[0].current_flag == "N"

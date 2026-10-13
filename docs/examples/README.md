@@ -136,3 +136,8 @@ the tests check both on SQLite and PostgreSQL.
 
 [SQL source watermark](sql-watermark.md) shows an incremental external-source merge and an
 audited reload.
+
+After applying configuration, run `etl-craft lineage` to record table lineage versions.
+`etl-craft lineage --table schema.table --version 1` reads the graph when that table's first
+version began; `--as-of TIME` reads versions valid at a timestamp or pipeline run's start.
+These commands use stored history and do not change configuration files.
