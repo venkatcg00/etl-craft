@@ -132,6 +132,7 @@ item's text, or work done early under another item.
 | S5.T Resource discovery and deployment profiles | Planned | | Opt-in laptop, server and server-with-workers sizing from usable process resources; one discovery module before S5.C |
 | S5.C and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
+| S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
 | S7.N Faster complete pull-request CI | Planned | | Five-minute required-check target without losing tests, platforms, services or failure detection; expensive stress remains in manual/release validation |
 | S8.H Support Insights scenario coverage | Planned | | Deterministic mixed-quality generators, every-feature demonstrations, business-rule and stewardship cases, and runnable README coverage |
@@ -270,6 +271,11 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- S6.D stays one implementation PR after S5.R item 3, as approved by the owner. Its active-flag
+  uniqueness migration needs a preflight marker for actionable legacy-duplicate diagnostics;
+  register that marker as data instead of adding another branch to the current runner. The
+  frozen soak still gates S5.R. Independent S7.N CI work can proceed meanwhile.
 
 - S6.C proceeds as independent catalog work while the frozen soak continues; no blocked S5
   prerequisite is moved. Its derived Done when is: bulk reads, indexed last-N pipeline/task
@@ -3179,6 +3185,9 @@ Branch: `perf/services-catalog`. Files: `services/catalog.py`, `engine/repositor
 
 Branch: `perf/handlers-business-rules`.
 
+Depends on S5.R item 3's data-driven migration-marker registry, after the frozen 0.4 soak.
+Keep S6.D as one implementation PR; do not split off an interim partial behaviour change.
+
 - *Problem.* Every normal BR task re-checks every standing flag in 500-key warehouse queries.
   Full checks must still find corrected or deleted rows outside the current data run, without
   making that run pay for a full scan. A weekly check must run independently of data arrivals,
@@ -3231,6 +3240,10 @@ Branch: `perf/handlers-business-rules`.
      Ship migrations for SQLite and PostgreSQL and matching fresh schemas; add no audit table.
   6. Add a unique index on active flags
      `(BUSINESS_RULE_ID, BUSINESS_RULE_KEY) WHERE ACTIVE_FLAG = 'Y'`. Keep inactive evidence.
+     Register `check-business-rule-flags` in S5.R item 3's marker registry: check before any
+     pending upgrade and repeat inside this migration's transaction. Report conflicting
+     rule/key values and result IDs, the expected uniqueness and the repair remedy on both
+     Engine DBs. Add the marker as data; do not add a file-specific branch to the runner.
      Serialize concurrent checks of the same rule through the existing Engine DB locking
      facilities so a normal and weekly check cannot publish flags from competing snapshots;
      different rules remain independent. A bounded lock failure names the rule and remedy.
