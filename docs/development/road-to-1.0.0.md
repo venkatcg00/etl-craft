@@ -124,10 +124,10 @@ item's text, or work done early under another item.
 | S5.O.1 SCD lifecycle invariants | Done | #148 | Common SCD flags, current-row soft deletes and legacy active-state upgrades |
 | S5.O.2a Common config contract | Done | #149 | Mandatory core/custom CFG audit fields and keys, safe token lifecycle history and lossless upgrades |
 | S5.O.2b Normalized object contracts | In progress | #150, #151, #152, #153, #154, #160, #162 | Merge column lists retain parameter storage; lineage versions use component endpoints with historical CLI/catalog reads; target state follows S5.R item 3 after the soak |
+| S5.P Project documentation gap UI | Planned | | Coloured column warnings, lineage gaps and project summary |
 | S5.R Consolidate before the cluster | Planned | | Behaviour-preserving: one query path for Engine DB SQL, data-driven migration markers, enums and `core` errors throughout, shorter functions |
 | S5.S Accounts, login and roles | Planned | | Registered user and service accounts, password and SSO login, tokens for services, a role check on every action, no implicit actor, local installations that operate a server |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
-| S5.P Project documentation gap UI | Planned | | Coloured column warnings, lineage gaps and project summary |
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
 | S5.T Resource discovery and deployment profiles | Planned | | Opt-in laptop, server and server-with-workers sizing from usable process resources; one discovery module before S5.C |
 | S5.C and later | Not started | | |
@@ -150,10 +150,11 @@ operator controls need proven people and roles, and S5.C's workers are service a
 S5.O.2b finishes with the three slices in
 [S5.O.2b Remaining object identities](#s5o2b-remaining-object-identities). Merge column lists
 stay task parameters rather than becoming child rows. The order is slice 2 (versioned lineage),
-then S5.R item 3 (data-driven migration markers) once the soak ends, then slice 3, whose
-conversion registers as data instead of a new branch in the migration runner, then the rest of
-S5.R. After S5.S, S5.O.3, S5.P and S5.Q, take S5.T (resource discovery and deployment
-profiles), then S5.C. S5.T supplies the single-machine foundation that workers reuse; it
+then S5.P (project documentation gap UI) while the soak runs, then S5.R item 3 (data-driven
+migration markers) once the soak ends, then slice 3, whose conversion registers as data instead
+of a new branch in the migration runner, then the rest of S5.R. S5.P needs no S5.R, S5.S or
+S5.O.3 work, and builds on the catalog pages slice 2 changed. After S5.S, S5.O.3 and S5.Q, take
+S5.T (resource discovery and deployment profiles), then S5.C. S5.T supplies the single-machine foundation that workers reuse; it
 does not move worker work ahead of the metadata, account or operator-control corrections.
 
 **Acceptance availability.**
@@ -2767,7 +2768,8 @@ Branch: `feat/scd-human-overrides`. After S5.O.2b, before S5.P.
 
 ### S5.P Project documentation gap UI
 
-Branch: `feat/catalog-gap-ui`. After S5.O, before S5.C.
+Branch: `feat/catalog-gap-ui`. After S5.O.2b slice 2 (#162), before S5.R. It needs no S5.R, S5.S
+or S5.O.3 work.
 
 - *Problem.* Textual drift findings do not identify column gaps visually or summarize their
   impact across a project.
