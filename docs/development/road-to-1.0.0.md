@@ -3177,11 +3177,101 @@ Branch: `perf/services-catalog`. Files: `services/catalog.py`, `engine/repositor
 
 ### S6.D Business rules that don't re-check everything (B52)
 
-On a normal run, a rule re-checks standing flags only for keys present in this run's rows
-(`PIPELINE_RUN_ID = :run`), with one query
-`SELECT key FROM target t WHERE <scope> AND NOT EXISTS (<rule>)` instead of 500-key batches. A full
-re-check happens on `--force` and on a weekly schedule (`Business_rules.Full_check_day`). Add a unique
-index on active flags `(BUSINESS_RULE_ID, BUSINESS_RULE_KEY) WHERE ACTIVE_FLAG = 'Y'`.
+Branch: `perf/handlers-business-rules`.
+
+- *Problem.* Every normal BR task re-checks every standing flag in 500-key warehouse queries.
+  Full checks must still find corrected or deleted rows outside the current data run, without
+  making that run pay for a full scan. A weekly check must run independently of data arrivals,
+  have ordinary execution history, and be something the team can deactivate.
+- *Where.* `handlers/business_rules.py`, `handlers/registry.py`, `engine/repository/business_rules.py`,
+  `engine/transitions.py`, the business-rule query catalog, `services/setup.py`, project migration
+  provisioning, config-file export/apply and validation, and the existing overseer scheduler.
+  Both Engine DB schemas and their next migrations; the business-rule guide and Support Insights
+  demo configuration and README.
+- *Change.*
+  1. On a normal task run, re-check standing flags only for keys present in that run's rows
+     (`PIPELINE_RUN_ID = :run`). Use one warehouse query
+     `SELECT key FROM target t WHERE <scope> AND NOT EXISTS (<rule>)`, intersecting its result
+     with that rule's active flags, instead of 500-key warehouse batches. Keep SCD active-version
+     filtering. Flags for rows outside the run, including rows no longer present, await a full
+     check; do not quietly retain the old all-key deletion scan. `run --force` still checks all
+     rows for the selected task's rules and clears flags whose keys no longer exist.
+  2. The package provisions one ordinary `ETL_CRAFT_BR_WEEKLY` pipeline with one `FULL_CHECK`
+     task using `HANDLER=BUSINESS_RULES`. Provision it through a generated project migration
+     applied by the existing setup/migration path, with explicit attribution and stable IDs;
+     never create or repair CFG rows inside the scheduler. Export includes these rows in the
+     existing config files; later edits go through normal project migrations or config apply.
+     Do not copy or re-parent rule definitions, add a config table, overwrite pending project
+     files, or silently take over an existing pipeline with this code. A collision fails with
+     the exact object and remedy. Repeated setup/upgrade keeps the existing row identities,
+     team-edited schedule and deactivation; it never switches the pipeline back on.
+  3. Its initial `RUN_SCHEDULE` is `0 0 * * SUN`, `SCHEDULE_TIMEZONE` is NULL (the existing project
+     time zone), `CATCHUP=N`, `MAX_CATCHUP_RUNS=1`, and `OVERLAP_POLICY=SKIP`. Reuse S4.C's tick
+     identities, catch-up, overlap audit and scheduler; do not add a timer, daemon or a second
+     weekly ledger. A restart catches up the latest eligible missed tick using those existing
+     rules. This replaces `Business_rules.Full_check_day`: there is no new connector setting.
+     The check does not wait for the next normal data-task execution.
+  4. Name the task parameter `BR_CHECK_MODE`, with `TASK` as the default and `PROJECT_FULL` on
+     the generated task. `TASK` keeps the existing task-bound rule selection, including
+     `--force`; `PROJECT_FULL` reads the current active rules belonging to active BR tasks in
+     active pipelines and performs a full check. Resolve rules by their existing IDs, preserving
+     their sequence waves and per-rule outcomes; do not duplicate SQL or other rule settings.
+     An invalid active rule still fails normally. For `PROJECT_FULL` only, no eligible rules
+     means the task and pipeline end `SKIPPED`, with reason "no active business rules" in the
+     normal run history and log. Open no warehouse connection and invent no per-rule run rows.
+     Ordinary `TASK` mode with no rules retains its configuration error. Teams deactivate the
+     weekly pipeline with the existing `ACTIVE_FLAG=N` config edit; existing pause controls
+     also apply. The scheduler then admits no further scheduled executions for it.
+  5. Add `CHECK_SCOPE` to the existing `AUD_BUSINESS_RULES_RUN_LOG`, with `SCOPED` and `FULL`
+     represented by a shared enum. Record the selected scope when starting each rule execution;
+     full weekly checks and forced task checks record `FULL`. Preserve the existing success,
+     failure and resume accounting. Historical rows retain NULL scope, displayed as unknown:
+     past forced/scoped execution cannot be inferred from the current rule or pipeline settings.
+     Ship migrations for SQLite and PostgreSQL and matching fresh schemas; add no audit table.
+  6. Add a unique index on active flags
+     `(BUSINESS_RULE_ID, BUSINESS_RULE_KEY) WHERE ACTIVE_FLAG = 'Y'`. Keep inactive evidence.
+     Serialize concurrent checks of the same rule through the existing Engine DB locking
+     facilities so a normal and weekly check cannot publish flags from competing snapshots;
+     different rules remain independent. A bounded lock failure names the rule and remedy.
+     Legacy active duplicates block upgrade with actionable diagnostics; never delete audit
+     history or arbitrarily choose a winning flag to make the index build succeed.
+  7. Document the upgrade's behaviour change: setup provisions the active weekly pipeline,
+     which becomes eligible when the ordinary overseer runs, even without new data arrivals.
+     Show how to inspect/change its schedule, deactivate it before starting the overseer, and
+     retain its generated rows when exporting/applying project config. A config apply follows
+     the normal complete-file semantics; there is no hidden exemption for system-created rows.
+     Explain the newly deferred clearing of out-of-run and deleted-row flags. Add the matching
+     CHANGELOG entry and demonstrate normal, full, no-rules and deactivated cases in the
+     packaged Support Insights example, with links for S8.H's external-project coverage.
+- *Tests.*
+  - Normal scope flags/clears only current-run keys; another run's corrected/deleted keys wait
+    for a full check. Warehouse clearing-query count is constant as standing flags exceed the
+    old 500-key batch size. Forced and weekly checks clear corrected and deleted keys globally;
+    SCD1/SCD2 checks judge only active versions.
+  - Provisioning on fresh and upgraded projects produces one ordinary pipeline/task/parameter
+    set without copying rules. Repeated setup preserves IDs, edits and deactivation; config
+    export/apply round-trips it. A reserved-code collision or pending project-file conflict
+    fails without overwriting the team's metadata or files.
+  - Explicit-clock scheduler tests cover a due weekly tick without a normal data run, repeat
+    ticks, restart/catch-up after a missed week, time-zone/DST handling, overlap, pause and
+    deactivation. Use the existing scheduler's semantics rather than inventing a once-per-week
+    success counter; failed executions retry/resume through the normal run identity.
+  - `PROJECT_FULL` uses existing rule IDs, picks up newly configured rules, excludes inactive
+    rule/task/pipeline definitions, and records `FULL` for successes and failures. No eligible
+    rules records the ordinary skipped task/pipeline and reason without warehouse work or
+    fictional rule executions. An invalid active rule fails; ordinary empty BR tasks still fail.
+  - Both Engine DBs enforce one active flag per rule/key, retain inactive history, and roll back
+    failed upgrades. Released-schema upgrades preserve old scope as unknown; new executions
+    record their scope. Coordinated concurrent normal/full checks cannot lose or duplicate flags.
+    Run warehouse behaviour on the four local warehouses and the affected live-cloud suites;
+    keep timing/stress repetitions in manual/release validation, not a new PR CI job.
+- *Done when.* Normal checks have no standing-key warehouse batches or all-key deletion scan;
+  forced checks retain their full semantics. The system-created weekly pipeline performs full
+  checks independently, logs skips/failures through the ordinary execution path, and can be
+  deactivated without later setup reactivating it. Rule definitions have one source of truth,
+  scope is auditable without inventing historical values, and flags remain unique under
+  concurrent execution. Fresh/upgrade, export/apply, scheduler and warehouse tests pass; the
+  guide, CHANGELOG and packaged demo explain the upgrade and demonstrate the behaviour.
 
 ### S6.E Cloning that keeps up (W14)
 
