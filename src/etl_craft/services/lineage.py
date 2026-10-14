@@ -40,22 +40,22 @@ from sqlglot.schema import MappingSchema
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.targets import active_catalog
-from etl_craft.core.enums import RefreshType, SqlAction
+from etl_craft.core.enums import Handler, RefreshType, SqlAction
 from etl_craft.core.errors import EtlCraftError, LockTimeoutError, MetadataError
 from etl_craft.core.text import sha256_hex
 from etl_craft.engine.locks import LINEAGE
 from etl_craft.engine.repository.lineage import (
     SqlTaskRef,
     StoredEdge,
+    fetch_lineage_cache,
     fetch_lineage_versions,
     fetch_sql_tasks,
-    fetch_task_lineage,
     fetch_version_edges,
     record_lineage_versions,
     store_task_lineage,
 )
 from etl_craft.engine.repository.source_columns import fetch_source_columns
-from etl_craft.engine.repository.tasks import fetch_task_parameters
+from etl_craft.engine.repository.tasks import fetch_all_task_parameters
 from etl_craft.engine.repository.validation import fetch_task_dependency_edges
 from etl_craft.handlers.sql.spec import resolve_select
 from etl_craft.services.source_columns import definition_problem
@@ -339,8 +339,10 @@ def _collect(
     """
     dialect, catalog = dialect_and_catalog(config)
     with engine.connect() as conn:
-        tasks = [(ref, fetch_task_parameters(conn, ref.task_id)) for ref in fetch_sql_tasks(conn)]
+        params_by_task = fetch_all_task_parameters(conn, Handler.SQL)
+        tasks = [(ref, params_by_task.get(ref.task_id, {})) for ref in fetch_sql_tasks(conn)]
         defined = fetch_source_columns(conn)
+        cache = {} if refresh else fetch_lineage_cache(conn)
     schemas: dict[str, dict[str, str]] = {}
     invalid: dict[str, str] = {}
     for column in defined:
@@ -391,30 +393,24 @@ def _collect(
                     + json.dumps(contract, sort_keys=True)
                 ).encode()
             )
-            with engine.connect() as conn:
-                stored = [] if refresh else fetch_task_lineage(conn, ref.task_id, key)
-            if stored:
-                edges = [stored_edge(e, name, catalog) for e in stored]
-                keys[ref.task_id] = key
-                results.append(TaskLineage(name, target, edges, cached=True, sources=sources))
-                if (params.get("SQL_ACTION") or "").upper() != SqlAction.DELETE_ROWS:
-                    schemas[table_name(target.split("."), catalog)] = dict.fromkeys(
-                        (e.target_column for e in edges), "UNKNOWN"
+            stored = cache.get((ref.task_id, key), [])
+            edges = (
+                [stored_edge(e, name, catalog) for e in stored]
+                if stored
+                else [
+                    Edge(
+                        e.target_object,
+                        e.target_column,
+                        e.source_object,
+                        e.source_column,
+                        e.transformation,
+                        name,
                     )
-                continue
-            edges = [
-                Edge(
-                    e.target_object,
-                    e.target_column,
-                    e.source_object,
-                    e.source_column,
-                    e.transformation,
-                    name,
-                )
-                for e in extract(
-                    select_sql, target, dialect=dialect, catalog=catalog, schemas=used_schemas
-                )
-            ]
+                    for e in extract(
+                        select_sql, target, dialect=dialect, catalog=catalog, schemas=used_schemas
+                    )
+                ]
+            )
         except EtlCraftError as error:
             reason = f"history not updated: {error}" if record else str(error)
             results.append(TaskLineage(name, target or None, [], error=reason, sources=sources))
@@ -423,11 +419,11 @@ def _collect(
             schemas[table_name(target.split("."), catalog)] = dict.fromkeys(
                 (e.target_column for e in edges), "UNKNOWN"
             )
-        if record:
+        if record and not stored:
             with engine.begin() as conn:
                 store_task_lineage(conn, ref.task_id, key, [cache_edge(e, catalog) for e in edges])
         keys[ref.task_id] = key
-        results.append(TaskLineage(name, target, edges, sources=sources))
+        results.append(TaskLineage(name, target, edges, cached=bool(stored), sources=sources))
     return sorted(results, key=lambda result: result.task)
 
 

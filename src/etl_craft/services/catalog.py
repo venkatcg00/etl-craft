@@ -49,6 +49,7 @@ from etl_craft.engine.repository.catalog import (
     RunSummary,
     TaskRow,
     TaskRunSummary,
+    fetch_catalog_interventions,
     fetch_catalog_pipelines,
     fetch_catalog_rules,
     fetch_catalog_tables,
@@ -58,7 +59,7 @@ from etl_craft.engine.repository.catalog import (
     fetch_pipeline_runs,
     fetch_task_runs,
 )
-from etl_craft.engine.repository.interventions import Intervention, fetch_interventions
+from etl_craft.engine.repository.interventions import Intervention
 from etl_craft.engine.repository.lineage import (
     LineageVersion,
     fetch_lineage_versions,
@@ -67,7 +68,7 @@ from etl_craft.engine.repository.lineage import (
 from etl_craft.engine.repository.normalization import ObjectIdentity
 from etl_craft.engine.repository.pauses import Pause, fetch_open_pauses
 from etl_craft.engine.repository.source_columns import fetch_source_columns
-from etl_craft.engine.repository.tasks import TargetTask, fetch_task_parameters
+from etl_craft.engine.repository.tasks import TargetTask, fetch_all_task_parameters
 from etl_craft.engine.repository.validation import (
     fetch_pipeline_edges,
     fetch_task_dependency_edges,
@@ -283,23 +284,22 @@ def collect_catalog(
         task_rows = fetch_catalog_tasks(conn)
         rule_rows = fetch_catalog_rules(conn)
         versions = fetch_documentation_versions(conn)
-        params = {row.task_id: fetch_task_parameters(conn, row.task_id) for row in task_rows}
+        params = fetch_all_task_parameters(conn)
         pipeline_edges = fetch_pipeline_edges(conn)
         task_edges = fetch_task_dependency_edges(conn)
         paused = fetch_open_pauses(conn)
         pipeline_runs = fetch_pipeline_runs(conn)
         task_runs = fetch_task_runs(conn)
         consumption = fetch_consumption(conn)
-        changes: dict[str, dict[int, list[Intervention]]] = {}
-        for pipeline in pipeline_rows:
-            code = pipeline.pipeline_code
-            listed = {run.pipeline_run_id for run in pipeline_runs.get(code, [])}
-            if not listed:
-                continue
-            by_run = changes.setdefault(code, {})
-            for change in fetch_interventions(conn, pipeline.pipeline_id, min(listed)):
-                if change.pipeline_run_id in listed:
-                    by_run.setdefault(change.pipeline_run_id, []).append(change)
+        interventions = fetch_catalog_interventions(conn)
+        changes = {
+            code: {
+                run.pipeline_run_id: interventions[run.pipeline_run_id]
+                for run in runs
+                if run.pipeline_run_id in interventions
+            }
+            for code, runs in pipeline_runs.items()
+        }
     lineages = {lineage.task: lineage for lineage in collect(engine, config, record=record_lineage)}
 
     def name_of(object_ref: str) -> str:
@@ -328,7 +328,7 @@ def collect_catalog(
         catalog.built_from.setdefault(used.pipeline_run_id, []).append(used)
         catalog.consumed_by.setdefault(used.upstream_run_id, []).append(used)
     for row in task_rows:
-        task_params = params[row.task_id]
+        task_params = params.get(row.task_id, {})
         task = TaskAsset(
             row,
             task_params,

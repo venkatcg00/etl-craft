@@ -30,6 +30,37 @@ jobs:
       - name: Release gate
         run: make release-gate
 
+  catalog-scale:
+    name: catalog load (cold and incremental, both Engine DBs)
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ETL_CRAFT_REQUIRE_SERVICES: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked --all-groups --python 3.11
+      - name: Start PostgreSQL
+        run: docker compose up -d --wait postgres
+      - name: Check cold and incremental catalog budgets
+        run: uv run pytest -q -x -p no:cacheprovider tests/acceptance/catalog_scale.py --junitxml=catalog-scale.xml
+      - name: Upload timings and results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: catalog-scale
+          path: catalog-scale.xml
+      - name: Service logs
+        if: failure()
+        run: docker compose logs --no-color postgres
+      - name: Stop PostgreSQL
+        if: always()
+        run: docker compose down -v
+
   chaos:
     name: chaos (${{ matrix.engine }}, 20 consecutive runs)
     needs: gate

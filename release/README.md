@@ -58,6 +58,23 @@ PostgreSQL, after the evidence check passes. It runs on release branches or manu
 keeping repeated stress checks out of pull-request CI. Each iteration uploads its JUnit results;
 any failure stops that dialect's job.
 
+## Catalog load acceptance
+
+The catalog timing benchmark is explicit manual/release validation, alongside repeated chaos
+checks. Query-count and incremental-page correctness remain ordinary pull-request tests.
+With local PostgreSQL running, execute:
+
+```bash
+ETL_CRAFT_REQUIRE_SERVICES=1 uv run pytest -q tests/acceptance/catalog_scale.py --junitxml=catalog-scale.xml
+```
+
+It seeds 300 pipelines × 10 tasks × 50 runs in isolated Engine DBs on SQLite and PostgreSQL.
+Each cold and incremental collection plus site build must complete within 60 seconds; JUnit
+properties record each duration. The incremental phase also checks that unchanged pages retain
+their modification time. This measures generated metadata/history, without a warehouse query
+or executing synthetic tasks. The Release gate workflow runs it after the evidence gate and
+uploads its JUnit artifact; it adds no job to pull-request CI and does not replace suite evidence.
+
 ## The soak
 
 Release 0.4's gate runs the demo for seven days under `etl-craft server`, with no cron or

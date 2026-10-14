@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.engine import Connection
 
+from etl_craft.core.enums import ActiveFlag, Handler
 from etl_craft.core.errors import MetadataError
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.pipelines import with_suggestions
@@ -56,13 +57,28 @@ def fetch_task_parameters(conn: Connection, task_id: int) -> dict[str, str]:
     rows = conn.execute(statement(conn, "task_parameters"), {"task_id": task_id})
     params = {}
     for row in rows:
-        if row.target_active_flag != "Y":
-            raise MetadataError(
-                f"TASK_ID={task_id} target {row.parameter_value}: table contract has "
-                "ACTIVE_FLAG=N; reactivate it or disable the task's target reference"
-            )
+        _check_target(task_id, row.parameter_value, row.target_active_flag)
         params[row.parameter_name] = row.parameter_value
     return params
+
+
+def fetch_all_task_parameters(
+    conn: Connection, handler: Handler | None = None
+) -> dict[int, dict[str, str]]:
+    """Read parameters and target references of active tasks/pipelines in one statement."""
+    params: dict[int, dict[str, str]] = {}
+    for row in conn.execute(statement(conn, "catalog_task_parameters"), {"handler": handler}):
+        _check_target(row.task_id, row.parameter_value, row.target_active_flag)
+        params.setdefault(row.task_id, {})[row.parameter_name] = row.parameter_value
+    return params
+
+
+def _check_target(task_id: int, value: str, active: str) -> None:
+    if active != ActiveFlag.YES:
+        raise MetadataError(
+            f"TASK_ID={task_id} target {value}: table contract has "
+            "ACTIVE_FLAG=N; reactivate it or disable the task's target reference"
+        )
 
 
 @dataclass(frozen=True)

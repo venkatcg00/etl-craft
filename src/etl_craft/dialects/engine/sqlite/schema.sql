@@ -220,7 +220,7 @@ CREATE TABLE AUD_PIPELINES_RUN_LOG (
 -- when several task processes start at once.
 CREATE UNIQUE INDEX ux_pipeline_run_one_active
     ON AUD_PIPELINES_RUN_LOG (PIPELINE_ID) WHERE STATUS = 'IN-PROGRESS';
-CREATE INDEX ix_pipeline_run_pipeline ON AUD_PIPELINES_RUN_LOG (PIPELINE_ID);
+CREATE INDEX ix_catalog_pipeline_runs ON AUD_PIPELINES_RUN_LOG (PIPELINE_ID, PIPELINE_RUN_ID DESC);
 CREATE UNIQUE INDEX ux_pipeline_run_key ON AUD_PIPELINES_RUN_LOG (PIPELINE_ID, RUN_KEY);
 
 
@@ -251,6 +251,7 @@ CREATE TABLE AUD_TASK_RUN_LOG (
 CREATE UNIQUE INDEX ux_task_run_one_per_pipeline_run
     ON AUD_TASK_RUN_LOG (TASK_ID, PIPELINE_RUN_ID);
 CREATE INDEX ix_task_run_pipeline_run ON AUD_TASK_RUN_LOG (PIPELINE_RUN_ID);
+CREATE INDEX ix_catalog_task_runs ON AUD_TASK_RUN_LOG (TASK_ID, TASK_RUN_ID DESC);
 
 -- Every change an operator made to a run: a task or a run marked, a stand-in run recorded, a run
 -- cancelled or reopened, a task reset to run again or run again, a task run without its

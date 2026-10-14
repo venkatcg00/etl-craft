@@ -43,13 +43,20 @@ table › its pipeline, and so on.
 
 A pipeline's page ends with its latest 30 runs:
 
-- **KPIs**: how many of the finished runs succeeded, how many failed or were cancelled, SLA
-  misses, and the average and longest run. A `SKIPPED` run did no work and one still
+- **KPIs**, in separate groups for scheduled, backfill, repair and other runs: how many of
+  the finished runs succeeded, how many failed or were cancelled, SLA misses, and the average
+  and longest run. A `SKIPPED` run did no work and one still
   `IN-PROGRESS` has not ended, so neither counts either way.
 - **A bar per run**, oldest first: its height is how long the run took, its colour the run's
   status. Each bar opens that run's page.
 - **A row per run**: its run date, status, start, duration, SLA, the upstream runs it was built
   from, and how many changes operators made to it.
+
+A repaired logical run (`OUTPUT_REVISION > 1` or `REPAIR_PENDING = Y`) belongs to **Repair**;
+otherwise a backfill belongs to **Backfill**, a schedule-triggered run to **Scheduled**, and
+manual/orchestrator/stand-in runs to **Other**. Each logical run is counted once in its current
+group, rather than counting repair attempts as extra runs. Task summaries inherit their
+pipeline run's group. The DAG overview uses the same groups.
 
 A task's page does the same for the task: the share of its runs that succeeded, the average run
 and the average rows written, a bar per run of the rows it wrote, and a row per run with its
@@ -58,8 +65,9 @@ attempts, counts and message.
 Each run has a page of its own, so runs chain like everything else: a run page lists the
 upstream runs it was built from and the downstream runs that used it, from the
 [consumption log](dependencies.md#dependencies-on-other-pipelines), each a link to that run's
-page. Follow them from any run to the first run of the data it holds, or to everything built
-from it.
+page when that run is also in its pipeline's displayed history. Older referenced runs retain
+their identity as text. Only consumption touching at least one displayed run is loaded;
+older-to-older history is omitted. Each task also shows its latest 30 runs.
 
 ## A pipeline's DAG
 
@@ -162,6 +170,21 @@ etl-craft generate-yml --docs --output dags/etl_craft_docs.yml
 0 2 * * *  cd /srv/etl-craft && etl-craft generate-docs      # crontab on Linux or macOS
 schtasks /Create /SC DAILY /ST 02:00 /TN etl-craft-docs /TR "cmd /c cd /d C:\etl-craft && etl-craft generate-docs"
 ```
+
+Regeneration stores per-page input versions and HTML hashes in `.etl-craft-manifest.json`.
+Unchanged pipeline, task, run, table, rule and script pages reuse their verified HTML and keep
+their generation timestamp and file modification time. Changed metadata, run history, referenced
+SQL/script files, lineage or rendering code invalidate affected pages. SQL file contents are
+captured once for both the version and the rendered page. Shared lineage components and linked
+runs can also invalidate dependent pages. Search, overview and gap outputs are refreshed each
+build. An older page's age notice describes its original render time and points to Search for
+the latest build time. A fresh warehouse comparison supplies a new comparison timestamp and
+invalidates reused comparison pages.
+
+A legacy site without a manifest gets a full build automatically. An invalid manifest, missing
+cached page or changed cached HTML fails generation and preserves the published site. Remove
+only `.etl-craft-manifest.json` from the output folder and regenerate to rebuild derived pages;
+keep the `.etl-craft-catalog` ownership marker and the publication/build lock sidecars.
 
 Writing the site again never leaves it half written: the new site is built beside the old one
 and swapped in once it is complete, so a server publishing the folder keeps serving whole pages.

@@ -8,6 +8,7 @@ from etl_craft.core.enums import RunStatus
 pytestmark = pytest.mark.unit
 
 EXPECTED = {
+    enums.CatalogRunKind: {"SCHEDULED", "BACKFILL", "REPAIR", "OTHER"},
     enums.GapAttribute: {"object", "object kind", "column", "type", "nullability", "lineage"},
     enums.GapState: {
         "Deployed only",

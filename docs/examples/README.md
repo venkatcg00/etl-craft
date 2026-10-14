@@ -143,3 +143,9 @@ After applying configuration, run `etl-craft lineage` to record table lineage ve
 `etl-craft lineage --table schema.table --version 1` reads the graph when that table's first
 version began; `--as-of TIME` reads versions valid at a timestamp or pipeline run's start.
 These commands use stored history and do not change configuration files.
+
+For the generated catalog, run `etl-craft generate-docs` twice after configuration and execution.
+Unchanged asset/run pages retain their timestamps using `.etl-craft-manifest.json`; search and
+gaps refresh each build. No connector setting is needed. See [catalog regeneration](../guides/catalog.md#keeping-it-up-to-date)
+for invalidation and recovery, and [run KPIs](../guides/catalog.md#runs-and-kpis) for the separate
+scheduled, backfill, repair and other groups.

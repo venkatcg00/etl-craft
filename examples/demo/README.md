@@ -55,6 +55,21 @@ version history. The gaps tab compares deployment metadata, shows engine-managed
 links warnings to tasks and lineage. Generate without `--with-warehouse` for offline docs with
 explicit Unchecked coverage. `catalog/gaps.json` exports the same records. History begins after upgrading the Engine DB and computing lineage.
 
+To see incremental generation, run the offline build twice with no intervening metadata or
+run changes:
+
+```bash
+etl-craft generate-docs
+etl-craft generate-docs
+```
+
+Unchanged pipeline/task/table pages retain their modification times and generation timestamps;
+search and gaps refresh. The generated `.etl-craft-manifest.json` tracks page inputs and HTML
+hashes. On a corrupt-manifest/cached-HTML error, remove only that manifest and regenerate.
+Pipeline/task histories and the DAG overview group KPIs by Scheduled, Backfill, Repair and
+Other; a repaired logical run is counted once in its current group. History displays the latest
+30 runs per pipeline/task, with older consumed run identities shown as text.
+
 ## Under an orchestrator
 
 In remote mode (`Orchestration.Mode: remote`) the orchestrator is the only source of truth for

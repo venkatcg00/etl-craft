@@ -131,6 +131,7 @@ item's text, or work done early under another item.
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
 | S5.T Resource discovery and deployment profiles | Planned | | Opt-in laptop, server and server-with-workers sizing from usable process resources; one discovery module before S5.C |
 | S5.C and later | Not started | | |
+| S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
 | S7.N Faster complete pull-request CI | Planned | | Five-minute required-check target without losing tests, platforms, services or failure detection; expensive stress remains in manual/release validation |
 | S8.H Support Insights scenario coverage | Planned | | Deterministic mixed-quality generators, every-feature demonstrations, business-rule and stewardship cases, and runnable README coverage |
@@ -161,6 +162,13 @@ S5.T (resource discovery and deployment profiles), then S5.C. S5.T supplies the 
 does not move worker work ahead of the metadata, account or operator-control corrections.
 
 **Acceptance availability.**
+
+S6.C passed the full local gate, strict docs, Python 3.12/3.13 unit suites, and focused catalog,
+lineage, publication and released-schema upgrade checks on both Engine DBs. Explicit cold and
+incremental load acceptance passed on SQLite/PostgreSQL; twenty SQL-file/publication race rounds
+and the complete installed-wheel/sdist matrix passed without skips. Workflow actionlint and
+catalog JavaScript syntax checks passed. Warehouse writes and Airflow exports are unchanged;
+their additional suites were not needed. The frozen soak and old stash remain untouched.
 
 S7.K passed the full local gate, strict docs, Python 3.12/3.13 unit suites, twenty consecutive
 publication/shared-lock race rounds, and the complete installed-wheel/sdist matrix without skips.
@@ -262,6 +270,21 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- S6.C proceeds as independent catalog work while the frozen soak continues; no blocked S5
+  prerequisite is moved. Its derived Done when is: bulk reads, indexed last-N pipeline/task
+  history, consumption/interventions touching shown runs, manifest-based incremental pages,
+  separate scheduled/backfill/repair KPIs, constant cached-collection statement counts for
+  100 versus 1,000 SQL tasks, and the manual/release 300 × 10 × 50 build under 60 seconds.
+  Changed lineage still publishes through the existing history recorder; the constant-count
+  regression measures confirmed unchanged SQL cache entries, and load acceptance covers cold
+  and incremental builds. A repair is the logical run's current group, with precedence over
+  backfill and schedule; task summaries inherit it. Other triggers remain visible separately.
+  Verified unchanged pages retain their timestamps; aggregates refresh. The internal manifest
+  holds input/content hashes, with no config setting or new Engine DB table. A missing manifest
+  gets a full build; corrupt derived state fails with a remove-only-manifest remedy. Migration
+  `0032` adds recent-history indexes in both dialects and replaces the redundant pipeline prefix
+  index. The owner's approved manual/release benchmark separation remains unchanged.
 
 - S6.C's large timing benchmark runs manually and before releases, following S3.H's repeated
   chaos checks, as approved by the owner. Query-count and incremental-build correctness remain

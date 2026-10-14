@@ -82,12 +82,14 @@ class LineageVersion:
         return self.catalog_name, self.schema_name, self.table_name
 
 
-def fetch_task_lineage(conn: Connection, task_id: int, source_sql_hash: str) -> list[StoredEdge]:
-    """Return the task cache only when its complete computation key matches."""
-    rows = conn.execute(
-        statement(conn, "task_lineage"), {"task_id": task_id, "source_sql_hash": source_sql_hash}
-    )
-    return [StoredEdge(**r._mapping) for r in rows]
+def fetch_lineage_cache(conn: Connection) -> dict[tuple[int, str], list[StoredEdge]]:
+    """Read active SQL tasks' edges grouped by their complete computation keys."""
+    cache: dict[tuple[int, str], list[StoredEdge]] = {}
+    for row in conn.execute(statement(conn, "catalog_lineage_cache")):
+        values = dict(row._mapping)
+        key = values.pop("task_id"), values.pop("source_sql_hash")
+        cache.setdefault(key, []).append(StoredEdge(**values))
+    return cache
 
 
 def store_task_lineage(

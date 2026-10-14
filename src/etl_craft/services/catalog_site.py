@@ -6,38 +6,31 @@ depth filters and column tracing. Everything the site needs is in its folder: no
 anything from elsewhere, so it can be opened from disk, served from any web server, or
 published with ``publish-docs``.
 
-The site is written to a folder of its own, marked with ``.etl-craft-catalog``: a folder that
-holds other files is refused, and a folder written before is replaced. The new site is written
-beside it first and swapped in once complete, so a server publishing the folder never serves a
-site half written. Every page says when it was generated, and warns once its run details are
-more than a day old.
+An owned output folder is rebuilt beside the current site and exchanged only when complete.
+Unchanged pages reuse verified HTML and keep their timestamps. Every page says when it was
+generated and warns once its run details are more than a day old.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
-import re
 import shutil
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from functools import partial
 from importlib import resources
 from pathlib import Path
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.config.project import sql_file
-from etl_craft.core.errors import EtlCraftError, UsageError
+from etl_craft.core.errors import UsageError
 from etl_craft.core.filelock import file_lock
-from etl_craft.engine.repository.catalog import Consumption, LastRun, RunSummary, TaskRunSummary
+from etl_craft.engine.repository.catalog import Consumption, RunSummary
 from etl_craft.services.catalog import (
     Catalog,
     PipelineAsset,
-    RunKpis,
     TableAsset,
     TaskAsset,
     latest_run,
-    run_kpis,
 )
 from etl_craft.services.catalog_gap_html import comparison_grid, gaps_page
 from etl_craft.services.catalog_gaps import gap_snapshot
@@ -49,7 +42,28 @@ from etl_craft.services.catalog_graph import (
     render_svg,
 )
 from etl_craft.services.catalog_html import escape as _e
+from etl_craft.services.catalog_html import pipeline_url as pipeline_url
 from etl_craft.services.catalog_html import render_table as _table
+from etl_craft.services.catalog_html import rule_url as rule_url
+from etl_craft.services.catalog_html import run_url as run_url
+from etl_craft.services.catalog_html import script_url as script_url
+from etl_craft.services.catalog_html import slug as slug
+from etl_craft.services.catalog_html import table_url as table_url
+from etl_craft.services.catalog_html import task_url as task_url
+from etl_craft.services.catalog_incremental import (
+    SqlFiles,
+    page_versions,
+    read_sql_files,
+    reuse_pages,
+    write_manifest,
+)
+from etl_craft.services.catalog_metrics import bars as _bars
+from etl_craft.services.catalog_metrics import counts as _counts
+from etl_craft.services.catalog_metrics import duration as _duration
+from etl_craft.services.catalog_metrics import facts as _facts
+from etl_craft.services.catalog_metrics import kpi_summary, kpi_values
+from etl_craft.services.catalog_metrics import status as _status
+from etl_craft.services.catalog_metrics import when as _when
 from etl_craft.services.catalog_storage import MARKER as MARKER
 from etl_craft.services.catalog_storage import check_folder, swap_site
 from etl_craft.services.lineage import COPY
@@ -109,9 +123,13 @@ def _write_site(catalog: Catalog, config: ConnectorConfig, folder: Path) -> Site
         "Written by `etl-craft generate-docs`, which replaces this folder each time.\n",
         encoding="utf-8",
     )
-    writer = _Writer(catalog, config, building)
     try:
+        sql_files = read_sql_files(catalog, config)
+        writer = _Writer(catalog, building, sql_files)
+        versions = page_versions(catalog, config, sql_files)
+        reuse_pages(folder, building, versions)
         writer.write_all()
+        write_manifest(building, versions)
     except BaseException:
         shutil.rmtree(building, ignore_errors=True)
         raise
@@ -119,128 +137,19 @@ def _write_site(catalog: Catalog, config: ConnectorConfig, folder: Path) -> Site
     return Site(folder, writer.pages)
 
 
-def slug(key: str) -> str:
-    """Return a file name for ``key``: itself when safe, else made safe with a short hash."""
-    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", key)
-    if safe == key and not key.startswith("."):
-        return key
-    return f"{safe.lstrip('.')}-{hashlib.sha256(key.encode()).hexdigest()[:8]}"
-
-
-def table_url(name: str) -> str:
-    """Return the URL of a table's page, from the site's root."""
-    return f"tables/{slug(name)}.html"
-
-
-def task_url(label: str) -> str:
-    """Return the URL of a task's page, from the site's root."""
-    return f"tasks/{slug(label)}.html"
-
-
-def pipeline_url(code: str) -> str:
-    """Return the URL of a pipeline's page, from the site's root."""
-    return f"pipelines/{slug(code)}.html"
-
-
-def rule_url(rule_id: int) -> str:
-    """Return the URL of a business rule's page, from the site's root."""
-    return f"rules/{rule_id}.html"
-
-
-def script_url(name: str) -> str:
-    """Return the URL of an ingestion script's page, from the site's root."""
-    return f"scripts/{slug(name)}.html"
-
-
-def run_url(pipeline_run_id: int) -> str:
-    """Return the URL of a pipeline run's page, from the site's root."""
-    return f"runs/{pipeline_run_id}.html"
-
-
-def _duration(seconds: float | None) -> str:
-    if seconds is None:
-        return ""
-    whole = round(seconds)
-    hours, rest = divmod(whole, 3600)
-    minutes, secs = divmod(rest, 60)
-    if hours:
-        return f"{hours}h {minutes:02d}m"
-    if minutes:
-        return f"{minutes}m {secs:02d}s"
-    return f"{secs}s"
-
-
-def _bars(entries: Sequence[tuple[float | None, str, str, str | None]], unit: str) -> str:
-    """Draw ``entries`` (value, status, label, link), oldest first, as a bar per run.
-
-    Each bar's height is its value against the largest, its colour its status; a run with no
-    value (not ended) is a short grey bar. Each bar links to its run and says what it holds.
-    """
-    if not entries:
-        return ""
-    width, height, gap = 12, 60, 3
-    largest = max((value for value, *_ in entries if value), default=0.0) or 1.0
-    bars = []
-    for index, (value, status, label, url) in enumerate(entries):
-        size = max(2.0, (value or 0.0) / largest * height) if value is not None else 2.0
-        x = index * (width + gap)
-        bar = (
-            f'<rect class="bar {_e(status)}" x="{x}" y="{height - size:.1f}" width="{width}" '
-            f'height="{size:.1f}"><title>{_e(label)}</title></rect>'
-        )
-        bars.append(f'<a href="{_e(url)}">{bar}</a>' if url else bar)
-    total = len(entries) * (width + gap)
-    return (
-        f'<figure class="bars"><svg viewBox="0 0 {total} {height}" width="{total}" '
-        f'height="{height}" role="img" aria-label="{_e(unit)} of each run, oldest first">'
-        f"{''.join(bars)}</svg><figcaption>{_e(unit)} of each run, oldest first; the colour "
-        "is the run's status</figcaption></figure>"
-    )
-
-
-def _rate(kpis: RunKpis) -> str:
-    rate = kpis.success_rate
-    return "" if rate is None else f"{rate:.0%} of {kpis.finished}"
-
-
-def _when(value: datetime | None) -> str:
-    return value.strftime("%Y-%m-%d %H:%M:%S %Z").strip() if value is not None else ""
-
-
-def _status(value: str | None) -> str:
-    return f'<span class="status {_e(value)}">{_e(value)}</span>' if value else ""
-
-
-def _facts(pairs: Iterable[tuple[str, str]]) -> str:
-    rows = "".join(f"<dt>{_e(k)}</dt><dd>{v}</dd>" for k, v in pairs if v)
-    return f'<dl class="facts">{rows}</dl>' if rows else ""
-
-
 def _anchor(*parts: str) -> str:
     """Return the id of a database's or schema's heading on the warehouse page."""
     return "w-" + slug(".".join(parts))
 
 
-def _counts(run: LastRun | TaskRunSummary) -> str:
-    counts = [
-        ("source", run.source_count),
-        ("target", run.target_count),
-        ("inserted", run.insert_count),
-        ("updated", run.update_count),
-        ("deleted", run.delete_count),
-        ("rejected", run.reject_count),
-    ]
-    return ", ".join(f"{name} {value:,}" for name, value in counts if value is not None)
-
-
 class _Writer:
     """Writes every page, keeping the links between them relative."""
 
-    def __init__(self, catalog: Catalog, config: ConnectorConfig, folder: Path) -> None:
+    def __init__(self, catalog: Catalog, folder: Path, sql_files: SqlFiles) -> None:
         self.catalog = catalog
-        self.config = config
         self.folder = folder
         self.pages = 0
+        self.sql_files = sql_files
 
     def write_all(self) -> None:
         for name in ASSETS:
@@ -252,16 +161,28 @@ class _Writer:
         )
         c = self.catalog
         self._gap_pages()
-        self._page("index.html", "etl-craft catalog", "", self._home(), "search", [])
-        self._page("dags.html", "DAGs", "", self._dags(), "dags", [])
-        self._page("warehouse.html", "Warehouse", "", self._warehouse(), "warehouse", [])
+        self._page("index.html", "etl-craft catalog", "", self._home, "search", [])
+        self._page("dags.html", "DAGs", "", self._dags, "dags", [])
+        self._page("warehouse.html", "Warehouse", "", self._warehouse, "warehouse", [])
         for code in c.pipelines:
             crumbs = [("dags.html", "DAGs"), (None, code)]
-            self._page(pipeline_url(code), code, "pipeline", self._pipeline(code), "dags", crumbs)
+            self._page(
+                pipeline_url(code), code, "pipeline", partial(self._pipeline, code), "dags", crumbs
+            )
         for label, task in c.tasks.items():
             self._page(
-                task_url(label), label, "task", self._task(label), "dags", self._task_crumbs(task)
+                task_url(label),
+                label,
+                "task",
+                partial(self._task, label),
+                "dags",
+                self._task_crumbs(task),
             )
+        self._run_pages()
+        self._supporting_pages()
+
+    def _run_pages(self) -> None:
+        c = self.catalog
         for code, pipeline in c.pipelines.items():
             for run in pipeline.runs:
                 crumbs = [
@@ -274,17 +195,20 @@ class _Writer:
                     run_url(run.pipeline_run_id),
                     f"{code} run {run.pipeline_run_id}",
                     "pipeline run",
-                    self._run(pipeline, run),
+                    partial(self._run, pipeline, run),
                     "dags",
                     crumbs,
                 )
+
+    def _supporting_pages(self) -> None:
+        c = self.catalog
         for name, table in c.tables.items():
             if not table.external:
                 self._page(
                     table_url(name),
                     name,
                     "table",
-                    self._table_page(name),
+                    partial(self._table_page, name),
                     "warehouse",
                     self._table_crumbs(name),
                 )
@@ -302,7 +226,7 @@ class _Writer:
                 rule_url(rule_id),
                 rule.row.name,
                 "business rule",
-                self._rule(rule_id),
+                partial(self._rule, rule_id),
                 "dags",
                 crumbs,
             )
@@ -313,7 +237,12 @@ class _Writer:
                 (None, name),
             ]
             self._page(
-                script_url(name), name, "ingestion script", self._script(name), "dags", crumbs
+                script_url(name),
+                name,
+                "ingestion script",
+                partial(self._script, name),
+                "dags",
+                crumbs,
             )
 
     def _gap_pages(self) -> None:
@@ -325,7 +254,9 @@ class _Writer:
             "gaps.html",
             "Schema and lineage gaps",
             "",
-            gaps_page(c, lambda n: self._table_link(n, ""), lambda n: self._task_link(n, "")),
+            lambda: gaps_page(
+                c, lambda n: self._table_link(n, ""), lambda n: self._task_link(n, "")
+            ),
             "gaps",
             [],
         )
@@ -350,10 +281,13 @@ class _Writer:
         path: str,
         title: str,
         kind: str,
-        body: str,
+        body: Callable[[], str],
         tab: str,
         crumbs: Sequence[tuple[str | None, str]],
     ) -> None:
+        if (self.folder / path).is_file():
+            self.pages += 1
+            return
         depth = path.count("/")
         root = "../" * depth
         nav = "".join(
@@ -380,7 +314,7 @@ class _Writer:
             '<div class="search"><input type="search" placeholder="Search pipelines, tasks, '
             'tables, columns, rules…" aria-label="Search the catalog" autocomplete="off">'
             '<div class="results"></div></div></header>'
-            f"<main>{crumb_bar}{kind_label}<h1>{_e(title)}</h1>{body}</main>"
+            f"<main>{crumb_bar}{kind_label}<h1>{_e(title)}</h1>{body()}</main>"
             f'<footer class="foot">Generated {_e(_when(self.catalog.generated_at))}; run '
             "details are as of then. <code>etl-craft generate-docs</code> writes the site "
             "again.</footer>"
@@ -460,10 +394,11 @@ class _Writer:
                     f"{_status(p.row.last_run.status)} {_e(_when(p.row.last_run.end))}"
                     if p.row.last_run
                     else "never run",
-                    _rate(run_kpis(p.runs)),
-                    _e(_duration(run_kpis(p.runs).average_seconds)),
+                    _e(rates),
+                    _e(durations),
                 ]
                 for code, p in c.pipelines.items()
+                for rates, durations in [kpi_values(p.runs)]
             ),
             "No active pipelines.",
         )
@@ -641,16 +576,9 @@ class _Writer:
     def _pipeline_runs(self, p: PipelineAsset) -> str:
         if not p.runs:
             return '<h2 id="runs">Runs</h2><p class="note">It has not run yet.</p>'
-        kpis = run_kpis(p.runs)
-        summary = _facts(
-            [
-                ("Runs shown", f"the latest {kpis.runs}"),
-                ("Succeeded", _rate(kpis)),
-                ("Failed or cancelled", str(kpis.failed)),
-                ("SLA missed", str(kpis.sla_breached) if p.row.sla_in_hours else ""),
-                ("Average run", _duration(kpis.average_seconds)),
-                ("Longest run", _duration(kpis.longest_seconds)),
-            ]
+        summary = (
+            f'<p class="note">Runs shown: the latest {len(p.runs)} logical runs; '
+            "repairs are counted separately from their original trigger.</p>" + kpi_summary(p.runs)
         )
         chart = _bars(
             [
@@ -665,10 +593,21 @@ class _Writer:
             "Duration",
         )
         rows = _table(
-            ["Run", "Run date", "Status", "Started", "Took", "SLA", "Built from", "Changes"],
+            [
+                "Run",
+                "Kind",
+                "Run date",
+                "Status",
+                "Started",
+                "Took",
+                "SLA",
+                "Built from",
+                "Changes",
+            ],
             (
                 [
                     self._link(run_url(run.pipeline_run_id), str(run.pipeline_run_id)),
+                    _e(run.run_kind.value.title()),
                     _e(run.run_date)
                     + (' <span class="badge">backfill</span>' if run.backfill else ""),
                     _status(run.status),
@@ -775,14 +714,10 @@ class _Writer:
     def _task_runs(self, task: TaskAsset) -> str:
         if not task.runs:
             return ""
-        kpis = run_kpis(task.runs)
-        summary = _facts(
-            [
-                ("Runs shown", f"the latest {kpis.runs}"),
-                ("Succeeded", _rate(kpis)),
-                ("Average run", _duration(kpis.average_seconds)),
-                ("Average rows written", f"{kpis.average_rows:,.0f}" if kpis.average_rows else ""),
-            ]
+        summary = (
+            f'<p class="note">Runs shown: the latest {len(task.runs)} logical runs; '
+            "repairs are counted separately from their original trigger.</p>"
+            + kpi_summary(task.runs)
         )
         chart = _bars(
             [
@@ -797,10 +732,11 @@ class _Writer:
             "Rows written",
         )
         rows = _table(
-            ["Run", "Status", "Attempts", "Took", "Counts", "Watermark", "Message"],
+            ["Run", "Kind", "Status", "Attempts", "Took", "Counts", "Watermark", "Message"],
             (
                 [
                     self._run_link(r.pipeline_run_id, task.row.pipeline_code),
+                    _e(r.run_kind.value.title()),
                     _status(r.status),
                     str(r.attempts),
                     _e(_duration(r.seconds)),
@@ -938,10 +874,10 @@ class _Writer:
         return "<h2>Parameters</h2>" + _table(["Parameter", "Value"], rows, "No parameters.")
 
     def _sql_file(self, name: str) -> str:
-        try:
-            return f"<pre>{_e(sql_file(self.config, name).read_text(encoding='utf-8'))}</pre>"
-        except (EtlCraftError, OSError) as error:
-            return f'<p class="note">The file cannot be read: {_e(error)}</p>'
+        value = self.sql_files[name]
+        if isinstance(value, str):
+            return f"<pre>{_e(value)}</pre>"
+        return f'<p class="note">The file cannot be read: {_e(value)}</p>'
 
     # Tables
 

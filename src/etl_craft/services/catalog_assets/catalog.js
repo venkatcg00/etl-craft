@@ -13,16 +13,16 @@
     return plain && !/(^|\/)\.\.(\/|#|$)/.test(path) ? path : "index.html";
   }
 
-  // Run details are as of when the site was generated: say so once they are over a day old.
+  // Reused HTML keeps its render time; the Search page always shows the latest build.
   var generated = Date.parse(document.body.getAttribute("data-generated") || "");
   var hours = (Date.now() - generated) / 3600000;
   if (hours > 26) {
     var note = document.createElement("p");
     note.className = "stale";
-    note.textContent = "The run details on this site are " +
+    note.textContent = "This page was rendered " +
       (hours < 48 ? Math.round(hours) + " hours" : Math.round(hours / 24) + " days") +
-      " old: it was generated " + new Date(generated).toLocaleString() +
-      " and has not been written again since.";
+      " ago, on " + new Date(generated).toLocaleString() +
+      ". Unchanged pages are reused; see Search for the latest catalog build time.";
     var main = document.querySelector("main");
     if (main) main.insertBefore(note, main.firstChild);
   }
