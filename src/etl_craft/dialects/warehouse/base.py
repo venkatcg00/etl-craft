@@ -30,6 +30,12 @@ if TYPE_CHECKING:
 
 SurrogateKey = Literal["identity", "sequence", "computed"]
 
+
+def unbounded_varchar(data_type: str) -> str:
+    """Render string types for Iceberg storage that does not retain VARCHAR bounds."""
+    return re.sub(r"\bVARCHAR\s*\(\s*\d+\s*\)", "VARCHAR", data_type, flags=re.IGNORECASE)
+
+
 AUDIT_COLUMN_TYPES: dict[str, str] = {
     "TASK_RUN_ID": "BIGINT",
     "PIPELINE_ID": "BIGINT",
@@ -419,6 +425,10 @@ class WarehouseDialect:
     def audit_column_type(self, column: str) -> str:
         """Return the DDL type of an engine-managed audit column."""
         return AUDIT_COLUMN_TYPES[column]
+
+    def audit_column_contract(self, column: str) -> str:
+        """Return an engine column's type as its storage format reports it."""
+        return self.evolution_column_type(self.audit_column_type(column))
 
     def scratch_table_keyword(self) -> str:
         """Return ``TEMPORARY TABLE``, or ``TABLE`` where temporary tables are unusable."""

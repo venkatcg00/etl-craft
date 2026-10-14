@@ -16,6 +16,7 @@ from etl_craft.dialects.warehouse.base import (
     ReplaceStrategy,
     SurrogateKey,
     WarehouseDialect,
+    unbounded_varchar,
 )
 from etl_craft.dialects.warehouse.replacement import replacement_ddl
 
@@ -127,3 +128,7 @@ class TrinoIcebergWarehouse(WarehouseDialect):
         """DESCRIBE retains precision and nested types exposed by the Iceberg connector."""
         rows = conn.execute(text(f"DESCRIBE {table}")).all()
         return {str(row[0]).lower(): str(row[1]) for row in rows}
+
+    def audit_column_contract(self, column: str) -> str:
+        """Iceberg reports engine strings without their DDL's ignored length bounds."""
+        return unbounded_varchar(super().audit_column_contract(column))

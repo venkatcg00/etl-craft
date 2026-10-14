@@ -15,11 +15,11 @@ from datetime import UTC, datetime
 
 from sqlalchemy.engine import Engine
 
-from etl_craft.config.targets import active_catalog, parse_warehouse_url
-from etl_craft.core.enums import SqlAction, TableFormat, enum_value
+from etl_craft.config.targets import active_catalog
+from etl_craft.core.enums import SqlAction
 from etl_craft.core.errors import ConfigurationError, SqlGuardError
 from etl_craft.core.text import qualify
-from etl_craft.dialects.warehouse import WarehouseDialect, resolve
+from etl_craft.dialects.warehouse import WarehouseDialect
 from etl_craft.engine import locks
 from etl_craft.engine.repository.hash_versions import (
     clear_hash_version,
@@ -32,7 +32,7 @@ from etl_craft.handlers.registry import HandlerResult, TaskContext
 from etl_craft.handlers.sql.actions import ACTIONS, ActionContext
 from etl_craft.handlers.sql.session import Session
 from etl_craft.handlers.sql.spec import read_sql_task
-from etl_craft.warehouse.connection import open_warehouse
+from etl_craft.warehouse.connection import open_warehouse, task_warehouse_dialect
 
 logger = logging.getLogger(__name__)
 
@@ -130,20 +130,5 @@ def task_dialect(context: TaskContext) -> WarehouseDialect:
     The format is the task's ``TABLE_FORMAT`` parameter, else ``Warehouse.Table_format``. Where
     the connection fixes the format (Trino, DuckDB over Iceberg), a task cannot choose another.
     """
-    config = context.config
-    assert config.warehouse is not None
-    default = config.warehouse_table_format
-    written = (context.task_params.get("TABLE_FORMAT") or "").strip().lower()
-    table_format = enum_value(
-        TableFormat,
-        written or default,
-        SqlGuardError(f"TABLE_FORMAT={written!r} is not one of {', '.join(TableFormat)}"),
-    )
-    url = parse_warehouse_url(config.warehouse.jdbc_url)
-    dialect = resolve(url.dialect, table_format)
-    if not dialect.spec.per_task_format and table_format != default:
-        raise SqlGuardError(
-            f"on {dialect.spec.display_name} the table format is fixed by the connection "
-            f"(Warehouse.Table_format={default}); TABLE_FORMAT={written} cannot change it"
-        )
-    return dialect
+    assert context.config.warehouse is not None
+    return task_warehouse_dialect(context.config, context.task_params)

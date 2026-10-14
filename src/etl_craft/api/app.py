@@ -12,6 +12,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import SQLAlchemyError
 
+from etl_craft.api.catalog import add_catalog_routes
 from etl_craft.core.errors import EtlCraftError, MetadataError, ResourceNotFoundError, UsageError
 from etl_craft.engine.runlog import RunSelector
 from etl_craft.services.operations import (
@@ -138,9 +139,7 @@ def create_app(ctx: OperationContext) -> FastAPI:
     def health(caller: Annotated[OperationContext, Depends(read)]) -> dict[str, str]:
         return {"schema": "etl-craft/health/1", "status": "ok"}
 
-    @app.get("/api/v1/pipelines")
-    def list_pipelines(caller: Annotated[OperationContext, Depends(read)]) -> dict[str, Any]:
-        return to_json(inspect.list_pipelines(caller))
+    add_catalog_routes(app, read)
 
     @app.get("/api/v1/pipelines/{code}")
     def pipeline(code: str, caller: Annotated[OperationContext, Depends(read)]) -> dict[str, Any]:

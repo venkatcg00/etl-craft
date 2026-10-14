@@ -1,5 +1,7 @@
 # The catalog site: where generate-docs writes it, when it is written again, and how
 # publish-docs publishes it through ngrok.
+# Generate with --with-warehouse to compare metadata, then open docs-site/gaps.html;
+# docs-site/gaps.json carries the structured report. Without the flag checks are Unchecked.
 #
 # `etl-craft generate-yml --docs` turns Schedule into a DAG that runs `etl-craft generate-docs`;
 # without an orchestrator, run that command from cron or Task Scheduler on the same schedule.

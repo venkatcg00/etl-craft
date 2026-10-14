@@ -169,3 +169,16 @@ svg.lineage.tracing .col.on text { font-weight: 700; }
 .bars .bar.SUCCESS { fill: var(--ok); }
 .bars .bar.FAILED, .bars .bar.CANCELLED { fill: var(--bad); }
 .bars .bar.SKIPPED, .bars .bar.IN-PROGRESS { fill: var(--warn); }
+
+/* Outcome colours supplement the state text and warning symbol. */
+.gap-amber { background: #fff1c2; color: #422f00; }
+.gap-red { background: #ffebe9; color: #67060c; }
+.gap-purple { background: #f4e8ff; color: #47166b; }
+.gap-grey { background: #eaeef2; color: #424a53; }
+.gap-neutral { background: transparent; }
+tr.gap-amber a, tr.gap-red a, tr.gap-purple a, tr.gap-grey a { color: #0550ae; }
+svg.lineage .has-gap .header { stroke: var(--warn); stroke-width: 2; }
+svg.lineage .has-gap .badge { fill: var(--warn); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+svg.lineage .edge.gap-edge:not(.on) { stroke: var(--warn); stroke-width: 2; }

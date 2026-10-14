@@ -124,7 +124,7 @@ item's text, or work done early under another item.
 | S5.O.1 SCD lifecycle invariants | Done | #148 | Common SCD flags, current-row soft deletes and legacy active-state upgrades |
 | S5.O.2a Common config contract | Done | #149 | Mandatory core/custom CFG audit fields and keys, safe token lifecycle history and lossless upgrades |
 | S5.O.2b Normalized object contracts | In progress | #150, #151, #152, #153, #154, #160, #162 | Merge column lists retain parameter storage; lineage versions use component endpoints with historical CLI/catalog reads; target state follows S5.R item 3 after the soak |
-| S5.P Project documentation gap UI | Planned | | Coloured column warnings, lineage gaps and project summary |
+| S5.P Project documentation gap UI | Done | #165 | Structured schema/lineage gaps, accessible column/graph warnings and read-only comparison API |
 | S5.R Consolidate before the cluster | Planned | | Behaviour-preserving: one query path for Engine DB SQL, data-driven migration markers, enums and `core` errors throughout, shorter functions |
 | S5.S Accounts, login and roles | Planned | | Registered user and service accounts, password and SSO login, tokens for services, a role check on every action, no implicit actor, local installations that operate a server |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
@@ -158,6 +158,13 @@ S5.T (resource discovery and deployment profiles), then S5.C. S5.T supplies the 
 does not move worker work ahead of the metadata, account or operator-control corrections.
 
 **Acceptance availability.**
+
+S5.P passed the full local gate, strict docs, Python 3.12/3.13 unit suites, focused catalog/API
+and SCD contract checks on both Engine DBs and all four local warehouses, and the complete
+installed-wheel/sdist matrix without skips. Browser checks covered filtering, keyboard navigation
+and accessible graph warnings. Warehouse write SQL is unchanged; the Snowflake Iceberg edit is a
+behaviour-preserving helper extraction exercised locally, so cloud acceptance was not needed.
+Airflow, workflows and concurrency are unchanged. The frozen soak and old stash remain untouched.
 
 S5.O.2b slice 2 passed the full local gate, strict docs, Python 3.12/3.13 unit suites,
 twenty consecutive lineage publication race rounds on both Engine DBs, released-schema and

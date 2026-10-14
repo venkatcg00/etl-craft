@@ -10,7 +10,7 @@ URL query, or driver arguments) is each warehouse dialect's ``present``.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import replace
 from typing import Any
@@ -22,7 +22,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from etl_craft.config import ConnectionProfile, ConnectorConfig, profile_secret
 from etl_craft.config.resolve import resolve_named_secret
 from etl_craft.config.targets import WarehouseUrl, active_catalog, parse_warehouse_url
-from etl_craft.core.errors import ConfigurationError, LockTimeoutError
+from etl_craft.core.enums import TableFormat, enum_value
+from etl_craft.core.errors import ConfigurationError, LockTimeoutError, SqlGuardError
 from etl_craft.core.text import public_url_query
 from etl_craft.dialects import credentials
 from etl_craft.dialects.engine import for_engine
@@ -51,6 +52,26 @@ def warehouse_dialect(config: ConnectorConfig) -> WarehouseDialect:
     """Return the dialect the active warehouse profile and the default table format select."""
     url = parse_warehouse_url(_active_profile(config).jdbc_url)
     return resolve(url.dialect, config.warehouse_table_format)
+
+
+def task_warehouse_dialect(config: ConnectorConfig, params: Mapping[str, str]) -> WarehouseDialect:
+    """Resolve the task's storage format with the same restrictions as task execution."""
+    assert config.warehouse is not None
+    default = config.warehouse_table_format
+    written = (params.get("TABLE_FORMAT") or "").strip().lower()
+    table_format = enum_value(
+        TableFormat,
+        written or default,
+        SqlGuardError(f"TABLE_FORMAT={written!r} is not one of {', '.join(TableFormat)}"),
+    )
+    url = parse_warehouse_url(config.warehouse.jdbc_url)
+    dialect = resolve(url.dialect, table_format)
+    if not dialect.spec.per_task_format and table_format != default:
+        raise SqlGuardError(
+            f"on {dialect.spec.display_name} the table format is fixed by the connection "
+            f"(Warehouse.Table_format={default}); TABLE_FORMAT={written} cannot change it"
+        )
+    return dialect
 
 
 def build_warehouse_engine(config: ConnectorConfig, **engine_kwargs: Any) -> Engine:

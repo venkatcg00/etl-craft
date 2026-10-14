@@ -12,7 +12,7 @@ from sqlalchemy.engine import Connection
 from etl_craft.config.auth import warehouse_by_key
 from etl_craft.core.errors import ConfigurationError, SqlGuardError
 from etl_craft.core.text import is_safe_identifier
-from etl_craft.dialects.warehouse.base import ReplaceStrategy, SurrogateKey
+from etl_craft.dialects.warehouse.base import ReplaceStrategy, SurrogateKey, unbounded_varchar
 from etl_craft.dialects.warehouse.snowflake import SnowflakeWarehouse
 
 if TYPE_CHECKING:
@@ -187,8 +187,7 @@ class SnowflakeIcebergWarehouse(SnowflakeWarehouse):
 
     def evolution_column_type(self, data_type: str) -> str:
         """Iceberg strings have no bounds; native stages can report different VARCHAR limits."""
-        pattern = r"\bVARCHAR\s*\(\s*\d+\s*\)"
-        return re.sub(pattern, "VARCHAR", data_type, flags=re.IGNORECASE)
+        return unbounded_varchar(data_type)
 
     def audit_column_type(self, column: str) -> str:
         """Use TIMESTAMP_NTZ(6) for audit instants: Iceberg tables here take no zoned timestamp.

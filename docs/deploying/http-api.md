@@ -52,6 +52,7 @@ A disconnected client does not cancel committed work; inspect its exact run befo
 
 | Method | Path under `/api/v1` | Input or result |
 |---|---|---|
+| GET | `/catalog/gaps?compare=true` | Viewer read-only warehouse metadata comparison; omit `compare` for offline coverage |
 | GET | `/health` | Engine DB authentication and health |
 | GET | `/pipelines`, `/pipelines/{code}` | Active definitions and pause state |
 | GET | `/pipelines/{code}/runs?limit=20&before=123` | Up to 100 runs; exclusive run-id cursor |
@@ -86,3 +87,21 @@ A task watermark reset uses `{"watermark":"0","reason":"reload corrected source"
 mark endpoint. It has the same type validation and live-attempt refusal as the CLI; the run id
 in the URL identifies its intervention record. Task and attempt documents include nullable
 `watermark_from` and `watermark_to` fields.
+
+## Catalog comparisons
+
+`GET /api/v1/catalog/gaps` returns `etl-craft/catalog-gaps/1`, with `generated_at`, nullable
+`compared_at`, warehouse profile/catalog, the config/SQL `contract_version`, and `records`.
+Each record names its table, optional column, attribute, state, declared/deployed values, reason,
+affected tasks and whether the column is engine managed. `?compare=true` explicitly requests a
+fresh warehouse metadata check. All roles can read; authentication is required.
+
+The service reads no business rows and changes no config, cache or lineage history. Without a
+comparison, records are **Unchecked**; an inaccessible warehouse produces **Unavailable** records
+with reasons, rather than a healthy empty report. A 200 response delivers the report; inspect its
+states for check failures. The generated catalog's `gaps.json` uses this same document.
+
+```bash
+curl -H "Authorization: Bearer $ETL_CRAFT_API_TOKEN" \
+  'http://127.0.0.1:8730/api/v1/catalog/gaps?compare=true'
+```

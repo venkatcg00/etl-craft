@@ -1,7 +1,6 @@
-"""The closed value sets of the Engine DB schema and ``craft-connector.yml``.
+"""Closed values for storage, configuration and public operation documents.
 
-Each enum's values are exactly what the Engine DB stores or the configuration file accepts, so
-members compare equal to the raw strings read from either.
+String enum members compare equal to their serialized values.
 """
 
 from __future__ import annotations
@@ -12,6 +11,34 @@ from typing import TypeVar
 from etl_craft.core.errors import EtlCraftError
 
 E = TypeVar("E", bound=StrEnum)
+
+
+class GapState(StrEnum):
+    """Comparison outcomes displayed in project documentation."""
+
+    DEPLOYED_ONLY = "Deployed only"
+    CONFIG_ONLY = "Config only"
+    TYPE_MISMATCH = "Type mismatch"
+    NULLABILITY_MISMATCH = "Nullability mismatch"
+    KIND_MISMATCH = "Object kind mismatch"
+    LINEAGE_GAP = "Lineage gap"
+    MATCH = "Matched"
+    UNCHECKED = "Unchecked"
+    UNAVAILABLE = "Unavailable"
+    STALE = "Stale"
+    NOT_DECLARED = "Not declared"
+    EXPECTED = "Expected before first deployment"
+
+
+class GapAttribute(StrEnum):
+    """Attributes with independent schema or lineage coverage."""
+
+    OBJECT = "object"
+    KIND = "object kind"
+    COLUMN = "column"
+    TYPE = "type"
+    NULLABILITY = "nullability"
+    LINEAGE = "lineage"
 
 
 def enum_value(enum: type[E], value: str, error: EtlCraftError) -> E:

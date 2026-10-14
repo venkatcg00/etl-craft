@@ -48,6 +48,7 @@ options. Project files remain relative to `config.project_dir`.
 | `tasks` | `run_task`, `force_task`, `rerun_task`, `mark_task` |
 | `pipelines` | `set_pause` |
 | `backfills` | `run_backfill` |
+| `catalog` | `get_gaps(ctx, compare=False)` returns the read-only schema/lineage gap snapshot |
 | `inspect` | `list_pipelines`, `pipeline_graph`, `pipeline_steps`, `run_history`, `audit` |
 
 Pass `verb="pause"` or `verb="resume"` to `pipelines.set_pause(ctx, pipeline_code, reason, ...)`.
@@ -104,6 +105,7 @@ The serializer returns a fresh dictionary.
 
 | Schema | Document |
 | --- | --- |
+| `etl-craft/catalog-gaps/1` | Dated schema comparison coverage and lineage gaps, shared with generated documentation |
 | `etl-craft/operation/1` | Call outcome with stored run, task or pipeline views |
 | `etl-craft/run/1` | Stored pipeline run |
 | `etl-craft/task-run/1` | Stored task summary and ordered attempts |

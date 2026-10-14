@@ -8,6 +8,16 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Generated project catalogs include a schema/lineage gaps page, coloured warning rows,
+  action-specific engine-column contracts, graph reasons and affected-task links. Storage type
+  normalization avoids false Iceberg engine-column warnings; failed SQL inference leaves unknown
+  output coverage unavailable. Action parsing uses execution's normalization rules. Offline,
+  unavailable and stale comparisons remain explicit; inferred names do not invent type contracts.
+  Missing tables/views distinguish pending first deployment from missing referenced objects.
+  `gaps.json` and authenticated `GET /api/v1/catalog/gaps?compare=true` share a dated input-versioned
+  report. API comparisons read metadata only and never publish lineage history. No config,
+  migration, dependency or warehouse business-data change is required.
+
 - Table lineage history records a new version only when combined writer edges change.
   Catalog table pages show current and historical versions with added/removed column sources.
   `lineage --as-of TIME` reads stored graphs; `lineage --table schema.table --version NUMBER`

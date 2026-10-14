@@ -26,6 +26,28 @@
     var main = document.querySelector("main");
     if (main) main.insertBefore(note, main.firstChild);
   }
+  var gapFilter = document.querySelector(".gap-filter");
+  if (gapFilter) gapFilter.addEventListener("input", function () {
+    var query = words(gapFilter.value);
+    document.querySelectorAll(".gap-records tr").forEach(function (row) {
+      if (row.querySelector("td")) {
+        var text = row.textContent.toLowerCase();
+        row.hidden = query.some(function (word) { return text.indexOf(word) < 0; });
+      }
+    });
+  });
+  var compared = Date.parse(document.body.getAttribute("data-compared") || "");
+  if (Date.now() - compared > 26 * 3600000) {
+    var stale = document.createElement("p");
+    stale.className = "stale gap-grey";
+    stale.setAttribute("role", "status");
+    stale.textContent = "Stale warehouse comparison: these are previous observations. Regenerate with --with-warehouse to check current deployment.";
+    document.querySelector("main").prepend(stale);
+    document.querySelectorAll(".badge.gap-neutral").forEach(function (badge) {
+      badge.className = "badge gap-grey";
+      badge.textContent = "Stale (previously " + badge.textContent + ")";
+    });
+  }
   var index = window.CATALOG_INDEX || [];
   var KINDS = ["pipeline", "task", "table", "column", "rule", "script"];
 
@@ -274,6 +296,8 @@
 
     function expand(node, open) {
       node.classList.toggle("collapsed", !open);
+      var head = node.querySelector(".head");
+      if (head) head.setAttribute("aria-expanded", String(open));
       var chevron = node.querySelector(".chevron");
       if (chevron) chevron.textContent = open ? "▾" : "▸";
       node.querySelector(".box").setAttribute("height", height(node));

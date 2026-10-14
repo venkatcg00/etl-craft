@@ -164,7 +164,10 @@ def test_the_catalog_joins_tasks_tables_and_rules(project):
     ]
     assert tables["sales.orders"].writers == ["SALES.convert"]
     assert tables["sales.orders"].readers == ["MART.copy_all", "MART.daily"]
-    assert list(tables["sales.orders"].columns) == ["id", "amount_usd"]
+    assert [c.name for c in tables["sales.orders"].columns.values() if not c.engine_managed] == [
+        "id",
+        "amount_usd",
+    ]
     assert tables["raw.orders"].writers == ["INGEST.pull"]
     assert tables["external:crm api"].external
     (rule,) = catalog.rules.values()
@@ -175,6 +178,7 @@ def test_the_catalog_joins_tasks_tables_and_rules(project):
     assert stage.documentation == "Stages positive orders."
     assert stage.row.last_run.status == "SUCCESS" and stage.row.last_run.target_count == 12
     assert catalog.tasks["INGEST.pull"].row.last_run is None
+    assert catalog.tasks["INGEST.stage"].row.has_successful_run
     # The SELECT * task keeps its table edge and says why its columns are unknown.
     (untraced,) = catalog.untraced
     assert untraced.label == "MART.copy_all" and "SELECT *" in untraced.lineage_error
@@ -197,7 +201,7 @@ def test_a_tables_graph_runs_to_the_first_source_and_the_last_consumer(project):
         "mart.daily": 1,
         "mart.everything": 1,
     }
-    assert drawing.nodes["sales.orders"].columns == ["id", "amount_usd"]
+    assert {"id", "amount_usd"} <= set(drawing.nodes["sales.orders"].columns)
     assert drawing.nodes["mart.daily"].derived == {"n": "COUNT(*)"}
     column_pairs = {
         (f"{e.source_object}.{e.source_column}", f"{e.target_object}.{e.target_column}")
@@ -225,6 +229,7 @@ def test_the_site_has_a_page_per_asset_and_a_search_index(project, tmp_path):
     pages = sorted(str(p.relative_to(folder)) for p in folder.rglob("*.html"))
     assert [p for p in pages if not p.startswith(("scripts/", "runs/"))] == sorted(
         [
+            "gaps.html",
             "dags.html",
             "warehouse.html",
             "index.html",
@@ -304,7 +309,8 @@ def test_the_command(project, capsys):
     assert not (root / "catalog").exists()
     assert main(["generate-docs", "--with-warehouse"]) == ExitCode.SUCCESS
     assert capsys.readouterr().out.splitlines()[-1] == (
-        f"generate-docs: wrote 21 page(s) to {root / 'catalog'}"
+        f"generate-docs: wrote {len(list((root / 'catalog').rglob('*.html')))} "
+        f"page(s) to {root / 'catalog'}"
     )
     assert (root / "catalog" / "index.html").is_file()
 
@@ -321,11 +327,247 @@ def test_warehouse_columns_add_types(project, tmp_path):
         conn.execute("COMMENT ON COLUMN sales.orders.note IS 'free text'")
     catalog = build_catalog(engine, config, with_warehouse=True)
     columns = catalog.tables["sales.orders"].columns
-    assert list(columns) == ["id", "amount_usd", "note"]
+    assert [c.name for c in columns.values() if not c.engine_managed] == [
+        "id",
+        "amount_usd",
+        "note",
+    ]
     assert columns["id"].data_type == "BIGINT"
     assert columns["note"].comment == "free text"
+    write_site(catalog, config, tmp_path / "commented")
+    page = (tmp_path / "commented" / "tables" / "sales.orders.html").read_text()
+    assert "<th>Comment</th>" in page and "free text" in page
     assert catalog.tables["sales.orders"].in_warehouse
     assert not catalog.tables["mart.daily"].in_warehouse
+
+
+def test_gap_snapshot_and_rows_show_both_directions_and_types(project, tmp_path):
+    import duckdb
+
+    engine, config, root = project
+    with duckdb.connect(str(root / "analytics.duckdb")) as conn:
+        conn.execute("CREATE SCHEMA raw")
+        conn.execute("CREATE TABLE raw.orders (id INT, currency VARCHAR, extra VARCHAR)")
+    catalog = build_catalog(engine, config, with_warehouse=True)
+    folder = write_site(catalog, config, tmp_path / "site").folder
+    html = (folder / "tables/raw.orders.html").read_text()
+    assert 'class="gap-amber"' in html and "Deployed only" in html and "extra" in html
+    assert 'class="gap-red"' in html and "Config only" in html and "amt" in html
+    assert 'class="gap-purple"' in html and "Type mismatch" in html
+    assert "⚠" in html and 'aria-hidden="true"' in html
+    assert "Script column lineage is unknown" in html
+    snapshot = json.loads((folder / "gaps.json").read_text())
+    outcomes = {
+        (r["column"], r["attribute"]): r for r in snapshot["records"] if r["table"] == "raw.orders"
+    }
+    assert outcomes["extra", "column"]["state"] == "Deployed only"
+    assert outcomes["amt", "column"]["state"] == "Config only"
+    assert outcomes["id", "type"]["state"] == "Type mismatch"
+    assert outcomes["currency", "type"]["state"] == "Matched"
+    assert outcomes["id", "type"]["tasks"] == ["INGEST.pull", "INGEST.stage"]
+    assert snapshot["compared_at"] and snapshot["contract_version"] and snapshot["warehouse"]
+    summary = (folder / "gaps.html").read_text()
+    assert 'href="tables/raw.orders.html"' in summary
+    assert 'href="tasks/INGEST.pull.html"' in summary
+    assert "Filter gaps by state, object, task or pipeline" in summary
+
+
+def test_offline_gap_pages_never_claim_checked_or_missing(project, tmp_path, monkeypatch):
+    from etl_craft.services import catalog as catalog_service
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("offline generation opened the warehouse")
+
+    monkeypatch.setattr(catalog_service, "open_warehouse", forbidden)
+    engine, config, _ = project
+    folder = write_site(build_catalog(engine, config), config, tmp_path / "site").folder
+    html = (folder / "gaps.html").read_text()
+    assert "Unchecked" in html and "Not checked" in html
+    assert "Matched" not in html and "Config only" not in html
+    assert "Unknown" not in html
+    assert (folder / "tables/sales.orders.html").read_text().count("Engine managed") == 5
+    snapshot = json.loads((folder / "gaps.json").read_text())
+    assert snapshot["compared_at"] is None
+    assert {r["state"] for r in snapshot["records"]} == {"Unchecked", "Lineage gap"}
+    assert any(
+        "SALES.rules" in r["tasks"] for r in snapshot["records"] if r["table"] == "sales.orders"
+    )
+
+
+def test_failed_comparison_is_unavailable_in_summary_and_table(project, tmp_path, monkeypatch):
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from etl_craft.services import catalog as catalog_service
+
+    def inaccessible(*args, **kwargs):
+        raise SQLAlchemyError("metadata access denied")
+
+    monkeypatch.setattr(catalog_service, "open_warehouse", inaccessible)
+    engine, config, _ = project
+    folder = write_site(
+        build_catalog(engine, config, with_warehouse=True), config, tmp_path / "site"
+    ).folder
+    snapshot = json.loads((folder / "gaps.json").read_text())
+    assert {r["state"] for r in snapshot["records"]} == {"Unavailable", "Lineage gap"}
+    for path in ("gaps.html", "tables/sales.orders.html"):
+        html = (folder / path).read_text()
+        assert "Unavailable" in html and "metadata access denied" in html
+        assert "Matched" not in html
+
+
+def test_lineage_warning_graph_has_reason_and_keyboard_controls(project, tmp_path):
+    engine, config, _ = project
+    folder = write_site(build_catalog(engine, config), config, tmp_path / "site").folder
+    html = (folder / "tables/mart.everything.html").read_text()
+    assert "has-gap" in html and "SELECT *" in html and "⚠" in html
+    assert "edge table gap-edge" in html and 'role="group"' in html
+    assert 'role="button"' in html and 'tabindex="0"' in html and "aria-label=" in html
+    assert 'href="../tasks/MART.copy_all.html"' in html
+    assert (folder / "tables/mart.daily.html").read_text().count("Lineage gap") >= 1
+
+
+def test_missing_objects_distinguish_expected_creations_and_existing_targets(project, tmp_path):
+    import duckdb
+
+    engine, config, root = project
+    with duckdb.connect(str(root / "analytics.duckdb")):
+        pass
+    catalog = build_catalog(engine, config, with_warehouse=True)
+    folder = write_site(catalog, config, tmp_path / "site").folder
+    snapshot = json.loads((folder / "gaps.json").read_text())
+    states = {r["table"]: r["state"] for r in snapshot["records"] if r["attribute"] == "object"}
+    assert states["mart.everything"] == "Expected before first deployment"
+    assert states["sales.orders"] == "Config only"
+    assert states["raw.orders"] == "Config only"
+    assert "Matched" not in (folder / "gaps.html").read_text()
+
+
+def test_constant_lineage_has_no_gap_and_failed_reasons_are_escaped(project, tmp_path):
+    engine, config, _ = project
+    with engine.begin() as conn:
+        pipeline = add_pipeline(conn, "CONSTANTS")
+        add_task(
+            conn,
+            pipeline,
+            "make",
+            SQL_ACTION="CREATE_TABLE",
+            TARGET_OBJECT="mart.constant",
+            SOURCE_SQL="SELECT 1 AS id",
+        )
+    catalog = build_catalog(engine, config)
+    catalog.tasks["MART.copy_all"].lineage_error = '<script>alert("bad")</script>'
+    folder = write_site(catalog, config, tmp_path / "site").folder
+    html = (folder / "tables/mart.constant.html").read_text()
+    assert 'class="lineage"' in html and "no source column" in html
+    snapshot = json.loads((folder / "gaps.json").read_text())
+    assert not [
+        r
+        for r in snapshot["records"]
+        if r["table"] == "mart.constant" and r["state"] == "Lineage gap"
+    ]
+    for path in ("gaps.html", "tables/mart.everything.html"):
+        page = (folder / path).read_text()
+        assert '<script>alert("bad")</script>' not in page
+        assert "&lt;script&gt;" in page
+
+
+def test_comparison_version_uses_inputs_and_stale_checks_are_not_healthy(project, tmp_path):
+    from datetime import timedelta
+
+    engine, config, _ = project
+    catalog = build_catalog(engine, config)
+    original = catalog.contract_version
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE CFG_COLUMNS SET DATA_TYPE='BIGINT' WHERE COLUMN_NAME='id'"))
+    changed = build_catalog(engine, config)
+    assert changed.contract_version != original
+    changed.compared_at = changed.generated_at - timedelta(hours=27)
+    table = changed.tables["raw.orders"]
+    table.warehouse_checked = table.in_warehouse = True
+    folder = write_site(changed, config, tmp_path / "site").folder
+    snapshot = json.loads((folder / "gaps.json").read_text())
+    records = [
+        r for r in snapshot["records"] if r["table"] == "raw.orders" and r["attribute"] == "object"
+    ]
+    assert records[0]["state"] == "Stale"
+    assert "Matched" not in (folder / "tables/raw.orders.html").read_text()
+
+
+def test_graph_column_warnings_do_not_spread_to_other_columns(project):
+    from xml.etree import ElementTree
+
+    import duckdb
+
+    from etl_craft.services.catalog_graph import render_svg
+
+    engine, config, root = project
+    with duckdb.connect(str(root / "analytics.duckdb")) as conn:
+        conn.execute("CREATE SCHEMA sales")
+        conn.execute("CREATE TABLE sales.orders (id BIGINT, amount_usd DECIMAL(18,2), extra INT)")
+    catalog = build_catalog(engine, config, with_warehouse=True)
+    svg = ElementTree.fromstring(render_svg(lineage_drawing(catalog, "sales.orders"), lambda n: n))
+    column = svg.find('.//{*}g[@data-col="sales.orders|id"]/{*}title')
+    extra = svg.find('.//{*}g[@data-col="sales.orders|extra"]/{*}title')
+    assert column is not None and column.text == "id"
+    assert extra is not None and "Deployed only" in extra.text
+
+
+def test_catalog_reports_quoted_components_as_unavailable_without_splitting_them(project, tmp_path):
+    import duckdb
+
+    engine, config, root = project
+    with engine.begin() as conn:
+        add_table(conn, '"raw.archive".orders')
+    with duckdb.connect(str(root / "analytics.duckdb")):
+        pass
+    catalog = build_catalog(engine, config, with_warehouse=True)
+    folder = write_site(catalog, config, tmp_path / "site").folder
+    snapshot = json.loads((folder / "gaps.json").read_text())
+    record = next(r for r in snapshot["records"] if r["table"] == "raw.archive.orders")
+    assert record["state"] == "Unavailable" and "quoted" in record["reason"]
+    assert catalog.where("raw.archive.orders") == ("analytics", "raw.archive", "orders")
+
+
+def test_failed_sql_output_does_not_guess_deployed_only_columns(project, tmp_path):
+    import duckdb
+
+    engine, config, root = project
+    build_catalog(engine, config)
+    with duckdb.connect(str(root / "analytics.duckdb")) as conn:
+        conn.execute("CREATE SCHEMA sales")
+        conn.execute("CREATE TABLE sales.orders (id BIGINT, unresolved_output DECIMAL(18,2))")
+    (config.sql_files_dir / "convert.sql").write_text("SELECT * FROM missing.source")
+    folder = write_site(
+        build_catalog(engine, config, with_warehouse=True), config, tmp_path / "site"
+    ).folder
+    snapshot = json.loads((folder / "gaps.json").read_text())
+    records = [
+        r
+        for r in snapshot["records"]
+        if r["table"] == "sales.orders" and r["column"] == "unresolved_output"
+    ]
+    assert records and all(r["state"] == "Unavailable" for r in records)
+    assert all("SALES.convert" in r["reason"] for r in records)
+
+
+def test_action_spelling_uses_execution_normalization(project):
+    engine, config, _ = project
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE='  overwrite_table  ' "
+                "WHERE PARAMETER_NAME='SQL_ACTION' AND TASK_ID IN "
+                "(SELECT TASK_ID FROM CFG_TASKS WHERE TASK_CODE='convert')"
+            )
+        )
+    table = build_catalog(engine, config).tables["sales.orders"]
+    assert {c.name for c in table.columns.values() if c.engine_managed} == {
+        "pipeline_id",
+        "pipeline_run_id",
+        "task_run_id",
+        "row_id",
+        "update_date",
+    }
 
 
 def test_every_page_chains_to_what_it_mentions(project, tmp_path):
