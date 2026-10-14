@@ -17,12 +17,13 @@ not to index them.
 
 ## What is in it
 
-Three tabs at the top of every page, and a trail of links back up from wherever you are:
+Four tabs at the top of every page, and a trail of links back up from wherever you are:
 
 | Tab | Leads to |
 |---|---|
 | **Search** | counts, and search across everything |
 | **DAGs** | every pipeline with its name, description, schedule, the pipelines it depends on, its last run, how many of its recent runs succeeded and how long they took on average; the ingestion scripts; and the SQL tasks whose columns cannot be traced |
+| **Schema and lineage gaps** | project-wide outcome counts, searchable gap records, check time, input version and links to affected tables and tasks |
 | **Warehouse** | every database, then schema, then table, with the tasks that write and read each table, its pipelines and business rules; and the external sources ingestion scripts read |
 
 Every task, table, pipeline, rule and script a page mentions is a link to its own page, so any
@@ -221,17 +222,42 @@ go too. A folder holding anything else is refused.
 
 ## Comparing documentation with the deployment
 
-`etl-craft generate-docs --with-warehouse` reports gaps in its output and each table's
-**Warehouse comparison** section. Source definitions retain their **Declared type** beside the
-**Deployed type**; missing columns and columns without definitions stay visible. It compares
-complete source definitions for added, missing and differently typed columns, and traced SQL
-targets for missing or undocumented columns. Engine-generated audit columns do not count as
-undocumented additions to SQL targets. Types that are not declared are not guessed.
+`etl-craft generate-docs --with-warehouse` reads only schema metadata through the configured
+warehouse connection. The **Schema and lineage gaps** page summarizes every referenced object,
+including active table contracts without column definitions. Its filter accepts state, object,
+column, task or pipeline text. Each table has a side-by-side contract/deployment grid with
+links to its writers, readers and column sources.
 
-A table that does not exist is labelled not deployed. An unavailable connection or metadata
-query is reported as a comparison that could not run, with the metadata catalog retained.
-Without the flag, the catalog stays offline. `--strict` continues to govern unresolved column
-lineage; use `etl-craft validate` to fail on source schema drift.
+| Outcome | Indicator |
+| --- | --- |
+| Deployed only | Amber row and ⚠: present in the warehouse, absent from the contract |
+| Config only | Red row and ⚠: declared column or referenced object is missing |
+| Type mismatch | Purple row and ⚠: declared and deployed types differ |
+| Object kind / nullability mismatch | Purple indicator with the specific attribute and both values |
+| Lineage gap | Amber ⚠ on columns and graph nodes, with the failed task's reason; script column lineage remains unknown |
+| Matched | Neutral, explicit label for the attribute actually compared |
+| Unchecked / Unavailable / Stale | Grey label with the reason; never a successful comparison |
+| Not declared | Inferred output names can match while their type coverage remains undeclared |
+| Expected before first deployment | Missing target with a creation task and no successful writer execution recorded |
+
+Engine-added columns remain visible as **Engine managed**, compared against the writing action's
+contract, including `SETUP_FOR` and the pipeline's other writers. They do not become editable
+config rows. Constants and aggregates with no source column are shown explicitly rather than
+counted as lineage failures.
+
+The snapshot identifies generation/comparison timestamps, warehouse profile/catalog and a hash
+of its config/SQL inputs. `gaps.json` exports the same structured records as the
+[authenticated comparison API](../deploying/http-api.md). Counts describe attribute outcomes,
+not distinct tables. A comparison over 26 hours old is marked stale, matching the catalog's
+existing freshness window; regenerate to check current deployment.
+
+Without the flag, generation remains offline and every warehouse comparison is **Unchecked**.
+An inaccessible warehouse retains the declared catalog and reports **Unavailable** with its reason.
+The existing unquoted tracing boundary remains: components needing quotes are reported as
+unavailable rather than split into a different object; ambiguous display identities are refused.
+`--strict` continues to govern unresolved SQL column lineage; use `etl-craft validate` to fail
+on source schema drift. Regenerate the site to replace old observations; no Engine DB comparison
+table or deployed-schema copy is created.
 
 ## Table lineage history
 

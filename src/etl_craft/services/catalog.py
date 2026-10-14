@@ -23,6 +23,8 @@ comments where the warehouse's information schema has them.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
@@ -31,14 +33,13 @@ from datetime import UTC, datetime
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
-from sqlglot.errors import SqlglotError
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.config.project import ingestion_script
-from etl_craft.config.targets import active_catalog
-from etl_craft.core.enums import Handler, SqlAction
-from etl_craft.core.errors import EtlCraftError
-from etl_craft.core.text import is_safe_object_ref
+from etl_craft.config.project import ingestion_script, sql_file
+from etl_craft.config.targets import active_catalog, parse_warehouse_url
+from etl_craft.core.enums import GapState, Handler, SqlAction
+from etl_craft.core.errors import EtlCraftError, MetadataError
+from etl_craft.core.text import is_safe_identifier
 from etl_craft.core.time import as_utc
 from etl_craft.engine.repository.catalog import (
     Consumption,
@@ -50,6 +51,7 @@ from etl_craft.engine.repository.catalog import (
     TaskRunSummary,
     fetch_catalog_pipelines,
     fetch_catalog_rules,
+    fetch_catalog_tables,
     fetch_catalog_tasks,
     fetch_consumption,
     fetch_documentation_versions,
@@ -62,17 +64,21 @@ from etl_craft.engine.repository.lineage import (
     fetch_lineage_versions,
     fetch_version_edges,
 )
+from etl_craft.engine.repository.normalization import ObjectIdentity
 from etl_craft.engine.repository.pauses import Pause, fetch_open_pauses
-from etl_craft.engine.repository.source_columns import SourceColumn, fetch_source_columns
-from etl_craft.engine.repository.tasks import fetch_task_parameters
+from etl_craft.engine.repository.source_columns import fetch_source_columns
+from etl_craft.engine.repository.tasks import TargetTask, fetch_task_parameters
 from etl_craft.engine.repository.validation import (
     fetch_pipeline_edges,
     fetch_task_dependency_edges,
 )
-from etl_craft.handlers.sql.tables import ENGINE_COLUMNS
+from etl_craft.handlers.sql.actions import writer_action
+from etl_craft.handlers.sql.spec import read_action, read_setup_for
+from etl_craft.handlers.sql.tables import AUDIT_COLUMNS
+from etl_craft.services.catalog_gaps import infers_output_columns, table_records
 from etl_craft.services.lineage import Edge, TaskLineage, collect, stored_edge, table_name
-from etl_craft.services.source_columns import drift, nullable, warehouse_kind
-from etl_craft.warehouse.connection import open_warehouse, warehouse_dialect
+from etl_craft.services.source_columns import nullable, warehouse_kind
+from etl_craft.warehouse.connection import open_warehouse, task_warehouse_dialect, warehouse_dialect
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +97,9 @@ class Column:
     warehouse_type: str | None = None
     declared_nullable: str | None = None
     warehouse_nullable: str | None = None
+    declared: bool = True
+    warehouse_present: bool = False
+    engine_managed: bool = False
 
 
 @dataclass
@@ -110,6 +119,7 @@ class TableAsset:
     lineage_history: list[tuple[LineageVersion, list[Edge], list[Edge]]] = field(
         default_factory=list
     )
+    declared_identity: ObjectIdentity | None = None
 
     @property
     def external(self) -> bool:
@@ -234,9 +244,15 @@ class Catalog:
     database: str | None = None
     built_from: dict[int, list[Consumption]] = field(default_factory=dict)
     consumed_by: dict[int, list[Consumption]] = field(default_factory=dict)
+    compared_at: datetime | None = None
+    warehouse_identity: str | None = None
+    contract_version: str = ""
+    sql_dialect: str | None = None
 
     def where(self, table: str) -> tuple[str, str, str]:
         """Return a table's ``(database, schema, table)``; the active database when unnamed."""
+        if table in self.tables and (identity := self.tables[table].declared_identity):
+            return identity[0] or self.database or "", identity[1], identity[2]
         parts = table.split(".")
         if len(parts) == 3:
             return parts[0], parts[1], parts[2]
@@ -250,14 +266,19 @@ class Catalog:
         return [task for task in self.tasks.values() if task.lineage_error is not None]
 
 
-def _build_catalog(
-    engine: Engine, config: ConnectorConfig, *, with_warehouse: bool = False
+def collect_catalog(
+    engine: Engine,
+    config: ConnectorConfig,
+    *,
+    with_warehouse: bool = False,
+    record_lineage: bool = True,
 ) -> Catalog:
     """Read the Engine DB and return the catalog; lineage is stored as ``lineage`` stores it."""
     catalog_name = active_catalog(config) if config.warehouse is not None else None
     database = catalog_name
     with engine.connect() as conn:
         definitions = fetch_source_columns(conn)
+        objects = fetch_catalog_tables(conn)
         pipeline_rows = fetch_catalog_pipelines(conn)
         task_rows = fetch_catalog_tasks(conn)
         rule_rows = fetch_catalog_rules(conn)
@@ -279,7 +300,7 @@ def _build_catalog(
             for change in fetch_interventions(conn, pipeline.pipeline_id, min(listed)):
                 if change.pipeline_run_id in listed:
                     by_run.setdefault(change.pipeline_run_id, []).append(change)
-    lineages = {lineage.task: lineage for lineage in collect(engine, config)}
+    lineages = {lineage.task: lineage for lineage in collect(engine, config, record=record_lineage)}
 
     def name_of(object_ref: str) -> str:
         return table_name(object_ref.strip().split("."), catalog_name)
@@ -320,7 +341,7 @@ def _build_catalog(
         _connect_task(catalog, task, lineages.get(task.label), name_of, config)
     for definition in definitions:
         table = _table(catalog, name_of(definition.table_name))
-        if any(catalog.tasks[writer].row.handler == Handler.SQL for writer in table.writers):
+        if any(infers_output_columns(catalog.tasks[writer]) for writer in table.writers):
             continue
         column = definition.column_name.lower()
         table.columns.setdefault(column, Column(column))
@@ -328,6 +349,7 @@ def _build_catalog(
         table.columns[column].declared_type = definition.data_type
         table.columns[column].declared_nullable = definition.is_nullable
         table.declared_kind = definition.object_kind
+    _declared_objects(catalog, objects)
     _writers_order_first(catalog)
     for edge in pipeline_edges:
         if edge.pipeline_code in catalog.pipelines:
@@ -354,18 +376,54 @@ def _build_catalog(
             catalog.tasks[rule.task].rules.append(rule_row.business_rule_id)
         _table(catalog, rule.table).rules.append(rule_row.business_rule_id)
         _table(catalog, rule.table).add_column(rule_row.key_column.lower())
-    if with_warehouse and config.warehouse is not None:
+    _compare_catalog(catalog, engine, config, with_warehouse)
+    return catalog
+
+
+def _compare_catalog(
+    catalog: Catalog, engine: Engine, config: ConnectorConfig, requested: bool
+) -> None:
+    _comparison_identity(catalog, config, requested)
+    if requested and config.warehouse is not None and catalog.compared_at is not None:
         try:
             _add_warehouse_columns(catalog, engine, config)
         except (SQLAlchemyError, EtlCraftError) as error:
             for table in catalog.tables.values():
                 if not table.external:
                     table.warehouse_findings.append(f"comparison unavailable: {error}")
-    return catalog
+    for table in catalog.tables.values():
+        for record in table_records(catalog, table):
+            if record.state in (
+                GapState.DEPLOYED_ONLY,
+                GapState.CONFIG_ONLY,
+                GapState.TYPE_MISMATCH,
+                GapState.NULLABILITY_MISMATCH,
+                GapState.KIND_MISMATCH,
+            ):
+                table.warehouse_findings.append(
+                    f"schema drift: {record.column or table.name} {record.attribute}: "
+                    f"{record.reason} "
+                    f"declared={record.declared}; deployed={record.deployed}"
+                )
 
 
 def _table(catalog: Catalog, name: str) -> TableAsset:
     return catalog.tables.setdefault(name, TableAsset(name))
+
+
+def _declared_objects(catalog: Catalog, objects: list[tuple[ObjectIdentity, str | None]]) -> None:
+    for identity, kind in objects:
+        name = table_name((part for part in identity if part), catalog.database)
+        table = _table(catalog, name)
+        resolved = identity[0] or catalog.database, identity[1], identity[2]
+        if table.declared_identity and table.declared_identity != resolved:
+            raise MetadataError(
+                f"catalog object {name!r} conflates {table.declared_identity!r} and {resolved!r}; "
+                "the current unquoted catalog cannot distinguish them; use distinct plain "
+                "identifiers before generating documentation"
+            )
+        table.declared_identity = resolved
+        table.declared_kind = kind
 
 
 def _connect_task(
@@ -434,16 +492,25 @@ def _add_warehouse_columns(catalog: Catalog, engine: Engine, config: ConnectorCo
         for table in catalog.tables.values():
             if table.external:
                 continue
-            parts = table.name.split(".")
+            parts = (
+                [table.declared_identity[0] or default_catalog, *table.declared_identity[1:]]
+                if table.declared_identity
+                else table.name.split(".")
+            )
             if len(parts) == 2:
                 parts = [default_catalog, *parts]
             if len(parts) != 3:
+                table.warehouse_findings.append(
+                    f"comparison unavailable: {table.name!r} needs schema.table or "
+                    "catalog.schema.table; qualify the source SQL or table contract"
+                )
                 continue
             database, schema, name = parts
-            if not is_safe_object_ref(".".join(parts)):
+            if not all(is_safe_identifier(part) for part in parts):
                 table.warehouse_findings.append(
-                    "comparison unavailable: expected unquoted database.schema.table identifiers; "
-                    "correct the table definition"
+                    f"comparison unavailable: object components {tuple(parts)!r} require quoted "
+                    "identifiers, unsupported by the current catalog; use plain identifiers "
+                    "or retain an offline snapshot"
                 )
                 continue
             known = table.columns
@@ -458,11 +525,7 @@ def _add_warehouse_columns(catalog: Catalog, engine: Engine, config: ConnectorCo
                     {"t": name, "s": schema, "c": database},
                 ).mappings()
                 found = [{str(k).lower(): v for k, v in row.items()} for row in rows]
-                full_types = (
-                    dialect.full_column_types(conn, ".".join(parts))
-                    if found and any(column.declared_type for column in known.values())
-                    else {}
-                )
+                full_types = dialect.full_column_types(conn, ".".join(parts)) if found else {}
                 kind = warehouse_kind(conn, config, table.name) if found else None
             except (SQLAlchemyError, EtlCraftError) as error:
                 logger.warning("could not read the columns of %s: %s", table.name, error)
@@ -486,57 +549,13 @@ def _add_warehouse_columns(catalog: Catalog, engine: Engine, config: ConnectorCo
                     full_types.get(column) or str(row.get("data_type") or "") or None,
                     known[column].declared_nullable if column in known else None,
                     nullable(row.get("is_nullable")),
+                    column in known,
+                    True,
+                    known[column].engine_managed if column in known else False,
                 )
             for column, value in known.items():
                 table.columns.setdefault(column, value)
             table.warehouse_kind = kind
-            definitions = [
-                SourceColumn(
-                    table.name,
-                    column.name,
-                    column.declared_type,
-                    index,
-                    column.declared_nullable,
-                    table.declared_kind,
-                )
-                for index, column in enumerate(known.values(), 1)
-                if column.declared_type
-            ]
-            if definitions:
-                actual = [
-                    SourceColumn(
-                        table.name,
-                        column.name,
-                        column.warehouse_type,
-                        index,
-                        column.warehouse_nullable,
-                        table.warehouse_kind,
-                    )
-                    for index, column in enumerate(table.columns.values(), 1)
-                    if column.warehouse_type
-                ]
-                try:
-                    table.warehouse_findings.extend(
-                        f"schema drift: {message}"
-                        for message in drift(definitions, actual, dialect.sqlglot_dialect)
-                    )
-                except (SqlglotError, ValueError) as error:
-                    table.warehouse_findings.append(
-                        f"type comparison unavailable: {error}; correct columns.csv"
-                    )
-            else:
-                present = {str(row["column_name"]).lower() for row in found}
-                table.warehouse_findings.extend(
-                    f"schema drift: warehouse lacks documented column {column}; "
-                    "correct the source query or deployment"
-                    for column in sorted(known.keys() - present)
-                )
-                if any(catalog.tasks[writer].column_edges for writer in table.writers):
-                    table.warehouse_findings.extend(
-                        f"schema drift: warehouse adds undocumented column {column}; "
-                        "update the task or deployment"
-                        for column in sorted(present - known.keys() - ENGINE_COLUMNS)
-                    )
 
 
 def _comment(row: dict[str, object]) -> str | None:
@@ -545,6 +564,93 @@ def _comment(row: dict[str, object]) -> str | None:
         if value:
             return str(value)
     return None
+
+
+def _engine_columns(catalog: Catalog, table: TableAsset, config: ConnectorConfig) -> None:
+    for writer in table.writers:
+        task = catalog.tasks[writer]
+        if task.row.handler != Handler.SQL:
+            continue
+        try:
+            action = read_action(task.params)
+            dialect = task_warehouse_dialect(config, task.params) if config.warehouse else None
+            if action == SqlAction.SETUP_TABLE:
+                action = _setup_writer(catalog, table, task)
+        except EtlCraftError as error:
+            table.warehouse_findings.append(
+                f"comparison unavailable: {task.label}: {error}; correct the task parameters"
+            )
+            continue
+        if action not in AUDIT_COLUMNS:
+            continue
+        for name in ("PIPELINE_RUN_ID", "ROW_ID", *AUDIT_COLUMNS[action]):
+            column = table.columns.setdefault(name.lower(), Column(name.lower()))
+            column.engine_managed = True
+            column.declared_type = (
+                "BIGINT"
+                if name in ("ROW_ID", "PIPELINE_RUN_ID")
+                else dialect.audit_column_contract(name)
+                if dialect
+                else None
+            )
+
+
+def _setup_writer(catalog: Catalog, table: TableAsset, task: TaskAsset) -> SqlAction:
+    specified = read_setup_for(task.params.get("SETUP_FOR"), SqlAction.SETUP_TABLE)
+    others = [
+        TargetTask(other.row.task_id, other.row.task_code, read_action(other.params))
+        for name in table.writers
+        if name != task.label
+        and (other := catalog.tasks[name]).row.pipeline_code == task.row.pipeline_code
+        and infers_output_columns(other)
+    ]
+    return SqlAction(writer_action(specified, others, table.name))
+
+
+def _comparison_identity(catalog: Catalog, config: ConnectorConfig, requested: bool) -> None:
+    """Identify the inputs without exporting SQL, credentials or connection strings."""
+    inputs: list[object] = []
+    for table in catalog.tables.values():
+        _engine_columns(catalog, table, config)
+    for task in catalog.tasks.values():
+        params = task.params
+        content = params.get("SOURCE_SQL", "")
+        if params.get("SOURCE_SQL_FILE"):
+            try:
+                content = sql_file(config, params["SOURCE_SQL_FILE"]).read_text(encoding="utf-8")
+            except (EtlCraftError, OSError) as error:
+                content = f"unavailable: {type(error).__name__}"
+        inputs.append((task.label, task.target, params.get("SQL_ACTION"), content))
+    inputs.extend(
+        (
+            table.name,
+            table.declared_kind,
+            [
+                (c.name, c.declared_type, c.declared_nullable)
+                for c in table.columns.values()
+                if c.declared
+            ],
+        )
+        for table in catalog.tables.values()
+    )
+    catalog.contract_version = hashlib.sha256(
+        json.dumps(inputs, sort_keys=True).encode()
+    ).hexdigest()
+    if config.warehouse:
+        location = parse_warehouse_url(config.warehouse.jdbc_url)
+        catalog.warehouse_identity = (
+            f"{config.warehouse.name}: {location.dialect} / "
+            f"{location.host or 'local'}:{location.port or 'default'} / "
+            f"{location.path or location.database} / catalog {catalog.database or 'absent'}"
+        )
+        catalog.sql_dialect = warehouse_dialect(config).sqlglot_dialect
+    if requested and any(not table.external for table in catalog.tables.values()):
+        catalog.compared_at = datetime.now(UTC)
+        if config.warehouse is None:
+            for table in catalog.tables.values():
+                table.warehouse_findings.append(
+                    "comparison unavailable: no warehouse connection configured"
+                )
 
 
 @dataclass(frozen=True)
@@ -648,6 +754,6 @@ def build_catalog(
     engine: Engine, config: ConnectorConfig, *, with_warehouse: bool = False
 ) -> Catalog:
     """Build current assets and attach their recorded lineage histories."""
-    catalog = _build_catalog(engine, config, with_warehouse=with_warehouse)
+    catalog = collect_catalog(engine, config, with_warehouse=with_warehouse)
     _lineage_history(catalog, engine)
     return catalog

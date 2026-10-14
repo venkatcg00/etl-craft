@@ -37,7 +37,7 @@ etl-craft run --pipeline_code CLIENT_ALPHA
 etl-craft run --pipeline_code CLIENT_BETA
 etl-craft run --pipeline_code SUPPORT_DM      # fails at flaky_feed; the alerts say so
 etl-craft run --pipeline_code SUPPORT_DM      # succeeds on the same client runs
-etl-craft generate-docs                       # then open catalog/index.html
+etl-craft generate-docs --with-warehouse      # then open catalog/gaps.html
 ```
 
 `prepare.py metadata` creates numbered seed migrations under `migrations/` and runs
@@ -51,7 +51,9 @@ the warehouse tables exist, using the script-landed source shapes in the seed me
 Each computation records changed table lineage as a version. After the first tracing, use
 `etl-craft lineage --table <schema.table> --version 1` (substitute a target listed by `lineage`)
 or `etl-craft lineage --as-of <ISO-time>` to read retained edges; catalog table pages show
-version history. History begins after upgrading the Engine DB and computing lineage.
+version history. The gaps tab compares deployment metadata, shows engine-managed columns and
+links warnings to tasks and lineage. Generate without `--with-warehouse` for offline docs with
+explicit Unchecked coverage. `catalog/gaps.json` exports the same records. History begins after upgrading the Engine DB and computing lineage.
 
 ## Under an orchestrator
 

@@ -11,9 +11,19 @@ def escape(value: object) -> str:
     return html.escape("" if value is None else str(value), quote=True)
 
 
-def render_table(headers: Sequence[str], rows: Iterable[Sequence[str]], empty: str) -> str:
+def render_table(
+    headers: Sequence[str],
+    rows: Iterable[Sequence[str]],
+    empty: str,
+    row_classes: Sequence[str] | None = None,
+) -> str:
     """Render already escaped cells with the catalog table markup."""
-    body = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in row) + "</tr>" for row in rows)
+    body = "".join(
+        (f'<tr class="{escape(row_classes[index])}">' if row_classes else "<tr>")
+        + "".join(f"<td>{c}</td>" for c in row)
+        + "</tr>"
+        for index, row in enumerate(rows)
+    )
     if not body:
         return f'<p class="note">{escape(empty)}</p>'
     head = "".join(f"<th>{escape(h)}</th>" for h in headers)

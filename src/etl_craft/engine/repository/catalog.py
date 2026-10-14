@@ -10,6 +10,7 @@ from sqlalchemy.engine import Connection
 
 from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
+from etl_craft.engine.repository.normalization import ObjectIdentity
 from etl_craft.engine.runlog import as_date
 
 
@@ -56,6 +57,7 @@ class TaskRow:
     handler: str
     run_condition: str | None
     last_run: LastRun | None
+    has_successful_run: bool = False
 
 
 @dataclass(frozen=True)
@@ -71,6 +73,14 @@ class RuleRow:
     sequence_number: int
     pipeline_code: str
     task_code: str
+
+
+def fetch_catalog_tables(conn: Connection) -> list[tuple[ObjectIdentity, str | None]]:
+    """Read active table identities and optional kind contracts, even without columns."""
+    return [
+        ((r.catalog_name, r.schema_name, r.table_name), r.object_kind)
+        for r in conn.execute(statement(conn, "catalog_tables"))
+    ]
 
 
 def fetch_catalog_pipelines(conn: Connection) -> list[PipelineRow]:
@@ -117,6 +127,7 @@ def fetch_catalog_tasks(conn: Connection) -> list[TaskRow]:
             )
             if r.run_status is not None
             else None,
+            bool(r.has_successful_run),
         )
         for r in conn.execute(statement(conn, "catalog_tasks"))
     ]

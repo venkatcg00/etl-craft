@@ -38,6 +38,8 @@ from etl_craft.services.catalog import (
     latest_run,
     run_kpis,
 )
+from etl_craft.services.catalog_gap_html import comparison_grid, gaps_page
+from etl_craft.services.catalog_gaps import gap_snapshot
 from etl_craft.services.catalog_graph import (
     dag_drawing,
     lineage_drawing,
@@ -48,6 +50,7 @@ from etl_craft.services.catalog_graph import (
 from etl_craft.services.catalog_html import escape as _e
 from etl_craft.services.catalog_html import render_table as _table
 from etl_craft.services.lineage import COPY
+from etl_craft.services.operations.serialization import to_json
 
 MARKER = ".etl-craft-catalog"
 """The file that marks a folder as a catalog site ``generate-docs`` may write over."""
@@ -66,6 +69,7 @@ TABS = (
     ("search", "index.html", "Search"),
     ("dags", "dags.html", "DAGs"),
     ("warehouse", "warehouse.html", "Warehouse"),
+    ("gaps", "gaps.html", "Schema and lineage gaps"),
 )
 """The tabs at the top of every page: key, page, label."""
 ON = ' class="on"'
@@ -260,6 +264,7 @@ class _Writer:
             encoding="utf-8",
         )
         c = self.catalog
+        self._gap_pages()
         self._page("index.html", "etl-craft catalog", "", self._home(), "search", [])
         self._page("dags.html", "DAGs", "", self._dags(), "dags", [])
         self._page("warehouse.html", "Warehouse", "", self._warehouse(), "warehouse", [])
@@ -324,6 +329,20 @@ class _Writer:
                 script_url(name), name, "ingestion script", self._script(name), "dags", crumbs
             )
 
+    def _gap_pages(self) -> None:
+        c = self.catalog
+        (self.folder / "gaps.json").write_text(
+            json.dumps(to_json(gap_snapshot(c))), encoding="utf-8"
+        )
+        self._page(
+            "gaps.html",
+            "Schema and lineage gaps",
+            "",
+            gaps_page(c, lambda n: self._table_link(n, ""), lambda n: self._task_link(n, "")),
+            "gaps",
+            [],
+        )
+
     def _task_crumbs(self, task: TaskAsset) -> list[tuple[str | None, str]]:
         code = task.row.pipeline_code
         return [("dags.html", "DAGs"), (pipeline_url(code), code), (None, task.row.task_code)]
@@ -361,13 +380,15 @@ class _Writer:
         crumb_bar = f'<nav class="crumbs">{trail}</nav>' if crumbs else ""
         kind_label = f'<div class="kind-label">{_e(kind)}</div>' if kind else ""
         generated = _e(self.catalog.generated_at.isoformat())
+        compared = _e(self.catalog.compared_at.isoformat()) if self.catalog.compared_at else ""
         document = (
             '<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
             '<meta name="robots" content="noindex, nofollow">'
             f"<title>{_e(title)} · etl-craft catalog</title>"
             f'<link rel="stylesheet" href="{root}catalog.css"></head>'
-            f'<body data-root="{root}" data-generated="{generated}"><header class="top">'
+            f'<body data-root="{root}" data-generated="{generated}" data-compared="{compared}">'
+            '<header class="top">'
             f'<a class="brand" href="{root}index.html">etl-craft catalog</a><nav>{nav}</nav>'
             '<div class="search"><input type="search" placeholder="Search pipelines, tasks, '
             'tables, columns, rules…" aria-label="Search the catalog" autocomplete="off">'
@@ -416,8 +437,8 @@ class _Writer:
                 ("Business rules", str(len(c.rules))),
                 ("Ingestion scripts", self._link("dags.html#scripts", str(len(c.scripts)), "")),
                 (
-                    "Lineage gaps",
-                    self._link("dags.html#untraced", f"{len(c.untraced)} task(s)", "")
+                    "Untraced SQL tasks",
+                    self._link("gaps.html", f"{len(c.untraced)} task(s)", "")
                     if c.untraced
                     else "none",
                 ),
@@ -976,57 +997,17 @@ class _Writer:
                 ),
             ]
         )
-        comparison = ""
-        if table.warehouse_findings:
-            comparison = (
-                "<h2>Warehouse comparison</h2><ul>"
-                + "".join(f"<li>{_e(message)}</li>" for message in table.warehouse_findings)
-                + "</ul>"
-            )
+        comparison = comparison_grid(self.catalog, table, self._task_link, self._table_link)
         history = lineage_history(table, self.catalog)
-        return f"{facts}{comparison}{self._columns(table)}{self._graph(name)}{history}"
-
-    def _columns(self, table: TableAsset) -> str:
-        sources: dict[str, list[str]] = {}
-        for e in self.catalog.column_edges:
-            if e.target_object != table.name:
-                continue
-            origin = (
-                f"{self._table_link(e.source_object)}.{_e(e.source_column)}"
-                if e.source_object
-                else "no source column"
-            )
-            how = "" if e.transformation == COPY else f" <code>{_e(e.transformation)}</code>"
-            sources.setdefault(e.target_column, []).append(f"{origin}{how} ({_e(e.task)})")
-        typed = any(c.data_type for c in table.columns.values())
-        compared = table.warehouse_checked and any(
-            column.declared_type for column in table.columns.values()
-        )
-        type_headers = (
-            ["Declared type", "Deployed type", "Comment"] if compared else ["Type", "Comment"]
-        )
-        headers = ["Column", *(type_headers if typed else []), "Made from"]
-        rows = []
-        for column in table.columns.values():
-            cells = [f'<a href="#col={_e(column.name)}" title="Trace it">{_e(column.name)}</a>']
-            if typed:
-                if compared:
-                    cells += [
-                        _e(column.declared_type) or "not defined",
-                        _e(column.warehouse_type) or "missing",
-                        _e(column.comment),
-                    ]
-                else:
-                    cells += [_e(column.data_type), _e(column.comment)]
-            cells.append("<br>".join(sources.get(column.name, [])))
-            rows.append(cells)
-        return "<h2>Columns</h2>" + _table(headers, rows, "No columns known yet.")
+        return f"{facts}{comparison}{self._graph(name)}{history}"
 
     def _graph(self, name: str) -> str:
         drawing = lineage_drawing(self.catalog, name)
         low, high = drawing.levels
         deepest = max(-low, high)
-        if deepest == 0:
+        if deepest == 0 and not (
+            self.catalog.tables[name].writers or self.catalog.tables[name].readers
+        ):
             return '<h2>Lineage</h2><p class="note">No task reads or writes this table yet.</p>'
         opening = DEFAULT_DEPTH if deepest > DEFAULT_DEPTH else None
         options = "".join(

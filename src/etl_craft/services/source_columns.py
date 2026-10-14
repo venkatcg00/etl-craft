@@ -111,7 +111,8 @@ def _type(value: str, dialect: str | None) -> exp.DataType:
     return exp.DataType.build(kind.sql(dialect=dialect), dialect=dialect)
 
 
-def _same_type(declared: str, deployed: str, dialect: str | None) -> bool:
+def same_type(declared: str, deployed: str, dialect: str | None) -> bool:
+    """Compare declared and observed SQL types using warehouse aliases and precision."""
     before, after = _type(declared, dialect), _type(deployed, dialect)
     if (
         dialect == "snowflake"
@@ -167,7 +168,7 @@ def drift(
                 f"declared {declared}; restore its constraint or update columns.csv"
             )
         before, after = expected[name].data_type, found[name].data_type
-        if not _same_type(before, after, dialect):
+        if not same_type(before, after, dialect):
             messages.append(
                 f"column {name} has warehouse type {after}, defined as {before}; restore its "
                 f"type or update columns.csv"

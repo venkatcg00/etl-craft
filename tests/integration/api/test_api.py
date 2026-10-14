@@ -6,8 +6,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import event, text
 from sqlalchemy import inspect as sql_inspect
-from sqlalchemy import text
 
 from etl_craft.api.app import create_app
 from etl_craft.core.actor import Actor, ActorKind, current_actor
@@ -70,6 +70,7 @@ def test_read_routes_require_token_and_share_cli_documents(api, role):
     assert (
         client.get("/api/v1/health", headers={"Authorization": "Bearer unknown"}).status_code == 401
     )
+
     assert client.get("/api/v1/runs/999999", headers=h).status_code == 404
     assert client.get("/api/v1/attempts/999999", headers=h).status_code == 404
     assert client.get("/api/v1/pipelines/missing", headers=h).status_code == 404
@@ -80,6 +81,57 @@ def test_read_routes_require_token_and_share_cli_documents(api, role):
         ]
         == "bearer"
     )
+
+
+@pytest.mark.parametrize("role", tokens.ROLES)
+def test_catalog_gaps_require_viewer_and_do_not_publish_lineage(api, role):
+    ctx, client, creds, _run, _attempt = api
+    assert client.get("/api/v1/catalog/gaps").status_code == 401
+    with ctx.engine.begin() as conn:
+        pipeline = conn.execute(
+            text("SELECT PIPELINE_ID AS pipeline_id FROM CFG_PIPELINES WHERE PIPELINE_CODE='P'")
+        ).scalar_one()
+        add_task(
+            conn,
+            pipeline,
+            "lineage",
+            SQL_ACTION="CREATE_TABLE",
+            TARGET_OBJECT="api.output",
+            SOURCE_SQL="SELECT 1 AS id",
+        )
+    with ctx.engine.connect() as conn:
+        before = conn.execute(
+            text("SELECT COUNT(*) AS count FROM AUD_LINEAGE_VERSIONS")
+        ).scalar_one()
+    statements = []
+
+    def capture(_conn, _cursor, statement, *_args):
+        statements.append(statement)
+
+    event.listen(ctx.engine, "before_cursor_execute", capture)
+    response = client.get("/api/v1/catalog/gaps", headers=headers(creds[role]))
+    assert response.status_code == 200
+    body = response.json()
+    assert body["schema"] == "etl-craft/catalog-gaps/1"
+    assert body["compared_at"] is None and body["contract_version"]
+    assert any(r["table"] == "api.output" for r in body["records"])
+    compared = client.get("/api/v1/catalog/gaps?compare=true", headers=headers(creds[role]))
+    assert compared.status_code == 200 and compared.json()["compared_at"]
+    event.remove(ctx.engine, "before_cursor_execute", capture)
+    assert not any("AUD_LINEAGE_VERSION" in sql.upper() for sql in statements)
+    with ctx.engine.connect() as conn:
+        after = conn.execute(
+            text("SELECT COUNT(*) AS count FROM AUD_LINEAGE_VERSIONS")
+        ).scalar_one()
+    assert after == before
+
+
+def test_empty_catalog_does_not_claim_a_warehouse_check(api):
+    _ctx, client, creds, _run, _attempt = api
+    response = client.get("/api/v1/catalog/gaps?compare=true", headers=headers(creds["viewer"]))
+    assert response.status_code == 200
+    assert response.json()["records"] == []
+    assert response.json()["compared_at"] is None
 
 
 @pytest.mark.parametrize("role", tokens.ROLES)

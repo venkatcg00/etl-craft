@@ -24,8 +24,9 @@ import html
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from etl_craft.core.enums import ActiveFlag
+from etl_craft.core.enums import ActiveFlag, GapState
 from etl_craft.services.catalog import Catalog, TableAsset
+from etl_craft.services.catalog_gaps import lineage_records, table_records
 from etl_craft.services.catalog_html import escape, render_table
 from etl_craft.services.lineage import COPY, Edge
 
@@ -57,6 +58,9 @@ class Node:
     hidden_columns: int = 0
     x: float = 0
     y: float = 0
+    warning: str = ""
+    table_warning: str = ""
+    column_warnings: dict[str, str] = field(default_factory=dict)
 
     @property
     def height(self) -> float:
@@ -105,6 +109,7 @@ def lineage_drawing(catalog: Catalog, focus: str) -> LineageDrawing:
         )
         for name, level in levels.items()
     }
+    _gap_warnings(catalog, nodes)
     column_edges = [
         e
         for e in catalog.column_edges
@@ -131,6 +136,32 @@ def lineage_drawing(catalog: Catalog, focus: str) -> LineageDrawing:
     )
     width, height = _place(nodes, column_edges, table_edges)
     return LineageDrawing(focus, nodes, column_edges, table_edges, width, height, truncated_at)
+
+
+def _gap_warnings(catalog: Catalog, nodes: dict[str, Node]) -> None:
+    for name, node in nodes.items():
+        if name not in catalog.tables:
+            continue
+        table = catalog.tables[name]
+        records = table_records(catalog, table) + lineage_records(catalog, table)
+        warnings = [
+            r
+            for r in records
+            if r.state
+            in (
+                GapState.LINEAGE_GAP,
+                GapState.CONFIG_ONLY,
+                GapState.DEPLOYED_ONLY,
+                GapState.TYPE_MISMATCH,
+                GapState.NULLABILITY_MISMATCH,
+                GapState.KIND_MISMATCH,
+            )
+        ]
+        node.warning = "; ".join(f"{r.state}: {r.reason}" for r in warnings)
+        node.table_warning = "; ".join(f"{r.state}: {r.reason}" for r in warnings if not r.column)
+        for record in warnings:
+            if record.column:
+                node.column_warnings[record.column] = f"{record.state}: {record.reason}"
 
 
 def _levels(
@@ -231,7 +262,7 @@ def render_svg(drawing: LineageDrawing, link: Callable[[str], str]) -> str:
     parts = [
         f'<svg class="lineage" xmlns="http://www.w3.org/2000/svg" '
         f'viewBox="0 0 {drawing.width:.0f} {drawing.height:.0f}" '
-        f'width="{drawing.width:.0f}" height="{drawing.height:.0f}" role="img" '
+        f'width="{drawing.width:.0f}" height="{drawing.height:.0f}" role="group" '
         f'aria-label="Lineage of {_e(drawing.focus)}" data-node-width="{NODE_WIDTH}" '
         f'data-header="{HEADER}" data-row="{ROW}" data-gap="{NODE_GAP}" data-margin="{MARGIN}">',
         "<defs>",
@@ -258,8 +289,16 @@ def render_svg(drawing: LineageDrawing, link: Callable[[str], str]) -> str:
         tip = f"{e.source_object}.{e.source_column} → {e.target_object}.{e.target_column}"
         tip += f"\n{e.transformation}" if kind == "derived" else " (copy)"
         tip += f"\nby {e.task}" if e.task else ""
+        warning = (
+            source.column_warnings.get(e.source_column)
+            or source.table_warning
+            or target.column_warnings.get(e.target_column)
+            or target.table_warning
+        )
+        tip += f"; {warning}" if warning else ""
+        css = kind + (" gap-edge" if warning else "")
         parts.append(
-            f'<path class="edge {kind}" d="{path}" {ARROW} '
+            f'<path class="edge {css}" d="{path}" {ARROW} '
             f'data-from="{_e(_col(e.source_object, e.source_column))}" '
             f'data-to="{_e(_col(e.target_object, e.target_column))}" '
             f'data-source="{_e(e.source_object)}" data-target="{_e(e.target_object)}">'
@@ -268,10 +307,13 @@ def render_svg(drawing: LineageDrawing, link: Callable[[str], str]) -> str:
     for source_name, target_name, task in drawing.table_edges:
         source, target = nodes[source_name], nodes[target_name]
         path = _curve(source.x + NODE_WIDTH, source.y + HEADER / 2, target.x, target.y + HEADER / 2)
+        warning = "; ".join(filter(None, (source.warning, target.warning)))
+        css = "table" + (" gap-edge" if warning else "")
         parts.append(
-            f'<path class="edge table" d="{path}" {ARROW} '
+            f'<path class="edge {css}" d="{path}" {ARROW} '
             f'data-source="{_e(source_name)}" data-target="{_e(target_name)}">'
-            f"<title>{_e(f'{source.label} → {target.label}, by {task} (table level)')}</title>"
+            f"<title>{_e(f'{source.label} → {target.label}, by {task} (table level)')}"
+            f"; {_e(warning)}</title>"
             "</path>"
         )
     parts.append("</g>")
@@ -283,17 +325,32 @@ def render_svg(drawing: LineageDrawing, link: Callable[[str], str]) -> str:
 
 def _node_svg(node: Node, *, focus: bool, link: Callable[[str], str]) -> str:
     classes = " ".join(
-        c for c in ("node", "focus" if focus else "", "external" if node.external else "") if c
+        c
+        for c in (
+            "node",
+            "focus" if focus else "",
+            "external" if node.external else "",
+            "has-gap" if node.warning else "",
+        )
+        if c
     )
     label = node.label if len(node.label) <= LABEL_CHARS else node.label[: LABEL_CHARS - 1] + "…"
     has_columns = bool(node.columns or node.hidden_columns)
     toggle = ": click to show or hide its columns" if has_columns else ""
     head = (
-        f'<g class="head" tabindex="0">'
+        '<g class="head" tabindex="0" role="button" '
+        f'aria-label="{_e(node.label + toggle + node.warning)}">'
         f'<rect class="header" width="{NODE_WIDTH}" height="{HEADER}" rx="6"/>'
         + ('<text class="chevron" x="10" y="20">▾</text>' if has_columns else "")
         + f'<text class="title" x="{26 if has_columns else 10}" y="20">{_e(label)}</text>'
-        f"<title>{_e(node.label)}{toggle}</title></g>"
+        f"<title>{_e(node.label)}{toggle}{_e(node.warning)}</title>"
+        + (
+            f'<text class="badge" x="{NODE_WIDTH - 42}" y="20" '
+            'aria-label="Lineage or schema gap">⚠</text>'
+            if node.warning
+            else ""
+        )
+        + "</g>"
     )
     opener = ""
     if not node.external:
@@ -315,12 +372,17 @@ def _node_svg(node: Node, *, focus: bool, link: Callable[[str], str]) -> str:
         top = HEADER + ROW * index
         badge = ""
         tip = column
+        warning = node.column_warnings.get(column) or node.table_warning
         if column in node.derived:
             badge = f'<text class="badge" x="{NODE_WIDTH - 10}" y="15" text-anchor="end">ƒ</text>'
             tip = f"{column} = {node.derived[column]} (no source column)"
+        if warning:
+            badge = f'<text class="badge" x="{NODE_WIDTH - 10}" y="15" text-anchor="end">⚠</text>'
+            tip += f"; {warning}"
         parts.append(
             f'<g class="col" data-col="{_e(_col(node.name, column))}" '
-            f'transform="translate(0,{top})" tabindex="0">'
+            f'transform="translate(0,{top})" tabindex="0" role="button" '
+            f'aria-label="Trace {_e(node.label)}.{_e(column)}; {_e(tip)}">'
             f'<rect class="row" width="{NODE_WIDTH}" height="{ROW}"/>'
             f'<text x="12" y="15">{_e(column)}</text>{badge}<title>{_e(tip)}</title></g>'
         )

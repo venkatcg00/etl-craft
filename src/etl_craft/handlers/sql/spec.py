@@ -159,7 +159,7 @@ class SqlTask:
 def read_sql_task(context: TaskContext, stored: StoredOffset | None = None) -> SqlTask:
     """Read and check the SQL task's parameters; ``SqlGuardError`` or ``MetadataError`` if wrong."""
     params = context.task_params
-    action = _action(params)
+    action = read_action(params)
     watermark = read_watermark(params, stored)
     target = (params.get("TARGET_OBJECT") or "").strip()
     if not target:
@@ -213,7 +213,7 @@ def read_sql_task(context: TaskContext, stored: StoredOffset | None = None) -> S
                 )
     if action not in KEYED and params.get("MERGE_KEY"):
         raise SqlGuardError(f"MERGE_KEY does not apply to SQL_ACTION={action}")
-    setup_for = _setup_for(params.get("SETUP_FOR"), action)
+    setup_for = read_setup_for(params.get("SETUP_FOR"), action)
     reject_limit = _reject_limit(params.get("REJECT_LIMIT"), action)
     if flags["SKIP_REJECTS_OVER_LIMIT"] and reject_limit is None:
         raise SqlGuardError(
@@ -239,7 +239,8 @@ def read_sql_task(context: TaskContext, stored: StoredOffset | None = None) -> S
     )
 
 
-def _action(params: Mapping[str, str]) -> SqlAction:
+def read_action(params: Mapping[str, str]) -> SqlAction:
+    """Parse action names with execution's case and whitespace rules."""
     written = (params.get("SQL_ACTION") or "").strip()
     actions = [member.value for member in SqlAction]
     if written.upper() in actions:
@@ -381,7 +382,8 @@ def _columns(
     return columns
 
 
-def _setup_for(value: str | None, action: SqlAction) -> SqlAction | None:
+def read_setup_for(value: str | None, action: SqlAction) -> SqlAction | None:
+    """Parse the optional creation contract and refuse non-writing actions."""
     if value is None or not value.strip():
         return None
     if action != SqlAction.SETUP_TABLE:

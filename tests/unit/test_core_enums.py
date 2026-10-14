@@ -1,4 +1,4 @@
-"""The enums hold exactly the values of the Engine DB CHECK constraints and the config file."""
+"""Closed values match the Engine DB, configuration and public comparison documents."""
 
 import pytest
 
@@ -8,6 +8,21 @@ from etl_craft.core.enums import RunStatus
 pytestmark = pytest.mark.unit
 
 EXPECTED = {
+    enums.GapAttribute: {"object", "object kind", "column", "type", "nullability", "lineage"},
+    enums.GapState: {
+        "Deployed only",
+        "Config only",
+        "Type mismatch",
+        "Nullability mismatch",
+        "Object kind mismatch",
+        "Lineage gap",
+        "Matched",
+        "Unchecked",
+        "Unavailable",
+        "Stale",
+        "Not declared",
+        "Expected before first deployment",
+    },
     enums.ActiveFlag: {"Y", "N"},
     enums.RunStatus: {"QUEUED", "IN-PROGRESS", "SUCCESS", "FAILED", "SKIPPED", "CANCELLED"},
     enums.SlaStatus: {"MET", "BREACHED"},

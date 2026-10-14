@@ -1,11 +1,43 @@
 """Warehouse drift and repository source seeding on every local warehouse."""
 
+import pytest
+
+from etl_craft.core.enums import SqlAction
 from etl_craft.services.catalog import build_catalog
 from etl_craft.services.catalog_site import write_site
 from etl_craft.services.config_files import export_config, read_config_files, sync_config
 from etl_craft.services.source_columns import warehouse_columns
 from etl_craft.services.validate import validate
 from fixtures.metadata import add_source_column, add_task
+
+
+@pytest.mark.parametrize("action", [SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE])
+def test_scd_engine_columns_match_the_action_contract(sql_world, action, tmp_path):
+    world = sql_world
+    select = "SELECT 1 AS id, 2 AS amount"
+    world.setup("managed", select, action.lower())
+    world.run(
+        "writer",
+        SQL_ACTION=f" {action.lower()} ",
+        TARGET_OBJECT="managed",
+        SOURCE_SQL=select,
+        MERGE_KEY="id",
+        MERGE_COMPARE_COLUMNS="amount",
+    )
+    catalog = build_catalog(world.engine_db, world.config, with_warehouse=True)
+    folder = write_site(catalog, world.config, tmp_path / "site").folder
+    assert "Engine managed" in (folder / "tables" / f"{world.schema}.managed.html").read_text()
+    from etl_craft.core.enums import GapState
+    from etl_craft.services.catalog_gaps import gap_snapshot
+
+    snapshot = gap_snapshot(catalog)
+    records = [r for r in snapshot.records if r.engine_managed]
+    assert records and all(r.state == GapState.MATCH for r in records), [
+        (r.column, r.declared, r.deployed, r.state) for r in records if r.state != GapState.MATCH
+    ]
+    assert {"created_by", "updated_by", "active_flag", "delete_flag", "hash_key"} <= {
+        r.column for r in records
+    }
 
 
 def test_export_seeds_sources_and_validate_names_all_drift(sql_world, tmp_path):
