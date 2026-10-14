@@ -280,7 +280,11 @@ def test_the_site_has_a_page_per_asset_and_a_search_index(project, tmp_path):
 
 
 def test_a_folder_that_holds_other_files_is_refused(project, tmp_path):
+    from pathlib import Path
+
     engine, config, _ = project
+    with pytest.raises(UsageError):
+        write_site(build_catalog(engine, config), config, Path("/"))
     folder = tmp_path / "mine"
     folder.mkdir()
     (folder / "notes.txt").write_text("keep me", "utf-8")
@@ -292,8 +296,8 @@ def test_a_folder_that_holds_other_files_is_refused(project, tmp_path):
     (site / "stale.html").write_text("old", "utf-8")
     write_site(build_catalog(engine, config), config, site)
     assert not (site / "stale.html").exists()
-    # The new site is built beside the old one and swapped in; nothing is left behind.
-    assert not [p.name for p in tmp_path.iterdir() if p.name.startswith(".site")]
+    # Stable lock sidecars remain; temporary builds and retired site folders do not.
+    assert not {".site.building", ".site.old"} & {p.name for p in tmp_path.iterdir()}
     page = (site / "index.html").read_text("utf-8")
     assert 'data-generated="' in page and "run details are as of then" in page
 

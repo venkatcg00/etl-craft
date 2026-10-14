@@ -1,0 +1,20 @@
+# Organization-hosted project catalog. No ngrok token or SDK is required.
+# The proxy preserves the prefix and replaces X-Forwarded-For with its observed client IP.
+Secrets:
+  Source_type: environment  # value
+Orchestration:
+  Mode: local  # value
+Engine:
+  dev:
+    jdbc_url: jdbc:sqlite:engine.db  # value
+    schema: main  # value
+Warehouse:
+  dev:
+    jdbc_url: jdbc:duckdb:warehouse.duckdb  # value
+    schema: main  # value
+Docs_site:
+  dev:
+    Output: catalog  # value
+    External_url: https://docs.example.com/etl-craft/  # value
+    Trusted_proxies: [127.0.0.1/32]  # value
+    Allowed_ips: [203.0.113.0/24]  # value — Replace with the team's visitor/VPN ranges.

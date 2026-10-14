@@ -28,6 +28,7 @@ from pathlib import Path
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.project import sql_file
 from etl_craft.core.errors import EtlCraftError, UsageError
+from etl_craft.core.filelock import file_lock
 from etl_craft.engine.repository.catalog import Consumption, LastRun, RunSummary, TaskRunSummary
 from etl_craft.services.catalog import (
     Catalog,
@@ -49,11 +50,10 @@ from etl_craft.services.catalog_graph import (
 )
 from etl_craft.services.catalog_html import escape as _e
 from etl_craft.services.catalog_html import render_table as _table
+from etl_craft.services.catalog_storage import MARKER as MARKER
+from etl_craft.services.catalog_storage import check_folder, swap_site
 from etl_craft.services.lineage import COPY
 from etl_craft.services.operations.serialization import to_json
-
-MARKER = ".etl-craft-catalog"
-"""The file that marks a folder as a catalog site ``generate-docs`` may write over."""
 
 ASSETS = ("catalog.css", "catalog.js")
 BACKFILL_BADGE = ' <span class="badge">backfill</span>'
@@ -90,7 +90,17 @@ def write_site(catalog: Catalog, config: ConnectorConfig, folder: Path) -> Site:
 
     The site is written into a hidden folder beside ``folder``, then swapped in.
     """
-    _check(folder)
+    if not folder.name:
+        raise UsageError(
+            f"catalog output {folder} has no directory name; choose a named output folder"
+        )
+    folder.parent.mkdir(parents=True, exist_ok=True)
+    with file_lock(folder.with_name(f".{folder.name}.build.lock"), wait_seconds=30):
+        return _write_site(catalog, config, folder)
+
+
+def _write_site(catalog: Catalog, config: ConnectorConfig, folder: Path) -> Site:
+    check_folder(folder)
     building = folder.with_name(f".{folder.name}.building")
     if building.exists():
         shutil.rmtree(building)
@@ -105,31 +115,8 @@ def write_site(catalog: Catalog, config: ConnectorConfig, folder: Path) -> Site:
     except BaseException:
         shutil.rmtree(building, ignore_errors=True)
         raise
-    _swap(building, folder)
+    swap_site(building, folder)
     return Site(folder, writer.pages)
-
-
-def _check(folder: Path) -> None:
-    if folder.exists() and not folder.is_dir():
-        raise UsageError(f"{folder} is a file; name a folder for the catalog site")
-    if folder.is_dir() and any(folder.iterdir()) and not (folder / MARKER).is_file():
-        raise UsageError(
-            f"{folder} already holds files that generate-docs did not write; name an empty "
-            "or new folder, or the folder of an earlier catalog site"
-        )
-
-
-def _swap(building: Path, folder: Path) -> None:
-    """Put the new site in place of the old one, then remove the old one."""
-    if not folder.exists():
-        building.rename(folder)
-        return
-    old = folder.with_name(f".{folder.name}.old")
-    if old.exists():
-        shutil.rmtree(old)
-    folder.rename(old)
-    building.rename(folder)
-    shutil.rmtree(old, ignore_errors=True)
 
 
 def slug(key: str) -> str:

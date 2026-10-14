@@ -8,6 +8,15 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Catalog publication supports organization-managed URLs with optional path prefixes using
+  `Docs_site.External_url` and explicit `Trusted_proxies`, without ngrok. Forwarded visitor
+  addresses are accepted only from trusted peers; public URL changes still require explicit
+  acceptance. Proxy and systemd examples cover persistent hosting and external authentication.
+  Generation and serving coordinate through stable sibling `.build.lock`/`.publish.lock` files
+  so requests cannot observe the directory exchange. Regenerate old sites before serving them
+  from read-only storage, and grant the server read access to the publication sidecar. Existing
+  local/ngrok selection is unchanged when `External_url` is absent. No Engine DB migration is needed.
+
 - Generated project catalogs include a schema/lineage gaps page, coloured warning rows,
   action-specific engine-column contracts, graph reasons and affected-task links. Storage type
   normalization avoids false Iceberg engine-column warnings; failed SQL inference leaves unknown

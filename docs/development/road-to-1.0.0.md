@@ -131,6 +131,7 @@ item's text, or work done early under another item.
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
 | S5.T Resource discovery and deployment profiles | Planned | | Opt-in laptop, server and server-with-workers sizing from usable process resources; one discovery module before S5.C |
 | S5.C and later | Not started | | |
+| S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
 
 ### Handover notes
 
@@ -158,6 +159,14 @@ S5.T (resource discovery and deployment profiles), then S5.C. S5.T supplies the 
 does not move worker work ahead of the metadata, account or operator-control corrections.
 
 **Acceptance availability.**
+
+S7.K passed the full local gate, strict docs, Python 3.12/3.13 unit suites, twenty consecutive
+publication/shared-lock race rounds, and the complete installed-wheel/sdist matrix without skips.
+Explicit manual acceptance passed the real ngrok adapter and documented NGINX configuration at
+root/prefixed URLs on both Engine DBs, using synthetic content only. Final catalog/refusal and
+nested navigation checks passed after review. No new CI job or live service requirement was added.
+Warehouse SQL, Airflow and workflows are unchanged; their additional suites were not needed.
+The frozen soak and old stash remain untouched.
 
 S5.P passed the full local gate, strict docs, Python 3.12/3.13 unit suites, focused catalog/API
 and SCD contract checks on both Engine DBs and all four local warehouses, and the complete
@@ -251,6 +260,14 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- At the owner's request to continue independent work while the soak runs, S7.K proceeds
+  before the later release work. Catalog hosting uses the existing server and needs no worker,
+  account or target-state changes; the S5.R/slice 3 soak gate and other prerequisites remain.
+  Optional `Docs_site.External_url` selects organization hosting and `Trusted_proxies` identifies
+  forwarding peers. Team authentication stays at the organization proxy. Generation and serving
+  share stable sibling lock files; old read-only deployments regenerate before publication so
+  their server can read the sidecar. No Engine DB migration or new dependency is introduced.
 
 - S5.O.2b slice 2 history reads currently load all version headers; catalog builds also load
   all recorded edges, and historical graphs fetch edges per valid version. S6.A retention and

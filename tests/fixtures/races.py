@@ -3,6 +3,7 @@
 import importlib
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from functools import wraps
 
 import pytest
@@ -31,3 +32,28 @@ def two_at_once(fn_a, fn_b, *, at, timeout=10):
             return tuple(future.result(timeout=max(1, timeout * 2)) for future in futures)
         finally:
             barrier.abort()
+
+
+@contextmanager
+def paused_after(fn, *, owner, name, when):
+    """Run a change and pause after a selected method call until the observer releases it."""
+    reached, resume = threading.Event(), threading.Event()
+    original = getattr(owner, name)
+
+    @wraps(original)
+    def paused(*args, **kwargs):
+        result = original(*args, **kwargs)
+        if when(*args, **kwargs):
+            reached.set()
+            assert resume.wait(timeout=10), f"observer did not release {name}"
+        return result
+
+    with pytest.MonkeyPatch.context() as patch, ThreadPoolExecutor(max_workers=1) as pool:
+        patch.setattr(owner, name, paused)
+        future = pool.submit(fn)
+        try:
+            assert reached.wait(timeout=10), f"change did not reach {name}"
+            yield resume
+        finally:
+            resume.set()
+            future.result(timeout=20)

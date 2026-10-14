@@ -95,3 +95,9 @@ because their sources are already written by etl-craft.
 Load `metadata/event_waits.sql` separately to try a scheduled local event wait before a CSV
 script. See [the file-delivery example](../../docs/examples/event-wait.md) for the commands;
 [Event waits](../../docs/guides/event-waits.md) describes settling, consumption and timeouts.
+
+The generated catalog can also sit behind the team's proxy. Set `Docs_site.External_url`
+(for example `https://docs.example.com/support/`) and the proxy's `Trusted_proxies` CIDRs, then
+run `etl-craft publish-docs --port 8080`. Preserve the prefix at the proxy and enforce team
+authentication there. No ngrok credentials are needed; see the catalog hosting guide and
+`deploy/catalog/` in the repository for the proxy and persistent-service examples.

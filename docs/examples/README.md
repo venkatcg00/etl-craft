@@ -13,6 +13,7 @@ Every file follows the same layout, in this order (the loader refuses any other)
 3. **Engine**: the Engine DB, one block per profile.
 4. **Warehouse**: the one warehouse, one block per profile.
 5. **Cloning** (optional): mirror Engine DB tables into the warehouse.
+6. **Docs_site** (optional): generate and publish the project catalog.
 
 `docs/craft-connector.example.yml` is the annotated reference that explains every key.
 
@@ -112,6 +113,7 @@ etl-craft, not an unattended scheduler. `sts` needs `pip install etl-craft[aws]`
 |---|---|
 | `cloning.yml` | `Enabled`/`Scope` per profile, including `Scope: none` |
 | `docs-site.yml` | `Docs_site`: when the catalog site is written again, where, and how it is published |
+| `docs-site-proxy.yml` | Organization-managed catalog URL, prefix and explicit proxy trust; no ngrok. |
 
 ## Profiles
 

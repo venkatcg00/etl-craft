@@ -5,6 +5,7 @@ import types
 import urllib.error
 import urllib.request
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 from sqlalchemy import text
@@ -51,7 +52,7 @@ def fetch(url, **headers):
         return error.code, dict(error.headers), ""
 
 
-def test_the_site_is_served_privately(engine_db, site):
+def test_the_site_is_served_privately(engine_db, site, monkeypatch):
     with published(engine_db.engine, engine_db.config, site, local_only=True) as served:
         status, headers, body = fetch(served.url + "index.html")
         assert status == 200 and "etl-craft catalog" in body
@@ -67,11 +68,16 @@ def test_the_site_is_served_privately(engine_db, site):
         assert fetch(served.url + "index.html")[0] == 200
     with pytest.raises(urllib.error.URLError):
         urllib.request.urlopen(served.url, timeout=2)
+    monkeypatch.chdir(site)
+    with published(engine_db.engine, engine_db.config, Path("."), local_only=True) as served:
+        assert fetch(served.url)[0] == 200
 
 
 def test_a_folder_without_a_site_is_refused(engine_db, tmp_path):
     with pytest.raises(ConfigurationError, match="run `etl-craft generate-docs` first"):
         publish(engine_db.engine, engine_db.config, tmp_path, local_only=True)
+    with pytest.raises(ConfigurationError):
+        publish(engine_db.engine, engine_db.config, Path("/"), local_only=True)
 
 
 @pytest.fixture
@@ -236,3 +242,218 @@ def test_directory_index_links_outside_the_site_are_refused(engine_db, site, tmp
             with pytest.raises(urllib.error.HTTPError) as caught:
                 urllib.request.urlopen(request, timeout=5)
             assert caught.value.code == 404
+
+
+@pytest.fixture
+def proxy():
+    import http.client
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Proxy(BaseHTTPRequestHandler):
+        def do_GET(self):
+            connection = http.client.HTTPConnection(self.server.upstream, timeout=10)
+            try:
+                forwarded = self.headers.get("X-Forwarded-For", "")
+                visitor = self.server.visitor
+                connection.request(
+                    self.command,
+                    self.path,
+                    headers={
+                        "X-Forwarded-For": f"{forwarded}, {visitor}" if forwarded else visitor,
+                    },
+                )
+                response = connection.getresponse()
+                body = response.read()
+                self.send_response(response.status)
+                for name, value in response.getheaders():
+                    if name.lower() not in ("connection", "transfer-encoding"):
+                        self.send_header(name, value)
+                self.end_headers()
+                self.wfile.write(body)
+            finally:
+                connection.close()
+
+        def log_message(self, *_args):
+            pass
+
+        def do_HEAD(self):
+            self.do_GET()
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Proxy)
+    server.visitor = "203.0.113.9"
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+@pytest.mark.parametrize("prefix", ["", "etl/catalog", "etl%20catalog"])
+def test_organization_url_through_proxy_keeps_links_and_records_the_public_url(
+    engine_db, site, proxy, prefix, monkeypatch
+):
+    import sys
+    from html.parser import HTMLParser
+    from urllib.parse import urljoin
+
+    from fixtures.metadata import add_pipeline, add_task
+
+    with engine_db.engine.begin() as conn:
+        pipeline = add_pipeline(conn, "DOCS")
+        add_task(
+            conn,
+            pipeline,
+            "load",
+            SQL_ACTION="CREATE_TABLE",
+            TARGET_OBJECT="mart.sample",
+            SOURCE_SQL="SELECT 1 AS id",
+        )
+    write_site(build_catalog(engine_db.engine, engine_db.config), engine_db.config, site)
+
+    # Organization hosting never imports the optional tunnel SDK or resolves its token.
+    monkeypatch.setitem(sys.modules, "ngrok", None)
+    monkeypatch.delenv("ETL_CRAFT_TEST_NGROK", raising=False)
+    base = f"http://127.0.0.1:{proxy.server_port}/" + (prefix + "/" if prefix else "")
+    config = publishing(engine_db, external_url=base, trusted_proxies=("127.0.0.1/32",))
+    links = []
+
+    class Links(HTMLParser):
+        def handle_starttag(self, _tag, attrs):
+            links.extend(value for name, value in attrs if name in ("href", "src") and value)
+
+    with published(engine_db.engine, config, site) as served:
+        proxy.upstream = served.local_address
+        assert served.url == base and served.local_address.startswith("127.0.0.1:")
+        for page in ("", "pipelines/DOCS.html", "tasks/DOCS.load.html", "tables/mart.sample.html"):
+            page_url = urljoin(base, page)
+            status, _headers, body = fetch(page_url)
+            assert status == 200 and "Schema and lineage gaps" in body
+            links.clear()
+            Links().feed(body)
+            assert links
+            for link in links:
+                assert fetch(urljoin(page_url, link))[0] == 200, link
+        assert fetch(base + "robots.txt")[0] == 200
+        with urllib.request.urlopen(
+            urllib.request.Request(base + "robots.txt", method="HEAD")
+        ) as head:
+            assert head.status == 200 and head.read() == b""
+        assert fetch(base + ".etl-craft-catalog")[0] == 404
+        assert fetch(base + "%2e%2e/private")[0] == 404
+        if prefix:
+            assert fetch(f"http://{served.local_address}/index.html")[0] == 404
+            assert fetch(base.rstrip("/"))[0] == 200  # redirected beneath the prefix
+    assert recorded(engine_db) == [base]
+    changed = replace(config, docs_site=replace(config.docs_site, external_url=base + "new/"))
+    with pytest.raises(ConfigurationError, match="already shared would break"):
+        publish(engine_db.engine, changed, site)
+    publish(engine_db.engine, changed, site, accept_new_url=True)
+    assert recorded(engine_db) == [base, base + "new/"]
+
+
+def test_proxy_ip_rules_ignore_untrusted_headers_and_preserve_the_last_untrusted_hop(
+    engine_db, site, proxy
+):
+    base = f"http://127.0.0.1:{proxy.server_port}/docs/"
+    config = publishing(
+        engine_db,
+        external_url=base,
+        trusted_proxies=("127.0.0.1/32",),
+        allowed_ips=("203.0.113.0/24",),
+    )
+    with published(engine_db.engine, config, site) as served:
+        proxy.upstream = served.local_address
+        assert fetch(base)[0] == 200
+        proxy.visitor = "198.51.100.4"
+        assert fetch(base, **{"X-Forwarded-For": "203.0.113.9"})[0] == 403
+        proxy.visitor = "203.0.113.9"
+        assert fetch(base, **{"X-Forwarded-For": "not-an-address"})[0] == 403
+        assert fetch(f"http://{served.local_address}/docs/")[0] == 403
+    direct = replace(config, docs_site=replace(config.docs_site, trusted_proxies=("192.0.2.1/32",)))
+    with published(engine_db.engine, direct, site) as served:
+        proxy.upstream = served.local_address
+        assert fetch(base, **{"X-Forwarded-For": "203.0.113.9"})[0] == 403
+
+
+def test_regeneration_cannot_expose_the_directory_exchange_gap(engine_db, site, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from queue import Queue
+
+    from etl_craft.core import filelock
+    from fixtures.races import paused_after
+
+    observed = Queue()
+    original = filelock._try_lock
+
+    def trying(*args, **kwargs):
+        if kwargs.get("shared"):
+            observed.put("reader waiting")
+        return original(*args, **kwargs)
+
+    def read(url):
+        result = fetch(url)
+        observed.put("reader finished")
+        return result
+
+    with published(engine_db.engine, engine_db.config, site, local_only=True) as served:
+        monkeypatch.setattr(filelock, "_try_lock", trying)
+        with (
+            ThreadPoolExecutor(max_workers=1) as pool,
+            paused_after(
+                lambda: write_site(
+                    build_catalog(engine_db.engine, engine_db.config), engine_db.config, site
+                ),
+                owner=Path,
+                name="rename",
+                when=lambda source, *_a, **_k: source == site,
+            ) as resume,
+        ):
+            request = pool.submit(read, served.url)
+            observed.get(timeout=5)
+            resume.set()
+            status, _headers, body = request.result(timeout=10)
+            assert status == 200 and "etl-craft catalog" in body
+
+
+def test_tunnel_cleanup_failure_still_stops_the_server(engine_db, site, ngrok):
+    address = None
+
+    def failed_close(_url):
+        raise ConfigurationError("tunnel cleanup failed")
+
+    ngrok.disconnect = failed_close
+    with (
+        pytest.raises(ConfigurationError, match="tunnel cleanup failed"),
+        published(engine_db.engine, publishing(engine_db), site) as served,
+    ):
+        address = f"http://{served.local_address}/"
+    with pytest.raises(urllib.error.URLError):
+        urllib.request.urlopen(address, timeout=2)
+
+
+def test_read_only_catalog_needs_no_writable_publication_sidecar(engine_db, site):
+    lock = site.with_name(f".{site.name}.publish.lock")
+    assert lock.is_file()
+    lock.chmod(0o444)
+    try:
+        with published(engine_db.engine, engine_db.config, site, local_only=True) as served:
+            assert fetch(served.url)[0] == 200
+    finally:
+        lock.chmod(0o644)
+
+
+def test_busy_publication_is_reported_as_unavailable(engine_db, site, monkeypatch, caplog):
+    import types
+
+    from etl_craft.core import filelock
+
+    with published(engine_db.engine, engine_db.config, site, local_only=True) as served:
+        clock = iter((0, 10))
+        monkeypatch.setattr(filelock, "time", types.SimpleNamespace(monotonic=lambda: next(clock)))
+        monkeypatch.setattr(filelock, "_try_lock", lambda *_args, **_kwargs: False)
+        assert fetch(served.url)[0] == 503
+    assert "publication lock" in caplog.text and "retry the request" in caplog.text

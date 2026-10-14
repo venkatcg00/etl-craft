@@ -963,3 +963,44 @@ def test_local_slots_per_kind_are_optional_whole_numbers(tmp_path):
     raw["Orchestration"]["Local_ingestion_slots"] = 0
     with pytest.raises(ConfigurationError, match="Local_ingestion_slots"):
         load_config(_write(tmp_path, raw))
+
+
+def test_organization_publication_url_and_trusted_proxies(tmp_path):
+    site = {
+        "External_url": "https://docs.example.com/etl%20catalog",
+        "Trusted_proxies": ["127.0.0.1", "::1"],
+        "Allowed_ips": ["203.0.113.0/24"],
+    }
+    config = load_config(_write(tmp_path, _minimal(Docs_site=site)))
+    assert config.docs_site.external_url == "https://docs.example.com/etl%20catalog/"
+    assert config.docs_site.trusted_proxies == ("127.0.0.1/32", "::1/128")
+    with pytest.raises(ConfigurationError, match="different hosting providers"):
+        load_config(_write(tmp_path, _minimal(Docs_site={**site, "Domain": "ngrok.example.com"})))
+    with pytest.raises(ConfigurationError, match="no trusted proxy"):
+        load_config(_write(tmp_path, _minimal(Docs_site={**site, "Trusted_proxies": []})))
+    with pytest.raises(ConfigurationError, match="must list CIDR ranges"):
+        load_config(_write(tmp_path, _minimal(Docs_site={**site, "Trusted_proxies": ["office"]})))
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "file:///tmp/site",
+        "https://user:private@docs.example.com/",
+        "https://docs.example.com/?token=private",
+        "https://docs.example.com/#fragment",
+        "https://docs.example.com:wrong/",
+        "https://docs.example.com:0/",
+        "https://docs.example.com/.hidden/",
+        "https://docs.example.com/%2e%2e/",
+        "https://docs.example.com/a//b/",
+        "https://docs.example.com/%252e/",
+        "https://docs.example.com/a\\b/",
+        "https://docs.example.com/%ff/",
+        "https://docs.example.com/\nunsafe",
+    ],
+)
+def test_organization_url_refuses_unsafe_values_without_echoing_secrets(tmp_path, url):
+    with pytest.raises(ConfigurationError, match=r"Docs_site\.External_url") as caught:
+        load_config(_write(tmp_path, _minimal(Docs_site={"External_url": url})))
+    assert "private" not in str(caught.value)

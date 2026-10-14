@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from etl_craft.config.docs_site import external_url
 from etl_craft.core.enums import AuthMode, CloningScope, GatePolicy, Mode, TableFormat
 from etl_craft.core.errors import ConfigurationError
 
@@ -103,6 +104,8 @@ class DocsSiteConfig:
     directory when not set. ``authtoken_var`` names the variable holding the ngrok authtoken,
     read only when the site is published; ``domain`` is the team's reserved ngrok domain, and
     ``allowed_ips`` the CIDR ranges ``publish-docs`` serves, every address when empty.
+    ``external_url`` selects organization hosting, including its path prefix, without ngrok;
+    ``trusted_proxies`` names the source networks allowed to supply visitor addresses.
     """
 
     schedule: str | None = None
@@ -110,6 +113,23 @@ class DocsSiteConfig:
     authtoken_var: str | None = None
     domain: str | None = None
     allowed_ips: tuple[str, ...] = ()
+    external_url: str | None = None
+    trusted_proxies: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Validate the hosting selection for config files and Python callers alike."""
+        if self.external_url is not None:
+            object.__setattr__(self, "external_url", external_url(self.external_url))
+            if self.domain:
+                raise ConfigurationError(
+                    "Docs_site.External_url and Domain select different hosting providers; "
+                    "set External_url for an organization proxy or Domain for ngrok, not both"
+                )
+            if self.allowed_ips and not self.trusted_proxies:
+                raise ConfigurationError(
+                    "Docs_site.External_url with Allowed_ips has no trusted proxy; "
+                    "set Trusted_proxies to the proxy's source CIDRs so visitor IPs can be checked"
+                )
 
 
 DEFAULT_SENDMAIL_PATH = "/usr/sbin/sendmail"
