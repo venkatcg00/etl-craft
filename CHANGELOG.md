@@ -8,6 +8,14 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Catalog generation bulk-loads task parameters, lineage caches and shown-run interventions,
+  bounds history/consumption to the displayed runs, and separates scheduled, backfill, repair
+  and other logical-run KPIs. Migration `0032` adds indexed recent-history reads on both Engine
+  DBs without changing config files. Unchanged asset/run pages reuse verified HTML using the
+  generated `.etl-craft-manifest.json`; aggregate pages remain fresh. Reused pages retain their
+  generation timestamp. Missing manifests trigger a full build; invalid manifests or altered
+  cached HTML fail with a remedy to remove only the manifest and regenerate.
+
 - Catalog publication supports organization-managed URLs with optional path prefixes using
   `Docs_site.External_url` and explicit `Trusted_proxies`, without ngrok. Forwarded visitor
   addresses are accepted only from trusted peers; public URL changes still require explicit

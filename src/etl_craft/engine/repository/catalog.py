@@ -8,8 +8,10 @@ from datetime import date, datetime
 from sqlalchemy import Boolean
 from sqlalchemy.engine import Connection
 
+from etl_craft.core.enums import CatalogRunKind
 from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
+from etl_craft.engine.repository.interventions import Intervention
 from etl_craft.engine.repository.normalization import ObjectIdentity
 from etl_craft.engine.runlog import as_date
 
@@ -163,6 +165,7 @@ class RunSummary:
     started_by_kind: str | None = None
     ended_by: str | None = None
     ended_by_kind: str | None = None
+    run_kind: CatalogRunKind = CatalogRunKind.OTHER
 
     @property
     def seconds(self) -> float | None:
@@ -188,6 +191,7 @@ class TaskRunSummary:
     error_message: str | None
     watermark_from: str | None = None
     watermark_to: str | None = None
+    run_kind: CatalogRunKind = CatalogRunKind.OTHER
 
     @property
     def seconds(self) -> float | None:
@@ -215,6 +219,7 @@ def fetch_pipeline_runs(conn: Connection, limit: int = RUN_HISTORY) -> dict[str,
         values = dict(row._mapping)
         code = values.pop("pipeline_code")
         values["run_date"] = None if row.run_date is None else as_date(row.run_date)
+        values["run_kind"] = CatalogRunKind(row.run_kind)
         runs.setdefault(code, []).append(RunSummary(**values))
     return runs
 
@@ -225,13 +230,27 @@ def fetch_task_runs(conn: Connection, limit: int = RUN_HISTORY) -> dict[int, lis
     for row in conn.execute(statement(conn, "catalog_task_runs"), {"limit": limit}):
         values = dict(row._mapping)
         task_id = values.pop("task_id")
+        values["run_kind"] = CatalogRunKind(row.run_kind)
         runs.setdefault(task_id, []).append(TaskRunSummary(**values))
     return runs
 
 
-def fetch_consumption(conn: Connection) -> list[Consumption]:
-    """Return every logged consumption by a known downstream run, oldest first."""
-    return [Consumption(**r._mapping) for r in conn.execute(statement(conn, "catalog_consumption"))]
+def fetch_consumption(conn: Connection, limit: int = RUN_HISTORY) -> list[Consumption]:
+    """Read consumption touching a shown run in either direction, oldest first."""
+    return [
+        Consumption(**r._mapping)
+        for r in conn.execute(statement(conn, "catalog_consumption"), {"limit": limit})
+    ]
+
+
+def fetch_catalog_interventions(
+    conn: Connection, limit: int = RUN_HISTORY
+) -> dict[int, list[Intervention]]:
+    """Read interventions of shown runs together, grouped by run identity."""
+    changes: dict[int, list[Intervention]] = {}
+    for row in conn.execute(statement(conn, "catalog_interventions"), {"limit": limit}):
+        changes.setdefault(row.pipeline_run_id, []).append(Intervention(**row._mapping))
+    return changes
 
 
 def _seconds(start: datetime | None, end: datetime | None) -> float | None:

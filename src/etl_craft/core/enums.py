@@ -49,6 +49,15 @@ def enum_value(enum: type[E], value: str, error: EtlCraftError) -> E:
         raise error from None
 
 
+class CatalogRunKind(StrEnum):
+    """Mutually exclusive groups of logical runs shown in catalog metrics."""
+
+    SCHEDULED = "SCHEDULED"
+    BACKFILL = "BACKFILL"
+    REPAIR = "REPAIR"
+    OTHER = "OTHER"
+
+
 class RunStatus(StrEnum):
     """Status of a pipeline run, a task run or a business-rule run.
 

@@ -58,9 +58,7 @@
       "src/etl_craft/handlers/sql/spec.py": 2,
       "src/etl_craft/overseer/schedules.py": 3,
       "src/etl_craft/overseer/server.py": 5,
-      "src/etl_craft/services/catalog.py": 4,
       "src/etl_craft/services/config_files.py": 12,
-      "src/etl_craft/services/lineage.py": 2,
       "src/etl_craft/services/upgrade_targets.py": 20
     },
     "broad-except": {
@@ -99,7 +97,6 @@
       "src/etl_craft/execution/runner.py": 2,
       "src/etl_craft/execution/scheduler.py": 7,
       "src/etl_craft/overseer/server.py": 4,
-      "src/etl_craft/services/catalog.py": 3,
       "src/etl_craft/services/config_files.py": 7,
       "src/etl_craft/services/upgrade_targets.py": 16
     },
@@ -165,9 +162,9 @@
       "src/etl_craft/handlers/sql/spec.py": 3,
       "src/etl_craft/overseer/schedules.py": 3,
       "src/etl_craft/overseer/server.py": 15,
-      "src/etl_craft/services/catalog.py": 32,
+      "src/etl_craft/services/catalog.py": 31,
       "src/etl_craft/services/config_files.py": 27,
-      "src/etl_craft/services/lineage.py": 39,
+      "src/etl_craft/services/lineage.py": 35,
       "src/etl_craft/services/operations/runs.py": 22,
       "src/etl_craft/services/operations/status.py": 52,
       "src/etl_craft/services/upgrade_targets.py": 107
@@ -196,7 +193,7 @@
       "src/etl_craft/engine/transitions.py": 150,
       "src/etl_craft/execution/pipeline.py": 513,
       "src/etl_craft/execution/runner.py": 196,
-      "src/etl_craft/services/catalog_site.py": 311,
+      "src/etl_craft/services/catalog_site.py": 247,
       "src/etl_craft/services/config_files.py": 15
     },
     "no-cover": {
@@ -217,8 +214,7 @@
       "src/etl_craft/execution/pipeline.py": 38,
       "src/etl_craft/execution/scheduler.py": 14,
       "src/etl_craft/overseer/server.py": 18,
-      "src/etl_craft/services/catalog.py": 15,
-      "src/etl_craft/services/lineage.py": 5,
+      "src/etl_craft/services/catalog.py": 9,
       "src/etl_craft/services/upgrade_targets.py": 41
     },
     "type-ignore": {
