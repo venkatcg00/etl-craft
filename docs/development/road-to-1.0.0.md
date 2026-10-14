@@ -132,6 +132,8 @@ item's text, or work done early under another item.
 | S5.T Resource discovery and deployment profiles | Planned | | Opt-in laptop, server and server-with-workers sizing from usable process resources; one discovery module before S5.C |
 | S5.C and later | Not started | | |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
+| S7.N Faster complete pull-request CI | Planned | | Five-minute required-check target without losing tests, platforms, services or failure detection; expensive stress remains in manual/release validation |
+| S8.H Support Insights scenario coverage | Planned | | Deterministic mixed-quality generators, every-feature demonstrations, business-rule and stewardship cases, and runnable README coverage |
 
 ### Handover notes
 
@@ -260,6 +262,11 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- S6.C's large timing benchmark runs manually and before releases, following S3.H's repeated
+  chaos checks, as approved by the owner. Query-count and incremental-build correctness remain
+  ordinary PR regressions; this does not reduce their coverage. S7.N separately targets the
+  complete required-check critical path before 1.0.0 without omitting existing tests.
 
 - At the owner's request to continue independent work while the soak runs, S7.K proceeds
   before the later release work. Catalog hosting uses the existing server and needs no worker,
@@ -851,8 +858,8 @@ flowchart LR
 | 0.4 | Overseer: `etl-craft server`, schedules with time zones, ready-set dispatch, retries, `status`, `explain`, JSON, HTTP API, versioned YAML | S4.A to S4.H | The demo runs a week with no cron or Airflow; `kill -9` of the overseer loses and doubles nothing |
 | 0.5 | Operational basics, then the cluster: row-level rejects, SQL watermarks, event waits, source definitions and schema-aware lineage, normalized metadata, accounts, login and roles; resource discovery and deployment profiles, pool interface, worker agents, project namespaces in one Engine DB, connection budget, managed PostgreSQL | S5.A to S5.T (S5.K to S5.N right after S5.B; S5.O to S5.T before S5.C) | Pool contract tests pass for both providers; many projects share one Engine DB |
 | 0.6 | At load: retention, bounded catalog, incremental cloning, metrics, backup and restore, benchmark | S6.A to S6.G | A sustained-load benchmark stays within its stated budgets; a restore is tested |
-| 0.7 to 0.9 | UI and finish: web UI with its sign-in, stewardship uploads, per-project roles, redaction, webhooks, secrets providers, packaging, compatibility policy, soak | S7.A to S7.M | A month-long soak of a real deployment passes |
-| 1.0.0 release candidates | The Support Insights example rebuilt on etl-craft, configured through CI, with its Superset dashboards | S8.A to S8.G | Every pipeline of the example runs and every chart of both dashboards renders correct data |
+| 0.7 to 0.9 | UI and finish: web UI with its sign-in, stewardship uploads, per-project roles, redaction, webhooks, secrets providers, packaging, compatibility policy, soak, faster complete PR checks | S7.A to S7.N | A month-long soak of a real deployment passes; complete PR checks meet the five-minute target |
+| 1.0.0 release candidates | The Support Insights example rebuilt on etl-craft, configured through CI, with its Superset dashboards and every-feature scenarios | S8.A to S8.H | Every pipeline, dashboard and feature scenario passes, with verified README walkthroughs |
 | 1.0.0 | Supported contract | | Every item of the [1.0.0 checklist](#100-release-checklist) has evidence |
 
 Releases are ordered by dependency. Do not start 0.4 before 0.3's chaos suite passes: the overseer,
@@ -3141,7 +3148,9 @@ Branch: `perf/services-catalog`. Files: `services/catalog.py`, `engine/repositor
 - KPIs separate scheduled runs from backfills and repairs.
 - *Tests.* A query-count test (SQLAlchemy event listener): building the catalog for 100 and for 1,000
   tasks issues the same number of statements. A timing test with 300 pipelines × 10 tasks × 50 runs
-  each stays under 60 s on CI.
+  each stays under 60 s in manual/release validation, using the same separation as S3.H's repeated
+  chaos checks. Ordinary query-count and incremental-build correctness tests remain in PR CI;
+  the large timing benchmark does not run on every pull request.
 
 ### S6.D Business rules that don't re-check everything (B52)
 
@@ -3495,7 +3504,59 @@ logo and banner visually in light and dark modes before release.
 **Done when.** ETL Craft has an original, documented visual identity and a recognizable CLI banner
 that works from an installed package without changing automation output.
 
-**Gate.** The soak passes.
+### S7.N Faster complete pull-request CI
+
+Branch: `perf/ci-required-checks`. Complete before 1.0.0; independent of the frozen 0.4 soak.
+
+**Problem.** Required pull-request checks take roughly forty minutes. That delays feedback on
+every change. The target is five minutes without skipping tests or weakening their checks.
+
+**Where.** `.github/workflows/ci.yml`, `.github/workflows/release.yml`, the existing test and
+release runners in `scripts/`, test fixtures, and the validation instructions in `AGENTS.md`,
+`CONTRIBUTING.md` and `.agents/skills/pre-pr-checks/SKILL.md` where their procedures change.
+
+**Change.**
+
+1. Measure the current critical path, including dependency installation, service startup,
+   fixture setup, test execution, packaging and documentation. Record runner sizes, cache
+   state, collected test identities, matrix coverage and timings before choosing optimizations.
+2. Target no more than five minutes from the first required job starting to the last required
+   check finishing, excluding GitHub runner queue time. Report cold-cache and warm-cache runs
+   separately. A warm-cache result alone does not meet the target.
+3. Reuse dependency/build artifacts and fixtures where safe, remove duplicate preparation,
+   and shard independent tests across jobs using measured durations. Isolate mutable databases,
+   warehouse namespaces, ports and files so parallel execution cannot change outcomes. Keep
+   each supported Python/platform, Engine DB, warehouse, installed-wheel/sdist and Airflow
+   contract combination that the existing required checks cover.
+4. Do not meet the target through path-based test omission, smaller test datasets that weaken a
+   contract, new skips, reduced assertions or coverage thresholds, removed matrix combinations,
+   unconditional passes, or moving ordinary regressions out of required PR checks. Preserve
+   the existing separation: ordinary regressions in PR CI; repeated chaos and sustained-load
+   benchmarks in manual/release validation. Cloud and release evidence remain required where
+   the release procedure already requires them.
+5. Make collection and shard accounting fail closed: every expected test/matrix case runs,
+   with no accidental omissions or overlapping shards within a matrix combination. Missing
+   artifacts, failed shards and missing matrix jobs fail the aggregate check. Keep failures
+   and logs easy to find.
+6. Record the before/after wall time and total runner minutes, including additional parallel
+   jobs. Do not silently buy speed with substantially greater runner cost or service resources;
+   present that tradeoff for owner review. Keep branch-protection check names working, or
+   document the exact coordinated change before replacing them.
+
+**Tests.** Compare collected and executed test identities and matrix combinations before and
+after. Exercise shard accounting with an omitted test, duplicate shard, failed job and missing
+result. Run the full checks on representative changes, including service-backed and packaging
+changes, with cold and warm caches; preserve the coverage gate and meaningful failure reports.
+
+**Done when.** Every existing required test/matrix contract still executes and can fail the PR,
+collection accounting proves none disappeared, and at least three consecutive full PR-check runs
+in each cache condition finish within five minutes on the documented runners. Timing and total
+runner-cost evidence are reviewable, with no weakened gate or unapproved cost increase. If the
+target cannot be reached under those constraints, report the measured bottleneck and seek a
+decision; do not declare the item complete or silently relax the target.
+These timing-acceptance runs are deliberate manual validation, not a new repeated PR job.
+
+**Gate.** The soak passes, and S7.N meets the complete-CI target without weakening checks.
 
 ## Release candidate: the Support Insights example
 
@@ -3503,8 +3564,9 @@ that works from an installed package without changing automation output.
 [Support Insights platform](https://github.com/venkatcg00/Supports-Insights-Docker) is rebuilt on
 etl-craft: everything etl-craft can do replaces what Airflow, PySpark and hand-written SQL do there
 today, its configuration is deployed by CI pipelines, and both Superset dashboards work from the data
-etl-craft produces. **1.0.0 is released only when every pipeline of the example runs and every chart
-of both dashboards renders correct data.**
+etl-craft produces. **1.0.0 is released only when every pipeline of the example runs, every chart
+of both dashboards renders correct data, and every package feature has a tested and documented
+Support Insights demonstration (S8.H).**
 
 **Depends on.** Every workstream of 0.2.0 to 0.9 merged and every defect in
 [Appendix A](#appendix-a-defect-traceability) closed. The example is built against 1.0.0 release
@@ -3521,7 +3583,7 @@ from PyPI like any user would. The etl-craft repository pins the example's commi
 | Part | Today | What happens to it |
 | --- | --- | --- |
 | Sources | MongoDB (client Alpha documents), Kafka (Beta events), MinIO (Gamma gzipped CSVs) | Kept: they are the sources |
-| Synthetic generators and their UI (port 1212) | `generators/*.py`, `infra/entrypoint/data_generator_orchestrator.py` | Kept: they stand in for real source systems |
+| Synthetic generators and their UI (port 1212) | `generators/*.py`, `infra/entrypoint/data_generator_orchestrator.py` | Kept and extended with S8.H's named mixed-quality cases: they stand in for real source systems |
 | Orchestration | Airflow (webserver, scheduler, its own database), three DAGs `Client_{Alpha,Beta,Gamma}_ETL_Task_Flow` | **Replaced** by the etl-craft overseer and workers |
 | Processing | PySpark in local mode, writing to PostgreSQL over JDBC | **Replaced** by etl-craft SQL tasks running in the warehouse, and Python ingestion scripts |
 | Checkpoints | `get_current_checkpoint` and `aud.dag_runs.source_checkpoint` | **Replaced** by etl-craft offsets |
@@ -3550,7 +3612,7 @@ Supports-Insights-Docker/
 │   ├── sql_files/                    one SELECT per SQL task, by layer and client
 │   ├── ingestion_scripts/            mongo_to_lnd.py, kafka_to_lnd.py, minio_to_lnd.py, seeds.py
 │   └── seeds/                        ds and info reference data as CSV
-├── generators/                       unchanged
+├── generators/                       deterministic valid, incomplete, rejectable and reportable cases (S8.H)
 ├── superset/                         dashboards export (re-exported in S8.D)
 ├── infra/
 │   ├── docker-compose.yml            postgres, mongo, kafka, minio, superset, generators UI,
@@ -3576,7 +3638,7 @@ Every Airflow task maps to an etl-craft task; nothing in the example runs Spark 
 | | `alpha_lnd_to_prs` (depends on the ingestion with `HAS_DATA`) | SQL `SCD2_MERGE` on `source_system_identifier`, `MERGE_DEDUPE_ORDER` on the source timestamp, so `prs` keeps every version of a source record | `client_alpha_lnd_to_prs` (insert, update and duplicate counts) |
 | | `alpha_prs_to_cdc` | SQL `OVERWRITE_TABLE` with `$$pipeline_run_id` and `ACTIVE_FLAG = 'Y'` (the versions `prs` opened in this run) | `client_alpha_prs_to_cdc` |
 | | `alpha_cdc_to_predm` | SQL `OVERWRITE_TABLE`: joins `ds` lookups, maps codes | the transform half of `client_alpha_cdc_to_predm` |
-| | `alpha_rules` | BUSINESS_RULES on `pre_dm.customer_support_stage_alpha`: one `REJECT` rule per validity check of today's `is_valid` logic | the validity half of `client_alpha_cdc_to_predm` and `aud.data_error_history` |
+| | `alpha_rules` | BUSINESS_RULES on `pre_dm.customer_support_stage_alpha`: `INCOMPLETE`, `REJECT` and `REPORT` checks with explicit downstream policies and known generator cases (S8.H) | the validity half of `client_alpha_cdc_to_predm` and `aud.data_error_history` |
 | | `alpha_predm_to_dm` | SQL `SCD2_MERGE` into `dm.customer_support_fact`, keyed on `source_system_identifier`, excluding rejected keys | `client_alpha_predm_to_dm` |
 | | `alpha_failure_alert` (depends on every task with `FAILURE`, run condition `ANY`) | EMAIL_ALERT to the team | Airflow failure emails |
 | `SI_CLIENT_BETA` | as Alpha, with `kafka_to_lnd.py` (consumer offsets stored as etl-craft offsets) | | `Client_Beta_ETL_Task_Flow` |
@@ -3646,11 +3708,13 @@ In the example repository's `.github/workflows/`:
 
 `tests/` in the example repository (run by `e2e.yml`):
 
-1. Every scheduled run of the four pipelines ends `SUCCESS`; `etl-craft status` shows no failed or
-   lost attempt.
-2. Row reconciliation: for each client, the number of distinct source records the generators wrote
-   equals the active rows in `dm.customer_support_fact` plus the rejected keys, and no key has two
-   active versions.
+1. Every baseline scheduled run of the four pipelines ends `SUCCESS`; `etl-craft status` shows
+   no unexplained failed or lost attempt. Injected failure scenarios state their expected failure
+   and recovery outcomes explicitly, and assert both.
+2. Row reconciliation: for each client, the known source keys, stewardship inserts/corrections
+   and deletions reconcile with active mart rows and excluded/rejected keys under the declared
+   S8.H policies. Count overlapping rule flags once per excluded key, distinguish load rejects,
+   and retain reportable rows when their policy permits it. No key has two active versions.
 3. Incremental behaviour: a second generator batch is picked up from the stored offsets with no
    duplicates in `lnd` or `prs`.
 4. Failure and recovery: stop MongoDB during a run; the Alpha run fails, the alert arrives in Mailpit,
@@ -3662,12 +3726,82 @@ In the example repository's `.github/workflows/`:
    A headless browser loads both dashboards and finds no chart in an error state.
 6. Catalog: `etl-craft generate-docs` builds, and every pipeline's lineage reaches
    `dm.customer_support_fact`.
+7. Scenario coverage: S8.H's expected source keys, reject reasons, business-rule flags, human
+   corrections and downstream counts match their fixtures. Every feature's demonstration has
+   recorded results; README commands and UI inspection instructions reproduce those results.
 
 ### S8.H Messy sources
 
-The generators break their data on purpose, as real source systems do, and each break has an
-etl-craft feature that handles it and a check in S8.F that proves it. Support Insights runs only
-once every feature below exists; a break with no handling feature is a gap to build first.
+**Problem.** A clean-data demo cannot show whether incomplete, rejected, reportable or
+human-corrected data behaves correctly. Everything built for etl-craft must be tested and
+demonstrated in Support Insights, with instructions showing the behavior rather than only
+claiming coverage. Build scenarios alongside the features they exercise; the complete release
+acceptance runs once every required handling feature exists. A scenario without one is a
+package gap to resolve first.
+
+**Where.** The Support Insights repository's `generators/`, generator UI and orchestrator,
+`etl-craft/` config files, SQL and ingestion scripts, `tests/`, dashboards, and root `README.md`.
+The package repository pins the tested example commit and records release evidence through
+S8.G; no example-specific workaround belongs in the package.
+
+**Slices.** Keep each implementation PR cohesive: (1) deterministic generators, truth fixtures
+and the initial README coverage matrix; (2) business-rule scenarios, reconciliation and their
+dashboard/README checks; (3) same-record stewardship, protection and permissions; (4) the final
+coverage audit and release-suite enforcement. The other feature demonstrations ship with their
+owning S8 project items, and later package features extend their matching example scenarios.
+Slice 4 verifies that work; it does not absorb missing feature implementations into a large PR.
+Every slice updates its runnable README walkthroughs and tests in the same example-repo PR.
+
+**Change.**
+
+1. Modify the Alpha, Beta and Gamma generators to produce reproducible, named cases, both
+   individually and in mixed batches: valid data, incomplete data, business-rule rejectable
+   data, rows rejected by load/type constraints, and valid but reportable anomalies. Include
+   boundary values, missing and NULL fields, duplicate/replayed keys, late updates, deletions,
+   recovery cases and corrections. Use fixed seeds, explicit timestamps and stable source
+   keys. Keep an independent expected-result fixture with scenario membership, values and
+   counts; do not derive expected outcomes from the transformation being tested.
+2. Configure actual `INCOMPLETE`, `REJECT` and `REPORT` rules for each client's warehouse
+   records: completeness of required business fields, invalid values or references, and
+   reportable anomalies that remain usable. State each rule's downstream inclusion policy.
+   Distinguish business-rule rejections from S5.K's `__rejects` for values that cannot load.
+   Test overlapping flags without counting one rejected key several times. Include clean
+   controls, correction and clearing of flags, recurrence, unchanged out-of-scope flags,
+   retries and thresholds. Reconciliation and dashboard reference queries follow these
+   policies; do not assume that every flag excludes a record from the mart.
+3. Add S7.M stewardship contracts and assigned users for corrections to the same Alpha/Beta/
+   Gamma records in their warehouse tables, rather than a disconnected upload-only dataset.
+   Demonstrate human inserts, row and value corrections, accurate uploader attribution,
+   rejected uploads and permission refusals. On protected SCD tables, subsequent writes from
+   source pipelines preserve human-locked rows/values while updating unlocked values; another
+   authorized human may update them, and an explicit unlock lets automation resume. Exercise
+   SCD1 and SCD2, including history and active/deleted flags. Machine-originated writes alone
+   create no human locks; ordinary non-SCD tables have no such overwrite protection. This
+   corrects warehouse records, not the MongoDB, Kafka or MinIO source systems.
+4. Maintain a feature-to-scenario coverage matrix in the example README for every package
+   feature through 1.0.0, not only the source-error table below. Derive the inventory from the
+   roadmap and published CLI, API, config, JSON and warehouse contracts. Link the owning roadmap
+   item, fixture, runnable test/demo, expected result and evidence. Cover happy paths,
+   relevant failure/recovery paths, CLI/API/UI parity where available, schedules and waits,
+   repairs/backfills, lineage and schema gaps, roles/stewardship, deployment profiles/workers,
+   secrets/redaction, retention and operational metrics. As each feature ships, add its
+   scenario to the example; the final candidate executes the complete matrix. Mutually
+   exclusive deployment or provider modes use separate documented runs of the same project,
+   with their required infrastructure and credentials, rather than pretending one stack tests
+   every mode. A missing demonstration is an open release gap, never an implicit pass.
+5. Document every case in the root README: prerequisites and versions, how to generate/reset
+   its data, exact commands or UI steps, source keys and expected counts/values, which rules
+   and pipeline act on it, and where to inspect the result in reject tables, rule flags, audit
+   history, catalog/gap pages, upload history, lock controls and dashboards. Provide navigation
+   and screenshots where useful. Link each walkthrough to its automated assertion and explain
+   replay/cleanup so a reader can reproduce it without editing the Engine DB.
+6. Run full-stack demonstrations through S8.E's manual/pre-release acceptance workflow and
+   the required S8.G suite, keeping ordinary regression checks in PR CI. Store scenario results,
+   logs, reconciliation results and UI/dashboard evidence against the pinned example commit
+   and candidate wheel. A discovered package bug is fixed with a regression test and a new
+   candidate, then its scenario runs again; it is not hidden in the example.
+
+The source-error cases below are a minimum, not the full feature-coverage matrix:
 
 | The source | etl-craft handles it with | The check |
 |---|---|---|
@@ -3684,6 +3818,24 @@ once every feature below exists; a break with no handling feature is a gap to bu
 | sends timestamps without zones, or across a DST change | typed `CAST` to the declared type; UTC audit times | run dates and event times match the generator's truth |
 | resends corrected history | backfills and reopened runs; `CONSUME_REPAIRS` | the mart reflects the correction once |
 
+**Tests.** For every client, generate each quality class and a mixed batch with known keys;
+assert exact membership, counts, reasons and downstream inclusion, including multi-flag rows.
+Load a second batch, replay it, correct bad records and verify flags clear without losing their
+history. Run assigned and unauthorized stewardship cases, then source refreshes and unlocks,
+and verify protected and unprotected values, actors and SCD history. Execute every feature's
+coverage-matrix check under its documented deployment/provider prerequisites. Validate README
+walkthroughs against actual CLI/API responses, UI pages and dashboard reference queries; a
+missing inventory entry or missing/failed scenario prevents the example's release evidence
+from passing. Verify that deliberately removing a feature's mapping or result fails that check.
+
+**Done when.** All three sources produce reproducible valid, incomplete, rejectable and
+reportable cases; their rules, rejects, corrections and reporting reconcile exactly with
+independent expected results. Stewards correct those same warehouse records and human-only
+protection is demonstrated through later source refreshes and unlocks. Every package feature
+has a passing Support Insights scenario and an accurate root-README walkthrough explaining
+what is covered and how to see it, with evidence for the pinned project and candidate. No known
+package bug or missing feature demonstration remains hidden behind a project workaround.
+
 ### S8.G The release gate
 
 1. Add a required suite `example-support-insights` to `release/required-suites.toml` (`where = "local"`,
@@ -3693,14 +3845,18 @@ once every feature below exists; a break with no handling feature is a gap to bu
 3. `release_gate.py` refuses 1.0.0 without passing evidence for this suite on the release commit.
 
 **Gate.** The example's three workflows pass against the final release candidate, every chart of both
-dashboards renders correct data, and the soak on the example passed.
+dashboards renders correct data, every S8.H feature/scenario and README walkthrough is verified,
+and the soak on the example passed. A partial coverage matrix cannot pass the release gate.
 
 ## 1.0.0 release checklist
 
 1.0.0 is tagged when each of these has evidence recorded the way `release/README.md` describes:
 
-- [ ] Every defect in [Appendix A](#appendix-a-defect-traceability) is fixed with a regression test,
-      or closed with a written reason.
+- [ ] Every reported defect is triaged and every confirmed bug is resolved before 1.0.0,
+      including Appendix A and bugs found later in reviews, CI, cloud acceptance, soaks and
+      Support Insights. Fixes have regression tests and passing relevant acceptance evidence.
+      A report closed as duplicate or not a bug links its evidence or the verified fix;
+      deferring a confirmed bug does not close this gate.
 - [ ] Every run, attempt and operator action is addressed by id; nothing resolves a run by recency.
 - [ ] A duplicate submission can't start a second execution of an attempt, and stale owners can't
       change status, counts, logs, offsets or consumption.
@@ -3722,7 +3878,11 @@ dashboards renders correct data, and the soak on the example passed.
 - [ ] `status` and `explain` answer every state, and exit codes tell a script what happened.
 - [ ] Backup, restore and the upgrade procedure are tested.
 - [ ] The Support Insights example passes its CI pipelines against the final release candidate, and
-      every chart of both Superset dashboards renders correct data.
+      every chart of both Superset dashboards renders correct data. Every package feature and
+      data-quality/stewardship scenario has passing coverage and runnable instructions in that
+      repository's root README (S8.H).
+- [ ] S7.N's complete required PR checks meet the five-minute target with measured cold- and
+      warm-cache evidence, without omitted tests, weaker coverage or removed matrix contracts.
 - [ ] The soak passed.
 - [ ] Every required suite, cloud included, has evidence matched to the release commit and wheel,
       and the release gate rejects incomplete evidence.
