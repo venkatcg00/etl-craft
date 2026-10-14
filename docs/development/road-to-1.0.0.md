@@ -3218,7 +3218,8 @@ Branch: `perf/handlers-business-rules`.
      their sequence waves and per-rule outcomes; do not duplicate SQL or other rule settings.
      An invalid active rule still fails normally. For `PROJECT_FULL` only, no eligible rules
      means the task and pipeline end `SKIPPED`, with reason "no active business rules" in the
-     normal run history and log. Open no warehouse connection and invent no per-rule run rows.
+     normal run history and log. Run no warehouse rule queries and invent no per-rule run rows;
+     ordinary pipeline preflight still applies.
      Ordinary `TASK` mode with no rules retains its configuration error. Teams deactivate the
      weekly pipeline with the existing `ACTIVE_FLAG=N` config edit; existing pause controls
      also apply. The scheduler then admits no further scheduled executions for it.
