@@ -380,7 +380,14 @@ def _cloning(config: ConnectorConfig) -> list[Check]:
 
 
 def _docs_site(config: ConnectorConfig) -> list[Check]:
-    """Check what publishing the catalog through ngrok needs, on the machine that does it."""
+    """Report organization hosting or the local requirements for ngrok publication."""
+    if config.docs_site.external_url:
+        return [
+            ok(
+                "Docs site publishing",
+                f"organization URL {config.docs_site.external_url}; no ngrok required",
+            )
+        ]
     name = config.docs_site.authtoken_var
     if name is None:
         return []

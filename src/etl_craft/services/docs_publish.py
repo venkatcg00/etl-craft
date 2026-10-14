@@ -1,4 +1,4 @@
-"""``publish-docs``: serve the catalog site, on this machine or at a link through ngrok.
+"""``publish-docs``: serve the catalog locally, through ngrok or an organization proxy.
 
 The site ``generate-docs`` writes is served from its folder by a small web server on
 ``127.0.0.1``. Each request reads the folder as it is then, so a site written again while it is
@@ -10,10 +10,10 @@ response tells search engines and caches to keep out (``X-Robots-Tag: noindex``,
 framed, and folders are never listed. ``Docs_site.Domain`` keeps the link the same from one
 publish to the next.
 
-``Docs_site.Allowed_ips`` is enforced by this server, whatever the ngrok plan: a visitor from
-any other address gets 403. Through ngrok the visitor's address is the last entry of
-``X-Forwarded-For``, which ngrok adds; only ngrok reaches the server on ``127.0.0.1``, and a
-request without that header is refused. Served locally, it is the connecting address.
+``Docs_site.Allowed_ips`` limits visitors. Organization hosting uses the configured public
+base URL and trusts forwarding headers only from ``Trusted_proxies``. Ngrok uses its managed
+loopback hop. Trusted chains are read from the right; missing or malformed visitor evidence is
+refused when IP restrictions apply. Direct, untrusted peers are checked by their socket address.
 
 The URL is recorded in the Engine DB. When a later publish gets another one, links already
 shared would break, so it fails naming both, unless told to accept the new one.
@@ -30,18 +30,19 @@ from dataclasses import dataclass
 from functools import partial
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from io import BytesIO
 from ipaddress import IPv4Network, IPv6Network, ip_address, ip_network
 from pathlib import Path
-from typing import Any
-from urllib.parse import unquote
+from typing import Any, BinaryIO
+from urllib.parse import unquote, urlsplit
 
 from sqlalchemy.engine import Engine
 
-from etl_craft.config import ConnectorConfig
+from etl_craft.config import ConnectorConfig, DocsSiteConfig
 from etl_craft.config.resolve import source_values
-from etl_craft.core.errors import ConfigurationError
+from etl_craft.core.errors import ConfigurationError, LockTimeoutError
 from etl_craft.engine.repository.docs_site import fetch_publication, record_publication
-from etl_craft.services.catalog_site import MARKER
+from etl_craft.services.catalog_storage import MARKER, prepare_site_lock, site_lock
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,8 @@ class _Server(ThreadingHTTPServer):
     """The web server, with who may read the site and whether requests come through ngrok."""
 
     allowed: tuple[IPv4Network | IPv6Network, ...] = ()
-    behind_tunnel: bool = False
+    trusted_proxies: tuple[IPv4Network | IPv6Network, ...] = ()
+    path_prefix: str = ""
 
 
 class _Handler(SimpleHTTPRequestHandler):
@@ -77,13 +79,17 @@ class _Handler(SimpleHTTPRequestHandler):
         allowed = self.server.allowed
         if not allowed:
             return True
-        if self.server.behind_tunnel:
-            forwarded = [p.strip() for p in self.headers.get("X-Forwarded-For", "").split(",")]
-            address = forwarded[-1] if forwarded and forwarded[-1] else ""
-        else:
-            address = str(self.client_address[0])
         try:
-            visitor = ip_address(address)
+            visitor = ip_address(self.client_address[0])
+            trusted = self.server.trusted_proxies
+            if any(visitor in network for network in trusted):
+                headers = self.headers.get_all("X-Forwarded-For", [])
+                if len(headers) != 1:
+                    return False
+                forwarded = [ip_address(part.strip()) for part in headers[0].split(",")]
+                for visitor in reversed(forwarded):
+                    if not any(visitor in network for network in trusted):
+                        break
         except ValueError:
             return False
         return any(visitor in network for network in allowed)
@@ -93,6 +99,13 @@ class _Handler(SimpleHTTPRequestHandler):
         try:
             decoded = unquote(raw.split("?", 1)[0].split("#", 1)[0], errors="strict")
         except UnicodeDecodeError:
+            return None
+        prefix = self.server.path_prefix
+        if decoded == prefix:
+            decoded = "/"
+        elif decoded.startswith(prefix + "/"):
+            decoded = decoded[len(prefix) :]
+        else:
             return None
         parts = decoded.replace("\\", "/").split("/")
         if any(part.startswith(".") for part in parts if part) or "\x00" in decoded:
@@ -117,36 +130,35 @@ class _Handler(SimpleHTTPRequestHandler):
             raise FileNotFoundError("request path is outside the site's public files")
         return str(safe)
 
-    def do_HEAD(self) -> None:
+    def send_head(self) -> BinaryIO | None:
+        try:
+            with site_lock(Path(self.directory), shared=True):
+                return self._open_response()
+        except LockTimeoutError as error:
+            logger.error("%s", error)
+            self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, "catalog publication busy; retry")
+            return None
+
+    def _open_response(self) -> BinaryIO | None:
         if not self._visitor_allowed():
             self.send_error(HTTPStatus.FORBIDDEN)
-            return
+            return None
         if self._safe_path(self.path) is None:
             self.send_error(HTTPStatus.NOT_FOUND)
-            return
-        super().do_HEAD()
-
-    def end_headers(self) -> None:
-        for name, value in HEADERS.items():
-            self.send_header(name, value)
-        super().end_headers()
-
-    def do_GET(self) -> None:
-        if not self._visitor_allowed():
-            self.send_error(HTTPStatus.FORBIDDEN)
-            return
-        if self._safe_path(self.path) is None:
-            self.send_error(HTTPStatus.NOT_FOUND)
-            return
-        if self.path.split("?", 1)[0] == "/robots.txt":
+            return None
+        if unquote(self.path.split("?", 1)[0]) == self.server.path_prefix + "/robots.txt":
             body = ROBOTS.encode()
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
-            return
-        super().do_GET()
+            return BytesIO(body)
+        return super().send_head()
+
+    def end_headers(self) -> None:
+        for name, value in HEADERS.items():
+            self.send_header(name, value)
+        super().end_headers()
 
     def list_directory(self, path: str | Any) -> None:
         self.send_error(HTTPStatus.NOT_FOUND)
@@ -170,19 +182,40 @@ def serve(
     *,
     allowed: tuple[str, ...] = (),
     behind_tunnel: bool = False,
+    site: DocsSiteConfig | None = None,
 ) -> ThreadingHTTPServer:
     """Return a web server for the site in ``folder``, not yet serving.
 
     ``allowed`` are the CIDR ranges visitors may come from, every address when empty.
+    ``site`` supplies the organization URL prefix and trusted proxy networks.
     ``ConfigurationError`` when ``folder`` holds no site ``generate-docs`` wrote.
     """
-    if not (folder / MARKER).is_file():
+    folder = folder.absolute()
+    if not folder.name:
         raise ConfigurationError(
-            f"there is no catalog site in {folder}: run `etl-craft generate-docs` first"
+            f"catalog folder {folder} is the filesystem root; choose a generated catalog directory"
         )
+    prepare_site_lock(folder)
+    with site_lock(folder, shared=True):
+        if not (folder / MARKER).is_file():
+            raise ConfigurationError(
+                f"there is no catalog site in {folder}: run `etl-craft generate-docs` first"
+            )
     server = _Server((host, port), partial(_Handler, directory=str(folder)))
-    server.allowed = tuple(ip_network(cidr, strict=False) for cidr in allowed)
-    server.behind_tunnel = behind_tunnel
+    try:
+        server.allowed = tuple(ip_network(cidr, strict=False) for cidr in allowed)
+        proxies = (
+            ("127.0.0.1/32", "::1/128") if behind_tunnel else site.trusted_proxies if site else ()
+        )
+        server.trusted_proxies = tuple(ip_network(cidr, strict=False) for cidr in proxies)
+    except ValueError as error:
+        server.server_close()
+        raise ConfigurationError(
+            "catalog Allowed_ips or Trusted_proxies contains an invalid network; "
+            "use IP addresses or CIDR ranges"
+        ) from error
+    path = urlsplit(site.external_url).path if site and site.external_url else ""
+    server.path_prefix = unquote(path).rstrip("/")
     return server
 
 
@@ -199,14 +232,18 @@ def published(
 ) -> Iterator[Published]:
     """Serve the site for the ``with`` body, locally or through ngrok, and yield where.
 
-    Through ngrok the URL is checked against the one recorded before and recorded.
+    Organization and ngrok URLs use the same recorded URL-change acceptance rule.
     """
+    site = config.docs_site
+    organization = site.external_url if not local_only else None
+    tunnel = not local_only and organization is None
     server = serve(
         folder,
-        host if local_only else "127.0.0.1",
+        "127.0.0.1" if tunnel else host,
         port,
-        allowed=config.docs_site.allowed_ips,
-        behind_tunnel=not local_only,
+        allowed=site.allowed_ips,
+        behind_tunnel=tunnel,
+        site=site if organization else None,
     )
     local = f"{server.server_address[0]!s}:{server.server_port}"
     thread = threading.Thread(target=server.serve_forever, name="catalog-site", daemon=True)
@@ -215,17 +252,22 @@ def published(
     try:
         if local_only:
             url = f"http://{local}/"
+        elif organization:
+            url = organization
+            _check_url(engine, url, accept_new_url=accept_new_url)
         else:
             url, close = open_tunnel(local, config)
             _check_url(engine, url, accept_new_url=accept_new_url)
         logger.info("serving %s at %s", folder, url)
         yield Published(url, local)
     finally:
-        if close is not None:
-            close()
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+        try:
+            if close is not None:
+                close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
 
 
 def open_tunnel(address: str, config: ConnectorConfig) -> tuple[str, Callable[[], None]]:
@@ -277,8 +319,8 @@ def _check_url(engine: Engine, url: str, *, accept_new_url: bool) -> None:
         before = fetch_publication(conn)
         if before is not None and before.url != url and not accept_new_url:
             raise ConfigurationError(
-                f"the catalog was published at {before.url}, and ngrok now gives {url}; links "
-                "already shared would break. Set Docs_site.Domain to keep the first link, or "
+                f"the catalog was published at {before.url}, and publishing now gives {url}; links "
+                "already shared would break. Keep Docs_site.External_url or Domain stable, or "
                 "publish with --accept-new-url to use the new one from now on"
             )
         record_publication(conn, url)

@@ -2,7 +2,7 @@
 #
 # Sections, in this order (the loader refuses any other): Secrets, Orchestration
 # (the DAG defaults and the Email relay live inside it), Engine, Warehouse, and
-# the optional Cloning.
+# optional Cloning and Docs_site sections.
 #
 # Each section that differs by environment holds one block per profile — dev,
 # sit, uat, prod here, but any names work. The active one is the section's own
@@ -226,3 +226,9 @@ Cloning:
   prod:
     Enabled: true                      # value
     Scope: all                         # value
+
+# Optional organization-hosted catalog; no ngrok setup needed.
+# Docs_site:
+#   External_url: https://docs.example.com/etl-craft/
+#   Trusted_proxies: [127.0.0.1/32]   # Only the proxy's actual source addresses.
+#   Allowed_ips: [203.0.113.0/24]    # Optional visitor/VPN networks, not proxy networks.

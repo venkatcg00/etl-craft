@@ -1,0 +1,17 @@
+[Unit]
+Description=ETL Craft generated project catalog
+After=network.target
+
+[Service]
+Type=simple
+User=etl-craft
+Group=etl-craft
+WorkingDirectory=/srv/etl-craft
+ExecStart=/srv/etl-craft/.venv/bin/etl-craft publish-docs --port 8080
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

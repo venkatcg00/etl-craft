@@ -13,7 +13,6 @@ Every problem is a ``ConfigurationError`` naming the file and the setting.
 
 from __future__ import annotations
 
-import ipaddress
 import os
 import re
 from collections.abc import Mapping
@@ -34,6 +33,7 @@ from etl_craft.config.auth import (
     warehouse_by_key,
     warehouse_spec,
 )
+from etl_craft.config.docs_site import cidr_ranges
 from etl_craft.config.model import (
     DEFAULT_LOG_DIR,
     DEFAULT_SENDMAIL_PATH,
@@ -112,7 +112,9 @@ _CONNECTION_FIELDS = frozenset(
 SECRETS_KEYS = frozenset({"Source_type", "Path", "Profile"})
 WAREHOUSE_SECTION_KEYS = frozenset({"Name", "Table_format"})
 CLONING_KEYS = frozenset({"Enabled", "Scope", "External_volume", "Base_location"})
-DOCS_SITE_KEYS = frozenset({"Schedule", "Output", "Authtoken", "Domain", "Allowed_ips"})
+DOCS_SITE_KEYS = frozenset(
+    {"Schedule", "Output", "Authtoken", "Domain", "Allowed_ips", "External_url", "Trusted_proxies"}
+)
 
 
 def settings_by_section() -> dict[str, frozenset[str]]:
@@ -1070,28 +1072,12 @@ def _parse_docs_site(
         output=_relative_to_config(output, path) if output else None,
         authtoken_var=authtoken.strip() if isinstance(authtoken, str) else None,
         domain=domain,
-        allowed_ips=_cidr_ranges(
-            profiled.value("Allowed_ips"), profiled.where("Allowed_ips"), path
+        allowed_ips=cidr_ranges(profiled.value("Allowed_ips"), profiled.where("Allowed_ips"), path),
+        external_url=profiled.text("External_url"),
+        trusted_proxies=cidr_ranges(
+            profiled.value("Trusted_proxies"), profiled.where("Trusted_proxies"), path
         ),
     )
-
-
-def _cidr_ranges(value: Any, where: str, path: Path) -> tuple[str, ...]:
-    """Read a list of CIDR ranges, as a YAML list or a comma-separated string."""
-    if value is None or value == "":
-        return ()
-    items = value if isinstance(value, list) else str(value).split(",")
-    ranges = []
-    for item in items:
-        text = str(item).strip()
-        try:
-            ranges.append(str(ipaddress.ip_network(text, strict=False)))
-        except ValueError as error:
-            raise ConfigurationError(
-                f"{path}: {where} must list CIDR ranges such as 203.0.113.0/24; {text!r} is not "
-                f"one ({error})"
-            ) from error
-    return tuple(ranges)
 
 
 def _parse_bool(value: Any, name: str, path: Path, *, default: bool) -> bool:

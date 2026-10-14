@@ -216,3 +216,23 @@ def test_relaxed_dependency_gates_are_warned_about(config):
     assert "(they are not checked at all)" in detail
     warned = found(run_checks(replace(config, dependency_gates="warn")))["Dependency gates"]
     assert "not checked at all" not in warned[1]
+
+
+def test_organization_catalog_hosting_needs_no_tunnel_sdk_or_credentials(config, monkeypatch):
+    from etl_craft.config import DocsSiteConfig
+
+    monkeypatch.setitem(sys.modules, "ngrok", None)
+    monkeypatch.delenv("ETL_CRAFT_TEST_NGROK", raising=False)
+    site = replace(
+        config,
+        docs_site=DocsSiteConfig(
+            external_url="https://docs.example.com/catalog/",
+            authtoken_var="ETL_CRAFT_TEST_NGROK",
+        ),
+    )
+    checks = found(run_checks(site))
+    assert checks["Docs site publishing"] == (
+        Status.OK,
+        "organization URL https://docs.example.com/catalog/; no ngrok required",
+    )
+    assert "Docs site authtoken" not in checks

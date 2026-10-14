@@ -30,7 +30,7 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--host",
         default="127.0.0.1",
-        help="with --local-only, the address to listen on (default: 127.0.0.1)",
+        help="local or organization-hosted listen address (default: 127.0.0.1)",
     )
     parser.add_argument(
         "--port", type=int, default=0, help="the local port (default: any free one)"
@@ -38,7 +38,7 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--accept-new-url",
         action="store_true",
-        help="publish even though ngrok gives another URL than the one recorded, and record it",
+        help="accept and record a publication URL different from the one recorded",
     )
 
 
@@ -79,7 +79,7 @@ def _run(args: argparse.Namespace, out: Output) -> int:
 
 COMMAND = Command(
     name="publish-docs",
-    help="Serve the catalog site until stopped, at an ngrok link or on this machine.",
+    help="Serve the catalog locally, through ngrok, or at Docs_site.External_url.",
     configure=_configure,
     run=_run,
 )

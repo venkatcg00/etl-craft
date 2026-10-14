@@ -213,6 +213,88 @@ etl-craft publish-docs --local-only                         # http://127.0.0.1:<
 etl-craft publish-docs --local-only --host 0.0.0.0 --port 8080   # to the local network
 ```
 
+### At an organization-managed URL
+
+Set the external base URL separately from the address the server listens on:
+
+```yaml
+Docs_site:
+  Output: catalog
+  External_url: https://docs.example.com/etl-craft/
+  Trusted_proxies: [127.0.0.1/32]
+  Allowed_ips: [203.0.113.0/24]  # optional: actual visitor/VPN ranges
+```
+
+```bash
+etl-craft generate-docs --with-warehouse
+etl-craft publish-docs --port 8080
+```
+
+`External_url` selects organization hosting without importing ngrok or resolving its token.
+`Domain` selects ngrok and cannot be combined with it. `--local-only` explicitly serves a
+local URL instead. The default listen address remains `127.0.0.1`; use `--host` only when the
+proxy requires another interface, and restrict the origin port to the actual proxy.
+The externally usable URL is recorded using the same URL-change rule as ngrok. A different
+host or prefix requires `--accept-new-url`; it does not silently replace links already shared.
+`doctor` reports organization hosting without requiring tunnel credentials or its SDK.
+
+The complete example is [docs-site-proxy.yml](../examples/docs-site-proxy.yml). The repository's
+[NGINX example](https://github.com/venkatcg00/etl-craft/blob/main/deploy/catalog/nginx.conf) forwards requests to `127.0.0.1:8080` without removing their prefix;
+it works for both a root URL and a URL beneath `/etl-craft/`. Pages, assets, robots and directory
+redirects retain that prefix. Configure the proxy to preserve the path, rather than strip it.
+NGINX's [proxy_pass and proxy_set_header documentation](https://nginx.org/en/docs/http/ngx_http_proxy_module.html)
+explains those directives.
+
+The team owns DNS, TLS certificates, routing and authentication. The sample proxy listens on
+loopback port 8081 for an organization's TLS/authentication gateway; add the organization's
+TLS/login policy to that proxy instead if it is the edge server. The catalog server has no login.
+Enforce SSO or another team authentication policy before forwarding any catalog request,
+including assets. A hidden URL, `noindex` and an IP allowlist do not supply authentication.
+
+Only peers in `Trusted_proxies` may supply `X-Forwarded-For`. Starting at the connecting peer,
+the server follows the chain from right to left until its first untrusted visitor address.
+Missing, duplicate or malformed forwarding headers from a trusted peer are refused when
+`Allowed_ips` is enabled. An untrusted peer's forwarding headers are ignored. The NGINX example
+replaces incoming `X-Forwarded-For` with its observed client IP, so a client cannot prepend an
+allowed address. A trusted internal proxy may append instead, provided every trusted hop is
+explicitly listed. Use actual proxy addresses, not a broad client subnet; anyone able to
+originate from a trusted address has that trust. Loopback binding alone does not isolate
+untrusted users on the same host. An organization URL with `Allowed_ips` requires explicit
+`Trusted_proxies`; without an allowlist, forwarded addresses are not used for an access decision.
+
+### Persistent serving and regeneration
+
+[The systemd unit](https://github.com/venkatcg00/etl-craft/blob/main/deploy/catalog/etl-craft-catalog.service) runs `publish-docs --port 8080` under systemd.
+Adjust its account, working directory and virtual environment to your installation, and make
+its configured secrets source readable by that account. For a purely local service add
+`--local-only`. Install the unit in the host's systemd unit directory, reload systemd and enable
+it using the team's deployment procedure. SIGTERM shuts down the server and any owned tunnel.
+
+Run `generate-docs` on the existing schedule while the server remains up. The builder works
+outside the published folder; requests briefly share a file lock while opening files, and the
+builder takes it exclusively only for the directory exchange. Concurrent builders serialize
+under a separate build lock. A publication lock held longer than five seconds yields an explicit
+503 response and a server log naming the lock and remedy, rather than serving a partial site.
+
+Two empty lock sidecars remain beside the output: `.catalog.build.lock` and
+`.catalog.publish.lock` for an output named `catalog`. Keep them while generators or servers
+use that output. New generation creates them. Publishing an old site creates the publication
+sidecar when its parent is writable; for a read-only deployment regenerate once before the
+upgrade and grant the server read access to that sidecar. The server opens existing sidecars
+read-only. No connector rewrite or Engine DB migration is required.
+
+Proxy integration checks run with the normal suite. Explicit acceptance of the real ngrok
+adapter and the documented NGINX configuration is available separately, so live tunnels and
+additional containers add no work to each PR's CI:
+
+```bash
+# With the publish extra and NGROK_AUTHTOKEN supplied by the configured secrets environment:
+uv run --extra publish pytest -q tests/acceptance/publishing.py
+```
+
+Those manual checks publish only a synthetic fixture. The NGINX cases require Docker on Linux;
+the tunnel cases require a usable ngrok account. They are not included in ordinary test discovery.
+
 ## The output folder
 
 `generate-docs` writes `--output`, else `Docs_site.Output`, else `catalog/` in the project

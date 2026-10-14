@@ -86,3 +86,17 @@ def test_the_lock_excludes_other_processes_and_dies_with_its_holder(tmp_path):
             holder.stdout.close()
     with file_lock(path, wait_seconds=2):
         pass
+
+
+def test_shared_readers_exclude_writers_without_write_access(tmp_path):
+    path = tmp_path / "publish.lock"
+    with file_lock(path):
+        pass
+    path.chmod(0o444)
+    try:
+        with file_lock(path, shared=True), file_lock(path, shared=True):
+            path.chmod(0o644)
+            with pytest.raises(LockTimeoutError), file_lock(path, wait_seconds=0.1):
+                pass
+    finally:
+        path.chmod(0o644)
