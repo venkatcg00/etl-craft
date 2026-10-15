@@ -301,7 +301,7 @@ use the configured warehouse connection and read schema metadata only, not busin
 | Table detail | Side-by-side column contract/deployment grid, warning row styles, audit fields, upstream/downstream links; current lineage version and its history, with the column sources each version added and removed |
 | Lineage tab | Warning nodes and affected edges; selected-column trace, unresolved reason, link to table comparison |
 | Run detail | Attempts, row counts, rejects, wait duration and errors; links back to pipeline trends and table gaps |
-| Metadata editor | Table contracts grouped by catalog/schema, with child column contracts; immutable creation fields, actor/history and validate-on-save |
+| Metadata view | Table contracts grouped by catalog/schema, with child column contracts; read-only, with creation fields, actor/history, `validate` findings and the source config file; changes go through the config files and `etl-craft config apply` |
 
 Project documentation needs both a summary gaps page and the per-column warnings, not only
 console output. Static pages say when generated and when compared, and link each gap to its
