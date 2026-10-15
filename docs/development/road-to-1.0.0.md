@@ -132,6 +132,7 @@ item's text, or work done early under another item.
 | S5.T Resource discovery and deployment profiles | Planned | | Opt-in laptop, server and server-with-workers sizing from usable process resources; one discovery module before S5.C |
 | S5.C and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
+| S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
 | S7.N Faster complete pull-request CI | Planned | | Five-minute required-check target without losing tests, platforms, services or failure detection; expensive stress remains in manual/release validation |
 | S8.H Support Insights scenario coverage | Planned | | Deterministic mixed-quality generators, every-feature demonstrations, business-rule and stewardship cases, and runnable README coverage |
@@ -270,6 +271,13 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- S6.D stays one implementation PR after S5.R item 3, as approved by the owner. Its active-flag
+  uniqueness migration needs a preflight marker for actionable legacy-duplicate diagnostics;
+  register that marker as data instead of adding another branch to the current runner. The
+  frozen soak still gates S5.R. Teams own reconciliation pipelines and schedules through the
+  existing BR configuration; add no automatic periodic rechecks, per-rule schedule column or
+  new execution mode. Independent S7.N CI work can proceed meanwhile.
 
 - S6.C proceeds as independent catalog work while the frozen soak continues; no blocked S5
   prerequisite is moved. Its derived Done when is: bulk reads, indexed last-N pipeline/task
@@ -3177,11 +3185,67 @@ Branch: `perf/services-catalog`. Files: `services/catalog.py`, `engine/repositor
 
 ### S6.D Business rules that don't re-check everything (B52)
 
-On a normal run, a rule re-checks standing flags only for keys present in this run's rows
-(`PIPELINE_RUN_ID = :run`), with one query
-`SELECT key FROM target t WHERE <scope> AND NOT EXISTS (<rule>)` instead of 500-key batches. A full
-re-check happens on `--force` and on a weekly schedule (`Business_rules.Full_check_day`). Add a unique
-index on active flags `(BUSINESS_RULE_ID, BUSINESS_RULE_KEY) WHERE ACTIVE_FLAG = 'Y'`.
+Branch: `perf/handlers-business-rules`.
+
+Depends on S5.R item 3's data-driven migration-marker registry, after the frozen 0.4 soak.
+Keep S6.D as one implementation PR.
+
+- *Problem.* Every normal BR task re-checks standing flags in 500-key warehouse queries.
+  Reduce that work without introducing another way to configure or execute business rules.
+- *Where.* `handlers/business_rules.py`, `engine/repository/business_rules.py`, the Engine DB
+  query catalog, `engine/locks.py`, the migration-marker registry, both Engine DB schemas and
+  their next migrations, the business-rule guide and the packaged Support Insights demo.
+- *Change.*
+  1. On a normal task run, re-check standing flags only for keys present in that run's rows
+     (`PIPELINE_RUN_ID = :run`). Use one warehouse query
+     `SELECT key FROM target t WHERE <scope> AND NOT EXISTS (<rule>)`, intersecting its result
+     with that rule's active flags, instead of 500-key warehouse batches. Keep SCD active-version
+     filtering and existing Engine DB write batching. Flags outside the current run, including
+     deleted-row flags, await an explicit full check; remove the old all-key deletion scan.
+  2. Preserve the existing BR task/rule configuration, sequence waves, failure logging and
+     retry/resume behaviour. `run --force` retains its existing full-table check for the selected
+     task's rules, clearing corrected and deleted-row flags. Preserve the configuration error
+     for a BR task with no active rules. Do not make pipeline refresh type imply a full BR scan.
+  3. Scheduling belongs to the team. A weekly, monthly or other reconciliation job is an ordinary
+     pipeline with a BR task and its own rules, using the existing `CFG_PIPELINES.RUN_SCHEDULE`,
+     time zone, catch-up, overlap, pause and deactivation controls. Keep current BR scope semantics
+     explicit in the guide; a pipeline schedule does not itself request a full-table check.
+     Do not automatically rerun ordinary daily rules on another cadence. Add no generated
+     pipeline or task, per-rule schedule column, BR execution mode, connector setting,
+     `CHECK_SCOPE` column, config table, audit table, timer or separate scheduling ledger.
+  4. Add a unique index on active flags
+     `(BUSINESS_RULE_ID, BUSINESS_RULE_KEY) WHERE ACTIVE_FLAG = 'Y'`. Keep inactive evidence.
+     Register `check-business-rule-flags` in S5.R item 3's marker registry: check before any
+     pending upgrade and repeat inside this migration's transaction. Report conflicting
+     rule/key values and result IDs, the expected uniqueness and the repair remedy on both
+     Engine DBs. Add the marker as data; do not add a file-specific branch to the runner.
+     Serialize checks of the same rule through existing Engine DB locking facilities so
+     concurrent checks cannot publish competing flag snapshots; different rules remain
+     independent. A bounded lock failure names the rule and remedy. Never delete audit history
+     or arbitrarily choose a winning legacy flag to make the index build succeed.
+  5. Ship the index migration and matching fresh schemas for SQLite and PostgreSQL. Document
+     deferred clearing of out-of-run/deleted-row flags and the existing explicit full-check path
+     in the guide, CHANGELOG and demo README. Show team-managed scheduling through ordinary
+     pipeline configuration, without promising a new reconciliation execution mechanism.
+- *Tests.*
+  - Normal checks flag/clear only current-run keys. Corrected/deleted keys outside that run
+    remain flagged until an explicit forced check. Warehouse clearing-query count is constant
+    beyond the old 500-key batch size; Engine DB updates retain their bind-limit-safe batching.
+  - Forced checks clear corrected and deleted keys globally; SCD1/SCD2 judge only active versions.
+    Existing sequence waves, failures, already-successful rule retries and empty-task errors
+    retain their behaviour. A scheduled pipeline uses the same BR path and scope as an ordinary
+    run; schedule/pause/deactivation behaviour stays with the existing scheduler tests.
+  - Both Engine DBs enforce one active flag per rule/key, retain inactive history, and refuse
+    duplicate legacy flags with actionable diagnostics and no destructive repair. Released-schema
+    upgrades and failed-migration rollback pass. Coordinated concurrent checks cannot lose or
+    duplicate flags. Run affected behaviour on all four local warehouses and live-cloud suites;
+    repeated stress stays in manual/release validation, not a new PR CI job.
+- *Done when.* Normal checks have no standing-key warehouse batches or all-key deletion scan;
+  explicit forced checks retain full semantics, and flags remain unique under concurrency.
+  Existing BR configuration, execution and team-owned schedules remain the only approach.
+  Fresh/upgrade, rollback and warehouse tests pass; the guide, CHANGELOG and demo explain the
+  scope change and demonstrate the existing full-check path. No automatic periodic execution
+  of existing rules or extra scheduling/configuration surface is introduced.
 
 ### S6.E Cloning that keeps up (W14)
 
