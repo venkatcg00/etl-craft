@@ -910,6 +910,16 @@ def test_server_shutdown_grace_is_nonnegative_and_defaults_to_sixty(tmp_path):
         load_config(_write(tmp_path, raw))
 
 
+def test_engine_db_outage_budget_is_nonnegative_and_defaults_to_two_minutes(tmp_path):
+    assert load_config(_write(tmp_path, _minimal())).limits.engine_db_outage_seconds == 120
+    raw = _minimal()
+    raw["Orchestration"]["Engine_db_outage_seconds"] = 0
+    assert load_config(_write(tmp_path, raw)).limits.engine_db_outage_seconds == 0
+    raw["Orchestration"]["Engine_db_outage_seconds"] = -1
+    with pytest.raises(ConfigurationError, match="Engine_db_outage_seconds"):
+        load_config(_write(tmp_path, raw))
+
+
 def test_project_timezone_defaults_to_utc_and_must_be_iana(tmp_path):
     assert load_config(_write(tmp_path, _minimal())).timezone == "UTC"
     raw = _minimal()

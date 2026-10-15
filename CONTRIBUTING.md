@@ -28,9 +28,10 @@ That context belongs in the pull request and the commit message. `make history` 
 and CI runs it on every pull request.
 
 Before opening a pull request, run the checks in `.agents/skills/pre-pr-checks/SKILL.md`:
-`make check docs`, the suites the change touches against the local services, the
-installed-wheel demos, `actionlint` for workflow changes, and the cloud tests when warehouse SQL
-changes. Fix failures before creating the pull request.
+`make static docs`, the tests for the code the change touches against the local services,
+repeated runs for concurrency changes, `actionlint` for workflow changes, and the cloud tests
+when warehouse SQL changes. CI runs the complete suite on the pull request in under ten minutes
+and is its authority. Fix failures before asking for a merge.
 
 CI partitions complete collections across jobs and isolated worker processes. Demo workers in
 one job share their warehouse service; each owns its databases, Iceberg namespaces and email

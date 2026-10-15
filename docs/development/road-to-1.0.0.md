@@ -37,8 +37,8 @@ passes.
 **Definition of done for every item** (the full list is in `AGENTS.md`):
 
 1. The tests named in the item exist, carry their suite marker, and fail on the old code.
-2. `make check` passes, and the suites the item touches pass against the local services
-   (`make services-up`).
+2. `make static docs` and the tests the item touches pass locally against the local services
+   (`make services-up`), and CI passes the complete suite.
 3. User-facing behaviour changes are reflected in `docs/` (guides and reference) in the same pull
    request, and in `CHANGELOG.md` under `[Unreleased]`.
 4. Engine DB changes ship as a migration in both `dialects/engine/postgres/migrations/` and
@@ -54,8 +54,9 @@ passes.
 **CI cost policy.** Validate each pull-request revision without repeating the test workflow after
 merge. Keep ordinary regression coverage in PR checks. Repeated chaos, sustained-load benchmarks
 and full example-stack acceptance belong to release validation or deliberate manual runs;
-post-merge workflows publish documentation and deploy approved changes. Run all required checks
-locally before opening a PR.
+post-merge workflows publish documentation and deploy approved changes. Before opening a PR, run
+the fast checks and the tests the change touches locally; CI runs the complete required suite in
+under ten minutes and is its authority.
 
 **Severity words.** *High*: possible wrong data, wrong run state or a security exposure under normal
 use. *Medium*: a feature fails or behaves surprisingly in a realistic case. *Low*: an edge case or a
@@ -131,7 +132,8 @@ item's text, or work done early under another item.
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
 | S5.T Resource discovery and deployment profiles | Planned | | Opt-in laptop, server and server-with-workers sizing from usable process resources; one discovery module before S5.C |
 | S5.V Team-owned config tables | Planned | | Teams' own `CFG_` tables carry no etl-craft guards, contract, history or config files; etl-craft's tables keep them |
-| S5.U Robustness before the cluster | Planned | | Engine DB restarts ridden out; no silent fallbacks in supervision, SLA and warehouse-lock paths; measured coverage of process, leadership and server code; deterministic timing tests |
+| S5.U Robustness before the cluster | In progress | #176 | Item 5 done: Engine DB restarts and failovers ridden out within `Orchestration.Engine_db_outage_seconds`; items 1 to 4 follow S5.R items 7 and 8 |
+| S5.W Retry only what can succeed | Planned | | Transient, permanent and unknown failure classes per dialect; `Retry_on` / `RETRY_ON`; each attempt records why it was or was not retried |
 | S5.C and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
@@ -190,7 +192,8 @@ does not move worker work ahead of the metadata, account or operator-control cor
   - Demo stewardship covers the `dm` mart and the `ds` reference tables (S8.H item 3).
 - **The UI never edits metadata.** It is for pipeline operations. Its actions follow
   Informatica PowerCenter's Workflow Monitor (S5.Q, S7.A.2), not Airflow's narrower
-  constraints. It adds run views, dbt-docs-style documentation and run-health dashboards.
+  constraints. It adds run views, the generated catalog documentation and run-health
+  dashboards.
   Metadata changes only through config files.
 - **1.0.0 does not fail for obvious reasons** ([What 1.0.0 is](#what-100-is), S7.P).
   - Ordinary outages are ridden out without an operator.
@@ -202,11 +205,16 @@ does not move worker work ahead of the metadata, account or operator-control cor
   - S5.U comes after S5.R and before S5.T and S5.C.
   - S5.V comes after S5.R item 3 and before S7.M.
   - S7.O starts after the frozen 0.4 soak ends.
+  - S5.W (retrying only failures that can succeed) follows S5.U item 5 and comes before
+    S5.C.
   - None of these moves S5.S, S5.O.3 or S5.Q.
   - S5.V and S7.M add `validation_scripts/` and `uploads/` to the project directory, and the
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.U item 5 passed the new outage, leadership and connection tests. Its PostgreSQL outage tests
+cut off the test's own database, which is safe beside other CI workers.
 
 S7.P's audit passed `make regressions` (11 of 19 rows with collected tests) and the new
 PostgreSQL dropped-connection test. Its other mapped tests run in their existing suites.
@@ -329,6 +337,36 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- S5.U item 5 came first, before S5.R items 7 and 8, at the owner's request.
+  - **Engine DB outage handling.**
+    - Connections: the PostgreSQL connection factory retries refused connections within
+      `Orchestration.Engine_db_outage_seconds`, but only once the process has reached the
+      Engine DB, so wrong settings still fail at once.
+    - Scheduler and heartbeats: the scheduler step (`Scheduler.step_riding_outages`) and the
+      lease heartbeat repeat a statement whose connection dropped.
+    - Server loop: `serve` moved into a `_Supervisor` class to stay within the quality limits,
+      and its loop rides out dropped statements.
+    - Leadership: `Leadership.hold` takes the session lock again before every pass, and stops
+      the server if another took it.
+  - **Leases are unchanged, as the design rule requires.** An outage longer than an attempt's
+    remaining lease (60s, renewed every 15s) cannot be renewed through. That attempt is
+    reconciled `LOST` and retried, so "the running attempts continue" holds for outages
+    shorter than that.
+  - **Task processes.** A task process whose supervisor reached the Engine DB builds its
+    engine with `supervised=True`, so an outage before its first connection is waited out
+    too.
+  - **The S3.H chaos test.** The PostgreSQL outage test now sets a 2-second lease, so its
+    5-second outage still outlasts the lease and still proves the fencing and the recovery.
+  - **What still abandons a run.** A dropped statement while a run is starting or finalizing,
+    outside the scheduler step, abandons the run in that server as before. Reconciliation
+    adopts it again.
+  - **How the outage is simulated.** The tests refuse connections to their own database
+    (`ALLOW_CONNECTIONS false`) and end its sessions, rather than `docker restart`. CI workers
+    share one PostgreSQL service, and only this cuts off a single test's database.
+  - **Positioning.** The same pull request adds the "What it is modelled on" paragraph to
+    [What 1.0.0 is](#what-100-is), at the owner's request: PowerCenter's operating model,
+    neither IICS nor an Airflow-plus-dbt stack.
 
 - S7.P's audit (item 2) records each row's tests in `release/regressions.toml`
   `[obvious_failures]`, not in the item's table. `make regressions` already runs in
@@ -873,6 +911,27 @@ etl-craft 1.0.0 is a standalone ETL orchestrator. A team describes its ETL as me
 derives the dependency graph, schedules runs, dispatches tasks to workers, records everything in the
 Engine DB, and shows it through the CLI, an HTTP API and a web UI. Neither Airflow nor dbt is
 required. Airflow remains supported as an optional external orchestrator through the generated YAML.
+
+**What it is modelled on.** etl-craft follows Informatica PowerCenter's operating model:
+- a metadata repository (the Engine DB's `CFG_` tables);
+- workflows of sessions (pipelines of tasks) with recorded dependencies;
+- Workflow Monitor operations on any pipeline, run or task;
+- an audit trail for every run and action.
+
+It has more functionality than PowerCenter: lineage and the generated catalog, business rules,
+row-level rejects, stewardship uploads, SCD human-override protection and schema-gap reports.
+
+It owns less of the transformation. There is no mapping designer and no transformation engine:
+- each transformation is the team's own SQL SELECT, run inside the warehouse, or the team's
+  ingestion script;
+- etl-craft owns how the result is written (the nine SQL actions), and when and in what order
+  things run.
+
+It is self-hosted, one package on the team's own machines:
+- it is not a cloud service like Informatica Intelligent Cloud Services;
+- it is not an Airflow-plus-dbt stack.
+
+When a design choice is open, PowerCenter's operator behaviour is the reference.
 
 **1.0.0 does not fail for obvious reasons.** That is its goal, and S7.P's catalog is the
 checklist.
@@ -3190,6 +3249,81 @@ Branch: `feat/engine-team-config-tables`. After the frozen 0.4 soak ends and S5.
 - *Done when.* Teams own their `CFG_` tables completely, and etl-craft's guards, history and
   config files cover exactly its own tables.
 
+### S5.W Retry only what can succeed
+
+Branch: `feat/execution-failure-classes`. After S5.U item 5, before S5.C: workers retry through
+this classification.
+
+- *Problem.*
+  - `core.errors` already marks failures that etl-craft detects itself (`SqlGuardError`,
+    `MetadataError`, `ConfigurationError`) as not retryable.
+  - Every warehouse error is a `HandlerError`, which is retryable. A syntax error, a missing
+    table or a refused permission is therefore retried `RETRIES` times and fails the same way
+    each time.
+  - An ingestion script's exception is retried the same way.
+
+  `AUD_TASK_ATTEMPTS.RETRYABLE` records the decision but not why, so an operator cannot tell
+  a failure that is worth retrying from one that is not.
+- *Change.*
+  1. **Failure classes** (`core.enums.FailureClass`):
+     - `TRANSIENT`: a retry can succeed;
+     - `PERMANENT`: the same input fails again;
+     - `UNKNOWN`: nothing says which.
+  2. **Classification in the dialects layer**, one function per dialect with a shared base:
+     - **The base classifier** reads the DB-API error class and the SQLSTATE:
+       - `TRANSIENT`: `OperationalError` and `InterfaceError`; SQLSTATE classes `08`
+         (connection), `40` (serialization or deadlock) and `53` (insufficient resources);
+         `57P01` to `57P03` (shutdown); and lock and statement timeouts;
+       - `PERMANENT`: `ProgrammingError`, `DataError`, `IntegrityError` and
+         `NotSupportedError`; SQLSTATE classes `42` (syntax, missing object, privilege), `22`
+         (data) and `23` (integrity);
+       - `UNKNOWN`: anything else.
+     - **Each warehouse dialect** refines the base for its driver: Trino's user errors against
+       its external, resource and internal errors; Snowflake's compile errors against network
+       errors; Databricks and DuckDB errors.
+     - **etl-craft's own errors** keep their `retryable` flag: `False` is `PERMANENT`.
+     - **Ingestion scripts** may raise `TransientError` or `PermanentError` from
+       `etl_craft.scripting`. Any other exception is `UNKNOWN`.
+  3. **Configuration.**
+     - `Orchestration.Retry_on` sets the project default:
+       - `TRANSIENT` (the default) retries only transient failures;
+       - `TRANSIENT_AND_UNKNOWN` also retries unclassified ones;
+       - `ANY` keeps today's behaviour.
+     - The task parameter `RETRY_ON` overrides it per task.
+     - `validate` refuses other values, naming the task and the allowed values.
+  4. **Record.**
+     - Each failed attempt records:
+       - `FAILURE_CLASS`;
+       - `FAILURE_SOURCE`: the driver's exception class, or etl-craft's error class;
+       - `FAILURE_CODE`: the SQLSTATE or driver code, when there is one;
+       - `RETRYABLE`, derived from the class and the task's `RETRY_ON`.
+     - The new columns ship as a migration in both Engine DB dialects. Existing attempts keep
+       `UNKNOWN`.
+     - `explain`, `status --json`, the API and the UI run detail say why an attempt was or was
+       not retried, for example "PERMANENT: ProgrammingError 42P01; RETRY_ON=TRANSIENT".
+- *Tests.*
+  - **Every local warehouse:**
+    - a SQL task with a real syntax error and `RETRIES=3` makes one attempt, recorded
+      `PERMANENT` with the SQLSTATE where the driver gives one;
+    - a dropped connection during the task (sessions ended as in S5.U's outage tests, on
+      PostgreSQL; the closest real equivalent elsewhere) is retried and succeeds.
+  - **The same pair** on Snowflake and Databricks in their cloud suites.
+  - **Driver classes:** per-dialect unit tests build each driver's real exception classes, so
+    a driver upgrade that changes the mapping fails a test.
+  - **`RETRY_ON` behaviour:**
+    - `ANY` retries the permanent error;
+    - `TRANSIENT_AND_UNKNOWN` retries an unclassified script exception;
+    - `TRANSIENT` does not.
+  - **Scripts:** `TransientError` and `PermanentError` from a script.
+  - **Upgrades:** from every released schema.
+  - **S7.P catalog:** a row "retrying a failure that cannot succeed" names these tests.
+- *Done when.*
+  - A failure that cannot succeed is not retried under the default.
+  - A transient one is retried.
+  - Each attempt records why.
+  - `Retry_on` and `RETRY_ON` change the behaviour as documented.
+  - The classification is verified on every supported warehouse.
+
 ### S5.C The PostgreSQL queue and the worker agent
 
 Branch: `feat/pools-worker`. Files: new `worker/` package (layer beside `overseer`),
@@ -3525,7 +3659,7 @@ Keep S6.D as one implementation PR.
 **Goal.** Everything an operator needs is in a web UI. It is for pipeline operations, never
 metadata editing. Its actions match Informatica PowerCenter's Workflow Monitor rather than
 Airflow's constraints: start or stop any pipeline or task, run from a task, recover, restart,
-hold, abort and override (S7.A.2). It adds run views, dbt-docs-style documentation and
+hold, abort and override (S7.A.2). It adds run views, the generated catalog documentation and
 run-health dashboards. Authors change metadata only through
 config files. Access is authenticated and role-based; secrets don't leak; the deployment is
 packaged; compatibility is promised; and a month of real use proves it.

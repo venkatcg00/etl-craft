@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, Connection, Engine
@@ -14,6 +15,7 @@ from sqlalchemy.exc import OperationalError
 from etl_craft.config.auth import POSTGRES_AUTH_FIELDS, engine_for_jdbc_url
 from etl_craft.core.enums import AuthMode
 from etl_craft.core.errors import ConfigurationError, EngineDbError, LockTimeoutError
+from etl_craft.core.outage import OutageBudget
 from etl_craft.core.text import JdbcUrl, parse_jdbc_url, public_url_query
 from etl_craft.dialects import credentials
 from etl_craft.dialects.engine.base import EngineDialect
@@ -23,6 +25,7 @@ if TYPE_CHECKING:
     from etl_craft.config import ConnectionProfile, ConnectorConfig
 
 DEFAULT_PORT = 5432
+C = TypeVar("C")
 
 
 class PostgresEngineDialect(EngineDialect):
@@ -36,17 +39,27 @@ class PostgresEngineDialect(EngineDialect):
         refresh_metadata_triggers(conn)
 
     def build_engine(
-        self, config: ConnectorConfig, profile: ConnectionProfile, **engine_kwargs: Any
+        self,
+        config: ConnectorConfig,
+        profile: ConnectionProfile,
+        *,
+        supervised: bool = False,
+        **engine_kwargs: Any,
     ) -> Engine:
         """Build the engine through psycopg; the password never appears in its URL.
 
         Every new connection authenticates afresh, so a minted credential (``oauth``, ``sts``)
-        is current; pooled connections using one are recycled before it expires.
+        is current; pooled connections using one are recycled before it expires. Once the
+        database has been reached, a refused connection is retried for the outage budget.
         """
         from etl_craft.config import profile_secret
 
         url = parse_postgres_url(profile.jdbc_url)
-        creator = postgres_creator(profile, profile_secret(config, profile), url)
+        creator = riding_out_outages(
+            postgres_creator(profile, profile_secret(config, profile), url),
+            config.limits.engine_db_outage_seconds,
+            reached=supervised,
+        )
         engine_kwargs.setdefault("pool_pre_ping", True)
         if profile.auth_mode in credentials.MINTED_AUTH_MODES:
             engine_kwargs.setdefault(
@@ -160,6 +173,42 @@ def psycopg_auth_kwargs(
         f"auth_mode {auth_mode!r} is not available for PostgreSQL — use one of "
         f"{sorted(POSTGRES_AUTH_FIELDS)}"
     )
+
+
+def riding_out_outages(
+    connect: Callable[[], C],
+    budget_seconds: float,
+    *,
+    reached: bool = False,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> Callable[[], C]:
+    """Retry refused connections within the budget, once the database has been reached.
+
+    A database never reached fails at once, so a wrong URL or password is reported without a
+    wait; ``reached`` says it was reached already, by the supervisor of a task process. Every
+    connection shares one outage, so once its budget is spent the process's other connections
+    fail at once instead of each waiting again.
+    """
+    import psycopg
+
+    outage = OutageBudget(budget_seconds, clock)
+
+    def open_connection() -> C:
+        nonlocal reached
+        while True:
+            try:
+                connection = connect()
+            except psycopg.OperationalError as error:
+                if not reached:
+                    raise
+                sleep(outage.failed("connecting to the Engine DB", error))
+                continue
+            reached = True
+            outage.recovered("connecting to the Engine DB")
+            return connection
+
+    return open_connection
 
 
 def postgres_creator(profile: ConnectionProfile, secret: str, url: JdbcUrl) -> Callable[[], Any]:

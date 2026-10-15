@@ -119,6 +119,26 @@ Reconciliation records expired attempts as `LOST` and stops a local child only a
 its PID and process birth identity. It then releases expired run ownership and resumes the
 same pipeline and task run, preserving successful or skipped tasks and earlier attempts.
 
+## Engine DB restarts and failovers
+
+On a PostgreSQL Engine DB, the server, its runs and their task processes wait out a restart or
+managed failover of up to `Orchestration.Engine_db_outage_seconds` (default 120):
+
+- Refused connections are retried once a process has reached the Engine DB. A database that was
+  never reached, such as one with a wrong URL or password, fails at once.
+- A run's step, a lease heartbeat or the overseer's loop that loses its connection mid-statement
+  is repeated when the Engine DB answers again. Each repeats from the recorded state.
+- The server's session lock ends with its connection. After reconnecting, the server takes the
+  lock again before supervising anything. If another server took it meanwhile, this one stops
+  and says which overseer is active.
+- Task ownership leases last 60 seconds and are renewed every 15. An outage that outlasts a
+  lease cannot be renewed through. The attempt is reconciled `LOST` and retried under its
+  task's retry settings, like any other lost attempt.
+
+Past the budget, the server fails with the length of the outage and the setting's name. Restart
+it once the Engine DB is back, or raise the setting for longer failovers. A SQLite Engine DB is
+a local file and has no such outages.
+
 ## Shutdown
 
 SIGTERM or Ctrl-C immediately stops new dispatch. Tasks already running may finish within

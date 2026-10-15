@@ -57,7 +57,6 @@
       "src/etl_craft/handlers/sql/__init__.py": 1,
       "src/etl_craft/handlers/sql/spec.py": 2,
       "src/etl_craft/overseer/schedules.py": 3,
-      "src/etl_craft/overseer/server.py": 5,
       "src/etl_craft/services/config_files.py": 12,
       "src/etl_craft/services/upgrade_targets.py": 20
     },
@@ -96,7 +95,6 @@
       "src/etl_craft/execution/pipeline.py": 12,
       "src/etl_craft/execution/runner.py": 2,
       "src/etl_craft/execution/scheduler.py": 7,
-      "src/etl_craft/overseer/server.py": 4,
       "src/etl_craft/services/config_files.py": 7,
       "src/etl_craft/services/upgrade_targets.py": 16
     },
@@ -161,7 +159,6 @@
       "src/etl_craft/handlers/sql/actions.py": 2,
       "src/etl_craft/handlers/sql/spec.py": 3,
       "src/etl_craft/overseer/schedules.py": 3,
-      "src/etl_craft/overseer/server.py": 15,
       "src/etl_craft/services/catalog.py": 31,
       "src/etl_craft/services/config_files.py": 27,
       "src/etl_craft/services/lineage.py": 35,
@@ -189,7 +186,7 @@
       "src/etl_craft/services/validate.py": 1
     },
     "module-lines": {
-      "src/etl_craft/config/loader.py": 295,
+      "src/etl_craft/config/loader.py": 294,
       "src/etl_craft/engine/transitions.py": 150,
       "src/etl_craft/execution/pipeline.py": 513,
       "src/etl_craft/execution/runner.py": 196,
@@ -213,7 +210,6 @@
       "src/etl_craft/execution/events.py": 15,
       "src/etl_craft/execution/pipeline.py": 38,
       "src/etl_craft/execution/scheduler.py": 14,
-      "src/etl_craft/overseer/server.py": 18,
       "src/etl_craft/services/catalog.py": 9,
       "src/etl_craft/services/upgrade_targets.py": 41
     },

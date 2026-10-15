@@ -164,7 +164,14 @@ B65 = [
 # S7.P's obvious-failure catalog (docs/development/road-to-1.0.0.md). Each row names the tests
 # that prove its 1.0.0 behaviour, or "open: <item>" for the unfinished item that owns it.
 [obvious_failures]
-engine-db-restart = "open: S5.U"
+engine-db-restart = [
+    "tests/integration/overseer/test_server.py::test_server_and_its_attempt_ride_out_an_engine_db_outage",
+    "tests/integration/overseer/test_server.py::test_an_outage_longer_than_its_budget_stops_the_server_naming_the_setting",
+    "tests/integration/overseer/test_server.py::test_a_leader_whose_connection_dropped_takes_its_lock_again",
+    "tests/integration/overseer/test_server.py::test_a_leader_whose_lock_was_taken_meanwhile_stops",
+    "tests/unit/test_engine_db_outage.py::test_a_reached_database_is_waited_for_until_it_answers",
+    "tests/unit/test_engine_db_outage.py::test_a_database_never_reached_fails_at_once",
+]
 warehouse-connection-drop = [
     "tests/integration/warehouse/test_sql_appends.py::test_a_dropped_warehouse_connection_fails_retryable_and_the_retry_loads_once",
     "tests/integration/warehouse/test_sql_appends.py::test_killed_append_converges_when_retried",
@@ -221,6 +228,7 @@ hung-task = [
 sla-breach-write-fails = "open: S5.U"
 engine-db-growth = "open: S6.A"
 worker-cut-off-or-clock-skew = "open: S5.C"
+retry-that-cannot-succeed = "open: S5.W"
 upgrade-from-0x = [
     "tests/integration/engine/test_upgrade.py::test_an_earlier_engine_db_upgrades_to_the_current_schema",
 ]

@@ -2,9 +2,12 @@
 
 import signal
 import sys
+import threading
 import time
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 
+import psycopg
 import pytest
 import yaml
 from sqlalchemy import text
@@ -15,6 +18,7 @@ from etl_craft.engine.repository import overseers
 from etl_craft.overseer.leadership import leadership
 from etl_craft.overseer.server import WorkingSet
 from etl_craft.services.operations import OperationContext
+from fixtures.engine_db import postgres_admin
 from fixtures.metadata import add_pipeline, add_task, start_run
 
 
@@ -270,3 +274,111 @@ def test_operator_cancellation_takes_precedence_over_shutdown_resume(cli_project
     server.signal(signal.SIGTERM)
     assert server.wait() == 0, server.output
     assert "P: pipeline_run_id=1 CANCELLED" in server.output
+
+
+POSTGRES_ONLY = pytest.mark.parametrize(
+    "empty_engine_db",
+    [pytest.param("postgresql", marks=pytest.mark.engine_postgres)],
+    indirect=True,
+)
+
+
+@contextmanager
+def engine_db_cut_off(engine):
+    """Refuse new connections to this test's database and end its sessions, as a restart does."""
+    name = psycopg.sql.Identifier(engine.url.database)
+    with postgres_admin() as admin:
+        admin.execute(psycopg.sql.SQL("ALTER DATABASE {} ALLOW_CONNECTIONS false").format(name))
+        admin.execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "WHERE datname = %s AND pid <> pg_backend_pid()",
+            (engine.url.database,),
+        )
+        try:
+            yield
+        finally:
+            admin.execute(psycopg.sql.SQL("ALTER DATABASE {} ALLOW_CONNECTIONS true").format(name))
+
+
+def wait_for_output(command, text_, timeout=15):
+    deadline = time.monotonic() + timeout
+    while text_ not in command.output:
+        assert time.monotonic() < deadline, f"{text_!r} never appeared:\n{command.output}"
+        time.sleep(0.05)
+
+
+def released_script(project):
+    (project.config.ingestion_scripts_dir / "load.py").write_text(
+        "from pathlib import Path\nimport time\nfrom etl_craft.scripting import ScriptResult\n"
+        "def run(task):\n    Path('started').write_text('started')\n"
+        "    while not Path('release').exists():\n        time.sleep(0.05)\n"
+        "    return ScriptResult(1)\n"
+    )
+
+
+@POSTGRES_ONLY
+def test_server_and_its_attempt_ride_out_an_engine_db_outage(cli_project):
+    p = cli_project
+    released_script(p)
+    assert p.run("run", "--pipeline_code", "P", "--init-only", "--run-key", "outage")[0] == 0
+    server = p.start("server")
+    started = p.config.project_dir / "started"
+    deadline = time.monotonic() + 15
+    while not started.exists():
+        assert time.monotonic() < deadline, server.output
+        time.sleep(0.02)
+    with engine_db_cut_off(p.engine):
+        wait_for_output(server, "the Engine DB is unavailable")
+        (p.config.project_dir / "release").write_text("go")
+    p.wait_for("SELECT STATUS FROM AUD_PIPELINES_RUN_LOG", expected="SUCCESS", timeout=30)
+    assert server.process.poll() is None, server.output
+    wait_for_output(server, "the Engine DB answers again")
+    with p.engine.connect() as conn:
+        statuses = conn.execute(text("SELECT STATUS FROM AUD_TASK_ATTEMPTS")).scalars().all()
+    assert statuses == ["SUCCESS"]
+    server.signal(signal.SIGTERM)
+    assert server.wait() == 0, server.output
+
+
+@POSTGRES_ONLY
+def test_an_outage_longer_than_its_budget_stops_the_server_naming_the_setting(cli_project):
+    p = cli_project
+    raw = yaml.safe_load(p.config.config_path.read_text())
+    raw["Orchestration"]["Engine_db_outage_seconds"] = 2
+    p.config.config_path.write_text(yaml.safe_dump(raw, sort_keys=False))
+    server = p.start("server")
+    p.wait_for("SELECT COUNT(*) FROM AUD_OVERSEERS", expected=1)
+    with engine_db_cut_off(p.engine):
+        code = server.wait(timeout=60)
+    assert code != 0
+    assert "Orchestration.Engine_db_outage_seconds allows 2s" in server.output
+
+
+@POSTGRES_ONLY
+def test_a_leader_whose_connection_dropped_takes_its_lock_again(engine_db):
+    engine = engine_db.engine
+    with leadership(engine) as leader:
+        before = leader.connection.connection.driver_connection.info.backend_pid
+        with postgres_admin() as admin:
+            admin.execute("SELECT pg_terminate_backend(%s)", (before,))
+        leader.wait(threading.Event())
+        assert leader.connection.connection.driver_connection.info.backend_pid != before
+        with (
+            pytest.raises(RunRefusedError, match="stop it before starting a server"),
+            leadership(engine),
+        ):
+            pytest.fail("second leader entered")
+
+
+@POSTGRES_ONLY
+def test_a_leader_whose_lock_was_taken_meanwhile_stops(engine_db):
+    engine = engine_db.engine
+    with leadership(engine) as leader:
+        pid = leader.connection.connection.driver_connection.info.backend_pid
+        with postgres_admin() as admin:
+            admin.execute("SELECT pg_terminate_backend(%s)", (pid,))
+        with (
+            leadership(engine),
+            pytest.raises(RunRefusedError, match="took over while this server's Engine DB"),
+        ):
+            leader.wait(threading.Event())

@@ -1,12 +1,14 @@
 ---
 name: pre-pr-checks
-description: Run etl-craft's validation before a pull request - make check docs, other Pythons and repeated races, the installed-wheel demos, Airflow contracts, actionlint, live-cloud acceptance when warehouse SQL changes, and a self-review of the diff. Use before opening a PR, when asked to check the state of a branch, or to run all the tests.
+description: Run etl-craft's validation before a pull request - make static docs, the tests for the code the change touches, repeated races for concurrency changes, Airflow contracts, actionlint, the installed-wheel demos for packaging changes, live-cloud acceptance when warehouse SQL changes, and a self-review of the diff. CI runs the complete suite in under ten minutes. Use before opening a PR or when asked to check the state of a branch.
 ---
 
 # Pre-PR checks
 
 Open the pull request only after every step that applies has finished green (`AGENTS.md`,
-"Validation"). Keep logs in a scratch directory outside the repository:
+"Validation"). CI then runs the complete suite, every matrix combination and the installed-wheel
+demos in under ten minutes, and is their authority: do not repeat that locally. Keep logs in a
+scratch directory outside the repository:
 
 ```bash
 SCRATCH="$(mktemp -d)"
@@ -28,18 +30,18 @@ systemd-run --user --scope --quiet -- \
 | Step | When | Takes |
 |---|---|---|
 | 0. Sweep removed names | a public name, field or setting was renamed or removed | seconds |
-| 1. Gate | always | about 25 min with services up |
-| 1b. Other Pythons, repeated races | always; races when concurrency code changed | about a minute |
-| 2. Installed-wheel demos | always (CI also runs them) | about 15 min |
+| 1. Static checks and touched tests | always | a few minutes |
+| 1b. Repeated races | concurrency code changed | a few minutes |
+| 2. Installed-wheel demos | packaging, `examples/demo/` or CLI installation changed | about 15 min |
 | 3. Airflow contracts | `integrations/airflow/`, YAML export or `scripts/export_airflow_contracts.py` changed | a few min per version |
 | 4. actionlint | `.github/workflows/` changed | seconds |
 | 5. Cloud tests | Snowflake or Databricks code changed, or the SQL every warehouse runs | about 15 min for the affected tests |
 | 6. Self-review | always | |
 
-The local services must be up for steps 1 and 2: `docker ps` lists the `etl-craft-*` containers
-as healthy; otherwise run `make services-up`. Without Docker (a cloud agent sandbox), run step 1
-anyway. The service tests skip, and CI runs them on the pull request. Say so in the pull
-request's Validation section.
+The local services must be up for the touched tests and step 2: `docker ps` lists the
+`etl-craft-*` containers as healthy; otherwise run `make services-up`. Without Docker (a cloud
+agent sandbox), run step 1 anyway. The service tests skip, and CI runs them on the pull request.
+Say so in the pull request's Validation section.
 
 ## 0. Sweep removed names
 
@@ -57,47 +59,44 @@ rg -n --hidden -g '!.git' -g '!.venv' -g '!site' -g '!dist' -g '!docs/developmen
 `tests/acceptance/cloud/`: search it too for the behaviour you change, and run the cloud tests
 that use it (step 5).
 
-## 1. Gate
+## 1. Static checks and touched tests
 
 ```bash
-make check docs > "$SCRATCH/check.log" 2>&1; echo "exit $?"
+make static docs > "$SCRATCH/static.log" 2>&1; echo "exit $?"
 ```
 
-`make check` runs these, in order:
+`make static` runs everything in `make check` except the test suite:
 - ruff lint and format check;
 - `mypy --strict`;
 - `lint-imports`;
 - the history gate;
 - the regression map;
-- the quality baseline (`make quality`);
-- the tests with coverage of at least 90%.
+- the quality baseline (`make quality`).
 
 When the quality baseline fails, fix the code; after an improvement, run
 `make quality-baseline` and commit the file (`AGENTS.md`, "The quality baseline").
 
 `make docs` builds the site strictly.
 
-Never set `ETL_CRAFT_REQUIRE_SERVICES=1` for this run. About 90 tests skip by design: the cloud
-suites without credentials, and the wheel demos without a wheel. The variable turns every one of
-those skips into a failure. Expect `N passed, ~90 skipped` with the services up. Any `FAILED` or
-`ERROR` line is real.
-
-## 1b. Other Pythons and repeated races
-
-The gate runs the project's Python only; CI also runs 3.12 and 3.13, on Linux and macOS. Run the
-unit tests on the other versions in scratch environments (a plain `uv run --python` would
-rebuild the project `.venv`):
+Then run the tests for the code the change touches: the test files of the modules you changed,
+the tests that import them (`git grep`), and the new tests. Include their service-backed cases,
+with the services up:
 
 ```bash
-for v in 3.12 3.13; do
-  UV_PROJECT_ENVIRONMENT="$SCRATCH/venv-$v" uv run --python "$v" --all-groups -q \
-    pytest -q -p no:cacheprovider -m unit tests/unit
-done
+uv run pytest -q -p no:cacheprovider tests/unit/test_x.py tests/integration/y/ \
+  > "$SCRATCH/touched.log" 2>&1; echo "exit $?"
 ```
 
-A race shows up on CI's slower runners long before it shows up on a fast workstation. When a
-change touches concurrent code (run creation, leases, locks, ROW_ID allocation, gates), run its
-tests 20 times:
+Never set `ETL_CRAFT_REQUIRE_SERVICES=1` for a run that includes the cloud suites or the wheel
+demos: their skips by design would turn into failures.
+
+`make check` still runs the complete suite serially (about 25 minutes) when CI is unavailable.
+
+## 1b. Repeated races
+
+CI runs each test once; a race shows up on CI's slower runners long before a fast workstation
+sees it. When a change touches concurrent code (run creation, leases, locks, ROW_ID allocation,
+gates, Engine DB outages), run its tests 20 times:
 
 ```bash
 for i in $(seq 20); do
@@ -105,9 +104,13 @@ for i in $(seq 20); do
 done
 ```
 
-macOS has no local equivalent; read a macOS-only CI failure before rerunning it.
+CI runs Python 3.12 and 3.13 on Linux and macOS. Read a version- or macOS-only CI failure before
+rerunning it.
 
 ## 2. Installed-wheel demos
+
+Run them locally only when packaging, `examples/demo/` or CLI installation changed; CI runs them
+on every pull request.
 
 ```bash
 uv build --out-dir "$SCRATCH/dist"      # wheel and sdist together; ./dist stays untouched
@@ -224,7 +227,7 @@ CI's **every test and matrix accounted for** check is required alongside the ind
 It verifies complete collection/outcome artifacts and combines coverage for each Python/platform
 pair at the unchanged 90% threshold. A passing partition alone is not a complete suite result.
 Use the `ci-*` artifacts for shard failures; do not bypass the final check when an artifact or
-matrix job is missing. Local `make check docs` and installed-wheel validation remain unchanged.
+matrix job is missing.
 
 For each step, give the passed, failed and skipped counts, the coverage, the duration and the log
 path. Report a failure caused by the environment (missing credentials, services down, no wheel)

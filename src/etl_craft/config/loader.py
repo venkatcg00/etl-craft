@@ -81,6 +81,7 @@ _ORCHESTRATION_KEYS = frozenset(
         "Task_timeout_seconds",
         "Max_parallel_tasks",
         "Shutdown_grace_seconds",
+        "Engine_db_outage_seconds",
         "Local_ingestion_slots",
         "Local_warehouse_slots",
         "Timezone",
@@ -640,20 +641,18 @@ def _string_list(settings: _Profiled, key: str, path: Path) -> list[str] | None:
 
 def _parse_limits(settings: _Profiled, path: Path) -> ExecutionLimits:
     defaults = ExecutionLimits()
+
+    def number(key: str, *, low: int = 0) -> int:
+        """``Orchestration.<key>``, defaulting to the limit field of the same lowercase name."""
+        return int(_whole_number(settings, key, getattr(defaults, key.lower()), path, minimum=low))
+
     return ExecutionLimits(
-        task_timeout_seconds=_whole_number(
-            settings, "Task_timeout_seconds", defaults.task_timeout_seconds, path
-        ),
-        max_parallel_tasks=_whole_number(
-            settings, "Max_parallel_tasks", defaults.max_parallel_tasks, path, minimum=1
-        ),
-        shutdown_grace_seconds=_whole_number(
-            settings, "Shutdown_grace_seconds", defaults.shutdown_grace_seconds, path
-        ),
+        task_timeout_seconds=number("Task_timeout_seconds"),
+        max_parallel_tasks=number("Max_parallel_tasks", low=1),
+        shutdown_grace_seconds=number("Shutdown_grace_seconds"),
+        engine_db_outage_seconds=number("Engine_db_outage_seconds"),
         enforce_sla=_flag(settings, "Enforce_sla", False, path),
-        gate_wait_minutes=_whole_number(
-            settings, "Gate_wait_minutes", defaults.gate_wait_minutes, path
-        ),
+        gate_wait_minutes=number("Gate_wait_minutes"),
         local_ingestion_slots=_whole_number(
             settings, "Local_ingestion_slots", None, path, minimum=1
         ),

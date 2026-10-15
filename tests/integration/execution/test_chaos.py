@@ -250,6 +250,8 @@ def test_postgres_outage_fences_the_supervisor_and_recovers(cli_project, monkeyp
     project = cli_project
     install_writer(project, hold=True)
     monkeypatch.setattr(leases, "HEARTBEAT_SECONDS", 0.1)
+    # The outage outlasts the lease, so the supervisor cannot renew through it and is fenced.
+    monkeypatch.setattr(leases, "LEASE_SECONDS", 2)
     service = require("postgres")
     database = project.engine.url.database
 

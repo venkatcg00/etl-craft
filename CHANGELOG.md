@@ -8,6 +8,17 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- A PostgreSQL Engine DB restart or managed failover no longer stops etl-craft. A process that
+  has reached the Engine DB waits up to `Orchestration.Engine_db_outage_seconds` (default 120;
+  0 fails at once) for it to answer again:
+  - refused connections are retried;
+  - a run's scheduler step, a lease heartbeat and the server loop repeat a dropped statement;
+  - the server takes its leadership lock again before supervising, and stops if another server
+    took it.
+
+  A database never reached still fails at once. Past the budget, the error names the outage's
+  length and the setting.
+
 - Catalog generation bulk-loads task parameters, lineage caches and shown-run interventions,
   bounds history/consumption to the displayed runs, and separates scheduled, backfill, repair
   and other logical-run KPIs. Migration `0032` adds indexed recent-history reads on both Engine

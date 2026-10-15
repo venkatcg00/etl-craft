@@ -211,7 +211,8 @@ it. Never copy it, and never import another module's `_private` name.
 
 1. The item's "Done when" is met. Each point appears checked in the pull request.
 2. Tests at the right level exist, carry their markers and fail on the old code.
-3. `make check docs` passes, and so do the suites the change touches (see Validation).
+3. `make static docs` and the tests the change touches pass locally, and CI passes the complete
+   suite (see Validation).
 4. User-facing behaviour (commands, `craft-connector.yml`, config files, JSON, exit codes,
    Python API) is in `CHANGELOG.md` under `[Unreleased]`, in the docs pages, and in
    `docs/examples/` and `examples/demo/` where they show it.
@@ -226,15 +227,20 @@ Follow `.agents/skills/pre-pr-checks/SKILL.md`. In short:
 
 ```bash
 make sync                 # dependencies: once, and after uv.lock changes
-make check                # ruff, format, mypy --strict, lint-imports, history, regressions,
-                          # quality baseline, tests with coverage >= 90%
+make static               # ruff, format, mypy --strict, lint-imports, history, regressions,
+                          # quality baseline: every check except the test suite
 make docs                 # strict documentation build
 make services-up          # local PostgreSQL, MinIO, Iceberg REST, Trino, Mailpit (Docker)
 ```
 
-- **Coverage gaps:** `make check` skips the service-backed and installed-wheel suites when their
-  services or wheel are missing. CI runs them on every pull request and is the authority for
-  them. Run the ones you can and report which ran.
+- **Tests:** locally, run the tests for the code the change touches. CI runs the complete suite,
+  every matrix combination and the installed-wheel demos on every pull request, in under ten
+  minutes, and is the authority for them. `make check` runs the complete suite serially
+  (about 25 minutes) when you need it offline.
+- **Concurrency:** a change to run creation, leases, locks, ROW_ID allocation or gates runs its
+  tests 20 times locally, because CI runs each test once.
+- **CI time:** required pull-request CI stays under ten minutes. A change that would take it
+  over is a stop-and-ask.
 - **Cloud suites:** CI never runs the Databricks and Snowflake suites. A change to their dialects
   or to SQL every warehouse runs needs them (see the skill). If you cannot run them, say so and
   leave the pull request unmerged for the owner.

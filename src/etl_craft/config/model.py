@@ -195,6 +195,9 @@ class ExecutionLimits:
     Python ingestion scripts and ``local_warehouse_slots`` run everything else; unset, each kind
     may use all of ``max_parallel_tasks``.
 
+    A process that has reached the Engine DB waits up to ``engine_db_outage_seconds`` for it to
+    answer again after a restart or failover; 0 fails at the first refused connection.
+
     Every run of a pipeline with ``SLA_IN_HOURS`` is marked ``MET`` or ``BREACHED``. With
     ``enforce_sla`` on, a run that misses its SLA also sends an SLA email, through the Email
     settings.
@@ -205,6 +208,7 @@ class ExecutionLimits:
     enforce_sla: bool = False
     gate_wait_minutes: int = DEFAULT_GATE_WAIT_MINUTES
     shutdown_grace_seconds: int = 60
+    engine_db_outage_seconds: int = 120
     local_ingestion_slots: int | None = None
     local_warehouse_slots: int | None = None
 

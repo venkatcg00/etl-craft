@@ -61,10 +61,19 @@ def for_engine(engine: Engine | Connection) -> EngineDialect:
 
 
 def build_engine(
-    config: ConnectorConfig, profile: ConnectionProfile | None = None, **engine_kwargs: Any
+    config: ConnectorConfig,
+    profile: ConnectionProfile | None = None,
+    *,
+    supervised: bool = False,
+    **engine_kwargs: Any,
 ) -> Engine:
-    """Build a SQLAlchemy engine for ``profile``, by default the active Engine profile."""
+    """Build a SQLAlchemy engine for ``profile``, by default the active Engine profile.
+
+    ``supervised`` is for task processes: see ``EngineDialect.build_engine``.
+    """
     profile = profile or config.engine
-    engine = for_jdbc_url(profile.jdbc_url).build_engine(config, profile, **engine_kwargs)
+    engine = for_jdbc_url(profile.jdbc_url).build_engine(
+        config, profile, supervised=supervised, **engine_kwargs
+    )
     mark_connections(engine)
     return engine

@@ -50,9 +50,18 @@ class EngineDialect(ABC):
 
     @abstractmethod
     def build_engine(
-        self, config: ConnectorConfig, profile: ConnectionProfile, **engine_kwargs: Any
+        self,
+        config: ConnectorConfig,
+        profile: ConnectionProfile,
+        *,
+        supervised: bool = False,
+        **engine_kwargs: Any,
     ) -> Engine:
-        """Build a SQLAlchemy engine for ``profile``, with no secret in its URL."""
+        """Build a SQLAlchemy engine for ``profile``, with no secret in its URL.
+
+        ``supervised`` marks a task process whose supervisor already reached the Engine DB, so
+        an outage at its first connection is waited out like any later one.
+        """
 
     @abstractmethod
     def lock(

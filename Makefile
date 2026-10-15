@@ -1,4 +1,4 @@
-.PHONY: help sync lint format typecheck imports history test coverage check build verify-package clean regressions \
+.PHONY: help sync lint format typecheck imports history test coverage check static build verify-package clean regressions \
 	quality quality-baseline \
 	certs services-up services-down services-reset test-harness suite release-gate \
 	docs docs-serve docs-site
@@ -44,6 +44,8 @@ quality-baseline: ## Rewrite scripts/quality-baseline.json from the code, after 
 	$(UV) run python scripts/check_quality.py --update
 
 check: lint typecheck imports history regressions quality coverage ## Everything CI runs on every pull request
+
+static: lint typecheck imports history regressions quality ## The checks of make check without the test suite
 
 build: ## Build the wheel and sdist into dist/
 	$(UV) build

@@ -48,7 +48,12 @@ class SqliteEngineDialect(EngineDialect):
         refresh_metadata_triggers(conn)
 
     def build_engine(
-        self, config: ConnectorConfig, profile: ConnectionProfile, **engine_kwargs: Any
+        self,
+        config: ConnectorConfig,
+        profile: ConnectionProfile,
+        *,
+        supervised: bool = False,
+        **engine_kwargs: Any,
     ) -> Engine:
         """Build the engine for a ``jdbc:sqlite:`` profile; there is nothing to authenticate."""
         if profile.auth_mode != AuthMode.NONE:
