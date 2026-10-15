@@ -130,13 +130,14 @@ item's text, or work done early under another item.
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
 | S5.T Resource discovery and deployment profiles | Planned | | Opt-in laptop, server and server-with-workers sizing from usable process resources; one discovery module before S5.C |
+| S5.V Team-owned config tables | Planned | | Teams' own `CFG_` tables carry no etl-craft guards, contract, history or config files; etl-craft's tables keep them |
 | S5.U Robustness before the cluster | Planned | | No silent fallbacks in supervision, SLA and cleanup paths; measured coverage of process, leadership and server code; deterministic timing tests |
 | S5.C and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
-| S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` on pipelines chosen by stewards; one pipe-delimited CSV/TXT or XLSX file; mandatory file-validation task before processing |
-| S7.O Package, demo and configuration repositories | Planned | | Package CI tests a package-owned fixture project; the demo and its configuration repository supply release evidence the package gate validates |
+| S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
+| S7.O Package, demo and configuration repositories | Planned | | A very small demo stays in package CI; the Support Insights demo and its configuration repository supply release evidence the package gate validates |
 | S7.N Faster complete pull-request CI | Done | #170 | Fail-closed collection/shard accounting, isolated schema templates and shared demo workers; complete checks in 6m33s-8m15s (owner-approved ten-minute target) |
 | S8.H Support Insights scenario coverage | Planned | | Deterministic mixed-quality generators, every-feature demonstrations, business-rule and stewardship cases, and runnable README coverage |
 
@@ -171,17 +172,34 @@ does not move worker work ahead of the metadata, account or operator-control cor
   - the Support Insights demo (sources, generators, SQL, scripts, dashboards);
   - a configuration repository whose CI applies the demo's `CFG_` CSV files with
     `etl-craft config plan` and `apply`.
-- **The package's CI tests the package only.** Package CI does not run or prove the demo. It
-  validates result evidence that the demo repository publishes for a candidate: S7.O and the
-  revised S8.G.
-- **Stewardship is chosen by pipeline.** A steward picks a stewardable pipeline and uploads one
-  pipe-delimited CSV or TXT file or one XLSX workbook. A mandatory file-validation task runs
-  before anything is processed: the revised S7.M. Demo stewardship covers the `dm` mart and the
-  `ds` reference tables (S8.H item 3).
-- **Order.** The quality and robustness review that same day added S5.R items 7 and 8 and S5.U.
+- **The package's CI tests the package only.** A very small demo stays in the package for its
+  tests. Package CI does not run or prove the Support Insights demo; it validates the result
+  evidence the demo publishes for a candidate (S7.O and the revised S8.G).
+- **Distribution.** The demo installs etl-craft from this repository's GitHub releases.
+  etl-craft goes to PyPI only when 1.0.0 is released and everything is done.
+- **Stewardship is chosen by pipeline** (the revised S7.M).
+  - `CFG_PIPELINES.STEWARDABLE_FLAG` marks a stewardable pipeline. It has no schedule, cannot
+    be run by hand, and runs only from an upload of one file: pipe-delimited CSV or TXT, or
+    XLSX. A steward picks the pipeline from a drop-down.
+  - Its first task is an explicit `FILE_VALIDATION` step running the dev team's own script,
+    which takes input parameters and returns nothing. The handler is allowed only in
+    stewardable pipelines.
+  - `craft-connector.yml` sets a blanket upload size limit for the project, and each
+    pipeline's `FILE_VALIDATION` task may set a lower one.
+  - Demo stewardship covers the `dm` mart and the `ds` reference tables (S8.H item 3).
+- **The UI never edits metadata.** It is for pipeline operations, like Informatica's Workflow
+  Monitor with more: Airflow-style run control, dbt-docs-style documentation and run-health
+  dashboards. Metadata changes only through config files.
+- **Teams own their extra `CFG_` tables** (S5.V). Teams maintain and use their own `CFG_` tables
+  with their own scripts; etl-craft keeps no restrictions on them.
+- **Order.**
+  - The quality and robustness review that same day added S5.R items 7 and 8 and S5.U.
   - S5.U comes after S5.R and before S5.T and S5.C.
+  - S5.V comes after S5.R item 3 and before S7.M.
   - S7.O starts after the frozen 0.4 soak ends.
-  - Neither moves S5.S, S5.O.3 or S5.Q.
+  - None of these moves S5.S, S5.O.3 or S5.Q.
+  - S5.V and S7.M add `validation_scripts/` and `uploads/` to the project directory, and the
+    implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
 
@@ -3074,6 +3092,51 @@ these gaps must close on one machine first.
   - The two task tests pass 50 consecutive runs with every CPU of a CI-sized runner busy.
   - PR CI time stays within S7.N's ten-minute target.
 
+### S5.V Team-owned config tables
+
+Branch: `feat/engine-team-config-tables`. After the frozen 0.4 soak ends and S5.R item 3
+(migration markers), before S7.M.
+
+- *Problem.* Every Engine DB table whose name starts with `CFG_` is treated as etl-craft's:
+  - It must carry the base fields and a single key (S5.O.2a).
+  - It gets the actor guard, which refuses writes that do not come through etl-craft.
+  - It gets history capture.
+  - An upgrade refuses a team table that misses the contract
+    (`docs/guides/configuration-migrations.md`, "Project configuration tables").
+
+  The owner's direction: a dev team may add its own `CFG_` tables and maintain and use them
+  with its own scripts, for example a table of hashed passwords. etl-craft keeps no
+  restrictions on those tables.
+- *Change.*
+  1. etl-craft's own config tables are a fixed list, kept with the Engine DB schema in
+     `dialects/engine/`. Only these tables get the base contract, actor guards, history,
+     `etl-craft config plan`/`apply`/`export`, catalog pages and upgrade checks.
+  2. Any other `CFG_` table is team-owned. etl-craft does not:
+     - install triggers on it or check its fields;
+     - capture its history;
+     - include it in config CSV files;
+     - read, write or document it.
+
+     The team's scripts and project migrations create, change and use it.
+  3. A migration in both dialects removes the guard and history triggers from team tables.
+     Their existing history tables stay as read-only audit records. `AUD_` stays reserved:
+     a team table named `AUD_...` is refused, naming the table and the remedy (rename it).
+  4. A later etl-craft migration that adds a config table whose name a team table already
+     uses fails before any change, naming both and the remedy.
+  5. The implementing pull request narrows `AGENTS.md`'s rule "Every write to the Engine DB
+     goes through etl-craft" to etl-craft's tables, and updates the configuration guides.
+     Credentials and secrets in `craft-connector.yml` keep the variable-name rule. What a
+     team stores in its own tables is the team's responsibility.
+- *Tests.*
+  - A team table accepts plain SQL writes with no actor and records no history.
+  - `config export` omits it.
+  - An upgrade from every released schema succeeds with a team table that lacks the base
+    fields.
+  - etl-craft's tables still refuse outside writes.
+  - An `AUD_` team table and a name collision with a new etl-craft table are both refused.
+- *Done when.* Teams own their `CFG_` tables completely, and etl-craft's guards, history and
+  config files cover exactly its own tables.
+
 ### S5.C The PostgreSQL queue and the worker agent
 
 Branch: `feat/pools-worker`. Files: new `worker/` package (layer beside `overseer`),
@@ -3406,9 +3469,11 @@ Keep S6.D as one implementation PR.
 
 ## Releases 0.7 to 0.9: UI and finish
 
-**Goal.** Everything an operator and an author need is in a web UI; access is authenticated and
-role-based; secrets don't leak; the deployment is packaged; compatibility is promised; and a month
-of real use proves it.
+**Goal.** Everything an operator needs is in a web UI. It is for pipeline operations, never
+metadata editing: Informatica Workflow Monitor-style controls, Airflow-style run views,
+dbt-docs-style documentation and run-health dashboards. Authors change metadata only through
+config files. Access is authenticated and role-based; secrets don't leak; the deployment is
+packaged; compatibility is promised; and a month of real use proves it.
 
 **Depends on.** 0.6. These workstreams can run in parallel; cut 0.7, 0.8 and 0.9 as they land.
 
@@ -3445,7 +3510,7 @@ restrictions. Browser tests must exercise the operations, not merely check visib
   - Workers and pools: capacity, slots in use, queue, heartbeats.
   - Catalog: today's lineage, tables, rules and scripts pages, linked from runs.
   - Metadata: a read-only view of `CFG_` rows (pipelines, tasks, parameters, dependencies,
-    rules, upload contracts), with each row's actor, history and `validate` findings, and a link
+    rules, stewardable pipelines and steward assignments), with each row's actor, history and `validate` findings, and a link
     to its CSV file in the configuration repository. The UI does not edit metadata. Changes
     are made in the config files and deployed by `etl-craft config apply`, so the UI and the
     reviewed files cannot drift apart.
@@ -3465,67 +3530,76 @@ after S5.S (accounts and roles) and S5.O.3 (protection of human writes).
   who load them by hand. Nobody records who supplied the data, and every correction waits on a
   developer.
 - *Who owns what.*
-  - The dev team owns the stewardable pipelines and their upload contracts: which pipelines
-    accept files, the file's columns, types and key, and what the pipeline does with them. All
-    of it changes only through the project's config files, reviewed like any other change.
+  - The dev team owns the stewardable pipelines, their file-validation scripts and what the
+    pipelines do with an accepted file. All of it changes only through the project's config
+    files and repository, reviewed like any other change.
   - Stewards own the data. They upload files to the pipelines they are assigned to, and
     nothing else.
 - *Change.*
   1. **Stewardable pipelines** (config files; the `developer` role).
-     - `CFG_PIPELINES` gains `STEWARDABLE_FLAG` (`Y`/`N`, default `N`), which marks the
-       pipelines stewards may upload to. Each stewardable pipeline takes exactly one file per
-       upload. A migration adds the column in both dialects with `N` for existing pipelines.
-       - `validate` refuses `Y` without exactly one active contract row.
-       - It refuses a contract row on a pipeline marked `N`.
-     - `CFG_UPLOAD_CONTRACTS` describes the file a stewardable pipeline takes, with the common
-       config fields from S5.O.2a:
-       - `UPLOAD_CONTRACT_ID`;
-       - `PIPELINE_ID`, unique among active rows: one contract per stewardable pipeline;
-       - `TABLE_ID`: the landing table's contract in `CFG_TABLES` and `CFG_COLUMNS` (S5.O.2b),
-         which gives the columns, types, nullability and key;
-       - `FILE_FORMAT`:
-         - `CSV` or `TXT`: delimited text, always separated by a pipe (`|`). Quoting follows
-           RFC 4180 with `|` as the separator. There is no delimiter setting; a comma- or
-           tab-separated file fails validation and the message names the expected separator;
-         - `XLSX`: an Excel workbook, read from the sheet in `SHEET_NAME`, or from the first
-           sheet when `SHEET_NAME` is empty;
-       - `ENCODING` for text files (default UTF-8);
-       - `REJECT_LIMIT`: as in S5.K;
-       - `ACTIVE_FLAG`.
-
-       Every format needs a header row whose names match the contract's columns.
-       - Macro-enabled workbooks (`.xlsm`) and the legacy `.xls` format are refused.
-       - A formula cell is read as the value saved with the workbook. A cell saved without a
-         value is a validation error naming the sheet and cell.
-       - Reading `XLSX` uses `openpyxl` in the optional `excel` extra, not a core dependency.
-         Without the extra, an `XLSX` contract fails `validate` and every upload to it, with
-         the remedy `pip install etl-craft[excel]`.
-     - **A mandatory file-validation task.** A new `FILE_VALIDATION` handler (`core.enums`)
-       validates the uploaded file against the contract before anything is processed.
-       - `validate` refuses a stewardable pipeline unless it has exactly one `FILE_VALIDATION`
-         task, that task is the pipeline's only root, and every other task depends on it,
-         directly or through others, with `SUCCESS`.
-       - `validate` also refuses a `FILE_VALIDATION` task in a pipeline whose
-         `STEWARDABLE_FLAG` is `N`.
-     - A stewardable pipeline runs only from an upload. It has no schedule, and `run` without
-       an upload is refused, naming the pipeline and the remedy. Retries and reruns reuse the
-       run's stored upload.
+     - `CFG_PIPELINES` gains `STEWARDABLE_FLAG` (`Y`/`N`, default `N`). A migration adds it in
+       both dialects with `N` for existing pipelines.
+     - A stewardable pipeline takes exactly one file per upload and runs only from an upload:
+       - `validate` refuses a schedule on it;
+       - `run`, the API and the UI refuse to start it any other way, naming the pipeline and
+         the remedy (upload a file);
+       - automatic retries and operator reruns of an upload's run reuse that upload's stored
+         file.
      - `CFG_UPLOAD_STEWARDS` assigns accounts to stewardable pipelines, and only an admin
        assigns.
      - The `steward` role sits between `viewer` and `operator`. An upload needs both the role
        and an assignment to the pipeline; no other role implies an assignment.
-     - A contract may land data for any table the pipeline writes. In the demo these are the
-       `dm` mart's SCD2 fact and the `ds` reference tables (S8.H item 3).
-  2. **Uploading.** One service sits behind `etl-craft upload --pipeline_code P FILE`,
+  2. **The `FILE_VALIDATION` task**: a supported handler (`core.enums`), allowed only in
+     stewardable pipelines.
+     - `validate` refuses a stewardable pipeline unless:
+       - it has exactly one `FILE_VALIDATION` task;
+       - that task is the pipeline's only root;
+       - every other task depends on it, directly or through others, with `SUCCESS`.
+     - `validate` refuses the handler in any pipeline whose `STEWARDABLE_FLAG` is `N`.
+     - **Task parameters:**
+       - `SCRIPT_NAME`: the dev team's validation script, a path inside the project's
+         `validation_scripts/` folder. Each stewardable pipeline has its own;
+       - `FILE_FORMAT`: `CSV` or `TXT` (delimited text, always separated by a pipe `|`, with
+         RFC 4180 quoting; there is no delimiter setting), or `XLSX` (an Excel workbook);
+       - `SHEET_NAME`, for `XLSX` (the first sheet when empty);
+       - `ENCODING`, for text (default UTF-8);
+       - `MAX_FILE_MB`: this pipeline's limit. `validate` refuses a value above the blanket
+         limit in `craft-connector.yml`, and an unset value uses the blanket limit;
+       - `INPUT_PARAMS`: optional JSON, as for ingestion scripts.
+     - **The engine checks before the script runs:**
+       - the file's size against `MAX_FILE_MB`;
+       - its extension against `FILE_FORMAT`;
+       - its type by content;
+       - that `.xls`, `.xlsm` and a file whose content does not match its type are refused;
+       - that `XLSX` has the optional `excel` extra (`openpyxl`, not a core dependency);
+         without it the task fails with the remedy `pip install etl-craft[excel]`.
+     - **The script** defines `validate(task: ValidationTask) -> None`.
+       - **Inputs.** `ValidationTask` gives it:
+         - the upload: id, file name, size, SHA-256 and uploader;
+         - the task's parameters and `INPUT_PARAMS`;
+         - a reader for the file. The reader applies the pipe separator, quoting and encoding,
+           or the sheet; reads a formula cell as its saved value; and raises naming the sheet
+           and cell when a value was not saved;
+         - a logger.
+
+         It gives no warehouse connection.
+       - **No outputs.** Returning normally accepts the file. Raising refuses it with the
+         script's message, which should name the row or cell, the value found, what was
+         expected and the remedy. Returning anything other than `None` fails the task as a
+         script defect.
+     - A refused file fails the task, so no downstream task runs. The downstream tasks the dev
+       team writes (ingestion scripts reading `task.upload`, then SQL actions) land and
+       process the accepted file. In the demo, these are the `dm` mart and the `ds` reference
+       tables (S8.H item 3).
+  3. **Uploading.** One service sits behind `etl-craft upload --pipeline_code P FILE`,
      `POST /api/v1/uploads` and the S7.A Uploads page.
      - **The page.** The steward chooses the pipeline from a drop-down listing only the active
        stewardable pipelines they are assigned to, picks one file and submits.
      - **Before a run starts,** the service refuses and records the upload when:
        - the uploader is not signed in (S5.S) or not assigned to the pipeline;
        - the request carries anything other than exactly one file;
-       - the file's extension does not match the contract's `FILE_FORMAT`;
-       - the file is larger than the server's `uploads.max_file_mb` (`craft-connector.yml`,
-         default 50);
+       - the file is larger than the blanket `uploads.max_file_mb` in `craft-connector.yml`
+         (default 50), which applies to every pipeline of the project;
        - the file is identical (same SHA-256) to one already loaded for the pipeline; the
          message names the earlier upload;
        - the pipeline already has a run in progress; the message names that run and its
@@ -3533,67 +3607,56 @@ after S5.S (accounts and roles) and S5.O.3 (protection of human writes).
 
        Otherwise the original file is kept under the project's `uploads/` directory by upload
        id, and the pipeline starts at once as a run requested by the uploader, with the upload
-       as its input (`$$upload_id` for SQL tasks, `task.upload` for ingestion scripts).
-     - **The `FILE_VALIDATION` task** runs first and checks:
-       - the file type by content, not only its extension;
-       - the separator, the encoding, the header names, required columns, types and key
-         uniqueness within the file.
-
-       A structural problem fails the task, so no downstream task runs. Structural problems
-       are a wrong separator, a wrong or missing column, an undecodable file, or a file whose
-       content does not match its type. The message names the column or cell, the value
-       found, what was expected and the remedy.
-
-       Rows that fail a type or constraint check go to S5.K's rejects, up to `REJECT_LIMIT`.
-       Over the limit, the task fails. Accepted rows land in the contract's landing table in
-       the task's transaction; the downstream tasks then process them.
+       as its input (`$$upload_id` for SQL tasks, `task.upload` for scripts).
      - The run's writer is the uploader (S5.S). Every row it inserts or updates in project
        tables carries the uploader's account in `CREATED_BY` and `UPDATED_BY`. On protected
        SCD tables these are human writes under S5.O.3's locks.
-  3. **Record.**
+  4. **Record.**
      - `AUD_UPLOADS` holds:
-       - `UPLOAD_ID`, the pipeline, the contract and the account;
+       - `UPLOAD_ID`, the pipeline and the account;
        - the file name, SHA-256 and size;
-       - the received, accepted and rejected row counts;
        - `PIPELINE_RUN_ID`;
-       - the status: `REFUSED` (before a run, or by the validation task, with the reasons),
-         `LOADED`, or `FAILED` with the run's outcome;
+       - the status: `REFUSED` (before a run, or by the `FILE_VALIDATION` task, with the
+         reason), `LOADED`, or `FAILED` with the run's outcome;
        - the times.
      - Stored files follow S6.A retention.
-  4. **Feedback.** The uploader sees the outcome, the validation failures or rejected rows with
-     their reasons, and the run's status, in the CLI output, the API response and the UI page.
-     `etl-craft uploads --pipeline_code P` lists the history.
+  5. **Feedback.** The uploader sees the outcome, the validation message and the run's status,
+     in the CLI output, the API response and the UI page. `etl-craft uploads --pipeline_code P`
+     lists the history.
 - *Tests.*
   - Access: assigned and unassigned accounts; accounts without the `steward` role; the
     drop-down lists only assigned, active stewardable pipelines.
   - Configuration: `validate` refuses:
-    - `STEWARDABLE_FLAG = 'Y'` without a contract;
-    - a contract on a pipeline marked `N`;
+    - a schedule on a stewardable pipeline;
     - a stewardable pipeline without a root `FILE_VALIDATION` task, with a second root, or
       with a task that does not depend on it;
-    - the handler in a pipeline that is not stewardable.
-  - Requests: zero and two files; an oversized file; a duplicate file; an upload while the
-    pipeline is running; a scheduled or plain `run` of a stewardable pipeline.
+    - the handler in a pipeline marked `N`;
+    - `MAX_FILE_MB` above the blanket limit.
+  - Starting: `run`, the API and the UI refuse a stewardable pipeline without an upload;
+    retries and reruns reuse the stored file.
+  - Requests: zero and two files; files over the blanket limit and over the pipeline's limit;
+    a duplicate file; an upload while the pipeline is running.
   - Formats:
     - pipe-delimited CSV and TXT, including quoted pipes;
-    - comma- and tab-separated files refused by name;
     - XLSX on a named and a default sheet;
-    - `.xls`, `.xlsm` and a file whose content does not match its type, all refused;
+    - `.xls`, `.xlsm` and a mismatched type, all refused;
     - formula cells with and without saved values;
     - non-UTF-8 encodings;
-    - an `XLSX` contract on an install without the `excel` extra.
-  - Validation: structural failures stop the run before any downstream task; row rejects and
-    the limit; a retry reuses the stored upload.
+    - `XLSX` without the `excel` extra.
+  - Scripts: one that accepts, one that raises, and one that returns a value. A refused file
+    stops the run before any downstream task.
   - Attribution: the uploader on every written row on all four local warehouses, for an SCD2
     target and an SCD1 or ordinary target; uploaded rows protected on SCD tables.
   - The same service through the CLI and the API.
 - *Done when.*
   - A steward assigned to a stewardable pipeline chooses it, uploads one file, and sees it
-    loaded, or refused with reasons before any data is processed. Nobody else can upload to
-    that pipeline.
-  - No stewardable pipeline can process a file that its `FILE_VALIDATION` task did not accept.
+    loaded, or refused with the validation script's reason before any data is processed.
+    Nobody else can upload to that pipeline.
+  - No stewardable pipeline runs on a schedule, starts without an upload, or processes a file
+    its `FILE_VALIDATION` script did not accept.
   - Every row an upload writes carries the uploader's account.
-  - The dev team changes stewardable pipelines and contracts only through config files.
+  - The dev team changes stewardable pipelines and validation scripts only through config
+    files and the project repository.
 
 ### S7.B Users, roles and identities (W10)
 
@@ -3816,7 +3879,7 @@ These timing-acceptance runs are deliberate manual validation, not a new repeate
 
 ### S7.O Package, demo and configuration repositories
 
-Branch: one per slice: `test/e2e-fixture-project`, `docs/demo-repository`,
+Branch: one per slice: `test/e2e-small-demo`, `docs/demo-repository`,
 `feat/release-example-evidence`. Starts after the frozen 0.4 soak ends. Slice 3 comes before
 S8.G.
 
@@ -3833,11 +3896,11 @@ S8.G.
     - the demo;
     - a configuration repository holding the demo's `CFG_` CSV files.
 
-    Package CI tests the package. For the demo, it only validates the result evidence the demo
-    publishes.
+    A very small demo stays in the package for its tests. For the Support Insights demo,
+    package CI only validates the result evidence the demo publishes.
 - *Change.*
-  1. **A package-owned fixture project** (`tests/fixtures/project/`).
-     - It holds the smallest project that exercises what today's installed-wheel tests assert:
+  1. **A very small demo stays** (`examples/demo`, cut down). It is the smallest project that
+     exercises what today's installed-wheel tests assert:
        - each SQL action;
        - an ingestion script with an offset;
        - a business rule;
@@ -3845,21 +3908,20 @@ S8.G.
        - an email alert through Mailpit;
        - server mode.
 
-       It uses no demo domain data.
-     - Repoint `tests/e2e`, the Airflow contract export and `release/README.md` to it. The
-       installed-wheel matrix stays a required PR check, with both Engine DBs, the four local
-       warehouses, pip and uv, and the wheel and sdist (S7.N rule 4).
+       It keeps only the data those checks need.
+     - `tests/e2e`, the Airflow contract export, the Quick Start and `release/README.md` keep
+       using it. The installed-wheel matrix stays a required PR check, with both Engine DBs,
+       the four local warehouses, pip and uv, and the wheel and sdist (S7.N rule 4).
      - The pull request lists every current e2e assertion. Each is either kept as a package
-       contract on the fixture or moved to the demo's S8.F/S8.H checks, with its new location.
-       No package contract is dropped.
-  2. **The demo leaves the package** (after slice 1).
-     - Move `examples/demo` into the Support Insights repository's `etl-craft` branch as its
-       starting point (S8), and delete it here.
-     - Rewrite the Quick Start over a minimal project in `docs/examples/quick-start/`, still
-       run as written by package CI. The README links to the demo repository for the full
-       walkthrough.
-     - The soak (S7.I) runs on the demo deployment. `scripts/soak.py` either takes a project
-       directory or is deleted with the in-repo demo.
+       contract on the small demo or moved to the Support Insights checks (S8.F/S8.H), with its
+       new location. No package contract is dropped.
+  2. **The full demo lives in its own repository** (after slice 1).
+     - Move the Support Insights domain content that slice 1 removed from `examples/demo` into
+       the Support Insights repository's `etl-craft` branch as its starting point (S8).
+     - The Quick Start runs the small demo, as written, in package CI. The README links to the
+       demo repository for the full walkthrough.
+     - The soak (S7.I) runs on the Support Insights deployment. `scripts/soak.py` takes a
+       project directory.
   3. **Release evidence from the demo** (replaces running the demo in S8.G).
      - The demo's acceptance workflow (S8.E) runs against a candidate wheel attached to the
        candidate's GitHub release and pinned by SHA-256. It writes a results manifest:
@@ -3882,9 +3944,9 @@ S8.G.
   - `release_gate.py` refuses each of the bad manifests above and accepts a complete one.
   - The Quick Start test runs the new page as written.
 - *Done when.*
-  - No package workflow, test or script refers to `examples/demo` or the demo repository,
-    except `release/example.toml` and the evidence check.
-  - The installed-wheel matrix still runs every combination on the fixture project.
+  - No package workflow, test or script refers to the Support Insights repository, except
+    `release/example.toml` and the evidence check.
+  - The installed-wheel matrix still runs every combination on the small demo.
   - 1.0.0 cannot be released without demo evidence that matches the release wheel, the pinned
     commits and the complete scenario inventory.
   - S7.N's timing is re-measured in both cache conditions and stays within ten minutes.
@@ -3911,8 +3973,9 @@ candidate is cut, never worked around in the example.
 - **The configuration repository.** It holds the project's `CFG_` CSV files, one per table, and
   the CI that plans and applies them (S8.C).
 
-Both install the candidate wheel attached to the candidate's GitHub release, pinned by SHA-256;
-nothing is published to PyPI before 1.0.0. The etl-craft repository pins both commits in
+Both get etl-craft from this package repository: the candidate wheel attached to the
+candidate's GitHub release, pinned by SHA-256. etl-craft goes to PyPI only when 1.0.0 is
+released and everything is done. The etl-craft repository pins both commits in
 `release/example.toml`. It validates the results manifest the demo publishes (S8.G) and never
 runs the demo itself.
 
@@ -3941,7 +4004,9 @@ Supports-Insights-Docker/
 ├── etl-craft/                        the etl-craft project directory
 │   ├── craft-connector.yml           Engine, Warehouse, Email, Cloning; secrets as variable names
 │   ├── sql_files/                    one SELECT per SQL task, by layer and client
-│   ├── ingestion_scripts/            mongo_to_lnd.py, kafka_to_lnd.py, minio_to_lnd.py, seeds.py
+│   ├── ingestion_scripts/            mongo_to_lnd.py, kafka_to_lnd.py, minio_to_lnd.py, seeds.py,
+│   │                                 steward_to_lnd.py
+│   ├── validation_scripts/           one FILE_VALIDATION script per stewardable pipeline
 │   └── seeds/                        ds and info reference data as CSV
 ├── generators/                       deterministic valid, incomplete, rejectable and reportable cases (S8.H)
 ├── superset/                         dashboards export (re-exported in S8.D)
@@ -3978,10 +4043,12 @@ Every Airflow task maps to an etl-craft task; nothing in the example runs Spark 
 | | `alpha_failure_alert` (depends on every task with `FAILURE`, run condition `ANY`) | EMAIL_ALERT to the team | Airflow failure emails |
 | `SI_CLIENT_BETA` | as Alpha, with `kafka_to_lnd.py` (consumer offsets stored as etl-craft offsets) | | `Client_Beta_ETL_Task_Flow` |
 | `SI_CLIENT_GAMMA` | as Alpha, with `minio_to_lnd.py` (the last processed object key, `{sequence_number:10d}_...`, as a `TEXT` offset) | | `Client_Gamma_ETL_Task_Flow` |
-| `SI_STEWARD_DS_<TABLE>` (stewardable, one per `ds` reference table; runs only from an upload) | `validate_file` | FILE_VALIDATION (S7.M) into the table's landing table | hand-loaded reference corrections |
-| | `steward_to_ds` (depends on `validate_file` with `SUCCESS`) | SQL `SCD1_MERGE` into the `ds` table; `SI_REFERENCE` then carries it to `dwh` | |
-| `SI_STEWARD_DM_FACT` (stewardable; runs only from an upload) | `validate_file` | FILE_VALIDATION into `lnd.steward_customer_support_fact` | hand-corrected mart rows |
-| | `steward_to_dm` (depends on `validate_file` with `SUCCESS`) | SQL `SCD2_MERGE` into `dm.customer_support_fact` as human writes under S5.O.3's locks | |
+| `SI_STEWARD_DS_<TABLE>` (`STEWARDABLE_FLAG = 'Y'`, one per `ds` reference table; no schedule, runs only from an upload) | `validate_file` | FILE_VALIDATION (S7.M) with the table's own script in `validation_scripts/` | hand-loaded reference corrections |
+| | `steward_to_lnd` (depends on `validate_file` with `SUCCESS`) | PYTHON `steward_to_lnd.py`: reads `task.upload` into the table's landing table | |
+| | `steward_to_ds` (depends on `steward_to_lnd`) | SQL `SCD1_MERGE` into the `ds` table; `SI_REFERENCE` then carries it to `dwh` | |
+| `SI_STEWARD_DM_FACT` (`STEWARDABLE_FLAG = 'Y'`; no schedule, runs only from an upload) | `validate_file` | FILE_VALIDATION with the fact's own script | hand-corrected mart rows |
+| | `steward_to_lnd` (depends on `validate_file` with `SUCCESS`) | PYTHON `steward_to_lnd.py` into `lnd.steward_customer_support_fact` | |
+| | `steward_to_dm` (depends on `steward_to_lnd`) | SQL `SCD2_MERGE` into `dm.customer_support_fact` as human writes under S5.O.3's locks | |
 
 Rules for building them:
 
@@ -4002,8 +4069,8 @@ Rules for building them:
 
 The metadata is code, kept in the configuration repository as one CSV file per `CFG_` table and
 merged by key.
-- A change to a pipeline, a rule, a stewardable pipeline's upload contract or a steward
-  assignment is a pull request that edits those files. Retiring a row sets `ACTIVE_FLAG = 'N'`.
+- A change to a pipeline, a rule, a stewardable pipeline or a steward assignment is a pull
+  request that edits those files. Retiring a row sets `ACTIVE_FLAG = 'N'`.
 - On a pull request, CI migrates an empty Engine DB to the candidate's schema, runs
   `etl-craft config plan` and `apply`, and runs `validate` for every pipeline.
 - On merge, CI runs `etl-craft config apply` against the deployed Engine DB through a GitHub
@@ -4125,9 +4192,11 @@ Every slice updates its runnable README walkthroughs and tests in the same examp
      reach `dwh` through `SI_REFERENCE`.
 
    Each takes one pipe-delimited CSV or TXT file or one XLSX workbook, chosen from the Uploads
-   drop-down. Its `FILE_VALIDATION` task refuses bad files before anything is processed: show
-   a wrong separator, a missing column, a bad type, a duplicate key and an over-limit reject
-   count.
+   drop-down. Its own `FILE_VALIDATION` script refuses bad files before anything is processed.
+   Show refusals for:
+   - a wrong separator, a missing column, a bad type and a duplicate key;
+   - a file over the pipeline's size limit and one over the blanket limit;
+   - an attempt to run the pipeline without an upload.
    Demonstrate human inserts, row and value corrections, accurate uploader attribution,
    rejected uploads and permission refusals. On protected SCD tables, subsequent writes from
    source pipelines preserve human-locked rows/values while updating unlocked values; another
@@ -4230,7 +4299,8 @@ and the soak on the example passed. A partial coverage matrix cannot pass the re
       Airflow is needed.
 - [ ] The pool interface has two providers that pass the contract tests.
 - [ ] Many projects share one Engine DB, with per-project configuration, limits and pauses.
-- [ ] The API and UI can do everything the CLI can, under roles.
+- [ ] The API can do everything the CLI can, and the UI every operational action, under roles.
+      The UI edits no metadata.
 - [ ] Metadata, YAML, API and JSON are versioned under the compatibility policy, and upgrades from
       every 0.x release pass the full schema diff.
 - [ ] Retention keeps the Engine DB bounded, and the load benchmark meets its budgets.
