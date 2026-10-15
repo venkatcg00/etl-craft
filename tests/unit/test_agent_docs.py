@@ -41,6 +41,8 @@ def _looks_like_path(span: str) -> bool:
     """A repository path names a directory; bare names such as ``schema.sql`` recur per dialect."""
     if any(char in span for char in " <>*$(){}=|,'\""):
         return False
+    if span.startswith("/") and "/" not in span[1:]:
+        return False  # a slash command such as ``/roadmap-item``
     return "/" in span.rstrip("/")
 
 
