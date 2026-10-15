@@ -3549,9 +3549,31 @@ stop/abort, recover/restart, explicit overrides and selected bulk actions. Show 
 state and completion acknowledgement; do not inherit unnecessary Airflow or CLI flag
 restrictions. Browser tests must exercise the operations, not merely check visible buttons.
 
-- *Technology.* Server-rendered pages (Jinja2 templates, the catalog's existing CSS and assets) with
-  htmx for live parts, so the UI needs no separate JavaScript build and uses the same service layer
-  as the API. Graphs reuse the catalog's SVG rendering.
+- *Technology.* One package and one language for contributors. The UI is served by
+  `etl-craft server` from the `server` extra, with no Node toolchain for users, contributors or
+  CI.
+  - **Pages.** FastAPI serves server-rendered Jinja2 pages, adding `jinja2` to the `server`
+    extra. They call the same service layer as the API and reuse the catalog's CSS and SVG graph
+    rendering.
+  - **Live parts.** htmx handles partial updates, and server-sent events push run, task and log
+    changes. htmx is vendored as one pinned static file.
+  - **Behaviour per view.** Each view gets a plain JavaScript module shipped as a static asset,
+    as `catalog.js` is today, with no build step. This covers zoom and pan, search, right-click
+    PowerCenter actions, multi-select bulk actions, live log follow and keyboard shortcuts.
+  - **Vendored libraries.** A few pinned, minified, single-file libraries are allowed where they
+    earn their place: an interactive graph canvas for the Workflow Monitor (for example
+    Cytoscape.js, MIT) and charts for the run-health dashboards and a task timeline. Each library
+    is kept under the package's static assets with its version, SHA-256 and license file. It is
+    updated by hand and reviewed like code. The pull request that adds one names the view that
+    needs it.
+  - **Rejected.**
+    - Django: it duplicates the SQLAlchemy Engine DB, migrations and accounts, and its admin is
+      a metadata editor.
+    - Flask: a second framework next to FastAPI, with the same Jinja2 pages.
+    - A compiled TypeScript or React frontend: it needs a Node toolchain and a JavaScript
+      dependency tree.
+  - **Demo stack.** The full demo stack's Docker Compose file lives in the demo repository
+    (S8.A); the package needs no Docker.
 - *Pages.*
   - Projects: health per project (running, failed today, SLA misses, queued work).
   - Pipelines: list with schedule, next run, last status, pause state; a pipeline page with the DAG
