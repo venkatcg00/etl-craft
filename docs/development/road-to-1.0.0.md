@@ -134,7 +134,7 @@ item's text, or work done early under another item.
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
-| S7.N Faster complete pull-request CI | In progress | #170 | Complete collection/shard accounting and isolated schema templates; hosted timing and runner-cost acceptance pending |
+| S7.N Faster complete pull-request CI | Done | #170 | Fail-closed collection/shard accounting, isolated schema templates and shared demo workers; complete checks in 6m33s-8m15s (owner-approved ten-minute target) |
 | S8.H Support Insights scenario coverage | Planned | | Deterministic mixed-quality generators, every-feature demonstrations, business-rule and stewardship cases, and runnable README coverage |
 
 ### Handover notes
@@ -168,9 +168,12 @@ S7.N passed the full local gate, strict docs, Python 3.12/3.13 unit suites and t
 installed-wheel/sdist matrix without skips. Schema-template isolation and audit guards passed
 on both Engine DBs; collection comparison retained every existing case. Shared demo workers
 passed the installed Trino cases, and twenty worker-dispatch/namespace-isolation rounds passed.
-Old-code regression checks and the real CI service runner were exercised. Hosted accounting
-and combined coverage passed for the first candidate; final cold/warm timing and runner-cost
-acceptance remain pending, so the item is not complete. The frozen soak and old stash remain untouched.
+Old-code regression checks and the real CI service runner were exercised. Three consecutive
+cold-cache runs (7m37s, 8m15s, 7m16s) and three warm-cache runs (6m39s, 7m25s, 6m33s) of the
+complete CI and Docs checks passed on standard GitHub-hosted runners, measured from the first job
+start along the dependency path with runner queue excluded; before, the service job alone took
+33m51s. Runner cost averaged 135.7 minutes per run against 126.35 before (+7%). The installed
+Iceberg demo jobs remain the critical path. The frozen soak and old stash remain untouched.
 
 S6.C passed the full local gate, strict docs, Python 3.12/3.13 unit suites, and focused catalog,
 lineage, publication and released-schema upgrade checks on both Engine DBs. Explicit cold and
