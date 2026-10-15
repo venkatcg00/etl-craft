@@ -125,15 +125,18 @@ item's text, or work done early under another item.
 | S5.O.2a Common config contract | Done | #149 | Mandatory core/custom CFG audit fields and keys, safe token lifecycle history and lossless upgrades |
 | S5.O.2b Normalized object contracts | In progress | #150, #151, #152, #153, #154, #160, #162 | Merge column lists retain parameter storage; lineage versions use component endpoints with historical CLI/catalog reads; target state follows S5.R item 3 after the soak |
 | S5.P Project documentation gap UI | Done | #165 | Structured schema/lineage gaps, accessible column/graph warnings and read-only comparison API |
-| S5.R Consolidate before the cluster | Planned | | Behaviour-preserving: one query path for Engine DB SQL, data-driven migration markers, enums and `core` errors throughout, shorter functions |
+| S5.R Consolidate before the cluster | Planned | | Behaviour-preserving: one query path for Engine DB SQL, data-driven migration markers, enums and `core` errors throughout, shorter functions, split execution core and config loader |
 | S5.S Accounts, login and roles | Planned | | Registered user and service accounts, password and SSO login, tokens for services, a role check on every action, no implicit actor, local installations that operate a server |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
 | S5.T Resource discovery and deployment profiles | Planned | | Opt-in laptop, server and server-with-workers sizing from usable process resources; one discovery module before S5.C |
+| S5.U Robustness before the cluster | Planned | | No silent fallbacks in supervision, SLA and cleanup paths; measured coverage of process, leadership and server code; deterministic timing tests |
 | S5.C and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
+| S7.M Stewardship uploads | Planned | | Stewardable pipelines chosen by stewards; one pipe-delimited CSV/TXT or XLSX file; mandatory file-validation task before processing |
+| S7.O Package, demo and configuration repositories | Planned | | Package CI tests a package-owned fixture project; the demo and its configuration repository supply release evidence the package gate validates |
 | S7.N Faster complete pull-request CI | Done | #170 | Fail-closed collection/shard accounting, isolated schema templates and shared demo workers; complete checks in 6m33s-8m15s (owner-approved ten-minute target) |
 | S8.H Support Insights scenario coverage | Planned | | Deterministic mixed-quality generators, every-feature demonstrations, business-rule and stewardship cases, and runnable README coverage |
 
@@ -161,6 +164,24 @@ of a new branch in the migration runner, then the rest of S5.R. S5.P needs no S5
 S5.O.3 work, and builds on the catalog pages slice 2 changed. After S5.S, S5.O.3 and S5.Q, take
 S5.T (resource discovery and deployment profiles), then S5.C. S5.T supplies the single-machine foundation that workers reuse; it
 does not move worker work ahead of the metadata, account or operator-control corrections.
+
+**Direction after S7.N (owner, 15 October 2026).**
+- **Three repositories.** etl-craft ends as three repositories:
+  - this package;
+  - the Support Insights demo (sources, generators, SQL, scripts, dashboards);
+  - a configuration repository whose CI applies the demo's `CFG_` CSV files with
+    `etl-craft config plan` and `apply`.
+- **The package's CI tests the package only.** Package CI does not run or prove the demo. It
+  validates result evidence that the demo repository publishes for a candidate: S7.O and the
+  revised S8.G.
+- **Stewardship is chosen by pipeline.** A steward picks a stewardable pipeline and uploads one
+  pipe-delimited CSV or TXT file or one XLSX workbook. A mandatory file-validation task runs
+  before anything is processed: the revised S7.M. Demo stewardship covers the `dm` mart and the
+  `ds` reference tables (S8.H item 3).
+- **Order.** The quality and robustness review that same day added S5.R items 7 and 8 and S5.U.
+  - S5.U comes after S5.R and before S5.T and S5.C.
+  - S7.O starts after the frozen 0.4 soak ends.
+  - Neither moves S5.S, S5.O.3 or S5.Q.
 
 **Acceptance availability.**
 
@@ -906,7 +927,7 @@ flowchart LR
 | 0.4 | Overseer: `etl-craft server`, schedules with time zones, ready-set dispatch, retries, `status`, `explain`, JSON, HTTP API, versioned YAML | S4.A to S4.H | The demo runs a week with no cron or Airflow; `kill -9` of the overseer loses and doubles nothing |
 | 0.5 | Operational basics, then the cluster: row-level rejects, SQL watermarks, event waits, source definitions and schema-aware lineage, normalized metadata, accounts, login and roles; resource discovery and deployment profiles, pool interface, worker agents, project namespaces in one Engine DB, connection budget, managed PostgreSQL | S5.A to S5.T (S5.K to S5.N right after S5.B; S5.O to S5.T before S5.C) | Pool contract tests pass for both providers; many projects share one Engine DB |
 | 0.6 | At load: retention, bounded catalog, incremental cloning, metrics, backup and restore, benchmark | S6.A to S6.G | A sustained-load benchmark stays within its stated budgets; a restore is tested |
-| 0.7 to 0.9 | UI and finish: web UI with its sign-in, stewardship uploads, per-project roles, redaction, webhooks, secrets providers, packaging, compatibility policy, soak, faster complete PR checks | S7.A to S7.N | A month-long soak of a real deployment passes; complete PR checks meet the five-minute target |
+| 0.7 to 0.9 | UI and finish: web UI with its sign-in, stewardship uploads, per-project roles, redaction, webhooks, secrets providers, packaging, compatibility policy, soak, faster complete PR checks, separate demo and configuration repositories | S7.A to S7.O | A month-long soak of a real deployment passes; complete PR checks meet the ten-minute target |
 | 1.0.0 release candidates | The Support Insights example rebuilt on etl-craft, configured through CI, with its Superset dashboards and every-feature scenarios | S8.A to S8.H | Every pipeline, dashboard and feature scenario passes, with verified README walkthroughs |
 | 1.0.0 | Supported contract | | Every item of the [1.0.0 checklist](#100-release-checklist) has evidence |
 
@@ -2642,6 +2663,26 @@ S5.O.3. No item changes behaviour, so none adds a `CHANGELOG.md` entry.
      - JDBC URL parsing: `core.text.parse_jdbc_url`, `config.targets.parse_warehouse_url` and
        `dialects.engine.postgres.parse_postgres_url`;
      - Y/N flags, compared inline with `== "Y"` in about ten places.
+  7. **Split the execution core** (`refactor/execution-pipeline-runner`). The quality baseline's
+     two largest debts are here, and S5.C's workers build on this code.
+     - `execution/pipeline.py` has 1,313 lines and 830 baseline points:
+       - `_start_steps` is 177 lines with 11 parameters;
+       - `pipeline_steps` is 132 lines with 13;
+       - `_finalize` is 116 lines with 11;
+       - `rerun_task` is 94 lines.
+     - `execution/runner.py` has 996 lines and 285 points: `run_task` is 129 lines and
+       `_start_and_record` has 13 parameters.
+
+     Split by responsibility: admission and start, wave stepping, finalization and SLA, and
+     reruns. Group repeated parameters in dataclasses, as `_StartOptions` already does. Keep each
+     module under the 800-line limit. Do not change behaviour, retry semantics or transaction
+     boundaries.
+  8. **Split the configuration loader and site writer** (`refactor/config-loader-site`).
+     - `config/loader.py` has 1,095 lines and carries 10 of the baseline's 27 bare-`Any`
+       signatures. Split it by section (engine, warehouse, email, cloning, docs) and type each
+       section's raw mapping.
+     - `services/catalog_site.py` has 1,047 lines. Move its page builders (`_pipeline`, `_task`,
+       `_run`, `_warehouse`) into their own module, beside the `Site` writer.
 - *Not part of this item.* `core.actor.current_actor()` returns the system actor when no actor
   is set; S5.S removes that fallback together with the accounts that replace it.
 - *Tests.* No new behaviour, so no new tests beyond those named: the marker test in item 3, and
@@ -2973,6 +3014,65 @@ profile sizing ship here; S5.C wires the same module into worker startup and hea
     stated fallback values; status/UI reuse the same report when their views are implemented.
   - Existing installations retain behavior without a profile; opting in and its upgrade effects
     are documented, and the team-owned connector file remains untouched.
+
+### S5.U Robustness before the cluster
+
+Branch: `fix/execution-robustness`. After S5.R items 7 and 8, which split the modules this
+touches, and before S5.T and S5.C. Workers add processes, machines and network failures, so
+these gaps must close on one machine first.
+
+- *Problem.* A review on 15 October 2026 found:
+  - **Silent fallbacks** that break "fail rather than guess":
+    - `execution/pipeline.py` `_SlaWatch._watch` marks an SLA breach once, at the deadline. If
+      that Engine DB write fails, it logs and returns. The breach is never marked during the
+      run and no lapse alert is sent, which is exactly the case where a run hangs.
+    - `warehouse/connection.py` `is_single_writer` returns `False` on a `ConfigurationError`.
+      The warehouse writer lock is then skipped, and a single-writer warehouse such as DuckDB
+      can be written by two processes at once.
+  - **Supervision code the coverage gate cannot see.** `[tool.coverage.run]` measures only the
+    pytest process. The code that runs in child processes, the overseer and the API server
+    counts as untested even when tests exercise it:
+    - `execution/reconcile.py` `stop_process` (PID and birth-identity checks before every
+      signal): 69% for the module, with the signal path unmeasured;
+    - `overseer/server.py`: 35%;
+    - `overseer/leadership.py`: 75%;
+    - `execution/child.py`: 76%;
+    - `execution/event_probe.py`: 60%;
+    - `api/server.py`: 0%.
+
+    The 90% gate therefore says nothing about the paths S5.C extends.
+  - **Timing-dependent tests.** Two task tests stop a task after `TASK_TIMEOUT_SECONDS=2` and
+    allow ten seconds for interpreter start-up. They have failed together on a loaded CI runner
+    (Handover notes, "Timing-sensitive tests on a slow runner").
+- *Change.*
+  1. The SLA watcher retries a failed breach write on the supervisor's next tick until it
+     succeeds or the run ends. The write is idempotent through `mark_sla_breached`'s result, so
+     the lapse alert is sent exactly once. Each failed write is logged with the run id and the
+     error.
+  2. `is_single_writer` lets the `ConfigurationError` propagate, naming the warehouse setting.
+     It no longer reports a multi-writer warehouse.
+  3. Measure subprocesses: set `patch = ["subprocess"]` in `[tool.coverage.run]` and combine
+     the data before the gate. Then add direct tests for the branches still uncovered:
+     - `stop_process` refusing a reused PID whose birth identity differs;
+     - `stop_process` killing recorded descendants after the group leader exits;
+     - leadership loss when the advisory-lock connection drops;
+     - the overseer and API servers shutting down on a signal.
+  4. Replace the wall-clock timeouts in the two task tests with an injected clock or a
+     readiness handshake from the child. No test depends on interpreter start-up time.
+- *Tests.*
+  - An Engine DB error injected on the first breach write still records the breach and sends
+    one alert.
+  - A configuration that cannot resolve its warehouse dialect fails before any write and names
+    the setting.
+  - The new process tests from item 3.
+  - Each fails on the old code.
+- *Done when.*
+  - No supervision, SLA or warehouse-lock path turns an error into a guessed value.
+  - The coverage report includes subprocess code. `execution/reconcile.py`,
+    `overseer/server.py`, `overseer/leadership.py` and `api/server.py` each reach the 90%
+    threshold.
+  - The two task tests pass 50 consecutive runs with every CPU of a CI-sized runner busy.
+  - PR CI time stays within S7.N's ten-minute target.
 
 ### S5.C The PostgreSQL queue and the worker agent
 
@@ -3344,11 +3444,14 @@ restrictions. Browser tests must exercise the operations, not merely check visib
   - Interventions: every recorded change with who, when and why.
   - Workers and pools: capacity, slots in use, queue, heartbeats.
   - Catalog: today's lineage, tables, rules and scripts pages, linked from runs.
-  - Metadata: forms to create and edit `CFG_` rows (pipelines, tasks, parameters, dependencies,
-    rules); saving runs `validate` for the affected pipeline and refuses invalid changes with its
-    messages; every change is attributed to the user.
-  - Uploads (S7.M): the contracts the signed-in steward is assigned to, a file upload, the
-    outcome with rejected rows and reasons, and the upload history.
+  - Metadata: a read-only view of `CFG_` rows (pipelines, tasks, parameters, dependencies,
+    rules, upload contracts), with each row's actor, history and `validate` findings, and a link
+    to its CSV file in the configuration repository. The UI does not edit metadata. Changes
+    are made in the config files and deployed by `etl-craft config apply`, so the UI and the
+    reviewed files cannot drift apart.
+  - Uploads (S7.M): a drop-down of the stewardable pipelines the signed-in steward is assigned
+    to, a single-file upload, the outcome with validation failures or rejected rows and
+    reasons, and the upload history.
 - *Tests.* Page tests with the API test client; an end-to-end browser test of the main operator flows
   (Playwright in a separate CI job).
 
@@ -3358,90 +3461,132 @@ Branch: `feat/stewardship-uploads`. Built with the web UI (S7.A), whose Uploads 
 after S5.S (accounts and roles) and S5.O.3 (protection of human writes).
 
 - *Problem.* Business users supply or correct data that has no other source: reference lists,
-  mappings, targets and manual adjustments. Today they send files to the dev team, who load them
-  by hand. Nobody records who supplied the data, and every correction waits on a developer.
+  mappings, targets and manual adjustments to mart rows. Today they send files to the dev team,
+  who load them by hand. Nobody records who supplied the data, and every correction waits on a
+  developer.
 - *Who owns what.*
-  - The dev team owns each upload contract, meaning the file's columns, types and key, and the
-    pipeline that processes it. Both change only through the project's config files, reviewed
-    like any other change.
-  - Stewards own the data. They upload files to the contracts they are assigned to, and
+  - The dev team owns the stewardable pipelines and their upload contracts: which pipelines
+    accept files, the file's columns, types and key, and what the pipeline does with them. All
+    of it changes only through the project's config files, reviewed like any other change.
+  - Stewards own the data. They upload files to the pipelines they are assigned to, and
     nothing else.
 - *Change.*
-  1. **Upload contracts** (config files; the `developer` role).
-     - `CFG_UPLOAD_CONTRACTS`, with the common config fields from S5.O.2a:
-       - `UPLOAD_CONTRACT_ID` and `CONTRACT_CODE`;
+  1. **Stewardable pipelines** (config files; the `developer` role).
+     - A pipeline is stewardable when it has an active row in `CFG_UPLOAD_CONTRACTS`. The row
+       is the mark; there is no separate flag to keep in step. The table has the common config
+       fields from S5.O.2a:
+       - `UPLOAD_CONTRACT_ID`;
+       - `PIPELINE_ID`, unique among active rows: one contract per stewardable pipeline;
        - `TABLE_ID`: the landing table's contract in `CFG_TABLES` and `CFG_COLUMNS` (S5.O.2b),
          which gives the columns, types, nullability and key;
        - `FILE_FORMAT`:
-         - `CSV`, comma-separated;
-         - `TXT`, delimited text whose `DELIMITER` the contract names (tab, pipe or another
-           single character);
-         - `XLSX`, an Excel workbook, read from the sheet in `SHEET_NAME`, or the first sheet
-           when it is empty.
-
-         Text files are read as `ENCODING` (default UTF-8), and every format needs a header row
-         whose names match the contract's columns. Macro-enabled workbooks (`.xlsm`) and the
-         legacy `.xls` format are refused. A formula cell is read as the value saved with the
-         workbook, and a cell saved without a value is a validation error naming the sheet and
-         cell. Reading `XLSX` uses `openpyxl` in the optional `excel` extra, not a core
-         dependency. Without the extra, an `XLSX` contract fails `validate` and every upload to
-         it, with the remedy `pip install etl-craft[excel]`;
-       - `PIPELINE_ID`: the pipeline that processes an accepted upload;
+         - `CSV` or `TXT`: delimited text, always separated by a pipe (`|`). Quoting follows
+           RFC 4180 with `|` as the separator. There is no delimiter setting; a comma- or
+           tab-separated file fails validation and the message names the expected separator;
+         - `XLSX`: an Excel workbook, read from the sheet in `SHEET_NAME`, or from the first
+           sheet when `SHEET_NAME` is empty;
+       - `ENCODING` for text files (default UTF-8);
        - `REJECT_LIMIT`: as in S5.K;
        - `ACTIVE_FLAG`.
-     - `CFG_UPLOAD_STEWARDS` assigns accounts to contracts, and only an admin assigns.
+
+       Every format needs a header row whose names match the contract's columns.
+       - Macro-enabled workbooks (`.xlsm`) and the legacy `.xls` format are refused.
+       - A formula cell is read as the value saved with the workbook. A cell saved without a
+         value is a validation error naming the sheet and cell.
+       - Reading `XLSX` uses `openpyxl` in the optional `excel` extra, not a core dependency.
+         Without the extra, an `XLSX` contract fails `validate` and every upload to it, with
+         the remedy `pip install etl-craft[excel]`.
+     - **A mandatory file-validation task.** A new `FILE_VALIDATION` handler (`core.enums`)
+       validates the uploaded file against the contract before anything is processed.
+       - `validate` refuses a stewardable pipeline unless it has exactly one `FILE_VALIDATION`
+         task, that task is the pipeline's only root, and every other task depends on it,
+         directly or through others, with `SUCCESS`.
+       - `validate` also refuses a `FILE_VALIDATION` task in a pipeline that is not
+         stewardable.
+     - A stewardable pipeline runs only from an upload. It has no schedule, and `run` without
+       an upload is refused, naming the pipeline and the remedy. Retries and reruns reuse the
+       run's stored upload.
+     - `CFG_UPLOAD_STEWARDS` assigns accounts to stewardable pipelines, and only an admin
+       assigns.
      - The `steward` role sits between `viewer` and `operator`. An upload needs both the role
-       and an assignment to the contract; no other role implies an assignment.
-  2. **Uploading.** One service sits behind `etl-craft upload --contract C FILE`,
+       and an assignment to the pipeline; no other role implies an assignment.
+     - A contract may land data for any table the pipeline writes. In the demo these are the
+       `dm` mart's SCD2 fact and the `ds` reference tables (S8.H item 3).
+  2. **Uploading.** One service sits behind `etl-craft upload --pipeline_code P FILE`,
      `POST /api/v1/uploads` and the S7.A Uploads page.
-     - The uploader must be signed in (S5.S) and assigned to the contract. Otherwise the
-       upload is refused and recorded.
-     - The file is checked against the contract before anything loads: the file type (by
-       content, not only its extension), the header names, required columns, types and key
-       uniqueness within the file.
-       - A structural problem, such as a wrong or missing column or an unreadable file, refuses
-         the whole upload. The message names the column, the value found, what was expected
-         and the remedy.
-       - Rows that fail a type or constraint check go to S5.K's rejects, up to
-         `REJECT_LIMIT`. Over the limit, the upload is refused.
-       - A file identical (same SHA-256) to one already loaded for the contract is refused,
-         naming the earlier upload.
-     - Accepted rows land in the contract's landing table. The contract's pipeline then starts
-       at once, as a run requested by the uploader, with the upload as its input
-       (`$$upload_id` for SQL tasks, `task.upload` for ingestion scripts).
-     - That run's writer is the uploader (S5.S). Every row it inserts or updates in project
-       tables carries the uploader's account in `CREATED_BY` and `UPDATED_BY`, and on
-       protected SCD tables these are human writes under S5.O.3's locks.
+     - **The page.** The steward chooses the pipeline from a drop-down listing only the active
+       stewardable pipelines they are assigned to, picks one file and submits.
+     - **Before a run starts,** the service refuses and records the upload when:
+       - the uploader is not signed in (S5.S) or not assigned to the pipeline;
+       - the request carries anything other than exactly one file;
+       - the file's extension does not match the contract's `FILE_FORMAT`;
+       - the file is larger than the server's `uploads.max_file_mb` (`craft-connector.yml`,
+         default 50);
+       - the file is identical (same SHA-256) to one already loaded for the pipeline; the
+         message names the earlier upload;
+       - the pipeline already has a run in progress; the message names that run and its
+         upload.
+
+       Otherwise the original file is kept under the project's `uploads/` directory by upload
+       id, and the pipeline starts at once as a run requested by the uploader, with the upload
+       as its input (`$$upload_id` for SQL tasks, `task.upload` for ingestion scripts).
+     - **The `FILE_VALIDATION` task** runs first and checks:
+       - the file type by content, not only its extension;
+       - the separator, the encoding, the header names, required columns, types and key
+         uniqueness within the file.
+
+       A structural problem fails the task, so no downstream task runs. Structural problems
+       are a wrong separator, a wrong or missing column, an undecodable file, or a file whose
+       content does not match its type. The message names the column or cell, the value
+       found, what was expected and the remedy.
+
+       Rows that fail a type or constraint check go to S5.K's rejects, up to `REJECT_LIMIT`.
+       Over the limit, the task fails. Accepted rows land in the contract's landing table in
+       the task's transaction; the downstream tasks then process them.
+     - The run's writer is the uploader (S5.S). Every row it inserts or updates in project
+       tables carries the uploader's account in `CREATED_BY` and `UPDATED_BY`. On protected
+       SCD tables these are human writes under S5.O.3's locks.
   3. **Record.**
      - `AUD_UPLOADS` holds:
-       - `UPLOAD_ID`, the contract and the account;
+       - `UPLOAD_ID`, the pipeline, the contract and the account;
        - the file name, SHA-256 and size;
        - the received, accepted and rejected row counts;
        - `PIPELINE_RUN_ID`;
-       - the status: `REFUSED`, `LOADED`, or `FAILED` with the run's outcome;
+       - the status: `REFUSED` (before a run, or by the validation task, with the reasons),
+         `LOADED`, or `FAILED` with the run's outcome;
        - the times.
-     - The original file is kept under the project's `uploads/` directory by upload id, for
-       audit and reprocessing. Retention follows S6.A.
-  4. **Feedback.** The uploader sees the outcome, the rejected rows with their reasons, and the
-     run's status, in the CLI output, the API response and the UI page. `etl-craft uploads
-     --contract C` lists the history.
+     - Stored files follow S6.A retention.
+  4. **Feedback.** The uploader sees the outcome, the validation failures or rejected rows with
+     their reasons, and the run's status, in the CLI output, the API response and the UI page.
+     `etl-craft uploads --pipeline_code P` lists the history.
 - *Tests.*
-  - Access: assigned and unassigned accounts; accounts without the `steward` role.
-  - Validation: structural refusals; row rejects and the limit; duplicate files.
-  - Formats: CSV, TXT with tab and pipe delimiters, and XLSX on a named and a default sheet;
-    the refused types (`.xls`, `.xlsm`, and a file whose content does not match its type);
-    formula cells with and without saved values; non-UTF-8 encodings; an `XLSX` contract on
-    an install without the `excel` extra.
-  - Loading: the pipeline run started with the upload as input; a failed run recorded on the
-    upload.
-  - Attribution: the uploader on every written row on all four local warehouses; uploaded rows
-    protected on SCD tables.
+  - Access: assigned and unassigned accounts; accounts without the `steward` role; the
+    drop-down lists only assigned, active stewardable pipelines.
+  - Configuration: `validate` refuses a stewardable pipeline without a root `FILE_VALIDATION`
+    task, with a second root, or with a task that does not depend on it, and refuses the
+    handler in a pipeline without a contract.
+  - Requests: zero and two files; an oversized file; a duplicate file; an upload while the
+    pipeline is running; a scheduled or plain `run` of a stewardable pipeline.
+  - Formats:
+    - pipe-delimited CSV and TXT, including quoted pipes;
+    - comma- and tab-separated files refused by name;
+    - XLSX on a named and a default sheet;
+    - `.xls`, `.xlsm` and a file whose content does not match its type, all refused;
+    - formula cells with and without saved values;
+    - non-UTF-8 encodings;
+    - an `XLSX` contract on an install without the `excel` extra.
+  - Validation: structural failures stop the run before any downstream task; row rejects and
+    the limit; a retry reuses the stored upload.
+  - Attribution: the uploader on every written row on all four local warehouses, for an SCD2
+    target and an SCD1 or ordinary target; uploaded rows protected on SCD tables.
   - The same service through the CLI and the API.
 - *Done when.*
-  - A steward assigned to a contract can upload a file and see it loaded, or refused with
-    reasons, and nobody else can upload to that contract.
+  - A steward assigned to a stewardable pipeline chooses it, uploads one file, and sees it
+    loaded, or refused with reasons before any data is processed. Nobody else can upload to
+    that pipeline.
+  - No stewardable pipeline can process a file that its `FILE_VALIDATION` task did not accept.
   - Every row an upload writes carries the uploader's account.
-  - The dev team changes contracts and pipelines only through config files.
+  - The dev team changes stewardable pipelines and contracts only through config files.
 
 ### S7.B Users, roles and identities (W10)
 
@@ -3662,6 +3807,81 @@ These timing-acceptance runs are deliberate manual validation, not a new repeate
 
 **Gate.** The soak passes, and S7.N meets the complete-CI target without weakening checks.
 
+### S7.O Package, demo and configuration repositories
+
+Branch: one per slice: `test/e2e-fixture-project`, `docs/demo-repository`,
+`feat/release-example-evidence`. Starts after the frozen 0.4 soak ends. Slice 3 comes before
+S8.G.
+
+- *Problem.*
+  - `examples/demo` is the package's Quick Start, the project its installed-wheel tests copy,
+    the source of the Airflow contract exports (`scripts/export_airflow_contracts.py`) and the
+    soak's deployment (`scripts/soak.py`).
+  - The Support Insights demo is a separate repository (S8). Keeping a second demo here
+    duplicates it.
+  - Proving demo content in package CI ties every package change to demo data. The installed
+    Iceberg demo cases are S7.N's critical path, at 290-326 seconds each.
+  - The owner's direction is three repositories:
+    - this package;
+    - the demo;
+    - a configuration repository holding the demo's `CFG_` CSV files.
+
+    Package CI tests the package. For the demo, it only validates the result evidence the demo
+    publishes.
+- *Change.*
+  1. **A package-owned fixture project** (`tests/fixtures/project/`).
+     - It holds the smallest project that exercises what today's installed-wheel tests assert:
+       - each SQL action;
+       - an ingestion script with an offset;
+       - a business rule;
+       - an event wait;
+       - an email alert through Mailpit;
+       - server mode.
+
+       It uses no demo domain data.
+     - Repoint `tests/e2e`, the Airflow contract export and `release/README.md` to it. The
+       installed-wheel matrix stays a required PR check, with both Engine DBs, the four local
+       warehouses, pip and uv, and the wheel and sdist (S7.N rule 4).
+     - The pull request lists every current e2e assertion. Each is either kept as a package
+       contract on the fixture or moved to the demo's S8.F/S8.H checks, with its new location.
+       No package contract is dropped.
+  2. **The demo leaves the package** (after slice 1).
+     - Move `examples/demo` into the Support Insights repository's `etl-craft` branch as its
+       starting point (S8), and delete it here.
+     - Rewrite the Quick Start over a minimal project in `docs/examples/quick-start/`, still
+       run as written by package CI. The README links to the demo repository for the full
+       walkthrough.
+     - The soak (S7.I) runs on the demo deployment. `scripts/soak.py` either takes a project
+       directory or is deleted with the in-repo demo.
+  3. **Release evidence from the demo** (replaces running the demo in S8.G).
+     - The demo's acceptance workflow (S8.E) runs against a candidate wheel attached to the
+       candidate's GitHub release and pinned by SHA-256. It writes a results manifest:
+       - the demo and configuration repository commits;
+       - the wheel's SHA-256;
+       - each S8.F check and S8.H scenario id with its outcome, counts and evidence links;
+       - the start and end times.
+     - The release pull request copies the manifest to
+       `release/evidence/<version>/example-support-insights.json`.
+     - `release/example.toml` pins both commits and lists the expected check and scenario ids.
+     - `release_gate.py` validates the manifest and fails closed. It refuses:
+       - a wheel hash other than the release wheel's;
+       - commits other than the pinned ones;
+       - a missing, extra, skipped or failed check or scenario;
+       - a manifest older than the wheel.
+
+       Package CI never checks out, installs or runs the demo.
+- *Tests.*
+  - Collection comparison before and after slice 1, with the assertion mapping.
+  - `release_gate.py` refuses each of the bad manifests above and accepts a complete one.
+  - The Quick Start test runs the new page as written.
+- *Done when.*
+  - No package workflow, test or script refers to `examples/demo` or the demo repository,
+    except `release/example.toml` and the evidence check.
+  - The installed-wheel matrix still runs every combination on the fixture project.
+  - 1.0.0 cannot be released without demo evidence that matches the release wheel, the pinned
+    commits and the complete scenario inventory.
+  - S7.N's timing is re-measured in both cache conditions and stays within ten minutes.
+
 ## Release candidate: the Support Insights example
 
 **Goal.** Prove 1.0.0 on a real project before it is released. The
@@ -3677,10 +3897,17 @@ Support Insights demonstration (S8.H).**
 candidates (`1.0.0rc1`, `1.0.0rc2`, ...); a defect it finds is fixed in etl-craft, and a new release
 candidate is cut, never worked around in the example.
 
-**Where it lives.** In the Support Insights repository itself, on a branch `etl-craft` that replaces
-its `main` once this stage passes, so the example stays a standalone project that installs etl-craft
-from PyPI like any user would. The etl-craft repository pins the example's commit in
-`release/example.toml` and runs it as a required release suite (`S8.G`).
+**Where it lives.** In two repositories outside the package (S7.O):
+- **The demo.** The Support Insights repository, on a branch `etl-craft` that replaces its
+  `master` once this stage passes. It holds the sources, generators, SQL files, ingestion
+  scripts, dashboards and acceptance checks.
+- **The configuration repository.** It holds the project's `CFG_` CSV files, one per table, and
+  the CI that plans and applies them (S8.C).
+
+Both install the candidate wheel attached to the candidate's GitHub release, pinned by SHA-256;
+nothing is published to PyPI before 1.0.0. The etl-craft repository pins both commits in
+`release/example.toml`. It validates the results manifest the demo publishes (S8.G) and never
+runs the demo itself.
 
 ### What the example has today
 
@@ -3706,13 +3933,6 @@ from PyPI like any user would. The etl-craft repository pins the example's commi
 Supports-Insights-Docker/
 ├── etl-craft/                        the etl-craft project directory
 │   ├── craft-connector.yml           Engine, Warehouse, Email, Cloning; secrets as variable names
-│   ├── migrations/                   the metadata: numbered SQL files inserting CFG_ rows
-│   │   ├── 0001_projects_and_pools.sql
-│   │   ├── 0002_reference_data.sql
-│   │   ├── 0003_client_alpha.sql
-│   │   ├── 0004_client_beta.sql
-│   │   ├── 0005_client_gamma.sql
-│   │   └── 0006_business_rules.sql
 │   ├── sql_files/                    one SELECT per SQL task, by layer and client
 │   ├── ingestion_scripts/            mongo_to_lnd.py, kafka_to_lnd.py, minio_to_lnd.py, seeds.py
 │   └── seeds/                        ds and info reference data as CSV
@@ -3723,6 +3943,10 @@ Supports-Insights-Docker/
 │   │                                 etl-craft overseer, two etl-craft workers
 │   └── sql/                          database, schemas, reference seed tables, vw views
 └── .github/workflows/                the CI pipelines (S8.E)
+
+support-insights-config/              the configuration repository (S8.C)
+├── config/                           one CSV file per CFG_ table, merged by key
+└── .github/workflows/                plan on pull requests, apply on merge
 ```
 
 Engine DB: a database `etl_craft` on the platform's PostgreSQL server, separate from the warehouse
@@ -3747,6 +3971,10 @@ Every Airflow task maps to an etl-craft task; nothing in the example runs Spark 
 | | `alpha_failure_alert` (depends on every task with `FAILURE`, run condition `ANY`) | EMAIL_ALERT to the team | Airflow failure emails |
 | `SI_CLIENT_BETA` | as Alpha, with `kafka_to_lnd.py` (consumer offsets stored as etl-craft offsets) | | `Client_Beta_ETL_Task_Flow` |
 | `SI_CLIENT_GAMMA` | as Alpha, with `minio_to_lnd.py` (the last processed object key, `{sequence_number:10d}_...`, as a `TEXT` offset) | | `Client_Gamma_ETL_Task_Flow` |
+| `SI_STEWARD_DS_<TABLE>` (stewardable, one per `ds` reference table; runs only from an upload) | `validate_file` | FILE_VALIDATION (S7.M) into the table's landing table | hand-loaded reference corrections |
+| | `steward_to_ds` (depends on `validate_file` with `SUCCESS`) | SQL `SCD1_MERGE` into the `ds` table; `SI_REFERENCE` then carries it to `dwh` | |
+| `SI_STEWARD_DM_FACT` (stewardable; runs only from an upload) | `validate_file` | FILE_VALIDATION into `lnd.steward_customer_support_fact` | hand-corrected mart rows |
+| | `steward_to_dm` (depends on `validate_file` with `SUCCESS`) | SQL `SCD2_MERGE` into `dm.customer_support_fact` as human writes under S5.O.3's locks | |
 
 Rules for building them:
 
@@ -3765,12 +3993,19 @@ Rules for building them:
 
 ### S8.C Configuration through CI
 
-The metadata is code. Every `CFG_` row the example needs is created by a numbered file in
-`etl-craft/migrations/`, applied by `etl-craft migrate`, which records each file with its checksum in
-`SCHEMA_MIGRATIONS` under the `PROJECT` stream. A change to a pipeline is a new migration file
-(`UPDATE` the rows, or retire them with `ACTIVE_FLAG = 'N'` and insert new ones), reviewed in a pull
-request like code. Nobody edits the Engine DB by hand, and the UI's metadata editor is not used for
-the example.
+The metadata is code, kept in the configuration repository as one CSV file per `CFG_` table and
+merged by key.
+- A change to a pipeline, a rule, a stewardable pipeline's upload contract or a steward
+  assignment is a pull request that edits those files. Retiring a row sets `ACTIVE_FLAG = 'N'`.
+- On a pull request, CI migrates an empty Engine DB to the candidate's schema, runs
+  `etl-craft config plan` and `apply`, and runs `validate` for every pipeline.
+- On merge, CI runs `etl-craft config apply` against the deployed Engine DB through a GitHub
+  environment with the Engine DB secret and required reviewers.
+
+Nobody edits the Engine DB by hand. The UI shows metadata read-only (S7.A).
+
+The SQL files and ingestion scripts the configuration names stay in the demo repository. Both
+repositories pin each other's commit for a deployment, and the results manifest records both.
 
 ### S8.D Dashboards
 
@@ -3804,9 +4039,12 @@ In the example repository's `.github/workflows/`:
 
 | Workflow | When | What it does |
 | --- | --- | --- |
-| `validate.yml` | every pull request | Install the pinned etl-craft; start PostgreSQL; `etl-craft init-db`; `etl-craft migrate` (applies every metadata migration to an empty Engine DB); `etl-craft validate` for every pipeline; `etl-craft generate-yml` for every pipeline (proves the export still works); lint the scripts. Fails on any error. |
-| `deploy-config.yml` | merge to `main` | Applies new metadata migrations to the deployed Engine DB with `etl-craft migrate`, using a GitHub environment with the Engine DB secret and required reviewers; publishes the project bundle (`etl-craft bundle publish`); records the deployed commit. |
-| `e2e.yml` | before release or manual dispatch | Brings up the whole stack with Docker Compose (sources, generators, warehouse, Engine DB, overseer, two workers, Superset); runs the generators for a fixed batch; waits for the scheduled runs; then runs the checks of `S8.F`. Uploads logs, the catalog and dashboard screenshots as artifacts. |
+| Repository | Workflow | When | What it does |
+| --- | --- | --- | --- |
+| configuration | `plan.yml` | every pull request | Install the pinned candidate wheel; start PostgreSQL; `etl-craft init-db`; `etl-craft config plan` and `apply` against the empty Engine DB with the demo commit's SQL files and scripts; `etl-craft validate` and `generate-yml` for every pipeline. Fails on any error. |
+| configuration | `apply.yml` | merge to `main` | `etl-craft config apply` to the deployed Engine DB through a GitHub environment with the Engine DB secret and required reviewers; publishes the project bundle; records the deployed configuration and demo commits. |
+| demo | `validate.yml` | every pull request | Install the pinned candidate wheel; lint the scripts; apply the pinned configuration commit to an empty Engine DB and run `validate`. |
+| demo | `e2e.yml` | before release or manual dispatch | Brings up the whole stack with Docker Compose (sources, generators, warehouse, Engine DB, overseer, two workers, Superset); applies the pinned configuration; runs the generators for a fixed batch; waits for the scheduled runs; runs the checks of S8.F and S8.H; writes the S7.O results manifest. Uploads it with the logs, the catalog and dashboard screenshots. |
 
 ### S8.F Acceptance checks
 
@@ -3873,8 +4111,16 @@ Every slice updates its runnable README walkthroughs and tests in the same examp
    controls, correction and clearing of flags, recurrence, unchanged out-of-scope flags,
    retries and thresholds. Reconciliation and dashboard reference queries follow these
    policies; do not assume that every flag excludes a record from the mart.
-3. Add S7.M stewardship contracts and assigned users for corrections to the same Alpha/Beta/
-   Gamma records in their warehouse tables, rather than a disconnected upload-only dataset.
+3. Add S7.M stewardable pipelines and assigned stewards for two kinds of target, correcting
+   the same Alpha, Beta and Gamma records rather than a disconnected upload-only dataset:
+   - **The `dm` mart:** `SI_STEWARD_DM_FACT` into `dm.customer_support_fact`.
+   - **The `ds` reference tables:** one `SI_STEWARD_DS_<TABLE>` per table, whose corrections
+     reach `dwh` through `SI_REFERENCE`.
+
+   Each takes one pipe-delimited CSV or TXT file or one XLSX workbook, chosen from the Uploads
+   drop-down. Its `FILE_VALIDATION` task refuses bad files before anything is processed: show
+   a wrong separator, a missing column, a bad type, a duplicate key and an over-limit reject
+   count.
    Demonstrate human inserts, row and value corrections, accurate uploader attribution,
    rejected uploads and permission refusals. On protected SCD tables, subsequent writes from
    source pipelines preserve human-locked rows/values while updating unlocked values; another
@@ -3899,10 +4145,10 @@ Every slice updates its runnable README walkthroughs and tests in the same examp
    history, catalog/gap pages, upload history, lock controls and dashboards. Provide navigation
    and screenshots where useful. Link each walkthrough to its automated assertion and explain
    replay/cleanup so a reader can reproduce it without editing the Engine DB.
-6. Run full-stack demonstrations through S8.E's manual/pre-release acceptance workflow and
-   the required S8.G suite, keeping ordinary regression checks in PR CI. Store scenario results,
-   logs, reconciliation results and UI/dashboard evidence against the pinned example commit
-   and candidate wheel. A discovered package bug is fixed with a regression test and a new
+6. Run full-stack demonstrations through the demo's manual/pre-release `e2e.yml` (S8.E).
+   Its results manifest is the evidence the package's S8.G gate validates. Store scenario
+   results, logs, reconciliation results and UI/dashboard evidence against the pinned demo and
+   configuration commits and the candidate wheel. A discovered package bug is fixed with a regression test and a new
    candidate, then its scenario runs again; it is not hidden in the example.
 
 The source-error cases below are a minimum, not the full feature-coverage matrix:
@@ -3942,11 +4188,14 @@ package bug or missing feature demonstration remains hidden behind a project wor
 
 ### S8.G The release gate
 
-1. Add a required suite `example-support-insights` to `release/required-suites.toml` (`where = "local"`,
-   `wheel = true`): it checks out the commit pinned in `release/example.toml`, installs the release
-   candidate's wheel into the example's images, and runs the example's `e2e.yml` steps.
+1. The demo's `e2e.yml` runs against the release candidate's wheel and writes the S7.O results
+   manifest. The release pull request copies it to
+   `release/evidence/<version>/example-support-insights.json`. The package's CI and release
+   suites never check out or run the demo.
 2. The soak (`S7.I`) runs on this example.
-3. `release_gate.py` refuses 1.0.0 without passing evidence for this suite on the release commit.
+3. `release_gate.py` refuses 1.0.0 unless the manifest matches the release wheel's SHA-256 and
+   the demo and configuration commits pinned in `release/example.toml`, and lists every
+   expected check and scenario as passed (S7.O item 3).
 
 **Gate.** The example's three workflows pass against the final release candidate, every chart of both
 dashboards renders correct data, every S8.H feature/scenario and README walkthrough is verified,
@@ -3984,9 +4233,11 @@ and the soak on the example passed. A partial coverage matrix cannot pass the re
 - [ ] The Support Insights example passes its CI pipelines against the final release candidate, and
       every chart of both Superset dashboards renders correct data. Every package feature and
       data-quality/stewardship scenario has passing coverage and runnable instructions in that
-      repository's root README (S8.H).
-- [ ] S7.N's complete required PR checks meet the five-minute target with measured cold- and
-      warm-cache evidence, without omitted tests, weaker coverage or removed matrix contracts.
+      repository's root README (S8.H). The package gate has validated its results manifest
+      against the release wheel and the pinned demo and configuration commits (S8.G).
+- [ ] S7.N's complete required PR checks meet the owner-approved ten-minute target with measured
+      cold- and warm-cache evidence, without omitted tests, weaker coverage or removed matrix
+      contracts.
 - [ ] The soak passed.
 - [ ] Every required suite, cloud included, has evidence matched to the release commit and wheel,
       and the release gate rejects incomplete evidence.
