@@ -69,7 +69,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     log.configure(args.log_level, args.log_format)
     config = load_config(args.config)
-    engine = engine_db(config)
+    engine = engine_db(config, supervised=True)
     attempt_id = args.attempt_id or os.environ.get("ETL_CRAFT_ATTEMPT_ID")
     owner = args.owner_id or os.environ.get("ETL_CRAFT_ATTEMPT_OWNER")
     identity = (int(attempt_id), owner) if attempt_id is not None and owner else None

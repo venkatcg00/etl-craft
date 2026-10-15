@@ -17,9 +17,11 @@ from etl_craft.config import ConnectorConfig
 from etl_craft.core.enums import SETTLED_STATUSES
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.graph import DependencyGraph, TaskRunState
+from etl_craft.core.outage import OutageBudget
 from etl_craft.engine import runlog
 from etl_craft.engine.repository import trackers
 from etl_craft.engine.repository.tasks import fetch_task_execution_detail, fetch_task_parameters
+from etl_craft.engine.retry import TRANSIENT_ERRORS
 from etl_craft.execution import leases
 from etl_craft.execution.events import EventCheck, check_event
 from etl_craft.execution.file_events import FileEvents
@@ -83,6 +85,23 @@ class Scheduler:
         self.after_failure: list[int] = []
         self.never_ready: list[int] = []
         self.next_check_at: datetime | None = None
+        self.outage = OutageBudget(config.limits.engine_db_outage_seconds)
+
+    def step_riding_outages(self) -> bool:
+        """Step, treating a dropped Engine DB connection as not settled until it answers.
+
+        Each step recomputes the run from the Engine DB and commits its writes one by one, so
+        repeating it after a dropped connection is safe. A longer outage raises
+        ``EngineDbError``.
+        """
+        what = f"{self.pipeline_code}: pipeline_run_id={self.pipeline_run_id}"
+        try:
+            settled = self.step()
+        except TRANSIENT_ERRORS as error:
+            self.outage.failed(what, error)
+            return False
+        self.outage.recovered(what)
+        return settled
 
     def step(self) -> bool:
         """Harvest completions, recompute readiness and dispatch; return true when settled."""
@@ -301,6 +320,8 @@ class Scheduler:
                 self.force,
                 decisions=decisions,
             )
+        except TRANSIENT_ERRORS:
+            raise
         except (EtlCraftError, OSError, SQLAlchemyError) as error:
             logger.error("%s: could not run: %s: %s", code, type(error).__name__, error)
             self.completed.add(task_id)

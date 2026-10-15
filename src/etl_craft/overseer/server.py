@@ -7,7 +7,7 @@ import logging
 import threading
 import time
 from collections.abc import Generator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -15,10 +15,12 @@ from sqlalchemy.exc import SQLAlchemyError
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
 from etl_craft.core.enums import Mode
 from etl_craft.core.errors import EngineDbError, EtlCraftError, RunRefusedError
+from etl_craft.core.outage import OutageBudget
 from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import overseers
 from etl_craft.engine.repository.dependencies import PipelineGraphData, fetch_pipeline_graph
+from etl_craft.engine.retry import TRANSIENT_ERRORS
 from etl_craft.engine.runlog import RunSelector, fetch_pipeline_run_status
 from etl_craft.execution import pipeline
 from etl_craft.execution.pools.local import LocalPool
@@ -79,31 +81,99 @@ class WorkingSet:
             return result
 
 
-def serve(ctx: OperationContext, stop: threading.Event) -> None:
-    """Run until shutdown; keep exact ownership and existing execution semantics."""
-    if ctx.config.mode != Mode.LOCAL:
-        raise RunRefusedError("server supervises local execution; set Orchestration.Mode to local")
-    working = WorkingSet()
-    schedules = Schedules()
-    next_heartbeat = 0.0
-    quiesce = stop
-    jobs: dict[
-        int, tuple[Generator[float, None, pipeline.PipelineOutcome], contextvars.Context]
-    ] = {}
-    pool = LocalPool(ctx.engine, ctx.config, child=ctx.child)
+Jobs = dict[int, tuple[Generator[float, None, pipeline.PipelineOutcome], contextvars.Context]]
 
-    def advance(run_id: int) -> None:
-        steps, context = jobs[run_id]
+
+@dataclass
+class _Supervisor:
+    """The server's working state: cached graphs, schedules and the runs it advances."""
+
+    ctx: OperationContext
+    stop: threading.Event
+    pool: LocalPool
+    working: WorkingSet = field(default_factory=WorkingSet)
+    schedules: Schedules = field(default_factory=Schedules)
+    jobs: Jobs = field(default_factory=dict)
+    next_heartbeat: float = 0.0
+
+    def advance(self, run_id: int) -> None:
+        """Take one step of a run; drop it when it ends or cannot go on."""
+        steps, context = self.jobs[run_id]
         try:
             context.run(next, steps)
         except StopIteration as done:
-            del jobs[run_id]
+            del self.jobs[run_id]
             logger.info("%s", done.value.message)
         except (EtlCraftError, InterruptedError, SQLAlchemyError, OSError):
-            del jobs[run_id]
+            del self.jobs[run_id]
             logger.exception("pipeline_run_id=%s: overseer could not finish run", run_id)
             context.run(steps.close)
 
+    def supervise_once(self, overseer_id: int) -> None:
+        """Heartbeat, reconcile, admit due schedules, advance runs and adopt unowned ones."""
+        if time.monotonic() >= self.next_heartbeat:
+            overseers.heartbeat(self.ctx.engine, overseer_id)
+            self.next_heartbeat = time.monotonic() + 15
+        reconcile(self.ctx.engine)
+        self.schedules.refresh(self.ctx, datetime.now(UTC), self.stop)
+        for run_id in list(self.jobs):
+            self.advance(run_id)
+        for run in self.working.refresh(self.ctx):
+            if self.stop.is_set():
+                break
+            if run.pipeline_run_id not in self.jobs and self._unowned(run.pipeline_run_id):
+                self._adopt(run)
+
+    def _unowned(self, run_id: int) -> bool:
+        with self.ctx.engine.connect() as conn:
+            row = conn.execute(statement(conn, "run_lease"), {"row_id": run_id}).one()
+        return row.owner_id is None
+
+    def _adopt(self, run: ActiveRun) -> None:
+        steps = pipeline.pipeline_steps(
+            self.ctx.engine,
+            self.ctx.config,
+            run.pipeline_code,
+            selector=RunSelector(run_id=run.pipeline_run_id),
+            backfill="overseer resumes backfill" if run.backfill else None,
+            child=self.ctx.child,
+            hooks=run_hooks(self.ctx.config, self.ctx.engine),
+            stop_dispatch=self.stop,
+            graph_data=run.graph_data,
+            pool=self.pool,
+        )
+        self.jobs[run.pipeline_run_id] = (steps, contextvars.copy_context())
+        self.advance(run.pipeline_run_id)
+
+    def drain(self, overseer_id: int) -> None:
+        """Stop admitting, let running work end within the grace period, then record the stop."""
+        self.stop.set()
+        deadline = time.monotonic() + self.ctx.config.limits.shutdown_grace_seconds
+        # Queued admissions have no child or lease to drain.
+        for run_id, (steps, context) in list(self.jobs.items()):
+            with self.ctx.engine.connect() as conn:
+                status = fetch_pipeline_run_status(conn, run_id)
+            if status == "QUEUED":
+                context.run(steps.close)
+                del self.jobs[run_id]
+        while self.jobs and time.monotonic() < deadline:
+            for run_id in list(self.jobs):
+                self.advance(run_id)
+            if self.jobs:
+                time.sleep(0.1)
+        for steps, context in self.jobs.values():
+            context.run(steps.close)
+        self.pool.close()
+        overseers.heartbeat(self.ctx.engine, overseer_id, stopped=True)
+        logger.info("overseer_id=%s: server stopped", overseer_id)
+
+
+def serve(ctx: OperationContext, stop: threading.Event) -> None:
+    """Run until shutdown; ride out Engine DB outages within their budget."""
+    if ctx.config.mode != Mode.LOCAL:
+        raise RunRefusedError("server supervises local execution; set Orchestration.Mode to local")
+    supervisor = _Supervisor(ctx, stop, LocalPool(ctx.engine, ctx.config, child=ctx.child))
+    outage = OutageBudget(ctx.config.limits.engine_db_outage_seconds)
     try:
         with acting_as(SYSTEM_ACTOR), leadership(ctx.engine) as leader:
             with acting_as(ctx.actor):
@@ -111,66 +181,19 @@ def serve(ctx: OperationContext, stop: threading.Event) -> None:
             logger.info("overseer_id=%s: server active", overseer_id)
             try:
                 while not stop.is_set():
-                    if time.monotonic() >= next_heartbeat:
-                        overseers.heartbeat(ctx.engine, overseer_id)
-                        next_heartbeat = time.monotonic() + 15
-                    reconcile(ctx.engine)
-                    schedules.refresh(ctx, datetime.now(UTC), stop)
-                    for run_id in list(jobs):
-                        advance(run_id)
-                    for run in working.refresh(ctx):
-                        if stop.is_set():
-                            break
-                        if run.pipeline_run_id in jobs:
-                            continue
-                        with ctx.engine.connect() as conn:
-                            owner = (
-                                conn.execute(
-                                    statement(conn, "run_lease"), {"row_id": run.pipeline_run_id}
-                                )
-                                .one()
-                                .owner_id
-                            )
-                        if owner is not None:
-                            continue
-                        steps = pipeline.pipeline_steps(
-                            ctx.engine,
-                            ctx.config,
-                            run.pipeline_code,
-                            selector=RunSelector(run_id=run.pipeline_run_id),
-                            backfill="overseer resumes backfill" if run.backfill else None,
-                            child=ctx.child,
-                            hooks=run_hooks(ctx.config, ctx.engine),
-                            stop_dispatch=quiesce,
-                            graph_data=run.graph_data,
-                            pool=pool,
-                        )
-                        jobs[run.pipeline_run_id] = (steps, contextvars.copy_context())
-                        advance(run.pipeline_run_id)
-                    leader.wait(stop)
+                    try:
+                        leader.hold()
+                        supervisor.supervise_once(overseer_id)
+                        leader.wait(stop)
+                    except TRANSIENT_ERRORS as error:
+                        stop.wait(outage.failed("supervising runs", error))
+                        continue
+                    outage.recovered("supervising runs")
             finally:
-                quiesce.set()
-                deadline = time.monotonic() + ctx.config.limits.shutdown_grace_seconds
-                # Queued admissions have no child or lease to drain.
-                for run_id, (steps, context) in list(jobs.items()):
-                    with ctx.engine.connect() as conn:
-                        status = fetch_pipeline_run_status(conn, run_id)
-                    if status == "QUEUED":
-                        context.run(steps.close)
-                        del jobs[run_id]
-                while jobs and time.monotonic() < deadline:
-                    for run_id in list(jobs):
-                        advance(run_id)
-                    if jobs:
-                        time.sleep(0.1)
-                for steps, context in jobs.values():
-                    context.run(steps.close)
-                pool.close()
-                overseers.heartbeat(ctx.engine, overseer_id, stopped=True)
-                logger.info("overseer_id=%s: server stopped", overseer_id)
+                supervisor.drain(overseer_id)
     except SQLAlchemyError as error:
         raise EngineDbError(
             f"server lost its Engine DB connection: {error}; restore it and restart server"
         ) from error
     finally:
-        pool.close()
+        supervisor.pool.close()

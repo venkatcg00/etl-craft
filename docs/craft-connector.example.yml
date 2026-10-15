@@ -49,6 +49,9 @@ Orchestration:
   # Api_address: 127.0.0.1:8730    # HTTP listener with etl-craft[server]
   Timezone: UTC                  # default logical date for manual runs and schedules
   Shutdown_grace_seconds: 60           # value — server waits before stopping local work
+  Engine_db_outage_seconds: 120       # value — how long a process that reached a PostgreSQL
+                                       # Engine DB waits for it after a restart or failover;
+                                       # 0: fail at the first refused connection
   Max_parallel_tasks: 8                # value
   # Local_ingestion_slots: 2           # value — optional: at most this many Python ingestion
   #                                    # tasks at once; unset, they may use every slot

@@ -295,7 +295,7 @@ def pipeline_steps(
         )
         try:
             with _SlaWatch(engine, pipeline_code, pipeline_run_id, detail.sla_in_hours, hooks):
-                while not scheduler.step():
+                while not scheduler.step_riding_outages():
                     delay = (
                         0.1
                         if scheduler.jobs or scheduler.next_check_at is None

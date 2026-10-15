@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
+TRANSIENT_ERRORS = (OperationalError, InterfaceError)
+"""Errors that mean "could not talk to the database", not that a statement was wrong."""
+
 RETRY_DELAYS_SECONDS = (0.5, 1.0, 2.0)
 """The waits between attempts: up to three retries over about 3.5 seconds."""
 
@@ -37,7 +40,7 @@ def retrying(
     for delay in delays:
         try:
             return call()
-        except (OperationalError, InterfaceError) as error:
+        except TRANSIENT_ERRORS as error:
             logger.warning("%s failed (%s); retrying in %gs", what, error.orig or error, delay)
             sleep(delay)
     return call()

@@ -21,6 +21,7 @@ from etl_craft.core.actor import acting_as, current_actor
 from etl_craft.core.errors import RunStateError, StaleTransitionError
 from etl_craft.engine import transitions
 from etl_craft.engine.queries import statement
+from etl_craft.engine.retry import retrying
 
 logger = logging.getLogger(__name__)
 LEASE_SECONDS = 60
@@ -88,29 +89,33 @@ def heartbeat(
     failures: list[Exception] = []
     actor = current_actor()
 
+    def renew_once() -> bool:
+        """Renew the live lease; false once the row has ended. An expired lease is refused."""
+        with acting_as(actor), engine.begin() as conn:
+            query = "run_lease" if kind == "run" else "transition_row_attempt"
+            row = conn.execute(statement(conn, query), {"row_id": row_id}).one_or_none()
+            active = {"IN-PROGRESS"} if kind == "run" else {"CLAIMED", "RUNNING"}
+            if row is not None and row.status == "LOST":
+                raise StaleTransitionError(
+                    f"attempt {row_id}: owner {owner} was reconciled LOST; stop its child"
+                )
+            if row is not None and row.status not in active:
+                return False
+            renewal = transitions.renew_run_lease if kind == "run" else transitions.renew_lease
+            renewal(
+                conn,
+                row_id,
+                actor,
+                owner=owner,
+                lease_expires_at=datetime.now(UTC) + timedelta(seconds=LEASE_SECONDS),
+            )
+            return True
+
     def renew() -> None:
         while not stop.wait(HEARTBEAT_SECONDS):
             try:
-                with acting_as(actor), engine.begin() as conn:
-                    query = "run_lease" if kind == "run" else "transition_row_attempt"
-                    row = conn.execute(statement(conn, query), {"row_id": row_id}).one_or_none()
-                    active = {"IN-PROGRESS"} if kind == "run" else {"CLAIMED", "RUNNING"}
-                    if row is not None and row.status == "LOST":
-                        raise StaleTransitionError(
-                            f"attempt {row_id}: owner {owner} was reconciled LOST; stop its child"
-                        )
-                    if row is not None and row.status not in active:
-                        return
-                    renewal = (
-                        transitions.renew_run_lease if kind == "run" else transitions.renew_lease
-                    )
-                    renewal(
-                        conn,
-                        row_id,
-                        actor,
-                        owner=owner,
-                        lease_expires_at=datetime.now(UTC) + timedelta(seconds=LEASE_SECONDS),
-                    )
+                if not retrying(f"renewing {kind} {row_id}'s lease", renew_once):
+                    return
             except Exception as error:
                 failures.append(error)
                 cancel.set()
