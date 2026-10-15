@@ -130,8 +130,7 @@ jobs:
           case "$PROFILE" in
             engine) docker compose up -d --wait postgres mailpit ;;
             warehouse-duckdb|warehouse-postgres) docker compose up -d --wait postgres ;;
-            warehouse-duckdb_iceberg) docker compose up -d --wait iceberg-rest ;;
-            warehouse-trino_iceberg) docker compose up -d --wait trino ;;
+            warehouse-iceberg) docker compose up -d --wait postgres trino ;;
             connections) make services-up ;;
             *) echo "Unknown service profile: $PROFILE" >&2; exit 1 ;;
           esac

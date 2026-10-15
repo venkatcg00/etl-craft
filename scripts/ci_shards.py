@@ -18,7 +18,9 @@ ROOT = Path(__file__).resolve().parents[1]
 LOCAL_WAREHOUSES = ("duckdb", "postgres", "duckdb_iceberg", "trino_iceberg")
 SERVICE_MARKERS = {
     "engine": "engine_sqlite or engine_postgres",
-    **{f"warehouse-{kind}": f"warehouse_{kind}" for kind in LOCAL_WAREHOUSES},
+    "warehouse-duckdb": "warehouse_duckdb",
+    "warehouse-postgres": "warehouse_postgres",
+    "warehouse-iceberg": "warehouse_duckdb_iceberg or warehouse_trino_iceberg",
     "connections": "harness or connections",
 }
 SHARDS = {
@@ -26,8 +28,7 @@ SHARDS = {
     "engine": 6,
     "warehouse-duckdb": 1,
     "warehouse-postgres": 1,
-    "warehouse-duckdb_iceberg": 2,
-    "warehouse-trino_iceberg": 3,
+    "warehouse-iceberg": 3,
     "connections": 1,
     "e2e": 4,
 }
