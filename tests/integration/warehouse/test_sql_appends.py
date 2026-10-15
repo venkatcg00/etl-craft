@@ -13,6 +13,7 @@ from fixtures.sql_appends import (
     create_legacy_append_target,
     run_killed_append,
 )
+from fixtures.sql_warehouse import warehouses
 
 
 def test_append_retries_replace_only_their_task_run(sql_world):
@@ -247,3 +248,26 @@ def test_sql_input_identities_match_target_provenance(sql_world):
     from fixtures.sql_appends import check_identity_inputs
 
     check_identity_inputs(sql_world, "input_identities")
+
+
+@warehouses("postgres")
+def test_a_dropped_warehouse_connection_fails_retryable_and_the_retry_loads_once(sql_world):
+    w = sql_world
+    w.setup("dropped_events", "SELECT CAST(1 AS BIGINT) AS id", "APPEND_TABLE")
+    w.execute(f"CREATE SEQUENCE {w.schema}.first_attempt")
+    params = {
+        "SQL_ACTION": "APPEND_TABLE",
+        "TARGET_OBJECT": "dropped_events",
+        "SOURCE_SQL": (
+            "SELECT CAST(1 AS BIGINT) AS id WHERE CASE "
+            f"WHEN nextval('{w.schema}.first_attempt') = 1 "
+            "THEN pg_terminate_backend(pg_backend_pid()) ELSE TRUE END"
+        ),
+    }
+    with pytest.raises(HandlerError) as dropped:
+        w.run("dropped_load", **params)
+    assert "terminating connection" in str(dropped.value)
+    assert dropped.value.retryable
+    result = w.run("dropped_load", **params)
+    assert (result.insert_count, result.target_count) == (1, 1)
+    assert w.rows(f"SELECT id FROM {w.name('dropped_events')}") == [(1,)]

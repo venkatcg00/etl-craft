@@ -138,7 +138,7 @@ item's text, or work done early under another item.
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
 | S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
 | S7.O Package, demo and configuration repositories | Planned | | A very small demo stays in package CI; the Support Insights demo and its configuration repository supply release evidence the package gate validates |
-| S7.P Obvious failures do not stop 1.0.0 | Planned | | A catalog of obvious failures, each with its 1.0.0 behaviour, owning item and named regression test |
+| S7.P Obvious failures do not stop 1.0.0 | In progress | #173 | Audit: 11 of 19 rows name collected tests in `release/regressions.toml`, checked by `make regressions`; 8 open with their owning items |
 | S7.N Faster complete pull-request CI | Done | #170 | Fail-closed collection/shard accounting, isolated schema templates and shared demo workers; complete checks in 6m33s-8m15s (owner-approved ten-minute target) |
 | S8.H Support Insights scenario coverage | Planned | | Deterministic mixed-quality generators, every-feature demonstrations, business-rule and stewardship cases, and runnable README coverage |
 
@@ -207,6 +207,9 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S7.P's audit passed `make regressions` (11 of 19 rows with collected tests) and the new
+PostgreSQL dropped-connection test. Its other mapped tests run in their existing suites.
 
 S7.N passed the full local gate, strict docs, Python 3.12/3.13 unit suites and the complete
 installed-wheel/sdist matrix without skips. Schema-template isolation and audit guards passed
@@ -326,6 +329,18 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- S7.P's audit (item 2) records each row's tests in `release/regressions.toml`
+  `[obvious_failures]`, not in the item's table. `make regressions` already runs in
+  `make check`, and it now refuses a row without collected tests unless the row is
+  `open: <item>`. The audit split three catalog rows so that each row has one owner:
+  - task or overseer kills, and worker kills (S5.C);
+  - hung tasks, and failed SLA writes (S5.U);
+  - port in use (S7.P). A second server is already covered by the two-overseers row.
+
+  That makes 19 manifest rows. Items 3 and 4 (the disk and port checks) follow the 0.4 soak.
+  The audit tests describe behaviour that already exists. Only the checker's own tests fail
+  on the old code.
 
 - S7.N's complete-CI target is ten minutes, as approved by the owner: each installed Iceberg
   demo case (`test_the_demo_runs_locally`, DuckDB/Trino Iceberg on both Engine DBs) runs one

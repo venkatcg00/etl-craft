@@ -1,4 +1,4 @@
-"""Check that every stabilization defect maps to named, collected regression tests."""
+"""Check that every stabilization defect and obvious-failure row maps to collected tests."""
 
 from __future__ import annotations
 
@@ -48,6 +48,20 @@ def problems(expected: set[str], manifest: dict[str, Any], nodes: list[str]) -> 
     return failures
 
 
+def catalog_problems(catalog: object, nodes: list[str]) -> list[str]:
+    """Each obvious-failure row names collected tests, or "open: <item>" for its owner."""
+    if not isinstance(catalog, dict) or not catalog:
+        return ["regression manifest needs an obvious_failures table"]
+    failures = []
+    for row, entry in catalog.items():
+        if isinstance(entry, str):
+            if not re.fullmatch(r"open: S\d+\.[A-Z][\w.]*", entry):
+                failures.append(f"{row}: expected tests or 'open: <item>', found {entry!r}")
+            continue
+        failures += problems({row}, {"defects": {row: entry}}, nodes)
+    return failures
+
+
 def main() -> int:
     """Collect the complete suite and verify the roadmap's defect coverage."""
     manifest = tomllib.loads((ROOT / "release" / "regressions.toml").read_text("utf-8"))
@@ -64,11 +78,17 @@ def main() -> int:
         if code != 0:
             print(output.getvalue(), file=sys.stderr)
             return 1
-        failures = problems(expected, manifest, json.loads(collected.read_text("utf-8")))
+        nodes = json.loads(collected.read_text("utf-8"))
+        failures = problems(expected, manifest, nodes)
+        failures += catalog_problems(manifest.get("obvious_failures"), nodes)
     if failures:
         print("\n".join(failures), file=sys.stderr)
         return 1
+    catalog = manifest["obvious_failures"]
+    still_open = sorted(row for row, entry in catalog.items() if isinstance(entry, str))
     print(f"{len(expected)} stabilization defects have named, collected regression tests")
+    print(f"{len(catalog) - len(still_open)} of {len(catalog)} obvious failures have tests; open:")
+    print("\n".join(f"  {row}: {catalog[row][6:]}" for row in still_open))
     return 0
 
 

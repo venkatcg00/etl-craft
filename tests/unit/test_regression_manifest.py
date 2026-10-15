@@ -51,3 +51,23 @@ def test_named_test_reference_covers_its_collected_dialect_cases():
         )
         == []
     )
+
+
+@pytest.mark.parametrize(
+    ("catalog", "reason"),
+    [
+        (None, "needs an obvious_failures table"),
+        ({}, "needs an obvious_failures table"),
+        ({"engine-db-restart": "later"}, "expected tests or 'open: <item>'"),
+        ({"engine-db-restart": []}, "at least one named test"),
+        ({"engine-db-restart": ["tests/x.py::test_gone"]}, "test not collected"),
+    ],
+)
+def test_an_obvious_failure_row_needs_collected_tests_or_an_owning_item(catalog, reason):
+    failures = regressions.catalog_problems(catalog, ["tests/x.py::test_restart"])
+    assert any(reason in failure for failure in failures)
+
+
+def test_obvious_failure_rows_accept_collected_tests_and_open_items():
+    catalog = {"engine-db-restart": "open: S5.U", "kill": ["tests/x.py::test_restart"]}
+    assert regressions.catalog_problems(catalog, ["tests/x.py::test_restart[sqlite]"]) == []
