@@ -351,7 +351,9 @@ The separate frozen 0.4 soak deployment is unchanged.
   - **Free-space floor.** The 64 MiB floor is a constant.
   - **Busy port.** A port in use refuses `server` with `RunRefusedError` (exit 10) before it
     takes leadership. Two servers on one Engine DB were already refused by leadership.
-  - **S7.F.** The same pull request records the owner's container-image decision in S7.F.
+  - **S7.F and S5.C.** The same pull request records the owner's container-image decision in
+    S7.F, and adds S5.C's worker communication through the Engine DB: `NOTIFY` wake-ups,
+    audited worker commands and the worker list.
 
 - S5.U item 5 came first, before S5.R items 7 and 8, at the owner's request.
   - **Engine DB outage handling.**
@@ -3407,7 +3409,34 @@ RETURNING a.ATTEMPT_ID
      the remaining children (their attempts end `FAILED` "worker drained") and set `GONE`.
 - *Overseer side.* Workers whose heartbeat is older than three intervals are `GONE`; their attempts'
   leases expire and reconciliation marks them `LOST` (`S3.D`).
+- *Talking to workers.* The overseer and workers talk only through the Engine DB, never by direct
+  network calls. A worker container needs no overseer address and opens no port, so there is no
+  service discovery, cross-container TLS or second authentication. Every exchange is a row.
+  1. **Prompt wake-ups.**
+     - Queuing an attempt, requesting a cancellation and a worker command each send a
+       PostgreSQL `NOTIFY` on a channel per pool, and per worker for its commands.
+     - An idle worker waits on `LISTEN` and claims at once. The 10-second heartbeat poll stays
+       the fallback, so a missed notification delays work but never loses it.
+     - Cancellation (S5.D) is acknowledged within seconds rather than one heartbeat interval.
+  2. **Operator commands, PowerCenter-style.**
+     - `etl-craft worker drain|resume|stop --worker-id N`, the matching API routes and UI
+       actions write a row to `AUD_WORKER_COMMANDS`: `COMMAND_ID`, `WORKER_ID`, `COMMAND`,
+       the requesting actor, `REQUESTED_AT` and `ACKNOWLEDGED_AT`.
+     - The worker reads its pending commands on notification or at its next heartbeat, applies
+       them, and records the acknowledgement.
+     - `drain` stops claiming and lets running attempts finish; `resume` undoes it; `stop`
+       drains and then exits.
+     - Every command and its outcome is audited; a command to a `GONE` worker is refused, naming
+       the worker.
+  3. **The worker list.** `etl-craft workers`, `GET /api/v1/workers` and the S7.A Workers page
+     show each worker's status, pool, host, version, slots in use and free, measured resources,
+     running attempts, last heartbeat and pending commands. They are computed by one service
+     shared with `doctor` and `status`.
 - *Tests* (`S5.J`).
+  - A queued attempt is claimed promptly through `NOTIFY`, and with notifications suppressed it
+    is still claimed by the heartbeat poll.
+  - Drain, resume and stop are applied and acknowledged, and refused for a `GONE` worker.
+  - The worker list matches the registry across joins, drains and departures.
 
 ### S5.D Cancellation across the cluster
 
