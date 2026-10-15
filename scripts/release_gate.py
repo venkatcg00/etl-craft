@@ -126,6 +126,14 @@ def check_results(suite: Suite, evidence: dict[str, Any]) -> list[str]:
     problems = []
     if evidence.get("marker") != suite.marker:
         problems.append(f"recorded marker {evidence.get('marker')!r}, expected {suite.marker!r}")
+    return problems + check_outcomes(evidence)
+
+
+def check_outcomes(
+    evidence: dict[str, Any], *, allow_skips: bool = False, require_pass: bool = True
+) -> list[str]:
+    """Check collected identities and outcome counts; release evidence never permits skips."""
+    problems = []
     collected = node_ids(evidence.get("collected"))
     if collected is None:
         problems.append("collected test ids must be a nonempty list without duplicates")
@@ -150,10 +158,10 @@ def check_results(suite: Suite, evidence: dict[str, Any]) -> list[str]:
         or any(counts.get(key, 0) != value for key, value in actual.items())
     ):
         problems.append("summary counts do not match test outcomes")
-    if not actual["passed"]:
+    if require_pass and not actual["passed"]:
         problems.append("no tests ran")
     for outcome in NOT_PASSING:
-        if actual[outcome]:
+        if actual[outcome] and not (allow_skips and outcome == "skipped"):
             problems.append(f"{actual[outcome]} {outcome}")
     return problems
 

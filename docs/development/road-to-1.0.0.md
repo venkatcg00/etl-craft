@@ -134,7 +134,7 @@ item's text, or work done early under another item.
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
-| S7.N Faster complete pull-request CI | Planned | | Five-minute required-check target without losing tests, platforms, services or failure detection; expensive stress remains in manual/release validation |
+| S7.N Faster complete pull-request CI | Done | #170 | Fail-closed collection/shard accounting, isolated schema templates and shared demo workers; complete checks in 6m33s-8m15s (owner-approved ten-minute target) |
 | S8.H Support Insights scenario coverage | Planned | | Deterministic mixed-quality generators, every-feature demonstrations, business-rule and stewardship cases, and runnable README coverage |
 
 ### Handover notes
@@ -163,6 +163,17 @@ S5.T (resource discovery and deployment profiles), then S5.C. S5.T supplies the 
 does not move worker work ahead of the metadata, account or operator-control corrections.
 
 **Acceptance availability.**
+
+S7.N passed the full local gate, strict docs, Python 3.12/3.13 unit suites and the complete
+installed-wheel/sdist matrix without skips. Schema-template isolation and audit guards passed
+on both Engine DBs; collection comparison retained every existing case. Shared demo workers
+passed the installed Trino cases, and twenty worker-dispatch/namespace-isolation rounds passed.
+Old-code regression checks and the real CI service runner were exercised. Three consecutive
+cold-cache runs (7m37s, 8m15s, 7m16s) and three warm-cache runs (6m39s, 7m25s, 6m33s) of the
+complete CI and Docs checks passed on standard GitHub-hosted runners, measured from the first job
+start along the dependency path with runner queue excluded; before, the service job alone took
+33m51s. Runner cost averaged 135.7 minutes per run against 126.35 before (+7%). The installed
+Iceberg demo jobs remain the critical path. The frozen soak and old stash remain untouched.
 
 S6.C passed the full local gate, strict docs, Python 3.12/3.13 unit suites, and focused catalog,
 lineage, publication and released-schema upgrade checks on both Engine DBs. Explicit cold and
@@ -271,6 +282,12 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- S7.N's complete-CI target is ten minutes, as approved by the owner: each installed Iceberg
+  demo case (`test_the_demo_runs_locally`, DuckDB/Trino Iceberg on both Engine DBs) runs one
+  end-to-end demo for 290-326 seconds, so no sharding reaches five minutes without weakening
+  that contract. The measurement, cache conditions, three-run requirement, cost rule and
+  fail-closed accounting are unchanged. Profiling the Iceberg demo run is separate work.
 
 - S6.D stays one implementation PR after S5.R item 3, as approved by the owner. Its active-flag
   uniqueness migration needs a preflight marker for actionable legacy-duplicate diagnostics;

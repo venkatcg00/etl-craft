@@ -3,6 +3,7 @@
 pytest_plugins = [
     "pytester",
     "plugins.evidence",
+    "plugins.ci_shards",
     "plugins.suites",
     "fixtures.engine_db",
     "fixtures.cli_project",

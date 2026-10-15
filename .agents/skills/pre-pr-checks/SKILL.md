@@ -220,6 +220,12 @@ Fix what you find, then rerun the steps it affects.
 
 ## Report
 
+CI's **every test and matrix accounted for** check is required alongside the individual jobs.
+It verifies complete collection/outcome artifacts and combines coverage for each Python/platform
+pair at the unchanged 90% threshold. A passing partition alone is not a complete suite result.
+Use the `ci-*` artifacts for shard failures; do not bypass the final check when an artifact or
+matrix job is missing. Local `make check docs` and installed-wheel validation remain unchanged.
+
 For each step, give the passed, failed and skipped counts, the coverage, the duration and the log
 path. Report a failure caused by the environment (missing credentials, services down, no wheel)
 as that, separately from failures in the code.

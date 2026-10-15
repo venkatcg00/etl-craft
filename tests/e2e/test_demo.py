@@ -214,11 +214,13 @@ def check_the_reports(demo: Demo) -> None:
         "FAILED",
     ]
     assert "wave" in demo.ok("graph", "--pipeline_code", "SUPPORT_DM").lower()
-    lineage = demo.ok("lineage", "--table", "dm.support_fact", "--column", "rating")
-    assert "lnd.client_alpha.rating" in lineage and "lnd.client_beta.score" in lineage
+    target = f"{demo.prefix}dm.support_fact"
+    lineage = demo.ok("lineage", "--table", target, "--column", "rating")
+    assert f"{demo.prefix}lnd.client_alpha.rating" in lineage
+    assert f"{demo.prefix}lnd.client_beta.score" in lineage
     assert "generate-docs: wrote" in demo.ok("generate-docs", "--strict", "--with-warehouse")
-    fact = (demo.root / "catalog" / "tables" / "dm.support_fact.html").read_text("utf-8")
-    assert "unknown agent" in fact and 'data-col="dm.support_fact|rating"' in fact
+    fact = (demo.root / "catalog" / "tables" / f"{target}.html").read_text("utf-8")
+    assert "unknown agent" in fact and f'data-col="{target}|rating"' in fact
 
 
 @pytest.mark.parametrize(("installer", "engine", "warehouse"), CASES)

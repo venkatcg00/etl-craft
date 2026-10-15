@@ -8,8 +8,8 @@ loads its metadata, runs the installed command line, and reads the warehouse, th
 and the emails Mailpit received.
 
 Each demo works in databases of its own: a SQLite file or a new PostgreSQL database for the
-Engine DB, and a DuckDB file or a new PostgreSQL database for the warehouse. The Iceberg REST
-catalog is shared, so the demo's namespaces there are emptied before it starts.
+Engine DB, and a DuckDB file or a new PostgreSQL database for the warehouse. Each Iceberg demo
+uses its own namespaces in the shared REST catalog and removes them when it closes.
 
 On Databricks and Snowflake the account is the team's, so the demo never touches a schema it
 did not make: its schemas get a prefix unique to the run (``ec_<tag>_lnd``, ...), written into
@@ -124,7 +124,7 @@ class Demo:
             self.root,
             ignore=shutil.ignore_patterns("*.db", "*.duckdb", ".flaky-*", "migrations"),
         )
-        if self.cloud:
+        if self.cloud or self.warehouse_kind in ("duckdb_iceberg", "trino_iceberg"):
             self.prefix = f"ec_{self.tag}_"
             self._rename_schemas()
         smtp = require("mailpit_smtp")
@@ -208,8 +208,8 @@ class Demo:
             trino = require("trino")
             self.catalog = "iceberg"
             profile = {
-                "jdbc_url": f"jdbc:trino://{trino.address}/iceberg/aud",
-                "schema": "aud",
+                "jdbc_url": f"jdbc:trino://{trino.address}/iceberg/{self.prefix}aud",
+                "schema": f"{self.prefix}aud",
                 "user": "etl",
                 "auth_mode": "none",
             }
@@ -219,7 +219,7 @@ class Demo:
         self.catalog = "lake"
         profile = {
             "jdbc_url": "jdbc:duckdb:",
-            "schema": "aud",
+            "schema": f"{self.prefix}aud",
             "catalog": "lake",
             "catalog_uri": catalog.http_url,
             "iceberg_warehouse": "s3://warehouse/",
@@ -282,7 +282,16 @@ class Demo:
             self.cleanup.append(drop)
             return
         if self.warehouse_kind in ("duckdb_iceberg", "trino_iceberg"):
-            _empty_namespaces(SCHEMAS)
+            names = [f"{self.prefix}{schema}" for schema in SCHEMAS]
+
+            def drop_namespaces() -> None:
+                _empty_namespaces(names)
+                catalog = require("iceberg_rest")
+                for name in names:
+                    _request("DELETE", f"{catalog.http_url}/v1/namespaces/{name}")
+
+            self.cleanup.append(drop_namespaces)
+            _empty_namespaces(names)
             return
         with self.warehouse() as engine, engine.begin() as conn:
             for schema in SCHEMAS:
@@ -314,6 +323,7 @@ class Demo:
     def close(self) -> None:
         for step in reversed(self.cleanup):
             step()
+        self.cleanup.clear()
 
     # Running it
 

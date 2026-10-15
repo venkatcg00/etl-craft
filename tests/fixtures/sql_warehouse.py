@@ -27,7 +27,7 @@ from etl_craft.engine import transitions
 from etl_craft.handlers import sql
 from etl_craft.handlers.registry import HandlerResult, TaskContext
 from etl_craft.warehouse.connection import build_warehouse_engine
-from fixtures.engine_db import apply_schema, sqlite_engine_db
+from fixtures.engine_db import prepared_sqlite_engine_db
 from fixtures.metadata import add_pipeline, add_task, start_run
 from fixtures.services import (
     MINIO_PASSWORD,
@@ -206,7 +206,10 @@ def warehouses(*kinds: str) -> pytest.MarkDecorator:
 
 @pytest.fixture(params=WAREHOUSES)
 def sql_world(
-    request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    sqlite_schema_template: Path,
 ) -> Iterator[SqlWorld]:
     """A fresh schema on each warehouse in turn, with an Engine DB and pipeline P."""
     kind = request.param
@@ -255,8 +258,7 @@ def sql_world(
         config = replace(config, warehouse_table_format="iceberg")
         catalog = "lake"
     monkeypatch.setenv("ETL_CRAFT_TEST_S3_SECRET", MINIO_PASSWORD)
-    engine_db = sqlite_engine_db(config.project_dir).engine
-    apply_schema(engine_db)
+    engine_db = prepared_sqlite_engine_db(config.project_dir, sqlite_schema_template).engine
     with engine_db.begin() as conn:
         pipeline_id = add_pipeline(conn, "P", refresh_type="INCREMENTAL")
         run_id = start_run(conn, pipeline_id)
