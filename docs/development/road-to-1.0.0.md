@@ -133,7 +133,7 @@ item's text, or work done early under another item.
 | S5.T Resource discovery and deployment profiles | Planned | | Opt-in laptop, server and server-with-workers sizing from usable process resources; one discovery module before S5.C |
 | S5.V Team-owned config tables | Planned | | Teams' own `CFG_` tables carry no etl-craft guards, contract, history or config files; etl-craft's tables keep them |
 | S5.U Robustness before the cluster | In progress | #176 | Item 5 done: Engine DB restarts and failovers ridden out within `Orchestration.Engine_db_outage_seconds`; items 1 to 4 follow S5.R items 7 and 8 |
-| S5.W Retry only what can succeed | Planned | | Transient, permanent and unknown failure classes per dialect; `Retry_on` / `RETRY_ON`; each attempt records why it was or was not retried |
+| S5.W Retry only what can succeed | Planned | | Transient, permanent and unknown failure classes per dialect; `Retry_on` / `RETRY_ON` of `NONE`, `TRANSIENT` (default), `TRANSIENT_AND_UNKNOWN` or `ANY`; each attempt records why it was or was not retried |
 | S5.C and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
@@ -3286,9 +3286,11 @@ this classification.
        `etl_craft.scripting`. Any other exception is `UNKNOWN`.
   3. **Configuration.**
      - `Orchestration.Retry_on` sets the project default:
+       - `NONE` never retries, even after a dropped connection;
        - `TRANSIENT` (the default) retries only transient failures;
        - `TRANSIENT_AND_UNKNOWN` also retries unclassified ones;
-       - `ANY` keeps today's behaviour.
+       - `ANY` retries every failure, as before this item. It is for teams that want it; the
+         default never retries a permanent failure.
      - The task parameter `RETRY_ON` overrides it per task.
      - `validate` refuses other values, naming the task and the allowed values.
   4. **Record.**
@@ -3311,6 +3313,7 @@ this classification.
   - **Driver classes:** per-dialect unit tests build each driver's real exception classes, so
     a driver upgrade that changes the mapping fails a test.
   - **`RETRY_ON` behaviour:**
+    - `NONE` does not retry a dropped connection;
     - `ANY` retries the permanent error;
     - `TRANSIENT_AND_UNKNOWN` retries an unclassified script exception;
     - `TRANSIENT` does not.
