@@ -280,6 +280,12 @@ The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
 
+- S7.N's complete-CI target is ten minutes, as approved by the owner: each installed Iceberg
+  demo case (`test_the_demo_runs_locally`, DuckDB/Trino Iceberg on both Engine DBs) runs one
+  end-to-end demo for 290-326 seconds, so no sharding reaches five minutes without weakening
+  that contract. The measurement, cache conditions, three-run requirement, cost rule and
+  fail-closed accounting are unchanged. Profiling the Iceberg demo run is separate work.
+
 - S6.D stays one implementation PR after S5.R item 3, as approved by the owner. Its active-flag
   uniqueness migration needs a preflight marker for actionable legacy-duplicate diagnostics;
   register that marker as data instead of adding another branch to the current runner. The
