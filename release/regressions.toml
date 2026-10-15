@@ -210,7 +210,11 @@ credentials-or-unreachable = [
     "tests/integration/engine/test_dialects.py::test_a_wrong_password_fails_when_connecting",
     "tests/unit/test_config_resolve.py::test_a_secret_is_checked_at_load_and_again_when_resolved",
 ]
-disk-full-or-unwritable = "open: S7.P"
+disk-full-or-unwritable = [
+    "tests/integration/execution/test_runner.py::test_a_log_disk_without_room_fails_the_attempt_before_its_process_starts",
+    "tests/unit/test_log_folder.py::test_a_folder_that_cannot_be_created_is_named",
+    "tests/unit/test_log_folder.py::test_a_folder_this_user_cannot_write_is_refused_with_the_remedy",
+]
 bad-values-or-business-data = [
     "tests/integration/warehouse/test_sql_rejects.py::test_a_messy_merge_loads_its_good_rows_and_sets_the_rest_aside",
     "tests/integration/warehouse/test_sql_rejects.py::test_over_the_limit_the_most_common_reasons_are_named",
@@ -232,4 +236,6 @@ retry-that-cannot-succeed = "open: S5.W"
 upgrade-from-0x = [
     "tests/integration/engine/test_upgrade.py::test_an_earlier_engine_db_upgrades_to_the_current_schema",
 ]
-port-in-use = "open: S7.P"
+port-in-use = [
+    "tests/integration/api/test_api.py::test_server_refuses_an_api_address_in_use_before_taking_leadership",
+]

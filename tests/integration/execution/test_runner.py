@@ -10,9 +10,15 @@ from sqlalchemy.exc import OperationalError
 
 from etl_craft.config import load_config
 from etl_craft.core.enums import RunStatus
-from etl_craft.core.errors import HandlerError, MetadataError, RunRefusedError, RunStateError
+from etl_craft.core.errors import (
+    ConfigurationError,
+    HandlerError,
+    MetadataError,
+    RunRefusedError,
+    RunStateError,
+)
 from etl_craft.engine import runlog, transitions
-from etl_craft.execution import runner
+from etl_craft.execution import runner, supervisor
 from etl_craft.execution.gates import CrossPipelineCheck
 from etl_craft.execution.runner import ChildOptions, run_task
 from fixtures.metadata import start_run
@@ -355,6 +361,19 @@ def test_a_task_process_that_cannot_start_is_recorded_failed(project, monkeypatc
         found.error_message
         == "could not run the task process: OSError: [Errno 24] Too many open files"
     )
+
+
+def test_a_log_disk_without_room_fails_the_attempt_before_its_process_starts(project, monkeypatch):
+    engine, config, ids = project
+    monkeypatch.setattr(supervisor, "MIN_FREE_LOG_BYTES", 2**62)
+    with pytest.raises(ConfigurationError, match="MiB free; a task needs at least"):
+        run(project, "ok")
+    with engine.connect() as conn:
+        found = runlog.fetch_task_run_result(conn, row_id(engine, ids["ok"], ids["run"]))
+    assert found.status == "FAILED"
+    assert found.error_message.startswith("could not run the task process: ConfigurationError:")
+    assert "Orchestration.Log_dir" in found.error_message
+    assert not (config.log_dir / "P" / f"run-{ids['run']}" / "ok.attempt-1.log").exists()
 
 
 def test_recording_an_outcome_survives_a_dropped_connection(project, monkeypatch):

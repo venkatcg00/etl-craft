@@ -8,6 +8,14 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- A task process starts only when its log folder under `Orchestration.Log_dir` can be created
+  and written, with at least 64 MiB free. Otherwise the attempt is recorded `FAILED` with a
+  `ConfigurationError` naming the folder, what was found and the remedy, before the task does
+  any work.
+- `etl-craft server` binds `Orchestration.Api_address` before it takes leadership or
+  supervises anything. An address already in use refuses the server with exit code 10, naming
+  the address and the remedy.
+
 - A PostgreSQL Engine DB restart or managed failover no longer stops etl-craft. A process that
   has reached the Engine DB waits up to `Orchestration.Engine_db_outage_seconds` (default 120;
   0 fails at once) for it to answer again:
