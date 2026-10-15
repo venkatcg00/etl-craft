@@ -140,7 +140,7 @@ item's text, or work done early under another item.
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
 | S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
 | S7.O Package, demo and configuration repositories | Planned | | A very small demo stays in package CI; the Support Insights demo and its configuration repository supply release evidence the package gate validates |
-| S7.P Obvious failures do not stop 1.0.0 | In progress | #173 | Audit: 11 of 19 rows name collected tests in `release/regressions.toml`, checked by `make regressions`; 8 open with their owning items |
+| S7.P Obvious failures do not stop 1.0.0 | In progress | #173, #178 | Audit done (#173); the log-folder and port checks close their catalog rows (#178); item 4 keeps the catalog current |
 | S7.N Faster complete pull-request CI | Done | #170 | Fail-closed collection/shard accounting, isolated schema templates and shared demo workers; complete checks in 6m33s-8m15s (owner-approved ten-minute target) |
 | S8.H Support Insights scenario coverage | Planned | | Deterministic mixed-quality generators, every-feature demonstrations, business-rule and stewardship cases, and runnable README coverage |
 
@@ -212,6 +212,9 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S7.P item 3 (#178) passed its unit tests, a runner test of a full log disk, an API server test of
+a port in use, and the touched execution, overseer and API suites.
 
 S5.U item 5 passed the new outage, leadership and connection tests. Its PostgreSQL outage tests
 cut off the test's own database, which is safe beside other CI workers.
@@ -337,6 +340,18 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- S7.P item 3 (#178) checks the log folder, not an uploads folder, because uploads arrive with
+  S7.M.
+  - **Log folder.** The check runs after the attempt is claimed and before its task process
+    starts. A refusal is then recorded on the attempt (`FAILED`, with the folder, the free space
+    found and the remedy), rather than lost at admission, and the task does no work.
+  - **Error class.** It uses `ConfigurationError`: an unwritable or full `Orchestration.Log_dir`
+    is a deployment setting to fix, so no new exit code is needed.
+  - **Free-space floor.** The 64 MiB floor is a constant.
+  - **Busy port.** A port in use refuses `server` with `RunRefusedError` (exit 10) before it
+    takes leadership. Two servers on one Engine DB were already refused by leadership.
+  - **S7.F.** The same pull request records the owner's container-image decision in S7.F.
 
 - S5.U item 5 came first, before S5.R items 7 and 8, at the owner's request.
   - **Engine DB outage handling.**
@@ -3907,9 +3922,17 @@ S5.S delivers the accounts, the login, the roles and the role check on every act
 
 ### S7.F Packaging and deployment
 
-- Container images: `etl-craft` (overseer, worker and CLI, with the `postgres`, `server` and chosen
-  warehouse extras) published per release.
-- A single-node `docker-compose` deployment (PostgreSQL, overseer, one worker) in `deploy/compose/`.
+- **Container image.** `etl-craft` holds the overseer, worker and CLI, with the `postgres`,
+  `server` and chosen warehouse extras. Its Dockerfile lives in this repository.
+  - Every release candidate's release workflow builds the image and smoke-tests it. It is not
+    built in pull-request CI, so that CI stays under ten minutes.
+  - It is pushed to GitHub Container Registry (`ghcr.io/venkatcg00/etl-craft`) only from
+    1.0.0, with the PyPI release. Nothing is published to a registry before 1.0.0.
+  - A Docker Hub mirror is optional at 1.0.0.
+  - Until then, the demo repository builds its own image from the pinned candidate wheel.
+- **A single-node Docker Compose template** (PostgreSQL, overseer, one worker) is published as a
+  deployment example in the package's docs and tested in release validation only. The full
+  Support Insights stack's Compose file stays in the demo repository (S8.A).
 - A documented cluster layout: the overseer on the largest node (at least 1.5 times a worker's
   memory), N workers, the Engine DB, the artifact and log stores; systemd unit files for hosts without
   containers.

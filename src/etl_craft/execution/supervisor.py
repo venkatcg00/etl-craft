@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import signal
 import subprocess
 import tempfile
@@ -21,6 +22,7 @@ from pathlib import Path
 from typing import IO
 
 from etl_craft.core import interrupts
+from etl_craft.core.errors import ConfigurationError
 from etl_craft.core.faults import fault_point
 
 logger = logging.getLogger(__name__)
@@ -33,6 +35,9 @@ TAIL_BYTES = 64 * 1024
 
 KILL_GRACE_SECONDS = 10.0
 """How long a timed-out child's process group has to exit after SIGTERM before SIGKILL."""
+
+MIN_FREE_LOG_BYTES = 64 * 1024 * 1024
+"""The free space a child's log folder needs before the child starts."""
 
 
 @dataclass(frozen=True)
@@ -177,10 +182,36 @@ def _output_file(path: Path | None) -> Iterator[IO[bytes]]:
         with tempfile.TemporaryFile() as handle:
             yield handle
         return
-    path.parent.mkdir(parents=True, exist_ok=True)
+    require_log_folder(path.parent)
     fault_point("supervisor.after_mkdir")
     with path.open("a+b") as handle:
         yield handle
+
+
+def require_log_folder(folder: Path) -> None:
+    """Refuse to start a child whose log folder cannot be written or has too little free space.
+
+    The check runs before the child starts, so a full or read-only disk never interrupts a task
+    halfway through its work.
+    """
+    remedy = "or point Orchestration.Log_dir at a writable disk with free space"
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise ConfigurationError(
+            f"cannot create the log folder {folder}: {error.strerror}; "
+            f"fix its permissions, {remedy}"
+        ) from error
+    if not os.access(folder, os.W_OK | os.X_OK):
+        raise ConfigurationError(
+            f"the log folder {folder} is not writable by this user; fix its permissions, {remedy}"
+        )
+    free = shutil.disk_usage(folder).free
+    if free < MIN_FREE_LOG_BYTES:
+        raise ConfigurationError(
+            f"the disk holding the log folder {folder} has {free // 2**20} MiB free; a task needs "
+            f"at least {MIN_FREE_LOG_BYTES // 2**20} MiB before it starts; free space, {remedy}"
+        )
 
 
 def _read_tail(output: IO[bytes], start_offset: int, tail_bytes: int) -> str:

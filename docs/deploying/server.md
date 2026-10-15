@@ -139,6 +139,16 @@ Past the budget, the server fails with the length of the outage and the setting'
 it once the Engine DB is back, or raise the setting for longer failovers. A SQLite Engine DB is
 a local file and has no such outages.
 
+## Refusals at start
+
+`etl-craft server` binds `Orchestration.Api_address` first. When the address is in use, it
+stops with exit code 10 before taking leadership, naming the address. Stop the process
+listening there, or choose a free port (port 0 picks one).
+
+A task process starts only when its log folder under `Orchestration.Log_dir` can be written and
+its disk has at least 64 MiB free. Otherwise the attempt is recorded `FAILED`, with the folder,
+the free space found and the remedy, and the task does no work.
+
 ## Shutdown
 
 SIGTERM or Ctrl-C immediately stops new dispatch. Tasks already running may finish within

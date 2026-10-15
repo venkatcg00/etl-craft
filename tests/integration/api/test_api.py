@@ -504,3 +504,25 @@ def test_watermark_reset_validates_and_audits_the_api_actor(api):
             {"task": task},
         ).one()
         assert tuple(intervention) == ("operator", "reset")
+
+
+def test_server_refuses_an_api_address_in_use_before_taking_leadership(cli_project):
+    import socket
+
+    import yaml
+
+    p = cli_project
+    with socket.socket() as taken:
+        taken.bind(("127.0.0.1", 0))
+        taken.listen()
+        port = taken.getsockname()[1]
+        path = p.config.config_path
+        config = yaml.safe_load(path.read_text())
+        config["Orchestration"]["Api_address"] = f"127.0.0.1:{port}"
+        path.write_text(yaml.safe_dump(config, sort_keys=False))
+        code, output = p.run("server")
+    assert code == 10, output
+    assert f"Orchestration.Api_address 127.0.0.1:{port} cannot be used" in output
+    assert "set Api_address to a free port" in output
+    with p.engine.connect() as conn:
+        assert conn.execute(text("SELECT COUNT(*) FROM AUD_OVERSEERS")).scalar_one() == 0
