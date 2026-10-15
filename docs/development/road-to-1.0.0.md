@@ -135,7 +135,7 @@ item's text, or work done early under another item.
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
-| S7.M Stewardship uploads | Planned | | Stewardable pipelines chosen by stewards; one pipe-delimited CSV/TXT or XLSX file; mandatory file-validation task before processing |
+| S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` on pipelines chosen by stewards; one pipe-delimited CSV/TXT or XLSX file; mandatory file-validation task before processing |
 | S7.O Package, demo and configuration repositories | Planned | | Package CI tests a package-owned fixture project; the demo and its configuration repository supply release evidence the package gate validates |
 | S7.N Faster complete pull-request CI | Done | #170 | Fail-closed collection/shard accounting, isolated schema templates and shared demo workers; complete checks in 6m33s-8m15s (owner-approved ten-minute target) |
 | S8.H Support Insights scenario coverage | Planned | | Deterministic mixed-quality generators, every-feature demonstrations, business-rule and stewardship cases, and runnable README coverage |
@@ -3472,9 +3472,13 @@ after S5.S (accounts and roles) and S5.O.3 (protection of human writes).
     nothing else.
 - *Change.*
   1. **Stewardable pipelines** (config files; the `developer` role).
-     - A pipeline is stewardable when it has an active row in `CFG_UPLOAD_CONTRACTS`. The row
-       is the mark; there is no separate flag to keep in step. The table has the common config
-       fields from S5.O.2a:
+     - `CFG_PIPELINES` gains `STEWARDABLE_FLAG` (`Y`/`N`, default `N`), which marks the
+       pipelines stewards may upload to. Each stewardable pipeline takes exactly one file per
+       upload. A migration adds the column in both dialects with `N` for existing pipelines.
+       - `validate` refuses `Y` without exactly one active contract row.
+       - It refuses a contract row on a pipeline marked `N`.
+     - `CFG_UPLOAD_CONTRACTS` describes the file a stewardable pipeline takes, with the common
+       config fields from S5.O.2a:
        - `UPLOAD_CONTRACT_ID`;
        - `PIPELINE_ID`, unique among active rows: one contract per stewardable pipeline;
        - `TABLE_ID`: the landing table's contract in `CFG_TABLES` and `CFG_COLUMNS` (S5.O.2b),
@@ -3501,8 +3505,8 @@ after S5.S (accounts and roles) and S5.O.3 (protection of human writes).
        - `validate` refuses a stewardable pipeline unless it has exactly one `FILE_VALIDATION`
          task, that task is the pipeline's only root, and every other task depends on it,
          directly or through others, with `SUCCESS`.
-       - `validate` also refuses a `FILE_VALIDATION` task in a pipeline that is not
-         stewardable.
+       - `validate` also refuses a `FILE_VALIDATION` task in a pipeline whose
+         `STEWARDABLE_FLAG` is `N`.
      - A stewardable pipeline runs only from an upload. It has no schedule, and `run` without
        an upload is refused, naming the pipeline and the remedy. Retries and reruns reuse the
        run's stored upload.
@@ -3562,9 +3566,12 @@ after S5.S (accounts and roles) and S5.O.3 (protection of human writes).
 - *Tests.*
   - Access: assigned and unassigned accounts; accounts without the `steward` role; the
     drop-down lists only assigned, active stewardable pipelines.
-  - Configuration: `validate` refuses a stewardable pipeline without a root `FILE_VALIDATION`
-    task, with a second root, or with a task that does not depend on it, and refuses the
-    handler in a pipeline without a contract.
+  - Configuration: `validate` refuses:
+    - `STEWARDABLE_FLAG = 'Y'` without a contract;
+    - a contract on a pipeline marked `N`;
+    - a stewardable pipeline without a root `FILE_VALIDATION` task, with a second root, or
+      with a task that does not depend on it;
+    - the handler in a pipeline that is not stewardable.
   - Requests: zero and two files; an oversized file; a duplicate file; an upload while the
     pipeline is running; a scheduled or plain `run` of a stewardable pipeline.
   - Formats:
