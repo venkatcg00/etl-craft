@@ -131,13 +131,14 @@ item's text, or work done early under another item.
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
 | S5.T Resource discovery and deployment profiles | Planned | | Opt-in laptop, server and server-with-workers sizing from usable process resources; one discovery module before S5.C |
 | S5.V Team-owned config tables | Planned | | Teams' own `CFG_` tables carry no etl-craft guards, contract, history or config files; etl-craft's tables keep them |
-| S5.U Robustness before the cluster | Planned | | No silent fallbacks in supervision, SLA and cleanup paths; measured coverage of process, leadership and server code; deterministic timing tests |
+| S5.U Robustness before the cluster | Planned | | Engine DB restarts ridden out; no silent fallbacks in supervision, SLA and warehouse-lock paths; measured coverage of process, leadership and server code; deterministic timing tests |
 | S5.C and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
 | S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
 | S7.O Package, demo and configuration repositories | Planned | | A very small demo stays in package CI; the Support Insights demo and its configuration repository supply release evidence the package gate validates |
+| S7.P Obvious failures do not stop 1.0.0 | Planned | | A catalog of obvious failures, each with its 1.0.0 behaviour, owning item and named regression test |
 | S7.N Faster complete pull-request CI | Done | #170 | Fail-closed collection/shard accounting, isolated schema templates and shared demo workers; complete checks in 6m33s-8m15s (owner-approved ten-minute target) |
 | S8.H Support Insights scenario coverage | Planned | | Deterministic mixed-quality generators, every-feature demonstrations, business-rule and stewardship cases, and runnable README coverage |
 
@@ -187,9 +188,13 @@ does not move worker work ahead of the metadata, account or operator-control cor
   - `craft-connector.yml` sets a blanket upload size limit for the project, and each
     pipeline's `FILE_VALIDATION` task may set a lower one.
   - Demo stewardship covers the `dm` mart and the `ds` reference tables (S8.H item 3).
-- **The UI never edits metadata.** It is for pipeline operations, like Informatica's Workflow
-  Monitor with more: Airflow-style run control, dbt-docs-style documentation and run-health
-  dashboards. Metadata changes only through config files.
+- **The UI never edits metadata.** It is for pipeline operations. Its actions follow
+  Informatica PowerCenter's Workflow Monitor (S5.Q, S7.A.2), not Airflow's narrower
+  constraints. It adds run views, dbt-docs-style documentation and run-health dashboards.
+  Metadata changes only through config files.
+- **1.0.0 does not fail for obvious reasons** ([What 1.0.0 is](#what-100-is), S7.P).
+  - Ordinary outages are ridden out without an operator.
+  - Ordinary mistakes are caught before a run, with the remedy.
 - **Teams own their extra `CFG_` tables** (S5.V). Teams maintain and use their own `CFG_` tables
   with their own scripts; etl-craft keeps no restrictions on them.
 - **Order.**
@@ -854,6 +859,17 @@ derives the dependency graph, schedules runs, dispatches tasks to workers, recor
 Engine DB, and shows it through the CLI, an HTTP API and a web UI. Neither Airflow nor dbt is
 required. Airflow remains supported as an optional external orchestrator through the generated YAML.
 
+**1.0.0 does not fail for obvious reasons.** That is its goal, and S7.P's catalog is the
+checklist.
+- **Outages are ridden out.** An Engine DB restart or failover, a warehouse or network blip, a
+  host reboot, or a killed process is ridden out without an operator, within a stated budget.
+- **Mistakes are caught before a run.** Missing or wrong files, bad configuration, expired
+  credentials and a bad upload are caught by `validate`, `doctor` or the upload checks. The
+  message names the problem and its remedy.
+
+Riding out an outage is bounded waiting, not guessing. When the budget runs out, the run fails
+with the exact cause, as the design rules require.
+
 ### Components
 
 ```mermaid
@@ -945,7 +961,7 @@ flowchart LR
 | 0.4 | Overseer: `etl-craft server`, schedules with time zones, ready-set dispatch, retries, `status`, `explain`, JSON, HTTP API, versioned YAML | S4.A to S4.H | The demo runs a week with no cron or Airflow; `kill -9` of the overseer loses and doubles nothing |
 | 0.5 | Operational basics, then the cluster: row-level rejects, SQL watermarks, event waits, source definitions and schema-aware lineage, normalized metadata, accounts, login and roles; resource discovery and deployment profiles, pool interface, worker agents, project namespaces in one Engine DB, connection budget, managed PostgreSQL | S5.A to S5.T (S5.K to S5.N right after S5.B; S5.O to S5.T before S5.C) | Pool contract tests pass for both providers; many projects share one Engine DB |
 | 0.6 | At load: retention, bounded catalog, incremental cloning, metrics, backup and restore, benchmark | S6.A to S6.G | A sustained-load benchmark stays within its stated budgets; a restore is tested |
-| 0.7 to 0.9 | UI and finish: web UI with its sign-in, stewardship uploads, per-project roles, redaction, webhooks, secrets providers, packaging, compatibility policy, soak, faster complete PR checks, separate demo and configuration repositories | S7.A to S7.O | A month-long soak of a real deployment passes; complete PR checks meet the ten-minute target |
+| 0.7 to 0.9 | UI and finish: web UI with its sign-in, stewardship uploads, per-project roles, redaction, webhooks, secrets providers, packaging, compatibility policy, soak, faster complete PR checks, separate demo and configuration repositories, the obvious-failure catalog | S7.A to S7.P | A month-long soak of a real deployment passes; complete PR checks meet the ten-minute target |
 | 1.0.0 release candidates | The Support Insights example rebuilt on etl-craft, configured through CI, with its Superset dashboards and every-feature scenarios | S8.A to S8.H | Every pipeline, dashboard and feature scenario passes, with verified README walkthroughs |
 | 1.0.0 | Supported contract | | Every item of the [1.0.0 checklist](#100-release-checklist) has evidence |
 
@@ -3059,6 +3075,16 @@ these gaps must close on one machine first.
     - `api/server.py`: 0%.
 
     The 90% gate therefore says nothing about the paths S5.C extends.
+  - **An Engine DB restart stops etl-craft.** A PostgreSQL restart or managed failover takes
+    10-120 seconds.
+    - `engine/retry.py` `retrying` gives up after about 3.5 seconds, and only
+      `execution/runner.py` uses it.
+    - `overseer/server.py` `serve` turns any `SQLAlchemyError` from its heartbeat,
+      reconciliation or schedule refresh into an `EngineDbError` ("restore it and restart
+      server") and exits.
+
+    So an ordinary database restart stops the server and fails the attempts in flight until
+    someone restarts it.
   - **Timing-dependent tests.** Two task tests stop a task after `TASK_TIMEOUT_SECONDS=2` and
     allow ten seconds for interpreter start-up. They have failed together on a loaded CI runner
     (Handover notes, "Timing-sensitive tests on a slow runner").
@@ -3077,15 +3103,27 @@ these gaps must close on one machine first.
      - the overseer and API servers shutting down on a signal.
   4. Replace the wall-clock timeouts in the two task tests with an injected clock or a
      readiness handshake from the child. No test depends on interpreter start-up time.
+  5. Ride out Engine DB outages up to `limits.engine_db_outage_seconds` in
+     `craft-connector.yml` (default 120).
+     - Every Engine DB call that is safe to repeat goes through `retrying` with that budget:
+       the overseer loop, heartbeats, lease renewal, reconciliation and task outcome writes.
+     - The overseer releases leadership when its advisory-lock connection drops, and supervises
+       nothing while it is down. After reconnecting, it re-acquires leadership and reconciles
+       before dispatching. Leases (S3.D) already stop two owners acting on the same attempt.
+     - Past the budget, it fails as today, naming the outage's length and the setting.
 - *Tests.*
   - An Engine DB error injected on the first breach write still records the breach and sends
     one alert.
   - A configuration that cannot resolve its warehouse dialect fails before any write and names
     the setting.
   - The new process tests from item 3.
+  - With the PostgreSQL Engine DB restarted mid-run (`docker restart` in the engine-postgres
+    suite), the server and the running attempts continue and the run succeeds. An outage
+    longer than the budget fails with the message above.
   - Each fails on the old code.
 - *Done when.*
   - No supervision, SLA or warehouse-lock path turns an error into a guessed value.
+  - An Engine DB restart within the budget needs no operator.
   - The coverage report includes subprocess code. `execution/reconcile.py`,
     `overseer/server.py`, `overseer/leadership.py` and `api/server.py` each reach the 90%
     threshold.
@@ -3470,8 +3508,10 @@ Keep S6.D as one implementation PR.
 ## Releases 0.7 to 0.9: UI and finish
 
 **Goal.** Everything an operator needs is in a web UI. It is for pipeline operations, never
-metadata editing: Informatica Workflow Monitor-style controls, Airflow-style run views,
-dbt-docs-style documentation and run-health dashboards. Authors change metadata only through
+metadata editing. Its actions match Informatica PowerCenter's Workflow Monitor rather than
+Airflow's constraints: start or stop any pipeline or task, run from a task, recover, restart,
+hold, abort and override (S7.A.2). It adds run views, dbt-docs-style documentation and
+run-health dashboards. Authors change metadata only through
 config files. Access is authenticated and role-based; secrets don't leak; the deployment is
 packaged; compatibility is promised; and a month of real use proves it.
 
@@ -3951,6 +3991,52 @@ S8.G.
     commits and the complete scenario inventory.
   - S7.N's timing is re-measured in both cache conditions and stays within ten minutes.
 
+### S7.P Obvious failures do not stop 1.0.0
+
+Branch: `test/obvious-failure-catalog`. The catalog is written first and then kept current: each
+item that closes an entry links its test here. The audit in item 2 runs before the first 1.0.0
+release candidate.
+
+- *Problem.* The goal of 1.0.0 is that etl-craft does not fail for obvious reasons. Many are
+  handled today, but nothing lists them or proves each one. Some are known gaps, for example an
+  Engine DB restart stopping the server (S5.U).
+- *Change.*
+  1. Keep this catalog. Each row is an obvious failure, what 1.0.0 does about it, the item that
+     delivers it and its regression test:
+
+     | Obvious failure | 1.0.0 behaviour | Item |
+     |---|---|---|
+     | Engine DB restart or managed failover | Ridden out within `limits.engine_db_outage_seconds`; fails naming the outage after it | S5.U |
+     | Warehouse connection drop or timeout mid-task | The attempt fails retryable and is retried; appends and replacements stay retry-safe | S3.G, S4.E |
+     | `kill -9` of a task, the overseer or a worker, or a host reboot | Reconciled as `LOST` and retried with no lost or doubled rows | S3.D, S4.B, S5.C |
+     | Two overseers started on one deployment | One leader; the other waits | S4.B |
+     | The same run requested twice | One run, through run keys and one in-progress run per pipeline | S3.C |
+     | Downtime across schedules, DST or time zones | Bounded catch-up on the right logical dates | S4.C |
+     | Missing or broken SQL file or script, unknown target, bad metadata | `validate` refuses it before a run, naming the object and the remedy | S2.D, S5.N, S5.P |
+     | Expired, rotated or missing credentials; an unreachable warehouse | `doctor` names it before a run; a run fails naming the profile and variable | S2.G, S7.E |
+     | Full disk, or an unwritable logs or uploads directory | Refused before an attempt starts, naming the path; never after a partial write | S7.P |
+     | Values that do not fit the target, or bad business data | Set aside in rejects, or flagged by rules | S5.K, S2.J |
+     | Source columns added, dropped or retyped | `validate` reports the drift; the run takes added columns or fails naming the column | S5.N, S3.G |
+     | A bad stewardship file | Refused by its `FILE_VALIDATION` script before processing | S7.M |
+     | A hung task or a run past its SLA | Task timeout; the SLA breach is recorded and alerted even if the first write fails | S2.A, S5.U |
+     | The Engine DB growing without bound | Retention keeps it bounded | S6.A |
+     | A worker cut off from the Engine DB, or clocks that disagree | Lease expiry and fenced writes stop a cut-off worker. Lease times come from the Engine DB's clock, not the worker's | S5.C |
+     | Upgrading from any 0.x release | Migrations upgrade, or refuse naming the object and the remedy | S2.K, S7.G |
+     | A port already in use, or a second server on one host | The server refuses to start, naming the port or the running server | S7.P |
+
+  2. Audit each row marked by a finished item. Name its regression test here, or add one. A row
+     without a passing test is an open defect for the 1.0.0 checklist, not a pass.
+  3. Close the two rows S7.P owns:
+     - check free space and writability of the logs and uploads directories before an attempt
+       starts;
+     - refuse a server start on a port in use or alongside a running server, naming it.
+  4. Add a row whenever a review, the soak or Support Insights (S8.H) finds another obvious
+     failure.
+- *Tests.* One named regression test per row, on both Engine DBs where the row involves one.
+  The Support Insights acceptance (S8.F, S8.H) exercises the outage and kill rows on the full
+  stack.
+- *Done when.* Every row names a passing regression test, and none is open.
+
 ## Release candidate: the Support Insights example
 
 **Goal.** Prove 1.0.0 on a real project before it is released. The
@@ -4315,6 +4401,7 @@ and the soak on the example passed. A partial coverage matrix cannot pass the re
 - [ ] S7.N's complete required PR checks meet the owner-approved ten-minute target with measured
       cold- and warm-cache evidence, without omitted tests, weaker coverage or removed matrix
       contracts.
+- [ ] Every row of S7.P's obvious-failure catalog names a passing regression test.
 - [ ] The soak passed.
 - [ ] Every required suite, cloud included, has evidence matched to the release commit and wheel,
       and the release gate rejects incomplete evidence.
