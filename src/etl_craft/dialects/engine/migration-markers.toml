@@ -1,4 +1,6 @@
 # Existing migration bytes remain immutable; new migrations declare markers in SQL headers.
+# [markers] adds markers to released files that predate headers.
+[markers]
 rebuild-metadata = [
   "0005_metadata_codes.sql",
   "0006_run_backfill_constraint.sql",
@@ -7,3 +9,15 @@ rebuild-metadata = [
   "0015_schedules.sql",
 ]
 check-metadata-codes = ["0005_metadata_codes.sql"]
+
+# [convert-at.<Engine DB>] is the statement index at which a file's conversion step
+# runs: the statements before it run first, the rest after. A negative index counts from the
+# end. A file with a conversion marker and no entry converts after every statement.
+[convert-at.postgresql]
+"0028_source_contracts.sql" = -3
+"0029_rule_target_contracts.sql" = 2
+"0030_task_target_contracts.sql" = 4
+
+[convert-at.sqlite]
+"0029_rule_target_contracts.sql" = 2
+"0030_task_target_contracts.sql" = 4

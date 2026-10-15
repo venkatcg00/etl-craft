@@ -46,7 +46,6 @@
     },
     "branches": {
       "src/etl_craft/core/text.py": 2,
-      "src/etl_craft/engine/migrations.py": 2,
       "src/etl_craft/engine/repository/config_history.py": 3,
       "src/etl_craft/engine/repository/source_contracts.py": 6,
       "src/etl_craft/execution/events.py": 6,
@@ -101,7 +100,6 @@
     "dialect-branch": {
       "src/etl_craft/engine/audit.py": 3,
       "src/etl_craft/engine/connection.py": 1,
-      "src/etl_craft/engine/migrations.py": 1,
       "src/etl_craft/engine/repository/normalization.py": 2,
       "src/etl_craft/engine/repository/rule_targets.py": 7,
       "src/etl_craft/engine/repository/source_columns.py": 1,
@@ -205,7 +203,6 @@
       "src/etl_craft/services/operations/tasks.py": 1
     },
     "statements": {
-      "src/etl_craft/engine/migrations.py": 1,
       "src/etl_craft/engine/repository/config_history.py": 14,
       "src/etl_craft/execution/events.py": 15,
       "src/etl_craft/execution/pipeline.py": 38,

@@ -3,6 +3,7 @@
 import threading
 
 import pytest
+from sqlalchemy import inspect as sql_inspect
 from sqlalchemy import text
 
 from etl_craft.core.errors import EngineDbError, MigrationError
@@ -270,3 +271,34 @@ def test_engine_header_markers_drive_policy_for_a_new_filename(initialized, pack
     assert apply_pending_migrations(initialized) == ["0099_new_policy.sql"]
     assert rebuilds == [sql]
     assert ledger(initialized) == [("ENGINE", "0099_new_policy.sql")]
+
+
+def test_a_new_migration_converts_where_the_registry_says_without_python(
+    initialized, packaged, monkeypatch, tmp_path
+):
+    registry = tmp_path / "migration-markers.toml"
+    registry.write_text(
+        f'[convert-at.{for_engine(initialized).name}]\n"0099_new_conversion.sql" = 1\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(migrations, "PACKAGED_MARKERS", registry)
+    seen = []
+
+    def convert(conn, rows, target):
+        tables = sql_inspect(conn)
+        seen.append((rows, tables.has_table("marker_first"), tables.has_table("marker_second")))
+
+    monkeypatch.setitem(
+        migrations.STEPS,
+        "convert-rule-targets",
+        migrations.MarkerStep(check=lambda conn, target: [{"read": "before"}], convert=convert),
+    )
+    write(
+        packaged,
+        "0099_new_conversion.sql",
+        "-- etl-craft: convert-rule-targets\n"
+        "CREATE TABLE marker_first (id INTEGER);\nCREATE TABLE marker_second (id INTEGER);",
+    )
+    assert apply_pending_migrations(initialized) == ["0099_new_conversion.sql"]
+    assert seen == [([{"read": "before"}], True, False)]
+    assert table_exists(initialized, "marker_second")
