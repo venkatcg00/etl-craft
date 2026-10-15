@@ -126,7 +126,7 @@ item's text, or work done early under another item.
 | S5.O.2a Common config contract | Done | #149 | Mandatory core/custom CFG audit fields and keys, safe token lifecycle history and lossless upgrades |
 | S5.O.2b Normalized object contracts | In progress | #150, #151, #152, #153, #154, #160, #162 | Merge column lists retain parameter storage; lineage versions use component endpoints with historical CLI/catalog reads; target state follows S5.R item 3 after the soak |
 | S5.P Project documentation gap UI | Done | #165 | Structured schema/lineage gaps, accessible column/graph warnings and read-only comparison API |
-| S5.R Consolidate before the cluster | Planned | | Behaviour-preserving: one query path for Engine DB SQL, data-driven migration markers, enums and `core` errors throughout, shorter functions, split execution core and config loader |
+| S5.R Consolidate before the cluster | In progress | #179 | Item 3 done: migration markers are a registry of Python steps, and conversion positions live in `migration-markers.toml`; items 1, 2 and 4 to 8 pending |
 | S5.S Accounts, login and roles | Planned | | Registered user and service accounts, password and SSO login, tokens for services, a role check on every action, no implicit actor, local installations that operate a server |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
@@ -134,6 +134,7 @@ item's text, or work done early under another item.
 | S5.V Team-owned config tables | Planned | | Teams' own `CFG_` tables carry no etl-craft guards, contract, history or config files; etl-craft's tables keep them |
 | S5.U Robustness before the cluster | In progress | #176 | Item 5 done: Engine DB restarts and failovers ridden out within `Orchestration.Engine_db_outage_seconds`; items 1 to 4 follow S5.R items 7 and 8 |
 | S5.W Retry only what can succeed | Planned | | Transient, permanent and unknown failure classes per dialect; `Retry_on` / `RETRY_ON` of `NONE`, `TRANSIENT` (default), `TRANSIENT_AND_UNKNOWN` or `ANY`; each attempt records why it was or was not retried |
+| S5.X Unmanaged SQL tasks | Planned | | `SQL_SCRIPT` runs any SQL as an ordinary dependent task with per-statement audit; pre- and post-SQL are upstream and downstream tasks |
 | S5.C and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
@@ -340,6 +341,17 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- **S5.R item 3 (#179)** starts while the frozen 0.4 soak runs, at the owner's request. The
+  soak tests the 0.3.0 wheel from its own release branch, so work on `main` does not touch it.
+  - **Registry.** Markers are a registry (`engine/migrations.py` `STEPS`) of a check and a
+    conversion per marker. Conversion positions moved from Python slicing into
+    `migration-markers.toml` `[convert-at.<dialect>]`, and file-name markers into its
+    `[markers]` table.
+  - **Check timing.** The `check-metadata-codes` check now also runs inside its file's
+    transaction, like the other checks; its result is unchanged.
+  - **Plan edits in the same PR.** At the owner's request, it also records business rules as
+    complete queries (S6.D item 1) and the new S5.X `SQL_SCRIPT` item.
 
 - S7.P item 3 (#178) checks the log folder, not an uploads folder, because uploads arrive with
   S7.M.
@@ -3344,6 +3356,45 @@ this classification.
   - `Retry_on` and `RETRY_ON` change the behaviour as documented.
   - The classification is verified on every supported warehouse.
 
+### S5.X Unmanaged SQL tasks
+
+Branch: `feat/handlers-sql-script`. After S5.W, which supplies `RETRY_ON`.
+
+- *Problem.* The nine SQL actions cover managed loads, and each takes one read-only SELECT. Teams
+  also need SQL those actions do not cover: stored procedures, grants, maintenance (`VACUUM`,
+  `OPTIMIZE`), custom DML. PowerCenter offers this as pre- and post-session SQL and the Command
+  task. Today the only route is a Python task that opens `task.warehouse()`.
+- *Change.*
+  1. **A `SQL_SCRIPT` handler** (`core.enums`). It runs a file in `sql_files/` named by
+     `SCRIPT_FILE`, statement by statement in order, on the task's warehouse connection.
+     - It is an ordinary task, so it follows `CFG_TASK_DEPENDENCY` and every other dependency
+       rule.
+     - Pre- and post-steps are `SQL_SCRIPT` or Python tasks upstream or downstream of the task
+       they serve. There are no pre or post parameters on other tasks.
+  2. **Unmanaged means no managed guarantees.** There are no hash versions, target locks or
+     ROW_ID handling.
+     - `validate` warns when a script writes a table a managed SQL action also targets, naming
+       both tasks, because the script sidesteps that action's hash and locks.
+     - Lineage reads what sqlglot can parse and marks it "unmanaged" in the catalog.
+  3. **Full statement audit.** Each statement's index, a short text, rows affected and duration
+     are recorded on the attempt. A failure names the statement number, its text and the
+     database's message.
+  4. **Retries** follow S5.W's `RETRY_ON`. The guide recommends `NONE`, because a script is
+     rarely safe to repeat.
+  5. **Docs.** The guides call `PYTHON` tasks "Python tasks": they run any code, and
+     ingestion is one use.
+  6. **`AGENTS.md`.** The design rule becomes: "managed SQL tasks supply exactly one read-only
+     SELECT; `SQL_SCRIPT` tasks run unmanaged SQL with full statement audit".
+- *Tests.*
+  - On each local warehouse: a script's statements run in order; per-statement counts are
+    recorded; a failing statement is named and later statements do not run.
+  - The overlap warning against a managed target.
+  - `RETRY_ON` behaviour.
+  - A dependency chain of Python, SQL and `SQL_SCRIPT` tasks standing in for pre- and post-SQL.
+- *Done when.*
+  - Teams can run any SQL as an ordinary dependent task, with each statement audited.
+  - Managed actions keep their guarantees, and the overlap is warned about.
+
 ### S5.C The PostgreSQL queue and the worker agent
 
 Branch: `feat/pools-worker`. Files: new `worker/` package (layer beside `overseer`),
@@ -3610,24 +3661,44 @@ Keep S6.D as one implementation PR.
   query catalog, `engine/locks.py`, the migration-marker registry, both Engine DB schemas and
   their next migrations, the business-rule guide and the packaged Support Insights demo.
 - *Change.*
-  1. On a normal task run, re-check standing flags only for keys present in that run's rows
-     (`PIPELINE_RUN_ID = :run`). Use one warehouse query
-     `SELECT key FROM target t WHERE <scope> AND NOT EXISTS (<rule>)`, intersecting its result
-     with that rule's active flags, instead of 500-key warehouse batches. Keep SCD active-version
-     filtering and existing Engine DB write batching. Flags outside the current run, including
-     deleted-row flags, await an explicit full check; remove the old all-key deletion scan.
-  2. Preserve the existing BR task/rule configuration, sequence waves, failure logging and
-     retry/resume behaviour. `run --force` retains its existing full-table check for the selected
+  1. **Rules become complete queries.** Each `BUSINESS_RULE_SQL` is one complete SELECT that
+     returns the keys of the breaking rows, in `BUSINESS_RULE_KEY_COLUMN`, instead of a
+     correlated fragment that refers to an outer `t`. Complete queries make these rules
+     possible: duplicates, cross-row totals, window functions and multi-table anti-joins.
+     They also avoid the correlated subqueries some warehouses evaluate poorly.
+     - **The scope token.** `$$rows_in_scope` expands to the target's in-scope rows:
+       `PIPELINE_RUN_ID = :run` and the active versions on a normal run, or every active row
+       under `--force`. A rule reads `FROM $$rows_in_scope t` to stay incremental.
+     - **The engine decides the scope.** It intersects the returned keys with the in-scope keys
+       before flagging or clearing. A rule that reads the whole table is therefore still
+       correct, only slower.
+     - **`validate`:**
+       - requires exactly one read-only SELECT whose output includes the key column;
+       - warns when a rule does not use `$$rows_in_scope`;
+       - refuses an old-form fragment (a `t` with no `FROM`), showing the converted SQL as the
+         remedy.
+     - **The upgrade converts stored rules.** It rewrites each stored rule as
+       `SELECT t.<key> FROM $$rows_in_scope t WHERE EXISTS (<old rule>)`, and `config export`
+       writes the new form. There is one rule form; the fragment form is deleted.
+     - **Teams keep an alternative.** A team may still run ordinary SQL or `SQL_SCRIPT` tasks
+       for bespoke checks with result tables of its own.
+  2. **One check query per rule.** On a normal task run, flag the in-scope keys the rule
+     returns. Clear that rule's active flags on in-scope keys it no longer returns, instead of
+     500-key warehouse batches. Keep SCD active-version filtering and existing Engine DB write
+     batching. Flags outside the current run, including deleted-row flags, await an explicit
+     full check; remove the old all-key deletion scan.
+  3. Apart from item 1's rule form, preserve the existing BR task/rule configuration, sequence
+     waves, failure logging and retry/resume behaviour. `run --force` retains its existing full-table check for the selected
      task's rules, clearing corrected and deleted-row flags. Preserve the configuration error
      for a BR task with no active rules. Do not make pipeline refresh type imply a full BR scan.
-  3. Scheduling belongs to the team. A weekly, monthly or other reconciliation job is an ordinary
+  4. Scheduling belongs to the team. A weekly, monthly or other reconciliation job is an ordinary
      pipeline with a BR task and its own rules, using the existing `CFG_PIPELINES.RUN_SCHEDULE`,
      time zone, catch-up, overlap, pause and deactivation controls. Keep current BR scope semantics
      explicit in the guide; a pipeline schedule does not itself request a full-table check.
      Do not automatically rerun ordinary daily rules on another cadence. Add no generated
      pipeline or task, per-rule schedule column, BR execution mode, connector setting,
      `CHECK_SCOPE` column, config table, audit table, timer or separate scheduling ledger.
-  4. Add a unique index on active flags
+  5. Add a unique index on active flags
      `(BUSINESS_RULE_ID, BUSINESS_RULE_KEY) WHERE ACTIVE_FLAG = 'Y'`. Keep inactive evidence.
      Register `check-business-rule-flags` in S5.R item 3's marker registry: check before any
      pending upgrade and repeat inside this migration's transaction. Report conflicting
@@ -3637,7 +3708,7 @@ Keep S6.D as one implementation PR.
      concurrent checks cannot publish competing flag snapshots; different rules remain
      independent. A bounded lock failure names the rule and remedy. Never delete audit history
      or arbitrarily choose a winning legacy flag to make the index build succeed.
-  5. Ship the index migration and matching fresh schemas for SQLite and PostgreSQL. Document
+  6. Ship the index migration and matching fresh schemas for SQLite and PostgreSQL. Document
      deferred clearing of out-of-run/deleted-row flags and the existing explicit full-check path
      in the guide, CHANGELOG and demo README. Show team-managed scheduling through ordinary
      pipeline configuration, without promising a new reconciliation execution mechanism.

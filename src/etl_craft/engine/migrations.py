@@ -14,8 +14,10 @@ import logging
 import os
 import re
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
@@ -32,17 +34,88 @@ logger = logging.getLogger(__name__)
 MIGRATIONS_DIR_ENV_VAR = "ETL_CRAFT_MIGRATIONS_DIR"
 ENGINE = "ENGINE"
 PROJECT = "PROJECT"
-MARKERS = frozenset(
-    {
-        "rebuild-metadata",
-        "check-metadata-codes",
-        "check-metadata-identities",
-        "convert-source-contracts",
-        "convert-rule-targets",
-        "convert-task-targets",
-    }
-)
 PACKAGED_MARKERS = Path(__file__).parents[1] / "dialects/engine/migration-markers.toml"
+
+
+@dataclass(frozen=True)
+class Target:
+    """Where converted metadata points: the warehouse catalog and SQL dialect."""
+
+    catalog: str | None = None
+    warehouse_dialect: str | None = None
+
+
+NO_TARGET = Target()
+
+
+LegacyRows = list[dict[str, Any]]
+"""What a conversion marker's check reads before the migration's statements run."""
+
+
+@dataclass(frozen=True)
+class MarkerStep:
+    """The Python a migration marker runs. A new migration using a marker needs no code.
+
+    ``check`` runs before any pending upgrade and again inside the file's transaction; what it
+    returns there is the state ``convert`` receives at the file's ``convert-at`` position.
+    ``names_migration`` attributes the file's writes to the migration.
+    """
+
+    check: Callable[[Connection, Target], LegacyRows | None] | None = None
+    convert: Callable[[Connection, LegacyRows, Target], None] | None = None
+    names_migration: bool = False
+
+
+def _legacy_sources(conn: Connection, target: Target) -> LegacyRows:
+    from etl_craft.engine.repository.source_contracts import legacy_sources
+
+    return legacy_sources(conn, target.catalog, target.warehouse_dialect)
+
+
+def _convert_sources(conn: Connection, state: LegacyRows, target: Target) -> None:
+    from etl_craft.engine.repository.source_contracts import convert_sources
+
+    convert_sources(conn, state)
+
+
+def _legacy_rules(conn: Connection, target: Target) -> LegacyRows:
+    from etl_craft.engine.repository.rule_targets import legacy_rule_targets
+
+    return legacy_rule_targets(conn, target.catalog, target.warehouse_dialect)
+
+
+def _convert_rules(conn: Connection, state: LegacyRows, target: Target) -> None:
+    from etl_craft.engine.repository.rule_targets import convert_rule_targets
+
+    convert_rule_targets(conn, state, target.catalog, target.warehouse_dialect)
+
+
+def _legacy_tasks(conn: Connection, target: Target) -> LegacyRows:
+    from etl_craft.engine.repository.task_targets import legacy_task_targets
+
+    return legacy_task_targets(conn, target.catalog, target.warehouse_dialect)
+
+
+def _convert_tasks(conn: Connection, state: LegacyRows, target: Target) -> None:
+    from etl_craft.engine.repository.task_targets import convert_task_targets
+
+    convert_task_targets(conn, state, target.catalog, target.warehouse_dialect)
+
+
+STEPS: dict[str, MarkerStep] = {
+    "rebuild-metadata": MarkerStep(),
+    "check-metadata-identities": MarkerStep(
+        check=lambda conn, target: _check_metadata_identities(conn)
+    ),
+    "check-metadata-codes": MarkerStep(check=lambda conn, target: _check_metadata_codes(conn)),
+    "convert-source-contracts": MarkerStep(check=_legacy_sources, convert=_convert_sources),
+    "convert-rule-targets": MarkerStep(check=_legacy_rules, convert=_convert_rules),
+    "convert-task-targets": MarkerStep(
+        check=_legacy_tasks, convert=_convert_tasks, names_migration=True
+    ),
+}
+"""Every marker, in the order its checks run."""
+MARKERS = frozenset(STEPS)
 
 
 @dataclass(frozen=True)
@@ -54,6 +127,7 @@ class MigrationFile:
     sql: str
     checksum: str
     markers: frozenset[str] = frozenset()
+    convert_at: int | None = None
 
     @property
     def version(self) -> str:
@@ -88,9 +162,15 @@ def resolve_project_migrations_dir(
     return None
 
 
-def read_stream(source: str, directory: Path) -> Stream:
-    """Read every ``*.sql`` file in ``directory``, in filename order."""
-    defaults = tomllib.loads(PACKAGED_MARKERS.read_text()) if source == ENGINE else {}
+def read_stream(source: str, directory: Path, dialect: str = "") -> Stream:
+    """Read every ``*.sql`` file in ``directory``, in filename order.
+
+    ``dialect`` names the Engine DB (``postgresql``, ``sqlite``) whose ``convert-at``
+    positions apply to the packaged stream.
+    """
+    registry = tomllib.loads(PACKAGED_MARKERS.read_text()) if source == ENGINE else {}
+    defaults = registry.get("markers", {})
+    positions = registry.get("convert-at", {}).get(dialect, {})
     files = []
     for path in sorted(p for p in directory.glob("*.sql") if p.is_file()):
         try:
@@ -109,7 +189,9 @@ def read_stream(source: str, directory: Path) -> Stream:
                 f"{path.name}: unknown migration markers {sorted(markers - MARKERS)}; "
                 f"use {sorted(MARKERS)}"
             )
-        files.append(MigrationFile(source, path, sql, sha256_hex(payload), markers))
+        files.append(
+            MigrationFile(source, path, sql, sha256_hex(payload), markers, positions.get(path.name))
+        )
     return Stream(source, directory, tuple(files))
 
 
@@ -123,7 +205,7 @@ def migration_streams(
             f"packaged migrations directory {str(package_dir)!r} does not exist — the "
             "installed etl-craft package is missing its SQL files"
         )
-    streams = [read_stream(ENGINE, package_dir)]
+    streams = [read_stream(ENGINE, package_dir, for_engine(engine).name)]
     project = resolve_project_migrations_dir(project_dir, project_default)
     if project is None:
         return streams
@@ -180,19 +262,14 @@ def _record(conn: Connection, migration: MigrationFile) -> None:
     )
 
 
-def _apply(
-    engine: Engine,
-    migration: MigrationFile,
-    *,
-    catalog: str | None = None,
-    warehouse_dialect: str | None = None,
-) -> None:
+def _apply(engine: Engine, migration: MigrationFile, target: Target = NO_TARGET) -> None:
     dialect = for_engine(engine)
+    steps = [step for marker, step in STEPS.items() if marker in migration.markers]
     token = current_migration.set(
         migration.version
         if migration.source == PROJECT
         else f"engine/{migration.version}"
-        if "convert-task-targets" in migration.markers
+        if any(step.names_migration for step in steps)
         else ""
     )
     try:
@@ -202,60 +279,43 @@ def _apply(
             if migration.source == ENGINE and "rebuild-metadata" in migration.markers
             else None,
         ) as conn:
-            if "check-metadata-identities" in migration.markers:
-                _check_metadata_identities(conn)
-            sources = None
-            if "convert-source-contracts" in migration.markers:
-                from etl_craft.engine.repository.source_contracts import legacy_sources
-
-                sources = legacy_sources(conn, catalog, warehouse_dialect)
-            rules = None
-            if "convert-rule-targets" in migration.markers:
-                from etl_craft.engine.repository.rule_targets import legacy_rule_targets
-
-                rules = legacy_rule_targets(conn, catalog, warehouse_dialect)
-            tasks = None
-            if "convert-task-targets" in migration.markers:
-                from etl_craft.engine.repository.task_targets import legacy_task_targets
-
-                tasks = legacy_task_targets(conn, catalog, warehouse_dialect)
-            statements = dialect.split_statements(migration.sql)
             if migration.source == PROJECT:
-                for sql in statements:
-                    run_script(conn, [sql])
-                    if re.search(r"\b(?:ALTER|CREATE)\s+TABLE\b", sql, re.IGNORECASE):
-                        dialect.refresh_metadata_triggers(conn)
-                from etl_craft.engine.repository.source_contracts import resolve_project_sources
-
-                resolve_project_sources(conn, catalog, warehouse_dialect)
+                _run_project(conn, migration, target)
             else:
-                if rules is not None:
-                    from etl_craft.engine.repository.rule_targets import convert_rule_targets
-
-                    run_script(conn, statements[:2])
-                    convert_rule_targets(conn, rules, catalog, warehouse_dialect)
-                    statements = statements[2:]
-                if tasks is not None:
-                    from etl_craft.engine.repository.task_targets import convert_task_targets
-
-                    run_script(conn, statements[:4])
-                    convert_task_targets(conn, tasks, catalog, warehouse_dialect)
-                    statements = statements[4:]
-                final_statements = []
-                if sources is not None and conn.dialect.name == "postgresql":
-                    statements, final_statements = statements[:-3], statements[-3:]
-                run_script(conn, statements)
-                if sources is not None:
-                    from etl_craft.engine.repository.source_contracts import convert_sources
-
-                    convert_sources(conn, sources)
-                    run_script(conn, final_statements)
-                dialect.refresh_metadata_triggers(conn)
+                _run_engine(conn, migration, steps, target)
             _record(conn, migration)
     except Exception as error:
         raise MigrationError(f"{migration.version} failed to apply: {error}") from error
     finally:
         current_migration.reset(token)
+
+
+def _run_project(conn: Connection, migration: MigrationFile, target: Target) -> None:
+    """Run a team migration, refreshing guards after each table it creates or alters."""
+    from etl_craft.engine.repository.source_contracts import resolve_project_sources
+
+    dialect = for_engine(conn)
+    for sql in dialect.split_statements(migration.sql):
+        run_script(conn, [sql])
+        if re.search(r"\b(?:ALTER|CREATE)\s+TABLE\b", sql, re.IGNORECASE):
+            dialect.refresh_metadata_triggers(conn)
+    resolve_project_sources(conn, target.catalog, target.warehouse_dialect)
+
+
+def _run_engine(
+    conn: Connection, migration: MigrationFile, steps: list[MarkerStep], target: Target
+) -> None:
+    """Run a packaged migration with its markers' checks and conversion at its position."""
+    dialect = for_engine(conn)
+    states = [(step, step.check(conn, target)) for step in steps if step.check is not None]
+    statements = dialect.split_statements(migration.sql)
+    at = len(statements) if migration.convert_at is None else migration.convert_at
+    run_script(conn, statements[:at])
+    for step, state in states:
+        if step.convert is not None and state is not None:
+            step.convert(conn, state, target)
+    run_script(conn, statements[at:])
+    dialect.refresh_metadata_triggers(conn)
 
 
 def pending_migrations(
@@ -322,61 +382,27 @@ def apply_pending_migrations(
     nothing left to do.
     """
     streams = migration_streams(engine, project_dir, project_default)
+    target = Target(catalog, warehouse_dialect)
     applied: list[str] = []
     with locks.MIGRATE.hold(engine, wait_seconds):
         with engine.connect() as conn:
             ledger = _load_ledger(conn)
         verify_ledger(ledger, streams)
-        if any(
-            file.source == ENGINE
-            and "check-metadata-identities" in file.markers
-            and (file.source, file.version) not in ledger
+        pending = [
+            file
             for stream in streams
             for file in stream.files
-        ):
-            with engine.connect() as conn:
-                _check_metadata_identities(conn)
-        if any(
-            file.source == ENGINE
-            and "check-metadata-codes" in file.markers
-            and (file.source, file.version) not in ledger
-            for stream in streams
-            for file in stream.files
-        ):
-            with engine.connect() as conn:
-                _check_metadata_codes(conn)
-        if any(
-            "convert-source-contracts" in file.markers and (file.source, file.version) not in ledger
-            for stream in streams
-            for file in stream.files
-        ):
-            from etl_craft.engine.repository.source_contracts import legacy_sources
-
-            with engine.connect() as conn:
-                legacy_sources(conn, catalog, warehouse_dialect)
-        if any(
-            "convert-rule-targets" in file.markers and (file.source, file.version) not in ledger
-            for stream in streams
-            for file in stream.files
-        ):
-            from etl_craft.engine.repository.rule_targets import legacy_rule_targets
-
-            with engine.connect() as conn:
-                legacy_rule_targets(conn, catalog, warehouse_dialect)
-        if any(
-            "convert-task-targets" in file.markers and (file.source, file.version) not in ledger
-            for stream in streams
-            for file in stream.files
-        ):
-            from etl_craft.engine.repository.task_targets import legacy_task_targets
-
-            with engine.connect() as conn:
-                legacy_task_targets(conn, catalog, warehouse_dialect)
+            if (file.source, file.version) not in ledger
+        ]
+        for marker, step in STEPS.items():
+            if step.check is not None and any(marker in file.markers for file in pending):
+                with engine.connect() as conn:
+                    step.check(conn, target)
         for stream in streams:
             for migration in stream.files:
                 if (migration.source, migration.version) in ledger:
                     continue
-                _apply(engine, migration, catalog=catalog, warehouse_dialect=warehouse_dialect)
+                _apply(engine, migration, target)
                 logger.info("applied %s migration %s", migration.source, migration.version)
                 applied.append(migration.version)
     return applied
