@@ -127,11 +127,14 @@ jobs:
         env:
           PROFILE: ${{ matrix.profile }}
         run: |
-          if [ "$PROFILE" = engine ]; then
-            docker compose up -d --wait postgres mailpit
-          else
-            make services-up
-          fi
+          case "$PROFILE" in
+            engine) docker compose up -d --wait postgres mailpit ;;
+            warehouse-duckdb|warehouse-postgres) docker compose up -d --wait postgres ;;
+            warehouse-duckdb_iceberg) docker compose up -d --wait iceberg-rest ;;
+            warehouse-trino_iceberg) docker compose up -d --wait trino ;;
+            connections) make services-up ;;
+            *) echo "Unknown service profile: $PROFILE" >&2; exit 1 ;;
+          esac
       - name: Execute assigned service tests
         env:
           ETL_CRAFT_CI_CACHE_MODE: ${{ inputs.cache || 'warm' }}
@@ -151,7 +154,7 @@ jobs:
         run: make services-down
 
   e2e:
-    name: installed demo (${{ matrix.warehouse }}, shard ${{ matrix.index }})
+    name: installed demo (${{ matrix.warehouse }})
     needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -183,15 +186,15 @@ jobs:
             trino_iceberg) services+=(trino) ;;
           esac
           docker compose up -d --wait "${services[@]}"
-      - name: Run installed-wheel demo partition
+      - name: Run isolated demo workers against the warehouse
         env:
           ETL_CRAFT_CI_CACHE_MODE: ${{ inputs.cache || 'warm' }}
           ETL_CRAFT_CI_CACHE_HIT: ${{ steps.uv.outputs.cache-hit }}
-        run: uv run python scripts/ci_shards.py run '${{ matrix.profile }}' '${{ matrix.index }}' '${{ matrix.count }}' "$RUNNER_TEMP/result"
+        run: uv run python scripts/ci_shards.py run-all '${{ matrix.profile }}' '${{ matrix.count }}' "$RUNNER_TEMP/result"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: ci-${{ matrix.profile }}-${{ matrix.index }}
+          name: ci-${{ matrix.profile }}
           path: ${{ runner.temp }}/result
           if-no-files-found: error
       - name: Service logs

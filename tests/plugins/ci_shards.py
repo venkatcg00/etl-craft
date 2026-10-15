@@ -22,7 +22,7 @@ def partitions(nodes: list[str], count: int, timings: dict[str, float]) -> list[
     loads = [0.0] * count
 
     def weight(node: str) -> float:
-        value = timings.get(node, timings.get(node.split("[", 1)[0], 1.0))
+        value = timings.get(node, 1.0)
         if not math.isfinite(value) or value < 0:
             raise pytest.UsageError(f"CI duration for {node!r} must be finite and nonnegative")
         return max(value, 0.01)
@@ -69,7 +69,15 @@ class Shard:
     ) -> None:
         """Apply the partition after ordinary marker and expression selection."""
         self.expected = sorted(item.nodeid for item in items)
-        timings = json.loads(TIMINGS.read_text(encoding="utf-8"))
+        family = self.profile.split("-", 1)[0]
+        if family == "coverage":
+            family += "-macos" if self.profile.endswith("macos-latest") else "-linux"
+        model = json.loads(TIMINGS.read_text(encoding="utf-8"))[family]
+        timings = {
+            f"{module}::{node}": duration
+            for module, cases in model.items()
+            for node, duration in cases.items()
+        }
         selected = set(partitions(self.expected, self.count, timings)[self.index])
         kept = [item for item in items if item.nodeid in selected]
         removed = [item for item in items if item.nodeid not in selected]

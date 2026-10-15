@@ -8,19 +8,29 @@ import os
 import subprocess
 import sys
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
 from release_gate import check_outcomes, git, node_ids, sha256_of
 
 ROOT = Path(__file__).resolve().parents[1]
+LOCAL_WAREHOUSES = ("duckdb", "postgres", "duckdb_iceberg", "trino_iceberg")
 SERVICE_MARKERS = {
     "engine": "engine_sqlite or engine_postgres",
-    "warehouse": "warehouse_postgres or warehouse_duckdb or warehouse_duckdb_iceberg "
-    "or warehouse_trino_iceberg",
+    **{f"warehouse-{kind}": f"warehouse_{kind}" for kind in LOCAL_WAREHOUSES},
     "connections": "harness or connections",
 }
-SHARDS = {"coverage": 4, "engine": 8, "warehouse": 4, "connections": 1, "e2e": 4}
+SHARDS = {
+    "coverage": 4,
+    "engine": 6,
+    "warehouse-duckdb": 1,
+    "warehouse-postgres": 1,
+    "warehouse-duckdb_iceberg": 2,
+    "warehouse-trino_iceberg": 3,
+    "connections": 1,
+    "e2e": 4,
+}
 VALIDATIONS = {"package-ubuntu-latest", "package-macos-latest", "airflow-2.11.0", "airflow-3.3.2"}
 
 
@@ -33,8 +43,7 @@ def combinations() -> dict[str, list[dict[str, str]]]:
     ]
     service = [{"profile": profile} for profile in SERVICE_MARKERS]
     e2e = [
-        {"profile": f"e2e-{warehouse}", "warehouse": warehouse}
-        for warehouse in ("duckdb", "postgres", "duckdb_iceberg", "trino_iceberg")
+        {"profile": f"e2e-{warehouse}", "warehouse": warehouse} for warehouse in LOCAL_WAREHOUSES
     ]
     return {"coverage": coverage, "service": service, "e2e": e2e}
 
@@ -45,8 +54,10 @@ def matrix(serial: bool = False) -> dict[str, list[dict[str, str | int]]]:
         family: [
             row | {"index": index, "count": count}
             for row in rows
-            for count in [1 if serial else SHARDS[str(row["profile"]).split("-", 1)[0]]]
-            for index in range(count)
+            for count in [
+                1 if serial else SHARDS[family if family != "service" else row["profile"]]
+            ]
+            for index in range(1 if family == "e2e" else count)
         ]
         for family, rows in combinations().items()
     }
@@ -84,7 +95,21 @@ def run(profile: str, index: int, count: int, output: Path) -> int:
         "ETL_CRAFT_CI_PROFILE": profile,
         "COVERAGE_FILE": str(output / "coverage.data"),
     }
-    return subprocess.run(command, cwd=ROOT, env=env, check=False).returncode
+    result = subprocess.run(
+        command,
+        cwd=ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        check=False,
+    )
+    print(
+        f"{profile}: shard {index}/{count}, exit {result.returncode}\n{result.stdout}",
+        end="",
+        flush=True,
+    )
+    return result.returncode
 
 
 def check_profile(profile: str, reports: list[dict[str, Any]], count: int) -> list[str]:
@@ -219,14 +244,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     plan = commands.add_parser("matrix")
     plan.add_argument("--serial", action="store_true")
     plan.add_argument("--output", type=Path, required=True)
-    execute = commands.add_parser("run")
-    execute.add_argument(
-        "profile",
-        choices=sorted(row["profile"] for rows in combinations().values() for row in rows),
-    )
-    execute.add_argument("index", type=int)
-    execute.add_argument("count", type=int)
-    execute.add_argument("output", type=Path)
+    for kind in ("run", "run-all"):
+        execute = commands.add_parser(kind)
+        execute.add_argument(
+            "profile",
+            choices=sorted(row["profile"] for rows in combinations().values() for row in rows),
+        )
+        if kind == "run":
+            execute.add_argument("index", type=int)
+        execute.add_argument("count", type=int)
+        execute.add_argument("output", type=Path)
     check = commands.add_parser("verify")
     check.add_argument("directory", type=Path)
     check.add_argument("wheel", type=Path)
@@ -242,6 +269,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "run":
         return run(args.profile, args.index, args.count, args.output)
+    if args.command == "run-all":
+        if args.count < 1:
+            parser.error(f"CI worker count {args.count} must be positive; set count to at least 1")
+        with ThreadPoolExecutor(max_workers=args.count) as workers:
+            futures = [
+                workers.submit(run, args.profile, index, args.count, args.output / str(index))
+                for index in range(args.count)
+            ]
+            codes = [future.result() for future in futures]
+        return int(any(code != 0 for code in codes))
     if args.command == "record":
         args.output.mkdir(parents=True, exist_ok=True)
         report = {"name": args.name, "commit": git(ROOT, "rev-parse", "HEAD").stdout.strip()}

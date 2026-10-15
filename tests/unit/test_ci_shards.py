@@ -2,6 +2,7 @@
 
 import copy
 import json
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -143,6 +144,31 @@ def test_serial_timing_runs_preserve_the_same_complete_combinations():
         assert all(row["index"] == 0 and row["count"] == 1 for row in serial[family])
 
 
+@pytest.mark.parametrize("failure", [None, -15, 1])
+def test_parallel_workers_all_finish_and_any_failure_or_signal_fails_the_job(
+    tmp_path, monkeypatch, failure
+):
+    barrier = threading.Barrier(4)
+    seen = []
+
+    def execute(profile, index, count, output):
+        assert profile == "e2e-duckdb" and count == 4
+        assert output == tmp_path / str(index)
+        barrier.wait(timeout=5)
+        seen.append(index)
+        return failure if index == 0 and failure is not None else 0
+
+    monkeypatch.setattr(ci, "run", execute)
+    assert ci.main(["run-all", "e2e-duckdb", "4", str(tmp_path)]) == int(failure is not None)
+    assert sorted(seen) == list(range(4))
+
+
+def test_each_demo_warehouse_uses_one_job_with_all_logical_workers():
+    rows = ci.matrix()["e2e"]
+    assert len(rows) == len(ci.combinations()["e2e"])
+    assert all(row["index"] == 0 and row["count"] == 4 for row in rows)
+
+
 def test_complete_matrix_verifies_and_a_missing_shard_or_wrong_wheel_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(ci, "git", lambda *args: SimpleNamespace(stdout="same-source"))
     monkeypatch.setattr(ci, "coverage_report", lambda *args: [])
@@ -150,37 +176,42 @@ def test_complete_matrix_verifies_and_a_missing_shard_or_wrong_wheel_fails(tmp_p
     wheel.write_bytes(b"wheel")
     paths = []
     installed = None
-    for rows in ci.matrix().values():
-        for row in rows:
-            profile = row["profile"]
-            report = copy.deepcopy(reports()[0])
-            node = f"test_{row['index']}"
-            report.update(collected=[node], tests=[{"nodeid": node, "outcome": "passed"}])
-            report["ci"].update(
-                profile=profile,
-                index=row["index"],
-                count=row["count"],
-                expected=[f"test_{index}" for index in range(row["count"])],
+    logical = [
+        row | {"index": index}
+        for family, rows in ci.matrix().items()
+        for row in rows
+        for index in (range(row["count"]) if family == "e2e" else [row["index"]])
+    ]
+    for row in logical:
+        profile = row["profile"]
+        report = copy.deepcopy(reports()[0])
+        node = f"test_{row['index']}"
+        report.update(collected=[node], tests=[{"nodeid": node, "outcome": "passed"}])
+        report["ci"].update(
+            profile=profile,
+            index=row["index"],
+            count=row["count"],
+            expected=[f"test_{index}" for index in range(row["count"])],
+        )
+        if profile.startswith("coverage-"):
+            report.update(
+                python=profile.split("-", 2)[1] + ".1",
+                platform_key="darwin" if profile.endswith("macos-latest") else "linux",
+                marker=None,
             )
-            if profile.startswith("coverage-"):
-                report.update(
-                    python=profile.split("-", 2)[1] + ".1",
-                    platform_key="darwin" if profile.endswith("macos-latest") else "linux",
-                    marker=None,
-                )
-            if profile.startswith("e2e-"):
-                report["ci"]["warehouse"] = profile.removeprefix("e2e-")
-                report["wheel_sha256"] = ci.sha256_of(wheel)
-                report["marker"] = "e2e_pip or e2e_uv"
-            elif not profile.startswith("coverage-"):
-                report["marker"] = ci.SERVICE_MARKERS[profile]
-            folder = tmp_path / f"{profile}-{row['index']}"
-            folder.mkdir()
-            path = folder / "results.json"
-            path.write_text(json.dumps(report))
-            paths.append(path)
-            if profile.startswith("e2e-"):
-                installed = path
+        if profile.startswith("e2e-"):
+            report["ci"]["warehouse"] = profile.removeprefix("e2e-")
+            report["wheel_sha256"] = ci.sha256_of(wheel)
+            report["marker"] = "e2e_pip or e2e_uv"
+        elif not profile.startswith("coverage-"):
+            report["marker"] = ci.SERVICE_MARKERS[profile]
+        folder = tmp_path / f"{profile}-{row['index']}"
+        folder.mkdir()
+        path = folder / "results.json"
+        path.write_text(json.dumps(report))
+        paths.append(path)
+        if profile.startswith("e2e-"):
+            installed = path
     for name in ci.VALIDATIONS:
         folder = tmp_path / name
         folder.mkdir()

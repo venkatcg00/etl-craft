@@ -163,9 +163,9 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
-- Developer CI partitions complete test collections across isolated jobs, shares the built
-  wheel with the installed demos, and verifies test identities and matrix results before
-  accepting combined Python/platform coverage at the unchanged 90% threshold. Release evidence
+- Developer CI partitions complete test collections across jobs and isolated worker processes,
+  shares the built wheel with the installed demos, and verifies test identities and matrix results
+  before accepting combined Python/platform coverage at the unchanged 90% threshold. Release evidence
   retains its strict no-skip policy; manual cold/warm timing validation is separate from PR runs.
 
 - SQL tasks and `validate` refuse repeated column names in `MERGE_KEY` and

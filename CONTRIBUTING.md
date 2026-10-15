@@ -32,14 +32,16 @@ Before opening a pull request, run the checks in `.agents/skills/pre-pr-checks/S
 installed-wheel demos, `actionlint` for workflow changes, and the cloud tests when warehouse SQL
 changes. Fix failures before creating the pull request.
 
-CI partitions the complete collections across isolated runners. The final **every test and
-matrix accounted for** check requires each shard, its test outcomes and the package/Airflow
+CI partitions complete collections across jobs and isolated worker processes. Demo workers in
+one job share their warehouse service; each owns its databases, Iceberg namespaces and email
+addresses. The final **every test and matrix accounted for** check requires each shard, its test
+outcomes and the package/Airflow
 matrix results. It combines coverage separately for each Python/platform pair before enforcing
 the same 90% threshold. Individual shard coverage is not an acceptance result.
 
 Download the `ci-*` artifacts to inspect collected IDs, outcomes, durations, runner resources
-and cache hits. `scripts/ci-durations.json` holds measured function estimates for balancing;
-tests absent from it still run. No test is excluded because it lacks a timing estimate.
+and cache hits. `scripts/ci-durations.json` holds measured case estimates grouped by suite and,
+for coverage, by platform. An unmeasured test runs with a one-second estimate; it is never omitted.
 Both CI and Docs accept a manual `cache=cold|warm` input for deliberate timing validation.
 CI also accepts `serial` to measure the complete unsharded matrix. Ordinary pull requests do
 not repeat either workflow for that measurement.

@@ -166,9 +166,11 @@ does not move worker work ahead of the metadata, account or operator-control cor
 
 S7.N passed the full local gate, strict docs, Python 3.12/3.13 unit suites and the complete
 installed-wheel/sdist matrix without skips. Schema-template isolation and audit guards passed
-on both Engine DBs; old-code regression checks, collection comparison and the real CI service
-runner were exercised. Hosted cold/warm timing, combined coverage and runner-cost acceptance
-remain pending; the item is not complete. The frozen soak and old stash remain untouched.
+on both Engine DBs; collection comparison retained every existing case. Shared demo workers
+passed the installed Trino cases, and twenty worker-dispatch/namespace-isolation rounds passed.
+Old-code regression checks and the real CI service runner were exercised. Hosted accounting
+and combined coverage passed for the first candidate; final cold/warm timing and runner-cost
+acceptance remain pending, so the item is not complete. The frozen soak and old stash remain untouched.
 
 S6.C passed the full local gate, strict docs, Python 3.12/3.13 unit suites, and focused catalog,
 lineage, publication and released-schema upgrade checks on both Engine DBs. Explicit cold and
