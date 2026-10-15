@@ -134,7 +134,7 @@ item's text, or work done early under another item.
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
-| S7.N Faster complete pull-request CI | Planned | | Five-minute required-check target without losing tests, platforms, services or failure detection; expensive stress remains in manual/release validation |
+| S7.N Faster complete pull-request CI | In progress | #170 | Complete collection/shard accounting and isolated schema templates; hosted timing and runner-cost acceptance pending |
 | S8.H Support Insights scenario coverage | Planned | | Deterministic mixed-quality generators, every-feature demonstrations, business-rule and stewardship cases, and runnable README coverage |
 
 ### Handover notes
@@ -163,6 +163,12 @@ S5.T (resource discovery and deployment profiles), then S5.C. S5.T supplies the 
 does not move worker work ahead of the metadata, account or operator-control corrections.
 
 **Acceptance availability.**
+
+S7.N passed the full local gate, strict docs, Python 3.12/3.13 unit suites and the complete
+installed-wheel/sdist matrix without skips. Schema-template isolation and audit guards passed
+on both Engine DBs; old-code regression checks, collection comparison and the real CI service
+runner were exercised. Hosted cold/warm timing, combined coverage and runner-cost acceptance
+remain pending; the item is not complete. The frozen soak and old stash remain untouched.
 
 S6.C passed the full local gate, strict docs, Python 3.12/3.13 unit suites, and focused catalog,
 lineage, publication and released-schema upgrade checks on both Engine DBs. Explicit cold and
