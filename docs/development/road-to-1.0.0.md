@@ -344,7 +344,7 @@ The separate frozen 0.4 soak deployment is unchanged.
 
 - **S5.R item 3 (#179)** starts while the frozen 0.4 soak runs, at the owner's request. The
   soak tests the 0.3.0 wheel from its own release branch, so work on `main` does not touch it.
-  - **Registry.** Markers are a registry (`engine/migrations.py` `STEPS`) of a check and a
+  - **Registry.** Markers are a registry (`engine/migration_steps.py` `STEPS`, kept apart from the runner so a new marker leaves `engine/migrations.py` unchanged) of a check and a
     conversion per marker. Conversion positions moved from Python slicing into
     `migration-markers.toml` `[convert-at.<dialect>]`, and file-name markers into its
     `[markers]` table.

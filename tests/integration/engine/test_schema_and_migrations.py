@@ -9,7 +9,7 @@ from sqlalchemy import text
 from etl_craft.core.errors import EngineDbError, MigrationError
 from etl_craft.dialects.engine import for_engine
 from etl_craft.dialects.engine.base import EngineDialect
-from etl_craft.engine import migrations
+from etl_craft.engine import migration_steps, migrations
 from etl_craft.engine.migrations import apply_pending_migrations, mark_packaged_migrations_applied
 from etl_craft.engine.schema import SENTINEL_TABLES, existing_engine_tables, init_db
 
@@ -251,7 +251,7 @@ def test_engine_header_markers_drive_policy_for_a_new_filename(initialized, pack
     transaction = type(dialect).migration_transaction
     checks = []
     rebuilds = []
-    check_codes = migrations._check_metadata_codes
+    check_codes = migration_steps.check_metadata_codes
 
     def checked(conn):
         checks.append(True)
@@ -264,7 +264,7 @@ def test_engine_header_markers_drive_policy_for_a_new_filename(initialized, pack
         with transaction(self, engine, rebuild_metadata=rebuild_metadata) as conn:
             yield conn
 
-    monkeypatch.setattr(migrations, "_check_metadata_codes", checked)
+    monkeypatch.setattr(migration_steps, "check_metadata_codes", checked)
     monkeypatch.setattr(type(dialect), "migration_transaction", recorded)
     sql = "-- etl-craft: rebuild-metadata\n-- etl-craft: check-metadata-codes\nSELECT 1;"
     write(packaged, "0099_new_policy.sql", sql)
@@ -289,9 +289,11 @@ def test_a_new_migration_converts_where_the_registry_says_without_python(
         seen.append((rows, tables.has_table("marker_first"), tables.has_table("marker_second")))
 
     monkeypatch.setitem(
-        migrations.STEPS,
+        migration_steps.STEPS,
         "convert-rule-targets",
-        migrations.MarkerStep(check=lambda conn, target: [{"read": "before"}], convert=convert),
+        migration_steps.MarkerStep(
+            check=lambda conn, target: [{"read": "before"}], convert=convert
+        ),
     )
     write(
         packaged,
