@@ -18,7 +18,7 @@ from sqlalchemy.engine import Engine
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.enums import SqlAction
 from etl_craft.core.errors import ConfigurationError, SqlGuardError
-from etl_craft.core.text import qualify
+from etl_craft.core.text import qualify as qualify
 from etl_craft.dialects.warehouse import WarehouseDialect
 from etl_craft.engine import locks
 from etl_craft.engine.repository.hash_versions import (
@@ -60,7 +60,7 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
     logger.debug("the SELECT:\n%s", task.select_sql)
     # Hold through warehouse commit: a computed ROW_ID base must include the previous insert.
     # Generated keys still share mutation ordering with replacement and hash upgrades.
-    with locks.target(qualify(task.target_object, catalog)).hold(engine_db):
+    with locks.target(task.target_object, catalog).hold(engine_db):
         if task.action in {SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE}:
             with engine_db.connect() as conn:
                 other = conflicting_merge_action(conn, context.task_id, task.action)

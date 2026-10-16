@@ -124,7 +124,7 @@ item's text, or work done early under another item.
 | S5.N Source definitions and schema-aware lineage | Done | #147 | Offline star/join tracing, audited source definitions, seeding and documented/deployed schema comparison |
 | S5.O.1 SCD lifecycle invariants | Done | #148 | Common SCD flags, current-row soft deletes and legacy active-state upgrades |
 | S5.O.2a Common config contract | Done | #149 | Mandatory core/custom CFG audit fields and keys, safe token lifecycle history and lossless upgrades |
-| S5.O.2b Normalized object contracts | In progress | #150, #151, #152, #153, #154, #160, #162 | Merge column lists retain parameter storage; lineage versions use component endpoints with historical CLI/catalog reads; target state follows S5.R item 3 after the soak |
+| S5.O.2b Normalized object contracts | Done | #150, #151, #152, #153, #154, #160, #162, #181 | Merge column lists retain parameter storage; lineage versions use component endpoints; target state, view statements and rule results are keyed by components, and target locks use the resolved identity |
 | S5.P Project documentation gap UI | Done | #165 | Structured schema/lineage gaps, accessible column/graph warnings and read-only comparison API |
 | S5.R Consolidate before the cluster | In progress | #179 | Item 3 done: migration markers are a registry of Python steps, and conversion positions live in `migration-markers.toml`; items 1, 2 and 4 to 8 pending |
 | S5.S Accounts, login and roles | Planned | | Registered user and service accounts, password and SSO login, tokens for services, a role check on every action, no implicit actor, local installations that operate a server |
@@ -134,6 +134,7 @@ item's text, or work done early under another item.
 | S5.V Team-owned config tables | Planned | | Teams' own `CFG_` tables carry no etl-craft guards, contract, history or config files; etl-craft's tables keep them |
 | S5.U Robustness before the cluster | In progress | #176 | Item 5 done: Engine DB restarts and failovers ridden out within `Orchestration.Engine_db_outage_seconds`; items 1 to 4 follow S5.R items 7 and 8 |
 | S5.W Retry only what can succeed | Planned | | Transient, permanent and unknown failure classes per dialect; `Retry_on` / `RETRY_ON` of `NONE`, `TRANSIENT` (default), `TRANSIENT_AND_UNKNOWN` or `ANY`; each attempt records why it was or was not retried |
+| S5.Z Controller and agent names | Planned | | The overseer becomes the controller (`etl-craft controller`, `AUD_CONTROLLERS`) and S5.C's worker the agent, before S5.C |
 | S5.X Unmanaged SQL tasks | Planned | | `SQL_SCRIPT` runs any SQL as an ordinary dependent task with per-statement audit; pre- and post-SQL are upstream and downstream tasks |
 | S5.C and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
@@ -142,6 +143,7 @@ item's text, or work done early under another item.
 | S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
 | S7.O Package, demo and configuration repositories | Planned | | A very small demo stays in package CI; the Support Insights demo and its configuration repository supply release evidence the package gate validates |
 | S7.P Obvious failures do not stop 1.0.0 | In progress | #173, #178 | Audit done (#173); the log-folder and port checks close their catalog rows (#178); item 4 keeps the catalog current |
+| S7.Q A generic ANSI SQL warehouse | Planned | | A `generic` dialect over SQLAlchemy for rare databases: ANSI SQL only, NULL-safe column comparison for merges, refusals for anything without an ANSI form |
 | S7.N Faster complete pull-request CI | Done | #170 | Fail-closed collection/shard accounting, isolated schema templates and shared demo workers; complete checks in 6m33s-8m15s (owner-approved ten-minute target) |
 | S8.H Support Insights scenario coverage | Planned | | Deterministic mixed-quality generators, every-feature demonstrations, business-rule and stewardship cases, and runnable README coverage |
 
@@ -208,11 +210,17 @@ does not move worker work ahead of the metadata, account or operator-control cor
   - S7.O starts after the frozen 0.4 soak ends.
   - S5.W (retrying only failures that can succeed) follows S5.U item 5 and comes before
     S5.C.
+  - S5.Z (controller and agent names) comes right before S5.C. S7.Q (generic ANSI warehouse)
+    follows S5.X.
   - None of these moves S5.S, S5.O.3 or S5.Q.
   - S5.V and S7.M add `validation_scripts/` and `uploads/` to the project directory, and the
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.O.2b slice 3 (#181) passed:
+- the new upgrade, refusal, lock and schema tests on both Engine DBs;
+- the unit, Engine DB, business-rule, hash-contract, view, event-wait and intervention suites.
 
 S7.P item 3 (#178) passed its unit tests, a runner test of a full log disk, an API server test of
 a port in use, and the touched execution, overseer and API suites.
@@ -341,6 +349,29 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- **S5.O.2b slice 3 (#181).**
+  - **Where the split happens.** The conversion splits names in each dialect's SQL, so large
+    rule-result tables never pass through Python.
+  - **The marker's check.** The `convert-target-state` marker has a Python check and no
+    conversion step: it refuses any recorded name that cannot be split, before any change. It
+    reads only the tables that already exist with their combined column, because an upgrade
+    from 0.2.0 creates them in the same run. The marker is registered in
+    `engine/migration_steps.py`, and `engine/migrations.py` is unchanged.
+  - **What the recorded names are.** Hash versions and view statements were always recorded as
+    `catalog.schema.table`. Rule results keep their contract's spelling: `schema.table`
+    converts with no catalog.
+  - **Locks.** `locks.target` resolves the identity from the object reference and the active
+    catalog, keeping today's lock keys. The event-wait lock that reused it is now
+    `locks.event`.
+  - **Plan edits in the same PR (owner-approved, 2026-10-16):**
+    - two install versions (`etl-craft` and `etl-craft[ui]`) and image tags;
+    - Kubernetes example manifests (S7.F);
+    - the new S5.Z (controller and agent names) and S7.Q (generic ANSI warehouse);
+    - S5.X's bound inputs for stored procedures;
+    - the Engine DB export recipe (S7.J);
+    - S5.T's container check;
+    - S8.A's agent sizing.
 
 - **S5.R item 3 (#179)** starts while the frozen 0.4 soak runs, at the owner's request. The
   soak tests the 0.3.0 wheel from its own release branch, so work on `main` does not touch it.
@@ -3133,6 +3164,11 @@ profile sizing ship here; S5.C wires the same module into worker startup and hea
      opts into derived sizing, with settings still acting as ceilings. Ship the new setting,
      profile behavior, fallback rules and any deliberate upgrade change in CHANGELOG, guides
      and examples in the implementation PR. Do not migrate or edit a team's connector file.
+  8. **Refuse slots a container cannot afford.** Discovery reads the container's memory limit.
+     An agent whose limit cannot hold its own process plus one task process refuses that slot
+     at startup, rather than being killed later. The message gives the limit, the measured need
+     and the remedy, for example: "this container has 128 MB; the agent and one task need about
+     130 MB; raise its memory, or start it with no slots".
 - *Tests.* Through setup/doctor and role startup, with supplied measurements rather than the
   workstation's capacity: laptop-sized and large hosts; each profile's derived sizes and
   reserves; CPU affinity and fractional quotas; container and inherited limits below host
@@ -3368,6 +3404,10 @@ Branch: `feat/handlers-sql-script`. After S5.W, which supplies `RETRY_ON`.
 - *Change.*
   1. **A `SQL_SCRIPT` handler** (`core.enums`). It runs a file in `sql_files/` named by
      `SCRIPT_FILE`, statement by statement in order, on the task's warehouse connection.
+     - **Bound inputs.** Statements receive bound values: `:pipeline_id`, `:pipeline_run_id`,
+       `:task_run_id`, `:run_date`, and each key of the task's `INPUT_PARAMS`. A team can then
+       call its own stored procedure, such as `CALL load_orders(:run_date)`. Reusable logic
+       lives in stored procedures, never in Jinja or macros.
      - It is an ordinary task, so it follows `CFG_TASK_DEPENDENCY` and every other dependency
        rule.
      - Pre- and post-steps are `SQL_SCRIPT` or Python tasks upstream or downstream of the task
@@ -3395,6 +3435,28 @@ Branch: `feat/handlers-sql-script`. After S5.W, which supplies `RETRY_ON`.
 - *Done when.*
   - Teams can run any SQL as an ordinary dependent task, with each statement audited.
   - Managed actions keep their guarantees, and the overlap is warned about.
+
+### S5.Z Controller and agent names
+
+Branch: `refactor/controller-agent-names`. Before S5.C, so the agent is built under its final
+name.
+
+- *Problem.* "Overseer" and "worker" are unclear names for the two processes. "Orchestrator"
+  would collide with etl-craft itself and with `Orchestration.Mode`, which names external
+  orchestrators such as Airflow.
+- *Change.*
+  - The overseer becomes the **controller**:
+    - `etl-craft server` becomes `etl-craft controller`;
+    - the `overseer/` package becomes `controller/`;
+    - a migration in both dialects renames `AUD_OVERSEERS` to `AUD_CONTROLLERS`;
+    - `doctor`, `status`, the API, the docs and the CHANGELOG follow.
+  - The worker becomes the **agent**: S5.C's command, package, table and docs use "agent" from
+    the start.
+  - There is no alias for the old command, because this is before 1.0.0.
+- *Tests.* Upgrades from every released schema keep every controller row. The renamed command
+  and API documents behave as before.
+- *Done when.* No user-facing name says "overseer" or "worker", apart from the CHANGELOG and
+  old migration files.
 
 ### S5.C The PostgreSQL queue and the worker agent
 
@@ -4023,9 +4085,19 @@ S5.S delivers the accounts, the login, the roles and the role check on every act
 
 ### S7.F Packaging and deployment
 
-- **Container image.** `etl-craft` holds the overseer, worker and CLI, with the `postgres`,
-  `server` and chosen warehouse extras. Its Dockerfile lives in this repository.
-  - Every release candidate's release workflow builds the image and smoke-tests it. It is not
+- **Two install versions of one package.** They share one distribution, one version and one
+  codebase, so the controller and agents never come from different releases.
+  - **`pip install etl-craft`, without a UI:** for agents, a headless controller, or a single
+    machine that needs no UI.
+  - **`pip install etl-craft[ui]`, with a UI:** adds FastAPI, uvicorn and Jinja2 with the
+    vendored UI assets. It is for the controller's HTTP API and web UI, or a single machine that
+    wants the UI.
+  - **The `server` extra becomes `ui`.** The CHANGELOG notes the changed install command; no
+    alias is kept, because this is before 1.0.0.
+- **Container images.** The two versions ship as `etl-craft:<version>` and
+  `etl-craft:<version>-ui`, run with role commands (`controller`, `agent`, `run`). Their
+  Dockerfile lives in this repository.
+  - Every release candidate's release workflow builds both images and smoke-tests them. It is not
     built in pull-request CI, so that CI stays under ten minutes.
   - It is pushed to GitHub Container Registry (`ghcr.io/venkatcg00/etl-craft`) only from
     1.0.0, with the PyPI release. Nothing is published to a registry before 1.0.0.
@@ -4037,8 +4109,15 @@ S5.S delivers the accounts, the login, the roles and the role check on every act
 - A documented cluster layout: the overseer on the largest node (at least 1.5 times a worker's
   memory), N workers, the Engine DB, the artifact and log stores; systemd unit files for hosts without
   containers.
-- Kubernetes manifests or Helm charts are not part of 1.0.0; a pool provider for Kubernetes can come
-  later behind the pool interface.
+- **Kubernetes example manifests** are published in the docs and checked in release validation:
+  - a controller Deployment with one replica (its leadership lock already prevents a second
+    active controller);
+  - an agent Deployment that can be scaled;
+  - an external PostgreSQL Engine DB.
+
+  The controller's readiness and liveness use `/health`. Agents open no ports, so theirs use a
+  command probe of the agent's own recorded heartbeat. There is no Helm chart until someone
+  needs one, and no pod-per-task pool provider.
 
 ### S7.G Compatibility policy
 
@@ -4091,6 +4170,9 @@ The documentation gate must inspect rendered content and links on the landing pa
   the contract: what a script gets, what it returns, when its offset is stored, how it is stopped).
 - Reference: every config key, task parameter, CLI command, API endpoint and JSON document, generated
   from the code where possible (as the existing reference pages are).
+- Recipe: exporting lineage, audit and run data to another system with an ordinary task that
+  reads the Engine DB tables. Reads are open, so no exporter or OpenLineage integration is
+  needed.
 
 ### S7.K Hosting the metadata-generated catalog documentation
 
@@ -4335,6 +4417,34 @@ release candidate.
   stack.
 - *Done when.* Every row names a passing regression test, and none is open.
 
+### S7.Q A generic ANSI SQL warehouse
+
+Branch: `feat/dialects-generic-ansi`. After S5.X.
+
+- *Problem.* etl-craft targets PostgreSQL, Snowflake, Databricks, DuckDB and Trino, and adds no
+  further native dialects. In rare cases a team must still load into another database.
+- *Change.*
+  1. **A `generic` warehouse dialect.** It connects through SQLAlchemy from the profile's
+     `jdbc_url`; the team installs the database's driver, and engine code never imports it.
+  2. **Only ANSI SQL:**
+     - `INSERT … SELECT`, and `DELETE` with `INSERT` in one transaction to overwrite;
+     - `CREATE TABLE` from the declared columns, then `INSERT`;
+     - `DROP VIEW` and `CREATE VIEW` in one transaction;
+     - merges as `UPDATE … WHERE EXISTS` and `INSERT … WHERE NOT EXISTS`;
+     - `ALTER TABLE … ADD` for schema evolution;
+     - `ROW_ID` as `MAX() + 1` under the Engine DB target lock;
+     - `information_schema` for metadata reads.
+  3. **Merges compare columns NULL-safely** (`a = b OR (a IS NULL AND b IS NULL)`) instead of
+     storing a change hash, so `rehash` and hash versions do not apply. This is the one
+     exception to the merge-hash design rule, approved by the owner.
+  4. **No guessing.** Anything without an ANSI form is refused at `validate`, naming the task,
+     the parameter and the reason. One example is `REJECT_LIMIT`, which needs `TRY_CAST`.
+     There are no per-database SQL fragments or settings.
+- *Tests.* The warehouse action suite runs against PostgreSQL and DuckDB acting as `generic`
+  targets, with no new CI service. It covers the refusals.
+- *Done when.* A database with an ANSI SQL SQLAlchemy dialect runs every managed action
+  except the refused ones, with the same audit and failure messages.
+
 ## Release candidate: the Support Insights example
 
 **Goal.** Prove 1.0.0 on a real project before it is released. The
@@ -4404,6 +4514,11 @@ support-insights-config/              the configuration repository (S8.C)
 ├── config/                           one CSV file per CFG_ table, merged by key
 └── .github/workflows/                plan on pull requests, apply on merge
 ```
+
+Containers: one controller with 1 GB and twelve agents with 256 MB and one slot each, about
+4 GB in all. One agent plus one task process measures about 128 MB before a query runs. S5.T's
+check refuses a container too small for a slot. S5.C measures lazy imports toward 160-192 MB per
+agent.
 
 Engine DB: a database `etl_craft` on the platform's PostgreSQL server, separate from the warehouse
 database `support_insights`. Warehouse: `support_insights` (PostgreSQL). One etl-craft project,

@@ -182,6 +182,14 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- `AUD_TARGET_HASH_VERSION`, `AUD_TARGET_VIEW_STATEMENT` and `AUD_BUSINESS_RULES_RESULTS` store
+  the target as `TARGET_CATALOG_NAME`, `TARGET_SCHEMA_NAME` and `TARGET_TABLE_NAME` instead of
+  one combined `TARGET_OBJECT` or `TARGET_TABLE` name. Migration `0033` converts recorded rows
+  from their own spelling, keeping values and times. A rule result recorded as `schema.table`
+  has no catalog. A recorded name that cannot be split stops the upgrade before any change and
+  names the row. Target locks use the resolved `catalog.schema.table`, so one target named with
+  or without its catalog takes one lock.
+
 - Developer CI partitions complete test collections across jobs and isolated worker processes,
   shares the built wheel with the installed demos, and verifies test identities and matrix results
   before accepting combined Python/platform coverage at the unchanged 90% threshold. Release evidence

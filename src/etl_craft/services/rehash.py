@@ -35,7 +35,7 @@ def rehash(
     split_object_ref(target)
     catalog = active_catalog(config)
     qualified = qualify(target, catalog)
-    with locks.target(qualified).hold(engine):
+    with locks.target(target, catalog).hold(engine):
         with engine.connect() as conn:
             task_ids = conn.execute(statement(conn, "rehash_tasks")).scalars().all()
             tasks = {task_id: fetch_task_parameters(conn, task_id) for task_id in task_ids}

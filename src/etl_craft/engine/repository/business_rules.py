@@ -9,6 +9,7 @@ from datetime import datetime
 from sqlalchemy import bindparam
 from sqlalchemy.engine import Connection
 
+from etl_craft.core.text import split_object_ref
 from etl_craft.engine import transitions
 from etl_craft.engine.queries import statement
 
@@ -82,9 +83,14 @@ def flag_rule_keys(
     keys: Sequence[str],
     now: datetime,
 ) -> None:
-    """Flag ``keys`` for ``rule``, found by ``business_rule_run_id``."""
+    """Flag ``keys`` for ``rule``, found by ``business_rule_run_id``.
+
+    Each flag records the target's catalog, schema and table as the rule's contract names them
+    now; a later edit of the contract leaves recorded flags unchanged.
+    """
     if not keys:
         return
+    catalog, schema, table = split_object_ref(rule.target_table, param_name="TARGET_TABLE")
     conn.execute(
         statement(conn, "insert_rule_result"),
         [
@@ -92,7 +98,9 @@ def flag_rule_keys(
                 "business_rule_run_id": business_rule_run_id,
                 "business_rule_id": rule.business_rule_id,
                 "business_rule_key": key,
-                "target_table": rule.target_table,
+                "target_catalog_name": catalog,
+                "target_schema_name": schema,
+                "target_table_name": table,
                 "status": rule.business_rule_type,
                 "now": now,
             }

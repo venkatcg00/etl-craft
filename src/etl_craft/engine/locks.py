@@ -8,6 +8,7 @@ from hashlib import blake2b
 
 from sqlalchemy.engine import Engine
 
+from etl_craft.core.text import split_object_ref
 from etl_craft.dialects.engine import for_engine
 
 
@@ -33,10 +34,20 @@ LINEAGE = EngineLock("lineage", 8_241_009)
 """Serializes task cache computations and table lineage version publication."""
 
 
-def target(name: str) -> EngineLock:
-    """Serialize target mutations and hash-contract publication across processes."""
-    normalized = name.lower()
-    key = advisory_key(normalized)
+def target(object_ref: str, catalog: str) -> EngineLock:
+    """Serialize target mutations and hash-contract publication across processes.
+
+    The lock comes from the canonical resolved identity, ``catalog.schema.table`` in lowercase,
+    so a target written with and without its catalog takes one lock.
+    """
+    database, schema, table = split_object_ref(object_ref)
+    key = advisory_key(f"{database or catalog}.{schema}.{table}".lower())
+    return EngineLock(f"target-{key & ((1 << 64) - 1):016x}", key)
+
+
+def event(task_id: int) -> EngineLock:
+    """Serialize evaluation of one event-wait task across processes."""
+    key = advisory_key(f"event:{task_id}")
     return EngineLock(f"target-{key & ((1 << 64) - 1):016x}", key)
 
 

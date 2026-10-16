@@ -42,7 +42,6 @@ from etl_craft.core.enums import (
     RunStatus,
 )
 from etl_craft.core.errors import RunRefusedError, RunStateError, UsageError
-from etl_craft.core.text import qualify
 from etl_craft.engine import locks, runlog, transitions
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import interventions as record
@@ -650,7 +649,7 @@ def reset_watermark(
         )
     wanted = Offset(value, task.watermark.start.datatype)
     with (
-        locks.target(qualify(task.target_object, active_catalog(config))).hold(engine),
+        locks.target(task.target_object, active_catalog(config)).hold(engine),
         engine.begin() as conn,
     ):
         selected = runlog.select_run(conn, pipeline_id, selector)

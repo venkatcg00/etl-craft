@@ -52,7 +52,7 @@ def check_event(
 ) -> EventCheck:
     """Check once; waiting never admits an attempt or holds a worker slot."""
     try:
-        with locks.target(f"event:{task_id}").hold(engine, wait_seconds=0.1):
+        with locks.event(task_id).hold(engine, wait_seconds=0.1):
             return _check_event(
                 engine, config, pipeline_run_id, task_id, now, decisions, cancel, force_check
             )

@@ -241,7 +241,17 @@ Restrict the Engine DB file and its containing directory to the deployment accou
 warns when the file is writable by group or others and suggests `chmod go-w`. Filesystem access
 is the boundary: anyone who can replace the file or its triggers can bypass the connection guard.
 
-`AUD_TARGET_HASH_VERSION` records each qualified warehouse target's published change-hash version
-and recomputation time. Migration `0011_target_hash_version.sql` creates this guarded tracker
-without guessing the hash version of existing tables. Upgrade those merge targets with
+`AUD_TARGET_HASH_VERSION` records each warehouse target's published change-hash version and
+recomputation time. `AUD_TARGET_VIEW_STATEMENT` records the statement behind each view. Both are
+keyed by the target's resolved catalog, schema and table (`TARGET_CATALOG_NAME`,
+`TARGET_SCHEMA_NAME`, `TARGET_TABLE_NAME`), and target locks use the same resolved identity. A
+target named with or without its catalog therefore shares one lock and one record. Migration
+`0011_target_hash_version.sql` creates the guarded tracker without guessing the hash version of
+existing tables.
+
+Migration `0033_target_state_components.sql` splits each recorded name into those components.
+It splits business-rule flags in `AUD_BUSINESS_RULES_RESULTS` the same way, keeping each one's
+spelling as recorded, never today's configured catalog. Values and timestamps are unchanged. A
+recorded name that cannot be split stops the upgrade before any change, naming the row; correct
+or delete it with a project migration and migrate again. Upgrade those merge targets with
 [`etl-craft rehash`](../guides/sql-tasks.md#change-hash-version-2).
