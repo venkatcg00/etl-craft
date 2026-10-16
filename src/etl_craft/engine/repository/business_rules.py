@@ -9,6 +9,7 @@ from datetime import datetime
 from sqlalchemy import bindparam
 from sqlalchemy.engine import Connection
 
+from etl_craft.core.enums import YesNo
 from etl_craft.core.text import split_object_ref
 from etl_craft.engine import transitions
 from etl_craft.engine.queries import statement
@@ -32,7 +33,7 @@ def fetch_business_rules_for_task(conn: Connection, task_id: int) -> list[Busine
     """Return the active business rules of ``task_id``, in the order they run."""
     rows = conn.execute(statement(conn, "business_rules_for_task"), {"task_id": task_id})
     return [
-        BusinessRule(**(dict(row._mapping) | {"target_active": row.target_active == "Y"}))
+        BusinessRule(**(dict(row._mapping) | {"target_active": row.target_active == YesNo.YES}))
         for row in rows
     ]
 

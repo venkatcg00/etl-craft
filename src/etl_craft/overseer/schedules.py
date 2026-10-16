@@ -11,7 +11,7 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.core.actor import Actor, ActorKind, acting_as
 from etl_craft.core.cron import next_after, timezone
-from etl_craft.core.enums import InterventionAction
+from etl_craft.core.enums import InterventionAction, YesNo
 from etl_craft.core.errors import MetadataError
 from etl_craft.core.time import as_utc
 from etl_craft.engine import transitions
@@ -85,7 +85,7 @@ class Schedules:
                     ) from error
             tick = next_after(row.run_schedule, cursor, zone)
             retained: deque[datetime] = deque()
-            count = row.max_catchup_runs if row.catchup == "Y" else 1
+            count = row.max_catchup_runs if row.catchup == YesNo.YES else 1
             with acting_as(SCHEDULE_ACTOR):
                 while tick <= now:
                     if stop is not None and stop.is_set():

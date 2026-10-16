@@ -11,6 +11,7 @@ from etl_craft.cli.commands.common import (
     configure_run_selector,
 )
 from etl_craft.cli.output import Output
+from etl_craft.core.enums import RunCondition
 from etl_craft.core.errors import ExitCode
 from etl_craft.engine.runlog import RunSelector
 from etl_craft.services.operations import inspect
@@ -43,7 +44,7 @@ def _run(args: argparse.Namespace, out: Output) -> int:
                 s.handler,
                 s.task_type,
                 f"N={s.run_condition_count}"
-                if s.run_condition == "N"
+                if s.run_condition == RunCondition.N
                 else s.run_condition or "ALL",
                 ", ".join(f"{name}={value}" for name, value in s.parameters.items()),
             )

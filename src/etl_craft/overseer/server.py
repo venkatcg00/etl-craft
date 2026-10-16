@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
-from etl_craft.core.enums import Mode
+from etl_craft.core.enums import Mode, YesNo
 from etl_craft.core.errors import EngineDbError, EtlCraftError, RunRefusedError
 from etl_craft.core.outage import OutageBudget
 from etl_craft.core.time import as_utc
@@ -74,7 +74,7 @@ class WorkingSet:
                         row.pipeline_id,
                         row.pipeline_run_id,
                         row.pipeline_code,
-                        row.backfill == "Y",
+                        row.backfill == YesNo.YES,
                         self.graphs[row.pipeline_id][1],
                     )
                 )

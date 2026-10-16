@@ -236,8 +236,13 @@ class TlsMode(StrEnum):
     SSL = "ssl"
 
 
-class ActiveFlag(StrEnum):
-    """The Y/N flag of a current or active record."""
+class YesNo(StrEnum):
+    """A Y/N flag column: active, current, backfill, catch-up."""
 
     YES = "Y"
     NO = "N"
+
+    @classmethod
+    def of(cls, value: bool) -> YesNo:
+        """Return the flag that records ``value``."""
+        return cls.YES if value else cls.NO

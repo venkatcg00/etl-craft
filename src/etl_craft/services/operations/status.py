@@ -12,7 +12,7 @@ from sqlalchemy.engine import Connection, RowMapping
 from etl_craft.core.actor import acting_as
 from etl_craft.core.enums import GatePolicy
 from etl_craft.core.graph import DependencyGraph, RunState, TaskRunState, build_graph
-from etl_craft.core.time import as_utc
+from etl_craft.core.time import as_utc, elapsed_seconds
 from etl_craft.engine import runlog
 from etl_craft.engine.connection import read_snapshot
 from etl_craft.engine.queries import statement
@@ -193,10 +193,6 @@ class StatusView:
     duration_seconds: float | None
     tasks: tuple[TaskStatusView, ...]
     blocked_by_failures: tuple[str, ...]
-
-
-def _duration(start: datetime | None, end: datetime | None, now: datetime) -> float | None:
-    return None if start is None else ((end or now) - start).total_seconds()
 
 
 def _snapshots(
@@ -438,7 +434,9 @@ def pipeline_status(
                 task.attempt_count if task is not None else 0,
                 task.rows_written if task is not None else None,
                 task.reject_count if task is not None else None,
-                _duration(task.start_date, task.end_date, now) if task is not None else None,
+                elapsed_seconds(task.start_date, task.end_date or now)
+                if task is not None
+                else None,
                 task.error_message.splitlines()[0]
                 if task is not None and task.error_message
                 else None,
@@ -448,7 +446,7 @@ def pipeline_status(
     return StatusView(
         pipeline,
         run,
-        _duration(run.start_date, run.end_date, now),
+        elapsed_seconds(run.start_date, run.end_date or now),
         tuple(tasks),
         tuple(t.task_code for t in tasks if t.explanation.state == "blocked by failure"),
     )

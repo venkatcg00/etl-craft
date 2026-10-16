@@ -189,7 +189,7 @@
       "src/etl_craft/execution/pipeline.py": 444,
       "src/etl_craft/execution/runner.py": 196,
       "src/etl_craft/services/catalog_site.py": 247,
-      "src/etl_craft/services/config_files.py": 15
+      "src/etl_craft/services/config_files.py": 13
     },
     "no-cover": {
       "src/etl_craft/execution/child.py": 1

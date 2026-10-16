@@ -5,6 +5,8 @@ from __future__ import annotations
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from etl_craft.core.text import quote_identifier
+
 
 def extra_write_grants(engine: Engine) -> list[tuple[str, str, str]]:
     """Return source grants reaching PUBLIC or another ordinary login, including inherited roles."""
@@ -33,7 +35,7 @@ def extra_write_grants(engine: Engine) -> list[tuple[str, str, str]]:
 
 def grants_sql(schema: str) -> str:
     """Return reviewable grants for an owner, engine and reader; execute nothing."""
-    quoted = '"' + schema.replace('"', '""') + '"'
+    quoted = quote_identifier(schema)
     return (
         "-- Replace these role names with your deployment's roles.\n"
         "CREATE ROLE etl_craft_owner NOLOGIN;\n"

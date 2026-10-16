@@ -25,7 +25,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.types import TypeEngine
 
-from etl_craft.core.enums import DependencyType, Handler, RefreshType, RunCondition
+from etl_craft.core.enums import DependencyType, Handler, RefreshType, RunCondition, YesNo
 from etl_craft.core.errors import MetadataFileError
 
 Kind = Literal["code", "text", "choice", "int", "float", "date", "json"]
@@ -469,11 +469,11 @@ def read_rows(conn: Connection, table: ConfigTable) -> list[StoredRow]:
         rows.append(
             StoredRow(
                 int(row["row_id"]),
-                row["active_flag"] == "Y",
+                row["active_flag"] == YesNo.YES,
                 tuple(
                     int(row[name]) if row[name] is not None else None for name, _ in table.parents
                 ),
-                row["well_formed"] == "Y",
+                row["well_formed"] == YesNo.YES,
                 values,
             )
         )

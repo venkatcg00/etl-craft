@@ -12,7 +12,7 @@ from sqlalchemy import BigInteger, String, bindparam
 from sqlalchemy.engine import Connection
 from sqlalchemy.types import TupleType
 
-from etl_craft.core.enums import ActiveFlag
+from etl_craft.core.enums import YesNo
 from etl_craft.core.text import sha256_hex
 from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
@@ -74,7 +74,7 @@ class LineageVersion:
     edges_hash: str
     valid_from: datetime
     valid_to: datetime
-    current_flag: ActiveFlag
+    current_flag: YesNo
 
     @property
     def identity(self) -> tuple[str | None, str, str]:
@@ -114,7 +114,7 @@ def fetch_lineage_versions(conn: Connection, *, current_only: bool = False) -> l
         LineageVersion(
             **dict(r._mapping)
             | {
-                "current_flag": ActiveFlag(r.current_flag),
+                "current_flag": YesNo(r.current_flag),
                 "valid_from": as_utc(r.valid_from),
                 "valid_to": as_utc(r.valid_to),
             }
@@ -156,7 +156,7 @@ def record_lineage_versions(
             edge
         )
     versions = fetch_lineage_versions(conn, current_only=True)
-    current = {v.identity: v for v in versions if v.current_flag == ActiveFlag.YES}
+    current = {v.identity: v for v in versions if v.current_flag == YesNo.YES}
     now = datetime.now(UTC)
     for identity, current_version in current.items():
         if identity not in grouped:

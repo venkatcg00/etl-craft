@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.engine import Connection
 
-from etl_craft.core.enums import ActiveFlag, Handler
+from etl_craft.core.enums import Handler, YesNo
 from etl_craft.core.errors import MetadataError
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.pipelines import with_suggestions
@@ -74,7 +74,7 @@ def fetch_all_task_parameters(
 
 
 def _check_target(task_id: int, value: str, active: str) -> None:
-    if active != ActiveFlag.YES:
+    if active != YesNo.YES:
         raise MetadataError(
             f"TASK_ID={task_id} target {value}: table contract has "
             "ACTIVE_FLAG=N; reactivate it or disable the task's target reference"
