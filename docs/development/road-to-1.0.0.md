@@ -132,7 +132,7 @@ item's text, or work done early under another item.
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
 | S5.T Resource discovery and deployment profiles | Planned | | Opt-in laptop, server and server-with-workers sizing from usable process resources; one discovery module before S5.C |
 | S5.V Team-owned config tables | Planned | | Teams' own `CFG_` tables carry no etl-craft guards, contract, history or config files; etl-craft's tables keep them |
-| S5.U Robustness before the cluster | In progress | #176, #182, #183 | Items 5, 1, 2 and 4 done: Engine DB restarts ridden out; SLA breach writes retried; no single-writer guess; timing tests verified under load. Item 3 (subprocess coverage) pending |
+| S5.U Robustness before the cluster | Done | #176, #182, #183, #184 | Engine DB restarts ridden out; SLA breach writes retried; no single-writer guess; timing tests verified under load; subprocess code measured by coverage |
 | S5.W Retry only what can succeed | Planned | | Transient, permanent and unknown failure classes per dialect; `Retry_on` / `RETRY_ON` of `NONE`, `TRANSIENT` (default), `TRANSIENT_AND_UNKNOWN` or `ANY`; each attempt records why it was or was not retried |
 | S5.Z Controller and agent names | Planned | | The overseer becomes the controller (`etl-craft controller`, `AUD_CONTROLLERS`) and S5.C's worker the agent, before S5.C |
 | S5.X Unmanaged SQL tasks | Planned | | `SQL_SCRIPT` runs any SQL as an ordinary dependent task with per-statement audit; pre- and post-SQL are upstream and downstream tasks |
@@ -353,6 +353,16 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- **S5.U item 3 (#184)** measures coverage in subprocesses (`patch = ["subprocess"]`).
+  - **Results.** `overseer/server.py` reaches 87-92% and `execution/child.py` 89%. New
+    `stop_process` tests cover the reused-PID refusal and the killing of recorded descendants.
+  - **Owner-accepted exceptions:**
+    - CI runner time rises about 18% (from about 136 to 161 runner-minutes), with the critical
+      path still about 8 minutes.
+    - `overseer/leadership.py` stays below 90%, because its PostgreSQL paths run only in the
+      service jobs, which collect no coverage; they are tested there. `api/server.py` is not
+      measured separately.
 
 - **S5.U item 4 (#183)** needed no code change.
   - **Why no clock seam.** Both tests already allow 10 seconds for interpreter start-up. A test
