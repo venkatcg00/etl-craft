@@ -30,14 +30,12 @@ does. ``RunHooks.on_sla_lapse`` is called once per run, the first time the breac
 
 from __future__ import annotations
 
-import contextvars
 import logging
 import threading
 from collections.abc import Callable, Generator, Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass, replace
-from datetime import UTC, date, datetime, timedelta
-from types import TracebackType
+from datetime import date, timedelta
 from typing import Required, TypedDict, TypeVar, Unpack
 
 from sqlalchemy.engine import Connection, Engine
@@ -57,7 +55,6 @@ from etl_craft.core.errors import RunRefusedError, RunStateError, StaleTransitio
 from etl_craft.core.faults import fault_point
 from etl_craft.core.graph import DependencyGraph, TaskRunState, build_graph
 from etl_craft.core.log import log_context
-from etl_craft.core.time import as_utc
 from etl_craft.engine import runlog, transitions
 from etl_craft.engine.repository import trackers
 from etl_craft.engine.repository.dependencies import PipelineGraphData, fetch_pipeline_graph
@@ -97,6 +94,7 @@ from etl_craft.execution.runner import (
     run_task,
 )
 from etl_craft.execution.scheduler import Scheduler
+from etl_craft.execution.sla import SlaLapse, SlaWatch
 from etl_craft.handlers.mail import send_sla_lapse_email
 
 logger = logging.getLogger(__name__)
@@ -117,16 +115,6 @@ class PipelineOutcome:
     message: str
     pipeline_run_id: int | None
     sla: runlog.SlaResult | None = None
-
-
-@dataclass(frozen=True)
-class SlaLapse:
-    """A run that has passed its pipeline's SLA."""
-
-    pipeline_code: str
-    pipeline_run_id: int
-    sla_hours: float
-    elapsed_hours: float
 
 
 @dataclass(frozen=True)
@@ -294,7 +282,7 @@ def pipeline_steps(
             ),
         )
         try:
-            with _SlaWatch(engine, pipeline_code, pipeline_run_id, detail.sla_in_hours, hooks):
+            with _sla_watch(engine, pipeline_code, pipeline_run_id, detail.sla_in_hours, hooks):
                 while not scheduler.step_riding_outages():
                     delay = (
                         0.1
@@ -1235,73 +1223,16 @@ def _running_elsewhere(
     return PipelineOutcome(RunStatus.IN_PROGRESS, message, pipeline_run_id)
 
 
-class _SlaWatch:
-    """Marks a running run ``BREACHED`` the moment its SLA passes, from a background thread."""
-
-    def __init__(
-        self,
-        engine: Engine,
-        pipeline_code: str,
-        pipeline_run_id: int,
-        sla_hours: float | None,
-        hooks: RunHooks,
-    ) -> None:
-        self.engine = engine
-        self.pipeline_code = pipeline_code
-        self.pipeline_run_id = pipeline_run_id
-        self.sla_hours = sla_hours
-        self.hooks = hooks
-        self.stop = threading.Event()
-        self.thread: threading.Thread | None = None
-
-    def __enter__(self) -> _SlaWatch:
-        hours = self.sla_hours
-        if hours is None:
-            return self
-        with self.engine.connect() as conn:
-            start = runlog.fetch_run_sla(conn, self.pipeline_run_id).start_date
-        start = as_utc(start)
-        self.thread = threading.Thread(
-            target=contextvars.copy_context().run,
-            args=(self._watch, start, hours),
-            name="etl-craft-sla-watch",
-            daemon=True,
-        )
-        self.thread.start()
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        self.stop.set()
-        if self.thread is not None:
-            self.thread.join()
-
-    def _watch(self, start: datetime, hours: float) -> None:
-        deadline = start + timedelta(hours=hours)
-        wait = (deadline - datetime.now(UTC)).total_seconds()
-        if self.stop.wait(timeout=max(wait, 0.0)):
-            return
-        try:
-            with self.engine.begin() as conn:
-                marked = transitions.mark_sla_breached(conn, self.pipeline_run_id)
-        except Exception:
-            logger.exception("%s: could not mark the SLA breached", self.pipeline_code)
-            return
-        if not marked:
-            return
-        elapsed = runlog.elapsed_hours(start, datetime.now(UTC))
-        logger.warning(
-            "%s: pipeline_run_id=%d is still running past its SLA of %g h",
-            self.pipeline_code,
-            self.pipeline_run_id,
-            hours,
-        )
-        lapse = SlaLapse(self.pipeline_code, self.pipeline_run_id, hours, elapsed)
-        _call_hook("on_sla_lapse", self.hooks.on_sla_lapse, lapse)
+def _sla_watch(
+    engine: Engine, pipeline_code: str, run_id: int, hours: float | None, hooks: RunHooks
+) -> SlaWatch:
+    return SlaWatch(
+        engine,
+        pipeline_code,
+        run_id,
+        hours,
+        lambda lapse: _call_hook("on_sla_lapse", hooks.on_sla_lapse, lapse),
+    )
 
 
 def _call_hook(name: str, hook: Callable[[T], None] | None, value: T) -> None:
