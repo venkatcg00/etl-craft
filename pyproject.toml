@@ -183,6 +183,7 @@ markers = [
 source = ["etl_craft"]
 branch = true
 relative_files = true
+patch = ["subprocess"]
 
 [tool.coverage.report]
 fail_under = 90
