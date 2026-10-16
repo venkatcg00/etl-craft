@@ -225,7 +225,12 @@ def coverage_report(profile: str, reports: list[Path], directory: Path) -> list[
         return [f"{profile}: missing coverage artifacts {missing}"]
     target = directory / "combined" / profile
     target.mkdir(parents=True, exist_ok=True)
-    env = {**os.environ, "COVERAGE_FILE": str(target / ".coverage")}
+    # The coverage tool itself is never measured, even when it runs under a measured process.
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"COVERAGE_PROCESS_START", "COVERAGE_PROCESS_CONFIG"}
+    } | {"COVERAGE_FILE": str(target / ".coverage")}
     commands = [
         ["combine", "--keep", *map(str, files)],
         ["report", "--fail-under=90"],

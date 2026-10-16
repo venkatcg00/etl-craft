@@ -274,7 +274,12 @@ def test_combined_real_partial_coverage_still_fails_the_ninety_percent_gate(tmp_
 
     part = tmp_path / "part"
     part.mkdir()
-    data = Coverage(data_file=str(part / "coverage.data"), source=["etl_craft"], branch=True)
+    data = Coverage(
+        data_file=str(part / "coverage.data"),
+        source=["etl_craft"],
+        branch=True,
+        config_file=False,
+    )
     data.set_option("run:relative_files", True)
     data.start()
     try:
