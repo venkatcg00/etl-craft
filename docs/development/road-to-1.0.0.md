@@ -132,7 +132,7 @@ item's text, or work done early under another item.
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
 | S5.T Resource discovery and deployment profiles | Planned | | Opt-in laptop, server and server-with-workers sizing from usable process resources; one discovery module before S5.C |
 | S5.V Team-owned config tables | Planned | | Teams' own `CFG_` tables carry no etl-craft guards, contract, history or config files; etl-craft's tables keep them |
-| S5.U Robustness before the cluster | In progress | #176, #182 | Items 5, 1 and 2 done: Engine DB restarts ridden out; SLA breach writes retried until they land; an unresolvable warehouse is never guessed to allow many writers. Items 3 and 4 pending |
+| S5.U Robustness before the cluster | In progress | #176, #182, #183 | Items 5, 1, 2 and 4 done: Engine DB restarts ridden out; SLA breach writes retried; no single-writer guess; timing tests verified under load. Item 3 (subprocess coverage) pending |
 | S5.W Retry only what can succeed | Planned | | Transient, permanent and unknown failure classes per dialect; `Retry_on` / `RETRY_ON` of `NONE`, `TRANSIENT` (default), `TRANSIENT_AND_UNKNOWN` or `ANY`; each attempt records why it was or was not retried |
 | S5.Z Controller and agent names | Planned | | The overseer becomes the controller (`etl-craft controller`, `AUD_CONTROLLERS`) and S5.C's worker the agent, before S5.C |
 | S5.X Unmanaged SQL tasks | Planned | | `SQL_SCRIPT` runs any SQL as an ordinary dependent task with per-statement audit; pre- and post-SQL are upstream and downstream tasks |
@@ -217,6 +217,10 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.U item 4 (#183): `test_what_a_script_printed_is_kept_when_it_is_stopped` and
+`test_a_task_process_that_ends_without_an_outcome_is_recorded_failed` passed 50 of 50 rounds with
+every CPU of a 12-CPU workstation busy, at about 47 seconds per round.
 
 S5.O.2b slice 3 (#181) passed:
 - the new upgrade, refusal, lock and schema tests on both Engine DBs;
@@ -349,6 +353,12 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- **S5.U item 4 (#183)** needed no code change.
+  - **Why no clock seam.** Both tests already allow 10 seconds for interpreter start-up. A test
+    clock would have to replace the operating system's process wait used for every task, which
+    is a product change for a test.
+  - **What met "Done when".** 50 consecutive runs of both tests with all 12 CPUs busy passed.
 
 - **S5.U items 1 and 2 (#182)** come before S5.R items 7 and 8, at the owner's request.
   - **The SLA watcher** moved from `execution/pipeline.py` to `execution/sla.py`, together with
