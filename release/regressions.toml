@@ -229,7 +229,9 @@ hung-task = [
     "tests/unit/test_supervisor.py::test_a_child_past_its_time_limit_is_stopped",
     "tests/unit/test_supervisor.py::test_a_timeout_stops_everything_the_child_started",
 ]
-sla-breach-write-fails = "open: S5.U"
+sla-breach-write-fails = [
+    "tests/integration/execution/test_sla_watch.py::test_a_refused_breach_write_is_retried_and_the_lapse_reported_once",
+]
 engine-db-growth = "open: S6.A"
 worker-cut-off-or-clock-skew = "open: S5.C"
 retry-that-cannot-succeed = "open: S5.W"

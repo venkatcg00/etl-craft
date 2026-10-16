@@ -162,13 +162,14 @@ def dbapi_connect(url: URL, extra: dict[str, Any] | None = None) -> Any:
 
 
 def is_single_writer(config: ConnectorConfig) -> bool:
-    """Whether the configured warehouse admits only one writing process at a time."""
+    """Whether the configured warehouse admits only one writing process at a time.
+
+    A warehouse whose dialect cannot be resolved raises ``ConfigurationError`` naming the
+    setting, rather than being treated as one that admits many writers.
+    """
     if config.warehouse is None:
         return False
-    try:
-        return warehouse_dialect(config).single_writer
-    except ConfigurationError:
-        return False
+    return warehouse_dialect(config).single_writer
 
 
 def is_in_memory(config: ConnectorConfig) -> bool:

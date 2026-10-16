@@ -132,7 +132,7 @@ item's text, or work done early under another item.
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
 | S5.T Resource discovery and deployment profiles | Planned | | Opt-in laptop, server and server-with-workers sizing from usable process resources; one discovery module before S5.C |
 | S5.V Team-owned config tables | Planned | | Teams' own `CFG_` tables carry no etl-craft guards, contract, history or config files; etl-craft's tables keep them |
-| S5.U Robustness before the cluster | In progress | #176 | Item 5 done: Engine DB restarts and failovers ridden out within `Orchestration.Engine_db_outage_seconds`; items 1 to 4 follow S5.R items 7 and 8 |
+| S5.U Robustness before the cluster | In progress | #176, #182 | Items 5, 1 and 2 done: Engine DB restarts ridden out; SLA breach writes retried until they land; an unresolvable warehouse is never guessed to allow many writers. Items 3 and 4 pending |
 | S5.W Retry only what can succeed | Planned | | Transient, permanent and unknown failure classes per dialect; `Retry_on` / `RETRY_ON` of `NONE`, `TRANSIENT` (default), `TRANSIENT_AND_UNKNOWN` or `ANY`; each attempt records why it was or was not retried |
 | S5.Z Controller and agent names | Planned | | The overseer becomes the controller (`etl-craft controller`, `AUD_CONTROLLERS`) and S5.C's worker the agent, before S5.C |
 | S5.X Unmanaged SQL tasks | Planned | | `SQL_SCRIPT` runs any SQL as an ordinary dependent task with per-statement audit; pre- and post-SQL are upstream and downstream tasks |
@@ -349,6 +349,13 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- **S5.U items 1 and 2 (#182)** come before S5.R items 7 and 8, at the owner's request.
+  - **The SLA watcher** moved from `execution/pipeline.py` to `execution/sla.py`, together with
+    `SlaLapse`, so the retry fits the quality limits. It retries a refused breach write every
+    15 seconds until it lands or the run ends, rather than on a supervisor tick.
+  - **`is_in_memory`** keeps its "False on a configuration error" behaviour, because only
+    `is_single_writer` is named in S5.U.
 
 - **S5.O.2b slice 3 (#181).**
   - **Where the split happens.** The conversion splits names in each dialect's SQL, so large

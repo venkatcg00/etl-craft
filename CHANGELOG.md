@@ -182,6 +182,13 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- An SLA breach whose Engine DB write fails is written again every 15 seconds until it lands or
+  the run ends. The breach is then recorded and its lapse alert sent once, instead of both being
+  lost.
+- A warehouse whose dialect cannot be resolved raises `ConfigurationError` when the engine checks
+  whether it admits a single writer. It is no longer treated as admitting many writers, which
+  could skip the DuckDB writer lock.
+
 - `AUD_TARGET_HASH_VERSION`, `AUD_TARGET_VIEW_STATEMENT` and `AUD_BUSINESS_RULES_RESULTS` store
   the target as `TARGET_CATALOG_NAME`, `TARGET_SCHEMA_NAME` and `TARGET_TABLE_NAME` instead of
   one combined `TARGET_OBJECT` or `TARGET_TABLE` name. Migration `0033` converts recorded rows

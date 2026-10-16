@@ -507,18 +507,21 @@ def test_no_warehouse_section():
         ("jdbc:duckdb:/data/warehouse.duckdb", TableFormat.NATIVE, True, False),
         ("jdbc:duckdb:", TableFormat.NATIVE, True, True),
         ("jdbc:duckdb:", TableFormat.ICEBERG, False, False),
-        ("nonsense", TableFormat.NATIVE, False, False),
     ],
 )
 def test_single_writer_and_in_memory(jdbc_url, table_format, single_writer, in_memory):
     mode = "password" if jdbc_url == POSTGRES else "none"
-    config = config_for(
-        profile(mode, "jdbc:duckdb:" if jdbc_url == "nonsense" else jdbc_url), table_format
-    )
-    if jdbc_url == "nonsense":
-        config = replace(config, warehouse=profile("none", jdbc_url))
+    config = config_for(profile(mode, jdbc_url), table_format)
     assert connection.is_single_writer(config) is single_writer
     assert connection.is_in_memory(config) is in_memory
+
+
+def test_an_unresolvable_warehouse_is_never_guessed_to_allow_many_writers():
+    config = replace(
+        config_for(profile("none", "jdbc:duckdb:")), warehouse=profile("none", "nonsense")
+    )
+    with pytest.raises(ConfigurationError):
+        connection.is_single_writer(config)
 
 
 def test_only_trino_has_a_catalog_to_verify():
