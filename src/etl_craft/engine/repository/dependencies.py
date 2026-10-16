@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from sqlalchemy import Boolean
 from sqlalchemy.engine import Connection
 
+from etl_craft.core.enums import YesNo
 from etl_craft.core.errors import MetadataError
 from etl_craft.core.graph import TaskEdge, TaskNode
 from etl_craft.engine.queries import statement
@@ -39,7 +40,7 @@ def fetch_pipeline_graph(conn: Connection, pipeline_id: int) -> PipelineGraphDat
     on_inactive = [
         f"{row.task_code} depends on {row.depends_on_task_code}"
         for row in edges
-        if row.depends_on_pipeline_id == pipeline_id and row.depends_on_active_flag != "Y"
+        if row.depends_on_pipeline_id == pipeline_id and row.depends_on_active_flag != YesNo.YES
     ]
     if on_inactive:
         raise MetadataError(

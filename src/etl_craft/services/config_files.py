@@ -36,6 +36,7 @@ from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import migration as current_migration
+from etl_craft.core.enums import RunCondition, YesNo
 from etl_craft.core.errors import EngineDbError, MetadataFileError
 from etl_craft.core.text import is_metadata_code, is_safe_identifier
 from etl_craft.dialects.engine import for_engine
@@ -81,7 +82,7 @@ class FileRow:
     @property
     def active(self) -> bool:
         """Whether the row's ``ACTIVE_FLAG`` is ``Y``."""
-        return self.values[ACTIVE_FLAG.name] == "Y"
+        return self.values[ACTIVE_FLAG.name] == YesNo.YES
 
 
 @dataclass(frozen=True)
@@ -130,10 +131,7 @@ class ConfigSync:
 
 @dataclass(frozen=True)
 class ConfigExport:
-    """The config files written from the ``CFG_`` rows, with each file's row count.
-
-    ``as_of`` is the moment they were rebuilt for, or ``None`` for the rows as they are now.
-    """
+    """Config files written from the ``CFG_`` rows, rebuilt ``as_of`` a moment or now (``None``)."""
 
     SCHEMA: ClassVar[str] = "etl-craft/config-export/1"
     directory: str
@@ -365,9 +363,9 @@ def _row_problem(table: ConfigTable, values: dict[str, Value]) -> str | None:
                 "all target components empty for a task without one"
             )
         condition, count = values["RUN_CONDITION"], values["RUN_CONDITION_COUNT"]
-        if condition == "N" and count is None:
+        if condition == RunCondition.N and count is None:
             return "RUN_CONDITION N needs a RUN_CONDITION_COUNT"
-        if condition != "N" and count is not None:
+        if condition != RunCondition.N and count is not None:
             return "RUN_CONDITION_COUNT goes with RUN_CONDITION N only; leave it empty"
     if table is TASK_DEPENDENCIES and (values["PIPELINE_CODE"], values["TASK_CODE"]) == (
         values["DEPENDS_ON_PIPELINE_CODE"],
@@ -806,7 +804,7 @@ def export_config(
         writer = csv.writer(buffer, lineterminator="\n")
         writer.writerow([column.name for column in table.columns])
         for row in rows:
-            values = row.values | {ACTIVE_FLAG.name: "Y" if row.active else "N"}
+            values = row.values | {ACTIVE_FLAG.name: YesNo.of(row.active)}
             writer.writerow([cell(values[column.name]) for column in table.columns])
         (directory / table.file).write_text(buffer.getvalue(), encoding="utf-8")
         counts[table.file] = len(rows)

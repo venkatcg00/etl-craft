@@ -126,7 +126,7 @@ item's text, or work done early under another item.
 | S5.O.2a Common config contract | Done | #149 | Mandatory core/custom CFG audit fields and keys, safe token lifecycle history and lossless upgrades |
 | S5.O.2b Normalized object contracts | Done | #150, #151, #152, #153, #154, #160, #162, #181 | Merge column lists retain parameter storage; lineage versions use component endpoints; target state, view statements and rule results are keyed by components, and target locks use the resolved identity |
 | S5.P Project documentation gap UI | Done | #165 | Structured schema/lineage gaps, accessible column/graph warnings and read-only comparison API |
-| S5.R Consolidate before the cluster | In progress | #179 | Item 3 done: migration markers are a registry of Python steps, and conversion positions live in `migration-markers.toml`; items 1, 2 and 4 to 8 pending |
+| S5.R Consolidate before the cluster | In progress | #179, #185 | Items 3 and 6 done: migration markers are a registry of Python steps; identifier quoting, durations and Y/N flags are written once; items 1, 2, 4, 5, 7 and 8 pending |
 | S5.S Accounts, login and roles | Planned | | Registered user and service accounts, password and SSO login, tokens for services, a role check on every action, no implicit actor, local installations that operate a server |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
@@ -411,6 +411,17 @@ The separate frozen 0.4 soak deployment is unchanged.
     transaction, like the other checks; its result is unchanged.
   - **Plan edits in the same PR.** At the owner's request, it also records business rules as
     complete queries (S6.D item 1) and the new S5.X `SQL_SCRIPT` item.
+
+- **S5.R item 6 (#185)** writes each helper once: `core.text.quote_identifier`,
+  `core.time.elapsed_seconds` and the `YesNo` enum (renamed from `ActiveFlag`, with
+  `YesNo.of(bool)`); `RUN_CONDITION` comparisons use `RunCondition.N`.
+  - **Choices that differ from the item text.**
+    - JDBC URL parsing needed no change: `parse_warehouse_url` and `parse_postgres_url`
+      already delegate to `core.text.parse_jdbc_url` and only add their vendor's rules.
+    - Durations take the catalog's rule. `etl-craft status` now reads naive timestamps as
+      UTC and shows an end before its start (clock skew between hosts) as 0 seconds rather
+      than a negative number.
+    - Other status and trigger-kind strings (`"SKIPPED"`, `"BACKFILL"`) stay for item 4.
 
 - S7.P item 3 (#178) checks the log folder, not an uploads folder, because uploads arrive with
   S7.M.

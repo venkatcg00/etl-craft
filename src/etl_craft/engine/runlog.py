@@ -14,7 +14,7 @@ from sqlalchemy import bindparam
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.cron import timezone
-from etl_craft.core.enums import SlaStatus
+from etl_craft.core.enums import SlaStatus, YesNo
 from etl_craft.core.errors import RunStateError
 from etl_craft.core.graph import TaskRunState
 from etl_craft.core.time import as_utc
@@ -128,7 +128,7 @@ def fetch_run_kind(conn: Connection, pipeline_run_id: int) -> RunKind:
     row = conn.execute(
         statement(conn, "pipeline_run_kind"), {"pipeline_run_id": pipeline_run_id}
     ).one()
-    return RunKind(as_date(row.run_date), row.backfill == "Y")
+    return RunKind(as_date(row.run_date), row.backfill == YesNo.YES)
 
 
 def as_date(value: object) -> date:

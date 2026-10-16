@@ -466,6 +466,11 @@ def is_safe_identifier(name: str) -> bool:
     return bool(_SAFE_IDENTIFIER.match(name))
 
 
+def quote_identifier(name: str) -> str:
+    """Return ``name`` as an ANSI double-quoted identifier, doubling any embedded quote."""
+    return '"' + name.replace('"', '""') + '"'
+
+
 def is_safe_object_ref(object_ref: str) -> bool:
     """Whether ``object_ref`` is ``schema.table`` or ``database.schema.table``, safe identifiers."""
     return bool(_SAFE_OBJECT_REF.match(object_ref))

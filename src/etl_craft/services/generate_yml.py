@@ -35,7 +35,7 @@ from sqlalchemy.engine import Connection
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.cron import timezone
-from etl_craft.core.enums import Mode
+from etl_craft.core.enums import Mode, RunCondition
 from etl_craft.core.errors import ConfigurationError, GraphError, MetadataError
 from etl_craft.core.graph import build_graph
 from etl_craft.core.text import is_metadata_code
@@ -125,7 +125,7 @@ def trigger_rule(run_condition: str, dependency_types: list[str]) -> str:
     distinct = set(dependency_types)
     if not distinct:
         return "all_success"
-    if len(distinct) > 1 or run_condition == "N":
+    if len(distinct) > 1 or run_condition == RunCondition.N:
         return "all_done"
     kind = distinct.pop()
     try:

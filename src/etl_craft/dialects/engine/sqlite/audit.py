@@ -19,6 +19,7 @@ from collections.abc import Callable
 
 from sqlalchemy.engine import Connection
 
+from etl_craft.core.text import quote_identifier as quote
 from etl_craft.dialects.engine.metadata import config_base_enabled, require_config_base
 
 NOW = "(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00')"
@@ -37,10 +38,6 @@ OPEN = "'9999-12-31 23:59:59.000000+00:00'"
 """``VALID_TO`` of a current version."""
 
 
-def _quote(name: str) -> str:
-    return '"' + name.replace('"', '""') + '"'
-
-
 def history_table(table: str) -> str:
     """Return the history table of ``CFG_`` table ``table``."""
     return f"AUD_{table.upper()}_HISTORY"
@@ -57,7 +54,7 @@ def _exists(conn: Connection, name: str, kind: str = "table") -> bool:
 
 def _columns(conn: Connection, table: str) -> list[tuple[str, str, bool]]:
     """Return (name, declared type, is primary key) for each column of ``table``."""
-    rows = conn.exec_driver_sql(f"PRAGMA table_info({_quote(table)})").all()
+    rows = conn.exec_driver_sql(f"PRAGMA table_info({quote(table)})").all()
     return [
         (row.name, row.type or "TEXT", bool(row.pk))
         for row in rows
@@ -113,7 +110,7 @@ def refresh_metadata_triggers(conn: Connection) -> None:
     next_id = (
         "(SELECT COALESCE(MAX(m), 0) + 1 FROM ("
         + " UNION ALL ".join(
-            f"SELECT MAX(CHANGE_ID) AS m FROM {_quote(history_table(table))}" for table in histories
+            f"SELECT MAX(CHANGE_ID) AS m FROM {quote(history_table(table))}" for table in histories
         )
         + "))"
     )
@@ -141,8 +138,8 @@ def _guard_writes(conn: Connection, table: str) -> None:
             else ""
         )
         conn.exec_driver_sql(
-            f"CREATE TRIGGER IF NOT EXISTS {_quote(guard)} BEFORE {operation} "
-            f"ON {_quote(table)} BEGIN SELECT CASE WHEN etl_craft_actor() IS NULL "
+            f"CREATE TRIGGER IF NOT EXISTS {quote(guard)} BEFORE {operation} "
+            f"ON {quote(table)} BEGIN SELECT CASE WHEN etl_craft_actor() IS NULL "
             f"THEN RAISE(ABORT, '{kind} are written only by etl-craft; "
             f"{remedy}') END; {immutable} END"
         )
@@ -157,9 +154,9 @@ def _ensure_history(conn: Connection, table: str) -> None:
     ]
     present = {name.upper() for name, _, _ in _columns(conn, history)}
     if not present:
-        listed = ", ".join(f"{_quote(name)} {kind}" for name, kind in columns)
+        listed = ", ".join(f"{quote(name)} {kind}" for name, kind in columns)
         conn.exec_driver_sql(
-            f"CREATE TABLE {_quote(history)} (CHANGE_ID BIGINT PRIMARY KEY, VALID_FROM TIMESTAMP "
+            f"CREATE TABLE {quote(history)} (CHANGE_ID BIGINT PRIMARY KEY, VALID_FROM TIMESTAMP "
             "NOT NULL, VALID_TO TIMESTAMP NOT NULL, CURRENT_FLAG VARCHAR(1) NOT NULL, OPERATION "
             "VARCHAR NOT NULL, ACTOR VARCHAR NOT NULL, ACTOR_KIND VARCHAR NOT NULL, MIGRATION "
             f"VARCHAR, {listed})"
@@ -167,7 +164,7 @@ def _ensure_history(conn: Connection, table: str) -> None:
         return
     for name, kind in columns:
         if name.upper() not in present:
-            conn.exec_driver_sql(f"ALTER TABLE {_quote(history)} ADD COLUMN {_quote(name)} {kind}")
+            conn.exec_driver_sql(f"ALTER TABLE {quote(history)} ADD COLUMN {quote(name)} {kind}")
 
 
 def _history_guards(conn: Connection, history: str) -> None:
@@ -177,7 +174,7 @@ def _history_guards(conn: Connection, history: str) -> None:
     """
     names = [name for name, _, _ in _columns(conn, history)]
     unchanged = " AND ".join(
-        f"NEW.{_quote(name)} IS OLD.{_quote(name)}"
+        f"NEW.{quote(name)} IS OLD.{quote(name)}"
         for name in names
         if name.upper() not in {"VALID_TO", "CURRENT_FLAG"}
     )
@@ -196,10 +193,10 @@ def _history_guards(conn: Connection, history: str) -> None:
         ("UPDATE", actor + kept.format(closing)),
         ("DELETE", actor + kept.format("")),
     ):
-        trigger = _quote(f"trg_actor_guard_{history.lower()}_{operation.lower()}")
+        trigger = quote(f"trg_actor_guard_{history.lower()}_{operation.lower()}")
         conn.exec_driver_sql(f"DROP TRIGGER IF EXISTS {trigger}")
         conn.exec_driver_sql(
-            f"CREATE TRIGGER {trigger} BEFORE {operation} ON {_quote(history)} BEGIN {body} END"
+            f"CREATE TRIGGER {trigger} BEFORE {operation} ON {quote(history)} BEGIN {body} END"
         )
 
 
@@ -212,8 +209,8 @@ def _move_log(conn: Connection, configs: list[str]) -> None:
             for name in names
         )
         conn.exec_driver_sql(
-            f"INSERT INTO {_quote(history_table(table))} ({', '.join(CHANGE_COLUMNS)}, "
-            f"{', '.join(_quote(name) for name in names)}) SELECT c.CHANGE_ID, c.CHANGED_AT, "
+            f"INSERT INTO {quote(history_table(table))} ({', '.join(CHANGE_COLUMNS)}, "
+            f"{', '.join(quote(name) for name in names)}) SELECT c.CHANGE_ID, c.CHANGED_AT, "
             "CASE WHEN c.OPERATION = 'DELETE' THEN c.CHANGED_AT "
             f"ELSE COALESCE(LEAD(c.CHANGED_AT) OVER w, {OPEN}) END, "
             "CASE WHEN c.OPERATION <> 'DELETE' AND LEAD(c.CHANGE_ID) OVER w IS NULL "
@@ -231,27 +228,27 @@ Capture = Callable[[str, list[str], str, str], str]
 
 def _history_capture(table: str, next_id: str) -> Capture:
     def capture(operation: str, names: list[str], primary: str, changed: str) -> str:
-        history = _quote(history_table(table))
+        history = quote(history_table(table))
         source = "OLD" if operation == "DELETE" else "row"
         record = "OLD" if operation == "DELETE" else "NEW"
-        values = ", ".join(f"{source}.{_quote(name)}" for name in names)
+        values = ", ".join(f"{source}.{quote(name)}" for name in names)
         when = (
             f" AND ({changed}) AND NOT etl_craft_inserting('{table.upper()}')"
             if operation == "UPDATE"
             else ""
         )
-        key = f"{_quote(primary)}=NEW.{_quote(primary)}"
+        key = f"{quote(primary)}=NEW.{quote(primary)}"
         where = (
             f" WHERE 1 = 1{when}"
             if operation == "DELETE"
-            else f" FROM {_quote(table)} row WHERE row.{key}{when}"
+            else f" FROM {quote(table)} row WHERE row.{key}{when}"
         )
         valid_to, current = (NOW, "'N'") if operation == "DELETE" else (OPEN, "'Y'")
         return (
             f"UPDATE {history} SET VALID_TO={NOW}, CURRENT_FLAG='N' WHERE CURRENT_FLAG='Y' "
-            f"AND {_quote(primary)}={record}.{_quote(primary)}{when};"
+            f"AND {quote(primary)}={record}.{quote(primary)}{when};"
             f"INSERT INTO {history} ({', '.join(CHANGE_COLUMNS)}, "
-            f"{', '.join(_quote(name) for name in names)}) SELECT {next_id}, {NOW}, {valid_to}, "
+            f"{', '.join(quote(name) for name in names)}) SELECT {next_id}, {NOW}, {valid_to}, "
             f"{current}, '{operation}', etl_craft_actor(), etl_craft_actor_kind(), "
             f"NULLIF(etl_craft_migration(), ''), {values}{where};"
         )
@@ -264,7 +261,7 @@ def _log_capture(table: str) -> Capture:
         def object_json(prefix: str) -> str:
             return (
                 "json_object("
-                + ", ".join(f"'{name.lower()}', {prefix}.{_quote(name)}" for name in names)
+                + ", ".join(f"'{name.lower()}', {prefix}.{quote(name)}" for name in names)
                 + ")"
             )
 
@@ -273,11 +270,11 @@ def _log_capture(table: str) -> Capture:
             "NULL"
             if operation == "DELETE"
             else (
-                f"(SELECT {object_json('row')} FROM {_quote(table)} row "
-                f"WHERE row.{_quote(primary)}=NEW.{_quote(primary)})"
+                f"(SELECT {object_json('row')} FROM {quote(table)} row "
+                f"WHERE row.{quote(primary)}=NEW.{quote(primary)})"
             )
         )
-        key = f"{'OLD' if operation == 'DELETE' else 'NEW'}.{_quote(primary)}"
+        key = f"{'OLD' if operation == 'DELETE' else 'NEW'}.{quote(primary)}"
         predicate = (
             f" WHERE ({changed}) AND NOT etl_craft_inserting('{table.upper()}')"
             if operation == "UPDATE"
@@ -302,12 +299,12 @@ def _change_triggers(conn: Connection, table: str, capture: Capture) -> None:
     regular = [name for name in names if name.upper() not in STAMPS]
     if table.upper() == "CFG_API_TOKENS":
         regular.append("TOKEN_SHA256")
-    changed = " OR ".join(f"NEW.{_quote(name)} IS NOT OLD.{_quote(name)}" for name in regular)
+    changed = " OR ".join(f"NEW.{quote(name)} IS NOT OLD.{quote(name)}" for name in regular)
     literal = table.upper().replace("'", "''")
     not_inserting = f"NOT etl_craft_inserting('{literal}')"
     for operation in ("INSERT", "UPDATE", "DELETE"):
         trigger = f"trg_audit_{table.lower()}_{operation.lower()}"
-        conn.exec_driver_sql(f"DROP TRIGGER IF EXISTS {_quote(trigger)}")
+        conn.exec_driver_sql(f"DROP TRIGGER IF EXISTS {quote(trigger)}")
         body = ""
         if operation != "DELETE" and {name.upper() for name in names} >= STAMPS:
             created = "etl_craft_actor()" if operation == "INSERT" else "OLD.CREATED_BY"
@@ -320,17 +317,16 @@ def _change_triggers(conn: Connection, table: str, capture: Capture) -> None:
                 else ""
             )
             body += (
-                f"UPDATE {_quote(table)} SET {dependency}CREATED_BY={created}, "
+                f"UPDATE {quote(table)} SET {dependency}CREATED_BY={created}, "
                 f"CREATE_DATE={create_date}, "
                 f"UPDATED_BY=etl_craft_actor(), UPDATED_DATE={NOW} "
-                f"WHERE {_quote(primary)}=NEW.{_quote(primary)}{guard};"
+                f"WHERE {quote(primary)}=NEW.{quote(primary)}{guard};"
             )
         body += capture(operation, names, primary, changed)
         if operation == "INSERT":
             body += f"SELECT etl_craft_exit_insert('{literal}');"
         conn.exec_driver_sql(
-            f"CREATE TRIGGER {_quote(trigger)} AFTER {operation} ON {_quote(table)}"
-            f" BEGIN {body} END"
+            f"CREATE TRIGGER {quote(trigger)} AFTER {operation} ON {quote(table)} BEGIN {body} END"
         )
         guard_name = f"trg_actor_guard_{table.lower()}_{operation.lower()}"
         enter = f"SELECT etl_craft_enter_insert('{literal}');" if operation == "INSERT" else ""
@@ -340,10 +336,10 @@ def _change_triggers(conn: Connection, table: str, capture: Capture) -> None:
             if operation != "DELETE" and "ACTIVE_FLAG" in {name.upper() for name in names}
             else ""
         )
-        conn.exec_driver_sql(f"DROP TRIGGER IF EXISTS {_quote(guard_name)}")
+        conn.exec_driver_sql(f"DROP TRIGGER IF EXISTS {quote(guard_name)}")
         conn.exec_driver_sql(
-            f"CREATE TRIGGER {_quote(guard_name)} "
-            f"BEFORE {operation} ON {_quote(table)} BEGIN SELECT CASE WHEN "
+            f"CREATE TRIGGER {quote(guard_name)} "
+            f"BEFORE {operation} ON {quote(table)} BEGIN SELECT CASE WHEN "
             "etl_craft_actor() IS NULL THEN RAISE(ABORT, 'metadata is written only by "
             f"etl-craft; use a project migration (etl-craft migrate)') END; {flag} {enter} END"
         )
@@ -371,16 +367,16 @@ def _change_view(conn: Connection, configs: list[str]) -> None:
             ]
         values = (
             "json_object("
-            + ", ".join(f"'{name.lower()}', {_quote(name)}" for name, _, _ in columns)
+            + ", ".join(f"'{name.lower()}', {quote(name)}" for name, _, _ in columns)
             + ")"
         )
-        key = _quote(primary)
+        key = quote(primary)
         parts.append(
             "SELECT CHANGE_ID, VALID_FROM AS CHANGED_AT, ACTOR, ACTOR_KIND, "
             f"'{table.upper()}' AS TABLE_NAME, CAST({key} AS TEXT) AS ROW_KEY, OPERATION, "
             f"CASE OPERATION WHEN 'INSERT' THEN NULL WHEN 'DELETE' THEN {values} "
             f"ELSE LAG({values}) OVER (PARTITION BY {key} ORDER BY CHANGE_ID) END AS BEFORE_JSON, "
             f"CASE OPERATION WHEN 'DELETE' THEN NULL ELSE {values} END AS AFTER_JSON, MIGRATION "
-            f"FROM {_quote(history)}"
+            f"FROM {quote(history)}"
         )
     conn.exec_driver_sql(f"CREATE VIEW AUD_METADATA_CHANGES AS {' UNION ALL '.join(parts)}")

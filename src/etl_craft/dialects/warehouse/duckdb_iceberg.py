@@ -12,6 +12,7 @@ from etl_craft.config.auth import warehouse_by_key
 from etl_craft.config.targets import attached_catalog_name
 from etl_craft.core.enums import AuthMode
 from etl_craft.core.errors import ConfigurationError, SqlGuardError
+from etl_craft.core.text import quote_identifier
 from etl_craft.dialects.warehouse.base import Presented, ReplaceStrategy, SurrogateKey
 from etl_craft.dialects.warehouse.duckdb import DuckDBWarehouse
 
@@ -170,7 +171,7 @@ class DuckDBIcebergWarehouse(DuckDBWarehouse):
             {"schema": schema, "table": table},
         ).all()
         for (catalog,) in rows:
-            name = ".".join(_quote(part) for part in (catalog, schema, table))
+            name = ".".join(quote_identifier(part) for part in (catalog, schema, table))
             conn.execute(text(f"SELECT * FROM {name} LIMIT 0")).all()
 
 
@@ -203,10 +204,6 @@ def _catalog_secret(auth_mode: str, values: dict[str, str], secret: str) -> list
     if values.get("scope"):
         options.append(f"OAUTH2_SCOPE '{values['scope']}'")
     return options
-
-
-def _quote(identifier: str) -> str:
-    return '"' + identifier.replace('"', '""') + '"'
 
 
 def _no_transaction() -> None:

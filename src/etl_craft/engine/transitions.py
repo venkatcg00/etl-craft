@@ -12,7 +12,7 @@ from sqlalchemy.exc import IntegrityError
 
 from etl_craft.core.actor import SYSTEM_ACTOR, Actor, current_actor
 from etl_craft.core.counts import NO_COUNTS, Counts
-from etl_craft.core.enums import FINISHED_RUN_STATUSES, RunStatus, SlaStatus
+from etl_craft.core.enums import FINISHED_RUN_STATUSES, RunStatus, SlaStatus, YesNo
 from etl_craft.core.errors import RunStateError, StaleTransitionError
 from etl_craft.core.faults import fault_point
 from etl_craft.core.time import as_utc
@@ -373,7 +373,7 @@ def create_run(
                     "end_date": datetime.now(UTC) if status == "SKIPPED" else None,
                     "ended_by": actor.name if status == "SKIPPED" else None,
                     "ended_by_kind": actor.kind.value if status == "SKIPPED" else None,
-                    "backfill": "Y" if trigger_kind == "BACKFILL" else "N",
+                    "backfill": YesNo.of(trigger_kind == "BACKFILL"),
                     "trigger_kind": trigger_kind,
                     "run_key": key,
                 },

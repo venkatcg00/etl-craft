@@ -24,7 +24,7 @@ import html
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from etl_craft.core.enums import ActiveFlag, GapState
+from etl_craft.core.enums import GapState, YesNo
 from etl_craft.services.catalog import Catalog, TableAsset
 from etl_craft.services.catalog_gaps import lineage_records, table_records
 from etl_craft.services.catalog_html import escape, render_table
@@ -539,9 +539,7 @@ def lineage_history(table: TableAsset, catalog: Catalog) -> str:
     heading = "<h2>Lineage history</h2>" + warnings
     if not table.lineage_history:
         return heading + "<p>No lineage versions recorded for this table.</p>"
-    current = next(
-        (v for v, _, _ in table.lineage_history if v.current_flag == ActiveFlag.YES), None
-    )
+    current = next((v for v, _, _ in table.lineage_history if v.current_flag == YesNo.YES), None)
     summary = (
         f"Current lineage version {current.version_number}, valid from "
         f"{escape(current.valid_from.isoformat())}."
@@ -566,9 +564,7 @@ def lineage_history(table: TableAsset, catalog: Catalog) -> str:
                     or "none"
                 )
             )
-        until = (
-            "current" if version.current_flag == ActiveFlag.YES else version.valid_to.isoformat()
-        )
+        until = "current" if version.current_flag == YesNo.YES else version.valid_to.isoformat()
         rows.append(
             [
                 str(version.version_number),

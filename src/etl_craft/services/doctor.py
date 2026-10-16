@@ -25,6 +25,7 @@ from etl_craft.config.model import ConnectionProfile, EmailProfile
 from etl_craft.config.resolve import resolve_named_secret, source_values
 from etl_craft.core.enums import CloningScope, GatePolicy, Mode
 from etl_craft.core.errors import EtlCraftError
+from etl_craft.core.text import quote_identifier
 from etl_craft.engine.connection import check_reachable, engine_db
 from etl_craft.engine.migrations import pending_migrations
 from etl_craft.engine.privileges import extra_write_grants
@@ -248,9 +249,9 @@ def _engine_state(config: ConnectorConfig, engine: Engine) -> list[Check]:
     checks = [ok("Engine DB migrations", "up to date")]
     if engine.dialect.name == "postgresql":
         for table, role, privilege in extra_write_grants(engine):
-            quoted_role = '"' + role.replace('"', '""') + '"' if role != "PUBLIC" else role
+            quoted_role = quote_identifier(role) if role != "PUBLIC" else role
             schema = config.engine.schema or "public"
-            qualified = '"' + schema.replace('"', '""') + '"."' + table.replace('"', '""') + '"'
+            qualified = f"{quote_identifier(schema)}.{quote_identifier(table)}"
             checks.append(
                 fail(
                     "Engine DB write grant",

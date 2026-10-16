@@ -9,7 +9,7 @@ from sqlalchemy import Boolean
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.enums import CatalogRunKind
-from etl_craft.core.time import as_utc
+from etl_craft.core.time import elapsed_seconds
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.interventions import Intervention
 from etl_craft.engine.repository.normalization import ObjectIdentity
@@ -170,7 +170,7 @@ class RunSummary:
     @property
     def seconds(self) -> float | None:
         """How long the run took, or ``None`` while it has not ended."""
-        return _seconds(self.start, self.end)
+        return elapsed_seconds(self.start, self.end)
 
 
 @dataclass(frozen=True)
@@ -196,7 +196,7 @@ class TaskRunSummary:
     @property
     def seconds(self) -> float | None:
         """How long the latest attempt took, or ``None`` while it has not ended."""
-        return _seconds(self.start, self.end)
+        return elapsed_seconds(self.start, self.end)
 
 
 @dataclass(frozen=True)
@@ -251,9 +251,3 @@ def fetch_catalog_interventions(
     for row in conn.execute(statement(conn, "catalog_interventions"), {"limit": limit}):
         changes.setdefault(row.pipeline_run_id, []).append(Intervention(**row._mapping))
     return changes
-
-
-def _seconds(start: datetime | None, end: datetime | None) -> float | None:
-    if start is None or end is None:
-        return None
-    return max((as_utc(end) - as_utc(start)).total_seconds(), 0.0)

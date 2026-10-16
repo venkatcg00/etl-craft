@@ -8,6 +8,7 @@ from datetime import datetime
 from sqlalchemy import Boolean
 from sqlalchemy.engine import Connection, RowMapping
 
+from etl_craft.core.enums import YesNo
 from etl_craft.core.errors import RunStateError, UsageError
 from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
@@ -61,7 +62,7 @@ def run_document(row: RowMapping) -> RunView:
     values["run_date"] = None if values["run_date"] is None else as_date(values["run_date"])
     values["start_date"] = timestamp(values["start_date"])
     values["end_date"] = timestamp(values["end_date"])
-    values["backfill"] = values["backfill"] == "Y"
+    values["backfill"] = values["backfill"] == YesNo.YES
     return RunView(**values)
 
 

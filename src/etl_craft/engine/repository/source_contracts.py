@@ -11,6 +11,7 @@ from sqlglot import exp
 from sqlglot.optimizer.normalize_identifiers import normalize_identifiers
 
 from etl_craft.core.actor import current_actor
+from etl_craft.core.enums import YesNo
 from etl_craft.core.errors import MigrationError
 from etl_craft.core.text import is_safe_identifier, is_safe_object_ref
 from etl_craft.engine.repository.normalization import ObjectIdentity, object_identity
@@ -130,7 +131,7 @@ def legacy_sources(
         column = normalize_identifiers(exp.to_identifier(row["column_name"]), dialect=dialect).name
         row["identity"], row["resolved_column"] = identity, column
         keys[(*identity, column)].append(row["source_column_id"])
-        if row["active_flag"] == "Y":
+        if row["active_flag"] == YesNo.YES:
             positions[(*identity, row["column_position"])].append(row["source_column_id"])
     for kind, groups in (("identity", keys), ("active column position", positions)):
         for key, ids in groups.items():
@@ -205,7 +206,7 @@ def convert_sources(conn: Connection, rows: list[dict[str, Any]]) -> None:
             ),
             dict(zip(("catalog", "schema", "table"), identity, strict=True))
             | {
-                "active": "Y" if any(row["active_flag"] == "Y" for row in columns) else "N",
+                "active": YesNo.of(any(r["active_flag"] == YesNo.YES for r in columns)),
                 "actor": actor.name,
                 "now": now,
             },

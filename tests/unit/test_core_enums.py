@@ -24,7 +24,7 @@ EXPECTED = {
         "Not declared",
         "Expected before first deployment",
     },
-    enums.ActiveFlag: {"Y", "N"},
+    enums.YesNo: {"Y", "N"},
     enums.RunStatus: {"QUEUED", "IN-PROGRESS", "SUCCESS", "FAILED", "SKIPPED", "CANCELLED"},
     enums.SlaStatus: {"MET", "BREACHED"},
     enums.RefreshType: {"FULL", "INCREMENTAL"},
