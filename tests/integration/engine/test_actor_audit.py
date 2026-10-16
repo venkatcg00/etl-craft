@@ -191,6 +191,9 @@ def seeded_tables(db):
             "arguments": "{}",
             "outcome": "REQUESTED",
             "target_object": "warehouse.s.t",
+            "target_catalog_name": "warehouse",
+            "target_schema_name": "s",
+            "target_table_name": "t",
             "recomputed_at": datetime.now(UTC),
         }
         inspector = inspect(conn)
@@ -214,7 +217,16 @@ def seeded_tables(db):
                     or column.get("autoincrement")
                     or (
                         column.get("primary_key")
-                        and lower not in {"task_id", "target_object", "file_path", "task_run_id"}
+                        and lower
+                        not in {
+                            "task_id",
+                            "target_object",
+                            "file_path",
+                            "task_run_id",
+                            "target_catalog_name",
+                            "target_schema_name",
+                            "target_table_name",
+                        }
                     )
                 ):
                     continue

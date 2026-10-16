@@ -118,7 +118,7 @@ def upgrade_targets(
         writers = [writer for writer in contracts[key] if writer[3]]
         qualified, _, dialect, declared = (writers or contracts[key])[0]
         with (
-            locks.target(qualified).hold(engine),
+            locks.target(qualified, "").hold(engine),
             open_warehouse(config, engine) as warehouse,
             warehouse.begin() as conn,
         ):

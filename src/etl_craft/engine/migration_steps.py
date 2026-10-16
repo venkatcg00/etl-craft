@@ -7,10 +7,12 @@ unchanged.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from sqlalchemy import inspect
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.errors import MigrationError
@@ -94,6 +96,7 @@ STEPS: dict[str, MarkerStep] = {
     "convert-task-targets": MarkerStep(
         check=_legacy_tasks, convert=_convert_tasks, names_migration=True
     ),
+    "convert-target-state": MarkerStep(check=lambda conn, target: check_target_names(conn)),
 }
 """Every marker, in the order its checks run."""
 MARKERS = frozenset(STEPS)
@@ -122,3 +125,40 @@ def check_metadata_identities(conn: Connection) -> None:
     problems = config_identity_problems(conn)
     if problems:
         raise MigrationError("config identity migration cannot run: " + "; ".join(problems))
+
+
+_TARGET_NAME = {
+    3: re.compile(r"[^.\s]+\.[^.\s]+\.[^.\s]+"),
+    2: re.compile(r"[^.\s]+(?:\.[^.\s]+){1,2}"),
+}
+_RECORDED_TARGET_NAMES = (
+    ("AUD_TARGET_HASH_VERSION", "TARGET_OBJECT", "recorded_hash_version_names", 3),
+    ("AUD_TARGET_VIEW_STATEMENT", "TARGET_OBJECT", "recorded_view_statement_names", 3),
+    ("AUD_BUSINESS_RULES_RESULTS", "TARGET_TABLE", "recorded_rule_result_names", 2),
+)
+
+
+def check_target_names(conn: Connection) -> None:
+    """Refuse the target-state migration while a recorded name cannot be split as recorded.
+
+    Hash versions and view statements were recorded as ``catalog.schema.table``; rule results
+    as ``schema.table`` or ``catalog.schema.table``. Each converts from its own spelling, never
+    from today's configured catalog. A table an earlier pending migration creates has no rows.
+    """
+    inspector = inspect(conn)
+    bad = [
+        f"{table} {row.name!r}"
+        for table, column, query, parts in _RECORDED_TARGET_NAMES
+        if inspector.has_table(table.lower())
+        and column.lower() in {c["name"].lower() for c in inspector.get_columns(table.lower())}
+        for row in conn.execute(statement(conn, query))
+        if not _TARGET_NAME[parts].fullmatch(str(row.name))
+    ]
+    if bad:
+        raise MigrationError(
+            "target state migration cannot run: "
+            + "; ".join(bad)
+            + " cannot be split into catalog, schema and table; nothing was changed. Correct or "
+            "delete each row with a project migration and run etl-craft migrate again; a deleted "
+            "hash version is rebuilt with etl-craft rehash"
+        )
