@@ -14,19 +14,18 @@ import logging
 import os
 import re
 import tomllib
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.core.actor import migration as current_migration
 from etl_craft.core.errors import MigrationError
-from etl_craft.core.text import is_metadata_code, sha256_hex
+from etl_craft.core.text import sha256_hex
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine import locks
+from etl_craft.engine.migration_steps import MARKERS, NO_TARGET, STEPS, MarkerStep, Target
 from etl_craft.engine.queries import run_script, statement
 
 logger = logging.getLogger(__name__)
@@ -35,87 +34,6 @@ MIGRATIONS_DIR_ENV_VAR = "ETL_CRAFT_MIGRATIONS_DIR"
 ENGINE = "ENGINE"
 PROJECT = "PROJECT"
 PACKAGED_MARKERS = Path(__file__).parents[1] / "dialects/engine/migration-markers.toml"
-
-
-@dataclass(frozen=True)
-class Target:
-    """Where converted metadata points: the warehouse catalog and SQL dialect."""
-
-    catalog: str | None = None
-    warehouse_dialect: str | None = None
-
-
-NO_TARGET = Target()
-
-
-LegacyRows = list[dict[str, Any]]
-"""What a conversion marker's check reads before the migration's statements run."""
-
-
-@dataclass(frozen=True)
-class MarkerStep:
-    """The Python a migration marker runs. A new migration using a marker needs no code.
-
-    ``check`` runs before any pending upgrade and again inside the file's transaction; what it
-    returns there is the state ``convert`` receives at the file's ``convert-at`` position.
-    ``names_migration`` attributes the file's writes to the migration.
-    """
-
-    check: Callable[[Connection, Target], LegacyRows | None] | None = None
-    convert: Callable[[Connection, LegacyRows, Target], None] | None = None
-    names_migration: bool = False
-
-
-def _legacy_sources(conn: Connection, target: Target) -> LegacyRows:
-    from etl_craft.engine.repository.source_contracts import legacy_sources
-
-    return legacy_sources(conn, target.catalog, target.warehouse_dialect)
-
-
-def _convert_sources(conn: Connection, state: LegacyRows, target: Target) -> None:
-    from etl_craft.engine.repository.source_contracts import convert_sources
-
-    convert_sources(conn, state)
-
-
-def _legacy_rules(conn: Connection, target: Target) -> LegacyRows:
-    from etl_craft.engine.repository.rule_targets import legacy_rule_targets
-
-    return legacy_rule_targets(conn, target.catalog, target.warehouse_dialect)
-
-
-def _convert_rules(conn: Connection, state: LegacyRows, target: Target) -> None:
-    from etl_craft.engine.repository.rule_targets import convert_rule_targets
-
-    convert_rule_targets(conn, state, target.catalog, target.warehouse_dialect)
-
-
-def _legacy_tasks(conn: Connection, target: Target) -> LegacyRows:
-    from etl_craft.engine.repository.task_targets import legacy_task_targets
-
-    return legacy_task_targets(conn, target.catalog, target.warehouse_dialect)
-
-
-def _convert_tasks(conn: Connection, state: LegacyRows, target: Target) -> None:
-    from etl_craft.engine.repository.task_targets import convert_task_targets
-
-    convert_task_targets(conn, state, target.catalog, target.warehouse_dialect)
-
-
-STEPS: dict[str, MarkerStep] = {
-    "rebuild-metadata": MarkerStep(),
-    "check-metadata-identities": MarkerStep(
-        check=lambda conn, target: _check_metadata_identities(conn)
-    ),
-    "check-metadata-codes": MarkerStep(check=lambda conn, target: _check_metadata_codes(conn)),
-    "convert-source-contracts": MarkerStep(check=_legacy_sources, convert=_convert_sources),
-    "convert-rule-targets": MarkerStep(check=_legacy_rules, convert=_convert_rules),
-    "convert-task-targets": MarkerStep(
-        check=_legacy_tasks, convert=_convert_tasks, names_migration=True
-    ),
-}
-"""Every marker, in the order its checks run."""
-MARKERS = frozenset(STEPS)
 
 
 @dataclass(frozen=True)
@@ -339,29 +257,6 @@ def pending_migrations(
         for migration in stream.files
         if (migration.source, migration.version) not in ledger
     ]
-
-
-def _check_metadata_codes(conn: Connection) -> None:
-    invalid = [
-        f"{row.object} (id {row.object_id}) = {row.code!r}"
-        for row in conn.execute(statement(conn, "metadata_codes"))
-        if not is_metadata_code(row.code)
-    ]
-    if invalid:
-        raise MigrationError(
-            "metadata code migration cannot run: "
-            + "; ".join(invalid)
-            + "; rename these codes to start with an ASCII letter and contain only letters, "
-            "digits and underscores, at most 128 characters, then run migrate again"
-        )
-
-
-def _check_metadata_identities(conn: Connection) -> None:
-    from etl_craft.engine.repository.normalization import config_identity_problems
-
-    problems = config_identity_problems(conn)
-    if problems:
-        raise MigrationError("config identity migration cannot run: " + "; ".join(problems))
 
 
 def apply_pending_migrations(
