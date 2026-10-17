@@ -25,7 +25,7 @@ from etl_craft.engine.repository.dependencies import (
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.repository.tasks import resolve_task_id
 from etl_craft.execution.gates import judge, satisfies
-from etl_craft.execution.runner import BACKFILL_ASSUMED
+from etl_craft.execution.readiness import BACKFILL_ASSUMED
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.models import PipelineView, RunView, TaskRunView
 from etl_craft.services.operations.snapshots import (

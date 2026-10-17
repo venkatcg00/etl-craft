@@ -19,8 +19,9 @@ from etl_craft.core.errors import (
 )
 from etl_craft.engine import runlog, transitions
 from etl_craft.execution import runner, supervisor
+from etl_craft.execution.attempt_types import ChildOptions
 from etl_craft.execution.gates import CrossPipelineCheck
-from etl_craft.execution.runner import ChildOptions, run_task
+from etl_craft.execution.runner import run_task
 from fixtures.metadata import start_run
 
 TESTS_DIR = Path(__file__).parents[2]

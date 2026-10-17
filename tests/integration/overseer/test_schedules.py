@@ -11,7 +11,7 @@ from etl_craft.core.actor import SYSTEM_ACTOR
 from etl_craft.core.cron import timezone
 from etl_craft.core.errors import StaleTransitionError
 from etl_craft.engine import runlog, transitions
-from etl_craft.execution.pipeline import init_pipeline_run
+from etl_craft.execution.run_start import init_pipeline_run
 from etl_craft.overseer.schedules import Schedules
 from etl_craft.overseer.server import WorkingSet
 from etl_craft.services.generate_yml import pipeline_dag

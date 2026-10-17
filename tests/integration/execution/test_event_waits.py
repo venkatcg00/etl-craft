@@ -207,8 +207,8 @@ def test_pipeline_releases_downstream_scripts_and_sql(world):
 def test_scheduler_checks_events_with_no_available_worker_and_resumes(world):
     from etl_craft.core.graph import build_graph
     from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
+    from etl_craft.execution.attempt_types import ChildOptions
     from etl_craft.execution.pools import Capacity
-    from etl_craft.execution.runner import ChildOptions
     from etl_craft.execution.scheduler import Scheduler
 
     engine, config, pipeline, task, run = setup(world, EVENT_FILE="*.csv", EVENT_SETTLE_SECONDS="0")
@@ -452,7 +452,7 @@ def test_indefinite_wait_survives_restart_without_resetting_to_finite_timeout(wo
 def test_scheduler_caches_idle_wait_and_notification_bypasses_fallback(world, monkeypatch):
     from etl_craft.core.graph import build_graph
     from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
-    from etl_craft.execution.runner import ChildOptions
+    from etl_craft.execution.attempt_types import ChildOptions
     from etl_craft.execution.scheduler import Scheduler
     from etl_craft.handlers.event_wait import probe
 

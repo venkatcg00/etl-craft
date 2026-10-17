@@ -17,8 +17,8 @@ from etl_craft.core.errors import MetadataError, RunStateError, UsageError
 from etl_craft.engine import transitions
 from etl_craft.engine.audit import command_request, register_engine
 from etl_craft.engine.runlog import RunSelector
-from etl_craft.execution import pipeline as execution
-from etl_craft.execution import runner
+from etl_craft.execution import reruns, run_types, runner
+from etl_craft.execution.attempt_types import TaskOutcome
 from etl_craft.services.operations import (
     OperationContext,
     backfills,
@@ -240,7 +240,7 @@ def test_task_result_uses_the_returned_task_id_not_another_pipelines_active_run(
         assert current_actor() == ctx.actor
         assert options["selector"].run_id == run_id
         assert options["override"].reason == "verified"
-        return runner.TaskOutcome(RunStatus.FAILED, "load failed", task_run_id)
+        return TaskOutcome(RunStatus.FAILED, "load failed", task_run_id)
 
     monkeypatch.setattr(runner, "run_task", run_bound)
     done = runs.execute_run(
@@ -266,9 +266,9 @@ def test_task_overrides_return_the_selected_run_and_stored_summary(ctx, monkeypa
 
     def override(engine, config, code, task_code, reason=None, **options):
         assert options["selector"].run_id == run_id
-        return execution.PipelineOutcome(RunStatus.FAILED, "still failed", run_id)
+        return run_types.PipelineOutcome(RunStatus.FAILED, "still failed", run_id)
 
-    monkeypatch.setattr(execution, method, override)
+    monkeypatch.setattr(reruns, method, override)
     keywords = {"selector": RunSelector(run_id=run_id)}
     if method == "rerun_task":
         keywords["reason"] = "verified"

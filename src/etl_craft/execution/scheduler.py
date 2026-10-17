@@ -23,6 +23,8 @@ from etl_craft.engine.repository import trackers
 from etl_craft.engine.repository.tasks import fetch_task_execution_detail, fetch_task_parameters
 from etl_craft.engine.retry import TRANSIENT_ERRORS
 from etl_craft.execution import leases
+from etl_craft.execution.attempt_records import run_cancelled
+from etl_craft.execution.attempt_types import ChildOptions
 from etl_craft.execution.events import EventCheck, check_event
 from etl_craft.execution.file_events import FileEvents
 from etl_craft.execution.gates import Clock, CrossPipelineCheck, TrackedGate, check_gate
@@ -31,7 +33,7 @@ from etl_craft.execution.pools import ExecutionHandle, HandleState, Pool, slot_k
 from etl_craft.execution.pools.local import LocalPool
 from etl_craft.execution.reconcile import reconcile
 from etl_craft.execution.retries import refresh_retries
-from etl_craft.execution.runner import ChildOptions, _preflight, admit_attempt, run_cancelled
+from etl_craft.execution.runner import _preflight, admit_attempt
 
 logger = logging.getLogger(__name__)
 

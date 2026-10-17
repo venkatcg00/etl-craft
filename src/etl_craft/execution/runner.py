@@ -18,15 +18,12 @@ cancels it (``etl-craft cancel``), the task process is stopped and the task is `
 
 from __future__ import annotations
 
-import contextvars
 import logging
 import os
 import socket
 import sys
-import threading
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 from sqlalchemy.engine import Engine
 
@@ -34,10 +31,7 @@ from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import (
     SETTLED_STATUSES,
-    TERMINAL_STATUSES,
     AttemptStatus,
-    DependencyType,
-    InterventionAction,
     Mode,
     RunStatus,
 )
@@ -48,12 +42,11 @@ from etl_craft.core.errors import (
     UsageError,
 )
 from etl_craft.core.faults import fault_point
-from etl_craft.core.graph import DependencyGraph, RunState, TaskRunState, build_graph
+from etl_craft.core.graph import build_graph
 from etl_craft.engine import runlog, transitions
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import trackers
 from etl_craft.engine.repository.dependencies import (
-    fetch_cross_pipeline_task_edges,
     fetch_pipeline_graph,
 )
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
@@ -64,6 +57,14 @@ from etl_craft.engine.repository.tasks import (
 )
 from etl_craft.engine.retry import retrying
 from etl_craft.execution import leases
+from etl_craft.execution.attempt_records import (
+    CancelWatch,
+    attempt_log_path,
+    attempt_started,
+    record_attempt,
+    run_cancelled,
+)
+from etl_craft.execution.attempt_types import ChildOptions, Override, TaskOutcome
 from etl_craft.execution.events import check_event
 from etl_craft.execution.gates import CrossPipelineCheck, TrackedGate
 from etl_craft.execution.interventions import (
@@ -74,74 +75,15 @@ from etl_craft.execution.interventions import (
 )
 from etl_craft.execution.limits import task_timeout_seconds
 from etl_craft.execution.pools import AttemptSpec
+from etl_craft.execution.readiness import backfill_cross_check, describe_unready, upstream_pending
 from etl_craft.execution.reconcile import reconcile
 from etl_craft.execution.retries import refresh_retries, task_retry_policy
 from etl_craft.execution.supervisor import (
-    KILL_GRACE_SECONDS,
-    ChildResult,
     ChildSpec,
     run_child,
 )
 
 logger = logging.getLogger(__name__)
-
-CHILD_MODULE = "etl_craft.execution.child"
-"""The module a task attempt runs as, with ``python -m``."""
-
-CANCEL_POLL_SECONDS = 2.0
-"""How often a running task looks whether an operator cancelled its run."""
-
-
-@dataclass(frozen=True)
-class TaskOutcome:
-    """How ``run --task_code`` ended: ``SUCCESS``, ``FAILED`` or ``SKIPPED``, and why.
-
-    ``reopened`` is the status of the ended run that ``force`` put back ``IN-PROGRESS`` to run
-    the task; the caller ends that run again (``pipeline.force_task``).
-    """
-
-    status: RunStatus
-    message: str
-    task_run_id: int | None = None
-    reopened: str | None = None
-    waiting: bool = False
-
-
-@dataclass(frozen=True)
-class Override:
-    """An operator's override of the checks before a task runs, with the reason for it.
-
-    ``rerun`` runs the task again although it already ended ``SUCCESS`` or ``SKIPPED``, as a
-    new attempt that skips nothing, reopening the run if it had ended (``--rerun``). Otherwise
-    the task runs without its dependencies being checked (``--ignore-dependencies``). Neither
-    checks the task's dependencies or consumes an upstream run, and each is recorded in
-    ``AUD_RUN_INTERVENTIONS``.
-    """
-
-    reason: str
-    rerun: bool = False
-
-    @property
-    def action(self) -> InterventionAction:
-        """How the override is recorded."""
-        return InterventionAction.RERUN if self.rerun else InterventionAction.IGNORE_DEPENDENCIES
-
-
-@dataclass(frozen=True)
-class ChildOptions:
-    """How the task process is started: its module, log settings and kill grace period.
-
-    Setting ``cancel`` stops a running task process; the pipeline runner sets it when the run is
-    interrupted. ``cancel_poll_seconds`` is how often a running task looks whether an operator
-    cancelled its run.
-    """
-
-    module: str = CHILD_MODULE
-    log_level: str = "INFO"
-    log_format: str = "text"
-    kill_grace_seconds: float = KILL_GRACE_SECONDS
-    cancel: threading.Event | None = None
-    cancel_poll_seconds: float = CANCEL_POLL_SECONDS
 
 
 def run_task(
@@ -474,7 +416,7 @@ def _preflight(
     cross = CrossPipelineCheck(0)
     if still_needed > 0 and task_id in graph_data.cross_pipeline_task_ids:
         if backfill:
-            cross = _backfill_cross_check(engine, task_id, still_needed)
+            cross = backfill_cross_check(engine, task_id, still_needed)
         else:
             cross = (
                 admission if admission is not None else gate.check(engine, task_id, still_needed)
@@ -483,10 +425,10 @@ def _preflight(
     if still_needed <= 0:
         return None, cross
 
-    unready = _describe_unready(graph, task_id, pipeline_run_id)
+    unready = describe_unready(graph, task_id, pipeline_run_id)
     if cross.reasons:
         reasons = "; ".join(cross.reasons)
-        if cross.definitive and not _upstream_pending(graph, task_id, run_state):
+        if cross.definitive and not upstream_pending(graph, task_id, run_state):
             return _record_skipped(
                 engine, task_id, pipeline_run_id, task_code, reasons, decisions=cross.decisions
             ), NO_CROSS
@@ -494,60 +436,17 @@ def _preflight(
             f"{task_code}: {reasons}, and {unready}; nothing recorded", waiting=True
         ), NO_CROSS
     if task_id in graph.unsatisfiable(run_state):
-        never = _describe_unready(graph, task_id, pipeline_run_id, can_never=True)
+        never = describe_unready(graph, task_id, pipeline_run_id, can_never=True)
         return _record_skipped(engine, task_id, pipeline_run_id, task_code, never), NO_CROSS
     waiting = f"{task_code}: {unready}; nothing recorded, run it again once they are"
     return _skipped(waiting, waiting=True), NO_CROSS
 
 
-BACKFILL_ASSUMED = frozenset(
-    {DependencyType.SUCCESS, DependencyType.HAS_DATA, DependencyType.ALWAYS}
-)
 """The dependency types on another pipeline that a backfill counts as met without checking."""
-
-
-def _backfill_cross_check(engine: Engine, task_id: int, needed: int) -> CrossPipelineCheck:
-    """Judge a task's dependencies on other pipelines in a backfill, which checks none of them.
-
-    A backfill re-runs history as if its upstreams had delivered, so ``SUCCESS``, ``HAS_DATA``
-    and ``ALWAYS`` dependencies count as met. A ``FAILURE`` dependency does not: nothing says an
-    upstream failed, and a task that runs only on an upstream failure (an alert) must not run.
-    Nothing is consumed either way.
-    """
-    with engine.connect() as conn:
-        edges = fetch_cross_pipeline_task_edges(conn, task_id)
-    assumed = sum(1 for edge in edges if edge.dependency_type in BACKFILL_ASSUMED)
-    unmet = [edge for edge in edges if edge.dependency_type not in BACKFILL_ASSUMED]
-    reasons = tuple(
-        f"upstream task {edge.depends_on_label} ({edge.dependency_type}) is not evaluated in a "
-        "backfill, so it is not met"
-        for edge in unmet
-    )
-    return CrossPipelineCheck(min(needed, assumed), reasons)
 
 
 def _skipped(message: str, *, waiting: bool = False) -> TaskOutcome:
     return TaskOutcome(RunStatus.SKIPPED, message, waiting=waiting)
-
-
-def _upstream_pending(graph: DependencyGraph, task_id: int, run_state: RunState) -> bool:
-    """Whether a same-pipeline upstream of ``task_id`` has not finished yet."""
-    return any(
-        run_state.get(edge.depends_on_task_id, TaskRunState()).status not in TERMINAL_STATUSES
-        for edge in graph.dependencies_of(task_id)
-    )
-
-
-def _describe_unready(
-    graph: DependencyGraph, task_id: int, pipeline_run_id: int, *, can_never: bool = False
-) -> str:
-    counts = (
-        f"(needs {graph.required_edge_count(task_id)} of {graph.total_edge_count(task_id)} "
-        "dependencies satisfied)"
-    )
-    if can_never:
-        return f"its dependencies can never be met under pipeline_run_id={pipeline_run_id} {counts}"
-    return f"its dependencies are not met yet under pipeline_run_id={pipeline_run_id} {counts}"
 
 
 def _record_skipped(
@@ -578,18 +477,6 @@ def _record_skipped(
             conn, binding.task_run_id, status=RunStatus.SKIPPED, error_message=reason
         )
     return TaskOutcome(RunStatus.SKIPPED, f"{task_code}: SKIPPED — {reason}", binding.task_run_id)
-
-
-def attempt_log_path(
-    config: ConnectorConfig, pipeline_code: str, pipeline_run_id: int, task_code: str, attempt: int
-) -> Path:
-    """Return the log file of one task attempt, under ``Orchestration.Log_dir``."""
-    return (
-        config.log_dir
-        / pipeline_code
-        / f"run-{pipeline_run_id}"
-        / f"{task_code}.attempt-{attempt}.log"
-    )
 
 
 def _run_attempt(
@@ -812,7 +699,7 @@ def _start_and_record(
         log_path,
     )
     with (
-        _CancelWatch(engine, pipeline_run_id, child) as stop,
+        CancelWatch(engine, pipeline_run_id, child) as stop,
         leases.heartbeat(engine, "attempt", attempt_id, owner, stop),
     ):
         result = run_child(
@@ -830,11 +717,11 @@ def _start_and_record(
             ),
             kill_grace_seconds=child.kill_grace_seconds,
             cancel=stop,
-            on_started=lambda pid: _attempt_started(engine, attempt_id, owner, pid),
+            on_started=lambda pid: attempt_started(engine, attempt_id, owner, pid),
         )
     return retrying(
         f"recording how {task_code} ended",
-        lambda: _record_attempt(
+        lambda: record_attempt(
             engine,
             task_run_id,
             pipeline_run_id,
@@ -845,150 +732,3 @@ def _start_and_record(
             owner=owner,
         ),
     )
-
-
-class _CancelWatch:
-    """Sets the event that stops a task process when the run is interrupted or cancelled.
-
-    A thread looks every ``cancel_poll_seconds`` whether an operator cancelled the run, and
-    passes on the pipeline runner's own ``cancel`` event at once.
-    """
-
-    def __init__(self, engine: Engine, pipeline_run_id: int, child: ChildOptions) -> None:
-        self.engine = engine
-        self.pipeline_run_id = pipeline_run_id
-        self.child = child
-        self.stop = threading.Event()
-        self.done = threading.Event()
-        self.thread = threading.Thread(
-            target=contextvars.copy_context().run,
-            args=(self._watch,),
-            name="etl-craft-cancel-watch",
-            daemon=True,
-        )
-
-    def __enter__(self) -> threading.Event:
-        self.thread.start()
-        return self.stop
-
-    def __exit__(self, *exc: object) -> None:
-        self.done.set()
-        self.thread.join()
-
-    def _watch(self) -> None:
-        interrupt = self.child.cancel
-        poll = max(self.child.cancel_poll_seconds, 0.05)
-        waited = 0.0
-        while not self.done.is_set():
-            if interrupt is not None and interrupt.is_set():
-                self.stop.set()
-                return
-            if waited >= poll:
-                waited = 0.0
-                if run_cancelled(self.engine, self.pipeline_run_id):
-                    logger.warning(
-                        "pipeline_run_id=%d was cancelled; stopping the task", self.pipeline_run_id
-                    )
-                    self.stop.set()
-                    return
-            self.done.wait(0.05)
-            waited += 0.05
-
-
-def run_cancelled(engine: Engine, pipeline_run_id: int) -> bool:
-    """Whether an operator cancelled ``pipeline_run_id``; a failed look counts as no."""
-    try:
-        with engine.connect() as conn:
-            status = runlog.fetch_pipeline_run_status(conn, pipeline_run_id)
-    except Exception:
-        logger.warning("could not read the status of pipeline_run_id=%d", pipeline_run_id)
-        return False
-    return status == RunStatus.CANCELLED
-
-
-def _record_attempt(
-    engine: Engine,
-    task_run_id: int,
-    pipeline_run_id: int,
-    task_code: str,
-    result: ChildResult,
-    log_path: Path,
-    *,
-    attempt_id: int,
-    owner: str,
-) -> TaskOutcome:
-    """Record the attempt's outcome, failing it if the task process ended without one.
-
-    A task stopped because its run was cancelled is ``CANCELLED``.
-    """
-    with engine.begin() as conn:
-        transitions.assert_attempt(conn, attempt_id, task_run_id, owner)
-        recorded = runlog.fetch_task_run_result(conn, task_run_id)
-        status = RunStatus(recorded.status)
-        message = recorded.error_message
-        values = conn.execute(
-            statement(conn, "task_run_log"), {"task_run_id": task_run_id}
-        ).scalar_one_or_none()
-        cancelled = runlog.fetch_pipeline_run_status(conn, pipeline_run_id) == RunStatus.CANCELLED
-        if status == RunStatus.IN_PROGRESS and cancelled:
-            status = RunStatus.CANCELLED
-            message = f"the run was cancelled, so the task process {result.describe()}"
-            transitions.cancel_attempt(conn, attempt_id, current_actor(), error_message=message)
-        elif status == RunStatus.IN_PROGRESS:
-            status = RunStatus.FAILED
-            message = f"the task process {result.describe()} before recording an outcome"
-            if result.timed_out:
-                message += (
-                    " (set the task's TASK_TIMEOUT_SECONDS, or Orchestration.Task_timeout_seconds,"
-                    " to change its time limit)"
-                )
-            if result.timed_out:
-                transitions.time_out_attempt(
-                    conn,
-                    attempt_id,
-                    current_actor(),
-                    owner=owner,
-                    error_message=message,
-                    task_log=result.output_tail,
-                )
-            else:
-                transitions.finish_attempt(
-                    conn,
-                    attempt_id,
-                    AttemptStatus.FAILED,
-                    current_actor(),
-                    owner=owner,
-                    error_message=message,
-                    task_log=result.output_tail,
-                    exit_code=result.returncode,
-                )
-            logger.error("%s: %s; see %s", task_code, message, log_path)
-        transitions.set_task_log(
-            conn, task_run_id, attempt_id, owner, _task_log(values, result.output_tail)
-        )
-    if status == RunStatus.SUCCESS:
-        logger.info("%s: SUCCESS", task_code)
-        return TaskOutcome(status, f"{task_code}: SUCCESS", task_run_id)
-    logger.error("%s: %s — %s (log: %s)", task_code, status, message, log_path)
-    return TaskOutcome(status, f"{task_code}: {status} — {message}", task_run_id)
-
-
-def _task_log(values: str | None, output_tail: str) -> str | None:
-    """Combine the task's reported values with the tail of its output."""
-    parts = [part for part in (values, output_tail.strip()) if part]
-    return "\n\n".join(parts) or None
-
-
-def _attempt_started(engine: Engine, attempt_id: int, owner: str, pid: int) -> None:
-    """Record the process started by this attempt's owner."""
-    with engine.begin() as conn:
-        transitions.ensure_attempt_started(
-            conn,
-            attempt_id,
-            current_actor(),
-            owner=owner,
-            host=socket.gethostname(),
-            pid=pid,
-            completed=True,
-            process_start=leases.process_start(pid),
-        )

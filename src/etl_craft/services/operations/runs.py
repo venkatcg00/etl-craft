@@ -9,8 +9,9 @@ from etl_craft.core.errors import UsageError
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.repository.tasks import resolve_task_id
 from etl_craft.engine.runlog import ACTIVE_RUN, RunSelector
-from etl_craft.execution import interventions, runner
+from etl_craft.execution import interventions, reruns, run_finish, run_start, runner
 from etl_craft.execution import pipeline as execution
+from etl_craft.execution.attempt_types import Override
 from etl_craft.execution.reconcile import reconcile
 from etl_craft.services.cloning import run_hooks
 from etl_craft.services.operations.context import OperationContext, operation
@@ -187,7 +188,7 @@ def _execute(ctx: OperationContext, request: RunRequest) -> OperationResult:
             request.task_code,
             child=ctx.child,
             selector=selector,
-            override=runner.Override(request.reason or "") if request.ignore_dependencies else None,
+            override=Override(request.reason or "") if request.ignore_dependencies else None,
         )
         return result(
             ctx,
@@ -213,7 +214,7 @@ def _execute(ctx: OperationContext, request: RunRequest) -> OperationResult:
     hooks = run_hooks(ctx.config, ctx.engine)
     if request.rerun:
         assert request.task_code is not None
-        done = execution.rerun_task(
+        done = reruns.rerun_task(
             ctx.engine,
             ctx.config,
             pipeline_code,
@@ -225,7 +226,7 @@ def _execute(ctx: OperationContext, request: RunRequest) -> OperationResult:
             selector=selector,
         )
     elif request.task_code is not None:
-        done = execution.force_task(
+        done = reruns.force_task(
             ctx.engine,
             ctx.config,
             pipeline_code,
@@ -235,7 +236,7 @@ def _execute(ctx: OperationContext, request: RunRequest) -> OperationResult:
             selector=selector,
         )
     elif request.init_only:
-        done = execution.init_pipeline_run(
+        done = run_start.init_pipeline_run(
             ctx.engine,
             ctx.config,
             pipeline_code,
@@ -244,7 +245,7 @@ def _execute(ctx: OperationContext, request: RunRequest) -> OperationResult:
             selector=selector,
         )
     elif request.finalize_only:
-        done = execution.finalize_active_run(
+        done = run_finish.finalize_active_run(
             ctx.engine, ctx.config, pipeline_code, hooks=hooks, selector=selector
         )
     else:

@@ -32,127 +32,53 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import Generator
 from contextlib import nullcontext
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Required, TypedDict, TypeVar, Unpack
+from typing import TypedDict, TypeVar, Unpack
 
-from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.core import interrupts
-from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import (
-    SETTLED_STATUSES,
-    Handler,
-    InterventionAction,
     Mode,
     RunStatus,
-    SlaStatus,
 )
-from etl_craft.core.errors import RunRefusedError, RunStateError, StaleTransitionError, UsageError
-from etl_craft.core.faults import fault_point
-from etl_craft.core.graph import DependencyGraph, TaskRunState, build_graph
+from etl_craft.core.errors import RunRefusedError, RunStateError, UsageError
 from etl_craft.core.log import log_context
-from etl_craft.engine import runlog, transitions
-from etl_craft.engine.repository import trackers
-from etl_craft.engine.repository.dependencies import PipelineGraphData, fetch_pipeline_graph
-from etl_craft.engine.repository.interventions import fetch_interventions, fetch_task_rows
-from etl_craft.engine.repository.pauses import Pause
+from etl_craft.engine import runlog
+from etl_craft.engine.repository.dependencies import PipelineGraphData
 from etl_craft.engine.repository.pipelines import (
-    PipelineDetail,
-    fetch_pipeline_detail,
-    fetch_pipeline_handlers,
     resolve_pipeline_id,
 )
-from etl_craft.engine.repository.runs import fetch_task_statuses_for_run
-from etl_craft.engine.repository.tasks import fetch_task_codes, resolve_task_id
+from etl_craft.engine.repository.tasks import fetch_task_codes
 from etl_craft.execution import leases
-from etl_craft.execution.connections import check_run_connections
+from etl_craft.execution.attempt_records import run_cancelled
+from etl_craft.execution.attempt_types import ChildOptions
 from etl_craft.execution.gates import (
     Clock,
-    PipelineGateResult,
-)
-from etl_craft.execution.gates import (
-    check_gate as check_gate_now,
 )
 from etl_craft.execution.interventions import (
     check_override,
     open_pause,
-    record_change,
-    record_gate_bypass,
-    reset_engine_skipped,
 )
 from etl_craft.execution.pools import Pool
-from etl_craft.execution.reconcile import reconcile
-from etl_craft.execution.remote import require_supported
-from etl_craft.execution.runner import (
-    ChildOptions,
-    Override,
-    run_cancelled,
-    run_task,
+from etl_craft.execution.run_finish import finalize, settle_unsatisfiable, sla_watch
+from etl_craft.execution.run_start import (
+    cancelled_run,
+    load_pipeline,
+    paused_outcome,
+    prepare,
+    skipped_run,
+    start_steps,
 )
+from etl_craft.execution.run_types import PipelineOutcome, RunHooks, default_hooks, drive
 from etl_craft.execution.scheduler import Scheduler
-from etl_craft.execution.sla import SlaLapse, SlaWatch
-from etl_craft.handlers.mail import send_sla_lapse_email
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
-
-
-@dataclass(frozen=True)
-class PipelineOutcome:
-    """How a pipeline run, or one step of it, ended.
-
-    ``status`` is ``IN-PROGRESS`` after ``--init-only`` started the run, or when the pipeline
-    was paused while it ran. ``pipeline_run_id`` is ``None`` when a paused pipeline started
-    nothing.
-    """
-
-    status: RunStatus
-    message: str
-    pipeline_run_id: int | None
-    sla: runlog.SlaResult | None = None
-
-
-@dataclass(frozen=True)
-class RunHooks:
-    """What other layers do at points of a run.
-
-    ``on_sla_lapse`` is called once per run, when it is first seen past its SLA.
-    ``on_finalized`` is called after the run has ended. A hook that raises is logged and does
-    not change how the run ended. A run given no hooks uses ``default_hooks``.
-    """
-
-    on_sla_lapse: Callable[[SlaLapse], None] | None = None
-    on_finalized: Callable[[PipelineOutcome], None] | None = None
-
-
-def default_hooks(config: ConnectorConfig, engine: Engine) -> RunHooks:
-    """Return the hooks a run gets unless given others: the SLA email, with ``Enforce_sla`` on.
-
-    The email goes to the pipeline's ``EMAIL_RECIPIENTS``, else the DAG default recipients,
-    through the Email settings.
-    """
-    if not config.limits.enforce_sla:
-        return RunHooks()
-
-    def email_the_lapse(lapse: SlaLapse) -> None:
-        with engine.connect() as conn:
-            pipeline_id = resolve_pipeline_id(conn, lapse.pipeline_code)
-            recipients = fetch_pipeline_detail(conn, pipeline_id).email_recipients
-        send_sla_lapse_email(
-            config,
-            recipients,
-            pipeline_code=lapse.pipeline_code,
-            pipeline_run_id=lapse.pipeline_run_id,
-            sla_hours=lapse.sla_hours,
-            elapsed_hours=lapse.elapsed_hours,
-        )
-
-    return RunHooks(on_sla_lapse=email_the_lapse)
 
 
 class _PipelineOptions(TypedDict, total=False):
@@ -174,26 +100,9 @@ def run_pipeline(
     **kwargs: Unpack[_PipelineOptions],
 ) -> PipelineOutcome:
     """Run the cooperative local scheduler in the foreground until it settles."""
-    return _drive(
+    return drive(
         pipeline_steps(engine, config, pipeline_code, **kwargs), kwargs.get("clock") or Clock()
     )
-
-
-def _drive(steps: Generator[float, None, T], clock: Clock) -> T:
-    """Wait only in the foreground supervisor; workers never wait on gate deadlines.
-
-    A signal held while a step worked is raised between steps, so it never interrupts one.
-    """
-    try:
-        while True:
-            interrupts.checkpoint()
-            try:
-                delay = next(steps)
-            except StopIteration as done:
-                return done.value  # type: ignore[no-any-return]
-            clock.sleep(delay)
-    finally:
-        steps.close()
 
 
 def pipeline_steps(
@@ -228,11 +137,11 @@ def pipeline_steps(
         )
     paused = open_pause(engine, pipeline_code)
     if paused is not None:
-        return _paused(pipeline_code, paused)
+        return paused_outcome(pipeline_code, paused)
     clock = clock or Clock()
     hooks = hooks or default_hooks(config, engine)
-    pipeline_id, detail = _prepare(engine, config, pipeline_code)
-    pipeline_run_id, skip_reason = yield from _start_steps(
+    pipeline_id, detail = prepare(engine, config, pipeline_code)
+    pipeline_run_id, skip_reason = yield from start_steps(
         engine,
         config,
         pipeline_code,
@@ -246,7 +155,7 @@ def pipeline_steps(
     if run_cancelled(engine, pipeline_run_id):
         with engine.connect() as conn:
             task_codes = fetch_task_codes(conn, pipeline_id)
-        return _cancelled_run(engine, pipeline_code, pipeline_run_id, task_codes, hooks)
+        return cancelled_run(engine, pipeline_code, pipeline_run_id, task_codes, hooks)
     with (
         leases.supervise_run(
             engine, pipeline_run_id, cancel=None if child is None else child.cancel
@@ -256,9 +165,9 @@ def pipeline_steps(
         log_context(pipeline=pipeline_code, pipeline_run_id=pipeline_run_id),
     ):
         if skip_reason is not None:
-            return _skipped_run(pipeline_code, pipeline_run_id, skip_reason, hooks)
+            return skipped_run(pipeline_code, pipeline_run_id, skip_reason, hooks)
         with engine.connect() as conn:
-            detail, graph, task_codes = _load_pipeline(
+            detail, graph, task_codes = load_pipeline(
                 conn, pipeline_id, detail=detail, graph_data=graph_data
             )
         scheduler = Scheduler(
@@ -277,12 +186,12 @@ def pipeline_steps(
                 (stop_dispatch is not None and stop_dispatch.is_set())
                 or open_pause(engine, pipeline_code) is not None
             ),
-            settle=lambda final: _settle_unsatisfiable(
+            settle=lambda final: settle_unsatisfiable(
                 engine, graph, pipeline_run_id, task_codes, failures_final=final
             ),
         )
         try:
-            with _sla_watch(engine, pipeline_code, pipeline_run_id, detail.sla_in_hours, hooks):
+            with sla_watch(engine, pipeline_code, pipeline_run_id, detail.sla_in_hours, hooks):
                 while not scheduler.step_riding_outages():
                     delay = (
                         0.1
@@ -299,7 +208,7 @@ def pipeline_steps(
             scheduler.close()
         never_ready, after_failure = scheduler.never_ready, scheduler.after_failure
         if run_cancelled(engine, pipeline_run_id):
-            return _cancelled_run(engine, pipeline_code, pipeline_run_id, task_codes, hooks)
+            return cancelled_run(engine, pipeline_code, pipeline_run_id, task_codes, hooks)
         if scheduler.cancel.is_set() or (stop_dispatch is not None and stop_dispatch.is_set()):
             return PipelineOutcome(
                 RunStatus.IN_PROGRESS,
@@ -316,7 +225,7 @@ def pipeline_steps(
             )
             logger.warning("%s", message)
             return PipelineOutcome(RunStatus.IN_PROGRESS, message, pipeline_run_id)
-        return _finalize(
+        return finalize(
             engine,
             pipeline_code,
             pipeline_id,
@@ -441,804 +350,3 @@ def backfill(
     )
     logger.info("%s", message)
     return BackfillOutcome(runs, None, message)
-
-
-def init_pipeline_run(
-    engine: Engine,
-    config: ConnectorConfig,
-    pipeline_code: str,
-    *,
-    clock: Clock | None = None,
-    hooks: RunHooks | None = None,
-    run_date: date | None = None,
-    selector: runlog.RunSelector = runlog.ACTIVE_RUN,
-) -> PipelineOutcome:
-    """Start or resume the run of ``pipeline_code``, for an orchestrator's first step.
-
-    ``run_date`` is the date a new run runs as of, such as the orchestrator's logical date.
-
-    Tests the run's connections and, for a new run in local mode, checks the pipeline's gate. The
-    outcome is ``IN-PROGRESS``, or ``SKIPPED`` when the gate was not satisfied. In remote mode the
-    orchestrator applies the pipeline's rules, so ``RemoteUnsupportedError`` is raised first when
-    it has rules the orchestrator does not support, and no gate is checked.
-    """
-    remote = config.mode == Mode.REMOTE
-    if remote:
-        with engine.connect() as conn:
-            require_supported(conn, config, pipeline_code)
-    else:
-        paused = open_pause(engine, pipeline_code)
-        if paused is not None:
-            return _paused(pipeline_code, paused)
-    pipeline_id, _ = _prepare(engine, config, pipeline_code)
-    pipeline_run_id, skip_reason = _start_run(
-        engine,
-        config,
-        pipeline_code,
-        pipeline_id,
-        clock or Clock(),
-        check_gate=not remote,
-        run_date=run_date,
-        remote=remote,
-        selector=selector,
-    )
-    if run_cancelled(engine, pipeline_run_id):
-        with engine.connect() as conn:
-            task_codes = fetch_task_codes(conn, pipeline_id)
-        return _cancelled_run(
-            engine,
-            pipeline_code,
-            pipeline_run_id,
-            task_codes,
-            hooks or default_hooks(config, engine),
-        )
-    if skip_reason is not None:
-        return _skipped_run(
-            pipeline_code, pipeline_run_id, skip_reason, hooks or default_hooks(config, engine)
-        )
-    return PipelineOutcome(
-        RunStatus.IN_PROGRESS,
-        f"{pipeline_code}: pipeline_run_id={pipeline_run_id} IN-PROGRESS",
-        pipeline_run_id,
-    )
-
-
-def finalize_active_run(
-    engine: Engine,
-    config: ConnectorConfig,
-    pipeline_code: str,
-    *,
-    hooks: RunHooks | None = None,
-    selector: runlog.RunSelector = runlog.ACTIVE_RUN,
-) -> PipelineOutcome:
-    """End the active run of ``pipeline_code`` from its tasks' statuses, for an orchestrator.
-
-    In remote mode this records the orchestrator's decisions (see ``_record_orchestrated``);
-    in local mode, tasks that can never run are recorded ``SKIPPED`` as in a local run. Raises
-    ``RunStateError`` when the pipeline has no active run.
-    """
-    with engine.connect() as conn:
-        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
-        selected = runlog.select_run(conn, pipeline_id, selector)
-        pipeline_run_id = selected.pipeline_run_id
-        if selected.status != RunStatus.IN_PROGRESS:
-            raise RunStateError(
-                f"{pipeline_code}: run_id={pipeline_run_id} is {selected.status}; "
-                "expected IN-PROGRESS to finalize"
-            )
-        detail, graph, task_codes = _load_pipeline(conn, pipeline_id)
-    with log_context(pipeline=pipeline_code, pipeline_run_id=pipeline_run_id):
-        return _finalize(
-            engine,
-            pipeline_code,
-            pipeline_id,
-            pipeline_run_id,
-            graph,
-            task_codes,
-            detail.sla_in_hours,
-            hooks or default_hooks(config, engine),
-            orchestrated=config.mode == Mode.REMOTE,
-        )
-
-
-def rerun_task(
-    engine: Engine,
-    config: ConnectorConfig,
-    pipeline_code: str,
-    task_code: str,
-    reason: str,
-    *,
-    with_downstream: bool = False,
-    child: ChildOptions | None = None,
-    hooks: RunHooks | None = None,
-    selector: runlog.RunSelector = runlog.ACTIVE_RUN,
-) -> PipelineOutcome:
-    """Run ``task_code`` again under the selected run: ``run --task_code --rerun``.
-
-    With ``with_downstream``, every task after it runs again too; local mode only. The task
-    runs as it stands, without its dependencies checked again. Each task after it runs again,
-    in dependency order, when its dependencies are satisfied by then; the others keep their
-    rows. A run that had ended is reopened for this and then ended again from its tasks'
-    statuses; a run still in progress is left for ``run --pipeline_code`` to finish.
-    """
-    check_override(config, "--rerun", reason)
-    child = child or ChildOptions()
-    with engine.connect() as conn:
-        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
-        task_id = resolve_task_id(conn, pipeline_id, task_code)
-        selected = runlog.select_run(conn, pipeline_id, selector)
-        pipeline_run_id = selected.pipeline_run_id
-        before = pipeline_run_id if selected.status == RunStatus.IN_PROGRESS else None
-        failed_before = (
-            runlog.fetch_task_run_status(conn, task_id, pipeline_run_id) == RunStatus.FAILED
-        )
-        selector = runlog.RunSelector(run_id=pipeline_run_id)
-        detail, graph, task_codes = _load_pipeline(conn, pipeline_id)
-    override = Override(reason, rerun=True)
-    first = run_task(
-        engine, config, pipeline_code, task_code, child=child, override=override, selector=selector
-    )
-    if first.task_run_id is None:
-        raise RunStateError(first.message)
-    ran = [first]
-    left: list[str] = []
-    kept: list[str] = []
-    if failed_before and first.status == RunStatus.SUCCESS:
-        # The tasks the engine skipped because this task had failed get to run again.
-        _, kept = reset_engine_skipped(
-            engine, pipeline_id, pipeline_run_id, reason, only=graph.downstream_of(task_id)
-        )
-    if with_downstream and first.status == RunStatus.SUCCESS:
-        downstream = graph.downstream_of(task_id)
-        for wave in graph.waves():
-            for later in (t for t in wave if t in downstream):
-                with engine.connect() as conn:
-                    run_state = runlog.fetch_run_state(conn, pipeline_run_id, list(graph.task_ids))
-                if graph.satisfied_edge_count(later, run_state) < graph.required_edge_count(later):
-                    left.append(task_codes[later])
-                    continue
-                ran.append(
-                    run_task(
-                        engine,
-                        config,
-                        pipeline_code,
-                        task_codes[later],
-                        child=child,
-                        override=override,
-                        selector=selector,
-                    )
-                )
-    summary = "; ".join(outcome.message for outcome in ran)
-    if left:
-        summary += f"; not run again, their dependencies are not met: {', '.join(left)}"
-    if kept:
-        summary += f"; kept SKIPPED: {', '.join(kept)}"
-    if before is not None:
-        status = (
-            RunStatus.FAILED
-            if any(o.status == RunStatus.FAILED for o in ran)
-            else RunStatus.IN_PROGRESS
-        )
-        return PipelineOutcome(
-            status,
-            f"{pipeline_code}: pipeline_run_id={pipeline_run_id} is still IN-PROGRESS: {summary}",
-            pipeline_run_id,
-        )
-    return _end_reopened(
-        engine,
-        pipeline_code,
-        pipeline_id,
-        pipeline_run_id,
-        graph,
-        task_codes,
-        detail.sla_in_hours,
-        hooks or default_hooks(config, engine),
-        f"ran again: {summary}",
-    )
-
-
-def force_task(
-    engine: Engine,
-    config: ConnectorConfig,
-    pipeline_code: str,
-    task_code: str,
-    *,
-    child: ChildOptions | None = None,
-    hooks: RunHooks | None = None,
-    selector: runlog.RunSelector = runlog.ACTIVE_RUN,
-) -> PipelineOutcome:
-    """Run ``task_code`` past its checks: ``run --task_code --force``; local mode only.
-
-    Under the pipeline's active run the task just runs. A run that had ended is reopened for
-    it and then ended again from its tasks' statuses, so a forced task that fails leaves the
-    run ``FAILED``.
-    """
-    with engine.connect() as conn:
-        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
-        selected = runlog.select_run(conn, pipeline_id, selector)
-    selector = runlog.RunSelector(run_id=selected.pipeline_run_id)
-    outcome = run_task(
-        engine, config, pipeline_code, task_code, force=True, child=child, selector=selector
-    )
-    with engine.connect() as conn:
-        run_id = selected.pipeline_run_id
-        if outcome.reopened is None:
-            return PipelineOutcome(outcome.status, outcome.message, run_id)
-        detail, graph, task_codes = _load_pipeline(conn, pipeline_id)
-    return _end_reopened(
-        engine,
-        pipeline_code,
-        pipeline_id,
-        run_id,
-        graph,
-        task_codes,
-        detail.sla_in_hours,
-        hooks or default_hooks(config, engine),
-        f"forced: {outcome.message}",
-    )
-
-
-def _end_reopened(
-    engine: Engine,
-    pipeline_code: str,
-    pipeline_id: int,
-    pipeline_run_id: int,
-    graph: DependencyGraph,
-    task_codes: dict[int, str],
-    sla_hours: float | None,
-    hooks: RunHooks,
-    summary: str,
-) -> PipelineOutcome:
-    """End again a run reopened to run some of its tasks, or keep it open for the rest.
-
-    A task with no row under the run has yet to run, so the run stays ``IN-PROGRESS`` for
-    ``run --pipeline_code`` to resume it.
-    """
-    with engine.connect() as conn:
-        rows = runlog.fetch_run_state(conn, pipeline_run_id, list(graph.task_ids))
-    not_run = sorted(task_codes[t] for t in graph.task_ids if t not in rows)
-    if not_run:
-        message = (
-            f"{pipeline_code}: pipeline_run_id={pipeline_run_id} stays IN-PROGRESS ({summary}); "
-            f"{len(not_run)} task(s) still need to run: {', '.join(not_run)}. "
-            f"`etl-craft run --pipeline_code {pipeline_code}` runs them"
-        )
-        logger.warning("%s", message)
-        return PipelineOutcome(RunStatus.IN_PROGRESS, message, pipeline_run_id)
-    with log_context(pipeline=pipeline_code, pipeline_run_id=pipeline_run_id):
-        ended = _finalize(
-            engine,
-            pipeline_code,
-            pipeline_id,
-            pipeline_run_id,
-            graph,
-            task_codes,
-            sla_hours,
-            hooks,
-        )
-    return replace(ended, message=f"{ended.message} ({summary})")
-
-
-def _load_pipeline(
-    conn: Connection,
-    pipeline_id: int,
-    *,
-    detail: PipelineDetail | None = None,
-    graph_data: PipelineGraphData | None = None,
-) -> tuple[PipelineDetail, DependencyGraph, dict[int, str]]:
-    """Load one pipeline's details, dependency graph and active task codes."""
-    detail = detail or fetch_pipeline_detail(conn, pipeline_id)
-    data = graph_data or fetch_pipeline_graph(conn, pipeline_id)
-    return (
-        detail,
-        build_graph(data.tasks, data.same_pipeline_edges),
-        fetch_task_codes(conn, pipeline_id),
-    )
-
-
-def _prepare(
-    engine: Engine, config: ConnectorConfig, pipeline_code: str
-) -> tuple[int, PipelineDetail]:
-    """Resolve the pipeline and test the connections its run uses."""
-    with engine.connect() as conn:
-        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
-        detail = fetch_pipeline_detail(conn, pipeline_id)
-        handlers = fetch_pipeline_handlers(conn, pipeline_id)
-    sends_sla_email = config.limits.enforce_sla and detail.sla_in_hours is not None
-    check_run_connections(engine, config, pipeline_code, handlers, sends_sla_email=sends_sla_email)
-    return pipeline_id, detail
-
-
-class _StartOptions(TypedDict, total=False):
-    check_gate: Required[bool]
-    run_date: date | None
-    backfill: str | None
-    remote: bool
-    selector: runlog.RunSelector
-
-
-def _start_run(
-    engine: Engine,
-    config: ConnectorConfig,
-    pipeline_code: str,
-    pipeline_id: int,
-    clock: Clock,
-    **kwargs: Unpack[_StartOptions],
-) -> tuple[int, str | None]:
-    """Initialize or resume a run, driving the shared gate admission in the foreground."""
-    return _drive(
-        _start_steps(
-            engine, config, pipeline_code, pipeline_id, clock, **kwargs, initialize_only=True
-        ),
-        clock,
-    )
-
-
-def _start_steps(
-    engine: Engine,
-    config: ConnectorConfig,
-    pipeline_code: str,
-    pipeline_id: int,
-    clock: Clock,
-    *,
-    check_gate: bool,
-    run_date: date | None = None,
-    backfill: str | None = None,
-    remote: bool = False,
-    selector: runlog.RunSelector = runlog.ACTIVE_RUN,
-    initialize_only: bool = False,
-) -> Generator[float, None, tuple[int, str | None]]:
-    """Return the run to use and, when the gate refused a new one, why it was ``SKIPPED``.
-
-    A new run runs as of ``run_date`` (today unless given). ``backfill``, the reason for a
-    backfill, makes it a backfill run, which checks no dependency on other pipelines. A run in
-    progress is resumed, unless it runs as of another date than ``run_date``. A gate
-    ``Dependency_gates`` bypassed, or skipped by a backfill, is recorded against the new run.
-    """
-    reconcile(engine, pipeline_id=pipeline_id)
-    queued: int | None = None
-    with engine.begin() as conn:
-        candidates = runlog.run_candidates(conn, pipeline_id)
-        explicit = selector.run_id is not None or selector.run_key is not None
-        selected = None
-        if explicit:
-            if selector.run_id is not None or any(
-                r.run_key == selector.run_key for r in candidates
-            ):
-                selected = runlog.select_run(conn, pipeline_id, selector)
-        elif any(r.status in {RunStatus.QUEUED, RunStatus.IN_PROGRESS} for r in candidates):
-            selected = runlog.select_run(conn, pipeline_id)
-        if selected is not None:
-            if explicit and run_date is not None and selected.run_date != run_date:
-                raise RunStateError(
-                    f"{pipeline_code}: run_id={selected.pipeline_run_id} has run_date="
-                    f"{selected.run_date}, not {run_date}; a run's date cannot change"
-                )
-            if selected.status not in {RunStatus.QUEUED, RunStatus.IN_PROGRESS}:
-                if not remote:
-                    raise RunStateError(
-                        f"{pipeline_code}: run_id={selected.pipeline_run_id} is {selected.status}; "
-                        "use --task_code --rerun with a reason, or start a new run"
-                    )
-                transitions.reopen_run(
-                    conn,
-                    selected.pipeline_run_id,
-                    current_actor(),
-                    reason="orchestrator initialized its run again",
-                )
-            if selected.status == RunStatus.QUEUED:
-                queued = selected.pipeline_run_id
-                logical_date = selected.run_date
-                existing, kind = None, None
-            else:
-                existing = selected.pipeline_run_id
-                kind = runlog.fetch_run_kind(conn, existing)
-        else:
-            existing, kind = None, None
-    if existing is not None and kind is not None:
-        if kind.backfill and backfill is None:
-            raise RunStateError(
-                f"{pipeline_code} is running backfill run pipeline_run_id={existing} as of "
-                f"{kind.run_date.isoformat()}; a scheduled run starts once it ends (or cancel it "
-                f"with `etl-craft cancel --pipeline_code {pipeline_code} --reason ...`)"
-            )
-        if backfill is not None and not kind.backfill:
-            raise RunStateError(
-                f"{pipeline_code} has a scheduled run in progress (pipeline_run_id={existing}); "
-                "a backfill never takes it over"
-            )
-        if run_date is not None and kind.run_date != run_date:
-            finalize = " --finalize-only" if remote else ""
-            raise RunStateError(
-                f"{pipeline_code} has a run in progress (pipeline_run_id={existing}) as of "
-                f"{kind.run_date.isoformat()}, not {run_date.isoformat()}; finish it with "
-                f"`etl-craft run --pipeline_code {pipeline_code}{finalize}`, or cancel it, first"
-            )
-        logger.info("%s: resuming pipeline_run_id=%d", pipeline_code, existing)
-        return existing, None
-    logical_date = (
-        logical_date if queued is not None else (run_date or runlog.today(config.timezone))
-    )
-    reason = None
-    decisions: tuple[trackers.GateDecision, ...] = ()
-    bypassed: tuple[str, ...] = ()
-    if check_gate:
-        if queued is None:
-            with engine.begin() as conn:
-                queued = transitions.create_run(
-                    conn,
-                    pipeline_id,
-                    current_actor(),
-                    run_date=logical_date,
-                    run_key=selector.run_key,
-                    status=RunStatus.QUEUED,
-                )
-        while True:
-            if run_cancelled(engine, queued):
-                return queued, None
-            result = check_gate_now(
-                engine,
-                queued,
-                pipeline_id,
-                clock=clock,
-                policy=config.dependency_gates,
-                wait_seconds=config.limits.gate_wait_minutes * 60,
-            )
-            if result.next_check_at is None:
-                break
-            yield max(0.0, (result.next_check_at - clock.now()).total_seconds())
-        assert isinstance(result.check, PipelineGateResult)
-        gate = result.check
-        bypassed, decisions = gate.bypassed, gate.decisions
-        if not gate.satisfied:
-            reason = "; ".join(gate.reasons)
-    created: int | None
-    with engine.begin() as conn:
-        if queued is not None:
-            try:
-                transitions.admit_run(conn, queued, current_actor())
-            except StaleTransitionError as error:
-                other = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
-                if initialize_only and other == queued:
-                    return queued, None
-                raise RunStateError(
-                    f"{pipeline_code}: another process started pipeline_run_id={other}; "
-                    f"pipeline_run_id={queued} stays QUEUED; select it explicitly to resume"
-                ) from error
-            created = queued
-        elif selector.run_key is not None:
-            created = transitions.create_run(
-                conn,
-                pipeline_id,
-                current_actor(),
-                run_date=logical_date,
-                run_key=selector.run_key,
-                trigger_kind="ORCHESTRATOR" if remote else "MANUAL",
-            )
-        else:
-            created = transitions.create_active_run(
-                conn, pipeline_id, run_date=logical_date, backfill=backfill is not None
-            )
-        if created is None:
-            other = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
-            raise RunStateError(
-                f"{pipeline_code}: another process started pipeline_run_id={other} while this "
-                "one was checking the pipeline's dependencies; that run is left as it is. See "
-                f"`etl-craft history --pipeline_code {pipeline_code}`"
-            )
-        pipeline_run_id = created
-        trackers.record_decisions(conn, pipeline_run_id, decisions)
-        fault_point("pipeline.after_insert")
-        if reason is not None and not transitions.end_run_if(
-            conn, pipeline_run_id, RunStatus.IN_PROGRESS, RunStatus.SKIPPED
-        ):
-            raise RunStateError(
-                f"{pipeline_code}: pipeline_run_id={pipeline_run_id} changed before it could "
-                "be recorded SKIPPED; it is left as it is"
-            )
-    logger.info("%s: started pipeline_run_id=%d", pipeline_code, pipeline_run_id)
-    if bypassed:
-        record_gate_bypass(engine, pipeline_id, pipeline_run_id, config.dependency_gates, bypassed)
-    if backfill is not None:
-        record_change(
-            engine,
-            pipeline_id=pipeline_id,
-            pipeline_run_id=pipeline_run_id,
-            action=InterventionAction.GATE_BYPASS,
-            reason=(
-                f"backfill for {logical_date.isoformat()}: {backfill}; "
-                "dependencies on other pipelines are not checked, and nothing is consumed"
-            ),
-        )
-    return pipeline_run_id, reason
-
-
-def _skipped_run(
-    pipeline_code: str, pipeline_run_id: int, reason: str, hooks: RunHooks
-) -> PipelineOutcome:
-    outcome = PipelineOutcome(
-        RunStatus.SKIPPED,
-        f"{pipeline_code}: pipeline_run_id={pipeline_run_id} SKIPPED — {reason}",
-        pipeline_run_id,
-    )
-    logger.warning("%s", outcome.message)
-    _call_hook("on_finalized", hooks.on_finalized, outcome)
-    return outcome
-
-
-def _paused(pipeline_code: str, pause: Pause) -> PipelineOutcome:
-    """Report a pipeline that started nothing because it is paused."""
-    message = (
-        f"{pipeline_code}: {pause.describe()}; nothing started. `etl-craft resume "
-        f"--pipeline_code {pipeline_code}` lets it run again"
-    )
-    logger.warning("%s", message)
-    return PipelineOutcome(RunStatus.SKIPPED, message, None)
-
-
-def _cancelled_run(
-    engine: Engine,
-    pipeline_code: str,
-    pipeline_run_id: int,
-    task_codes: dict[int, str],
-    hooks: RunHooks,
-) -> PipelineOutcome:
-    """Report a run an operator cancelled; it already ended ``CANCELLED``."""
-    with engine.connect() as conn:
-        rows = runlog.fetch_run_state(conn, pipeline_run_id, list(task_codes))
-    stopped = sorted(
-        task_codes[task_id]
-        for task_id, state in rows.items()
-        if state.status == RunStatus.CANCELLED
-    )
-    message = f"{pipeline_code}: pipeline_run_id={pipeline_run_id} CANCELLED"
-    if stopped:
-        message += f"; stopped: {', '.join(stopped)}"
-    outcome = PipelineOutcome(RunStatus.CANCELLED, message, pipeline_run_id)
-    logger.warning("%s", message)
-    _call_hook("on_finalized", hooks.on_finalized, outcome)
-    return outcome
-
-
-def _settle_unsatisfiable(
-    engine: Engine,
-    graph: DependencyGraph,
-    pipeline_run_id: int,
-    task_codes: dict[int, str],
-    *,
-    failures_final: bool = False,
-) -> list[int]:
-    """Record ``SKIPPED`` for every task not yet run whose dependencies can never be met.
-
-    Returns the tasks recorded.
-    """
-    with engine.connect() as conn:
-        run_state = runlog.fetch_run_state(conn, pipeline_run_id, list(graph.task_ids))
-    skipped: list[int] = []
-    for task_id in graph.unsatisfiable(run_state, failures_final=failures_final):
-        reason = f"its dependencies can never be met under pipeline_run_id={pipeline_run_id}"
-        with engine.begin() as conn:
-            binding = transitions.find_or_create_task_run(conn, task_id, pipeline_run_id)
-            if not binding.created:
-                continue
-            transitions.finish_task_run(
-                conn, binding.task_run_id, status=RunStatus.SKIPPED, error_message=reason
-            )
-        skipped.append(task_id)
-        logger.info("%s: SKIPPED — %s", task_codes[task_id], reason)
-    return skipped
-
-
-NOT_RUN_BY_ORCHESTRATOR = "not run by the orchestrator"
-"""Why ``--finalize-only`` records a task ``SKIPPED`` in remote mode."""
-
-
-def _record_orchestrated(
-    engine: Engine, graph: DependencyGraph, pipeline_run_id: int, task_codes: dict[int, str]
-) -> list[int]:
-    """Record what the orchestrator decided about the tasks it left unfinished; remote mode.
-
-    A task with no row under the run was never run: its trigger rule was not met, or the DAG
-    run was stopped. It is recorded ``SKIPPED``. A task still ``IN-PROGRESS`` lost its
-    ``run --task_code`` process (the orchestrator waits for every task before finalizing), so it
-    is recorded ``FAILED``. Returns the tasks recorded ``SKIPPED``.
-    """
-    with engine.connect() as conn:
-        run_state = runlog.fetch_run_state(conn, pipeline_run_id, list(graph.task_ids))
-    not_run: list[int] = []
-    for task_id in sorted(graph.task_ids, key=lambda t: task_codes[t]):
-        state = run_state.get(task_id)
-        if state is not None and state.status != RunStatus.IN_PROGRESS:
-            continue
-        with engine.begin() as conn:
-            binding = transitions.find_or_create_task_run(conn, task_id, pipeline_run_id)
-            if binding.created:
-                transitions.finish_task_run(
-                    conn,
-                    binding.task_run_id,
-                    status=RunStatus.SKIPPED,
-                    error_message=NOT_RUN_BY_ORCHESTRATOR,
-                )
-                not_run.append(task_id)
-                logger.info("%s: SKIPPED — %s", task_codes[task_id], NOT_RUN_BY_ORCHESTRATOR)
-                continue
-            if binding.status != RunStatus.IN_PROGRESS:
-                continue
-            reason = (
-                "still IN-PROGRESS when the orchestrator finalized the run: its run --task_code "
-                "process ended without recording an outcome"
-            )
-            transitions.finish_task_run(
-                conn, binding.task_run_id, status=RunStatus.FAILED, error_message=reason
-            )
-        logger.error("%s: FAILED — %s", task_codes[task_id], reason)
-    return not_run
-
-
-def _finalize(
-    engine: Engine,
-    pipeline_code: str,
-    pipeline_id: int,
-    pipeline_run_id: int,
-    graph: DependencyGraph,
-    task_codes: dict[int, str],
-    sla_hours: float | None,
-    hooks: RunHooks,
-    never_ready: Sequence[int] = (),
-    after_failure: Sequence[int] = (),
-    *,
-    orchestrated: bool = False,
-) -> PipelineOutcome:
-    """End the run from its tasks' statuses, record its SLA, and consume its upstream runs.
-
-    ``orchestrated`` (remote mode) records the orchestrator's decisions instead of settling the
-    tasks that can never run, and consumes nothing. A run whose tasks all ended ``SKIPPED``, or
-    whose tasks the orchestrator ran none of (a sensor on an upstream failed, say), ends
-    ``SKIPPED``, which a downstream ``SUCCESS`` dependency does not accept.
-    Alerts do not affect a data pipeline's outcome; a pipeline of only alerts judges its alerts.
-    """
-    not_run: list[int] = []
-    if orchestrated:
-        not_run = _record_orchestrated(engine, graph, pipeline_run_id, task_codes)
-    else:
-        _settle_unsatisfiable(engine, graph, pipeline_run_id, task_codes)
-        running = _running_elsewhere(engine, pipeline_code, pipeline_run_id)
-        if running is not None:
-            return running
-    with engine.connect() as conn:
-        run_state = runlog.fetch_run_state(conn, pipeline_run_id, list(graph.task_ids))
-        data_tasks = {
-            task.task_id
-            for task in fetch_task_statuses_for_run(conn, pipeline_id, pipeline_run_id)
-            if task.handler != Handler.EMAIL_ALERT
-        } & set(graph.task_ids)
-    judged_tasks = data_tasks or set(graph.task_ids)
-    alert_failures = sorted(
-        task_codes[task_id]
-        for task_id in set(graph.task_ids) - data_tasks
-        if run_state.get(task_id, TaskRunState()).status == RunStatus.FAILED
-    )
-    unsettled = {
-        task_id: run_state.get(task_id, TaskRunState()).status or "never started"
-        for task_id in judged_tasks
-        if run_state.get(task_id, TaskRunState()).status not in SETTLED_STATUSES
-    }
-    status = RunStatus.FAILED if unsettled else RunStatus.SUCCESS
-    if orchestrated and not unsettled and not_run and judged_tasks <= set(not_run):
-        status = RunStatus.SKIPPED
-    if (
-        not unsettled
-        and judged_tasks
-        and all(run_state[task_id].status == RunStatus.SKIPPED for task_id in judged_tasks)
-    ):
-        status = RunStatus.SKIPPED
-    with engine.begin() as conn:
-        breached_before = runlog.fetch_run_sla(conn, pipeline_run_id).sla_status
-        backfill_run = runlog.fetch_run_kind(conn, pipeline_run_id).backfill
-        ending = transitions.finalize_pipeline_run(
-            conn,
-            pipeline_run_id,
-            status,
-            sla_in_hours=sla_hours,
-            owner=leases.run_owner(pipeline_run_id),
-            consume=not orchestrated and not backfill_run,
-        )
-        current = runlog.fetch_pipeline_run_status(conn, pipeline_run_id)
-    if not ending.ended:
-        message = (
-            f"{pipeline_code}: pipeline_run_id={pipeline_run_id} is {current}: it was ended "
-            f"elsewhere (an operator's cancel, say) while this process was ending it {status}; "
-            f"nothing more was recorded. `etl-craft history --pipeline_code {pipeline_code}` shows "
-            "who ended it"
-        )
-        logger.warning("%s", message)
-        return PipelineOutcome(RunStatus(current), message, pipeline_run_id)
-    sla = ending.sla
-    message = f"{pipeline_code}: pipeline_run_id={pipeline_run_id} {status}"
-    if alert_failures and data_tasks:
-        message += f"; alert task(s) failed: {', '.join(alert_failures)} (see their attempt logs)"
-        logger.error("%s: alert task(s) failed: %s", pipeline_code, ", ".join(alert_failures))
-    if unsettled:
-        listed = ", ".join(f"{task_codes[t]} ({state})" for t, state in unsettled.items())
-        message += f" — {len(unsettled)} task(s) did not succeed: {listed}"
-        if never_ready:
-            message += (
-                f"; {len(never_ready)} of them could not start because their dependencies "
-                "were not met"
-            )
-        if after_failure:
-            skipped = ", ".join(task_codes[t] for t in after_failure)
-            message += f"; skipped because of the failure: {skipped}"
-    if not_run:
-        message += f"; not run by the orchestrator: {', '.join(task_codes[t] for t in not_run)}"
-    with engine.connect() as conn:
-        bypasses = [
-            change
-            for change in fetch_interventions(conn, pipeline_id, pipeline_run_id)
-            if change.pipeline_run_id == pipeline_run_id
-            and change.action == InterventionAction.GATE_BYPASS
-        ]
-    if bypasses:
-        where = sorted({change.task_code or pipeline_code for change in bypasses})
-        message += f"; dependency gates bypassed for {', '.join(where)} (see history)"
-    if sla is not None and sla.status == SlaStatus.BREACHED:
-        message += f"; {sla.describe()}"
-    outcome = PipelineOutcome(status, message, pipeline_run_id, sla)
-    logger.log(logging.INFO if status == RunStatus.SUCCESS else logging.ERROR, "%s", message)
-
-    if sla is not None and sla.status == SlaStatus.BREACHED and breached_before != sla.status:
-        lapse = SlaLapse(pipeline_code, pipeline_run_id, sla.sla_hours, sla.elapsed_hours)
-        _call_hook("on_sla_lapse", hooks.on_sla_lapse, lapse)
-    _call_hook("on_finalized", hooks.on_finalized, outcome)
-    return outcome
-
-
-def _running_elsewhere(
-    engine: Engine, pipeline_code: str, pipeline_run_id: int
-) -> PipelineOutcome | None:
-    """Return the outcome that leaves the run open when a task of it is still running.
-
-    By the time a local run is finalized, every task this process started has ended, so a task
-    still ``IN-PROGRESS`` belongs to another process, or to one that died without recording an
-    outcome. Either way the run must not be ended under it.
-    """
-    with engine.connect() as conn:
-        running = [
-            row
-            for row in fetch_task_rows(conn, pipeline_run_id)
-            if row.status == RunStatus.IN_PROGRESS
-        ]
-    if not running:
-        return None
-    listed = ", ".join(f"{row.task_code} (task_run_id={row.task_run_id})" for row in running)
-    first = running[0].task_code
-    message = (
-        f"{pipeline_code}: pipeline_run_id={pipeline_run_id} stays IN-PROGRESS: {listed} "
-        f"{'is' if len(running) == 1 else 'are'} still IN-PROGRESS in another process. When it "
-        f"ends, `etl-craft run --pipeline_code {pipeline_code}` finishes the run. If that process "
-        f"is gone, record the task's outcome with `etl-craft mark --pipeline_code {pipeline_code} "
-        f"--task_code {first} --status FAILED --stale --reason ...`"
-    )
-    logger.warning("%s", message)
-    return PipelineOutcome(RunStatus.IN_PROGRESS, message, pipeline_run_id)
-
-
-def _sla_watch(
-    engine: Engine, pipeline_code: str, run_id: int, hours: float | None, hooks: RunHooks
-) -> SlaWatch:
-    return SlaWatch(
-        engine,
-        pipeline_code,
-        run_id,
-        hours,
-        lambda lapse: _call_hook("on_sla_lapse", hooks.on_sla_lapse, lapse),
-    )
-
-
-def _call_hook(name: str, hook: Callable[[T], None] | None, value: T) -> None:
-    if hook is None:
-        return
-    try:
-        hook(value)
-    except Exception:
-        logger.exception("the %s hook failed; the run's outcome is unchanged", name)
