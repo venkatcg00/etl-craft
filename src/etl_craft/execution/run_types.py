@@ -14,6 +14,7 @@ from etl_craft.core import interrupts
 from etl_craft.core.enums import (
     RunStatus,
 )
+from etl_craft.core.graph import DependencyGraph
 from etl_craft.engine import runlog
 from etl_craft.engine.repository.pipelines import (
     fetch_pipeline_detail,
@@ -28,6 +29,18 @@ from etl_craft.handlers.mail import send_sla_lapse_email
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+
+@dataclass(frozen=True)
+class PipelineRun:
+    """The identity, task graph and SLA of one admitted pipeline run."""
+
+    pipeline_code: str
+    pipeline_id: int
+    pipeline_run_id: int
+    graph: DependencyGraph
+    task_codes: dict[int, str]
+    sla_hours: float | None
 
 
 @dataclass(frozen=True)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from sqlalchemy.engine import Engine
 
@@ -29,7 +30,13 @@ from etl_craft.execution import leases
 from etl_craft.execution.run_start import (
     load_pipeline,
 )
-from etl_craft.execution.run_types import PipelineOutcome, RunHooks, call_hook, default_hooks
+from etl_craft.execution.run_types import (
+    PipelineOutcome,
+    PipelineRun,
+    RunHooks,
+    call_hook,
+    default_hooks,
+)
 from etl_craft.execution.sla import SlaLapse, SlaWatch
 
 NOT_RUN_BY_ORCHESTRATOR = "not run by the orchestrator"
@@ -66,12 +73,9 @@ def finalize_active_run(
     with log_context(pipeline=pipeline_code, pipeline_run_id=pipeline_run_id):
         return finalize(
             engine,
-            pipeline_code,
-            pipeline_id,
-            pipeline_run_id,
-            graph,
-            task_codes,
-            detail.sla_in_hours,
+            PipelineRun(
+                pipeline_code, pipeline_id, pipeline_run_id, graph, task_codes, detail.sla_in_hours
+            ),
             hooks or default_hooks(config, engine),
             orchestrated=config.mode == Mode.REMOTE,
         )
@@ -148,14 +152,18 @@ def _record_orchestrated(
     return not_run
 
 
+@dataclass(frozen=True)
+class _Judgement:
+    status: RunStatus
+    data_tasks: set[int]
+    alert_failures: list[str]
+    unsettled: dict[int, str]
+    not_run: list[int]
+
+
 def finalize(
     engine: Engine,
-    pipeline_code: str,
-    pipeline_id: int,
-    pipeline_run_id: int,
-    graph: DependencyGraph,
-    task_codes: dict[int, str],
-    sla_hours: float | None,
+    run: PipelineRun,
     hooks: RunHooks,
     never_ready: Sequence[int] = (),
     after_failure: Sequence[int] = (),
@@ -172,23 +180,61 @@ def finalize(
     """
     not_run: list[int] = []
     if orchestrated:
-        not_run = _record_orchestrated(engine, graph, pipeline_run_id, task_codes)
+        not_run = _record_orchestrated(engine, run.graph, run.pipeline_run_id, run.task_codes)
     else:
-        settle_unsatisfiable(engine, graph, pipeline_run_id, task_codes)
-        running = _running_elsewhere(engine, pipeline_code, pipeline_run_id)
+        settle_unsatisfiable(engine, run.graph, run.pipeline_run_id, run.task_codes)
+        running = _running_elsewhere(engine, run.pipeline_code, run.pipeline_run_id)
         if running is not None:
             return running
+    judgement = _judge_run(engine, run, not_run, orchestrated)
+    status = judgement.status
+    with engine.begin() as conn:
+        breached_before = runlog.fetch_run_sla(conn, run.pipeline_run_id).sla_status
+        backfill_run = runlog.fetch_run_kind(conn, run.pipeline_run_id).backfill
+        ending = transitions.finalize_pipeline_run(
+            conn,
+            run.pipeline_run_id,
+            status,
+            sla_in_hours=run.sla_hours,
+            owner=leases.run_owner(run.pipeline_run_id),
+            consume=not orchestrated and not backfill_run,
+        )
+        current = runlog.fetch_pipeline_run_status(conn, run.pipeline_run_id)
+    if not ending.ended:
+        message = (
+            f"{run.pipeline_code}: pipeline_run_id={run.pipeline_run_id} is {current}: "
+            "it was ended "
+            f"elsewhere (an operator's cancel, say) while this process was ending it {status}; "
+            f"nothing more was recorded. `etl-craft history --pipeline_code "
+            f"{run.pipeline_code}` shows "
+            "who ended it"
+        )
+        logger.warning("%s", message)
+        return PipelineOutcome(RunStatus(current), message, run.pipeline_run_id)
+    sla = ending.sla
+    outcome = _outcome(engine, run, judgement, sla, never_ready, after_failure)
+    if sla is not None and sla.status == SlaStatus.BREACHED and breached_before != sla.status:
+        lapse = SlaLapse(run.pipeline_code, run.pipeline_run_id, sla.sla_hours, sla.elapsed_hours)
+        call_hook("on_sla_lapse", hooks.on_sla_lapse, lapse)
+    call_hook("on_finalized", hooks.on_finalized, outcome)
+    return outcome
+
+
+def _judge_run(
+    engine: Engine, run: PipelineRun, not_run: list[int], orchestrated: bool
+) -> _Judgement:
+    """Judge data tasks, using alert outcomes only for an alert-only pipeline."""
     with engine.connect() as conn:
-        run_state = runlog.fetch_run_state(conn, pipeline_run_id, list(graph.task_ids))
+        run_state = runlog.fetch_run_state(conn, run.pipeline_run_id, list(run.graph.task_ids))
         data_tasks = {
             task.task_id
-            for task in fetch_task_statuses_for_run(conn, pipeline_id, pipeline_run_id)
+            for task in fetch_task_statuses_for_run(conn, run.pipeline_id, run.pipeline_run_id)
             if task.handler != Handler.EMAIL_ALERT
-        } & set(graph.task_ids)
-    judged_tasks = data_tasks or set(graph.task_ids)
+        } & set(run.graph.task_ids)
+    judged_tasks = data_tasks or set(run.graph.task_ids)
     alert_failures = sorted(
-        task_codes[task_id]
-        for task_id in set(graph.task_ids) - data_tasks
+        run.task_codes[task_id]
+        for task_id in set(run.graph.task_ids) - data_tasks
         if run_state.get(task_id, TaskRunState()).status == RunStatus.FAILED
     )
     unsettled = {
@@ -205,34 +251,27 @@ def finalize(
         and all(run_state[task_id].status == RunStatus.SKIPPED for task_id in judged_tasks)
     ):
         status = RunStatus.SKIPPED
-    with engine.begin() as conn:
-        breached_before = runlog.fetch_run_sla(conn, pipeline_run_id).sla_status
-        backfill_run = runlog.fetch_run_kind(conn, pipeline_run_id).backfill
-        ending = transitions.finalize_pipeline_run(
-            conn,
-            pipeline_run_id,
-            status,
-            sla_in_hours=sla_hours,
-            owner=leases.run_owner(pipeline_run_id),
-            consume=not orchestrated and not backfill_run,
-        )
-        current = runlog.fetch_pipeline_run_status(conn, pipeline_run_id)
-    if not ending.ended:
-        message = (
-            f"{pipeline_code}: pipeline_run_id={pipeline_run_id} is {current}: it was ended "
-            f"elsewhere (an operator's cancel, say) while this process was ending it {status}; "
-            f"nothing more was recorded. `etl-craft history --pipeline_code {pipeline_code}` shows "
-            "who ended it"
-        )
-        logger.warning("%s", message)
-        return PipelineOutcome(RunStatus(current), message, pipeline_run_id)
-    sla = ending.sla
-    message = f"{pipeline_code}: pipeline_run_id={pipeline_run_id} {status}"
+    return _Judgement(status, data_tasks, alert_failures, unsettled, not_run)
+
+
+def _outcome(
+    engine: Engine,
+    run: PipelineRun,
+    judgement: _Judgement,
+    sla: runlog.SlaResult | None,
+    never_ready: Sequence[int],
+    after_failure: Sequence[int],
+) -> PipelineOutcome:
+    """Describe the committed ending, its unsuccessful tasks, bypasses and SLA."""
+    status = judgement.status
+    data_tasks, alert_failures = judgement.data_tasks, judgement.alert_failures
+    unsettled, not_run = judgement.unsettled, judgement.not_run
+    message = f"{run.pipeline_code}: pipeline_run_id={run.pipeline_run_id} {status}"
     if alert_failures and data_tasks:
         message += f"; alert task(s) failed: {', '.join(alert_failures)} (see their attempt logs)"
-        logger.error("%s: alert task(s) failed: %s", pipeline_code, ", ".join(alert_failures))
+        logger.error("%s: alert task(s) failed: %s", run.pipeline_code, ", ".join(alert_failures))
     if unsettled:
-        listed = ", ".join(f"{task_codes[t]} ({state})" for t, state in unsettled.items())
+        listed = ", ".join(f"{run.task_codes[t]} ({state})" for t, state in unsettled.items())
         message += f" — {len(unsettled)} task(s) did not succeed: {listed}"
         if never_ready:
             message += (
@@ -240,29 +279,24 @@ def finalize(
                 "were not met"
             )
         if after_failure:
-            skipped = ", ".join(task_codes[t] for t in after_failure)
+            skipped = ", ".join(run.task_codes[t] for t in after_failure)
             message += f"; skipped because of the failure: {skipped}"
     if not_run:
-        message += f"; not run by the orchestrator: {', '.join(task_codes[t] for t in not_run)}"
+        message += f"; not run by the orchestrator: {', '.join(run.task_codes[t] for t in not_run)}"
     with engine.connect() as conn:
         bypasses = [
             change
-            for change in fetch_interventions(conn, pipeline_id, pipeline_run_id)
-            if change.pipeline_run_id == pipeline_run_id
+            for change in fetch_interventions(conn, run.pipeline_id, run.pipeline_run_id)
+            if change.pipeline_run_id == run.pipeline_run_id
             and change.action == InterventionAction.GATE_BYPASS
         ]
     if bypasses:
-        where = sorted({change.task_code or pipeline_code for change in bypasses})
+        where = sorted({change.task_code or run.pipeline_code for change in bypasses})
         message += f"; dependency gates bypassed for {', '.join(where)} (see history)"
     if sla is not None and sla.status == SlaStatus.BREACHED:
         message += f"; {sla.describe()}"
-    outcome = PipelineOutcome(status, message, pipeline_run_id, sla)
+    outcome = PipelineOutcome(status, message, run.pipeline_run_id, sla)
     logger.log(logging.INFO if status == RunStatus.SUCCESS else logging.ERROR, "%s", message)
-
-    if sla is not None and sla.status == SlaStatus.BREACHED and breached_before != sla.status:
-        lapse = SlaLapse(pipeline_code, pipeline_run_id, sla.sla_hours, sla.elapsed_hours)
-        call_hook("on_sla_lapse", hooks.on_sla_lapse, lapse)
-    call_hook("on_finalized", hooks.on_finalized, outcome)
     return outcome
 
 
