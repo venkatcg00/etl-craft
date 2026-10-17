@@ -143,19 +143,19 @@ def test_invalid_legacy_targets_refuse_all_pending_changes(legacy_targets_db, na
 
 
 def test_late_failure_rolls_back_schema_data_history_and_ledger(legacy_targets_db, monkeypatch):
-    from etl_craft.engine.repository import task_targets
+    from etl_craft.engine.repository import target_contracts
 
     db = legacy_targets_db
     with db.engine.begin() as conn:
         add_task(conn, add_pipeline(conn, "P"), "load", TARGET_OBJECT="raw.orders")
     before = snapshot(db.engine)
-    original = task_targets.convert_task_targets
+    original = target_contracts.convert_targets
 
     def fail(*args, **kwargs):
         original(*args, **kwargs)
         raise RuntimeError("conversion fault")
 
-    monkeypatch.setattr(task_targets, "convert_task_targets", fail)
+    monkeypatch.setattr(target_contracts, "convert_targets", fail)
     with pytest.raises(MigrationError, match="conversion fault"):
         migrations.apply_pending_migrations(db.engine)
     assert snapshot(db.engine) == before

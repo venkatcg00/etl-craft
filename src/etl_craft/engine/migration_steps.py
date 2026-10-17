@@ -62,27 +62,35 @@ def _convert_sources(conn: Connection, state: LegacyRows, target: Target) -> Non
 
 
 def _legacy_rules(conn: Connection, target: Target) -> LegacyRows:
-    from etl_craft.engine.repository.rule_targets import legacy_rule_targets
+    from etl_craft.engine.repository import target_contracts as contracts
 
-    return legacy_rule_targets(conn, target.catalog, target.warehouse_dialect)
+    return contracts.legacy_targets(
+        conn, contracts.RULE_TARGETS, target.catalog, target.warehouse_dialect
+    )
 
 
 def _convert_rules(conn: Connection, state: LegacyRows, target: Target) -> None:
-    from etl_craft.engine.repository.rule_targets import convert_rule_targets
+    from etl_craft.engine.repository import target_contracts as contracts
 
-    convert_rule_targets(conn, state, target.catalog, target.warehouse_dialect)
+    contracts.convert_targets(
+        conn, contracts.RULE_TARGETS, state, target.catalog, target.warehouse_dialect
+    )
 
 
 def _legacy_tasks(conn: Connection, target: Target) -> LegacyRows:
-    from etl_craft.engine.repository.task_targets import legacy_task_targets
+    from etl_craft.engine.repository import target_contracts as contracts
 
-    return legacy_task_targets(conn, target.catalog, target.warehouse_dialect)
+    return contracts.legacy_targets(
+        conn, contracts.TASK_TARGETS, target.catalog, target.warehouse_dialect
+    )
 
 
 def _convert_tasks(conn: Connection, state: LegacyRows, target: Target) -> None:
-    from etl_craft.engine.repository.task_targets import convert_task_targets
+    from etl_craft.engine.repository import target_contracts as contracts
 
-    convert_task_targets(conn, state, target.catalog, target.warehouse_dialect)
+    contracts.convert_targets(
+        conn, contracts.TASK_TARGETS, state, target.catalog, target.warehouse_dialect
+    )
 
 
 STEPS: dict[str, MarkerStep] = {

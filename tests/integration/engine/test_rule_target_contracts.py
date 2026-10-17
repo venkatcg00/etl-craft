@@ -167,7 +167,7 @@ def test_deleted_rule_reconstructs_original_target(legacy_rules_db, tmp_path):
 def test_late_conversion_failure_rolls_back_schema_rows_history_and_ledger(
     legacy_rules_db, monkeypatch
 ):
-    from etl_craft.engine.repository import rule_targets
+    from etl_craft.engine.repository import target_contracts
 
     db = legacy_rules_db
     with db.engine.begin() as conn:
@@ -177,13 +177,13 @@ def test_late_conversion_failure_rolls_back_schema_rows_history_and_ledger(
         rows = conn.execute(text("SELECT * FROM CFG_BUSINESS_RULES")).all()
         history = conn.execute(text("SELECT * FROM AUD_CFG_BUSINESS_RULES_HISTORY")).all()
         ledger = conn.execute(text("SELECT * FROM SCHEMA_MIGRATIONS")).all()
-    original = rule_targets.convert_rule_targets
+    original = target_contracts.convert_targets
 
     def fail_after_copy(*args, **kwargs):
         original(*args, **kwargs)
         raise RuntimeError("conversion fault")
 
-    monkeypatch.setattr(rule_targets, "convert_rule_targets", fail_after_copy)
+    monkeypatch.setattr(target_contracts, "convert_targets", fail_after_copy)
     with pytest.raises(MigrationError, match="conversion fault"):
         migrations.apply_pending_migrations(
             db.engine, catalog="analytics", warehouse_dialect="duckdb"
