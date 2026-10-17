@@ -126,7 +126,7 @@ item's text, or work done early under another item.
 | S5.O.2a Common config contract | Done | #149 | Mandatory core/custom CFG audit fields and keys, safe token lifecycle history and lossless upgrades |
 | S5.O.2b Normalized object contracts | Done | #150, #151, #152, #153, #154, #160, #162, #181 | Merge column lists retain parameter storage; lineage versions use component endpoints; target state, view statements and rule results are keyed by components, and target locks use the resolved identity |
 | S5.P Project documentation gap UI | Done | #165 | Structured schema/lineage gaps, accessible column/graph warnings and read-only comparison API |
-| S5.R Consolidate before the cluster | In progress | #179, #185, #188, #189 | Items 3 to 6 done: migration markers are a registry of Python steps; status, attempt, trigger and role values are enums; the longest functions are split; identifier quoting, durations and Y/N flags are written once; items 1, 2, 7 and 8 pending |
+| S5.R Consolidate before the cluster | In progress | #179, #185, #188 to #190 | Items 2 to 6 done: rule and task targets convert through one module; migration markers are a registry of Python steps; status, attempt, trigger and role values are enums; the longest functions are split; identifier quoting, durations and Y/N flags are written once; items 1, 7 and 8 pending |
 | S5.S Accounts, login and roles | Planned | | Registered user and service accounts, password and SSO login, tokens for services, a role check on every action, no implicit actor, local installations that operate a server |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
@@ -420,6 +420,11 @@ The separate frozen 0.4 soak deployment is unchanged.
     transaction, like the other checks; its result is unchanged.
   - **Plan edits in the same PR.** At the owner's request, it also records business rules as
     complete queries (S6.D item 1) and the new S5.X `SQL_SCRIPT` item.
+
+- **S5.R item 2 (#190)** replaces `rule_targets.py` and `task_targets.py` with
+  `engine/repository/target_contracts.py`: one check, read and conversion path, and a
+  `TargetContract` record each for rules and tasks. Its SQL text and dialect branches move to
+  the query catalog and `dialects/` with item 1.
 
 - **S5.R item 5 (#189)** splits `create_app`, `upgrade_targets`, `config_as_of` and
   `_check_event` by responsibility, with no transaction moved.
