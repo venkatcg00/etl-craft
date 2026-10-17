@@ -151,6 +151,43 @@ item's text, or work done early under another item.
 
 What a person picking up the work needs that the code and the item texts do not say.
 
+**Next agent: finishing S5.R (as of #193).** Two pieces remain, each one pull request:
+
+1. *Item 8, the configuration loader* (`refactor/config-loader-config`). Split
+   `config/loader.py` by section (engine, warehouse, email, cloning, docs) and type each
+   section's raw mapping in place of bare `Any`. Its helpers (`_mapping`, `_reject_unknown`,
+   `_parse_bool`, `_whole_number`, `_Fields` and others) are shared across sections. Keep them
+   in one helpers module under public names; never import another module's `_private` name.
+2. *Shorten the execution functions #193 moved whole*: `run_start.start_steps`,
+   `run_finish.finalize`, `pipeline.pipeline_steps`, `reruns.rerun_task` and
+   `runner.run_task`. Group repeated parameters in dataclasses, as `StartOptions` does.
+   Concurrency code: run its tests 20 times (`AGENTS.md`, "Concurrency").
+
+Traps these refactors hit, with what works:
+
+- **The baseline is compared file by file.** Moving a function that carries debt into a new
+  module reads as growth even when the total falls. Lower the debt in the same pull request
+  or stop and ask the owner; never apply `quality-exception` yourself.
+- **Status writes stay in `engine/transitions.py`.** `test_no_direct_status_writes` fails
+  otherwise. That module is exactly at its 950-line baseline: any line added there needs a
+  line removed.
+- **mypy refuses implicit re-exports.** After moving a name, repoint every importer in
+  `src/` and `tests/` (`git grep`). Also repoint each `monkeypatch.setattr(module, ...)`
+  target, the string paths passed to `tests/fixtures/races.py`, and `fault=` names, to the
+  module where the name is now looked up.
+- **The query catalog.** Every dialect must expose the same query names, so a
+  dialect-specific query needs a file in both `sqlite/queries/` and `postgres/queries/`.
+  Every selected column needs a lower-case alias, so `SELECT *` is refused. SQL built from
+  table names belongs in `EngineDialect` methods.
+- **Renaming a private function to public** can collide with a local variable of that name
+  (`paused` became `paused_outcome`).
+- **Moving code with a script** drops module-level assignments (`logger`, `TypeVar`s,
+  constants). Run `ruff check` and `mypy --strict` on `src/etl_craft` after each move.
+- **Before calling a refactor done:** `make static docs`, the unit tests, and the
+  integration tests of every touched package on both Engine DBs with
+  `ETL_CRAFT_REQUIRE_SERVICES=1`. The pre-PR skill lists the environment failures (Iceberg
+  REST after a reboot) to rule out first.
+
 **The 0.4 gate and 0.4.0.** The soak ran the 0.3.0 wheel (`release/0.3.0` at bbf2bdc, the same
 `src/` and lock file as `v0.3.0`) from 10 October 08:01 UTC until a reboot on 16 October at about
 05:09 UTC, 5 days 21 hours. Its last check passed: every due tick made one run (563, 564 and 564),
