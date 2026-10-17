@@ -22,7 +22,7 @@ import logging
 import os
 import socket
 import sys
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.engine import Engine
@@ -86,6 +86,31 @@ from etl_craft.execution.supervisor import (
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class _TaskRun:
+    """The task and explicit run shared by retrying and attempt admission."""
+
+    pipeline_code: str
+    task_code: str
+    task_id: int
+    pipeline_run_id: int
+    force: bool
+    decisions: tuple[trackers.GateDecision, ...] = ()
+    reopened: str | None = None
+
+
+@dataclass(frozen=True)
+class _LocalOptions:
+    """Controls shared by local task admission and its retry loop."""
+
+    force: bool
+    gate: TrackedGate | None
+    child: ChildOptions | None
+    selector: runlog.RunSelector
+    admission: CrossPipelineCheck | None
+    automatic_retries: bool
+
+
 def run_task(
     engine: Engine,
     config: ConnectorConfig,
@@ -136,7 +161,26 @@ def run_task(
         return _run_for_orchestrator(
             engine, config, pipeline_code, pipeline_id, task_code, child, selector
         )
-    gate = gate or TrackedGate(
+    return _run_local(
+        engine,
+        config,
+        pipeline_code,
+        pipeline_id,
+        task_code,
+        _LocalOptions(force, gate, child, selector, admission, automatic_retries),
+    )
+
+
+def _run_local(
+    engine: Engine,
+    config: ConnectorConfig,
+    pipeline_code: str,
+    pipeline_id: int,
+    task_code: str,
+    options: _LocalOptions,
+) -> TaskOutcome:
+    """Resolve the selected run, check admission and drive its attempts and durable retries."""
+    gate = options.gate or TrackedGate(
         policy=config.dependency_gates, wait_seconds=config.limits.gate_wait_minutes * 60
     )
     with engine.connect() as conn:
@@ -145,14 +189,14 @@ def run_task(
         pipeline_run_id, reopened = transitions.resolve_run(
             conn,
             pipeline_id,
-            force=force,
+            force=options.force,
             reason=f"--force: {task_code} runs again under the ended run",
-            selector=selector,
+            selector=options.selector,
         )
     decisions: tuple[trackers.GateDecision, ...] = ()
-    if not force:
+    if not options.force:
         blocked, cross = _preflight(
-            engine, gate, pipeline_id, task_id, task_code, pipeline_run_id, admission
+            engine, gate, pipeline_id, task_id, task_code, pipeline_run_id, options.admission
         )
         if blocked is not None:
             logger.info(blocked.message)
@@ -167,54 +211,58 @@ def run_task(
                 cross.bypassed,
                 task_id=task_id,
             )
-    if automatic_retries:
-        waiting, _ = refresh_retries(engine, config, pipeline_run_id, {task_id})
-        if task_id in waiting and not _wait_retry(
-            engine, pipeline_run_id, pipeline_code, waiting[task_id], gate, child
+    task = _TaskRun(
+        pipeline_code, task_code, task_id, pipeline_run_id, options.force, decisions, reopened
+    )
+    return _run_with_retries(engine, config, task, gate, options)
+
+
+def _run_with_retries(
+    engine: Engine,
+    config: ConnectorConfig,
+    task: _TaskRun,
+    gate: TrackedGate,
+    options: _LocalOptions,
+) -> TaskOutcome:
+    """Wait for durable retry deadlines outside the worker, preserving each attempt's outcome."""
+    if options.automatic_retries:
+        waiting, _ = refresh_retries(engine, config, task.pipeline_run_id, {task.task_id})
+        if task.task_id in waiting and not _wait_retry(
+            engine,
+            task.pipeline_run_id,
+            task.pipeline_code,
+            waiting[task.task_id],
+            gate,
+            options.child,
         ):
             return TaskOutcome(
                 RunStatus.CANCELLED
-                if run_cancelled(engine, pipeline_run_id)
+                if run_cancelled(engine, task.pipeline_run_id)
                 else RunStatus.IN_PROGRESS,
-                f"{task_code}: retry was not started",
+                f"{task.task_code}: retry was not started",
             )
-    outcome = _run_attempt(
-        engine,
-        config,
-        task_id,
-        task_code,
-        pipeline_code,
-        pipeline_run_id,
-        force,
-        child,
-        decisions=decisions,
-    )
-    while automatic_retries and outcome.status == RunStatus.FAILED:
-        waiting, _ = refresh_retries(engine, config, pipeline_run_id, {task_id})
-        if task_id not in waiting:
+    outcome = _run_attempt(engine, config, task, options.child)
+    while options.automatic_retries and outcome.status == RunStatus.FAILED:
+        waiting, _ = refresh_retries(engine, config, task.pipeline_run_id, {task.task_id})
+        if task.task_id not in waiting:
             break
-        if not _wait_retry(engine, pipeline_run_id, pipeline_code, waiting[task_id], gate, child):
+        if not _wait_retry(
+            engine,
+            task.pipeline_run_id,
+            task.pipeline_code,
+            waiting[task.task_id],
+            gate,
+            options.child,
+        ):
             return TaskOutcome(
                 RunStatus.CANCELLED
-                if run_cancelled(engine, pipeline_run_id)
+                if run_cancelled(engine, task.pipeline_run_id)
                 else RunStatus.IN_PROGRESS,
-                f"{task_code}: retry was not started",
+                f"{task.task_code}: retry was not started",
                 outcome.task_run_id,
             )
-        outcome = _run_attempt(
-            engine,
-            config,
-            task_id,
-            task_code,
-            pipeline_code,
-            pipeline_run_id,
-            force,
-            child,
-            decisions=decisions,
-        )
-    if reopened is not None:
-        return replace(outcome, reopened=reopened)
-    return outcome
+        outcome = _run_attempt(engine, config, task, options.child)
+    return replace(outcome, reopened=task.reopened) if task.reopened is not None else outcome
 
 
 def _wait_retry(
@@ -280,11 +328,7 @@ def _run_overridden(
     outcome = _run_attempt(
         engine,
         config,
-        task_id,
-        task_code,
-        pipeline_code,
-        pipeline_run_id,
-        False,
+        _TaskRun(pipeline_code, task_code, task_id, pipeline_run_id, False),
         child,
         rerun=status in SETTLED_STATUSES,
     )
@@ -348,11 +392,7 @@ def _run_for_orchestrator(
     return _run_attempt(
         engine,
         config,
-        task_id,
-        task_code,
-        pipeline_code,
-        pipeline_run_id,
-        False,
+        _TaskRun(pipeline_code, task_code, task_id, pipeline_run_id, False),
         child,
         rerun=rerun,
     )
@@ -482,22 +522,22 @@ def _record_skipped(
 def _run_attempt(
     engine: Engine,
     config: ConnectorConfig,
-    task_id: int,
-    task_code: str,
-    pipeline_code: str,
-    pipeline_run_id: int,
-    force: bool,
+    task: _TaskRun,
     child: ChildOptions | None,
     *,
     rerun: bool = False,
-    decisions: tuple[trackers.GateDecision, ...] = (),
 ) -> TaskOutcome:
     """Admit an attempt and run it in the foreground; see ``execute_attempt``."""
     with engine.connect() as conn:
-        handler = fetch_task_execution_detail(conn, task_id).handler
+        handler = fetch_task_execution_detail(conn, task.task_id).handler
     if handler == "EVENT_WAIT":
         result = check_event(
-            engine, config, pipeline_run_id, task_id, datetime.now(UTC), decisions=decisions
+            engine,
+            config,
+            task.pipeline_run_id,
+            task.task_id,
+            datetime.now(UTC),
+            decisions=task.decisions,
         )
         return TaskOutcome(
             RunStatus(result.status or RunStatus.IN_PROGRESS),
@@ -508,13 +548,13 @@ def _run_attempt(
     spec = admit_attempt(
         engine,
         config,
-        task_id,
-        task_code,
-        pipeline_code,
-        pipeline_run_id,
-        force,
+        task.task_id,
+        task.task_code,
+        task.pipeline_code,
+        task.pipeline_run_id,
+        task.force,
         rerun=rerun,
-        decisions=decisions,
+        decisions=task.decisions,
     )
     return execute_attempt(engine, config, spec, child or ChildOptions())
 
@@ -594,21 +634,7 @@ def execute_attempt(
         )
     try:
         fault_point("runner.after_bind")
-        return _start_and_record(
-            engine,
-            config,
-            spec.task_run_id,
-            spec.attempt_number,
-            spec.timeout_seconds,
-            spec.task_code,
-            spec.pipeline_code,
-            spec.pipeline_run_id,
-            spec.force,
-            child,
-            rerun=spec.rerun,
-            attempt_id=spec.attempt_id,
-            owner=owner,
-        )
+        return _start_and_record(engine, config, spec, child, owner)
     except BaseException as error:
         _fail_after_bind(
             engine, spec.task_run_id, spec.task_code, error, attempt_id=spec.attempt_id, owner=owner
@@ -652,33 +678,71 @@ def _fail_after_bind(
 
 
 def _start_and_record(
-    engine: Engine,
-    config: ConnectorConfig,
-    task_run_id: int,
-    attempt: int,
-    timeout: int,
-    task_code: str,
-    pipeline_code: str,
-    pipeline_run_id: int,
-    force: bool,
-    child: ChildOptions,
-    *,
-    rerun: bool,
-    attempt_id: int,
-    owner: str,
+    engine: Engine, config: ConnectorConfig, spec: AttemptSpec, child: ChildOptions, owner: str
 ) -> TaskOutcome:
     """Start the bound attempt's task process, wait for it, and record how it ended."""
     assert config.config_path is not None
-    log_path = attempt_log_path(config, pipeline_code, pipeline_run_id, task_code, attempt)
+    log_path = attempt_log_path(
+        config, spec.pipeline_code, spec.pipeline_run_id, spec.task_code, spec.attempt_number
+    )
+    argv = _child_argv(config, spec, child, owner)
+    logger.info(
+        "starting %s attempt %d (task_run_id=%d), time limit %s, log %s",
+        spec.task_code,
+        spec.attempt_number,
+        spec.task_run_id,
+        f"{spec.timeout_seconds}s" if spec.timeout_seconds else "none",
+        log_path,
+    )
+    with (
+        CancelWatch(engine, spec.pipeline_run_id, child) as stop,
+        leases.heartbeat(engine, "attempt", spec.attempt_id, owner, stop),
+    ):
+        result = run_child(
+            ChildSpec(
+                argv=(sys.executable, *argv),
+                timeout_seconds=spec.timeout_seconds,
+                log_path=log_path,
+                # Output reaches the log as it is written, so a hang or a kill loses none of it.
+                env={
+                    **os.environ,
+                    "PYTHONUNBUFFERED": "1",
+                    "ETL_CRAFT_ATTEMPT_ID": str(spec.attempt_id),
+                    "ETL_CRAFT_ATTEMPT_OWNER": owner,
+                },
+            ),
+            kill_grace_seconds=child.kill_grace_seconds,
+            cancel=stop,
+            on_started=lambda pid: attempt_started(engine, spec.attempt_id, owner, pid),
+        )
+    return retrying(
+        f"recording how {spec.task_code} ended",
+        lambda: record_attempt(
+            engine,
+            spec.task_run_id,
+            spec.pipeline_run_id,
+            spec.task_code,
+            result,
+            log_path,
+            attempt_id=spec.attempt_id,
+            owner=owner,
+        ),
+    )
+
+
+def _child_argv(
+    config: ConnectorConfig, spec: AttemptSpec, child: ChildOptions, owner: str
+) -> list[str]:
+    """Build the child invocation for this exact claimed attempt."""
     argv = [
         "-m",
         child.module,
         "--config",
         str(config.config_path),
         "--task-run-id",
-        str(task_run_id),
+        str(spec.task_run_id),
         "--attempt-id",
-        str(attempt_id),
+        str(spec.attempt_id),
         "--owner-id",
         owner,
         "--log-level",
@@ -686,49 +750,8 @@ def _start_and_record(
         "--log-format",
         child.log_format,
     ]
-    if force:
+    if spec.force:
         argv.append("--force")
-    if rerun:
+    if spec.rerun:
         argv.append("--rerun")
-    logger.info(
-        "starting %s attempt %d (task_run_id=%d), time limit %s, log %s",
-        task_code,
-        attempt,
-        task_run_id,
-        f"{timeout}s" if timeout else "none",
-        log_path,
-    )
-    with (
-        CancelWatch(engine, pipeline_run_id, child) as stop,
-        leases.heartbeat(engine, "attempt", attempt_id, owner, stop),
-    ):
-        result = run_child(
-            ChildSpec(
-                argv=(sys.executable, *argv),
-                timeout_seconds=timeout,
-                log_path=log_path,
-                # Output reaches the log as it is written, so a hang or a kill loses none of it.
-                env={
-                    **os.environ,
-                    "PYTHONUNBUFFERED": "1",
-                    "ETL_CRAFT_ATTEMPT_ID": str(attempt_id),
-                    "ETL_CRAFT_ATTEMPT_OWNER": owner,
-                },
-            ),
-            kill_grace_seconds=child.kill_grace_seconds,
-            cancel=stop,
-            on_started=lambda pid: attempt_started(engine, attempt_id, owner, pid),
-        )
-    return retrying(
-        f"recording how {task_code} ended",
-        lambda: record_attempt(
-            engine,
-            task_run_id,
-            pipeline_run_id,
-            task_code,
-            result,
-            log_path,
-            attempt_id=attempt_id,
-            owner=owner,
-        ),
-    )
+    return argv

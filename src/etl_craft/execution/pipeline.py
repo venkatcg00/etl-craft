@@ -66,6 +66,7 @@ from etl_craft.execution.interventions import (
 from etl_craft.execution.pools import Pool
 from etl_craft.execution.run_finish import finalize, settle_unsatisfiable, sla_watch
 from etl_craft.execution.run_start import (
+    StartOptions,
     cancelled_run,
     load_pipeline,
     paused_outcome,
@@ -73,7 +74,13 @@ from etl_craft.execution.run_start import (
     skipped_run,
     start_steps,
 )
-from etl_craft.execution.run_types import PipelineOutcome, RunHooks, default_hooks, drive
+from etl_craft.execution.run_types import (
+    PipelineOutcome,
+    PipelineRun,
+    RunHooks,
+    default_hooks,
+    drive,
+)
 from etl_craft.execution.scheduler import Scheduler
 
 logger = logging.getLogger(__name__)
@@ -147,10 +154,12 @@ def pipeline_steps(
         pipeline_code,
         pipeline_id,
         clock,
-        check_gate=not force and backfill is None,
-        run_date=run_date,
-        backfill=backfill,
-        selector=selector,
+        StartOptions(
+            check_gate=not force and backfill is None,
+            run_date=run_date,
+            backfill=backfill,
+            selector=selector,
+        ),
     )
     if run_cancelled(engine, pipeline_run_id):
         with engine.connect() as conn:
@@ -170,73 +179,107 @@ def pipeline_steps(
             detail, graph, task_codes = load_pipeline(
                 conn, pipeline_id, detail=detail, graph_data=graph_data
             )
-        scheduler = Scheduler(
-            engine,
-            config,
-            pipeline_code,
-            pipeline_id,
-            pipeline_run_id,
-            task_codes,
-            graph,
-            force=force,
-            clock=clock,
-            pool=pool,
-            child=child or ChildOptions(),
-            paused=lambda: (
-                (stop_dispatch is not None and stop_dispatch.is_set())
-                or open_pause(engine, pipeline_code) is not None
-            ),
-            settle=lambda final: settle_unsatisfiable(
-                engine, graph, pipeline_run_id, task_codes, failures_final=final
-            ),
+        run = PipelineRun(
+            pipeline_code, pipeline_id, pipeline_run_id, graph, task_codes, detail.sla_in_hours
         )
-        try:
-            with sla_watch(engine, pipeline_code, pipeline_run_id, detail.sla_in_hours, hooks):
-                while not scheduler.step_riding_outages():
-                    delay = (
-                        0.1
-                        if scheduler.jobs or scheduler.next_check_at is None
-                        else max(0.0, (scheduler.next_check_at - clock.now()).total_seconds())
-                    )
-                    if any(event.next_check_at for event in scheduler.event_due.values()):
-                        delay = min(1.0, delay)
-                    yield delay
-        except BaseException:
-            scheduler.close(interrupted=True)
-            raise
-        else:
-            scheduler.close()
-        never_ready, after_failure = scheduler.never_ready, scheduler.after_failure
-        if run_cancelled(engine, pipeline_run_id):
-            return cancelled_run(engine, pipeline_code, pipeline_run_id, task_codes, hooks)
-        if scheduler.cancel.is_set() or (stop_dispatch is not None and stop_dispatch.is_set()):
-            return PipelineOutcome(
-                RunStatus.IN_PROGRESS,
-                f"pipeline_run_id={pipeline_run_id}: supervisor stopped admitting tasks; "
-                "resume this run",
-                pipeline_run_id,
-            )
-        paused = open_pause(engine, pipeline_code)
-        if paused is not None:
-            message = (
-                f"{pipeline_code}: pipeline_run_id={pipeline_run_id} stays IN-PROGRESS, "
-                f"{paused.describe()}; the tasks that were running finished, and "
-                "`etl-craft run` goes on with the rest once it is resumed"
-            )
-            logger.warning("%s", message)
-            return PipelineOutcome(RunStatus.IN_PROGRESS, message, pipeline_run_id)
-        return finalize(
-            engine,
-            pipeline_code,
-            pipeline_id,
-            pipeline_run_id,
-            graph,
-            task_codes,
-            detail.sla_in_hours,
-            hooks,
-            never_ready,
-            after_failure,
+        options = _ScheduleOptions(force, clock, child, hooks, stop_dispatch, pool)
+        return (yield from _run_schedule(engine, config, run, options))
+
+
+@dataclass(frozen=True)
+class _ScheduleOptions:
+    """The controls shared by a run's scheduler and its completion checks."""
+
+    force: bool
+    clock: Clock
+    child: ChildOptions | None
+    hooks: RunHooks
+    stop_dispatch: threading.Event | None
+    pool: Pool | None
+
+
+def _run_schedule(
+    engine: Engine, config: ConnectorConfig, run: PipelineRun, options: _ScheduleOptions
+) -> Generator[float, None, PipelineOutcome]:
+    """Drive admitted tasks, then finalize only when the supervisor is allowed to finish."""
+    scheduler = Scheduler(
+        engine,
+        config,
+        run.pipeline_code,
+        run.pipeline_id,
+        run.pipeline_run_id,
+        run.task_codes,
+        run.graph,
+        force=options.force,
+        clock=options.clock,
+        pool=options.pool,
+        child=options.child or ChildOptions(),
+        paused=lambda: (
+            (options.stop_dispatch is not None and options.stop_dispatch.is_set())
+            or open_pause(engine, run.pipeline_code) is not None
+        ),
+        settle=lambda final: settle_unsatisfiable(
+            engine, run.graph, run.pipeline_run_id, run.task_codes, failures_final=final
+        ),
+    )
+    yield from _drive_scheduler(engine, run, scheduler, options)
+    stopped = _stopped_run(engine, run, scheduler, options)
+    if stopped is not None:
+        return stopped
+    return finalize(engine, run, options.hooks, scheduler.never_ready, scheduler.after_failure)
+
+
+def _drive_scheduler(
+    engine: Engine, run: PipelineRun, scheduler: Scheduler, options: _ScheduleOptions
+) -> Generator[float, None, None]:
+    """Yield scheduler deadlines and close all jobs on completion or interruption."""
+    try:
+        with sla_watch(
+            engine, run.pipeline_code, run.pipeline_run_id, run.sla_hours, options.hooks
+        ):
+            while not scheduler.step_riding_outages():
+                delay = (
+                    0.1
+                    if scheduler.jobs or scheduler.next_check_at is None
+                    else max(0.0, (scheduler.next_check_at - options.clock.now()).total_seconds())
+                )
+                if any(event.next_check_at for event in scheduler.event_due.values()):
+                    delay = min(1.0, delay)
+                yield delay
+    except BaseException:
+        scheduler.close(interrupted=True)
+        raise
+    else:
+        scheduler.close()
+
+
+def _stopped_run(
+    engine: Engine, run: PipelineRun, scheduler: Scheduler, options: _ScheduleOptions
+) -> PipelineOutcome | None:
+    """Report cancellation, stopped dispatch or a pause without finalizing the run."""
+    if run_cancelled(engine, run.pipeline_run_id):
+        return cancelled_run(
+            engine, run.pipeline_code, run.pipeline_run_id, run.task_codes, options.hooks
         )
+    if scheduler.cancel.is_set() or (
+        options.stop_dispatch is not None and options.stop_dispatch.is_set()
+    ):
+        return PipelineOutcome(
+            RunStatus.IN_PROGRESS,
+            f"pipeline_run_id={run.pipeline_run_id}: supervisor stopped admitting tasks; "
+            "resume this run",
+            run.pipeline_run_id,
+        )
+    paused = open_pause(engine, run.pipeline_code)
+    if paused is not None:
+        message = (
+            f"{run.pipeline_code}: pipeline_run_id={run.pipeline_run_id} stays IN-PROGRESS, "
+            f"{paused.describe()}; the tasks that were running finished, and "
+            "`etl-craft run` goes on with the rest once it is resumed"
+        )
+        logger.warning("%s", message)
+        return PipelineOutcome(RunStatus.IN_PROGRESS, message, run.pipeline_run_id)
+    return None
 
 
 MAX_BACKFILL_DAYS = 366

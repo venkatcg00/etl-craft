@@ -126,7 +126,7 @@ item's text, or work done early under another item.
 | S5.O.2a Common config contract | Done | #149 | Mandatory core/custom CFG audit fields and keys, safe token lifecycle history and lossless upgrades |
 | S5.O.2b Normalized object contracts | Done | #150, #151, #152, #153, #154, #160, #162, #181 | Merge column lists retain parameter storage; lineage versions use component endpoints; target state, view statements and rule results are keyed by components, and target locks use the resolved identity |
 | S5.P Project documentation gap UI | Done | #165 | Structured schema/lineage gaps, accessible column/graph warnings and read-only comparison API |
-| S5.R Consolidate before the cluster | In progress | #179, #185, #188 to #193, #195 | Items 1 to 6 and 8 done; item 7 split the execution core by responsibility, with shortening its moved functions still pending; the configuration loader is split by section with typed raw settings and shared helpers |
+| S5.R Consolidate before the cluster | Done | #179, #185, #188 to #193, #195, #201 | Items 1 to 8 complete: the execution core and configuration loader are split by responsibility; the moved execution functions are shortened with shared run records and unchanged transactions and retries |
 | S5.S Accounts, login and roles | Planned | | Registered user and service accounts, password and SSO login, tokens for services, a role check on every action, no implicit actor, local installations that operate a server |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
@@ -151,13 +151,12 @@ item's text, or work done early under another item.
 
 What a person picking up the work needs that the code and the item texts do not say.
 
-**Next agent: finishing S5.R (as of #195).** One piece remains, in one pull request:
-shorten the execution functions #193 moved whole: `run_start.start_steps`,
-`run_finish.finalize`, `pipeline.pipeline_steps`, `reruns.rerun_task` and
-`runner.run_task`. Group repeated parameters in dataclasses, as `StartOptions` does.
-Concurrency code: run its tests 20 times (`AGENTS.md`, "Concurrency").
-The configuration loader split is complete (#195); its shared helpers live under public
-names in `config/loader_helpers.py`.
+**Next agent: after S5.R (#201).** S5.R is complete. The next item is S5.S item 1,
+Accounts and roles (`feat/accounts-schema`); read its whole section and apply the
+stop-and-ask review before implementation. Execution shares its run identity, task graph and
+SLA through `run_types.PipelineRun`; initialization and local admission share the frozen
+`run_start.StartOptions`. The configuration loader's shared helpers live under public names
+in `config/loader_helpers.py`.
 
 Traps these refactors hit, with what works:
 
@@ -259,6 +258,12 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.R item 7, shortening the moved execution functions (#201), passed `make static docs`,
+all 1,807 unit tests, all 517 execution integration tests and 101 API/overseer caller tests.
+Twenty consecutive rounds of 32 admission, lease, retry, cancellation and atomic-ending tests
+passed on both Engine DBs (640 executions), with services required and no skips.
+Cloud acceptance, local wheel demos, Airflow and actionlint were not needed for this refactor.
 
 S5.R item 8, configuration loader (#195), passed `make static docs`, all 1,807 unit tests,
 and 157 connection, run-connection, validation, catalog and lineage integration tests,
@@ -458,6 +463,17 @@ The separate frozen 0.4 soak deployment is unchanged.
     transaction, like the other checks; its result is unchanged.
   - **Plan edits in the same PR.** At the owner's request, it also records business rules as
     complete queries (S6.D item 1) and the new S5.X `SQL_SCRIPT` item.
+
+- **S5.R item 7, execution follow-up (#201)** shortens `start_steps`, `finalize`,
+  `pipeline_steps`, `rerun_task`, `run_task` and `_start_and_record` below 80 lines, with no
+  execution module over 800 lines. Run selection, gate waiting and admission are separate;
+  scheduler driving and stop checks, outcome judgement and messages, downstream reruns and
+  durable retry execution each have their own function. Process startup takes `AttemptSpec`.
+  - **Decisions.** Caller-facing keyword signatures stay compatible; repeated internal
+    parameters are grouped in frozen records. The selection/reopen, admission/decision and
+    finalization/consumption transactions, lease scopes, interrupted cleanup, retry outcome
+    fields, messages and post-commit hooks are unchanged. The unrelated long `backfill`
+    function remains outside this follow-up's named functions.
 
 - **S5.R item 7 (#193)** splits `execution/pipeline.py` into `run_types.py` (outcome, hooks,
   step driver), `run_start.py` (admission and start), `run_finish.py` (finalization and SLA),

@@ -12,14 +12,13 @@ from etl_craft.core.enums import (
     RunStatus,
 )
 from etl_craft.core.errors import RunStateError
-from etl_craft.core.graph import DependencyGraph
 from etl_craft.core.log import log_context
 from etl_craft.engine import runlog
 from etl_craft.engine.repository.pipelines import (
     resolve_pipeline_id,
 )
 from etl_craft.engine.repository.tasks import resolve_task_id
-from etl_craft.execution.attempt_types import ChildOptions, Override
+from etl_craft.execution.attempt_types import ChildOptions, Override, TaskOutcome
 from etl_craft.execution.interventions import (
     check_override,
     reset_engine_skipped,
@@ -28,7 +27,7 @@ from etl_craft.execution.run_finish import finalize
 from etl_craft.execution.run_start import (
     load_pipeline,
 )
-from etl_craft.execution.run_types import PipelineOutcome, RunHooks, default_hooks
+from etl_craft.execution.run_types import PipelineOutcome, PipelineRun, RunHooks, default_hooks
 from etl_craft.execution.runner import run_task
 
 logger = logging.getLogger(__name__)
@@ -67,6 +66,9 @@ def rerun_task(
         )
         selector = runlog.RunSelector(run_id=pipeline_run_id)
         detail, graph, task_codes = load_pipeline(conn, pipeline_id)
+    run = PipelineRun(
+        pipeline_code, pipeline_id, pipeline_run_id, graph, task_codes, detail.sla_in_hours
+    )
     override = Override(reason, rerun=True)
     first = run_task(
         engine, config, pipeline_code, task_code, child=child, override=override, selector=selector
@@ -82,25 +84,8 @@ def rerun_task(
             engine, pipeline_id, pipeline_run_id, reason, only=graph.downstream_of(task_id)
         )
     if with_downstream and first.status == RunStatus.SUCCESS:
-        downstream = graph.downstream_of(task_id)
-        for wave in graph.waves():
-            for later in (t for t in wave if t in downstream):
-                with engine.connect() as conn:
-                    run_state = runlog.fetch_run_state(conn, pipeline_run_id, list(graph.task_ids))
-                if graph.satisfied_edge_count(later, run_state) < graph.required_edge_count(later):
-                    left.append(task_codes[later])
-                    continue
-                ran.append(
-                    run_task(
-                        engine,
-                        config,
-                        pipeline_code,
-                        task_codes[later],
-                        child=child,
-                        override=override,
-                        selector=selector,
-                    )
-                )
+        later, left = _rerun_downstream(engine, config, run, task_id, child, override)
+        ran.extend(later)
     summary = "; ".join(outcome.message for outcome in ran)
     if left:
         summary += f"; not run again, their dependencies are not met: {', '.join(left)}"
@@ -118,16 +103,45 @@ def rerun_task(
             pipeline_run_id,
         )
     return _end_reopened(
-        engine,
-        pipeline_code,
-        pipeline_id,
-        pipeline_run_id,
-        graph,
-        task_codes,
-        detail.sla_in_hours,
-        hooks or default_hooks(config, engine),
-        f"ran again: {summary}",
+        engine, run, hooks or default_hooks(config, engine), f"ran again: {summary}"
     )
+
+
+def _rerun_downstream(
+    engine: Engine,
+    config: ConnectorConfig,
+    run: PipelineRun,
+    task_id: int,
+    child: ChildOptions,
+    override: Override,
+) -> tuple[list[TaskOutcome], list[str]]:
+    """Rerun downstream tasks in dependency order, retaining unmet tasks unchanged."""
+    ran: list[TaskOutcome] = []
+    left: list[str] = []
+    downstream = run.graph.downstream_of(task_id)
+    for wave in run.graph.waves():
+        for later in (t for t in wave if t in downstream):
+            with engine.connect() as conn:
+                run_state = runlog.fetch_run_state(
+                    conn, run.pipeline_run_id, list(run.graph.task_ids)
+                )
+            if run.graph.satisfied_edge_count(later, run_state) < run.graph.required_edge_count(
+                later
+            ):
+                left.append(run.task_codes[later])
+                continue
+            ran.append(
+                run_task(
+                    engine,
+                    config,
+                    run.pipeline_code,
+                    run.task_codes[later],
+                    child=child,
+                    override=override,
+                    selector=runlog.RunSelector(run_id=run.pipeline_run_id),
+                )
+            )
+    return ran, left
 
 
 def force_task(
@@ -160,27 +174,14 @@ def force_task(
         detail, graph, task_codes = load_pipeline(conn, pipeline_id)
     return _end_reopened(
         engine,
-        pipeline_code,
-        pipeline_id,
-        run_id,
-        graph,
-        task_codes,
-        detail.sla_in_hours,
+        PipelineRun(pipeline_code, pipeline_id, run_id, graph, task_codes, detail.sla_in_hours),
         hooks or default_hooks(config, engine),
         f"forced: {outcome.message}",
     )
 
 
 def _end_reopened(
-    engine: Engine,
-    pipeline_code: str,
-    pipeline_id: int,
-    pipeline_run_id: int,
-    graph: DependencyGraph,
-    task_codes: dict[int, str],
-    sla_hours: float | None,
-    hooks: RunHooks,
-    summary: str,
+    engine: Engine, run: PipelineRun, hooks: RunHooks, summary: str
 ) -> PipelineOutcome:
     """End again a run reopened to run some of its tasks, or keep it open for the rest.
 
@@ -188,25 +189,17 @@ def _end_reopened(
     ``run --pipeline_code`` to resume it.
     """
     with engine.connect() as conn:
-        rows = runlog.fetch_run_state(conn, pipeline_run_id, list(graph.task_ids))
-    not_run = sorted(task_codes[t] for t in graph.task_ids if t not in rows)
+        rows = runlog.fetch_run_state(conn, run.pipeline_run_id, list(run.graph.task_ids))
+    not_run = sorted(run.task_codes[t] for t in run.graph.task_ids if t not in rows)
     if not_run:
         message = (
-            f"{pipeline_code}: pipeline_run_id={pipeline_run_id} stays IN-PROGRESS ({summary}); "
+            f"{run.pipeline_code}: pipeline_run_id={run.pipeline_run_id} "
+            f"stays IN-PROGRESS ({summary}); "
             f"{len(not_run)} task(s) still need to run: {', '.join(not_run)}. "
-            f"`etl-craft run --pipeline_code {pipeline_code}` runs them"
+            f"`etl-craft run --pipeline_code {run.pipeline_code}` runs them"
         )
         logger.warning("%s", message)
-        return PipelineOutcome(RunStatus.IN_PROGRESS, message, pipeline_run_id)
-    with log_context(pipeline=pipeline_code, pipeline_run_id=pipeline_run_id):
-        ended = finalize(
-            engine,
-            pipeline_code,
-            pipeline_id,
-            pipeline_run_id,
-            graph,
-            task_codes,
-            sla_hours,
-            hooks,
-        )
+        return PipelineOutcome(RunStatus.IN_PROGRESS, message, run.pipeline_run_id)
+    with log_context(pipeline=run.pipeline_code, pipeline_run_id=run.pipeline_run_id):
+        ended = finalize(engine, run, hooks)
     return replace(ended, message=f"{ended.message} ({summary})")
