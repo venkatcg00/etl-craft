@@ -36,7 +36,10 @@ that damages the package is not helpful; saying so, with a better option, is.
      a released version cannot upgrade from without a migration;
    - redesigns something merged in the last few days, which means the design is not settled;
    - needs more than one pull request, or a change to a plan or design document;
-   - can be read two ways that users would notice.
+   - can be read two ways that users would notice;
+   - cuts, tags or publishes a release whose code is not the code its gate tested. Compare
+     `git diff --stat <tested commit> <release commit> -- src pyproject.toml uv.lock` first: a
+     soak or evidence run certifies only the code it ran.
 3. **Write a design note** when you stop. Keep it to about 15 lines:
 
    ```text
@@ -59,6 +62,23 @@ that damages the package is not helpful; saying so, with a better option, is.
    - add roadmap items, future designs or workstation logs inside a feature pull request;
    - change behaviour in a refactor, or add scope to an item on your own;
    - weaken a check, test, marker or gate to get green.
+
+## Working efficiently
+
+- **Size before you start.** Count the sites with `git grep` (string literals, callers, raises)
+  before choosing an approach. A refactor that touches more than one item's list is two pull
+  requests.
+- **Check the premise.** An item can name a duplication or a defect that a later change already
+  removed. Confirm it in the code; when it is gone, record that under "Choices that differ from
+  the item text" instead of inventing work.
+- **A refactor that must pick between two disagreeing copies** changes behaviour for one caller.
+  Take the safer rule, and say which caller changed, and how, in the pull request and the
+  Handover notes.
+- **Run `make quality` early** on a change that grows long modules: reformatting a line past 100
+  characters adds lines, and module and function line counts are part of the baseline. A named
+  module-level `frozenset` keeps a repeated status set on one line.
+- **Environment before code.** When many service tests fail at once, read one failure's message
+  and check the service (`pre-pr-checks`, "Known environment failures") before changing code.
 
 ## Design rules that must hold
 
