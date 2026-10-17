@@ -13,6 +13,7 @@ from sqlalchemy.engine import URL, Connection, Engine
 from sqlalchemy.exc import OperationalError
 
 from etl_craft.config.auth import POSTGRES_AUTH_FIELDS, engine_for_jdbc_url
+from etl_craft.core.actor import Actor
 from etl_craft.core.enums import AuthMode
 from etl_craft.core.errors import ConfigurationError, EngineDbError, LockTimeoutError
 from etl_craft.core.outage import OutageBudget
@@ -33,6 +34,56 @@ class PostgresEngineDialect(EngineDialect):
 
     spec = engine_for_jdbc_url("jdbc:postgresql:")
     directory = Path(__file__).parent
+
+    def stored_name(self, table: str) -> str:
+        """Return ``table`` in lower case, as PostgreSQL folds unquoted names."""
+        return table.lower()
+
+    def drop_trigger(self, conn: Connection, trigger: str, table: str) -> None:
+        """Drop ``trigger`` from ``table``."""
+        quoted = conn.dialect.identifier_preparer.quote(trigger)
+        conn.exec_driver_sql(f"DROP TRIGGER {quoted} ON {self.stored_name(table)}")
+
+    def record_config_conversion(
+        self, conn: Connection, table: str, primary: str, *, migration: str, actor: Actor
+    ) -> None:
+        """Record the conversion, then move the change-id sequence past it."""
+        super().record_config_conversion(conn, table, primary, migration=migration, actor=actor)
+        self._advance_change_id(conn)
+
+    def record_config_baseline(
+        self, conn: Connection, tables: tuple[str, ...], *, migration: str, actor: Actor
+    ) -> None:
+        """Record the baseline, then move the change-id sequence past it."""
+        super().record_config_baseline(conn, tables, migration=migration, actor=actor)
+        self._advance_change_id(conn)
+
+    def _advance_change_id(self, conn: Connection) -> None:
+        conn.execute(
+            text(f"SELECT setval('etl_craft_change_id', {self._last_change_id(conn)}+1, false)")
+        )
+
+    def legacy_source_id_high_water(self, conn: Connection) -> int:
+        """Return the legacy id sequence's last handed-out value."""
+        sequence = conn.execute(
+            text(
+                "SELECT pg_get_serial_sequence('cfg_source_columns','source_column_id') AS sequence"
+            )
+        ).scalar_one()
+        last, called = conn.execute(
+            text(f"SELECT last_value AS last_value, is_called AS is_called FROM {sequence}")
+        ).one()
+        return int(last) if called else int(last) - 1
+
+    def set_column_id_high_water(self, conn: Connection, high_water: int) -> None:
+        """Set ``CFG_COLUMNS``' identity sequence to continue after ``high_water``."""
+        conn.execute(
+            text(
+                "SELECT setval(pg_get_serial_sequence('cfg_columns','column_id'), :value, :called)"
+                " AS value"
+            ),
+            {"value": max(1, high_water), "called": high_water > 0},
+        )
 
     def refresh_metadata_triggers(self, conn: Connection) -> None:
         """Install this database's metadata capture and write guards."""
