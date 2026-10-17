@@ -5,6 +5,12 @@ from sqlalchemy.engine import Connection
 
 from etl_craft.core.errors import MetadataError
 
+CREDENTIAL_COLUMNS = {
+    "CFG_API_TOKENS": frozenset({"TOKEN_SHA256"}),
+    "CFG_ACCOUNTS": frozenset({"PASSWORD_HASH"}),
+}
+"""Credential hashes excluded from general metadata history and warehouse mirrors."""
+
 BASE_COLUMNS = ("created_by", "create_date", "updated_by", "updated_date", "active_flag")
 
 

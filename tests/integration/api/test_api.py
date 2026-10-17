@@ -234,7 +234,7 @@ def test_tokens_store_hash_only_expiry_validation_and_audit(api):
         requests = conn.execute(
             text("SELECT COMMAND AS command, ARGUMENTS AS arguments FROM AUD_ACTIONS")
         ).all()
-        assert len(requests) == 4
+        assert len(requests) == len(creds) + 1
         assert all(row.command == "token create" for row in requests)
         audit = str(requests)
         assert value.token not in audit

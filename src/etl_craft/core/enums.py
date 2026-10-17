@@ -113,11 +113,19 @@ class TriggerKind(StrEnum):
     STAND_IN = "STAND_IN"
 
 
+class AccountKind(StrEnum):
+    """Whether a registered account represents a person or an automated caller."""
+
+    USER = "USER"
+    SERVICE = "SERVICE"
+
+
 class ApiRole(StrEnum):
-    """The role an API token grants, each including the ones before it."""
+    """A deployment account role, each including the ones before it."""
 
     VIEWER = "viewer"
     OPERATOR = "operator"
+    DEVELOPER = "developer"
     ADMIN = "admin"
 
 

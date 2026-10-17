@@ -14,7 +14,7 @@ def install(db, release):
         run_script(
             conn, db.dialect.split_statements((SCHEMAS / release / f"{kind}.sql").read_text())
         )
-        if release == "0.2.0":
+        if release in {"0.2.0", "0.3.0"}:
             for migration in migrations.migration_streams(db.engine)[0].files:
-                if migration.version < "0007":
+                if migration.version < ("0007" if release == "0.2.0" else "0019"):
                     migrations._record(conn, migration)

@@ -43,6 +43,7 @@ from etl_craft.config.targets import active_catalog, parse_warehouse_url
 from etl_craft.core.enums import CloningScope
 from etl_craft.core.errors import CloningError, ConfigurationError
 from etl_craft.core.text import parse_jdbc_url, qualify
+from etl_craft.dialects.engine.metadata import CREDENTIAL_COLUMNS
 from etl_craft.dialects.warehouse import WarehouseDialect
 from etl_craft.engine import locks
 from etl_craft.execution.run_types import PipelineOutcome, RunHooks, default_hooks
@@ -168,7 +169,11 @@ def _engine_tables(
     found = []
     for name in sorted(inspector.get_table_names(schema=schema), key=str.upper):
         if name.upper().startswith(prefixes) and name.upper() != "CFG_API_TOKENS":
-            columns = inspector.get_columns(name, schema=schema)
+            columns = [
+                c
+                for c in inspector.get_columns(name, schema=schema)
+                if str(c["name"]).upper() not in CREDENTIAL_COLUMNS.get(name.upper(), ())
+            ]
             found.append((name.upper(), [(str(c["name"]).upper(), c["type"]) for c in columns]))
     return found
 

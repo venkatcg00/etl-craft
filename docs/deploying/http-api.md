@@ -21,16 +21,39 @@ etl-craft token revoke --token-id 2
 
 Creation prints the token once. Save it securely; the Engine DB stores only its SHA-256 hash.
 Tokens may omit `--expires` for no expiry. Revocation and expiry take effect on the next request.
-The token's name is the actor in action and lifecycle records. Each token is deployment-wide;
+The account's name is the actor in action and lifecycle records. Each token is deployment-wide;
 project-scoped tokens are not accepted until project authorization exists.
+
+Each credential belongs to a deployment account in `CFG_ACCOUNTS`. `token create --name`
+creates a service account when that name is new, or reuses the existing active account when
+`--role` matches its current role. A conflicting role or inactive account is refused, with
+nothing created. Multiple credentials can share one account; changing its role affects all
+of them, and setting its `ACTIVE_FLAG` to `N` invalidates all of them on the next request.
+Accounts retain their identity when disabled and cannot be deleted. Account changes currently
+use explicit project migrations; interactive account administration and login are delivered
+in the following authentication slice. Local commands retain their existing Engine DB trust
+boundary until that rollout.
+
+Before upgrading, legacy token names must be unique even among revoked tokens, non-empty,
+at most 128 characters and free of control characters. Migration
+`0034_accounts.sql` reports conflicting names, token IDs and roles before applying any pending
+migration. Use the old installed version to apply an explicit project migration that gives
+those tokens distinct `NAME` values, then upgrade and run `etl-craft migrate` again. The
+migration preserves credential hashes, IDs, creation fields, expiry and revocation; tokens
+continue working with their original roles. It never silently merges or renames accounts.
+The token-local `ROLE` column is removed; join `CFG_API_TOKENS.ACCOUNT_ID` to `CFG_ACCOUNTS`
+to read the current role.
 
 Every resource endpoint, including health, requires `Authorization: Bearer <token>`.
 `viewer` can read, `operator` can also trigger, cancel, pause, resume, mark, rerun and backfill,
-and `admin` can also create, list and revoke tokens through `/api/v1/tokens`.
+`developer` includes operator access, and `admin` can also create, list and revoke tokens
+through `/api/v1/tokens`.
 Token values and hashes are absent from token listings and audit arguments. The token table
 is excluded from metadata snapshots and warehouse cloning. Safe lifecycle versions live in
 `AUD_CFG_API_TOKENS_HISTORY` and appear in `AUD_METADATA_CHANGES`; these contain no token
-value or hash. Revocation sets `ACTIVE_FLAG='N'`; inactive credentials also fail authentication,
+value or hash. Account versions live in `AUD_CFG_ACCOUNTS_HISTORY`; password hashes never
+enter these histories, metadata exports or warehouse mirrors. Revocation sets `ACTIVE_FLAG='N'`;
+inactive credentials also fail authentication,
 even without a revocation timestamp. Storage uses the common `CREATE_DATE` and update fields;
 the public token document retains `created_at`. Run `etl-craft migrate` before using the new
 version against an existing Engine DB.

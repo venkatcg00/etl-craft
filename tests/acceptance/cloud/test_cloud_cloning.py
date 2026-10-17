@@ -33,15 +33,38 @@ def gains_columns(tmp_path, name, fields, table_format, schema):
     apply_schema(engine_db)
     with engine_db.begin() as conn:
         add_pipeline(conn, "SALES")
+        conn.execute(
+            text(
+                "INSERT INTO CFG_ACCOUNTS (ACCOUNT_NAME,ACCOUNT_KIND,ROLE,PASSWORD_HASH) "
+                "VALUES ('person','USER','viewer','scrypt:private')"
+            )
+        )
     warehouse = build_warehouse_engine(config)
     dialect = warehouse_dialect(config)
     mirror = f"{active_catalog(config)}.{schema}.etl_craft_mirror_{uuid.uuid4().hex[:8]}"
+    accounts_mirror = mirror + "_accounts"
+    inventory = dict(cloning._engine_tables(engine_db, config, ("CFG_",)))
     columns = next(
         cols
         for table, cols in cloning._engine_tables(engine_db, config, ("CFG_",))
         if table == "CFG_PIPELINES"
     )
     try:
+        account_copy = cloning._clone_table(
+            engine_db,
+            warehouse,
+            dialect,
+            config,
+            "CFG_ACCOUNTS",
+            accounts_mirror,
+            inventory["CFG_ACCOUNTS"],
+        )
+        assert account_copy.rows == 1
+        with warehouse.connect() as conn:
+            result = conn.execute(text(f"SELECT * FROM {accounts_mirror}"))
+            names = result.keys()
+            assert "password_hash" not in {k.lower() for k in names}
+            assert "scrypt:private" not in str(result.all())
         with warehouse.begin() as conn:
             conn.execute(text(f"CREATE TABLE {mirror} (PIPELINE_ID BIGINT)"))
         cloned = cloning._clone_table(
@@ -58,6 +81,7 @@ def gains_columns(tmp_path, name, fields, table_format, schema):
     finally:
         with warehouse.begin() as conn:
             conn.execute(text(f"DROP TABLE IF EXISTS {mirror}"))
+            conn.execute(text(f"DROP TABLE IF EXISTS {accounts_mirror}"))
         warehouse.dispose()
         engine_db.dispose()
 

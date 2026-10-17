@@ -11,7 +11,7 @@ from typing import ClassVar
 from sqlalchemy.engine import RowMapping
 
 from etl_craft.core.actor import Actor, ActorKind
-from etl_craft.core.enums import ApiRole
+from etl_craft.core.enums import AccountKind, ApiRole, YesNo
 from etl_craft.core.errors import UsageError
 from etl_craft.core.text import sha256_hex
 from etl_craft.engine.queries import statement
@@ -87,10 +87,21 @@ def create_token(
         ctx.engine.begin() as conn,
     ):
         conn.execute(
+            statement(conn, "api_token_account_create"),
+            {"name": name, "kind": AccountKind.SERVICE, "role": role},
+        )
+        account = conn.execute(statement(conn, "api_token_account"), {"name": name}).one()
+        if account.active_flag != YesNo.YES or account.role != role:
+            raise UsageError(
+                f"account {name!r}: role={account.role!r}, ACTIVE_FLAG={account.active_flag!r}; "
+                f"expected an active account with role={role!r}; use its current role or ask "
+                "an administrator to update the account through a project migration"
+            )
+        conn.execute(
             statement(conn, "api_token_create"),
             {
                 "name": name,
-                "role": role,
+                "account_id": account.account_id,
                 "actor": ctx.actor.name,
                 "digest": sha256_hex(token.encode()),
                 "now": now,

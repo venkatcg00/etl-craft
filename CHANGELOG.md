@@ -8,6 +8,15 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Deployment accounts in `CFG_ACCOUNTS`; API tokens inherit their account's current role and
+  stop authenticating immediately when it is inactive. Roles now include `developer`, between
+  `operator` and `admin`. Account history and warehouse mirrors exclude password hashes.
+- Engine DB migration `0034` preserves existing token values and creates one service account
+  per legacy token. Invalid actor names or duplicate token names, including revoked credentials,
+  stop the upgrade before any pending migration writes; resolve them through a project migration on the old
+  version first. `token create --name` creates or reuses that account and refuses a role that
+  disagrees with it. Account administration, password login and bootstrap follow separately.
+
 - A task process starts only when its log folder under `Orchestration.Log_dir` can be created
   and written, with at least 64 MiB free. Otherwise the attempt is recorded `FAILED` with a
   `ConfigurationError` naming the folder, what was found and the remedy, before the task does

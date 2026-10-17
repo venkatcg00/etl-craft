@@ -41,6 +41,12 @@ def test_every_table_is_mirrored_and_replaced_on_the_next_clone(sql_world):
     with world.engine_db.begin() as conn:
         add_task(conn, world.pipeline_id, "load", SQL_ACTION="CREATE_TABLE")
         conn.execute(
+            text(
+                "INSERT INTO CFG_ACCOUNTS (ACCOUNT_NAME, ACCOUNT_KIND, ROLE, PASSWORD_HASH) "
+                "VALUES ('person', 'USER', 'viewer', 'scrypt:private')"
+            )
+        )
+        conn.execute(
             text("UPDATE CFG_PIPELINES SET PIPELINE_PARAMETERS = :p, SLA_IN_HOURS = 1.5"),
             {"p": json.dumps({"RETRIES": 2, "TAGS": ["sales"]})},
         )
@@ -48,6 +54,9 @@ def test_every_table_is_mirrored_and_replaced_on_the_next_clone(sql_world):
     first = clone(world.engine_db, config)
     assert [t.table for t in first] == engine_tables(world)
     assert "CFG_API_TOKENS" not in {t.table for t in first}
+    assert "password_hash" not in world.columns("CFG_ACCOUNTS")
+    assert "password_hash" not in world.columns("AUD_CFG_ACCOUNTS_HISTORY")
+    assert count(world, "CFG_ACCOUNTS") == 1
     assert all(t.created for t in first)
     assert {t.mirror for t in first} == {world.name(t.table) for t in first}
     assert {t.table: t.rows for t in first}["CFG_TASK_PARAMETERS"] == 1
