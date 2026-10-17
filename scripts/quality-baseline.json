@@ -28,7 +28,7 @@
       "src/etl_craft/core/text.py": 9,
       "src/etl_craft/engine/repository/interventions.py": 5,
       "src/etl_craft/engine/transitions.py": 20,
-      "src/etl_craft/execution/events.py": 4,
+      "src/etl_craft/execution/events.py": 2,
       "src/etl_craft/execution/gates.py": 3,
       "src/etl_craft/execution/interventions.py": 11,
       "src/etl_craft/execution/pipeline.py": 28,
@@ -46,9 +46,7 @@
     },
     "branches": {
       "src/etl_craft/core/text.py": 2,
-      "src/etl_craft/engine/repository/config_history.py": 3,
       "src/etl_craft/engine/repository/source_contracts.py": 6,
-      "src/etl_craft/execution/events.py": 6,
       "src/etl_craft/execution/pipeline.py": 19,
       "src/etl_craft/execution/remote.py": 3,
       "src/etl_craft/execution/runner.py": 4,
@@ -56,8 +54,7 @@
       "src/etl_craft/handlers/sql/__init__.py": 1,
       "src/etl_craft/handlers/sql/spec.py": 2,
       "src/etl_craft/overseer/schedules.py": 3,
-      "src/etl_craft/services/config_files.py": 12,
-      "src/etl_craft/services/upgrade_targets.py": 20
+      "src/etl_craft/services/config_files.py": 12
     },
     "broad-except": {
       "src/etl_craft/api/server.py": 1,
@@ -86,15 +83,11 @@
       "src/etl_craft/services/operations/serialization.py": 1
     },
     "complexity": {
-      "src/etl_craft/api/app.py": 10,
-      "src/etl_craft/engine/repository/config_history.py": 1,
       "src/etl_craft/engine/repository/source_contracts.py": 2,
-      "src/etl_craft/execution/events.py": 2,
       "src/etl_craft/execution/pipeline.py": 12,
       "src/etl_craft/execution/runner.py": 2,
       "src/etl_craft/execution/scheduler.py": 7,
-      "src/etl_craft/services/config_files.py": 7,
-      "src/etl_craft/services/upgrade_targets.py": 16
+      "src/etl_craft/services/config_files.py": 7
     },
     "dialect-branch": {
       "src/etl_craft/engine/audit.py": 3,
@@ -125,15 +118,12 @@
       "src/etl_craft/services/upgrade_targets.py": 4
     },
     "function-lines": {
-      "src/etl_craft/api/app.py": 131,
       "src/etl_craft/cli/commands/history.py": 10,
       "src/etl_craft/config/loader.py": 8,
       "src/etl_craft/core/text.py": 19,
       "src/etl_craft/dialects/engine/postgres/audit.py": 38,
-      "src/etl_craft/engine/repository/config_history.py": 102,
       "src/etl_craft/engine/repository/rule_targets.py": 29,
       "src/etl_craft/engine/repository/source_contracts.py": 84,
-      "src/etl_craft/execution/events.py": 75,
       "src/etl_craft/execution/gates.py": 11,
       "src/etl_craft/execution/interventions.py": 11,
       "src/etl_craft/execution/pipeline.py": 212,
@@ -149,15 +139,14 @@
       "src/etl_craft/services/config_files.py": 27,
       "src/etl_craft/services/lineage.py": 35,
       "src/etl_craft/services/operations/runs.py": 22,
-      "src/etl_craft/services/operations/status.py": 52,
-      "src/etl_craft/services/upgrade_targets.py": 107
+      "src/etl_craft/services/operations/status.py": 52
     },
     "inline-sql": {
       "src/etl_craft/engine/audit.py": 3,
       "src/etl_craft/engine/connection.py": 1,
       "src/etl_craft/engine/privileges.py": 1,
       "src/etl_craft/engine/repository/audit_reads.py": 4,
-      "src/etl_craft/engine/repository/config_history.py": 18,
+      "src/etl_craft/engine/repository/config_history.py": 15,
       "src/etl_craft/engine/repository/config_rows.py": 1,
       "src/etl_craft/engine/repository/normalization.py": 2,
       "src/etl_craft/engine/repository/overseers.py": 3,
@@ -191,12 +180,9 @@
       "src/etl_craft/services/operations/tasks.py": 1
     },
     "statements": {
-      "src/etl_craft/engine/repository/config_history.py": 14,
-      "src/etl_craft/execution/events.py": 15,
       "src/etl_craft/execution/pipeline.py": 38,
       "src/etl_craft/execution/scheduler.py": 14,
-      "src/etl_craft/services/catalog.py": 9,
-      "src/etl_craft/services/upgrade_targets.py": 41
+      "src/etl_craft/services/catalog.py": 9
     },
     "type-ignore": {
       "src/etl_craft/execution/pipeline.py": 1,
