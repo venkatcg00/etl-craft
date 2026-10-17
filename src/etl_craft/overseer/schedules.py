@@ -11,7 +11,7 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.core.actor import Actor, ActorKind, acting_as
 from etl_craft.core.cron import next_after, timezone
-from etl_craft.core.enums import InterventionAction, YesNo
+from etl_craft.core.enums import InterventionAction, RunStatus, YesNo
 from etl_craft.core.errors import MetadataError
 from etl_craft.core.time import as_utc
 from etl_craft.engine import transitions
@@ -127,7 +127,7 @@ def _create_tick(
         ).scalar_one_or_none()
         if existing is not None:
             return
-        status = "SKIPPED" if reason else "QUEUED"
+        status = RunStatus.SKIPPED if reason else RunStatus.QUEUED
         run_id = transitions.create_run(
             conn,
             pipeline_id,

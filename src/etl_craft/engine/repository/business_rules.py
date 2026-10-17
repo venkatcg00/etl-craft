@@ -9,7 +9,7 @@ from datetime import datetime
 from sqlalchemy import bindparam
 from sqlalchemy.engine import Connection
 
-from etl_craft.core.enums import YesNo
+from etl_craft.core.enums import RunStatus, YesNo
 from etl_craft.core.text import split_object_ref
 from etl_craft.engine import transitions
 from etl_craft.engine.queries import statement
@@ -58,7 +58,7 @@ def begin_rule_run(
     if row is None:
         run_id = transitions.create_rule_run(conn, business_rule_id, task_run_id)
         return RuleRunBinding(int(run_id), False)
-    if row.status == "SUCCESS":
+    if row.status == RunStatus.SUCCESS:
         return RuleRunBinding(int(row.business_rule_run_id), True)
     transitions.restart_rule_run(conn, int(row.business_rule_run_id), now)
     return RuleRunBinding(int(row.business_rule_run_id), False)

@@ -78,7 +78,6 @@
       "src/etl_craft/engine/repository/source_contracts.py": 1,
       "src/etl_craft/execution/retries.py": 2,
       "src/etl_craft/overseer/schedules.py": 1,
-      "src/etl_craft/services/config_files.py": 11,
       "src/etl_craft/services/docs_publish.py": 1,
       "src/etl_craft/services/source_columns.py": 1
     },
@@ -111,30 +110,19 @@
       "src/etl_craft/warehouse/connection.py": 1
     },
     "enum-literal": {
-      "src/etl_craft/engine/repository/business_rules.py": 1,
-      "src/etl_craft/engine/runlog.py": 2,
-      "src/etl_craft/engine/transitions.py": 29,
-      "src/etl_craft/execution/events.py": 11,
+      "src/etl_craft/engine/transitions.py": 2,
       "src/etl_craft/execution/interventions.py": 2,
-      "src/etl_craft/execution/leases.py": 1,
-      "src/etl_craft/execution/pipeline.py": 5,
       "src/etl_craft/execution/remote.py": 1,
-      "src/etl_craft/execution/retries.py": 2,
-      "src/etl_craft/execution/runner.py": 6,
-      "src/etl_craft/execution/scheduler.py": 3,
-      "src/etl_craft/handlers/business_rules.py": 2,
+      "src/etl_craft/execution/runner.py": 1,
+      "src/etl_craft/execution/scheduler.py": 2,
       "src/etl_craft/handlers/email_alert.py": 4,
       "src/etl_craft/handlers/registry.py": 4,
-      "src/etl_craft/overseer/schedules.py": 2,
-      "src/etl_craft/overseer/server.py": 1,
-      "src/etl_craft/services/catalog.py": 7,
+      "src/etl_craft/services/catalog.py": 1,
       "src/etl_craft/services/catalog_graph.py": 3,
       "src/etl_craft/services/catalog_site.py": 4,
       "src/etl_craft/services/generate_yml.py": 8,
-      "src/etl_craft/services/operations/status.py": 10,
       "src/etl_craft/services/rehash.py": 2,
-      "src/etl_craft/services/upgrade_targets.py": 4,
-      "src/etl_craft/services/validate.py": 2
+      "src/etl_craft/services/upgrade_targets.py": 4
     },
     "function-lines": {
       "src/etl_craft/api/app.py": 131,
@@ -187,7 +175,7 @@
       "src/etl_craft/config/loader.py": 294,
       "src/etl_craft/engine/transitions.py": 150,
       "src/etl_craft/execution/pipeline.py": 444,
-      "src/etl_craft/execution/runner.py": 196,
+      "src/etl_craft/execution/runner.py": 194,
       "src/etl_craft/services/catalog_site.py": 247,
       "src/etl_craft/services/config_files.py": 13
     },

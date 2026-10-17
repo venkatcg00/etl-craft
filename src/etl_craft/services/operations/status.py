@@ -10,7 +10,7 @@ from typing import ClassVar
 from sqlalchemy.engine import Connection, RowMapping
 
 from etl_craft.core.actor import acting_as
-from etl_craft.core.enums import GatePolicy
+from etl_craft.core.enums import AttemptStatus, GatePolicy, RunStatus
 from etl_craft.core.graph import DependencyGraph, RunState, TaskRunState, build_graph
 from etl_craft.core.time import as_utc, elapsed_seconds
 from etl_craft.engine import runlog
@@ -108,10 +108,10 @@ def explain(snapshot: TaskSnapshot) -> Explanation:
     """Explain a captured state with no database calls, clock reads or mutations."""
     task = snapshot.task
     last = task.attempts[-1] if task is not None and task.attempts else None
-    retry_at = last.not_before if last is not None and last.status == "QUEUED" else None
+    retry_at = last.not_before if last is not None and last.status == AttemptStatus.QUEUED else None
     unmet = [d for d in snapshot.dependencies if not d.met]
     met = len(snapshot.dependencies) - len(unmet)
-    if task is not None and task.status in {"SUCCESS", "SKIPPED"}:
+    if task is not None and task.status in {RunStatus.SUCCESS, RunStatus.SKIPPED}:
         state, action = task.status.lower(), "No work is needed; this task is already settled."
     elif snapshot.pipeline.paused is not None:
         state, action = "paused", "Resume the pipeline before starting this task."
@@ -120,7 +120,7 @@ def explain(snapshot: TaskSnapshot) -> Explanation:
         action = f"The supervisor can claim the retry at {retry_at.isoformat()}."
         if retry_at <= snapshot.now:
             action = "The retry is due; an available supervisor can claim it."
-    elif task is not None and task.status == "IN-PROGRESS":
+    elif task is not None and task.status == RunStatus.IN_PROGRESS:
         state, action = "running", "Wait for the current attempt to finish."
     elif snapshot.unsatisfiable:
         state, action = (
@@ -128,7 +128,7 @@ def explain(snapshot: TaskSnapshot) -> Explanation:
             "Repair the upstream outcome or dependency before rerunning.",
         )
     elif snapshot.blocked_by_failure or (
-        met < snapshot.required_count and any(d.status == "FAILED" for d in unmet)
+        met < snapshot.required_count and any(d.status == RunStatus.FAILED for d in unmet)
     ):
         state, action = (
             "blocked by failure",
@@ -145,9 +145,9 @@ def explain(snapshot: TaskSnapshot) -> Explanation:
             "waiting on a gate",
             "Wait for enough upstream dependencies to be satisfied.",
         )
-    elif task is not None and task.status == "FAILED":
+    elif task is not None and task.status == RunStatus.FAILED:
         state, action = "failed", "Correct the recorded error before retrying this task."
-    elif snapshot.run.status not in {"QUEUED", "IN-PROGRESS"}:
+    elif snapshot.run.status not in {RunStatus.QUEUED, RunStatus.IN_PROGRESS}:
         state, action = "run ended", "Explicitly reopen or rerun the selected ended run."
     else:
         state, action = "not run", "An available supervisor can start this ready task."
@@ -274,7 +274,7 @@ def _snapshots(
                     if run.backfill
                     else "Dependency gates are off.",
                 )
-            elif latest is not None and latest.status == "IN-PROGRESS":
+            elif latest is not None and latest.status == RunStatus.IN_PROGRESS:
                 met, status, upstream = False, latest.status, None
                 reason = "Wait for the running upstream pipeline to finish."
             elif not met and policy == GatePolicy.WARN:
@@ -390,7 +390,7 @@ def _dependencies(
                 upstream_run, status = None, None
             elif policy == GatePolicy.OFF:
                 met, reason = True, "Dependency gates are off."
-            elif latest is not None and latest.status == "IN-PROGRESS":
+            elif latest is not None and latest.status == RunStatus.IN_PROGRESS:
                 met, status, upstream_run = False, latest.status, None
                 reason = "Wait for the running upstream task to finish."
             elif not met and policy == GatePolicy.WARN:

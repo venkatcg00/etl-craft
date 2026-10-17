@@ -18,6 +18,7 @@ import psutil
 from sqlalchemy.engine import Engine
 
 from etl_craft.core.actor import acting_as, current_actor
+from etl_craft.core.enums import AttemptStatus, RunStatus
 from etl_craft.core.errors import RunStateError, StaleTransitionError
 from etl_craft.engine import transitions
 from etl_craft.engine.queries import statement
@@ -94,8 +95,12 @@ def heartbeat(
         with acting_as(actor), engine.begin() as conn:
             query = "run_lease" if kind == "run" else "transition_row_attempt"
             row = conn.execute(statement(conn, query), {"row_id": row_id}).one_or_none()
-            active = {"IN-PROGRESS"} if kind == "run" else {"CLAIMED", "RUNNING"}
-            if row is not None and row.status == "LOST":
+            active = (
+                {RunStatus.IN_PROGRESS}
+                if kind == "run"
+                else {AttemptStatus.CLAIMED, AttemptStatus.RUNNING}
+            )
+            if row is not None and row.status == AttemptStatus.LOST:
                 raise StaleTransitionError(
                     f"attempt {row_id}: owner {owner} was reconciled LOST; stop its child"
                 )

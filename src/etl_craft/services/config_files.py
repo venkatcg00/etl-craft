@@ -247,7 +247,7 @@ def _read_table(
         for column in table.columns:
             try:
                 values[column.name] = _parse(column, given.get(column.name, ""))
-            except ValueError as error:
+            except MetadataFileError as error:
                 problems.append(f"{path} line {line}, column {column.name}: {error}")
         if len(values) != len(table.columns):
             continue
@@ -283,51 +283,51 @@ def _read_table(
 
 
 def _parse(column: Column, cell: str) -> Value:
-    """Return a cell's value in its column's type; raise ``ValueError`` saying what was expected."""
+    """Return a cell's value in its column's type; ``MetadataFileError`` says what was expected."""
     if cell == "":
         if column.required:
-            raise ValueError("is empty; this column needs a value")
+            raise MetadataFileError("is empty; this column needs a value")
         return column.default
     if column.kind == "code":
         if not is_metadata_code(cell):
-            raise ValueError(
+            raise MetadataFileError(
                 f"{cell!r} is not a code: start with an ASCII letter, then use letters, digits "
                 "or _, at most 128 characters"
             )
         return cell
     if column.kind == "choice":
         if cell not in column.choices:
-            raise ValueError(f"{cell!r} is not one of {', '.join(column.choices)}")
+            raise MetadataFileError(f"{cell!r} is not one of {', '.join(column.choices)}")
         return cell
     if column.kind == "int":
         if not re.fullmatch(r"-?[0-9]+", cell):
-            raise ValueError(f"{cell!r} is not a whole number")
+            raise MetadataFileError(f"{cell!r} is not a whole number")
         number = int(cell)
         if column.minimum is not None and number < column.minimum:
-            raise ValueError(f"{number} is less than {column.minimum}")
+            raise MetadataFileError(f"{number} is less than {column.minimum}")
         return number
     if column.kind == "float":
         try:
             decimal = Decimal(cell)
         except InvalidOperation:
-            raise ValueError(f"{cell!r} is not a number") from None
+            raise MetadataFileError(f"{cell!r} is not a number") from None
         if not decimal.is_finite():
-            raise ValueError(f"{cell!r} is not a finite number")
+            raise MetadataFileError(f"{cell!r} is not a finite number")
         return float(decimal)
     if column.kind == "date":
         try:
-            if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", cell):
-                raise ValueError
-            return date.fromisoformat(cell)
+            if re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", cell):
+                return date.fromisoformat(cell)
         except ValueError:
-            raise ValueError(f"{cell!r} is not a date written YYYY-MM-DD") from None
+            pass
+        raise MetadataFileError(f"{cell!r} is not a date written YYYY-MM-DD")
     if column.kind == "json":
         try:
             parsed = json.loads(cell)
         except ValueError as error:
-            raise ValueError(f"is not JSON: {error}") from None
+            raise MetadataFileError(f"is not JSON: {error}") from None
         if not isinstance(parsed, dict):
-            raise ValueError("is not a JSON object; write it as {...}")
+            raise MetadataFileError("is not a JSON object; write it as {...}")
         return parsed
     return cell
 

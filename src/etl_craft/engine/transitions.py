@@ -12,7 +12,14 @@ from sqlalchemy.exc import IntegrityError
 
 from etl_craft.core.actor import SYSTEM_ACTOR, Actor, current_actor
 from etl_craft.core.counts import NO_COUNTS, Counts
-from etl_craft.core.enums import FINISHED_RUN_STATUSES, RunStatus, SlaStatus, YesNo
+from etl_craft.core.enums import (
+    FINISHED_RUN_STATUSES,
+    AttemptStatus,
+    RunStatus,
+    SlaStatus,
+    TriggerKind,
+    YesNo,
+)
 from etl_craft.core.errors import RunStateError, StaleTransitionError
 from etl_craft.core.faults import fault_point
 from etl_craft.core.time import as_utc
@@ -38,15 +45,16 @@ def create_active_run(
     and ``backfill`` marks it part of a backfill.
     """
     kind = trigger_kind or ("BACKFILL" if backfill else "MANUAL")
-    if backfill and kind != "BACKFILL":
+    if backfill and kind != TriggerKind.BACKFILL:
         raise RunStateError(
             f"pipeline_id={pipeline_id}: trigger_kind={kind!r}, backfill={backfill!r}; "
             "expected MANUAL, BACKFILL or STAND_IN, with BACKFILL for a backfill run. "
             "Use BACKFILL for backfills and MANUAL or STAND_IN for other runs."
         )
     logical_date = run_date or runlog.today()
-    prefix = "stand-in" if kind == "STAND_IN" else kind.lower()
-    run_key = f"{prefix}:{logical_date}:{uuid4()}" if kind == "BACKFILL" else f"{prefix}:{uuid4()}"
+    prefix = "stand-in" if kind == TriggerKind.STAND_IN else kind.lower()
+    suffix = f"{logical_date}:{uuid4()}" if kind == TriggerKind.BACKFILL else str(uuid4())
+    run_key = f"{prefix}:{suffix}"
     try:
         return create_run(
             conn,
@@ -61,10 +69,7 @@ def create_active_run(
 
 
 def end_run_if(conn: Connection, pipeline_run_id: int, from_status: str, status: str) -> bool:
-    """End ``pipeline_run_id`` with ``status`` only if it is still ``from_status``.
-
-    Return whether it did. The caller decides what a refusal means; nothing is changed then.
-    """
+    """End ``pipeline_run_id`` with ``status`` if still ``from_status``; return whether it did."""
     if from_status != RunStatus.IN_PROGRESS:
         return False
     try:
@@ -100,10 +105,7 @@ def resolve_run(
 def find_or_create_task_run(
     conn: Connection, task_id: int, pipeline_run_id: int
 ) -> runlog.TaskRunBinding:
-    """Return the row of ``task_id`` under ``pipeline_run_id``, creating it ``IN-PROGRESS``.
-
-    A concurrent insert that loses reads back the winner.
-    """
+    """Return ``task_id``'s row under ``pipeline_run_id``, creating it; a losing insert reads it."""
     params = {"task_id": task_id, "pipeline_run_id": pipeline_run_id}
     existing = conn.execute(statement(conn, "task_run"), params).one_or_none()
     if existing is not None:
@@ -167,7 +169,7 @@ def finish_task_run(
                 "task_log": task_log,
             },
         )
-        if changed.rowcount and status == "SUCCESS" and offset is not None:
+        if changed.rowcount and status == RunStatus.SUCCESS and offset is not None:
             task_id = (
                 conn.execute(statement(conn, "task_run_context"), {"task_run_id": task_run_id})
                 .one()
@@ -217,7 +219,7 @@ def finalize_pipeline_run(
                 owner=owner,
             )
             ended = True
-            if consume and status == "SUCCESS":
+            if consume and status == RunStatus.SUCCESS:
                 fault_point("pipeline.before_consumption")
                 trackers.consume_pipeline_decisions(conn, pipeline_run_id)
                 fault_point("pipeline.after_consumption")
@@ -231,10 +233,7 @@ def finalize_pipeline_run(
 
 
 def mark_sla_breached(conn: Connection, pipeline_run_id: int) -> bool:
-    """Mark a still running ``pipeline_run_id`` ``BREACHED``; return whether this call did.
-
-    ``False`` when the run already finished or was already marked.
-    """
+    """Mark a still running ``pipeline_run_id`` ``BREACHED``; return whether this call did."""
     result = conn.execute(
         statement(conn, "transition_mark_sla_breached"), {"pipeline_run_id": pipeline_run_id}
     )
@@ -285,7 +284,7 @@ def cancel_task_run(conn: Connection, task_run_id: int, error_message: str) -> b
 def cancel_pipeline_run(conn: Connection, pipeline_run_id: int) -> None:
     """Cancel an active run on request; refuse a changed status or owner."""
     row = conn.execute(statement(conn, "run_lease"), {"row_id": pipeline_run_id}).one()
-    finish_run(conn, pipeline_run_id, "CANCELLED", current_actor(), owner=row.owner_id)
+    finish_run(conn, pipeline_run_id, RunStatus.CANCELLED, current_actor(), owner=row.owner_id)
 
 
 def delete_skipped_task_run(conn: Connection, task_run_id: int) -> None:
@@ -344,17 +343,17 @@ def create_run(
     run_date: date | None = None,
     trigger_kind: str = "MANUAL",
     run_key: str | None = None,
-    status: str = "IN-PROGRESS",
+    status: str = RunStatus.IN_PROGRESS,
 ) -> int:
     """Create an active run or a queued/skipped schedule with its exact key."""
-    if status not in {"IN-PROGRESS", "QUEUED", "SKIPPED"} or (
-        status == "SKIPPED" and trigger_kind != "SCHEDULE"
+    if status not in {RunStatus.IN_PROGRESS, RunStatus.QUEUED, RunStatus.SKIPPED} or (
+        status == RunStatus.SKIPPED and trigger_kind != TriggerKind.SCHEDULE
     ):
         raise RunStateError(
             f"pipeline_id={pipeline_id}: initial status={status!r}; "
             "only schedules may start SKIPPED"
         )
-    if trigger_kind not in {"SCHEDULE", "MANUAL", "BACKFILL", "ORCHESTRATOR", "STAND_IN"}:
+    if trigger_kind not in set(TriggerKind):
         raise RunStateError(
             f"pipeline_id={pipeline_id}: invalid trigger_kind={trigger_kind!r}; "
             "use SCHEDULE, MANUAL, BACKFILL, ORCHESTRATOR or STAND_IN"
@@ -370,10 +369,10 @@ def create_run(
                     "pipeline_id": pipeline_id,
                     "run_date": logical_date,
                     "status": status,
-                    "end_date": datetime.now(UTC) if status == "SKIPPED" else None,
-                    "ended_by": actor.name if status == "SKIPPED" else None,
-                    "ended_by_kind": actor.kind.value if status == "SKIPPED" else None,
-                    "backfill": YesNo.of(trigger_kind == "BACKFILL"),
+                    "end_date": datetime.now(UTC) if status == RunStatus.SKIPPED else None,
+                    "ended_by": actor.name if status == RunStatus.SKIPPED else None,
+                    "ended_by_kind": actor.kind.value if status == RunStatus.SKIPPED else None,
+                    "backfill": YesNo.of(trigger_kind == TriggerKind.BACKFILL),
                     "trigger_kind": trigger_kind,
                     "run_key": key,
                 },
@@ -444,9 +443,9 @@ def finish_run(
     sla_status: str | None = None,
 ) -> None:
     """End an active run only when no claimed or running attempt remains."""
-    if status not in {"SUCCESS", "FAILED", "SKIPPED", "CANCELLED"}:
+    if status not in FINISHED_RUN_STATUSES:
         raise _stale(conn, "run", pipeline_run_id, "terminal outcome", owner)
-    query = "cancel_run" if status == "CANCELLED" else "finish_run"
+    query = "cancel_run" if status == RunStatus.CANCELLED else "finish_run"
     _guard(
         conn,
         query,
@@ -491,7 +490,7 @@ def reopen_run(
                     "task_id": None,
                     "action": "REOPEN",
                     "from_status": row.status,
-                    "to_status": "IN-PROGRESS",
+                    "to_status": RunStatus.IN_PROGRESS,
                     "target_count": None,
                     "previous_message": None,
                     "reason": reason,
@@ -510,7 +509,7 @@ def mark_run(
     conn: Connection, pipeline_run_id: int, status: str, actor: Actor, *, owner: str | None = None
 ) -> None:
     """Record an operator's outcome only when no claimed or running attempt remains."""
-    if status not in {"SUCCESS", "FAILED", "SKIPPED"}:
+    if status not in {RunStatus.SUCCESS, RunStatus.FAILED, RunStatus.SKIPPED}:
         raise _stale(conn, "run", pipeline_run_id, "SUCCESS, FAILED or SKIPPED outcome", owner)
     _guard(
         conn,
@@ -641,7 +640,7 @@ def _end_attempt(
         row = conn.execute(statement(conn, f"transition_{query}"), params).one_or_none()
         if row is None:
             raise _stale(conn, "attempt", attempt_id, expected, owner)
-        if query == "finish_attempt" and status == "SUCCESS":
+        if query == "finish_attempt" and status == AttemptStatus.SUCCESS:
             fault_point("attempt.before_summary")
         _sync_summary(conn, attempt_id)
 
@@ -661,7 +660,7 @@ def finish_attempt(
     retryable: bool = True,
 ) -> None:
     """Record the owned outcome, summary, offset and admitted consumption atomically."""
-    if status not in {"SUCCESS", "FAILED"}:
+    if status not in {AttemptStatus.SUCCESS, AttemptStatus.FAILED}:
         raise _stale(conn, "attempt", attempt_id, "SUCCESS or FAILED outcome", owner)
     with conn.begin_nested():
         _end_attempt(
@@ -678,7 +677,7 @@ def finish_attempt(
             exit_code=exit_code,
             retryable=retryable,
         )
-        if status == "SUCCESS":
+        if status == AttemptStatus.SUCCESS:
             fault_point("attempt.after_status")
             row = conn.execute(
                 statement(conn, "task_run_for_attempt"), {"attempt_id": attempt_id}
@@ -710,7 +709,7 @@ def time_out_attempt(
         "time_out_attempt",
         "RUNNING",
         owner,
-        "TIMED_OUT",
+        AttemptStatus.TIMED_OUT,
         error_message=error_message,
         task_log=task_log,
     )
@@ -732,7 +731,7 @@ def cancel_attempt(
         "cancel_attempt",
         "QUEUED, CLAIMED or RUNNING",
         None,
-        "CANCELLED",
+        AttemptStatus.CANCELLED,
         error_message=error_message,
         task_log=task_log,
     )
@@ -754,7 +753,7 @@ def lose_attempt(
         "lose_attempt",
         "CLAIMED or RUNNING; expired lease",
         owner,
-        "LOST",
+        AttemptStatus.LOST,
         error_message=error_message or f"lost owner {owner}: side effects are uncertain",
     )
 
@@ -873,8 +872,9 @@ def ensure_attempt_started(
         row = conn.execute(
             statement(conn, "transition_row_attempt"), {"row_id": attempt_id}
         ).one_or_none()
-        allowed = {"RUNNING", "SUCCESS", "FAILED"} if completed else {"RUNNING"}
-        if row is not None and row.status == "RUNNING":
+        running = {AttemptStatus.RUNNING}
+        allowed = running | {AttemptStatus.SUCCESS, AttemptStatus.FAILED} if completed else running
+        if row is not None and row.status == AttemptStatus.RUNNING:
             expiry = row.lease_expires_at
             instant = None if expiry is None else as_utc(expiry)
             if instant is None or runlog.elapsed_hours(instant, datetime.now(UTC)) >= 0:
