@@ -1,6 +1,6 @@
 ---
 name: roadmap-item
-description: Take an etl-craft Road to 1.0.0 item from a fresh branch to a merged pull request - find and read the item, check it against the design rules and stop with a design note when it conflicts, implement, update CHANGELOG and the roadmap's progress row and handover notes, validate, open the PR with every template section filled, watch CI and squash-merge. Use when asked to continue, take over, or ship the next roadmap item.
+description: Take an etl-craft Road to 1.0.0 item from a fresh branch to a merged pull request - find and read the item, check it against the design rules and stop with a design note when it conflicts, implement, update CHANGELOG and the roadmap's progress row and handover notes, validate, open the PR with every template section filled and hand the squash-merge to GitHub auto-merge. Use when asked to continue, take over, or ship the next roadmap item.
 ---
 
 # Ship a Road to 1.0.0 item
@@ -13,7 +13,12 @@ environment's GitHub tools where it is not available.
 ```bash
 git fetch origin && git switch main && git pull --ff-only
 gh pr list --state open                  # finish an open item before starting another
+gh run list --branch main --limit 5      # the last merge's Docs deployment succeeded
 ```
+
+An open pull request from an earlier session comes first. If its CI failed, auto-merge left it
+open: read the log (`gh run view <run-id> --log-failed`), find the cause, fix it, rerun the
+matching local step and push. Auto-merge stays on and merges it once the checks pass.
 
 - The Progress table near the top of `docs/development/road-to-1.0.0.md` lists the work in
   order. The next item is the first row whose status is `In progress` or `Planned` and whose
@@ -103,14 +108,13 @@ after it is green.
   The PR policy workflow checks the sections and the "Done when" ticks; edit the description to
   fix it.
 
-## 7. CI and merge
+## 7. Hand the merge to GitHub
 
-- Every push starts pull-request CI again. Watch it: `gh pr checks <n> --watch --fail-fast`.
-- On a failure, read the log first (`gh run view <run-id> --log-failed`). Find the cause, fix
-  it, rerun the matching local step and push. Rerun a job only for a cause outside the change,
-  and say which.
-- When every check, including the PR policy workflow, is green, `gh pr merge <n> --squash`. Never pass `--delete-branch`; every
-  branch is kept. Leave the pull request unmerged, with the reason in it, when a required suite
-  could not run (`AGENTS.md`, "Validation").
-- Afterwards, run `git switch main && git pull --ff-only`, and confirm the Docs deployment
-  succeeded: `gh run list --branch main --limit 5`.
+- Unless a required suite could not run, turn on auto-merge and end the session:
+  `gh pr merge <n> --squash --auto`. GitHub squash-merges once every required check passes and
+  keeps the branch. Never pass `--delete-branch`.
+- Do not watch CI, poll checks or wait for logs: every check re-sends the whole session. The next
+  session finds the pull request in step 1 if CI failed.
+- When a required suite could not run (`AGENTS.md`, "Validation"), leave the pull request
+  unmerged with the reason in it, and do not turn on auto-merge.
+- Rerun a failed job only for a cause outside the change, after reading its log, and say which.

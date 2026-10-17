@@ -297,9 +297,10 @@ make services-up          # local PostgreSQL, MinIO, Iceberg REST, Trino, Mailpi
    and "New public surface and dependencies" say "None" when empty; never leave them out.
    The PR policy workflow checks the sections and the ticked "Done when" points, and runs
    again when the description is edited.
-3. **Merge after every check is green**, squash-merging and keeping the branch. Never merge
-   with a red, pending or skipped required check. Never rerun a failed job without first reading
-   its log and explaining the failure.
+3. **Merge with auto-merge** (`gh pr merge <n> --squash --auto`), keeping the branch, and end
+   the session instead of watching CI: GitHub merges once every required check passes. Never
+   merge with a red, pending or skipped required check. Never rerun a failed job without first
+   reading its log and explaining the failure.
 
 ## Reporting
 
