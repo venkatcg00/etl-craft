@@ -118,7 +118,7 @@ item's text, or work done early under another item.
 | SQL checks with sqlglot | Done | #141 | Parse-tree checks of SELECTs and rule SQL in the warehouse's dialect; `validate` warns on SQL sqlglot cannot read |
 | S5.K Row-level rejects | Done | #143 | `REJECT_LIMIT` sets aside rows the target cannot take in `<target>__rejects`; `REJECT_COUNT` in the run logs |
 | Configuration history | Done | #144 | A typed SCD type 4 history table per `CFG_` table, `AUD_METADATA_CHANGES` a view over them, and `config export --as-of` |
-| 0.4 gate | In progress | | Seven-day soak of the frozen candidate ends 17 October 2026 at 08:01 UTC; release remains gated |
+| 0.4 gate | Done | | The 0.3.0 wheel passed an owner-accepted 5.9-day soak with 88 server kills; 0.3.0 is the soaked release, and 0.4.0 waits for a soak of its own code |
 | S5.L SQL watermarks | Done | #145 | Typed source positions, atomic success offsets, attempt/run ranges and audited resets |
 | S5.M Event waits | Done | #146 | Durable file/query waits, indefinite deadlines, native file hints, evidence and downstream file tokens |
 | S5.N Source definitions and schema-aware lineage | Done | #147 | Offline star/join tracing, audited source definitions, seeding and documented/deployed schema comparison |
@@ -150,6 +150,15 @@ item's text, or work done early under another item.
 ### Handover notes
 
 What a person picking up the work needs that the code and the item texts do not say.
+
+**The 0.4 gate and 0.4.0.** The soak ran the 0.3.0 wheel (`release/0.3.0` at bbf2bdc, the same
+`src/` and lock file as `v0.3.0`) from 10 October 08:01 UTC until a reboot on 16 October at about
+05:09 UTC, 5 days 21 hours. Its last check passed: every due tick made one run (563, 564 and 564),
+12,945 attempts succeeded beside one expected flaky-feed failure, and all 88 server kills were
+recovered with nothing lost or doubled. The owner accepted it without a restart, so it meets the
+0.4 gate for the code it ran, which is 0.3.0. Only soaked code is released: no 0.4.0 is cut from
+it, and `main`'s changes since 0.3.0 stay under `[Unreleased]`. 0.4.0 is cut from a later `main`
+commit after that commit's wheel passes its own soak.
 
 **Priority correction after S5.N.** Build S5.O, S5.P and S5.Q before S5.C. The
 [metadata and pipeline UI design](metadata-and-ui.md) records the schema gaps, normalized
