@@ -14,108 +14,39 @@ Every problem is a ``ConfigurationError`` naming the file and the setting.
 from __future__ import annotations
 
 import os
-import re
-from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl, urlencode
 
 import yaml
 
-from etl_craft.config.auth import (
-    AUTH_EXTRA_FIELDS,
-    EMAIL_AUTH_FIELDS,
-    ENGINE_NAMES,
-    WAREHOUSE_NAMES,
-    WAREHOUSES,
-    engine_for_jdbc_url,
-    warehouse_by_key,
-    warehouse_spec,
+from etl_craft.config.auth import WAREHOUSES
+from etl_craft.config.loader_cloning import CLONING_KEYS, parse_cloning
+from etl_craft.config.loader_docs import DOCS_SITE_KEYS, parse_docs_site
+from etl_craft.config.loader_email import EMAIL_KEYS, parse_email
+from etl_craft.config.loader_engine import parse_engine
+from etl_craft.config.loader_helpers import (
+    CONNECTION_FIELDS,
+    SECRETS_KEYS,
+    mapping,
+    parse_source,
+    profiled_settings,
+    reject_unknown,
+    relative_to_config,
 )
-from etl_craft.config.docs_site import cidr_ranges
-from etl_craft.config.model import (
-    DEFAULT_LOG_DIR,
-    DEFAULT_SENDMAIL_PATH,
-    EXAMPLE_PATH,
-    CloningConfig,
-    ConnectionProfile,
-    ConnectorConfig,
-    DagDefaults,
-    DocsSiteConfig,
-    EmailProfile,
-    ExecutionLimits,
-    SourceConfig,
+from etl_craft.config.loader_orchestration import (
+    ORCHESTRATION_KEYS,
+    parse_dag_defaults,
+    parse_dependency_gates,
+    parse_limits,
+    parse_mode,
 )
+from etl_craft.config.loader_warehouse import WAREHOUSE_SECTION_KEYS, parse_warehouse
+from etl_craft.config.model import DEFAULT_LOG_DIR, EXAMPLE_PATH, ConnectorConfig
 from etl_craft.config.resolve import Resolver
-from etl_craft.config.targets import (
-    active_catalog,
-    parse_warehouse_url,
-    preferred_connection_url,
-)
-from etl_craft.core.cron import parse as parse_cron
-from etl_craft.core.enums import (
-    AuthMode,
-    CloningScope,
-    EmailTransport,
-    GatePolicy,
-    Mode,
-    TableFormat,
-    TlsMode,
-    enum_value,
-)
+from etl_craft.config.targets import active_catalog
 from etl_craft.core.errors import ConfigurationError, MetadataError
-from etl_craft.core.text import SECRET_KEYS, is_env_name, is_safe_identifier
 
 SECTIONS = ("Secrets", "Orchestration", "Engine", "Warehouse", "Cloning", "Docs_site")
-"""The top-level sections, in the order the file must present them."""
-
-_SOURCE_TYPES = ("environment", "file")
-
-_ORCHESTRATION_KEYS = frozenset(
-    {
-        "Api_address",
-        "Mode",
-        "Name",
-        "Log_dir",
-        "Task_timeout_seconds",
-        "Max_parallel_tasks",
-        "Shutdown_grace_seconds",
-        "Engine_db_outage_seconds",
-        "Local_ingestion_slots",
-        "Local_warehouse_slots",
-        "Timezone",
-        "Enforce_sla",
-        "Gate_wait_minutes",
-        "Global_dag",
-        "Catchup",
-        "Tags",
-        "Retries",
-        "Retry_delay_minutes",
-        "Depends_on_past",
-        "Email_on_failure",
-        "Email_recipients",
-        "Allow_schedule",
-        "Dependency_gates",
-        "Email",
-    }
-)
-_EMAIL_KEYS = frozenset(
-    {"host", "port", "from_address", "auth_mode", "user", "secret", "scope"}
-    | {"client_id", "token_url", "transport", "sendmail_path", "from_name", "tls_mode", "ca_file"}
-)
-_SMTP_ONLY_EMAIL_KEYS = frozenset(
-    _EMAIL_KEYS - {"from_address", "from_name", "transport", "sendmail_path"}
-)
-_CONNECTION_FIELDS = frozenset(
-    {"jdbc_url", "user", "auth_mode", "secret", "schema", *AUTH_EXTRA_FIELDS}
-)
-SECRETS_KEYS = frozenset({"Source_type", "Path", "Profile"})
-WAREHOUSE_SECTION_KEYS = frozenset({"Name", "Table_format"})
-CLONING_KEYS = frozenset({"Enabled", "Scope", "External_volume", "Base_location"})
-DOCS_SITE_KEYS = frozenset(
-    {"Schedule", "Output", "Authtoken", "Domain", "Allowed_ips", "External_url", "Trusted_proxies"}
-)
 
 
 def settings_by_section() -> dict[str, frozenset[str]]:
@@ -130,26 +61,22 @@ def settings_by_section() -> dict[str, frozenset[str]]:
         warehouse_fields.update(spec.profile_fields)
     return {
         "Secrets": SECRETS_KEYS,
-        "Orchestration": _ORCHESTRATION_KEYS - {"Email"},
-        "Orchestration.Email": _EMAIL_KEYS,
-        "Engine": frozenset({"Name"}) | _CONNECTION_FIELDS,
-        "Warehouse": WAREHOUSE_SECTION_KEYS | _CONNECTION_FIELDS | warehouse_fields,
+        "Orchestration": ORCHESTRATION_KEYS - {"Email"},
+        "Orchestration.Email": EMAIL_KEYS,
+        "Engine": frozenset({"Name"}) | CONNECTION_FIELDS,
+        "Warehouse": WAREHOUSE_SECTION_KEYS | CONNECTION_FIELDS | warehouse_fields,
         "Cloning": CLONING_KEYS,
         "Docs_site": DOCS_SITE_KEYS,
     }
 
 
-# The field whose presence selects the separate-fields connection shape.
-_PREFERRED_SHAPE_MARKER = {"databricks": "catalog", "snowflake": "account"}
-
-
 class _StrictLoader(yaml.SafeLoader):
     """Refuse duplicate mapping keys, with their section paths and source lines."""
 
-    def construct_document(self, node: Any) -> Any:
+    def construct_document(self, node: yaml.Node) -> object:
         self.section_paths: dict[int, str] = {}
 
-        def index(current: Any, path: str) -> None:
+        def index(current: yaml.Node, path: str) -> None:
             if id(current) in self.section_paths:
                 return
             self.section_paths[id(current)] = path
@@ -163,11 +90,11 @@ class _StrictLoader(yaml.SafeLoader):
         index(node, "")
         return super().construct_document(node)
 
-    def construct_mapping(self, node: Any, deep: bool = False) -> dict[Any, Any]:
+    def construct_mapping(self, node: Any, deep: bool = False) -> dict[object, object]:
         if not isinstance(node, yaml.MappingNode):
             return super().construct_mapping(node, deep=deep)
         self.flatten_mapping(node)
-        seen: dict[Any, int] = {}
+        seen: dict[object, int] = {}
         for key_node, _ in node.value:
             key = self.construct_object(key_node, deep=True)
             try:
@@ -184,27 +111,6 @@ class _StrictLoader(yaml.SafeLoader):
                 # SafeLoader supplies the diagnostic for an unhashable mapping key.
                 return super().construct_mapping(node, deep=deep)
         return super().construct_mapping(node, deep=deep)
-
-
-def _connection_url(written: str, path: Path, where: str) -> str:
-    """Refuse URL credentials and make certificate URL paths project-relative."""
-    base, separator, query = written.partition("?")
-    if not separator:
-        return written
-    pairs = parse_qsl(query, keep_blank_values=True)
-    for key, _ in pairs:
-        if key.lower() in SECRET_KEYS:
-            raise ConfigurationError(
-                f"{path}: {where} contains credential query key {key!r}; "
-                "put the secret in a variable and name it in `secret`"
-            )
-    resolved = [
-        (key, str(_relative_to_config(value, path)))
-        if key.lower() in {"sslrootcert", "sslcert", "sslkey", "private_key_file"}
-        else (key, value)
-        for key, value in pairs
-    ]
-    return f"{base}?{urlencode(resolved)}" if resolved != pairs else written
 
 
 def load_config(path: str | Path) -> ConnectorConfig:
@@ -224,44 +130,43 @@ def load_config(path: str | Path) -> ConnectorConfig:
     return parse_config(raw, path)
 
 
-def parse_config(raw: Any, path: Path) -> ConnectorConfig:
+def parse_config(raw: object, path: Path) -> ConnectorConfig:
     """Validate an already-loaded ``craft-connector.yml`` mapping; ``path`` is where it came from.
 
     Relative paths in it (``Secrets.Path``) resolve against ``path``'s directory.
     """
     path = path.absolute()
-    _check_layout(raw, path)
-    secrets = _mapping(raw, "Secrets", path, required=True)
+    raw = _check_layout(raw, path)
+    secrets = mapping(raw, "Secrets", path, required=True)
     # Secrets.Source_type and Secrets.Path can only come from the process environment: the
     # source they describe is not known yet.
     environment = Resolver(values=os.environ, origin="the process environment", path=path)
-    source = _parse_source(secrets, path, environment)
+    source = parse_source(secrets, path, environment)
     resolver = Resolver.for_source(source, path)
     resolver.sources.extend(environment.sources)
     global_profile = resolver.text(secrets.get("Profile"), "Secrets.Profile")
 
-    orchestration = _profiled_settings("Orchestration", raw, global_profile, path, resolver)
-    _reject_unknown(orchestration.settings, _ORCHESTRATION_KEYS, "Orchestration", path)
-    mode = _parse_mode(orchestration, path)
-    dependency_gates = _parse_dependency_gates(orchestration, mode, path)
-    limits = _parse_limits(orchestration, path)
+    orchestration = profiled_settings("Orchestration", raw, global_profile, path, resolver)
+    reject_unknown(orchestration.settings, ORCHESTRATION_KEYS, "Orchestration", path)
+    mode = parse_mode(orchestration, path)
+    dependency_gates = parse_dependency_gates(orchestration, mode, path)
+    limits = parse_limits(orchestration, path)
     project_timezone = orchestration.text("Timezone")
     project_timezone = "UTC" if project_timezone is None else project_timezone
     from etl_craft.core.cron import timezone
-    from etl_craft.core.errors import MetadataError
 
     try:
         timezone(project_timezone)
     except MetadataError as error:
         raise ConfigurationError(f"{path}: Orchestration.Timezone: {error}") from error
-    dag_defaults = _parse_dag_defaults(orchestration, path)
+    dag_defaults = parse_dag_defaults(orchestration, path)
     orchestrator_name = orchestration.text("Name")
-    log_dir = _relative_to_config(orchestration.text("Log_dir") or DEFAULT_LOG_DIR, path)
-    email = _parse_email(orchestration, path, resolver)
-    engine = _parse_engine(raw, global_profile, path, resolver)
-    warehouse, table_format = _parse_warehouse(raw, global_profile, path, resolver)
-    cloning = _parse_cloning(raw, global_profile, path, resolver)
-    docs_site = _parse_docs_site(raw, global_profile, path, resolver)
+    log_dir = relative_to_config(orchestration.text("Log_dir") or DEFAULT_LOG_DIR, path)
+    email = parse_email(orchestration, path, resolver)
+    engine = parse_engine(raw, global_profile, path, resolver)
+    warehouse, table_format = parse_warehouse(raw, global_profile, path, resolver)
+    cloning = parse_cloning(raw, global_profile, path, resolver)
+    docs_site = parse_docs_site(raw, global_profile, path, resolver)
 
     from etl_craft.config.model import parse_api_address
 
@@ -296,26 +201,7 @@ def parse_config(raw: Any, path: Path) -> ConnectorConfig:
     return config
 
 
-def _duckdb_url_beside_config(jdbc_url: str, path: Path) -> str:
-    """Return a DuckDB URL whose relative file path is taken from the config's directory."""
-    file = parse_warehouse_url(jdbc_url).path
-    if not file or file == ":memory:" or Path(file).is_absolute():
-        return jdbc_url
-    return f"jdbc:duckdb:{_relative_to_config(file, path)}"
-
-
-def _relative_to_config(written: str, path: Path) -> Path:
-    """Return ``written`` as an absolute path, a relative one taken from the config's directory.
-
-    An absolute path is kept as written; symbolic links are never resolved.
-    """
-    resolved = Path(written).expanduser()
-    if not resolved.is_absolute():
-        resolved = path.absolute().parent / resolved
-    return Path(os.path.normpath(resolved))
-
-
-def _check_layout(raw: Any, path: Path) -> None:
+def _check_layout(raw: object, path: Path) -> dict[str, object]:
     """Refuse a non-mapping, unknown sections and sections out of order."""
     if not isinstance(raw, dict):
         raise ConfigurationError(f"{path}: craft-connector.yml must contain a top-level mapping")
@@ -332,763 +218,4 @@ def _check_layout(raw: Any, path: Path) -> None:
             f"{path}: sections are in the order {present}; write them as {expected} "
             "(Secrets, Orchestration, Engine, Warehouse, Cloning, then Docs_site)"
         )
-
-
-# Sections and profiles
-
-
-@dataclass(frozen=True)
-class _Profiled:
-    """One section's settings: its own values overlaid with the active profile's block."""
-
-    section: str
-    profile: str | None
-    settings: dict[str, Any]
-    resolver: Resolver
-    path: Path
-
-    def where(self, key: str) -> str:
-        return f"{self.section}.{self.profile}.{key}" if self.profile else f"{self.section}.{key}"
-
-    def value(self, key: str) -> Any:
-        return self.resolver.resolve(
-            self.settings.get(key), self.where(key), profile=self.profile, field_name=key
-        )
-
-    def text(self, key: str) -> str | None:
-        return self.resolver.text(
-            self.settings.get(key), self.where(key), profile=self.profile, field_name=key
-        )
-
-
-def _mapping(raw: dict[str, Any], name: str, path: Path, *, required: bool) -> dict[str, Any]:
-    section = raw.get(name)
-    if section is None:
-        if required:
-            raise ConfigurationError(f"{path}: missing the {name} section (see {EXAMPLE_PATH})")
-        return {}
-    if not isinstance(section, dict):
-        raise ConfigurationError(f"{path}: {name} must be a mapping")
-    return section
-
-
-def _profiled_settings(
-    name: str,
-    raw: dict[str, Any],
-    global_profile: str | None,
-    path: Path,
-    resolver: Resolver,
-    *,
-    nested: frozenset[str] = frozenset({"Email"}),
-) -> _Profiled:
-    """Select ``name``'s active profile block and overlay it on the section's own values.
-
-    A mapping-valued key is a profile block unless it is in ``nested``, a structured setting
-    that lives inside a profile, like Orchestration's Email.
-    """
-    section = _mapping(raw, name, path, required=name == "Orchestration")
-    blocks = {
-        key: value
-        for key, value in section.items()
-        if isinstance(value, dict) and key not in nested
-    }
-    base = {key: value for key, value in section.items() if key not in blocks and key != "Profile"}
-    selected = resolver.text(section.get("Profile"), f"{name}.Profile") or global_profile
-    if not blocks:
-        return _Profiled(name, selected, base, resolver, path)
-    if selected is None:
-        if len(blocks) != 1:
-            raise ConfigurationError(
-                f"{path}: {name} has profiles {sorted(blocks)} but none is selected — set "
-                f"{name}.Profile or Secrets.Profile"
-            )
-        selected = next(iter(blocks))
-    if selected not in blocks:
-        where = f"{name}.Profile" if "Profile" in section else "Secrets.Profile"
-        raise ConfigurationError(
-            f"{path}: {name} has no profile {selected!r} (it has {sorted(blocks)})"
-            f"{resolver.hint(where)}"
-        )
-    return _Profiled(name, selected, {**base, **blocks[selected]}, resolver, path)
-
-
-def _reject_unknown(
-    settings: Mapping[str, Any], allowed: frozenset[str] | set[str], where: str, path: Path
-) -> None:
-    unknown = sorted(set(settings) - set(allowed))
-    if unknown:
-        raise ConfigurationError(f"{path}: unknown key(s) {unknown} in {where}")
-
-
-# Secrets
-
-
-def _parse_source(secrets: dict[str, Any], path: Path, environment: Resolver) -> SourceConfig:
-    _reject_unknown(secrets, SECRETS_KEYS, "Secrets", path)
-    written_type = environment.text(secrets.get("Source_type"), "Secrets.Source_type")
-    source_type = (written_type or "").lower()
-    if source_type not in _SOURCE_TYPES:
-        raise ConfigurationError(
-            f"{path}: Secrets.Source_type must be one of {sorted(_SOURCE_TYPES)}, "
-            f"got {secrets.get('Source_type')!r}{environment.hint('Secrets.Source_type')}"
-        )
-    raw_path = environment.text(secrets.get("Path"), "Secrets.Path")
-    if source_type == "environment":
-        if raw_path is not None:
-            raise ConfigurationError(f"{path}: Secrets.Path is only used with Source_type: file")
-        return SourceConfig(type=source_type)
-    if raw_path is None:
-        raise ConfigurationError(f"{path}: Secrets.Path is required when Source_type is file")
-    return SourceConfig(type=source_type, path=str(_relative_to_config(raw_path, path)))
-
-
-# Connection profiles
-
-
-@dataclass(frozen=True)
-class _Fields:
-    """The fields of one connection profile block, resolved on demand."""
-
-    block: dict[str, Any]
-    where: str
-    profile: str | None
-    resolver: Resolver
-    path: Path
-
-    def value(self, key: str, *, required: bool = False) -> str | None:
-        raw = self.block.get(key)
-        if raw is None:
-            if required:
-                raise ConfigurationError(f"{self.path}: {self.where} needs {key}")
-            return None
-        value = self.resolver.resolve(
-            raw, f"{self.where}.{key}", profile=self.profile, field_name=key
-        )
-        text = str(value).strip() if value is not None else None
-        if text is not None and key == "jdbc_url":
-            return _connection_url(text, self.path, f"{self.where}.{key}")
-        return text
-
-    def secret_var(self, key: str = "secret") -> str | None:
-        return self.resolver.secret_name(
-            self.block.get(key), f"{self.where}.{key}", profile=self.profile, field_name=key
-        )
-
-    def hint(self, key: str) -> str:
-        return self.resolver.hint(f"{self.where}.{key}")
-
-
-def _auth_extra(
-    fields: _Fields,
-    auth_mode: str,
-    required: tuple[str, ...],
-    *,
-    user: str,
-    secret_key: str = "secret",
-) -> dict[str, Any]:
-    """Check an auth mode's fields are present and return the profile's ``extra`` for it."""
-    path, where = fields.path, fields.where
-    if "user" in required and not user:
-        raise ConfigurationError(f"{path}: {where} needs user for auth_mode {auth_mode}")
-    extra: dict[str, Any] = {}
-    secret_var = fields.secret_var(secret_key)
-    if "secret" in required and not secret_var:
-        raise ConfigurationError(
-            f"{path}: {where} needs {secret_key} (a variable name) for auth_mode {auth_mode}"
-        )
-    if secret_var:
-        extra["secret_var"] = secret_var
-    for name in AUTH_EXTRA_FIELDS:
-        value = fields.value(name)
-        if value:
-            extra[name] = (
-                str(_relative_to_config(value, path))
-                if name in {"key_file", "cert_file", "private_key_file"}
-                else value
-            )
-        elif name in required:
-            raise ConfigurationError(f"{path}: {where} needs {name} for auth_mode {auth_mode}")
-    return extra
-
-
-def _check_auth_mode(auth_mode: str, accepted: frozenset[str], label: str, fields: _Fields) -> None:
-    if auth_mode not in accepted:
-        raise ConfigurationError(
-            f"{fields.path}: {fields.where}.auth_mode resolved to {auth_mode!r}; {label} "
-            f"takes {sorted(accepted)}{fields.hint('auth_mode')}"
-        )
-
-
-def _connection_block(
-    name: str, raw: dict[str, Any], global_profile: str | None, path: Path, resolver: Resolver
-) -> tuple[_Profiled, dict[str, Any]] | None:
-    """Return a connection section's selection and a copy of its active profile block."""
-    section = _mapping(raw, name, path, required=name == "Engine")
-    if not section:
-        return None
-    profiled = _profiled_settings(name, raw, global_profile, path, resolver)
-    if profiled.profile is None or not isinstance(section.get(profiled.profile), dict):
-        raise ConfigurationError(
-            f"{path}: {name} needs at least one profile block (dev, prod, ...) holding its "
-            f"connection settings — see {EXAMPLE_PATH}"
-        )
-    return profiled, dict(section[profiled.profile])
-
-
-# Orchestration
-
-
-def _parse_mode(orchestration: _Profiled, path: Path) -> Mode:
-    return enum_value(
-        Mode,
-        orchestration.text("Mode") or "",
-        ConfigurationError(
-            f"{path}: Orchestration.Mode must be local or remote, got "
-            f"{orchestration.settings.get('Mode')!r}"
-            f"{orchestration.resolver.hint(orchestration.where('Mode'))}"
-        ),
-    )
-
-
-def _parse_dependency_gates(orchestration: _Profiled, mode: Mode, path: Path) -> GatePolicy:
-    raw = orchestration.text("Dependency_gates")
-    if raw is None:
-        return GatePolicy.ENFORCE
-    policy = enum_value(
-        GatePolicy,
-        raw,
-        ConfigurationError(
-            f"{path}: Orchestration.Dependency_gates must be enforce, warn or off, got {raw!r}"
-            f"{orchestration.resolver.hint(orchestration.where('Dependency_gates'))}"
-        ),
-    )
-    if mode == Mode.REMOTE and policy != GatePolicy.ENFORCE:
-        raise ConfigurationError(
-            f"{path}: Orchestration.Dependency_gates is {policy}, but Mode is remote: in remote "
-            "mode etl-craft checks no dependency gate (the orchestrator's sensors do), so there "
-            "is nothing to relax. Remove Dependency_gates from the remote profile, or bypass the "
-            "sensor in the orchestrator"
-        )
-    return policy
-
-
-def _bounded_number(
-    value: Any,
-    where: str,
-    path: Path,
-    *,
-    minimum: int = 0,
-    maximum: int | None = None,
-    hint: str = "",
-) -> int:
-    """Accept whole numbers or ASCII decimal strings inside the setting's bounds."""
-    written = value
-    if isinstance(value, str) and re.fullmatch(r"[0-9]+", value.strip()):
-        value = int(value.strip())
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, int)
-        or value < minimum
-        or (maximum is not None and value > maximum)
-    ):
-        bounds = f"{minimum} to {maximum}" if maximum is not None else f"at least {minimum}"
-        raise ConfigurationError(
-            f"{path}: {where} must be a whole number {bounds}, got {written!r}{hint}"
-        )
-    return value
-
-
-def _whole_number(
-    settings: _Profiled,
-    key: str,
-    default: int | None,
-    path: Path,
-    *,
-    minimum: int = 0,
-    maximum: int | None = None,
-) -> Any:
-    value = settings.value(key)
-    if value is None:
-        return default
-    return _bounded_number(
-        value,
-        settings.where(key),
-        path,
-        minimum=minimum,
-        maximum=maximum,
-        hint=settings.resolver.hint(settings.where(key)),
-    )
-
-
-def _flag(settings: _Profiled, key: str, default: bool | None, path: Path) -> Any:
-    value = settings.value(key)
-    if value is None:
-        return default
-    return _parse_bool(value, settings.where(key), path, default=bool(default))
-
-
-def _string_list(settings: _Profiled, key: str, path: Path) -> list[str] | None:
-    value = settings.value(key)
-    if value is None:
-        return None
-    if isinstance(value, str):
-        # A variable, or a value, holding a comma-separated list.
-        return [item.strip() for item in value.split(",") if item.strip()]
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise ConfigurationError(f"{path}: Orchestration.{key} must be a list of strings")
-    return value
-
-
-def _parse_limits(settings: _Profiled, path: Path) -> ExecutionLimits:
-    defaults = ExecutionLimits()
-
-    def number(key: str, *, low: int = 0) -> int:
-        """``Orchestration.<key>``, defaulting to the limit field of the same lowercase name."""
-        return int(_whole_number(settings, key, getattr(defaults, key.lower()), path, minimum=low))
-
-    return ExecutionLimits(
-        task_timeout_seconds=number("Task_timeout_seconds"),
-        max_parallel_tasks=number("Max_parallel_tasks", low=1),
-        shutdown_grace_seconds=number("Shutdown_grace_seconds"),
-        engine_db_outage_seconds=number("Engine_db_outage_seconds"),
-        enforce_sla=_flag(settings, "Enforce_sla", False, path),
-        gate_wait_minutes=number("Gate_wait_minutes"),
-        local_ingestion_slots=_whole_number(
-            settings, "Local_ingestion_slots", None, path, minimum=1
-        ),
-        local_warehouse_slots=_whole_number(
-            settings, "Local_warehouse_slots", None, path, minimum=1
-        ),
-    )
-
-
-def _parse_dag_defaults(settings: _Profiled, path: Path) -> DagDefaults:
-    return DagDefaults(
-        global_dag=_flag(settings, "Global_dag", False, path),
-        catchup=_flag(settings, "Catchup", None, path),
-        tags=_string_list(settings, "Tags", path),
-        retries=_whole_number(settings, "Retries", None, path),
-        retry_delay_minutes=_whole_number(settings, "Retry_delay_minutes", None, path),
-        depends_on_past=_flag(settings, "Depends_on_past", None, path),
-        email_on_failure=_flag(settings, "Email_on_failure", None, path),
-        email_recipients=_string_list(settings, "Email_recipients", path),
-        allow_schedule=_flag(settings, "Allow_schedule", True, path),
-    )
-
-
-def _parse_email(orchestration: _Profiled, path: Path, resolver: Resolver) -> EmailProfile | None:
-    block = orchestration.settings.get("Email")
-    if block is None:
-        return None
-    where = orchestration.where("Email")
-    if not isinstance(block, dict):
-        raise ConfigurationError(f"{path}: {where} must be a mapping")
-    _reject_unknown(block, _EMAIL_KEYS, where, path)
-    fields = _Fields(block, where, orchestration.profile, resolver, path)
-    transport = fields.value("transport") or "smtp"
-    transport = enum_value(
-        EmailTransport,
-        transport,
-        ConfigurationError(
-            f"{path}: {where}.transport resolved to {transport!r}, which is not one of "
-            f"{', '.join(EmailTransport)}{fields.hint('transport')}"
-        ),
-    )
-    name = orchestration.profile or "default"
-    if transport == "sendmail":
-        smtp_only = sorted(set(block) & _SMTP_ONLY_EMAIL_KEYS)
-        if smtp_only:
-            raise ConfigurationError(
-                f"{path}: {where} sends through sendmail, so {', '.join(smtp_only)} would be "
-                "ignored; remove them, or set transport: smtp"
-            )
-        return EmailProfile(
-            section="EMAIL",
-            name=name,
-            host="",
-            port=0,
-            from_address=fields.value("from_address", required=True) or "",
-            from_name=fields.value("from_name") or "",
-            transport="sendmail",
-            sendmail_path=str(
-                _relative_to_config(fields.value("sendmail_path") or DEFAULT_SENDMAIL_PATH, path)
-            ),
-        )
-    if "sendmail_path" in block:
-        raise ConfigurationError(
-            f"{path}: {where}.sendmail_path applies only with transport: sendmail"
-        )
-    port = _bounded_number(
-        fields.resolver.resolve(
-            block.get("port"), f"{where}.port", profile=fields.profile, field_name="port"
-        ),
-        f"{where}.port",
-        path,
-        minimum=1,
-        maximum=65535,
-        hint=fields.hint("port"),
-    )
-    auth_mode = fields.value("auth_mode") or AuthMode.NONE
-    if auth_mode not in EMAIL_AUTH_FIELDS:
-        raise ConfigurationError(
-            f"{path}: {where}.auth_mode resolved to {auth_mode!r}, which is not one of "
-            f"{sorted(EMAIL_AUTH_FIELDS)}{fields.hint('auth_mode')}"
-        )
-    user = fields.value("user") or ""
-    extra = _auth_extra(fields, auth_mode, EMAIL_AUTH_FIELDS[auth_mode], user=user)
-    tls_mode = fields.value("tls_mode") or "starttls"
-    tls_mode = enum_value(
-        TlsMode,
-        tls_mode,
-        ConfigurationError(
-            f"{path}: {where}.tls_mode resolved to {tls_mode!r}, which is not one of "
-            f"none, starttls, ssl{fields.hint('tls_mode')}"
-        ),
-    )
-    ca_file = fields.value("ca_file")
-    if ca_file and tls_mode == "none":
-        raise ConfigurationError(
-            f"{path}: {where}.ca_file={ca_file!r} would be ignored with tls_mode=none; "
-            "set tls_mode to starttls or ssl, or remove ca_file"
-        )
-    return EmailProfile(
-        section="EMAIL",
-        name=name,
-        host=fields.value("host", required=True) or "",
-        port=port,
-        from_address=fields.value("from_address", required=True) or "",
-        auth_mode=auth_mode,
-        user=user or None,
-        extra=extra,
-        from_name=fields.value("from_name") or "",
-        tls_mode=tls_mode,
-        ca_file=_relative_to_config(ca_file, path) if ca_file else None,
-    )
-
-
-# Engine
-
-
-def _parse_engine(
-    raw: dict[str, Any], global_profile: str | None, path: Path, resolver: Resolver
-) -> ConnectionProfile:
-    selected = _connection_block("Engine", raw, global_profile, path, resolver)
-    assert selected is not None  # the Engine section is required
-    profiled, block = selected
-    where = f"Engine.{profiled.profile}"
-    block.pop("Name", None)  # a per-profile Name is already in profiled.settings
-    _reject_unknown(block, _CONNECTION_FIELDS, where, path)
-    _reject_unknown(
-        {k: v for k, v in profiled.settings.items() if k == "Name" or k not in block},
-        {"Name"},
-        "Engine",
-        path,
-    )
-    fields = _Fields(block, where, profiled.profile, resolver, path)
-    jdbc_url = fields.value("jdbc_url", required=True) or ""
-    try:
-        spec = engine_for_jdbc_url(jdbc_url)
-    except ConfigurationError as error:
-        raise ConfigurationError(
-            f"{path}: {where}.jdbc_url: {error}{fields.hint('jdbc_url')}"
-        ) from error
-
-    declared = profiled.text("Name")
-    if declared and ENGINE_NAMES.get(declared.lower()) != spec.name:
-        raise ConfigurationError(
-            f"{path}: Engine.Name is {declared!r}, but its jdbc_url is a {spec.name} URL"
-        )
-    # An Engine DB with nothing to authenticate (SQLite) needs no auth_mode.
-    default_auth = AuthMode.NONE if spec.auth_modes == {AuthMode.NONE} else ""
-    auth_mode = fields.value("auth_mode") or default_auth
-    _check_auth_mode(auth_mode, spec.auth_modes, f"a {spec.name} Engine DB", fields)
-    user = (fields.value("user") or "") if auth_mode != AuthMode.NONE else ""
-    extra = (
-        _auth_extra(fields, auth_mode, spec.auth_fields[auth_mode], user=user)
-        if auth_mode != AuthMode.NONE
-        else {}
-    )
-    return ConnectionProfile(
-        section="ENGINE",
-        name=profiled.profile or "",
-        jdbc_url=jdbc_url,
-        user=user,
-        auth_mode=auth_mode,
-        extra=extra,
-        schema=_schema(fields),
-    )
-
-
-# Warehouse
-
-
-def _parse_warehouse(
-    raw: dict[str, Any], global_profile: str | None, path: Path, resolver: Resolver
-) -> tuple[ConnectionProfile | None, TableFormat]:
-    selected = _connection_block("Warehouse", raw, global_profile, path, resolver)
-    if selected is None:
-        return None, TableFormat.NATIVE
-    profiled, block = selected
-    where = f"Warehouse.{profiled.profile}"
-    # Name and Table_format may sit on the section or on one profile (a dev DuckDB beside a
-    # prod Postgres); the profile's own value wins.
-    for key in ("Name", "Table_format"):
-        block.pop(key, None)
-    settings = {
-        k: v for k, v in profiled.settings.items() if k in WAREHOUSE_SECTION_KEYS or k not in block
-    }
-    _reject_unknown(settings, WAREHOUSE_SECTION_KEYS, "Warehouse", path)
-    table_format = enum_value(
-        TableFormat,
-        profiled.text("Table_format") or TableFormat.NATIVE,
-        ConfigurationError(
-            f"{path}: Warehouse.Table_format must be native or iceberg, got "
-            f"{settings.get('Table_format')!r}"
-        ),
-    )
-    declared = profiled.text("Name")
-    expected_dialect = WAREHOUSE_NAMES.get(declared.lower()) if declared else None
-    if declared and expected_dialect is None:
-        names = sorted({spec.display_name for spec in WAREHOUSES})
-        raise ConfigurationError(f"{path}: Warehouse.Name {declared!r} must be one of {names}")
-    fields = _Fields(block, where, profiled.profile, resolver, path)
-
-    marker = _PREFERRED_SHAPE_MARKER.get(expected_dialect or "")
-    if marker and (marker in block or "token" in block):
-        assert declared is not None and expected_dialect is not None
-        profile = _preferred_shape_profile(
-            fields, profiled, declared, expected_dialect, table_format
-        )
-    elif "token" in block:
-        raise ConfigurationError(
-            f"{path}: {where}.token is only for Warehouse.Name Databricks or Snowflake"
-        )
-    else:
-        profile = _jdbc_url_profile(fields, profiled, declared, expected_dialect, table_format)
-    return profile, table_format
-
-
-def _preferred_shape_profile(
-    fields: _Fields,
-    profiled: _Profiled,
-    declared: str,
-    expected_dialect: str,
-    table_format: str,
-) -> ConnectionProfile:
-    """Build a Databricks or Snowflake profile from separate fields and a credential-free URL.
-
-    A ``token`` field means auth mode ``token``; any other mode is named in ``auth_mode``.
-    """
-    path, where, block = fields.path, fields.where, fields.block
-    spec = warehouse_spec(expected_dialect, table_format)
-    _reject_unknown(
-        block, {*spec.preferred_fields, "auth_mode", "secret", *AUTH_EXTRA_FIELDS}, where, path
-    )
-    auth_mode = fields.value("auth_mode") or ("token" if "token" in block else "")
-    _check_auth_mode(auth_mode, spec.auth_modes, f"a {declared} warehouse", fields)
-    if auth_mode == AuthMode.TOKEN and "secret" in block:
-        raise ConfigurationError(f"{path}: {where} names its token under `token`, not `secret`")
-    parts = {
-        name: fields.value(name, required=True) or ""
-        for name in spec.preferred_fields
-        if name != "token"
-    }
-    try:
-        jdbc_url = preferred_connection_url(declared, parts)
-    except ConfigurationError as error:
-        raise ConfigurationError(f"{path}: {where}: {error}") from error
-    user = parts.get("user", "")
-    extra = _auth_extra(
-        fields,
-        auth_mode,
-        spec.auth_fields[auth_mode],
-        user=user,
-        secret_key="token" if auth_mode == AuthMode.TOKEN else "secret",
-    )
-    return ConnectionProfile(
-        section="WAREHOUSE",
-        name=profiled.profile or "",
-        jdbc_url=jdbc_url,
-        user=user,
-        auth_mode=auth_mode,
-        extra=extra,
-        schema=_schema(fields),
-    )
-
-
-def _jdbc_url_profile(
-    fields: _Fields,
-    profiled: _Profiled,
-    declared: str | None,
-    expected_dialect: str | None,
-    table_format: str,
-) -> ConnectionProfile:
-    """Build a warehouse profile from a whole JDBC URL."""
-    path, where, block = fields.path, fields.where, fields.block
-    # DuckDB over Iceberg reads its catalog and object-storage settings from the profile.
-    profile_fields: tuple[str, ...] = ()
-    if expected_dialect == "duckdb" and table_format == TableFormat.ICEBERG:
-        profile_fields = warehouse_by_key("duckdb_iceberg").profile_fields
-    _reject_unknown(block, _CONNECTION_FIELDS | set(profile_fields), where, path)
-    jdbc_url = fields.value("jdbc_url", required=True) or ""
-    try:
-        dialect = parse_warehouse_url(jdbc_url).dialect
-        spec = warehouse_spec(dialect, table_format)
-    except ConfigurationError as error:
-        raise ConfigurationError(f"{path}: {where}: {error}{fields.hint('jdbc_url')}") from error
-    actual = dialect.split("+", 1)[0]
-    if expected_dialect and actual != expected_dialect:
-        raise ConfigurationError(
-            f"{path}: Warehouse.Name is {declared!r}, but its jdbc_url resolves to {actual!r}"
-        )
-    if actual == "duckdb":
-        jdbc_url = _duckdb_url_beside_config(jdbc_url, path)
-    # A DuckDB file has nothing to authenticate; over Iceberg, the catalog may still ask.
-    default_auth = AuthMode.NONE if actual == "duckdb" else ""
-    auth_mode = fields.value("auth_mode") or default_auth
-    _check_auth_mode(auth_mode, spec.auth_modes, f"a {spec.display_name} warehouse", fields)
-    user = fields.value("user") or ""
-    extra = _auth_extra(fields, auth_mode, spec.auth_fields[auth_mode], user=user)
-    for key in profile_fields:
-        if key == "s3_secret":
-            name = fields.secret_var(key)
-            if name is not None:
-                extra[key] = name
-            continue
-        value = fields.value(key)
-        if value is not None:
-            extra[key] = value
-    schema = _schema(fields)
-    url_schema = _url_schema(jdbc_url)
-    if url_schema and url_schema.lower() != schema.lower():
-        raise ConfigurationError(
-            f"{path}: {where}.schema is {schema!r}, but its jdbc_url names schema "
-            f"{url_schema!r}; make them the same"
-        )
-    return ConnectionProfile(
-        section="WAREHOUSE",
-        name=profiled.profile or "",
-        jdbc_url=jdbc_url,
-        user=user,
-        auth_mode=auth_mode,
-        extra=extra,
-        schema=schema,
-    )
-
-
-def _schema(fields: _Fields) -> str:
-    """Return the profile's required ``schema``: a plain identifier."""
-    schema = fields.value("schema", required=True) or ""
-    if not is_safe_identifier(schema):
-        raise ConfigurationError(
-            f"{fields.path}: {fields.where}.schema must be a plain identifier (letters, digits "
-            f"and underscores), got {schema!r}{fields.hint('schema')}"
-        )
-    return schema
-
-
-def _url_schema(jdbc_url: str) -> str | None:
-    """Return the schema a Trino URL names after its catalog, if any."""
-    url = parse_warehouse_url(jdbc_url)
-    if url.dialect.startswith("trino") and "/" in url.database:
-        return url.database.split("/", 1)[1] or None
-    return None
-
-
-# Cloning
-
-
-def _parse_cloning(
-    raw: dict[str, Any], global_profile: str | None, path: Path, resolver: Resolver
-) -> CloningConfig:
-    profiled = _profiled_settings(
-        "Cloning", raw, global_profile, path, resolver, nested=frozenset()
-    )
-    if not profiled.settings:
-        return CloningConfig()
-    _reject_unknown(
-        profiled.settings,
-        CLONING_KEYS,
-        "Cloning",
-        path,
-    )
-    scope = profiled.text("Scope") or CloningScope.CFG
-    scope = enum_value(
-        CloningScope,
-        scope,
-        ConfigurationError(
-            f"{path}: Cloning.Scope must be one of {sorted(CloningScope)}, got {scope!r}"
-        ),
-    )
-    enabled = _parse_bool(profiled.value("Enabled"), profiled.where("Enabled"), path, default=False)
-    return CloningConfig(
-        enabled=enabled and scope != CloningScope.NONE,
-        scope=scope,
-        external_volume=profiled.text("External_volume") or "",
-        base_location=profiled.text("Base_location") or "",
-    )
-
-
-def _parse_docs_site(
-    raw: dict[str, Any], global_profile: str | None, path: Path, resolver: Resolver
-) -> DocsSiteConfig:
-    profiled = _profiled_settings(
-        "Docs_site", raw, global_profile, path, resolver, nested=frozenset()
-    )
-    if not profiled.settings:
-        return DocsSiteConfig()
-    _reject_unknown(
-        profiled.settings,
-        DOCS_SITE_KEYS,
-        "Docs_site",
-        path,
-    )
-    schedule = (profiled.text("Schedule") or "").strip() or None
-    if schedule is not None:
-        try:
-            parse_cron(schedule)
-        except MetadataError as error:
-            raise ConfigurationError(
-                f"{path}: {profiled.where('Schedule')} must be a valid cron expression; {error}"
-            ) from error
-    output = profiled.text("Output")
-    authtoken = profiled.settings.get("Authtoken")
-    if authtoken is not None and not (
-        isinstance(authtoken, str) and is_env_name(authtoken.strip())
-    ):
-        raise ConfigurationError(
-            f"{path}: {profiled.where('Authtoken')} must be the name of a variable holding the "
-            "ngrok authtoken — a secret is never written into craft-connector.yml"
-        )
-    domain = (profiled.text("Domain") or "").strip().lower() or None
-    if domain is not None and not re.fullmatch(r"[a-z0-9]([a-z0-9.-]*[a-z0-9])?", domain):
-        raise ConfigurationError(
-            f"{path}: {profiled.where('Domain')} must be a host name, such as "
-            f"docs.example.com, without a scheme or path; got {domain!r}"
-        )
-    return DocsSiteConfig(
-        schedule=schedule,
-        output=_relative_to_config(output, path) if output else None,
-        authtoken_var=authtoken.strip() if isinstance(authtoken, str) else None,
-        domain=domain,
-        allowed_ips=cidr_ranges(profiled.value("Allowed_ips"), profiled.where("Allowed_ips"), path),
-        external_url=profiled.text("External_url"),
-        trusted_proxies=cidr_ranges(
-            profiled.value("Trusted_proxies"), profiled.where("Trusted_proxies"), path
-        ),
-    )
-
-
-def _parse_bool(value: Any, name: str, path: Path, *, default: bool) -> bool:
-    """Accept YAML booleans and the usual environment spellings (true/false, 1/0, yes/no)."""
-    if value is None or value == "":
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"true", "1", "yes"}:
-            return True
-        if normalized in {"false", "0", "no"}:
-            return False
-    raise ConfigurationError(f"{path}: {name} must be true or false, got {value!r}")
+    return raw

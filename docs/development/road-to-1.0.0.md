@@ -126,7 +126,7 @@ item's text, or work done early under another item.
 | S5.O.2a Common config contract | Done | #149 | Mandatory core/custom CFG audit fields and keys, safe token lifecycle history and lossless upgrades |
 | S5.O.2b Normalized object contracts | Done | #150, #151, #152, #153, #154, #160, #162, #181 | Merge column lists retain parameter storage; lineage versions use component endpoints; target state, view statements and rule results are keyed by components, and target locks use the resolved identity |
 | S5.P Project documentation gap UI | Done | #165 | Structured schema/lineage gaps, accessible column/graph warnings and read-only comparison API |
-| S5.R Consolidate before the cluster | In progress | #179, #185, #188 to #193 | Items 1 to 7 and item 8's site writer done: the execution core is split by responsibility; the catalog pages are their own module; Engine DB SQL in the contract and history modules runs from the query catalog and dialect methods; rule and task targets convert through one module; migration markers are a registry of Python steps; status, attempt, trigger and role values are enums; the longest functions are split; identifier quoting, durations and Y/N flags are written once; item 8's configuration loader pending |
+| S5.R Consolidate before the cluster | In progress | #179, #185, #188 to #193, #195 | Items 1 to 6 and 8 done; item 7 split the execution core by responsibility, with shortening its moved functions still pending; the configuration loader is split by section with typed raw settings and shared helpers |
 | S5.S Accounts, login and roles | Planned | | Registered user and service accounts, password and SSO login, tokens for services, a role check on every action, no implicit actor, local installations that operate a server |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
@@ -151,17 +151,13 @@ item's text, or work done early under another item.
 
 What a person picking up the work needs that the code and the item texts do not say.
 
-**Next agent: finishing S5.R (as of #193).** Two pieces remain, each one pull request:
-
-1. *Item 8, the configuration loader* (`refactor/config-loader-config`). Split
-   `config/loader.py` by section (engine, warehouse, email, cloning, docs) and type each
-   section's raw mapping in place of bare `Any`. Its helpers (`_mapping`, `_reject_unknown`,
-   `_parse_bool`, `_whole_number`, `_Fields` and others) are shared across sections. Keep them
-   in one helpers module under public names; never import another module's `_private` name.
-2. *Shorten the execution functions #193 moved whole*: `run_start.start_steps`,
-   `run_finish.finalize`, `pipeline.pipeline_steps`, `reruns.rerun_task` and
-   `runner.run_task`. Group repeated parameters in dataclasses, as `StartOptions` does.
-   Concurrency code: run its tests 20 times (`AGENTS.md`, "Concurrency").
+**Next agent: finishing S5.R (as of #195).** One piece remains, in one pull request:
+shorten the execution functions #193 moved whole: `run_start.start_steps`,
+`run_finish.finalize`, `pipeline.pipeline_steps`, `reruns.rerun_task` and
+`runner.run_task`. Group repeated parameters in dataclasses, as `StartOptions` does.
+Concurrency code: run its tests 20 times (`AGENTS.md`, "Concurrency").
+The configuration loader split is complete (#195); its shared helpers live under public
+names in `config/loader_helpers.py`.
 
 Traps these refactors hit, with what works:
 
@@ -263,6 +259,11 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.R item 8, configuration loader (#195), passed `make static docs`, all 1,807 unit tests,
+and 157 connection, run-connection, validation, catalog and lineage integration tests,
+including both Engine DBs and all four local warehouses, with services required and no skips.
+Cloud acceptance, wheel demos, Airflow and repeated races were not needed for this refactor.
 
 S5.U item 4 (#183): `test_what_a_script_printed_is_kept_when_it_is_stopped` and
 `test_a_task_process_that_ends_without_an_outcome_is_recorded_failed` passed 50 of 50 rounds with
@@ -468,6 +469,15 @@ The separate frozen 0.4 soak deployment is unchanged.
     parameter lists are not yet shortened or grouped into dataclasses, so their debt moved
     with them, under the owner's `quality-exception` label. Shortening them is follow-up work.
     No behaviour, retry rule or transaction boundary changed.
+
+- **S5.R item 8, configuration loader (#195)** keeps `load_config`, `parse_config` and
+  `settings_by_section` in `config/loader.py`, with section parsers beside it and shared
+  profile, connection, path and scalar helpers in `loader_helpers.py`.
+  - **Choices that differ from the item text.** Raw settings use `dict[str, object]` until
+    validated; bounded numbers and flags preserve their default's optional type. One `Any`
+    remains on PyYAML's mapping-node override to retain its malformed-node diagnostic.
+    Email's sendmail constructor is extracted to keep the moved parser under 80 lines.
+    No accepted setting, resolution order, message or runtime behaviour changes.
 
 - **S5.R item 8, site writer (#192)** moves the page builders of `services/catalog_site.py`
   into `services/catalog_pages.py` (`Pages`, which `_Writer` extends). The configuration

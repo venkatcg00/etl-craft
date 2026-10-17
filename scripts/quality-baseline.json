@@ -11,7 +11,7 @@
   ],
   "metrics": {
     "any-signature": {
-      "src/etl_craft/config/loader.py": 10,
+      "src/etl_craft/config/loader.py": 1,
       "src/etl_craft/config/resolve.py": 3,
       "src/etl_craft/dialects/engine/actors.py": 2,
       "src/etl_craft/dialects/engine/postgres/__init__.py": 1,
@@ -120,7 +120,6 @@
     },
     "function-lines": {
       "src/etl_craft/cli/commands/history.py": 10,
-      "src/etl_craft/config/loader.py": 8,
       "src/etl_craft/core/text.py": 19,
       "src/etl_craft/dialects/engine/postgres/audit.py": 38,
       "src/etl_craft/engine/repository/source_contracts.py": 7,
@@ -160,7 +159,6 @@
       "src/etl_craft/services/validate.py": 1
     },
     "module-lines": {
-      "src/etl_craft/config/loader.py": 294,
       "src/etl_craft/engine/transitions.py": 150,
       "src/etl_craft/services/config_files.py": 13
     },
