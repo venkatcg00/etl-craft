@@ -22,7 +22,7 @@ from etl_craft.engine.repository import overseers
 from etl_craft.engine.repository.dependencies import PipelineGraphData, fetch_pipeline_graph
 from etl_craft.engine.retry import TRANSIENT_ERRORS
 from etl_craft.engine.runlog import RunSelector, fetch_pipeline_run_status
-from etl_craft.execution import pipeline
+from etl_craft.execution import pipeline, run_types
 from etl_craft.execution.pools.local import LocalPool
 from etl_craft.execution.reconcile import reconcile
 from etl_craft.overseer.leadership import leadership
@@ -81,7 +81,7 @@ class WorkingSet:
             return result
 
 
-Jobs = dict[int, tuple[Generator[float, None, pipeline.PipelineOutcome], contextvars.Context]]
+Jobs = dict[int, tuple[Generator[float, None, run_types.PipelineOutcome], contextvars.Context]]
 
 
 @dataclass

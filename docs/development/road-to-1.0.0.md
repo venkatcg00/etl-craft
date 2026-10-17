@@ -126,7 +126,7 @@ item's text, or work done early under another item.
 | S5.O.2a Common config contract | Done | #149 | Mandatory core/custom CFG audit fields and keys, safe token lifecycle history and lossless upgrades |
 | S5.O.2b Normalized object contracts | Done | #150, #151, #152, #153, #154, #160, #162, #181 | Merge column lists retain parameter storage; lineage versions use component endpoints; target state, view statements and rule results are keyed by components, and target locks use the resolved identity |
 | S5.P Project documentation gap UI | Done | #165 | Structured schema/lineage gaps, accessible column/graph warnings and read-only comparison API |
-| S5.R Consolidate before the cluster | In progress | #179, #185, #188 to #192 | Items 1 to 6 and item 8's site writer done: the catalog pages are their own module; Engine DB SQL in the contract and history modules runs from the query catalog and dialect methods; rule and task targets convert through one module; migration markers are a registry of Python steps; status, attempt, trigger and role values are enums; the longest functions are split; identifier quoting, durations and Y/N flags are written once; item 7 and item 8's configuration loader pending |
+| S5.R Consolidate before the cluster | In progress | #179, #185, #188 to #193 | Items 1 to 7 and item 8's site writer done: the execution core is split by responsibility; the catalog pages are their own module; Engine DB SQL in the contract and history modules runs from the query catalog and dialect methods; rule and task targets convert through one module; migration markers are a registry of Python steps; status, attempt, trigger and role values are enums; the longest functions are split; identifier quoting, durations and Y/N flags are written once; item 8's configuration loader pending |
 | S5.S Accounts, login and roles | Planned | | Registered user and service accounts, password and SSO login, tokens for services, a role check on every action, no implicit actor, local installations that operate a server |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
@@ -420,6 +420,17 @@ The separate frozen 0.4 soak deployment is unchanged.
     transaction, like the other checks; its result is unchanged.
   - **Plan edits in the same PR.** At the owner's request, it also records business rules as
     complete queries (S6.D item 1) and the new S5.X `SQL_SCRIPT` item.
+
+- **S5.R item 7 (#193)** splits `execution/pipeline.py` into `run_types.py` (outcome, hooks,
+  step driver), `run_start.py` (admission and start), `run_finish.py` (finalization and SLA),
+  `reruns.py` and the wave stepping and backfills left in `pipeline.py`. It also splits
+  `execution/runner.py` into `attempt_types.py`, `attempt_records.py` and `readiness.py`.
+  Every module is under 800 lines.
+  - **Choices that differ from the item text.** Functions moved whole. The long functions
+    (`start_steps`, `finalize`, `pipeline_steps`, `rerun_task`, `run_task`) and their
+    parameter lists are not yet shortened or grouped into dataclasses, so their debt moved
+    with them, under the owner's `quality-exception` label. Shortening them is follow-up work.
+    No behaviour, retry rule or transaction boundary changed.
 
 - **S5.R item 8, site writer (#192)** moves the page builders of `services/catalog_site.py`
   into `services/catalog_pages.py` (`Pages`, which `_Writer` extends). The configuration

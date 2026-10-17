@@ -12,7 +12,7 @@ from sqlalchemy.engine import Engine
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import Actor, acting_as
 from etl_craft.engine.audit import command_request, register_engine
-from etl_craft.execution.runner import ChildOptions
+from etl_craft.execution.attempt_types import ChildOptions
 
 
 @dataclass(frozen=True)

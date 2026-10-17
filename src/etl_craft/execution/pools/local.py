@@ -16,6 +16,7 @@ from dataclasses import replace
 from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
+from etl_craft.execution.attempt_types import ChildOptions, TaskOutcome
 from etl_craft.execution.pools import (
     SLOT_KINDS,
     AttemptSpec,
@@ -24,7 +25,7 @@ from etl_craft.execution.pools import (
     HandleState,
     HandleStatus,
 )
-from etl_craft.execution.runner import ChildOptions, TaskOutcome, execute_attempt
+from etl_craft.execution.runner import execute_attempt
 
 
 class LocalPool:

@@ -18,9 +18,9 @@ def test_slow_sql_event_does_not_block_other_events_or_scheduler_shutdown(sql_wo
 
     from etl_craft.core.graph import build_graph
     from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
+    from etl_craft.execution.attempt_types import ChildOptions
     from etl_craft.execution.gates import Clock
     from etl_craft.execution.pools import Capacity
-    from etl_craft.execution.runner import ChildOptions
     from etl_craft.execution.scheduler import Scheduler
     from fixtures.metadata import add_task
 

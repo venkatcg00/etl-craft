@@ -15,7 +15,7 @@ from etl_craft.engine.connection import read_snapshot
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.runlog import RunSelector
-from etl_craft.execution.runner import attempt_log_path
+from etl_craft.execution.attempt_records import attempt_log_path
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.models import AttemptView, PipelineView, RunView
 from etl_craft.services.operations.snapshots import attempt_document, pipeline_view, run_document

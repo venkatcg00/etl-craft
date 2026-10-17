@@ -6,8 +6,8 @@ from sqlalchemy import text
 from etl_craft.core.actor import current_actor
 from etl_craft.core.errors import RunStateError
 from etl_craft.engine import runlog, transitions
-from etl_craft.execution import pipeline
-from etl_craft.execution.pipeline import init_pipeline_run
+from etl_craft.execution import run_start
+from etl_craft.execution.run_start import init_pipeline_run
 from fixtures.metadata import add_pipeline
 from fixtures.races import two_at_once
 
@@ -29,7 +29,7 @@ def test_simultaneous_initializers_leave_one_active_run(engine_db):
     results = two_at_once(
         lambda: initialize("first"),
         lambda: initialize("second"),
-        at="etl_craft.execution.pipeline.check_gate_now",
+        at="etl_craft.execution.run_start.check_gate_now",
     )
     winners = [result for result in results if not isinstance(result, RunStateError)]
     refused = [result for result in results if isinstance(result, RunStateError)]
@@ -67,7 +67,7 @@ def test_initializer_accepts_its_exact_run_admitted_by_the_server(engine_db, mon
     db = engine_db
     with db.engine.begin() as conn:
         add_pipeline(conn, "P")
-    check = pipeline.check_gate_now
+    check = run_start.check_gate_now
 
     def server_admits(engine, run_id, pipeline_id, **kwargs):
         result = check(engine, run_id, pipeline_id, **kwargs)
@@ -75,7 +75,7 @@ def test_initializer_accepts_its_exact_run_admitted_by_the_server(engine_db, mon
             transitions.admit_run(conn, run_id, current_actor())
         return result
 
-    monkeypatch.setattr(pipeline, "check_gate_now", server_admits)
+    monkeypatch.setattr(run_start, "check_gate_now", server_admits)
     outcome = init_pipeline_run(db.engine, db.config, "P")
     assert outcome.status == "IN-PROGRESS"
     with db.engine.connect() as conn:

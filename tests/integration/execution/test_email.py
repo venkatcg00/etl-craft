@@ -18,10 +18,12 @@ from sqlalchemy import text
 from etl_craft.config import EmailProfile, ExecutionLimits, load_config
 from etl_craft.core.errors import HandlerError
 from etl_craft.engine import transitions
+from etl_craft.execution.attempt_types import ChildOptions
 from etl_craft.execution.connections import probe_email_relay
 from etl_craft.execution.context import build_task_context
-from etl_craft.execution.pipeline import SlaLapse, default_hooks
-from etl_craft.execution.runner import ChildOptions, run_task
+from etl_craft.execution.run_types import default_hooks
+from etl_craft.execution.runner import run_task
+from etl_craft.execution.sla import SlaLapse
 from etl_craft.handlers import email_alert
 from etl_craft.handlers.mail import send_sla_lapse_email
 from fixtures.metadata import add_dependency, add_pipeline, add_task, start_run, task_run

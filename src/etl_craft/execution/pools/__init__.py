@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Protocol
 from etl_craft.core.enums import Handler
 
 if TYPE_CHECKING:
-    from etl_craft.execution.runner import TaskOutcome
+    from etl_craft.execution.attempt_types import TaskOutcome
 
 SLOT_KINDS = ("ingestion", "warehouse")
 """Python ingestion scripts take ``ingestion`` slots; every other handler, ``warehouse`` ones."""

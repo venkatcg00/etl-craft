@@ -6,6 +6,7 @@ from datetime import date
 
 from etl_craft.engine.connection import read_snapshot
 from etl_craft.execution import pipeline as execution
+from etl_craft.execution import run_types
 from etl_craft.services.cloning import run_hooks
 from etl_craft.services.operations.context import OperationContext, operation
 from etl_craft.services.operations.models import BackfillView, OperationResult
@@ -40,7 +41,7 @@ def run_backfill(
         )
         with read_snapshot(ctx.engine) as conn:
 
-            def capture(outcome: execution.PipelineOutcome) -> OperationResult:
+            def capture(outcome: run_types.PipelineOutcome) -> OperationResult:
                 view = (
                     None
                     if outcome.pipeline_run_id is None

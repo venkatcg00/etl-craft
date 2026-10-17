@@ -444,7 +444,8 @@ def test_a_child_crashing_after_commit_keeps_the_complete_success(cli_project):
 
 
 def test_finalized_hook_observes_committed_consumption(cli_project):
-    from etl_craft.execution.pipeline import RunHooks, run_pipeline
+    from etl_craft.execution.pipeline import run_pipeline
+    from etl_craft.execution.run_types import RunHooks
 
     project = cli_project
     upstream(project)

@@ -13,7 +13,7 @@ from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import CloningScope
 from etl_craft.core.errors import CloningError, ConfigurationError
 from etl_craft.engine import transitions
-from etl_craft.execution.pipeline import finalize_active_run
+from etl_craft.execution.run_finish import finalize_active_run
 from etl_craft.services.cloning import clone, run_hooks
 from fixtures.metadata import add_pipeline, add_task
 

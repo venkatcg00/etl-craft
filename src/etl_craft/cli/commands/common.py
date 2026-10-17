@@ -14,7 +14,7 @@ from etl_craft.cli.output import Output
 from etl_craft.config import ConnectorConfig, load_config, resolve_config_path
 from etl_craft.core.actor import current_actor
 from etl_craft.engine.connection import check_reachable, engine_db
-from etl_craft.execution.runner import ChildOptions
+from etl_craft.execution.attempt_types import ChildOptions
 from etl_craft.services.operations import OperationContext
 
 logger = logging.getLogger(__name__)

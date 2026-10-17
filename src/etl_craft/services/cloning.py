@@ -45,7 +45,7 @@ from etl_craft.core.errors import CloningError, ConfigurationError
 from etl_craft.core.text import parse_jdbc_url, qualify
 from etl_craft.dialects.warehouse import WarehouseDialect
 from etl_craft.engine import locks
-from etl_craft.execution.pipeline import PipelineOutcome, RunHooks, default_hooks
+from etl_craft.execution.run_types import PipelineOutcome, RunHooks, default_hooks
 from etl_craft.warehouse.connection import open_warehouse, warehouse_dialect
 
 logger = logging.getLogger(__name__)

@@ -11,8 +11,8 @@ from sqlalchemy import text
 from etl_craft.core.graph import build_graph
 from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
 from etl_craft.engine.repository.tasks import fetch_task_codes
+from etl_craft.execution.attempt_types import ChildOptions
 from etl_craft.execution.gates import Clock, check_gate
-from etl_craft.execution.runner import ChildOptions
 from etl_craft.execution.scheduler import Scheduler
 from fixtures.metadata import (
     add_dependency,
