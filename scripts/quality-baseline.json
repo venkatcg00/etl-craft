@@ -46,7 +46,7 @@
     },
     "branches": {
       "src/etl_craft/core/text.py": 2,
-      "src/etl_craft/engine/repository/source_contracts.py": 6,
+      "src/etl_craft/engine/repository/source_contracts.py": 2,
       "src/etl_craft/execution/pipeline.py": 19,
       "src/etl_craft/execution/remote.py": 3,
       "src/etl_craft/execution/runner.py": 4,
@@ -83,7 +83,6 @@
       "src/etl_craft/services/operations/serialization.py": 1
     },
     "complexity": {
-      "src/etl_craft/engine/repository/source_contracts.py": 2,
       "src/etl_craft/execution/pipeline.py": 12,
       "src/etl_craft/execution/runner.py": 2,
       "src/etl_craft/execution/scheduler.py": 7,
@@ -94,8 +93,6 @@
       "src/etl_craft/engine/connection.py": 1,
       "src/etl_craft/engine/repository/normalization.py": 2,
       "src/etl_craft/engine/repository/source_columns.py": 1,
-      "src/etl_craft/engine/repository/source_contracts.py": 9,
-      "src/etl_craft/engine/repository/target_contracts.py": 7,
       "src/etl_craft/overseer/leadership.py": 1,
       "src/etl_craft/services/doctor.py": 1,
       "src/etl_craft/services/validate.py": 1,
@@ -121,7 +118,7 @@
       "src/etl_craft/config/loader.py": 8,
       "src/etl_craft/core/text.py": 19,
       "src/etl_craft/dialects/engine/postgres/audit.py": 38,
-      "src/etl_craft/engine/repository/source_contracts.py": 84,
+      "src/etl_craft/engine/repository/source_contracts.py": 7,
       "src/etl_craft/execution/gates.py": 11,
       "src/etl_craft/execution/interventions.py": 11,
       "src/etl_craft/execution/pipeline.py": 212,
@@ -144,13 +141,10 @@
       "src/etl_craft/engine/connection.py": 1,
       "src/etl_craft/engine/privileges.py": 1,
       "src/etl_craft/engine/repository/audit_reads.py": 4,
-      "src/etl_craft/engine/repository/config_history.py": 15,
       "src/etl_craft/engine/repository/config_rows.py": 1,
       "src/etl_craft/engine/repository/normalization.py": 2,
       "src/etl_craft/engine/repository/overseers.py": 3,
       "src/etl_craft/engine/repository/source_columns.py": 1,
-      "src/etl_craft/engine/repository/source_contracts.py": 16,
-      "src/etl_craft/engine/repository/target_contracts.py": 12,
       "src/etl_craft/execution/connections.py": 1,
       "src/etl_craft/overseer/leadership.py": 4,
       "src/etl_craft/services/catalog.py": 1,
@@ -169,8 +163,7 @@
       "src/etl_craft/execution/child.py": 1
     },
     "noqa": {
-      "src/etl_craft/core/filelock.py": 1,
-      "src/etl_craft/engine/repository/config_history.py": 1
+      "src/etl_craft/core/filelock.py": 1
     },
     "private-import": {
       "src/etl_craft/execution/scheduler.py": 1,

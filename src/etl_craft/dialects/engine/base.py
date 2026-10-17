@@ -16,14 +16,16 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
+from datetime import UTC, datetime
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import bindparam, text
+from sqlalchemy import bindparam, inspect, text
 from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.config.auth import EngineSpec
+from etl_craft.core.actor import Actor
 from etl_craft.core.text import split_statements
 
 if TYPE_CHECKING:
@@ -142,3 +144,130 @@ class EngineDialect(ABC):
         with engine.connect() as conn:
             rows = conn.execute(statement, {"names": [name.lower() for name in names]}).all()
         return sorted(str(row.table_name).lower() for row in rows)
+
+    def stored_name(self, table: str) -> str:
+        """Return ``table`` as this Engine DB's catalog stores an unquoted name."""
+        return table
+
+    def table_triggers(self, conn: Connection, table: str) -> list[str]:
+        """Return the names of the user triggers on ``table``."""
+        rows = conn.execute(text(self.query("table_triggers")), {"name": self.stored_name(table)})
+        return list(rows.scalars())
+
+    def table_indexes(self, conn: Connection, table: str) -> list[tuple[str, str]]:
+        """Return each named index on ``table`` with its definition."""
+        rows = conn.execute(text(self.query("table_indexes")), {"name": self.stored_name(table)})
+        return [(row.name, row.definition) for row in rows]
+
+    def drop_trigger(self, conn: Connection, trigger: str, table: str) -> None:
+        """Drop ``trigger`` from ``table``."""
+        conn.exec_driver_sql(f"DROP TRIGGER {conn.dialect.identifier_preparer.quote(trigger)}")
+
+    def index_names(self, conn: Connection, table: str) -> list[str]:
+        """Return the names of the indexes on ``table``, its primary key's excluded."""
+        return [str(index["name"]) for index in inspect(conn).get_indexes(self.stored_name(table))]
+
+    @abstractmethod
+    def legacy_source_id_high_water(self, conn: Connection) -> int:
+        """Return the highest ``SOURCE_COLUMN_ID`` the legacy table's id generator handed out."""
+
+    @abstractmethod
+    def set_column_id_high_water(self, conn: Connection, high_water: int) -> None:
+        """Make ``CFG_COLUMNS`` ids continue after ``high_water``."""
+
+    def record_config_conversion(
+        self, conn: Connection, table: str, primary: str, *, migration: str, actor: Actor
+    ) -> None:
+        """Close ``table``'s current versions and record its rows again, stamps unchanged."""
+        now = datetime.now(UTC)
+        conn.execute(
+            text(
+                f"UPDATE AUD_{table}_HISTORY SET VALID_TO=:now,CURRENT_FLAG='N' "
+                f"WHERE CURRENT_FLAG='Y' AND {primary} IN "
+                f"(SELECT {primary} FROM {table})"
+            ),
+            {"now": now},
+        )
+        self._insert_history(conn, table, primary, ("UPDATE", migration, actor, now))
+        conn.exec_driver_sql("DROP VIEW IF EXISTS AUD_METADATA_CHANGES")
+
+    def record_config_baseline(
+        self, conn: Connection, tables: tuple[str, ...], *, migration: str, actor: Actor
+    ) -> None:
+        """Record every row of ``tables`` as inserted by ``migration``, the start of history."""
+        now = datetime.now(UTC)
+        for table in tables:
+            first = inspect(conn).get_columns(self.stored_name(table))[0]["name"]
+            self._insert_history(conn, table, first, ("INSERT", migration, actor, now))
+
+    def _insert_history(
+        self,
+        conn: Connection,
+        table: str,
+        order_by: str,
+        change: tuple[str, str, Actor, datetime],
+    ) -> None:
+        """Copy ``table``'s rows into its history as current versions of one change."""
+        operation, migration, actor, now = change
+        quote = conn.dialect.identifier_preparer.quote
+        names = [column["name"] for column in inspect(conn).get_columns(self.stored_name(table))]
+        listed = ", ".join(quote(column) for column in names)
+        conn.execute(
+            text(
+                f"INSERT INTO AUD_{table}_HISTORY (CHANGE_ID,VALID_FROM,VALID_TO,"
+                "CURRENT_FLAG,OPERATION,ACTOR,ACTOR_KIND,MIGRATION,"
+                f"{listed}) SELECT {self._last_change_id(conn)}+ROW_NUMBER() OVER "
+                f"(ORDER BY {order_by}),:now,:end,'Y',:operation,:actor,:kind,:migration,"
+                f"{listed} FROM {table}"
+            ),
+            {
+                "operation": operation,
+                "migration": migration,
+                "now": now,
+                "end": datetime(9999, 12, 31, 23, 59, 59, tzinfo=UTC),
+                "actor": actor.name,
+                "kind": actor.kind.value,
+            },
+        )
+
+    def _last_change_id(self, conn: Connection) -> str:
+        """Return an expression for the highest change id across the config histories."""
+        histories = [
+            table
+            for table in inspect(conn).get_table_names()
+            if table.upper().startswith("AUD_CFG_") and table.upper().endswith("_HISTORY")
+        ]
+        return (
+            "(SELECT COALESCE(MAX(m),0) FROM ("
+            + " UNION ALL ".join(f"SELECT MAX(CHANGE_ID) AS m FROM {table}" for table in histories)
+            + ") changes)"
+        )
+
+    def table_rows(
+        self, conn: Connection, table: str, *, order_by: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return every row of ``table``, keyed by lower-case column name."""
+        order = f" ORDER BY {order_by}" if order_by else ""
+        return [
+            {str(name).lower(): value for name, value in row.items()}
+            for row in conn.execute(text(f"SELECT * FROM {table}{order}")).mappings()
+        ]
+
+    def column_names(self, conn: Connection, table: str) -> list[str]:
+        """Return ``table``'s column names in lower case, in table order."""
+        names = conn.execute(text(f"SELECT * FROM {table} WHERE 1 = 0")).keys()
+        return [str(name).lower() for name in names]
+
+    def write_table(
+        self, conn: Connection, table: str, columns: list[str], rows: list[dict[str, Any]]
+    ) -> None:
+        """Create ``table`` with untyped ``columns`` and insert ``rows`` into it."""
+        conn.execute(text(f"CREATE TABLE {table} ({', '.join(columns)})"))
+        if rows:
+            conn.execute(
+                text(
+                    f"INSERT INTO {table} ({', '.join(columns)}) "
+                    f"VALUES ({', '.join(f':{name}' for name in columns)})"
+                ),
+                rows,
+            )

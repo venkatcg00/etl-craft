@@ -43,6 +43,37 @@ class SqliteEngineDialect(EngineDialect):
     spec = engine_for_jdbc_url(JDBC_PREFIX)
     directory = Path(__file__).parent
 
+    def index_names(self, conn: Connection, table: str) -> list[str]:
+        """Return the names of the indexes on ``table``, its primary key's excluded."""
+        return [
+            row.name
+            for row in conn.exec_driver_sql(f"PRAGMA index_list({table})")
+            if row.origin != "pk"
+        ]
+
+    def legacy_source_id_high_water(self, conn: Connection) -> int:
+        """Return the legacy table's ``AUTOINCREMENT`` high-water mark."""
+        return int(
+            conn.execute(
+                text(
+                    "SELECT COALESCE(MAX(seq),0) AS high_water FROM sqlite_sequence "
+                    "WHERE upper(name)='CFG_SOURCE_COLUMNS'"
+                )
+            ).scalar_one()
+        )
+
+    def set_column_id_high_water(self, conn: Connection, high_water: int) -> None:
+        """Set ``CFG_COLUMNS``' ``AUTOINCREMENT`` mark to ``high_water`` when there is one."""
+        if not high_water:
+            return
+        params = {"value": high_water}
+        if not conn.execute(
+            text("UPDATE sqlite_sequence SET seq=:value WHERE name='CFG_COLUMNS'"), params
+        ).rowcount:
+            conn.execute(
+                text("INSERT INTO sqlite_sequence (name,seq) VALUES ('CFG_COLUMNS',:value)"), params
+            )
+
     def refresh_metadata_triggers(self, conn: Connection) -> None:
         """Install this database's metadata capture and write guards."""
         refresh_metadata_triggers(conn)
