@@ -89,6 +89,30 @@ def create_app(ctx: OperationContext) -> FastAPI:
     )
     bearer = HTTPBearer(auto_error=False)
 
+    authorize = _authorizer(ctx, bearer)
+    read = authorize(ApiRole.VIEWER)
+    write = authorize(ApiRole.OPERATOR)
+    admin = authorize(ApiRole.ADMIN)
+    _add_error_handlers(app)
+
+    @app.get("/api/v1/health")
+    def health(caller: Annotated[OperationContext, Depends(read)]) -> dict[str, str]:
+        return {"schema": "etl-craft/health/1", "status": "ok"}
+
+    add_catalog_routes(app, read)
+    _add_pipeline_routes(app, read, write)
+    _add_run_routes(app, read, write)
+    _add_task_routes(app, write)
+    _add_attempt_routes(app, read)
+    _add_token_routes(app, admin)
+    return app
+
+
+def _authorizer(
+    ctx: OperationContext, bearer: HTTPBearer
+) -> Callable[[str], Callable[..., OperationContext]]:
+    """Return a factory of dependencies that admit a bearer token holding at least a role."""
+
     def authorize(role: str) -> Callable[..., OperationContext]:
         def authorized(
             credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
@@ -106,9 +130,11 @@ def create_app(ctx: OperationContext) -> FastAPI:
 
         return authorized
 
-    read = authorize(ApiRole.VIEWER)
-    write = authorize(ApiRole.OPERATOR)
-    admin = authorize(ApiRole.ADMIN)
+    return authorize
+
+
+def _add_error_handlers(app: FastAPI) -> None:
+    """Answer domain errors with their exit code, and Engine DB errors with 503."""
 
     @app.exception_handler(EtlCraftError)
     async def domain_error(request: Request, error: EtlCraftError) -> JSONResponse:
@@ -136,11 +162,11 @@ def create_app(ctx: OperationContext) -> FastAPI:
             status_code=503,
         )
 
-    @app.get("/api/v1/health")
-    def health(caller: Annotated[OperationContext, Depends(read)]) -> dict[str, str]:
-        return {"schema": "etl-craft/health/1", "status": "ok"}
 
-    add_catalog_routes(app, read)
+def _add_pipeline_routes(
+    app: FastAPI, read: Callable[..., OperationContext], write: Callable[..., OperationContext]
+) -> None:
+    """Add pipeline reads, triggers, backfills, pause and resume."""
 
     @app.get("/api/v1/pipelines/{code}")
     def pipeline(code: str, caller: Annotated[OperationContext, Depends(read)]) -> dict[str, Any]:
@@ -183,6 +209,12 @@ def create_app(ctx: OperationContext) -> FastAPI:
     ) -> dict[str, Any]:
         return to_json(pipelines.set_pause(caller, code, body.reason, verb="resume"))
 
+
+def _add_run_routes(
+    app: FastAPI, read: Callable[..., OperationContext], write: Callable[..., OperationContext]
+) -> None:
+    """Add run status, its tasks, explanations and cancellation."""
+
     @app.get("/api/v1/runs/{run_id}")
     def run(run_id: int, caller: Annotated[OperationContext, Depends(read)]) -> dict[str, Any]:
         return to_json(api_reads.get_run_status(caller, run_id).run)
@@ -223,6 +255,10 @@ def create_app(ctx: OperationContext) -> FastAPI:
             )
         )
 
+
+def _add_task_routes(app: FastAPI, write: Callable[..., OperationContext]) -> None:
+    """Add operator marks and reruns of a run's tasks."""
+
     @app.post("/api/v1/runs/{run_id}/tasks/{task}/mark")
     def mark(
         run_id: int, task: str, body: Mark, caller: Annotated[OperationContext, Depends(write)]
@@ -256,6 +292,10 @@ def create_app(ctx: OperationContext) -> FastAPI:
             )
         )
 
+
+def _add_attempt_routes(app: FastAPI, read: Callable[..., OperationContext]) -> None:
+    """Add attempt rows and their logs."""
+
     @app.get("/api/v1/attempts/{attempt_id}")
     def attempt(
         attempt_id: int, caller: Annotated[OperationContext, Depends(read)]
@@ -272,6 +312,10 @@ def create_app(ctx: OperationContext) -> FastAPI:
             api_reads.attempt_log(caller, attempt_id, offset), media_type="text/plain"
         )
 
+
+def _add_token_routes(app: FastAPI, admin: Callable[..., OperationContext]) -> None:
+    """Add aPI token administration."""
+
     @app.get("/api/v1/tokens")
     def list_tokens(caller: Annotated[OperationContext, Depends(admin)]) -> dict[str, Any]:
         return to_json(tokens.list_tokens(caller))
@@ -287,5 +331,3 @@ def create_app(ctx: OperationContext) -> FastAPI:
         token_id: int, caller: Annotated[OperationContext, Depends(admin)]
     ) -> dict[str, Any]:
         return to_json(tokens.revoke_token(caller, token_id))
-
-    return app
