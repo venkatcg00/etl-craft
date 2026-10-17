@@ -37,7 +37,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.project import ingestion_script, sql_file
 from etl_craft.config.targets import active_catalog, parse_warehouse_url
-from etl_craft.core.enums import GapState, Handler, SqlAction
+from etl_craft.core.enums import GapState, Handler, RunStatus, SqlAction
 from etl_craft.core.errors import EtlCraftError, MetadataError
 from etl_craft.core.text import is_safe_identifier
 from etl_craft.core.time import as_utc
@@ -678,18 +678,22 @@ def run_kpis(runs: Sequence[RunSummary | TaskRunSummary]) -> RunKpis:
     A run counts as finished once it is ``SUCCESS``, ``FAILED`` or ``CANCELLED``; ``SKIPPED``
     runs did no work and ``IN-PROGRESS`` ones have not ended, so neither counts either way.
     """
-    finished = [r for r in runs if r.status in ("SUCCESS", "FAILED", "CANCELLED")]
+    finished = [
+        r for r in runs if r.status in (RunStatus.SUCCESS, RunStatus.FAILED, RunStatus.CANCELLED)
+    ]
     seconds = [s for r in finished if (s := r.seconds) is not None]
     rows = [
         r.target_count
         for r in runs
-        if isinstance(r, TaskRunSummary) and r.status == "SUCCESS" and r.target_count is not None
+        if isinstance(r, TaskRunSummary)
+        and r.status == RunStatus.SUCCESS
+        and r.target_count is not None
     ]
     return RunKpis(
         runs=len(runs),
         finished=len(finished),
-        succeeded=sum(1 for r in finished if r.status == "SUCCESS"),
-        failed=sum(1 for r in finished if r.status != "SUCCESS"),
+        succeeded=sum(1 for r in finished if r.status == RunStatus.SUCCESS),
+        failed=sum(1 for r in finished if r.status != RunStatus.SUCCESS),
         sla_breached=sum(
             1 for r in runs if isinstance(r, RunSummary) and r.sla_status == "BREACHED"
         ),

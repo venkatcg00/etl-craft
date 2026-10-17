@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
-from etl_craft.core.enums import Mode, YesNo
+from etl_craft.core.enums import Mode, RunStatus, YesNo
 from etl_craft.core.errors import EngineDbError, EtlCraftError, RunRefusedError
 from etl_craft.core.outage import OutageBudget
 from etl_craft.core.time import as_utc
@@ -153,7 +153,7 @@ class _Supervisor:
         for run_id, (steps, context) in list(self.jobs.items()):
             with self.ctx.engine.connect() as conn:
                 status = fetch_pipeline_run_status(conn, run_id)
-            if status == "QUEUED":
+            if status == RunStatus.QUEUED:
                 context.run(steps.close)
                 del self.jobs[run_id]
         while self.jobs and time.monotonic() < deadline:

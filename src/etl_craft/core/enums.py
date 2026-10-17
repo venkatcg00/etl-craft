@@ -90,6 +90,37 @@ MARKABLE_STATUSES = (RunStatus.SUCCESS, RunStatus.FAILED, RunStatus.SKIPPED)
 """The statuses ``mark`` sets on a task or a run."""
 
 
+class AttemptStatus(StrEnum):
+    """Status of one attempt of a task run in the attempt ledger."""
+
+    QUEUED = "QUEUED"
+    CLAIMED = "CLAIMED"
+    RUNNING = "RUNNING"
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
+    TIMED_OUT = "TIMED_OUT"
+    CANCELLED = "CANCELLED"
+    LOST = "LOST"
+
+
+class TriggerKind(StrEnum):
+    """What started a pipeline run."""
+
+    SCHEDULE = "SCHEDULE"
+    MANUAL = "MANUAL"
+    BACKFILL = "BACKFILL"
+    ORCHESTRATOR = "ORCHESTRATOR"
+    STAND_IN = "STAND_IN"
+
+
+class ApiRole(StrEnum):
+    """The role an API token grants, each including the ones before it."""
+
+    VIEWER = "viewer"
+    OPERATOR = "operator"
+    ADMIN = "admin"
+
+
 class InterventionAction(StrEnum):
     """What an operator did to a run, as ``AUD_RUN_INTERVENTIONS.ACTION`` records it."""
 

@@ -35,6 +35,7 @@ from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import (
     SETTLED_STATUSES,
     TERMINAL_STATUSES,
+    AttemptStatus,
     DependencyType,
     InterventionAction,
     Mode,
@@ -64,10 +65,7 @@ from etl_craft.engine.repository.tasks import (
 from etl_craft.engine.retry import retrying
 from etl_craft.execution import leases
 from etl_craft.execution.events import check_event
-from etl_craft.execution.gates import (
-    CrossPipelineCheck,
-    TrackedGate,
-)
+from etl_craft.execution.gates import CrossPipelineCheck, TrackedGate
 from etl_craft.execution.interventions import (
     check_override,
     open_pause,
@@ -447,7 +445,7 @@ def _preflight(
         )
         queued_here = any(
             row["task_id"] == task_id
-            and row["status"] == "QUEUED"
+            and row["status"] == AttemptStatus.QUEUED
             and row["not_before"] is not None
             for row in queued
         )
@@ -615,7 +613,7 @@ def _run_attempt(
             engine, config, pipeline_run_id, task_id, datetime.now(UTC), decisions=decisions
         )
         return TaskOutcome(
-            RunStatus(result.status or "IN-PROGRESS"),
+            RunStatus(result.status or RunStatus.IN_PROGRESS),
             result.message,
             result.task_run_id,
             waiting=result.next_check_at is not None,
@@ -665,7 +663,7 @@ def admit_attempt(
         active = transitions.active_attempt(conn, binding.task_run_id)
         attempt_id = (
             active.attempt_id
-            if active is not None and active.status == "QUEUED"
+            if active is not None and active.status == AttemptStatus.QUEUED
             else transitions.queue_attempt(conn, binding.task_run_id, current_actor())
         )
         trackers.record_decisions(conn, pipeline_run_id, decisions, attempt_id=attempt_id)
@@ -753,7 +751,7 @@ def _fail_after_bind(
                 transitions.finish_attempt(
                     conn,
                     attempt_id,
-                    "FAILED",
+                    AttemptStatus.FAILED,
                     current_actor(),
                     owner=owner,
                     error_message=message,
@@ -957,7 +955,7 @@ def _record_attempt(
                 transitions.finish_attempt(
                     conn,
                     attempt_id,
-                    "FAILED",
+                    AttemptStatus.FAILED,
                     current_actor(),
                     owner=owner,
                     error_message=message,

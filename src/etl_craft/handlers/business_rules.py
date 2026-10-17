@@ -44,6 +44,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config.targets import active_catalog
+from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import ConfigurationError, HandlerError, SqlGuardError
 from etl_craft.core.text import (
     as_subquery,
@@ -232,10 +233,14 @@ class _RuleRunner:
             with self.engine_db.begin() as conn:
                 flag_rule_keys(conn, rule, binding.business_rule_run_id, new, now)
                 clear_rule_keys(conn, rule.business_rule_id, passing, now)
-                finish_rule_run(conn, binding.business_rule_run_id, "SUCCESS", datetime.now(UTC))
+                finish_rule_run(
+                    conn, binding.business_rule_run_id, RunStatus.SUCCESS, datetime.now(UTC)
+                )
         except Exception as error:
             with contextlib.suppress(Exception), self.engine_db.begin() as conn:
-                finish_rule_run(conn, binding.business_rule_run_id, "FAILED", datetime.now(UTC))
+                finish_rule_run(
+                    conn, binding.business_rule_run_id, RunStatus.FAILED, datetime.now(UTC)
+                )
             cause = getattr(error, "orig", None) or error
             detail = str(cause).strip().splitlines()[0] if str(cause).strip() else repr(cause)
             logger.error(

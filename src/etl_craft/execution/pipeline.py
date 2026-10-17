@@ -806,7 +806,7 @@ def _start_steps(
                 r.run_key == selector.run_key for r in candidates
             ):
                 selected = runlog.select_run(conn, pipeline_id, selector)
-        elif any(r.status in {"QUEUED", "IN-PROGRESS"} for r in candidates):
+        elif any(r.status in {RunStatus.QUEUED, RunStatus.IN_PROGRESS} for r in candidates):
             selected = runlog.select_run(conn, pipeline_id)
         if selected is not None:
             if explicit and run_date is not None and selected.run_date != run_date:
@@ -814,7 +814,7 @@ def _start_steps(
                     f"{pipeline_code}: run_id={selected.pipeline_run_id} has run_date="
                     f"{selected.run_date}, not {run_date}; a run's date cannot change"
                 )
-            if selected.status not in {"QUEUED", RunStatus.IN_PROGRESS}:
+            if selected.status not in {RunStatus.QUEUED, RunStatus.IN_PROGRESS}:
                 if not remote:
                     raise RunStateError(
                         f"{pipeline_code}: run_id={selected.pipeline_run_id} is {selected.status}; "
@@ -826,7 +826,7 @@ def _start_steps(
                     current_actor(),
                     reason="orchestrator initialized its run again",
                 )
-            if selected.status == "QUEUED":
+            if selected.status == RunStatus.QUEUED:
                 queued = selected.pipeline_run_id
                 logical_date = selected.run_date
                 existing, kind = None, None
@@ -871,7 +871,7 @@ def _start_steps(
                     current_actor(),
                     run_date=logical_date,
                     run_key=selector.run_key,
-                    status="QUEUED",
+                    status=RunStatus.QUEUED,
                 )
         while True:
             if run_cancelled(engine, queued):

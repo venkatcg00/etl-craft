@@ -11,13 +11,14 @@ from typing import ClassVar
 from sqlalchemy.engine import RowMapping
 
 from etl_craft.core.actor import Actor, ActorKind
+from etl_craft.core.enums import ApiRole
 from etl_craft.core.errors import UsageError
 from etl_craft.core.text import sha256_hex
 from etl_craft.engine.queries import statement
 from etl_craft.services.operations.context import OperationContext, operation
 from etl_craft.services.operations.snapshots import timestamp
 
-ROLES = ("viewer", "operator", "admin")
+ROLES = tuple(ApiRole)
 
 
 @dataclass(frozen=True)

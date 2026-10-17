@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.api.catalog import add_catalog_routes
+from etl_craft.core.enums import ApiRole
 from etl_craft.core.errors import EtlCraftError, MetadataError, ResourceNotFoundError, UsageError
 from etl_craft.engine.runlog import RunSelector
 from etl_craft.services.operations import (
@@ -105,9 +106,9 @@ def create_app(ctx: OperationContext) -> FastAPI:
 
         return authorized
 
-    read = authorize("viewer")
-    write = authorize("operator")
-    admin = authorize("admin")
+    read = authorize(ApiRole.VIEWER)
+    write = authorize(ApiRole.OPERATOR)
+    admin = authorize(ApiRole.ADMIN)
 
     @app.exception_handler(EtlCraftError)
     async def domain_error(request: Request, error: EtlCraftError) -> JSONResponse:

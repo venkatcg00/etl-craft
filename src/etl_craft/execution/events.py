@@ -15,6 +15,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import current_actor
 from etl_craft.core.counts import Counts
+from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import EtlCraftError, LockTimeoutError
 from etl_craft.core.faults import fault_point
 from etl_craft.core.time import as_utc
@@ -37,6 +38,10 @@ class EventCheck:
     status: str | None = None
     task_run_id: int | None = None
     message: str = ""
+
+
+_ENDED = frozenset({RunStatus.SUCCESS, RunStatus.SKIPPED, RunStatus.CANCELLED})
+"""Task-run statuses after which an event wait has nothing left to check."""
 
 
 def check_event(
@@ -73,7 +78,7 @@ def _check_event(
     params = {"pipeline_run_id": pipeline_run_id, "task_id": task_id}
     with engine.connect() as conn:
         task_run = conn.execute(statement(conn, "task_run"), params).one_or_none()
-        if task_run and task_run.status in {"SUCCESS", "SKIPPED", "CANCELLED"}:
+        if task_run and task_run.status in _ENDED:
             return EventCheck(status=task_run.status, task_run_id=task_run.task_run_id)
         row = conn.execute(statement(conn, "event_wait"), params).one_or_none()
         task_params = fetch_task_parameters(conn, task_id)
@@ -130,23 +135,23 @@ def _check_event(
             if event.sql:
                 now += timedelta(seconds=time.monotonic() - started)
         status = (
-            "SUCCESS"
+            RunStatus.SUCCESS
             if evidence
             else event.on_timeout
             if deadline is not None and now >= deadline
             else None
         )
         if status == "FAIL":
-            status = "FAILED"
+            status = RunStatus.FAILED
         elif status == "SKIP":
-            status = "SKIPPED"
+            status = RunStatus.SKIPPED
         if status and not evidence:
             message = (
                 f"EVENT_WAIT task_id={task_id} timed out after "
                 f"{(event.timeout_seconds or 0) / 60:g} minutes"
             )
     except (EtlCraftError, OSError, SQLAlchemyError) as error:
-        status, message = "FAILED", f"EVENT_WAIT task_id={task_id}: {error}"
+        status, message = RunStatus.FAILED, f"EVENT_WAIT task_id={task_id}: {error}"
         deadline = as_utc(row.wait_until) if row and row.wait_until is not None else now
     next_check = None
     if status is None:
@@ -180,9 +185,9 @@ def _check_event(
         if status is None:
             return EventCheck(next_check)
         binding = transitions.find_or_create_task_run(conn, task_id, pipeline_run_id)
-        if binding.status in {"SUCCESS", "SKIPPED", "CANCELLED"}:
+        if binding.status in _ENDED:
             return EventCheck(status=binding.status, task_run_id=binding.task_run_id)
-        if status == "SKIPPED":
+        if status == RunStatus.SKIPPED:
             trackers.record_decisions(conn, pipeline_run_id, decisions)
             transitions.finish_task_run(
                 conn, binding.task_run_id, status=status, error_message=message

@@ -27,7 +27,7 @@ from etl_craft.config import ConnectorConfig
 from etl_craft.config.project import ingestion_script
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.cron import parse, timezone
-from etl_craft.core.enums import DependencyType, Handler, Mode, SqlAction
+from etl_craft.core.enums import DependencyType, EmailFlavour, Handler, Mode, SqlAction
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.graph import build_graph
 from etl_craft.core.text import is_metadata_code, qualify, suggest
@@ -346,7 +346,7 @@ def _alert_ordering(data: _Metadata, report: Report) -> None:
                     "an ALWAYS dependency on each",
                 )
             outcomes = _alert_outcomes(data.params[alert.task_id])
-            if outcomes & {"FAILED", "COMPLETED_WITH_ERRORS"}:
+            if outcomes & {EmailFlavour.FAILED, EmailFlavour.COMPLETED_WITH_ERRORS}:
                 strict = sorted(
                     upstream
                     for upstream, edge in waits.items()

@@ -14,7 +14,7 @@ from sqlalchemy import bindparam
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.cron import timezone
-from etl_craft.core.enums import SlaStatus, YesNo
+from etl_craft.core.enums import RunStatus, SlaStatus, YesNo
 from etl_craft.core.errors import RunStateError
 from etl_craft.core.graph import TaskRunState
 from etl_craft.core.time import as_utc
@@ -94,7 +94,7 @@ def select_run(
             if selector.run_id is not None
             else r.run_key == selector.run_key
             if selector.run_key is not None
-            else r.status in {"QUEUED", "IN-PROGRESS"}
+            else r.status in {RunStatus.QUEUED, RunStatus.IN_PROGRESS}
         )
     ]
     if len(matches) == 1:

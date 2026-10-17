@@ -14,7 +14,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.core.enums import SETTLED_STATUSES
+from etl_craft.core.enums import SETTLED_STATUSES, RunStatus
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.graph import DependencyGraph, TaskRunState
 from etl_craft.core.outage import OutageBudget
@@ -141,7 +141,7 @@ class Scheduler:
         with self.engine.connect() as conn:
             state = runlog.fetch_run_state(conn, self.pipeline_run_id, self.graph.task_ids)
             backfill = runlog.fetch_run_kind(conn, self.pipeline_run_id).backfill
-        state.update({t: TaskRunState(status="IN-PROGRESS") for t in self.jobs})
+        state.update({t: TaskRunState(status=RunStatus.IN_PROGRESS) for t in self.jobs})
         pending = [
             t
             for t in self.graph.task_ids
