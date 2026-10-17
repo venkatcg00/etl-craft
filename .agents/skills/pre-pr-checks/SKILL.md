@@ -162,8 +162,10 @@ the SQL every warehouse runs:
 
 Skip them for refactors whose paths the four local warehouses already run. For a pull request,
 run only the cloud tests that exercise the change, on the cloud whose code changed (or both for
-shared SQL). `-k` selects them. Credentials live in the gitignored `.env.acceptance`
-(`.env.acceptance.example` lists the variables):
+shared SQL). `-k` selects them. Credentials live in a gitignored env file:
+`.env.acceptance` by default (`.env.acceptance.example` lists the variables). The owner's
+workstation keeps them in `.env`; pass that file instead (`--env-file .env`, `ENV_FILE=.env`)
+when `.env.acceptance` does not exist:
 
 ```bash
 uv run python -c 'import os, sys; from pathlib import Path; import pytest
@@ -220,6 +222,25 @@ Read the whole diff (`git diff origin/main...`) as a reviewer who has to maintai
   review of the branch.
 
 Fix what you find, then rerun the steps it affects.
+
+## Known environment failures
+
+Recognize these before blaming the change:
+
+- **Iceberg REST after a host reboot.** Every Trino and Iceberg test errors with
+  `ICEBERG_CATALOG_ERROR ... Failed to create namespace`, and the `iceberg-rest` log shows
+  `SQLITE_BUSY`. Recreate both containers, then rerun the failed files:
+  `docker compose up -d --wait --force-recreate iceberg-rest trino`.
+- **A run with no new output for ten minutes** is usually waiting on a broken service, not a
+  slow test. Look at the last lines of its log and at `docker ps` before waiting longer.
+- **No pytest-xdist.** `pytest -n` is not installed; the unit and integration tests take about
+  35 minutes serially. Run the touched tests locally and leave the complete suite to CI.
+- **Shells that do not split words.** In zsh, `pytest $files` passes one argument. Write the
+  list to a file and use `xargs -a <file> uv run pytest ...`.
+- **Stopping a background run.** `pkill -f <pattern>` also matches the shell that runs the
+  command. Find the PIDs with `pgrep -af`, then `kill` them by number.
+- **Evidence and dirty trees.** `scripts/run_suite.py` refuses a dirty tree, so edit nothing in
+  the working tree while evidence records. Use `git worktree add` for other work meanwhile.
 
 ## Report
 
