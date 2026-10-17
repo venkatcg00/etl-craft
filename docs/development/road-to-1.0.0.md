@@ -127,7 +127,7 @@ item's text, or work done early under another item.
 | S5.O.2b Normalized object contracts | Done | #150, #151, #152, #153, #154, #160, #162, #181 | Merge column lists retain parameter storage; lineage versions use component endpoints; target state, view statements and rule results are keyed by components, and target locks use the resolved identity |
 | S5.P Project documentation gap UI | Done | #165 | Structured schema/lineage gaps, accessible column/graph warnings and read-only comparison API |
 | S5.R Consolidate before the cluster | Done | #179, #185, #188 to #193, #195, #201 | Items 1 to 8 complete: the execution core and configuration loader are split by responsibility; the moved execution functions are shortened with shared run records and unchanged transactions and retries |
-| S5.S Accounts, login and roles | Planned | | Registered user and service accounts, password and SSO login, tokens for services, a role check on every action, no implicit actor, local installations that operate a server |
+| S5.S Accounts, login and roles | In progress | #203 | Item 1 schema slice: account identities, inherited token roles and safe legacy token conversion; login, account administration, explicit actors and remote operation remain |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
 | S5.T Resource discovery and deployment profiles | Planned | | Opt-in laptop, server and server-with-workers sizing from usable process resources; one discovery module before S5.C |
@@ -151,12 +151,18 @@ item's text, or work done early under another item.
 
 What a person picking up the work needs that the code and the item texts do not say.
 
-**Next agent: after S5.R (#201).** S5.R is complete. The next item is S5.S item 1,
-Accounts and roles (`feat/accounts-schema`); read its whole section and apply the
-stop-and-ask review before implementation. Execution shares its run identity, task graph and
-SLA through `run_types.PipelineRun`; initialization and local admission share the frozen
-`run_start.StartOptions`. The configuration loader's shared helpers live under public names
-in `config/loader_helpers.py`.
+**Next agent: finish S5.S item 1 (#203).** Its implementation is locally validated, but the
+pull request is left unmerged: required Databricks cloning acceptance cannot open a SQL session
+(the provider reports it cannot create the resource). Snowflake cloning passed. Rerun the
+Databricks acceptance when the service is available, then finish the pull request before
+starting the dependent S5.S item 2 (`feat/accounts-login`), including the owner-approved move of
+account administration, interactive first-admin bootstrap and its no-active-admin doctor check
+from item 1, so administration ships with authenticated login. Implement password hashing with
+`hashlib.scrypt` there; this slice supplies its user-only storage field, not password login.
+Token creation currently creates or reuses a service account by name and refuses a conflicting
+role or inactive account. Local CLI identity and its Engine DB trust boundary remain unchanged
+until authentication is delivered. S5.R is complete; execution shares `run_types.PipelineRun`
+and frozen `run_start.StartOptions`, and loader helpers live in `config/loader_helpers.py`.
 
 Traps these refactors hit, with what works:
 
@@ -258,6 +264,14 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.S item 1 (#203) passed `make static docs`, 1,811 unit tests, 1,080 Engine DB/API tests,
+20 cloning tests across all four local warehouses and 50 final account/upgrade/catalog checks.
+All 32 new account cases fail with the old source. Snowflake cloning passed, including omission
+of account password hashes. Databricks native and Iceberg acceptance is unavailable: opening
+a SQL session fails with the provider's `BAD_REQUEST: Cannot create the resource`, before SQL
+executes. The pull request remains unmerged without auto-merge until that acceptance can run.
+Local wheel demos, Airflow, actionlint and repeated races were not needed for this slice.
 
 S5.R item 7, shortening the moved execution functions (#201), passed `make static docs`,
 all 1,807 unit tests, all 517 execution integration tests and 101 API/overseer caller tests.
@@ -405,6 +419,23 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- **S5.S item 1 (#203), owner-approved schema slice.**
+  - Account administration, interactive bootstrap and the corresponding doctor check move to
+    item 2 alongside login; checking the current self-claimed CLI actor would not prove an admin.
+    Password hashing ships with login; the account schema restricts password hashes to users.
+  - The owner approved `check-account-token-identities`: reject every duplicate legacy token
+    name before pending migration writes, including revoked/inactive tokens and equal roles.
+    The same preflight refuses invalid audit-actor names. Resolve names explicitly with the
+    old installed version before upgrading; never coalesce
+    accounts or choose privileges. The marker also records the conversion in existing histories.
+  - `token create` keeps its existing command/API shape: a new name creates a service account;
+    repeated names share its current role, and a conflicting role or inactive account is refused.
+    Credential hashes stay out of general metadata history and warehouse mirrors.
+  - Item 1's acceptance checklist is derived from its approved schema scope: mandatory common
+    fields, unique retained identities, role ordering, required token ownership, inherited roles,
+    immediate account disabling, secret-free history/mirroring and atomic released-schema upgrades.
+    The workstream's full "Done when" remains for its later items.
 
 - **S5.U item 3 (#184)** measures coverage in subprocesses (`patch = ["subprocess"]`).
   - **Results.** `overseer/server.py` reaches 87-92% and `execution/child.py` 89%. New

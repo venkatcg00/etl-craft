@@ -1089,12 +1089,33 @@ BEGIN
     SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'audit rows are written only by etl-craft; use etl-craft run, mark or cancel') END;
 END;
 
--- Opaque API credentials: SHA-256 hashes, roles and expiry; token values are never stored or cloned.
+-- Deployment identities, current roles and user credentials; accounts are retired rather than deleted.
+CREATE TABLE CFG_ACCOUNTS (
+    ACCOUNT_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+    ACCOUNT_NAME VARCHAR(128) NOT NULL UNIQUE CHECK (length(trim(ACCOUNT_NAME)) BETWEEN 1 AND 128),
+    ACCOUNT_KIND VARCHAR(16) NOT NULL CHECK (ACCOUNT_KIND IN ('USER','SERVICE')),
+    ROLE VARCHAR(16) NOT NULL CHECK (ROLE IN ('viewer','operator','developer','admin')),
+    EMAIL VARCHAR(320),
+    PASSWORD_HASH TEXT,
+    OIDC_SUBJECT TEXT UNIQUE,
+    ACTIVE_FLAG VARCHAR(1) NOT NULL DEFAULT 'Y' CHECK (ACTIVE_FLAG IN ('Y','N')),
+    CREATED_BY VARCHAR(128) NOT NULL DEFAULT 'etl-craft',
+    CREATE_DATE TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
+    UPDATED_BY VARCHAR(128) NOT NULL DEFAULT 'etl-craft',
+    UPDATED_DATE TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
+    CHECK (ACCOUNT_KIND = 'USER' OR PASSWORD_HASH IS NULL)
+);
+
+CREATE TRIGGER trg_accounts_no_delete BEFORE DELETE ON CFG_ACCOUNTS
+BEGIN
+    SELECT RAISE(ABORT, 'CFG_ACCOUNTS cannot be deleted; disable the account with ACTIVE_FLAG=N');
+END;
+
+-- Opaque API credentials owned by accounts; only credential hashes are retained.
 CREATE TABLE CFG_API_TOKENS (
     TOKEN_ID INTEGER PRIMARY KEY AUTOINCREMENT,
     NAME VARCHAR(128) NOT NULL,
     TOKEN_SHA256 VARCHAR(64) NOT NULL UNIQUE,
-    ROLE VARCHAR(16) NOT NULL CHECK (ROLE IN ('viewer', 'operator', 'admin')),
     PROJECT_ID BIGINT,
     CREATED_BY VARCHAR(128) NOT NULL DEFAULT 'etl-craft',
     CREATE_DATE TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
@@ -1102,7 +1123,8 @@ CREATE TABLE CFG_API_TOKENS (
     REVOKED_AT TIMESTAMP,
     ACTIVE_FLAG VARCHAR(1) NOT NULL DEFAULT 'Y' CHECK (ACTIVE_FLAG IN ('Y','N')),
     UPDATED_BY VARCHAR(128) NOT NULL DEFAULT 'etl-craft',
-    UPDATED_DATE TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00')
+    UPDATED_DATE TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
+    ACCOUNT_ID BIGINT NOT NULL REFERENCES CFG_ACCOUNTS(ACCOUNT_ID)
 );
 
 CREATE TRIGGER trg_actor_guard_cfg_api_tokens_insert BEFORE INSERT ON CFG_API_TOKENS
@@ -1315,7 +1337,8 @@ CREATE TABLE AUD_CFG_API_TOKENS_HISTORY (
     REVOKED_AT TIMESTAMP,
     ACTIVE_FLAG VARCHAR(1),
     UPDATED_BY VARCHAR(128),
-    UPDATED_DATE TIMESTAMP
+    UPDATED_DATE TIMESTAMP,
+    ACCOUNT_ID BIGINT
 );
 
 CREATE INDEX ix_aud_cfg_api_tokens_history_row ON AUD_CFG_API_TOKENS_HISTORY (TOKEN_ID, CHANGE_ID);
@@ -1367,3 +1390,26 @@ BEGIN
     SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'AUD_LINEAGE_VERSION_EDGES is written only by etl-craft; record lineage with etl-craft lineage') END;
     SELECT RAISE(ABORT, 'AUD_LINEAGE_VERSION_EDGES rejects DELETE: lineage history is append-only; only closing a current version is allowed; recompute with etl-craft lineage');
 END;
+
+-- Account history excludes password hashes.
+CREATE TABLE AUD_CFG_ACCOUNTS_HISTORY (
+    CHANGE_ID BIGINT PRIMARY KEY,
+    VALID_FROM TIMESTAMP NOT NULL,
+    VALID_TO TIMESTAMP NOT NULL,
+    CURRENT_FLAG VARCHAR(1) NOT NULL,
+    OPERATION VARCHAR NOT NULL,
+    ACTOR VARCHAR NOT NULL,
+    ACTOR_KIND VARCHAR NOT NULL,
+    MIGRATION VARCHAR,
+    ACCOUNT_ID BIGINT,
+    ACCOUNT_NAME VARCHAR(128),
+    ACCOUNT_KIND VARCHAR(16),
+    ROLE VARCHAR(16),
+    EMAIL VARCHAR(320),
+    OIDC_SUBJECT TEXT,
+    ACTIVE_FLAG VARCHAR(1),
+    CREATED_BY VARCHAR(128),
+    CREATE_DATE TIMESTAMP,
+    UPDATED_BY VARCHAR(128),
+    UPDATED_DATE TIMESTAMP
+);

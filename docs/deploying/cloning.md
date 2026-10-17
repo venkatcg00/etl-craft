@@ -57,3 +57,7 @@ CFG_TASKS	analytics.etl_craft.CFG_TASKS	87
 
 Each line is the Engine DB table, its copy, the rows copied, and `created` when the copy was
 created, or `added` and the columns added to it. A failure exits with status `17` (`CloningError`), naming the table.
+
+Account mirrors contain safe metadata only: `CFG_ACCOUNTS.PASSWORD_HASH` is never copied.
+Account history also excludes that field. API credential hashes remain excluded together
+with `CFG_API_TOKENS` itself.

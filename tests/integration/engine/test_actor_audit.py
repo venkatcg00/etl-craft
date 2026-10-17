@@ -13,6 +13,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.exc import DBAPIError
 
 from etl_craft.core.actor import Actor, ActorKind, acting_as
+from etl_craft.core.enums import AccountKind
 from etl_craft.engine import migrations, transitions
 from etl_craft.engine.audit import command_request, register_engine
 from etl_craft.engine.privileges import extra_write_grants
@@ -161,6 +162,7 @@ def seeded_tables(db):
             "current_flag": "Y",
             "table_id": contract,
             "role": "viewer",
+            "account_kind": AccountKind.SERVICE,
             "token_sha256": "0" * 64,
             "pipeline_id": p1,
             "task_id": t1,
@@ -294,7 +296,10 @@ def test_plain_connections_cannot_mutate_any_protected_table(engine_db):
             if engine_db.engine.dialect.name == "postgresql":
                 statements.append(f'TRUNCATE "{table}" CASCADE')
             for sql in statements:
-                with pytest.raises(error, match=expected):
+                refusal = expected
+                if table.upper() == "CFG_ACCOUNTS" and sql.startswith(("DELETE", "TRUNCATE")):
+                    refusal = rf"{expected}|CFG_ACCOUNTS cannot be deleted"
+                with pytest.raises(error, match=refusal):
                     plain.execute(sql)
                 plain.rollback()
     finally:

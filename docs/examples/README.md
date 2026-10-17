@@ -149,3 +149,17 @@ Unchanged asset/run pages retain their timestamps using `.etl-craft-manifest.jso
 gaps refresh each build. No connector setting is needed. See [catalog regeneration](../guides/catalog.md#keeping-it-up-to-date)
 for invalidation and recovery, and [run KPIs](../guides/catalog.md#runs-and-kpis) for the separate
 scheduled, backfill, repair and other groups.
+
+## API service credentials
+
+With any example configured and its Engine DB initialized or migrated, create a service
+credential locally (save the printed value securely):
+
+```bash
+etl-craft token create --name dashboard --role viewer --expires 30d
+```
+
+The name identifies one deployment account. Repeat with that name and role to issue another
+credential for the same account; an inconsistent role is refused. Disabling the account
+invalidates every credential belonging to it. See [tokens and roles](../deploying/http-api.md#tokens-and-roles)
+for the upgrade procedure when old token names collide.

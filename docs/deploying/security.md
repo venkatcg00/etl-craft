@@ -24,6 +24,20 @@ certificate, CA and sendmail paths, including `sslrootcert`, `sslcert` and `sslk
 start at the directory holding `craft-connector.yml`. A symlinked config uses the link's
 folder. `doctor` reports missing or unreadable files at their resolved paths.
 
+## Deployment accounts
+
+API credentials belong to registered `USER` or `SERVICE` accounts and inherit the account's
+current deployment role: `viewer`, `operator`, `developer`, then `admin`. Inactive accounts
+cannot authenticate a bearer credential. Credentials are still administered through the
+[existing token commands](http-api.md#tokens-and-roles); password login, interactive bootstrap
+and account commands follow in the authentication slice. Local Engine DB credentials remain
+the local command trust boundary until then.
+
+`CFG_ACCOUNTS.PASSWORD_HASH` allows user credentials and is refused on service
+accounts. Password hashes are excluded from typed history, metadata exports and warehouse
+mirrors. Account names and optional OIDC subjects remain unique even after retirement.
+Accounts are disabled rather than deleted so recorded identities remain resolvable.
+
 ## Least privilege
 
 etl-craft creates nothing outside a SQLite file: every schema must exist, and it creates tables

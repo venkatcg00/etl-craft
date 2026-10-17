@@ -27,6 +27,7 @@ from sqlalchemy.engine import Connection, Engine
 from etl_craft.config.auth import EngineSpec
 from etl_craft.core.actor import Actor
 from etl_craft.core.text import split_statements
+from etl_craft.dialects.engine.metadata import CREDENTIAL_COLUMNS
 
 if TYPE_CHECKING:
     from etl_craft.config import ConnectionProfile, ConnectorConfig
@@ -210,7 +211,11 @@ class EngineDialect(ABC):
         """Copy ``table``'s rows into its history as current versions of one change."""
         operation, migration, actor, now = change
         quote = conn.dialect.identifier_preparer.quote
-        names = [column["name"] for column in inspect(conn).get_columns(self.stored_name(table))]
+        names = [
+            column["name"]
+            for column in inspect(conn).get_columns(self.stored_name(table))
+            if column["name"].upper() not in CREDENTIAL_COLUMNS.get(table.upper(), ())
+        ]
         listed = ", ".join(quote(column) for column in names)
         conn.execute(
             text(

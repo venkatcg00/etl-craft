@@ -20,7 +20,11 @@ from collections.abc import Callable
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.text import quote_identifier as quote
-from etl_craft.dialects.engine.metadata import config_base_enabled, require_config_base
+from etl_craft.dialects.engine.metadata import (
+    CREDENTIAL_COLUMNS,
+    config_base_enabled,
+    require_config_base,
+)
 
 NOW = "(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00')"
 STAMPS = {"CREATED_BY", "CREATE_DATE", "UPDATED_BY", "UPDATED_DATE"}
@@ -58,7 +62,7 @@ def _columns(conn: Connection, table: str) -> list[tuple[str, str, bool]]:
     return [
         (row.name, row.type or "TEXT", bool(row.pk))
         for row in rows
-        if not (table.upper() == "CFG_API_TOKENS" and row.name.upper() == "TOKEN_SHA256")
+        if row.name.upper() not in CREDENTIAL_COLUMNS.get(table.upper(), ())
     ]
 
 
@@ -297,8 +301,7 @@ def _change_triggers(conn: Connection, table: str, capture: Capture) -> None:
     names = [name for name, _, _ in columns]
     primary = next((name for name, _, pk in columns if pk), names[0])
     regular = [name for name in names if name.upper() not in STAMPS]
-    if table.upper() == "CFG_API_TOKENS":
-        regular.append("TOKEN_SHA256")
+    regular.extend(CREDENTIAL_COLUMNS.get(table.upper(), ()))
     changed = " OR ".join(f"NEW.{quote(name)} IS NOT OLD.{quote(name)}" for name in regular)
     literal = table.upper().replace("'", "''")
     not_inserting = f"NOT etl_craft_inserting('{literal}')"

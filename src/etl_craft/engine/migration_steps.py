@@ -8,6 +8,7 @@ unchanged.
 from __future__ import annotations
 
 import re
+from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -15,8 +16,10 @@ from typing import Any
 from sqlalchemy import inspect
 from sqlalchemy.engine import Connection
 
-from etl_craft.core.errors import MigrationError
+from etl_craft.core.actor import Actor, ActorKind, current_actor, migration
+from etl_craft.core.errors import ConfigurationError, MigrationError
 from etl_craft.core.text import is_metadata_code
+from etl_craft.dialects.engine import for_engine
 from etl_craft.engine.queries import statement
 
 
@@ -93,8 +96,52 @@ def _convert_tasks(conn: Connection, state: LegacyRows, target: Target) -> None:
     )
 
 
+def check_account_token_identities(conn: Connection) -> LegacyRows:
+    """Refuse invalid or conflicting account identities before pending migration writes."""
+    inspector = inspect(conn)
+    if not inspector.has_table("cfg_api_tokens"):
+        return []
+    names: dict[str, list[str]] = defaultdict(list)
+    invalid = []
+    for row in conn.execute(statement(conn, "account_legacy_tokens")):
+        try:
+            Actor(row.name, ActorKind.HUMAN)
+        except ConfigurationError:
+            invalid.append(f"TOKEN_ID={row.token_id}, NAME={row.name!r}: invalid actor name")
+        if row.name_count > 1:
+            names[row.name].append(f"TOKEN_ID={row.token_id}, ROLE={row.role}")
+    conflicts = invalid + [f"{name!r}: {', '.join(rows)}" for name, rows in names.items()]
+    if conflicts:
+        raise MigrationError(
+            "CFG_API_TOKENS account migration found invalid identities: "
+            + "; ".join(conflicts)
+            + "; expected one legacy token per non-empty actor name of at most 128 characters "
+            "without control characters, including inactive and revoked tokens. Nothing was "
+            "changed; give these tokens valid, distinct NAME values through "
+            "an explicit project migration before upgrading, then run etl-craft migrate again"
+        )
+    return []
+
+
+def _record_accounts(conn: Connection, state: LegacyRows, target: Target) -> None:
+    """Keep account creation and changed token ownership in existing typed histories."""
+    dialect = for_engine(conn)
+    dialect.refresh_metadata_triggers(conn)
+    dialect.record_config_baseline(
+        conn, ("CFG_ACCOUNTS",), migration=migration.get(), actor=current_actor()
+    )
+    dialect.record_config_conversion(
+        conn, "CFG_API_TOKENS", "TOKEN_ID", migration=migration.get(), actor=current_actor()
+    )
+
+
 STEPS: dict[str, MarkerStep] = {
     "rebuild-metadata": MarkerStep(),
+    "check-account-token-identities": MarkerStep(
+        check=lambda conn, target: check_account_token_identities(conn),
+        convert=_record_accounts,
+        names_migration=True,
+    ),
     "check-metadata-identities": MarkerStep(
         check=lambda conn, target: check_metadata_identities(conn)
     ),
