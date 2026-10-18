@@ -592,3 +592,47 @@ def test_scoped_control_routes_share_durable_identity_and_role_policy(api):
     assert stop.status_code == 200 and stop.json()["status"] == "COMPLETED"
     assert stop.json()["run_status"] == "IN-PROGRESS"
     assert stop.json()["attempt_ids"] == [attempt]
+
+
+def test_recovery_capabilities_and_bulk_routes_share_exact_requests(api):
+    _, client, creds, run, _ = api
+    viewer, operator = headers(creds["viewer"]), headers(creds["operator"])
+    caps = client.get(f"/api/v1/pipelines/P/capabilities?run_id={run}", headers=viewer)
+    assert caps.status_code == 200 and caps.json()["schema"] == "etl-craft/capabilities/1"
+    assert all(not a["available"] for a in caps.json()["actions"])
+    body = {
+        "requests": [
+            {
+                "pipeline_code": "P",
+                "run_id": run,
+                "task_code": "T",
+                "action": "HOLD",
+                "reason": "selected task",
+                "request_key": "bulk:T",
+            },
+            {
+                "pipeline_code": "P",
+                "run_id": run,
+                "action": "RESTART",
+                "reason": "restart",
+                "request_key": "bulk:restart",
+            },
+        ]
+    }
+    assert client.post("/api/v1/controls/bulk", json=body, headers=viewer).status_code == 403
+    result = client.post("/api/v1/controls/bulk", json=body, headers=operator)
+    assert result.status_code == 200, result.text
+    outcomes = result.json()["outcomes"]
+    assert outcomes[0]["control"]["task_code"] == "T"
+    assert outcomes[1]["control"] is None and outcomes[1]["error"]
+    repeated = client.post("/api/v1/controls/bulk", json=body, headers=operator)
+    assert (
+        repeated.json()["outcomes"][0]["control"]["control_id"]
+        == outcomes[0]["control"]["control_id"]
+    )
+    rejected = client.post(
+        "/api/v1/controls/bulk",
+        json={"requests": [{**body["requests"][0], "unexpected": True}]},
+        headers=operator,
+    )
+    assert rejected.status_code == 422

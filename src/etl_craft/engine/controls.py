@@ -56,6 +56,7 @@ class ControlView:
     message: str
     run_status: RunStatus
     attempts: tuple[ControlAttempt, ...]
+    execution_run_id: int | None = None
 
 
 def lock_run(conn: Connection, run_id: int) -> None:
@@ -177,3 +178,10 @@ def scope_attempts(
         statement(conn, "control_scope_attempts"), {"run_id": run_id, "task_id": task_id}
     )
     return tuple(ControlAttempt(**dict(row._mapping)) for row in rows)
+
+
+def permits_paused(conn: Connection, run_id: int) -> bool:
+    """Check one-run permission without changing the definition pause."""
+    return bool(
+        conn.execute(statement(conn, "control_permits_paused"), {"run_id": run_id}).scalar()
+    )

@@ -142,7 +142,7 @@ def run_task(
         if force:
             raise UsageError(f"{option} and --force are different overrides: choose one")
     if config.mode == Mode.LOCAL:
-        paused = open_pause(engine, pipeline_code)
+        paused = open_pause(engine, pipeline_code, selector=selector)
         if paused is not None:
             return _skipped(
                 f"{task_code}: {pipeline_code} is {paused.describe()}; nothing started or "
@@ -276,7 +276,11 @@ def _wait_retry(
     """Wait outside a worker pool; interruption leaves the delayed attempt durable."""
     while True:
         if (child is not None and child.cancel is not None and child.cancel.is_set()) or (
-            run_cancelled(engine, pipeline_run_id) or open_pause(engine, pipeline_code) is not None
+            run_cancelled(engine, pipeline_run_id)
+            or open_pause(
+                engine, pipeline_code, selector=runlog.RunSelector(run_id=pipeline_run_id)
+            )
+            is not None
         ):
             return False
         remaining = (due - gate.clock.now()).total_seconds()

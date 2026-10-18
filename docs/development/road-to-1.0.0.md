@@ -130,7 +130,7 @@ item's text, or work done early under another item.
 | S5.R Consolidate before the cluster | Done | #179, #185, #188 to #193, #195, #201 | Items 1 to 8 complete: the execution core and configuration loader are split by responsibility; the moved execution functions are shortened with shared run records and unchanged transactions and retries |
 | S5.S Accounts, login and roles | Done | #203, #204, #205, #206, #207 | Account identities, local and server sign-in with refresh tokens, one service-role policy, explicit actors with an `etl-craft` writer on every run, and a local installation operating a server over HTTPS; every action has one implementation that the CLI, the API and later the UI call |
 | S5.O.3 SCD human override protection | In progress | #208 | Native PostgreSQL/DuckDB protection, admin edits/unlocks and column provenance implemented; cloud acceptance unavailable |
-| S5.Q Scoped operator controls | In progress | #209, #210 | Slices 1–2: isolated manual selections and scoped holds/stop/abort with durable process/query evidence; recovery/restart, bulk actions and shared capabilities remain |
+| S5.Q Scoped operator controls | Done | #209, #210, #211 | Isolated manual selections, scoped holds/stop/abort, durable recovery/restart preparation, one-run pause permission, selected bulk outcomes and shared capabilities |
 | S5.T Resource discovery and deployment profiles | Planned | | Opt-in laptop, server and server-with-workers sizing from usable process resources; one discovery module before S5.C |
 | S5.V Team-owned config tables | Planned | | Teams' own `CFG_` tables carry no etl-craft guards, contract, history or config files; etl-craft's tables keep them |
 | S5.U Robustness before the cluster | Done | #176, #182, #183, #184 | Engine DB restarts ridden out; SLA breach writes retried; no single-writer guess; timing tests verified under load; subprocess code measured by coverage |
@@ -152,10 +152,11 @@ item's text, or work done early under another item.
 
 What a person picking up the work needs that the code and the item texts do not say.
 
-**Next agent: continue S5.Q.** The owner merged S5.O.3 (#208) and approved three S5.Q
-pull requests: (1) isolated manual runs and task selection; (2) holds/stop/abort with durable
-process/query acknowledgement; (3) recovery/restart, bulk actions and shared capabilities.
-S5.Q stays In progress until all three are complete.
+**S5.Q completes in three approved slices:** #209 isolates manual selections; #210 adds
+holds/stop/abort and physical completion evidence; #211 adds recovery/restart preparation,
+one-run permission under definition pause, selected bulk results and shared capabilities.
+S5.O.3 cloud acceptance remains recorded below; probe provider availability rather than
+waiting for a human quota reset. S5.T is the next planned implementation item.
 
 Item 2 includes the approved move of account administration, interactive first-admin bootstrap,
 the no-active-admin doctor check and scrypt password hashing from item 1. Sessions reuse
@@ -271,6 +272,12 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.Q slice 3 (#211) uses both Engine DBs for populated/released-schema upgrades, recovery and
+checkpoint preservation, durable restart identity, one-run definition-pause permissions,
+capability policy, selected bulk results and local/server CLI contracts. Run creation and
+control races are repeated locally. Warehouse SQL/authentication are unchanged; no cloud
+acceptance is required for this slice. The earlier server-query adapter limitations remain.
 
 S5.Q slice 2 (#210) uses SQLite/PostgreSQL Engine DB migrations and local worker, CLI/API,
 process-identity, event-fence and concurrency acceptance. Warehouse SQL and cloud authentication
@@ -477,6 +484,20 @@ The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
 
+- S5.Q slice 3: the owner chose recovery in the selected run and restart in a new run retaining
+  current checkpoints; reset/replay is separate. Both are durable preparations, with an
+  `execution_run_id` separate from the source run and actual execution status. The local CLI
+  explicitly drives that identity; the server picks up eligible whole-pipeline contexts.
+  Recovery keeps SUCCESS/SKIPPED and recorded consumption; restart repeats handler writes
+  without truncating data or releasing human locks. A task-only recovery cannot reopen a
+  terminal whole-pipeline context and silently admit its siblings; whole recovery, isolated
+  restart or explicit rerun are actionable alternatives. Task restarts use the existing
+  standalone target/checkpoint/dependency isolation policy. Paused definitions allow an
+  explicitly keyed whole-pipeline or supported isolated-task context, or permission for an
+  existing exact run; the automatic definition pause stays open. Bulk requests need explicit
+  identities and unique keys, commit per object and return individual refusals. Capabilities
+  share acceptance checks and data-effect descriptions; snapshots never reserve permission.
+
 - S5.Q slice 2: scoped pause/resume selects an exact run/task; unselected pause/resume keeps
   definition-wide behavior. `cancel --stop` drains; ordinary cancel requests an abort. Both
   return durable acceptance/acknowledgement/completion separately from actual run status.
@@ -486,8 +507,8 @@ The separate frozen 0.4 soak deployment is unchanged.
   require a query adapter for scoped stop. Reconciliation revisits pending terminal and
   already-LOST workers, preserving outcomes and unreadable identities as unknown. Active event probes refuse
   control until their lock is available; server-side event-query controls need an adapter.
-  Recovery/restart, bulk operations, shared capability discovery and paused-definition manual
-  overrides remain in the approved third PR.
+  Recovery/restart, bulk operations, shared capabilities and paused-definition one-run
+  permissions are completed in the approved third PR (#211).
 
 - S5.Q: the owner approved the three-PR split above and an exception to one active run per
   pipeline when manual target, checkpoint and consumption isolation is enforceable. Slice 1

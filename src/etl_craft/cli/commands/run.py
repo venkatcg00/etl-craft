@@ -6,6 +6,7 @@ import argparse
 import signal
 from datetime import date
 
+from etl_craft.cli.commands import control_requests
 from etl_craft.cli.commands.common import (
     Command,
     command_context,
@@ -26,7 +27,8 @@ from etl_craft.services.operations.requests import RunRequest
 def _configure(parser: argparse.ArgumentParser) -> None:
     configure_output(parser)
     configure_run_selector(parser)
-    parser.add_argument("--pipeline_code", required=True, help="the pipeline to run")
+    parser.add_argument("--pipeline_code", help="the pipeline to run")
+    control_requests.configure(parser)
     step = parser.add_mutually_exclusive_group()
     step.add_argument("--task_code", help="run only this task, under the selected pipeline run")
     step.add_argument(
@@ -92,6 +94,9 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
+    if control_requests.selected(args):
+        return control_requests.execute(args, out)
+    _ordinary(args)
     # Ctrl-C, SIGTERM and SIGHUP stop the run at its next safe point: its task processes are
     # stopped and their attempts recorded. SIGKILL cannot be caught: its task processes are left
     # running, their rows IN-PROGRESS until their leases expire and reconciliation releases them.
@@ -125,6 +130,9 @@ def _request(args: argparse.Namespace, reason: str | None) -> RunRequest:
 
 
 def _remote(args: argparse.Namespace, out: Output, server: ServerClient) -> int:
+    if control_requests.selected(args):
+        return control_requests.execute(args, out, server)
+    _ordinary(args)
     if args.standalone:
         _request(args, args.reason)
     local_only = [
@@ -227,3 +235,11 @@ COMMAND = Command(
     run=_run,
     remote=_remote,
 )
+
+
+def _ordinary(args: argparse.Namespace) -> None:
+    """Keep ordinary execution validation independent of preparatory controls."""
+    if args.pipeline_code is None:
+        raise UsageError("run needs --pipeline_code or --controls-file")
+    if args.request_key is not None:
+        raise UsageError("--request-key goes with --recover, --restart or --allow-paused")

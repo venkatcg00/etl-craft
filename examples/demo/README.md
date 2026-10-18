@@ -189,3 +189,15 @@ Replace `PIPELINE`, `TASK`, `42` and `17` with this project's code and returned 
 A request is finished only at `COMPLETED`; inspect `run_status` and the affected attempt
 acknowledgements. Server warehouse aborts without a query acknowledgement adapter refuse;
 use `--stop` to drain them. A task-only control leaves the rest of the run available.
+
+Scoped recovery and restart are preparatory operations. Replace `RUN_ID` with an exact run from
+`etl-craft history`; do not use a successful run for recovery:
+
+```bash
+etl-craft run --pipeline_code SUPPORT_DM --run-id RUN_ID --restart --request-key demo-restart --reason "new context" --format json
+etl-craft status --pipeline_code SUPPORT_DM --run-id RUN_ID --capabilities --format json
+```
+
+Run the returned `execution_run_id` explicitly. Restart retains current checkpoints and human
+locks; it can repeat data writes. Use `run --controls-file selected-controls.json --format json`
+for an explicit selection with per-object outcomes; see `docs/examples/operator-controls.md`.

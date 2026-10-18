@@ -84,6 +84,10 @@ A disconnected client does not cancel committed work; inspect its exact run befo
 | POST | `/pipelines/{code}/cancel` | Nonblank `reason`; optional `run_id` or `run_key` |
 | POST | `/pipelines/{code}/mark` | `reason` and either `status` or `watermark`; optional `task_code`, `rows`, `stale`, `new_run`, `run_id`, `run_key`, as `etl-craft mark` takes them |
 | POST | `/pipelines/{code}/tasks/{task}/rerun` | `reason`; optional `with_downstream`, `run_id`, `run_key` |
+| POST | `/pipelines/{code}/controls` | `action` (`HOLD`, `RELEASE`, `STOP`, `ABORT`, `RECOVER`, `RESTART`, `RUN_PAUSED`) and `reason`; optional `run_id`, `run_key`, `task_code`, `request_key`. The `control` document |
+| GET | `/control-requests/{id}` | The `control` document `etl-craft status --request-id` prints |
+| GET | `/pipelines/{code}/capabilities?run_id=` | Viewer read: each control's availability, refusal reason and data effect for the selected run, or one `task_code` |
+| POST | `/controls/bulk` | `requests`: 1 to 100 controls, each with `pipeline_code`, an explicit `run_id` or `run_key` and a unique `request_key`; one result or refusal per object |
 | POST | `/pipelines/{code}/runs` | `run_date`, `reason`, both optional |
 | POST | `/pipelines/{code}/backfills` | Inclusive `first`, `last` dates and `reason` |
 | POST | `/pipelines/{code}/pause`, `/resume` | Nonblank `reason` |

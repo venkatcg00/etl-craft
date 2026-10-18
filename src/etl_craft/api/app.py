@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.api.catalog import add_catalog_routes
+from etl_craft.api.control_capabilities import add_control_capability_routes
 from etl_craft.api.login import add_login_routes
 from etl_craft.api.selected import add_selected_routes
 from etl_craft.api.values import add_value_routes
@@ -108,6 +109,7 @@ def create_app(ctx: OperationContext) -> FastAPI:
 
     add_login_routes(app, ctx)
     add_selected_routes(app, authorize)
+    add_control_capability_routes(app, authorize)
     add_catalog_routes(app, authorize)
     add_value_routes(app, authorize)
     _add_pipeline_routes(app, authorize)

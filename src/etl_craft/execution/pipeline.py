@@ -142,7 +142,7 @@ def pipeline_steps(
             "mode does; in remote mode the orchestrator runs each task, between run --init-only "
             "and run --finalize-only"
         )
-    paused = open_pause(engine, pipeline_code)
+    paused = open_pause(engine, pipeline_code, selector=selector)
     if paused is not None:
         return paused_outcome(pipeline_code, paused)
     clock = clock or Clock()
@@ -216,7 +216,10 @@ def _run_schedule(
         child=options.child or ChildOptions(),
         paused=lambda: (
             (options.stop_dispatch is not None and options.stop_dispatch.is_set())
-            or open_pause(engine, run.pipeline_code) is not None
+            or open_pause(
+                engine, run.pipeline_code, selector=runlog.RunSelector(run_id=run.pipeline_run_id)
+            )
+            is not None
         ),
         settle=lambda final: settle_unsatisfiable(
             engine, run.graph, run.pipeline_run_id, run.task_codes, failures_final=final
@@ -279,7 +282,9 @@ def _stopped_run(
             f"{fences}; inspect the control request and release the exact scope to resume",
             run.pipeline_run_id,
         )
-    paused = open_pause(engine, run.pipeline_code)
+    paused = open_pause(
+        engine, run.pipeline_code, selector=runlog.RunSelector(run_id=run.pipeline_run_id)
+    )
     if paused is not None:
         message = (
             f"{run.pipeline_code}: pipeline_run_id={run.pipeline_run_id} stays IN-PROGRESS, "

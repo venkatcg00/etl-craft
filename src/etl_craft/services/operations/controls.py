@@ -20,7 +20,7 @@ from etl_craft.core.enums import (
     RunStatus,
 )
 from etl_craft.core.errors import LockTimeoutError, RunRefusedError, RunStateError, UsageError
-from etl_craft.engine import controls, locks, run_scopes, runlog
+from etl_craft.engine import controls, locks, run_scopes, runlog, transitions
 from etl_craft.engine.controls import ControlView
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
@@ -31,7 +31,15 @@ from etl_craft.engine.repository.tasks import (
     resolve_task_id,
 )
 from etl_craft.execution import control_flow
+from etl_craft.execution.manual import select_tasks
 from etl_craft.services.operations.context import OperationContext, operation
+from etl_craft.services.operations.recovery import (
+    IMMEDIATE_ACTIONS,
+    RECOVERY_ACTIONS,
+    check_recovery,
+    control_effect,
+    prepare_recovery,
+)
 
 
 @dataclass(frozen=True)
@@ -50,7 +58,7 @@ class ControlRequest:
         if not isinstance(self.action, ControlAction):
             raise UsageError(
                 f"control action={self.action!r}; expected a ControlAction enum; "
-                "use HOLD, RELEASE, STOP or ABORT"
+                "use a supported ControlAction value"
             )
         if not self.reason.strip():
             raise UsageError("control reason is empty; give a nonblank reason for this action")
@@ -62,9 +70,7 @@ class ControlRequest:
 
 def request_control(ctx: OperationContext, request: ControlRequest) -> ControlView:
     """Commit the dispatch fence first; return acceptance separately from worker completion."""
-    command = {ControlAction.HOLD: "pause", ControlAction.RELEASE: "resume"}.get(
-        request.action, "cancel"
-    )
+    command = control_command(request.action)
     args = {
         "pipeline_code": request.pipeline_code,
         "task_code": request.task_code,
@@ -81,7 +87,9 @@ def request_control(ctx: OperationContext, request: ControlRequest) -> ControlVi
                 "worker control adapter; stop/hold the exact task in that orchestrator. "
                 "Native controls require a local owning worker."
             )
-        with _event_locks(ctx, request) as run_id, ctx.engine.begin() as conn:
+        if request.action == ControlAction.RUN_PAUSED and request.selector == runlog.ACTIVE_RUN:
+            return _new_paused(ctx, request)
+        with control_scope(ctx, request) as run_id, ctx.engine.begin() as conn:
             pipeline_id = resolve_pipeline_id(conn, request.pipeline_code)
             controls.lock_run(conn, run_id)
             selected = runlog.select_run(conn, pipeline_id, runlog.RunSelector(run_id=run_id))
@@ -95,24 +103,65 @@ def request_control(ctx: OperationContext, request: ControlRequest) -> ControlVi
             existing = _existing(conn, request, run_id, task_id)
             if existing is not None:
                 return controls.get(conn, existing)
-            if selected.status not in {RunStatus.QUEUED, RunStatus.IN_PROGRESS}:
-                raise RunStateError(
-                    f"run_id={run_id} is {selected.status}; controls need a non-terminal run. "
-                    "Start a new run or inspect the completed request instead."
-                )
-            attempts = tuple(
-                a
-                for a in controls.scope_attempts(conn, run_id, task_id)
-                if a.status in control_flow.ACTIVE_ATTEMPTS
-                or a.status == AttemptStatus.LOST
-                or a.process_ended_at is None
-                or a.queries_ended_at is None
-            )
-            _check_query_control(ctx, request, attempts)
+            attempts = check_control(conn, ctx, request, selected, task_id)
             control_id = _insert(conn, ctx, request, run_id, task_id, attempts)
+            if request.action in RECOVERY_ACTIONS:
+                prepare_recovery(conn, ctx, selected, request, control_id)
         control_flow.advance(ctx.engine, run_id)
         with ctx.engine.connect() as conn:
             return controls.get(conn, control_id)
+
+
+def check_control(
+    conn: Connection,
+    ctx: OperationContext,
+    request: ControlRequest,
+    selected: runlog.RunIdentity,
+    task_id: int | None,
+) -> tuple[controls.ControlAttempt, ...]:
+    """Share state/capability decisions between previews and accepted requests."""
+    run_id = selected.pipeline_run_id
+    if ctx.config.mode != Mode.LOCAL:
+        raise RunRefusedError(
+            f"run_id={run_id}: legacy orchestrator has no native control adapter; act on "
+            f"the exact task in its orchestrator"
+        )
+    if request.action in RECOVERY_ACTIONS:
+        check_recovery(conn, selected, request.action, task_id)
+    else:
+        if request.action == ControlAction.RUN_PAUSED and task_id is not None:
+            raise UsageError(
+                "RUN_PAUSED grants one run permission; omit task_code to keep the "
+                "definition pause intact"
+            )
+        if selected.status not in {RunStatus.QUEUED, RunStatus.IN_PROGRESS}:
+            raise RunStateError(
+                f"run_id={run_id} is {selected.status}; controls need a non-terminal run. "
+                "Start a new run or inspect the completed request instead."
+            )
+    attempts = tuple(
+        a
+        for a in controls.scope_attempts(conn, run_id, task_id)
+        if a.status in control_flow.ACTIVE_ATTEMPTS
+        or a.status == AttemptStatus.LOST
+        or a.process_ended_at is None
+        or a.queries_ended_at is None
+    )
+    if request.action in {ControlAction.HOLD, ControlAction.RELEASE}:
+        pending = (
+            conn.execute(
+                statement(conn, "control_unfinished"), {"run_id": run_id, "task_id": task_id}
+            )
+            .scalars()
+            .all()
+        )
+        if pending:
+            raise RunRefusedError(
+                f"run_id={run_id}: pending controls={pending}; inspect process/query "
+                f"acknowledgements before changing this fence"
+            )
+    _check_query_control(ctx, request, attempts)
+    return attempts
 
 
 def _existing(
@@ -138,7 +187,9 @@ def _existing(
         statement(conn, "control_latest"), {"run_id": run_id, "task_id": task_id}
     ).one_or_none()
     if latest is not None:
-        if latest.action == request.action:
+        if latest.action == request.action and not (
+            request.action in RECOVERY_ACTIONS and request.request_key is not None
+        ):
             return int(latest.control_id)
         if latest.status != ControlStatus.COMPLETED and (
             request.action in {ControlAction.HOLD, ControlAction.RELEASE}
@@ -191,7 +242,7 @@ def _insert(
     attempts: tuple[controls.ControlAttempt, ...],
 ) -> int:
     now = datetime.now(UTC)
-    immediate = request.action in {ControlAction.HOLD, ControlAction.RELEASE}
+    immediate = request.action in IMMEDIATE_ACTIONS
     status = ControlStatus.COMPLETED if immediate else ControlStatus.REQUESTED
     inserted = conn.execute(
         statement(conn, "control_insert"),
@@ -209,7 +260,8 @@ def _insert(
             "acknowledged_at": now if immediate else None,
             "completed_at": now if immediate else None,
             "message": (
-                f"{request.action}: dispatch fence committed; running attempts continue"
+                f"{request.action}: {control_effect(request.action)} "
+                "Preparation committed; inspect execution_run_id separately from execution outcome."
                 if immediate
                 else f"{request.action} requested; waiting for actual worker/query endings"
             ),
@@ -232,8 +284,15 @@ def get_control(ctx: OperationContext, control_id: int) -> ControlView:
         return controls.get(conn, control_id)
 
 
+def control_command(action: ControlAction) -> str:
+    """Name the operation whose role policy and audit record a control uses."""
+    if action in RECOVERY_ACTIONS or action == ControlAction.RUN_PAUSED:
+        return "run"
+    return {ControlAction.HOLD: "pause", ControlAction.RELEASE: "resume"}.get(action, "cancel")
+
+
 @contextmanager
-def _event_locks(ctx: OperationContext, request: ControlRequest) -> Iterator[int]:
+def control_scope(ctx: OperationContext, request: ControlRequest) -> Iterator[int]:
     """Finish any active probe under its existing lock before fencing its scope."""
     with ctx.engine.connect() as conn:
         pipeline_id = resolve_pipeline_id(conn, request.pipeline_code)
@@ -271,3 +330,52 @@ def _event_locks(ctx: OperationContext, request: ControlRequest) -> Iterator[int
             f"{request.pipeline_code}: an event probe is active; no control was accepted. "
             "Retry after its query finishes; an active probe cannot be acknowledged as stopped."
         ) from error
+
+
+def _new_paused(ctx: OperationContext, request: ControlRequest) -> ControlView:
+    """Create a keyed one-off context atomically with its definition-pause permission."""
+    if request.request_key is None:
+        raise UsageError(
+            "RUN_PAUSED without a run selector creates a context; "
+            "supply --request-key for repeatable creation"
+        )
+    key = request.request_key
+    lock = locks.EngineLock("control-context", locks.advisory_key(f"control-context:{key}"))
+    with lock.hold(ctx.engine), ctx.engine.begin() as conn:
+        pipeline_id = resolve_pipeline_id(conn, request.pipeline_code)
+        task_id = (
+            None
+            if request.task_code is None
+            else resolve_task_id(conn, pipeline_id, request.task_code)
+        )
+        keyed = conn.execute(statement(conn, "control_by_key"), {"request_key": key}).one_or_none()
+        if keyed is not None:
+            original = controls.get(conn, keyed.control_id)
+            if (original.pipeline_id, original.task_id, original.action) != (
+                pipeline_id,
+                task_id,
+                request.action,
+            ):
+                raise RunStateError(
+                    f"request_key={key!r}: another scope/action already owns it; "
+                    "reuse its original inputs or choose a new key"
+                )
+            return original
+        run_key = f"control-paused:{key}"
+        logical_date = runlog.today(ctx.config.timezone)
+        if request.task_code is None:
+            run_id = transitions.create_run(
+                conn,
+                pipeline_id,
+                ctx.actor,
+                run_key=run_key,
+                run_date=logical_date,
+                status=RunStatus.QUEUED,
+            )
+        else:
+            scope = select_tasks(conn, pipeline_id, request.task_code)
+            run_id = run_scopes.create_manual_run(
+                conn, pipeline_id, ctx.actor, scope, run_key, logical_date
+            )
+        control_id = _insert(conn, ctx, request, run_id, task_id, ())
+        return controls.get(conn, control_id)

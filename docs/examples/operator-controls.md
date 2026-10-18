@@ -14,3 +14,16 @@ The stop response pins affected attempt ids. Wait for `status=COMPLETED`; `REQUE
 `ACKNOWLEDGED` retain actual pending process/query endings. `run_status` is independent.
 Without `--stop`, cancellation requests an abort; server-side queries require a cancellation
 adapter and otherwise refuse with a graceful-stop remedy. See the [control guide](../guides/run-control.md).
+
+Prepare recovery of the same run, or a new restart that retains current checkpoints:
+
+```bash
+etl-craft run --pipeline_code SALES_DAILY --run-id 42 --recover --request-key repair-42 --reason "input fixed" --format json
+etl-craft run --pipeline_code SALES_DAILY --run-id 42 --restart --request-key fresh-42 --reason "fresh context" --format json
+etl-craft status --pipeline_code SALES_DAILY --run-id 42 --capabilities --format json
+```
+
+Use the returned `execution_run_id` with `run --run-id`; preparation completion is separate from
+execution completion. Restart retains offsets/watermarks and can repeat handler writes. The
+[control guide](../guides/run-control.md#inspect-capabilities-and-apply-an-explicit-selection)
+includes the exact bulk JSON format and one-run permission under a definition pause.

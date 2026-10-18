@@ -105,6 +105,13 @@ def required_role(command: str, arguments: Mapping[str, object]) -> ApiRole | No
     return ROLES[name]
 
 
+def has_role(role: ApiRole | None, required: ApiRole | None) -> bool:
+    """Whether ``role`` meets ``required``; an unproven role meets only no requirement."""
+    return required is None or (
+        role is not None and tuple(ApiRole).index(role) >= tuple(ApiRole).index(required)
+    )
+
+
 def authorize(
     ctx: OperationContext, command: str, arguments: Mapping[str, object] | None = None
 ) -> None:
@@ -123,9 +130,7 @@ def authorize(
         )
         if any(name.startswith("engine/") for name in pending):
             required = ROLES["migrate engine"]
-    if required is None or (
-        ctx.role is not None and tuple(ApiRole).index(ctx.role) >= tuple(ApiRole).index(required)
-    ):
+    if has_role(ctx.role, required):
         return
     name = operation_name(command, arguments)
     error = PermissionDeniedError(
