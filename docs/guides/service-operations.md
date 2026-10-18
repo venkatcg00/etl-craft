@@ -52,7 +52,7 @@ options. Project files remain relative to `config.project_dir`.
 
 | Area | Operations |
 | --- | --- |
-| `runs` | `trigger_run`, `initialize_run`, `finalize_run`, `skip_run`, `mark`, `mark_run`, `stand_in_run`, `cancel_run`, `reconcile_runs` |
+| `runs` | `trigger_run`, `initialize_run`, `finalize_run`, `skip_run`, `mark`, `mark_run`, `stand_in_run`, `reconcile_runs` |
 | `tasks` | `run_task`, `force_task`, `rerun_task`, `mark_task` |
 | `pipelines` | `set_pause` |
 | `controls` | `request_control(ctx, ControlRequest(...))`, `get_control(ctx, control_id)` |
@@ -62,8 +62,8 @@ options. Project files remain relative to `config.project_dir`.
 
 `controls.ControlRequest` selects a run and optional task, action (`ControlAction`), reason and
 optional idempotency key. It returns `etl-craft/control/1` with acceptance, acknowledgement and
-completion separate from `run_status`. `runs.cancel_run` delegates to the same abort operation
-and returns this control document. See [scoped controls](run-control.md#hold-or-release-dispatch-in-a-selected-run).
+completion separate from `run_status`. The `stop`, `abort`, `hold` and `release` commands each
+send one `ControlAction` through it. See [scoped controls](run-control.md#hold-or-release-dispatch-in-a-selected-run).
 
 Pass `verb="pause"` or `verb="resume"` to `pipelines.set_pause(ctx, pipeline_code, reason, ...)`.
 
@@ -112,7 +112,7 @@ and attempt history; action records are never updated.
 
 ## JSON on the command line
 
-These commands accept `--format json`: `run`, `mark`, `cancel`, `pause`, `resume`,
+These commands accept `--format json`: `run`, `mark`, `stop`, `abort`, `hold`, `release`, `pause`, `resume`,
 `reconcile`, `list`, `graph`, `steps`, `history` and `audit`. Text remains the default.
 
 ```bash

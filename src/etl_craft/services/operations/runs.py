@@ -6,7 +6,6 @@ from datetime import date
 
 from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import UsageError
-from etl_craft.engine.controls import ControlView
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.repository.tasks import resolve_task_id
 from etl_craft.engine.runlog import ACTIVE_RUN, RunSelector
@@ -94,22 +93,6 @@ def stand_in_run(
 ) -> OperationResult:
     """Record a stand-in run and optionally its stand-in task."""
     return mark(ctx, pipeline_code, status, reason, new_run=True, task_code=task_code, rows=rows)
-
-
-def cancel_run(
-    ctx: OperationContext,
-    pipeline_code: str,
-    reason: str,
-    *,
-    selector: RunSelector = ACTIVE_RUN,
-) -> ControlView:
-    """Request an abort and expose its actual durable acknowledgement state."""
-    from etl_craft.core.enums import ControlAction
-    from etl_craft.services.operations.controls import ControlRequest, request_control
-
-    return request_control(
-        ctx, ControlRequest(pipeline_code, ControlAction.ABORT, reason, selector)
-    )
 
 
 def reconcile_runs(

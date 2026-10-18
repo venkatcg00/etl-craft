@@ -146,7 +146,7 @@ fields. `--log-level DEBUG` adds the detail: for example, the SQL each action ru
 
 | Column | Holds |
 |---|---|
-| `STATUS` | `SUCCESS`, `FAILED`, `SKIPPED`, or `CANCELLED` when its run was [cancelled](run-control.md#cancel-a-run) |
+| `STATUS` | `SUCCESS`, `FAILED`, `SKIPPED`, or `CANCELLED` when its run was [stopped or aborted](run-control.md#stop-or-abort-a-run) |
 | `ERROR_MESSAGE` | the one-line cause of a failure or a skip |
 | `SOURCE_COUNT`, `TARGET_COUNT`, `INSERT_COUNT`, `UPDATE_COUNT`, `DELETE_COUNT` | the counts the task reported |
 | `ROWS_WRITTEN` | the rows the attempt inserted, updated or deleted; a `HAS_DATA` dependency is met when it is above 0 |

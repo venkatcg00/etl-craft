@@ -3,9 +3,9 @@
 from etl_craft.cli.commands import (
     account,
     audit,
-    cancel,
     clone,
     config_files,
+    controls,
     docs_version,
     doctor,
     explain,
@@ -34,6 +34,9 @@ from etl_craft.cli.commands import (
     validate,
 )
 from etl_craft.cli.commands.common import Command as Command
+from etl_craft.core.enums import ControlAction
+
+CONTROL_VERBS = (ControlAction.STOP, ControlAction.ABORT, ControlAction.HOLD, ControlAction.RELEASE)
 
 COMMANDS: tuple[Command, ...] = (
     *login.COMMANDS,
@@ -42,7 +45,7 @@ COMMANDS: tuple[Command, ...] = (
     server.COMMAND,
     token.COMMAND,
     mark.COMMAND,
-    cancel.COMMAND,
+    *(controls.command(a) for a in CONTROL_VERBS),
     reconcile.COMMAND,
     rehash.COMMAND,
     upgrade_targets.COMMAND,

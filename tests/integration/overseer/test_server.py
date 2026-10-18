@@ -261,9 +261,7 @@ def test_operator_cancellation_takes_precedence_over_shutdown_resume(cli_project
     assert p.run("run", "--pipeline_code", "P", "--init-only", "--run-key", "cancel")[0] == 0
     server = p.start("server")
     wait_for_script(p)
-    code, output = p.run(
-        "cancel", "--pipeline_code", "P", "--run-key", "cancel", "--reason", "stop"
-    )
+    code, output = p.run("abort", "--pipeline_code", "P", "--run-key", "cancel", "--reason", "stop")
     assert code == 0, output
     p.wait_for("SELECT OWNER_ID FROM AUD_PIPELINES_RUN_LOG", expected=None)
     with p.engine.connect() as conn:

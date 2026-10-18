@@ -294,8 +294,8 @@ def _resume_run(
     if kind.backfill and options.backfill is None:
         raise RunStateError(
             f"{pipeline_code} is running backfill run pipeline_run_id={existing} as of "
-            f"{kind.run_date.isoformat()}; a scheduled run starts once it ends (or cancel it "
-            f"with `etl-craft cancel --pipeline_code {pipeline_code} --reason ...`)"
+            f"{kind.run_date.isoformat()}; a scheduled run starts once it ends (or end it "
+            f"with `etl-craft stop` or `abort --pipeline_code {pipeline_code} --reason ...`)"
         )
     if options.backfill is not None and not kind.backfill:
         raise RunStateError(

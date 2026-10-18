@@ -96,6 +96,7 @@ def parse_limits(settings: Profiled, path: Path) -> ExecutionLimits:
         local_warehouse_slots=whole_number(
             settings, "Local_warehouse_slots", None, path, minimum=1
         ),
+        max_parallel_tasks_written=settings.value("Max_parallel_tasks") is not None,
     )
 
 

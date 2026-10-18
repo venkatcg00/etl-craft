@@ -478,7 +478,7 @@ def test_cli_actor_requests_and_read_only_audit(
         ).scalar_one()
     command("pause", "--pipeline_code", "P", "--reason", "wait")
     command("resume", "--pipeline_code", "P", "--reason", "ready")
-    command("cancel", "--pipeline_code", "P", "--reason", "stop")
+    command("abort", "--pipeline_code", "P", "--reason", "stop")
     command(
         "mark",
         "--pipeline_code",
@@ -505,7 +505,7 @@ def test_cli_actor_requests_and_read_only_audit(
             text("SELECT COMMAND, ACTOR, ACTOR_KIND FROM AUD_ACTIONS ORDER BY ACTION_ID")
         ).all()
         assert [tuple(row) for row in actions] == [
-            (name, actor_name, "SERVICE") for name in ("run", "pause", "resume", "cancel", "mark")
+            (name, actor_name, "SERVICE") for name in ("run", "pause", "resume", "abort", "mark")
         ]
         row = conn.execute(
             text(

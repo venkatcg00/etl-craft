@@ -179,16 +179,16 @@ Use the pipeline code and run id printed by the demo run. Pause a selected task 
 pausing unrelated work, or drain a run before maintenance:
 
 ```bash
-etl-craft pause --pipeline_code PIPELINE --run-id 42 --task_code TASK --reason "inspect input"
-etl-craft resume --pipeline_code PIPELINE --run-id 42 --task_code TASK --reason "ready"
-etl-craft cancel --pipeline_code PIPELINE --run-id 42 --stop --reason "maintenance"
+etl-craft hold --pipeline_code PIPELINE --run-id 42 --task_code TASK --reason "inspect input"
+etl-craft release --pipeline_code PIPELINE --run-id 42 --task_code TASK --reason "ready"
+etl-craft stop --pipeline_code PIPELINE --run-id 42 --reason "maintenance"
 etl-craft status --request-id 17 --format json
 ```
 
 Replace `PIPELINE`, `TASK`, `42` and `17` with this project's code and returned identities.
 A request is finished only at `COMPLETED`; inspect `run_status` and the affected attempt
 acknowledgements. Server warehouse aborts without a query acknowledgement adapter refuse;
-use `--stop` to drain them. A task-only control leaves the rest of the run available.
+use `stop` to drain them. A task-only control leaves the rest of the run available.
 
 Scoped recovery and restart are preparatory operations. Replace `RUN_ID` with an exact run from
 `etl-craft history`; do not use a successful run for recovery:

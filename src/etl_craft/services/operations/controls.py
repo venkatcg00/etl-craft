@@ -288,7 +288,7 @@ def control_command(action: ControlAction) -> str:
     """Name the operation whose role policy and audit record a control uses."""
     if action in RECOVERY_ACTIONS or action == ControlAction.RUN_PAUSED:
         return "run"
-    return {ControlAction.HOLD: "pause", ControlAction.RELEASE: "resume"}.get(action, "cancel")
+    return action.lower()
 
 
 @contextmanager

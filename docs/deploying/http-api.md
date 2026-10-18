@@ -81,7 +81,6 @@ A disconnected client does not cancel committed work; inspect its exact run befo
 | GET | `/pipelines/{code}/runs?limit=20&before=123` | The `history` document `etl-craft history` prints: up to 100 runs, newest first, with interventions and the next page's exclusive run-id cursor in `before`. Optional `task_code`, `all=false` with `run_id` or `run_key` to select one run |
 | GET | `/pipelines/{code}/status?run_id=` | The selected run and every task; `run_key` instead, or neither for the active run |
 | GET | `/pipelines/{code}/tasks/{task}/explain?run_id=` | The selected run's explanation of the task |
-| POST | `/pipelines/{code}/cancel` | Nonblank `reason`; optional `run_id` or `run_key` |
 | POST | `/pipelines/{code}/mark` | `reason` and either `status` or `watermark`; optional `task_code`, `rows`, `stale`, `new_run`, `run_id`, `run_key`, as `etl-craft mark` takes them |
 | POST | `/pipelines/{code}/tasks/{task}/rerun` | `reason`; optional `with_downstream`, `run_id`, `run_key` |
 | POST | `/pipelines/{code}/controls` | `action` (`HOLD`, `RELEASE`, `STOP`, `ABORT`, `RECOVER`, `RESTART`, `RUN_PAUSED`) and `reason`; optional `run_id`, `run_key`, `task_code`, `request_key`. The `control` document |
@@ -93,7 +92,6 @@ A disconnected client does not cancel committed work; inspect its exact run befo
 | POST | `/pipelines/{code}/pause`, `/resume` | Nonblank `reason` |
 | GET | `/runs/{id}`, `/runs/{id}/tasks` | Exact run and configured task states |
 | GET | `/runs/{id}/tasks/{task}/explain` | Task code; shared explanation document |
-| POST | `/runs/{id}/cancel` | Nonblank `reason` |
 | POST | `/runs/{id}/tasks/{task}/mark` | `reason` and either `status` or `watermark`; optional `rows`, `stale` for a status mark |
 | POST | `/runs/{id}/tasks/{task}/rerun` | `reason`; optional `with_downstream` |
 | GET | `/attempts/{id}` | Stored attempt document |

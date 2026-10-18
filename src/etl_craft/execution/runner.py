@@ -13,7 +13,7 @@ The task itself runs in a freshly started interpreter, supervised with its time 
 output goes to the attempt's log file, whose tail is kept in ``TASK_LOG``. When that process
 ends without recording an outcome (it crashed, was killed, or ran out of time), the task is
 recorded ``FAILED`` with the reason. While it runs, the run is watched: once an operator
-cancels it (``etl-craft cancel``), the task process is stopped and the task is ``CANCELLED``.
+aborts it (``etl-craft abort``), the task process is stopped and the task is ``CANCELLED``.
 """
 
 from __future__ import annotations

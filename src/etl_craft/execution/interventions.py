@@ -105,7 +105,7 @@ def mark_task(
         if before == RunStatus.IN_PROGRESS:
             raise RunRefusedError(
                 f"{pipeline_code}.{task_code} is running under pipeline_run_id={run_id}; wait "
-                "for it to end, or cancel the run with `etl-craft cancel`. If the process "
+                "for it to end, or end the run with `etl-craft stop` or `abort`. If the process "
                 "running it is gone, pass --stale after its lease expires to record its outcome"
             )
         if before == status and rows is None and not lost:
@@ -185,7 +185,7 @@ def mark_run(
         if running:
             raise RunRefusedError(
                 f"{pipeline_code}: tasks of pipeline_run_id={run_id} are running "
-                f"({', '.join(running)}); cancel the run with `etl-craft cancel`, or wait"
+                f"({', '.join(running)}); end the run with `etl-craft stop` or `abort`, or wait"
             )
         if run_status == status:
             raise UsageError(

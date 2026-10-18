@@ -28,7 +28,7 @@ def _run(args: argparse.Namespace, out: Output) -> int:
         number: signal.signal(number, stopping) for number in (signal.SIGTERM, signal.SIGINT)
     }
     try:
-        with command_context(args) as ctx:
+        with command_context(args, role="server") as ctx:
             if find_spec("fastapi") is None or find_spec("uvicorn") is None:
                 serve(ctx, stop)
             else:

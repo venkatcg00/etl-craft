@@ -5,7 +5,8 @@ this) or ``FAIL`` (this will stop runs). The checks cover the settings used as w
 like variables nobody set, each secret, auth modes not verified against a live service here, the
 Engine DB (its connection, schema, tables and pending migrations), the warehouse (its connection,
 schema and, on Trino, that its catalog is Iceberg), how email is sent, whether cloning can
-write where it is set to, and the project folders.
+write where it is set to, the project folders, and the measured CPU and memory with the
+deployment profile's sizes and the Engine DB connection budget.
 """
 
 from __future__ import annotations
@@ -23,9 +24,21 @@ from etl_craft.config import ConnectorConfig, profile_needs_secret, resolve_secr
 from etl_craft.config.auth import EMAIL_VERIFIED_AUTH_MODES, engine_for_jdbc_url
 from etl_craft.config.model import ConnectionProfile, EmailProfile
 from etl_craft.config.resolve import resolve_named_secret, source_values
-from etl_craft.core.enums import CloningScope, GatePolicy, Mode
+from etl_craft.config.sizing import ceilings
+from etl_craft.core.enums import CloningScope, DeploymentProfile, GatePolicy, Mode
 from etl_craft.core.errors import EtlCraftError
+from etl_craft.core.resources import (
+    DEFAULT_POOL_SIZE,
+    MIB,
+    POOL_OVERFLOW,
+    Host,
+    Measurement,
+    describe,
+    discover,
+    size,
+)
 from etl_craft.core.text import quote_identifier
+from etl_craft.dialects.engine import for_engine
 from etl_craft.engine.connection import check_reachable, engine_db
 from etl_craft.engine.migrations import pending_migrations
 from etl_craft.engine.privileges import extra_write_grants
@@ -99,7 +112,101 @@ def run_checks(config: ConnectorConfig, *, engine_state: bool = True) -> list[Ch
         *_cloning(config),
         *_docs_site(config),
         *_project(config),
+        *resource_checks(config),
     ]
+
+
+def resource_checks(config: ConnectorConfig, host: Host | None = None) -> list[Check]:
+    """Report the measured allocation, the profile and every size it implies.
+
+    Without a profile the sizes are what laptop, the recommended profile, would apply; nothing
+    changes until the team declares ``Deployment.Profile``.
+    """
+    allocation = discover(host)
+    checks = [
+        _measured("Resources: CPU", allocation.cpus, "CPUs", "sized as one CPU"),
+        _measured(
+            "Resources: memory", allocation.memory, "bytes", "no automatic task-memory admission"
+        ),
+        ok(
+            "Resources: host",
+            f"{allocation.host_cpus or 'unknown'} CPUs, "
+            f"{(allocation.host_memory or 0) // MIB or 'unknown'} MB in {allocation.scope}, "
+            f"observed {allocation.observed_at:%Y-%m-%d %H:%M:%S} UTC; context only when a "
+            "tighter limit applies",
+        ),
+    ]
+    profile = config.deployment or DeploymentProfile.LAPTOP
+    if config.deployment is None:
+        checks.append(
+            ok(
+                "Deployment profile",
+                "none: slots, threads and pools come from the Orchestration settings. "
+                "Recommended: laptop, because etl-craft cannot tell whether this host is shared; "
+                "declare server for a dedicated host. Sizes below are what laptop would apply",
+            )
+        )
+    elif config.deployment == DeploymentProfile.SERVER_WORKERS:
+        checks.append(
+            warn(
+                "Deployment profile",
+                "server-workers: the controller runs no tasks, and this version has no worker "
+                "queue provider, so run and server refuse to start",
+            )
+        )
+    else:
+        checks.append(ok("Deployment profile", f"{profile}: applied when run and server start"))
+    sizing = size(allocation, profile, ceilings(config))
+    reserve = f"{sizing.reserve_cpus:g} CPUs" + (
+        "" if sizing.reserve_memory is None else f", {sizing.reserve_memory / MIB:.0f} MB"
+    )
+    checks += [
+        ok("Sizing: reserve", f"{reserve} for the rest of the host ({profile})"),
+        *(
+            ok(f"Sizing: {name}", f"{item.value} ({item.reason})")
+            for name, item in (
+                ("task slots", sizing.task_slots),
+                ("ingestion slots", sizing.ingestion_slots),
+                ("warehouse slots", sizing.warehouse_slots),
+                ("server threads", sizing.server_threads),
+                ("Engine DB pool", sizing.engine_pool),
+            )
+        ),
+        *(warn("Sizing: fallback", fallback) for fallback in sizing.fallbacks),
+    ]
+    return checks
+
+
+def _measured(name: str, measurement: Measurement, unit: str, fallback: str) -> Check:
+    if measurement.value is None:
+        return warn(name, f"{describe(measurement, unit)}; {fallback}")
+    return ok(name, describe(measurement, unit))
+
+
+def _connection_budget(config: ConnectorConfig, engine: Engine) -> list[Check]:
+    """Compare the processes' Engine DB connections with the server's limit."""
+    with engine.connect() as conn:
+        limit = for_engine(engine).max_connections(conn)
+    if limit is None:
+        return []
+    if config.deployment in (DeploymentProfile.LAPTOP, DeploymentProfile.SERVER):
+        sizing = size(discover(), config.deployment, ceilings(config))
+        pool, tasks = sizing.engine_pool.value, sizing.task_slots.value
+    else:
+        pool, tasks = DEFAULT_POOL_SIZE, config.limits.max_parallel_tasks
+    budget = pool + POOL_OVERFLOW + tasks
+    detail = (
+        f"{budget} of max_connections={limit}: server pool {pool} + overflow {POOL_OVERFLOW} "
+        f"+ one per task process ({tasks})"
+    )
+    if budget > limit * 0.8:
+        return [
+            warn(
+                "Engine DB connection budget",
+                f"{detail}; over 80%: raise max_connections or lower the task slots",
+            )
+        ]
+    return [ok("Engine DB connection budget", detail)]
 
 
 def _settings(config: ConnectorConfig) -> list[Check]:
@@ -221,6 +328,7 @@ def _engine(config: ConnectorConfig, *, engine_state: bool) -> list[Check]:
                 )
             else:
                 checks.append(ok("Engine DB kind", detail))
+        checks += _connection_budget(config, engine)
         if engine_state:
             checks += _engine_state(config, engine)
     finally:

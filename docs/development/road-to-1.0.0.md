@@ -131,7 +131,7 @@ item's text, or work done early under another item.
 | S5.S Accounts, login and roles | Done | #203, #204, #205, #206, #207 | Account identities, local and server sign-in with refresh tokens, one service-role policy, explicit actors with an `etl-craft` writer on every run, and a local installation operating a server over HTTPS; every action has one implementation that the CLI, the API and later the UI call |
 | S5.O.3 SCD human override protection | In progress | #208 | Native PostgreSQL/DuckDB protection, admin edits/unlocks and column provenance implemented; cloud acceptance unavailable |
 | S5.Q Scoped operator controls | Done | #209, #210, #211 | Isolated manual selections, scoped holds/stop/abort, durable recovery/restart preparation, one-run pause permission, selected bulk outcomes and shared capabilities |
-| S5.T Resource discovery and deployment profiles | Planned | | Opt-in laptop, server and server-with-workers sizing from usable process resources; one discovery module before S5.C |
+| S5.T Resource discovery and deployment profiles | Done | #212 | `core/resources.py` measures affinity, cgroup v1/v2 quotas and memory limits; `Deployment.Profile` sizes `run` and `server` slots, server threads and the Engine DB pool within written ceilings; doctor/setup report measurements, sizes, fallbacks and the PostgreSQL connection budget |
 | S5.V Team-owned config tables | Planned | | Teams' own `CFG_` tables carry no etl-craft guards, contract, history or config files; etl-craft's tables keep them |
 | S5.U Robustness before the cluster | Done | #176, #182, #183, #184 | Engine DB restarts ridden out; SLA breach writes retried; no single-writer guess; timing tests verified under load; subprocess code measured by coverage |
 | S5.W Retry only what can succeed | Planned | | Transient, permanent and unknown failure classes per dialect; `Retry_on` / `RETRY_ON` of `NONE`, `TRANSIENT` (default), `TRANSIENT_AND_UNKNOWN` or `ANY`; each attempt records why it was or was not retried |
@@ -156,7 +156,9 @@ What a person picking up the work needs that the code and the item texts do not 
 holds/stop/abort and physical completion evidence; #211 adds recovery/restart preparation,
 one-run permission under definition pause, selected bulk results and shared capabilities.
 S5.O.3 cloud acceptance remains recorded below; probe provider availability rather than
-waiting for a human quota reset. S5.T is the next planned implementation item.
+waiting for a human quota reset. S5.T is done (#212), which also split `cancel` into `stop` and
+`abort` and scoped `pause`/`resume` into `hold`/`release` at the owner's request. S5.V is the
+next planned implementation item.
 
 Item 2 includes the approved move of account administration, interactive first-admin bootstrap,
 the no-active-admin doctor check and scrypt password hashing from item 1. Sessions reuse
@@ -272,6 +274,11 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.T (#212) runs discovery and sizing from supplied measurements in unit tests, and role
+startup, the sized Engine DB pool, a zero-slot pool and the connection budget on both Engine
+DBs. No warehouse SQL changed; no cloud acceptance applies. Real containers (Docker cgroup v2
+limits) were not exercised beyond this workstation's cgroup; S5.C's worker tests run them.
 
 S5.Q slice 3 (#211) uses both Engine DBs for populated/released-schema upgrades, recovery and
 checkpoint preservation, durable restart identity, one-run definition-pause permissions,
@@ -483,6 +490,22 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- S5.T: `Deployment` is a flat section without profile blocks, because a profiled section's
+  `Profile` key already selects a block; a per-environment value comes from a variable. The
+  recommendation is always `laptop` with the reason, since no measurement shows whether a host
+  is shared. The controller (overseer and HTTP server, one process here) is counted once at
+  0.5 CPU and 256 MB; per-kind estimates are 0.25 CPU/128 MB (SQL, rules, alerts) and
+  1 CPU/512 MB (ingestion). Measurements are logged at role startup and shown by doctor, not
+  stored in the Engine DB, since the item names no table. `run` with no slot that fits refuses
+  instead of queueing, because a foreground run would wait forever; `server` starts with zero
+  slots and queues. The Engine DB pool keeps SQLAlchemy's overflow of 10; only its size is
+  derived. Doctor's 80% `max_connections` warning comes forward from S5.H for the single-machine
+  roles. Item 8's container check applies the same rule to the single process: it refuses
+  below 256 MB, and `run` refuses when no task fits.
+- Owner request in the S5.T pull request: `cancel` is replaced by `stop` and `abort`, scoped
+  `pause`/`resume` by `hold`/`release`; `pause`/`resume` act only on definitions. The cancel
+  HTTP routes and `runs.cancel_run` are removed in favour of `/controls`.
 
 - S5.Q slice 3: the owner chose recovery in the selected run and restart in a new run retaining
   current checkpoints; reset/replay is separate. Both are durable preparations, with an

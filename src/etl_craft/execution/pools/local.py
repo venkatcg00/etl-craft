@@ -50,7 +50,8 @@ class LocalPool:
             "ingestion": limits.local_ingestion_slots or self.total,
             "warehouse": limits.local_warehouse_slots or self.total,
         }
-        self._executor = ThreadPoolExecutor(self.total, thread_name_prefix="etl-craft-task")
+        # A sized server may have no task slots: capacity stays zero and runs stay queued.
+        self._executor = ThreadPoolExecutor(max(self.total, 1), thread_name_prefix="etl-craft-task")
         self._attempts: dict[int, tuple[AttemptSpec, Future[TaskOutcome], threading.Event]] = {}
         self._lock = threading.Lock()
 

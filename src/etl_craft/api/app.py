@@ -252,19 +252,6 @@ def _add_run_routes(
             )
         )
 
-    @app.post("/api/v1/runs/{run_id}/cancel")
-    def cancel(
-        run_id: int, body: Reason, caller: Annotated[OperationContext, Depends(authorize("cancel"))]
-    ) -> dict[str, Any]:
-        return to_json(
-            runs.cancel_run(
-                caller,
-                api_reads.run_code(caller, run_id),
-                body.reason,
-                selector=RunSelector(run_id=run_id),
-            )
-        )
-
 
 def _add_task_routes(
     app: FastAPI, authorize: Callable[[str], Callable[..., OperationContext]]

@@ -19,7 +19,7 @@ from sqlalchemy import text
 from etl_craft.cli import main as cli_main
 from etl_craft.config import load_config
 from etl_craft.core.actor import Actor, ActorKind, current_actor
-from etl_craft.core.enums import ApiRole, Mode, RunStatus
+from etl_craft.core.enums import ApiRole, ControlAction, Mode, RunStatus
 from etl_craft.core.errors import ExitCode, RunRefusedError, RunStateError, UsageError
 from etl_craft.engine import runlog, transitions
 from etl_craft.execution.attempt_records import attempt_log_path
@@ -39,7 +39,7 @@ from etl_craft.execution.run_start import init_pipeline_run
 from etl_craft.execution.run_types import RunHooks
 from etl_craft.execution.runner import run_task
 from etl_craft.services.operations import OperationContext
-from etl_craft.services.operations import runs as run_operations
+from etl_craft.services.operations.controls import ControlRequest, request_control
 from fixtures.auth import service_token
 from fixtures.metadata import (
     add_dependency,
@@ -113,6 +113,13 @@ def pipeline(engine_db):
         add_dependency(conn, ids["P"], ids["after_broken"], ids["broken"])
         add_dependency(conn, ids["P"], ids["alert"], ids["extract"], "FAILURE")
     return engine, ids
+
+
+def abort(ctx, pipeline_code, reason, *, selector=runlog.ACTIVE_RUN):
+    """Request an abort the way the ``abort`` command does."""
+    return request_control(
+        ctx, ControlRequest(pipeline_code, ControlAction.ABORT, reason, selector)
+    )
 
 
 def statuses(engine, pipeline_run_id):
@@ -376,7 +383,7 @@ def test_cancel_stops_a_running_run(config, pipeline):
     with pytest.raises(RunRefusedError, match=r"P.extract is running under pipeline_run_id="):
         mark_task(engine, config, "P", "extract", "SUCCESS", "too early", requested_by=WHO)
 
-    cancelled = run_operations.cancel_run(
+    cancelled = abort(
         OperationContext(engine, config, Actor(WHO, ActorKind.USER), role=ApiRole.OPERATOR),
         "P",
         "wrong data",
@@ -396,7 +403,7 @@ def test_cancel_stops_a_running_run(config, pipeline):
     assert "transform" not in statuses(engine, run_id)
     # The next run is a new one.
     with pytest.raises(RunStateError, match="matched 0 runs"):
-        run_operations.cancel_run(
+        abort(
             OperationContext(engine, config, Actor(WHO, ActorKind.USER), role=ApiRole.OPERATOR),
             "P",
             "again",
@@ -489,7 +496,7 @@ def test_what_mark_and_cancel_refuse(config, pipeline):
             engine, remote, "P", "SUCCESS", "why", selector=runlog.RunSelector(run_id=run_id)
         ),
         lambda: record_stand_in_run(engine, remote, "P", "SUCCESS", "why"),
-        lambda: run_operations.cancel_run(
+        lambda: abort(
             OperationContext(engine, remote, current_actor(), role=ApiRole.OPERATOR), "P", "why"
         ),
     ):
@@ -537,7 +544,7 @@ def test_the_commands(config, pipeline, capsys, monkeypatch, engine_db):
     assert "Interventions:" in history
     assert "(the run)" in history and "fine as it is" in history
 
-    assert cli_main(["cancel", "--pipeline_code", "P", "--reason", "x"]) == ExitCode.RUN_STATE
+    assert cli_main(["abort", "--pipeline_code", "P", "--reason", "x"]) == ExitCode.RUN_STATE
     assert "matched 0 runs" in capsys.readouterr().err
     # A reason is required.
     with pytest.raises(SystemExit) as usage:

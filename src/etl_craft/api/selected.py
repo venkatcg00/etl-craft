@@ -153,12 +153,6 @@ def _add_selected_controls(app: FastAPI, authorize: Authorize) -> None:
             )
         )
 
-    @app.post("/api/v1/pipelines/{code}/cancel")
-    def cancel(
-        code: str, body: Selected, caller: Annotated[OperationContext, Depends(authorize("cancel"))]
-    ) -> dict[str, Any]:
-        return to_json(runs.cancel_run(caller, code, body.reason, selector=body.selector))
-
     @app.post("/api/v1/pipelines/{code}/mark")
     def mark(
         code: str,
@@ -204,7 +198,8 @@ def _add_scoped_controls(app: FastAPI, authorize: Authorize) -> None:
     def control(
         code: str,
         body: ScopedControl,
-        caller: Annotated[OperationContext, Depends(authorize("cancel"))],
+        # Every control needs an operator; request_control checks the action's own policy.
+        caller: Annotated[OperationContext, Depends(authorize("run"))],
     ) -> dict[str, Any]:
         return to_json(
             request_control(

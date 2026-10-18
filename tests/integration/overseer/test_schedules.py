@@ -235,7 +235,7 @@ def test_a_queued_scheduled_run_can_be_cancelled_before_admission(cli_project):
             status="QUEUED",
         )
     code, output = p.run(
-        "cancel",
+        "abort",
         "--pipeline_code",
         "P",
         "--run-id",

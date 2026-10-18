@@ -103,8 +103,8 @@ etl-craft logout
   session.
 - **Only HTTPS.** `--server` refuses plain HTTP except to `localhost`, and refuses redirects.
 - **What works.** `status`, `explain`, `history`, `logs`, `whoami`, `run` (a run, a backfill
-  with `--backfill`, or a rerun with `--rerun --task_code`), `pause`, `resume`, `mark` and
-  `cancel`, within the account's role, with the same text and JSON output and exit codes as on
+  with `--backfill`, or a rerun with `--rerun --task_code`), `pause`, `resume`, `mark`,
+  `stop`, `abort`, `hold` and `release`, within the account's role, with the same text and JSON output and exit codes as on
   the server's own project.
 - **What does not.** `config`, `migrate`, `init-db`, `setup`, `account` and `token` change
   metadata or the Engine DB and are refused against a server, naming the server-side way:

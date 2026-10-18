@@ -146,6 +146,13 @@ Orchestration:
       tls_mode: EMAIL_TLS_MODE         # variable — starttls | ssl | none
       secret: EMAIL_SECRET             # variable, required: a secret is never used as written
 
+# Deployment:                          # optional; no profile blocks: Profile names the shape
+#   Profile: laptop                    # value or variable — laptop | server | server-workers.
+#                                      # Unset: slots, threads and pools come from the settings
+#                                      # above. Set: run and server size them from the measured
+#                                      # CPU and memory, with the settings above as ceilings.
+#                                      # `etl-craft doctor` shows the sizes before you choose.
+
 Engine:
   # SQLite (one file, nothing to install) or PostgreSQL (recommended for
   # production). Name is optional — Postgres | SQLite — and checked against
