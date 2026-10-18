@@ -8,6 +8,7 @@ from sqlalchemy import text
 
 from etl_craft.cli import main
 from etl_craft.config import load_config
+from etl_craft.core.enums import ApiRole
 from etl_craft.core.errors import ExitCode
 from etl_craft.services.lineage import collect
 from fixtures.auth import service_token
@@ -550,7 +551,9 @@ def test_python_lineage_query_validates_before_collecting(project):
     from etl_craft.services.operations.diagnostics import LineageQuery, trace_lineage
 
     engine, config = project
-    ctx = OperationContext(engine, config, Actor("lineage-test", ActorKind.HUMAN))
+    ctx = OperationContext(
+        engine, config, Actor("lineage-test", ActorKind.HUMAN), role=ApiRole.ADMIN
+    )
     with pytest.raises(UsageError, match="mutually exclusive"):
         trace_lineage(ctx, LineageQuery(as_of="2026-10-13T08:00:00Z", version=1))
     assert version_rows(engine) == []

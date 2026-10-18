@@ -11,10 +11,12 @@ from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
 from etl_craft.services import config_files
 from etl_craft.services.operations.context import OperationContext, operation
+from etl_craft.services.operations.permissions import authorize
 
 
 def plan_config(ctx: OperationContext, directory: Path | None = None) -> config_files.ConfigSync:
     """Load the config files, validate the result and roll it back: what ``apply`` would do."""
+    authorize(ctx, "config plan")
     files = config_files.read_config_files(config_files.config_directory(ctx.config, directory))
     with acting_as(ctx.actor):
         return config_files.sync_config(ctx.engine, ctx.config, files, apply=False)
@@ -40,6 +42,7 @@ def export_config(
     ``as_of`` is a ``pipeline_run_id``, meaning the moment that run started, or an ISO 8601
     time; a time without a zone is UTC.
     """
+    authorize(ctx, "config export")
     target = config_files.config_directory(ctx.config, directory)
     moment = None if as_of is None else resolve_as_of(ctx, as_of)
     with acting_as(ctx.actor):
@@ -50,6 +53,7 @@ def export_config(
 
 def resolve_as_of(ctx: OperationContext, as_of: str) -> datetime:
     """Resolve the shared run-id or ISO timestamp selector to UTC."""
+    authorize(ctx, "history")
     written = as_of.strip()
     if written.isdigit():
         with ctx.engine.connect() as conn:

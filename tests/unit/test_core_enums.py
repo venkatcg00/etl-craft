@@ -38,6 +38,7 @@ EXPECTED = {
     },
     enums.TriggerKind: {"SCHEDULE", "MANUAL", "BACKFILL", "ORCHESTRATOR", "STAND_IN"},
     enums.AccountKind: {"USER", "SERVICE"},
+    enums.ActionOutcome: {"REQUESTED", "REFUSED"},
     enums.ApiRole: {"viewer", "operator", "developer", "admin"},
     enums.SlaStatus: {"MET", "BREACHED"},
     enums.RefreshType: {"FULL", "INCREMENTAL"},

@@ -13,6 +13,7 @@ import yaml
 from sqlalchemy import text
 
 from etl_craft.core.actor import SYSTEM_ACTOR
+from etl_craft.core.enums import ApiRole
 from etl_craft.core.errors import RunRefusedError
 from etl_craft.engine.repository import overseers
 from etl_craft.overseer.leadership import leadership
@@ -46,7 +47,7 @@ def test_only_one_leader_and_session_release_not_history_controls_restart(engine
 
 
 def test_working_set_retains_only_active_graphs_and_refreshes_metadata(engine_db):
-    ctx = OperationContext(engine_db.engine, engine_db.config, SYSTEM_ACTOR)
+    ctx = OperationContext(engine_db.engine, engine_db.config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
     with ctx.engine.begin() as conn:
         first = add_pipeline(conn, "P")
         second = add_pipeline(conn, "HISTORY")

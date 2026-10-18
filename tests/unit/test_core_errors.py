@@ -11,6 +11,7 @@ EXIT_CODES = {
     errors.MetadataFileError: ExitCode.METADATA_FILE,
     errors.EtlCraftError: ExitCode.UNEXPECTED,
     errors.ConfigurationError: ExitCode.CONFIGURATION,
+    errors.PermissionDeniedError: ExitCode.PERMISSION_DENIED,
     errors.UsageError: ExitCode.USAGE,
     errors.MetadataError: ExitCode.METADATA,
     errors.GraphError: ExitCode.GRAPH,
@@ -40,7 +41,7 @@ def all_error_classes(root=EtlCraftError):
 
 
 def test_the_exit_codes():
-    assert [(code.name, int(code)) for code in ExitCode] == [
+    released_codes = [
         ("SUCCESS", 0),
         ("FAILURE", 1),
         ("USAGE", 2),
@@ -68,6 +69,9 @@ def test_the_exit_codes():
         ("RESOURCE_NOT_FOUND", 24),
         ("METADATA_FILE", 25),
     ]
+    for name, number in released_codes:
+        assert int(ExitCode[name]) == number
+    assert int(ExitCode.PERMISSION_DENIED) == 26
 
 
 @pytest.mark.parametrize(

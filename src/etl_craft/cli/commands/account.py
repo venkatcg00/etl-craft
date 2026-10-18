@@ -31,7 +31,6 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 
 def _run(args: argparse.Namespace, out: Output) -> int:
     with command_context(args) as ctx:
-        accounts.require_admin(ctx)
         if args.account_verb == "add":
             account = accounts.Account(
                 0,

@@ -14,6 +14,7 @@ from etl_craft.core.actor import Actor, acting_as
 from etl_craft.core.enums import ApiRole
 from etl_craft.engine.audit import command_request, register_engine
 from etl_craft.execution.attempt_types import ChildOptions
+from etl_craft.services.operations.permissions import authorize
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,7 @@ class OperationContext:
 @contextmanager
 def operation(ctx: OperationContext, command: str, arguments: Mapping[str, Any]) -> Iterator[None]:
     """Record one request before executing it, including domain refusals."""
+    authorize(ctx, command, arguments)
     with acting_as(ctx.actor), command_request(command, arguments):
         register_engine(ctx.engine)
         yield

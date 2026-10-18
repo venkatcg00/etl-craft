@@ -8,6 +8,17 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- One service-operation role policy shared by local CLI, HTTP/UI routes and Python callers.
+  Reads require viewer, run controls operator, metadata changes/project migrations developer,
+  and administration admin. Administrative maintenance includes clone, rehash, server startup
+  and documentation publishing/version writes; documentation generation and lineage refresh
+  require developer. Read-only checks and exports remain viewer operations.
+- Permission refusals name the account and required role, return CLI exit 26
+  (`PermissionDeniedError`) or HTTP 403, and append `REFUSED` to `AUD_ACTIONS` before the
+  action can run. Python operation callers must supply the authenticated account's role in
+  `OperationContext`; missing roles are refused. Packaged Engine DB migrations require admin
+  even when a developer invokes project migrations.
+
 - Local account login with passwords or registered OIDC device-flow subjects, private expiring
   sessions, `logout`, `whoami`, admin-only account commands and interactive first-admin/recovery
   setup. `Auth.Session_hours` defaults to 12; OIDC uses `Auth.Oidc_issuer` and `Auth.Oidc_client_id`.

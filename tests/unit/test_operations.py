@@ -11,7 +11,7 @@ from sqlalchemy import event, text
 from etl_craft.cli import main
 from etl_craft.config import load_config
 from etl_craft.core.actor import Actor, ActorKind, acting_as, current_actor
-from etl_craft.core.enums import RunStatus
+from etl_craft.core.enums import ApiRole, RunStatus
 from etl_craft.core.errors import MetadataError, RunStateError, UsageError
 from etl_craft.engine import transitions
 from etl_craft.engine.audit import command_request, register_engine
@@ -56,7 +56,9 @@ def ctx(tmp_path, monkeypatch):
     monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(db.engine, "api-user"))
     config = load_config(path)
     try:
-        yield OperationContext(db.engine, config, Actor("api-user", ActorKind.HUMAN))
+        yield OperationContext(
+            db.engine, config, Actor("api-user", ActorKind.HUMAN), role=ApiRole.ADMIN
+        )
     finally:
         db.engine.dispose()
 

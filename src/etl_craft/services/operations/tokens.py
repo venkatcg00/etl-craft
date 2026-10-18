@@ -16,6 +16,7 @@ from etl_craft.core.errors import UsageError
 from etl_craft.core.text import sha256_hex
 from etl_craft.engine.queries import statement
 from etl_craft.services.operations.context import OperationContext, operation
+from etl_craft.services.operations.permissions import authorize
 from etl_craft.services.operations.snapshots import timestamp
 
 ROLES = tuple(ApiRole)
@@ -69,6 +70,7 @@ def create_token(
     ctx: OperationContext, name: str, role: str, expires: str | None = None
 ) -> CreatedToken:
     """Print-once credentials contain 256 random bits; only their SHA-256 is stored."""
+    authorize(ctx, "token create")
     Actor(name, ActorKind.HUMAN)
     if role not in ROLES:
         raise UsageError(f"token role={role!r}; expected {', '.join(ROLES)}")
@@ -106,6 +108,7 @@ def create_token(
 
 def list_tokens(ctx: OperationContext) -> TokensView:
     """Return safe metadata; credential hashes never enter operation JSON."""
+    authorize(ctx, "token list")
     with ctx.engine.connect() as conn:
         return TokensView(
             tuple(_view(row._mapping) for row in conn.execute(statement(conn, "api_token_list")))
@@ -114,6 +117,7 @@ def list_tokens(ctx: OperationContext) -> TokensView:
 
 def revoke_token(ctx: OperationContext, token_id: int) -> TokensView:
     """Revoke a token immediately; each request authenticates against current storage."""
+    authorize(ctx, "token revoke")
     with operation(ctx, "token revoke", {"token_id": token_id}), ctx.engine.begin() as conn:
         found = conn.execute(
             statement(conn, "api_token_revoke"),

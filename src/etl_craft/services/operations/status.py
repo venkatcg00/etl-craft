@@ -28,6 +28,7 @@ from etl_craft.execution.gates import judge, satisfies
 from etl_craft.execution.readiness import BACKFILL_ASSUMED
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.models import PipelineView, RunView, TaskRunView
+from etl_craft.services.operations.permissions import authorize
 from etl_craft.services.operations.snapshots import (
     pipeline_view,
     run_view,
@@ -415,6 +416,7 @@ def pipeline_status(
     ctx: OperationContext, pipeline_code: str, *, selector: runlog.RunSelector = runlog.ACTIVE_RUN
 ) -> StatusView:
     """Inspect an exact run; never reconcile or resolve it by recency."""
+    authorize(ctx, "status")
     with acting_as(ctx.actor), read_snapshot(ctx.engine) as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         snapshots = _snapshots(conn, pipeline_id, selector, ctx.config.dependency_gates)
@@ -460,6 +462,7 @@ def explain_task(
     selector: runlog.RunSelector = runlog.ACTIVE_RUN,
 ) -> Explanation:
     """Capture the selected task's state and explain it without modifying the run."""
+    authorize(ctx, "explain")
     with acting_as(ctx.actor), read_snapshot(ctx.engine) as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         resolve_task_id(conn, pipeline_id, task_code)

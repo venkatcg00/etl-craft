@@ -128,3 +128,12 @@ states for check failures. The generated catalog's `gaps.json` uses this same do
 curl -H "Authorization: Bearer $ETL_CRAFT_API_TOKEN" \
   'http://127.0.0.1:8730/api/v1/catalog/gaps?compare=true'
 ```
+
+## Shared role enforcement
+
+HTTP dependencies authenticate bearer credentials and ask the shared services policy about the
+operation. They contain no separate role ordering or permission map. The same services enforce
+the policy for local CLI and Python callers; UI actions use these HTTP routes. Insufficient
+roles return HTTP 403 with `PermissionDeniedError`, exit code 26 and the account/role remedy,
+and append a `REFUSED` action record. Missing/invalid bearer credentials still return HTTP 401.
+See the [deployment role table](security.md#deployment-accounts).

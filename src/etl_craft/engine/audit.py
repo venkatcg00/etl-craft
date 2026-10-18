@@ -12,12 +12,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.core.actor import Actor, current_actor
+from etl_craft.core.enums import ActionOutcome
 from etl_craft.core.text import is_secret_name
+from etl_craft.dialects.engine import for_engine
+from etl_craft.engine.queries import statement
 
 logger = logging.getLogger(__name__)
 
@@ -76,47 +78,30 @@ class ActionRequest:
     actor: Actor = field(default_factory=current_actor)
     engine: Engine | None = None
     recorded: bool = False
+    outcome: ActionOutcome = ActionOutcome.REQUESTED
+    exit_code: int | None = None
 
     def record(self) -> None:
         """Record the request itself; flow outcomes belong to run and attempt logs."""
         if self.recorded or self.engine is None:
             return
         engine = self.engine
+        if not for_engine(engine).existing_tables(engine, ("aud_actions",)):
+            return
         with engine.begin() as conn:
-            inspector = inspect(conn)
-            schema = None if engine.dialect.name == "sqlite" else inspector.default_schema_name
-            name = "AUD_ACTIONS" if engine.dialect.name == "sqlite" else "aud_actions"
-            if not inspector.has_table(name, schema=schema):
-                return
             pipeline = conn.execute(
-                text(
-                    "SELECT PIPELINE_ID AS pipeline_id FROM CFG_PIPELINES "
-                    "WHERE PIPELINE_CODE=:code AND ACTIVE_FLAG='Y'"
-                ),
-                {"code": self.arguments.get("pipeline_code")},
+                statement(conn, "action_pipeline"), {"code": self.arguments.get("pipeline_code")}
             ).scalar_one_or_none()
             task = None
             if pipeline is not None and self.arguments.get("task_code"):
                 task = conn.execute(
-                    text(
-                        "SELECT TASK_ID AS task_id FROM CFG_TASKS WHERE PIPELINE_ID=:pipeline "
-                        "AND TASK_CODE=:code AND ACTIVE_FLAG='Y'"
-                    ),
+                    statement(conn, "action_task"),
                     {"pipeline": pipeline, "code": self.arguments["task_code"]},
                 ).scalar_one_or_none()
             actor = self.actor
             payload = json.dumps(self.arguments, default=str)
-            arguments = (
-                "CAST(:arguments AS JSONB)" if engine.dialect.name == "postgresql" else ":arguments"
-            )
             conn.execute(
-                text(
-                    "INSERT INTO AUD_ACTIONS (STARTED_AT, ENDED_AT, ACTOR, ACTOR_KIND, HOST, "
-                    "COMMAND, "
-                    "ARGUMENTS, PIPELINE_ID, TASK_ID, OUTCOME) VALUES "
-                    f"(:started, :ended, :actor, :kind, :host, :command, {arguments}, "
-                    ":pipeline, :task, 'REQUESTED')"
-                ),
+                statement(conn, "action_insert"),
                 {
                     "started": self.requested_at,
                     "ended": datetime.now(UTC),
@@ -127,6 +112,8 @@ class ActionRequest:
                     "arguments": payload,
                     "pipeline": pipeline,
                     "task": task,
+                    "outcome": self.outcome,
+                    "exit_code": self.exit_code,
                 },
             )
         self.recorded = True

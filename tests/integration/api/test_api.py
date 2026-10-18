@@ -11,6 +11,7 @@ from sqlalchemy import inspect as sql_inspect
 
 from etl_craft.api.app import create_app
 from etl_craft.core.actor import Actor, ActorKind, current_actor
+from etl_craft.core.enums import ApiRole
 from etl_craft.core.errors import UsageError
 from etl_craft.core.text import sha256_hex
 from etl_craft.engine import transitions
@@ -31,6 +32,7 @@ def api(engine_db, tmp_path):
         engine_db.engine,
         replace(engine_db.config, log_dir=tmp_path / "logs"),
         Actor("owner", ActorKind.HUMAN),
+        role=ApiRole.ADMIN,
     )
     with ctx.engine.begin() as conn:
         engine_db.dialect.refresh_metadata_triggers(conn)
@@ -445,7 +447,7 @@ def test_tokens_work_after_released_schema_upgrade(empty_engine_db, tmp_path, mo
     monkeypatch.delenv("ETL_CRAFT_MIGRATIONS_DIR", raising=False)
     applied = apply_pending_migrations(db.engine)
     assert "0018_api_tokens.sql" in applied
-    ctx = OperationContext(db.engine, db.config, current_actor())
+    ctx = OperationContext(db.engine, db.config, current_actor(), role=ApiRole.ADMIN)
     created = tokens.create_token(ctx, "upgraded", "viewer", "1d")
     assert tokens.authenticate(ctx, created.token).name == "upgraded"
     assert apply_pending_migrations(db.engine) == []

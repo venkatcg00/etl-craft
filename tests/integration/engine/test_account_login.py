@@ -12,7 +12,7 @@ from sqlalchemy import text
 from etl_craft.cli import main
 from etl_craft.core.actor import SYSTEM_ACTOR, Actor, ActorKind
 from etl_craft.core.enums import AccountKind, ApiRole, YesNo
-from etl_craft.core.errors import UsageError
+from etl_craft.core.errors import PermissionDeniedError, UsageError
 from etl_craft.services import credentials
 from etl_craft.services.operations import OperationContext, accounts, sessions, tokens
 
@@ -96,9 +96,9 @@ def test_sso_requires_a_registered_active_user(project):
 
 def test_account_controls_require_a_proven_admin(project):
     ctx = project
-    with pytest.raises(UsageError, match="admin role is required"):
+    with pytest.raises(PermissionDeniedError, match="admin role is required"):
         accounts.list_accounts(replace(ctx, role=None))
-    with pytest.raises(UsageError, match="admin role is required"):
+    with pytest.raises(PermissionDeniedError, match="admin role is required"):
         accounts.disable(replace(ctx, role=ApiRole.VIEWER), "owner")
     with pytest.raises(UsageError, match="active admin already exists"):
         accounts.add_account(
@@ -305,10 +305,10 @@ def test_cli_token_administration_cannot_escalate_a_viewer(project, monkeypatch,
     ctx = project
     viewer = tokens.create_token(ctx, "reader", ApiRole.VIEWER)
     monkeypatch.setenv("ETL_CRAFT_TOKEN", viewer.token)
-    assert main(["token", "create", "--name", "elevated", "--role", "admin"]) == 2
+    assert main(["token", "create", "--name", "elevated", "--role", "admin"]) == 26
     assert "admin role is required" in capsys.readouterr().err
     assert not any(a.name == "elevated" for a in accounts.list_accounts(ctx).accounts)
-    assert main(["token", "list"]) == 2
+    assert main(["token", "list"]) == 26
     assert "admin role is required" in capsys.readouterr().err
 
 

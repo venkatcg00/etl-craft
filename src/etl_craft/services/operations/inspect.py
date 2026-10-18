@@ -40,11 +40,13 @@ from etl_craft.services.operations.models import (
     StepView,
     TaskRunView,
 )
+from etl_craft.services.operations.permissions import authorize
 from etl_craft.services.operations.snapshots import run_document, task_document
 
 
 def list_pipelines(ctx: OperationContext) -> PipelineListView:
     """List active definitions without recording a mutating action."""
+    authorize(ctx, "list")
     with acting_as(ctx.actor), read_snapshot(ctx.engine) as conn:
         pauses = fetch_open_pauses(conn)
         views = []
@@ -68,6 +70,7 @@ def list_pipelines(ctx: OperationContext) -> PipelineListView:
 
 def pipeline_graph(ctx: OperationContext, pipeline_code: str) -> GraphView:
     """Read the static graph with the pipeline's canonical definition id."""
+    authorize(ctx, "graph")
     with acting_as(ctx.actor), read_snapshot(ctx.engine) as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         data = fetch_pipeline_graph(conn, pipeline_id)
@@ -109,6 +112,7 @@ def pipeline_steps(
     selector: RunSelector = ACTIVE_RUN,
 ) -> StepsView:
     """Read configured tasks under the exact selected run, including tasks not yet started."""
+    authorize(ctx, "steps")
     with acting_as(ctx.actor), read_snapshot(ctx.engine) as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         selected = select_run(conn, pipeline_id, selector)
@@ -144,6 +148,7 @@ def run_history(
     selector: RunSelector = ACTIVE_RUN,
 ) -> HistoryView:
     """Read bounded history; selection never falls back to the most recent ended run."""
+    authorize(ctx, "history")
     if limit < 1:
         raise UsageError(f"--limit must be 1 or more, got {limit}")
     if all_runs and (selector.run_id is not None or selector.run_key is not None):
@@ -189,6 +194,7 @@ def audit(
     since: datetime | None = None,
 ) -> AuditView:
     """Read completed requests and immutable metadata captures without making an action."""
+    authorize(ctx, "audit")
     since = None if since is None else as_utc(since)
     with acting_as(ctx.actor), read_snapshot(ctx.engine) as conn:
         pipeline_id = None if pipeline_code is None else resolve_pipeline_id(conn, pipeline_code)

@@ -69,6 +69,19 @@ restrictions remain the same as their CLI equivalents.
 Domain refusals raise the existing `core.errors` classes. Read operations use one consistent
 database snapshot for related views and do not create action records.
 
+## Shared permissions
+
+`OperationContext.role` carries the role proven by the caller's token/session. Leaving it unset
+refuses normal operations; a claimed actor name supplies no permission. CLI and HTTP adapters
+use the same services policy as direct Python operations, so changing the central policy
+changes every transport. Do not implement role comparisons in a command or route.
+
+See the [deployment role table](../deploying/security.md#deployment-accounts). A role refusal
+raises `PermissionDeniedError` with exit code 26, records `AUD_ACTIONS.OUTCOME=REFUSED`, and
+names the account, current role, required role and remedy. Normal successful reads still make
+no action records. Low-level engine/warehouse helpers are internal building blocks under the
+Engine DB writer trust boundary; authenticated applications call the operation boundary.
+
 ## Execution identities and outcomes
 
 Every stored run view names its `pipeline_id` and `pipeline_run_id`. Every task and attempt

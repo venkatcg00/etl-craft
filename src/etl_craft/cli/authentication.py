@@ -19,6 +19,7 @@ from etl_craft.engine.queries import statement
 from etl_craft.services.credentials import database_key, read_session
 from etl_craft.services.operations.accounts import has_admin
 from etl_craft.services.operations.context import OperationContext
+from etl_craft.services.operations.permissions import authorize
 from etl_craft.services.operations.tokens import TokenView, authenticate
 
 
@@ -64,11 +65,11 @@ def access_context(args: argparse.Namespace) -> Iterator[None]:
                         f"no signed-in account for {database_key(engine, config.engine.schema)}; "
                         "run `etl-craft login`, or set ETL_CRAFT_TOKEN for a service account"
                     )
-                if args.command in _LOCAL_PROVISIONING and identity.role != ApiRole.ADMIN:
-                    raise ConfigurationError(
-                        f"account {identity.name!r}: role={identity.role}; admin role is required; "
-                        "ask an administrator"
-                    )
+                authorize(
+                    OperationContext(engine, config, identity.actor, role=ApiRole(identity.role)),
+                    args.command,
+                    vars(args),
+                )
             scoped = command_identity.set(CommandIdentity(config, identity))
             try:
                 with acting_as(identity.actor if identity else SYSTEM_ACTOR):

@@ -14,6 +14,7 @@ from etl_craft.engine.repository.lineage import fetch_lineage_versions
 from etl_craft.services import doctor, lineage, validate
 from etl_craft.services.operations.config_files import resolve_as_of
 from etl_craft.services.operations.context import OperationContext
+from etl_craft.services.operations.permissions import authorize
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,7 @@ def check_configuration(config: ConnectorConfig) -> DoctorView:
 
 def validate_metadata(ctx: OperationContext, pipeline_code: str | None = None) -> validate.Report:
     """Validate metadata and files under the caller's actor without running tasks."""
+    authorize(ctx, "validate")
     with acting_as(ctx.actor):
         return validate.validate(ctx.engine, ctx.config, pipeline_code)
 
@@ -86,6 +88,7 @@ class LineageQuery:
 
 def trace_lineage(ctx: OperationContext, query: LineageQuery) -> LineageView:
     """Collect and select lineage using the same validation for every caller."""
+    authorize(ctx, "lineage", {"refresh": query.refresh})
     query.validate()
     table, column = query.table, query.column
     upstream, downstream, depth = query.upstream, query.downstream, query.depth

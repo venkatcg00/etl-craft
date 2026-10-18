@@ -33,3 +33,4 @@ error class has its own status; every error etl-craft raises on purpose belongs 
 | `23` | `WAITING` | A single-task run recorded nothing because its dependencies are not met yet. Run it again once the upstreams satisfy its condition. |
 | `24` | `RESOURCE_NOT_FOUND` | An exact execution resource or attempt log is unavailable. |
 | `25` | `METADATA_FILE` | A file in the project's `config/` folder cannot be read, or its rows cannot be loaded; the message names the file, line, column and value. |
+| `26` | `PERMISSION_DENIED` | The proven account lacks the operation’s required role (`PermissionDeniedError`). Ask an administrator to grant that role or a higher one; the refusal is recorded in `AUD_ACTIONS`. |
