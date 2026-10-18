@@ -274,7 +274,9 @@ does not move worker work ahead of the metadata, account or operator-control cor
 **Acceptance availability.**
 
 S5.S item 2 (#204) passed the unit, account/session, API/CLI caller, execution and local
-warehouse CLI checks, installed-wheel demos and packaging checks. Credential-file and account
+warehouse CLI checks, installed-wheel demos and packaging checks. Local caller validation
+also covers script-process signals and schedule exports with explicit fixture credentials.
+Credential-file and account
 revocation/recovery races passed twenty consecutive rounds. Airflow contracts passed on both
 supported versions; static checks, strict docs and actionlint passed. New account APIs are
 absent from the old source; command authentication and Airflow credential regressions also fail

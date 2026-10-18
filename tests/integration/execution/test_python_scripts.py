@@ -25,6 +25,7 @@ from etl_craft.execution.context import build_task_context
 from etl_craft.execution.runner import run_task
 from etl_craft.handlers import python_scripts
 from etl_craft.warehouse.connection import build_warehouse_engine
+from fixtures.auth import service_token
 from fixtures.cli_project import CliProcess
 from fixtures.metadata import add_pipeline, add_task, start_run
 
@@ -473,7 +474,11 @@ def test_a_signal_to_run_stops_the_task_process_and_records_it(project, tmp_path
     with parent_log.open("wb") as output:
         parent = subprocess.Popen(
             [sys.executable, "-m", "etl_craft", "run", "--pipeline_code", "P", *how],
-            env={**os.environ, "ETL_CRAFT_CONFIG": str(config.config_path)},
+            env={
+                **os.environ,
+                "ETL_CRAFT_CONFIG": str(config.config_path),
+                "ETL_CRAFT_TOKEN": service_token(engine),
+            },
             cwd=config.project_dir,
             stdout=output,
             stderr=subprocess.STDOUT,
