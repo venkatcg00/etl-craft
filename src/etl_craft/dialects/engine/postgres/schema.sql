@@ -233,10 +233,11 @@ CREATE TABLE AUD_PIPELINES_RUN_LOG (
     OUTPUT_REVISION  INT NOT NULL DEFAULT 1,
     CONFIG_SHA256    VARCHAR(64),
     STARTED_BY VARCHAR DEFAULT current_setting('etl_craft.actor', true),
-    STARTED_BY_KIND VARCHAR DEFAULT current_setting('etl_craft.actor_kind', true) CONSTRAINT ck_aud_pipelines_run_log_started_by_kind CHECK (STARTED_BY_KIND IN ('HUMAN','SCHEDULE','ORCHESTRATOR','WORKER','SYSTEM')),
+    STARTED_BY_KIND VARCHAR DEFAULT current_setting('etl_craft.actor_kind', true) CONSTRAINT ck_aud_pipelines_run_log_started_by_kind CHECK (STARTED_BY_KIND IN ('USER','SERVICE','SYSTEM','HUMAN','SCHEDULE','ORCHESTRATOR','WORKER')),
     ENDED_BY VARCHAR,
-    ENDED_BY_KIND VARCHAR CONSTRAINT ck_aud_pipelines_run_log_ended_by_kind CHECK (ENDED_BY_KIND IN ('HUMAN','SCHEDULE','ORCHESTRATOR','WORKER','SYSTEM')),
+    ENDED_BY_KIND VARCHAR CONSTRAINT ck_aud_pipelines_run_log_ended_by_kind CHECK (ENDED_BY_KIND IN ('USER','SERVICE','SYSTEM','HUMAN','SCHEDULE','ORCHESTRATOR','WORKER')),
     REPAIR_PENDING   VARCHAR NOT NULL DEFAULT 'N' CONSTRAINT ck_run_repair_pending CHECK (REPAIR_PENDING IN ('Y','N')),
+    WRITER VARCHAR(128) NOT NULL DEFAULT 'etl-craft' CONSTRAINT ck_run_writer CHECK (length(trim(WRITER)) BETWEEN 1 AND 128),
     CONSTRAINT ck_pipeline_run_trigger_kind CHECK (TRIGGER_KIND IN ('SCHEDULE','MANUAL','BACKFILL','ORCHESTRATOR','STAND_IN')),
     CONSTRAINT ck_pipeline_run_backfill CHECK (BACKFILL IN ('Y','N')),
     CONSTRAINT ck_pipeline_run_status CHECK (STATUS IN ('QUEUED','IN-PROGRESS','SUCCESS','FAILED','SKIPPED','CANCELLED')),
@@ -297,7 +298,7 @@ CREATE TABLE AUD_RUN_INTERVENTIONS (
     REASON            VARCHAR NOT NULL,
     REQUESTED_BY      VARCHAR NOT NULL,
     REQUESTED_AT      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    REQUESTED_BY_KIND VARCHAR DEFAULT current_setting('etl_craft.actor_kind', true) CONSTRAINT ck_aud_run_interventions_requested_by_kind CHECK (REQUESTED_BY_KIND IN ('HUMAN','SCHEDULE','ORCHESTRATOR','WORKER','SYSTEM')),
+    REQUESTED_BY_KIND VARCHAR DEFAULT current_setting('etl_craft.actor_kind', true) CONSTRAINT ck_aud_run_interventions_requested_by_kind CHECK (REQUESTED_BY_KIND IN ('USER','SERVICE','SYSTEM','HUMAN','SCHEDULE','ORCHESTRATOR','WORKER')),
     CONSTRAINT ck_intervention_action CHECK (ACTION IN ('MARK','NEW_RUN','CANCEL','REOPEN','RESET',
                                                      'GATE_BYPASS','IGNORE_DEPENDENCIES','RERUN'))
 );
@@ -315,8 +316,8 @@ CREATE TABLE AUD_PIPELINE_PAUSES (
     RESUMED_AT         TIMESTAMPTZ,
     RESUMED_BY         VARCHAR,
     RESUME_REASON      VARCHAR,
-    PAUSED_BY_KIND VARCHAR DEFAULT current_setting('etl_craft.actor_kind', true) CONSTRAINT ck_aud_pipeline_pauses_paused_by_kind CHECK (PAUSED_BY_KIND IN ('HUMAN','SCHEDULE','ORCHESTRATOR','WORKER','SYSTEM')),
-    RESUMED_BY_KIND VARCHAR CONSTRAINT ck_aud_pipeline_pauses_resumed_by_kind CHECK (RESUMED_BY_KIND IN ('HUMAN','SCHEDULE','ORCHESTRATOR','WORKER','SYSTEM'))
+    PAUSED_BY_KIND VARCHAR DEFAULT current_setting('etl_craft.actor_kind', true) CONSTRAINT ck_aud_pipeline_pauses_paused_by_kind CHECK (PAUSED_BY_KIND IN ('USER','SERVICE','SYSTEM','HUMAN','SCHEDULE','ORCHESTRATOR','WORKER')),
+    RESUMED_BY_KIND VARCHAR CONSTRAINT ck_aud_pipeline_pauses_resumed_by_kind CHECK (RESUMED_BY_KIND IN ('USER','SERVICE','SYSTEM','HUMAN','SCHEDULE','ORCHESTRATOR','WORKER'))
 );
 
 -- At most one open pause per pipeline.
@@ -511,7 +512,7 @@ CREATE TABLE AUD_TASK_ATTEMPTS (
     TASK_LOG         VARCHAR,
     LOG_PATH         VARCHAR,
     REQUESTED_BY     VARCHAR DEFAULT current_setting('etl_craft.actor', true),
-    REQUESTED_BY_KIND VARCHAR DEFAULT current_setting('etl_craft.actor_kind', true) CONSTRAINT ck_aud_task_attempts_requested_by_kind CHECK (REQUESTED_BY_KIND IN ('HUMAN','SCHEDULE','ORCHESTRATOR','WORKER','SYSTEM')),
+    REQUESTED_BY_KIND VARCHAR DEFAULT current_setting('etl_craft.actor_kind', true) CONSTRAINT ck_aud_task_attempts_requested_by_kind CHECK (REQUESTED_BY_KIND IN ('USER','SERVICE','SYSTEM','HUMAN','SCHEDULE','ORCHESTRATOR','WORKER')),
     NOT_BEFORE       TIMESTAMP,
     RETRYABLE        BOOLEAN NOT NULL DEFAULT TRUE CHECK (RETRYABLE IN (TRUE, FALSE)),
     REJECT_COUNT     BIGINT,
@@ -559,7 +560,7 @@ CREATE TABLE AUD_ACTIONS (
     TASK_ID BIGINT REFERENCES CFG_TASKS(TASK_ID),
     OUTCOME VARCHAR NOT NULL,
     EXIT_CODE INT,
-    CONSTRAINT ck_actions_actor_kind CHECK (ACTOR_KIND IN ('HUMAN','SCHEDULE','ORCHESTRATOR','WORKER','SYSTEM'))
+    CONSTRAINT ck_actions_actor_kind CHECK (ACTOR_KIND IN ('USER','SERVICE','SYSTEM','HUMAN','SCHEDULE','ORCHESTRATOR','WORKER'))
 );
 CREATE INDEX ix_actions_pipeline ON AUD_ACTIONS (PIPELINE_ID, STARTED_AT);
 

@@ -31,7 +31,7 @@ def api(engine_db, tmp_path):
     ctx = OperationContext(
         engine_db.engine,
         replace(engine_db.config, log_dir=tmp_path / "logs"),
-        Actor("owner", ActorKind.HUMAN),
+        Actor("owner", ActorKind.USER),
         role=ApiRole.ADMIN,
     )
     with ctx.engine.begin() as conn:

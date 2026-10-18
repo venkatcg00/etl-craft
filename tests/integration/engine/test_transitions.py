@@ -8,14 +8,14 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
-from etl_craft.core.actor import Actor, ActorKind
+from etl_craft.core.actor import Actor, ActorKind, acting_as
 from etl_craft.core.counts import Counts
 from etl_craft.core.errors import StaleTransitionError
 from etl_craft.engine import runlog
 from etl_craft.engine import transitions as tr
 from fixtures.metadata import add_pipeline, add_task
 
-ACTOR = Actor("scheduler:test", ActorKind.SCHEDULE)
+ACTOR = Actor("scheduler:test", ActorKind.SERVICE)
 OWNER = "host:123:uuid"
 STATUSES = ("QUEUED", "CLAIMED", "RUNNING", "SUCCESS", "FAILED", "TIMED_OUT", "CANCELLED", "LOST")
 OPERATIONS = {
@@ -180,7 +180,7 @@ def test_queue_retries_keep_immutable_outcomes_and_all_counts(engine_db):
                 "SELECT REQUESTED_BY, REQUESTED_BY_KIND FROM AUD_TASK_ATTEMPTS WHERE ATTEMPT_ID=:id"
             ),
             {"id": second},
-        ).one() == (ACTOR.name, "SCHEDULE")
+        ).one() == (ACTOR.name, "SERVICE")
         # A queued attempt has no process and does not block run finalization.
         tr.cancel_attempt(conn, second, ACTOR, error_message="done")
         tr.finish_run(conn, run, "SUCCESS", ACTOR)
@@ -300,6 +300,7 @@ def test_concurrent_queue_has_one_winner(engine_db):
         _, _, _, task = scene(conn)
     barrier = Barrier(2)
 
+    @acting_as(ACTOR)
     def queue():
         barrier.wait(timeout=10)
         try:
@@ -374,7 +375,7 @@ def test_run_reopen_and_history_are_atomic(engine_db):
             "IN-PROGRESS",
             "fixed source",
             ACTOR.name,
-            "SCHEDULE",
+            "SERVICE",
         )
 
 

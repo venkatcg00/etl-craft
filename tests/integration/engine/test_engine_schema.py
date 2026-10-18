@@ -56,7 +56,7 @@ def test_a_missing_postgres_schema_is_refused_with_the_remedy(postgres_database)
 
 
 @pytest.mark.engine_sqlite
-def test_sqlite_needs_no_schema_of_its_own(tmp_path):
+def test_sqlite_needs_no_schema_of_its_own(tmp_path, engine_actor):
     db = sqlite_engine_db(tmp_path)
     try:
         check_reachable(db.engine, "main")

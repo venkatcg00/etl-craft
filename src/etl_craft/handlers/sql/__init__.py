@@ -87,7 +87,7 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
                 task=task,
                 context=context,
                 engine_db=engine_db,
-                user=config.warehouse.user or "",
+                user=context.writer,
                 now=datetime.now(UTC),
             )
             failure = None

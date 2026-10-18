@@ -14,7 +14,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.core.actor import current_actor
+from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
 from etl_craft.core.counts import Counts
 from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import EtlCraftError, LockTimeoutError
@@ -45,6 +45,7 @@ _ENDED = frozenset({RunStatus.SUCCESS, RunStatus.SKIPPED, RunStatus.CANCELLED})
 """Task-run statuses after which an event wait has nothing left to check."""
 
 
+@acting_as(SYSTEM_ACTOR)
 def check_event(
     engine: Engine,
     config: ConnectorConfig,

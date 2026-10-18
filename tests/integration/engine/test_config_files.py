@@ -26,7 +26,7 @@ from etl_craft.services.config_files import (
 from fixtures.auth import service_token
 from fixtures.metadata import start_run
 
-ALICE = Actor("github:alice", ActorKind.HUMAN)
+ALICE = Actor("github:alice", ActorKind.USER)
 EXAMPLE = Path(__file__).parents[3] / "docs" / "examples" / "config"
 
 

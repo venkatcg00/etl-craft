@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import event, text
 
 from etl_craft.core import interrupts
+from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
 from fixtures.engine_db import apply_schema, sqlite_engine_db
 from fixtures.metadata import start_run
 
@@ -16,7 +17,7 @@ pytestmark = pytest.mark.engine_sqlite
 
 
 @pytest.fixture
-def engine(tmp_path):
+def engine(tmp_path, engine_actor):
     db = sqlite_engine_db(tmp_path)
     apply_schema(db.engine)
     with db.engine.begin() as conn:
@@ -84,6 +85,7 @@ def test_transactions_that_read_then_write_wait_for_each_other(engine):
     barrier = threading.Barrier(4)
     errors = []
 
+    @acting_as(SYSTEM_ACTOR)
     def read_then_write():
         try:
             barrier.wait(timeout=10)

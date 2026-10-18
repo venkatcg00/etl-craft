@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.engine import Engine
 
-from etl_craft.core.actor import Actor, ActorKind, acting_as
+from etl_craft.core.actor import acting_as, current_actor
 from etl_craft.core.cron import next_after, timezone
 from etl_craft.core.enums import InterventionAction, RunStatus, YesNo
 from etl_craft.core.errors import MetadataError
@@ -19,8 +19,6 @@ from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.interventions import record_intervention
 from etl_craft.engine.runlog import as_date
 from etl_craft.services.operations import OperationContext
-
-SCHEDULE_ACTOR = Actor("schedule", ActorKind.SCHEDULE)
 
 
 class Schedules:
@@ -86,7 +84,7 @@ class Schedules:
             tick = next_after(row.run_schedule, cursor, zone)
             retained: deque[datetime] = deque()
             count = row.max_catchup_runs if row.catchup == YesNo.YES else 1
-            with acting_as(SCHEDULE_ACTOR):
+            with acting_as(ctx.actor):
                 while tick <= now:
                     if stop is not None and stop.is_set():
                         return
@@ -131,7 +129,7 @@ def _create_tick(
         run_id = transitions.create_run(
             conn,
             pipeline_id,
-            SCHEDULE_ACTOR,
+            current_actor(),
             run_date=instant.astimezone(zone).date(),
             trigger_kind="SCHEDULE",
             run_key=key,
@@ -143,6 +141,6 @@ def _create_tick(
             pipeline_run_id=run_id,
             action=InterventionAction.NEW_RUN,
             reason=reason or "scheduled tick",
-            requested_by=SCHEDULE_ACTOR.name,
+            requested_by=current_actor().name,
             to_status=status,
         )

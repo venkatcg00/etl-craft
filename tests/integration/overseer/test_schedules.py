@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import text
 
 from etl_craft.config import AuthConfig
-from etl_craft.core.actor import SYSTEM_ACTOR
+from etl_craft.core.actor import SYSTEM_ACTOR, Actor, ActorKind
 from etl_craft.core.cron import timezone
 from etl_craft.core.enums import ApiRole
 from etl_craft.core.errors import StaleTransitionError
@@ -35,7 +35,9 @@ def configure(db, *, policy="SKIP", catchup="Y", zone="UTC", start="2026-01-02")
             ),
             {"catchup": catchup, "policy": policy, "zone": zone, "start": start, "id": pipeline},
         )
-    return pipeline, OperationContext(db.engine, db.config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
+    return pipeline, OperationContext(
+        db.engine, db.config, Actor("scheduler", ActorKind.SERVICE), role=ApiRole.ADMIN
+    )
 
 
 def test_three_missed_ticks_keep_two_and_record_one_skipped_across_restarts(engine_db):
@@ -58,7 +60,7 @@ def test_three_missed_ticks_keep_two_and_record_one_skipped_across_restarts(engi
         )
     assert [r.status for r in rows] == ["SKIPPED", "QUEUED", "QUEUED"]
     assert len({r.run_key for r in rows}) == 3
-    assert all(r.actor_kind == "SCHEDULE" for r in rows)
+    assert all(r.actor_kind == "SERVICE" for r in rows)
     assert reasons == ["missed while no overseer was running", "scheduled tick", "scheduled tick"]
     assert len(WorkingSet().refresh(ctx)) == 1
 

@@ -39,7 +39,7 @@ def sign_in(
                     f"account {name!r}: sign-in refused; expected an active registered USER "
                     "with matching credentials; ask an administrator to check the account"
                 )
-        caller = replace(ctx, actor=Actor(name, ActorKind.HUMAN))
+        caller = replace(ctx, actor=Actor(name, ActorKind.USER))
         with operation(caller, "login", {"name": name}), ctx.engine.begin() as conn:
             return issue_token(
                 conn,

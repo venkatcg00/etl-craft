@@ -16,8 +16,8 @@ from etl_craft.services.operations import OperationContext, tokens
 from fixtures.metadata import add_pipeline
 from fixtures.released_schema import install
 
-ALICE = Actor("alice", ActorKind.HUMAN)
-BOB = Actor("bob", ActorKind.HUMAN)
+ALICE = Actor("alice", ActorKind.USER)
+BOB = Actor("bob", ActorKind.USER)
 
 
 def test_all_config_tables_have_mandatory_base_fields_and_one_key(engine_db):

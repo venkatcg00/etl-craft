@@ -10,7 +10,9 @@ at `Orchestration.Api_address` (default `127.0.0.1:8730`).
 ## Starting and submitting work
 
 Initialize or upgrade the [Engine DB](engine-db.md), configure `Orchestration.Mode: local`,
-and start the server with the same project configuration used by the CLI:
+and set `ETL_CRAFT_TOKEN` to an admin SERVICE account token. The server and its schedules
+record that account; a user session is refused for server startup. Start it with the same
+project configuration used by the CLI:
 
 ```bash
 etl-craft --config /srv/etl-craft/craft-connector.yml server

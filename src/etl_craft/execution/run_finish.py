@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
+from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
 from etl_craft.core.enums import (
     SETTLED_STATUSES,
     Handler,
@@ -81,6 +82,7 @@ def finalize_active_run(
         )
 
 
+@acting_as(SYSTEM_ACTOR)
 def settle_unsatisfiable(
     engine: Engine,
     graph: DependencyGraph,
@@ -110,6 +112,7 @@ def settle_unsatisfiable(
     return skipped
 
 
+@acting_as(SYSTEM_ACTOR)
 def _record_orchestrated(
     engine: Engine, graph: DependencyGraph, pipeline_run_id: int, task_codes: dict[int, str]
 ) -> list[int]:
@@ -161,6 +164,7 @@ class _Judgement:
     not_run: list[int]
 
 
+@acting_as(SYSTEM_ACTOR)
 def finalize(
     engine: Engine,
     run: PipelineRun,

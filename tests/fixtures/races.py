@@ -4,6 +4,7 @@ import importlib
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from contextvars import copy_context
 from functools import wraps
 
 import pytest
@@ -26,7 +27,7 @@ def two_at_once(fn_a, fn_b, *, at, timeout=10):
 
     with pytest.MonkeyPatch.context() as patch, ThreadPoolExecutor(max_workers=2) as pool:
         patch.setattr(module, name, together)
-        futures = [pool.submit(fn) for fn in (fn_a, fn_b)]
+        futures = [pool.submit(copy_context().run, fn) for fn in (fn_a, fn_b)]
         try:
             # Future waits include scheduling time before a caller reaches the barrier.
             return tuple(future.result(timeout=max(1, timeout * 2)) for future in futures)
@@ -50,7 +51,7 @@ def paused_after(fn, *, owner, name, when):
 
     with pytest.MonkeyPatch.context() as patch, ThreadPoolExecutor(max_workers=1) as pool:
         patch.setattr(owner, name, paused)
-        future = pool.submit(fn)
+        future = pool.submit(copy_context().run, fn)
         try:
             assert reached.wait(timeout=10), f"change did not reach {name}"
             yield resume

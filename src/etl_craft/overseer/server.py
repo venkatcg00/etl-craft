@@ -12,9 +12,9 @@ from datetime import UTC, datetime
 
 from sqlalchemy.exc import SQLAlchemyError
 
-from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
+from etl_craft.core.actor import ActorKind, acting_as
 from etl_craft.core.enums import Mode, RunStatus, YesNo
-from etl_craft.core.errors import EngineDbError, EtlCraftError, RunRefusedError
+from etl_craft.core.errors import ConfigurationError, EngineDbError, EtlCraftError, RunRefusedError
 from etl_craft.core.outage import OutageBudget
 from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
@@ -172,12 +172,16 @@ def serve(ctx: OperationContext, stop: threading.Event) -> None:
     """Run until shutdown; ride out Engine DB outages within their budget."""
     if ctx.config.mode != Mode.LOCAL:
         raise RunRefusedError("server supervises local execution; set Orchestration.Mode to local")
+    if ctx.actor.kind != ActorKind.SERVICE:
+        raise ConfigurationError(
+            f"server account={ctx.actor.name!r}, kind={ctx.actor.kind}; expected SERVICE; "
+            "set ETL_CRAFT_TOKEN to an administrator service account token"
+        )
     supervisor = _Supervisor(ctx, stop, LocalPool(ctx.engine, ctx.config, child=ctx.child))
     outage = OutageBudget(ctx.config.limits.engine_db_outage_seconds)
     try:
-        with acting_as(SYSTEM_ACTOR), leadership(ctx.engine) as leader:
-            with acting_as(ctx.actor):
-                overseer_id = overseers.start(ctx.engine)
+        with acting_as(ctx.actor), leadership(ctx.engine) as leader:
+            overseer_id = overseers.start(ctx.engine)
             logger.info("overseer_id=%s: server active", overseer_id)
             try:
                 while not stop.is_set():

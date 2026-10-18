@@ -789,3 +789,22 @@ def test_format_mismatch_fails_before_staging_or_mutating(sql_world, monkeypatch
         )
     assert w.rows(f"SELECT * FROM {w.name('format_guard')}") == before
     assert w.tables() == ["format_guard"]
+
+
+@pytest.mark.parametrize("action", ["SCD1_MERGE", "SCD2_MERGE"])
+def test_etl_merge_stamps_engine_writer_instead_of_warehouse_login(customers, action):
+    w = customers(action)
+    params = {**SCD, "SQL_ACTION": action}
+    w.run("merge", SOURCE_SQL="SELECT 1 AS id, 'first' AS name, 'city' AS city", **params)
+    w.run("merge", SOURCE_SQL="SELECT 1 AS id, 'second' AS name, 'city' AS city", **params)
+    from sqlalchemy import text
+
+    with w.warehouse.connect() as conn:
+        rows = conn.execute(
+            text(
+                f"SELECT CREATED_BY AS created_by, UPDATED_BY AS updated_by "
+                f"FROM {w.name('customers')}"
+            )
+        ).all()
+    assert rows
+    assert all(row.created_by == "etl-craft" and row.updated_by == "etl-craft" for row in rows)

@@ -210,6 +210,7 @@ def sql_world(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     sqlite_schema_template: Path,
+    engine_actor: None,
 ) -> Iterator[SqlWorld]:
     """A fresh schema on each warehouse in turn, with an Engine DB and pipeline P."""
     kind = request.param

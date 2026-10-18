@@ -1,6 +1,6 @@
 ---
 name: pre-pr-checks
-description: Run etl-craft's validation before a pull request - make static docs, the tests for the code the change touches, repeated races for concurrency changes, Airflow contracts, actionlint, the installed-wheel demos for packaging changes, live-cloud acceptance when warehouse SQL changes, and a self-review of the diff. CI runs the complete suite in under ten minutes. Use before opening a PR or when asked to check the state of a branch.
+description: Run etl-craft's validation before a pull request - make static docs, the tests for the code the change touches, repeated races for concurrency changes, actionlint, live-cloud acceptance when warehouse SQL changes and the owner made cloud budget available, and a self-review of the diff; the wheel demos and Airflow contracts run in CI. CI runs the complete suite in under ten minutes. Use before opening a PR or when asked to check the state of a branch.
 ---
 
 # Pre-PR checks
@@ -14,10 +14,10 @@ scratch directory outside the repository:
 SCRATCH="$(mktemp -d)"
 ```
 
-Run each long step in the background with its output in `$SCRATCH/<step>.log`, and check its
-exit status; `pytest | tail` hides a failure. Steps 1 to 3 share the local services and the
-build output, so run them one after another. Step 5 uses no local service and can run alongside
-them; on a machine short of memory, run everything one at a time.
+Write each long step's output to `$SCRATCH/<step>.log` and check its exit status; `pytest | tail`
+hides a failure. Run it so that one tool call returns its result: in the foreground with a long
+timeout, or in the background only where your harness tells you when it ends. Never poll a log,
+a process or CI: every check re-sends the whole session. Run the steps one at a time.
 
 On a Linux workstation, start each long run in its own systemd scope so that an out-of-memory
 kill of the editor does not take the run with it, and keep the machine from suspending:
@@ -32,10 +32,10 @@ systemd-run --user --scope --quiet -- \
 | 0. Sweep removed names | a public name, field or setting was renamed or removed | seconds |
 | 1. Static checks and touched tests | always | a few minutes |
 | 1b. Repeated races | concurrency code changed | a few minutes |
-| 2. Installed-wheel demos | packaging, `examples/demo/` or CLI installation changed | about 15 min |
-| 3. Airflow contracts | `integrations/airflow/`, YAML export or `scripts/export_airflow_contracts.py` changed | a few min per version |
+| 2. Installed-wheel demos | only to reproduce a CI failure in them | about 15 min |
+| 3. Airflow contracts | only to reproduce a CI failure in them | a few min per version |
 | 4. actionlint | `.github/workflows/` changed | seconds |
-| 5. Cloud tests | Snowflake or Databricks code changed, or the SQL every warehouse runs | about 15 min for the affected tests |
+| 5. Cloud tests | Snowflake or Databricks code changed, or the SQL every warehouse runs, and the owner made cloud budget available | about 15 min for the affected tests |
 | 6. Self-review | always | |
 
 The local services must be up for the touched tests and step 2: `docker ps` lists the
@@ -109,8 +109,8 @@ rerunning it.
 
 ## 2. Installed-wheel demos
 
-Run them locally only when packaging, `examples/demo/` or CLI installation changed; CI runs them
-on every pull request.
+CI runs them on every pull request, so they are not a pre-PR step. Run them locally only to
+reproduce a CI failure in them that the log does not explain.
 
 ```bash
 uv build --out-dir "$SCRATCH/dist"      # wheel and sdist together; ./dist stays untouched
@@ -126,7 +126,9 @@ time, because the local Iceberg demos share fixed namespaces.
 
 ## 3. Airflow contracts
 
-Mirror the `airflow` job in `.github/workflows/ci.yml` and take the versions from its matrix:
+CI's `airflow` job runs them on every pull request. Run them locally only to reproduce a failure
+of that job that its log does not explain, mirroring the job and taking the versions from its
+matrix:
 
 ```bash
 export ETL_CRAFT_AIRFLOW_CONTRACTS="$SCRATCH/airflow-contracts" \
@@ -160,7 +162,10 @@ the SQL every warehouse runs:
 - cloning;
 - warehouse authentication.
 
-Skip them for refactors whose paths the four local warehouses already run. For a pull request,
+Cloud compute has a usage budget: run them only when the owner has made it available, and
+otherwise treat the cloud as unable to run (below). Never retry a cloud run that failed on
+compute or credentials. Skip them for refactors whose paths the four local warehouses already
+run. For a pull request,
 run only the cloud tests that exercise the change, on the cloud whose code changed (or both for
 shared SQL). `-k` selects them. Credentials live in a gitignored env file:
 `.env.acceptance` by default (`.env.acceptance.example` lists the variables). The owner's
@@ -231,8 +236,8 @@ Recognize these before blaming the change:
   `ICEBERG_CATALOG_ERROR ... Failed to create namespace`, and the `iceberg-rest` log shows
   `SQLITE_BUSY`. Recreate both containers, then rerun the failed files:
   `docker compose up -d --wait --force-recreate iceberg-rest trino`.
-- **A run with no new output for ten minutes** is usually waiting on a broken service, not a
-  slow test. Look at the last lines of its log and at `docker ps` before waiting longer.
+- **A run that hits its timeout** is usually waiting on a broken service, not a slow test. Read
+  the end of its log once and check `docker ps` before running it again.
 - **No pytest-xdist.** `pytest -n` is not installed; the unit and integration tests take about
   35 minutes serially. Run the touched tests locally and leave the complete suite to CI.
 - **Shells that do not split words.** In zsh, `pytest $files` passes one argument. Write the

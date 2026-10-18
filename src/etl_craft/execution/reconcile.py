@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 import psutil
 from sqlalchemy.engine import Engine
 
-from etl_craft.core.actor import current_actor
+from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
 from etl_craft.core.errors import StaleTransitionError
 from etl_craft.core.time import as_utc
 from etl_craft.engine import transitions
@@ -62,6 +62,7 @@ def stop_process(pid: int, birth: str, *, grace_seconds: float = 10) -> None:
         return
 
 
+@acting_as(SYSTEM_ACTOR)
 def reconcile(
     engine: Engine, *, pipeline_id: int | None = None, task_id: int | None = None
 ) -> Reconciliation:

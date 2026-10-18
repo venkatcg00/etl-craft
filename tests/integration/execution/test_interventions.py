@@ -4,6 +4,7 @@
 Tasks run in real task processes whose handlers are fakes (``fixtures.task_child``).
 """
 
+import contextvars
 import logging
 import threading
 import time
@@ -354,7 +355,7 @@ def test_cancel_stops_a_running_run(config, pipeline):
             engine, config, "P", child=CHILD, hooks=RunHooks(on_finalized=finished.append)
         )
 
-    thread = threading.Thread(target=run)
+    thread = threading.Thread(target=contextvars.copy_context().run, args=(run,))
     started = time.monotonic()
     thread.start()
     run_id = None
@@ -762,7 +763,8 @@ def test_a_run_paused_while_it_runs_stops_starting_tasks_and_goes_on_once_resume
         )
     outcome = {}
     thread = threading.Thread(
-        target=lambda: outcome.setdefault("run", run_pipeline(engine, config, "P", child=CHILD))
+        target=contextvars.copy_context().run,
+        args=(lambda: outcome.setdefault("run", run_pipeline(engine, config, "P", child=CHILD)),),
     )
     thread.start()
     started = time.monotonic()

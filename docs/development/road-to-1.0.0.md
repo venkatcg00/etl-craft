@@ -127,7 +127,7 @@ item's text, or work done early under another item.
 | S5.O.2b Normalized object contracts | Done | #150, #151, #152, #153, #154, #160, #162, #181 | Merge column lists retain parameter storage; lineage versions use component endpoints; target state, view statements and rule results are keyed by components, and target locks use the resolved identity |
 | S5.P Project documentation gap UI | Done | #165 | Structured schema/lineage gaps, accessible column/graph warnings and read-only comparison API |
 | S5.R Consolidate before the cluster | Done | #179, #185, #188 to #193, #195, #201 | Items 1 to 8 complete: the execution core and configuration loader are split by responsibility; the moved execution functions are shortened with shared run records and unchanged transactions and retries |
-| S5.S Accounts, login and roles | In progress | #203, #204, #205 | Items 1–3: account identities, login, administration and one service-role policy with recorded refusals across CLI/HTTP; explicit actors and remote CLI remain |
+| S5.S Accounts, login and roles | In progress | #203, #204, #205, #206 | Items 1–4: account identities, login, administration, one service-role policy with recorded refusals across CLI/HTTP, and explicit actors with an `etl-craft` writer on every run; remote CLI remains |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
 | S5.T Resource discovery and deployment profiles | Planned | | Opt-in laptop, server and server-with-workers sizing from usable process resources; one discovery module before S5.C |
@@ -151,9 +151,9 @@ item's text, or work done early under another item.
 
 What a person picking up the work needs that the code and the item texts do not say.
 
-**Next agent: finish S5.S item 3 (#205), then take item 4 (`refactor/accounts-explicit-actors`).**
-If #205 is still open, read and fix its failed CI before starting another item; otherwise continue
-with explicit actors and warehouse writer attribution. #204 is merged. The owner merged #203 despite
+**Next agent: finish S5.S item 4 (#206), then take item 5 (remote CLI and sign-in endpoints).**
+If #206 is still open, read and fix its failed CI before starting another item. #204 and #205
+are merged. The owner merged #203 despite
 unavailable Databricks acceptance. Databricks has a usage budget: do not retry it until the owner
 explicitly makes budget available. Item 2 changes no warehouse SQL and needs no cloud acceptance.
 The owner withdrew the Spec Kit requirement; follow `AGENTS.md` and the roadmap-item procedure.
@@ -446,6 +446,19 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- **S5.S item 4 (#206), explicit actors and the run writer.**
+  - `ActorKind` holds only `USER`, `SERVICE` and `SYSTEM`, as the owner asked: schedules,
+    orchestrators and workers act through service accounts, and the execution source is already
+    recorded separately. The audit CHECK constraints still accept the retired kinds, so upgraded
+    history keeps its original values.
+  - Local task processes act as the system account. S5.C's workers take their own service
+    accounts with S5.C.
+  - `core.actor.scoped_actor()` returns the actor or `None`, so the connection hooks leave the
+    actor empty for unauthenticated reads. The Engine DB triggers then refuse any write.
+  - Every run's `WRITER` is `etl-craft`. Nothing sets another writer yet; S7.M's uploads are its
+    second writer.
+  - `etl-craft server` refuses a non-SERVICE account, naming the account and its kind.
 
 - **S5.S item 3 (#205), shared role policy and owner-approved maintenance defaults.**
   - The owner chose admin for clone, rehash, server startup, documentation publishing and

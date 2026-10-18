@@ -59,7 +59,7 @@ def add_account(
     """Add a user or service account; local recovery is serialized with credential changes."""
     if not recovery:
         authorize(ctx, "account add")
-    Actor(account.name, ActorKind.HUMAN)
+    Actor(account.name, ActorKind.USER)
     if account.kind == AccountKind.SERVICE and (password is not None or account.oidc_subject):
         raise UsageError(f"account {account.name!r}: SERVICE expects a token, not password or SSO")
     if account.kind == AccountKind.USER and not (password or account.oidc_subject):

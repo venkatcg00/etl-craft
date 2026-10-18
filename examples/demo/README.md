@@ -123,3 +123,8 @@ the Engine DB. A deployed run-only service token needs operator; project configu
 need developer. Clone, rehash, server startup and publishing documentation need admin. These
 permissions are identical through the CLI, Python services and HTTP/UI routes. A role refusal
 returns exit 26 (HTTP 403) and records `REFUSED` in the Engine DB audit history.
+
+ETL rows use the run writer `etl-craft` in `CREATED_BY` and `UPDATED_BY`, including runs
+started by a person. Action audit rows retain the signed-in account with kind `USER` or
+`SERVICE`; automatic engine actions use `SYSTEM`. Starting `etl-craft server` requires an
+admin service token in `ETL_CRAFT_TOKEN`.

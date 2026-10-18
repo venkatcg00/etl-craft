@@ -53,4 +53,5 @@ def build_task_context(
         run_date=kind.run_date,
         backfill=kind.backfill,
         event_files=event_files,
+        writer=row.writer,
     )

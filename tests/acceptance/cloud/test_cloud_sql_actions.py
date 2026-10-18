@@ -32,7 +32,7 @@ from fixtures.sql_warehouse import SqlWorld
 from fixtures.sql_watermarks import check_watermark_literals, check_watermarks
 
 # Some forty statements against a remote warehouse, one to three seconds each, cold start aside.
-pytestmark = pytest.mark.timeout(1200)
+pytestmark = [pytest.mark.timeout(1200), pytest.mark.usefixtures("engine_actor")]
 
 
 def cloud_world(tmp_path, name, fields, table_format, schema):
@@ -131,6 +131,18 @@ def walk_every_action(w):
             **scd,
         )
         assert (changed.update_count, changed.insert_count, changed.target_count) == (1, 1, 2)
+        for target in (names["customers"], names["history"]):
+            with w.warehouse.connect() as conn:
+                rows = conn.execute(
+                    text(
+                        f"SELECT CREATED_BY AS created_by, UPDATED_BY AS updated_by "
+                        f"FROM {w.name(target)}"
+                    )
+                ).all()
+            assert rows
+            assert all(
+                row.created_by == "etl-craft" and row.updated_by == "etl-craft" for row in rows
+            )
 
         w.setup(names["events"], "SELECT 1 AS id", "APPEND_TABLE")
         appended = w.run(

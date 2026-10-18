@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import text
 
-from etl_craft.core.actor import current_actor
+from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
 from etl_craft.core.counts import Counts
 from etl_craft.core.enums import RunStatus, SlaStatus
 from etl_craft.core.errors import MetadataError, RunStateError
@@ -326,6 +326,7 @@ def test_concurrent_starts_share_one_run(seeded):
     engine, ids = seeded
     results, errors, barrier = [], [], threading.Barrier(4)
 
+    @acting_as(SYSTEM_ACTOR)
     def start():
         try:
             barrier.wait(10)
@@ -424,6 +425,7 @@ def test_concurrent_binds_share_one_row(seeded):
         run_id = start_run(conn, ids["alpha"])
     results, errors, barrier = [], [], threading.Barrier(4)
 
+    @acting_as(SYSTEM_ACTOR)
     def bind():
         try:
             barrier.wait(10)

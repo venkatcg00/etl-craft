@@ -208,6 +208,17 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- Warehouse `CREATED_BY` and `UPDATED_BY` columns written by ETL now hold the run's writer,
+  `etl-craft`, instead of the warehouse login. Engine DB migration `0035` adds the writer to
+  every run and accepts the account kinds `USER`, `SERVICE` and `SYSTEM`; historical names and
+  kinds are kept unchanged.
+- Nothing is recorded under an actor nobody set: `current_actor()` raises `ConfigurationError`
+  outside `acting_as`. Finalization, reconciliation, gate skips, retries and local task processes
+  act as the system account `etl-craft`. `etl-craft server` needs a SERVICE account's token, and
+  its schedules act as that account. Token metadata includes the account's `account_kind`.
+- `ActorKind` holds only `USER`, `SERVICE` and `SYSTEM`. Python callers replace `HUMAN` with
+  `USER`, and `SCHEDULE`, `ORCHESTRATOR` and `WORKER` with `SERVICE`.
+
 - Commands require a proven account through `ETL_CRAFT_TOKEN` or a stored session.
   `ETL_CRAFT_ACTOR` and `ETL_CRAFT_ACTOR_KIND` no longer select an identity. Run `setup` locally
   to provision an admin, then `login`; supply service tokens explicitly in automation.

@@ -29,6 +29,7 @@ class TokenView:
     SCHEMA: ClassVar[str] = "etl-craft/token/1"
     token_id: int
     name: str
+    account_kind: AccountKind
     role: str
     project_id: int | None
     created_by: str
@@ -39,7 +40,7 @@ class TokenView:
     @property
     def actor(self) -> Actor:
         """Attribute requests to the token's validated name."""
-        return Actor(self.name, ActorKind.HUMAN)
+        return Actor(self.name, ActorKind(self.account_kind))
 
 
 @dataclass(frozen=True)
@@ -61,6 +62,7 @@ class CreatedToken:
 
 def _view(row: RowMapping) -> TokenView:
     values = dict(row)
+    values["account_kind"] = AccountKind(values["account_kind"])
     for key in ("created_at", "expires_at", "revoked_at"):
         values[key] = timestamp(values[key])
     return TokenView(**values)
@@ -71,7 +73,7 @@ def create_token(
 ) -> CreatedToken:
     """Print-once credentials contain 256 random bits; only their SHA-256 is stored."""
     authorize(ctx, "token create")
-    Actor(name, ActorKind.HUMAN)
+    Actor(name, ActorKind.SERVICE)
     if role not in ROLES:
         raise UsageError(f"token role={role!r}; expected {', '.join(ROLES)}")
     now = datetime.now(UTC)

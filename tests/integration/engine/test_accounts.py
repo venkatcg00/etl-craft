@@ -16,7 +16,7 @@ from etl_craft.engine import migrations
 from etl_craft.services.operations import OperationContext, tokens
 from fixtures.released_schema import SCHEMAS, install
 
-OWNER = Actor("owner", ActorKind.HUMAN)
+OWNER = Actor("owner", ActorKind.USER)
 
 
 def context(db):
