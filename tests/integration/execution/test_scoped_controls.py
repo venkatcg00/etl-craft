@@ -4,14 +4,12 @@ import contextvars
 import threading
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 import pytest
-import yaml
 from sqlalchemy import text
 
-from etl_craft.config import ConnectionProfile, load_config
-from etl_craft.core.actor import Actor, ActorKind, current_actor
+from etl_craft.config import ConnectionProfile
+from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import (
     ApiRole,
     AttemptStatus,
@@ -27,44 +25,13 @@ from etl_craft.execution import control_flow
 from etl_craft.execution.attempt_types import ChildOptions
 from etl_craft.execution.pipeline import run_pipeline
 from etl_craft.execution.runner import admit_attempt, execute_attempt
-from etl_craft.services.operations import OperationContext, from_json, to_json
+from etl_craft.services.operations import from_json, to_json
 from etl_craft.services.operations.controls import ControlRequest, get_control, request_control
 from fixtures.metadata import add_dependency, add_pipeline, add_task, start_run
 from fixtures.races import paused_after, two_at_once
+from fixtures.scoped_controls import ctx as ctx
 
 CHILD = ChildOptions(module="fixtures.task_child", kill_grace_seconds=1, cancel_poll_seconds=0.05)
-
-
-@pytest.fixture
-def ctx(engine_db, tmp_path, monkeypatch):
-    profile = engine_db.config.engine
-    block = {"jdbc_url": profile.jdbc_url, "schema": profile.schema or "public"}
-    if profile.auth_mode != "none":
-        block |= {
-            "user": profile.user,
-            "auth_mode": profile.auth_mode,
-            "secret": profile.secret_var,
-        }
-    path = tmp_path / "craft-connector.yml"
-    path.write_text(
-        yaml.safe_dump(
-            {
-                "Secrets": {"Source_type": "environment"},
-                "Orchestration": {"Mode": "local"},
-                "Engine": {"test": block},
-            },
-            sort_keys=False,
-        )
-    )
-    # SQLite fixture paths remain relative to the directory of this connector.
-    monkeypatch.setenv("PYTHONPATH", str(Path(__file__).parents[2]))
-    return OperationContext(
-        engine_db.engine,
-        load_config(path),
-        Actor("operator", ActorKind.USER),
-        child=CHILD,
-        role=ApiRole.OPERATOR,
-    )
 
 
 def seed(ctx):
@@ -565,7 +532,7 @@ def test_active_run_is_pinned_before_event_locks_and_never_reselected(ctx, monke
     from etl_craft.services.operations import controls as operations
 
     pipeline, original_run, _, _ = seed(ctx)
-    original = operations._event_locks
+    original = operations.control_scope
     replacements = []
 
     @contextmanager
@@ -576,7 +543,7 @@ def test_active_run_is_pinned_before_event_locks_and_never_reselected(ctx, monke
                 replacements.append(start_run(conn, pipeline))
             yield pinned
 
-    monkeypatch.setattr(operations, "_event_locks", replace_active)
+    monkeypatch.setattr(operations, "control_scope", replace_active)
     with pytest.raises(RunStateError, match="controls need a non-terminal run"):
         request_control(ctx, ControlRequest("P", ControlAction.HOLD, "maintenance"))
     with ctx.engine.connect() as conn:

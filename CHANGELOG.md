@@ -8,6 +8,15 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Exact-run recovery and restart preparation through `run --recover` / `--restart`, with reasons,
+  idempotency keys and durable `execution_run_id` inspection. Recovery preserves SUCCESS/SKIPPED
+  and committed checkpoints; restart creates a new context retaining current offsets/watermarks
+  and source history. Neither releases human locks or guesses process/query completion.
+- `run --allow-paused` grants one exact run permission while its definition remains paused;
+  `status --capabilities` shares scoped action availability and remedies with the HTTP API.
+  `run --controls-file` and `POST /api/v1/controls/bulk` apply an explicit bounded selection with
+  independent durable outcomes. Migration `0039` extends control actions in both Engine DBs.
+
 - Scoped run/task dispatch holds with `pause`/`resume` plus a run selector or `--task_code`;
   `cancel --stop` drains running work and `cancel --task_code` affects only that task. Controls
   return durable `etl-craft/control/1` requests, optional `--request-key` idempotency, and

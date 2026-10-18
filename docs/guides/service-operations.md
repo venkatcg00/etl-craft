@@ -177,3 +177,10 @@ authentication do not invent an actor.
 A handler receives the exact run's durable `TaskContext.writer`. SQL merge and rejection audit
 columns use this value; ordinary ETL runs retain `etl-craft`, including runs requested by users.
 The initiator remains in the action/run audit separately from the warehouse writer.
+
+`capabilities.control_capabilities` exposes exact-run/task action availability and data effects.
+`bulk_controls.request_bulk_controls` applies only explicit keyed selections, retaining individual
+refusals alongside accepted controls. `ControlAction.RECOVER`, `RESTART` and `RUN_PAUSED` use
+`controls.request_control`; preparation returns promptly with `execution_run_id`, separately from
+actual execution outcome. Recovery preserves successful work; restart keeps current checkpoints
+in a new context. See the [control guide](run-control.md#recover-or-restart-an-exact-execution).

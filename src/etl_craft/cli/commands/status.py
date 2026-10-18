@@ -15,6 +15,7 @@ from etl_craft.cli.remote import ServerClient, api_path, selector_query
 from etl_craft.core.errors import UsageError
 from etl_craft.engine.controls import ControlView
 from etl_craft.engine.runlog import RunSelector
+from etl_craft.services.operations.capabilities import CapabilitiesView, control_capabilities
 from etl_craft.services.operations.controls import get_control
 from etl_craft.services.operations.status import StatusView, pipeline_status
 
@@ -23,11 +24,26 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     configure_output(parser)
     configure_run_selector(parser)
     parser.add_argument("--pipeline_code")
+    parser.add_argument(
+        "--capabilities",
+        action="store_true",
+        help="show available scoped actions and refusal reasons",
+    )
+    parser.add_argument("--task_code", help="with --capabilities: inspect one task scope")
     parser.add_argument("--request-id", type=int, help="inspect durable control acknowledgements")
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
     _validate(args)
+    if args.capabilities:
+        with command_context(args) as ctx:
+            done_caps = control_capabilities(
+                ctx,
+                args.pipeline_code,
+                selector=RunSelector(args.run_id, args.run_key),
+                task_code=args.task_code,
+            )
+        return _capabilities(out, args, done_caps)
     if args.request_id is not None:
         with command_context(args) as ctx:
             done_control = get_control(ctx, args.request_id)
@@ -42,6 +58,14 @@ def _run(args: argparse.Namespace, out: Output) -> int:
 
 def _remote(args: argparse.Namespace, out: Output, server: ServerClient) -> int:
     _validate(args)
+    if args.capabilities:
+        done_caps = server.call(
+            "GET",
+            api_path("pipelines", args.pipeline_code, "capabilities"),
+            CapabilitiesView,
+            query={**selector_query(args), "task_code": args.task_code},
+        )
+        return _capabilities(out, args, done_caps)
     if args.request_id is not None:
         done_control = server.call(
             "GET", api_path("control-requests", str(args.request_id)), ControlView
@@ -100,6 +124,10 @@ COMMAND = Command(
 
 
 def _validate(args: argparse.Namespace) -> None:
+    if args.task_code is not None and not args.capabilities:
+        raise UsageError("status --task_code needs --capabilities")
+    if args.capabilities and (args.request_id is not None or args.pipeline_code is None):
+        raise UsageError("status --capabilities needs --pipeline_code without --request-id")
     if args.request_id is not None:
         if args.request_id < 1 or any(
             value is not None for value in (args.pipeline_code, args.run_id, args.run_key)
@@ -109,3 +137,15 @@ def _validate(args: argparse.Namespace) -> None:
             )
     elif args.pipeline_code is None:
         raise UsageError("status needs --pipeline_code or --request-id")
+
+
+def _capabilities(out: Output, args: argparse.Namespace, done: CapabilitiesView) -> int:
+    """Render the same action/reason snapshot as the HTTP API."""
+    out.result(
+        done,
+        args.output_format,
+        text=lambda: out.rows(
+            (a.action, "available" if a.available else "refused", a.reason) for a in done.actions
+        ),
+    )
+    return 0

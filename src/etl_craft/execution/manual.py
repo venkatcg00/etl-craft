@@ -50,7 +50,8 @@ def run_manual(
             "legacy remote mode delegates workers to its orchestrator. Use an explicit "
             "orchestrator run with --run-id or --run-key."
         )
-    pause = open_pause(engine, pipeline_code)
+    selector = options.get("selector", runlog.ACTIVE_RUN)
+    pause = open_pause(engine, pipeline_code, selector=selector)
     if pause is not None:
         raise RunRefusedError(
             f"{pipeline_code}: {pause.describe()}; independent manual dispatch while paused "
@@ -59,10 +60,15 @@ def run_manual(
     ignore = options.get("ignore_dependencies", False)
     if ignore:
         check_override(config, "--ignore-dependencies", options.get("reason") or "")
-    selector = options.get("selector", runlog.ACTIVE_RUN)
     with engine.begin() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
-        scope = _selection(conn, pipeline_id, task_code, options)
+        scope = select_tasks(
+            conn,
+            pipeline_id,
+            task_code,
+            with_downstream=options.get("with_downstream", False),
+            ignore_dependencies=options.get("ignore_dependencies", False),
+        )
         selected = _select_run(conn, pipeline_id, selector, scope, options.get("run_date"))
         if selected is not None:
             run_id = selected.pipeline_run_id
@@ -111,11 +117,16 @@ def run_manual(
     )
 
 
-def _selection(
-    conn: Connection, pipeline_id: int, task_code: str, options: _ManualOptions
+def select_tasks(
+    conn: Connection,
+    pipeline_id: int,
+    task_code: str,
+    *,
+    with_downstream: bool = False,
+    ignore_dependencies: bool = False,
 ) -> run_scopes.TaskSelection:
     """Validate the requested graph and handler isolation before creating a run."""
-    ignore = options.get("ignore_dependencies", False)
+    ignore = ignore_dependencies
     task_id = resolve_task_id(conn, pipeline_id, task_code)
     if fetch_pipeline_dependency_edges(conn, pipeline_id) and not ignore:
         raise RunRefusedError(
@@ -125,7 +136,7 @@ def _selection(
     data = fetch_pipeline_graph(conn, pipeline_id)
     graph = build_graph(data.tasks, data.same_pipeline_edges)
     ids = {task_id}
-    if options.get("with_downstream", False):
+    if with_downstream:
         ids |= graph.downstream_of(task_id)
     scope = run_scopes.TaskSelection(tuple(sorted(ids)), ignore)
     run_scopes.selected_graph(data, scope)

@@ -62,7 +62,8 @@ class Output:
             self.line(
                 f"control_id={done.control_id} {done.action} {done.status}; "
                 f"run_id={done.pipeline_run_id} task={done.task_code or 'all'} "
-                f"run_status={done.run_status}: {done.message}"
+                f"run_status={done.run_status} execution_run_id={done.execution_run_id}: "
+                f"{done.message}"
             )
         else:
             assert isinstance(done, (OperationResult, BackfillView, ReconciliationView))

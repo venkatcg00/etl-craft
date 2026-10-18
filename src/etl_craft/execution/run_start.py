@@ -75,7 +75,7 @@ def init_pipeline_run(
         with engine.connect() as conn:
             require_supported(conn, config, pipeline_code)
     else:
-        paused = open_pause(engine, pipeline_code)
+        paused = open_pause(engine, pipeline_code, selector=selector)
         if paused is not None:
             return paused_outcome(pipeline_code, paused)
     pipeline_id, _ = prepare(engine, config, pipeline_code)

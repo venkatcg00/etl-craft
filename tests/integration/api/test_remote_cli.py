@@ -478,3 +478,81 @@ def test_remote_scoped_cli_uses_same_request_and_status_document(server, monkeyp
     )
     assert code == 0, err
     assert json.loads(out)["action"] == "RELEASE"
+
+
+def test_remote_cli_prepares_recovery_restart_and_selected_bulk(
+    server, monkeypatch, capsys, tmp_path
+):
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", server["service"]["operator"])
+    url, source = server["url"], server["run"]
+    code, out, err = run(
+        capsys,
+        "cancel",
+        "--pipeline_code",
+        "P",
+        "--run-id",
+        str(source),
+        "--reason",
+        "maintenance",
+        "--format",
+        "json",
+        "--server",
+        url,
+    )
+    assert code == 0, err
+    assert json.loads(out)["run_status"] == "CANCELLED"
+    code, out, err = run(
+        capsys,
+        "run",
+        "--pipeline_code",
+        "P",
+        "--run-id",
+        str(source),
+        "--restart",
+        "--request-key",
+        "remote-restart",
+        "--reason",
+        "fresh context",
+        "--format",
+        "json",
+        "--server",
+        url,
+    )
+    assert code == 0, err
+    restarted = json.loads(out)
+    assert restarted["execution_run_id"] != source
+    assert restarted["pipeline_run_id"] == source
+    code, out, err = run(
+        capsys,
+        "status",
+        "--pipeline_code",
+        "P",
+        "--run-id",
+        str(source),
+        "--capabilities",
+        "--format",
+        "json",
+        "--server",
+        url,
+    )
+    assert code == 0, err
+    assert json.loads(out)["schema"] == "etl-craft/capabilities/1"
+    selection = tmp_path / "controls.json"
+    selection.write_text(
+        json.dumps(
+            [
+                {
+                    "pipeline_code": "P",
+                    "run_id": restarted["execution_run_id"],
+                    "action": "HOLD",
+                    "reason": "pause new work",
+                    "request_key": "bulk:hold",
+                }
+            ]
+        )
+    )
+    code, out, err = run(
+        capsys, "run", "--controls-file", str(selection), "--format", "json", "--server", url
+    )
+    assert code == 0, err
+    assert json.loads(out)["outcomes"][0]["control"]["action"] == "HOLD"

@@ -318,3 +318,103 @@ of the immutable attempt outcome:
 | `TARGET_COUNT` | the row count stated with `--rows` |
 | `PREVIOUS_MESSAGE` | the row's `ERROR_MESSAGE` before the change |
 | `REASON`, `REQUESTED_BY`, `REQUESTED_AT` | why (for a bypass, the dependencies let through), who (`user@host`) and when |
+
+## Recover or restart an exact execution
+
+Recovery prepares the selected run to resume unfinished work. It retains `SUCCESS` and
+`SKIPPED` task summaries, immutable attempts, committed offsets/watermarks, admission decisions
+and human data locks. A failed or cancelled run reopens as a repair; a subsequent successful
+ending publishes its repaired output revision through the existing consumption policy.
+Recovery does not roll back partially committed external work. Check the failed handler's
+message and data effects before resuming it.
+
+Restart prepares a **new run** with the original logical date. It keeps the source run's history
+and the **current** task offsets/watermarks. It does not reset to the source run's historical
+checkpoint and does not truncate, restore or unlock data. The new context runs tasks again;
+for example, an append action can append again. Use the explicit supported watermark-reset
+operation separately when replay is intended. A whole-pipeline restart goes through fresh
+pipeline admission and records fresh dependency decisions. A manual restart retains its stored
+selection and dependency-override intent; it never publishes or consumes pipeline outputs.
+
+```bash
+etl-craft run --pipeline_code SALES_DAILY --run-id 42 --recover \
+    --request-key recover-42 --reason "repaired input" --format json
+etl-craft run --pipeline_code SALES_DAILY --run-id 42 --restart \
+    --request-key restart-42 --reason "new execution with current checkpoints" --format json
+```
+
+These commands **prepare** work and return promptly with a durable `control_id` and
+`execution_run_id`. `COMPLETED` means preparation committed, not that any task succeeded.
+`pipeline_run_id` remains the source identity; inspect the execution run separately. On a server,
+the overseer picks up eligible whole-pipeline contexts. Locally, execute the returned identity
+with `etl-craft run --pipeline_code SALES_DAILY --run-id EXECUTION_ID`; add `--task_code TASK`
+when recovering only a task in an existing run. An independent restart selection can be driven
+with `run --run-id EXECUTION_ID` without recreating its selection. Reusing a request key returns
+the original preparation even after the execution finishes. A new restart key deliberately
+creates a new context; keys cannot change scope or action.
+
+Neither operation adopts an expired owner or assumes a query ended. Stop/drain the exact scope,
+wait for actual process/query acknowledgement and reconcile expired ownership first. A live
+supervisor, a pending stop, an unobserved process exit or an unknown server query prevents
+preparation. A task restart needs the same target/checkpoint/dependency isolation as a standalone
+selection. Task-only recovery of a terminal whole-pipeline run refuses to reopen its siblings;
+recover the whole run, use a supported isolated restart, or explicitly rerun the task instead.
+Recovery clears its own dispatch fence, retaining other task holds. Restart does not clear any
+source fence. Successful and skipped evidence is never reset by recovery.
+
+## Run once while automatic execution remains paused
+
+For an existing exact execution, authorize a one-run exception with a reason:
+
+```bash
+etl-craft run --pipeline_code SALES_DAILY --run-id 43 --allow-paused \
+    --request-key manual-43 --reason "approved maintenance run"
+etl-craft run --pipeline_code SALES_DAILY --run-id 43
+```
+
+This permission lasts for that run. The definition pause stays open and blocks automatic starts
+and other executions. It grants no release of a scoped hold, stop fence, dependency requirement
+or human data lock. To create a new context directly, omit the run selector and provide a request key:
+`run --pipeline_code SALES_DAILY --allow-paused --request-key maintenance-1 --reason ...`.
+Add `--task_code TASK` for an isolated one-task context; the existing standalone isolation and
+outside-dependency checks still apply. Creation and permission commit together, and repeated
+keys return the same context. A new whole-pipeline context is queued for ordinary dependency
+admission; isolated task contexts require explicit execution. Automatic schedules remain paused.
+
+## Inspect capabilities and apply an explicit selection
+
+`status --capabilities` exposes the same scoped action/state/handler and role decisions as the
+HTTP API. A refusal includes its remedy; inspection does not request or release a control.
+An action always revalidates under the execution's locks, so an available snapshot is not a
+reservation. Existing task `explain` output describes run readiness and dependency blockers.
+
+```bash
+etl-craft status --pipeline_code SALES_DAILY --run-id 43 --task_code transform \
+    --capabilities --format json
+etl-craft run --controls-file selected-controls.json --format json
+```
+
+The selection file is a UTF-8 JSON list of 1–100 control objects:
+
+```json
+[
+  {"pipeline_code":"SALES_DAILY","run_id":43,"task_code":"transform",
+   "action":"HOLD","reason":"inspect input","request_key":"hold-transform-43"},
+  {"pipeline_code":"OTHER","run_id":12,"action":"STOP",
+   "reason":"maintenance","request_key":"stop-other-12"}
+]
+```
+
+Each object requires an explicit `run_id` or `run_key`, nonblank reason and unique request key.
+Only selected objects are affected. Results include each accepted control or its independent
+refusal; this is not an all-or-nothing transaction. A nonzero CLI exit means at least one object
+refused, while earlier accepted actions remain committed. Retry the same selection with the
+same keys to inspect accepted requests safely. Bulk preparation does not wait for task execution
+or worker/query endings. The same flags support `--server`.
+
+The shared HTTP routes are `GET /api/v1/pipelines/{code}/capabilities`,
+`POST /api/v1/pipelines/{code}/controls` (including `RECOVER`, `RESTART`, `RUN_PAUSED`) and
+`POST /api/v1/controls/bulk` with `{"requests": [...]}`. Viewers can inspect capabilities and
+requests; operators can submit actions. `execution_run_id` is additive in `etl-craft/control/1`.
+Legacy external orchestrators still require their own worker/query adapter; capabilities name
+that limitation rather than claiming a native action completed.

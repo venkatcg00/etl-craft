@@ -36,7 +36,7 @@ EXPECTED = {
         "CANCELLED",
         "LOST",
     },
-    enums.ControlAction: {"HOLD", "RELEASE", "STOP", "ABORT"},
+    enums.ControlAction: {"HOLD", "RELEASE", "STOP", "ABORT", "RECOVER", "RESTART", "RUN_PAUSED"},
     enums.ControlStatus: {"REQUESTED", "ACKNOWLEDGED", "COMPLETED"},
     enums.ControlAcknowledgement: {"PROCESS", "QUERIES"},
     enums.TriggerKind: {"SCHEDULE", "MANUAL", "BACKFILL", "ORCHESTRATOR", "STAND_IN"},

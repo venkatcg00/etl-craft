@@ -110,6 +110,9 @@ class ControlAction(StrEnum):
     RELEASE = "RELEASE"
     STOP = "STOP"
     ABORT = "ABORT"
+    RECOVER = "RECOVER"
+    RESTART = "RESTART"
+    RUN_PAUSED = "RUN_PAUSED"
 
 
 class ControlStatus(StrEnum):

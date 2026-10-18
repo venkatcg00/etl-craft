@@ -40,7 +40,7 @@ from etl_craft.core.enums import (
     RunStatus,
 )
 from etl_craft.core.errors import RunRefusedError, RunStateError, UsageError
-from etl_craft.engine import locks, runlog, transitions
+from etl_craft.engine import controls, locks, runlog, transitions
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import interventions as record
 from etl_craft.engine.repository import pauses
@@ -357,10 +357,26 @@ def resume_pipeline(
     return message
 
 
-def open_pause(engine: Engine, pipeline_code: str) -> pauses.Pause | None:
+def open_pause(
+    engine: Engine, pipeline_code: str, *, selector: runlog.RunSelector | None = None
+) -> pauses.Pause | None:
     """Return the open pause of ``pipeline_code``, or ``None`` when it is not paused."""
     with engine.connect() as conn:
-        return pauses.fetch_open_pause(conn, resolve_pipeline_id(conn, pipeline_code))
+        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+        pause = pauses.fetch_open_pause(conn, pipeline_id)
+        if (
+            pause is not None
+            and selector is not None
+            and (selector.run_id is not None or selector.run_key is not None)
+        ):
+            if selector.run_id is None and not any(
+                r.run_key == selector.run_key for r in runlog.run_candidates(conn, pipeline_id)
+            ):
+                return pause
+            selected = runlog.select_run(conn, pipeline_id, selector)
+            if controls.permits_paused(conn, selected.pipeline_run_id):
+                return None
+        return pause
 
 
 def record_change(
