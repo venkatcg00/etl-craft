@@ -138,7 +138,14 @@ def postgres_admin():
 
 
 @pytest.fixture
-def postgres_database(monkeypatch: pytest.MonkeyPatch) -> Iterator[EngineDb]:
+def engine_actor() -> Iterator[None]:
+    """Attribute fixture setup and direct library calls explicitly."""
+    with acting_as(SYSTEM_ACTOR):
+        yield
+
+
+@pytest.fixture
+def postgres_database(monkeypatch: pytest.MonkeyPatch, engine_actor: None) -> Iterator[EngineDb]:
     """An empty PostgreSQL database for initialization and upgrade tests."""
     with postgres_engine_db(monkeypatch) as db:
         yield db
@@ -187,7 +194,7 @@ def postgres_schema_template() -> Iterator[str]:
 
 
 @pytest.fixture(params=ENGINE_CASES)
-def empty_engine_db(request: pytest.FixtureRequest, tmp_path: Path) -> EngineDb:
+def empty_engine_db(request: pytest.FixtureRequest, tmp_path: Path, engine_actor: None) -> EngineDb:
     """An Engine DB with nothing in it, on each dialect in turn."""
     if request.param == "sqlite":
         db = sqlite_engine_db(tmp_path)

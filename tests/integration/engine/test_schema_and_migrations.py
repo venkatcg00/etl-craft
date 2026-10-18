@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import inspect as sql_inspect
 from sqlalchemy import text
 
+from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
 from etl_craft.core.errors import EngineDbError, MigrationError
 from etl_craft.dialects.engine import for_engine
 from etl_craft.dialects.engine.base import EngineDialect
@@ -175,6 +176,7 @@ def test_concurrent_runs_apply_each_file_once(initialized, tmp_path):
     write(project, "0001_first.sql", "CREATE TABLE P1 (ID INT);")
     results, errors = [], []
 
+    @acting_as(SYSTEM_ACTOR)
     def run():
         try:
             results.append(apply_pending_migrations(initialized, project))

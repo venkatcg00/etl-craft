@@ -12,6 +12,7 @@ from sqlalchemy import text
 
 from etl_craft.config import DagDefaults, DocsSiteConfig, parse_config
 from etl_craft.config.model import AuthConfig
+from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
 from etl_craft.core.enums import Mode
 from etl_craft.core.errors import RemoteUnsupportedError
 from etl_craft.dialects.engine import for_engine
@@ -35,7 +36,7 @@ def export_contracts(output: Path) -> None:
         try:
             config = replace(config, auth=AuthConfig(airflow_connection_id="etl_craft"))
             init_db(engine)
-            with engine.begin() as conn:
+            with acting_as(SYSTEM_ACTOR), engine.begin() as conn:
                 source = (
                     Path(__file__).resolve().parents[1]
                     / "examples/demo/metadata/support_insights.sql"

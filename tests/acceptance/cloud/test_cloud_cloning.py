@@ -21,7 +21,7 @@ from fixtures.cloud import DATABRICKS_VARS, SNOWFLAKE_VARS, require_variables, w
 from fixtures.engine_db import apply_schema, sqlite_engine_db
 from fixtures.metadata import add_pipeline
 
-pytestmark = pytest.mark.timeout(600)
+pytestmark = [pytest.mark.timeout(600), pytest.mark.usefixtures("engine_actor")]
 
 
 def gains_columns(tmp_path, name, fields, table_format, schema):

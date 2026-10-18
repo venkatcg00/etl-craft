@@ -33,7 +33,7 @@ def legacy_identity_db(empty_engine_db, monkeypatch):
 
 
 @pytest.mark.engine_sqlite
-def test_readiness_does_not_decode_unrelated_inactive_settings(tmp_path):
+def test_readiness_does_not_decode_unrelated_inactive_settings(tmp_path, engine_actor):
     from fixtures.engine_db import apply_schema, sqlite_engine_db
 
     db = sqlite_engine_db(tmp_path)

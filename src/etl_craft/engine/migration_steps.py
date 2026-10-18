@@ -105,7 +105,7 @@ def check_account_token_identities(conn: Connection) -> LegacyRows:
     invalid = []
     for row in conn.execute(statement(conn, "account_legacy_tokens")):
         try:
-            Actor(row.name, ActorKind.HUMAN)
+            Actor(row.name, ActorKind.SERVICE)
         except ConfigurationError:
             invalid.append(f"TOKEN_ID={row.token_id}, NAME={row.name!r}: invalid actor name")
         if row.name_count > 1:

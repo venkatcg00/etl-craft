@@ -12,7 +12,7 @@ from etl_craft.warehouse.connection import build_warehouse_engine, warehouse_dia
 from fixtures.cloud import DATABRICKS_VARS, SNOWFLAKE_VARS, require_variables, write_config
 from fixtures.hash_contract import golden_sql
 
-pytestmark = pytest.mark.timeout(1200)
+pytestmark = [pytest.mark.timeout(1200), pytest.mark.usefixtures("engine_actor")]
 
 
 @pytest.mark.parametrize(

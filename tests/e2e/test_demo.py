@@ -19,6 +19,7 @@ import pytest
 import yaml
 from sqlalchemy import text
 
+from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
 from etl_craft.engine.connection import engine_db
 from fixtures.demo import Demo, demos, installed_cli
 from fixtures.orchestrator import SKIPPED, SUCCESS, run_dag
@@ -60,7 +61,7 @@ def make_demo(clis, tmp_path):
 def set_parameter(demo: Demo, pipeline: str, task: str, name: str, value: str) -> None:
     engine = engine_db(demo.config)
     try:
-        with engine.begin() as conn:
+        with acting_as(SYSTEM_ACTOR), engine.begin() as conn:
             conn.execute(
                 text(
                     "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE = :v WHERE PARAMETER_NAME = :n "

@@ -157,3 +157,17 @@ use `to_json` and a versioned `schema` identifier, matching CLI `--format json` 
 Run results include `waiting=True` when a single-task command recorded nothing because
 its dependencies were not met. That call exits 23; unfinished executions exit 22. Initializing
 a run with `--init-only` retains exit 0 for orchestrator first steps.
+
+## Actor scopes and run writers
+
+`ActorKind` lives in `core.enums` and contains `USER`, `SERVICE` and `SYSTEM`; its existing
+import through `core.actor` also works. Replace the old `HUMAN` kind with `USER`, and
+`SCHEDULE`, `ORCHESTRATOR` and `WORKER` with `SERVICE`. Historical audit values remain
+unchanged. Authenticate once and use the returned identity and current role in
+`OperationContext`; library calls that write directly must use `acting_as` explicitly.
+An unset `current_actor()` raises `ConfigurationError`. Database connection reads used for
+authentication do not invent an actor.
+
+A handler receives the exact run's durable `TaskContext.writer`. SQL merge and rejection audit
+columns use this value; ordinary ETL runs retain `etl-craft`, including runs requested by users.
+The initiator remains in the action/run audit separately from the warehouse writer.

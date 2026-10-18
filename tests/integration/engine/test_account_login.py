@@ -46,7 +46,7 @@ def project(empty_engine_db, tmp_path, monkeypatch, cli_logging):
     ctx = OperationContext(db.engine, db.config, SYSTEM_ACTOR)
     admin = accounts.Account(0, "owner", AccountKind.USER, ApiRole.ADMIN, None, None, YesNo.YES)
     accounts.add_account(ctx, admin, PASSWORD, recovery=True)
-    return replace(ctx, actor=Actor("owner", ActorKind.HUMAN), role=ApiRole.ADMIN)
+    return replace(ctx, actor=Actor("owner", ActorKind.USER), role=ApiRole.ADMIN)
 
 
 def user(ctx, name="alice", subject=None):

@@ -113,6 +113,14 @@ class TriggerKind(StrEnum):
     STAND_IN = "STAND_IN"
 
 
+class ActorKind(StrEnum):
+    """The kind of account responsible for an action."""
+
+    USER = "USER"
+    SERVICE = "SERVICE"
+    SYSTEM = "SYSTEM"
+
+
 class AccountKind(StrEnum):
     """Whether a registered account represents a person or an automated caller."""
 

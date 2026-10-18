@@ -34,3 +34,8 @@ etl-craft account list                              # refused, exit 26; AUD_ACTI
 Only an administrator grants roles. See the [full role table](../../deploying/security.md#deployment-accounts)
 for maintenance and documentation permissions. Local commands and HTTP routes call the shared
 services policy; no HTTP server is needed for local commands.
+
+ETL rows use the run writer `etl-craft` in `CREATED_BY` and `UPDATED_BY`, including runs
+started by a person. Action audit rows retain the signed-in account with kind `USER` or
+`SERVICE`; automatic engine actions use `SYSTEM`. Starting `etl-craft server` requires an
+admin service token in `ETL_CRAFT_TOKEN`.

@@ -115,3 +115,21 @@ and links outside the site root are refused with 404, including directory-index 
 The [catalog](../guides/catalog.md) shows every task's SQL, table columns, lineage and run
 details. `publish-docs` serves it only to the addresses in `Docs_site.Allowed_ips`, with
 headers that keep it out of search engines; leave it unpublished where that is too much to share.
+
+## Explicit attribution and warehouse writers
+
+New audit rows record the proven account name and kind: `USER` for people, `SERVICE` for
+automation, and `SYSTEM` for the engine. Execution source remains in the run trigger; schedules
+record the server service account. Finalization, reconciliation, gate skips, automatic retries
+and local task children explicitly act as `etl-craft` (`SYSTEM`).
+
+Each run retains its warehouse writer in `AUD_PIPELINES_RUN_LOG.WRITER`. ETL writes use
+`etl-craft` in `CREATED_BY` and `UPDATED_BY`, even when a person starts the run. The warehouse
+login remains a connection credential. Migration `0035` assigns existing runs the ETL writer
+and preserves their historical actor names and kinds. Apply migrations before using the new
+version; do not edit audit history.
+
+Python callers must explicitly scope library writes with `core.actor.acting_as`;
+`current_actor()` raises `ConfigurationError` outside a scope. Unauthenticated connection reads
+remain available for sign-in, while Engine DB guards reject unscoped writes. Token metadata
+returns the registered `account_kind`; a service token never claims to be a person.

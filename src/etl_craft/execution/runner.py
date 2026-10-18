@@ -28,7 +28,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.core.actor import current_actor
+from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
 from etl_craft.core.enums import (
     SETTLED_STATUSES,
     AttemptStatus,
@@ -489,6 +489,7 @@ def _skipped(message: str, *, waiting: bool = False) -> TaskOutcome:
     return TaskOutcome(RunStatus.SKIPPED, message, waiting=waiting)
 
 
+@acting_as(SYSTEM_ACTOR)
 def _record_skipped(
     engine: Engine,
     task_id: int,

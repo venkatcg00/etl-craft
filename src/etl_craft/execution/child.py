@@ -31,7 +31,7 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig, load_config
 from etl_craft.core import log
-from etl_craft.core.actor import Actor, ActorKind, acting_as, current_actor
+from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
 from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import EtlCraftError, ExitCode
 from etl_craft.core.faults import fault_point
@@ -75,11 +75,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     identity = (int(attempt_id), owner) if attempt_id is not None and owner else None
     token = _identity.set(identity)
     try:
-        with (
-            acting_as(Actor(f"worker:{owner}", ActorKind.WORKER))
-            if identity
-            else acting_as(Actor("etl-craft", ActorKind.SYSTEM))
-        ):
+        with acting_as(SYSTEM_ACTOR):
             return _run_bound(engine, config, args)
     finally:
         _identity.reset(token)

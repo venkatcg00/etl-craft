@@ -16,6 +16,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
+from etl_craft.core.actor import SYSTEM_ACTOR
 from etl_craft.core.counts import Counts
 from etl_craft.core.errors import HandlerError
 from etl_craft.engine.repository.offsets import StoredOffset
@@ -49,6 +50,7 @@ class TaskContext:
     attempt_id: int | None = None
     owner: str | None = None
     event_files: tuple[str, ...] = ()
+    writer: str = SYSTEM_ACTOR.name
 
 
 @dataclass(frozen=True)

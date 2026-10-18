@@ -1,5 +1,6 @@
 """Real process admission and recovery across independent command invocations."""
 
+import contextvars
 import time
 from datetime import UTC, datetime, timedelta
 
@@ -189,7 +190,7 @@ def test_three_pipeline_callers_waiting_on_a_repair_admit_one_supervisor(cli_pro
             return error
 
     with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = [pool.submit(execute) for _ in range(3)]
+        futures = [pool.submit(contextvars.copy_context().run, execute) for _ in range(3)]
         try:
             waiting.wait()
             with project.engine.begin() as conn:
@@ -272,7 +273,7 @@ def test_postgres_outage_fences_the_supervisor_and_recovers(cli_project, monkeyp
         ) as admin,
         ThreadPoolExecutor(max_workers=1) as pool,
     ):
-        future = pool.submit(execute)
+        future = pool.submit(contextvars.copy_context().run, execute)
         try:
             project.wait_for("SELECT STATUS FROM AUD_TASK_ATTEMPTS", expected="RUNNING", timeout=30)
             admin.execute(

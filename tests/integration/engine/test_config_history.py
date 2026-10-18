@@ -7,13 +7,13 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
-from etl_craft.core.actor import Actor, ActorKind, acting_as
+from etl_craft.core.actor import SYSTEM_ACTOR, Actor, ActorKind, acting_as
 from etl_craft.core.time import as_utc
 from etl_craft.engine import migrations
 from fixtures.metadata import add_pipeline, add_task
 from fixtures.released_schema import install
 
-ALICE = Actor("github:alice", ActorKind.HUMAN)
+ALICE = Actor("github:alice", ActorKind.USER)
 
 
 def document(value):
@@ -57,8 +57,8 @@ def test_each_change_is_a_typed_version_and_the_view_gives_before_and_after(engi
             )
         ).all()
         assert [tuple(row)[:6] for row in versions] == [
-            ("INSERT", "github:alice", "HUMAN", "SALES", "N", "N"),
-            ("UPDATE", "github:alice", "HUMAN", "SALES", "Y", "Y"),
+            ("INSERT", "github:alice", "USER", "SALES", "N", "N"),
+            ("UPDATE", "github:alice", "USER", "SALES", "Y", "Y"),
         ]
         first, second = versions
         assert as_utc(first.valid_to) == as_utc(second.valid_from)
@@ -106,7 +106,7 @@ def test_an_upgrade_moves_the_change_log_into_the_history_tables(empty_engine_db
     for migration in migrations.migration_streams(db.engine)[0].files:
         if "0007" <= migration.version < "0021":
             migrations._apply(db.engine, migration)
-    with acting_as(ALICE), db.engine.begin() as conn:
+    with acting_as(SYSTEM_ACTOR), db.engine.begin() as conn:
         pipeline = add_pipeline(conn, "SALES")
         conn.execute(
             text("UPDATE CFG_PIPELINES SET PIPELINE_NAME = 'Sales' WHERE PIPELINE_ID = :p"),

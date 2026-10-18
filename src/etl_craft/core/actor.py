@@ -7,19 +7,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from enum import StrEnum
 
+from etl_craft.core.enums import ActorKind as ActorKind
 from etl_craft.core.errors import ConfigurationError
-
-
-class ActorKind(StrEnum):
-    """How an actor reached the engine."""
-
-    HUMAN = "HUMAN"
-    SCHEDULE = "SCHEDULE"
-    ORCHESTRATOR = "ORCHESTRATOR"
-    WORKER = "WORKER"
-    SYSTEM = "SYSTEM"
 
 
 @dataclass(frozen=True)
@@ -49,8 +39,19 @@ migration: ContextVar[str] = ContextVar("etl_craft_migration", default="")
 
 
 def current_actor() -> Actor:
-    """Return the scoped identity, or the engine's system identity for library calls."""
-    return _actor.get() or SYSTEM_ACTOR
+    """Return the explicitly scoped identity; refuse unattributed work."""
+    actor = scoped_actor()
+    if actor is None:
+        raise ConfigurationError(
+            "actor=None; expected an explicitly scoped account; "
+            "wrap the operation in core.actor.acting_as with its requesting or system account"
+        )
+    return actor
+
+
+def scoped_actor() -> Actor | None:
+    """Return the connection marker, allowing unauthenticated reads without a writer."""
+    return _actor.get()
 
 
 @contextmanager

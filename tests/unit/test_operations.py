@@ -39,7 +39,7 @@ P = "P"
 
 
 @pytest.fixture
-def ctx(tmp_path, monkeypatch):
+def ctx(tmp_path, monkeypatch, engine_actor):
     db = sqlite_engine_db(tmp_path)
     apply_schema(db.engine)
     path = tmp_path / "craft-connector.yml"
@@ -57,7 +57,7 @@ def ctx(tmp_path, monkeypatch):
     config = load_config(path)
     try:
         yield OperationContext(
-            db.engine, config, Actor("api-user", ActorKind.HUMAN), role=ApiRole.ADMIN
+            db.engine, config, Actor("api-user", ActorKind.SERVICE), role=ApiRole.ADMIN
         )
     finally:
         db.engine.dispose()
@@ -307,7 +307,7 @@ def test_nested_requests_with_different_actors_are_distinct(ctx):
         runs.initialize_run(ctx, P)
         assert current_actor() == outer
     actions = inspect.audit(ctx, P).actions
-    assert [(a.actor, a.kind) for a in actions] == [("outer", "SYSTEM"), ("api-user", "HUMAN")]
+    assert [(a.actor, a.kind) for a in actions] == [("outer", "SYSTEM"), ("api-user", "SERVICE")]
 
 
 @pytest.mark.parametrize(

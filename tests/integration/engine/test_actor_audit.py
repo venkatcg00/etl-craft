@@ -21,7 +21,7 @@ from fixtures.metadata import add_pipeline, add_pipeline_dependency, add_task
 from fixtures.released_schema import install
 from fixtures.services import POSTGRES_PASSWORD, POSTGRES_USER, require
 
-ALICE = Actor("alice", ActorKind.HUMAN)
+ALICE = Actor("alice", ActorKind.USER)
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +41,7 @@ def test_attribution_and_immutable_command_requests(engine_db):
         row = conn.execute(
             text("SELECT STARTED_BY, STARTED_BY_KIND FROM AUD_PIPELINES_RUN_LOG")
         ).one()
-        assert tuple(row) == ("alice", "HUMAN")
+        assert tuple(row) == ("alice", "USER")
         transitions.finalize_pipeline_run(conn, run, "SUCCESS")
         assert tuple(
             conn.execute(text("SELECT ENDED_BY, ENDED_BY_KIND FROM AUD_PIPELINES_RUN_LOG")).one()
@@ -65,7 +65,7 @@ def test_attribution_and_immutable_command_requests(engine_db):
         row = conn.execute(
             text("SELECT ACTOR, ACTOR_KIND, OUTCOME, ARGUMENTS FROM AUD_ACTIONS")
         ).one()
-        assert tuple(row)[:3] == ("alice", "HUMAN", "REQUESTED")
+        assert tuple(row)[:3] == ("alice", "USER", "REQUESTED")
         assert "sensitive" not in str(row[3])
     for sql in ("UPDATE AUD_ACTIONS SET OUTCOME='SUCCESS'", "DELETE FROM AUD_ACTIONS"):
         with pytest.raises(DBAPIError, match=r"immutable|append-only"), engine.begin() as conn:
@@ -104,7 +104,7 @@ def test_project_changes_record_before_after_actor_and_migration(engine_db, tmp_
             )
         ).all()
         assert len(rows) == 3
-        assert all(tuple(row)[:2] == ("alice", "HUMAN") for row in rows)
+        assert all(tuple(row)[:2] == ("alice", "USER") for row in rows)
         objects = [
             (
                 a if isinstance(a, dict) else json.loads(a),
@@ -187,7 +187,7 @@ def seeded_tables(db):
             "offset_type": "NUMBER",
             "result": "SATISFIED",
             "actor": "alice",
-            "actor_kind": "HUMAN",
+            "actor_kind": "USER",
             "host": "host",
             "command": "run",
             "arguments": "{}",
@@ -479,7 +479,7 @@ def test_cli_actor_requests_and_read_only_audit(
     capsys.readouterr()
     command("audit", "--pipeline_code", "P", "--since", "2026-01-01")
     shown = capsys.readouterr().out
-    assert actor_name in shown and "HUMAN" in shown and "REQUESTED" in shown
+    assert actor_name in shown and "SERVICE" in shown and "REQUESTED" in shown
     assert "deleted_parameter_history" in shown
     assert "unrelated_parameter_history" not in shown
     command("setup", "--print-grants")
@@ -491,7 +491,7 @@ def test_cli_actor_requests_and_read_only_audit(
             text("SELECT COMMAND, ACTOR, ACTOR_KIND FROM AUD_ACTIONS ORDER BY ACTION_ID")
         ).all()
         assert [tuple(row) for row in actions] == [
-            (name, actor_name, "HUMAN") for name in ("run", "pause", "resume", "cancel", "mark")
+            (name, actor_name, "SERVICE") for name in ("run", "pause", "resume", "cancel", "mark")
         ]
         row = conn.execute(
             text(
@@ -499,14 +499,14 @@ def test_cli_actor_requests_and_read_only_audit(
                 "FROM AUD_PIPELINES_RUN_LOG"
             )
         ).one()
-        assert tuple(row) == (actor_name, "HUMAN", actor_name, "HUMAN")
+        assert tuple(row) == (actor_name, "SERVICE", actor_name, "SERVICE")
         row = conn.execute(
             text("SELECT PAUSED_BY_KIND, RESUMED_BY_KIND FROM AUD_PIPELINE_PAUSES")
         ).one()
-        assert tuple(row) == ("HUMAN", "HUMAN")
+        assert tuple(row) == ("SERVICE", "SERVICE")
         assert set(
             conn.execute(text("SELECT REQUESTED_BY_KIND FROM AUD_RUN_INTERVENTIONS")).scalars()
-        ) == {"HUMAN"}
+        ) == {"SERVICE"}
 
     monkeypatch.setenv("ETL_CRAFT_TOKEN", "invalid")
     assert main(["--config", str(config), "run", "--pipeline_code", "P", "--init-only"]) == 3
@@ -613,7 +613,7 @@ def test_actor_stamps_survive_failed_insert_and_project_column_refresh(engine_db
         pipeline = add_pipeline(conn, "P")
         migrations.mark_packaged_migrations_applied(conn)
     migrations.apply_pending_migrations(engine_db.engine, project)
-    bob = Actor("bob", ActorKind.HUMAN)
+    bob = Actor("bob", ActorKind.USER)
     with acting_as(bob):
         with pytest.raises(DBAPIError), engine_db.engine.begin() as conn:
             add_pipeline(conn, "P")

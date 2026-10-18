@@ -11,7 +11,7 @@ from sqlalchemy import Boolean
 from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.core.actor import current_actor
+from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
 from etl_craft.core.enums import AttemptStatus
 from etl_craft.core.errors import MetadataError, StaleTransitionError
 from etl_craft.core.time import as_utc
@@ -67,6 +67,7 @@ def task_retry_policy(params: Mapping[str, str], config: ConnectorConfig) -> Ret
     return RetryPolicy(values["RETRIES"], values["RETRY_DELAY_SECONDS"], backoff)
 
 
+@acting_as(SYSTEM_ACTOR)
 def refresh_retries(
     engine: Engine, config: ConnectorConfig, pipeline_run_id: int, task_ids: Set[int]
 ) -> tuple[dict[int, datetime], set[int]]:

@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import event
 from sqlalchemy.engine import Connection, Engine
 
-from etl_craft.core.actor import current_actor, migration, purpose
+from etl_craft.core.actor import migration, purpose, scoped_actor
 
 
 def mark_connections(engine: Engine) -> None:
@@ -30,10 +30,16 @@ def mark_connections(engine: Engine) -> None:
             driver.create_function("etl_craft_exit_insert", 1, leave)
             driver.create_function("etl_craft_inserting", 1, lambda table: table in inserting)
             driver.create_function(
-                "etl_craft_actor", 0, lambda: current_actor().name, deterministic=True
+                "etl_craft_actor",
+                0,
+                lambda: actor.name if (actor := scoped_actor()) is not None else None,
+                deterministic=True,
             )
             driver.create_function(
-                "etl_craft_actor_kind", 0, lambda: current_actor().kind.value, deterministic=True
+                "etl_craft_actor_kind",
+                0,
+                lambda: actor.kind.value if (actor := scoped_actor()) is not None else None,
+                deterministic=True,
             )
             driver.create_function("etl_craft_purpose", 0, purpose.get, deterministic=True)
             driver.create_function("etl_craft_migration", 0, migration.get, deterministic=True)
@@ -53,13 +59,18 @@ def mark_connections(engine: Engine) -> None:
     else:
 
         def begun(conn: Connection) -> None:
-            actor = current_actor()
+            actor = scoped_actor()
             conn.exec_driver_sql(
                 "SELECT set_config('etl_craft.actor', %s, true) AS actor, "
                 "set_config('etl_craft.actor_kind', %s, true) AS actor_kind, "
                 "set_config('etl_craft.purpose', %s, true) AS purpose, "
                 "set_config('etl_craft.migration', %s, true) AS migration",
-                (actor.name, actor.kind.value, purpose.get(), migration.get()),
+                (
+                    "" if actor is None else actor.name,
+                    "" if actor is None else actor.kind.value,
+                    purpose.get(),
+                    migration.get(),
+                ),
             )
 
         event.listen(engine, "begin", begun)

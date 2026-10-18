@@ -353,7 +353,7 @@ def test_concurrent_collectors_publish_one_table_version(project):
     engine, config = project
 
     def record():
-        with acting_as(Actor("lineage-test", ActorKind.HUMAN)):
+        with acting_as(Actor("lineage-test", ActorKind.USER)):
             return collect(engine, config, refresh=True)
 
     results = two_at_once(record, record, at="etl_craft.engine.locks.for_engine")
@@ -552,7 +552,7 @@ def test_python_lineage_query_validates_before_collecting(project):
 
     engine, config = project
     ctx = OperationContext(
-        engine, config, Actor("lineage-test", ActorKind.HUMAN), role=ApiRole.ADMIN
+        engine, config, Actor("lineage-test", ActorKind.USER), role=ApiRole.ADMIN
     )
     with pytest.raises(UsageError, match="mutually exclusive"):
         trace_lineage(ctx, LineageQuery(as_of="2026-10-13T08:00:00Z", version=1))
