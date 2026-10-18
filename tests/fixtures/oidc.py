@@ -2,6 +2,7 @@
 
 import base64
 import json
+import ssl
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -75,6 +76,7 @@ def issuer(tmp_path, monkeypatch):
             pass
 
     server = ThreadingHTTPServer(("localhost", 0), Handler)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     server.socket = context.wrap_socket(server.socket, server_side=True)
     address = f"https://localhost:{server.server_port}"
     monkeypatch.setenv("SSL_CERT_FILE", str(certificate))
