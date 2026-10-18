@@ -38,6 +38,7 @@ from etl_craft.execution.reruns import force_task, rerun_task
 from etl_craft.execution.run_start import init_pipeline_run
 from etl_craft.execution.run_types import RunHooks
 from etl_craft.execution.runner import run_task
+from fixtures.auth import service_token
 from fixtures.metadata import (
     add_dependency,
     add_pipeline,
@@ -503,7 +504,8 @@ def test_what_mark_and_cancel_refuse(config, pipeline):
     assert interventions(engine)[0][:3] == (run_id, "broken", "MARK")
 
 
-def test_the_commands(config, pipeline, capsys, monkeypatch):
+def test_the_commands(config, pipeline, capsys, monkeypatch, engine_db):
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(engine_db.engine))
     engine, _ = pipeline
     monkeypatch.chdir(config.project_dir)
     run_id = run_pipeline(engine, config, "P", child=CHILD).pipeline_run_id
@@ -681,7 +683,8 @@ def test_a_rerun_runs_a_task_and_what_follows_it_again(config, pipeline):
         )
 
 
-def test_the_run_options(config, pipeline, capsys, monkeypatch):
+def test_the_run_options(config, pipeline, capsys, monkeypatch, engine_db):
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(engine_db.engine))
     monkeypatch.chdir(config.project_dir)
     for argv, message in (
         (["--rerun"], "apply to one task: pass --task_code"),
@@ -810,7 +813,8 @@ def test_a_run_skipped_on_purpose_is_recorded_and_seen_downstream(config, pipeli
     assert "upstream pipeline P (SUCCESS)" in downstream.message
 
 
-def test_the_pause_and_skip_commands(config, pipeline, capsys, monkeypatch):
+def test_the_pause_and_skip_commands(config, pipeline, capsys, monkeypatch, engine_db):
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(engine_db.engine))
     monkeypatch.chdir(config.project_dir)
     assert cli_main(["pause", "--pipeline_code", "P", "--reason", "hold"]) == ExitCode.SUCCESS
     assert capsys.readouterr().out.startswith("P: paused;")
@@ -992,6 +996,7 @@ def test_what_a_backfill_refuses(config, pipeline):
 
 def test_the_run_date_and_backfill_options(config, engine_db, capsys, monkeypatch):
     # A pipeline with no tasks: the options are what is tested here.
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(engine_db.engine))
     with engine_db.engine.begin() as conn:
         add_pipeline(conn, "P")
     monkeypatch.chdir(config.project_dir)

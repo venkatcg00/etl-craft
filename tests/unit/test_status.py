@@ -19,10 +19,9 @@ from etl_craft.services.operations.status import (
     pipeline_status,
 )
 from unit.test_operations import ctx as ctx
-from unit.test_operations import restore_logger as restore_logger
 from unit.test_operations import seed
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("cli_logging")]
 NOW = datetime(2026, 10, 9, tzinfo=UTC)
 
 
@@ -130,7 +129,10 @@ def test_retry_due_and_settled_state_take_precedence(snapshot):
     assert explain(captured).state == "success"
 
 
-def test_optional_command_configuration_is_built_and_runs(capsys):
+def test_optional_command_configuration_is_built_and_runs(capsys, monkeypatch):
+    from contextlib import nullcontext
+
+    monkeypatch.setattr("etl_craft.cli.access_context", lambda args: nullcontext())
     command = Command("plain", "No command options.", run=lambda args, out: 0)
     assert build_parser([command]).parse_args(["plain"]).handler is command.run
     assert main(["plain"], commands=[command]) == 0

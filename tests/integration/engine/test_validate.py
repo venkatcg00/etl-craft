@@ -14,6 +14,7 @@ from etl_craft.core.enums import Mode
 from etl_craft.core.errors import ExitCode, MetadataError
 from etl_craft.services.doctor import Status
 from etl_craft.services.validate import validate
+from fixtures.auth import service_token
 from fixtures.metadata import (
     add_dependency,
     add_pipeline,
@@ -37,6 +38,7 @@ def restore_logger():
 
 @pytest.fixture
 def project(engine_db, tmp_path, monkeypatch):
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(engine_db.engine))
     """A project with a DuckDB warehouse, email, a SQL file and an ingestion script."""
     profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"

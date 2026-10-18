@@ -1,6 +1,7 @@
 """The optional delivery example and a warehouse event, run from the installed wheel."""
 
 import json
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -10,6 +11,7 @@ import pytest
 import yaml
 
 from fixtures.demo import DEMO, installed_cli
+from fixtures.terminal import login_answers, setup_answers, terminal_run
 
 pytestmark = [pytest.mark.e2e_uv, pytest.mark.timeout(180)]
 
@@ -60,9 +62,19 @@ def test_installed_event_pipeline_records_rows_and_consumes_delivery(tmp_path):
     inbox.mkdir()
     delivery = inbox / "batch-001.csv"
     delivery.write_text("id\n1\n2\n")
-    for args in (("setup",), ("migrate",), ("run", "--pipeline_code", "FILE_DELIVERY")):
+    environment = {**os.environ, "XDG_CONFIG_HOME": str(tmp_path / "person")}
+    for verb, answers in (("setup", setup_answers()), ("login", login_answers())):
+        done = terminal_run([str(cli), verb], cwd=project, env=environment, answers=answers)
+        assert done.returncode == 0, done.stdout
+    for args in (("migrate",), ("run", "--pipeline_code", "FILE_DELIVERY")):
         done = subprocess.run(
-            [str(cli), *args], cwd=project, capture_output=True, text=True, timeout=60, check=False
+            [str(cli), *args],
+            cwd=project,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
         )
         assert done.returncode == 0, (args, done.stdout, done.stderr)
     with sqlite3.connect(project / "engine.db") as conn:

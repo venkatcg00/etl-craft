@@ -7,6 +7,7 @@ import pytest
 from etl_craft.core.errors import ConfigurationError, HandlerError
 from etl_craft.services.upgrade_targets import upgrade_targets
 from etl_craft.warehouse.connection import warehouse_dialect
+from fixtures.auth import service_token
 from fixtures.sql_appends import (
     check_append_retries,
     check_legacy_upgrade,
@@ -122,7 +123,8 @@ def test_upgrade_deduplicates_qualified_targets_and_refuses_format_conflicts(sql
     assert "task_run_id" not in w.columns("shared_load")
 
 
-def test_upgrade_command_validates_then_adds_and_records_requests(sql_world, capsys):
+def test_upgrade_command_validates_then_adds_and_records_requests(sql_world, capsys, monkeypatch):
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(sql_world.engine_db))
     import yaml
 
     from etl_craft.cli import main

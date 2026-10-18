@@ -30,7 +30,8 @@ port 51025), from this folder:
 
 ```bash
 python prepare.py warehouse                   # the schemas the demo writes, in warehouse.duckdb
-etl-craft setup                               # checks every connection, creates the Engine DB
+etl-craft setup                               # checks connections and prompts for the first admin
+etl-craft login                               # stores your private session on this server
 python prepare.py metadata                    # the pipelines, as CFG_ rows, in engine.db
 etl-craft validate
 etl-craft run --pipeline_code CLIENT_ALPHA

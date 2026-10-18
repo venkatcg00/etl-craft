@@ -1,9 +1,7 @@
 """A local SMTP relay with a test certificate, recipient refusals and captured messages."""
 
-import shutil
 import socket
 import ssl
-import subprocess
 import threading
 from types import SimpleNamespace
 
@@ -15,40 +13,9 @@ def tls_relay(tmp_path, monkeypatch):
     # SMTP resolves the client's EHLO name after connecting. A fixed name keeps DNS lookup
     # delays outside this relay's idle timeout.
     monkeypatch.setattr(socket, "getfqdn", lambda name="": "smtp-client.test")
-    openssl = shutil.which("openssl")
-    if openssl is None:
-        pytest.skip("the local TLS relay needs openssl")
-    certificate, key = tmp_path / "relay.crt", tmp_path / "relay.key"
-    configuration = tmp_path / "relay.cnf"
-    configuration.write_text(
-        "[req]\nprompt = no\ndistinguished_name = dn\nx509_extensions = extensions\n"
-        "[dn]\nCN = localhost\n[extensions]\nsubjectAltName = DNS:localhost\n"
-        "basicConstraints = critical,CA:TRUE\nextendedKeyUsage = serverAuth\n",
-        encoding="utf-8",
-    )
-    subprocess.run(
-        [
-            openssl,
-            "req",
-            "-x509",
-            "-newkey",
-            "rsa:2048",
-            "-nodes",
-            "-days",
-            "1",
-            "-sha256",
-            "-config",
-            str(configuration),
-            "-keyout",
-            str(key),
-            "-out",
-            str(certificate),
-        ],
-        check=True,
-        capture_output=True,
-    )
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.load_cert_chain(certificate, key)
+    from fixtures.tls import localhost_tls
+
+    context, certificate = localhost_tls(tmp_path)
     servers = []
 
     def start(mode="starttls", refused=()):

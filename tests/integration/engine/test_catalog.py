@@ -16,6 +16,7 @@ from etl_craft.execution.interventions import mark_task
 from etl_craft.services.catalog import build_catalog
 from etl_craft.services.catalog_graph import lineage_drawing
 from etl_craft.services.catalog_site import MARKER, table_url, write_site
+from fixtures.auth import service_token
 from fixtures.metadata import (
     add_dependency,
     add_pipeline,
@@ -39,6 +40,7 @@ def restore_logger():
 
 @pytest.fixture
 def project(engine_db, tmp_path, monkeypatch):
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(engine_db.engine))
     """crm → raw.orders (script) → staging.orders → sales.orders → mart.daily, plus gaps."""
     profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"

@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime
 import pytest
 from sqlalchemy import text
 
+from etl_craft.config import AuthConfig
 from etl_craft.core.actor import SYSTEM_ACTOR
 from etl_craft.core.cron import timezone
 from etl_craft.core.errors import StaleTransitionError
@@ -192,7 +193,11 @@ def test_validation_reports_bad_cron_and_zone_and_remote_yaml_localizes_date(cli
             )
         )
     with p.engine.connect() as conn:
-        dag = pipeline_dag(conn, replace(p.config, mode="remote"), "P")
+        dag = pipeline_dag(
+            conn,
+            replace(p.config, mode="remote", auth=AuthConfig(airflow_connection_id="etl_craft")),
+            "P",
+        )
     assert dag["timezone"] == "America/New_York"
     assert dag["start_date"] == "2026-01-01"
     assert (
@@ -209,9 +214,10 @@ def test_validation_reports_bad_cron_and_zone_and_remote_yaml_localizes_date(cli
     instant = datetime(2026, 1, 2, 2, tzinfo=UTC)
     interval = SimpleNamespace(in_timezone=lambda name: instant.astimezone(timezone(name)))
     rendered = env.from_string(dag["tasks"]["__init__"]["bash_command"]).render(
-        data_interval_end=interval, run_id="one"
+        data_interval_end=interval, run_id="one", dag_run=SimpleNamespace()
     )
-    assert split(rendered)[-1] == "2026-01-01"
+    command = split(rendered)
+    assert command[command.index("--run-date") + 1] == "2026-01-01"
 
 
 def test_a_queued_scheduled_run_can_be_cancelled_before_admission(cli_project):

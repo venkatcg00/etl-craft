@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import getpass
-import os
-import socket
 import unicodedata
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -40,8 +37,8 @@ class Actor:
             or any(unicodedata.category(c).startswith("C") for c in self.name)
         ):
             raise ConfigurationError(
-                "ETL_CRAFT_ACTOR must contain a non-empty name of at most 128 characters "
-                "without control characters; set it to the person, token or worker responsible"
+                f"actor name={self.name!r}; expected a non-empty name of at most 128 characters "
+                "without control characters; use a valid registered account name"
             )
 
 
@@ -49,28 +46,6 @@ SYSTEM_ACTOR = Actor("etl-craft", ActorKind.SYSTEM)
 _actor: ContextVar[Actor | None] = ContextVar("etl_craft_actor", default=None)
 purpose: ContextVar[str] = ContextVar("etl_craft_purpose", default="")
 migration: ContextVar[str] = ContextVar("etl_craft_migration", default="")
-
-
-def resolve_actor() -> Actor:
-    """Resolve the command's identity from its environment or the local user and host."""
-    name = os.environ.get("ETL_CRAFT_ACTOR")
-    if name is None:
-        try:
-            name = f"{getpass.getuser()}@{socket.gethostname()}"
-        except (KeyError, OSError) as error:
-            raise ConfigurationError(
-                "cannot resolve ETL_CRAFT_ACTOR from the local user and host; "
-                "set ETL_CRAFT_ACTOR to the person, token or worker responsible"
-            ) from error
-    written_kind = os.environ.get("ETL_CRAFT_ACTOR_KIND", ActorKind.HUMAN)
-    try:
-        kind = ActorKind(written_kind)
-    except ValueError:
-        raise ConfigurationError(
-            f"ETL_CRAFT_ACTOR_KIND={written_kind!r}; expected one of "
-            f"{', '.join(ActorKind)}; set the source of the actor"
-        ) from None
-    return Actor(name, kind)
 
 
 def current_actor() -> Actor:

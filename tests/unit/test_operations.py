@@ -1,7 +1,6 @@
 """Service contracts on SQLite without warehouses, network services or task subprocesses."""
 
 import json
-import logging
 from dataclasses import FrozenInstanceError, replace
 from datetime import UTC, date, datetime, timedelta
 
@@ -31,20 +30,12 @@ from etl_craft.services.operations import (
 from etl_craft.services.operations.models import GraphView
 from etl_craft.services.operations.requests import RunRequest
 from etl_craft.services.operations.snapshots import run_view, task_run_view
+from fixtures.auth import service_token
 from fixtures.engine_db import apply_schema, sqlite_engine_db
 from fixtures.metadata import add_pipeline, add_task, start_run
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("cli_logging")]
 P = "P"
-
-
-@pytest.fixture(autouse=True)
-def restore_logger():
-    logger = logging.getLogger("etl_craft")
-    handlers, level = list(logger.handlers), logger.level
-    yield
-    logger.handlers[:] = handlers
-    logger.setLevel(level)
 
 
 @pytest.fixture
@@ -62,8 +53,7 @@ def ctx(tmp_path, monkeypatch):
             sort_keys=False,
         )
     )
-    monkeypatch.setenv("ETL_CRAFT_ACTOR", "api-user")
-    monkeypatch.setenv("ETL_CRAFT_ACTOR_KIND", "HUMAN")
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(db.engine, "api-user"))
     config = load_config(path)
     try:
         yield OperationContext(db.engine, config, Actor("api-user", ActorKind.HUMAN))

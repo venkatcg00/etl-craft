@@ -23,6 +23,12 @@ logger = logging.getLogger(__name__)
 
 MUTATING_COMMANDS = frozenset(
     {
+        "login",
+        "logout",
+        "account add",
+        "account set-role",
+        "account disable",
+        "account reset-password",
         "token create",
         "token revoke",
         "run",

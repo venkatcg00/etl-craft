@@ -15,6 +15,7 @@ from etl_craft.core.enums import CloningScope
 from etl_craft.core.errors import ExitCode
 from etl_craft.services.cloning import cloning_problem
 from etl_craft.services.doctor import Status, run_checks
+from fixtures.auth import service_token
 from fixtures.metadata import add_pipeline
 
 
@@ -49,6 +50,7 @@ def write_config(engine_db, root, cloning):
 
 @pytest.fixture
 def project(engine_db, tmp_path, monkeypatch):
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(engine_db.engine))
     root = (engine_db.config.config_path or tmp_path / "craft-connector.yml").parent
     monkeypatch.chdir(root)
     monkeypatch.delenv("ETL_CRAFT_CONFIG", raising=False)

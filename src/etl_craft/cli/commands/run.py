@@ -14,7 +14,7 @@ from etl_craft.cli.commands.common import (
 )
 from etl_craft.cli.output import Output
 from etl_craft.core import interrupts
-from etl_craft.core.enums import RunStatus
+from etl_craft.core.enums import Mode, RunStatus
 from etl_craft.core.errors import ExitCode
 from etl_craft.engine.runlog import RunSelector
 from etl_craft.services.operations import runs
@@ -81,31 +81,32 @@ def _configure(parser: argparse.ArgumentParser) -> None:
         "runs; local mode only, with --reason",
     )
     parser.add_argument(
-        "--reason", help="why, for --ignore-dependencies, --rerun, --skip or --backfill"
+        "--reason", help="remote action context, or why a local intervention is needed"
     )
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    request = RunRequest(
-        args.pipeline_code,
-        selector=RunSelector(args.run_id, args.run_key),
-        task_code=args.task_code,
-        init_only=args.init_only,
-        finalize_only=args.finalize_only,
-        force=args.force,
-        ignore_dependencies=args.ignore_dependencies,
-        rerun=args.rerun,
-        with_downstream=args.with_downstream,
-        skip=args.skip,
-        run_date=args.run_date,
-        backfill=args.backfill,
-        reason=args.reason,
-    )
     # Ctrl-C, SIGTERM and SIGHUP stop the run at its next safe point: its task processes are
     # stopped and their attempts recorded. SIGKILL cannot be caught: its task processes are left
     # running, their rows IN-PROGRESS until their leases expire and reconciliation releases them.
     stopping = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
     with command_context(args) as ctx, interrupts.deferred(*stopping):
+        # Remote reasons describe the requester; local reasons justify an intervention.
+        request = RunRequest(
+            args.pipeline_code,
+            selector=RunSelector(args.run_id, args.run_key),
+            task_code=args.task_code,
+            init_only=args.init_only,
+            finalize_only=args.finalize_only,
+            force=args.force,
+            ignore_dependencies=args.ignore_dependencies,
+            rerun=args.rerun,
+            with_downstream=args.with_downstream,
+            skip=args.skip,
+            run_date=args.run_date,
+            backfill=args.backfill,
+            reason=None if ctx.config.mode == Mode.REMOTE else args.reason,
+        )
         done = runs.execute_run(ctx, request)
     out.result(done, args.output_format)
     if done.status in (RunStatus.FAILED, RunStatus.CANCELLED):

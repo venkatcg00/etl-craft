@@ -21,6 +21,7 @@ import pytest
 
 from fixtures.demo import DEMO, REPO, installed_cli
 from fixtures.services import require
+from fixtures.terminal import login_answers, setup_answers, terminal_run
 
 pytestmark = [pytest.mark.e2e_pip, pytest.mark.timeout(1800)]
 
@@ -48,7 +49,7 @@ def test_the_page_runs_the_whole_demo():
     assert commands()[:3] == [
         "python prepare.py warehouse",
         "etl-craft setup",
-        "python prepare.py metadata",
+        "etl-craft login",
     ]
     assert "etl-craft generate-docs" in commands()
 
@@ -68,19 +69,29 @@ def test_the_quick_start_runs_as_written(tmp_path):
             "engine.db*", "warehouse.duckdb*", "logs", "catalog", ".flaky-has-failed", "migrations"
         ),
     )
+    environment = {**os.environ, "XDG_CONFIG_HOME": str(tmp_path / "person")}
     printed = []
     for line in commands():
         command, _, comment = line.partition("#")
         argv = command.split()
         program = cli if argv[0] == "etl-craft" else python
-        done = subprocess.run(
-            [str(program), *argv[1:]],
-            cwd=project,
-            capture_output=True,
-            text=True,
-            timeout=900,
-            check=False,
-        )
+        if argv[:2] in (["etl-craft", "setup"], ["etl-craft", "login"]):
+            done = terminal_run(
+                [str(program), *argv[1:]],
+                cwd=project,
+                env=environment,
+                answers=setup_answers() if argv[1] == "setup" else login_answers(),
+            )
+        else:
+            done = subprocess.run(
+                [str(program), *argv[1:]],
+                cwd=project,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=900,
+                check=False,
+            )
         expected = 1 if "fails" in comment else 0
         assert done.returncode == expected, (line, done.stdout[-3000:], done.stderr[-3000:])
         printed.append(done.stdout)
@@ -99,6 +110,7 @@ def test_the_quick_start_runs_as_written(tmp_path):
     repeated = subprocess.run(
         [str(python), "prepare.py", "metadata"],
         cwd=project,
+        env=environment,
         capture_output=True,
         text=True,
         timeout=60,
@@ -114,6 +126,7 @@ def test_the_quick_start_runs_as_written(tmp_path):
     refused = subprocess.run(
         [str(python), "prepare.py", "metadata"],
         cwd=project,
+        env=environment,
         capture_output=True,
         text=True,
         timeout=60,

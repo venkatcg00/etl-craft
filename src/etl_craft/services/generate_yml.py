@@ -359,7 +359,7 @@ def _remote_pipeline_dag(
     }
     for step in tasks.values():
         if "bash_command" in step:
-            step["env"] = _orchestrator_env()
+            step["env"] = _orchestrator_env(config)
             step["append_env"] = True
     return _dag_settings(config, detail, tasks)
 
@@ -371,7 +371,16 @@ def _remote_command(code: str, *arguments: str, zone: str = "UTC") -> str:
         if zone == "UTC"
         else f"{{{{ data_interval_end.in_timezone({json.dumps(zone)}) | ds }}}}"
     )
-    return _command(code, *arguments, "--run-key", RUN_KEY_TEMPLATE, "--run-date", logical_date)
+    return _command(
+        code,
+        *arguments,
+        "--run-key",
+        RUN_KEY_TEMPLATE,
+        "--run-date",
+        logical_date,
+        "--reason",
+        'Airflow user: {{ dag_run.triggering_user_name | default("scheduler", true) | urlencode }}',
+    )
 
 
 _CONSTRAINT = re.compile(r"(~=|==|!=|<=|>=|<|>)\s*([0-9]+(?:\.[0-9]+)*)(?:\.\*)?")
@@ -406,14 +415,14 @@ def require_airflow_run_templates(version_range: str) -> None:
         )
 
 
-def _orchestrator_env() -> dict[str, str]:
-    return {
-        "ETL_CRAFT_ACTOR": (
-            "airflow:{{ dag_run.run_id }}:"
-            "{{ dag_run.triggering_user_name | default('scheduler', true) }}"
-        ),
-        "ETL_CRAFT_ACTOR_KIND": "ORCHESTRATOR",
-    }
+def _orchestrator_env(config: ConnectorConfig) -> dict[str, str]:
+    connection = config.auth.airflow_connection_id
+    if not connection:
+        raise ConfigurationError(
+            "Auth.Airflow_connection_id is missing; name the Airflow connection whose password "
+            "holds the etl-craft service account token before generating remote DAGs"
+        )
+    return {"ETL_CRAFT_TOKEN": "{{ conn[" + json.dumps(connection) + "].password }}"}
 
 
 def _sensor(
@@ -505,7 +514,7 @@ def docs_dag(config: ConnectorConfig) -> dict[str, Any]:
             DOCS_TASK: {
                 "bash_command": join(["etl-craft", "generate-docs"]),
                 **(
-                    {"env": _orchestrator_env(), "append_env": True}
+                    {"env": _orchestrator_env(config), "append_env": True}
                     if config.mode == Mode.REMOTE
                     else {}
                 ),

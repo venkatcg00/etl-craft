@@ -12,6 +12,7 @@ from etl_craft.engine.repository.tasks import fetch_task_parameters
 from etl_craft.handlers import sql
 from etl_craft.services.rehash import rehash
 from etl_craft.warehouse.connection import warehouse_dialect
+from fixtures.auth import service_token
 from fixtures.hash_contract import golden_sql
 
 
@@ -124,7 +125,8 @@ def test_missing_or_ambiguous_rehash_contract_is_refused(sql_world):
         rehash(w.engine_db, w.config, f"{w.schema}.ambiguous")
 
 
-def test_rehash_command_validates_dry_run_then_upgrades(sql_world, capsys):
+def test_rehash_command_validates_dry_run_then_upgrades(sql_world, capsys, monkeypatch):
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(sql_world.engine_db))
     import yaml
 
     from etl_craft.cli import main

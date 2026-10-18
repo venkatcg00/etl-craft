@@ -7,25 +7,33 @@ dataclasses, and never print or dispose the caller's engine.
 ## Calling from Python
 
 Use an initialized, upgraded [Engine DB](../deploying/engine-db.md). The caller owns its engine
-and supplies the acting identity:
+and authenticates its service token before supplying the acting identity:
 
 ```python
 import json
+import os
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
 from etl_craft.config import load_config
-from etl_craft.core.actor import resolve_actor
+from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
+from etl_craft.core.errors import ConfigurationError
 from etl_craft.engine.connection import check_reachable, engine_db
 from etl_craft.engine.runlog import RunSelector
 from etl_craft.services.operations import OperationContext, to_json
-from etl_craft.services.operations import runs
+from etl_craft.services.operations import runs, tokens
 
 config = load_config(Path("craft-connector.yml"))
 engine = engine_db(config)
 try:
     check_reachable(engine, config.engine.schema)
-    ctx = OperationContext(engine, config, resolve_actor())
+    ctx = OperationContext(engine, config, SYSTEM_ACTOR)
+    with acting_as(SYSTEM_ACTOR):
+        identity = tokens.authenticate(ctx, os.environ["ETL_CRAFT_TOKEN"])
+    if identity is None:
+        raise ConfigurationError("ETL_CRAFT_TOKEN is invalid; obtain a service token from an admin")
+    ctx = replace(ctx, actor=identity.actor, role=identity.role)
     done = runs.initialize_run(
         ctx,
         "SALES",
