@@ -11,10 +11,12 @@ from etl_craft.cli.commands.common import (
     configure_run_selector,
 )
 from etl_craft.cli.output import Output
+from etl_craft.cli.remote import ServerClient, api_path, selector_query
 from etl_craft.core.enums import MARKABLE_STATUSES
-from etl_craft.core.errors import ExitCode, UsageError
+from etl_craft.core.errors import ExitCode
 from etl_craft.engine.runlog import RunSelector
 from etl_craft.services.operations import runs
+from etl_craft.services.operations.models import OperationResult
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -46,10 +48,6 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    if args.stale and (not args.task_code or args.new_run):
-        raise UsageError("--stale marks one task: pass --task_code, without --new-run")
-    if args.new_run and (args.run_id is not None or args.run_key is not None):
-        raise UsageError("--new-run creates a stand-in run; do not pass a run selector")
     with command_context(args) as ctx:
         done = runs.mark(
             ctx,
@@ -67,9 +65,30 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     return ExitCode.SUCCESS
 
 
+def _remote(args: argparse.Namespace, out: Output, server: ServerClient) -> int:
+    done = server.call(
+        "POST",
+        api_path("pipelines", args.pipeline_code, "mark"),
+        OperationResult,
+        body={
+            "reason": args.reason,
+            "task_code": args.task_code,
+            "status": args.status,
+            "watermark": args.watermark,
+            "rows": args.rows,
+            "stale": args.stale,
+            "new_run": args.new_run,
+            **selector_query(args),
+        },
+    )
+    out.result(done, args.output_format)
+    return ExitCode.SUCCESS
+
+
 COMMAND = Command(
     name="mark",
     help="Mark a status, record a stand-in run or reset a SQL watermark; local mode.",
     configure=_configure,
     run=_run,
+    remote=_remote,
 )

@@ -22,6 +22,7 @@ from etl_craft.services.operations import (
     to_json,
     tokens,
 )
+from etl_craft.services.operations.models import HistoryQuery
 from etl_craft.services.operations.status import explain_task
 from fixtures.metadata import add_pipeline, add_task, start_run
 
@@ -58,7 +59,9 @@ def test_read_routes_require_token_and_share_cli_documents(api, role):
         "/api/v1/health": {"schema": "etl-craft/health/1", "status": "ok"},
         "/api/v1/pipelines": to_json(inspect.list_pipelines(ctx)),
         "/api/v1/pipelines/P": to_json(api_reads.get_pipeline(ctx, "P")),
-        "/api/v1/pipelines/P/runs": to_json(api_reads.get_runs(ctx, "P")),
+        "/api/v1/pipelines/P/runs": to_json(
+            inspect.run_history(ctx, "P", HistoryQuery(all_runs=True))
+        ),
         f"/api/v1/runs/{run}": to_json(api_reads.get_run_status(ctx, run).run),
         f"/api/v1/runs/{run}/tasks": to_json(inspect.pipeline_steps(ctx, "P")),
         f"/api/v1/runs/{run}/tasks/T/explain": to_json(explain_task(ctx, "P", "T")),
@@ -310,10 +313,10 @@ def test_run_history_cursor_is_bounded_and_exact(api):
         second = start_run(conn, pipeline)
     h = headers(creds["viewer"])
     first = client.get("/api/v1/pipelines/P/runs?limit=1", headers=h).json()
-    assert first["runs"][0]["pipeline_run_id"] == second
+    assert first["entries"][0]["pipeline_run_id"] == second
     assert first["before"] == second
     last = client.get(f"/api/v1/pipelines/P/runs?limit=1&before={second}", headers=h).json()
-    assert last["runs"][0]["pipeline_run_id"] == run
+    assert last["entries"][0]["pipeline_run_id"] == run
     assert last["before"] is None
 
 

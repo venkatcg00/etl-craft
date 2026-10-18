@@ -55,6 +55,10 @@ rg -n --hidden -g '!.git' -g '!.venv' -g '!site' -g '!dist' -g '!docs/developmen
   -g '!CHANGELOG.md' -g '!release/evidence/**' -e 'old_name|OldClass|old_setting' .
 ```
 
+When a shared helper changes behaviour rather than name (it now raises, refuses or needs a scope
+it did not), search `scripts/`, `tests/fixtures/` and `tests/e2e/` for callers that relied on the
+old behaviour: the CI-only suites are the first to run them.
+
 `examples/demo/` is the project the installed-wheel demos copy. The local gate never runs
 `tests/acceptance/cloud/`: search it too for the behaviour you change, and run the cloud tests
 that use it (step 5).

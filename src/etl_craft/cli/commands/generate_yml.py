@@ -5,10 +5,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from etl_craft.cli.commands.common import Command, connect_engine_db, load_command_config
+from etl_craft.cli.commands.common import Command, command_context
 from etl_craft.cli.output import Output
 from etl_craft.core.errors import ExitCode
-from etl_craft.services.generate_yml import docs_dag, global_dag, pipeline_dag, to_yaml
+from etl_craft.services.operations import documents
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -35,23 +35,14 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    config = load_command_config(args)
-    if args.docs:
-        dag = docs_dag(config)
-    else:
-        engine = connect_engine_db(config)
-        try:
-            with engine.connect() as conn:
-                dag = (
-                    global_dag(conn, config)
-                    if args.global_dag
-                    else pipeline_dag(
-                        conn, config, args.pipeline_code, airflow_version=args.airflow_version
-                    )
-                )
-        finally:
-            engine.dispose()
-    text = to_yaml(dag, config.mode)
+    with command_context(args) as ctx:
+        text = documents.dag_yaml(
+            ctx,
+            pipeline_code=args.pipeline_code,
+            global_dag_file=args.global_dag,
+            docs=args.docs,
+            airflow_version=args.airflow_version,
+        )
     if args.output is None:
         out.stdout.write(text)
         return ExitCode.SUCCESS

@@ -60,20 +60,20 @@ def test_sessions_expire_revoke_and_follow_current_account_roles(project):
     with pytest.raises(UsageError, match="sign-in refused"):
         sessions.sign_in(ctx, "alice", "wrong")
     created = sessions.sign_in(ctx, "alice", PASSWORD)
-    assert tokens.authenticate(ctx, created.token).name == "alice"
+    assert tokens.authenticate(ctx, created.access_token).name == "alice"
     assert created.metadata.expires_at <= datetime.now(UTC) + timedelta(hours=12)
     accounts.set_role(ctx, "alice", ApiRole.OPERATOR)
-    assert tokens.authenticate(ctx, created.token).role == ApiRole.OPERATOR
+    assert tokens.authenticate(ctx, created.access_token).role == ApiRole.OPERATOR
     accounts.reset_password(ctx, "alice", "new password for alice")
-    assert tokens.authenticate(ctx, created.token) is None
+    assert tokens.authenticate(ctx, created.access_token) is None
     with pytest.raises(UsageError):
         sessions.sign_in(ctx, "alice", PASSWORD)
     other = sessions.sign_in(ctx, "alice", "new password for alice")
-    sessions.sign_out(ctx, other.token)
-    assert tokens.authenticate(ctx, other.token) is None
+    sessions.sign_out(ctx, other.access_token)
+    assert tokens.authenticate(ctx, other.access_token) is None
     last = sessions.sign_in(ctx, "alice", "new password for alice")
     accounts.disable(ctx, "alice")
-    assert tokens.authenticate(ctx, last.token) is None
+    assert tokens.authenticate(ctx, last.access_token) is None
     with pytest.raises(UsageError):
         sessions.sign_in(ctx, "alice", "new password for alice")
     assert any(
@@ -88,7 +88,7 @@ def test_sso_requires_a_registered_active_user(project):
         sessions.sign_in_subject(ctx, "external-id")
     user(ctx, subject="external-id")
     session = sessions.sign_in_subject(ctx, "external-id")
-    assert tokens.authenticate(ctx, session.token).name == "alice"
+    assert tokens.authenticate(ctx, session.access_token).name == "alice"
     accounts.disable(ctx, "alice")
     with pytest.raises(UsageError, match="no active registered"):
         sessions.sign_in_subject(ctx, "external-id")
@@ -145,7 +145,7 @@ def test_session_expiry_is_enforced_on_the_next_command(project, capsys):
     ctx = project
     session = sessions.sign_in(ctx, "owner", PASSWORD)
     credentials.store_session(
-        credentials.database_key(ctx.engine, ctx.config.engine.schema), session.token
+        credentials.database_key(ctx.engine, ctx.config.engine.schema), session.access_token
     )
     from etl_craft.core.actor import acting_as
 
@@ -186,7 +186,7 @@ def test_account_cli_and_local_recovery(project, monkeypatch, capsys):
     assert accounts.has_admin(ctx.engine)
     assert tokens.authenticate(ctx, service.token) is None
     session = sessions.sign_in(ctx, "recovery-owner", PASSWORD)
-    assert tokens.authenticate(ctx, session.token).role == ApiRole.ADMIN
+    assert tokens.authenticate(ctx, session.access_token).role == ApiRole.ADMIN
     from fastapi.testclient import TestClient
 
     from etl_craft.api.app import create_app
@@ -203,7 +203,7 @@ def test_password_reset_and_sign_in_cannot_escape_revocation(project):
 
     def login():
         try:
-            return sessions.sign_in(ctx, "alice", PASSWORD).token
+            return sessions.sign_in(ctx, "alice", PASSWORD).access_token
         except UsageError:
             return None
 
@@ -295,10 +295,10 @@ def test_user_sessions_and_service_credentials_keep_their_boundaries(project):
                 "WHERE COMMAND='login' ORDER BY ACTION_ID"
             )
         ).all()
-    assert session.token not in hashes
+    assert session.access_token not in hashes
     assert all(len(digest) == 64 for digest in hashes)
     assert recorded[-1].actor == "alice"
-    assert PASSWORD not in str(recorded) and session.token not in str(recorded)
+    assert PASSWORD not in str(recorded) and session.access_token not in str(recorded)
 
 
 def test_cli_token_administration_cannot_escalate_a_viewer(project, monkeypatch, capsys):
@@ -357,3 +357,21 @@ def test_remote_requester_reason_is_audited_without_an_intervention(project, mon
             conn.execute(text("SELECT COUNT(*) AS count FROM AUD_RUN_INTERVENTIONS")).scalar_one()
             == 0
         )
+
+
+def test_a_refused_password_costs_one_check_whether_or_not_the_account_exists(project, monkeypatch):
+    ctx = project
+    user(ctx, "sso-only", subject="external-id")
+    tokens.create_token(ctx, "robot", ApiRole.VIEWER)
+    checks = []
+    real = sessions.verify_password
+    monkeypatch.setattr(
+        sessions,
+        "verify_password",
+        lambda password, encoded: checks.append(encoded) or real(password, encoded),
+    )
+    for name in ("nobody", "robot", "sso-only", "owner"):
+        with pytest.raises(UsageError, match="sign-in refused"):
+            sessions.sign_in(ctx, name, "not the right password")
+    assert len(checks) == 4
+    assert checks[:3] == [sessions.DECOY] * 3 and checks[3] != sessions.DECOY

@@ -39,3 +39,21 @@ ETL rows use the run writer `etl-craft` in `CREATED_BY` and `UPDATED_BY`, includ
 started by a person. Action audit rows retain the signed-in account with kind `USER` or
 `SERVICE`; automatic engine actions use `SYSTEM`. Starting `etl-craft server` requires an
 admin service token in `ETL_CRAFT_TOKEN`.
+
+## From your own installation
+
+An analyst operates the server from their own installation, without its Engine DB or warehouse
+credentials. `login --server` stores a one-hour access token and a refresh token for that
+server; the CLI renews access until the refresh token expires (`Auth.Refresh_days`) or is
+revoked:
+
+```bash
+etl-craft login --server https://etl.example.com
+etl-craft whoami --server https://etl.example.com          # analyst operator
+etl-craft run --pipeline_code SALES --reason "late file" --server https://etl.example.com
+etl-craft --server https://etl.example.com config apply    # refused: apply config files on the server
+etl-craft logout --server https://etl.example.com
+```
+
+See [operating a server](../../deploying/security.md#operating-a-server-from-your-own-installation)
+for what works against a server and what stays on its host.

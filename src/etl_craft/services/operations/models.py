@@ -10,6 +10,7 @@ from typing import Any, ClassVar
 from etl_craft.core.enums import RunStatus
 from etl_craft.engine.repository.interventions import Intervention
 from etl_craft.engine.repository.pauses import Pause
+from etl_craft.engine.runlog import ACTIVE_RUN, RunSelector
 
 
 @dataclass(frozen=True)
@@ -199,6 +200,20 @@ class StepsView:
 
 
 @dataclass(frozen=True)
+class HistoryQuery:
+    """Which history to read: a task's or the pipeline's, for one run or a page of runs.
+
+    ``before`` is an exclusive run-id cursor; ``all_runs`` lists runs instead of selecting one.
+    """
+
+    task_code: str | None = None
+    limit: int = 20
+    all_runs: bool = False
+    before: int | None = None
+    selector: RunSelector = ACTIVE_RUN
+
+
+@dataclass(frozen=True)
 class HistoryView:
     """Bounded run or task history and the interventions on the runs shown."""
 
@@ -208,6 +223,7 @@ class HistoryView:
     task_code: str | None
     entries: tuple[RunView | TaskRunView, ...]
     changes: tuple[Intervention, ...]
+    before: int | None = None
 
 
 @dataclass(frozen=True)

@@ -11,8 +11,9 @@ from etl_craft.cli.commands.common import (
     configure_run_selector,
 )
 from etl_craft.cli.output import Output
+from etl_craft.cli.remote import ServerClient, api_path, selector_query
 from etl_craft.engine.runlog import RunSelector
-from etl_craft.services.operations.status import pipeline_status
+from etl_craft.services.operations.status import StatusView, pipeline_status
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -26,7 +27,20 @@ def _run(args: argparse.Namespace, out: Output) -> int:
         done = pipeline_status(
             ctx, args.pipeline_code, selector=RunSelector(args.run_id, args.run_key)
         )
+    return _render(args, out, done)
 
+
+def _remote(args: argparse.Namespace, out: Output, server: ServerClient) -> int:
+    done = server.call(
+        "GET",
+        api_path("pipelines", args.pipeline_code, "status"),
+        StatusView,
+        query=selector_query(args),
+    )
+    return _render(args, out, done)
+
+
+def _render(args: argparse.Namespace, out: Output, done: StatusView) -> int:
     def render() -> None:
         run = done.run
         out.line(
@@ -60,5 +74,9 @@ def _run(args: argparse.Namespace, out: Output) -> int:
 
 
 COMMAND = Command(
-    "status", "Show the selected run and every configured task.", run=_run, configure=_configure
+    "status",
+    "Show the selected run and every configured task.",
+    run=_run,
+    configure=_configure,
+    remote=_remote,
 )

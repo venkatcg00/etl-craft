@@ -12,6 +12,7 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.cli.authentication import command_identity
 from etl_craft.cli.output import Output
+from etl_craft.cli.remote import ServerClient
 from etl_craft.config import ConnectorConfig, load_config, resolve_config_path
 from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import ApiRole
@@ -36,6 +37,8 @@ class Command:
     help: str
     run: Callable[[argparse.Namespace, Output], int]
     configure: Callable[[argparse.ArgumentParser], None] | None = None
+    remote: Callable[[argparse.Namespace, Output, ServerClient], int] | None = None
+    """How the command runs against a server with ``--server``; ``None`` refuses it there."""
 
 
 def load_command_config(args: argparse.Namespace) -> ConnectorConfig:
@@ -75,6 +78,12 @@ def configure_output(parser: argparse.ArgumentParser) -> None:
         default="text",
         help="result format (default: text)",
     )
+
+
+def provisioning() -> bool:
+    """Whether this command is local Engine DB setup, admitted before any admin exists."""
+    scoped = command_identity.get()
+    return scoped is not None and scoped.identity is None
 
 
 @contextmanager

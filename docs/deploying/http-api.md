@@ -78,7 +78,12 @@ A disconnected client does not cancel committed work; inspect its exact run befo
 | GET | `/catalog/gaps?compare=true` | Viewer read-only warehouse metadata comparison; omit `compare` for offline coverage |
 | GET | `/health` | Engine DB authentication and health |
 | GET | `/pipelines`, `/pipelines/{code}` | Active definitions and pause state |
-| GET | `/pipelines/{code}/runs?limit=20&before=123` | Up to 100 runs; exclusive run-id cursor |
+| GET | `/pipelines/{code}/runs?limit=20&before=123` | The `history` document `etl-craft history` prints: up to 100 runs, newest first, with interventions and the next page's exclusive run-id cursor in `before`. Optional `task_code`, `all=false` with `run_id` or `run_key` to select one run |
+| GET | `/pipelines/{code}/status?run_id=` | The selected run and every task; `run_key` instead, or neither for the active run |
+| GET | `/pipelines/{code}/tasks/{task}/explain?run_id=` | The selected run's explanation of the task |
+| POST | `/pipelines/{code}/cancel` | Nonblank `reason`; optional `run_id` or `run_key` |
+| POST | `/pipelines/{code}/mark` | `reason` and either `status` or `watermark`; optional `task_code`, `rows`, `stale`, `new_run`, `run_id`, `run_key`, as `etl-craft mark` takes them |
+| POST | `/pipelines/{code}/tasks/{task}/rerun` | `reason`; optional `with_downstream`, `run_id`, `run_key` |
 | POST | `/pipelines/{code}/runs` | `run_date`, `reason`, both optional |
 | POST | `/pipelines/{code}/backfills` | Inclusive `first`, `last` dates and `reason` |
 | POST | `/pipelines/{code}/pause`, `/resume` | Nonblank `reason` |
@@ -91,6 +96,21 @@ A disconnected client does not cancel committed work; inspect its exact run befo
 | GET | `/attempts/{id}/log?offset=0` | Log bytes from a nonnegative byte offset |
 | GET, POST | `/tokens` | Admin listing or creation: `name`, `role`, optional `expires` |
 | POST | `/tokens/{id}/revoke` | Admin revocation |
+| GET | `/whoami` | The caller's account and role |
+
+### Sign-in routes
+
+These routes take no bearer token; each body is the proof. They call the same sign-in
+operations as a local `etl-craft login`, and `etl-craft login --server` uses them.
+
+| Method | Path under `/api/v1` | Input or result |
+|---|---|---|
+| GET | `/login/methods` | Whether SSO is configured |
+| POST | `/login/password` | `name`, `password`; a one-hour access token and an `Auth.Refresh_days` refresh token |
+| POST | `/login/sso` | Starts the issuer's device flow: the code to show, and the `device_code` and `nonce` to poll with |
+| POST | `/login/sso/poll` | `device_code`, `nonce`; the session once the person approves, else the seconds to add to the polling interval |
+| POST | `/login/refresh` | `token`: a refresh token; a new access token |
+| POST | `/login/revoke` | `token`: revokes a session token, and a refresh token's access tokens; 204 |
 
 Run ids select that stored execution; they never fall back to another active or recent run.
 JSON uses the same schema-versioned documents as the [CLI and Python operations](../guides/service-operations.md).

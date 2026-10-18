@@ -11,7 +11,7 @@ from typing import ClassVar
 from sqlalchemy.engine import Connection, RowMapping
 
 from etl_craft.core.actor import Actor, ActorKind
-from etl_craft.core.enums import AccountKind, ApiRole, YesNo
+from etl_craft.core.enums import AccountKind, ApiRole, TokenKind, YesNo
 from etl_craft.core.errors import UsageError
 from etl_craft.core.text import sha256_hex
 from etl_craft.engine.queries import statement
@@ -30,6 +30,7 @@ class TokenView:
     token_id: int
     name: str
     account_kind: AccountKind
+    token_kind: TokenKind
     role: str
     project_id: int | None
     created_by: str
@@ -52,6 +53,17 @@ class TokensView:
 
 
 @dataclass(frozen=True)
+class TokenGrant:
+    """What to issue: whose credential, which kind, until when, and the refresh token behind it."""
+
+    account_id: int
+    name: str
+    kind: TokenKind
+    expires_at: datetime | None
+    refresh_token_id: int | None = None
+
+
+@dataclass(frozen=True)
 class CreatedToken:
     """The value returned once, alongside safe token metadata."""
 
@@ -63,6 +75,7 @@ class CreatedToken:
 def _view(row: RowMapping) -> TokenView:
     values = dict(row)
     values["account_kind"] = AccountKind(values["account_kind"])
+    values["token_kind"] = TokenKind(values["token_kind"])
     for key in ("created_at", "expires_at", "revoked_at"):
         values[key] = timestamp(values[key])
     return TokenView(**values)
@@ -105,7 +118,11 @@ def create_token(
                 "use its current role or ask "
                 "an administrator to use `etl-craft account set-role`"
             )
-        return issue_token(conn, ctx.actor.name, account.account_id, name, expires_at)
+        return issue_token(
+            conn,
+            ctx.actor.name,
+            TokenGrant(account.account_id, name, TokenKind.SERVICE, expires_at),
+        )
 
 
 def list_tokens(ctx: OperationContext) -> TokensView:
@@ -131,7 +148,13 @@ def revoke_token(ctx: OperationContext, token_id: int) -> TokensView:
 
 
 def authenticate(ctx: OperationContext, token: str) -> TokenView | None:
-    """Refuse unknown, expired, revoked and unsupported project-scoped tokens."""
+    """Refuse refresh tokens and unknown, expired, revoked or project-scoped tokens."""
+    view = find_token(ctx, token)
+    return None if view is None or view.token_kind == TokenKind.REFRESH else view
+
+
+def find_token(ctx: OperationContext, token: str) -> TokenView | None:
+    """Return a usable token of any kind; refresh tokens only renew access."""
     if not 1 <= len(token) <= 256:
         return None
     with ctx.engine.connect() as conn:
@@ -150,21 +173,21 @@ def authenticate(ctx: OperationContext, token: str) -> TokenView | None:
     return view
 
 
-def issue_token(
-    conn: Connection, actor: str, account_id: int, name: str, expires_at: datetime | None
-) -> CreatedToken:
+def issue_token(conn: Connection, actor: str, grant: TokenGrant) -> CreatedToken:
     """Issue a credential inside its caller's account-validation transaction."""
     token = secrets.token_urlsafe(32)
     digest = sha256_hex(token.encode())
     conn.execute(
         statement(conn, "api_token_create"),
         {
-            "name": name,
-            "account_id": account_id,
+            "name": grant.name,
+            "account_id": grant.account_id,
             "actor": actor,
             "digest": digest,
             "now": datetime.now(UTC),
-            "expires_at": expires_at,
+            "expires_at": grant.expires_at,
+            "kind": grant.kind,
+            "refresh_token_id": grant.refresh_token_id,
         },
     )
     metadata = _view(

@@ -12,6 +12,7 @@ EXIT_CODES = {
     errors.EtlCraftError: ExitCode.UNEXPECTED,
     errors.ConfigurationError: ExitCode.CONFIGURATION,
     errors.PermissionDeniedError: ExitCode.PERMISSION_DENIED,
+    errors.ServerError: ExitCode.SERVER,
     errors.UsageError: ExitCode.USAGE,
     errors.MetadataError: ExitCode.METADATA,
     errors.GraphError: ExitCode.GRAPH,

@@ -31,6 +31,7 @@ from etl_craft.services.operations.models import (
     ActionView,
     AuditView,
     GraphView,
+    HistoryQuery,
     HistoryView,
     MetadataChangeView,
     PipelineListView,
@@ -139,18 +140,26 @@ def pipeline_steps(
 
 
 def run_history(
-    ctx: OperationContext,
-    pipeline_code: str,
-    task_code: str | None = None,
-    *,
-    limit: int = 20,
-    all_runs: bool = False,
-    selector: RunSelector = ACTIVE_RUN,
+    ctx: OperationContext, pipeline_code: str, query: HistoryQuery | None = None
 ) -> HistoryView:
-    """Read bounded history; selection never falls back to the most recent ended run."""
+    """Read bounded history; selection never falls back to the most recent ended run.
+
+    Entries come newest run first; the view's ``before`` is the next page's cursor, or ``None``
+    on the last page.
+    """
     authorize(ctx, "history")
+    query = query or HistoryQuery()
+    task_code, limit, all_runs, before, selector = (
+        query.task_code,
+        query.limit,
+        query.all_runs,
+        query.before,
+        query.selector,
+    )
     if limit < 1:
         raise UsageError(f"--limit must be 1 or more, got {limit}")
+    if before is not None and before < 1:
+        raise UsageError(f"before={before}; expected a positive run id")
     if all_runs and (selector.run_id is not None or selector.run_key is not None):
         raise UsageError("--all lists runs; do not pass a run selector")
     with acting_as(ctx.actor), read_snapshot(ctx.engine) as conn:
@@ -158,8 +167,9 @@ def run_history(
         selected = None if all_runs else select_run(conn, pipeline_id, selector)
         parameters = {
             "pipeline_id": pipeline_id,
-            "limit": limit,
+            "limit": limit + 1,
             "run_id": None if selected is None else selected.pipeline_run_id,
+            "before": before,
         }
         entries: tuple[RunView | TaskRunView, ...]
         if task_code is None:
@@ -173,6 +183,7 @@ def run_history(
                 task_document(conn, row._mapping)
                 for row in conn.execute(statement(conn, "task_run_history"), parameters)
             )
+        more, entries = len(entries) > limit, entries[:limit]
         listed = {entry.pipeline_run_id for entry in entries}
         changes = (
             ()
@@ -184,7 +195,14 @@ def run_history(
                 and (task_code is None or change.task_code in (None, task_code))
             )
         )
-        return HistoryView(pipeline_id, pipeline_code, task_code, entries, changes)
+        return HistoryView(
+            pipeline_id,
+            pipeline_code,
+            task_code,
+            entries,
+            changes,
+            entries[-1].pipeline_run_id if more else None,
+        )
 
 
 def audit(

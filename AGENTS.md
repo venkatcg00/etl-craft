@@ -121,6 +121,13 @@ that damages the package is not helpful; saying so, with a better option, is.
   expects, fail; never warn and continue, fall back silently or work around it. The message names
   the exact object, the value found, what was expected and the remedy, and the failure is
   recorded in the audit tables and the attempt's log.
+- **One implementation per action, many interfaces.** Every action (a run, a mark, a sign-in, a
+  token, a docs build) is one function in `services/operations` that makes every decision,
+  checks the role and records the request. The CLI, the HTTP API, the UI and orchestrators only
+  parse input, call that function and render its result; a CLI command against a server calls
+  the API, which calls the same function. `lint-imports` refuses an interface that imports
+  another service module. Only long-running processes (`server`, `publish-docs`) are started by
+  the interface itself.
 
 ## Architecture
 
@@ -130,8 +137,8 @@ Each package imports only the packages below it; `lint-imports` enforces the ord
 
 | Package | Responsibility |
 |---|---|
-| `cli` | argparse commands, output, exit codes; the only package that prints |
-| `api` | optional FastAPI routes, bearer authorization and HTTP server lifecycle |
+| `cli` | argparse commands, output, exit codes, and the client for `--server`; the only package that prints |
+| `api` | optional FastAPI routes, sign-in routes, bearer authorization and HTTP server lifecycle |
 | `overseer` | leadership, active-run working set, local supervision and shutdown |
 | `services` | actor-scoped operations, doctor, setup, validate, config files, cloning, DAG YAML, lineage, docs site |
 | `execution` | task runner, process supervisor, ready-task scheduler, run lifecycle, cross-pipeline gates |

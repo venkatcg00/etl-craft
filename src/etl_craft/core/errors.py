@@ -43,6 +43,7 @@ class ExitCode(IntEnum):
     RESOURCE_NOT_FOUND = 24
     METADATA_FILE = 25
     PERMISSION_DENIED = 26
+    SERVER = 27
 
 
 class EtlCraftError(Exception):
@@ -139,6 +140,12 @@ class CloningError(EtlCraftError):
     """Copying an Engine DB table into the warehouse failed; the message names the table."""
 
     exit_code = ExitCode.CLONING
+
+
+class ServerError(EtlCraftError):
+    """A server could not be reached, or answered with something that is not etl-craft JSON."""
+
+    exit_code = ExitCode.SERVER
 
 
 class RemoteUnsupportedError(EtlCraftError):

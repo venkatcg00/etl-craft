@@ -8,7 +8,9 @@ from etl_craft.config.model import AuthConfig
 from etl_craft.config.resolve import Resolver
 from etl_craft.core.errors import ConfigurationError
 
-AUTH_KEYS = frozenset({"Session_hours", "Oidc_issuer", "Oidc_client_id", "Airflow_connection_id"})
+AUTH_KEYS = frozenset(
+    {"Session_hours", "Refresh_days", "Oidc_issuer", "Oidc_client_id", "Airflow_connection_id"}
+)
 
 
 def parse_auth(
@@ -18,6 +20,7 @@ def parse_auth(
     settings = profiled_settings("Auth", raw, profile, path, resolver, nested=frozenset())
     reject_unknown(settings.settings, AUTH_KEYS, "Auth", path)
     hours = whole_number(settings, "Session_hours", 12, path, minimum=1, maximum=8760)
+    refresh_days = whole_number(settings, "Refresh_days", 30, path, minimum=1, maximum=365)
     issuer = settings.text("Oidc_issuer")
     client = settings.text("Oidc_client_id")
     if bool(issuer) != bool(client):
@@ -43,4 +46,6 @@ def parse_auth(
                 f"{path}: Auth.Oidc_issuer is invalid; expected a credential-free HTTPS issuer URL "
                 "without a query or fragment; correct the setting"
             )
-    return AuthConfig(hours, issuer, client, settings.text("Airflow_connection_id"))
+    return AuthConfig(
+        hours, issuer, client, settings.text("Airflow_connection_id"), refresh_days=refresh_days
+    )

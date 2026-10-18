@@ -8,10 +8,10 @@ import threading
 from pathlib import Path
 
 from etl_craft.cli.commands.common import Command, connect_engine_db, load_command_config
-from etl_craft.cli.commands.generate_docs import DEFAULT_FOLDER
 from etl_craft.cli.output import Output
 from etl_craft.core.errors import ExitCode
 from etl_craft.services.docs_publish import published
+from etl_craft.services.operations.documents import DEFAULT_FOLDER, docs_folder
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -56,7 +56,7 @@ def wait_until_stopped() -> None:
 
 def _run(args: argparse.Namespace, out: Output) -> int:
     config = load_command_config(args)
-    folder = args.output or config.docs_site.output or config.project_dir / DEFAULT_FOLDER
+    folder = docs_folder(config, args.output)
     engine = connect_engine_db(config)
     try:
         with published(

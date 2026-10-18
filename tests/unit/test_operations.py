@@ -27,7 +27,7 @@ from etl_craft.services.operations import (
     tasks,
     to_json,
 )
-from etl_craft.services.operations.models import GraphView
+from etl_craft.services.operations.models import GraphView, HistoryQuery
 from etl_craft.services.operations.requests import RunRequest
 from etl_craft.services.operations.snapshots import run_view, task_run_view
 from fixtures.auth import service_token
@@ -137,7 +137,10 @@ def test_trigger_skip_and_stand_in_use_their_returned_run_ids(ctx):
         "SKIPPED",
         "SUCCESS",
     ]
-    assert inspect.run_history(ctx, P, all_runs=True).entries[0].pipeline_run_id == ids[-1]
+    assert (
+        inspect.run_history(ctx, P, HistoryQuery(all_runs=True)).entries[0].pipeline_run_id
+        == ids[-1]
+    )
     assert action_count(ctx) == 3
     doc = to_json(inspect.audit(ctx, P))
     assert all(action["actor"] == "api-user" for action in doc["actions"])
@@ -168,7 +171,9 @@ def test_task_mark_preserves_failed_attempt_history_and_canonical_ids(ctx):
     assert done.task.attempts[0].task_run_id == task_run_id
     assert done.task.attempts[0].pipeline_run_id == run_id
     assert done.task.attempts[0].pipeline_id == pipeline_id
-    doc = to_json(inspect.run_history(ctx, P, "load", selector=RunSelector(run_id=run_id)))
+    doc = to_json(
+        inspect.run_history(ctx, P, HistoryQuery("load", selector=RunSelector(run_id=run_id)))
+    )
     assert doc["entries"][0]["attempts"][0]["schema"] == "etl-craft/attempt/1"
     assert "run_id" not in doc["entries"][0]
     assert "T" in doc["changes"][0]["requested_at"]
@@ -275,12 +280,12 @@ def test_wrong_pipeline_and_wrong_date_are_refused_without_changing_history(ctx)
     with ctx.engine.begin() as conn:
         other = add_pipeline(conn, "OTHER")
         other_run = start_run(conn, other)
-    before = to_json(inspect.run_history(ctx, P, all_runs=True))
+    before = to_json(inspect.run_history(ctx, P, HistoryQuery(all_runs=True)))
     with pytest.raises(RunStateError):
         runs.finalize_run(ctx, P, selector=RunSelector(run_id=other_run))
     with pytest.raises(UsageError, match="a run's date cannot change"):
         runs.finalize_run(ctx, P, selector=RunSelector(run_id=run_id), run_date=date(2000, 1, 1))
-    assert to_json(inspect.run_history(ctx, P, all_runs=True)) == before
+    assert to_json(inspect.run_history(ctx, P, HistoryQuery(all_runs=True))) == before
     with ctx.engine.connect() as conn:
         with pytest.raises(RunStateError):
             run_view(conn, pipeline_id, other_run)
@@ -395,7 +400,7 @@ def test_serializer_returns_fresh_mappings_and_refuses_nondocuments():
 def test_read_operations_leave_audit_actions_unchanged_and_keep_empty_documents(ctx):
     seed(ctx)
     assert to_json(inspect.list_pipelines(ctx))["pipelines"][0]["pipeline_id"] > 0
-    assert to_json(inspect.run_history(ctx, P, all_runs=True))["entries"] == []
+    assert to_json(inspect.run_history(ctx, P, HistoryQuery(all_runs=True)))["entries"] == []
     assert inspect.pipeline_graph(ctx, P).waves == ()
     assert inspect.audit(ctx, P, since=datetime(2099, 1, 1, tzinfo=UTC)).actions == ()
     assert action_count(ctx) == 0
@@ -409,10 +414,10 @@ def test_json_numbers_must_be_finite():
 
 def test_missing_override_reason_is_refused_before_a_task_runs(ctx):
     seed(ctx, active=True, task=True)
-    before = to_json(inspect.run_history(ctx, P, "load"))
+    before = to_json(inspect.run_history(ctx, P, HistoryQuery("load")))
     with pytest.raises(UsageError, match="needs a --reason"):
         runs.execute_run(ctx, RunRequest(P, task_code="load", ignore_dependencies=True))
-    assert to_json(inspect.run_history(ctx, P, "load")) == before
+    assert to_json(inspect.run_history(ctx, P, HistoryQuery("load"))) == before
     assert action_count(ctx) == 1
 
 
@@ -433,7 +438,7 @@ def test_inspection_reads_do_not_grow_per_pipeline_or_run(ctx, view):
         first = (
             inspect.list_pipelines(ctx)
             if view == "list"
-            else inspect.run_history(ctx, P, all_runs=True)
+            else inspect.run_history(ctx, P, HistoryQuery(all_runs=True))
         )
         baseline = len(queries)
         for number in range(1, 5):
@@ -446,7 +451,7 @@ def test_inspection_reads_do_not_grow_per_pipeline_or_run(ctx, view):
         expanded = (
             inspect.list_pipelines(ctx)
             if view == "list"
-            else inspect.run_history(ctx, P, all_runs=True)
+            else inspect.run_history(ctx, P, HistoryQuery(all_runs=True))
         )
         assert len(queries) == baseline
         field = "pipelines" if view == "list" else "entries"

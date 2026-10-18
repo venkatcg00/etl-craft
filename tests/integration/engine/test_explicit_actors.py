@@ -29,7 +29,10 @@ def test_account_proof_selects_user_or_service_kind(engine_db):
     )
     person = sessions.sign_in(ctx, "person", "correct horse battery")
     service = tokens.create_token(ctx, "scheduler", ApiRole.ADMIN)
-    for credential, kind in ((person.token, ActorKind.USER), (service.token, ActorKind.SERVICE)):
+    for credential, kind in (
+        (person.access_token, ActorKind.USER),
+        (service.token, ActorKind.SERVICE),
+    ):
         identity = tokens.authenticate(ctx, credential)
         assert identity is not None
         assert identity.actor.kind == kind

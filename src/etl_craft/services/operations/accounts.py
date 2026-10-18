@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from etl_craft.core.actor import Actor, ActorKind
 from etl_craft.core.enums import AccountKind, ApiRole, YesNo
 from etl_craft.core.errors import UsageError
+from etl_craft.dialects.engine import for_engine
 from etl_craft.engine import locks
 from etl_craft.engine.queries import statement
 from etl_craft.services.operations.context import OperationContext, operation
@@ -36,6 +37,26 @@ class Accounts:
 
     SCHEMA: ClassVar[str] = "etl-craft/accounts/1"
     accounts: tuple[Account, ...]
+
+
+LOCAL_PROVISIONING = frozenset({"setup", "init-db", "migrate", "doctor"})
+"""Commands a local installation may run before any admin exists, to create or repair one."""
+
+
+def local_provisioning(engine: Engine, command: str) -> bool:
+    """Whether ``command`` runs as local provisioning: before the account schema or an admin.
+
+    ``doctor`` always may; ``setup`` may while no active admin exists; ``init-db`` and ``migrate``
+    may while no account exists at all.
+    """
+    if command not in LOCAL_PROVISIONING:
+        return False
+    if command == "doctor" or not for_engine(engine).existing_tables(engine, ("cfg_accounts",)):
+        return True
+    if command == "setup":
+        return not has_admin(engine)
+    with engine.connect() as conn:
+        return not conn.execute(statement(conn, "account_count")).scalar_one()
 
 
 def has_admin(engine: Engine) -> bool:

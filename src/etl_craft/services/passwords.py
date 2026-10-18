@@ -6,6 +6,9 @@ import secrets
 
 from etl_craft.core.errors import UsageError
 
+DECOY = "scrypt$16384$8$5$" + "00" * 16 + "$" + "00" * 64
+"""A well-formed hash no password matches: checking it costs what checking a real one costs."""
+
 
 def hash_password(password: str) -> str:
     """Store a random salt and a bounded, versioned scrypt digest."""

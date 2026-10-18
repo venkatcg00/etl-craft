@@ -79,6 +79,44 @@ only directly from the authenticated TLS token endpoint, as permitted by
 with issuer, client audience, nonce and lifetime validation; arbitrary supplied ID tokens
 are never accepted. Provider tokens are discarded after the local session is issued.
 
+
+## Operating a server from your own installation
+
+People develop on their own installation, against a local Engine DB and warehouse. To operate a
+server installation they sign in to it instead, and never hold its Engine DB or warehouse
+credentials:
+
+```bash
+etl-craft login --server https://etl.example.com      # password, or SSO when it is configured
+etl-craft status --pipeline_code SALES --server https://etl.example.com
+export ETL_CRAFT_SERVER=https://etl.example.com      # or name the server once per session
+etl-craft history --pipeline_code SALES --all
+etl-craft logs --attempt-id 4812
+etl-craft logout
+```
+
+- **Sign-in.** `login --server` sends the password once to the server, or, for SSO, shows the
+  issuer's code while the server runs the device flow and verifies the ID token. The server
+  issues a one-hour access token and a refresh token that lasts `Auth.Refresh_days` (default
+  30). The credential file keeps both, under the server's address, and the CLI renews the access
+  token when it expires. `logout`, disabling the account or revoking the refresh token ends the
+  session.
+- **Only HTTPS.** `--server` refuses plain HTTP except to `localhost`, and refuses redirects.
+- **What works.** `status`, `explain`, `history`, `logs`, `whoami`, `run` (a run, a backfill
+  with `--backfill`, or a rerun with `--rerun --task_code`), `pause`, `resume`, `mark` and
+  `cancel`, within the account's role, with the same text and JSON output and exit codes as on
+  the server's own project.
+- **What does not.** `config`, `migrate`, `init-db`, `setup`, `account` and `token` change
+  metadata or the Engine DB and are refused against a server, naming the server-side way:
+  config files and migrations reach a server only through its own deployment, by CI or an
+  admin. Other commands work on a local project only.
+- **Automation.** CI and Airflow keep a service token in `ETL_CRAFT_TOKEN`, with no refresh.
+- **Errors.** A server that cannot be reached, or that answers with something other than
+  etl-craft JSON, exits **27**. Every other refusal keeps its own exit code.
+
+Every command reaches the same operation whichever interface starts it: a local command calls
+it directly, and a command against a server calls the server's API, which calls it.
+
 ## Least privilege
 
 etl-craft creates nothing outside a SQLite file: every schema must exist, and it creates tables

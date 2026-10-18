@@ -13,12 +13,13 @@ from etl_craft.cli.commands.common import (
     configure_run_selector,
 )
 from etl_craft.cli.output import Output
+from etl_craft.cli.remote import ServerClient, api_path, selector_query
 from etl_craft.core import interrupts
 from etl_craft.core.enums import Mode, RunStatus
-from etl_craft.core.errors import ExitCode
+from etl_craft.core.errors import ExitCode, UsageError
 from etl_craft.engine.runlog import RunSelector
 from etl_craft.services.operations import runs
-from etl_craft.services.operations.models import BackfillView
+from etl_craft.services.operations.models import BackfillView, OperationResult
 from etl_craft.services.operations.requests import RunRequest
 
 
@@ -109,13 +110,72 @@ def _run(args: argparse.Namespace, out: Output) -> int:
         )
         done = runs.execute_run(ctx, request)
     out.result(done, args.output_format)
+    return _exit_code(done, started_only=args.init_only)
+
+
+def _remote(args: argparse.Namespace, out: Output, server: ServerClient) -> int:
+    local_only = [
+        flag
+        for flag, given in (
+            ("--init-only", args.init_only),
+            ("--finalize-only", args.finalize_only),
+            ("--force", args.force),
+            ("--ignore-dependencies", args.ignore_dependencies),
+            ("--skip", args.skip),
+            ("--task_code without --rerun", args.task_code is not None and not args.rerun),
+        )
+        if given
+    ]
+    if local_only:
+        raise UsageError(
+            f"run {', '.join(local_only)}: works on the server's host only; against a server, "
+            "`run` starts a run, a backfill (--backfill) or a rerun (--rerun --task_code)"
+        )
+    done: OperationResult | BackfillView
+    if args.backfill is not None:
+        first, last = args.backfill
+        done = server.call(
+            "POST",
+            api_path("pipelines", args.pipeline_code, "backfills"),
+            BackfillView,
+            body={"first": first.isoformat(), "last": last.isoformat(), "reason": args.reason},
+        )
+    elif args.rerun:
+        done = server.call(
+            "POST",
+            api_path("pipelines", args.pipeline_code, "tasks", args.task_code, "rerun"),
+            OperationResult,
+            body={
+                "reason": args.reason,
+                "with_downstream": args.with_downstream,
+                **selector_query(args),
+            },
+        )
+    else:
+        if args.run_id is not None or args.run_key is not None:
+            raise UsageError("run against a server starts a new run; do not pass a run selector")
+        done = server.call(
+            "POST",
+            api_path("pipelines", args.pipeline_code, "runs"),
+            OperationResult,
+            body={
+                "run_date": None if args.run_date is None else args.run_date.isoformat(),
+                "reason": args.reason,
+            },
+        )
+    out.result(done, args.output_format)
+    return _exit_code(done, started_only=args.backfill is None and not args.rerun)
+
+
+def _exit_code(done: OperationResult | BackfillView, *, started_only: bool) -> int:
+    """Exit with the run's outcome; a run only started is a success while it is in progress."""
     if done.status in (RunStatus.FAILED, RunStatus.CANCELLED):
         return ExitCode.FAILURE
     if isinstance(done, BackfillView):
         return ExitCode.INCOMPLETE if done.stopped is not None else ExitCode.SUCCESS
     if done.waiting:
         return ExitCode.WAITING
-    if done.status == RunStatus.IN_PROGRESS and not args.init_only:
+    if done.status == RunStatus.IN_PROGRESS and not started_only:
         return ExitCode.INCOMPLETE
     return ExitCode.SUCCESS
 
@@ -139,4 +199,5 @@ COMMAND = Command(
     help="Run a pipeline in dependency waves, one task of it, or its first or last step.",
     configure=_configure,
     run=_run,
+    remote=_remote,
 )

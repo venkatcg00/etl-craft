@@ -32,9 +32,20 @@ class OperationContext:
 
 
 @contextmanager
-def operation(ctx: OperationContext, command: str, arguments: Mapping[str, Any]) -> Iterator[None]:
-    """Record one request before executing it, including domain refusals."""
-    authorize(ctx, command, arguments)
+def operation(
+    ctx: OperationContext,
+    command: str,
+    arguments: Mapping[str, Any],
+    *,
+    provisioning: bool = False,
+) -> Iterator[None]:
+    """Record one request before executing it, including domain refusals.
+
+    ``provisioning`` is local Engine DB setup before any admin exists; it skips only the role
+    check, which has no account to check yet.
+    """
+    if not provisioning:
+        authorize(ctx, command, arguments)
     with acting_as(ctx.actor), command_request(command, arguments):
         register_engine(ctx.engine)
         yield

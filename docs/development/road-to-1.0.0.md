@@ -31,8 +31,9 @@ items (`S2.A.3`). Every item has the same parts:
 
 **Branches.** One branch per workstream, or per item when an item is large, named
 `<type>/<area>-<topic>` as `CONTRIBUTING.md` requires (for example `fix/execution-run-admission`).
-Squash-merge by pull request. A release is cut when every workstream in it is merged and its gate
-passes.
+Squash-merge by pull request. After 0.3.0 the next release is 1.0.0: each later milestone ends
+when its workstreams are merged and its gate passes on `main`, with no tag, version or evidence
+files (see [Release overview](#release-overview)).
 
 **Definition of done for every item** (the full list is in `AGENTS.md`):
 
@@ -127,7 +128,7 @@ item's text, or work done early under another item.
 | S5.O.2b Normalized object contracts | Done | #150, #151, #152, #153, #154, #160, #162, #181 | Merge column lists retain parameter storage; lineage versions use component endpoints; target state, view statements and rule results are keyed by components, and target locks use the resolved identity |
 | S5.P Project documentation gap UI | Done | #165 | Structured schema/lineage gaps, accessible column/graph warnings and read-only comparison API |
 | S5.R Consolidate before the cluster | Done | #179, #185, #188 to #193, #195, #201 | Items 1 to 8 complete: the execution core and configuration loader are split by responsibility; the moved execution functions are shortened with shared run records and unchanged transactions and retries |
-| S5.S Accounts, login and roles | In progress | #203, #204, #205, #206 | Items 1–4: account identities, login, administration, one service-role policy with recorded refusals across CLI/HTTP, and explicit actors with an `etl-craft` writer on every run; remote CLI remains |
+| S5.S Accounts, login and roles | Done | #203, #204, #205, #206, #207 | Account identities, local and server sign-in with refresh tokens, one service-role policy, explicit actors with an `etl-craft` writer on every run, and a local installation operating a server over HTTPS; every action has one implementation that the CLI, the API and later the UI call |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
 | S5.T Resource discovery and deployment profiles | Planned | | Opt-in laptop, server and server-with-workers sizing from usable process resources; one discovery module before S5.C |
@@ -151,9 +152,9 @@ item's text, or work done early under another item.
 
 What a person picking up the work needs that the code and the item texts do not say.
 
-**Next agent: finish S5.S item 4 (#206), then take item 5 (remote CLI and sign-in endpoints).**
-If #206 is still open, read and fix its failed CI before starting another item. #204 and #205
-are merged. The owner merged #203 despite
+**Next agent: finish S5.S item 5 (#207), then take S5.O.3.** If #207 is still open, read and fix
+its failed CI before starting another item. After 0.3.0 the next release is 1.0.0 (see
+[Release overview](#release-overview)); milestone gates run on `main` without a tag. The owner merged #203 despite
 unavailable Databricks acceptance. Databricks has a usage budget: do not retry it until the owner
 explicitly makes budget available. Item 2 changes no warehouse SQL and needs no cloud acceptance.
 The owner withdrew the Spec Kit requirement; follow `AGENTS.md` and the roadmap-item procedure.
@@ -272,6 +273,17 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.S item 5 (#207) passed `make static docs` and the complete unit suite (1,897). Against a real
+HTTP server on both Engine DBs it passed password and SSO sign-in, renewal, refresh expiry,
+logout, account disabling, matching local and remote output, the role boundary with recorded
+refusals, refused metadata commands, HTTPS enforcement and attempt logs (20). The API, account,
+sign-in, explicit-actor, inspection and catalog-upgrade tests passed (164), including
+fresh-versus-upgraded catalogs from 0.1.0, 0.2.0 and 0.3.0. The integration tests of every
+command now routed through an operation passed (1,027). The new tests and the import contract
+fail on the old source. No warehouse SQL, run creation, lease, lock or gate code changed, so
+cloud acceptance and repeated races were not required; the installed-wheel demos and Airflow
+contracts run in CI. Databricks was not used.
 
 S5.S item 3 (#205) passed the complete unit suite, the shared policy and real CLI/HTTP/service
 role cases on both Engine DBs, existing account/API/audit callers, configuration/inspection/
@@ -446,6 +458,39 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- **S5.S item 5 (#207), a local installation operating a server, with owner-directed scope.**
+  - The owner chose how `login --server` signs in: the CLI sends the password once over HTTPS to
+    the server's password route, and for SSO the server runs the issuer's device flow while the
+    CLI shows the code and polls the server. The server verifies the ID token itself, because the
+    token is trusted only from the issuer's own TLS endpoint. The UI will start the same
+    operations from its own pages.
+  - The owner chose two `CFG_API_TOKENS` columns (migration 0036): `TOKEN_KIND` (`SERVICE`,
+    `ACCESS`, `REFRESH`) and `REFRESH_TOKEN_ID` on access tokens renewed from a refresh token.
+    Refresh tokens cannot call the API; revoking one revokes its access tokens. Existing user
+    sessions become access tokens.
+  - A server session's access token lasts one hour with no setting; the item's "default 1 hour"
+    needs no second value yet. `Auth.Refresh_days` (default 30) sets the refresh lifetime, and a
+    local `login` keeps one `Auth.Session_hours` token with no refresh.
+  - `etl-craft logs --attempt-id N [--offset]` prints an attempt's log locally or from a server;
+    the item names attempt logs, and no command showed them. `upload` and `uploads` remain S7.M.
+  - Against a server, `run` starts a run, a backfill or a rerun; `--force`, `--skip`,
+    `--ignore-dependencies`, `--init-only`, `--finalize-only` and a foreground `--task_code` run
+    are refused there, naming the host as the place for them.
+  - Commands with sub-verbs (`config`, `account`, `token`) take global options, `--server`
+    included, before the command name, as they already did for `--config`.
+  - `GET /api/v1/pipelines/{code}/runs` returns the `history` document the CLI prints
+    (`entries`, `changes`, `before`) instead of `runs/1`; one implementation serves both.
+  - The password route has no rate limit; scrypt slows each guess, refusals are recorded in
+    `AUD_ACTIONS`, and the server is expected behind a proxy that limits requests.
+  - At the owner's request the pull request also applies rule 10 of
+    [Rules that hold in 1.0.0](#rules-that-hold-in-100): clone, rehash, upgrade-targets, init-db,
+    migrate, setup, generate-docs, docs-version and generate-yml now call operations; the API's
+    second run listing and the CLI's copies of history, mark and reconcile checks are removed;
+    sign-out attributes itself to the token's account for every interface; the local
+    provisioning rule moved from the CLI into the account operations; and a `lint-imports`
+    contract refuses interfaces that import another service module. It also records the
+    owner's decision to release 1.0.0 next, without 0.x releases.
 
 - **S5.S item 4 (#206), explicit actors and the run writer.**
   - `ActorKind` holds only `USER`, `SERVICE` and `SYSTEM`, as the owner asked: schedules,
@@ -1327,6 +1372,9 @@ flowchart LR
 9. Every load is auditable from the Engine DB alone: who started it, what it read (its watermark
    range, the event that started it), what it wrote, what it set aside and why. A feature that moves
    data without recording that is not finished.
+10. Every action has one implementation, in `services/operations`, and many interfaces: the CLI,
+    the HTTP API, the UI and orchestrators parse input, call it and render its result. A CLI command
+    against a server calls the API, which calls the same function.
 
 ### Non-goals for 1.0.0
 
@@ -1361,20 +1409,29 @@ flowchart LR
     R2[0.2.0 Stabilize] --> R3[0.3 Identity] --> R4[0.4 Overseer] --> R5[0.5 Cluster] --> R6[0.6 At load] --> R7[0.7-0.9 UI and finish] --> RC[Release candidates: Support Insights example] --> R1[1.0.0]
 ```
 
-| Release | Theme | Workstreams | Gate to leave the release |
+| Milestone | Theme | Workstreams | Gate to leave the milestone |
 | --- | --- | --- | --- |
 | 0.2.0 | Stabilize: ship pause, backfill, consumption log and catalog history with every fix that needs no new ownership model | S2.A to S2.L | A regression test per fixed defect; every required suite green on the release commit, cloud included |
 | 0.3 | Identity: run and attempt ids everywhere, attempt ledger, leases, fenced writes, recorded gate decisions, actors on every action and engine-only Engine DB writes, data contract v2 | S3.A to S3.I (S3.I right after S3.A) | The chaos suite passes on SQLite and PostgreSQL |
 | 0.4 | Overseer: `etl-craft server`, schedules with time zones, ready-set dispatch, retries, `status`, `explain`, JSON, HTTP API, versioned YAML | S4.A to S4.H | The demo runs a week with no cron or Airflow; `kill -9` of the overseer loses and doubles nothing |
-| 0.5 | Operational basics, then the cluster: row-level rejects, SQL watermarks, event waits, source definitions and schema-aware lineage, normalized metadata, accounts, login and roles; resource discovery and deployment profiles, pool interface, worker agents, project namespaces in one Engine DB, connection budget, managed PostgreSQL | S5.A to S5.T (S5.K to S5.N right after S5.B; S5.O to S5.T before S5.C) | Pool contract tests pass for both providers; many projects share one Engine DB |
+| 0.5 | Operational basics, then the cluster: row-level rejects, SQL watermarks, event waits, source definitions and schema-aware lineage, normalized metadata, accounts, login and roles; resource discovery and deployment profiles, pool interface, worker agents, project namespaces in one Engine DB, connection budget, managed PostgreSQL | S5.A to S5.T (S5.K to S5.N right after S5.B; S5.O to S5.T before S5.C) | Pool contract tests pass for both providers; many projects share one Engine DB; the chaos suite passes |
 | 0.6 | At load: retention, bounded catalog, incremental cloning, metrics, backup and restore, benchmark | S6.A to S6.G | A sustained-load benchmark stays within its stated budgets; a restore is tested |
 | 0.7 to 0.9 | UI and finish: web UI with its sign-in, stewardship uploads, per-project roles, redaction, webhooks, secrets providers, packaging, compatibility policy, soak, faster complete PR checks, separate demo and configuration repositories, the obvious-failure catalog | S7.A to S7.P | A month-long soak of a real deployment passes; complete PR checks meet the ten-minute target |
 | 1.0.0 release candidates | The Support Insights example rebuilt on etl-craft, configured through CI, with its Superset dashboards and every-feature scenarios | S8.A to S8.H | Every pipeline, dashboard and feature scenario passes, with verified README walkthroughs |
 | 1.0.0 | Supported contract | | Every item of the [1.0.0 checklist](#100-release-checklist) has evidence |
 
-Releases are ordered by dependency. Do not start 0.4 before 0.3's chaos suite passes: the overseer,
-the API and remote workers each add processes that race on the Engine DB, and only 0.3 makes those
-races safe.
+Milestones are ordered by dependency. Do not start 0.4 before 0.3's chaos suite passes: the
+overseer, the API and remote workers each add processes that race on the Engine DB, and only 0.3
+makes those races safe.
+
+**Only 1.0.0 is released after 0.3.0.** Nothing is published before 1.0.0, so a 0.x release would
+only add a tag, a gate run, cloud evidence and a soak that no installation uses, and a released
+schema every later version must upgrade from. The milestones above keep their order and their
+gates, which run on `main` without a tag; cloud acceptance runs at a milestone only with budget
+the owner approves. The version stays 0.3.0 and `CHANGELOG.md` collects every change under
+`[Unreleased]` until the 1.0.0 release pull request. 1.0.0 upgrades from 0.3.0, the soaked release
+the owner's deployment runs, with nothing lost, and its gate is the full release gate (cloud
+evidence, chaos, the Support Insights run and a soak) on exactly the code it tags.
 
 ## Shared foundations
 
@@ -4117,7 +4174,8 @@ run-health dashboards. Authors change metadata only through
 config files. Access is authenticated and role-based; secrets don't leak; the deployment is
 packaged; compatibility is promised; and a month of real use proves it.
 
-**Depends on.** 0.6. These workstreams can run in parallel; cut 0.7, 0.8 and 0.9 as they land.
+**Depends on.** 0.6. These workstreams can run in parallel and land on `main`; no release is cut
+before 1.0.0.
 
 ### S7.A Web UI
 

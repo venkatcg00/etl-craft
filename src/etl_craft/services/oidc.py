@@ -5,13 +5,12 @@ import json
 import math
 import secrets
 import time
-from collections.abc import Callable
+from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from etl_craft.config.model import AuthConfig
-from etl_craft.core import interrupts
 from etl_craft.core.errors import ConfigurationError
 
 
@@ -95,57 +94,68 @@ def _seconds(data: dict[str, object], key: str, default: int = 0) -> int:
     return value
 
 
-def device_subject(auth: AuthConfig, display: Callable[[str], None]) -> str:
-    """Authenticate with a public registered client and return only its validated subject."""
+@dataclass(frozen=True)
+class DeviceGrant:
+    """What the person needs to approve the sign-in, and what polling it needs back."""
+
+    user_code: str
+    verification_uri: str
+    device_code: str
+    nonce: str
+    interval: int
+    expires_in: int
+
+
+def _client(auth: AuthConfig) -> tuple[str, str, dict[str, object]]:
     if not auth.oidc_issuer or not auth.oidc_client_id:
         raise ConfigurationError(
             "SSO requires Auth.Oidc_issuer and Auth.Oidc_client_id; configure both"
         )
-    issuer = auth.oidc_issuer
-    metadata = _request(issuer.rstrip("/") + "/.well-known/openid-configuration")
-    if metadata.get("issuer") != issuer:
+    metadata = _request(auth.oidc_issuer.rstrip("/") + "/.well-known/openid-configuration")
+    if metadata.get("issuer") != auth.oidc_issuer:
         raise ConfigurationError(
             "OIDC discovery issuer differs from Auth.Oidc_issuer; correct the setting"
         )
+    return auth.oidc_issuer, auth.oidc_client_id, metadata
+
+
+def start_device(auth: AuthConfig) -> DeviceGrant:
+    """Ask the issuer for a user code with a public registered client."""
+    _, client, metadata = _client(auth)
     nonce = secrets.token_urlsafe(32)
     device = _request(
         _text(metadata, "device_authorization_endpoint"),
-        {
-            "client_id": auth.oidc_client_id,
-            "scope": "openid",
-            "nonce": nonce,
-        },
+        {"client_id": client, "scope": "openid", "nonce": nonce},
     )
-    display(
-        f"Open {_endpoint(_text(device, 'verification_uri'))} "
-        f"and enter {_text(device, 'user_code')}"
+    return DeviceGrant(
+        user_code=_text(device, "user_code"),
+        verification_uri=_endpoint(_text(device, "verification_uri")),
+        device_code=_text(device, "device_code"),
+        nonce=nonce,
+        interval=_seconds(device, "interval", 5),
+        expires_in=_seconds(device, "expires_in"),
     )
-    result = _poll(
+
+
+def poll_device(auth: AuthConfig, device_code: str, nonce: str) -> str | int:
+    """Poll once: the validated subject, or the seconds to wait before polling again."""
+    issuer, client, metadata = _client(auth)
+    response = _request(
         _text(metadata, "token_endpoint"),
         {
-            "client_id": auth.oidc_client_id,
-            "device_code": _text(device, "device_code"),
+            "client_id": client,
+            "device_code": device_code,
             "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
         },
-        _seconds(device, "expires_in"),
-        _seconds(device, "interval", 5),
     )
-    return _subject(_text(result, "id_token"), issuer, auth.oidc_client_id, nonce)
-
-
-def _poll(endpoint: str, data: dict[str, str], expires: int, interval: int) -> dict[str, object]:
-    deadline = time.monotonic() + expires
-    while time.monotonic() + interval < deadline:
-        interrupts.sleep(interval)
-        response = _request(endpoint, data)
-        error = response.get("error")
-        if error is None:
-            return response
-        if error == "slow_down":
-            interval += 5
-        elif error != "authorization_pending":
-            raise ConfigurationError("OIDC sign-in refused or expired; run `etl-craft login` again")
-    raise ConfigurationError("OIDC device code expired; run `etl-craft login` again")
+    error = response.get("error")
+    if error == "authorization_pending":
+        return 0
+    if error == "slow_down":
+        return 5
+    if error is not None:
+        raise ConfigurationError("OIDC sign-in refused or expired; run `etl-craft login` again")
+    return _subject(_text(response, "id_token"), issuer, client, nonce)
 
 
 def _subject(token: str, issuer: str, client: str, nonce: str) -> str:

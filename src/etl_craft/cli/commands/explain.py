@@ -11,8 +11,9 @@ from etl_craft.cli.commands.common import (
     configure_run_selector,
 )
 from etl_craft.cli.output import Output
+from etl_craft.cli.remote import ServerClient, api_path, selector_query
 from etl_craft.engine.runlog import RunSelector
-from etl_craft.services.operations.status import explain_task
+from etl_craft.services.operations.status import Explanation, explain_task
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -27,7 +28,20 @@ def _run(args: argparse.Namespace, out: Output) -> int:
         done = explain_task(
             ctx, args.pipeline_code, args.task_code, selector=RunSelector(args.run_id, args.run_key)
         )
+    return _render(args, out, done)
 
+
+def _remote(args: argparse.Namespace, out: Output, server: ServerClient) -> int:
+    done = server.call(
+        "GET",
+        api_path("pipelines", args.pipeline_code, "tasks", args.task_code, "explain"),
+        Explanation,
+        query=selector_query(args),
+    )
+    return _render(args, out, done)
+
+
+def _render(args: argparse.Namespace, out: Output, done: Explanation) -> int:
     def render() -> None:
         out.line(f"{done.pipeline.pipeline_code}.{done.task_code}: {done.state}")
         out.line(
@@ -68,4 +82,5 @@ COMMAND = Command(
     "Explain the selected task's state and what would let it run.",
     run=_run,
     configure=_configure,
+    remote=_remote,
 )

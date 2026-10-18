@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 from collections.abc import Sequence
 from contextlib import nullcontext
 from pathlib import Path
@@ -12,13 +13,26 @@ from etl_craft import __version__
 from etl_craft.cli.authentication import access_context
 from etl_craft.cli.commands import COMMANDS, Command
 from etl_craft.cli.output import Output
+from etl_craft.cli.remote import ServerClient
 from etl_craft.core import log
-from etl_craft.core.errors import EtlCraftError, ExitCode
+from etl_craft.core.errors import EtlCraftError, ExitCode, UsageError
 from etl_craft.engine.audit import command_request
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_LOG_LEVEL = "INFO"
+
+SERVER_SIDE = {
+    "config": "commit the config files to the project the server deploys and run "
+    "`etl-craft config apply` there, by CI or an admin",
+    "migrate": "commit the migration to the project the server deploys and run "
+    "`etl-craft migrate` there, by CI or an admin",
+    "init-db": "run it on the server's host",
+    "setup": "run it on the server's host",
+    "account": "an admin runs `etl-craft account` on the server's host",
+    "token": "an admin runs `etl-craft token` on the server's host",
+}
+"""Commands that change metadata or the Engine DB, and how to make the change on a server."""
 
 
 def _global_options(*, defaults: bool) -> argparse.ArgumentParser:
@@ -38,6 +52,13 @@ def _global_options(*, defaults: bool) -> argparse.ArgumentParser:
         type=Path,
         metavar="PATH",
         help="craft-connector.yml to read",
+        default=default(None),
+    )
+    group.add_argument(
+        "--server",
+        metavar="URL",
+        help="operate this etl-craft server instead of the local project (default: "
+        "$ETL_CRAFT_SERVER); https:// except to localhost",
         default=default(None),
     )
     group.add_argument(
@@ -74,7 +95,7 @@ def build_parser(commands: Sequence[Command] = COMMANDS) -> argparse.ArgumentPar
             )
             if command.configure is not None:
                 command.configure(subparser)
-            subparser.set_defaults(handler=command.run)
+            subparser.set_defaults(handler=command.run, remote=command.remote)
     return parser
 
 
@@ -92,7 +113,10 @@ def main(argv: Sequence[str] | None = None, commands: Sequence[Command] = COMMAN
         parser.print_usage(out.stdout)
         return ExitCode.USAGE
     log.configure(args.log_level, args.log_format)
+    server = args.server or os.environ.get("ETL_CRAFT_SERVER")
     try:
+        if server:
+            return int(_on_server(args, out, server))
         with access_context(args):
             request = (
                 nullcontext()
@@ -108,3 +132,16 @@ def main(argv: Sequence[str] | None = None, commands: Sequence[Command] = COMMAN
         logger.exception("unexpected error in etl-craft %s", args.command)
         out.error(f"unexpected {type(error).__name__}: {error}")
         return ExitCode.UNEXPECTED
+
+
+def _on_server(args: argparse.Namespace, out: Output, server: str) -> int:
+    """Run the command against a server's API; the server checks the role and records it."""
+    if args.remote is None:
+        remedy = SERVER_SIDE.get(args.command)
+        raise UsageError(
+            f"`{args.command}` changes metadata or the Engine DB, so it is refused against a "
+            f"server; {remedy}"
+            if remedy
+            else f"`{args.command}` works on a local project only; run it without --server"
+        )
+    return int(args.remote(args, out, ServerClient(server)))

@@ -19,6 +19,7 @@ READ_ONLY = {
     "steps",
     "validate",
     "whoami",
+    "logs",
 }
 """The commands that change nothing in the Engine DB or the warehouse."""
 
