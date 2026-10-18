@@ -363,6 +363,9 @@ def test_cli_json_is_the_service_document_with_one_action(
     "kwargs",
     [
         {"force": True, "init_only": True},
+        {"standalone": True},
+        {"standalone": True, "task_code": "load", "force": True},
+        {"standalone": True, "task_code": "load", "rerun": True},
         {"ignore_dependencies": True},
         {"rerun": True, "ignore_dependencies": True, "task_code": "load"},
         {"force": True, "rerun": True, "task_code": "load"},

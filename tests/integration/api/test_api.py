@@ -149,6 +149,11 @@ def test_every_write_route_enforces_role_and_passes_actor_to_service(api, role, 
         return inspect.list_pipelines(ctx)
 
     cases = [
+        (
+            "/api/v1/pipelines/P/tasks/T/run",
+            "etl_craft.services.operations.runs.execute_run",
+            {"run_id": run, "standalone": True},
+        ),
         ("/api/v1/pipelines/P/runs", "etl_craft.services.operations.runs.trigger_run", {}),
         (
             "/api/v1/pipelines/P/backfills",
@@ -193,7 +198,12 @@ def test_every_write_route_enforces_role_and_passes_actor_to_service(api, role, 
         assert response.status_code == (403 if role == "viewer" else 200), response.text
         if role != "viewer":
             assert calls[-1][0] == role
-            assert calls[-1][1][0] == "P"
+            if operation.endswith("execute_run"):
+                request = calls[-1][1][0]
+                assert request.pipeline_code == "P" and request.standalone
+                assert request.selector.run_id == run
+            else:
+                assert calls[-1][1][0] == "P"
             if "/runs/" in path:
                 assert calls[-1][2]["selector"].run_id == run
     if role == "viewer":
@@ -531,3 +541,14 @@ def test_server_refuses_an_api_address_in_use_before_taking_leadership(cli_proje
     assert "set Api_address to a free port" in output
     with p.engine.connect() as conn:
         assert conn.execute(text("SELECT COUNT(*) FROM AUD_OVERSEERS")).scalar_one() == 0
+
+
+def test_task_run_refuses_unknown_control_fields(api):
+    _ctx, client, creds, _run, _attempt = api
+    response = client.post(
+        "/api/v1/pipelines/P/tasks/T/run",
+        json={"standalone": True, "force": True},
+        headers=headers(creds["operator"]),
+    )
+    assert response.status_code == 422
+    assert "force" in response.text and "extra_forbidden" in response.text

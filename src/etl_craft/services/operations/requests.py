@@ -17,6 +17,7 @@ class RunRequest:
     pipeline_code: str
     selector: RunSelector = ACTIVE_RUN
     task_code: str | None = None
+    standalone: bool = False
     init_only: bool = False
     finalize_only: bool = False
     force: bool = False
@@ -30,6 +31,7 @@ class RunRequest:
 
     def __post_init__(self) -> None:
         """Refuse incompatible requests before any resources are opened."""
+        self.check_manual()
         if self.task_code is not None and not self.task_code.strip():
             raise UsageError("--task_code must not be empty; supply an active task code")
         if sum(bool(v) for v in (self.task_code, self.init_only, self.finalize_only)) > 1:
@@ -47,12 +49,12 @@ class RunRequest:
         if self.force and (self.ignore_dependencies or self.rerun):
             option = "--rerun" if self.rerun else "--ignore-dependencies"
             raise UsageError(f"{option} and --force are different overrides: choose one")
-        if self.with_downstream and not self.rerun:
-            raise UsageError("--with-downstream goes with --rerun")
+        if self.with_downstream and not (self.rerun or self.standalone):
+            raise UsageError("--with-downstream goes with --rerun or --standalone")
         if self.skip and (self.task_code or self.init_only or self.finalize_only or self.force):
             raise UsageError("--skip records a whole run SKIPPED; it takes only --reason")
         if self.reason and not (
-            self.ignore_dependencies or self.rerun or self.skip or self.backfill
+            self.ignore_dependencies or self.rerun or self.skip or self.backfill or self.standalone
         ):
             raise UsageError(
                 "--reason goes with --ignore-dependencies, --rerun, --skip or --backfill"
@@ -69,6 +71,11 @@ class RunRequest:
             raise UsageError("--backfill and --skip create new runs; do not pass a run selector")
         if self.run_date and (self.skip or self.backfill):
             raise UsageError("--run-date cannot be combined with --skip or --backfill")
+
+    def check_manual(self) -> None:
+        """Validate independent task selection options."""
+        if self.standalone and (not self.task_code or self.force or self.rerun):
+            raise UsageError("--standalone requires --task_code, without --force or --rerun")
 
     def arguments(self) -> dict[str, Any]:
         """Return audit arguments without configuration objects or secrets."""

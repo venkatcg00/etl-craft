@@ -163,3 +163,16 @@ The name identifies one deployment account. Repeat with that name and role to is
 credential for the same account; an inconsistent role is refused. Disabling the account
 invalidates every credential belonging to it. See [tokens and roles](../deploying/http-api.md#tokens-and-roles)
 for the upgrade procedure when old token names collide.
+
+## Independent task execution
+
+After applying your metadata, use a non-watermarked SQL task with no outside dependencies:
+
+```bash
+etl-craft run --pipeline_code SALES_DAILY --task_code load_orders --standalone
+```
+
+Add `--with-downstream` for its selected continuation, or explicitly justify current inputs
+with `--ignore-dependencies --reason "upstream data verified"`. See
+[manual selections](../guides/running-tasks.md#independent-manual-selections) for admission and
+checkpoint limits and the equivalent HTTP request.

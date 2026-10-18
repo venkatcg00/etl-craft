@@ -41,6 +41,11 @@ def _configure(parser: argparse.ArgumentParser) -> None:
         help="end the selected pipeline run from its tasks' statuses; an orchestrator's last step",
     )
     parser.add_argument(
+        "--standalone",
+        action="store_true",
+        help="with --task_code: create or explicitly resume an independent manual run",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="run even if tasks already succeeded or their dependencies are not met; local "
@@ -61,7 +66,7 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--with-downstream",
         action="store_true",
-        help="with --rerun: run every task after it again too, in dependency order",
+        help="with --rerun or --standalone: include downstream tasks in dependency order",
     )
     parser.add_argument(
         "--skip",
@@ -93,36 +98,43 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     stopping = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
     with command_context(args) as ctx, interrupts.deferred(*stopping):
         # Remote reasons describe the requester; local reasons justify an intervention.
-        request = RunRequest(
-            args.pipeline_code,
-            selector=RunSelector(args.run_id, args.run_key),
-            task_code=args.task_code,
-            init_only=args.init_only,
-            finalize_only=args.finalize_only,
-            force=args.force,
-            ignore_dependencies=args.ignore_dependencies,
-            rerun=args.rerun,
-            with_downstream=args.with_downstream,
-            skip=args.skip,
-            run_date=args.run_date,
-            backfill=args.backfill,
-            reason=None if ctx.config.mode == Mode.REMOTE else args.reason,
-        )
+        request = _request(args, None if ctx.config.mode == Mode.REMOTE else args.reason)
         done = runs.execute_run(ctx, request)
     out.result(done, args.output_format)
     return _exit_code(done, started_only=args.init_only)
 
 
+def _request(args: argparse.Namespace, reason: str | None) -> RunRequest:
+    """Parse execution flags once for local and server-backed task requests."""
+    return RunRequest(
+        args.pipeline_code,
+        selector=RunSelector(args.run_id, args.run_key),
+        task_code=args.task_code,
+        standalone=args.standalone,
+        init_only=args.init_only,
+        finalize_only=args.finalize_only,
+        force=args.force,
+        ignore_dependencies=args.ignore_dependencies,
+        rerun=args.rerun,
+        with_downstream=args.with_downstream,
+        skip=args.skip,
+        run_date=args.run_date,
+        backfill=args.backfill,
+        reason=reason,
+    )
+
+
 def _remote(args: argparse.Namespace, out: Output, server: ServerClient) -> int:
+    if args.standalone:
+        _request(args, args.reason)
     local_only = [
         flag
         for flag, given in (
             ("--init-only", args.init_only),
             ("--finalize-only", args.finalize_only),
             ("--force", args.force),
-            ("--ignore-dependencies", args.ignore_dependencies),
+            ("--ignore-dependencies", args.ignore_dependencies and not args.standalone),
             ("--skip", args.skip),
-            ("--task_code without --rerun", args.task_code is not None and not args.rerun),
         )
         if given
     ]
@@ -139,6 +151,20 @@ def _remote(args: argparse.Namespace, out: Output, server: ServerClient) -> int:
             api_path("pipelines", args.pipeline_code, "backfills"),
             BackfillView,
             body={"first": first.isoformat(), "last": last.isoformat(), "reason": args.reason},
+        )
+    elif args.standalone or (args.task_code is not None and not args.rerun):
+        done = server.call(
+            "POST",
+            api_path("pipelines", args.pipeline_code, "tasks", args.task_code, "run"),
+            OperationResult,
+            body={
+                "standalone": args.standalone,
+                "reason": args.reason,
+                "with_downstream": args.with_downstream,
+                "ignore_dependencies": args.ignore_dependencies,
+                "run_date": None if args.run_date is None else args.run_date.isoformat(),
+                **selector_query(args),
+            },
         )
     elif args.rerun:
         done = server.call(
@@ -164,7 +190,7 @@ def _remote(args: argparse.Namespace, out: Output, server: ServerClient) -> int:
             },
         )
     out.result(done, args.output_format)
-    return _exit_code(done, started_only=args.backfill is None and not args.rerun)
+    return _exit_code(done, started_only=args.backfill is None and args.task_code is None)
 
 
 def _exit_code(done: OperationResult | BackfillView, *, started_only: bool) -> int:

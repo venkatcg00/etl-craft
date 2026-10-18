@@ -34,6 +34,14 @@ def today(zone: str = "UTC") -> date:
     return datetime.now(timezone(zone)).date()
 
 
+def fetch_exclusive_run_id(conn: Connection, pipeline_id: int) -> int | None:
+    """Return the run occupying a pipeline's exclusive admission slot."""
+    row = conn.execute(
+        statement(conn, "active_exclusive_run"), {"pipeline_id": pipeline_id}
+    ).scalar_one_or_none()
+    return None if row is None else int(row)
+
+
 @dataclass(frozen=True)
 class RunSelector:
     """An explicit run id or pipeline-scoped key, or the single non-terminal run."""
@@ -63,6 +71,7 @@ class RunIdentity:
     trigger_kind: str
     run_date: date
     status: str
+    task_selection: str | None = None
 
 
 def run_candidates(conn: Connection, pipeline_id: int) -> list[RunIdentity]:
@@ -74,6 +83,7 @@ def run_candidates(conn: Connection, pipeline_id: int) -> list[RunIdentity]:
             str(r.trigger_kind),
             as_date(r.run_date),
             str(r.status),
+            r.task_selection,
         )
         for r in conn.execute(
             statement(conn, "pipeline_run_candidates"), {"pipeline_id": pipeline_id}
@@ -94,7 +104,7 @@ def select_run(
             if selector.run_id is not None
             else r.run_key == selector.run_key
             if selector.run_key is not None
-            else r.status in {RunStatus.QUEUED, RunStatus.IN_PROGRESS}
+            else r.task_selection is None and r.status in {RunStatus.QUEUED, RunStatus.IN_PROGRESS}
         )
     ]
     if len(matches) == 1:

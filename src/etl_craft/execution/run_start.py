@@ -19,7 +19,7 @@ from etl_craft.core.enums import (
 from etl_craft.core.errors import RunStateError, StaleTransitionError
 from etl_craft.core.faults import fault_point
 from etl_craft.core.graph import DependencyGraph, build_graph
-from etl_craft.engine import runlog, transitions
+from etl_craft.engine import run_scopes, runlog, transitions
 from etl_craft.engine.repository import trackers
 from etl_craft.engine.repository.dependencies import PipelineGraphData, fetch_pipeline_graph
 from etl_craft.engine.repository.pauses import Pause
@@ -124,14 +124,19 @@ def load_pipeline(
     *,
     detail: PipelineDetail | None = None,
     graph_data: PipelineGraphData | None = None,
+    run_id: int | None = None,
 ) -> tuple[PipelineDetail, DependencyGraph, dict[int, str]]:
     """Load one pipeline's details, dependency graph and active task codes."""
     detail = detail or fetch_pipeline_detail(conn, pipeline_id)
     data = graph_data or fetch_pipeline_graph(conn, pipeline_id)
+    scope = None if run_id is None else run_scopes.fetch_selection(conn, run_id)
+    if scope is not None:
+        data = run_scopes.selected_graph(data, scope)
+    codes = fetch_task_codes(conn, pipeline_id)
     return (
         detail,
         build_graph(data.tasks, data.same_pipeline_edges),
-        fetch_task_codes(conn, pipeline_id),
+        {task.task_id: codes[task.task_id] for task in data.tasks},
     )
 
 
@@ -250,7 +255,10 @@ def _select_run(
                 r.run_key == options.selector.run_key for r in candidates
             ):
                 selected = runlog.select_run(conn, pipeline_id, options.selector)
-        elif any(r.status in {RunStatus.QUEUED, RunStatus.IN_PROGRESS} for r in candidates):
+        elif any(
+            r.task_selection is None and r.status in {RunStatus.QUEUED, RunStatus.IN_PROGRESS}
+            for r in candidates
+        ):
             selected = runlog.select_run(conn, pipeline_id)
         if selected is not None:
             if explicit and options.run_date is not None and selected.run_date != options.run_date:
@@ -341,7 +349,7 @@ def _admit_run(
         try:
             transitions.admit_run(conn, queued, current_actor())
         except StaleTransitionError as error:
-            other = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
+            other = runlog.fetch_exclusive_run_id(conn, pipeline_id)
             if options.initialize_only and other == queued:
                 return None
             raise RunStateError(
@@ -363,7 +371,7 @@ def _admit_run(
             conn, pipeline_id, run_date=logical_date, backfill=options.backfill is not None
         )
     if created is None:
-        other = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
+        other = runlog.fetch_exclusive_run_id(conn, pipeline_id)
         raise RunStateError(
             f"{pipeline_code}: another process started pipeline_run_id={other} while this "
             "one was checking the pipeline's dependencies; that run is left as it is. See "

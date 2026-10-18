@@ -86,8 +86,10 @@ that damages the package is not helpful; saying so, with a better option, is.
   starts ready tasks after each completion, one child process per task. Gate waits use no worker
   slots and retain their budget in `AUD_GATE_WAITS`.
 - A task is given its run by whoever starts it; nothing resolves a run by recency. Commands
-  select an explicit `--run-id` or `--run-key`, or the single non-terminal run. A partial unique
-  index keeps one IN-PROGRESS run per pipeline.
+  select an explicit `--run-id` or `--run-key`, or the single non-terminal whole-pipeline run.
+  Manual task selections require an explicit identity to resume and never bind implicitly.
+  A partial unique index keeps one IN-PROGRESS exclusive execution per pipeline; isolated
+  manual selections may overlap only where target, checkpoint and consumption isolation holds.
 - Whole-pipeline and task supervisors renew 60-second ownership leases every 15 seconds.
   Reconcile expired attempts as `LOST` before retrying; never adopt an expired lease directly,
   and signal a local process only after verifying its PID and process birth identity.

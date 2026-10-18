@@ -6,6 +6,7 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.errors import RunStateError
+from etl_craft.engine import run_scopes
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.events import run_event_files
 from etl_craft.engine.repository.tasks import fetch_task_execution_detail, fetch_task_parameters
@@ -34,6 +35,7 @@ def build_task_context(
             raise RunStateError(f"no task run with task_run_id={task_run_id}")
         detail = fetch_task_execution_detail(conn, row.task_id)
         params = fetch_task_parameters(conn, row.task_id)
+        run_scopes.check_task(conn, row.pipeline_run_id, row.task_id, detail=detail, params=params)
         kind = fetch_run_kind(conn, row.pipeline_run_id)
         event_files = run_event_files(conn, row.pipeline_run_id)
     return TaskContext(

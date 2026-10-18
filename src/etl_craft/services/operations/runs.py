@@ -13,6 +13,7 @@ from etl_craft.execution import interventions, reruns, run_finish, run_start, ru
 from etl_craft.execution import pipeline as execution
 from etl_craft.execution.attempt_types import Override
 from etl_craft.execution.reconcile import reconcile
+from etl_craft.execution.run_types import PipelineOutcome
 from etl_craft.services.cloning import run_hooks
 from etl_craft.services.operations.context import OperationContext, operation
 from etl_craft.services.operations.models import BackfillView, OperationResult, ReconciliationView
@@ -178,6 +179,8 @@ def _execute(ctx: OperationContext, request: RunRequest) -> OperationResult:
     pipeline_code = request.pipeline_code
     pipeline_id = prepare_execution(ctx, pipeline_code)
     selector = request.selector
+    if request.standalone:
+        return _manual(ctx, request, pipeline_id)
     if request.task_code is not None or request.finalize_only:
         selector = selected_date(ctx, pipeline_id, selector, request.run_date)
     if request.task_code is not None and not (request.force or request.rerun):
@@ -211,6 +214,21 @@ def _execute(ctx: OperationContext, request: RunRequest) -> OperationResult:
             pipeline_run_id=skipped.pipeline_run_id,
             pipeline_id=pipeline_id,
         )
+    done = _run_step(ctx, request, selector)
+    return result(
+        ctx,
+        pipeline_code,
+        done.status,
+        done.message,
+        pipeline_run_id=done.pipeline_run_id,
+        task_code=request.task_code,
+        pipeline_id=pipeline_id,
+    )
+
+
+def _run_step(ctx: OperationContext, request: RunRequest, selector: RunSelector) -> PipelineOutcome:
+    """Execute one selected run lifecycle step."""
+    pipeline_code = request.pipeline_code
     hooks = run_hooks(ctx.config, ctx.engine)
     if request.rerun:
         assert request.task_code is not None
@@ -259,13 +277,34 @@ def _execute(ctx: OperationContext, request: RunRequest) -> OperationResult:
             run_date=request.run_date,
             selector=selector,
         )
+    return done
+
+
+def _manual(ctx: OperationContext, request: RunRequest, pipeline_id: int) -> OperationResult:
+    """Execute an independently selected manual run through the shared scheduler."""
+    pipeline_code = request.pipeline_code
+    selector = request.selector
+    from etl_craft.execution.manual import run_manual
+
+    done = run_manual(
+        ctx.engine,
+        ctx.config,
+        pipeline_code,
+        request.task_code or "",
+        selector=selector,
+        run_date=request.run_date,
+        with_downstream=request.with_downstream,
+        ignore_dependencies=request.ignore_dependencies,
+        reason=request.reason,
+        child=ctx.child,
+        hooks=run_hooks(ctx.config, ctx.engine),
+    )
     return result(
         ctx,
         pipeline_code,
         done.status,
         done.message,
         pipeline_run_id=done.pipeline_run_id,
-        task_code=request.task_code,
         pipeline_id=pipeline_id,
     )
 
