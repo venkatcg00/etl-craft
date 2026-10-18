@@ -18,6 +18,7 @@ from etl_craft.engine.runlog import RunSelector
 from etl_craft.execution.interventions import reset_watermark
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.status import explain_task
+from fixtures.auth import service_token
 from fixtures.metadata import add_pipeline, add_task
 
 
@@ -160,7 +161,8 @@ def test_reset_refuses_active_attempts_and_records_old_and_new(engine_db, waterm
         reset_watermark(engine, config, "P", "T", "1", "", selector=selector)
 
 
-def test_cli_watermark_reset_does_not_change_run_status(metadata_project, capsys):
+def test_cli_watermark_reset_does_not_change_run_status(metadata_project, capsys, monkeypatch):
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(metadata_project.engine))
     from etl_craft.cli import main
 
     p = metadata_project

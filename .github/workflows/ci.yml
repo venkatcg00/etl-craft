@@ -15,9 +15,6 @@ on:
         type: boolean
         default: false
 
-env:
-  ETL_CRAFT_ACTOR: github:${{ github.actor }}
-
 permissions:
   contents: read
 

@@ -126,7 +126,7 @@ def _authorizer(
                 )
             if tokens.ROLES.index(identity.role) < tokens.ROLES.index(role):
                 raise HTTPException(403, f"{role} role is required")
-            return replace(ctx, actor=identity.actor)
+            return replace(ctx, actor=identity.actor, role=ApiRole(identity.role))
 
         return authorized
 

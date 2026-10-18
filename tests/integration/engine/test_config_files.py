@@ -23,6 +23,7 @@ from etl_craft.services.config_files import (
     read_config_files,
     sync_config,
 )
+from fixtures.auth import service_token
 from fixtures.metadata import start_run
 
 ALICE = Actor("github:alice", ActorKind.HUMAN)
@@ -308,7 +309,8 @@ def test_a_configuration_that_validate_fails_is_not_applied(exported):
     ) == [("ANY",)]
 
 
-def test_the_command_plans_applies_and_exports(metadata_project, capsys):
+def test_the_command_plans_applies_and_exports(metadata_project, capsys, monkeypatch):
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(metadata_project.engine))
     metadata_project.load_examples("0002")
     assert main(["config", "plan"]) == ExitCode.METADATA_FILE
     assert "no config folder" in capsys.readouterr().err
@@ -474,7 +476,10 @@ def files(folder):
     return {path.name: path.read_text("utf-8") for path in sorted(folder.glob("*.csv"))}
 
 
-def test_export_as_of_a_time_or_a_run_writes_the_rows_that_stood_then(exported, tmp_path, capsys):
+def test_export_as_of_a_time_or_a_run_writes_the_rows_that_stood_then(
+    exported, tmp_path, capsys, monkeypatch
+):
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(exported.engine))
     then = files(exported.config_dir)
     pipeline = min(row[0] for row in exported.rows("SELECT PIPELINE_ID FROM CFG_PIPELINES"))
     with exported.engine.begin() as conn:
@@ -498,7 +503,10 @@ def test_export_as_of_a_time_or_a_run_writes_the_rows_that_stood_then(exported, 
     assert files(tmp_path / "now") != then
 
 
-def test_export_as_of_refuses_what_the_history_cannot_tell(metadata_project, tmp_path, capsys):
+def test_export_as_of_refuses_what_the_history_cannot_tell(
+    metadata_project, tmp_path, capsys, monkeypatch
+):
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(metadata_project.engine))
     metadata_project.load_examples("0002")
     folder = str(tmp_path / "past")
     for when, code, message in (

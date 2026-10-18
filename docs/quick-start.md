@@ -41,6 +41,7 @@ The demo's `craft-connector.yml` sends its alerts to port `51025`; you read them
 ```bash
 python prepare.py warehouse
 etl-craft setup
+etl-craft login
 python prepare.py metadata
 etl-craft validate
 ```
@@ -49,6 +50,8 @@ etl-craft validate
   never creates warehouse schemas: your team does.
 - `setup` runs every check `doctor` makes (the config, the Engine DB, the warehouse, the email
   relay, the project folders) and creates the Engine DB's tables in `engine.db`.
+- `setup` asks for your first admin name and a password of at least 12 characters.
+  `login` signs that account in and stores a private, 12-hour session on this server.
 - `prepare.py metadata` loads the pipelines, their tasks, parameters, dependencies and business
   rules into `engine.db`, as `CFG_` rows, by copying the seed SQL into numbered project
   migrations and running `etl-craft migrate`. In your own project, author these migrations

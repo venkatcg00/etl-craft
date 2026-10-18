@@ -11,6 +11,7 @@ from tempfile import TemporaryDirectory
 from sqlalchemy import text
 
 from etl_craft.config import DagDefaults, DocsSiteConfig, parse_config
+from etl_craft.config.model import AuthConfig
 from etl_craft.core.enums import Mode
 from etl_craft.core.errors import RemoteUnsupportedError
 from etl_craft.dialects.engine import for_engine
@@ -32,6 +33,7 @@ def export_contracts(output: Path) -> None:
         )
         engine = engine_db(config)
         try:
+            config = replace(config, auth=AuthConfig(airflow_connection_id="etl_craft"))
             init_db(engine)
             with engine.begin() as conn:
                 source = (

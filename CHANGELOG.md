@@ -8,6 +8,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Local account login with passwords or registered OIDC device-flow subjects, private expiring
+  sessions, `logout`, `whoami`, admin-only account commands and interactive first-admin/recovery
+  setup. `Auth.Session_hours` defaults to 12; OIDC uses `Auth.Oidc_issuer` and `Auth.Oidc_client_id`.
+- Remote Airflow DAG credentials come from the connection named by `Auth.Airflow_connection_id`;
+  remote `run --reason` records requester context without creating an intervention.
+
 - Deployment accounts in `CFG_ACCOUNTS`; API tokens inherit their account's current role and
   stop authenticating immediately when it is inactive. Roles now include `developer`, between
   `operator` and `admin`. Account history and warehouse mirrors exclude password hashes.
@@ -15,7 +21,7 @@ All notable changes are recorded here. The format follows
   per legacy token. Invalid actor names or duplicate token names, including revoked credentials,
   stop the upgrade before any pending migration writes; resolve them through a project migration on the old
   version first. `token create --name` creates or reuses that account and refuses a role that
-  disagrees with it. Account administration, password login and bootstrap follow separately.
+  disagrees with it. Account administration and login use the commands described above.
 
 - A task process starts only when its log folder under `Orchestration.Log_dir` can be created
   and written, with at least 64 MiB free. Otherwise the attempt is recorded `FAILED` with a
@@ -190,6 +196,13 @@ All notable changes are recorded here. The format follows
   `Max_parallel_tasks`; unset, either kind may use every slot, as before.
 
 ### Changed
+
+- Commands require a proven account through `ETL_CRAFT_TOKEN` or a stored session.
+  `ETL_CRAFT_ACTOR` and `ETL_CRAFT_ACTOR_KIND` no longer select an identity. Run `setup` locally
+  to provision an admin, then `login`; supply service tokens explicitly in automation.
+  Python callers replace `core.actor.resolve_actor` with an explicitly scoped `Actor`.
+- `doctor` fails without an active admin. Disabling accounts or resetting passwords revokes
+  existing credentials; token creation is reserved for SERVICE accounts.
 
 - An SLA breach whose Engine DB write fails is written again every 15 seconds until it lands or
   the run ends. The breach is then recorded and its lapse alert sent once, instead of both being

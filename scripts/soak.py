@@ -59,7 +59,6 @@ def _env(soak: Path) -> dict[str, str]:
     return {
         **os.environ,
         "PATH": f"{soak / 'venv' / 'bin'}{os.pathsep}{os.environ['PATH']}",
-        "ETL_CRAFT_ACTOR": "soak",
     }
 
 
@@ -79,6 +78,7 @@ def setup(soak: Path, wheel: Path, every: int) -> None:
     shutil.copytree(REPO / "examples" / "demo", soak / "demo")
     _call(soak, _bin(soak, "python"), "prepare.py", "warehouse")
     _call(soak, _bin(soak, "etl-craft"), "setup")
+    _call(soak, _bin(soak, "etl-craft"), "login")
     _call(soak, _bin(soak, "python"), "prepare.py", "metadata")
     offsets = [0, every // 3, 2 * every // 3]
     lines = [
@@ -91,7 +91,10 @@ def setup(soak: Path, wheel: Path, every: int) -> None:
     )
     _call(soak, _bin(soak, "etl-craft"), "migrate")
     _call(soak, _bin(soak, "etl-craft"), "validate")
-    print(f"soak prepared in {soak}; start it with: python scripts/soak.py run {soak}")
+    print(
+        f"soak prepared in {soak}; provide a SERVICE account's ETL_CRAFT_TOKEN before "
+        f"starting it with: python scripts/soak.py run {soak}"
+    )
 
 
 def _state(soak: Path, days: float) -> dict[str, str | int]:

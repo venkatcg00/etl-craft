@@ -30,6 +30,9 @@ MIGRATE = EngineLock("migrate", 8_241_007)
 CLONE = EngineLock("clone", 8_241_008)
 """Serializes cloning, so two runs finishing together never write the same mirror at once."""
 
+ACCOUNTS = EngineLock("accounts", 8_241_010)
+"""Serialize account recovery and credential changes with sign-in."""
+
 LINEAGE = EngineLock("lineage", 8_241_009)
 """Serializes task cache computations and table lineage version publication."""
 

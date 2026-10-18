@@ -127,7 +127,7 @@ item's text, or work done early under another item.
 | S5.O.2b Normalized object contracts | Done | #150, #151, #152, #153, #154, #160, #162, #181 | Merge column lists retain parameter storage; lineage versions use component endpoints; target state, view statements and rule results are keyed by components, and target locks use the resolved identity |
 | S5.P Project documentation gap UI | Done | #165 | Structured schema/lineage gaps, accessible column/graph warnings and read-only comparison API |
 | S5.R Consolidate before the cluster | Done | #179, #185, #188 to #193, #195, #201 | Items 1 to 8 complete: the execution core and configuration loader are split by responsibility; the moved execution functions are shortened with shared run records and unchanged transactions and retries |
-| S5.S Accounts, login and roles | In progress | #203 | Item 1 schema slice: account identities, inherited token roles and safe legacy token conversion; login, account administration, explicit actors and remote operation remain |
+| S5.S Accounts, login and roles | In progress | #203, #204 | Items 1–2: account identities, inherited token roles, local login, sessions, account administration and bootstrap; central role checks, explicit actors and remote CLI remain |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
 | S5.T Resource discovery and deployment profiles | Planned | | Opt-in laptop, server and server-with-workers sizing from usable process resources; one discovery module before S5.C |
@@ -151,18 +151,26 @@ item's text, or work done early under another item.
 
 What a person picking up the work needs that the code and the item texts do not say.
 
-**Next agent: finish S5.S item 1 (#203).** Its implementation is locally validated, but the
-pull request is left unmerged: required Databricks cloning acceptance cannot open a SQL session
-(the provider reports it cannot create the resource). Snowflake cloning passed. Rerun the
-Databricks acceptance when the service is available, then finish the pull request before
-starting the dependent S5.S item 2 (`feat/accounts-login`), including the owner-approved move of
-account administration, interactive first-admin bootstrap and its no-active-admin doctor check
-from item 1, so administration ships with authenticated login. Implement password hashing with
-`hashlib.scrypt` there; this slice supplies its user-only storage field, not password login.
-Token creation currently creates or reuses a service account by name and refuses a conflicting
-role or inactive account. Local CLI identity and its Engine DB trust boundary remain unchanged
-until authentication is delivered. S5.R is complete; execution shares `run_types.PipelineRun`
-and frozen `run_start.StartOptions`, and loader helpers live in `config/loader_helpers.py`.
+**Next agent: finish S5.S item 2 (#204), then take item 3 (`feat/accounts-roles`).**
+If #204 is still open, read and fix its failed CI before starting another item; otherwise continue
+with the shared service-operation role map and recorded refusals. The owner merged #203 despite
+unavailable Databricks acceptance. Databricks has a usage budget: do not retry it until the owner
+explicitly makes budget available. Item 2 changes no warehouse SQL and needs no cloud acceptance.
+The owner withdrew the Spec Kit requirement; follow `AGENTS.md` and the roadmap-item procedure.
+
+Item 2 includes the approved move of account administration, interactive first-admin bootstrap,
+the no-active-admin doctor check and scrypt password hashing from item 1. Sessions reuse
+account-owned `CFG_API_TOKENS` with mandatory expiry for users; service-token creation refuses
+USER accounts. The CLI resolves the credential and configuration once. Account/token management
+and local provisioning require admin; the general role map remains item 3, actor-kind/system
+fallback changes remain item 4, and remote transports/sign-in endpoints remain item 5.
+The approved local recovery boundary is interactive `setup` with Engine DB writer credentials
+when no active admin remains, never an HTTP route. Remote Airflow exports require the approved
+`Auth.Airflow_connection_id`; pipeline action reasons carry the triggering user URL-encoded,
+while the service account remains the actor.
+
+S5.R is complete; execution shares `run_types.PipelineRun` and frozen `run_start.StartOptions`,
+and loader helpers live in `config/loader_helpers.py`.
 
 Traps these refactors hit, with what works:
 
@@ -265,12 +273,20 @@ does not move worker work ahead of the metadata, account or operator-control cor
 
 **Acceptance availability.**
 
+S5.S item 2 (#204) passed the unit, account/session, API/CLI caller, execution and local
+warehouse CLI checks, installed-wheel demos and packaging checks. Credential-file and account
+revocation/recovery races passed twenty consecutive rounds. Airflow contracts passed on both
+supported versions; static checks, strict docs and actionlint passed. New account APIs are
+absent from the old source; command authentication and Airflow credential regressions also fail
+against the old source. No cloud acceptance is required for this item; Databricks was not used.
+
 S5.S item 1 (#203) passed `make static docs`, 1,811 unit tests, 1,080 Engine DB/API tests,
 20 cloning tests across all four local warehouses and 50 final account/upgrade/catalog checks.
 All 32 new account cases fail with the old source. Snowflake cloning passed, including omission
 of account password hashes. Databricks native and Iceberg acceptance is unavailable: opening
 a SQL session fails with the provider's `BAD_REQUEST: Cannot create the resource`, before SQL
-executes. The pull request remains unmerged without auto-merge until that acceptance can run.
+executes. The owner merged #203 with that environment limitation; do not rerun Databricks
+until the owner makes usage budget available.
 Local wheel demos, Airflow, actionlint and repeated races were not needed for this slice.
 
 S5.R item 7, shortening the moved execution functions (#201), passed `make static docs`,
@@ -419,6 +435,26 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- **S5.S item 2 (#204), owner-approved login and administration scope.**
+  - Account administration, bootstrap, doctor and scrypt hashing complete the deferred part
+    of item 1. Account-owned API token storage also holds expiring USER sessions; no new
+    Engine DB schema, migration marker or core dependency is needed.
+  - The owner approved `Auth.Airflow_connection_id` and interactive local writer-credential
+    recovery when no active admin remains, including databases that already contain accounts.
+    Recovery creates a distinct admin and never restores revoked credentials or runs over HTTP.
+    Remote `run --reason` is action context, matching API triggers; local intervention validation
+    is unchanged. The main command audit retains it, outside the execution request.
+  - OIDC accepts RS256 ID tokens only directly from the issuer's validated HTTPS token
+    endpoint, using OIDC Core 3.1.3.7's TLS validation option. It validates issuer, client,
+    nonce and lifetime; registered subjects only, no automatic signup or stored provider tokens.
+  - Item 2's derived acceptance checklist is password/SSO sign-in, registered active users,
+    private per-person/per-DB credentials, expiry/logout, token precedence, removal of actor
+    overrides, admin account/token controls, local bootstrap/recovery and Airflow credentials.
+    The workstream's full "Done when" remains for items 3–5. Doctor and pre-account local
+    provisioning remain explicit writer-credential entry points so initialization and recovery work.
+  - General operation-role enforcement remains item 3; actor kinds and the library's system
+    fallback remain item 4. Remote CLI access and HTTP sign-in endpoints remain item 5.
 
 - **S5.S item 1 (#203), owner-approved schema slice.**
   - Account administration, interactive bootstrap and the corresponding doctor check move to

@@ -33,6 +33,7 @@ from etl_craft.engine.schema import existing_engine_tables
 from etl_craft.execution.connections import probe_email_relay, probe_warehouse
 from etl_craft.handlers.mail import email_tls_problem
 from etl_craft.services.cloning import cloning_problem
+from etl_craft.services.operations.accounts import has_admin
 from etl_craft.warehouse.connection import (
     build_warehouse_engine,
     is_in_memory,
@@ -247,6 +248,15 @@ def _engine_state(config: ConnectorConfig, engine: Engine) -> list[Check]:
             )
         ]
     checks = [ok("Engine DB migrations", "up to date")]
+    checks.append(
+        ok("Active admin", "an active administrator exists")
+        if has_admin(engine)
+        else fail(
+            "Active admin",
+            "no active admin; run `etl-craft setup` interactively "
+            "with the Engine DB writer credentials to provision or recover one",
+        )
+    )
     if engine.dialect.name == "postgresql":
         for table, role, privilege in extra_write_grants(engine):
             quoted_role = quote_identifier(role) if role != "PUBLIC" else role

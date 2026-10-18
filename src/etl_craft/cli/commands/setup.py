@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import argparse
 
-from etl_craft.cli.commands.common import Command, load_command_config
+from etl_craft.cli.commands.common import Command, command_context, load_command_config
 from etl_craft.cli.commands.doctor import report
 from etl_craft.cli.output import Output
+from etl_craft.cli.prompts import interactive, password
+from etl_craft.core.enums import AccountKind, ApiRole, YesNo
 from etl_craft.core.errors import ExitCode
 from etl_craft.engine.privileges import grants_sql
+from etl_craft.services.operations import accounts
 from etl_craft.services.setup import setup
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--oidc-subject", help="provider subject for the first or recovery admin")
     parser.add_argument(
         "--print-grants",
         action="store_true",
@@ -38,6 +42,16 @@ def _run(args: argparse.Namespace, out: Output) -> int:
         out.line(f"setup: applied {version}")
     if not result.created_tables and not result.applied_migrations:
         out.line("setup: the Engine DB is already up to date")
+    with command_context(args) as ctx:
+        if not accounts.has_admin(ctx.engine):
+            interactive()
+            name = input("First or recovery admin account name: ")
+            secret = None if args.oidc_subject else password(confirm=True)
+            admin = accounts.Account(
+                0, name, AccountKind.USER, ApiRole.ADMIN, None, args.oidc_subject, YesNo.YES
+            )
+            accounts.add_account(ctx, admin, secret, recovery=True)
+            out.line(f"setup: created admin {name}; run `etl-craft login`")
     return ExitCode.SUCCESS
 
 

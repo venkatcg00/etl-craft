@@ -138,6 +138,7 @@ nav:
       - Warehouses: connectors/warehouses.md
       - Authentication: connectors/authentication.md
       - craft-connector.yml examples: examples/README.md
+      - Accounts and login: examples/accounts/README.md
       - File delivery event: examples/event-wait.md
       - SQL source watermark: examples/sql-watermark.md
   - Reference:

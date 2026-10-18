@@ -38,3 +38,7 @@ Cloning:
 Docs_site:
   dev:
     Schedule: "0 2 * * *"              # value — generate-yml --docs writes a DAG that runs nightly
+
+Auth:
+  Session_hours: 12                     # value — run setup and login before operating the demo
+  Airflow_connection_id: etl_craft       # value — used only for generated remote Airflow DAGs

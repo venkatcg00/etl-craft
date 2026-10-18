@@ -107,6 +107,7 @@ class Demo:
     catalog: str = ""
     cleanup: list[Any] = field(default_factory=list)
     prefix: str = ""
+    access_token: str | None = None
 
     @property
     def cloud(self) -> bool:
@@ -149,6 +150,7 @@ class Demo:
             "Cloning": {
                 "dev": {"Enabled": self.warehouse_kind != "snowflake_iceberg", "Scope": "all"}
             },
+            "Auth": {"Airflow_connection_id": "etl_craft"},
         }
         path = self.root / "craft-connector.yml"
         if self.cloud:
@@ -299,6 +301,10 @@ class Demo:
 
     def environment(self) -> dict[str, str]:
         env = {**os.environ, PASSWORD_VAR: POSTGRES_PASSWORD, S3_VAR: MINIO_PASSWORD}
+        env["XDG_CONFIG_HOME"] = str(self.root / ".person")
+        env.pop("ETL_CRAFT_TOKEN", None)
+        if self.access_token is not None:
+            env["ETL_CRAFT_TOKEN"] = self.access_token
         env.pop("ETL_CRAFT_CONFIG", None)
         env.pop("ETL_CRAFT_MIGRATIONS_DIR", None)
         return env
@@ -329,6 +335,35 @@ class Demo:
 
     def run(self, *args: str, timeout: float = 900) -> subprocess.CompletedProcess[str]:
         """Run the installed ``etl-craft`` in the project directory."""
+        if args == ("setup",):
+            from fixtures.terminal import login_answers, setup_answers, terminal_run
+
+            done = terminal_run(
+                [str(self.cli), "setup"],
+                cwd=self.root,
+                env=self.environment(),
+                answers=setup_answers(),
+                timeout=timeout,
+            )
+            if done.returncode == 0:
+                signed_in = terminal_run(
+                    [str(self.cli), "login"],
+                    cwd=self.root,
+                    env=self.environment(),
+                    answers=login_answers(),
+                )
+                assert signed_in.returncode == 0, signed_in.stdout
+                created = subprocess.run(
+                    [str(self.cli), "token", "create", "--name", "demo-ci", "--role", "admin"],
+                    cwd=self.root,
+                    env=self.environment(),
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=60,
+                )
+                self.access_token = created.stdout.strip()
+            return done
         return subprocess.run(
             [str(self.cli), *args],
             cwd=self.root,

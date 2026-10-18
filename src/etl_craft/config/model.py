@@ -214,6 +214,16 @@ class ExecutionLimits:
 
 
 @dataclass(frozen=True)
+class AuthConfig:
+    """Deployment login and orchestration credentials."""
+
+    session_hours: int = 12
+    oidc_issuer: str | None = None
+    oidc_client_id: str | None = None
+    airflow_connection_id: str | None = None
+
+
+@dataclass(frozen=True)
 class ConnectorConfig:
     """Everything ``craft-connector.yml`` configures.
 
@@ -245,6 +255,7 @@ class ConnectorConfig:
     dependency_gates: GatePolicy = GatePolicy.ENFORCE
     settings: tuple[SettingSource, ...] = ()
     log_dir: Path = Path(DEFAULT_LOG_DIR)
+    auth: AuthConfig = field(default_factory=AuthConfig)
 
     @property
     def project_dir(self) -> Path:

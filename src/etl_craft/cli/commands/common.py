@@ -10,9 +10,11 @@ from dataclasses import dataclass
 
 from sqlalchemy.engine import Engine
 
+from etl_craft.cli.authentication import command_identity
 from etl_craft.cli.output import Output
 from etl_craft.config import ConnectorConfig, load_config, resolve_config_path
 from etl_craft.core.actor import current_actor
+from etl_craft.core.enums import ApiRole
 from etl_craft.engine.connection import check_reachable, engine_db
 from etl_craft.execution.attempt_types import ChildOptions
 from etl_craft.services.operations import OperationContext
@@ -38,6 +40,9 @@ class Command:
 
 def load_command_config(args: argparse.Namespace) -> ConnectorConfig:
     """Find and load craft-connector.yml: ``--config``, ``$ETL_CRAFT_CONFIG``, or a search."""
+    scoped = command_identity.get()
+    if scoped is not None:
+        return scoped.config
     path = resolve_config_path(args.config)
     logger.debug("reading %s", path)
     return load_config(path)
@@ -83,6 +88,11 @@ def command_context(args: argparse.Namespace) -> Iterator[OperationContext]:
             config,
             current_actor(),
             ChildOptions(log_level=args.log_level, log_format=args.log_format),
+            role=(
+                ApiRole(scoped.identity.role)
+                if (scoped := command_identity.get()) and scoped.identity
+                else None
+            ),
         )
     finally:
         engine.dispose()

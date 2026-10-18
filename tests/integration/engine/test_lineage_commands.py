@@ -10,6 +10,7 @@ from etl_craft.cli import main
 from etl_craft.config import load_config
 from etl_craft.core.errors import ExitCode
 from etl_craft.services.lineage import collect
+from fixtures.auth import service_token
 from fixtures.metadata import add_pipeline, add_source_column, add_task
 
 
@@ -24,6 +25,7 @@ def restore_logger():
 
 @pytest.fixture
 def project(engine_db, tmp_path, monkeypatch):
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(engine_db.engine))
     """INGEST stages raw orders, SALES converts them, MART sums them; one task cannot be traced."""
     profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"

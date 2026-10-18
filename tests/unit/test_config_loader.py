@@ -453,7 +453,7 @@ def test_sections_must_appear_in_the_documented_order(tmp_path):
     ):
         load_config(_write(tmp_path, reordered))
     cloning_first = {"Cloning": {"Enabled": False}, **_minimal()}
-    with pytest.raises(ConfigurationError, match="Cloning, then Docs_site"):
+    with pytest.raises(ConfigurationError, match="Cloning, Docs_site, then Auth"):
         load_config(_write(tmp_path, cloning_first))
     with_cloning = _minimal(Cloning={"Enabled": False})
     assert load_config(_write(tmp_path, with_cloning)).cloning.enabled is False

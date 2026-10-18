@@ -10,9 +10,11 @@ from sqlalchemy import text
 
 from etl_craft.cli import main
 from etl_craft.config import DagDefaults, DocsSiteConfig
+from etl_craft.config.model import AuthConfig
 from etl_craft.core.enums import Mode
 from etl_craft.core.errors import ConfigurationError, ExitCode, RemoteUnsupportedError
 from etl_craft.services.generate_yml import GLOBAL_DAG_ID, docs_dag, global_dag, pipeline_dag
+from fixtures.auth import service_token
 from fixtures.metadata import add_dependency, add_pipeline, add_pipeline_dependency, add_task
 
 
@@ -138,7 +140,9 @@ def one_type(engine):
 
 
 def test_remote_mode_puts_every_rule_in_the_dag(engine_db, pipelines):
-    remote = replace(engine_db.config, mode=Mode.REMOTE)
+    remote = replace(
+        engine_db.config, mode=Mode.REMOTE, auth=AuthConfig(airflow_connection_id="etl_craft")
+    )
     with pipelines.connect() as conn, pytest.raises(RemoteUnsupportedError) as refused:
         pipeline_dag(conn, remote, "SALES")
     assert str(refused.value) == (
@@ -153,17 +157,17 @@ def test_remote_mode_puts_every_rule_in_the_dag(engine_db, pipelines):
     with pipelines.connect() as conn:
         dag = pipeline_dag(conn, remote, "SALES")
     identity = " --run-key 'orchestrator:{{ run_id }}' --run-date '{{ data_interval_end | ds }}'"
+    identity += (
+        " --reason 'Airflow user: {{ dag_run.triggering_user_name "
+        '| default("scheduler", true) | urlencode }}\''
+    )
     run = "etl-craft run --pipeline_code SALES"
     assert dag["max_active_runs"] == 1
     assert "pipeline_dependencies" not in dag
     assert "cross_pipeline_task_dependencies" not in dag
     for step in dag["tasks"].values():
         if "bash_command" in step:
-            assert step.pop("env") == {
-                "ETL_CRAFT_ACTOR": "airflow:{{ dag_run.run_id }}:"
-                "{{ dag_run.triggering_user_name | default('scheduler', true) }}",
-                "ETL_CRAFT_ACTOR_KIND": "ORCHESTRATOR",
-            }
+            assert step.pop("env") == {"ETL_CRAFT_TOKEN": '{{ conn["etl_craft"].password }}'}
             assert step.pop("append_env") is True
     assert dag["tasks"] == {
         "__init__": {
@@ -254,7 +258,9 @@ def test_remote_mode_names_each_rule_it_cannot_apply(engine_db, pipelines, chang
     one_type(pipelines)
     with pipelines.begin() as conn:
         conn.execute(text(change))
-    remote = replace(engine_db.config, mode=Mode.REMOTE)
+    remote = replace(
+        engine_db.config, mode=Mode.REMOTE, auth=AuthConfig(airflow_connection_id="etl_craft")
+    )
     with pipelines.connect() as conn, pytest.raises(RemoteUnsupportedError) as refused:
         pipeline_dag(conn, remote, "SALES")
     assert f"in remote mode: {where}: {rule}; the remote orchestrator does not support this." in (
@@ -274,7 +280,12 @@ def test_the_global_dag_in_remote_mode_needs_one_type_per_pipeline(engine_db, pi
             other,
             "ALWAYS",
         )
-    config = replace(engine_db.config, mode=Mode.REMOTE, dag_defaults=DagDefaults(global_dag=True))
+    config = replace(
+        engine_db.config,
+        mode=Mode.REMOTE,
+        auth=AuthConfig(airflow_connection_id="etl_craft"),
+        dag_defaults=DagDefaults(global_dag=True),
+    )
     with pipelines.connect() as conn:
         with pytest.raises(
             RemoteUnsupportedError,
@@ -313,6 +324,7 @@ def test_the_global_dag(engine_db, pipelines):
 
 
 def test_the_command_writes_yaml(engine_db, pipelines, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(engine_db.engine))
     profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
     block = {"jdbc_url": profile.jdbc_url, "schema": schema}
@@ -328,6 +340,7 @@ def test_the_command_writes_yaml(engine_db, pipelines, tmp_path, monkeypatch, ca
         "Orchestration": {"Mode": "remote"},
         "Engine": {"dev": block},
         "Docs_site": {"Schedule": "30 1 * * *"},
+        "Auth": {"Airflow_connection_id": "etl_craft"},
     }
     (root / "craft-connector.yml").write_text(yaml.safe_dump(raw, sort_keys=False), "utf-8")
     monkeypatch.chdir(root)

@@ -1,6 +1,7 @@
 """Commands in their order in ``etl-craft --help``."""
 
 from etl_craft.cli.commands import (
+    account,
     audit,
     cancel,
     clone,
@@ -15,6 +16,7 @@ from etl_craft.cli.commands import (
     init_db,
     lineage,
     list_pipelines,
+    login,
     mark,
     migrate,
     pause,
@@ -33,6 +35,8 @@ from etl_craft.cli.commands import (
 from etl_craft.cli.commands.common import Command as Command
 
 COMMANDS: tuple[Command, ...] = (
+    *login.COMMANDS,
+    account.COMMAND,
     run.COMMAND,
     server.COMMAND,
     token.COMMAND,

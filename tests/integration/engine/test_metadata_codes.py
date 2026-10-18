@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DataError, IntegrityError
 
+from etl_craft.config import AuthConfig
 from etl_craft.core.enums import Mode
 from etl_craft.core.errors import MetadataError, MigrationError
 from etl_craft.dialects.engine import for_engine
@@ -85,7 +86,13 @@ def test_generated_dags_have_controls_and_no_self_dependency(engine_db, count, m
                 if (position + upstream) % 3 != 0 or upstream == position - 1:
                     add_dependency(conn, pipeline, tasks[position], tasks[upstream])
     with engine_db.engine.connect() as conn:
-        dag = pipeline_dag(conn, replace(engine_db.config, mode=mode), "P")
+        dag = pipeline_dag(
+            conn,
+            replace(
+                engine_db.config, mode=mode, auth=AuthConfig(airflow_connection_id="etl_craft")
+            ),
+            "P",
+        )
     assert list(dag["tasks"]).count(INIT_TASK) == list(dag["tasks"]).count(FINALIZE_TASK) == 1
     for code, step in dag["tasks"].items():
         assert code not in step["depends_on"]

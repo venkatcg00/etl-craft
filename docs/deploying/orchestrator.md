@@ -193,7 +193,9 @@ underscores, at most 128 characters. The database enforces this rule, and `valid
 for generated control steps. Generated shell commands quote each argument separately, including
 the run-date template, and generation refuses self-dependencies or missing control steps.
 
-Generated remote Bash tasks pass `ETL_CRAFT_ACTOR_KIND=ORCHESTRATOR` and an actor name containing
-`dag_run.run_id`. Airflow 3's `dag_run.triggering_user_name` is included when available; otherwise
-the user part is `scheduler`. `append_env` preserves the task's configured environment. This
-attributes requests without coupling their audit records to the eventual flow outcome.
+Generated remote Bash tasks use `ETL_CRAFT_TOKEN` from the password of the Airflow connection
+named by `Auth.Airflow_connection_id`. Provision a SERVICE account and put its token in that
+connection; the generated YAML contains only the Jinja connection reference. `append_env`
+preserves the task's other environment settings. Pipeline actions record Airflow's triggering
+user (or `scheduler`) in their reason, URL-encoded so user-supplied names cannot become shell
+syntax. The proven service account remains the audit actor.

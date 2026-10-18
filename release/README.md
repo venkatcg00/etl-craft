@@ -87,6 +87,12 @@ python scripts/soak.py setup ~/etl-craft-soak/0.4.0 --wheel dist/etl_craft-0.4.0
 ~/etl-craft-soak/0.4.0/venv/bin/python scripts/soak.py check ~/etl-craft-soak/0.4.0
 ```
 
+Use the script from the same checkout as the wheel. For account-enabled wheels, `setup`
+requires an interactive terminal to create and sign in the first admin. Provision a SERVICE
+account token for that Engine DB and provide it as `ETL_CRAFT_TOKEN` for the long-running
+`run` and `check` commands; a person's default 12-hour session is too short for a multi-day soak.
+Existing frozen deployments continue using their pinned wheel and script.
+
 `setup` installs the wheel into its own environment, copies `examples/demo`, and schedules
 `CLIENT_ALPHA`, `CLIENT_BETA` and `SUPPORT_DM` every 15 minutes. `run` kills the server every 20
 to 180 minutes, starts it again, and appends a check to `report.jsonl` every half hour; started

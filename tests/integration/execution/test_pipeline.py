@@ -36,6 +36,7 @@ from etl_craft.execution.run_finish import finalize_active_run
 from etl_craft.execution.run_start import init_pipeline_run
 from etl_craft.execution.run_types import RunHooks
 from etl_craft.execution.runner import run_task
+from fixtures.auth import service_token
 from fixtures.metadata import (
     add_dependency,
     add_pipeline,
@@ -531,7 +532,8 @@ def test_a_relay_outage_does_not_prevent_data_tasks_from_running(config, engine_
         assert runlog.fetch_task_run_status(conn, notify, outcome.pipeline_run_id) == "FAILED"
 
 
-def test_the_command_line(config, pipeline, capsys, monkeypatch):
+def test_the_command_line(config, pipeline, capsys, monkeypatch, engine_db):
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(engine_db.engine))
     engine, _ = pipeline
     monkeypatch.chdir(config.config_path.parent)
     assert cli_main(["run", "--pipeline_code", "P", "--init-only"]) == ExitCode.SUCCESS

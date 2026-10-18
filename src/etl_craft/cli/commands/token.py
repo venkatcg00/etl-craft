@@ -7,6 +7,7 @@ import argparse
 from etl_craft.cli.commands.common import Command, command_context, configure_output
 from etl_craft.cli.output import Output
 from etl_craft.core.errors import ExitCode
+from etl_craft.services.operations.accounts import require_admin
 from etl_craft.services.operations.tokens import ROLES, create_token, list_tokens, revoke_token
 
 
@@ -25,6 +26,7 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 
 def _run(args: argparse.Namespace, out: Output) -> int:
     with command_context(args) as ctx:
+        require_admin(ctx)
         if args.token_verb == "create":
             done = create_token(ctx, args.name, args.role, args.expires)
             if args.output_format == "text":

@@ -15,6 +15,7 @@ from etl_craft.execution import child
 from etl_craft.execution.context import build_task_context
 from etl_craft.handlers import registry
 from etl_craft.handlers.registry import HandlerResult
+from fixtures.auth import service_token
 from fixtures.metadata import start_run
 
 
@@ -142,7 +143,8 @@ def test_an_unknown_task_run(bound):
     assert child.main(args(config_path, 999999)) == ExitCode.RUN_STATE
 
 
-def test_the_command_line_records_a_handler_failure(bound, capsys, monkeypatch):
+def test_the_command_line_records_a_handler_failure(bound, capsys, monkeypatch, engine_db):
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(engine_db.engine))
     engine, config_path, task_run_id, _ = bound
     monkeypatch.chdir(config_path.parent)
     # An earlier attempt failed, so this run is a retry of the same row.

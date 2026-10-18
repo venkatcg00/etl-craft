@@ -145,3 +145,27 @@ def test_unsupported_remote_demo_rules_were_refused():
         "SUPPORT_EXPORT",
         "SUPPORT_BACKFILL",
     }
+
+
+def test_remote_credentials_and_requester_render_without_shell_injection():
+    import shlex
+    from types import SimpleNamespace
+    from urllib.parse import unquote
+
+    document = yaml.safe_load((ROOT / "remote/CLIENT_BETA.yml").read_text())
+    dag = build_dag(document, start_date=START)
+    task = dag.get_task("__init__")
+    requester = "alice'$(touch /tmp/untrusted);`id`"
+    task.render_template_fields(
+        {
+            "conn": {"etl_craft": SimpleNamespace(password="opaque-service-token")},
+            "dag_run": SimpleNamespace(run_id="manual-run", triggering_user_name=requester),
+            "run_id": "manual-run",
+            "data_interval_end": START,
+        }
+    )
+    assert task.env == {"ETL_CRAFT_TOKEN": "opaque-service-token"}
+    command = shlex.split(task.bash_command)
+    reason = command[command.index("--reason") + 1]
+    assert unquote(reason.removeprefix("Airflow user: ")) == requester
+    assert all(character not in task.bash_command for character in ("$", ";", "`"))

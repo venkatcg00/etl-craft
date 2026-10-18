@@ -26,17 +26,42 @@ folder. `doctor` reports missing or unreadable files at their resolved paths.
 
 ## Deployment accounts
 
-API credentials belong to registered `USER` or `SERVICE` accounts and inherit the account's
-current deployment role: `viewer`, `operator`, `developer`, then `admin`. Inactive accounts
-cannot authenticate a bearer credential. Credentials are still administered through the
-[existing token commands](http-api.md#tokens-and-roles); password login, interactive bootstrap
-and account commands follow in the authentication slice. Local Engine DB credentials remain
-the local command trust boundary until then.
+Every local command signs in once using `ETL_CRAFT_TOKEN`, then the current person's stored
+session. An invalid environment token fails even when a valid stored session exists. There is
+no implicit OS-user identity. `login` prompts for a password, or offers OIDC device sign-in when
+`Auth.Oidc_issuer` and `Auth.Oidc_client_id` are configured. Only registered active `USER`
+accounts can sign in; SSO subjects must already match `CFG_ACCOUNTS.OIDC_SUBJECT`.
 
-`CFG_ACCOUNTS.PASSWORD_HASH` allows user credentials and is refused on service
-accounts. Password hashes are excluded from typed history, metadata exports and warehouse
-mirrors. Account names and optional OIDC subjects remain unique even after retirement.
-Accounts are disabled rather than deleted so recorded identities remain resolvable.
+`setup` creates the first admin interactively, with a password or `--oidc-subject SUBJECT`.
+When no active admin remains, the same local command can create a new recovery admin using
+the Engine DB writer credentials. Recovery is never exposed through HTTP. `doctor` diagnoses
+a missing admin without requiring sign-in. Empty/old databases can still be initialized or
+migrated locally before accounts exist; other commands require a credential. Once an admin
+exists, provisioning commands require an authenticated admin.
+
+Sessions last `Auth.Session_hours` (default 12) and are stored per Engine DB in
+`$XDG_CONFIG_HOME/etl-craft/credentials`, otherwise `~/.config/etl-craft/credentials`.
+The file must be owned by the current user with mode **0600**. Insecure files are refused
+with their path and the `chmod` remedy. `logout` revokes and removes that stored session;
+it does not revoke the independent service token supplied by the environment. Each person
+uses their own OS home/config directory. The Engine DB stores only SHA-256 token digests,
+never raw credentials. Sessions and service token values never enter warehouse clones.
+
+Admins manage identities through `account add`, `list`, `set-role`, `disable` and
+`reset-password`; see the [account example](../examples/accounts/README.md).
+Roles are inherited from the account on each command/API request. Disabling revokes all
+credentials immediately; password reset revokes existing sessions. Accounts are never deleted.
+Password hashes use salted `hashlib.scrypt` and never enter metadata histories or mirrors.
+Service accounts use `token create`, then present the value in `ETL_CRAFT_TOKEN`.
+The central role map for all service operations is delivered by S5.S item 3; account
+and token administration, local provisioning and the existing API route roles are enforced now.
+
+OIDC uses RFC 8628 polling and the configured issuer's HTTPS discovery/token endpoints.
+Register a public device client with RS256 ID tokens and nonce support. Tokens are accepted
+only directly from the authenticated TLS token endpoint, as permitted by
+[OIDC Core §3.1.3.7](https://openid.net/specs/openid-connect-core-1_0.html#IDTokenValidation),
+with issuer, client audience, nonce and lifetime validation; arbitrary supplied ID tokens
+are never accepted. Provider tokens are discarded after the local session is issued.
 
 ## Least privilege
 

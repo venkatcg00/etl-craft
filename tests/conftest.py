@@ -10,4 +10,5 @@ pytest_plugins = [
     "fixtures.metadata_project",
     "fixtures.sql_warehouse",
     "fixtures.smtp",
+    "fixtures.oidc",
 ]

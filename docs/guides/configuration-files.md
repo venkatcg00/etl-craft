@@ -200,7 +200,7 @@ Run `plan` on every change before it merges, and `apply` when it deploys, after 
 migrations:
 
 ```bash
-export ETL_CRAFT_ACTOR=github:alice      # in CI: github:${{ github.actor }}
+# Supply ETL_CRAFT_TOKEN from your CI secret manager
 etl-craft migrate
 etl-craft config apply
 ```

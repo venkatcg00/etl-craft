@@ -1,5 +1,6 @@
 """Throwaway projects driven through the installed command line and real process trees."""
 
+import logging
 import os
 import signal
 import subprocess
@@ -13,7 +14,17 @@ import yaml
 from sqlalchemy import text
 
 from etl_craft.config import load_config
+from fixtures.auth import service_token
 from fixtures.metadata import add_pipeline, add_task
+
+
+@pytest.fixture
+def cli_logging():
+    logger = logging.getLogger("etl_craft")
+    handlers, level = list(logger.handlers), logger.level
+    yield
+    logger.handlers[:] = handlers
+    logger.setLevel(level)
 
 
 def descendants(pid):
@@ -163,7 +174,7 @@ class CliProject:
 
 
 @pytest.fixture
-def cli_project(empty_engine_db, tmp_path):
+def cli_project(empty_engine_db, tmp_path, monkeypatch):
     db = empty_engine_db
     profile = db.config.engine
     block = {
@@ -191,6 +202,7 @@ def cli_project(empty_engine_db, tmp_path):
     project = CliProject(db.engine, config, 0, 0, [])
     code, output = project.run("init-db")
     assert code == 0, output
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(db.engine))
     config.ingestion_scripts_dir.mkdir()
     (config.ingestion_scripts_dir / "load.py").write_text(
         "from etl_craft.scripting import ScriptResult\ndef run(task):\n    return ScriptResult(1)\n"

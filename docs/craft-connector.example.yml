@@ -235,3 +235,10 @@ Cloning:
 #   External_url: https://docs.example.com/etl-craft/
 #   Trusted_proxies: [127.0.0.1/32]   # Only the proxy's actual source addresses.
 #   Allowed_ips: [203.0.113.0/24]    # Optional visitor/VPN networks, not proxy networks.
+
+# Account sign-in settings; the optional Auth section follows Docs_site.
+# Auth:
+#   Session_hours: 12                   # value — integer 1..8760; local session lifetime
+#   Oidc_issuer: https://sso.example.com # value — exact HTTPS issuer, paired with Oidc_client_id
+#   Oidc_client_id: etl-craft            # value — public device-flow client, RS256 ID tokens
+#   Airflow_connection_id: etl_craft     # value — Airflow connection password holds a service token

@@ -64,7 +64,7 @@ def test_setup_creates_the_engine_db_then_changes_nothing(config, empty_engine_d
     first = setup(config)
     assert not first.failed and first.created_tables
     assert existing_engine_tables(empty_engine_db.engine)
-    assert failed(run_checks(config)) == []
+    assert failed(run_checks(config)) == ["Active admin"]
     assert found(run_checks(config))["Engine DB migrations"] == (Status.OK, "up to date")
 
     again = setup(config)
@@ -82,7 +82,7 @@ def test_a_project_migration_is_pending_until_setup_applies_it(config, tmp_path)
         "1 pending: project/0001_owner.sql; run `etl-craft migrate`",
     )
     assert setup(config).applied_migrations == ["0001_owner.sql"]
-    assert failed(run_checks(config)) == []
+    assert failed(run_checks(config)) == ["Active admin"]
 
 
 def test_setup_changes_nothing_when_a_check_fails(config, empty_engine_db):
@@ -155,6 +155,14 @@ def test_email_secrets_auth_and_sendmail(config, monkeypatch):
 
 @pytest.mark.engine_sqlite
 def test_the_commands(tmp_path, monkeypatch, capsys):
+
+    from etl_craft.config import load_config
+    from etl_craft.engine.connection import engine_db
+    from fixtures.auth import service_token
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _: "test-owner")
+    monkeypatch.setattr("getpass.getpass", lambda _: "password for test owner")
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ETL_CRAFT_CONFIG", raising=False)
     monkeypatch.delenv("ETL_CRAFT_MIGRATIONS_DIR", raising=False)
@@ -172,8 +180,15 @@ def test_the_commands(tmp_path, monkeypatch, capsys):
     assert out[-1].endswith("1 failed")
 
     assert main(["setup"]) == ExitCode.SUCCESS
+    signed_config = load_config(tmp_path / "craft-connector.yml")
+    signed_engine = engine_db(signed_config)
+    try:
+        monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(signed_engine))
+    finally:
+        signed_engine.dispose()
     out = capsys.readouterr().out.splitlines()
-    assert out[-1] == "setup: created the Engine DB tables"
+    assert "setup: created the Engine DB tables" in out
+    assert out[-1] == "setup: created admin test-owner; run `etl-craft login`"
     assert main(["setup"]) == ExitCode.SUCCESS
     assert capsys.readouterr().out.splitlines()[-1] == "setup: the Engine DB is already up to date"
     assert main(["doctor"]) == ExitCode.SUCCESS

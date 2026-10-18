@@ -28,6 +28,7 @@ It exits 1 when any check fails, so it can gate a deployment. It checks:
 | Auth | | an `auth_mode` has not been verified against a live service |
 | Engine DB connection | the database cannot be reached, or its `schema` does not exist | a SQLite Engine DB in remote mode |
 | Engine DB tables and migrations | there are no Engine DB tables, a migration is pending, or an applied migration file has changed | |
+| Active admin | no active admin exists; run setup interactively with writer credentials | |
 | Engine DB write access | PostgreSQL grants writes to another login or PUBLIC | the SQLite file is writable by group or others |
 | Warehouse | the database cannot be reached, its `schema` does not exist, it is an in-memory DuckDB, or a Trino catalog is not Iceberg | |
 | Email | the relay does not answer, TLS certificate or hostname verification fails, the CA file is unreadable, a login uses `tls_mode: none`, or the `sendmail` program cannot be run | |
@@ -42,7 +43,14 @@ the mode and trust source.
 apart from the Engine DB's tables and migrations, and then:
 
 - on a database with no Engine DB tables, creates them (as `init-db` does);
-- applies every pending migration, packaged and your own (as `migrate` does).
+- applies every pending migration, packaged and your own (as `migrate` does);
+- when no active admin exists, asks interactively for a new admin name and password
+  (12–1024 characters), or binds `--oidc-subject SUBJECT` for SSO-only sign-in.
+
+Run `etl-craft login` afterwards. The same local writer-credential boundary supports admin
+recovery if every admin was disabled or demoted. It creates a distinct identity and never
+restores old credentials or exposes recovery over HTTP. With an existing active admin,
+setup requires a signed-in admin; unattended deployments supply `ETL_CRAFT_TOKEN`.
 
 If any check fails, `setup` changes nothing and exits 1: every connection a run needs must work
 before it builds anything. On an Engine DB that is up to date it changes nothing and says so, so

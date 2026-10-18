@@ -36,10 +36,10 @@ with a project migration (etl-craft migrate)`.
    SALES_MART` shows the order the tasks run in.
 3. **Review it like code**, in a pull request, with the `validate` output.
 4. **Deploy it.** The deployment job runs `migrate` and then `validate` against each Engine DB,
-   with a stable actor name:
+   with a registered service account token:
 
     ```bash
-    export ETL_CRAFT_ACTOR=github:alice      # in CI: github:${{ github.actor }}
+    # Supply ETL_CRAFT_TOKEN from your CI secret manager
     etl-craft migrate
     etl-craft validate
     ```

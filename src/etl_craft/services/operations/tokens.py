@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import ClassVar
 
-from sqlalchemy.engine import RowMapping
+from sqlalchemy.engine import Connection, RowMapping
 
 from etl_craft.core.actor import Actor, ActorKind
 from etl_craft.core.enums import AccountKind, ApiRole, YesNo
@@ -81,7 +81,6 @@ def create_token(
         if not 1 <= days <= 36500:
             raise UsageError("token --expires must be between 1d and 36500d")
         expires_at = now + timedelta(days=days)
-    token = secrets.token_urlsafe(32)
     with (
         operation(ctx, "token create", {"name": name, "role": role, "expires": expires}),
         ctx.engine.begin() as conn,
@@ -91,29 +90,18 @@ def create_token(
             {"name": name, "kind": AccountKind.SERVICE, "role": role},
         )
         account = conn.execute(statement(conn, "api_token_account"), {"name": name}).one()
-        if account.active_flag != YesNo.YES or account.role != role:
+        if (
+            account.active_flag != YesNo.YES
+            or account.role != role
+            or account.kind != AccountKind.SERVICE
+        ):
             raise UsageError(
                 f"account {name!r}: role={account.role!r}, ACTIVE_FLAG={account.active_flag!r}; "
-                f"expected an active account with role={role!r}; use its current role or ask "
-                "an administrator to update the account through a project migration"
+                f"expected an active account with role={role!r} and kind=SERVICE; "
+                "use its current role or ask "
+                "an administrator to use `etl-craft account set-role`"
             )
-        conn.execute(
-            statement(conn, "api_token_create"),
-            {
-                "name": name,
-                "account_id": account.account_id,
-                "actor": ctx.actor.name,
-                "digest": sha256_hex(token.encode()),
-                "now": now,
-                "expires_at": expires_at,
-            },
-        ).scalar_one()
-        metadata = _view(
-            conn.execute(statement(conn, "api_token_find"), {"digest": sha256_hex(token.encode())})
-            .one()
-            ._mapping
-        )
-    return CreatedToken(token, metadata)
+        return issue_token(conn, ctx.actor.name, account.account_id, name, expires_at)
 
 
 def list_tokens(ctx: OperationContext) -> TokensView:
@@ -154,3 +142,26 @@ def authenticate(ctx: OperationContext, token: str) -> TokenView | None:
     ):
         return None
     return view
+
+
+def issue_token(
+    conn: Connection, actor: str, account_id: int, name: str, expires_at: datetime | None
+) -> CreatedToken:
+    """Issue a credential inside its caller's account-validation transaction."""
+    token = secrets.token_urlsafe(32)
+    digest = sha256_hex(token.encode())
+    conn.execute(
+        statement(conn, "api_token_create"),
+        {
+            "name": name,
+            "account_id": account_id,
+            "actor": actor,
+            "digest": digest,
+            "now": datetime.now(UTC),
+            "expires_at": expires_at,
+        },
+    )
+    metadata = _view(
+        conn.execute(statement(conn, "api_token_find"), {"digest": digest}).one()._mapping
+    )
+    return CreatedToken(token, metadata)

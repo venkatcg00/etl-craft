@@ -20,6 +20,14 @@ apart from a leftover table.
 
 ## Upgrading
 
+Account authentication replaces the former `ETL_CRAFT_ACTOR` and `ETL_CRAFT_ACTOR_KIND`
+environment overrides. After installing this version, run `etl-craft setup` locally with
+writer credentials to migrate and provision your first admin, then `etl-craft login`.
+Existing service tokens keep their values and inherited account roles. If all migrated
+accounts are non-admin, local interactive setup provisions a recovery admin; no HTTP route
+can do so. Replace actor overrides in CI with a registered service token in `ETL_CRAFT_TOKEN`
+and regenerate remote DAGs after configuring `Auth.Airflow_connection_id`.
+
 After installing a new etl-craft version, and whenever your own migrations change, run:
 
 ```bash
@@ -123,20 +131,12 @@ rows keep unknown actor fields empty; the migration does not invent who performe
 rebuilds the run, attempt, intervention and pause tables to add actor defaults, preserving rows,
 references, custom objects and identity counters with the same rollback checks as migration 0007.
 
-The CLI resolves one actor per command from `ETL_CRAFT_ACTOR`, or `user@hostname` when it is unset.
-Names must be non-empty, contain no control characters and fit 128 characters. Set a stable name
-in automation:
+The CLI resolves its actor once from a registered account's session or `ETL_CRAFT_TOKEN`.
+Account names must be non-empty, contain no control characters and fit 128 characters.
+Use `etl-craft setup` and `etl-craft login` for people; provision a SERVICE account and
+store its token in your CI secret manager for automation. See [account security](security.md).
+Library callers scope their actor explicitly with `etl_craft.core.actor.acting_as(actor)`.
 
-```bash
-export ETL_CRAFT_ACTOR=github:alice
-etl-craft migrate
-```
-
-CI uses `github:${{ github.actor }}`. `ETL_CRAFT_ACTOR_KIND` defaults to `HUMAN`; generated remote
-DAGs set `ORCHESTRATOR` and include the DAG run id and Airflow's triggering user when available.
-Other sources are `SCHEDULE`, `WORKER` and `SYSTEM`. These environment values identify an action;
-they do not authenticate a user. Library callers can scope an `Actor` with
-`etl_craft.core.actor.acting_as(actor)`; otherwise library work uses the engine's `SYSTEM` actor.
 A run records its starter, and its ending actor: system finalization, or the person marking or
 cancelling it. Pauses, resumes, interventions and attempts record their actor kind too.
 

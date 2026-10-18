@@ -413,8 +413,10 @@ def test_postgres_extra_write_grant_is_reported(engine_db):
             conn.exec_driver_sql(f'DROP ROLE "{role}"')
 
 
-@pytest.mark.parametrize("override", [True, False])
-def test_cli_actor_requests_and_read_only_audit(engine_db, tmp_path, monkeypatch, capsys, override):
+@pytest.mark.parametrize("actor_name", ["alice", "alice@laptop"])
+def test_cli_actor_requests_and_read_only_audit(
+    engine_db, tmp_path, monkeypatch, capsys, actor_name
+):
     import yaml
 
     from etl_craft.cli import main
@@ -447,14 +449,9 @@ def test_cli_actor_requests_and_read_only_audit(engine_db, tmp_path, monkeypatch
         add_task(conn, unrelated, "other", NOTE="unrelated_parameter_history")
         conn.execute(text("DELETE FROM CFG_TASK_PARAMETERS WHERE TASK_ID=:task"), {"task": deleted})
         conn.execute(text("DELETE FROM CFG_TASKS WHERE TASK_ID=:task"), {"task": deleted})
-    actor_name = "alice" if override else "alice@laptop"
-    if override:
-        monkeypatch.setenv("ETL_CRAFT_ACTOR", actor_name)
-    else:
-        monkeypatch.delenv("ETL_CRAFT_ACTOR", raising=False)
-        monkeypatch.setattr("getpass.getuser", lambda: "alice")
-        monkeypatch.setattr("socket.gethostname", lambda: "laptop")
-    monkeypatch.delenv("ETL_CRAFT_ACTOR_KIND", raising=False)
+    from fixtures.auth import service_token
+
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(engine_db.engine, actor_name))
 
     def command(*argv):
         result = main(["--config", str(config), *argv])
@@ -511,9 +508,9 @@ def test_cli_actor_requests_and_read_only_audit(engine_db, tmp_path, monkeypatch
             conn.execute(text("SELECT REQUESTED_BY_KIND FROM AUD_RUN_INTERVENTIONS")).scalars()
         ) == {"HUMAN"}
 
-    monkeypatch.setenv("ETL_CRAFT_ACTOR", "")
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", "invalid")
     assert main(["--config", str(config), "run", "--pipeline_code", "P", "--init-only"]) == 3
-    assert "ETL_CRAFT_ACTOR" in capsys.readouterr().err
+    assert "no signed-in account" in capsys.readouterr().err
     with engine_db.engine.connect() as conn:
         assert conn.execute(text("SELECT COUNT(*) FROM AUD_ACTIONS")).scalar_one() == 5
 

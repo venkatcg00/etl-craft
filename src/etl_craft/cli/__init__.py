@@ -5,13 +5,14 @@ from __future__ import annotations
 import argparse
 import logging
 from collections.abc import Sequence
+from contextlib import nullcontext
 from pathlib import Path
 
 from etl_craft import __version__
+from etl_craft.cli.authentication import access_context
 from etl_craft.cli.commands import COMMANDS, Command
 from etl_craft.cli.output import Output
 from etl_craft.core import log
-from etl_craft.core.actor import acting_as, resolve_actor
 from etl_craft.core.errors import EtlCraftError, ExitCode
 from etl_craft.engine.audit import command_request
 
@@ -92,8 +93,14 @@ def main(argv: Sequence[str] | None = None, commands: Sequence[Command] = COMMAN
         return ExitCode.USAGE
     log.configure(args.log_level, args.log_format)
     try:
-        with acting_as(resolve_actor()), command_request(args.command, vars(args)):
-            return int(args.handler(args, out))
+        with access_context(args):
+            request = (
+                nullcontext()
+                if args.command in {"login", "logout"}
+                else command_request(args.command, vars(args))
+            )
+            with request:
+                return int(args.handler(args, out))
     except EtlCraftError as error:
         out.error(str(error))
         return error.exit_code

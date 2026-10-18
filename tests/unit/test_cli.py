@@ -5,6 +5,7 @@ import logging
 import runpy
 import subprocess
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,12 @@ from etl_craft.cli.commands import Command
 from etl_craft.core.errors import ConfigurationError, MetadataError, UsageError
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def handler_boundary(monkeypatch):
+    # These tests supply synthetic commands and isolate parser, dispatch and error rendering.
+    monkeypatch.setattr("etl_craft.cli.access_context", lambda args: nullcontext())
 
 
 def test_version_flag_prints_the_package_version(capsys):

@@ -20,6 +20,7 @@ from typing import Any
 import yaml
 
 from etl_craft.config.auth import WAREHOUSES
+from etl_craft.config.loader_auth import AUTH_KEYS, parse_auth
 from etl_craft.config.loader_cloning import CLONING_KEYS, parse_cloning
 from etl_craft.config.loader_docs import DOCS_SITE_KEYS, parse_docs_site
 from etl_craft.config.loader_email import EMAIL_KEYS, parse_email
@@ -46,7 +47,7 @@ from etl_craft.config.resolve import Resolver
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.errors import ConfigurationError, MetadataError
 
-SECTIONS = ("Secrets", "Orchestration", "Engine", "Warehouse", "Cloning", "Docs_site")
+SECTIONS = ("Secrets", "Orchestration", "Engine", "Warehouse", "Cloning", "Docs_site", "Auth")
 
 
 def settings_by_section() -> dict[str, frozenset[str]]:
@@ -67,6 +68,7 @@ def settings_by_section() -> dict[str, frozenset[str]]:
         "Warehouse": WAREHOUSE_SECTION_KEYS | CONNECTION_FIELDS | warehouse_fields,
         "Cloning": CLONING_KEYS,
         "Docs_site": DOCS_SITE_KEYS,
+        "Auth": AUTH_KEYS,
     }
 
 
@@ -179,6 +181,7 @@ def parse_config(raw: object, path: Path) -> ConnectorConfig:
         timezone=project_timezone,
         source=source,
         engine=engine,
+        auth=parse_auth(raw, global_profile, path, resolver),
         cloning=cloning,
         docs_site=docs_site,
         warehouse=warehouse,
@@ -216,6 +219,6 @@ def _check_layout(raw: object, path: Path) -> dict[str, object]:
     if present != expected:
         raise ConfigurationError(
             f"{path}: sections are in the order {present}; write them as {expected} "
-            "(Secrets, Orchestration, Engine, Warehouse, Cloning, then Docs_site)"
+            "(Secrets, Orchestration, Engine, Warehouse, Cloning, Docs_site, then Auth)"
         )
     return raw

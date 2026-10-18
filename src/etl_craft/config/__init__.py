@@ -7,6 +7,7 @@ names, never values.
 from etl_craft.config.discovery import resolve_config_path
 from etl_craft.config.loader import load_config, parse_config
 from etl_craft.config.model import (
+    AuthConfig,
     CloningConfig,
     ConnectionProfile,
     ConnectorConfig,
@@ -20,6 +21,7 @@ from etl_craft.config.model import (
 from etl_craft.config.resolve import profile_needs_secret, profile_secret, resolve_secret
 
 __all__ = [
+    "AuthConfig",
     "CloningConfig",
     "ConnectionProfile",
     "ConnectorConfig",
