@@ -18,6 +18,7 @@ from etl_craft.engine.runlog import RunSelector
 from etl_craft.execution.attempt_records import attempt_log_path
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.models import AttemptView, PipelineView, RunView
+from etl_craft.services.operations.permissions import authorize
 from etl_craft.services.operations.snapshots import attempt_document, pipeline_view, run_document
 from etl_craft.services.operations.status import StatusView, pipeline_status
 
@@ -33,6 +34,7 @@ class RunsView:
 
 def get_pipeline(ctx: OperationContext, code: str) -> PipelineView:
     """Read one active definition without duplicating pipeline assembly."""
+    authorize(ctx, "list")
     with acting_as(ctx.actor), read_snapshot(ctx.engine) as conn:
         return pipeline_view(conn, resolve_pipeline_id(conn, code))
 
@@ -41,6 +43,7 @@ def get_runs(
     ctx: OperationContext, code: str, limit: int = 20, before: int | None = None
 ) -> RunsView:
     """Read a bounded identity page without selecting a run by recency."""
+    authorize(ctx, "history")
     if not 1 <= limit <= 100 or (before is not None and before < 1):
         raise UsageError("runs needs limit between 1 and 100 and a positive before run id")
     with acting_as(ctx.actor), read_snapshot(ctx.engine) as conn:
@@ -55,6 +58,7 @@ def get_runs(
 
 def run_code(ctx: OperationContext, run_id: int) -> str:
     """Resolve only the requested run's pipeline, never an active or recent replacement."""
+    authorize(ctx, "history")
     with ctx.engine.connect() as conn:
         code = conn.execute(
             statement(conn, "api_run_code"), {"run_id": run_id}
@@ -71,6 +75,7 @@ def get_run_status(ctx: OperationContext, run_id: int) -> StatusView:
 
 def get_attempt(ctx: OperationContext, attempt_id: int) -> AttemptView:
     """Read one attempt with the same fields and conversions as CLI inspection."""
+    authorize(ctx, "attempt")
     with acting_as(ctx.actor), read_snapshot(ctx.engine) as conn:
         row = conn.execute(
             statement(conn, "api_attempt").columns(retryable=Boolean), {"attempt_id": attempt_id}
@@ -82,6 +87,7 @@ def get_attempt(ctx: OperationContext, attempt_id: int) -> AttemptView:
 
 def attempt_log(ctx: OperationContext, attempt_id: int, offset: int = 0) -> Iterator[bytes]:
     """Stream a stored attempt's canonical log in bounded chunks from a byte offset."""
+    authorize(ctx, "attempt log")
     if offset < 0:
         raise UsageError("log offset must be a nonnegative byte offset")
     attempt = get_attempt(ctx, attempt_id)

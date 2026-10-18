@@ -127,7 +127,7 @@ item's text, or work done early under another item.
 | S5.O.2b Normalized object contracts | Done | #150, #151, #152, #153, #154, #160, #162, #181 | Merge column lists retain parameter storage; lineage versions use component endpoints; target state, view statements and rule results are keyed by components, and target locks use the resolved identity |
 | S5.P Project documentation gap UI | Done | #165 | Structured schema/lineage gaps, accessible column/graph warnings and read-only comparison API |
 | S5.R Consolidate before the cluster | Done | #179, #185, #188 to #193, #195, #201 | Items 1 to 8 complete: the execution core and configuration loader are split by responsibility; the moved execution functions are shortened with shared run records and unchanged transactions and retries |
-| S5.S Accounts, login and roles | In progress | #203, #204 | Items 1–2: account identities, inherited token roles, local login, sessions, account administration and bootstrap; central role checks, explicit actors and remote CLI remain |
+| S5.S Accounts, login and roles | In progress | #203, #204, #205 | Items 1–3: account identities, login, administration and one service-role policy with recorded refusals across CLI/HTTP; explicit actors and remote CLI remain |
 | S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
 | S5.T Resource discovery and deployment profiles | Planned | | Opt-in laptop, server and server-with-workers sizing from usable process resources; one discovery module before S5.C |
@@ -151,9 +151,9 @@ item's text, or work done early under another item.
 
 What a person picking up the work needs that the code and the item texts do not say.
 
-**Next agent: finish S5.S item 2 (#204), then take item 3 (`feat/accounts-roles`).**
-If #204 is still open, read and fix its failed CI before starting another item; otherwise continue
-with the shared service-operation role map and recorded refusals. The owner merged #203 despite
+**Next agent: finish S5.S item 3 (#205), then take item 4 (`refactor/accounts-explicit-actors`).**
+If #205 is still open, read and fix its failed CI before starting another item; otherwise continue
+with explicit actors and warehouse writer attribution. #204 is merged. The owner merged #203 despite
 unavailable Databricks acceptance. Databricks has a usage budget: do not retry it until the owner
 explicitly makes budget available. Item 2 changes no warehouse SQL and needs no cloud acceptance.
 The owner withdrew the Spec Kit requirement; follow `AGENTS.md` and the roadmap-item procedure.
@@ -162,7 +162,7 @@ Item 2 includes the approved move of account administration, interactive first-a
 the no-active-admin doctor check and scrypt password hashing from item 1. Sessions reuse
 account-owned `CFG_API_TOKENS` with mandatory expiry for users; service-token creation refuses
 USER accounts. The CLI resolves the credential and configuration once. Account/token management
-and local provisioning require admin; the general role map remains item 3, actor-kind/system
+and local provisioning use the shared services role policy from item 3. Actor-kind/system
 fallback changes remain item 4, and remote transports/sign-in endpoints remain item 5.
 The approved local recovery boundary is interactive `setup` with Engine DB writer credentials
 when no active admin remains, never an HTTP route. Remote Airflow exports require the approved
@@ -272,6 +272,15 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.S item 3 (#205) passed the complete unit suite, the shared policy and real CLI/HTTP/service
+role cases on both Engine DBs, existing account/API/audit callers, configuration/inspection/
+lineage/overseer callers and all four local warehouse CLI/watermark callers. The installed-wheel
+local and orchestrated demo matrix, package/quick-start checks, static checks and strict docs
+passed. Shared-policy branch coverage is complete. Old-source command/migration regressions
+fail behaviorally; the new policy/error APIs are absent from that source. Cloud acceptance,
+Airflow/actionlint and repeated races are not required: warehouse SQL, YAML generation,
+workflows and concurrency algorithms are unchanged. Databricks was not used.
 
 S5.S item 2 (#204) passed the unit, account/session, API/CLI caller, execution and local
 warehouse CLI checks, installed-wheel demos and packaging checks. Local caller validation
@@ -437,6 +446,25 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- **S5.S item 3 (#205), shared role policy and owner-approved maintenance defaults.**
+  - The owner chose admin for clone, rehash, server startup, documentation publishing and
+    documentation-version writes; developer for documentation generation and lineage refresh;
+    viewer for read-only checks and exports. These roles include all lower roles.
+  - CLI and HTTP/UI adapters call the same services policy. Existing service operations enforce
+    it directly as well; no HTTP server is required for local CLI commands. The old independent
+    API ordering/admin checks are removed. Direct Python callers supply the proven role in
+    `OperationContext`; a missing role is refused rather than receiving implicit privileges.
+  - Project migrations need developer only while no packaged engine migration is pending;
+    packaged migrations need admin. Existing local bootstrap/recovery and diagnostic doctor
+    entry points, plus login/logout, keep their approved explicit exceptions.
+  - Refusals append `REFUSED` with exit code 26 (`PermissionDeniedError`), returning HTTP 403.
+    Existing audit columns accept these outcomes; no schema migration is needed. Audit queries
+    now live in the dialect query catalog, reducing the quality baseline.
+  - Item 3's derived acceptance checklist is one shared role map, inherited roles, service/CLI/HTTP
+    enforcement, named account/current-role/required-role/remedy errors, recorded refusals before
+    action effects, viewer reads, and unchanged bootstrap exceptions. Items 4 and 5 still own
+    actor-kind/system fallback removal and remote transports/sign-in endpoints.
 
 - **S5.S item 2 (#204), owner-approved login and administration scope.**
   - Account administration, bootstrap, doctor and scrypt hashing complete the deferred part

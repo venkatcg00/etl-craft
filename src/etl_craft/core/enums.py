@@ -129,6 +129,13 @@ class ApiRole(StrEnum):
     ADMIN = "admin"
 
 
+class ActionOutcome(StrEnum):
+    """Immutable action-request outcomes, separate from execution results."""
+
+    REQUESTED = "REQUESTED"
+    REFUSED = "REFUSED"
+
+
 class InterventionAction(StrEnum):
     """What an operator did to a run, as ``AUD_RUN_INTERVENTIONS.ACTION`` records it."""
 

@@ -10,6 +10,7 @@ from sqlalchemy import text
 from etl_craft.config import AuthConfig
 from etl_craft.core.actor import SYSTEM_ACTOR
 from etl_craft.core.cron import timezone
+from etl_craft.core.enums import ApiRole
 from etl_craft.core.errors import StaleTransitionError
 from etl_craft.engine import runlog, transitions
 from etl_craft.execution.run_start import init_pipeline_run
@@ -34,7 +35,7 @@ def configure(db, *, policy="SKIP", catchup="Y", zone="UTC", start="2026-01-02")
             ),
             {"catchup": catchup, "policy": policy, "zone": zone, "start": start, "id": pipeline},
         )
-    return pipeline, OperationContext(db.engine, db.config, SYSTEM_ACTOR)
+    return pipeline, OperationContext(db.engine, db.config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
 
 
 def test_three_missed_ticks_keep_two_and_record_one_skipped_across_restarts(engine_db):

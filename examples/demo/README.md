@@ -117,3 +117,9 @@ The generated catalog can also sit behind the team's proxy. Set `Docs_site.Exter
 run `etl-craft publish-docs --port 8080`. Preserve the prefix at the proxy and enforce team
 authentication there. No ngrok credentials are needed; see the catalog hosting guide and
 `deploy/catalog/` in the repository for the proxy and persistent-service examples.
+
+The setup/configuration walkthrough needs an admin account because it provisions and migrates
+the Engine DB. A deployed run-only service token needs operator; project configuration applies
+need developer. Clone, rehash, server startup and publishing documentation need admin. These
+permissions are identical through the CLI, Python services and HTTP/UI routes. A role refusal
+returns exit 26 (HTTP 403) and records `REFUSED` in the Engine DB audit history.

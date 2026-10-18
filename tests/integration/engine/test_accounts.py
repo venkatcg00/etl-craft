@@ -9,6 +9,7 @@ from sqlalchemy.exc import DBAPIError
 
 from etl_craft.api.app import create_app
 from etl_craft.core.actor import Actor, ActorKind, acting_as
+from etl_craft.core.enums import ApiRole
 from etl_craft.core.errors import MigrationError, UsageError
 from etl_craft.core.text import sha256_hex
 from etl_craft.engine import migrations
@@ -19,7 +20,7 @@ OWNER = Actor("owner", ActorKind.HUMAN)
 
 
 def context(db):
-    return OperationContext(db.engine, db.config, OWNER)
+    return OperationContext(db.engine, db.config, OWNER, role=ApiRole.ADMIN)
 
 
 def test_tokens_share_current_account_role_and_disable_together(engine_db):

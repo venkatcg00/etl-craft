@@ -53,8 +53,24 @@ Roles are inherited from the account on each command/API request. Disabling revo
 credentials immediately; password reset revokes existing sessions. Accounts are never deleted.
 Password hashes use salted `hashlib.scrypt` and never enter metadata histories or mirrors.
 Service accounts use `token create`, then present the value in `ETL_CRAFT_TOKEN`.
-The central role map for all service operations is delivered by S5.S item 3; account
-and token administration, local provisioning and the existing API route roles are enforced now.
+The shared services API enforces one role policy for CLI, HTTP and Python callers. Roles
+include every lower role; transports name operations, not their own permission rules.
+
+| Minimum role | Operations |
+| --- | --- |
+| viewer | Reads, inspection, validation, configuration plan/export, YAML export, `docs-version --check`, `rehash --dry-run`, `setup --print-grants` |
+| operator | Run, backfill, mark, cancel, pause/resume and reconcile |
+| developer | `config apply`, project migrations, `generate-docs`, `lineage --refresh` |
+| admin | Accounts/tokens, setup/init-db, packaged Engine DB migrations, upgrade-targets, rehash, clone, server startup, publish-docs and docs-version writes |
+
+`migrate` can apply project migrations as developer only when no packaged Engine DB migration
+is pending. An admin must apply pending engine upgrades first. A refused operation names the
+account, its current role, the required role and the administrator who can grant it. The CLI
+returns exit **26**, HTTP returns **403**, and the immutable action record has outcome
+`REFUSED` with the same exit code. No operation runs after refusal. The permission check adds no records for allowed reads. Unregistered operations fail closed until the shared policy names them.
+
+Local first-admin/recovery, pre-account initialization/migration, diagnostic doctor, and
+login/logout remain the explicit credential/bootstrap entry points described above.
 
 OIDC uses RFC 8628 polling and the configured issuer's HTTPS discovery/token endpoints.
 Register a public device client with RS256 ID tokens and nonce support. Tokens are accepted

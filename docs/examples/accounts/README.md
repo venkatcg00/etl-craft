@@ -20,3 +20,17 @@ in the Airflow connection password named by `Auth.Airflow_connection_id`, or pro
 CI as `ETL_CRAFT_TOKEN`. Never commit its value. Token creation requires a SERVICE account;
 users sign in for expiring sessions instead. Disabling retains the account and revokes all
 credentials. Password reset revokes all existing sessions.
+
+The same role policy holds for CLI, HTTP/UI and Python operations. The `airflow` operator can
+run, pause and resume pipelines, but cannot apply configuration or administer tokens. Those
+require developer and admin respectively. For example, with Airflow's operator token:
+
+```bash
+etl-craft list                                      # viewer read: allowed
+etl-craft pause --pipeline_code SALES --reason hold  # operator: allowed
+etl-craft account list                              # refused, exit 26; AUD_ACTIONS: REFUSED
+```
+
+Only an administrator grants roles. See the [full role table](../../deploying/security.md#deployment-accounts)
+for maintenance and documentation permissions. Local commands and HTTP routes call the shared
+services policy; no HTTP server is needed for local commands.

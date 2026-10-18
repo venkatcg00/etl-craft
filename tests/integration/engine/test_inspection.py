@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import event, text
 
 from etl_craft.core.actor import current_actor
+from etl_craft.core.enums import ApiRole
 from etl_craft.core.errors import MetadataError, RunStateError
 from etl_craft.engine import transitions
 from etl_craft.engine.repository import trackers
@@ -24,7 +25,7 @@ from fixtures.metadata import (
 
 def test_status_includes_unrun_tasks_and_transitive_failure_blocks(engine_db):
     engine = engine_db.engine
-    ctx = OperationContext(engine, engine_db.config, current_actor())
+    ctx = OperationContext(engine, engine_db.config, current_actor(), role=ApiRole.ADMIN)
     with engine.begin() as conn:
         pipeline = add_pipeline(conn, "P")
         first = add_task(conn, pipeline, "first")
@@ -78,7 +79,7 @@ def test_status_includes_unrun_tasks_and_transitive_failure_blocks(engine_db):
 
 def test_explain_retains_recorded_cross_pipeline_decisions_and_retry_due(engine_db):
     engine = engine_db.engine
-    ctx = OperationContext(engine, engine_db.config, current_actor())
+    ctx = OperationContext(engine, engine_db.config, current_actor(), role=ApiRole.ADMIN)
     due = datetime.now(UTC) + timedelta(minutes=1)
     with engine.begin() as conn:
         upstream = add_pipeline(conn, "UP")
@@ -136,7 +137,7 @@ def test_gate_waits_are_visible_and_conditional_dependencies_use_the_required_co
     from etl_craft.engine.queries import statement
 
     engine = engine_db.engine
-    ctx = OperationContext(engine, engine_db.config, current_actor())
+    ctx = OperationContext(engine, engine_db.config, current_actor(), role=ApiRole.ADMIN)
     now = datetime.now(UTC)
     with engine.begin() as conn:
         pipeline = add_pipeline(conn, "P")
@@ -185,7 +186,10 @@ def test_pending_cross_pipeline_gates_follow_runtime_policy(engine_db, policy):
 
     engine = engine_db.engine
     ctx = OperationContext(
-        engine, replace(engine_db.config, dependency_gates=GatePolicy(policy)), current_actor()
+        engine,
+        replace(engine_db.config, dependency_gates=GatePolicy(policy)),
+        current_actor(),
+        role=ApiRole.ADMIN,
     )
     with engine.begin() as conn:
         upstream = add_pipeline(conn, "UP")
@@ -229,7 +233,7 @@ def test_pending_cross_pipeline_gates_follow_runtime_policy(engine_db, policy):
 
 def test_backfill_explanation_assumes_success_but_never_failure(engine_db):
     engine = engine_db.engine
-    ctx = OperationContext(engine, engine_db.config, current_actor())
+    ctx = OperationContext(engine, engine_db.config, current_actor(), role=ApiRole.ADMIN)
     with engine.begin() as conn:
         upstream = add_pipeline(conn, "UP")
         upstream_task = add_task(conn, upstream, "load")

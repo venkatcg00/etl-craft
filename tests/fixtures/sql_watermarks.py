@@ -5,6 +5,7 @@ from datetime import datetime
 import pytest
 
 from etl_craft.core.actor import current_actor
+from etl_craft.core.enums import ApiRole
 from etl_craft.core.errors import InjectedFaultError
 from etl_craft.engine import transitions
 from etl_craft.engine.repository.offsets import fetch_task_offset
@@ -55,7 +56,7 @@ def check_watermarks(w, target):
         assert fetch_task_offset(conn, context.task_id).offset_value == "2"
     assert run_handler(w.engine_db, context) == 0
     assert sorted(w.rows(f"SELECT id FROM {w.name(target)}")) == [(1,), (2,), (3,)]
-    ctx = OperationContext(w.engine_db, w.config, current_actor())
+    ctx = OperationContext(w.engine_db, w.config, current_actor(), role=ApiRole.ADMIN)
     explanation = explain_task(
         ctx, "P", "watermark_load", selector=RunSelector(run_id=w.pipeline_run_id)
     )

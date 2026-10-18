@@ -89,7 +89,6 @@
       "src/etl_craft/services/config_files.py": 7
     },
     "dialect-branch": {
-      "src/etl_craft/engine/audit.py": 3,
       "src/etl_craft/engine/connection.py": 1,
       "src/etl_craft/engine/repository/normalization.py": 2,
       "src/etl_craft/engine/repository/source_columns.py": 1,
@@ -134,7 +133,6 @@
       "src/etl_craft/services/operations/status.py": 52
     },
     "inline-sql": {
-      "src/etl_craft/engine/audit.py": 3,
       "src/etl_craft/engine/connection.py": 1,
       "src/etl_craft/engine/privileges.py": 1,
       "src/etl_craft/engine/repository/audit_reads.py": 4,

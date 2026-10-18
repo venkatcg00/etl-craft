@@ -42,6 +42,7 @@ class ExitCode(IntEnum):
     WAITING = 23
     RESOURCE_NOT_FOUND = 24
     METADATA_FILE = 25
+    PERMISSION_DENIED = 26
 
 
 class EtlCraftError(Exception):
@@ -67,6 +68,13 @@ class UsageError(EtlCraftError):
 
     retryable = False
     exit_code = ExitCode.USAGE
+
+
+class PermissionDeniedError(EtlCraftError):
+    """A proven account lacks the role needed for the requested operation."""
+
+    retryable = False
+    exit_code = ExitCode.PERMISSION_DENIED
 
 
 class MetadataError(EtlCraftError):

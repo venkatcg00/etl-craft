@@ -1,6 +1,6 @@
 """Registered accounts, administrator controls and local writer-credential recovery."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import ClassVar
 
@@ -13,6 +13,7 @@ from etl_craft.core.errors import UsageError
 from etl_craft.engine import locks
 from etl_craft.engine.queries import statement
 from etl_craft.services.operations.context import OperationContext, operation
+from etl_craft.services.operations.permissions import authorize
 from etl_craft.services.passwords import hash_password
 
 
@@ -37,15 +38,6 @@ class Accounts:
     accounts: tuple[Account, ...]
 
 
-def require_admin(ctx: OperationContext) -> None:
-    """Require a credential-proven administrator, rather than a claimed actor name."""
-    if ctx.role != ApiRole.ADMIN:
-        raise UsageError(
-            f"account {ctx.actor.name!r}: role={ctx.role!r}; admin role is required; "
-            "ask an administrator to grant it"
-        )
-
-
 def has_admin(engine: Engine) -> bool:
     """Check whether interactive provisioning requires a signed-in administrator."""
     with engine.connect() as conn:
@@ -54,7 +46,7 @@ def has_admin(engine: Engine) -> bool:
 
 def list_accounts(ctx: OperationContext) -> Accounts:
     """List accounts, including disabled identities retained for audit history."""
-    require_admin(ctx)
+    authorize(ctx, "account list")
     with ctx.engine.connect() as conn:
         return Accounts(
             tuple(Account(**row._mapping) for row in conn.execute(statement(conn, "account_list")))
@@ -65,6 +57,8 @@ def add_account(
     ctx: OperationContext, account: Account, password: str | None = None, *, recovery: bool = False
 ) -> None:
     """Add a user or service account; local recovery is serialized with credential changes."""
+    if not recovery:
+        authorize(ctx, "account add")
     Actor(account.name, ActorKind.HUMAN)
     if account.kind == AccountKind.SERVICE and (password is not None or account.oidc_subject):
         raise UsageError(f"account {account.name!r}: SERVICE expects a token, not password or SSO")
@@ -81,11 +75,13 @@ def add_account(
                 raise UsageError("an active admin already exists; sign in before managing accounts")
             if account.role != ApiRole.ADMIN or account.kind != AccountKind.USER:
                 raise UsageError("local recovery requires a USER account with the admin role")
-        else:
-            require_admin(ctx)
         try:
             with (
-                operation(ctx, "account add", {"name": account.name, "recovery": recovery}),
+                operation(
+                    replace(ctx, role=ApiRole.ADMIN) if recovery else ctx,
+                    "account add",
+                    {"name": account.name, "recovery": recovery},
+                ),
                 ctx.engine.begin() as conn,
             ):
                 conn.execute(
@@ -125,18 +121,15 @@ def reset_password(ctx: OperationContext, name: str, password: str) -> None:
 def _update(
     ctx: OperationContext, name: str, query: str, values: dict[str, object], *, revoke: bool = False
 ) -> None:
-    require_admin(ctx)
+    command = {
+        "account_role": "account set-role",
+        "account_disable": "account disable",
+        "account_password": "account reset-password",
+    }[query]
+    authorize(ctx, command)
     with (
         locks.ACCOUNTS.hold(ctx.engine, wait_seconds=30),
-        operation(
-            ctx,
-            {
-                "account_role": "account set-role",
-                "account_disable": "account disable",
-                "account_password": "account reset-password",
-            }[query],
-            {"name": name},
-        ),
+        operation(ctx, command, {"name": name}),
         ctx.engine.begin() as conn,
     ):
         account_id = conn.execute(

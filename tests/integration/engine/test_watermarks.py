@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import text
 
 from etl_craft.core.actor import current_actor
+from etl_craft.core.enums import ApiRole
 from etl_craft.core.errors import (
     InjectedFaultError,
     RunRefusedError,
@@ -100,7 +101,7 @@ def test_failed_ranges_and_success_offsets_are_atomic(engine_db, watermarked, mo
         )
         assert fetch_task_offset(conn, task).offset_value == "4"
     explanation = explain_task(
-        OperationContext(engine, engine_db.config, current_actor()),
+        OperationContext(engine, engine_db.config, current_actor(), role=ApiRole.ADMIN),
         "P",
         "T",
         selector=RunSelector(run_id=run),
