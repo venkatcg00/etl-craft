@@ -14,7 +14,7 @@ import psutil
 from sqlalchemy.engine import Engine
 
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
-from etl_craft.core.errors import StaleTransitionError
+from etl_craft.core.errors import RunStateError, StaleTransitionError
 from etl_craft.core.time import as_utc
 from etl_craft.engine import transitions
 from etl_craft.engine.queries import statement
@@ -58,6 +58,17 @@ def stop_process(pid: int, birth: str, *, grace_seconds: float = 10) -> None:
                     psutil.Process(child_pid).kill()
                 except psutil.NoSuchProcess:
                     continue
+        deadline = time.monotonic() + max(1, grace_seconds)
+        while any(
+            started is not None and process_start(child_pid) == started
+            for child_pid, started in known.items()
+        ):
+            if time.monotonic() >= deadline:
+                raise RunStateError(
+                    f"pid={pid}, birth={birth}: process group did not end after SIGKILL; "
+                    "inspect the host process state before retrying or acknowledging a stop"
+                )
+            time.sleep(0.05)
     except (ProcessLookupError, psutil.NoSuchProcess):
         return
 

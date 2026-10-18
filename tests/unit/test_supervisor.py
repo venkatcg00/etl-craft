@@ -180,7 +180,7 @@ def test_a_cancelled_child_is_stopped():
         cancel=cancel,
     )
     assert result.cancelled and not result.timed_out
-    assert result.describe() == "was stopped because the run was interrupted"
+    assert result.describe() == "was stopped by its supervisor"
     assert time.monotonic() - started < 10
 
 

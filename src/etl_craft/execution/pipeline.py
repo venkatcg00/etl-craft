@@ -47,7 +47,7 @@ from etl_craft.core.enums import (
 )
 from etl_craft.core.errors import RunRefusedError, RunStateError, UsageError
 from etl_craft.core.log import log_context
-from etl_craft.engine import runlog
+from etl_craft.engine import controls, runlog
 from etl_craft.engine.repository.dependencies import PipelineGraphData
 from etl_craft.engine.repository.pipelines import (
     resolve_pipeline_id,
@@ -268,6 +268,15 @@ def _stopped_run(
             RunStatus.IN_PROGRESS,
             f"pipeline_run_id={run.pipeline_run_id}: supervisor stopped admitting tasks; "
             "resume this run",
+            run.pipeline_run_id,
+        )
+    with engine.connect() as conn:
+        fences = controls.blocked(conn, run.pipeline_run_id)
+    if fences:
+        return PipelineOutcome(
+            RunStatus.IN_PROGRESS,
+            f"pipeline_run_id={run.pipeline_run_id}: scoped controls retain dispatch fences "
+            f"{fences}; inspect the control request and release the exact scope to resume",
             run.pipeline_run_id,
         )
     paused = open_pause(engine, run.pipeline_code)

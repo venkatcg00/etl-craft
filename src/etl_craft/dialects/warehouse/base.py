@@ -113,6 +113,9 @@ class WarehouseDialect:
     # Whether the database enforces a PRIMARY KEY, which business rules rely on.
     enforces_primary_keys: bool = True
     # Whether only one process may write at a time (a DuckDB file).
+    process_local_queries: bool = False
+    """Embedded query execution ends with the owning task process."""
+
     single_writer: bool = False
     atomic_protection: bool = False
     """Whether business writes and protection evidence share one atomic transaction."""

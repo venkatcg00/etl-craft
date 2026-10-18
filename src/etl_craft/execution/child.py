@@ -32,13 +32,14 @@ from sqlalchemy.engine import Engine
 from etl_craft.config import ConnectorConfig, load_config
 from etl_craft.core import log
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
-from etl_craft.core.enums import RunStatus
+from etl_craft.core.enums import ControlAcknowledgement, Handler, RunStatus
 from etl_craft.core.errors import EtlCraftError, ExitCode
 from etl_craft.core.faults import fault_point
-from etl_craft.engine import transitions
+from etl_craft.engine import controls, transitions
 from etl_craft.engine.connection import engine_db
 from etl_craft.engine.transitions import finish_task_run
 from etl_craft.execution.context import build_task_context
+from etl_craft.execution.control_flow import process_local_queries
 from etl_craft.execution.leases import process_start
 from etl_craft.handlers.registry import TaskContext, format_task_log, resolve_handler
 
@@ -150,6 +151,10 @@ def run_handler(engine: Engine, context: TaskContext) -> int:
             attempt_id=None if identity is None else identity[0],
             owner=None if identity is None else identity[1],
         )
+        if identity is not None and (
+            context.handler != Handler.PYTHON or process_local_queries(context.config)
+        ):
+            controls.acknowledge(conn, identity[0], ControlAcknowledgement.QUERIES)
     fault_point("child.after_outcome")
     logger.info(
         "task succeeded: source %s, target %s, inserted %s, updated %s, deleted %s, rejected %s",

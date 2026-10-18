@@ -9,14 +9,16 @@ import threading
 from pathlib import Path
 
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import (
     AttemptStatus,
+    ControlAction,
     RunStatus,
 )
-from etl_craft.engine import runlog, transitions
+from etl_craft.engine import controls, runlog, transitions
 from etl_craft.engine.queries import statement
 from etl_craft.execution import leases
 from etl_craft.execution.attempt_types import ChildOptions, TaskOutcome
@@ -46,11 +48,14 @@ class CancelWatch:
     passes on the pipeline runner's own ``cancel`` event at once.
     """
 
-    def __init__(self, engine: Engine, pipeline_run_id: int, child: ChildOptions) -> None:
+    def __init__(
+        self, engine: Engine, pipeline_run_id: int, child: ChildOptions, task_id: int | None = None
+    ) -> None:
         """Watch ``pipeline_run_id`` at ``child``'s poll interval."""
         self.engine = engine
         self.pipeline_run_id = pipeline_run_id
         self.child = child
+        self.task_id = task_id
         self.stop = threading.Event()
         self.done = threading.Event()
         self.thread = threading.Thread(
@@ -80,9 +85,24 @@ class CancelWatch:
                 return
             if waited >= poll:
                 waited = 0.0
-                if run_cancelled(self.engine, self.pipeline_run_id):
+                from etl_craft.execution import control_flow
+
+                try:
+                    control_flow.advance(self.engine, self.pipeline_run_id, observed=True)
+                    aborted = self.task_id is not None and control_flow.abort_requested(
+                        self.engine, self.pipeline_run_id, self.task_id
+                    )
+                except SQLAlchemyError:
+                    logger.exception(
+                        "could not inspect controls for run_id=%d", self.pipeline_run_id
+                    )
+                    continue
+                if aborted or run_cancelled(self.engine, self.pipeline_run_id):
                     logger.warning(
-                        "pipeline_run_id=%d was cancelled; stopping the task", self.pipeline_run_id
+                        "stop requested for pipeline_run_id=%d, task_id=%s; "
+                        "stopping this task process",
+                        self.pipeline_run_id,
+                        self.task_id,
                     )
                     self.stop.set()
                     return
@@ -124,10 +144,18 @@ def record_attempt(
         values = conn.execute(
             statement(conn, "task_run_log"), {"task_run_id": task_run_id}
         ).scalar_one_or_none()
-        cancelled = runlog.fetch_pipeline_run_status(conn, pipeline_run_id) == RunStatus.CANCELLED
+        row = conn.execute(
+            statement(conn, "control_task_context"), {"task_run_id": task_run_id}
+        ).one()
+        fences = controls.blocked(conn, pipeline_run_id)
+        aborted = ControlAction.ABORT in (fences.get(None), fences.get(row.task_id))
+        cancelled = (
+            aborted
+            or runlog.fetch_pipeline_run_status(conn, pipeline_run_id) == RunStatus.CANCELLED
+        )
         if status == RunStatus.IN_PROGRESS and cancelled:
             status = RunStatus.CANCELLED
-            message = f"the run was cancelled, so the task process {result.describe()}"
+            message = f"an abort was requested, so the task process {result.describe()}"
             transitions.cancel_attempt(conn, attempt_id, current_actor(), error_message=message)
         elif status == RunStatus.IN_PROGRESS:
             status = RunStatus.FAILED
@@ -158,6 +186,7 @@ def record_attempt(
                     exit_code=result.returncode,
                 )
             logger.error("%s: %s; see %s", task_code, message, log_path)
+        controls.observe_exit(conn, attempt_id, queries_ended=result.queries_ended)
         transitions.set_task_log(
             conn, task_run_id, attempt_id, owner, _task_log(values, result.output_tail)
         )

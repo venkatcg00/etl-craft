@@ -18,11 +18,11 @@ from etl_craft.core.enums import SETTLED_STATUSES, RunStatus
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.graph import DependencyGraph, TaskRunState
 from etl_craft.core.outage import OutageBudget
-from etl_craft.engine import runlog
+from etl_craft.engine import controls, runlog
 from etl_craft.engine.repository import trackers
 from etl_craft.engine.repository.tasks import fetch_task_execution_detail, fetch_task_parameters
 from etl_craft.engine.retry import TRANSIENT_ERRORS
-from etl_craft.execution import leases
+from etl_craft.execution import control_flow, leases
 from etl_craft.execution.attempt_records import run_cancelled
 from etl_craft.execution.attempt_types import ChildOptions
 from etl_craft.execution.events import EventCheck, check_event
@@ -108,14 +108,18 @@ class Scheduler:
     def step(self) -> bool:
         """Harvest completions, recompute readiness and dispatch; return true when settled."""
         self._harvest()
+        control_flow.advance(self.engine, self.pipeline_run_id, observed=True)
+        with self.engine.connect() as conn:
+            fences = controls.blocked(conn, self.pipeline_run_id)
         if self.cancel.is_set():
             self._stop_running()
         if (
             self.cancel.is_set()
             or run_cancelled(self.engine, self.pipeline_run_id)
             or self.paused()
+            or None in fences
         ):
-            return not self.jobs
+            return not self.jobs and not any(f.running() for f in self.event_checks.values())
         if (
             not self.jobs
             and self.event_due
@@ -125,18 +129,7 @@ class Scheduler:
             and not self.file_events.pending()
         ):
             return False
-        retries, exhausted = refresh_retries(
-            self.engine,
-            self.config,
-            self.pipeline_run_id,
-            set(self.graph.task_ids) - self.jobs.keys(),
-        )
-        if not self.force:
-            self.attempted.update(exhausted)
-        for task_id in retries:
-            if task_id not in self.jobs:
-                self.attempted.discard(task_id)
-                self.completed.discard(task_id)
+        retries = self._refresh_retries()
         skipped = [] if self.force else self.settle(self.failures_final)
         if self.failures_final:
             self.after_failure.extend(skipped)
@@ -150,22 +143,9 @@ class Scheduler:
             if t not in self.attempted
             and (self.force or state.get(t, TaskRunState()).status not in SETTLED_STATUSES)
         ]
-        ready = (
-            [
-                t
-                for t in pending
-                if all(
-                    e.depends_on_task_id in self.completed for e in self.graph.dependencies_of(t)
-                )
-            ]
-            if self.force
-            else [
-                t
-                for t in self.graph.ready({**state, **{t: TaskRunState() for t in retries}})
-                if t in pending
-            ]
-        )
+        ready = self._ready(state, pending, retries)
         waiting = [due for due in retries.values() if due > self.clock.now()]
+        ready = [task_id for task_id in ready if task_id not in fences]
         for task_id in ready:
             if task_id in retries and retries[task_id] > self.clock.now():
                 continue
@@ -236,6 +216,8 @@ class Scheduler:
             return False
         if not pending:
             return True
+        if fences:
+            return True
         if not self.failures_final:
             self.failures_final = True
             return False
@@ -243,6 +225,42 @@ class Scheduler:
             return False
         self.never_ready = pending
         return True
+
+    def _refresh_retries(self) -> dict[int, datetime]:
+        """Reconsider only eligible tasks after their durable retry deadline."""
+        retries, exhausted = refresh_retries(
+            self.engine,
+            self.config,
+            self.pipeline_run_id,
+            set(self.graph.task_ids) - self.jobs.keys(),
+        )
+        if not self.force:
+            self.attempted.update(exhausted)
+        for task_id in retries:
+            if task_id not in self.jobs:
+                self.attempted.discard(task_id)
+                self.completed.discard(task_id)
+        return retries
+
+    def _ready(
+        self, state: dict[int, TaskRunState], pending: list[int], retries: dict[int, datetime]
+    ) -> list[int]:
+        """Select ready work using the same graph for normal and forced dispatch."""
+        return (
+            [
+                t
+                for t in pending
+                if all(
+                    e.depends_on_task_id in self.completed for e in self.graph.dependencies_of(t)
+                )
+            ]
+            if self.force
+            else [
+                t
+                for t in self.graph.ready({**state, **{t: TaskRunState() for t in retries}})
+                if t in pending
+            ]
+        )
 
     def _event_check(
         self, task_id: int, decisions: tuple[trackers.GateDecision, ...]
@@ -326,7 +344,12 @@ class Scheduler:
             raise
         except (EtlCraftError, OSError, SQLAlchemyError) as error:
             logger.error("%s: could not run: %s: %s", code, type(error).__name__, error)
-            self.completed.add(task_id)
+            with self.engine.connect() as conn:
+                fences = controls.blocked(conn, self.pipeline_run_id)
+            if None in fences or task_id in fences:
+                self.attempted.discard(task_id)
+            else:
+                self.completed.add(task_id)
             return
         self.jobs[task_id] = self.pool.submit(spec)
 

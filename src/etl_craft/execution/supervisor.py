@@ -16,14 +16,16 @@ import tempfile
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
 
 from etl_craft.core import interrupts
-from etl_craft.core.errors import ConfigurationError
+from etl_craft.core.errors import ConfigurationError, RunStateError
 from etl_craft.core.faults import fault_point
+from etl_craft.execution.leases import process_start
+from etl_craft.execution.reconcile import stop_process
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +72,7 @@ class ChildResult:
     elapsed_seconds: float
     output_tail: str
     cancelled: bool = False
+    queries_ended: bool = False
 
     @property
     def succeeded(self) -> bool:
@@ -81,7 +84,7 @@ class ChildResult:
         if self.timed_out:
             return f"timed out after {self.spec.timeout_seconds:g}s and was killed"
         if self.cancelled:
-            return "was stopped because the run was interrupted"
+            return "was stopped by its supervisor"
         if self.returncode < 0:
             return f"was killed by signal {_signal_name(-self.returncode)}"
         return f"exited with code {self.returncode}"
@@ -114,6 +117,7 @@ def run_child(
             cwd=spec.cwd,
             start_new_session=True,
         )
+        birth = process_start(process.pid)
         logger.debug("started pid %s: %s", process.pid, " ".join(spec.argv))
         timed_out = cancelled = False
         try:
@@ -122,16 +126,16 @@ def run_child(
             fault_point("supervisor.after_popen")
             cancelled = _wait(process, spec.timeout_seconds or None, cancel)
             if cancelled:
-                logger.warning("stopping pid %s: the run was interrupted", process.pid)
-                _stop_group(process, kill_grace_seconds)
+                logger.warning("stopping pid %s: cancellation was requested", process.pid)
+                _stop_group(process, birth, kill_grace_seconds)
         except subprocess.TimeoutExpired:
             timed_out = True
             logger.warning(
                 "pid %s exceeded its %gs limit; stopping it", process.pid, spec.timeout_seconds
             )
-            _stop_group(process, kill_grace_seconds)
+            _stop_group(process, birth, kill_grace_seconds)
         except BaseException:
-            _stop_group(process, kill_grace_seconds)
+            _stop_group(process, birth, kill_grace_seconds)
             raise
         elapsed = time.monotonic() - started
         tail = _read_tail(output, start_offset, tail_bytes)
@@ -228,24 +232,13 @@ def _signal_name(number: int) -> str:
         return str(number)
 
 
-def _stop_group(process: subprocess.Popen[bytes], grace_seconds: float) -> None:
-    """Stop the child's whole process group: SIGTERM, then SIGKILL after the grace period.
-
-    The group id is the child's pid. It stays taken while any process in the group lives,
-    so the final SIGKILL reaches only what the child started, or nothing.
-    """
-    _signal_group(process.pid, signal.SIGTERM)
-    try:
-        process.wait(timeout=grace_seconds)
-    except subprocess.TimeoutExpired:
-        _signal_group(process.pid, signal.SIGKILL)
-        process.wait()
-    else:
-        _signal_group(process.pid, signal.SIGKILL)
-
-
-def _signal_group(pgid: int, sig: signal.Signals) -> None:
-    # ProcessLookupError: the group is gone. PermissionError: macOS reports a group of
-    # zombies this way, and a group owned by another user is not ours to signal.
-    with suppress(ProcessLookupError, PermissionError):
-        os.killpg(pgid, sig)
+def _stop_group(process: subprocess.Popen[bytes], birth: str | None, grace_seconds: float) -> None:
+    """Stop only the recorded process birth and its observed descendants, then reap it."""
+    if birth is None and process.poll() is None:
+        raise RunStateError(
+            f"pid={process.pid}: process birth could not be verified; no signal sent. "
+            "Inspect the host process before retrying or acknowledging cancellation."
+        )
+    if birth is not None:
+        stop_process(process.pid, birth, grace_seconds=grace_seconds)
+    process.wait()

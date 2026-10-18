@@ -11,9 +11,12 @@ import pytest
 
 
 def two_at_once(fn_a, fn_b, *, at, timeout=10):
-    """Patch ``module.function`` so each caller waits once, then return both results in order."""
-    module_name, name = at.rsplit(".", 1)
-    module = importlib.import_module(module_name)
+    """Pause both callers at a function path or (object, method), then return their results."""
+    if isinstance(at, tuple):
+        module, name = at
+    else:
+        module_name, name = at.rsplit(".", 1)
+        module = importlib.import_module(module_name)
     original = getattr(module, name)
     barrier = threading.Barrier(2, timeout=timeout)
     local = threading.local()

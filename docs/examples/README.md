@@ -176,3 +176,5 @@ Add `--with-downstream` for its selected continuation, or explicitly justify cur
 with `--ignore-dependencies --reason "upstream data verified"`. See
 [manual selections](../guides/running-tasks.md#independent-manual-selections) for admission and
 checkpoint limits and the equivalent HTTP request.
+
+Scoped operator controls: see [holds, stop and abort](operator-controls.md).

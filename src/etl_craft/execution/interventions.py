@@ -1,4 +1,4 @@
-"""``mark`` and ``cancel``: an operator's control over runs, in local mode.
+"""Operator marks, definition pauses and dependency overrides for local runs.
 
 In local mode etl-craft is the orchestrator, so it is where an operator steps in:
 
@@ -9,8 +9,6 @@ In local mode etl-craft is the orchestrator, so it is where an operator steps in
   resumes it from there: mark a failed task ``SUCCESS`` and its dependents run.
 - ``mark --new-run`` records a finished stand-in run, with a task in it if named, so a gate on
   this pipeline passes where it cannot really run (an upstream that only exists elsewhere).
-- ``cancel`` ends the pipeline's run ``CANCELLED``, with its running tasks. The process running
-  each task watches for this and stops it; the process running the pipeline starts nothing more.
 - ``run --skip`` records a run ``SKIPPED`` on purpose, as ``mark --new-run`` does, so the
   pipelines that depend on it see a run that did nothing.
 - ``pause`` stops a pipeline from running until ``resume``: ``run`` starts nothing of it, and a
@@ -363,71 +361,6 @@ def open_pause(engine: Engine, pipeline_code: str) -> pauses.Pause | None:
     """Return the open pause of ``pipeline_code``, or ``None`` when it is not paused."""
     with engine.connect() as conn:
         return pauses.fetch_open_pause(conn, resolve_pipeline_id(conn, pipeline_code))
-
-
-def cancel_run(
-    engine: Engine,
-    config: ConnectorConfig,
-    pipeline_code: str,
-    reason: str,
-    *,
-    requested_by: str | None = None,
-    selector: runlog.RunSelector = runlog.ACTIVE_RUN,
-) -> Intervened:
-    """End the pipeline's queued or active run ``CANCELLED``, with every task still running.
-
-    The process running each task stops it within a few seconds, and the process running the
-    pipeline starts nothing more. Raises ``RunStateError`` when the selected run is not queued
-    or active.
-    """
-    _check(config, "cancel", reason, None, None)
-    who = requested_by or current_actor().name
-    with engine.begin() as conn:
-        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
-        selected = runlog.select_run(conn, pipeline_id, selector)
-        run_id = selected.pipeline_run_id
-        if selected.status not in {RunStatus.QUEUED, RunStatus.IN_PROGRESS}:
-            raise RunStateError(
-                f"{pipeline_code}: run_id={run_id} is {selected.status}; "
-                "expected QUEUED or IN-PROGRESS to cancel"
-            )
-        stopped = []
-        for row in record.fetch_task_rows(conn, run_id):
-            if row.status != RunStatus.IN_PROGRESS:
-                continue
-            if transitions.cancel_task_run(conn, row.task_run_id, f"cancelled by {who}: {reason}"):
-                stopped.append(row.task_code)
-                record.record_intervention(
-                    conn,
-                    pipeline_id=pipeline_id,
-                    pipeline_run_id=run_id,
-                    task_id=row.task_id,
-                    action=InterventionAction.CANCEL,
-                    from_status=RunStatus.IN_PROGRESS,
-                    to_status=RunStatus.CANCELLED,
-                    previous_message=row.error_message,
-                    reason=reason,
-                    requested_by=who,
-                )
-        transitions.cancel_pipeline_run(conn, run_id)
-        record.record_intervention(
-            conn,
-            pipeline_id=pipeline_id,
-            pipeline_run_id=run_id,
-            action=InterventionAction.CANCEL,
-            from_status=selected.status,
-            to_status=RunStatus.CANCELLED,
-            reason=reason,
-            requested_by=who,
-        )
-    message = f"{pipeline_code}: pipeline_run_id={run_id} CANCELLED"
-    if stopped:
-        message += (
-            f"; stopping {len(stopped)} running task(s): {', '.join(stopped)} (the process "
-            "running each stops it within a few seconds)"
-        )
-    logger.warning("%s (by %s: %s)", message, who, reason)
-    return Intervened(message, run_id)
 
 
 def record_change(

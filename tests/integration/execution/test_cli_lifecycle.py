@@ -1,5 +1,6 @@
 """Lifecycle boundaries through the real CLI, on both Engine DB dialects."""
 
+import json
 import signal
 import sys
 import time
@@ -50,7 +51,7 @@ def test_a_child_failure_after_recording_success_keeps_the_recorded_outcome(cli_
     project.wait_for("SELECT STATUS FROM AUD_PIPELINES_RUN_LOG", expected="SUCCESS")
 
 
-def test_a_hard_exit_after_binding_can_be_cancelled_without_starting_a_child(cli_project):
+def test_a_hard_exit_after_binding_does_not_fabricate_cancellation_acknowledgement(cli_project):
     project = cli_project
     assert project.run("run", "--pipeline_code", "P", "--init-only")[0] == 0
     code, _ = project.run(
@@ -58,9 +59,18 @@ def test_a_hard_exit_after_binding_can_be_cancelled_without_starting_a_child(cli
     )
     assert code == 137
     project.wait_for("SELECT STATUS FROM AUD_TASK_RUN_LOG", expected="IN-PROGRESS")
-    code, output = project.run("cancel", "--pipeline_code", "P", "--reason", "lost CLI")
+    code, output = project.run(
+        "cancel", "--pipeline_code", "P", "--reason", "lost CLI", "--format", "json"
+    )
     assert code == 0, output
-    project.wait_for("SELECT STATUS FROM AUD_TASK_RUN_LOG", expected="CANCELLED")
+    request = json.loads(output)
+    assert request["status"] == "REQUESTED" and request["completed_at"] is None
+    assert request["run_status"] == "IN-PROGRESS"
+    assert len(request["attempts"]) == 1
+    attempt = request["attempts"][0]
+    assert attempt["status"] == "CLAIMED" and attempt["pid"] is None
+    assert attempt["process_ended_at"] is None and attempt["queries_ended_at"] is None
+    project.wait_for("SELECT STATUS FROM AUD_TASK_RUN_LOG", expected="IN-PROGRESS")
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="process-tree inspection requires Linux")

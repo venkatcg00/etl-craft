@@ -7,6 +7,7 @@ from typing import Annotated, Any
 from fastapi import Depends, FastAPI, Query
 from pydantic import BaseModel, ConfigDict, Field
 
+from etl_craft.core.enums import ControlAction
 from etl_craft.engine.runlog import RunSelector
 from etl_craft.services.operations import (
     OperationContext,
@@ -16,6 +17,7 @@ from etl_craft.services.operations import (
     tasks,
     to_json,
 )
+from etl_craft.services.operations.controls import ControlRequest, get_control, request_control
 from etl_craft.services.operations.models import HistoryQuery
 from etl_craft.services.operations.requests import RunRequest
 from etl_craft.services.operations.status import explain_task, pipeline_status
@@ -34,6 +36,15 @@ class Selected(BaseModel):
     def selector(self) -> RunSelector:
         """The run this request selects."""
         return RunSelector(self.run_id, self.run_key)
+
+
+class ScopedControl(Selected):
+    """One exact run/task action with a durable request identity."""
+
+    model_config = ConfigDict(extra="forbid")
+    action: ControlAction
+    task_code: str | None = None
+    request_key: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class PipelineMark(Selected):
@@ -101,6 +112,7 @@ def add_selected_routes(app: FastAPI, authorize: Authorize) -> None:
         return to_json(inspect.run_history(caller, code, query))
 
     _add_selected_controls(app, authorize)
+    _add_scoped_controls(app, authorize)
 
 
 def _history_query(
@@ -185,3 +197,32 @@ def _add_selected_controls(app: FastAPI, authorize: Authorize) -> None:
                 selector=body.selector,
             )
         )
+
+
+def _add_scoped_controls(app: FastAPI, authorize: Authorize) -> None:
+    @app.post("/api/v1/pipelines/{code}/controls")
+    def control(
+        code: str,
+        body: ScopedControl,
+        caller: Annotated[OperationContext, Depends(authorize("cancel"))],
+    ) -> dict[str, Any]:
+        return to_json(
+            request_control(
+                caller,
+                ControlRequest(
+                    code,
+                    body.action,
+                    body.reason,
+                    body.selector,
+                    body.task_code,
+                    body.request_key,
+                ),
+            )
+        )
+
+    @app.get("/api/v1/control-requests/{control_id}")
+    def control_status(
+        control_id: int,
+        caller: Annotated[OperationContext, Depends(authorize("status"))],
+    ) -> dict[str, Any]:
+        return to_json(get_control(caller, control_id))

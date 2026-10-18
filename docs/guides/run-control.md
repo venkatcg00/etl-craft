@@ -141,10 +141,69 @@ A pipeline with a run in progress is refused: mark that run, or cancel it.
 etl-craft cancel --pipeline_code SALES_DAILY --reason "the source sent yesterday's file"
 ```
 
-The pipeline's run in progress ends `CANCELLED`, and so does each of its running tasks. The
-process running each task looks every two seconds, stops the task's process when it sees the
-cancel, and the process running the pipeline starts nothing more; `run` then exits `1`. The next
-`run --pipeline_code` starts a new run.
+`cancel` requests an abort of the selected run. Add `--stop` for a graceful stop: running
+attempts finish normally while the dispatch fence prevents new attempts and retries. Add
+`--task_code TASK` to affect only that task under the selected run. Other tasks, pipelines and
+independent manual runs keep running. Abort does not undo warehouse commits. Successful results,
+counts, logs, checkpoints and recorded
+consumption remain intact.
+
+```bash
+etl-craft cancel --pipeline_code SALES_DAILY --run-id 42 --stop --reason "drain before maintenance"
+etl-craft cancel --pipeline_code SALES_DAILY --run-id 42 --task_code extract --reason "wrong input"
+etl-craft status --request-id 17 --format json
+```
+
+The response is `etl-craft/control/1`, with a durable `control_id`, exact scope, pinned attempt
+ids, actor and reason. `REQUESTED` means the fence is committed; `ACKNOWLEDGED` means the worker
+has observed it but process/query endings are still pending; `COMPLETED` requires actual exit
+and query-ending observations. The separate `run_status` always shows the stored run outcome.
+A run-scope stop ends the run `CANCELLED` only after those observations; a task-scope stop leaves
+the run active and retains that task's fence. `--request-key KEY` makes retries refer to the
+original request. Repeating the same latest scoped action also returns its original identity.
+Inspect a completed request by id even after its run ends.
+
+Abort stops only the affected owned child processes, checking their PID birth identities before
+signalling. Embedded DuckDB queries end with those processes. Server-side warehouse queries
+currently have no durable cancellation adapter: abort refuses before signalling or changing the
+scope; use graceful `--stop` for supported handlers to let them finish. Python scripts on
+server-side warehouses cannot certify every script-owned query ending;
+scoped stop refuses while such a script is active, with definition pause as the dispatch-only
+alternative. Built-in synchronous handlers commit their query acknowledgement with its outcome; an abnormal server-side
+query failure without such evidence stays pending. A crashed owner, expired lease, terminal task
+summary or disconnected browser is never query-ending evidence. Unknown acknowledgements remain
+pending, with their attempt ids in the response. Reconcile records expired active owners as `LOST` before observing verified local exits;
+existing terminal outcomes are preserved. Server-side query status remains unknown without
+its own acknowledgement. Native controls
+in legacy external-orchestrator mode report the missing adapter and direct the operator to that
+orchestrator. Server-side `EVENT_SQL` stop/abort is unavailable without a query adapter; use a
+definition pause or wait for a successful check. An active event probe can refuse a scoped
+control until its current check finishes, rather than claiming its query has stopped.
+
+## Hold or release dispatch in a selected run
+
+```bash
+etl-craft pause --pipeline_code SALES_DAILY --run-id 42 --reason "hold dispatch"
+etl-craft pause --pipeline_code SALES_DAILY --run-id 42 --task_code transform --reason "inspect input"
+etl-craft resume --pipeline_code SALES_DAILY --run-id 42 --task_code transform --reason "ready"
+etl-craft resume --pipeline_code SALES_DAILY --run-id 42 --reason "resume dispatch"
+```
+
+A run selector, `--task_code` or `--request-key` makes pause/resume a scoped `HOLD`/`RELEASE` control. Holds block
+new admission, including force and retry claims, while existing attempts finish. A task hold
+leaves its dependents pending and lets unrelated ready tasks run. The run stays `IN-PROGRESS`;
+release the exact held scope, then resume with `etl-craft run` if its supervisor has exited.
+Releasing a task does not release a run hold, and releasing a run does not release task holds.
+Release refuses until an earlier stop/abort in that scope has completed.
+
+Without those scoped options, pause/resume keeps the definition-wide behavior below. Definition
+pauses and scoped holds are independent; a scoped release does not clear a definition pause.
+
+HTTP clients use `POST /api/v1/pipelines/{code}/controls` with `action` (`HOLD`, `RELEASE`,
+`STOP`, `ABORT`), `reason`, optional `run_id`/`run_key`, `task_code` and `request_key`.
+`GET /api/v1/control-requests/{control_id}` returns the same document as `status --request-id`.
+Controls require operator; inspection requires viewer. Local and `--server` commands call the
+same services and preserve the authenticated actor.
 
 ## Pause and resume a pipeline
 
@@ -246,7 +305,10 @@ orchestrator's sensors are the gates.
 
 `etl-craft history --pipeline_code SALES_DAILY --all` lists the interventions on the runs it shows,
 under the runs, and the [catalog](catalog.md) lists those on each pipeline's last run.
-`AUD_RUN_INTERVENTIONS` holds every one:
+`AUD_RUN_INTERVENTIONS` holds marks, reruns and dependency overrides below. Historical `CANCEL`
+rows remain readable. New scoped controls, including cancellation, live in `AUD_CONTROL_REQUESTS`;
+append-only `AUD_ATTEMPT_ACKNOWLEDGEMENTS` records each physical process/query ending independently
+of the immutable attempt outcome:
 
 | Column | Holds |
 |---|---|

@@ -8,6 +8,19 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Scoped run/task dispatch holds with `pause`/`resume` plus a run selector or `--task_code`;
+  `cancel --stop` drains running work and `cancel --task_code` affects only that task. Controls
+  return durable `etl-craft/control/1` requests, optional `--request-key` idempotency, and
+  `status --request-id` inspection locally or through `--server`. Shared HTTP routes expose
+  the same operator controls and viewer inspection. Migration `0038` adds control requests
+  and append-only process/query acknowledgements on SQLite and PostgreSQL.
+- Cancellation now reports acceptance separately from physical completion, preserving successful
+  evidence. The run becomes `CANCELLED` only after affected process and query endings are observed.
+  `runs.cancel_run` and existing cancel HTTP routes return the control document instead of an
+  operation success. Server-side warehouse aborts without a cancellation acknowledgement adapter
+  refuse explicitly; graceful stop remains available for supported handlers. Server-side Python
+  scripts need a query adapter for scoped stop; definition pause remains available. Lost leases never imply query termination.
+
 - `run --task_code TASK --standalone` starts an independent manual selection;
   `--with-downstream` includes its continuation from metadata edges. Explicit run identities
   resume the same selection; manual results never satisfy or consume pipeline dependencies.

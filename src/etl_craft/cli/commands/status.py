@@ -12,17 +12,27 @@ from etl_craft.cli.commands.common import (
 )
 from etl_craft.cli.output import Output
 from etl_craft.cli.remote import ServerClient, api_path, selector_query
+from etl_craft.core.errors import UsageError
+from etl_craft.engine.controls import ControlView
 from etl_craft.engine.runlog import RunSelector
+from etl_craft.services.operations.controls import get_control
 from etl_craft.services.operations.status import StatusView, pipeline_status
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
     configure_output(parser)
     configure_run_selector(parser)
-    parser.add_argument("--pipeline_code", required=True)
+    parser.add_argument("--pipeline_code")
+    parser.add_argument("--request-id", type=int, help="inspect durable control acknowledgements")
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
+    _validate(args)
+    if args.request_id is not None:
+        with command_context(args) as ctx:
+            done_control = get_control(ctx, args.request_id)
+        out.result(done_control, args.output_format)
+        return 0
     with command_context(args) as ctx:
         done = pipeline_status(
             ctx, args.pipeline_code, selector=RunSelector(args.run_id, args.run_key)
@@ -31,6 +41,13 @@ def _run(args: argparse.Namespace, out: Output) -> int:
 
 
 def _remote(args: argparse.Namespace, out: Output, server: ServerClient) -> int:
+    _validate(args)
+    if args.request_id is not None:
+        done_control = server.call(
+            "GET", api_path("control-requests", str(args.request_id)), ControlView
+        )
+        out.result(done_control, args.output_format)
+        return 0
     done = server.call(
         "GET",
         api_path("pipelines", args.pipeline_code, "status"),
@@ -80,3 +97,15 @@ COMMAND = Command(
     configure=_configure,
     remote=_remote,
 )
+
+
+def _validate(args: argparse.Namespace) -> None:
+    if args.request_id is not None:
+        if args.request_id < 1 or any(
+            value is not None for value in (args.pipeline_code, args.run_id, args.run_key)
+        ):
+            raise UsageError(
+                "status --request-id needs a positive id without pipeline/run selectors"
+            )
+    elif args.pipeline_code is None:
+        raise UsageError("status needs --pipeline_code or --request-id")

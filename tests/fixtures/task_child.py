@@ -9,6 +9,7 @@ import os
 import signal
 import sys
 import time
+from pathlib import Path
 
 from etl_craft.core.errors import HandlerError, SqlGuardError
 from etl_craft.execution import child
@@ -45,6 +46,17 @@ def handler(context, engine):
         os.kill(os.getpid(), signal.SIGKILL)
     if behaviour == "sleep":
         time.sleep(60)
+    if behaviour == "barrier":
+        Path(context.task_params["READY_FILE"]).touch()
+        release = Path(context.task_params["RELEASE_FILE"])
+        deadline = time.monotonic() + 30
+        while not release.exists():
+            if time.monotonic() >= deadline:
+                raise HandlerError(
+                    f"release file {release} did not arrive before the test deadline"
+                )
+            time.sleep(0.05)
+        return HandlerResult(target_count=1)
     if behaviour == "brief":
         time.sleep(2)
         return HandlerResult(target_count=1)

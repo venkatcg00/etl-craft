@@ -11,6 +11,7 @@ import sys
 from collections.abc import Callable, Iterable
 from typing import TextIO
 
+from etl_craft.engine.controls import ControlView
 from etl_craft.services.operations import to_json
 from etl_craft.services.operations.models import BackfillView, OperationResult, ReconciliationView
 
@@ -57,6 +58,12 @@ class Output:
             self.document(done)
         elif text is not None:
             text()
+        elif isinstance(done, ControlView):
+            self.line(
+                f"control_id={done.control_id} {done.action} {done.status}; "
+                f"run_id={done.pipeline_run_id} task={done.task_code or 'all'} "
+                f"run_status={done.run_status}: {done.message}"
+            )
         else:
             assert isinstance(done, (OperationResult, BackfillView, ReconciliationView))
             self.line(done.message)

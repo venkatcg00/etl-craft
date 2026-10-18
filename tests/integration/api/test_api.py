@@ -552,3 +552,43 @@ def test_task_run_refuses_unknown_control_fields(api):
     )
     assert response.status_code == 422
     assert "force" in response.text and "extra_forbidden" in response.text
+
+
+def test_scoped_control_routes_share_durable_identity_and_role_policy(api):
+    _, client, creds, run, attempt = api
+    path = "/api/v1/pipelines/P/controls"
+    body = {
+        "action": "HOLD",
+        "task_code": "T",
+        "run_id": run,
+        "reason": "maintenance",
+        "request_key": "hold:T",
+    }
+    assert client.post(path, json=body, headers=headers(creds["viewer"])).status_code == 403
+    first = client.post(path, json=body, headers=headers(creds["operator"]))
+    assert first.status_code == 200
+    document = first.json()
+    assert document["schema"] == "etl-craft/control/1"
+    assert document["action"] == "HOLD" and document["status"] == "COMPLETED"
+    assert document["requested_by"] == "operator" and document["task_code"] == "T"
+    assert document["run_status"] == "IN-PROGRESS" and document["attempt_ids"] == []
+    repeated = client.post(path, json=body, headers=headers(creds["operator"]))
+    assert repeated.json()["control_id"] == document["control_id"]
+    read = client.get(
+        f"/api/v1/control-requests/{document['control_id']}", headers=headers(creds["viewer"])
+    )
+    assert read.status_code == 200 and read.json() == document
+    assert (
+        client.post(
+            path, json={**body, "unexpected": True}, headers=headers(creds["operator"])
+        ).status_code
+        == 422
+    )
+    stop = client.post(
+        path,
+        json={**body, "action": "STOP", "request_key": "stop:T"},
+        headers=headers(creds["operator"]),
+    )
+    assert stop.status_code == 200 and stop.json()["status"] == "COMPLETED"
+    assert stop.json()["run_status"] == "IN-PROGRESS"
+    assert stop.json()["attempt_ids"] == [attempt]

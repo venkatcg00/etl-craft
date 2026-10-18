@@ -21,6 +21,7 @@ class DuckDBWarehouse(WarehouseDialect):
     replace_strategy: ReplaceStrategy = "transactional"
     surrogate_key: SurrogateKey = "sequence"
     single_writer = True
+    process_local_queries = True
 
     def timestamp_text(self, value: str, kind: str) -> str:
         """Normalize aware timestamps explicitly, including after a timezone change."""

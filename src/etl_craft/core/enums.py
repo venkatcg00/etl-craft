@@ -103,6 +103,23 @@ class AttemptStatus(StrEnum):
     LOST = "LOST"
 
 
+class ControlAction(StrEnum):
+    """Run/task dispatch and worker controls."""
+
+    HOLD = "HOLD"
+    RELEASE = "RELEASE"
+    STOP = "STOP"
+    ABORT = "ABORT"
+
+
+class ControlStatus(StrEnum):
+    """Accepted controls remain pending until their actual acknowledgements exist."""
+
+    REQUESTED = "REQUESTED"
+    ACKNOWLEDGED = "ACKNOWLEDGED"
+    COMPLETED = "COMPLETED"
+
+
 class TriggerKind(StrEnum):
     """What started a pipeline run."""
 
@@ -319,3 +336,10 @@ class ProtectionEvent(StrEnum):
     DELETE = "DELETE"
     LOCK = "LOCK"
     UNLOCK = "UNLOCK"
+
+
+class ControlAcknowledgement(StrEnum):
+    """Independent, append-only physical observations from an owning worker."""
+
+    PROCESS = "PROCESS"
+    QUERIES = "QUERIES"
