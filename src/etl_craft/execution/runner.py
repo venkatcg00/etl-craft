@@ -25,7 +25,7 @@ import sys
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
@@ -43,7 +43,7 @@ from etl_craft.core.errors import (
 )
 from etl_craft.core.faults import fault_point
 from etl_craft.core.graph import build_graph
-from etl_craft.engine import runlog, transitions
+from etl_craft.engine import run_scopes, runlog, transitions
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import trackers
 from etl_craft.engine.repository.dependencies import (
@@ -402,6 +402,21 @@ NO_CROSS = CrossPipelineCheck(0)
 """What a preflight that stopped before the cross-pipeline gate reports from it."""
 
 
+def _queued_retry(conn: Connection, pipeline_run_id: int, task_id: int) -> bool:
+    """Whether a task already has a delayed queued retry."""
+    queued = (
+        conn.execute(statement(conn, "retry_attempts"), {"pipeline_run_id": pipeline_run_id})
+        .mappings()
+        .all()
+    )
+    return any(
+        row["task_id"] == task_id
+        and row["status"] == AttemptStatus.QUEUED
+        and row["not_before"] is not None
+        for row in queued
+    )
+
+
 def _preflight(
     engine: Engine,
     gate: TrackedGate,
@@ -420,18 +435,12 @@ def _preflight(
         status = runlog.fetch_task_run_status(conn, task_id, pipeline_run_id)
         run_status = runlog.fetch_pipeline_run_status(conn, pipeline_run_id)
         backfill = runlog.fetch_run_kind(conn, pipeline_run_id).backfill
-        queued = (
-            conn.execute(statement(conn, "retry_attempts"), {"pipeline_run_id": pipeline_run_id})
-            .mappings()
-            .all()
-        )
-        queued_here = any(
-            row["task_id"] == task_id
-            and row["status"] == AttemptStatus.QUEUED
-            and row["not_before"] is not None
-            for row in queued
-        )
+        queued_here = _queued_retry(conn, pipeline_run_id, task_id)
+        run_scopes.check_task(conn, pipeline_run_id, task_id)
         graph_data = fetch_pipeline_graph(conn, pipeline_id)
+        scope = run_scopes.fetch_selection(conn, pipeline_run_id)
+        if scope is not None:
+            graph_data = run_scopes.selected_graph(graph_data, scope)
         run_state = runlog.fetch_run_state(
             conn, pipeline_run_id, [task.task_id for task in graph_data.tasks]
         )

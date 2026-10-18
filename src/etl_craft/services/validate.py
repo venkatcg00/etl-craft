@@ -191,7 +191,7 @@ def validate_on(
         problem = definition_problem(definition, dialect)
         if problem:
             report.fail(f"source {definition.table_name}.{definition.column_name}", problem)
-    for schedule in conn.execute(statement(conn, "overseer_schedules")):
+    for schedule in conn.execute(statement(conn, "active_schedule_definitions")):
         zone = (
             schedule.schedule_timezone
             if schedule.schedule_timezone is not None

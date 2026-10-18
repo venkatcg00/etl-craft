@@ -362,3 +362,36 @@ def test_sso_sign_in_runs_the_device_flow_on_the_server(
         assert code == 0, err
         assert "enter ABCD-EFGH" in out and f"Signed in to {url} as sam (viewer)" in out
         assert run(capsys, "whoami", "--server", url)[1] == "sam viewer\n"
+
+
+@pytest.mark.parametrize("standalone", [False, True])
+@pytest.mark.parametrize("status", [RunStatus.SUCCESS, RunStatus.IN_PROGRESS])
+def test_remote_task_run_forwards_the_exact_selection(
+    server, monkeypatch, capsys, standalone, status
+):
+    calls = []
+
+    def execute(caller, request):
+        calls.append((caller.actor.name, request))
+        return OperationResult(status, "P: task done", 1, "P")
+
+    monkeypatch.setattr("etl_craft.services.operations.runs.execute_run", execute)
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", server["service"]["operator"])
+    args = ["run", "--pipeline_code", "P", "--task_code", "T", "--run-key", "manual:test"]
+    if standalone:
+        args += [
+            "--standalone",
+            "--with-downstream",
+            "--ignore-dependencies",
+            "--reason",
+            "checked",
+        ]
+    code, out, err = run(capsys, *args, "--server", server["url"])
+    expected = ExitCode.SUCCESS if status == RunStatus.SUCCESS else ExitCode.INCOMPLETE
+    assert code == expected and out == "P: task done\n", err
+    actor, request = calls[0]
+    assert actor == "ci-operator" and request.pipeline_code == "P"
+    assert request.selector.run_key == "manual:test" and request.task_code == "T"
+    assert (
+        request.standalone == request.with_downstream == request.ignore_dependencies == standalone
+    )

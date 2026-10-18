@@ -26,6 +26,44 @@ satisfied. See [Dependencies and run conditions](dependencies.md).
 The task then runs in a process of its own. The command exits `0` when it ends `SUCCESS` and `1`
 when it ends `FAILED`; every other status is listed under [Exit codes](../reference/exit-codes.md).
 
+## Independent manual selections
+
+```bash
+etl-craft run --pipeline_code SALES_DAILY --task_code load_orders --standalone
+etl-craft run --pipeline_code SALES_DAILY --task_code load_orders --standalone --with-downstream
+```
+
+The first command runs only the selected task. The second includes every active descendant
+from `CFG_TASK_DEPENDENCY`, in dependency order. The selected ids are stored on the new run;
+restarting a supervisor cannot expand it to unrelated tasks. No existing pipeline run is
+adopted. Use `--run-key operator:orders` to name a new selection, or its exact `--run-id` or
+`--run-key` with the original selection options to resume unfinished work. Successful tasks
+are preserved. An ended manual run returns its existing result on a repeated named start; omit the selector
+to request a new execution deliberately.
+
+Dependencies outside the selection, including pipeline dependencies, are refused by default.
+To use current warehouse inputs explicitly, add `--ignore-dependencies --reason "..."`.
+Internal selected edges still determine order. The bypass and its actor/reason are audited.
+Manual outcomes never become upstream publications or consume dependency revisions.
+
+SQL selections hold the same exclusive pipeline admission slot as whole-pipeline work and
+retain warehouse target locks and human-value protection. Finish or cancel the other exact
+exclusive run before starting them. Email-only selections can overlap other pipeline work.
+Python offsets, SQL watermarks, business-rule flags and event checkpoints currently have shared
+state: standalone execution refuses those tasks, naming the available explicit pipeline-run
+path. Legacy external-orchestrator mode requires that path too. Pipeline pause still blocks
+manual dispatch; resume the definition before starting a selection.
+
+The API exposes `POST /api/v1/pipelines/{code}/tasks/{task}/run`, requiring operator role.
+Its body accepts `standalone`, `run_id` or `run_key`, `with_downstream`, `ignore_dependencies`,
+`run_date` and `reason`. With `standalone: false`, it runs the task in the selected pipeline
+run. The CLI uses this same operation against `--server`. Execution waits for its actual
+outcome.
+
+Run JSON includes `selected_task_ids` (null for a whole pipeline), `ignore_dependencies` and
+`exclusive_run`. Selection survives disconnects in the Engine DB; foreground execution is
+resumed explicitly after its ownership lease has been reconciled.
+
 ## Retries and `--force`
 
 Local pipeline runs, the overseer and ordinary `run --task_code` automatically retry failed,

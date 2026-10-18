@@ -23,7 +23,7 @@ from etl_craft.core.enums import (
 from etl_craft.core.errors import RunStateError, StaleTransitionError
 from etl_craft.core.faults import fault_point
 from etl_craft.core.time import as_utc
-from etl_craft.engine import runlog
+from etl_craft.engine import run_scopes, runlog
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import trackers
 from etl_craft.engine.repository.offsets import StoredOffset, save_task_offset
@@ -41,8 +41,7 @@ def create_active_run(
 
     Return ``None`` when the pipeline already has a run in progress: the unique index on
     ``IN-PROGRESS`` runs refuses a second one, so of several processes starting a run at once,
-    exactly one gets an id. A new run runs as of ``run_date`` (today, in UTC, unless given),
-    and ``backfill`` marks it part of a backfill.
+    exactly one gets an id. ``run_date`` defaults to UTC today; ``backfill`` marks backfills.
     """
     kind = trigger_kind or ("BACKFILL" if backfill else "MANUAL")
     if backfill and kind != TriggerKind.BACKFILL:
@@ -106,6 +105,7 @@ def find_or_create_task_run(
     conn: Connection, task_id: int, pipeline_run_id: int
 ) -> runlog.TaskRunBinding:
     """Return ``task_id``'s row under ``pipeline_run_id``, creating it; a losing insert reads it."""
+    run_scopes.check_task(conn, pipeline_run_id, task_id)
     params = {"task_id": task_id, "pipeline_run_id": pipeline_run_id}
     existing = conn.execute(statement(conn, "task_run"), params).one_or_none()
     if existing is not None:

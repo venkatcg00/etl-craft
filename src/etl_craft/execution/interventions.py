@@ -233,7 +233,7 @@ def record_stand_in_run(
     with engine.begin() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         task_id = None if task_code is None else resolve_task_id(conn, pipeline_id, task_code)
-        active = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
+        active = runlog.fetch_exclusive_run_id(conn, pipeline_id)
         if active is not None:
             raise RunStateError(
                 f"{pipeline_code} has a run in progress (pipeline_run_id={active}); mark that "
@@ -245,7 +245,7 @@ def record_stand_in_run(
         if created is None:
             raise RunStateError(
                 f"{pipeline_code}: another process started a run just now "
-                f"(pipeline_run_id={runlog.fetch_active_pipeline_run_id(conn, pipeline_id)}); "
+                f"(pipeline_run_id={runlog.fetch_exclusive_run_id(conn, pipeline_id)}); "
                 "mark that run, or cancel it, before recording a stand-in run"
             )
         run_id = created

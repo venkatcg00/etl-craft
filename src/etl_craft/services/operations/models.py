@@ -33,6 +33,9 @@ class RunView:
     started_by_kind: str | None
     ended_by: str | None
     ended_by_kind: str | None
+    selected_task_ids: tuple[int, ...] | None = None
+    ignore_dependencies: bool = False
+    exclusive_run: bool = True
 
 
 @dataclass(frozen=True)

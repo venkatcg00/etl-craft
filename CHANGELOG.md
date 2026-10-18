@@ -8,6 +8,15 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- `run --task_code TASK --standalone` starts an independent manual selection;
+  `--with-downstream` includes its continuation from metadata edges. Explicit run identities
+  resume the same selection; manual results never satisfy or consume pipeline dependencies.
+  Email-only selections may overlap whole-pipeline execution. SQL selections retain exclusive
+  admission and target locks; shared offsets, watermarks, business-rule flags and event
+  checkpoints are refused with a remedy. The task-run HTTP route uses the same operation.
+  Migration `0037` adds `AUD_PIPELINES_RUN_LOG.TASK_SELECTION` and `EXCLUSIVE_RUN` on both
+  Engine DBs. Run JSON adds `selected_task_ids`, `ignore_dependencies` and `exclusive_run`.
+
 - Shared SCD value edit, provenance and unlock services and HTTP routes under
   `/api/v1/pipelines/{code}/tasks/{task}/values`. Human admin inserts protect their row;
   edits protect changed values. ETL and authenticated service integrations respect those

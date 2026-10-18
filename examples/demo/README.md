@@ -155,3 +155,20 @@ The next `SUPPORT_DM` run restores `Ann`. This opt-in walkthrough uses native Du
 PostgreSQL; protection refuses the Iceberg/cloud variants. It creates no automatic file-upload
 flow. See [the full protection contract](../../docs/guides/human-overrides.md), including
 backing up warehouse-side evidence with the business tables.
+
+## Run an individual SQL task
+
+To execute a task independently without reopening a demo pipeline run, choose its task code
+from `etl-craft steps --pipeline_code SUPPORT_DM` and run:
+
+```bash
+etl-craft run --pipeline_code SUPPORT_DM --task_code area_summary --standalone \
+  --ignore-dependencies --reason "demo inputs already verified"
+```
+
+Outside dependencies require the
+explicit reason above; selected descendants are included only with `--with-downstream`.
+Finish any active exclusive pipeline run first. Script offsets, SQL watermarks, business-rule
+flags and event checkpoints are shared, so those handlers need an explicit pipeline-run
+context rather than standalone execution. Manual success never supplies an upstream pipeline
+publication.

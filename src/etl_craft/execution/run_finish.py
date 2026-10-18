@@ -70,7 +70,7 @@ def finalize_active_run(
                 f"{pipeline_code}: run_id={pipeline_run_id} is {selected.status}; "
                 "expected IN-PROGRESS to finalize"
             )
-        detail, graph, task_codes = load_pipeline(conn, pipeline_id)
+        detail, graph, task_codes = load_pipeline(conn, pipeline_id, run_id=pipeline_run_id)
     with log_context(pipeline=pipeline_code, pipeline_run_id=pipeline_run_id):
         return finalize(
             engine,

@@ -65,7 +65,7 @@ def rerun_task(
             runlog.fetch_task_run_status(conn, task_id, pipeline_run_id) == RunStatus.FAILED
         )
         selector = runlog.RunSelector(run_id=pipeline_run_id)
-        detail, graph, task_codes = load_pipeline(conn, pipeline_id)
+        detail, graph, task_codes = load_pipeline(conn, pipeline_id, run_id=pipeline_run_id)
     run = PipelineRun(
         pipeline_code, pipeline_id, pipeline_run_id, graph, task_codes, detail.sla_in_hours
     )
@@ -171,7 +171,7 @@ def force_task(
         run_id = selected.pipeline_run_id
         if outcome.reopened is None:
             return PipelineOutcome(outcome.status, outcome.message, run_id)
-        detail, graph, task_codes = load_pipeline(conn, pipeline_id)
+        detail, graph, task_codes = load_pipeline(conn, pipeline_id, run_id=run_id)
     return _end_reopened(
         engine,
         PipelineRun(pipeline_code, pipeline_id, run_id, graph, task_codes, detail.sla_in_hours),

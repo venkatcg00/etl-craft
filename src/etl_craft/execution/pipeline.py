@@ -177,7 +177,7 @@ def pipeline_steps(
             return skipped_run(pipeline_code, pipeline_run_id, skip_reason, hooks)
         with engine.connect() as conn:
             detail, graph, task_codes = load_pipeline(
-                conn, pipeline_id, detail=detail, graph_data=graph_data
+                conn, pipeline_id, detail=detail, graph_data=graph_data, run_id=pipeline_run_id
             )
         run = PipelineRun(
             pipeline_code, pipeline_id, pipeline_run_id, graph, task_codes, detail.sla_in_hours
@@ -340,7 +340,7 @@ def backfill(
             # Checked before every date: another run may have started since the last one.
             with engine.connect() as conn:
                 pipeline_id = resolve_pipeline_id(conn, pipeline_code)
-                active = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
+                active = runlog.fetch_exclusive_run_id(conn, pipeline_id)
             if active is not None:
                 raise RunStateError(
                     f"{pipeline_code} has a run in progress (pipeline_run_id={active}); finish "

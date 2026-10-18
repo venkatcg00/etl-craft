@@ -14,7 +14,8 @@ In remote mode the orchestrator is the only source of truth for runs, so all of 
 
 `run`, `mark`, `cancel`, `history` and `steps` accept `--run-id 42` or
 `--run-key 'manual:...'`. The identity must belong to `--pipeline_code`. Without a selector,
-operations use the pipeline's single non-terminal run. When none or several exist, the command
+operations use the pipeline's single non-terminal whole-pipeline run. Independent manual
+selections always require an explicit selector to resume. When none or several exist, the command
 refuses and lists candidates with their id, key, trigger kind, run date and status. It never
 selects a completed run by recency.
 

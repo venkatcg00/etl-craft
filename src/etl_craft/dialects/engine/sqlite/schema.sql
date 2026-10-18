@@ -211,16 +211,17 @@ CREATE TABLE AUD_PIPELINES_RUN_LOG (
     ENDED_BY_KIND VARCHAR CONSTRAINT ck_aud_pipelines_run_log_ended_by_kind CHECK (ENDED_BY_KIND IN ('USER','SERVICE','SYSTEM','HUMAN','SCHEDULE','ORCHESTRATOR','WORKER')),
     REPAIR_PENDING   VARCHAR NOT NULL DEFAULT 'N' CONSTRAINT ck_run_repair_pending CHECK (REPAIR_PENDING IN ('Y','N')),
     WRITER VARCHAR(128) NOT NULL DEFAULT 'etl-craft' CONSTRAINT ck_run_writer CHECK (length(trim(WRITER)) BETWEEN 1 AND 128),
+    TASK_SELECTION   TEXT,
+    EXCLUSIVE_RUN    VARCHAR(1) NOT NULL DEFAULT 'Y' CONSTRAINT ck_run_exclusive CHECK (EXCLUSIVE_RUN IN ('Y','N') AND (EXCLUSIVE_RUN='Y' OR TASK_SELECTION IS NOT NULL)),
     CONSTRAINT ck_pipeline_run_trigger_kind CHECK (TRIGGER_KIND IN ('SCHEDULE','MANUAL','BACKFILL','ORCHESTRATOR','STAND_IN')),
     CONSTRAINT ck_pipeline_run_backfill CHECK (BACKFILL IN ('Y','N')),
     CONSTRAINT ck_pipeline_run_status CHECK (STATUS IN ('QUEUED','IN-PROGRESS','SUCCESS','FAILED','SKIPPED','CANCELLED')),
     CONSTRAINT ck_pipeline_run_sla_status CHECK (SLA_STATUS IN ('MET','BREACHED'))
 );
 
--- At most one IN-PROGRESS run per pipeline: this index is what makes run-id resolution safe
--- when several task processes start at once.
+-- One active exclusive execution per pipeline; isolated manual selections use no slot.
 CREATE UNIQUE INDEX ux_pipeline_run_one_active
-    ON AUD_PIPELINES_RUN_LOG (PIPELINE_ID) WHERE STATUS = 'IN-PROGRESS';
+    ON AUD_PIPELINES_RUN_LOG (PIPELINE_ID) WHERE STATUS = 'IN-PROGRESS' AND EXCLUSIVE_RUN='Y';
 CREATE INDEX ix_catalog_pipeline_runs ON AUD_PIPELINES_RUN_LOG (PIPELINE_ID, PIPELINE_RUN_ID DESC);
 CREATE UNIQUE INDEX ux_pipeline_run_key ON AUD_PIPELINES_RUN_LOG (PIPELINE_ID, RUN_KEY);
 

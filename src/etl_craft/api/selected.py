@@ -1,10 +1,11 @@
 """Routes that select a pipeline's run as the CLI does: by run id, run key or the active run."""
 
 from collections.abc import Callable
+from datetime import date
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from etl_craft.engine.runlog import RunSelector
 from etl_craft.services.operations import (
@@ -16,6 +17,7 @@ from etl_craft.services.operations import (
     to_json,
 )
 from etl_craft.services.operations.models import HistoryQuery
+from etl_craft.services.operations.requests import RunRequest
 from etl_craft.services.operations.status import explain_task, pipeline_status
 
 Authorize = Callable[[str], Callable[..., OperationContext]]
@@ -49,6 +51,19 @@ class TaskRerun(Selected):
     """Whether to rerun the tasks downstream of the task as well."""
 
     with_downstream: bool = False
+
+
+class TaskRun(BaseModel):
+    """An explicit independent selection or one task under a selected pipeline run."""
+
+    model_config = ConfigDict(extra="forbid")
+    standalone: bool = False
+    run_id: int | None = Field(default=None, ge=1)
+    run_key: str | None = None
+    with_downstream: bool = False
+    ignore_dependencies: bool = False
+    run_date: date | None = None
+    reason: str | None = Field(default=None, min_length=1, max_length=4096, pattern=r"\S")
 
 
 def add_selected_routes(app: FastAPI, authorize: Authorize) -> None:
@@ -102,6 +117,29 @@ def _history_query(
 
 def _add_selected_controls(app: FastAPI, authorize: Authorize) -> None:
     """Add cancel, mark and rerun of the selected run."""
+
+    @app.post("/api/v1/pipelines/{code}/tasks/{task}/run")
+    def run_task(
+        code: str,
+        task: str,
+        body: TaskRun,
+        caller: Annotated[OperationContext, Depends(authorize("run"))],
+    ) -> dict[str, Any]:
+        return to_json(
+            runs.execute_run(
+                caller,
+                RunRequest(
+                    code,
+                    task_code=task,
+                    selector=RunSelector(body.run_id, body.run_key),
+                    standalone=body.standalone,
+                    with_downstream=body.with_downstream,
+                    ignore_dependencies=body.ignore_dependencies,
+                    run_date=body.run_date,
+                    reason=body.reason,
+                ),
+            )
+        )
 
     @app.post("/api/v1/pipelines/{code}/cancel")
     def cancel(

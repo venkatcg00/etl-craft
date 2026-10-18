@@ -14,6 +14,7 @@ from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.pauses import fetch_open_pause
 from etl_craft.engine.repository.pipelines import fetch_pipeline_detail
+from etl_craft.engine.run_scopes import TaskSelection
 from etl_craft.engine.runlog import as_date
 from etl_craft.services.operations.models import AttemptView, PipelineView, RunView, TaskRunView
 
@@ -63,6 +64,12 @@ def run_document(row: RowMapping) -> RunView:
     values["start_date"] = timestamp(values["start_date"])
     values["end_date"] = timestamp(values["end_date"])
     values["backfill"] = values["backfill"] == YesNo.YES
+    selection = values.pop("task_selection", None)
+    if selection is not None:
+        scope = TaskSelection.deserialize(selection)
+        values["selected_task_ids"] = scope.task_ids
+        values["ignore_dependencies"] = scope.ignore_dependencies
+    values["exclusive_run"] = values.get("exclusive_run", YesNo.YES) == YesNo.YES
     return RunView(**values)
 
 

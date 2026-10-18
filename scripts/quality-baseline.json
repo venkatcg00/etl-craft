@@ -126,7 +126,7 @@
       "src/etl_craft/services/catalog.py": 31,
       "src/etl_craft/services/config_files.py": 27,
       "src/etl_craft/services/lineage.py": 35,
-      "src/etl_craft/services/operations/runs.py": 22,
+      "src/etl_craft/services/operations/runs.py": 8,
       "src/etl_craft/services/operations/status.py": 52
     },
     "inline-sql": {
