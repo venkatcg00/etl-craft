@@ -217,6 +217,13 @@ audit stamps. Reviving an inactive deleted SCD2 key counts as one insert and no 
 Both SCD actions preserve creation stamps and stamp updates; unchanged input writes nothing.
 SCD1 and SCD2 must not share a target, even though their audit column sets match.
 
+### Human corrections
+
+Native PostgreSQL and DuckDB SCD targets can retain authorized human corrections across ETL
+refreshes, with row/value locks and independent column provenance. See
+[Protecting human SCD edits](human-overrides.md) for the admin service/API, effective hashes,
+delete behavior and the atomicity/outside-writer contract. Ordinary non-SCD tables gain no locks.
+
 ### Change hash version 2
 
 `HASH_KEY` remains a 32-character MD5 digest. Its input encodes each compare column as `N`

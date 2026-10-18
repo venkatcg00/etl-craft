@@ -26,7 +26,9 @@ READ_ONLY = {
 
 def test_every_command_is_audited_or_only_reads():
     names = {command.name for command in COMMANDS}
-    audited = {name.split()[0] for name in MUTATING_COMMANDS}
+    service_actions = {"data edit", "data unlock"}
+    assert service_actions <= MUTATING_COMMANDS
+    audited = {name.split()[0] for name in MUTATING_COMMANDS - service_actions}
     assert names - audited - READ_ONLY == set()
     assert audited & READ_ONLY == set()
     assert audited <= names

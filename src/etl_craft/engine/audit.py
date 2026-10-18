@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 MUTATING_COMMANDS = frozenset(
     {
         "login",
+        "data edit",
+        "data unlock",
         "logout",
         "account add",
         "account set-role",

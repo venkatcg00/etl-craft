@@ -308,3 +308,14 @@ class YesNo(StrEnum):
     def of(cls, value: bool) -> YesNo:
         """Return the flag that records ``value``."""
         return cls.YES if value else cls.NO
+
+
+class ProtectionEvent(StrEnum):
+    """Warehouse evidence for protection and value attribution."""
+
+    ENABLE = "ENABLE"
+    BASELINE = "BASELINE"
+    WRITE = "WRITE"
+    DELETE = "DELETE"
+    LOCK = "LOCK"
+    UNLOCK = "UNLOCK"

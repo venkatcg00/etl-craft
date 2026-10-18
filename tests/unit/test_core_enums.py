@@ -37,6 +37,7 @@ EXPECTED = {
         "LOST",
     },
     enums.TriggerKind: {"SCHEDULE", "MANUAL", "BACKFILL", "ORCHESTRATOR", "STAND_IN"},
+    enums.ProtectionEvent: {"ENABLE", "BASELINE", "WRITE", "DELETE", "LOCK", "UNLOCK"},
     enums.ActorKind: {"USER", "SERVICE", "SYSTEM"},
     enums.TokenKind: {"SERVICE", "ACCESS", "REFRESH"},
     enums.AccountKind: {"USER", "SERVICE"},

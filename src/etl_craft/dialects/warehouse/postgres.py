@@ -21,10 +21,15 @@ class PostgresWarehouse(WarehouseDialect):
     """PostgreSQL, native tables."""
 
     spec = warehouse_by_key("postgres")
+    atomic_protection = True
     sqlglot_dialect = "postgres"
     secure_view = "security_barrier"
     replace_strategy: ReplaceStrategy = "transactional"
     identifier_case = "lower"
+
+    def protection_lock_sql(self, target: str) -> str:
+        """Block outside row/schema changes until data and evidence commit."""
+        return f"LOCK TABLE {target} IN SHARE ROW EXCLUSIVE MODE"
 
     def present(self, profile: ConnectionProfile, secret: str, url: WarehouseUrl) -> Presented:
         """Authenticate through psycopg's own arguments, exactly as the Engine DB does.

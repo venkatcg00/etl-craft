@@ -129,7 +129,7 @@ item's text, or work done early under another item.
 | S5.P Project documentation gap UI | Done | #165 | Structured schema/lineage gaps, accessible column/graph warnings and read-only comparison API |
 | S5.R Consolidate before the cluster | Done | #179, #185, #188 to #193, #195, #201 | Items 1 to 8 complete: the execution core and configuration loader are split by responsibility; the moved execution functions are shortened with shared run records and unchanged transactions and retries |
 | S5.S Accounts, login and roles | Done | #203, #204, #205, #206, #207 | Account identities, local and server sign-in with refresh tokens, one service-role policy, explicit actors with an `etl-craft` writer on every run, and a local installation operating a server over HTTPS; every action has one implementation that the CLI, the API and later the UI call |
-| S5.O.3 SCD human override protection | Planned | | Optional ordinary-table actors, required protected-SCD actors and human-only row/value locks |
+| S5.O.3 SCD human override protection | In progress | #208 | Native PostgreSQL/DuckDB protection, admin edits/unlocks and column provenance implemented; cloud acceptance unavailable |
 | S5.Q Scoped operator controls | Planned | | PowerCenter-style pipeline/run/task actions; review unnecessary execution restrictions before UI |
 | S5.T Resource discovery and deployment profiles | Planned | | Opt-in laptop, server and server-with-workers sizing from usable process resources; one discovery module before S5.C |
 | S5.V Team-owned config tables | Planned | | Teams' own `CFG_` tables carry no etl-craft guards, contract, history or config files; etl-craft's tables keep them |
@@ -152,8 +152,9 @@ item's text, or work done early under another item.
 
 What a person picking up the work needs that the code and the item texts do not say.
 
-**Next agent: finish S5.S item 5 (#207), then take S5.O.3.** If #207 is still open, read and fix
-its failed CI before starting another item. After 0.3.0 the next release is 1.0.0 (see
+**Next agent: finish S5.O.3 (#208), then take S5.Q.** The protection pull request remains
+unmerged pending cloud acceptance or the owner's acceptance of its availability limit.
+If its CI fails, read and fix the failure before starting another item. After 0.3.0 the next release is 1.0.0 (see
 [Release overview](#release-overview)); milestone gates run on `main` without a tag. The owner merged #203 despite
 unavailable Databricks acceptance. Databricks has a usage budget: do not retry it until the owner
 explicitly makes budget available. Item 2 changes no warehouse SQL and needs no cloud acceptance.
@@ -273,6 +274,12 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.O.3 (#208) implements transactional protection on native PostgreSQL and DuckDB, with
+explicit refusals on non-atomic warehouses. Local validation includes SCD1/SCD2 effective
+values, provenance, authenticated API roles on both Engine DBs, rollback and repeated ETL/edit/
+unlock races. Cloud acceptance is unavailable under the recorded budget restriction; leave
+the pull request unmerged until the owner supplies or accepts that evidence.
 
 S5.S item 5 (#207) passed `make static docs` and the complete unit suite (1,897). Against a real
 HTTP server on both Engine DBs it passed password and SSO sign-in, renewal, refresh expiry,
@@ -458,6 +465,16 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- S5.O.3 uses the owner-approved initial admin boundary: human admins edit and unlock;
+  authenticated admin service integrations write without creating or releasing human locks.
+  Scoped stewardship remains S7.M. The owner selected warehouse-side protection/provenance
+  committed with business writes; native PostgreSQL and DuckDB are supported, while other
+  warehouses refuse protected edits. Two per-target warehouse evidence tables store hashes,
+  locks and actual writers, with no Engine DB migration or business-value mirror. Outside
+  writes are unsupported and detected against physical-version fingerprints; historical
+  attribution begins explicitly unknown. Ordinary tables already support omitted actors and
+  keep that behavior. Replacement/append/drop/rehash cannot bypass an enabled contract.
 
 - **S5.S item 5 (#207), a local installation operating a server, with owner-directed scope.**
   - The owner chose how `login --server` signs in: the CLI sends the password once over HTTPS to

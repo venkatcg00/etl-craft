@@ -16,7 +16,8 @@ from datetime import UTC, datetime
 from sqlalchemy.engine import Engine
 
 from etl_craft.config.targets import active_catalog
-from etl_craft.core.enums import SqlAction
+from etl_craft.core.actor import Actor
+from etl_craft.core.enums import ActorKind, SqlAction
 from etl_craft.core.errors import ConfigurationError, SqlGuardError
 from etl_craft.core.text import qualify as qualify
 from etl_craft.dialects.warehouse import WarehouseDialect
@@ -30,6 +31,11 @@ from etl_craft.engine.repository.offsets import fetch_task_offset
 from etl_craft.engine.repository.tasks import conflicting_merge_action
 from etl_craft.handlers.registry import HandlerResult, TaskContext
 from etl_craft.handlers.sql.actions import ACTIONS, ActionContext
+from etl_craft.handlers.sql.protection import (
+    ProtectionRequest,
+    for_task,
+    refuse_evidence_target,
+)
 from etl_craft.handlers.sql.session import Session
 from etl_craft.handlers.sql.spec import read_sql_task
 from etl_craft.warehouse.connection import open_warehouse, task_warehouse_dialect
@@ -90,30 +96,9 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
                 user=context.writer,
                 now=datetime.now(UTC),
             )
-            failure = None
-            try:
-                if (
-                    task.action
-                    in {
-                        SqlAction.CREATE_TABLE,
-                        SqlAction.SETUP_TABLE,
-                        SqlAction.OVERWRITE_TABLE,
-                        SqlAction.SCD1_MERGE,
-                        SqlAction.SCD2_MERGE,
-                    }
-                    and session.target_columns()
-                ):
-                    session.check_target_format()
-                result = ACTIONS[task.action](session, action)
-            except SqlGuardError as error:
-                if error is not session.failure_to_commit:
-                    raise
-                # The target is untouched; commit what was set aside, then fail.
-                failure = error
-            finally:
-                session.sweep()
-        if failure is not None:
-            raise failure
+            outcome = _apply(session, action)
+        if isinstance(outcome, SqlGuardError):
+            raise outcome
         with engine_db.begin() as conn:
             if session.clear_hash_version:
                 clear_hash_version(conn, session.target)
@@ -121,7 +106,7 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
                 save_hash_version(conn, session.target, session.publish_hash_version)
             if session.publish_view_statement is not None:
                 save_view_statement(conn, session.target, session.publish_view_statement)
-    return replace(result, offset=session.watermark_to) if task.watermark is not None else result
+    return replace(outcome, offset=session.watermark_to) if task.watermark is not None else outcome
 
 
 def task_dialect(context: TaskContext) -> WarehouseDialect:
@@ -132,3 +117,50 @@ def task_dialect(context: TaskContext) -> WarehouseDialect:
     """
     assert context.config.warehouse is not None
     return task_warehouse_dialect(context.config, context.task_params)
+
+
+def _apply(session: Session, action: ActionContext) -> HandlerResult | SqlGuardError:
+    """Apply the action and evidence, retaining quarantine-only failures until commit."""
+    task = action.task
+    refuse_evidence_target(session)
+    try:
+        if (
+            task.action
+            in {
+                SqlAction.CREATE_TABLE,
+                SqlAction.SETUP_TABLE,
+                SqlAction.OVERWRITE_TABLE,
+                SqlAction.SCD1_MERGE,
+                SqlAction.SCD2_MERGE,
+            }
+            and session.target_columns()
+        ):
+            session.check_target_format()
+        session.protection = for_task(session, task)
+        result = ACTIONS[task.action](session, action)
+        if session.protection is not None:
+            context = action.context
+            session.protection.finish(
+                ProtectionRequest(
+                    Actor(action.user, ActorKind.SYSTEM),
+                    f"ETL {task.action}",
+                    f"task-run:{context.task_run_id}/attempt:{context.attempt}",
+                    action.now,
+                )
+            )
+            result = replace(
+                result,
+                variables={
+                    **result.variables,
+                    "PROTECTED_ROWS": session.protection.prevented_rows,
+                    "PROTECTED_VALUES": session.protection.prevented_values,
+                },
+            )
+        return result
+    except SqlGuardError as error:
+        if error is not session.failure_to_commit:
+            raise
+        # The target is untouched; commit what was set aside, then fail.
+        return error
+    finally:
+        session.sweep()

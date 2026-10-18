@@ -17,6 +17,7 @@ from etl_craft.engine.repository.tasks import fetch_task_parameters
 from etl_craft.engine.repository.validation import fetch_active_tasks
 from etl_craft.handlers.registry import TaskContext
 from etl_craft.handlers.sql import task_dialect
+from etl_craft.handlers.sql.protection import refuse_replacement
 from etl_craft.handlers.sql.session import Session
 from etl_craft.handlers.sql.tables import IDENTITY_COLUMNS, check_identity_types, require_target
 from etl_craft.warehouse.connection import open_warehouse
@@ -211,6 +212,8 @@ def _upgrade_target(
             backfill = _scd1_statements(session, columns, additions, statements)
         elif merge == {SqlAction.SCD2_MERGE}:
             backfill = _scd2_statements(session, columns, statements)
+        if not dry_run and statements:
+            refuse_replacement(session)
         if not dry_run:
             for sql in statements:
                 session.run(sql, step="upgrade target audit columns")
