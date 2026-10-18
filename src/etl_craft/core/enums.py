@@ -263,6 +263,14 @@ class Mode(StrEnum):
     REMOTE = "remote"
 
 
+class DeploymentProfile(StrEnum):
+    """The deployment shape a team declares in ``Deployment.Profile``; never inferred."""
+
+    LAPTOP = "laptop"
+    SERVER = "server"
+    SERVER_WORKERS = "server-workers"
+
+
 class GatePolicy(StrEnum):
     """What a local run does with its dependencies on other pipelines: ``Dependency_gates``.
 

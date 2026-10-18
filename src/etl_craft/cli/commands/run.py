@@ -101,7 +101,7 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     # stopped and their attempts recorded. SIGKILL cannot be caught: its task processes are left
     # running, their rows IN-PROGRESS until their leases expire and reconciliation releases them.
     stopping = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
-    with command_context(args) as ctx, interrupts.deferred(*stopping):
+    with command_context(args, role="run") as ctx, interrupts.deferred(*stopping):
         # Remote reasons describe the requester; local reasons justify an intervention.
         request = _request(args, None if ctx.config.mode == Mode.REMOTE else args.reason)
         done = runs.execute_run(ctx, request)

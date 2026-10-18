@@ -60,7 +60,7 @@ def test_a_hard_exit_after_binding_does_not_fabricate_cancellation_acknowledgeme
     assert code == 137
     project.wait_for("SELECT STATUS FROM AUD_TASK_RUN_LOG", expected="IN-PROGRESS")
     code, output = project.run(
-        "cancel", "--pipeline_code", "P", "--reason", "lost CLI", "--format", "json"
+        "abort", "--pipeline_code", "P", "--reason", "lost CLI", "--format", "json"
     )
     assert code == 0, output
     request = json.loads(output)

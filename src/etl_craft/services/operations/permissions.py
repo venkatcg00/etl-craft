@@ -47,7 +47,10 @@ ROLES: dict[str, ApiRole | None] = {
         ),
         ApiRole.VIEWER,
     ),
-    **dict.fromkeys(("run", "mark", "cancel", "pause", "resume", "reconcile"), ApiRole.OPERATOR),
+    **dict.fromkeys(
+        ("run", "mark", "stop", "abort", "hold", "release", "pause", "resume", "reconcile"),
+        ApiRole.OPERATOR,
+    ),
     **dict.fromkeys(
         ("config apply", "migrate", "generate-docs", "lineage refresh"),
         ApiRole.DEVELOPER,

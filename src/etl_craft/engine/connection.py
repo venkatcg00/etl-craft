@@ -17,7 +17,12 @@ from etl_craft.engine.audit import register_engine
 
 
 def engine_db(config: ConnectorConfig, **engine_kwargs: Any) -> Engine:
-    """Build the active Engine profile and record a scoped command request when present."""
+    """Build the active Engine profile and record a scoped command request when present.
+
+    A role sized from its ``Deployment.Profile`` keeps the derived pool size.
+    """
+    if config.sizing is not None:
+        engine_kwargs.setdefault("pool_size", config.sizing.engine_pool.value)
     engine = build_engine(config, **engine_kwargs)
     try:
         register_engine(engine)

@@ -32,6 +32,13 @@ It exits 1 when any check fails, so it can gate a deployment. It checks:
 | Engine DB write access | PostgreSQL grants writes to another login or PUBLIC | the SQLite file is writable by group or others |
 | Warehouse | the database cannot be reached, its `schema` does not exist, it is an in-memory DuckDB, or a Trino catalog is not Iceberg | |
 | Email | the relay does not answer, TLS certificate or hostname verification fails, the CA file is unreadable, a login uses `tls_mode: none`, or the `sendmail` program cannot be run | |
+| Engine DB connection budget | | a PostgreSQL Engine DB's `max_connections` is less than 1.25 times the server pool, its overflow and one connection per task slot |
+| Resources and sizing | | a CPU or memory measurement is unavailable, so a stated fallback applies, or the profile is `server-workers` |
+
+The resource lines show the CPU and memory this process may use, where each was measured, the
+`Deployment.Profile` (or the recommended one when none is set) and every size it implies; see
+[deployment profiles](sizing.md). Doctor and setup only report: they never write
+`craft-connector.yml`.
 
 The relay check uses the configured TLS mode and CA certificate and sends `NOOP` without logging
 in, so it never spends a login attempt against a relay that locks accounts out. Its output shows

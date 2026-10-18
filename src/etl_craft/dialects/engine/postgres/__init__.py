@@ -126,6 +126,10 @@ class PostgresEngineDialect(EngineDialect):
         )
         return create_engine(sqlalchemy_url, creator=creator, **engine_kwargs)
 
+    def max_connections(self, conn: Connection) -> int | None:
+        """Return the server's ``max_connections``."""
+        return int(conn.execute(text("SHOW max_connections")).scalar_one())
+
     def schema_problem(self, conn: Connection, schema: str) -> str | None:
         """Return why the Engine schema cannot be used: it must already exist."""
         found = conn.execute(

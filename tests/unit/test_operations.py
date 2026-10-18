@@ -9,11 +9,12 @@ import yaml
 from sqlalchemy import event, text
 
 from etl_craft.cli import main
+from etl_craft.cli.commands import controls as control_commands
 from etl_craft.config import load_config
 from etl_craft.core.actor import Actor, ActorKind, acting_as, current_actor
-from etl_craft.core.enums import ApiRole, RunStatus
+from etl_craft.core.enums import ApiRole, ControlAction, RunStatus
 from etl_craft.core.errors import MetadataError, RunStateError, UsageError
-from etl_craft.engine import transitions
+from etl_craft.engine import runlog, transitions
 from etl_craft.engine.audit import command_request, register_engine
 from etl_craft.engine.runlog import RunSelector
 from etl_craft.execution import reruns, run_types, runner
@@ -27,6 +28,7 @@ from etl_craft.services.operations import (
     tasks,
     to_json,
 )
+from etl_craft.services.operations.controls import ControlRequest, request_control
 from etl_craft.services.operations.models import GraphView, HistoryQuery
 from etl_craft.services.operations.requests import RunRequest
 from etl_craft.services.operations.snapshots import run_view, task_run_view
@@ -61,6 +63,13 @@ def ctx(tmp_path, monkeypatch, engine_actor):
         )
     finally:
         db.engine.dispose()
+
+
+def abort(ctx, pipeline_code, reason, *, selector=runlog.ACTIVE_RUN):
+    """Request an abort the way the ``abort`` command does."""
+    return request_control(
+        ctx, ControlRequest(pipeline_code, ControlAction.ABORT, reason, selector)
+    )
 
 
 def seed(ctx, *, active=False, task=False):
@@ -193,7 +202,7 @@ def test_cancel_pause_resume_and_reconcile_do_not_invent_executions(ctx):
     assert task.status == "SKIPPED" and task.task is None
     resumed = pipelines.set_pause(ctx, P, "ready", verb="resume")
     assert resumed.pipeline.paused is None
-    cancelled = runs.cancel_run(ctx, P, "stop", selector=RunSelector(run_id=run_id))
+    cancelled = abort(ctx, P, "stop", selector=RunSelector(run_id=run_id))
     assert cancelled.status == "COMPLETED" and cancelled.run_status == "CANCELLED"
     report = runs.reconcile_runs(ctx, P)
     assert report.lost_attempt_ids == () and report.released_pipeline_run_ids == ()
@@ -320,7 +329,7 @@ def test_nested_requests_with_different_actors_are_distinct(ctx):
     [
         ("run", runs, "execute_run", ["--init-only"]),
         ("mark", runs, "mark", ["--status", "FAILED", "--reason", "verified"]),
-        ("cancel", runs, "cancel_run", ["--reason", "stop"]),
+        ("abort", control_commands, "request_control", ["--reason", "stop"]),
         ("pause", pipelines, "set_pause", ["--reason", "maintenance"]),
         ("resume", pipelines, "set_pause", ["--reason", "ready"]),
         ("reconcile", runs, "reconcile_runs", []),
@@ -355,7 +364,7 @@ def test_cli_json_is_the_service_document_with_one_action(
     assert code == 0, output.err
     assert len(observed) == 1
     assert json.loads(output.out) == to_json(observed[0])
-    mutating = command in {"run", "mark", "cancel", "pause", "resume", "reconcile"}
+    mutating = command in {"run", "mark", "abort", "pause", "resume", "reconcile"}
     assert action_count(ctx) == before_actions + int(mutating)
 
 

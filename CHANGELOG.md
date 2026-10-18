@@ -8,6 +8,15 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Deployment profiles: an optional `Deployment` section with `Profile: laptop | server |
+  server-workers`. Without it nothing changes. With it, `run` and `server` measure the CPU and
+  memory the process may use (CPU affinity, cgroup v2 or v1 quotas and memory limits including
+  ancestors, else host totals) and size task slots, HTTP server threads and the Engine DB pool
+  from them; written `Max_parallel_tasks` and `Local_*_slots` values become ceilings. `laptop`
+  keeps the server on loopback; `server-workers` needs a PostgreSQL Engine DB and refuses to
+  execute until workers exist. `doctor` and `setup` report every measurement, the recommended
+  or selected profile, each derived size with its binding constraint, fallbacks, and the
+  PostgreSQL connection budget. etl-craft never writes `craft-connector.yml`.
 - Exact-run recovery and restart preparation through `run --recover` / `--restart`, with reasons,
   idempotency keys and durable `execution_run_id` inspection. Recovery preserves SUCCESS/SKIPPED
   and committed checkpoints; restart creates a new context retaining current offsets/watermarks
@@ -17,16 +26,15 @@ All notable changes are recorded here. The format follows
   `run --controls-file` and `POST /api/v1/controls/bulk` apply an explicit bounded selection with
   independent durable outcomes. Migration `0039` extends control actions in both Engine DBs.
 
-- Scoped run/task dispatch holds with `pause`/`resume` plus a run selector or `--task_code`;
-  `cancel --stop` drains running work and `cancel --task_code` affects only that task. Controls
+- Scoped run/task controls: `hold`/`release` block and unblock dispatch, `stop` drains running
+  work and `abort` stops its task processes, each on the selected run or one `--task_code`. Controls
   return durable `etl-craft/control/1` requests, optional `--request-key` idempotency, and
   `status --request-id` inspection locally or through `--server`. Shared HTTP routes expose
   the same operator controls and viewer inspection. Migration `0038` adds control requests
   and append-only process/query acknowledgements on SQLite and PostgreSQL.
-- Cancellation now reports acceptance separately from physical completion, preserving successful
+- Stop and abort report acceptance separately from physical completion, preserving successful
   evidence. The run becomes `CANCELLED` only after affected process and query endings are observed.
-  `runs.cancel_run` and existing cancel HTTP routes return the control document instead of an
-  operation success. Server-side warehouse aborts without a cancellation acknowledgement adapter
+  Server-side warehouse aborts without a cancellation acknowledgement adapter
   refuse explicitly; graceful stop remains available for supported handlers. Server-side Python
   scripts need a query adapter for scoped stop; definition pause remains available. Lost leases never imply query termination.
 
@@ -268,6 +276,12 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- `etl-craft cancel` is replaced by `etl-craft abort` (stop task processes now) and
+  `etl-craft stop` (let running attempts finish); both end the run `CANCELLED`. `runs.cancel_run`
+  and the `POST /api/v1/pipelines/{code}/cancel` and `/runs/{id}/cancel` routes are removed: use
+  `POST /api/v1/pipelines/{code}/controls` with `action` `ABORT` or `STOP`. `pause` and `resume`
+  act only on the pipeline definition; scoped holds are `hold` and `release`. Audit records name
+  the operation `stop`, `abort`, `hold` or `release` instead of `cancel`.
 - `GET /api/v1/pipelines/{code}/runs` returns the `etl-craft/history/1` document that
   `etl-craft history` prints (`entries`, `changes`, and the next page's `before`) instead of
   `etl-craft/runs/1`. Run and task history list the newest run id first.

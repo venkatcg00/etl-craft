@@ -8,6 +8,7 @@ import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import anyio.to_thread
 import uvicorn
 from fastapi import FastAPI
 
@@ -53,6 +54,9 @@ def serve_http(ctx: OperationContext, stop: threading.Event) -> None:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        if ctx.config.sizing is not None:
+            limiter = anyio.to_thread.current_default_thread_limiter()
+            limiter.total_tokens = ctx.config.sizing.server_threads.value
         thread = threading.Thread(target=supervise, name="etl-craft-overseer")
         thread.start()
         try:

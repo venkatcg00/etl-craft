@@ -2,8 +2,9 @@
 
 The file is written by the team and only read by the engine. Its sections come in this order:
 ``Secrets`` (where variables are read from, and the default profile), ``Orchestration`` (mode,
-limits, DAG defaults and the Email relay), ``Engine``, then the optional ``Warehouse`` and
-``Cloning``. Every section that varies by environment holds one block per profile (``dev``,
+limits, DAG defaults and the Email relay), the optional ``Deployment`` (the declared deployment
+profile, a flat section), ``Engine``, then the optional ``Warehouse`` and ``Cloning``. Every
+section that varies by environment holds one block per profile (``dev``,
 ``prod``, or any names). The active one is the section's own ``Profile``, else
 ``Secrets.Profile``; a section with a single profile block needs no selection. A profile
 block's settings override the section's own.
@@ -19,9 +20,10 @@ from typing import Any
 
 import yaml
 
-from etl_craft.config.auth import WAREHOUSES
+from etl_craft.config.auth import WAREHOUSES, engine_for_jdbc_url
 from etl_craft.config.loader_auth import AUTH_KEYS, parse_auth
 from etl_craft.config.loader_cloning import CLONING_KEYS, parse_cloning
+from etl_craft.config.loader_deployment import DEPLOYMENT_KEYS, parse_deployment
 from etl_craft.config.loader_docs import DOCS_SITE_KEYS, parse_docs_site
 from etl_craft.config.loader_email import EMAIL_KEYS, parse_email
 from etl_craft.config.loader_engine import parse_engine
@@ -47,7 +49,16 @@ from etl_craft.config.resolve import Resolver
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.errors import ConfigurationError, MetadataError
 
-SECTIONS = ("Secrets", "Orchestration", "Engine", "Warehouse", "Cloning", "Docs_site", "Auth")
+SECTIONS = (
+    "Secrets",
+    "Orchestration",
+    "Deployment",
+    "Engine",
+    "Warehouse",
+    "Cloning",
+    "Docs_site",
+    "Auth",
+)
 
 
 def settings_by_section() -> dict[str, frozenset[str]]:
@@ -64,6 +75,7 @@ def settings_by_section() -> dict[str, frozenset[str]]:
         "Secrets": SECRETS_KEYS,
         "Orchestration": ORCHESTRATION_KEYS - {"Email"},
         "Orchestration.Email": EMAIL_KEYS,
+        "Deployment": DEPLOYMENT_KEYS,
         "Engine": frozenset({"Name"}) | CONNECTION_FIELDS,
         "Warehouse": WAREHOUSE_SECTION_KEYS | CONNECTION_FIELDS | warehouse_fields,
         "Cloning": CLONING_KEYS,
@@ -170,12 +182,17 @@ def parse_config(raw: object, path: Path) -> ConnectorConfig:
     cloning = parse_cloning(raw, global_profile, path, resolver)
     docs_site = parse_docs_site(raw, global_profile, path, resolver)
 
-    from etl_craft.config.model import parse_api_address
-
     api_address = orchestration.text("Api_address")
     api_address = "127.0.0.1:8730" if api_address is None else api_address
-    parse_api_address(api_address)
+    deployment = parse_deployment(
+        raw,
+        path,
+        resolver,
+        engine=engine_for_jdbc_url(engine.jdbc_url),
+        api_address=api_address,
+    )
     config = ConnectorConfig(
+        deployment=deployment,
         mode=mode,
         api_address=api_address,
         timezone=project_timezone,
@@ -219,6 +236,6 @@ def _check_layout(raw: object, path: Path) -> dict[str, object]:
     if present != expected:
         raise ConfigurationError(
             f"{path}: sections are in the order {present}; write them as {expected} "
-            "(Secrets, Orchestration, Engine, Warehouse, Cloning, Docs_site, then Auth)"
+            "(Secrets, Orchestration, Deployment, Engine, Warehouse, Cloning, Docs_site, then Auth)"
         )
     return raw

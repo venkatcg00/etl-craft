@@ -263,40 +263,41 @@ def test_remote_controls_reach_the_same_operations_with_the_selected_run(
         1, "P", date(2026, 1, 1), date(2026, 1, 2), RunStatus.SUCCESS, "b", (), None
     )
     for target, result in (
-        ("runs.mark", done),
-        ("runs.cancel_run", control),
-        ("runs.trigger_run", done),
-        ("tasks.rerun_task", done),
-        ("backfills.run_backfill", backfill),
+        ("services.operations.runs.mark", done),
+        ("api.selected.request_control", control),
+        ("services.operations.runs.trigger_run", done),
+        ("services.operations.tasks.rerun_task", done),
+        ("services.operations.backfills.run_backfill", backfill),
     ):
-        monkeypatch.setattr(f"etl_craft.services.operations.{target}", record(target, result))
+        monkeypatch.setattr(f"etl_craft.{target}", record(target, result))
     monkeypatch.setenv("ETL_CRAFT_TOKEN", server["service"]["operator"])
     by_key = ("--run-key", "k1")
     for argv in (
         ("mark", "--pipeline_code", "P", "--task_code", "T", "--status", "SUCCESS", *by_key),
-        ("cancel", "--pipeline_code", "P", "--run-id", str(run_id)),
+        ("abort", "--pipeline_code", "P", "--run-id", str(run_id)),
         ("run", "--pipeline_code", "P", "--run-date", "2026-01-05"),
         ("run", "--pipeline_code", "P", "--task_code", "T", "--rerun", "--with-downstream"),
         ("run", "--pipeline_code", "P", "--backfill", "2026-01-01:2026-01-02"),
     ):
         code, out, err = run(capsys, *argv, "--reason", "why", "--server", url)
         assert code == 0, (argv, err)
-        if argv[0] == "cancel":
+        if argv[0] == "abort":
             assert "control_id=" in out and out.endswith("P: done\n"), out
         else:
             assert out in ("P: done\n", "b\n"), out
     names = [name for name, *_ in calls]
     assert names == [
-        "runs.mark",
-        "runs.cancel_run",
-        "runs.trigger_run",
-        "tasks.rerun_task",
-        "backfills.run_backfill",
+        "services.operations.runs.mark",
+        "api.selected.request_control",
+        "services.operations.runs.trigger_run",
+        "services.operations.tasks.rerun_task",
+        "services.operations.backfills.run_backfill",
     ]
     assert {actor for _, actor, *_ in calls} == {"ci-operator"}
-    mark, cancel, trigger, rerun, filled = (call[2:] for call in calls)
+    mark, abort, trigger, rerun, filled = (call[2:] for call in calls)
     assert mark[1]["task_code"] == "T" and mark[1]["selector"].run_key == "k1"
-    assert cancel[1]["selector"].run_id == run_id
+    assert abort[0][0].action == ControlAction.ABORT
+    assert abort[0][0].selector.run_id == run_id
     assert trigger[1]["run_date"] == date(2026, 1, 5) and trigger[1]["reason"] == "why"
     assert rerun[0][1] == "T" and rerun[1]["with_downstream"] is True
     assert filled[0][1:] == (date(2026, 1, 1), date(2026, 1, 2), "why")
@@ -410,7 +411,7 @@ def test_remote_scoped_cli_uses_same_request_and_status_document(server, monkeyp
     url, run_id = server["url"], server["run"]
     code, out, err = run(
         capsys,
-        "pause",
+        "hold",
         "--pipeline_code",
         "P",
         "--run-id",
@@ -441,14 +442,13 @@ def test_remote_scoped_cli_uses_same_request_and_status_document(server, monkeyp
     assert json.loads(out) == held
     code, out, err = run(
         capsys,
-        "cancel",
+        "stop",
         "--pipeline_code",
         "P",
         "--run-id",
         str(run_id),
         "--task_code",
         "T",
-        "--stop",
         "--reason",
         "drain",
         "--format",
@@ -462,7 +462,7 @@ def test_remote_scoped_cli_uses_same_request_and_status_document(server, monkeyp
     assert stopped["run_status"] == "IN-PROGRESS" and stopped["task_code"] == "T"
     code, out, err = run(
         capsys,
-        "resume",
+        "release",
         "--pipeline_code",
         "P",
         "--run-id",
@@ -487,7 +487,7 @@ def test_remote_cli_prepares_recovery_restart_and_selected_bulk(
     url, source = server["url"], server["run"]
     code, out, err = run(
         capsys,
-        "cancel",
+        "abort",
         "--pipeline_code",
         "P",
         "--run-id",

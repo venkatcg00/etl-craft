@@ -92,7 +92,7 @@ def test_an_id_from_another_pipeline_is_refused(cli_project):
         ("run", ["--task_code", "load"]),
         ("run", ["--init-only"]),
         ("mark", ["--status", "FAILED", "--reason", "repair"]),
-        ("cancel", ["--reason", "repair"]),
+        ("abort", ["--reason", "repair"]),
         ("history", []),
         ("steps", []),
     ]:

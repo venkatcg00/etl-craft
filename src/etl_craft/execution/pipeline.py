@@ -20,8 +20,8 @@ orchestrator does not support, tests connections and starts the run, and ``run
 ``SKIPPED``, and the run is ``FAILED`` when a data task failed, ``SKIPPED`` when it ran none.
 No gate is checked and no upstream run is consumed; the orchestrator's DAGs hold those rules.
 
-An operator may cancel a local run (``etl-craft cancel``): its running tasks are stopped, no
-other task starts, and the run ends ``CANCELLED``.
+An operator may abort a local run (``etl-craft abort``): its running tasks are stopped, no
+other task starts, and the run ends ``CANCELLED``. ``etl-craft stop`` lets them finish first.
 
 Every run of a pipeline with ``SLA_IN_HOURS`` is marked ``MET`` or ``BREACHED``. While a local run
 is going, a watcher marks it ``BREACHED`` as soon as the SLA passes; otherwise the finalize step

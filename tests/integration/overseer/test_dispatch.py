@@ -240,7 +240,7 @@ def test_cancelled_pipeline_admission_stops_waiting_without_starting_a_worker(cl
     server = p.start("server")
     p.wait_for("SELECT COUNT(*) FROM AUD_GATE_WAITS WHERE TASK_ID IS NULL", expected=1)
     code, output = p.run(
-        "cancel",
+        "abort",
         "--pipeline_code",
         "P",
         "--run-id",

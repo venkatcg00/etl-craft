@@ -70,6 +70,8 @@ class EngineSpec:
     jdbc_prefix: str
     auth_fields: AuthFields
     verified_auth_modes: frozenset[str]
+    shared_by_hosts: bool = False
+    """Whether processes on several hosts can share it, as workers need."""
 
     @property
     def auth_modes(self) -> frozenset[str]:
@@ -84,6 +86,7 @@ ENGINES: tuple[EngineSpec, ...] = (
         jdbc_prefix="jdbc:postgresql:",
         auth_fields=POSTGRES_AUTH_FIELDS,
         verified_auth_modes=frozenset({"password", "key_file"}),
+        shared_by_hosts=True,
     ),
     EngineSpec(
         name="sqlite",

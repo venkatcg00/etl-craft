@@ -80,6 +80,10 @@ class EngineDialect(ABC):
     def refresh_metadata_triggers(self, conn: Connection) -> None:
         """Install metadata capture and write guards for the current table definitions."""
 
+    def max_connections(self, conn: Connection) -> int | None:
+        """Return the server's connection limit; ``None`` for a database without one."""
+        return None
+
     def schema_problem(self, conn: Connection, schema: str) -> str | None:
         """Return why the Engine schema cannot be used, or ``None``.
 

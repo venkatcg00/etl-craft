@@ -13,8 +13,16 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from etl_craft.config.docs_site import external_url
-from etl_craft.core.enums import AuthMode, CloningScope, GatePolicy, Mode, TableFormat
+from etl_craft.core.enums import (
+    AuthMode,
+    CloningScope,
+    DeploymentProfile,
+    GatePolicy,
+    Mode,
+    TableFormat,
+)
 from etl_craft.core.errors import ConfigurationError
+from etl_craft.core.resources import Sizing
 
 CONFIG_FILENAME = "craft-connector.yml"
 PROJECT_DIRNAME = "etl-craft"
@@ -211,6 +219,8 @@ class ExecutionLimits:
     engine_db_outage_seconds: int = 120
     local_ingestion_slots: int | None = None
     local_warehouse_slots: int | None = None
+    max_parallel_tasks_written: bool = False
+    """Whether the team wrote ``Max_parallel_tasks``: then it is a deployment profile's ceiling."""
 
 
 @dataclass(frozen=True)
@@ -257,6 +267,9 @@ class ConnectorConfig:
     settings: tuple[SettingSource, ...] = ()
     log_dir: Path = Path(DEFAULT_LOG_DIR)
     auth: AuthConfig = field(default_factory=AuthConfig)
+    deployment: DeploymentProfile | None = None
+    sizing: Sizing | None = None
+    """Set at ``run`` and ``server`` startup from the measured allocation and ``deployment``."""
 
     @property
     def project_dir(self) -> Path:

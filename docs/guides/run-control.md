@@ -12,7 +12,7 @@ In remote mode the orchestrator is the only source of truth for runs, so all of 
 
 ## Choose the run
 
-`run`, `mark`, `cancel`, `history` and `steps` accept `--run-id 42` or
+`run`, `mark`, `stop`, `abort`, `hold`, `release`, `history` and `steps` accept `--run-id 42` or
 `--run-key 'manual:...'`. The identity must belong to `--pipeline_code`. Without a selector,
 operations use the pipeline's single non-terminal whole-pipeline run. Independent manual
 selections always require an explicit selector to resume. When none or several exist, the command
@@ -133,26 +133,27 @@ etl-craft mark --pipeline_code CRM_EXPORT --new-run --task_code publish --status
 ```
 
 With `--task_code`, the task gets a row in the stand-in run too, for dependencies on that task.
-A pipeline with a run in progress is refused: mark that run, or cancel it.
+A pipeline with a run in progress is refused: mark that run, or stop or abort it.
 
-## Cancel a run
+## Stop or abort a run
 
-```bash
-etl-craft cancel --pipeline_code SALES_DAILY --reason "the source sent yesterday's file"
-```
-
-`cancel` requests an abort of the selected run. Add `--stop` for a graceful stop: running
-attempts finish normally while the dispatch fence prevents new attempts and retries. Add
-`--task_code TASK` to affect only that task under the selected run. Other tasks, pipelines and
-independent manual runs keep running. Abort does not undo warehouse commits. Successful results,
-counts, logs, checkpoints and recorded
-consumption remain intact.
+| Command | Running attempts | New attempts and retries | Stored outcome |
+|---|---|---|---|
+| `stop` | finish and keep their own outcome | blocked | the run ends `CANCELLED` once they have ended |
+| `abort` | their task processes are stopped now, ending `CANCELLED` | blocked | the run ends `CANCELLED` |
+| `hold` | finish and keep their own outcome | blocked until `release` | the run stays `IN-PROGRESS` |
 
 ```bash
-etl-craft cancel --pipeline_code SALES_DAILY --run-id 42 --stop --reason "drain before maintenance"
-etl-craft cancel --pipeline_code SALES_DAILY --run-id 42 --task_code extract --reason "wrong input"
+etl-craft abort --pipeline_code SALES_DAILY --reason "the source sent yesterday's file"
+etl-craft stop --pipeline_code SALES_DAILY --run-id 42 --reason "drain before maintenance"
+etl-craft abort --pipeline_code SALES_DAILY --run-id 42 --task_code extract --reason "wrong input"
 etl-craft status --request-id 17 --format json
 ```
+
+Each acts on the selected run: `--run-id`, `--run-key`, or the pipeline's single active run.
+Add `--task_code TASK` to affect only that task under the selected run. Other tasks, pipelines and
+independent manual runs keep running. Abort does not undo warehouse commits. Successful results,
+counts, logs, checkpoints and recorded consumption remain intact.
 
 The response is `etl-craft/control/1`, with a durable `control_id`, exact scope, pinned attempt
 ids, actor and reason. `REQUESTED` means the fence is committed; `ACKNOWLEDGED` means the worker
@@ -166,7 +167,7 @@ Inspect a completed request by id even after its run ends.
 Abort stops only the affected owned child processes, checking their PID birth identities before
 signalling. Embedded DuckDB queries end with those processes. Server-side warehouse queries
 currently have no durable cancellation adapter: abort refuses before signalling or changing the
-scope; use graceful `--stop` for supported handlers to let them finish. Python scripts on
+scope; use `stop` for supported handlers to let them finish. Python scripts on
 server-side warehouses cannot certify every script-owned query ending;
 scoped stop refuses while such a script is active, with definition pause as the dispatch-only
 alternative. Built-in synchronous handlers commit their query acknowledgement with its outcome; an abnormal server-side
@@ -183,21 +184,21 @@ control until its current check finishes, rather than claiming its query has sto
 ## Hold or release dispatch in a selected run
 
 ```bash
-etl-craft pause --pipeline_code SALES_DAILY --run-id 42 --reason "hold dispatch"
-etl-craft pause --pipeline_code SALES_DAILY --run-id 42 --task_code transform --reason "inspect input"
-etl-craft resume --pipeline_code SALES_DAILY --run-id 42 --task_code transform --reason "ready"
-etl-craft resume --pipeline_code SALES_DAILY --run-id 42 --reason "resume dispatch"
+etl-craft hold --pipeline_code SALES_DAILY --run-id 42 --reason "hold dispatch"
+etl-craft hold --pipeline_code SALES_DAILY --run-id 42 --task_code transform --reason "inspect input"
+etl-craft release --pipeline_code SALES_DAILY --run-id 42 --task_code transform --reason "ready"
+etl-craft release --pipeline_code SALES_DAILY --run-id 42 --reason "resume dispatch"
 ```
 
-A run selector, `--task_code` or `--request-key` makes pause/resume a scoped `HOLD`/`RELEASE` control. Holds block
-new admission, including force and retry claims, while existing attempts finish. A task hold
+Holds block new admission, including force and retry claims, while existing attempts finish. A task hold
 leaves its dependents pending and lets unrelated ready tasks run. The run stays `IN-PROGRESS`;
 release the exact held scope, then resume with `etl-craft run` if its supervisor has exited.
 Releasing a task does not release a run hold, and releasing a run does not release task holds.
 Release refuses until an earlier stop/abort in that scope has completed.
 
-Without those scoped options, pause/resume keeps the definition-wide behavior below. Definition
-pauses and scoped holds are independent; a scoped release does not clear a definition pause.
+`pause` and `resume` act on the pipeline definition instead (below). Definition pauses and
+holds are independent: `release` does not clear a definition pause, and `resume` does not release
+a hold.
 
 HTTP clients use `POST /api/v1/pipelines/{code}/controls` with `action` (`HOLD`, `RELEASE`,
 `STOP`, `ABORT`), `reason`, optional `run_id`/`run_key`, `task_code` and `request_key`.

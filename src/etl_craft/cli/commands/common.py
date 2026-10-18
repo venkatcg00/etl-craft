@@ -7,6 +7,7 @@ import logging
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import Literal
 
 from sqlalchemy.engine import Engine
 
@@ -14,6 +15,7 @@ from etl_craft.cli.authentication import command_identity
 from etl_craft.cli.output import Output
 from etl_craft.cli.remote import ServerClient
 from etl_craft.config import ConnectorConfig, load_config, resolve_config_path
+from etl_craft.config.sizing import start_role
 from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import ApiRole
 from etl_craft.engine.connection import check_reachable, engine_db
@@ -87,9 +89,17 @@ def provisioning() -> bool:
 
 
 @contextmanager
-def command_context(args: argparse.Namespace) -> Iterator[OperationContext]:
-    """Load command resources and dispose them after the service operation."""
+def command_context(
+    args: argparse.Namespace, *, role: Literal["run", "server"] | None = None
+) -> Iterator[OperationContext]:
+    """Load command resources and dispose them after the service operation.
+
+    ``role`` marks a process that runs tasks or serves: its allocation is measured and, with a
+    ``Deployment.Profile``, its slots, threads and Engine DB pool are sized from it.
+    """
     config = load_command_config(args)
+    if role is not None:
+        config = start_role(config, server=role == "server")
     engine = connect_engine_db(config)
     try:
         yield OperationContext(

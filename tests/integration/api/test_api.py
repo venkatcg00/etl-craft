@@ -171,11 +171,6 @@ def test_every_write_route_enforces_role_and_passes_actor_to_service(api, role, 
             {"reason": "test"},
         ),
         (
-            f"/api/v1/runs/{run}/cancel",
-            "etl_craft.services.operations.runs.cancel_run",
-            {"reason": "test"},
-        ),
-        (
             f"/api/v1/runs/{run}/tasks/T/mark",
             "etl_craft.services.operations.tasks.mark_task",
             {"status": "SUCCESS", "reason": "test"},
