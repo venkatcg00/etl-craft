@@ -7,7 +7,7 @@ from sqlalchemy import inspect, text
 
 from etl_craft.core.errors import MigrationError
 from etl_craft.engine import locks, migrations
-from fixtures.metadata import add_pipeline, add_table, add_task, start_run, task_run
+from fixtures.metadata import add_pipeline, add_table, add_task
 from fixtures.released_schema import install
 
 RECORDED = datetime(2026, 10, 1, 12, 30, tzinfo=UTC)
@@ -50,12 +50,26 @@ def record_legacy_state(conn, *, hash_name, view_name, rule_names):
         ),
         {"pipeline": pipeline, "task": task, "table": add_table(conn, "raw.orders")},
     ).scalar_one()
+    pipeline_run = conn.execute(
+        text(
+            "INSERT INTO AUD_PIPELINES_RUN_LOG (PIPELINE_ID, STATUS) "
+            "VALUES (:pipeline, 'IN-PROGRESS') RETURNING PIPELINE_RUN_ID AS pipeline_run_id"
+        ),
+        {"pipeline": pipeline},
+    ).scalar_one()
+    task_run = conn.execute(
+        text(
+            "INSERT INTO AUD_TASK_RUN_LOG (TASK_ID, PIPELINE_RUN_ID, STATUS) "
+            "VALUES (:task, :run, 'SUCCESS') RETURNING TASK_RUN_ID AS task_run_id"
+        ),
+        {"task": task, "run": pipeline_run},
+    ).scalar_one()
     rule_run = conn.execute(
         text(
             "INSERT INTO AUD_BUSINESS_RULES_RUN_LOG (BUSINESS_RULE_ID, TASK_RUN_ID, STATUS) "
             "VALUES (:rule, :task_run, 'SUCCESS') RETURNING BUSINESS_RULE_RUN_ID AS id"
         ),
-        {"rule": rule, "task_run": task_run(conn, task, start_run(conn, pipeline))},
+        {"rule": rule, "task_run": task_run},
     ).scalar_one()
     for key, name in enumerate(rule_names):
         conn.execute(
