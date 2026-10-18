@@ -221,6 +221,7 @@ class AuthConfig:
     oidc_issuer: str | None = None
     oidc_client_id: str | None = None
     airflow_connection_id: str | None = None
+    refresh_days: int = 30
 
 
 @dataclass(frozen=True)

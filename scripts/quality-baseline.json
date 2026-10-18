@@ -112,7 +112,6 @@
       "src/etl_craft/services/upgrade_targets.py": 4
     },
     "function-lines": {
-      "src/etl_craft/cli/commands/history.py": 10,
       "src/etl_craft/core/text.py": 19,
       "src/etl_craft/dialects/engine/postgres/audit.py": 38,
       "src/etl_craft/engine/repository/source_contracts.py": 7,

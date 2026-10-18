@@ -3,13 +3,16 @@
 import base64
 import json
 import time
+from types import SimpleNamespace
 
 import pytest
 
+from etl_craft.cli.commands import login
 from etl_craft.config import parse_config
 from etl_craft.config.model import AuthConfig
 from etl_craft.core.errors import ConfigurationError, UsageError
 from etl_craft.services import credentials, oidc, passwords
+from etl_craft.services.operations.sessions import SsoPoll, SsoStart
 
 pytestmark = pytest.mark.unit
 
@@ -64,7 +67,7 @@ def test_symlinks_malformed_files_and_shared_directories_are_refused(tmp_path):
     credentials.store_session("db", "secret")
     path = credentials.credential_path()
     path.write_text('{"db": 42}')
-    with pytest.raises(ConfigurationError, match="Engine DB/token"):
+    with pytest.raises(ConfigurationError, match="Engine DB and server session entries"):
         credentials.read_session("db")
     path.write_text("not json")
     with pytest.raises(ConfigurationError, match="invalid JSON"):
@@ -163,28 +166,37 @@ def test_device_token_requires_issuer_client_nonce_and_fresh_lifetime(claims):
         oidc._subject(jwt(**claims), "https://issuer", "etl", "nonce")
 
 
-def test_device_polling_obeys_pending_and_slow_down(monkeypatch):
-    replies = iter([{"error": "authorization_pending"}, {"error": "slow_down"}, {"id_token": "id"}])
+def _sso(expires_in=60, interval=2):
+    return SsoStart("ABCD", "https://issuer/verify", "device", "nonce", interval, expires_in)
+
+
+def test_sso_sign_in_waits_while_pending_and_backs_off_when_asked(monkeypatch):
+    session = object()
+    polls = iter([SsoPoll(None, 0), SsoPoll(None, 5), SsoPoll(session, 0)])
     intervals = []
-    monkeypatch.setattr(oidc.interrupts, "sleep", intervals.append)
-    monkeypatch.setattr(oidc, "_request", lambda *a: next(replies))
-    assert oidc._poll("https://issuer/token", {}, 60, 2) == {"id_token": "id"}
+    monkeypatch.setattr(login.interrupts, "sleep", intervals.append)
+    shown = []
+    out = SimpleNamespace(line=shown.append)
+    assert login.sso_session(_sso, lambda start: next(polls), out) is session
     assert intervals == [2, 2, 7]
+    assert shown == ["Open https://issuer/verify and enter ABCD"]
 
 
-@pytest.mark.parametrize(
-    "reply", [{"error": "access_denied"}, {"error": "expired_token"}, {"error": "invalid_client"}]
-)
-def test_device_polling_stops_on_refusal(monkeypatch, reply):
-    monkeypatch.setattr(oidc.interrupts, "sleep", lambda _: None)
-    monkeypatch.setattr(oidc, "_request", lambda *a: reply)
+@pytest.mark.parametrize("error", ["access_denied", "expired_token", "invalid_client"])
+def test_device_polling_stops_on_refusal(monkeypatch, error):
+    metadata = {"token_endpoint": "https://issuer/token"}
+    monkeypatch.setattr(oidc, "_client", lambda auth: ("https://issuer", "etl", metadata))
+    monkeypatch.setattr(oidc, "_request", lambda *a: {"error": error})
     with pytest.raises(ConfigurationError, match="refused or expired"):
-        oidc._poll("https://issuer/token", {}, 60, 1)
+        oidc.poll_device(AuthConfig(), "device", "nonce")
 
 
-def test_device_polling_never_exceeds_the_code_lifetime():
+def test_sso_sign_in_never_polls_beyond_the_code_lifetime():
+    def poll(start):
+        raise AssertionError("polled after the code expired")
+
     with pytest.raises(ConfigurationError, match="expired"):
-        oidc._poll("https://issuer/token", {}, 1, 5)
+        login.sso_session(lambda: _sso(expires_in=1, interval=5), poll, SimpleNamespace(line=print))
 
 
 def test_oidc_never_accepts_insecure_or_credentialed_endpoints():

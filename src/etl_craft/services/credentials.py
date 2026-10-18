@@ -32,7 +32,23 @@ def database_key(engine: Engine, schema: str | None) -> str:
     return identity.render_as_string() + "#" + (schema or "main")
 
 
-def _read(path: Path) -> dict[str, str]:
+Entry = str | dict[str, str]
+"""An Engine DB's session token, or a server's access token, refresh token and access expiry."""
+
+SERVER_FIELDS = frozenset({"access", "refresh", "access_expires_at"})
+
+
+def _valid(entry: object) -> bool:
+    if isinstance(entry, str):
+        return 1 <= len(entry) <= 256
+    return (
+        isinstance(entry, dict)
+        and set(entry) == SERVER_FIELDS
+        and all(isinstance(v, str) and 1 <= len(v) <= 256 for v in entry.values())
+    )
+
+
+def _read(path: Path) -> dict[str, Entry]:
     try:
         descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
@@ -67,20 +83,27 @@ def _read(path: Path) -> dict[str, str]:
                 f"credential file {path}: invalid JSON; remove it and login again"
             ) from error
     if not isinstance(values, dict) or not all(
-        isinstance(k, str) and isinstance(v, str) and 1 <= len(v) <= 256 for k, v in values.items()
+        isinstance(k, str) and _valid(v) for k, v in values.items()
     ):
         raise ConfigurationError(
-            f"credential file {path}: expected Engine DB/token entries; login again"
+            f"credential file {path}: expected Engine DB and server session entries; login again"
         )
     return values
 
 
 def read_session(key: str) -> str | None:
     """Read a complete old or new file across atomic replacements."""
-    return _read(credential_path()).get(key)
+    entry = _read(credential_path()).get(key)
+    return entry if isinstance(entry, str) else None
 
 
-def store_session(key: str, token: str | None) -> None:
+def read_server(url: str) -> dict[str, str] | None:
+    """Read a server's stored access token, refresh token and access expiry."""
+    entry = _read(credential_path()).get(url)
+    return entry if isinstance(entry, dict) else None
+
+
+def store_session(key: str, token: Entry | None) -> None:
     """Serialize read/modify/replace so signing in to another Engine DB preserves both entries."""
     path = credential_path()
     try:

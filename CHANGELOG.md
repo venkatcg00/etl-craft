@@ -8,6 +8,27 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- A local installation operates a server: `--server https://<host>` (or `ETL_CRAFT_SERVER`)
+  sends `status`, `explain`, `history`, `logs`, `whoami`, `run` (a run, `--backfill` or
+  `--rerun`), `pause`, `resume`, `mark` and `cancel` to the server's API, within the account's
+  role, with the same text and JSON output and exit codes as on the server. Plain HTTP is
+  refused except to `localhost`. Commands that change metadata or the Engine DB are refused
+  against a server, naming the server-side way. CI keeps using `ETL_CRAFT_TOKEN`.
+- `etl-craft login --server` signs in with a password or, for SSO, the device flow the server
+  runs. It stores a one-hour access token and a refresh token, `Auth.Refresh_days` (default
+  30), and renews access automatically; `logout --server` revokes the refresh token and its
+  access tokens. Engine DB and warehouse credentials never reach the local installation.
+- `etl-craft logs --attempt-id N [--offset BYTES]` prints an attempt's log, locally or from a
+  server.
+- HTTP sign-in routes under `/api/v1/login/` (methods, password, SSO start and poll, refresh,
+  revoke), `GET /api/v1/whoami`, and pipeline-code routes for status, explain, cancel, mark and
+  rerun that select a run with `run_id`, `run_key` or the active run, as the CLI does.
+- Engine DB migration `0036` adds `CFG_API_TOKENS.TOKEN_KIND` (`SERVICE`, `ACCESS`, `REFRESH`)
+  and `REFRESH_TOKEN_ID`; existing user sessions become access tokens. Token JSON includes
+  `token_kind`.
+- Exit status 27 (`SERVER`, `ServerError`): a server could not be reached or answered with
+  something other than etl-craft JSON.
+
 - One service-operation role policy shared by local CLI, HTTP/UI routes and Python callers.
   Reads require viewer, run controls operator, metadata changes/project migrations developer,
   and administration admin. Administrative maintenance includes clone, rehash, server startup
@@ -207,6 +228,18 @@ All notable changes are recorded here. The format follows
   `Max_parallel_tasks`; unset, either kind may use every slot, as before.
 
 ### Changed
+
+- `GET /api/v1/pipelines/{code}/runs` returns the `etl-craft/history/1` document that
+  `etl-craft history` prints (`entries`, `changes`, and the next page's `before`) instead of
+  `etl-craft/runs/1`. Run and task history list the newest run id first.
+- Every action has one implementation in `services.operations`, which the CLI, the HTTP API
+  and later the UI call. Python callers use `operations.maintenance` (`initialize`, `migrate`,
+  `clone_tables`, `rehash_target`, `upgrade_audit_columns`, `setup_engine`, `grants`) and
+  `operations.documents` (`generate_docs`, `documentation_versions`, `dag_yaml`) instead of
+  the service modules. `sessions.sign_in` returns a `Session` (`access_token`, and a refresh
+  token for server sign-in); `services.oidc.device_subject` is replaced by `start_device` and
+  `poll_device`, which `sessions.start_sso` and `sessions.poll_sso` call; `api_reads.get_runs`
+  is removed. Sign-out records the token's own account whatever starts it.
 
 - Warehouse `CREATED_BY` and `UPDATED_BY` columns written by ETL now hold the run's writer,
   `etl-craft`, instead of the warehouse login. Engine DB migration `0035` adds the writer to

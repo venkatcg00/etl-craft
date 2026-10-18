@@ -12,11 +12,12 @@ from etl_craft.cli.commands.common import (
     configure_run_selector,
 )
 from etl_craft.cli.output import Output
-from etl_craft.core.errors import ExitCode, UsageError
+from etl_craft.cli.remote import ServerClient, api_path, selector_query
+from etl_craft.core.errors import ExitCode
 from etl_craft.engine.repository.interventions import Intervention
 from etl_craft.engine.runlog import RunSelector
 from etl_craft.services.operations import inspect
-from etl_craft.services.operations.models import RunView, TaskRunView
+from etl_craft.services.operations.models import HistoryQuery, HistoryView, RunView, TaskRunView
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -29,20 +30,36 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    if args.limit < 1:
-        raise UsageError(f"--limit must be 1 or more, got {args.limit}")
-    if args.all and (args.run_id is not None or args.run_key is not None):
-        raise UsageError("--all lists runs; do not pass a run selector")
     with command_context(args) as ctx:
         done = inspect.run_history(
             ctx,
             args.pipeline_code,
-            args.task_code,
-            limit=args.limit,
-            all_runs=args.all,
-            selector=RunSelector(args.run_id, args.run_key),
+            HistoryQuery(
+                args.task_code,
+                args.limit,
+                args.all,
+                selector=RunSelector(args.run_id, args.run_key),
+            ),
         )
+    return _render(args, out, done)
 
+
+def _remote(args: argparse.Namespace, out: Output, server: ServerClient) -> int:
+    done = server.call(
+        "GET",
+        api_path("pipelines", args.pipeline_code, "runs"),
+        HistoryView,
+        query={
+            "task_code": args.task_code,
+            "all": str(args.all).lower(),
+            "limit": args.limit,
+            **selector_query(args),
+        },
+    )
+    return _render(args, out, done)
+
+
+def _render(args: argparse.Namespace, out: Output, done: HistoryView) -> int:
     def render_text() -> None:
         entries, changes = done.entries, done.changes
         if not entries:
@@ -147,4 +164,5 @@ COMMAND = Command(
     help="Show a pipeline's recent runs, or one task's.",
     configure=_configure,
     run=_run,
+    remote=_remote,
 )

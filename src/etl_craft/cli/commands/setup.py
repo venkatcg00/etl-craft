@@ -10,9 +10,8 @@ from etl_craft.cli.output import Output
 from etl_craft.cli.prompts import interactive, password
 from etl_craft.core.enums import AccountKind, ApiRole, YesNo
 from etl_craft.core.errors import ExitCode
-from etl_craft.engine.privileges import grants_sql
 from etl_craft.services.operations import accounts
-from etl_craft.services.setup import setup
+from etl_craft.services.operations.maintenance import grants, setup_engine
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -27,12 +26,9 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 def _run(args: argparse.Namespace, out: Output) -> int:
     config = load_command_config(args)
     if args.print_grants:
-        if not config.engine.jdbc_url.startswith("jdbc:postgresql:"):
-            out.line("SQLite uses file permissions; restrict the database file to its owner.")
-        else:
-            out.line(grants_sql(config.engine.schema or "public"))
+        out.line(grants(config))
         return ExitCode.SUCCESS
-    result = setup(config)
+    result = setup_engine(config)
     if report(out, result.checks):
         out.line("setup: nothing changed; fix the failed check(s) and run setup again")
         return ExitCode.FAILURE

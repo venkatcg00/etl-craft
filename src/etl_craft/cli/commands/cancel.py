@@ -11,9 +11,11 @@ from etl_craft.cli.commands.common import (
     configure_run_selector,
 )
 from etl_craft.cli.output import Output
+from etl_craft.cli.remote import ServerClient, api_path, selector_query
 from etl_craft.core.errors import ExitCode
 from etl_craft.engine.runlog import RunSelector
 from etl_craft.services.operations import runs
+from etl_craft.services.operations.models import OperationResult
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -35,9 +37,21 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     return ExitCode.SUCCESS
 
 
+def _remote(args: argparse.Namespace, out: Output, server: ServerClient) -> int:
+    done = server.call(
+        "POST",
+        api_path("pipelines", args.pipeline_code, "cancel"),
+        OperationResult,
+        body={"reason": args.reason, **selector_query(args)},
+    )
+    out.result(done, args.output_format)
+    return ExitCode.SUCCESS
+
+
 COMMAND = Command(
     name="cancel",
     help="Stop a pipeline's run in progress and end it CANCELLED; local mode.",
     configure=_configure,
     run=_run,
+    remote=_remote,
 )

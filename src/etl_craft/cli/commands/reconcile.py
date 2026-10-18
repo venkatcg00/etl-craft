@@ -6,7 +6,7 @@ import argparse
 
 from etl_craft.cli.commands.common import Command, command_context, configure_output
 from etl_craft.cli.output import Output
-from etl_craft.core.errors import ExitCode, UsageError
+from etl_craft.core.errors import ExitCode
 from etl_craft.services.operations import runs
 
 
@@ -17,8 +17,6 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    if args.task_code and not args.pipeline_code:
-        raise UsageError("--task_code needs --pipeline_code")
     with command_context(args) as ctx:
         report = runs.reconcile_runs(
             ctx,

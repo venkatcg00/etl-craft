@@ -8,8 +8,10 @@ from typing import Literal
 
 from etl_craft.cli.commands.common import Command, command_context, configure_output
 from etl_craft.cli.output import Output
+from etl_craft.cli.remote import ServerClient, api_path
 from etl_craft.core.errors import ExitCode
 from etl_craft.services.operations import pipelines
+from etl_craft.services.operations.models import OperationResult
 
 
 def _configure(parser: argparse.ArgumentParser, *, verb: str) -> None:
@@ -25,6 +27,19 @@ def _run(args: argparse.Namespace, out: Output, *, verb: Literal["pause", "resum
     return ExitCode.SUCCESS
 
 
+def _remote(
+    args: argparse.Namespace, out: Output, server: ServerClient, *, verb: Literal["pause", "resume"]
+) -> int:
+    done = server.call(
+        "POST",
+        api_path("pipelines", args.pipeline_code, verb),
+        OperationResult,
+        body={"reason": args.reason},
+    )
+    out.result(done, args.output_format)
+    return ExitCode.SUCCESS
+
+
 def command(verb: Literal["pause", "resume"]) -> Command:
     """Register either verb with its existing help and shared implementation."""
     help_text = {
@@ -32,5 +47,9 @@ def command(verb: Literal["pause", "resume"]) -> Command:
         "resume": "Let a paused pipeline run again; local mode.",
     }[verb]
     return Command(
-        verb, help_text, run=partial(_run, verb=verb), configure=partial(_configure, verb=verb)
+        verb,
+        help_text,
+        run=partial(_run, verb=verb),
+        configure=partial(_configure, verb=verb),
+        remote=partial(_remote, verb=verb),
     )

@@ -7,17 +7,14 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 
-from sqlalchemy.engine import Engine
-
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
 from etl_craft.core.enums import ApiRole
 from etl_craft.core.errors import ConfigurationError
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine.connection import check_reachable, engine_db
-from etl_craft.engine.queries import statement
 from etl_craft.services.credentials import database_key, read_session
-from etl_craft.services.operations.accounts import has_admin
+from etl_craft.services.operations.accounts import LOCAL_PROVISIONING, local_provisioning
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.permissions import authorize
 from etl_craft.services.operations.tokens import TokenView, authenticate
@@ -32,7 +29,6 @@ class CommandIdentity:
 
 
 command_identity: ContextVar[CommandIdentity | None] = ContextVar("command_identity", default=None)
-_LOCAL_PROVISIONING = frozenset({"setup", "init-db", "migrate", "doctor"})
 _SIGN_IN = frozenset({"login", "logout"})
 
 
@@ -45,7 +41,7 @@ def access_context(args: argparse.Namespace) -> Iterator[None]:
     engine = engine_db(config)
     try:
         check_reachable(engine, config.engine.schema)
-        if args.command not in _LOCAL_PROVISIONING and not for_engine(engine).existing_tables(
+        if args.command not in LOCAL_PROVISIONING and not for_engine(engine).existing_tables(
             engine, ("cfg_accounts",)
         ):
             raise ConfigurationError(
@@ -54,7 +50,7 @@ def access_context(args: argparse.Namespace) -> Iterator[None]:
             )
         with acting_as(SYSTEM_ACTOR):
             identity = None
-            if args.command not in _SIGN_IN and not _provisioning(args.command, engine):
+            if args.command not in _SIGN_IN and not local_provisioning(engine, args.command):
                 token = os.environ.get("ETL_CRAFT_TOKEN")
                 if token is None:
                     token = read_session(database_key(engine, config.engine.schema))
@@ -78,17 +74,3 @@ def access_context(args: argparse.Namespace) -> Iterator[None]:
                 command_identity.reset(scoped)
     finally:
         engine.dispose()
-
-
-def _provisioning(command: str, engine: Engine) -> bool:
-    if command not in _LOCAL_PROVISIONING:
-        return False
-    if command == "doctor":
-        return True
-    accounts = for_engine(engine).existing_tables(engine, ("cfg_accounts",))
-    if not accounts:
-        return True
-    if command == "setup":
-        return not has_admin(engine)
-    with engine.connect() as conn:
-        return not conn.execute(statement(conn, "account_count")).scalar_one()

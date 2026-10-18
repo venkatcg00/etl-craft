@@ -239,6 +239,7 @@ Cloning:
 # Account sign-in settings; the optional Auth section follows Docs_site.
 # Auth:
 #   Session_hours: 12                   # value — integer 1..8760; local session lifetime
+#   Refresh_days: 30                    # value — integer 1..365; server sign-in refresh lifetime
 #   Oidc_issuer: https://sso.example.com # value — exact HTTPS issuer, paired with Oidc_client_id
 #   Oidc_client_id: etl-craft            # value — public device-flow client, RS256 ID tokens
 #   Airflow_connection_id: etl_craft     # value — Airflow connection password holds a service token

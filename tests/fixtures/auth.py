@@ -3,7 +3,7 @@
 import secrets
 
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
-from etl_craft.core.enums import AccountKind, ApiRole
+from etl_craft.core.enums import AccountKind, ApiRole, TokenKind
 from etl_craft.core.text import sha256_hex
 from etl_craft.engine.queries import statement
 
@@ -35,6 +35,8 @@ def service_token(engine, name="test-admin"):
                 "digest": sha256_hex(token.encode()),
                 "now": datetime.now(UTC),
                 "expires_at": None,
+                "kind": TokenKind.SERVICE,
+                "refresh_token_id": None,
             },
         )
         return token

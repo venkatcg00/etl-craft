@@ -4,24 +4,14 @@ from __future__ import annotations
 
 import argparse
 
-from etl_craft.cli.commands.common import Command, connect_engine_db, load_command_config
+from etl_craft.cli.commands.common import Command, command_context
 from etl_craft.cli.output import Output
-from etl_craft.core.errors import ConfigurationError
-from etl_craft.services.cloning import clone
+from etl_craft.services.operations import maintenance
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    config = load_command_config(args)
-    if not config.cloning.enabled:
-        raise ConfigurationError(
-            "Cloning is off in craft-connector.yml: set Cloning.Enabled: true and a Scope of cfg, "
-            "aud or all"
-        )
-    engine = connect_engine_db(config)
-    try:
-        tables = clone(engine, config)
-    finally:
-        engine.dispose()
+    with command_context(args) as ctx:
+        tables = maintenance.clone_tables(ctx)
     for table in tables:
         change = "\tcreated" if table.created else ""
         if table.added:

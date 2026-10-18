@@ -18,7 +18,7 @@ def issuer(tmp_path, monkeypatch):
     from etl_craft.config.model import AuthConfig
 
     context, certificate = localhost_tls(tmp_path)
-    state = {"nonce": None, "requests": [], "redirect": False, "wrong_issuer": False}
+    state = {"nonce": None, "requests": [], "redirect": False, "wrong_issuer": False, "errors": []}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -49,6 +49,8 @@ def issuer(tmp_path, monkeypatch):
                         "interval": 1,
                     }
                 )
+            elif state["errors"]:
+                self.reply({"error": state["errors"].pop(0)})
             else:
 
                 def encode(obj):

@@ -2,10 +2,10 @@
 
 import argparse
 
-from etl_craft.cli.commands.common import Command, connect_engine_db, load_command_config
+from etl_craft.cli.commands.common import Command, command_context
 from etl_craft.cli.output import Output
 from etl_craft.core.errors import ExitCode
-from etl_craft.services.rehash import rehash
+from etl_craft.services.operations import maintenance
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -16,12 +16,8 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    config = load_command_config(args)
-    engine = connect_engine_db(config)
-    try:
-        result = rehash(engine, config, args.target, dry_run=args.dry_run)
-    finally:
-        engine.dispose()
+    with command_context(args) as ctx:
+        result = maintenance.rehash_target(ctx, args.target, dry_run=args.dry_run)
     if result.dry_run:
         out.line(f"{result.target}: would rehash {result.rows} row(s) with hash version 2")
         out.line(result.sql)

@@ -2,11 +2,11 @@
 
 import argparse
 
-from etl_craft.cli.commands.common import Command, connect_engine_db, load_command_config
+from etl_craft.cli.commands.common import Command, command_context
 from etl_craft.cli.output import Output
 from etl_craft.core.enums import SqlAction
 from etl_craft.core.errors import ExitCode
-from etl_craft.services.upgrade_targets import upgrade_targets
+from etl_craft.services.operations import maintenance
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -31,14 +31,10 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    config = load_command_config(args)
-    engine = connect_engine_db(config)
-    try:
-        results = upgrade_targets(
-            engine, config, action=args.action, target=args.target, dry_run=args.dry_run
+    with command_context(args) as ctx:
+        results = maintenance.upgrade_audit_columns(
+            ctx, action=args.action, target=args.target, dry_run=args.dry_run
         )
-    finally:
-        engine.dispose()
     if not results:
         out.line("No active configured targets to upgrade")
     for result in results:

@@ -5,13 +5,12 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from etl_craft.cli.commands.common import Command, connect_engine_db, load_command_config
+from etl_craft.cli.commands.common import Command, command_context
 from etl_craft.cli.output import Output
 from etl_craft.core.errors import ExitCode
-from etl_craft.services.catalog import build_catalog
-from etl_craft.services.catalog_site import write_site
+from etl_craft.services.operations import documents
+from etl_craft.services.operations.documents import DEFAULT_FOLDER
 
-DEFAULT_FOLDER = "catalog"
 """Where the site goes, in the project directory, unless ``--output`` or ``Docs_site.Output``
 names another folder."""
 
@@ -37,23 +36,21 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    config = load_command_config(args)
-    engine = connect_engine_db(config)
-    try:
-        catalog = build_catalog(engine, config, with_warehouse=args.with_warehouse)
-    finally:
-        engine.dispose()
-    for task in catalog.untraced:
+    with command_context(args) as ctx:
+        built = documents.generate_docs(
+            ctx, with_warehouse=args.with_warehouse, output=args.output, strict=args.strict
+        )
+    for task in built.catalog.untraced:
         out.line(f"column lineage unavailable: {task.label}: {task.lineage_error}")
-    if args.strict and catalog.untraced:
-        out.line(f"generate-docs: nothing written; {len(catalog.untraced)} task(s) not traced")
+    if built.site is None:
+        out.line(
+            f"generate-docs: nothing written; {len(built.catalog.untraced)} task(s) not traced"
+        )
         return ExitCode.FAILURE
-    for table in catalog.tables.values():
+    for table in built.catalog.tables.values():
         for finding in table.warehouse_findings:
             out.line(f"warehouse comparison: {table.name}: {finding}")
-    folder = args.output or config.docs_site.output or config.project_dir / DEFAULT_FOLDER
-    site = write_site(catalog, config, folder)
-    out.line(f"generate-docs: wrote {site.pages} page(s) to {site.folder}")
+    out.line(f"generate-docs: wrote {built.site.pages} page(s) to {built.site.folder}")
     return ExitCode.SUCCESS
 
 

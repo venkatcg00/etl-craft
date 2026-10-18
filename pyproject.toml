@@ -212,6 +212,28 @@ layers = [
 ]
 
 [[tool.importlinter.contracts]]
+name = "Interfaces call actions through etl_craft.services.operations, the one implementation"
+type = "forbidden"
+source_modules = ["etl_craft.cli", "etl_craft.api"]
+forbidden_modules = ["etl_craft.services.*"]
+allow_indirect_imports = true
+ignore_imports = [
+    "etl_craft.cli.** -> etl_craft.services.operations",
+    "etl_craft.cli.** -> etl_craft.services.operations.**",
+    "etl_craft.api.** -> etl_craft.services.operations",
+    "etl_craft.api.** -> etl_craft.services.operations.**",
+    # The person's own credential file belongs to the CLI, not to an action.
+    "etl_craft.cli.** -> etl_craft.services.credentials",
+    # Result types the CLI renders.
+    "etl_craft.cli.commands.doctor -> etl_craft.services.doctor",
+    "etl_craft.cli.commands.validate -> etl_craft.services.doctor",
+    "etl_craft.cli.commands.lineage -> etl_craft.services.lineage",
+    "etl_craft.cli.commands.config_files -> etl_craft.services.config_files",
+    # A long-running process the interface starts and stops, like `server`.
+    "etl_craft.cli.commands.publish_docs -> etl_craft.services.docs_publish",
+]
+
+[[tool.importlinter.contracts]]
 name = "The server extra (FastAPI, Pydantic, uvicorn) is imported only by etl_craft.api"
 type = "forbidden"
 source_modules = [

@@ -13,6 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.api.catalog import add_catalog_routes
+from etl_craft.api.login import add_login_routes
+from etl_craft.api.selected import add_selected_routes
 from etl_craft.core.enums import ApiRole
 from etl_craft.core.errors import (
     EtlCraftError,
@@ -103,6 +105,8 @@ def create_app(ctx: OperationContext) -> FastAPI:
     def health(caller: Annotated[OperationContext, Depends(authorize("health"))]) -> dict[str, str]:
         return {"schema": "etl-craft/health/1", "status": "ok"}
 
+    add_login_routes(app, ctx)
+    add_selected_routes(app, authorize)
     add_catalog_routes(app, authorize)
     _add_pipeline_routes(app, authorize)
     _add_run_routes(app, authorize)
@@ -180,15 +184,6 @@ def _add_pipeline_routes(
         code: str, caller: Annotated[OperationContext, Depends(authorize("list"))]
     ) -> dict[str, Any]:
         return to_json(api_reads.get_pipeline(caller, code))
-
-    @app.get("/api/v1/pipelines/{code}/runs")
-    def history(
-        code: str,
-        caller: Annotated[OperationContext, Depends(authorize("history"))],
-        limit: Annotated[int, Query(ge=1, le=100)] = 20,
-        before: Annotated[int | None, Query(ge=1)] = None,
-    ) -> dict[str, Any]:
-        return to_json(api_reads.get_runs(caller, code, limit, before))
 
     @app.post("/api/v1/pipelines/{code}/runs")
     def trigger(

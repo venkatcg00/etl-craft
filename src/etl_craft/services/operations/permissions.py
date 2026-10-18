@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 
 ROLES: dict[str, ApiRole | None] = {
-    **dict.fromkeys(("login", "logout")),
+    **dict.fromkeys(("login", "logout", "refresh")),
     **dict.fromkeys(
         (
             "whoami",
@@ -32,6 +32,7 @@ ROLES: dict[str, ApiRole | None] = {
             "health",
             "attempt",
             "attempt log",
+            "logs",
             "catalog gaps",
             "validate",
             "doctor",

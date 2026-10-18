@@ -121,6 +121,14 @@ class ActorKind(StrEnum):
     SYSTEM = "SYSTEM"
 
 
+class TokenKind(StrEnum):
+    """What a stored credential is for: automation, a request, or renewing a user's access."""
+
+    SERVICE = "SERVICE"
+    ACCESS = "ACCESS"
+    REFRESH = "REFRESH"
+
+
 class AccountKind(StrEnum):
     """Whether a registered account represents a person or an automated caller."""
 

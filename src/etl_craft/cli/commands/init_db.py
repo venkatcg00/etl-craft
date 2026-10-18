@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import argparse
 
-from etl_craft.cli.commands.common import Command, connect_engine_db, load_command_config
+from etl_craft.cli.commands.common import Command, command_context, provisioning
 from etl_craft.cli.output import Output
-from etl_craft.engine.schema import init_db
+from etl_craft.services.operations import maintenance
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -18,11 +18,8 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    engine = connect_engine_db(load_command_config(args))
-    try:
-        result = init_db(engine, force=args.force)
-    finally:
-        engine.dispose()
+    with command_context(args) as ctx:
+        result = maintenance.initialize(ctx, force=args.force, provisioning=provisioning())
     out.line(f"init-db: applied {result.statements} statement(s) from the packaged schema")
     if result.recorded_migrations:
         out.line(
