@@ -21,7 +21,7 @@ from etl_craft.core.enums import (
 from etl_craft.core.errors import RunStateError
 from etl_craft.core.graph import DependencyGraph, TaskRunState
 from etl_craft.core.log import log_context
-from etl_craft.engine import runlog, transitions
+from etl_craft.engine import controls, runlog, transitions
 from etl_craft.engine.repository.interventions import fetch_interventions, fetch_task_rows
 from etl_craft.engine.repository.pipelines import (
     resolve_pipeline_id,
@@ -97,10 +97,19 @@ def settle_unsatisfiable(
     """
     with engine.connect() as conn:
         run_state = runlog.fetch_run_state(conn, pipeline_run_id, list(graph.task_ids))
+        fences = controls.blocked(conn, pipeline_run_id)
+    if None in fences:
+        return []
+    run_state.update(
+        {t: TaskRunState(status=RunStatus.IN_PROGRESS) for t in fences if t is not None}
+    )
     skipped: list[int] = []
     for task_id in graph.unsatisfiable(run_state, failures_final=failures_final):
         reason = f"its dependencies can never be met under pipeline_run_id={pipeline_run_id}"
         with engine.begin() as conn:
+            controls.lock_run(conn, pipeline_run_id)
+            if controls.blocked(conn, pipeline_run_id) != fences:
+                return skipped
             binding = transitions.find_or_create_task_run(conn, task_id, pipeline_run_id)
             if not binding.created:
                 continue
@@ -193,6 +202,14 @@ def finalize(
     judgement = _judge_run(engine, run, not_run, orchestrated)
     status = judgement.status
     with engine.begin() as conn:
+        controls.lock_run(conn, run.pipeline_run_id)
+        if controls.blocked(conn, run.pipeline_run_id):
+            return PipelineOutcome(
+                RunStatus(runlog.fetch_pipeline_run_status(conn, run.pipeline_run_id)),
+                f"pipeline_run_id={run.pipeline_run_id}: dispatch is fenced; inspect the control "
+                "request and release the exact scope before finalizing",
+                run.pipeline_run_id,
+            )
         breached_before = runlog.fetch_run_sla(conn, run.pipeline_run_id).sla_status
         backfill_run = runlog.fetch_run_kind(conn, run.pipeline_run_id).backfill
         ending = transitions.finalize_pipeline_run(

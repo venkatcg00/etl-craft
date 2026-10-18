@@ -4,7 +4,7 @@ import json
 import logging
 import re
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import psycopg
@@ -13,7 +13,13 @@ from sqlalchemy import inspect, text
 from sqlalchemy.exc import DBAPIError
 
 from etl_craft.core.actor import Actor, ActorKind, acting_as
-from etl_craft.core.enums import AccountKind
+from etl_craft.core.enums import (
+    AccountKind,
+    AttemptStatus,
+    ControlAcknowledgement,
+    ControlAction,
+    ControlStatus,
+)
 from etl_craft.engine import migrations, transitions
 from etl_craft.engine.audit import command_request, register_engine
 from etl_craft.engine.privileges import extra_write_grants
@@ -155,7 +161,23 @@ def seeded_tables(db):
         from fixtures.metadata import add_table
 
         contract = add_table(conn, "warehouse.s.t")
+        attempt = transitions.queue_attempt(conn, task_run, ALICE)
+        transitions.claim_attempt(
+            conn,
+            attempt,
+            ALICE,
+            owner="audit-fixture",
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+        )
+        transitions.finish_attempt(
+            conn, attempt, AttemptStatus.SUCCESS, ALICE, owner="audit-fixture"
+        )
         values = {
+            "attempt_id": attempt,
+            "kind": ControlAcknowledgement.PROCESS,
+            "request_key": "audit-guard-fixture",
+            "attempt_ids": "[]",
+            "requested_by_kind": ActorKind.USER,
             "target_table_id": contract,
             "column_position": 1,
             "operation": "INSERT",
@@ -217,19 +239,7 @@ def seeded_tables(db):
                 if (
                     column.get("identity")
                     or column.get("autoincrement")
-                    or (
-                        column.get("primary_key")
-                        and lower
-                        not in {
-                            "task_id",
-                            "target_object",
-                            "file_path",
-                            "task_run_id",
-                            "target_catalog_name",
-                            "target_schema_name",
-                            "target_table_name",
-                        }
-                    )
+                    or (column.get("primary_key") and lower not in values)
                 ):
                     continue
                 if (
@@ -243,6 +253,10 @@ def seeded_tables(db):
                         value = datetime.now(UTC)
                     else:
                         value = 1 if "INT" in type_name or "NUMERIC" in type_name else "sample"
+                if table.upper() == "AUD_CONTROL_REQUESTS":
+                    value = {"status": ControlStatus.REQUESTED, "action": ControlAction.HOLD}.get(
+                        lower, value
+                    )
                 if table.upper() == "AUD_BUSINESS_RULES_RESULTS" and lower == "status":
                     value = "REPORT"
                 payload[name] = value
@@ -584,6 +598,7 @@ def test_terminal_attempts_and_append_only_rows_are_immutable(engine_db):
     tables = seeded_tables(engine_db)
     protected = {
         "AUD_TASK_ATTEMPTS",
+        "AUD_ATTEMPT_ACKNOWLEDGEMENTS",
         "AUD_TASK_EVENTS",
         "AUD_EVENT_FILES",
         "AUD_RUN_INTERVENTIONS",

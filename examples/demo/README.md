@@ -172,3 +172,20 @@ Finish any active exclusive pipeline run first. Script offsets, SQL watermarks, 
 flags and event checkpoints are shared, so those handlers need an explicit pipeline-run
 context rather than standalone execution. Manual success never supplies an upstream pipeline
 publication.
+
+### Scoped holds and maintenance stops
+
+Use the pipeline code and run id printed by the demo run. Pause a selected task without
+pausing unrelated work, or drain a run before maintenance:
+
+```bash
+etl-craft pause --pipeline_code PIPELINE --run-id 42 --task_code TASK --reason "inspect input"
+etl-craft resume --pipeline_code PIPELINE --run-id 42 --task_code TASK --reason "ready"
+etl-craft cancel --pipeline_code PIPELINE --run-id 42 --stop --reason "maintenance"
+etl-craft status --request-id 17 --format json
+```
+
+Replace `PIPELINE`, `TASK`, `42` and `17` with this project's code and returned identities.
+A request is finished only at `COMPLETED`; inspect `run_status` and the affected attempt
+acknowledgements. Server warehouse aborts without a query acknowledgement adapter refuse;
+use `--stop` to drain them. A task-only control leaves the rest of the run available.

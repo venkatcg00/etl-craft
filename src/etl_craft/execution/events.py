@@ -20,7 +20,7 @@ from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import EtlCraftError, LockTimeoutError
 from etl_craft.core.faults import fault_point
 from etl_craft.core.time import as_utc
-from etl_craft.engine import locks, transitions
+from etl_craft.engine import controls, locks, transitions
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import trackers
 from etl_craft.engine.repository.events import consumed_files, record_event
@@ -60,6 +60,11 @@ def check_event(
     """Check once; waiting never admits an attempt or holds a worker slot."""
     try:
         with locks.event(task_id).hold(engine, wait_seconds=0.1):
+            with engine.begin() as conn:
+                fences = controls.blocked(conn, pipeline_run_id)
+                if None in fences or task_id in fences:
+                    return EventCheck(now + timedelta(seconds=1), message="dispatch is held")
+                controls.assert_dispatch(conn, pipeline_run_id, task_id)
             wait = _EventWait(
                 engine, config, pipeline_run_id, task_id, decisions, cancel, force_check
             )

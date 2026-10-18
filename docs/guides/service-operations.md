@@ -55,9 +55,15 @@ options. Project files remain relative to `config.project_dir`.
 | `runs` | `trigger_run`, `initialize_run`, `finalize_run`, `skip_run`, `mark`, `mark_run`, `stand_in_run`, `cancel_run`, `reconcile_runs` |
 | `tasks` | `run_task`, `force_task`, `rerun_task`, `mark_task` |
 | `pipelines` | `set_pause` |
+| `controls` | `request_control(ctx, ControlRequest(...))`, `get_control(ctx, control_id)` |
 | `backfills` | `run_backfill` |
 | `catalog` | `get_gaps(ctx, compare=False)` returns the read-only schema/lineage gap snapshot |
 | `inspect` | `list_pipelines`, `pipeline_graph`, `pipeline_steps`, `run_history`, `audit` |
+
+`controls.ControlRequest` selects a run and optional task, action (`ControlAction`), reason and
+optional idempotency key. It returns `etl-craft/control/1` with acceptance, acknowledgement and
+completion separate from `run_status`. `runs.cancel_run` delegates to the same abort operation
+and returns this control document. See [scoped controls](run-control.md#hold-or-release-dispatch-in-a-selected-run).
 
 Pass `verb="pause"` or `verb="resume"` to `pipelines.set_pause(ctx, pipeline_code, reason, ...)`.
 

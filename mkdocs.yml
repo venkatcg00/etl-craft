@@ -142,6 +142,7 @@ nav:
       - Accounts and login: examples/accounts/README.md
       - File delivery event: examples/event-wait.md
       - SQL source watermark: examples/sql-watermark.md
+      - Scoped operator controls: examples/operator-controls.md
   - Reference:
       - reference/index.md
       - Command line: reference/cli.md

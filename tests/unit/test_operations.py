@@ -194,7 +194,7 @@ def test_cancel_pause_resume_and_reconcile_do_not_invent_executions(ctx):
     resumed = pipelines.set_pause(ctx, P, "ready", verb="resume")
     assert resumed.pipeline.paused is None
     cancelled = runs.cancel_run(ctx, P, "stop", selector=RunSelector(run_id=run_id))
-    assert cancelled.status == "SUCCESS" and cancelled.run.status == "CANCELLED"
+    assert cancelled.status == "COMPLETED" and cancelled.run_status == "CANCELLED"
     report = runs.reconcile_runs(ctx, P)
     assert report.lost_attempt_ids == () and report.released_pipeline_run_ids == ()
 

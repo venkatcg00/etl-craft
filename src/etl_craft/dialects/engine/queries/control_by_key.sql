@@ -1,0 +1,2 @@
+SELECT CONTROL_ID AS control_id, PIPELINE_RUN_ID AS pipeline_run_id,
+TASK_ID AS task_id, ACTION AS action FROM AUD_CONTROL_REQUESTS WHERE REQUEST_KEY=:request_key

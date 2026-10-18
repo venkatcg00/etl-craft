@@ -18,15 +18,14 @@ from sqlalchemy import text
 
 from etl_craft.cli import main as cli_main
 from etl_craft.config import load_config
-from etl_craft.core.actor import current_actor
-from etl_craft.core.enums import Mode, RunStatus
+from etl_craft.core.actor import Actor, ActorKind, current_actor
+from etl_craft.core.enums import ApiRole, Mode, RunStatus
 from etl_craft.core.errors import ExitCode, RunRefusedError, RunStateError, UsageError
 from etl_craft.engine import runlog, transitions
 from etl_craft.execution.attempt_records import attempt_log_path
 from etl_craft.execution.attempt_types import ChildOptions, Override
 from etl_craft.execution.gates import Clock
 from etl_craft.execution.interventions import (
-    cancel_run,
     mark_run,
     mark_task,
     pause_pipeline,
@@ -39,6 +38,8 @@ from etl_craft.execution.reruns import force_task, rerun_task
 from etl_craft.execution.run_start import init_pipeline_run
 from etl_craft.execution.run_types import RunHooks
 from etl_craft.execution.runner import run_task
+from etl_craft.services.operations import OperationContext
+from etl_craft.services.operations import runs as run_operations
 from fixtures.auth import service_token
 from fixtures.metadata import (
     add_dependency,
@@ -375,11 +376,14 @@ def test_cancel_stops_a_running_run(config, pipeline):
     with pytest.raises(RunRefusedError, match=r"P.extract is running under pipeline_run_id="):
         mark_task(engine, config, "P", "extract", "SUCCESS", "too early", requested_by=WHO)
 
-    cancelled = cancel_run(engine, config, "P", "wrong data", requested_by=WHO)
-    assert cancelled.message == (
-        f"P: pipeline_run_id={run_id} CANCELLED; stopping 1 running task(s): extract (the "
-        "process running each stops it within a few seconds)"
+    cancelled = run_operations.cancel_run(
+        OperationContext(engine, config, Actor(WHO, ActorKind.USER), role=ApiRole.OPERATOR),
+        "P",
+        "wrong data",
     )
+    assert cancelled.pipeline_run_id == run_id
+    assert cancelled.status in {"REQUESTED", "ACKNOWLEDGED"}
+    assert cancelled.run_status == RunStatus.IN_PROGRESS
     thread.join(timeout=30)
     assert not thread.is_alive()
     assert time.monotonic() - started < 30
@@ -390,13 +394,13 @@ def test_cancel_stops_a_running_run(config, pipeline):
     # Only what had started is recorded: nothing started after the cancel.
     assert statuses(engine, run_id)["extract"] == ("CANCELLED", None)
     assert "transform" not in statuses(engine, run_id)
-    assert [row[:5] for row in interventions(engine)] == [
-        (run_id, "extract", "CANCEL", "IN-PROGRESS", "CANCELLED"),
-        (run_id, None, "CANCEL", "IN-PROGRESS", "CANCELLED"),
-    ]
     # The next run is a new one.
     with pytest.raises(RunStateError, match="matched 0 runs"):
-        cancel_run(engine, config, "P", "again", requested_by=WHO)
+        run_operations.cancel_run(
+            OperationContext(engine, config, Actor(WHO, ActorKind.USER), role=ApiRole.OPERATOR),
+            "P",
+            "again",
+        )
 
 
 def test_what_mark_and_cancel_refuse(config, pipeline):
@@ -485,9 +489,11 @@ def test_what_mark_and_cancel_refuse(config, pipeline):
             engine, remote, "P", "SUCCESS", "why", selector=runlog.RunSelector(run_id=run_id)
         ),
         lambda: record_stand_in_run(engine, remote, "P", "SUCCESS", "why"),
-        lambda: cancel_run(engine, remote, "P", "why"),
+        lambda: run_operations.cancel_run(
+            OperationContext(engine, remote, current_actor(), role=ApiRole.OPERATOR), "P", "why"
+        ),
     ):
-        with pytest.raises(RunRefusedError, match="the orchestrator is the only source of truth"):
+        with pytest.raises(RunRefusedError, match="orchestrator"):
             refused()
 
     mark_task(

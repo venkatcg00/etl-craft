@@ -56,7 +56,7 @@ from etl_craft.engine.repository.tasks import (
     resolve_task_id,
 )
 from etl_craft.engine.retry import retrying
-from etl_craft.execution import leases
+from etl_craft.execution import control_flow, leases
 from etl_craft.execution.attempt_records import (
     CancelWatch,
     attempt_log_path,
@@ -705,7 +705,7 @@ def _start_and_record(
         log_path,
     )
     with (
-        CancelWatch(engine, spec.pipeline_run_id, child) as stop,
+        CancelWatch(engine, spec.pipeline_run_id, child, spec_task_id(engine, spec)) as stop,
         leases.heartbeat(engine, "attempt", spec.attempt_id, owner, stop),
     ):
         result = run_child(
@@ -725,7 +725,8 @@ def _start_and_record(
             cancel=stop,
             on_started=lambda pid: attempt_started(engine, spec.attempt_id, owner, pid),
         )
-    return retrying(
+    result = replace(result, queries_ended=control_flow.process_local_queries(config))
+    outcome = retrying(
         f"recording how {spec.task_code} ended",
         lambda: record_attempt(
             engine,
@@ -738,6 +739,9 @@ def _start_and_record(
             owner=owner,
         ),
     )
+
+    control_flow.after_exit(engine, spec.pipeline_run_id)
+    return outcome
 
 
 def _child_argv(
@@ -765,3 +769,12 @@ def _child_argv(
     if spec.rerun:
         argv.append("--rerun")
     return argv
+
+
+def spec_task_id(engine: Engine, spec: AttemptSpec) -> int:
+    """Read the exact task of a bound attempt without selecting another run."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            statement(conn, "control_task_context"), {"task_run_id": spec.task_run_id}
+        ).one()
+        return int(row.task_id)

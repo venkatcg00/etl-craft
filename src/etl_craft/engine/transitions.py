@@ -23,7 +23,7 @@ from etl_craft.core.enums import (
 from etl_craft.core.errors import RunStateError, StaleTransitionError
 from etl_craft.core.faults import fault_point
 from etl_craft.core.time import as_utc
-from etl_craft.engine import run_scopes, runlog
+from etl_craft.engine import controls, run_scopes, runlog
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import trackers
 from etl_craft.engine.repository.offsets import StoredOffset, save_task_offset
@@ -37,12 +37,7 @@ def create_active_run(
     backfill: bool = False,
     trigger_kind: Literal["MANUAL", "BACKFILL", "STAND_IN"] | None = None,
 ) -> int | None:
-    """Start a new ``IN-PROGRESS`` run of ``pipeline_id`` and return its id.
-
-    Return ``None`` when the pipeline already has a run in progress: the unique index on
-    ``IN-PROGRESS`` runs refuses a second one, so of several processes starting a run at once,
-    exactly one gets an id. ``run_date`` defaults to UTC today; ``backfill`` marks backfills.
-    """
+    """Start an exclusive run of ``pipeline_id``; concurrent starts return None."""
     kind = trigger_kind or ("BACKFILL" if backfill else "MANUAL")
     if backfill and kind != TriggerKind.BACKFILL:
         raise RunStateError(
@@ -188,14 +183,7 @@ def finalize_pipeline_run(
     owner: str | None = None,
     consume: bool = False,
 ) -> runlog.RunEnding:
-    """End ``pipeline_run_id`` with ``status`` and END_DATE now, if it is still ``IN-PROGRESS``.
-
-    With ``sla_in_hours`` (the pipeline's ``SLA_IN_HOURS``, whenever it has one) the run is also
-    marked ``MET`` or ``BREACHED``, measured from START_DATE, whether or not SLA emails are on,
-    unless it already has an SLA status: a run reopened after it met its SLA stays ``MET``, and
-    the returned result carries the recorded status. STATUS is left alone either way: a late run
-    did its work. A run that is no longer ``IN-PROGRESS`` is not changed, and ``ended`` is false.
-    """
+    """End an active run, guarding task liveness and committing SLA and consumption."""
     now = datetime.now(UTC)
     sla = None
     if sla_in_hours is not None:
@@ -266,19 +254,6 @@ def mark_task_run(
 
     if result.rowcount != 1:
         raise _stale(conn, "task", task_run_id, "existing summary; no active attempt", None)
-
-
-def cancel_task_run(conn: Connection, task_run_id: int, error_message: str) -> bool:
-    """End an ``IN-PROGRESS`` task row ``CANCELLED``; return whether it was still running."""
-    active = active_attempt(conn, task_run_id)
-    if active is not None:
-        cancel_attempt(conn, active.attempt_id, current_actor(), error_message=error_message)
-        return True
-    result = conn.execute(
-        statement(conn, "transition_cancel_task_run"),
-        {"task_run_id": task_run_id, "error_message": error_message, "now": datetime.now(UTC)},
-    )
-    return bool(result.rowcount)
 
 
 def cancel_pipeline_run(conn: Connection, pipeline_run_id: int) -> None:
@@ -532,6 +507,7 @@ def queue_attempt(
     previous_attempt_id: int | None = None,
 ) -> int:
     """Queue one attempt, serializing admission through its task summary."""
+    controls.guard_task(conn, task_run_id)
     try:
         with conn.begin_nested():
             params = {
@@ -573,6 +549,7 @@ def claim_attempt(
     host: str | None = None,
 ) -> None:
     """Claim a queued attempt for one owner."""
+    controls.guard_attempt(conn, attempt_id)
     with conn.begin_nested():
         _guard(
             conn,
@@ -948,3 +925,8 @@ def record_watermark_range(
             raise _stale(conn, "task", task_run_id, "live owned attempt for watermark range", owner)
         if attempt_id is not None:
             _sync_summary(conn, attempt_id)
+
+
+def update_control(conn: Connection, parameters: dict[str, object]) -> None:
+    """Advance a durable control status without rewriting its original request."""
+    conn.execute(statement(conn, "transition_control"), parameters)

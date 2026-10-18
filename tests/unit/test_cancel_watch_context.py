@@ -5,7 +5,7 @@ import logging
 import pytest
 
 from etl_craft.core.log import ContextFilter, log_context
-from etl_craft.execution import attempt_records
+from etl_craft.execution import attempt_records, control_flow
 from etl_craft.execution.attempt_types import ChildOptions
 
 pytestmark = pytest.mark.unit
@@ -23,6 +23,7 @@ def test_watch_warning_carries_run_and_task_context(monkeypatch):
     handler = Capture()
     logger.addHandler(handler)
     monkeypatch.setattr(attempt_records, "run_cancelled", lambda engine, run: True)
+    monkeypatch.setattr(control_flow, "advance", lambda *args, **kwargs: None)
     try:
         with (
             log_context(pipeline="P", task="T", pipeline_run_id=7),
@@ -31,7 +32,7 @@ def test_watch_warning_carries_run_and_task_context(monkeypatch):
             assert stop.wait(5)
     finally:
         logger.removeHandler(handler)
-    warning = next(record for record in records if "was cancelled" in record.getMessage())
+    warning = next(record for record in records if "stop requested" in record.getMessage())
     assert warning.pipeline == "P"
     assert warning.task == "T"
     assert warning.pipeline_run_id == 7

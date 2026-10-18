@@ -16,12 +16,13 @@ from etl_craft.api.app import create_app
 from etl_craft.cli import main
 from etl_craft.cli.commands import login
 from etl_craft.core.actor import SYSTEM_ACTOR, Actor, ActorKind, acting_as
-from etl_craft.core.enums import AccountKind, ApiRole, RunStatus, YesNo
+from etl_craft.core.enums import AccountKind, ApiRole, ControlAction, RunStatus, YesNo
 from etl_craft.core.errors import ExitCode
 from etl_craft.engine import transitions
 from etl_craft.engine.schema import init_db
 from etl_craft.services import credentials
 from etl_craft.services.operations import OperationContext, accounts, tokens
+from etl_craft.services.operations.controls import ControlRequest, request_control
 from etl_craft.services.operations.models import BackfillView, OperationResult
 from fixtures.metadata import add_pipeline, add_task, start_run
 
@@ -245,6 +246,10 @@ def test_remote_controls_reach_the_same_operations_with_the_selected_run(
 ):
     url, run_id = server["url"], server["run"]
     calls = []
+    control = replace(
+        request_control(server["ctx"], ControlRequest("P", ControlAction.HOLD, "test")),
+        message="P: done",
+    )
     done = OperationResult(RunStatus.SUCCESS, "P: done", 1, "P")
 
     def record(name, result=done):
@@ -259,7 +264,7 @@ def test_remote_controls_reach_the_same_operations_with_the_selected_run(
     )
     for target, result in (
         ("runs.mark", done),
-        ("runs.cancel_run", done),
+        ("runs.cancel_run", control),
         ("runs.trigger_run", done),
         ("tasks.rerun_task", done),
         ("backfills.run_backfill", backfill),
@@ -276,7 +281,10 @@ def test_remote_controls_reach_the_same_operations_with_the_selected_run(
     ):
         code, out, err = run(capsys, *argv, "--reason", "why", "--server", url)
         assert code == 0, (argv, err)
-        assert out in ("P: done\n", "b\n"), out
+        if argv[0] == "cancel":
+            assert "control_id=" in out and out.endswith("P: done\n"), out
+        else:
+            assert out in ("P: done\n", "b\n"), out
     names = [name for name, *_ in calls]
     assert names == [
         "runs.mark",
@@ -395,3 +403,78 @@ def test_remote_task_run_forwards_the_exact_selection(
     assert (
         request.standalone == request.with_downstream == request.ignore_dependencies == standalone
     )
+
+
+def test_remote_scoped_cli_uses_same_request_and_status_document(server, monkeypatch, capsys):
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", server["service"]["operator"])
+    url, run_id = server["url"], server["run"]
+    code, out, err = run(
+        capsys,
+        "pause",
+        "--pipeline_code",
+        "P",
+        "--run-id",
+        str(run_id),
+        "--task_code",
+        "T",
+        "--reason",
+        "maintenance",
+        "--format",
+        "json",
+        "--server",
+        url,
+    )
+    assert code == 0, err
+    held = json.loads(out)
+    assert held["status"] == "COMPLETED" and held["action"] == "HOLD"
+    code, out, err = run(
+        capsys,
+        "status",
+        "--request-id",
+        str(held["control_id"]),
+        "--format",
+        "json",
+        "--server",
+        url,
+    )
+    assert code == 0, err
+    assert json.loads(out) == held
+    code, out, err = run(
+        capsys,
+        "cancel",
+        "--pipeline_code",
+        "P",
+        "--run-id",
+        str(run_id),
+        "--task_code",
+        "T",
+        "--stop",
+        "--reason",
+        "drain",
+        "--format",
+        "json",
+        "--server",
+        url,
+    )
+    assert code == 0, err
+    stopped = json.loads(out)
+    assert stopped["action"] == "STOP" and stopped["status"] == "COMPLETED"
+    assert stopped["run_status"] == "IN-PROGRESS" and stopped["task_code"] == "T"
+    code, out, err = run(
+        capsys,
+        "resume",
+        "--pipeline_code",
+        "P",
+        "--run-id",
+        str(run_id),
+        "--task_code",
+        "T",
+        "--reason",
+        "ready",
+        "--format",
+        "json",
+        "--server",
+        url,
+    )
+    assert code == 0, err
+    assert json.loads(out)["action"] == "RELEASE"
