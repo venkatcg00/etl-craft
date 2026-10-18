@@ -39,6 +39,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig, load_config
+from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine.connection import engine_db
 from etl_craft.engine.queries import run_script
@@ -321,7 +322,7 @@ class Demo:
         sql = sql.replace("@example.com", f"+{self.tag}@example.com")
         engine = engine_db(self.config)
         try:
-            with engine.begin() as conn:
+            with acting_as(SYSTEM_ACTOR), engine.begin() as conn:
                 run_script(conn, for_engine(engine).split_statements(sql))
         finally:
             engine.dispose()
