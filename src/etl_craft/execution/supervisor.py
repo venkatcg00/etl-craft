@@ -84,7 +84,7 @@ class ChildResult:
         if self.timed_out:
             return f"timed out after {self.spec.timeout_seconds:g}s and was killed"
         if self.cancelled:
-            return "was stopped by its supervisor"
+            return "was interrupted and stopped by its supervisor"
         if self.returncode < 0:
             return f"was killed by signal {_signal_name(-self.returncode)}"
         return f"exited with code {self.returncode}"

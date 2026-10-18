@@ -1425,13 +1425,14 @@ CREATE TABLE AUD_ATTEMPT_ACKNOWLEDGEMENTS (
     ATTEMPT_ID BIGINT NOT NULL REFERENCES AUD_TASK_ATTEMPTS(ATTEMPT_ID),
     KIND VARCHAR(8) NOT NULL CHECK (KIND IN ('PROCESS','QUERIES')),
     OBSERVED_AT TIMESTAMP NOT NULL,
-    PRIMARY KEY (ATTEMPT_ID, KIND)
+    CONSTRAINT pk_attempt_acknowledgements PRIMARY KEY (ATTEMPT_ID, KIND)
 );
 CREATE TRIGGER trg_attempt_ack_update BEFORE UPDATE ON AUD_ATTEMPT_ACKNOWLEDGEMENTS
 BEGIN SELECT RAISE(ABORT, 'attempt acknowledgement is immutable; record new evidence'); END;
 CREATE TRIGGER trg_attempt_ack_delete BEFORE DELETE ON AUD_ATTEMPT_ACKNOWLEDGEMENTS
 WHEN etl_craft_purpose() <> 'retention'
 BEGIN SELECT RAISE(ABORT, 'attempt acknowledgement is immutable; use etl-craft retention'); END;
+-- Scoped operator requests retain their identity, progress and physical completion evidence.
 CREATE TABLE AUD_CONTROL_REQUESTS (
     CONTROL_ID INTEGER PRIMARY KEY AUTOINCREMENT,
     REQUEST_KEY VARCHAR(128) NOT NULL UNIQUE,
