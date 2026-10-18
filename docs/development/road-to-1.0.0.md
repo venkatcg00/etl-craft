@@ -456,8 +456,9 @@ The separate frozen 0.4 soak deployment is unchanged.
     accounts with S5.C.
   - `core.actor.scoped_actor()` returns the actor or `None`, so the connection hooks leave the
     actor empty for unauthenticated reads. The Engine DB triggers then refuse any write.
-  - Every run's `WRITER` is `etl-craft`. Nothing sets another writer yet; S7.M's uploads are its
-    second writer.
+  - Every run's `WRITER` is `etl-craft` until S7.M. S7.M sets it to the uploader's account name
+    for a run that processes an upload, so every row that run writes carries the uploader in
+    `CREATED_BY` and `UPDATED_BY`; the SQL actions already stamp the run's `WRITER`.
   - `etl-craft server` refuses a non-SERVICE account, naming the account and its kind.
 
 - **S5.S item 3 (#205), shared role policy and owner-approved maintenance defaults.**
