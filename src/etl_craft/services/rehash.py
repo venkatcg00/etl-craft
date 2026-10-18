@@ -14,6 +14,7 @@ from etl_craft.engine import locks
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.hash_versions import save_hash_version
 from etl_craft.engine.repository.tasks import fetch_task_parameters
+from etl_craft.handlers.sql.protection import refuse_replacement
 from etl_craft.handlers.sql.session import Session
 from etl_craft.warehouse.connection import open_warehouse, warehouse_dialect
 
@@ -74,6 +75,8 @@ def rehash(
                 task_run_id=0,
                 params={},
             )
+            if not dry_run:
+                refuse_replacement(session)
             shape = {name.lower() for name, _ in session.target_columns()}
             if "hash_key" not in shape:
                 raise HandlerError(

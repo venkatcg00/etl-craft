@@ -52,7 +52,6 @@
       "src/etl_craft/engine/repository/source_contracts.py": 2,
       "src/etl_craft/execution/remote.py": 3,
       "src/etl_craft/execution/scheduler.py": 9,
-      "src/etl_craft/handlers/sql/__init__.py": 1,
       "src/etl_craft/handlers/sql/spec.py": 2,
       "src/etl_craft/overseer/schedules.py": 3,
       "src/etl_craft/services/config_files.py": 12
@@ -121,7 +120,6 @@
       "src/etl_craft/execution/remote.py": 16,
       "src/etl_craft/execution/scheduler.py": 58,
       "src/etl_craft/handlers/python_scripts.py": 3,
-      "src/etl_craft/handlers/sql/__init__.py": 5,
       "src/etl_craft/handlers/sql/actions.py": 2,
       "src/etl_craft/handlers/sql/spec.py": 3,
       "src/etl_craft/overseer/schedules.py": 3,

@@ -57,3 +57,11 @@ etl-craft logout --server https://etl.example.com
 
 See [operating a server](../../deploying/security.md#operating-a-server-from-your-own-installation)
 for what works against a server and what stays on its host.
+
+## Human corrections
+
+An authenticated USER admin can use the [SCD value service/API](../../guides/human-overrides.md)
+to correct business values, inspect their writers and explicitly unlock them. An admin SERVICE
+integration may write through the same endpoint but cannot create or release human locks.
+Operator/developer accounts cannot edit or unlock business values. Starting an ETL pipeline as
+an admin still uses the engine writer and creates no human locks.

@@ -22,6 +22,7 @@ ROLES: dict[str, ApiRole | None] = {
     **dict.fromkeys(
         (
             "whoami",
+            "data provenance",
             "list",
             "graph",
             "steps",
@@ -54,6 +55,8 @@ ROLES: dict[str, ApiRole | None] = {
     **dict.fromkeys(
         (
             "account add",
+            "data edit",
+            "data unlock",
             "account list",
             "account set-role",
             "account disable",

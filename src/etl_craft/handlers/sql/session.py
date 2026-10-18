@@ -17,7 +17,7 @@ import logging
 import secrets
 import time
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, CursorResult
@@ -27,6 +27,9 @@ from etl_craft.core.errors import HandlerError, SqlGuardError
 from etl_craft.core.text import qualify, split_object_ref
 from etl_craft.dialects.warehouse import WarehouseDialect
 from etl_craft.engine.repository.offsets import StoredOffset
+
+if TYPE_CHECKING:
+    from etl_craft.handlers.sql.protection import Protection
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +58,7 @@ class Session:
         self.target_object = target_object
         self.task_run_id = task_run_id
         self.params = params
+        self.protection: Protection | None = None
         database, self.schema, self.table = split_object_ref(target_object)
         # A target that names its database is written there; otherwise in the active one.
         self.catalog = database or catalog

@@ -128,3 +128,30 @@ ETL rows use the run writer `etl-craft` in `CREATED_BY` and `UPDATED_BY`, includ
 started by a person. Action audit rows retain the signed-in account with kind `USER` or
 `SERVICE`; automatic engine actions use `SYSTEM`. Starting `etl-craft server` requires an
 admin service token in `ETL_CRAFT_TOKEN`.
+
+## Protect a human correction
+
+After the first successful `SUPPORT_DM` run, serve this project and sign in as a USER admin
+through its [HTTP sign-in flow](../../docs/deploying/security.md). With that access token in
+`ACCESS_TOKEN` and the server URL in `SERVER`, correct Ann's name:
+
+```bash
+curl --fail-with-body "$SERVER/api/v1/pipelines/SUPPORT_DM/tasks/agents/values" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"key":{"agent_code":"A01"},"values":{"agent_name":"Anne"},"reason":"Verified spelling"}'
+```
+
+Run `SUPPORT_DM` again: `ds.agents` retains `Anne` while unlocked source fields still refresh.
+The response and the `/values/provenance` endpoint attribute the protected name to the admin;
+ETL retains the engine identity on fields it changes. To release the correction:
+
+```bash
+curl --fail-with-body "$SERVER/api/v1/pipelines/SUPPORT_DM/tasks/agents/values/unlock" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"key":{"agent_code":"A01"},"columns":["agent_name"],"reason":"Use source spelling again"}'
+```
+
+The next `SUPPORT_DM` run restores `Ann`. This opt-in walkthrough uses native DuckDB or
+PostgreSQL; protection refuses the Iceberg/cloud variants. It creates no automatic file-upload
+flow. See [the full protection contract](../../docs/guides/human-overrides.md), including
+backing up warehouse-side evidence with the business tables.

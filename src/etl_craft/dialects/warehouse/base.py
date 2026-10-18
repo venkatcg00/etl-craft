@@ -114,6 +114,8 @@ class WarehouseDialect:
     enforces_primary_keys: bool = True
     # Whether only one process may write at a time (a DuckDB file).
     single_writer: bool = False
+    atomic_protection: bool = False
+    """Whether business writes and protection evidence share one atomic transaction."""
     # The type values are cast to before hashing.
     string_type: str = "VARCHAR"
     # The case unquoted identifiers fold to ("lower" or "upper"), or None where the database
@@ -125,6 +127,10 @@ class WarehouseDialect:
     token_username: str | None = None
     # Whether a bearer token (token, oauth) is sent under a username.
     bearer_needs_user: bool = True
+
+    def protection_lock_sql(self, target: str) -> str | None:
+        """Exclude uncoordinated DML while protected data is checked and changed."""
+        return None
 
     def identity_table_ddl(self, target: str, columns: str, params: Mapping[str, str]) -> str:
         """Create an empty table with the supplied columns and a generated ROW_ID."""

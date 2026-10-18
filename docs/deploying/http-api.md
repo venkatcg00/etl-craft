@@ -157,3 +157,11 @@ the policy for local CLI and Python callers; UI actions use these HTTP routes. I
 roles return HTTP 403 with `PermissionDeniedError`, exit code 26 and the account/role remedy,
 and append a `REFUSED` action record. Missing/invalid bearer credentials still return HTTP 401.
 See the [deployment role table](security.md#deployment-accounts).
+
+## Protected SCD values
+
+`POST /api/v1/pipelines/{code}/tasks/{task}/values` writes a reasoned value edit or insert
+(admin). The `/unlock` suffix releases selected locks (human admin), and `/provenance` reads
+known column writers and protection history (viewer). Each calls the shared Python operation.
+See [Protecting human SCD edits](../guides/human-overrides.md) for request bodies, integration
+identities, atomic warehouse support and recovery.

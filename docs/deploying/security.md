@@ -58,10 +58,10 @@ include every lower role; transports name operations, not their own permission r
 
 | Minimum role | Operations |
 | --- | --- |
-| viewer | Reads, inspection, validation, configuration plan/export, YAML export, `docs-version --check`, `rehash --dry-run`, `setup --print-grants` |
+| viewer | SCD provenance, reads, inspection, validation, configuration plan/export, YAML export, `docs-version --check`, `rehash --dry-run`, `setup --print-grants` |
 | operator | Run, backfill, mark, cancel, pause/resume and reconcile |
 | developer | `config apply`, project migrations, `generate-docs`, `lineage --refresh` |
-| admin | Accounts/tokens, setup/init-db, packaged Engine DB migrations, upgrade-targets, rehash, clone, server startup, publish-docs and docs-version writes |
+| admin | SCD value edits and human unlocks, accounts/tokens, setup/init-db, packaged Engine DB migrations, upgrade-targets, rehash, clone, server startup, publish-docs and docs-version writes |
 
 `migrate` can apply project migrations as developer only when no packaged Engine DB migration
 is pending. An admin must apply pending engine upgrades first. A refused operation names the

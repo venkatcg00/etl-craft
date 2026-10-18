@@ -78,6 +78,8 @@ class ActionContext:
     engine_db: Engine
     user: str
     now: datetime
+    staged: str | None = None
+    respect_protection: bool = True
 
     @property
     def select_sql(self) -> str:
@@ -87,6 +89,8 @@ class ActionContext:
 
     def build_stage(self, session: Session, *, empty: bool = False) -> str:
         """Stage the SELECT once and record its watermark before any target mutation."""
+        if self.staged is not None:
+            return self.staged
         stage = build_stage(session, self.select_sql, empty=empty)
         if self.task.watermark is not None:
             record_range(session, stage, self.task.watermark, self.context, self.engine_db)
@@ -96,9 +100,9 @@ class ActionContext:
     def stamp(self) -> dict[str, object]:
         """The values the audit columns are stamped with."""
         return {
-            "pipeline_run_id": self.context.pipeline_run_id,
-            "pipeline_id": self.context.pipeline_id,
-            "task_run_id": self.context.task_run_id,
+            "pipeline_run_id": None if self.staged else self.context.pipeline_run_id,
+            "pipeline_id": None if self.staged else self.context.pipeline_id,
+            "task_run_id": None if self.staged else self.context.task_run_id,
             "now": self.now,
             "updated_by": self.user,
         }
@@ -388,6 +392,8 @@ def _merge_stage(
     refuse_null_keys(session, stage, task.merge_key)
     stage = dedupe(session, stage, task.merge_key, task.dedupe_order)
     check_or_evolve(session, stage, kind, schema_evolution=task.schema_evolution)
+    if session.protection is not None and action.respect_protection:
+        stage = session.protection.stage(stage)
     add_hash_key(session, stage, task.merge_compare_columns)
     session.prepare_update_stage(stage, task.merge_key)
     return stage, source, rejected
@@ -433,13 +439,9 @@ def scd1_merge(session: Session, action: ActionContext) -> HandlerResult:
 
     compared = kept_hash("t") if task.preserve_target else "s.HASH_KEY"
     condition = f"(t.HASH_KEY IS DISTINCT FROM {compared} OR t.DELETE_FLAG = 'Y')"
+    condition = edit_condition(action, tuple(non_key), condition)
     # A soft-deleted key the SELECT returns again comes back, changed or not.
-    changed = _changed_keys(
-        session,
-        stage,
-        task.merge_key,
-        condition,
-    )
+    changed = _changed_keys(session, stage, task.merge_key, condition)
     update_count = session.count(f"SELECT COUNT(*) FROM {changed}", step="changed rows")
 
     assignments = {}
@@ -505,12 +507,10 @@ def scd2_merge(session: Session, action: ActionContext) -> HandlerResult:
     target = session.target
     key_match = _key_match(task.merge_key)
 
+    condition = "t.HASH_KEY IS DISTINCT FROM s.HASH_KEY OR t.DELETE_FLAG = 'Y'"
+    condition = edit_condition(action, tuple(stage_columns), condition)
     changed = _changed_keys(
-        session,
-        stage,
-        task.merge_key,
-        # A soft-deleted active version is closed and followed by a live one, as a change is.
-        "t.ACTIVE_FLAG = 'Y' AND (t.HASH_KEY IS DISTINCT FROM s.HASH_KEY OR t.DELETE_FLAG = 'Y')",
+        session, stage, task.merge_key, f"t.ACTIVE_FLAG = 'Y' AND ({condition})"
     )
     closed = session.count(f"SELECT COUNT(*) FROM {changed}", step="changed keys")
     session.prepare_update_stage(changed, task.merge_key)
@@ -636,6 +636,8 @@ def delete_rows(session: Session, action: ActionContext) -> HandlerResult:
                 "SETUP_TABLE task for it, add the columns, or set HARD_DELETE=true"
             )
         check_identity_types(session)
+    if session.protection is not None:
+        stage = session.protection.stage(stage, delete=True)
     key_match = _key_match(task.merge_key)
     # A soft delete leaves rows already flagged as they were, with their first UPDATE_DATE.
     live = "" if task.hard_delete else " AND t.ACTIVE_FLAG = 'Y' AND t.DELETE_FLAG = 'N'"
@@ -712,3 +714,11 @@ ACTIONS: dict[SqlAction, Action] = {
 
 def _key_match(keys: tuple[str, ...], target: str = "t", source: str = "s") -> str:
     return " AND ".join(f"{target}.{key} = {source}.{key}" for key in keys)
+
+
+def edit_condition(action: ActionContext, columns: tuple[str, ...], condition: str) -> str:
+    """Deliberate edits also compare columns outside the ETL change-detection contract."""
+    if action.staged is None:
+        return condition
+    changes = " OR ".join(f"t.{c} IS DISTINCT FROM s.{c}" for c in columns)
+    return f"({condition} OR {changes})"

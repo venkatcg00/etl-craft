@@ -8,6 +8,14 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Shared SCD value edit, provenance and unlock services and HTTP routes under
+  `/api/v1/pipelines/{code}/tasks/{task}/values`. Human admin inserts protect their row;
+  edits protect changed values. ETL and authenticated service integrations respect those
+  locks, with effective hashes/counts and independent column attribution. Only human admins
+  may unlock. Native PostgreSQL and DuckDB commit data and warehouse-side evidence together;
+  other warehouses refuse protected edits. Unobserved writes and replacement paths fail
+  explicitly. No Engine DB migration or new dependency is required.
+
 - A local installation operates a server: `--server https://<host>` (or `ETL_CRAFT_SERVER`)
   sends `status`, `explain`, `history`, `logs`, `whoami`, `run` (a run, `--backfill` or
   `--rerun`), `pause`, `resume`, `mark` and `cancel` to the server's API, within the account's
