@@ -46,8 +46,8 @@ def run_manual(
     """Create or explicitly resume a manual selection without adopting another run."""
     if config.mode != Mode.LOCAL:
         raise RunRefusedError(
-            f"{pipeline_code}: standalone execution needs a local owning worker; "
-            "legacy remote mode delegates workers to its orchestrator. Use an explicit "
+            f"{pipeline_code}: standalone execution needs a local owning agent; "
+            "legacy remote mode delegates agents to its orchestrator. Use an explicit "
             "orchestrator run with --run-id or --run-key."
         )
     selector = options.get("selector", runlog.ACTIVE_RUN)

@@ -1,0 +1,10 @@
+DROP TRIGGER trg_actor_guard_aud_overseers ON AUD_OVERSEERS;
+DROP TRIGGER trg_truncate_aud_overseers ON AUD_OVERSEERS;
+ALTER TABLE AUD_OVERSEERS RENAME TO AUD_CONTROLLERS;
+ALTER TABLE AUD_CONTROLLERS RENAME COLUMN OVERSEER_ID TO CONTROLLER_ID;
+DROP INDEX ix_overseer_unclosed;
+CREATE INDEX ix_controller_unclosed ON AUD_CONTROLLERS (CONTROLLER_ID) WHERE STOPPED_AT IS NULL;
+ALTER SEQUENCE aud_overseers_overseer_id_seq RENAME TO aud_controllers_controller_id_seq;
+ALTER TABLE AUD_CONTROLLERS RENAME CONSTRAINT aud_overseers_pkey TO aud_controllers_pkey;
+COMMENT ON TABLE AUD_CONTROLLERS IS 'Controller process history; the session lock owns leadership and unclosed history does not block a replacement.';
+ALTER TABLE AUD_CONTROLLERS RENAME CONSTRAINT aud_overseers_pid_check TO aud_controllers_pid_check;

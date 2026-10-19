@@ -143,19 +143,19 @@ def resource_checks(config: ConnectorConfig, host: Host | None = None) -> list[C
                 "Deployment profile",
                 "none: slots, threads and pools come from the Orchestration settings. "
                 "Recommended: laptop, because etl-craft cannot tell whether this host is shared; "
-                "declare server for a dedicated host. Sizes below are what laptop would apply",
+                "declare controller for a dedicated host. Sizes below are what laptop would apply",
             )
         )
-    elif config.deployment == DeploymentProfile.SERVER_WORKERS:
+    elif config.deployment == DeploymentProfile.CONTROLLER_AGENTS:
         checks.append(
             warn(
                 "Deployment profile",
-                "server-workers: the controller runs no tasks, and this version has no worker "
-                "queue provider, so run and server refuse to start",
+                "controller-agents: the controller runs no tasks, and this version has no agent "
+                "queue provider, so run and controller refuse to start",
             )
         )
     else:
-        checks.append(ok("Deployment profile", f"{profile}: applied when run and server start"))
+        checks.append(ok("Deployment profile", f"{profile}: applied when run and controller start"))
     sizing = size(allocation, profile, ceilings(config))
     reserve = f"{sizing.reserve_cpus:g} CPUs" + (
         "" if sizing.reserve_memory is None else f", {sizing.reserve_memory / MIB:.0f} MB"
@@ -189,7 +189,7 @@ def _connection_budget(config: ConnectorConfig, engine: Engine) -> list[Check]:
         limit = for_engine(engine).max_connections(conn)
     if limit is None:
         return []
-    if config.deployment in (DeploymentProfile.LAPTOP, DeploymentProfile.SERVER):
+    if config.deployment in (DeploymentProfile.LAPTOP, DeploymentProfile.CONTROLLER):
         sizing = size(discover(), config.deployment, ceilings(config))
         pool, tasks = sizing.engine_pool.value, sizing.task_slots.value
     else:
@@ -322,8 +322,8 @@ def _engine(config: ConnectorConfig, *, engine_state: bool) -> list[Check]:
                 checks.append(
                     warn(
                         "Engine DB kind",
-                        f"{detail}: in remote mode every orchestrator worker must run on this "
-                        "machine, because a worker elsewhere cannot open the file",
+                        f"{detail}: in remote mode each orchestrator task process must run on this "
+                        "machine, because a process elsewhere cannot open the file",
                     )
                 )
             else:

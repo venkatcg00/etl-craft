@@ -66,14 +66,14 @@ resumed explicitly after its ownership lease has been reconciled.
 
 ## Retries and `--force`
 
-Local pipeline runs, the overseer and ordinary `run --task_code` automatically retry failed,
+Local pipeline runs, the controller and ordinary `run --task_code` automatically retry failed,
 timed-out or lost attempts when `RETRIES` permits another attempt. The task parameter overrides
 `Orchestration.Retries`; without either, no automatic retry is enabled. `RETRY_DELAY_SECONDS`
 defaults to 60 and `RETRY_BACKOFF` to 2.0. Delays grow after each failure and are capped at one
 hour. Set the delay to `0` for immediate retries.
 
 The next attempt is stored as `QUEUED` with `NOT_BEFORE`, so restarting the supervisor preserves
-its due time and attempt budget. Waiting occupies no pipeline worker slot. Failure and always
+its due time and attempt budget. Waiting occupies no pipeline agent slot. Failure and always
 dependencies wait for this retry to settle. Retry budgets count persisted attempt numbers under
 one task-run identity; restarting a supervisor does not grant extra attempts.
 

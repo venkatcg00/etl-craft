@@ -48,7 +48,7 @@ def actions(engine):
         ("account list", ApiRole.ADMIN),
         ("clone", ApiRole.ADMIN),
         ("rehash", ApiRole.ADMIN),
-        ("server", ApiRole.ADMIN),
+        ("controller", ApiRole.ADMIN),
         ("publish-docs", ApiRole.ADMIN),
         ("docs-version", ApiRole.ADMIN),
         ("generate-docs", ApiRole.DEVELOPER),

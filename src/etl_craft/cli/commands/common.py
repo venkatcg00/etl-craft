@@ -90,7 +90,7 @@ def provisioning() -> bool:
 
 @contextmanager
 def command_context(
-    args: argparse.Namespace, *, role: Literal["run", "server"] | None = None
+    args: argparse.Namespace, *, role: Literal["run", "controller"] | None = None
 ) -> Iterator[OperationContext]:
     """Load command resources and dispose them after the service operation.
 
@@ -99,7 +99,7 @@ def command_context(
     """
     config = load_command_config(args)
     if role is not None:
-        config = start_role(config, server=role == "server")
+        config = start_role(config, server=role == "controller")
     engine = connect_engine_db(config)
     try:
         yield OperationContext(

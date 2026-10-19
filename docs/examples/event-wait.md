@@ -46,7 +46,7 @@ printf 'id\n1\n' > inbox/batch-001.csv
 
 The run waits, records the settled file and lets the script read it. A later run ignores
 `batch-001.csv`; deliver `batch-002.csv` to trigger it. The scheduled version uses
-`etl-craft overseer start` with the project's connector configuration.
+`etl-craft controller start` with the project's connector configuration.
 
 For a table instead of a file, replace `EVENT_FILE` with `EVENT_SQL`, such as
 `SELECT delivery_id FROM source.deliveries WHERE ready=true`. Each run checks that query anew;

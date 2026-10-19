@@ -47,10 +47,10 @@ def watermarked(engine_db):
             conn,
             attempt,
             current_actor(),
-            owner="worker",
+            owner="agent",
             lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
         )
-        tr.start_attempt(conn, attempt, current_actor(), owner="worker")
+        tr.start_attempt(conn, attempt, current_actor(), owner="agent")
         save_task_offset(conn, task, StoredOffset("NUMBER", "2"))
     return engine, task, run, summary, attempt
 
@@ -58,19 +58,19 @@ def watermarked(engine_db):
 def test_failed_ranges_and_success_offsets_are_atomic(engine_db, watermarked, monkeypatch):
     engine, task, run, summary, attempt = watermarked
     with engine.begin() as conn:
-        tr.record_watermark_range(conn, summary, "2", "3", attempt_id=attempt, owner="worker")
-        tr.finish_attempt(conn, attempt, "FAILED", current_actor(), owner="worker")
+        tr.record_watermark_range(conn, summary, "2", "3", attempt_id=attempt, owner="agent")
+        tr.finish_attempt(conn, attempt, "FAILED", current_actor(), owner="agent")
         assert fetch_task_offset(conn, task).offset_value == "2"
         retry = tr.queue_attempt(conn, summary, current_actor())
         tr.claim_attempt(
             conn,
             retry,
             current_actor(),
-            owner="worker",
+            owner="agent",
             lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
         )
-        tr.start_attempt(conn, retry, current_actor(), owner="worker")
-        tr.record_watermark_range(conn, summary, "2", "4", attempt_id=retry, owner="worker")
+        tr.start_attempt(conn, retry, current_actor(), owner="agent")
+        tr.record_watermark_range(conn, summary, "2", "4", attempt_id=retry, owner="agent")
     monkeypatch.setenv("ETL_CRAFT_FAULT", "script.after_offset")
     with pytest.raises(InjectedFaultError), engine.begin() as conn:
         tr.finish_attempt(
@@ -78,7 +78,7 @@ def test_failed_ranges_and_success_offsets_are_atomic(engine_db, watermarked, mo
             retry,
             "SUCCESS",
             current_actor(),
-            owner="worker",
+            owner="agent",
             offset=StoredOffset("NUMBER", "4"),
         )
     with engine.connect() as conn:
@@ -96,7 +96,7 @@ def test_failed_ranges_and_success_offsets_are_atomic(engine_db, watermarked, mo
             retry,
             "SUCCESS",
             current_actor(),
-            owner="worker",
+            owner="agent",
             offset=StoredOffset("NUMBER", "4"),
         )
         assert fetch_task_offset(conn, task).offset_value == "4"
@@ -123,7 +123,7 @@ def test_stale_owners_cannot_record_ranges(watermarked):
             {"expired": datetime.now(UTC) - timedelta(seconds=1), "id": attempt},
         )
         with pytest.raises(StaleTransitionError):
-            tr.record_watermark_range(conn, summary, "2", "3", attempt_id=attempt, owner="worker")
+            tr.record_watermark_range(conn, summary, "2", "3", attempt_id=attempt, owner="agent")
         row = conn.execute(
             text("SELECT WATERMARK_FROM, WATERMARK_TO FROM AUD_TASK_RUN_LOG WHERE TASK_RUN_ID=:id"),
             {"id": summary},
@@ -148,7 +148,7 @@ def test_reset_refuses_active_attempts_and_records_old_and_new(engine_db, waterm
     with pytest.raises(RunRefusedError, match="active attempt"):
         reset_watermark(engine, config, "P", "T", "1", "reload", selector=selector)
     with engine.begin() as conn:
-        tr.finish_attempt(conn, attempt, "FAILED", current_actor(), owner="worker")
+        tr.finish_attempt(conn, attempt, "FAILED", current_actor(), owner="agent")
     done = reset_watermark(engine, config, "P", "T", "1", "reload", selector=selector)
     assert "2 -> 1 (NUMBER)" in done.message
     with engine.connect() as conn:

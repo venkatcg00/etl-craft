@@ -1,4 +1,4 @@
-"""Worker acknowledgements, graceful draining and scoped process aborts."""
+"""Agent acknowledgements, graceful draining and scoped process aborts."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def process_ended(attempt: controls.ControlAttempt) -> bool:
 
 
 def abort_requested(engine: Engine, run_id: int, task_id: int) -> bool:
-    """Whether a worker must terminate this task, never another task's process."""
+    """Whether an agent must terminate this task, never another task's process."""
     with engine.connect() as conn:
         fences = controls.blocked(conn, run_id)
     return ControlAction.ABORT in (fences.get(None), fences.get(task_id))
@@ -95,7 +95,7 @@ def advance(engine: Engine, run_id: int | None = None, *, observed: bool = False
                 conn,
                 row.control_id,
                 ControlStatus.COMPLETED,
-                f"{row.action} completed; affected worker processes and "
+                f"{row.action} completed; affected agent processes and "
                 "engine-owned warehouse queries have ended; successful evidence is kept",
             )
 

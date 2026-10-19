@@ -524,8 +524,8 @@ def test_http_request_logs_do_not_expose_query_keys_in_attempt_log(project):
             pass
 
     server = HTTPServer(("127.0.0.1", 0), Endpoint)
-    worker = threading.Thread(target=server.serve_forever, daemon=True)
-    worker.start()
+    agent = threading.Thread(target=server.serve_forever, daemon=True)
+    agent.start()
     url = f"http://127.0.0.1:{server.server_port}/?api_key=hidden-key"
     (config.ingestion_scripts_dir / "load.py").write_text(
         "import logging, requests\n"
@@ -549,7 +549,7 @@ def test_http_request_logs_do_not_expose_query_keys_in_attempt_log(project):
     finally:
         server.shutdown()
         server.server_close()
-        worker.join(timeout=5)
+        agent.join(timeout=5)
 
 
 def test_handler_returns_the_offset_without_persisting_it(project):

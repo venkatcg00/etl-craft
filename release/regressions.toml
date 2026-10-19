@@ -165,10 +165,10 @@ B65 = [
 # that prove its 1.0.0 behaviour, or "open: <item>" for the unfinished item that owns it.
 [obvious_failures]
 engine-db-restart = [
-    "tests/integration/overseer/test_server.py::test_server_and_its_attempt_ride_out_an_engine_db_outage",
-    "tests/integration/overseer/test_server.py::test_an_outage_longer_than_its_budget_stops_the_server_naming_the_setting",
-    "tests/integration/overseer/test_server.py::test_a_leader_whose_connection_dropped_takes_its_lock_again",
-    "tests/integration/overseer/test_server.py::test_a_leader_whose_lock_was_taken_meanwhile_stops",
+    "tests/integration/controller/test_server.py::test_server_and_its_attempt_ride_out_an_engine_db_outage",
+    "tests/integration/controller/test_server.py::test_an_outage_longer_than_its_budget_stops_the_server_naming_the_setting",
+    "tests/integration/controller/test_server.py::test_a_leader_whose_connection_dropped_takes_its_lock_again",
+    "tests/integration/controller/test_server.py::test_a_leader_whose_lock_was_taken_meanwhile_stops",
     "tests/unit/test_engine_db_outage.py::test_a_reached_database_is_waited_for_until_it_answers",
     "tests/unit/test_engine_db_outage.py::test_a_database_never_reached_fails_at_once",
 ]
@@ -181,13 +181,13 @@ warehouse-connection-drop = [
 kill-task-or-overseer = [
     "tests/integration/execution/test_leases.py::test_parent_sigkill_reconciles_and_retries_real_child",
     "tests/integration/execution/test_leases.py::test_child_sigkill_is_failed_by_live_parent",
-    "tests/integration/overseer/test_server.py::test_killed_server_reconciles_before_retrying_exact_task_run",
+    "tests/integration/controller/test_server.py::test_killed_server_reconciles_before_retrying_exact_task_run",
     "tests/integration/execution/test_retries.py::test_lost_attempt_retries_with_a_new_owner",
 ]
 kill-worker = "open: S5.C"
 two-overseers = [
-    "tests/integration/overseer/test_server.py::test_only_one_leader_and_session_release_not_history_controls_restart",
-    "tests/integration/overseer/test_server.py::test_server_picks_up_cli_run_and_second_server_is_refused",
+    "tests/integration/controller/test_server.py::test_only_one_leader_and_session_release_not_history_controls_restart",
+    "tests/integration/controller/test_server.py::test_server_picks_up_cli_run_and_second_server_is_refused",
 ]
 same-run-twice = [
     "tests/integration/engine/test_schema.py::test_one_in_progress_run_per_pipeline",
@@ -196,8 +196,8 @@ same-run-twice = [
 ]
 schedules-downtime-dst = [
     "tests/unit/test_cron.py::test_next_tick",
-    "tests/integration/overseer/test_schedules.py::test_three_missed_ticks_keep_two_and_record_one_skipped_across_restarts",
-    "tests/integration/overseer/test_schedules.py::test_no_catchup_keeps_latest_tick_and_logical_date_uses_schedule_timezone",
+    "tests/integration/controller/test_schedules.py::test_three_missed_ticks_keep_two_and_record_one_skipped_across_restarts",
+    "tests/integration/controller/test_schedules.py::test_no_catchup_keeps_latest_tick_and_logical_date_uses_schedule_timezone",
 ]
 bad-metadata-or-files = [
     "tests/integration/engine/test_validate.py::test_task_definitions_are_checked_with_the_handlers_own_rules",

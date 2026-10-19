@@ -189,6 +189,6 @@ def test_overlapping_email_does_not_block_scheduled_dispatch(engine_db):
         manual_run = create(conn, pipeline, task, "manual")
         queued = transitions.create_run(conn, pipeline, current_actor(), status=RunStatus.QUEUED)
         active = [
-            row.pipeline_run_id for row in conn.execute(statement(conn, "overseer_active_runs"))
+            row.pipeline_run_id for row in conn.execute(statement(conn, "controller_active_runs"))
         ]
         assert queued in active and manual_run not in active

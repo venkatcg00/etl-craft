@@ -90,7 +90,7 @@ class TokenInput(BaseModel):
 
 
 def create_app(ctx: OperationContext) -> FastAPI:
-    """Build routes without opening connections or starting the overseer."""
+    """Build routes without opening connections or starting the controller."""
     app = FastAPI(
         title="etl-craft",
         version="1",

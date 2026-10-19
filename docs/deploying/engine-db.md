@@ -115,7 +115,7 @@ all fields and constraints. Execution writes immutable attempts and updates thei
 `AUD_GATE_WAITS` retains each run’s pipeline or task gate polling budget across restarts.
 `TASK_ID` is NULL for pipeline admission; `FIRST_CHECK_AT`, `NEXT_CHECK_AT`, `LOOKS` and
 `WAIT_UNTIL` track the original budget. Settled gates clear `NEXT_CHECK_AT`. Waiting gates
-occupy no task workers. See [gate waits and dispatch](server.md#gate-waits-and-dispatch).
+occupy no task agents. See [gate waits and dispatch](server.md#gate-waits-and-dispatch).
 
 Admission records the selected upstream identities and revisions in `AUD_GATE_DECISIONS`,
 and successful downstream work consumes only its recorded satisfied decisions.

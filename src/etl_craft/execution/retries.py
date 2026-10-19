@@ -1,4 +1,4 @@
-"""Persist automatic retry admission; delayed attempts use no worker slots."""
+"""Persist automatic retry admission; delayed attempts use no agent slots."""
 
 from __future__ import annotations
 

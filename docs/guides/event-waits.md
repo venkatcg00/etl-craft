@@ -1,8 +1,8 @@
 # Waiting for files or warehouse rows
 
 A local pipeline can start on its schedule and wait for a source to arrive. Add a task with
-`HANDLER='EVENT_WAIT'` before the tasks that read the source. The overseer checks the event
-without submitting a worker; a whole-pipeline `run` does the same. A frequent schedule with
+`HANDLER='EVENT_WAIT'` before the tasks that read the source. The controller checks the event
+without submitting an agent; a whole-pipeline `run` does the same. A frequent schedule with
 `OVERLAP_POLICY='SKIP'` leaves one run waiting instead of building a queue of empty runs.
 
 | Parameter | Value |
@@ -20,10 +20,10 @@ records every settled, unconsumed match. An already old file still gets a full o
 interval. A change to either size or modification time restarts that interval.
 
 `AUD_GATE_WAITS` stores `WAIT_KIND='EVENT'`, the original deadline, the next check and file
-observations. An indefinite wait has a NULL deadline; restarting an overseer preserves it.
+observations. An indefinite wait has a NULL deadline; restarting an controller preserves it.
 File waits use native filesystem notifications through watchdog (inotify on Linux and FSEvents
 on macOS) to bring a check forward. The scheduler checks notification hints within one second,
-without admitting a task worker. Notifications watch the fixed directory prefix of the glob,
+without admitting a task agent. Notifications watch the fixed directory prefix of the glob,
 including future subdirectories when needed; read access and unrelated file writes are ignored.
 A timer checks a matching file when its settling interval ends. Periodic scans at
 `EVENT_POLL_SECONDS` recover missed notifications, network filesystem changes and unavailable
@@ -33,15 +33,15 @@ wait checks once immediately for deliveries received during downtime.
 SQL waits probe at `EVENT_POLL_SECONDS`, close their connections between probes and use the
 normal warehouse connection and single-writer lock. A busy single-writer
 warehouse leaves the event waiting. A query or filesystem error fails the task with its cause.
-SQL probes run in fresh interpreters outside the scheduler loop, without worker slots.
+SQL probes run in fresh interpreters outside the scheduler loop, without agent slots.
 Each probe gets at most 30 seconds or the remaining event budget, whichever is shorter;
 a slow probe is stopped and checked again while budget remains. Interruption stops the local
 probe, which also exits if its supervisor dies. The original deadline is committed before querying. Keep queries short: stopping
 the local client does not guarantee that a remote warehouse immediately cancels its query.
 
 Idle waits retain only durable metadata, cached deadlines and file watch handles; they do not
-hold a warehouse connection or worker slot. The existing supervisor still performs cancellation,
-pause and lease checks, and the overseer still manages schedules and deployment health. Resource
+hold a warehouse connection or agent slot. The existing supervisor still performs cancellation,
+pause and lease checks, and the controller still manages schedules and deployment health. Resource
 usage is low rather than zero. Choose a longer polling interval for expensive queries or remote
 filesystems; this increases fallback detection latency. Use a dedicated inbox to keep recursive
 watch counts small.
@@ -94,9 +94,9 @@ def run(task):
 ```
 
 A single-task `run --task_code` performs one check and exits `23` (`WAITING`) if the event is
-not ready; it admits no worker or execution attempt. Resume with the same run identity or let
-the local pipeline runner or overseer continue. `explain` reports its durable event wait.
+not ready; it admits no agent or execution attempt. Resume with the same run identity or let
+the local pipeline runner or controller continue. `explain` reports its durable event wait.
 Remote mode refuses `EVENT_WAIT` in validation and DAG generation: its orchestrator would need
-a deferrable sensor to wait without using a worker. Use local mode for these event pipelines.
+a deferrable sensor to wait without using an agent. Use local mode for these event pipelines.
 
 See the [complete file-delivery example](../examples/event-wait.md).

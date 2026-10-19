@@ -45,7 +45,7 @@ def test_slow_sql_event_does_not_block_other_events_or_scheduler_shutdown(sql_wo
             return Capacity({"ingestion": 1, "warehouse": 1}, {"ingestion": 0, "warehouse": 0})
 
         def submit(self, spec):
-            pytest.fail("event waits must never occupy a worker")
+            pytest.fail("event waits must never occupy an agent")
 
     scheduler = Scheduler(
         world.engine_db,

@@ -8,14 +8,14 @@ import pytest
 from sqlalchemy import text
 
 from etl_craft.config import AuthConfig
+from etl_craft.controller.schedules import Schedules
+from etl_craft.controller.supervisor import WorkingSet
 from etl_craft.core.actor import SYSTEM_ACTOR, Actor, ActorKind
 from etl_craft.core.cron import timezone
 from etl_craft.core.enums import ApiRole
 from etl_craft.core.errors import StaleTransitionError
 from etl_craft.engine import runlog, transitions
 from etl_craft.execution.run_start import init_pipeline_run
-from etl_craft.overseer.schedules import Schedules
-from etl_craft.overseer.server import WorkingSet
 from etl_craft.services.generate_yml import pipeline_dag
 from etl_craft.services.operations import OperationContext
 from etl_craft.services.validate import validate
@@ -61,7 +61,7 @@ def test_three_missed_ticks_keep_two_and_record_one_skipped_across_restarts(engi
     assert [r.status for r in rows] == ["SKIPPED", "QUEUED", "QUEUED"]
     assert len({r.run_key for r in rows}) == 3
     assert all(r.actor_kind == "SERVICE" for r in rows)
-    assert reasons == ["missed while no overseer was running", "scheduled tick", "scheduled tick"]
+    assert reasons == ["missed while no controller was running", "scheduled tick", "scheduled tick"]
     assert len(WorkingSet().refresh(ctx)) == 1
 
 
@@ -122,7 +122,7 @@ def test_server_creates_and_finishes_a_scheduled_run(cli_project):
             text("UPDATE CFG_PIPELINES SET RUN_SCHEDULE='@daily', SCHEDULE_START_DATE=:today"),
             {"today": today},
         )
-    server = p.start("server")
+    server = p.start("controller")
     p.wait_for(
         "SELECT COUNT(*) FROM AUD_PIPELINES_RUN_LOG "
         "WHERE TRIGGER_KIND='SCHEDULE' AND STATUS='SUCCESS'",

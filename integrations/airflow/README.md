@@ -11,8 +11,8 @@ pip install ./integrations/airflow
 # Or install Airflow too: pip install './integrations/airflow[airflow3]'
 ```
 
-Install `etl-craft` separately in the worker's ETL environment. Put its executable on the
-worker's PATH and set `ETL_CRAFT_CONFIG` to the project's connector file. Airflow's dependency
+Install `etl-craft` separately in the agent's ETL environment. Put its executable on the
+agent's PATH and set `ETL_CRAFT_CONFIG` to the project's connector file. Airflow's dependency
 constraints do not apply to that environment. The factory never imports the ETL engine.
 
 Generate YAML with `etl-craft generate-yml` into a folder next to your DAG module. In that module:
@@ -31,7 +31,7 @@ globals().update(
 ```
 
 Choose the start date for your deployment; the metadata's `start_date` wins when present.
-Only deploy trusted YAML: its Bash commands execute on your workers. Validation refuses
+Only deploy trusted YAML: its Bash commands execute on your agents. Validation refuses
 malformed YAML, unknown versions, missing dependencies, cycles and duplicate DAG ids.
 
 Pipeline commands, environment, trigger rules, timezone, schedule, retries and graph are

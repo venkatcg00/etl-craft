@@ -47,11 +47,11 @@ def start_role(
     )
     if config.deployment is None:
         return config
-    if config.deployment == DeploymentProfile.SERVER_WORKERS:
+    if config.deployment == DeploymentProfile.CONTROLLER_AGENTS:
         raise ConfigurationError(
-            "Deployment.Profile is server-workers: tasks run on registered workers, and this "
-            "version has no worker queue provider, so nothing runs here instead. Choose laptop "
-            "or server until workers are available"
+            "Deployment.Profile is controller-agents: tasks run on registered agents, and this "
+            "version has no agent queue provider, so nothing runs here instead. Choose laptop "
+            "or controller until agents are available"
         )
     sizing = size(allocation, config.deployment, ceilings(config))
     _refuse_unaffordable(allocation, sizing, server=server)
@@ -98,5 +98,5 @@ def _refuse_unaffordable(allocation: Allocation, sizing: Sizing, *, server: bool
         f"{describe(allocation.memory, 'bytes')}; after the {sizing.profile} reserve and the "
         f"etl-craft process no task slot fits ({sizing.task_slots.reason}; one task needs about "
         f"{cpu_cost:g} CPU and {memory_cost // MIB} MB). Raise the allocation, or choose the "
-        "server profile on a dedicated host"
+        "controller profile on a dedicated host"
     )

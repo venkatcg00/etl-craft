@@ -1034,9 +1034,9 @@ BEGIN
     SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'AUD_TARGET_VIEW_STATEMENT is written only by etl-craft; use etl-craft run') END;
 END;
 
--- Overseer process history; the session lock is the source of leadership.
-CREATE TABLE AUD_OVERSEERS (
-    OVERSEER_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+-- Controller process history; the session lock is the source of leadership.
+CREATE TABLE AUD_CONTROLLERS (
+    CONTROLLER_ID INTEGER PRIMARY KEY AUTOINCREMENT,
     HOST VARCHAR NOT NULL,
     PID INTEGER NOT NULL CHECK (PID > 0),
     VERSION VARCHAR NOT NULL,
@@ -1048,21 +1048,21 @@ CREATE TABLE AUD_OVERSEERS (
     STOPPED_BY VARCHAR,
     STOPPED_BY_KIND VARCHAR
 );
-CREATE INDEX ix_overseer_unclosed ON AUD_OVERSEERS (OVERSEER_ID) WHERE STOPPED_AT IS NULL;
-CREATE TRIGGER trg_actor_guard_aud_overseers_insert BEFORE INSERT ON AUD_OVERSEERS
+CREATE INDEX ix_controller_unclosed ON AUD_CONTROLLERS (CONTROLLER_ID) WHERE STOPPED_AT IS NULL;
+CREATE TRIGGER trg_actor_guard_aud_controllers_insert BEFORE INSERT ON AUD_CONTROLLERS
 WHEN etl_craft_actor() IS NULL OR etl_craft_actor() = ''
 BEGIN
-    SELECT RAISE(ABORT, 'AUD_OVERSEERS is written only by etl-craft');
+    SELECT RAISE(ABORT, 'AUD_CONTROLLERS is written only by etl-craft');
 END;
-CREATE TRIGGER trg_actor_guard_aud_overseers_update BEFORE UPDATE ON AUD_OVERSEERS
+CREATE TRIGGER trg_actor_guard_aud_controllers_update BEFORE UPDATE ON AUD_CONTROLLERS
 WHEN etl_craft_actor() IS NULL OR etl_craft_actor() = ''
 BEGIN
-    SELECT RAISE(ABORT, 'AUD_OVERSEERS is written only by etl-craft');
+    SELECT RAISE(ABORT, 'AUD_CONTROLLERS is written only by etl-craft');
 END;
-CREATE TRIGGER trg_actor_guard_aud_overseers_delete BEFORE DELETE ON AUD_OVERSEERS
+CREATE TRIGGER trg_actor_guard_aud_controllers_delete BEFORE DELETE ON AUD_CONTROLLERS
 WHEN etl_craft_actor() IS NULL OR etl_craft_actor() = ''
 BEGIN
-    SELECT RAISE(ABORT, 'AUD_OVERSEERS is written only by etl-craft');
+    SELECT RAISE(ABORT, 'AUD_CONTROLLERS is written only by etl-craft');
 END;
 
 CREATE INDEX ix_pipeline_schedule_key ON AUD_PIPELINES_RUN_LOG (PIPELINE_ID, RUN_KEY) WHERE TRIGGER_KIND = 'SCHEDULE';
@@ -1424,7 +1424,7 @@ CREATE TABLE AUD_CFG_ACCOUNTS_HISTORY (
     UPDATED_DATE TIMESTAMP
 );
 
--- Durable scoped requests and append-only observations of worker/query endings.
+-- Durable scoped requests and append-only observations of agent/query endings.
 CREATE TABLE AUD_ATTEMPT_ACKNOWLEDGEMENTS (
     ATTEMPT_ID BIGINT NOT NULL REFERENCES AUD_TASK_ATTEMPTS(ATTEMPT_ID),
     KIND VARCHAR(8) NOT NULL CHECK (KIND IN ('PROCESS','QUERIES')),

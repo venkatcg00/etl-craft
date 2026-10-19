@@ -104,7 +104,7 @@ class AttemptStatus(StrEnum):
 
 
 class ControlAction(StrEnum):
-    """Run/task dispatch and worker controls."""
+    """Run/task dispatch and agent controls."""
 
     HOLD = "HOLD"
     RELEASE = "RELEASE"
@@ -267,8 +267,8 @@ class DeploymentProfile(StrEnum):
     """The deployment shape a team declares in ``Deployment.Profile``; never inferred."""
 
     LAPTOP = "laptop"
-    SERVER = "server"
-    SERVER_WORKERS = "server-workers"
+    CONTROLLER = "controller"
+    CONTROLLER_AGENTS = "controller-agents"
 
 
 class GatePolicy(StrEnum):
@@ -350,7 +350,7 @@ class ProtectionEvent(StrEnum):
 
 
 class ControlAcknowledgement(StrEnum):
-    """Independent, append-only physical observations from an owning worker."""
+    """Independent, append-only physical observations from an owning agent."""
 
     PROCESS = "PROCESS"
     QUERIES = "QUERIES"

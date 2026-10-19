@@ -12,12 +12,12 @@ import pytest
 import yaml
 from sqlalchemy import text
 
+from etl_craft.controller.leadership import leadership
+from etl_craft.controller.supervisor import WorkingSet
 from etl_craft.core.actor import SYSTEM_ACTOR
 from etl_craft.core.enums import ApiRole
 from etl_craft.core.errors import RunRefusedError
-from etl_craft.engine.repository import overseers
-from etl_craft.overseer.leadership import leadership
-from etl_craft.overseer.server import WorkingSet
+from etl_craft.engine.repository import controllers
 from etl_craft.services.operations import OperationContext
 from fixtures.engine_db import postgres_admin
 from fixtures.metadata import add_pipeline, add_task, start_run
@@ -26,21 +26,22 @@ from fixtures.metadata import add_pipeline, add_task, start_run
 def test_only_one_leader_and_session_release_not_history_controls_restart(engine_db):
     engine = engine_db.engine
     with leadership(engine):
-        first = overseers.start(engine)
+        first = controllers.start(engine)
         with (
-            pytest.raises(RunRefusedError, match=f"overseer {first} on .* is active"),
+            pytest.raises(RunRefusedError, match=f"controller {first} on .* is active"),
             leadership(engine),
         ):
             pytest.fail("second leader entered")
     # An unclosed history row cannot prevent the replacement from owning the session lock.
     with leadership(engine):
-        second = overseers.start(engine)
+        second = controllers.start(engine)
         assert second > first
-        overseers.heartbeat(engine, second, stopped=True)
+        controllers.heartbeat(engine, second, stopped=True)
     with engine.connect() as conn:
         assert (
             conn.execute(
-                text("SELECT STOPPED_AT FROM AUD_OVERSEERS WHERE OVERSEER_ID=:id"), {"id": first}
+                text("SELECT STOPPED_AT FROM AUD_CONTROLLERS WHERE CONTROLLER_ID=:id"),
+                {"id": first},
             ).scalar_one()
             is None
         )
@@ -94,10 +95,10 @@ def test_working_set_retains_only_active_graphs_and_refreshes_metadata(engine_db
 
 def test_server_picks_up_cli_run_and_second_server_is_refused(cli_project):
     p = cli_project
-    server = p.start("server")
-    p.wait_for("SELECT COUNT(*) FROM AUD_OVERSEERS", expected=1)
-    code, output = p.run("server")
-    assert code != 0 and "overseer 1 on" in output and "is active" in output
+    server = p.start("controller")
+    p.wait_for("SELECT COUNT(*) FROM AUD_CONTROLLERS", expected=1)
+    code, output = p.run("controller")
+    assert code != 0 and "controller 1 on" in output and "is active" in output
     code, output = p.run("run", "--pipeline_code", "P", "--init-only", "--run-key", "server:one")
     assert code == 0, output
     p.wait_for(
@@ -105,11 +106,11 @@ def test_server_picks_up_cli_run_and_second_server_is_refused(cli_project):
     )
     server.signal(signal.SIGTERM)
     assert server.wait() == 0, server.output
-    p.wait_for("SELECT COUNT(*) FROM AUD_OVERSEERS WHERE STOPPED_AT IS NOT NULL", expected=1)
+    p.wait_for("SELECT COUNT(*) FROM AUD_CONTROLLERS WHERE STOPPED_AT IS NOT NULL", expected=1)
     with p.engine.connect() as conn:
         assert (
             conn.execute(
-                text("SELECT COUNT(*) FROM AUD_ACTIONS WHERE COMMAND='server'")
+                text("SELECT COUNT(*) FROM AUD_ACTIONS WHERE COMMAND='controller'")
             ).scalar_one()
             == 2
         )
@@ -147,7 +148,7 @@ def test_shutdown_stops_tasks_and_leaves_exact_run_resumable(cli_project):
     blocking_script(p)
     code, output = p.run("run", "--pipeline_code", "P", "--init-only", "--run-key", "shutdown")
     assert code == 0, output
-    server = p.start("server")
+    server = p.start("controller")
     p.wait_for("SELECT COUNT(*) FROM AUD_TASK_ATTEMPTS WHERE STATUS='RUNNING'", expected=1)
     p.wait_for("SELECT COUNT(*) FROM AUD_TASK_ATTEMPTS WHERE PID IS NOT NULL", expected=1)
     wait_for_script(p)
@@ -155,7 +156,7 @@ def test_shutdown_stops_tasks_and_leaves_exact_run_resumable(cli_project):
     assert server.wait() == 0, server.output
     p.wait_for("SELECT STATUS FROM AUD_PIPELINES_RUN_LOG", expected="IN-PROGRESS")
     p.wait_for("SELECT OWNER_ID FROM AUD_PIPELINES_RUN_LOG", expected=None)
-    replacement = p.start("server")
+    replacement = p.start("controller")
     p.wait_for("SELECT STATUS FROM AUD_PIPELINES_RUN_LOG", expected="SUCCESS")
     replacement.signal(signal.SIGTERM)
     assert replacement.wait() == 0, replacement.output
@@ -170,7 +171,7 @@ def test_killed_server_reconciles_before_retrying_exact_task_run(cli_project):
     p = cli_project
     blocking_script(p)
     assert p.run("run", "--pipeline_code", "P", "--init-only", "--run-key", "recover")[0] == 0
-    server = p.start("server")
+    server = p.start("controller")
     p.wait_for("SELECT COUNT(*) FROM AUD_TASK_ATTEMPTS WHERE STATUS='RUNNING'", expected=1)
     wait_for_script(p)
     server.descendants()
@@ -185,7 +186,7 @@ def test_killed_server_reconciles_before_retrying_exact_task_run(cli_project):
         conn.execute(
             text("UPDATE AUD_PIPELINES_RUN_LOG SET LEASE_EXPIRES_AT=:expired"), {"expired": expired}
         )
-    replacement = p.start("server")
+    replacement = p.start("controller")
     p.wait_for("SELECT STATUS FROM AUD_PIPELINES_RUN_LOG", expected="SUCCESS", timeout=20)
     replacement.signal(signal.SIGTERM)
     assert replacement.wait() == 0, replacement.output
@@ -234,7 +235,7 @@ def test_shutdown_interrupts_gate_wait_without_starting_a_task(cli_project):
         add_dependency(conn, p.pipeline_id, p.task_id, task, upstream_pipeline=upstream)
     assert p.run("pause", "--pipeline_code", "UPSTREAM", "--reason", "maintenance")[0] == 0
     assert p.run("run", "--pipeline_code", "P", "--init-only", "--run-key", "gate")[0] == 0
-    server = p.start("server")
+    server = p.start("controller")
     p.wait_for("SELECT COUNT(*) FROM AUD_GATE_WAITS WHERE NEXT_CHECK_AT IS NOT NULL", expected=1)
     started = time.monotonic()
     server.signal(signal.SIGTERM)
@@ -259,7 +260,7 @@ def test_operator_cancellation_takes_precedence_over_shutdown_resume(cli_project
         after = add_task(conn, p.pipeline_id, "after", "PYTHON", SCRIPT_NAME="load.py")
         add_dependency(conn, p.pipeline_id, after, p.task_id)
     assert p.run("run", "--pipeline_code", "P", "--init-only", "--run-key", "cancel")[0] == 0
-    server = p.start("server")
+    server = p.start("controller")
     wait_for_script(p)
     code, output = p.run("abort", "--pipeline_code", "P", "--run-key", "cancel", "--reason", "stop")
     assert code == 0, output
@@ -320,7 +321,7 @@ def test_server_and_its_attempt_ride_out_an_engine_db_outage(cli_project):
     p = cli_project
     released_script(p)
     assert p.run("run", "--pipeline_code", "P", "--init-only", "--run-key", "outage")[0] == 0
-    server = p.start("server")
+    server = p.start("controller")
     started = p.config.project_dir / "started"
     deadline = time.monotonic() + 15
     while not started.exists():
@@ -345,8 +346,8 @@ def test_an_outage_longer_than_its_budget_stops_the_server_naming_the_setting(cl
     raw = yaml.safe_load(p.config.config_path.read_text())
     raw["Orchestration"]["Engine_db_outage_seconds"] = 2
     p.config.config_path.write_text(yaml.safe_dump(raw, sort_keys=False))
-    server = p.start("server")
-    p.wait_for("SELECT COUNT(*) FROM AUD_OVERSEERS", expected=1)
+    server = p.start("controller")
+    p.wait_for("SELECT COUNT(*) FROM AUD_CONTROLLERS", expected=1)
     with engine_db_cut_off(p.engine):
         code = server.wait(timeout=60)
     assert code != 0
@@ -363,7 +364,7 @@ def test_a_leader_whose_connection_dropped_takes_its_lock_again(engine_db):
         leader.wait(threading.Event())
         assert leader.connection.connection.driver_connection.info.backend_pid != before
         with (
-            pytest.raises(RunRefusedError, match="stop it before starting a server"),
+            pytest.raises(RunRefusedError, match="stop it before starting a controller"),
             leadership(engine),
         ):
             pytest.fail("second leader entered")
@@ -378,6 +379,6 @@ def test_a_leader_whose_lock_was_taken_meanwhile_stops(engine_db):
             admin.execute("SELECT pg_terminate_backend(%s)", (pid,))
         with (
             leadership(engine),
-            pytest.raises(RunRefusedError, match="took over while this server's Engine DB"),
+            pytest.raises(RunRefusedError, match="took over while this controller's Engine DB"),
         ):
             leader.wait(threading.Event())

@@ -1,4 +1,4 @@
-"""Automatic retries retain attempt history and release worker slots while delayed."""
+"""Automatic retries retain attempt history and release agent slots while delayed."""
 
 from datetime import UTC, datetime, timedelta
 
@@ -132,10 +132,10 @@ def test_lost_attempt_retries_with_a_new_owner(engine_db, config):
             conn,
             first,
             current_actor(),
-            owner="lost-worker",
+            owner="lost-agent",
             lease_expires_at=datetime.now(UTC) - timedelta(seconds=1),
         )
-        transitions.lose_attempt(conn, first, current_actor(), owner="lost-worker")
+        transitions.lose_attempt(conn, first, current_actor(), owner="lost-agent")
     outcome = run_task(engine, config, "P", "load", child=CHILD)
     rows = attempts(engine, run)
     assert outcome.status == "SUCCESS"
@@ -163,11 +163,11 @@ def test_delayed_retry_does_not_take_the_only_worker_slot(engine_db, config):
             conn,
             first,
             current_actor(),
-            owner="failed-worker",
+            owner="failed-agent",
             lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
         )
         transient_failure(conn, first)
-        transitions.finish_attempt(conn, first, "FAILED", current_actor(), owner="failed-worker")
+        transitions.finish_attempt(conn, first, "FAILED", current_actor(), owner="failed-agent")
     steps = pipeline_steps(engine, config, "P", child=CHILD)
     deadline = time.monotonic() + 10
     try:

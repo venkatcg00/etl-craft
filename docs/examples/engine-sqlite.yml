@@ -3,7 +3,7 @@
 # One file per environment, nothing to install and nothing to authenticate
 # (auth_mode is `none` whether written or not). Relative paths resolve
 # against this file. SQLite serves one machine: a remote orchestrator's
-# workers elsewhere cannot open the file, so production uses PostgreSQL.
+# agents elsewhere cannot open the file, so production uses PostgreSQL.
 #
 # Each setting is marked `# variable` or `# value`. A variable is looked up in
 # the secrets source (here: the process environment); when it is not set, the

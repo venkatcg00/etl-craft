@@ -1,4 +1,4 @@
-"""Send a command to an etl-craft server's API, as the signed-in person or a service token."""
+"""Send a command to an etl-craft controller's API, as the signed-in person or a service token."""
 
 from __future__ import annotations
 

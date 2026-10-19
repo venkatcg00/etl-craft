@@ -1,4 +1,4 @@
-"""Durable event waits and atomic completion outside the worker pool."""
+"""Durable event waits and atomic completion outside the agent pool."""
 
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ def check_event(
     cancel: threading.Event | None = None,
     force_check: bool = False,
 ) -> EventCheck:
-    """Check once; waiting never admits an attempt or holds a worker slot."""
+    """Check once; waiting never admits an attempt or holds an agent slot."""
     try:
         with locks.event(task_id).hold(engine, wait_seconds=0.1):
             with engine.begin() as conn:

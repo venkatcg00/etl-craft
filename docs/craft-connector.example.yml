@@ -49,7 +49,7 @@ Orchestration:
   Task_timeout_seconds: 21600          # value — 0 disables; a task's TASK_TIMEOUT_SECONDS overrides
   # Api_address: 127.0.0.1:8730    # HTTP listener with etl-craft[server]
   Timezone: UTC                  # default logical date for manual runs and schedules
-  Shutdown_grace_seconds: 60           # value — server waits before stopping local work
+  Shutdown_grace_seconds: 60           # value — controller waits before stopping local work
   Engine_db_outage_seconds: 120       # value — how long a process that reached a PostgreSQL
                                        # Engine DB waits for it after a restart or failover;
                                        # 0: fail at the first refused connection
@@ -148,9 +148,9 @@ Orchestration:
       secret: EMAIL_SECRET             # variable, required: a secret is never used as written
 
 # Deployment:                          # optional; no profile blocks: Profile names the shape
-#   Profile: laptop                    # value or variable — laptop | server | server-workers.
+#   Profile: laptop                    # value or variable — laptop | controller | controller-agents.
 #                                      # Unset: slots, threads and pools come from the settings
-#                                      # above. Set: run and server size them from the measured
+#                                      # above. Set: run and controller size them from the measured
 #                                      # CPU and memory, with the settings above as ceilings.
 #                                      # `etl-craft doctor` shows the sizes before you choose.
 

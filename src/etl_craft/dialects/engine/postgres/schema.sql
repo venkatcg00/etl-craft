@@ -921,9 +921,9 @@ CREATE TRIGGER trg_truncate_aud_target_hash_version BEFORE TRUNCATE ON AUD_TARGE
 CREATE TRIGGER trg_actor_guard_aud_target_view_statement BEFORE INSERT OR UPDATE OR DELETE ON AUD_TARGET_VIEW_STATEMENT FOR EACH ROW EXECUTE FUNCTION etl_craft_guard();
 CREATE TRIGGER trg_truncate_aud_target_view_statement BEFORE TRUNCATE ON AUD_TARGET_VIEW_STATEMENT FOR EACH STATEMENT EXECUTE FUNCTION etl_craft_guard();
 
--- Overseer process history; the session lock is the source of leadership.
-CREATE TABLE AUD_OVERSEERS (
-    OVERSEER_ID BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+-- Controller process history; the session lock is the source of leadership.
+CREATE TABLE AUD_CONTROLLERS (
+    CONTROLLER_ID BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     HOST VARCHAR NOT NULL,
     PID INTEGER NOT NULL CHECK (PID > 0),
     VERSION VARCHAR NOT NULL,
@@ -935,10 +935,10 @@ CREATE TABLE AUD_OVERSEERS (
     STOPPED_BY VARCHAR,
     STOPPED_BY_KIND VARCHAR
 );
-COMMENT ON TABLE AUD_OVERSEERS IS 'Overseer process history; the session lock owns leadership and unclosed history does not block a replacement.';
-CREATE INDEX ix_overseer_unclosed ON AUD_OVERSEERS (OVERSEER_ID) WHERE STOPPED_AT IS NULL;
-CREATE TRIGGER trg_actor_guard_aud_overseers BEFORE INSERT OR UPDATE OR DELETE ON AUD_OVERSEERS FOR EACH ROW EXECUTE FUNCTION etl_craft_guard();
-CREATE TRIGGER trg_truncate_aud_overseers BEFORE TRUNCATE ON AUD_OVERSEERS FOR EACH STATEMENT EXECUTE FUNCTION etl_craft_guard();
+COMMENT ON TABLE AUD_CONTROLLERS IS 'Controller process history; the session lock owns leadership and unclosed history does not block a replacement.';
+CREATE INDEX ix_controller_unclosed ON AUD_CONTROLLERS (CONTROLLER_ID) WHERE STOPPED_AT IS NULL;
+CREATE TRIGGER trg_actor_guard_aud_controllers BEFORE INSERT OR UPDATE OR DELETE ON AUD_CONTROLLERS FOR EACH ROW EXECUTE FUNCTION etl_craft_guard();
+CREATE TRIGGER trg_truncate_aud_controllers BEFORE TRUNCATE ON AUD_CONTROLLERS FOR EACH STATEMENT EXECUTE FUNCTION etl_craft_guard();
 CREATE OR REPLACE FUNCTION etl_craft_notify_execution() RETURNS trigger AS $$
 BEGIN
     PERFORM pg_notify('etl_craft_events', current_schema());
@@ -1284,7 +1284,7 @@ CREATE TABLE AUD_CFG_ACCOUNTS_HISTORY (
     UPDATED_DATE TIMESTAMPTZ
 );
 
--- Durable scoped requests and append-only observations of worker/query endings.
+-- Durable scoped requests and append-only observations of agent/query endings.
 CREATE TABLE AUD_ATTEMPT_ACKNOWLEDGEMENTS (
     ATTEMPT_ID BIGINT NOT NULL REFERENCES AUD_TASK_ATTEMPTS(ATTEMPT_ID),
     KIND VARCHAR(8) NOT NULL CHECK (KIND IN ('PROCESS','QUERIES')),

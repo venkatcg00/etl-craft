@@ -340,7 +340,7 @@ def test_run_ending_and_consumption_roll_back_together(cli_project, point, crash
         assert (
             conn.execute(text("SELECT COUNT(*) FROM AUD_DEPENDENCY_CONSUMPTION")).scalar_one() == 0
         )
-        # The dead overseer's lease is expired before the next command reconciles it.
+        # The dead controller's lease is expired before the next command reconciles it.
         conn.execute(
             text("UPDATE AUD_PIPELINES_RUN_LOG SET LEASE_EXPIRES_AT=:past WHERE PIPELINE_ID=:id"),
             {"id": project.pipeline_id, "past": "2000-01-01 00:00:00"},

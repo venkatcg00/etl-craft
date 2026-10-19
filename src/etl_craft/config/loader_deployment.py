@@ -41,19 +41,19 @@ def parse_deployment(
             f"{[p.value for p in DeploymentProfile]}{resolver.hint('Deployment.Profile')}"
         ),
     )
-    if profile == DeploymentProfile.SERVER_WORKERS and not engine.shared_by_hosts:
+    if profile == DeploymentProfile.CONTROLLER_AGENTS and not engine.shared_by_hosts:
         raise ConfigurationError(
-            f"{path}: Deployment.Profile is server-workers, but the Engine DB is "
+            f"{path}: Deployment.Profile is controller-agents, but the Engine DB is "
             f"{engine.display_name}; "
-            "workers share one PostgreSQL Engine DB. Use a PostgreSQL Engine profile, or choose "
-            "laptop or server"
+            "agents share one PostgreSQL Engine DB. Use a PostgreSQL Engine profile, or choose "
+            "laptop or controller"
         )
     host, _ = parse_api_address(api_address)
     if profile == DeploymentProfile.LAPTOP and not _loopback(host):
         raise ConfigurationError(
             f"{path}: Deployment.Profile is laptop, but Orchestration.Api_address={api_address!r} "
-            "listens beyond this machine; a laptop server binds to loopback. Use 127.0.0.1, "
-            "or choose the server profile"
+            "listens beyond this machine; a laptop controller binds to loopback. Use 127.0.0.1, "
+            "or choose the controller profile"
         )
     return profile
 

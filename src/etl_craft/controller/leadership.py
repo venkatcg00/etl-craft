@@ -10,13 +10,14 @@ from dataclasses import dataclass
 from typing import Any
 
 import psycopg
-from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.core.errors import LockTimeoutError, RunRefusedError
 from etl_craft.core.filelock import file_lock
+from etl_craft.dialects.engine import for_engine
 from etl_craft.engine.locks import advisory_key
-from etl_craft.engine.repository.overseers import active_overseer
+from etl_craft.engine.queries import statement
+from etl_craft.engine.repository.controllers import active_controller
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ class Leadership:
     def hold(self) -> None:
         """Take the PostgreSQL session lock again when a dropped connection took it away.
 
-        Refuse when another server took it meanwhile. SQLite's file lock never drops.
+        Refuse when another controller took it meanwhile. SQLite's file lock never drops.
         """
         if self.engine is not None and self.connection is None:
             self.connection = _acquire(self.engine, self.key, retaking=True)
@@ -61,18 +62,16 @@ def _acquire(engine: Engine, key: int, *, retaking: bool = False) -> Connection:
     """Hold the deployment's session lock and listen for execution notifications."""
     conn = engine.connect().execution_options(isolation_level="AUTOCOMMIT")
     try:
-        held = conn.execute(
-            text("SELECT pg_try_advisory_lock(:key) AS held"), {"key": key}
-        ).scalar_one()
+        held = conn.execute(statement(conn, "controller_try_lock"), {"key": key}).scalar_one()
         if not held:
             reason = (
-                "; it took over while this server's Engine DB connection was down, so this "
-                "server stops"
+                "; it took over while this controller's Engine DB connection was down, so this "
+                "controller stops"
                 if retaking
-                else "; stop it before starting a server"
+                else "; stop it before starting a controller"
             )
-            raise RunRefusedError(active_overseer(engine) + reason)
-        conn.exec_driver_sql("LISTEN etl_craft_events")
+            raise RunRefusedError(active_controller(engine) + reason)
+        conn.execute(statement(conn, "controller_listen"))
     except BaseException:
         conn.close()
         raise
@@ -81,26 +80,24 @@ def _acquire(engine: Engine, key: int, *, retaking: bool = False) -> Connection:
 
 @contextmanager
 def leadership(engine: Engine) -> Iterator[Leadership]:
-    """Hold a deployment-specific lock until all local workers have stopped."""
-    if engine.dialect.name == "sqlite":
-        database = engine.url.database
-        if not database or database == ":memory:":
-            raise RunRefusedError("server requires a file-backed SQLite Engine DB")
+    """Hold a deployment-specific lock until all local agents have stopped."""
+    path = for_engine(engine).controller_lock_path(engine)
+    if path is not None:
         acquired = False
         try:
-            with file_lock(f"{database}.overseer.lock", wait_seconds=0.05):
+            with file_lock(path, wait_seconds=0.05):
                 acquired = True
                 yield Leadership()
         except LockTimeoutError:
             if acquired:
                 raise
             raise RunRefusedError(
-                active_overseer(engine) + "; stop it before starting a server"
+                active_controller(engine) + "; stop it before starting a controller"
             ) from None
         return
     with engine.connect() as conn:
-        schema = str(conn.execute(text("SELECT current_schema() AS schema")).scalar_one())
-    key = advisory_key(f"etl-craft:overseer:{schema}")
+        schema = str(conn.execute(statement(conn, "controller_schema")).scalar_one())
+    key = advisory_key(f"etl-craft:controller:{schema}")
     leader = Leadership(_acquire(engine, key), engine, key)
     try:
         yield leader
@@ -118,8 +115,8 @@ def leadership(engine: Engine) -> Iterator[Leadership]:
 def _release(conn: Connection, key: int) -> None:
     """Stop listening and release the session lock, then close the connection."""
     try:
-        conn.exec_driver_sql("UNLISTEN etl_craft_events")
-        conn.execute(text("SELECT pg_advisory_unlock(:key) AS released"), {"key": key})
+        conn.execute(statement(conn, "controller_unlisten"))
+        conn.execute(statement(conn, "controller_unlock"), {"key": key})
     except Exception:
         conn.invalidate()
         raise

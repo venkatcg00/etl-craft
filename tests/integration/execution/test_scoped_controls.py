@@ -1,4 +1,4 @@
-"""Scoped fences and durable worker/query acknowledgements on both Engine DBs."""
+"""Scoped fences and durable agent/query acknowledgements on both Engine DBs."""
 
 import contextvars
 import threading
@@ -107,7 +107,7 @@ def test_claim_racing_hold_is_either_owned_or_fenced(ctx):
                     conn,
                     attempt,
                     current_actor(),
-                    owner="worker",
+                    owner="agent",
                     lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
                 )
             return True
@@ -248,7 +248,7 @@ def wait_for(check, timeout=20):
 
     deadline = time.monotonic() + timeout
     while not check():
-        assert time.monotonic() < deadline, "expected worker observation did not arrive"
+        assert time.monotonic() < deadline, "expected agent observation did not arrive"
         threading.Event().wait(0.05)
 
 
@@ -485,7 +485,7 @@ def test_server_query_acknowledgement_requires_handler_completion_not_just_exit(
             ),
         ),
     )
-    # The fake handler exercises the worker protocol without issuing a warehouse query.
+    # The fake handler exercises the agent protocol without issuing a warehouse query.
     spec = admit_attempt(ctx.engine, server.config, first, "first", "P", run, False)
     result = execute_attempt(ctx.engine, server.config, spec, CHILD)
     assert result.status == (RunStatus.SUCCESS if behavior == "succeed" else RunStatus.FAILED)

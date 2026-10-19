@@ -206,3 +206,14 @@ def test_a_command_help_includes_the_global_options(capsys):
     text = capsys.readouterr().out
     assert "--pipeline_code" in text
     assert "global options" in text
+
+
+def test_controller_is_the_only_supervisor_command(capsys):
+    with pytest.raises(SystemExit) as help_exit:
+        main(["controller", "--help"])
+    assert help_exit.value.code == 0
+    assert "etl-craft controller" in capsys.readouterr().out
+    with pytest.raises(SystemExit) as old_exit:
+        main(["server"])
+    assert old_exit.value.code == 2
+    assert "invalid choice: 'server'" in capsys.readouterr().err

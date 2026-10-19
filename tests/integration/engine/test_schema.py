@@ -34,7 +34,7 @@ TABLES = (
     "aud_task_documentation",
     "aud_dependency_consumption",
     "schema_migrations",
-    "aud_overseers",
+    "aud_controllers",
 )
 
 

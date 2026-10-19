@@ -1,4 +1,4 @@
-"""Run the demo under ``etl-craft server`` for days, killing the server at random, and check it.
+"""Run the demo under ``etl-craft controller`` for days, killing the server at random, and check it.
 
 Usage::
 
@@ -8,7 +8,7 @@ Usage::
 
 ``setup`` installs the wheel into ``DIR/venv``, copies ``examples/demo`` to ``DIR/demo``, prepares
 its warehouse and metadata, and schedules ``CLIENT_ALPHA``, ``CLIENT_BETA`` and ``SUPPORT_DM``
-every ``--every`` minutes, a third of the interval apart. ``run`` keeps ``etl-craft server``
+every ``--every`` minutes, a third of the interval apart. ``run`` keeps ``etl-craft controller``
 running in ``DIR/demo``, sends it SIGKILL at random times and starts it again, appends a check to
 ``DIR/report.jsonl`` every half hour, and after ``--days`` stops the server and runs the final
 check. Started again after an interruption, it continues until the same end.
@@ -124,7 +124,7 @@ def _start_server(soak: Path, state: dict[str, str | int]) -> subprocess.Popen[b
     logs.mkdir(exist_ok=True)
     with (logs / f"server-{state['server_starts']:04d}.log").open("wb") as output:
         return subprocess.Popen(
-            [_bin(soak, "etl-craft"), "server"],
+            [_bin(soak, "etl-craft"), "controller"],
             cwd=soak / "demo",
             env=_env(soak),
             stdout=output,
@@ -385,7 +385,7 @@ def _check_explanations(soak: Path, db: sqlite3.Connection) -> list[str]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Soak the demo under etl-craft server.")
+    parser = argparse.ArgumentParser(description="Soak the demo under etl-craft controller.")
     verbs = parser.add_subparsers(dest="verb", required=True)
     prepare = verbs.add_parser("setup")
     prepare.add_argument("dir", type=Path)

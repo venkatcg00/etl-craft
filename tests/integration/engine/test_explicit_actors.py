@@ -8,13 +8,13 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
+from etl_craft.controller.supervisor import serve
 from etl_craft.core.actor import SYSTEM_ACTOR, Actor, ActorKind, acting_as, current_actor
 from etl_craft.core.enums import AccountKind, ApiRole, FailureClass, YesNo
 from etl_craft.core.errors import ConfigurationError
 from etl_craft.core.failures import Failure
 from etl_craft.engine import migrations, transitions
 from etl_craft.execution.context import build_task_context
-from etl_craft.overseer.server import serve
 from etl_craft.services.operations import OperationContext, accounts, sessions, tokens
 from fixtures.metadata import add_pipeline, add_task
 from fixtures.released_schema import SCHEMAS, install
@@ -116,7 +116,7 @@ def test_upgrade_keeps_legacy_actor_and_adds_run_writer(
             text(
                 "INSERT INTO AUD_ACTIONS "
                 "(ACTOR, ACTOR_KIND, HOST, COMMAND, ARGUMENTS, OUTCOME) "
-                "VALUES ('original-worker', 'WORKER', 'host', 'run', '{}', 'REQUESTED')"
+                "VALUES ('original-agent', 'WORKER', 'host', 'run', '{}', 'REQUESTED')"
             )
         )
     assert "0035_explicit_actors.sql" in migrations.apply_pending_migrations(db.engine)
@@ -132,13 +132,13 @@ def test_upgrade_keeps_legacy_actor_and_adds_run_writer(
         action = conn.execute(
             text(
                 "SELECT ACTOR AS name, ACTOR_KIND AS kind FROM AUD_ACTIONS "
-                "WHERE ACTOR='original-worker'"
+                "WHERE ACTOR='original-agent'"
             )
         ).one()
     assert row.name == "original-person"
     assert row.kind == "HUMAN"
     assert row.writer == "etl-craft"
-    assert action.name == "original-worker"
+    assert action.name == "original-agent"
     assert action.kind == "WORKER"
     with acting_as(Actor("new-person", ActorKind.USER)), db.engine.begin() as conn:
         new_run = transitions.create_active_run(conn, pipeline)

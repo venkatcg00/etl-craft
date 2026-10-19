@@ -57,7 +57,7 @@ def _global_options(*, defaults: bool) -> argparse.ArgumentParser:
     group.add_argument(
         "--server",
         metavar="URL",
-        help="operate this etl-craft server instead of the local project (default: "
+        help="operate this etl-craft controller instead of the local project (default: "
         "$ETL_CRAFT_SERVER); https:// except to localhost",
         default=default(None),
     )

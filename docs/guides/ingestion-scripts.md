@@ -91,7 +91,7 @@ replaced by `_`: `crm/customers.py` becomes `etl_craft_script_crm_customers_py`.
 own future imports apply; dataclasses, enums, pickling and `typing.get_type_hints` work as in
 other modules. A script may use `ProcessPoolExecutor` with the `fork` start method on platforms
 that support it. The `spawn` start method cannot re-import the script by its generated module
-name; put functions needed by spawned workers in a normally importable helper module.
+name; put functions needed by spawned agents in a normally importable helper module.
 
 ## Output and logs
 

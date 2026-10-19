@@ -411,7 +411,7 @@ def lock_active_run(conn: Connection, pipeline_run_id: int) -> None:
 def start_run(
     conn: Connection, pipeline_run_id: int, actor: Actor, *, owner: str, lease_expires_at: datetime
 ) -> None:
-    """Attach the overseer to an active run that has no owner."""
+    """Attach the controller to an active run that has no owner."""
     _guard(
         conn,
         "start_run",
@@ -716,7 +716,7 @@ def cancel_attempt(
     error_message: str,
     task_log: str | None = None,
 ) -> None:
-    """Cancel a nonterminal attempt on behalf of an operator or overseer."""
+    """Cancel a nonterminal attempt on behalf of an operator or controller."""
     _end_attempt(
         conn,
         attempt_id,

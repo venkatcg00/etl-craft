@@ -16,4 +16,4 @@ Running etl-craft on a machine or under an orchestrator.
 - [Operations](operations.md): backups, upgrades, logs and watching runs.
 - [Security](security.md): secrets, least-privilege accounts, and what tasks can do.
 
-- [Local server](server.md): leadership, submitting active runs, crash recovery and graceful shutdown.
+- [Controller](server.md): leadership, submitting active runs, crash recovery and graceful shutdown.

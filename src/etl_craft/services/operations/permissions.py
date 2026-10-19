@@ -73,7 +73,7 @@ ROLES: dict[str, ApiRole | None] = {
             "upgrade-targets",
             "rehash",
             "clone",
-            "server",
+            "controller",
             "publish-docs",
             "docs-version",
         ),

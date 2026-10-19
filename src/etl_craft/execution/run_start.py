@@ -316,7 +316,7 @@ def _resume_run(
 def _wait_gate(
     engine: Engine, config: ConnectorConfig, pipeline_id: int, queued: int, clock: Clock
 ) -> Generator[float, None, PipelineGateResult | None]:
-    """Yield gate deadlines without a worker, stopping if the queued run is cancelled."""
+    """Yield gate deadlines without an agent, stopping if the queued run is cancelled."""
     while True:
         if run_cancelled(engine, queued):
             return None

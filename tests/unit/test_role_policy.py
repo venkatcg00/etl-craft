@@ -32,7 +32,7 @@ pytestmark = pytest.mark.unit
         ("setup", {"print_grants": True}, ApiRole.VIEWER),
         ("publish-docs", {}, ApiRole.ADMIN),
         ("clone", {}, ApiRole.ADMIN),
-        ("server", {}, ApiRole.ADMIN),
+        ("controller", {}, ApiRole.ADMIN),
         ("login", {}, None),
         ("logout", {}, None),
     ],

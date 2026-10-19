@@ -1,6 +1,6 @@
 """The local pool: each attempt's task process on this host, within slots per kind.
 
-It is the default pool, the only one on SQLite, and what the overseer and ``etl-craft run``
+It is the default pool, the only one on SQLite, and what the controller and ``etl-craft run``
 use. ``execute_attempt`` claims each attempt, runs its task process and records its outcome, on
 one of the pool's threads.
 """

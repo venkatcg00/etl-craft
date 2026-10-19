@@ -104,7 +104,7 @@ ENGINE_SQL_PACKAGES = (
     "core",
     "engine",
     "execution",
-    "overseer",
+    "controller",
     "services",
 )
 RUFF_VALUE = re.compile(r"\((\d+) > (\d+)\)")

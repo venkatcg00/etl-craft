@@ -1,4 +1,4 @@
-"""Where attempts run: the pool interface the scheduler, the overseer and the CLI use.
+"""Where attempts run: the pool interface the scheduler, the controller and the CLI use.
 
 The caller admits an attempt (binds its task run, queues the attempt and records its gate
 decisions) and submits its ``AttemptSpec``; the pool claims the attempt, runs its task process,
