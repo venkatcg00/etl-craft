@@ -166,10 +166,12 @@ class ApiRole(StrEnum):
 
 
 class ActionOutcome(StrEnum):
-    """Immutable action-request outcomes, separate from execution results."""
+    """Immutable request and completion outcomes, separate from task and run results."""
 
     REQUESTED = "REQUESTED"
     REFUSED = "REFUSED"
+    SUCCESS = "SUCCESS"
+    FAILURE = "FAILURE"
 
 
 class InterventionAction(StrEnum):

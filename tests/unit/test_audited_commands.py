@@ -11,7 +11,6 @@ READ_ONLY = {
     "audit",
     "doctor",
     "explain",
-    "generate-yml",
     "graph",
     "history",
     "list",

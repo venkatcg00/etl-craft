@@ -6,8 +6,8 @@ then run `etl-craft login`. For an SSO-only admin, use `setup --oidc-subject SUB
 
 ```bash
 etl-craft account add --name analyst --kind USER --role viewer
-etl-craft account add --name airflow --kind SERVICE --role operator
-etl-craft token create --name airflow --role operator --expires 90d
+etl-craft account add --name scheduler --kind SERVICE --role operator
+etl-craft token create --name scheduler --role operator --expires 90d
 etl-craft account set-role --name analyst --role operator
 etl-craft account reset-password --name analyst
 etl-craft account disable --name analyst
@@ -16,14 +16,13 @@ etl-craft logout
 ```
 
 Password entry is interactive and never a command argument. Put the printed service token
-in the Airflow connection password named by `Auth.Airflow_connection_id`, or provide it to
-CI as `ETL_CRAFT_TOKEN`. Never commit its value. Token creation requires a SERVICE account;
+in `ETL_CRAFT_TOKEN` for the scheduler. Never commit its value. Token creation requires a SERVICE account;
 users sign in for expiring sessions instead. Disabling retains the account and revokes all
 credentials. Password reset revokes all existing sessions.
 
-The same role policy holds for CLI, HTTP/UI and Python operations. The `airflow` operator can
+The same role policy holds for CLI, HTTP/UI and Python operations. The `scheduler` operator can
 run, pause and resume pipelines, but cannot apply configuration or administer tokens. Those
-require developer and admin respectively. For example, with Airflow's operator token:
+require developer and admin respectively. For example, with external scheduler's operator token:
 
 ```bash
 etl-craft list                                      # viewer read: allowed

@@ -1,21 +1,16 @@
 """Metadata code checks on fresh schemas, released schemas and generated commands."""
 
-from dataclasses import replace
 from pathlib import Path
-from shlex import split
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DataError, IntegrityError
 
-from etl_craft.config import AuthConfig
-from etl_craft.core.enums import Mode
-from etl_craft.core.errors import MetadataError, MigrationError
+from etl_craft.core.errors import MigrationError
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine.migrations import apply_pending_migrations
 from etl_craft.engine.queries import run_script
-from etl_craft.services.generate_yml import FINALIZE_TASK, INIT_TASK, pipeline_dag
-from fixtures.metadata import add_dependency, add_pipeline, add_task
+from fixtures.metadata import add_pipeline, add_task
 
 
 @pytest.mark.parametrize(
@@ -62,47 +57,6 @@ def test_migration_lists_all_invalid_codes_before_changing_anything(legacy, monk
         conn.execute(text("UPDATE CFG_TASKS SET TASK_CODE = 'load'"))
     assert apply_pending_migrations(legacy.engine)
     assert apply_pending_migrations(legacy.engine) == []
-
-
-@pytest.mark.parametrize("mode", [Mode.LOCAL, Mode.REMOTE])
-@pytest.mark.parametrize("object", ["pipeline", "task"])
-def test_generation_refuses_legacy_codes_even_without_database_checks(legacy, mode, object):
-    with legacy.engine.begin() as conn:
-        code = "bad$code" if object == "pipeline" else "P"
-        pipeline = add_pipeline(conn, code)
-        add_task(conn, pipeline, "__init__" if object == "task" else "load")
-    with legacy.engine.connect() as conn, pytest.raises(MetadataError, match="rename"):
-        pipeline_dag(conn, replace(legacy.config, mode=mode), code)
-
-
-@pytest.mark.parametrize("count", [0, 1, 2, 5, 10])
-@pytest.mark.parametrize("mode", [Mode.LOCAL, Mode.REMOTE])
-def test_generated_dags_have_controls_and_no_self_dependency(engine_db, count, mode):
-    with engine_db.engine.begin() as conn:
-        pipeline = add_pipeline(conn, "P")
-        tasks = [add_task(conn, pipeline, f"task_{position}") for position in range(count)]
-        for position in range(1, count):
-            for upstream in range(position):
-                if (position + upstream) % 3 != 0 or upstream == position - 1:
-                    add_dependency(conn, pipeline, tasks[position], tasks[upstream])
-    with engine_db.engine.connect() as conn:
-        dag = pipeline_dag(
-            conn,
-            replace(
-                engine_db.config, mode=mode, auth=AuthConfig(airflow_connection_id="etl_craft")
-            ),
-            "P",
-        )
-    assert list(dag["tasks"]).count(INIT_TASK) == list(dag["tasks"]).count(FINALIZE_TASK) == 1
-    for code, step in dag["tasks"].items():
-        assert code not in step["depends_on"]
-        arguments = split(step["bash_command"])
-        assert arguments[:4] == ["etl-craft", "run", "--pipeline_code", "P"]
-        if "--task_code" in arguments:
-            assert arguments[arguments.index("--task_code") + 1] == code
-        if "--run-date" in arguments:
-            assert arguments[arguments.index("--run-date") + 1] == "{{ data_interval_end | ds }}"
-            assert arguments[arguments.index("--run-key") + 1] == "orchestrator:{{ run_id }}"
 
 
 def test_upgrade_preserves_metadata_references_identity_counters_and_custom_index(

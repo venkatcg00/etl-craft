@@ -113,10 +113,9 @@ def test_auth_settings_validate_lifetime_and_issuer(tmp_path):
         "Session_hours": 2,
         "Oidc_issuer": "https://issuer.example",
         "Oidc_client_id": "etl",
-        "Airflow_connection_id": "craft",
     }
     assert parse_config(raw, tmp_path / "c.yml").auth == AuthConfig(
-        2, "https://issuer.example", "etl", "craft"
+        2, "https://issuer.example", "etl"
     )
     for broken in (
         {"Session_hours": True},
@@ -238,3 +237,18 @@ def test_credentials_refuse_non_regular_files_and_wrong_owners(monkeypatch):
     path.mkdir()
     with pytest.raises(ConfigurationError, match="expected a regular file"):
         credentials.read_session("db")
+
+
+def test_removed_export_auth_setting_is_unknown(tmp_path):
+    removed = "Air" + "flow_connection_id"
+    raw = {
+        "Secrets": {"Source_type": "environment"},
+        "Orchestration": {"Mode": "local"},
+        "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:e.db", "schema": "main"}},
+        "Auth": {removed: "scheduler"},
+    }
+    with pytest.raises(ConfigurationError) as caught:
+        parse_config(raw, tmp_path / "connector.yml")
+    assert removed in str(caught.value)
+    assert "Auth" in str(caught.value)
+    assert str(tmp_path / "connector.yml") in str(caught.value)

@@ -2,8 +2,7 @@
 
 etl-craft is a metadata-driven ETL orchestration engine. Pipelines, their tasks and the
 dependencies between them are rows in a database, the **Engine DB**. etl-craft reads those rows
-and runs the work against one **warehouse**. It runs pipelines by itself, or it generates a DAG
-description for an orchestrator such as Airflow to schedule.
+and runs the work against one **warehouse**. The controller schedules and supervises its pipelines.
 
 ## Core ideas
 
@@ -14,7 +13,7 @@ change.
 
 **One verb runs everything.** `etl-craft run --pipeline_code X` runs a pipeline by dispatching
 ready tasks after each completion, one child process per task. `etl-craft run --pipeline_code X --task_code Y` runs one task;
-it is the command a generated orchestrator DAG calls for each step.
+Run requests may also be submitted through the HTTP API.
 
 **Runs resolve themselves.** A run's id is never passed between tasks. Each task finds the
 pipeline's active run in `AUD_PIPELINES_RUN_LOG`, and the database guarantees there is only one.

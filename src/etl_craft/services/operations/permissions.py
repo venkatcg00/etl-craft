@@ -38,7 +38,6 @@ ROLES: dict[str, ApiRole | None] = {
             "validate",
             "doctor",
             "lineage",
-            "generate-yml",
             "config plan",
             "config export",
             "docs-version check",

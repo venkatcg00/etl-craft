@@ -20,8 +20,8 @@ Secrets:
   Profile: ETL_CRAFT_PROFILE           # variable — dev | sit | uat | prod, set in each environment
 
 Orchestration:
-  Mode: remote                         # value — an orchestrator runs each task from generate-yml's DAGs
-  Name: Airflow                        # value — informational: the YAML DAG is the same; convert it with your own scripts
+  Mode: remote                         # value — external execution
+  Name: external scheduler                        # value — informational label for external execution
   Task_timeout_seconds: 21600          # value
   Max_parallel_tasks: 8                # value
   Enforce_sla: false                   # value — true: email when a run misses its SLA_IN_HOURS

@@ -8,7 +8,7 @@ profile it declares, so none of them can drift from the loader.
 Every file follows the same layout, in this order (the loader refuses any other):
 
 1. **Secrets**: where the variable names below are looked up, and the default profile.
-2. **Orchestration**: execution mode, limits, the `generate-yml` DAG defaults, and the Email
+2. **Orchestration**: execution mode, limits, scheduling defaults and the Email
    relay, per profile.
 3. **Engine**: the Engine DB, one block per profile.
 4. **Warehouse**: the one warehouse, one block per profile.
@@ -58,8 +58,7 @@ retry counts and delays are at least 0.
 
 | File | Engine | Warehouse | Mode | Shows |
 |---|---|---|---|---|
-| `orchestration-local.yml` | SQLite | DuckDB file | local | etl-craft dispatches ready tasks; per-profile DAG defaults for previewing `generate-yml` |
-| `orchestration-remote.yml` | PostgreSQL | PostgreSQL | remote | Airflow runs each task; `Allow_schedule: false` outside prod, Email per profile, `Global_dag` in prod |
+| `orchestration-local.yml` | SQLite | DuckDB file | local | etl-craft dispatches ready tasks; per-profile limits and scheduling defaults |
 
 ## Engine DB
 

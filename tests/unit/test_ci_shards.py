@@ -115,7 +115,7 @@ def test_missing_matrix_artifacts_fail(tmp_path):
     wheel.write_bytes(b"wheel")
     problems = ci.verify(tmp_path, wheel)
     assert any("profiles missing" in problem for problem in problems)
-    assert any("package/Airflow matrix" in problem for problem in problems)
+    assert any("package matrix" in problem for problem in problems)
 
 
 def test_every_original_python_platform_and_warehouse_combination_is_planned():

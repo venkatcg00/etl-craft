@@ -1,8 +1,8 @@
 # etl-craft
 
 A metadata-driven ETL orchestration engine. Pipelines, tasks and their dependencies are rows in
-an Engine DB; etl-craft reads that metadata and runs it against one warehouse. It works with or
-without an external orchestrator.
+an Engine DB; etl-craft reads that metadata and runs it against one warehouse.
+The controller schedules and supervises the work.
 
 Documentation: <https://venkatcg00.github.io/etl-craft/>
 

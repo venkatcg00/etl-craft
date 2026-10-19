@@ -136,7 +136,7 @@ item's text, or work done early under another item.
 | S5.U Robustness before the cluster | Done | #176, #182, #183, #184 | Engine DB restarts ridden out; SLA breach writes retried; no single-writer guess; timing tests verified under load; subprocess code measured by coverage |
 | S5.W Retry only what can succeed | Done | #215 | Failure classification, retry policies and immutable attempt evidence; local and Snowflake acceptance passed, unavailable Databricks live acceptance waived by the owner |
 | S5.Z Controller and agent names | Done | #216 | Controller command/package/history, agent terminology and consistent deployment profiles; lossless Engine DB upgrades |
-| S5.Y A standalone orchestrator | Planned | | Airflow export, `etl-craft-airflow` and remote mode deleted; the controller rebuilds the catalog on `Docs_site.Schedule` |
+| S5.Y A standalone orchestrator | In progress | #219 | Slice 1 removes the export and schedules controller catalog builds; remote-mode removal is slice 2 |
 | S5.AA One source for every action | Planned | | One action table for roles, audit and placement; generated API routes; one request per action; consistent names, folders and types |
 | S5.X Unmanaged SQL tasks | Planned | | `SQL_SCRIPT` runs any SQL as an ordinary dependent task with per-statement audit; pre- and post-SQL are upstream and downstream tasks |
 | S5.C and later | Not started | | |
@@ -281,6 +281,11 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.Y.1 (#219) covers the controller's catalog ticks and immutable request/completion audit
+on both Engine DBs, preserved leadership and service roles, removal refusals, documentation,
+and complete remaining CI matrix accounting. No warehouse SQL or authentication changes;
+cloud acceptance does not apply. Remote execution remains for S5.Y.2.
 
 S5.Z (#216) validates the controller command, both Engine DBs, preserved process history from
 released schemas, fresh/upgraded catalog equivalence, scheduling, leadership and local/API
@@ -515,6 +520,18 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- S5.Y.1: the owner approved one REQUESTED row and one SUCCESS/FAILURE completion row per
+  catalog build, using the existing audit table. The rows share request time and arguments;
+  no historical row is updated. The existing operation context exposes its request for that
+  correlation, without changing permission or request-recording policy. A single background
+  worker preserves supervision/lease renewal and is joined before releasing leadership.
+  A first start with no request waits for the next tick; elapsed ticks are not replayed.
+  Deleted export references are removed from B47/B64; B47 now names the retained invalid-code
+  upgrade guard and B64 keeps the database guard, preserving the required defect coverage.
+  The unused simulated-orchestrator fixture is removed with its sole export-based caller;
+  remote-mode execution itself stays in slice 2. The now-unused jsonschema dependency is
+  removed with its consumer.
 
 - S5.Z: the owner approved consistent pre-1.0 names without aliases, including configuration:
   deployment profiles are `laptop`, `controller` and `controller-agents`. The table's key is

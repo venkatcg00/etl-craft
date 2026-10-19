@@ -90,7 +90,7 @@ task again or without its dependencies, or relax dependency gates), see
 
 ## Under an orchestrator
 
-In remote mode an orchestrator such as Airflow runs the tasks and is the only source of truth for
+In remote mode an orchestrator such as external scheduler runs the tasks and is the only source of truth for
 scheduling, so `run --pipeline_code` without `--task_code` is refused (exit status `10`). The
 orchestrator runs three kinds of step:
 
@@ -110,7 +110,7 @@ etl-craft run --pipeline_code SALES_DAILY --finalize-only          # last
 
 In local mode, `--init-only` checks the pipeline's dependencies and prints `SKIPPED` with the
 reason when they are not satisfied, and `--finalize-only` records `SKIPPED` for tasks that can
-never run. See [Running under an orchestrator](../deploying/orchestrator.md).
+never run. See [Starting runs from another scheduler](../deploying/http-api.md#starting-runs-from-another-scheduler).
 
 ## SLA
 

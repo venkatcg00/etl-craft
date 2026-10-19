@@ -94,15 +94,12 @@ class Expected:
 
 EXPECTED = {
     "minimal-local.yml": Expected("sqlite", "duckdb", "local"),
-    "docs-site.yml": Expected("sqlite", "duckdb", "remote"),
+    "docs-site.yml": Expected("sqlite", "duckdb", "local"),
     "docs-site-proxy.yml": Expected("sqlite", "duckdb", "local"),
     "secrets-environment.yml": Expected("postgresql", "postgres", "local", POSTGRES_WAREHOUSE_URL),
     # Its values come from secrets-file.env, not from anything set here.
     "secrets-file.yml": Expected("postgresql", "postgres", "local"),
     "orchestration-local.yml": Expected("sqlite", "duckdb", "local"),
-    "orchestration-remote.yml": Expected(
-        "postgresql", "postgres", "remote", POSTGRES_WAREHOUSE_URL
-    ),
     "engine-sqlite.yml": Expected("sqlite", "postgres", "local", POSTGRES_WAREHOUSE_URL),
     "engine-postgres.yml": Expected("postgresql", "postgres", "remote", POSTGRES_WAREHOUSE_URL),
     "warehouse-postgres.yml": Expected("postgresql", "postgres", "remote", POSTGRES_WAREHOUSE_URL),
@@ -244,27 +241,6 @@ def test_every_example_loads_for_every_profile(clean_environment, tmp_path, name
     # The Postgres auth example sets the Engine DB's login the same way.
     if name == "auth-postgres.yml":
         assert config.engine.auth_mode == profile
-
-
-def test_allow_schedule_and_email_follow_the_profile(clean_environment):
-    for variable, value in VALUES.items():
-        clean_environment.setenv(variable, value)
-    clean_environment.setenv("WAREHOUSE_JDBC_URL", POSTGRES_WAREHOUSE_URL)
-    path = EXAMPLES / "orchestration-remote.yml"
-
-    clean_environment.setenv("ETL_CRAFT_PROFILE", "dev")
-    dev = load_config(path)
-    assert dev.dag_defaults.allow_schedule is False
-    assert dev.dag_defaults.global_dag is False
-    assert dev.email is None
-
-    clean_environment.setenv("ETL_CRAFT_PROFILE", "prod")
-    prod = load_config(path)
-    assert prod.dag_defaults.allow_schedule is True
-    assert prod.dag_defaults.global_dag is True
-    assert prod.dag_defaults.email_on_failure is True
-    assert prod.dag_defaults.email_recipients == ["data-alerts@example.com"]
-    assert prod.email is not None and prod.email.port == 587
 
 
 def test_the_secrets_file_example_reads_only_its_file(clean_environment):

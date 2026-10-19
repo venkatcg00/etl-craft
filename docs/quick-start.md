@@ -122,4 +122,3 @@ and after every run the Engine DB's tables are cloned into its `aud` schema.
   scripts and alerts work, and how to step in on a run.
 - [The project directory](deploying/project-layout.md) and
   [`craft-connector.yml` examples](examples/README.md): starting a project of your own.
-- [Running under an orchestrator](deploying/orchestrator.md): the same pipelines as Airflow DAGs.

@@ -227,52 +227,10 @@ jobs:
           path: ${{ runner.temp }}/result
           if-no-files-found: error
 
-  airflow:
-    name: Airflow contract (${{ matrix.airflow-version }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        airflow-version: ["2.11.0", "3.3.2"]
-    env:
-      AIRFLOW_HOME: /tmp/etl-craft-airflow
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-      ETL_CRAFT_AIRFLOW_CONTRACTS: /tmp/etl-craft-airflow-contracts
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: ${{ inputs.cache != 'cold' }}
-      - name: Install engine test dependencies
-        run: uv sync --locked --all-groups --python 3.11
-      - name: Export every demo pipeline
-        run: uv run python scripts/export_airflow_contracts.py "$ETL_CRAFT_AIRFLOW_CONTRACTS"
-      - name: Install factory with real Airflow in an isolated environment
-        run: |
-          uv venv "$RUNNER_TEMP/airflow-venv" --python 3.11
-          uv pip install --python "$RUNNER_TEMP/airflow-venv/bin/python" \
-            "apache-airflow==${{ matrix.airflow-version }}" pytest mypy \
-            types-pyyaml types-jsonschema ./integrations/airflow
-      - name: Validate operator graphs, commands and refused exports
-        run: >-
-          "$RUNNER_TEMP/airflow-venv/bin/python" -m pytest -q integrations/airflow/tests
-      - name: Type-check the isolated factory
-        run: >-
-          "$RUNNER_TEMP/airflow-venv/bin/python" -m mypy --strict
-          --follow-imports=skip --ignore-missing-imports integrations/airflow/src
-      - name: Record Airflow validation
-        run: uv run python scripts/ci_shards.py record airflow-${{ matrix.airflow-version }} "$RUNNER_TEMP/result"
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: ci-airflow-${{ matrix.airflow-version }}
-          path: ${{ runner.temp }}/result
-          if-no-files-found: error
-
   complete:
     name: every test and matrix accounted for
     if: always()
-    needs: [prepare, static, test, service, e2e, package, airflow]
+    needs: [prepare, static, test, service, e2e, package]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

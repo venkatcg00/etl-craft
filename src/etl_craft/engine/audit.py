@@ -137,22 +137,22 @@ def register_engine(engine: Engine) -> None:
 
 
 @contextmanager
-def command_request(command: str, arguments: Mapping[str, Any]) -> Iterator[None]:
+def command_request(command: str, arguments: Mapping[str, Any]) -> Iterator[ActionRequest | None]:
     """Record state-changing command requests; read-only commands make no audit writes."""
     checking = (command == "docs-version" and arguments.get("check")) or (
         command == "rehash" and arguments.get("dry_run")
     )
     if command not in MUTATING_COMMANDS or checking:
-        yield
+        yield None
         return
     existing = _request.get()
     if existing is not None and existing.command == command and existing.actor == current_actor():
-        yield
+        yield existing
         return
     request = ActionRequest(command, mask_arguments(arguments), datetime.now(UTC))
     token = _request.set(request)
     try:
-        yield
+        yield request
     finally:
         try:
             request.record()

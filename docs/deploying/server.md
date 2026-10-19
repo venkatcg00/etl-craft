@@ -32,8 +32,8 @@ Initialization performs the usual admission checks. The controller picks up an u
 Scheduled runs begin `QUEUED`. The oldest queued run of each pipeline is admitted through
 the pipeline gates when there is no active sibling. Gate checks never sleep or enter the task
 agent pool. Ready tasks are dispatched after each completion; automatic retries remain a
-subsequent roadmap item. To run under Airflow or another orchestrator, use
-[remote mode](orchestrator.md); `controller` refuses that mode.
+subsequent roadmap item. To run under external scheduler or another orchestrator, use
+[remote mode](http-api.md#starting-runs-from-another-scheduler); `controller` refuses that mode.
 
 With a [deployment profile](sizing.md), the controller sizes its pool, threads and Engine DB pool
 from the measured allocation, and the settings below are ceilings. `Max_parallel_tasks` bounds
@@ -85,7 +85,7 @@ so long catch-up histories release the database writer lock between records.
 preserves the tick for later admission. Only one run per pipeline can be `IN-PROGRESS`.
 You can inspect or cancel a queued run by its exact `--run-id` or `--run-key`.
 These columns govern the local controller; the existing `PIPELINE_PARAMETERS.CATCHUP` boolean
-continues to control Airflow's generated DAG catch-up setting.
+continues to control external scheduler's generated DAG catch-up setting.
 
 ## Gate waits and dispatch
 

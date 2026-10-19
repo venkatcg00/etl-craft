@@ -8,7 +8,7 @@ intervention, the message it had before.
 
 In remote mode the orchestrator is the only source of truth for runs, so all of these are refused
 (exit status `10`): mark, clear or stop the task in the orchestrator instead. See
-[Running under an orchestrator](../deploying/orchestrator.md).
+[Starting runs from another scheduler](../deploying/http-api.md#starting-runs-from-another-scheduler).
 
 ## Choose the run
 

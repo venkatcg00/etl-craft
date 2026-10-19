@@ -110,7 +110,7 @@ etl-craft logout
   metadata or the Engine DB and are refused against a server, naming the server-side way:
   config files and migrations reach a server only through its own deployment, by CI or an
   admin. Other commands work on a local project only.
-- **Automation.** CI and Airflow keep a service token in `ETL_CRAFT_TOKEN`, with no refresh.
+- **Automation.** CI and external scheduler keep a service token in `ETL_CRAFT_TOKEN`, with no refresh.
 - **Errors.** A server that cannot be reached, or that answers with something other than
   etl-craft JSON, exits **27**. Every other refusal keeps its own exit code.
 

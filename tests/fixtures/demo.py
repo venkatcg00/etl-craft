@@ -151,7 +151,6 @@ class Demo:
             "Cloning": {
                 "dev": {"Enabled": self.warehouse_kind != "snowflake_iceberg", "Scope": "all"}
             },
-            "Auth": {"Airflow_connection_id": "etl_craft"},
         }
         path = self.root / "craft-connector.yml"
         if self.cloud:

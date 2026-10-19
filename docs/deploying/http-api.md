@@ -167,3 +167,11 @@ See the [deployment role table](security.md#deployment-accounts).
 known column writers and protection history (viewer). Each calls the shared Python operation.
 See [Protecting human SCD edits](../guides/human-overrides.md) for request bodies, integration
 identities, atomic warehouse support and recovery.
+
+## Starting runs from another scheduler
+
+Provision a SERVICE account with the operator role and keep its token in `ETL_CRAFT_TOKEN`.
+Call `etl-craft run --pipeline_code SALES --server https://etl.example.com`, or
+`POST /api/v1/pipelines/SALES/runs` with bearer authentication. The controller owns dispatch,
+leases and finalization. Use the documented command exit codes and explicit run identities to
+inspect progress; no scheduler-specific package or exported DAG is needed.
