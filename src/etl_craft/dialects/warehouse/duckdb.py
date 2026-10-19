@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from etl_craft.config.auth import warehouse_by_key
+from etl_craft.core.enums import FailureClass
+from etl_craft.core.failures import Failure
+from etl_craft.dialects.failures import driver_error
 from etl_craft.dialects.warehouse.base import ReplaceStrategy, SurrogateKey, WarehouseDialect
 
 
@@ -14,6 +19,27 @@ class DuckDBWarehouse(WarehouseDialect):
 
     Only one process may write a DuckDB file at a time, so warehouse access is queued.
     """
+
+    def classify_failure(self, error: BaseException) -> Failure:
+        """DuckDB reports SQL and transaction errors as native exception classes."""
+        error = driver_error(error)
+        failure = super().classify_failure(error)
+        names = {base.__name__ for base in type(error).__mro__}
+        if names & {
+            "TransactionException",
+            "IOException",
+            "OutOfMemoryException",
+            "InterruptException",
+        }:
+            return replace(failure, kind=FailureClass.TRANSIENT)
+        if names & {
+            "ParserException",
+            "BinderException",
+            "CatalogException",
+            "PermissionException",
+        }:
+            return replace(failure, kind=FailureClass.PERMANENT)
+        return failure
 
     spec = warehouse_by_key("duckdb")
     atomic_protection = True

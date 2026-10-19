@@ -10,6 +10,7 @@ from sqlalchemy.engine import Connection, RowMapping
 
 from etl_craft.core.enums import YesNo
 from etl_craft.core.errors import RunStateError, UsageError
+from etl_craft.core.failures import retry_reason
 from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.pauses import fetch_open_pause
@@ -128,4 +129,10 @@ def attempt_document(row: RowMapping) -> AttemptView:
         "not_before",
     ):
         captured[key] = timestamp(captured[key])
+    captured["retry_reason"] = retry_reason(
+        captured["failure_class"],
+        captured["failure_source"],
+        captured["failure_code"],
+        captured["retry_on"],
+    )
     return AttemptView(**captured)

@@ -43,10 +43,10 @@ class GapAttribute(StrEnum):
 
 def enum_value(enum: type[E], value: str, error: EtlCraftError) -> E:
     """Read a case-insensitive enum value or raise the caller's domain diagnostic."""
-    try:
-        return enum(value.strip().lower())
-    except ValueError:
-        raise error from None
+    for member in enum:
+        if member.value.casefold() == value.strip().casefold():
+            return member
+    raise error
 
 
 class CatalogRunKind(StrEnum):
@@ -354,3 +354,28 @@ class ControlAcknowledgement(StrEnum):
 
     PROCESS = "PROCESS"
     QUERIES = "QUERIES"
+
+
+class FailureClass(StrEnum):
+    """Whether repeating the same work can succeed."""
+
+    TRANSIENT = "TRANSIENT"
+    PERMANENT = "PERMANENT"
+    UNKNOWN = "UNKNOWN"
+
+
+class RetryOn(StrEnum):
+    """Failure classes eligible for automatic retry within the retry budget."""
+
+    NONE = "NONE"
+    TRANSIENT = "TRANSIENT"
+    TRANSIENT_AND_UNKNOWN = "TRANSIENT_AND_UNKNOWN"
+    ANY = "ANY"
+
+    def permits(self, failure: FailureClass) -> bool:
+        """Decide eligibility independently of the number of attempts remaining."""
+        return (
+            self == RetryOn.ANY
+            or (self != RetryOn.NONE and failure == FailureClass.TRANSIENT)
+            or (self == RetryOn.TRANSIENT_AND_UNKNOWN and failure == FailureClass.UNKNOWN)
+        )

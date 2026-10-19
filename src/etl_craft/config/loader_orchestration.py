@@ -6,7 +6,7 @@ from pathlib import Path
 
 from etl_craft.config.loader_helpers import Profiled, flag, string_list, whole_number
 from etl_craft.config.model import DagDefaults, ExecutionLimits
-from etl_craft.core.enums import GatePolicy, Mode, enum_value
+from etl_craft.core.enums import GatePolicy, Mode, RetryOn, enum_value
 from etl_craft.core.errors import ConfigurationError
 
 ORCHESTRATION_KEYS = frozenset(
@@ -28,6 +28,7 @@ ORCHESTRATION_KEYS = frozenset(
         "Catchup",
         "Tags",
         "Retries",
+        "Retry_on",
         "Retry_delay_minutes",
         "Depends_on_past",
         "Email_on_failure",
@@ -112,4 +113,19 @@ def parse_dag_defaults(settings: Profiled, path: Path) -> DagDefaults:
         email_on_failure=flag(settings, "Email_on_failure", None, path),
         email_recipients=string_list(settings, "Email_recipients", path),
         allow_schedule=flag(settings, "Allow_schedule", True, path),
+    )
+
+
+def parse_retry_on(settings: Profiled, path: Path) -> RetryOn:
+    """Read the project policy; reject a typo rather than broadening retries."""
+    raw = settings.text("Retry_on")
+    if raw is None:
+        return RetryOn.TRANSIENT
+    return enum_value(
+        RetryOn,
+        raw,
+        ConfigurationError(
+            f"{path}: Orchestration.Retry_on={raw!r}; expected "
+            f"{', '.join(RetryOn)}; set Retry_on to one of these values"
+        ),
     )

@@ -19,6 +19,7 @@ from etl_craft.core.enums import (
     DeploymentProfile,
     GatePolicy,
     Mode,
+    RetryOn,
     TableFormat,
 )
 from etl_craft.core.errors import ConfigurationError
@@ -270,6 +271,8 @@ class ConnectorConfig:
     deployment: DeploymentProfile | None = None
     sizing: Sizing | None = None
     """Set at ``run`` and ``server`` startup from the measured allocation and ``deployment``."""
+
+    retry_on: RetryOn = RetryOn.TRANSIENT
 
     @property
     def project_dir(self) -> Path:

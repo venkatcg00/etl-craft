@@ -38,6 +38,7 @@ Secrets:
                                        # write ETL_CRAFT_PROFILE to set it per environment
 
 Orchestration:
+  Retry_on: TRANSIENT                 # value; retry only failures that can succeed
   # Profile: prod                 # overrides Secrets.Profile for this section only
   Mode: local                          # value — local: etl-craft dispatches ready tasks itself.
                                        # remote: an orchestrator runs one task at a time

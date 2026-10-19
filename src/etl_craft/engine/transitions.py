@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from typing import Any, Literal
 from uuid import uuid4
@@ -24,6 +24,21 @@ from etl_craft.core.errors import RunStateError, StaleTransitionError
 from etl_craft.core.faults import fault_point
 from etl_craft.core.time import as_utc
 from etl_craft.engine import controls, run_scopes, runlog
+from etl_craft.engine.attempts import (
+    ActiveAttempt as ActiveAttempt,
+)
+from etl_craft.engine.attempts import (
+    active_attempt as active_attempt,
+)
+from etl_craft.engine.attempts import (
+    record_attempt_ending,
+)
+from etl_craft.engine.attempts import (
+    record_attempt_failure as record_attempt_failure,
+)
+from etl_craft.engine.attempts import (
+    set_attempt_retry_policy as set_attempt_retry_policy,
+)
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import trackers
 from etl_craft.engine.repository.offsets import StoredOffset, save_task_offset
@@ -614,6 +629,7 @@ def _end_attempt(
             "exit_code": exit_code,
             "retryable": retryable,
         }
+        record_attempt_ending(conn, attempt_id, status, retryable)
         row = conn.execute(statement(conn, f"transition_{query}"), params).one_or_none()
         if row is None:
             raise _stale(conn, "attempt", attempt_id, expected, owner)
@@ -747,28 +763,6 @@ def renew_lease(
         "CLAIMED or RUNNING; live lease",
         owner,
         {**_actor_params(actor), "lease": lease_expires_at},
-    )
-
-
-@dataclass(frozen=True)
-class ActiveAttempt:
-    """Identity and owner of a nonterminal attempt."""
-
-    attempt_id: int
-    attempt_number: int
-    owner: str | None
-    status: str
-
-
-def active_attempt(conn: Connection, task_run_id: int) -> ActiveAttempt | None:
-    """Return the task's nonterminal attempt, if one exists."""
-    row = conn.execute(
-        statement(conn, "active_attempt"), {"task_run_id": task_run_id}
-    ).one_or_none()
-    return (
-        None
-        if row is None
-        else ActiveAttempt(int(row.attempt_id), int(row.attempt_number), row.owner_id, row.status)
     )
 
 

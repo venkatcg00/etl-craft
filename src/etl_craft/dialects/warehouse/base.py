@@ -22,7 +22,9 @@ from sqlalchemy.engine import Connection
 from etl_craft.config.auth import WarehouseSpec
 from etl_craft.core.enums import AuthMode, TableFormat
 from etl_craft.core.errors import ConfigurationError, SqlGuardError
+from etl_craft.core.failures import Failure
 from etl_craft.dialects import credentials
+from etl_craft.dialects.failures import classify
 
 if TYPE_CHECKING:
     from etl_craft.config import CloningConfig, ConnectionProfile
@@ -78,6 +80,10 @@ ReplaceStrategy = Literal["transactional", "create_or_replace", "copy_and_restor
 
 class WarehouseDialect:
     """What differs between warehouses; the defaults are the ANSI behaviour PostgreSQL follows."""
+
+    def classify_failure(self, error: BaseException) -> Failure:
+        """Classify the driver error using DB-API types and SQLSTATE."""
+        return classify(error)
 
     spec: WarehouseSpec
 

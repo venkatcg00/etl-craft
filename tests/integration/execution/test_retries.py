@@ -98,6 +98,7 @@ def test_delayed_retry_is_persisted_and_cannot_be_claimed_early(engine_db, confi
             owner="first",
             lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
         )
+        transient_failure(conn, first)
         transitions.finish_attempt(conn, first, "FAILED", current_actor(), owner="first")
     waiting, exhausted = refresh_retries(engine, config, run, {task})
     assert task in waiting and not exhausted and waiting[task] > datetime.now(UTC)
@@ -165,6 +166,7 @@ def test_delayed_retry_does_not_take_the_only_worker_slot(engine_db, config):
             owner="failed-worker",
             lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
         )
+        transient_failure(conn, first)
         transitions.finish_attempt(conn, first, "FAILED", current_actor(), owner="failed-worker")
     steps = pipeline_steps(engine, config, "P", child=CHILD)
     deadline = time.monotonic() + 10
@@ -240,3 +242,22 @@ def test_cancelled_attempt_never_retries(engine_db, config):
         )
     assert refresh_retries(engine, config, run, {task}) == ({}, set())
     assert len(attempts(engine, run)) == 1
+
+
+def transient_failure(conn, attempt_id):
+    from etl_craft.core.enums import FailureClass
+    from etl_craft.core.failures import Failure
+
+    transitions.record_attempt_failure(
+        conn, attempt_id, Failure(FailureClass.TRANSIENT, "TransientError")
+    )
+
+
+def test_unclassified_error_does_not_retry_by_default(engine_db, config):
+    engine = engine_db.engine
+    with engine.begin() as conn:
+        pipeline = add_pipeline(conn, "P")
+        add_task(conn, pipeline, "load", BEHAVIOUR="raise", RETRIES="3", RETRY_DELAY_SECONDS="0")
+    outcome = run_pipeline(engine, config, "P", child=CHILD)
+    assert outcome.status == "FAILED"
+    assert len(attempts(engine, outcome.pipeline_run_id)) == 1

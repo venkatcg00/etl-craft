@@ -8,6 +8,7 @@ Secrets:
   Source_type: environment             # value
 
 Orchestration:
+  Retry_on: TRANSIENT                 # value; retry only failures that can succeed
   Mode: local                          # value — run pipelines with `etl-craft run --pipeline_code`
   Task_timeout_seconds: 600            # value
   Max_parallel_tasks: 4                # value

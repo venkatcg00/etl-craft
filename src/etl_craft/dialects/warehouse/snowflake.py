@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from etl_craft.config.auth import warehouse_by_key
-from etl_craft.core.enums import AuthMode, TableFormat
+from etl_craft.core.enums import AuthMode, FailureClass, TableFormat
 from etl_craft.core.errors import SqlGuardError
+from etl_craft.core.failures import Failure
+from etl_craft.dialects.failures import driver_error
 from etl_craft.dialects.warehouse.base import (
     Presented,
     ReplaceStrategy,
@@ -27,6 +30,14 @@ if TYPE_CHECKING:
 
 class SnowflakeWarehouse(WarehouseDialect):
     """Snowflake, ordinary tables."""
+
+    def classify_failure(self, error: BaseException) -> Failure:
+        """SQLSTATE and compile errors precede Snowflake's general network classes."""
+        error = driver_error(error)
+        failure = super().classify_failure(error)
+        if getattr(error, "errno", None) in {1003, 2003, 2043}:
+            return replace(failure, kind=FailureClass.PERMANENT)
+        return failure
 
     spec = warehouse_by_key("snowflake")
     sqlglot_dialect = "snowflake"

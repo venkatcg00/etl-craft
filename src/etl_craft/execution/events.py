@@ -252,6 +252,8 @@ def _complete(
         transitions.finish_task_run(conn, task_run_id, status=status, error_message=message)
     else:
         attempt = transitions.queue_attempt(conn, task_run_id, current_actor())
+        policy = task_retry_policy(fetch_task_parameters(conn, wait.task_id), wait.config)
+        transitions.set_attempt_retry_policy(conn, attempt, policy.retry_on)
         owner = f"event:{attempt}"
         transitions.claim_attempt(
             conn,

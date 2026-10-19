@@ -1,0 +1,5 @@
+UPDATE AUD_TASK_ATTEMPTS
+SET FAILURE_CLASS = :failure_class, FAILURE_SOURCE = :failure_source,
+    FAILURE_CODE = :failure_code, RETRYABLE = :retryable
+WHERE ATTEMPT_ID = :attempt_id AND STATUS IN ('QUEUED','CLAIMED','RUNNING')
+AND (FAILURE_SOURCE IS NULL OR :overwrite)

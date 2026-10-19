@@ -5,15 +5,18 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from etl_craft.config.auth import warehouse_by_key
-from etl_craft.core.enums import AuthMode, TableFormat
+from etl_craft.core.enums import AuthMode, FailureClass, TableFormat
 from etl_craft.core.errors import ConfigurationError, SqlGuardError
+from etl_craft.core.failures import Failure
 from etl_craft.dialects import credentials
+from etl_craft.dialects.failures import driver_error, state_class
 from etl_craft.dialects.warehouse.base import (
     Presented,
     ReplaceStrategy,
@@ -29,6 +32,22 @@ if TYPE_CHECKING:
 
 class DatabricksWarehouse(WarehouseDialect):
     """Databricks, Delta tables. A session has no default schema, so scratch tables are named."""
+
+    def classify_failure(self, error: BaseException) -> Failure:
+        """Thrift server errors carry Spark SQLSTATE in their diagnostic message."""
+        error = driver_error(error)
+        failure = super().classify_failure(error)
+        match = re.search(r"SQLSTATE[:=] ?([0-9A-Z]{5})", str(error), re.IGNORECASE)
+        if match:
+            state = match[1].upper()
+            return replace(failure, kind=state_class(state), code=state)
+        context = getattr(error, "context", {})
+        status = str(context.get("http-code", "")) if isinstance(context, dict) else ""
+        if status in {"401", "403"}:
+            return replace(failure, kind=FailureClass.PERMANENT, code=status)
+        if status in {"408", "429", "500", "502", "503", "504"}:
+            return replace(failure, kind=FailureClass.TRANSIENT, code=status)
+        return failure
 
     spec = warehouse_by_key("databricks")
     sqlglot_dialect = "databricks"

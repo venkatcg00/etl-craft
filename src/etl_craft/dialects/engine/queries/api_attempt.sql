@@ -11,7 +11,9 @@ SELECT p.PIPELINE_ID AS pipeline_id, r.PIPELINE_RUN_ID AS pipeline_run_id,
        a.REJECT_COUNT AS reject_count,
        a.WATERMARK_FROM AS watermark_from, a.WATERMARK_TO AS watermark_to,        a.ERROR_MESSAGE AS error_message, a.LOG_PATH AS log_path,
        a.REQUESTED_BY AS requested_by, a.REQUESTED_BY_KIND AS requested_by_kind,
-       a.NOT_BEFORE AS not_before, a.RETRYABLE AS retryable
+       a.NOT_BEFORE AS not_before, a.RETRYABLE AS retryable,
+       a.FAILURE_CLASS AS failure_class, a.FAILURE_SOURCE AS failure_source,
+       a.FAILURE_CODE AS failure_code, a.RETRY_ON AS retry_on
 FROM AUD_TASK_ATTEMPTS a
 JOIN AUD_TASK_RUN_LOG r ON r.TASK_RUN_ID = a.TASK_RUN_ID
 JOIN AUD_PIPELINES_RUN_LOG p ON p.PIPELINE_RUN_ID = r.PIPELINE_RUN_ID

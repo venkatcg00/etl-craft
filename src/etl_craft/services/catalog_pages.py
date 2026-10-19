@@ -338,7 +338,7 @@ class Pages:
                         if task_run.watermark_from is not None
                         else ""
                     ),
-                    _e(task_run.error_message),
+                    failure_messages(task_run.error_message, task_run.failure_reasons),
                 ]
                 for label in p.tasks
                 for task_run in self.catalog.tasks[label].runs
@@ -402,7 +402,7 @@ class Pages:
                         if r.watermark_from is not None
                         else ""
                     ),
-                    _e(r.error_message),
+                    failure_messages(r.error_message, r.failure_reasons),
                 ]
                 for r in task.runs
             ),
@@ -670,3 +670,8 @@ class Pages:
         )
 
     # Search index
+
+
+def failure_messages(message: str | None, reasons: Sequence[str]) -> str:
+    """Escape both the database message and each recorded retry decision."""
+    return "<br>".join(_e(value) for value in (message, *reasons) if value)

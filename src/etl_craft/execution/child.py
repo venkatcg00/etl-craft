@@ -40,6 +40,7 @@ from etl_craft.engine.connection import engine_db
 from etl_craft.engine.transitions import finish_task_run
 from etl_craft.execution.context import build_task_context
 from etl_craft.execution.control_flow import process_local_queries
+from etl_craft.execution.failures import classify_failure
 from etl_craft.execution.leases import process_start
 from etl_craft.handlers.registry import TaskContext, format_task_log, resolve_handler
 
@@ -108,7 +109,7 @@ def _run_bound(engine: Engine, config: ConnectorConfig, args: argparse.Namespace
             )
         except EtlCraftError as error:
             logger.error("could not start the task: %s", error)
-            _record_failure(engine, args.task_run_id, str(error), retryable=error.retryable)
+            _record_failure(engine, args.task_run_id, error, config)
             return error.exit_code
         with log.log_context(
             pipeline=context.pipeline_code,
@@ -134,11 +135,23 @@ def run_handler(engine: Engine, context: TaskContext) -> int:
     except EtlCraftError as error:
         logger.error("task failed: %s", error)
         logger.debug("traceback", exc_info=True)
-        _record_failure(engine, context.task_run_id, str(error), retryable=error.retryable)
+        _record_failure(
+            engine,
+            context.task_run_id,
+            error,
+            context.config,
+            script=context.handler == Handler.PYTHON,
+        )
         return error.exit_code
     except Exception as error:
         logger.exception("task failed with an unexpected %s", type(error).__name__)
-        _record_failure(engine, context.task_run_id, f"{type(error).__name__}: {error}")
+        _record_failure(
+            engine,
+            context.task_run_id,
+            error,
+            context.config,
+            script=context.handler == Handler.PYTHON,
+        )
         return ExitCode.UNEXPECTED
     with engine.begin() as conn:
         finish_task_run(
@@ -169,19 +182,35 @@ def run_handler(engine: Engine, context: TaskContext) -> int:
 
 
 def _record_failure(
-    engine: Engine, task_run_id: int, message: str, *, retryable: bool = True
+    engine: Engine,
+    task_run_id: int,
+    error: BaseException,
+    config: ConnectorConfig,
+    *,
+    script: bool = False,
 ) -> None:
     identity = _identity.get()
+    failure = classify_failure(error, config, script=script)
     with engine.begin() as conn:
+        if identity is not None:
+            transitions.record_attempt_failure(conn, identity[0], failure)
         finish_task_run(
             conn,
             task_run_id,
             status=RunStatus.FAILED,
-            error_message=message,
-            retryable=retryable,
+            error_message=str(error)
+            if isinstance(error, EtlCraftError)
+            else f"{type(error).__name__}: {error}",
             attempt_id=None if identity is None else identity[0],
             owner=None if identity is None else identity[1],
         )
+        if identity is not None:
+            logger.error(
+                "%s: %s %s; recorded RETRY_ON policy determines retry eligibility",
+                failure.kind,
+                failure.source,
+                failure.code or "",
+            )
 
 
 def run_as_process(argv: Sequence[str] | None = None) -> NoReturn:

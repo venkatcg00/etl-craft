@@ -7,6 +7,8 @@ from etl_craft.core.graph import CycleError, SelfDependencyError, UnknownTaskErr
 pytestmark = pytest.mark.unit
 
 EXIT_CODES = {
+    errors.TransientError: ExitCode.TRANSIENT,
+    errors.PermanentError: ExitCode.PERMANENT,
     errors.ResourceNotFoundError: ExitCode.RESOURCE_NOT_FOUND,
     errors.MetadataFileError: ExitCode.METADATA_FILE,
     errors.EtlCraftError: ExitCode.UNEXPECTED,

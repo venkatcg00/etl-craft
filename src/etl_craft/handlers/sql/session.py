@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, CursorResult
-from sqlalchemy.exc import DataError, IntegrityError, ProgrammingError, SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.core.errors import HandlerError, SqlGuardError
 from etl_craft.core.text import qualify, split_object_ref
@@ -128,12 +128,7 @@ class Session:
         """Say which step on which target failed, with the database's own first line."""
         cause = getattr(error, "orig", None) or error
         detail = str(cause).strip().splitlines()[0] if str(cause).strip() else repr(cause)
-        error_type = (
-            SqlGuardError
-            if isinstance(error, (DataError, IntegrityError, ProgrammingError))
-            else HandlerError
-        )
-        return error_type(
+        return HandlerError(
             f"{self.action} {self.target}: {step} failed: {type(cause).__name__}: {detail}"
         )
 

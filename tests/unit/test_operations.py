@@ -471,3 +471,57 @@ def test_inspection_reads_do_not_grow_per_pipeline_or_run(ctx, view):
         assert len(getattr(expanded, field)) == 5
     finally:
         event.remove(ctx.engine, "before_cursor_execute", record)
+
+
+def test_retry_evidence_survives_config_edits_in_cli_and_catalog(ctx, capsys, tmp_path):
+    from etl_craft.core.enums import FailureClass
+    from etl_craft.core.failures import Failure
+    from etl_craft.services.catalog import collect_catalog
+    from etl_craft.services.catalog_html import run_url
+    from etl_craft.services.catalog_site import write_site
+
+    with ctx.engine.begin() as conn:
+        pipeline = add_pipeline(conn, "P")
+        task = add_task(conn, pipeline, "load", "PYTHON")
+        run = start_run(conn, pipeline)
+        summary = transitions.find_or_create_task_run(conn, task, run).task_run_id
+        attempt = transitions.queue_attempt(conn, summary, current_actor())
+        transitions.claim_attempt(
+            conn,
+            attempt,
+            current_actor(),
+            owner="test",
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+        )
+        transitions.record_attempt_failure(
+            conn, attempt, Failure(FailureClass.PERMANENT, "ProgrammingError", "42P01")
+        )
+        transitions.finish_attempt(
+            conn, attempt, "FAILED", current_actor(), owner="test", error_message="missing <table>"
+        )
+    raw = yaml.safe_load(ctx.config.config_path.read_text())
+    raw["Orchestration"]["Retry_on"] = "NONE"
+    ctx.config.config_path.write_text(yaml.safe_dump(raw, sort_keys=False))
+    arguments = [
+        "--config",
+        str(ctx.config.config_path),
+        "explain",
+        "--pipeline_code",
+        "P",
+        "--task_code",
+        "load",
+        "--run-id",
+        str(run),
+    ]
+    assert main(arguments) == 0
+    reason = "PERMANENT: ProgrammingError 42P01; RETRY_ON=TRANSIENT"
+    assert reason in capsys.readouterr().out
+    assert main([*arguments, "--format", "json"]) == 0
+    document = json.loads(capsys.readouterr().out)
+    assert document["task"]["attempts"][0]["retry_reason"] == reason
+    catalog = collect_catalog(ctx.engine, ctx.config, record_lineage=False)
+    folder = tmp_path / "catalog"
+    write_site(catalog, ctx.config, folder)
+    html = (folder / run_url(run)).read_text()
+    assert reason in html
+    assert "missing &lt;table&gt;" in html

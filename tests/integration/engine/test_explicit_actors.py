@@ -9,8 +9,9 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from etl_craft.core.actor import SYSTEM_ACTOR, Actor, ActorKind, acting_as, current_actor
-from etl_craft.core.enums import AccountKind, ApiRole, YesNo
+from etl_craft.core.enums import AccountKind, ApiRole, FailureClass, YesNo
 from etl_craft.core.errors import ConfigurationError
+from etl_craft.core.failures import Failure
 from etl_craft.engine import migrations, transitions
 from etl_craft.execution.context import build_task_context
 from etl_craft.overseer.server import serve
@@ -164,6 +165,9 @@ def test_automatic_retry_uses_system_account_and_restores_requester(engine_db):
                 requester,
                 owner="initial",
                 lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+            )
+            transitions.record_attempt_failure(
+                conn, attempt, Failure(FailureClass.TRANSIENT, "TransientError")
             )
             transitions.finish_attempt(conn, attempt, "FAILED", requester, owner="initial")
         waiting, exhausted = refresh_retries(db.engine, db.config, run, {task})

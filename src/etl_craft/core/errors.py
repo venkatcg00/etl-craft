@@ -44,6 +44,8 @@ class ExitCode(IntEnum):
     METADATA_FILE = 25
     PERMISSION_DENIED = 26
     SERVER = 27
+    TRANSIENT = 28
+    PERMANENT = 29
 
 
 class EtlCraftError(Exception):
@@ -190,3 +192,16 @@ class MetadataFileError(EtlCraftError):
 
     retryable = False
     exit_code = ExitCode.METADATA_FILE
+
+
+class TransientError(EtlCraftError):
+    """A script failure that can succeed on another attempt."""
+
+    exit_code = ExitCode.TRANSIENT
+
+
+class PermanentError(EtlCraftError):
+    """A script failure that needs its input or configuration corrected."""
+
+    retryable = False
+    exit_code = ExitCode.PERMANENT
