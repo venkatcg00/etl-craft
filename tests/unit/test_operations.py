@@ -49,7 +49,7 @@ def ctx(tmp_path, monkeypatch, engine_actor):
         yaml.safe_dump(
             {
                 "Secrets": {"Source_type": "environment"},
-                "Orchestration": {"Mode": "local"},
+                "Orchestration": {},
                 "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "main"}},
             },
             sort_keys=False,
@@ -126,7 +126,7 @@ def test_run_lifecycle_has_one_request_per_call_and_restores_actor(ctx):
     assert document["run"]["start_date"].endswith("+00:00")
     with pytest.raises(FrozenInstanceError):
         started.run.status = "FAILED"
-    ended = runs.finalize_run(ctx, P, selector=RunSelector(run_key="api:one"))
+    ended = runs.trigger_run(ctx, P, selector=RunSelector(run_key="api:one"))
     assert ended.run.pipeline_run_id == started.run.pipeline_run_id
     assert ended.run.status == "SUCCESS"
     assert ended.run.ended_by == "etl-craft"
@@ -291,9 +291,9 @@ def test_wrong_pipeline_and_wrong_date_are_refused_without_changing_history(ctx)
         other_run = start_run(conn, other)
     before = to_json(inspect.run_history(ctx, P, HistoryQuery(all_runs=True)))
     with pytest.raises(RunStateError):
-        runs.finalize_run(ctx, P, selector=RunSelector(run_id=other_run))
-    with pytest.raises(UsageError, match="a run's date cannot change"):
-        runs.finalize_run(ctx, P, selector=RunSelector(run_id=run_id), run_date=date(2000, 1, 1))
+        runs.trigger_run(ctx, P, selector=RunSelector(run_id=other_run))
+    with pytest.raises(RunStateError, match="a run's date cannot change"):
+        runs.trigger_run(ctx, P, selector=RunSelector(run_id=run_id), run_date=date(2000, 1, 1))
     assert to_json(inspect.run_history(ctx, P, HistoryQuery(all_runs=True))) == before
     with ctx.engine.connect() as conn:
         with pytest.raises(RunStateError):

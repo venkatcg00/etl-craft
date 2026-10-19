@@ -1,4 +1,4 @@
-"""``etl-craft mark``: set a status or reset a SQL watermark, with a reason; local mode."""
+"""``etl-craft mark``: set a status or reset a SQL watermark, with a reason."""
 
 from __future__ import annotations
 
@@ -87,7 +87,7 @@ def _remote(args: argparse.Namespace, out: Output, server: ServerClient) -> int:
 
 COMMAND = Command(
     name="mark",
-    help="Mark a status, record a stand-in run or reset a SQL watermark; local mode.",
+    help="Mark a status, record a stand-in run or reset a SQL watermark.",
     configure=_configure,
     run=_run,
     remote=_remote,

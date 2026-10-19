@@ -33,7 +33,7 @@ def save_project(world):
 
     raw = {
         "Secrets": {"Source_type": "environment"},
-        "Orchestration": {"Mode": "local", "Task_timeout_seconds": 60},
+        "Orchestration": {"Task_timeout_seconds": 60},
         "Engine": {"dev": profile(config.engine, "main")},
         "Warehouse": {
             "Table_format": str(config.warehouse_table_format),

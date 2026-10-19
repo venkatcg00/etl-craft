@@ -15,7 +15,7 @@ pytestmark = pytest.mark.unit
 def write_config(tmp_path, **sections):
     raw = {
         "Secrets": {"Source_type": "environment"},
-        "Orchestration": {"Mode": "local"},
+        "Orchestration": {},
         "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "main"}},
     }
     raw.update(sections)
@@ -88,7 +88,7 @@ def test_jdbc_query_credentials_are_refused_without_echoing_value(tmp_path, key,
     ],
 )
 def test_numeric_settings_are_bounded_ascii_numbers(tmp_path, key, value):
-    path = write_config(tmp_path, Orchestration={"Mode": "local", key: value})
+    path = write_config(tmp_path, Orchestration={key: value})
     with pytest.raises(ConfigurationError, match=key):
         load_config(path)
 
@@ -98,7 +98,6 @@ def test_smtp_ports_are_bounded_ascii_numbers(tmp_path, port):
     path = write_config(
         tmp_path,
         Orchestration={
-            "Mode": "local",
             "Email": {"host": "localhost", "port": port, "from_address": "etl@example.com"},
         },
     )
@@ -271,7 +270,6 @@ def test_relative_sendmail_executable_is_project_relative(tmp_path, monkeypatch)
     path = write_config(
         tmp_path,
         Orchestration={
-            "Mode": "local",
             "Email": {
                 "transport": "sendmail",
                 "from_address": "etl@example.com",

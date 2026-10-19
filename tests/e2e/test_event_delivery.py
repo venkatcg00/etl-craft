@@ -22,7 +22,7 @@ def test_installed_event_pipeline_records_rows_and_consumes_delivery(tmp_path):
     project.mkdir()
     raw = {
         "Secrets": {"Source_type": "environment"},
-        "Orchestration": {"Mode": "local"},
+        "Orchestration": {},
         "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "main"}},
         "Warehouse": {"dev": {"jdbc_url": "jdbc:duckdb:warehouse.duckdb", "schema": "main"}},
     }

@@ -30,7 +30,7 @@ def write_config(directory, name, fields, table_format):
     """Write and load a craft-connector.yml in ``directory`` for warehouse ``name``."""
     raw = {
         "Secrets": {"Source_type": "environment"},
-        "Orchestration": {"Mode": "local"},
+        "Orchestration": {},
         "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "main"}},
         "Warehouse": {"Name": name, "Table_format": str(table_format), "dev": fields},
     }

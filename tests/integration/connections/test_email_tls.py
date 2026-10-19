@@ -17,7 +17,7 @@ pytestmark = pytest.mark.connections
 def config(tmp_path, relay, mode, *, trusted=True, host=None):
     path = tmp_path / "craft-connector.yml"
     path.write_text(
-        "Secrets:\n  Source_type: environment\nOrchestration:\n  Mode: local\n"
+        "Secrets:\n  Source_type: environment\nOrchestration:\n"
         "Engine:\n  dev:\n    jdbc_url: jdbc:sqlite:engine.db\n    schema: main\n",
         encoding="utf-8",
     )

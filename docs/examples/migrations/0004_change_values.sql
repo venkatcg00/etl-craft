@@ -65,8 +65,8 @@ SET BUSINESS_RULE_TYPE = 'REJECT'
 WHERE BUSINESS_RULE_NAME = 'large order this run' AND ACTIVE_FLAG = 'Y'
   AND TASK_ID = (SELECT ID FROM codes_in_use WHERE CODE = 'SALES_DAILY.check_orders');
 
--- A task's code. Runs refer to a task by id, so its history stays with it; commands, logs and
--- generated DAGs use the new code from now on. Rename while no run of the pipeline is active.
+-- A task's code. Runs refer to a task by id, so its history stays with it; commands and logs
+-- use the new code from now on. Rename while no run of the pipeline is active.
 UPDATE CFG_TASKS
 SET TASK_CODE = 'totals_by_region'
 WHERE TASK_ID = (SELECT ID FROM codes_in_use WHERE CODE = 'SALES_MART.region_totals');

@@ -59,16 +59,13 @@ def test_an_alert_is_checked_for_every_outcome_it_can_send_on():
 
 def test_pipeline_parameters_are_typed():
     assert pipeline_parameter_problems(None) == ([], [])
-    assert pipeline_parameter_problems('{"RETRIES": 2, "TAGS": ["a"], "CATCHUP": false}') == (
+    assert pipeline_parameter_problems('{"TAGS": ["a"], "EMAIL_RECIPIENTS": ["a@x.io"]}') == (
         [],
         [],
     )
-    assert pipeline_parameter_problems({"RETRIES": True, "TAGS": "a", "OWNER": "x"}) == (
-        [
-            "PIPELINE_PARAMETERS.RETRIES=true must be a whole number, 0 or more",
-            'PIPELINE_PARAMETERS.TAGS="a" must be a list of strings',
-        ],
-        ["OWNER"],
+    assert pipeline_parameter_problems({"TAGS": "a", "CATCHUP": False}) == (
+        ['PIPELINE_PARAMETERS.TAGS="a" must be a list of strings'],
+        ["CATCHUP"],
     )
     assert pipeline_parameter_problems("[1]")[0] == [
         "PIPELINE_PARAMETERS must be a JSON object; it is [1]"

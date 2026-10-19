@@ -309,6 +309,38 @@ table/task/lineage view. Export the structured gap records through the same serv
 by these pages. Distinguish no source lineage for a constant expression from failed tracing;
 script lineage is unknown unless explicitly declared, never fabricated from its target name.
 
+## Workflow navigation: Databricks and PowerCenter
+
+PowerCenter's Workflow Monitor sets the interaction: a navigator of folders and workflows, a
+Gantt chart and a task view of the same runs, and right-click actions on the selected object.
+Databricks Workflows sets the navigation: searchable job lists with tags, a run matrix, graph
+and timeline views of a run, and a task side panel. They agree on selection-then-act, so they
+combine: Databricks' views are more ways to select, and PowerCenter's scoped actions are the
+only way to act.
+
+| Element | From | etl-craft view and data |
+| --- | --- | --- |
+| Navigator | PowerCenter navigator; Databricks sidebar | Left tree: tags (as PowerCenter folders), then pipelines, then recent runs; a pipeline with several tags appears under each; only pipelines the account may view (S5.AD) |
+| Global search | Databricks search | Pipelines, tasks, tables and run ids or keys from one box (`/` or Ctrl+K); results open the object's page |
+| Breadcrumbs | Databricks | Project › pipeline › run › task run › attempt on every page; each part is a link |
+| Pipeline list | Databricks jobs list | Name, tags, schedule (with `Allow_schedule` and pause state), next tick, last N runs as status dots, SLA state; filters by tag, status, schedule state and name; sortable |
+| Pipeline side panel | Databricks job details | Schedule, timezone, catch-up, overlap, tags, `EMAIL_RECIPIENTS`, SLA, upstream and downstream pipelines, trigger tasks in and out (S5.AC), the groups granted access and the viewer's own role on it (S5.AD), definition source file |
+| Run matrix | Databricks matrix view | Tasks as rows, the latest runs as columns, a status cell per task run with duration; a cell selects that task run |
+| Run-duration chart | Databricks runs chart | Bars of recent run durations coloured by status, above the run list; a bar selects its run |
+| Runs list | Databricks job runs; PowerCenter task view | All runs or one pipeline's, filtered by status, trigger kind, date range, tag and run key; parent and child runs linked (S5.AC) |
+| Run graph | Databricks graph view; PowerCenter workflow view | The DAG coloured by task status, waits and holds marked; a node selects its task run |
+| Task timeline | Databricks timeline; PowerCenter Gantt chart | One bar per attempt on a time axis, with queue, gate and event wait segments apart from execution; a bar selects its attempt |
+| Task side panel | Databricks task run panel; PowerCenter properties | Status, attempts with failure classes, parameters as run, rows and rejects, `explain`, log tail and download (S7.A.3), owner and host; opens beside the graph, matrix or timeline |
+| Repair and rerun | Databricks repair run | Offered as S7.A.2's Recover, Run from here and Run task only, with the affected tasks shown before confirmation; no separate repair semantics |
+| Run now with parameters | Databricks | S7.A.2's one-off parameter overrides, audited with the run |
+| Live refresh | Databricks; PowerCenter monitor | Server-sent events update the open view; a paused stream says so |
+
+Per-pipeline permissions are S5.AD's group grants on pipelines and tags, the PowerCenter
+folder permission in Databricks' per-job form: every view shows only what the account may see,
+and every menu only what it may do. Left out: Databricks' job and task editors, "Run as" and
+compute settings. Definitions change through the config files, and agents and pools have their
+own page.
+
 ## Built-in dashboard calculations
 
 Reuse `run_kpis` where its semantics apply. Query bounded date ranges through repository

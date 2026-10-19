@@ -154,7 +154,7 @@ def test_rehash_command_validates_dry_run_then_upgrades(sql_world, capsys, monke
         fields["secret"] = name
     raw = {
         "Secrets": {"Source_type": "environment"},
-        "Orchestration": {"Mode": "local"},
+        "Orchestration": {},
         "Engine": {
             "dev": {"jdbc_url": f"jdbc:sqlite:{w.engine_db.url.database}", "schema": "main"}
         },

@@ -5,7 +5,6 @@ import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
-import yaml
 from sqlalchemy import text
 
 from etl_craft.core.errors import ExitCode
@@ -92,14 +91,9 @@ def test_parent_hard_exit_at_startup_reconciles_before_retry(cli_project, point)
     assert_complete(project)
 
 
-@pytest.mark.parametrize("remote", [False, True])
-def test_duplicate_task_delivery_executes_one_attempt(cli_project, remote):
+def test_duplicate_task_delivery_executes_one_attempt(cli_project):
     project = cli_project
     install_writer(project, hold=True)
-    if remote:
-        raw = yaml.safe_load(project.config.config_path.read_text())
-        raw["Orchestration"]["Mode"] = "remote"
-        project.config.config_path.write_text(yaml.safe_dump(raw, sort_keys=False))
     identity = ("--run-key", "delivery")
     assert project.run("run", "--pipeline_code", "P", "--init-only", *identity)[0] == 0
     arguments = ("run", "--pipeline_code", "P", "--task_code", "load", *identity)
@@ -107,43 +101,18 @@ def test_duplicate_task_delivery_executes_one_attempt(cli_project, remote):
     try:
         project.wait_for("SELECT STATUS FROM AUD_TASK_ATTEMPTS", expected="RUNNING", timeout=30)
         second = project.start(*arguments)
-        assert second.wait() == (ExitCode.STALE_TRANSITION if remote else ExitCode.INCOMPLETE), (
-            second.output
-        )
+        assert second.wait() == ExitCode.INCOMPLETE, second.output
         assert "already IN-PROGRESS" in second.output
         with project.engine.connect() as conn:
             assert conn.execute(text("SELECT COUNT(*) FROM AUD_TASK_ATTEMPTS")).scalar_one() == 1
         (project.config.project_dir / "release").touch()
         assert first.wait() == 0, first.output
-        code, output = project.run("run", "--pipeline_code", "P", "--finalize-only", *identity)
+        code, output = project.run("run", "--pipeline_code", "P", *identity)
         assert code == 0, output
         assert_complete(project)
     finally:
         (project.config.project_dir / "release").touch()
         first.close()
-
-
-def test_late_remote_finalize_leaves_the_newer_run_untouched(cli_project):
-    project = cli_project
-    raw = yaml.safe_load(project.config.config_path.read_text())
-    raw["Orchestration"]["Mode"] = "remote"
-    project.config.config_path.write_text(yaml.safe_dump(raw, sort_keys=False))
-    for step in (("--init-only",), ("--task_code", "load"), ("--finalize-only",)):
-        code, output = project.run("run", "--pipeline_code", "P", "--run-key", "old", *step)
-        assert code == 0, output
-    assert project.run("run", "--pipeline_code", "P", "--run-key", "new", "--init-only")[0] == 0
-    with project.engine.connect() as conn:
-        before = conn.execute(
-            text("SELECT * FROM AUD_PIPELINES_RUN_LOG ORDER BY PIPELINE_RUN_ID")
-        ).all()
-    code, output = project.run("run", "--pipeline_code", "P", "--run-key", "old", "--finalize-only")
-    assert code == 9 and "expected IN-PROGRESS to finalize" in output
-    with project.engine.connect() as conn:
-        assert (
-            conn.execute(text("SELECT * FROM AUD_PIPELINES_RUN_LOG ORDER BY PIPELINE_RUN_ID")).all()
-            == before
-        )
-        assert conn.execute(text("SELECT COUNT(*) FROM AUD_TASK_ATTEMPTS")).scalar_one() == 1
 
 
 def test_three_pipeline_callers_waiting_on_a_repair_admit_one_supervisor(cli_project):

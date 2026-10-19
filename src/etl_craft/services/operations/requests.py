@@ -19,7 +19,6 @@ class RunRequest:
     task_code: str | None = None
     standalone: bool = False
     init_only: bool = False
-    finalize_only: bool = False
     force: bool = False
     ignore_dependencies: bool = False
     rerun: bool = False
@@ -34,12 +33,10 @@ class RunRequest:
         self.check_manual()
         if self.task_code is not None and not self.task_code.strip():
             raise UsageError("--task_code must not be empty; supply an active task code")
-        if sum(bool(v) for v in (self.task_code, self.init_only, self.finalize_only)) > 1:
-            raise UsageError("choose one of --task_code, --init-only or --finalize-only")
-        if self.force and (self.init_only or self.finalize_only):
-            raise UsageError(
-                "--force runs tasks; it does not apply to --init-only or --finalize-only"
-            )
+        if sum(bool(v) for v in (self.task_code, self.init_only)) > 1:
+            raise UsageError("choose one of --task_code or --init-only")
+        if self.force and (self.init_only):
+            raise UsageError("--force runs tasks; it does not apply to --init-only")
         if (self.ignore_dependencies or self.rerun) and not self.task_code:
             raise UsageError(
                 "--ignore-dependencies and --rerun apply to one task: pass --task_code"
@@ -51,7 +48,7 @@ class RunRequest:
             raise UsageError(f"{option} and --force are different overrides: choose one")
         if self.with_downstream and not (self.rerun or self.standalone):
             raise UsageError("--with-downstream goes with --rerun or --standalone")
-        if self.skip and (self.task_code or self.init_only or self.finalize_only or self.force):
+        if self.skip and (self.task_code or self.init_only or self.force):
             raise UsageError("--skip records a whole run SKIPPED; it takes only --reason")
         if self.reason and not (
             self.ignore_dependencies or self.rerun or self.skip or self.backfill or self.standalone
@@ -59,9 +56,7 @@ class RunRequest:
             raise UsageError(
                 "--reason goes with --ignore-dependencies, --rerun, --skip or --backfill"
             )
-        if self.backfill and (
-            self.task_code or self.init_only or self.finalize_only or self.force or self.skip
-        ):
+        if self.backfill and (self.task_code or self.init_only or self.force or self.skip):
             raise UsageError(
                 "--backfill runs the whole pipeline once per date; it takes only --reason"
             )

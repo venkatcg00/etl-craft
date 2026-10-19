@@ -30,7 +30,7 @@ def configured_secret(monkeypatch):
 def config(warehouse_url=None, relay=None):
     raw = {
         "Secrets": {"Source_type": "environment"},
-        "Orchestration": {"Mode": "local"},
+        "Orchestration": {},
         "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:e.db", "schema": "main"}},
     }
     if warehouse_url is not None:

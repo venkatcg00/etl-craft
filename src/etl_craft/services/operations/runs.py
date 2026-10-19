@@ -9,7 +9,7 @@ from etl_craft.core.errors import UsageError
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.repository.tasks import resolve_task_id
 from etl_craft.engine.runlog import ACTIVE_RUN, RunSelector
-from etl_craft.execution import interventions, reruns, run_finish, run_start, runner
+from etl_craft.execution import interventions, reruns, run_start, runner
 from etl_craft.execution import pipeline as execution
 from etl_craft.execution.attempt_types import Override
 from etl_craft.execution.reconcile import reconcile
@@ -49,19 +49,6 @@ def initialize_run(
     """Initialize or resume a run without running its tasks."""
     return _run_request(
         ctx, RunRequest(pipeline_code, init_only=True, run_date=run_date, selector=selector)
-    )
-
-
-def finalize_run(
-    ctx: OperationContext,
-    pipeline_code: str,
-    *,
-    selector: RunSelector = ACTIVE_RUN,
-    run_date: date | None = None,
-) -> OperationResult:
-    """Finalize the selected run from its task summaries."""
-    return _run_request(
-        ctx, RunRequest(pipeline_code, finalize_only=True, run_date=run_date, selector=selector)
     )
 
 
@@ -156,7 +143,7 @@ def _execute(ctx: OperationContext, request: RunRequest) -> OperationResult:
     selector = request.selector
     if request.standalone:
         return _manual(ctx, request, pipeline_id)
-    if request.task_code is not None or request.finalize_only:
+    if request.task_code is not None:
         selector = selected_date(ctx, pipeline_id, selector, request.run_date)
     if request.task_code is not None and not (request.force or request.rerun):
         task = runner.run_task(
@@ -236,10 +223,6 @@ def _run_step(ctx: OperationContext, request: RunRequest, selector: RunSelector)
             hooks=hooks,
             run_date=request.run_date,
             selector=selector,
-        )
-    elif request.finalize_only:
-        done = run_finish.finalize_active_run(
-            ctx.engine, ctx.config, pipeline_code, hooks=hooks, selector=selector
         )
     else:
         done = execution.run_pipeline(

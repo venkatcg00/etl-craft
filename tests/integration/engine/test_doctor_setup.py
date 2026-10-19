@@ -9,7 +9,6 @@ import pytest
 from etl_craft.cli import main
 from etl_craft.config import ConnectionProfile, EmailProfile
 from etl_craft.config.model import SettingSource
-from etl_craft.core.enums import Mode
 from etl_craft.core.errors import ExitCode
 from etl_craft.engine.schema import existing_engine_tables
 from etl_craft.services.doctor import Status, run_checks
@@ -100,7 +99,6 @@ def test_every_problem_is_reported_not_only_the_first(config):
     warehouse = ConnectionProfile("WAREHOUSE", "dev", "jdbc:duckdb:", "", "none", schema="main")
     broken = replace(
         config,
-        mode=Mode.REMOTE,
         warehouse=warehouse,
         email=email,
         settings=(SettingSource("Engine.dev.user", "ETL_USER"),),
@@ -110,8 +108,6 @@ def test_every_problem_is_reported_not_only_the_first(config):
     assert "an in-memory DuckDB warehouse" in found(checks)["Warehouse"][1]
     warnings = [c for c in checks if c.status is Status.WARN]
     assert warnings[0].detail.startswith("Engine.dev.user is 'ETL_USER': no variable")
-    if config.engine.jdbc_url.startswith("jdbc:sqlite"):
-        assert "in remote mode" in found(checks)["Engine DB kind"][1]
 
 
 def test_an_engine_db_that_cannot_be_reached_is_one_failed_check(config):
@@ -167,7 +163,7 @@ def test_the_commands(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv("ETL_CRAFT_CONFIG", raising=False)
     monkeypatch.delenv("ETL_CRAFT_MIGRATIONS_DIR", raising=False)
     (tmp_path / "craft-connector.yml").write_text(
-        "Secrets:\n  Source_type: environment\nOrchestration:\n  Mode: local\n"
+        "Secrets:\n  Source_type: environment\nOrchestration:\n"
         "Engine:\n  dev:\n    jdbc_url: jdbc:sqlite:engine.db\n    schema: main\n",
         encoding="utf-8",
     )

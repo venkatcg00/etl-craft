@@ -46,8 +46,8 @@ def clis(tmp_path_factory):
 def make_demo(clis, tmp_path):
     made: list[Demo] = []
 
-    def make(installer: str, engine: str, warehouse: str, mode: str = "local") -> Demo:
-        demo = Demo(clis(installer), tmp_path / "support-insights", engine, warehouse, mode)
+    def make(installer: str, engine: str, warehouse: str) -> Demo:
+        demo = Demo(clis(installer), tmp_path / "support-insights", engine, warehouse)
         made.append(demo)
         return demo.build()
 

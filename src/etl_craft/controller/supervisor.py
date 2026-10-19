@@ -15,8 +15,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from etl_craft.controller.leadership import leadership
 from etl_craft.controller.schedules import Schedules
 from etl_craft.core.actor import ActorKind, acting_as
-from etl_craft.core.enums import Mode, RunStatus, YesNo
-from etl_craft.core.errors import ConfigurationError, EngineDbError, EtlCraftError, RunRefusedError
+from etl_craft.core.enums import RunStatus, YesNo
+from etl_craft.core.errors import ConfigurationError, EngineDbError, EtlCraftError
 from etl_craft.core.outage import OutageBudget
 from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
@@ -170,10 +170,6 @@ class _Supervisor:
 
 def serve(ctx: OperationContext, stop: threading.Event) -> None:
     """Run until shutdown; ride out Engine DB outages within their budget."""
-    if ctx.config.mode != Mode.LOCAL:
-        raise RunRefusedError(
-            "controller supervises local execution; set Orchestration.Mode to local"
-        )
     if ctx.actor.kind != ActorKind.SERVICE:
         raise ConfigurationError(
             f"controller account={ctx.actor.name!r}, kind={ctx.actor.kind}; expected SERVICE; "
@@ -185,6 +181,8 @@ def serve(ctx: OperationContext, stop: threading.Event) -> None:
         with acting_as(ctx.actor), leadership(ctx.engine) as leader:
             controller_id = controllers.start(ctx.engine)
             logger.info("controller_id=%s: controller active", controller_id)
+            if not ctx.config.allow_schedule:
+                logger.info("Orchestration.Allow_schedule is false: no scheduled pipeline runs")
             try:
                 while not stop.is_set():
                     try:

@@ -39,7 +39,7 @@ def resolve_pipeline_id(conn: Connection, pipeline_code: str) -> int:
 
 @dataclass(frozen=True)
 class PipelineDetail:
-    """A pipeline's row, with the DAG settings from ``PIPELINE_PARAMETERS`` as typed fields."""
+    """A pipeline's row, with tags and alert settings from ``PIPELINE_PARAMETERS`` as fields."""
 
     pipeline_code: str
     pipeline_name: str
@@ -51,12 +51,7 @@ class PipelineDetail:
     create_date: datetime | None = None
     schedule_timezone: str | None = None
     schedule_start_date: date | None = None
-    catchup: bool | None = None
     tags: list[str] | None = None
-    retries: int | None = None
-    retry_delay_minutes: int | None = None
-    depends_on_past: bool | None = None
-    email_on_failure: bool | None = None
     email_recipients: list[str] | None = None
 
 
@@ -83,20 +78,11 @@ def fetch_pipeline_detail(conn: Connection, pipeline_id: int) -> PipelineDetail:
     )
 
 
-def _is_count(value: object) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
-
-
 def _is_strings(value: object) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
 PIPELINE_PARAMETER_KINDS: dict[str, tuple[str, Callable[[object], bool]]] = {
-    "CATCHUP": ("true or false", lambda value: isinstance(value, bool)),
-    "DEPENDS_ON_PAST": ("true or false", lambda value: isinstance(value, bool)),
-    "EMAIL_ON_FAILURE": ("true or false", lambda value: isinstance(value, bool)),
-    "RETRIES": ("a whole number, 0 or more", _is_count),
-    "RETRY_DELAY_MINUTES": ("a whole number, 0 or more", _is_count),
     "TAGS": ("a list of strings", _is_strings),
     "EMAIL_RECIPIENTS": ("a list of strings", _is_strings),
 }
@@ -106,8 +92,7 @@ PIPELINE_PARAMETER_KINDS: dict[str, tuple[str, Callable[[object], bool]]] = {
 def pipeline_parameter_problems(stored: object) -> tuple[list[str], list[str]]:
     """Check a pipeline's ``PIPELINE_PARAMETERS`` as stored; return ``(problems, unknown keys)``.
 
-    A value of the wrong type is a problem. A key etl-craft does not read is returned apart:
-    it may be a typo, and it is ignored either way.
+    A value of the wrong type is a problem. Unknown keys are returned for refusal by validation.
     """
     if stored is None:
         return [], []

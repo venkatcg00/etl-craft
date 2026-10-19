@@ -14,9 +14,8 @@ from etl_craft.core.enums import CloningScope, FailureClass
 from etl_craft.core.errors import CloningError, ConfigurationError
 from etl_craft.core.failures import Failure
 from etl_craft.engine import transitions
-from etl_craft.execution.run_finish import finalize_active_run
 from etl_craft.services.cloning import clone, run_hooks
-from fixtures.metadata import add_pipeline, add_task
+from fixtures.metadata import add_pipeline, add_task, finalize_pipeline
 
 
 def cloning(world, scope=CloningScope.ALL):
@@ -102,7 +101,7 @@ def test_a_mirror_gains_new_columns_and_keeps_old_ones(sql_world):
 def test_a_clone_runs_when_a_run_ends(sql_world):
     world = sql_world
     config = cloning(world, CloningScope.AUD)
-    ended = finalize_active_run(
+    ended = finalize_pipeline(
         world.engine_db, config, "P", hooks=run_hooks(config, world.engine_db)
     )
     assert ended.status == "SUCCESS"
@@ -117,7 +116,7 @@ def test_a_failed_clone_names_the_table_and_leaves_the_run_as_it_ended(sql_world
     with pytest.raises((CloningError, ConfigurationError), match="t_missing_schema"):
         clone(world.engine_db, config)
     with caplog.at_level(logging.ERROR, logger="etl_craft"):
-        ended = finalize_active_run(
+        ended = finalize_pipeline(
             world.engine_db, config, "P", hooks=run_hooks(config, world.engine_db)
         )
     assert ended.status == "SUCCESS"

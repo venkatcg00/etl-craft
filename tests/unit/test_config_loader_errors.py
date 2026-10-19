@@ -10,7 +10,7 @@ from etl_craft.core.errors import ConfigurationError, ExitCode
 pytestmark = pytest.mark.unit
 
 SECRETS = {"Source_type": "environment"}
-ORCHESTRATION = {"Mode": "local"}
+ORCHESTRATION = {}
 ENGINE = {"dev": {"jdbc_url": "jdbc:sqlite:e.db", "schema": "main"}}
 
 
@@ -43,17 +43,16 @@ def postgres_warehouse(**fields):
             r"needs secret \(a variable name\) for auth_mode password",
         ),
         (
-            config(Orchestration={"Mode": "local", "Tags": 5}),
-            "Orchestration.Tags must be a list of strings",
+            config(Orchestration={"Email_recipients": 5}),
+            "Orchestration.Email_recipients must be a list of strings",
         ),
         (
-            config(Orchestration={"Mode": "local", "Email": "smtp.internal"}),
+            config(Orchestration={"Email": "smtp.internal"}),
             "Orchestration.Email must be a mapping",
         ),
         (
             config(
                 Orchestration={
-                    "Mode": "local",
                     "Email": {"host": "h", "port": "twenty-five", "from_address": "a@b"},
                 }
             ),
@@ -62,7 +61,6 @@ def postgres_warehouse(**fields):
         (
             config(
                 Orchestration={
-                    "Mode": "local",
                     "Email": {"host": "h", "port": 25, "from_address": "a@b", "auth_mode": "sso"},
                 }
             ),
@@ -116,7 +114,7 @@ def postgres_warehouse(**fields):
         ),
         (config(Cloning={"Scope": "everything"}), "Cloning.Scope must be one of"),
         (config(Cloning={"Enabled": "maybe"}), "Cloning.Enabled must be true or false"),
-        (config(Orchestration={"Mode": "local", "Enforce_sla": 3}), "must be true or false"),
+        (config(Orchestration={"Enforce_sla": 3}), "must be true or false"),
     ],
 )
 def test_a_configuration_error_names_the_setting(tmp_path, monkeypatch, raw, message):

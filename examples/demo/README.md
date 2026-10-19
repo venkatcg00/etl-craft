@@ -83,15 +83,14 @@ through the authenticated HTTP API.
 |---|---|
 | `craft-connector.yml` | SQLite Engine DB, DuckDB warehouse, Mailpit, cloning into `aud` |
 | `metadata/support_insights.sql` | source-column definitions and the pipelines, tasks, parameters, dependencies and rules, as `CFG_` rows; runs as written on SQLite and PostgreSQL |
-| `metadata/remote_mode.sql` | the changes remote mode needs, loaded after `support_insights.sql` |
 | `ingestion_scripts/` | the scripts that land each source, plus a flaky feed and a slow task |
 | `sql_files/` | the SELECTs the SQL tasks wrap in their actions |
 | `warehouse_schemas.sql` | the schemas to create first: etl-craft never creates warehouse schemas |
 | `prepare.py` | creates those schemas in `warehouse.duckdb`, and loads the metadata into `engine.db` |
 
 The end-to-end tests run this demo from the built wheel installed with pip, on SQLite and
-PostgreSQL Engine DBs and on PostgreSQL, DuckDB, DuckDB over Iceberg and Trino warehouses, in
-local mode and under a simulated orchestrator; and installed with uv, on SQLite and DuckDB
+PostgreSQL Engine DBs and on PostgreSQL, DuckDB, DuckDB over Iceberg and Trino warehouses;
+and installed with uv, on SQLite and DuckDB
 (`tests/e2e/test_demo.py`).
 
 ## SQL sources with watermarks

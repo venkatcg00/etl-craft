@@ -56,7 +56,6 @@ def execute(args: argparse.Namespace, out: Output, server: ServerClient | None =
         (
             args.standalone,
             args.init_only,
-            args.finalize_only,
             args.force,
             args.ignore_dependencies,
             args.rerun,

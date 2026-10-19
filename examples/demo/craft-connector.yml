@@ -9,7 +9,6 @@ Secrets:
 
 Orchestration:
   Retry_on: TRANSIENT                 # value; retry only failures that can succeed
-  Mode: local                          # value — run pipelines with `etl-craft run --pipeline_code`
   Task_timeout_seconds: 600            # value
   Max_parallel_tasks: 4                # value
   Enforce_sla: true                    # value — email the pipeline's EMAIL_RECIPIENTS on an SLA miss

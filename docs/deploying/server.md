@@ -9,7 +9,7 @@ at `Orchestration.Api_address` (default `127.0.0.1:8730`).
 
 ## Starting and submitting work
 
-Initialize or upgrade the [Engine DB](engine-db.md), configure `Orchestration.Mode: local`,
+Initialize or upgrade the [Engine DB](engine-db.md), configure the project,
 and set `ETL_CRAFT_TOKEN` to an admin SERVICE account token. The controller and its schedules
 record that account; a user session is refused for controller startup. Start it with the same
 project configuration used by the CLI:
@@ -31,9 +31,8 @@ Initialization performs the usual admission checks. The controller picks up an u
 `IN-PROGRESS` run by its exact `pipeline_run_id`; it never chooses an ended run by recency.
 Scheduled runs begin `QUEUED`. The oldest queued run of each pipeline is admitted through
 the pipeline gates when there is no active sibling. Gate checks never sleep or enter the task
-agent pool. Ready tasks are dispatched after each completion; automatic retries remain a
-subsequent roadmap item. To run under external scheduler or another orchestrator, use
-[remote mode](http-api.md#starting-runs-from-another-scheduler); `controller` refuses that mode.
+agent pool. Ready tasks are dispatched after each completion.
+Another scheduler can [submit a run over HTTP](http-api.md#starting-runs-from-another-scheduler).
 
 With a [deployment profile](sizing.md), the controller sizes its pool, threads and Engine DB pool
 from the measured allocation, and the settings below are ceilings. `Max_parallel_tasks` bounds
@@ -64,12 +63,17 @@ and weekdays `SUN`–`SAT` are supported. Sunday is 0 or 7. The macros are `@hou
 following [cron's day-field rule](https://man7.org/linux/man-pages/man5/crontab.5.html).
 A NULL schedule creates no automatic runs.
 
+`Orchestration.Allow_schedule: false` in an environment's profile turns schedules off for that
+environment only: its controller creates no scheduled runs, while manual runs, `--init-only`
+runs and catalog builds continue. The same metadata keeps its schedules in other environments.
+When schedules are turned on again, each pipeline's `CATCHUP` and `MAX_CATCHUP_RUNS` decide
+which ticks from the off period run, as after a controller outage.
+
 `SCHEDULE_TIMEZONE` is an IANA name. NULL uses `Orchestration.Timezone`, which defaults to
 `UTC`. A missing wall-clock minute during a DST jump fires at the next valid minute; a repeated
 minute fires once, at its first occurrence. Audit timestamps remain UTC. A scheduled run's
 `RUN_DATE` is the tick's date in its schedule timezone; manual runs and stand-ins without an
-explicit date use the project timezone. Generated remote DAGs use the schedule timezone for
-both their start date and the `data_interval_end` date passed to CLI tasks.
+explicit date use the project timezone.
 
 Each tick gets `RUN_KEY = schedule:<UTC ISO instant>` and `TRIGGER_KIND = SCHEDULE`. The key
 prevents duplicate ticks after restart. `SCHEDULE_START_DATE` includes that local calendar date;
@@ -84,8 +88,7 @@ so long catch-up histories release the database writer lock between records.
 `previous run still active` when the pipeline already has queued or active work. `QUEUE`
 preserves the tick for later admission. Only one run per pipeline can be `IN-PROGRESS`.
 You can inspect or cancel a queued run by its exact `--run-id` or `--run-key`.
-These columns govern the local controller; the existing `PIPELINE_PARAMETERS.CATCHUP` boolean
-continues to control external scheduler's generated DAG catch-up setting.
+These columns govern the controller's catch-up.
 
 ## Gate waits and dispatch
 
@@ -166,7 +169,6 @@ For example:
 
 ```yaml
 Orchestration:
-  Mode: local
   Max_parallel_tasks: 8
   Shutdown_grace_seconds: 60
 ```

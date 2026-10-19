@@ -18,7 +18,6 @@ from etl_craft.core.enums import (
     CloningScope,
     DeploymentProfile,
     GatePolicy,
-    Mode,
     RetryOn,
     TableFormat,
 )
@@ -175,21 +174,6 @@ class EmailProfile:
 
 
 @dataclass(frozen=True)
-class DagDefaults:
-    """External scheduling options from the project configuration."""
-
-    global_dag: bool = False
-    catchup: bool | None = None
-    tags: list[str] | None = None
-    retries: int | None = None
-    retry_delay_minutes: int | None = None
-    depends_on_past: bool | None = None
-    email_on_failure: bool | None = None
-    email_recipients: list[str] | None = None
-    allow_schedule: bool = True
-
-
-@dataclass(frozen=True)
 class ExecutionLimits:
     """Deployment-wide limits: a task's time limit, parallel tasks, SLA alerts and gate waits.
 
@@ -244,20 +228,21 @@ class ConnectorConfig:
     It holds the project's ``sql_files/``, ``ingestion_scripts/`` and ``migrations/``.
     """
 
-    mode: Mode
     source: SourceConfig
     engine: ConnectionProfile
     cloning: CloningConfig = field(default_factory=CloningConfig)
     docs_site: DocsSiteConfig = field(default_factory=DocsSiteConfig)
     warehouse: ConnectionProfile | None = None
     warehouse_table_format: TableFormat = TableFormat.NATIVE
-    dag_defaults: DagDefaults = field(default_factory=DagDefaults)
+    retries: int | None = None
+    email_recipients: list[str] | None = None
+    allow_schedule: bool = True
+    """Whether this environment's controller starts pipelines on their ``RUN_SCHEDULE``."""
     email: EmailProfile | None = None
     limits: ExecutionLimits = field(default_factory=ExecutionLimits)
     config_path: Path | None = None
     api_address: str = "127.0.0.1:8730"
     timezone: str = "UTC"
-    orchestrator_name: str | None = None
     dependency_gates: GatePolicy = GatePolicy.ENFORCE
     settings: tuple[SettingSource, ...] = ()
     log_dir: Path = Path(DEFAULT_LOG_DIR)

@@ -34,7 +34,7 @@
       "src/etl_craft/execution/pipeline.py": 10,
       "src/etl_craft/execution/reruns.py": 4,
       "src/etl_craft/execution/run_start.py": 1,
-      "src/etl_craft/execution/runner.py": 12,
+      "src/etl_craft/execution/runner.py": 11,
       "src/etl_craft/execution/scheduler.py": 7,
       "src/etl_craft/handlers/sql/rejects.py": 1,
       "src/etl_craft/handlers/sql/session.py": 1,
@@ -49,7 +49,6 @@
     "branches": {
       "src/etl_craft/core/text.py": 2,
       "src/etl_craft/engine/repository/source_contracts.py": 2,
-      "src/etl_craft/execution/remote.py": 3,
       "src/etl_craft/execution/scheduler.py": 7,
       "src/etl_craft/handlers/sql/spec.py": 2,
       "src/etl_craft/services/config_files.py": 12
@@ -95,7 +94,6 @@
     "enum-literal": {
       "src/etl_craft/engine/transitions.py": 2,
       "src/etl_craft/execution/interventions.py": 2,
-      "src/etl_craft/execution/remote.py": 1,
       "src/etl_craft/execution/runner.py": 1,
       "src/etl_craft/execution/scheduler.py": 2,
       "src/etl_craft/handlers/email_alert.py": 4,
@@ -111,7 +109,6 @@
       "src/etl_craft/execution/gates.py": 11,
       "src/etl_craft/execution/interventions.py": 11,
       "src/etl_craft/execution/pipeline.py": 13,
-      "src/etl_craft/execution/remote.py": 16,
       "src/etl_craft/execution/scheduler.py": 40,
       "src/etl_craft/handlers/python_scripts.py": 3,
       "src/etl_craft/handlers/sql/actions.py": 2,

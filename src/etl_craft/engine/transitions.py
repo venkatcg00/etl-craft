@@ -93,15 +93,15 @@ def resolve_run(
     pipeline_id: int,
     *,
     force: bool = False,
-    orchestrated: bool = False,
+    rerun: bool = False,
     reason: str = "task requested under an ended run",
     selector: runlog.RunSelector = runlog.ACTIVE_RUN,
 ) -> tuple[int, str | None]:
-    """Bind to the exact selected run; force or an orchestrator may reopen it."""
+    """Bind to the exact selected run; force or an explicit rerun may reopen it."""
     selected = runlog.select_run(conn, pipeline_id, selector)
     if selected.status == RunStatus.IN_PROGRESS:
         return selected.pipeline_run_id, None
-    if not orchestrated and (not force or selected.status == RunStatus.CANCELLED):
+    if not rerun and (not force or selected.status == RunStatus.CANCELLED):
         raise RunStateError(
             f"pipeline_id={pipeline_id}: pipeline_run_id={selected.pipeline_run_id} "
             f"is {selected.status}; start a new run with --init-only, or use --force "

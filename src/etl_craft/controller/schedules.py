@@ -35,6 +35,8 @@ class Schedules:
     ) -> None:
         """Record missed ticks and enqueue due work in short transactions."""
         self.catalog.refresh(ctx, now, stop)
+        if not ctx.config.allow_schedule:
+            return
         with ctx.engine.connect() as conn:
             rows = conn.execute(statement(conn, "controller_schedules")).all()
         active = {r.pipeline_id for r in rows if r.run_schedule is not None}

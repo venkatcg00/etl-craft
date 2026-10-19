@@ -76,7 +76,7 @@ full error message, including line breaks.
 With `Enforce_sla: true`, a run of a pipeline with `SLA_IN_HOURS` that is still going when its SLA
 passes gets one SLA email, at that moment; a run that ends late is emailed as it ends. The email
 goes to the pipeline's `EMAIL_RECIPIENTS` in `PIPELINE_PARAMETERS`, else the email recipients in
-the `Orchestration` DAG defaults. When neither is set, the engine logs that the SLA email could not
+`Orchestration.Email_recipients`. When neither is set, the engine logs that the SLA email could not
 be sent and why; the run itself is not affected. With `Enforce_sla` off, runs are still marked `MET`
 or `BREACHED`, and nothing is sent.
 
@@ -90,9 +90,7 @@ Failed alert tasks stay `FAILED` in the audit tables and logs and are named at E
 pipeline ends. They do not change a data pipeline's outcome: successful data tasks still produce
 a `SUCCESS` run, failed data tasks a `FAILED` run, and all-skipped data tasks a `SKIPPED` run.
 A pipeline containing only alerts uses its alert tasks' outcomes. Task dependency edges still
-judge an alert's actual task status, so put alerts at the end of the data pipeline. In remote mode,
-the engine's finalization follows the same rule; the external orchestrator owns its own task and
-DAG failure policy.
+judge an alert's actual task status, so put alerts at the end of the data pipeline.
 
 The task fails with a message naming the relay and the step (`connect`, `start TLS`, `log in`,
 `send`, or `build headers`) and the relay's own answer, or the `sendmail` program and its exit

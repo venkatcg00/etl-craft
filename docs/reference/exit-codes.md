@@ -17,7 +17,7 @@ error class has its own status; every error etl-craft raises on purpose belongs 
 | `7` | `DEPENDENCY_CYCLE` | The dependencies form a cycle (`CycleError`). |
 | `8` | `UNKNOWN_TASK` | A dependency names a task that is not active in the pipeline (`UnknownTaskError`). |
 | `9` | `RUN_STATE` | The run log is in a state the requested run cannot proceed from, such as a single task with no run to bind to (`RunStateError`). |
-| `10` | `RUN_REFUSED` | The run is not allowed in the configured mode, for example `--force` in remote mode (`RunRefusedError`). |
+| `10` | `RUN_REFUSED` | The requested run or intervention is refused by its current state (`RunRefusedError`). |
 | `11` | `CONNECTION_TEST` | A connection failed its test before the run started (`ConnectionTestError`). |
 | `12` | `ENGINE_DB` | The Engine DB cannot be initialised or changed (`EngineDbError`). |
 | `13` | `MIGRATION` | A migration failed, or an applied migration file is missing or was edited (`MigrationError`). |
@@ -25,7 +25,7 @@ error class has its own status; every error etl-craft raises on purpose belongs 
 | `15` | `HANDLER` | A task handler is missing or failed; the task is recorded as `FAILED` (`HandlerError`). |
 | `16` | `UNEXPECTED` | An error with no class of its own, including a bug. Its traceback is written to the log. |
 | `17` | `CLONING` | Copying an Engine DB table into the warehouse failed; the message names the table and the database's error (`CloningError`). |
-| `18` | `REMOTE_UNSUPPORTED` | In remote mode, a pipeline has a rule its orchestrator does not support, such as run condition `N` or a `HAS_DATA` dependency; the message names each pipeline, task and rule, with the remedy (`RemoteUnsupportedError`). |
+| `18` | `REMOTE_UNSUPPORTED` | Historical unsupported-orchestrator outcome; retained for reading audit records. |
 | `19` | `INJECTED_FAULT` | A development fault was deliberately injected (`InjectedFaultError`). |
 | `20` | `STALE_TRANSITION` | A run or attempt changed status or owner before this write, or another active attempt won admission (`StaleTransitionError`). Read its history and refresh the row before retrying. |
 | `21` | `SQL_GUARD` | Correct the SQL input or target state before retrying (`SqlGuardError`). |

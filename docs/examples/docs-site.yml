@@ -15,8 +15,7 @@
 Secrets:
   Source_type: environment             # value
 
-Orchestration:
-  Mode: local                         # value
+Orchestration: {}  # value
 
 Engine:
   dev:

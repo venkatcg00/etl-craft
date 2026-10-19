@@ -46,10 +46,6 @@ during a run.
 
 ## During a run
 
-This section is local mode, where etl-craft is the orchestrator. In remote mode the orchestrator
-applies these rules instead, using explicit run and task requests; see
-[Starting runs from another scheduler](../deploying/http-api.md#starting-runs-from-another-scheduler).
-
 The engine starts every task that is ready, runs it, and looks again, until nothing is left
 to start.
 
@@ -114,10 +110,6 @@ dependencies on other pipelines are not satisfied is recorded `SKIPPED` too, unl
 its own pipeline has not finished yet. `SKIPPED` is final for that run: the task does not run
 until a new run finds its dependencies satisfied. A run whose tasks were all skipped ends `SKIPPED`
 itself, so a pipeline that depends on it with `SUCCESS` is skipped in turn.
-
-In remote mode none of this is checked by etl-craft and no tracker moves: the orchestrator's
-sensors wait for the upstream instead (see
-[Starting runs from another scheduler](../deploying/http-api.md#starting-runs-from-another-scheduler)).
 
 A successful pipeline ending records its status, SLA result and admitted pipeline-dependency
 consumption in one Engine DB transaction. A successful task attempt records its outcome, summary,

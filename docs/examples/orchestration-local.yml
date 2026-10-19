@@ -19,7 +19,6 @@ Secrets:
 
 Orchestration:
   Retry_on: TRANSIENT                 # value; retry only failures that can succeed
-  Mode: local                          # value
   Task_timeout_seconds: 21600          # value — 0 disables; a task's TASK_TIMEOUT_SECONDS overrides
   Max_parallel_tasks: 8                # value
   Enforce_sla: false                   # value — true: email when a run misses its SLA_IN_HOURS
@@ -27,41 +26,13 @@ Orchestration:
     Dependency_gates: warn             # value — enforce (default) | warn | off: whether a run waits
                                        # for its dependencies on other pipelines; warn and off
                                        # go ahead and record the bypass (dev lacks some upstreams)
-    Global_dag: false                  # value
-    Catchup: false                     # value
-    Tags: [analytics]                  # value
     Retries: 1                         # value
-    Retry_delay_minutes: 5             # value
-    Depends_on_past: false             # value
-    Email_on_failure: false            # value
-    Allow_schedule: false              # value
   sit:
-    Global_dag: false                  # value
-    Catchup: false                     # value
-    Tags: [analytics]                  # value
     Retries: 1                         # value
-    Retry_delay_minutes: 5             # value
-    Depends_on_past: false             # value
-    Email_on_failure: false            # value
-    Allow_schedule: false              # value
   uat:
-    Global_dag: false                  # value
-    Catchup: false                     # value
-    Tags: [analytics]                  # value
     Retries: 1                         # value
-    Retry_delay_minutes: 5             # value
-    Depends_on_past: false             # value
-    Email_on_failure: false            # value
-    Allow_schedule: false              # value
   prod:
-    Global_dag: false                  # value
-    Catchup: false                     # value
-    Tags: [analytics]                  # value
     Retries: 1                         # value
-    Retry_delay_minutes: 5             # value
-    Depends_on_past: false             # value
-    Email_on_failure: false            # value
-    Allow_schedule: false              # value
 
 Engine:
   Name: SQLite                         # value

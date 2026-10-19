@@ -18,7 +18,6 @@ Secrets:
   Profile: ETL_CRAFT_PROFILE           # variable — dev | sit | uat | prod, set in each environment
 
 Orchestration:
-  Mode: local                          # value
   Task_timeout_seconds: 21600          # value
   Max_parallel_tasks: 8                # value
   Enforce_sla: false                   # value

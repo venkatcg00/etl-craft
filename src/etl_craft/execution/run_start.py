@@ -13,7 +13,6 @@ from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import (
     InterventionAction,
-    Mode,
     RunStatus,
 )
 from etl_craft.core.errors import RunStateError, StaleTransitionError
@@ -45,7 +44,6 @@ from etl_craft.execution.interventions import (
     record_gate_bypass,
 )
 from etl_craft.execution.reconcile import reconcile
-from etl_craft.execution.remote import require_supported
 from etl_craft.execution.run_types import PipelineOutcome, RunHooks, call_hook, default_hooks, drive
 
 logger = logging.getLogger(__name__)
@@ -61,23 +59,13 @@ def init_pipeline_run(
     run_date: date | None = None,
     selector: runlog.RunSelector = runlog.ACTIVE_RUN,
 ) -> PipelineOutcome:
-    """Start or resume the run of ``pipeline_code``, for an orchestrator's first step.
+    """Start or resume a run for the controller, testing connections and pipeline gates.
 
-    ``run_date`` is the date a new run runs as of, such as the orchestrator's logical date.
-
-    Tests the run's connections and, for a new run in local mode, checks the pipeline's gate. The
-    outcome is ``IN-PROGRESS``, or ``SKIPPED`` when the gate was not satisfied. In remote mode the
-    orchestrator applies the pipeline's rules, so ``RemoteUnsupportedError`` is raised first when
-    it has rules the orchestrator does not support, and no gate is checked.
+    ``run_date`` is the date a new run runs as of. A refused gate records a skipped run.
     """
-    remote = config.mode == Mode.REMOTE
-    if remote:
-        with engine.connect() as conn:
-            require_supported(conn, config, pipeline_code)
-    else:
-        paused = open_pause(engine, pipeline_code, selector=selector)
-        if paused is not None:
-            return paused_outcome(pipeline_code, paused)
+    paused = open_pause(engine, pipeline_code, selector=selector)
+    if paused is not None:
+        return paused_outcome(pipeline_code, paused)
     pipeline_id, _ = prepare(engine, config, pipeline_code)
     selected_clock = clock or Clock()
     pipeline_run_id, skip_reason = drive(
@@ -88,9 +76,8 @@ def init_pipeline_run(
             pipeline_id,
             selected_clock,
             StartOptions(
-                check_gate=not remote,
+                check_gate=True,
                 run_date=run_date,
-                remote=remote,
                 selector=selector,
                 initialize_only=True,
             ),
@@ -160,7 +147,6 @@ class StartOptions:
     check_gate: bool
     run_date: date | None = None
     backfill: str | None = None
-    remote: bool = False
     selector: runlog.RunSelector = runlog.ACTIVE_RUN
     initialize_only: bool = False
 
@@ -245,7 +231,7 @@ def start_steps(
 def _select_run(
     engine: Engine, pipeline_code: str, pipeline_id: int, options: StartOptions
 ) -> tuple[runlog.RunIdentity | None, runlog.RunKind | None]:
-    """Select and, for an orchestrator, reopen a run in one transaction."""
+    """Select a non-terminal run in one transaction."""
     with engine.begin() as conn:
         candidates = runlog.run_candidates(conn, pipeline_id)
         explicit = options.selector.run_id is not None or options.selector.run_key is not None
@@ -267,16 +253,9 @@ def _select_run(
                     f"{selected.run_date}, not {options.run_date}; a run's date cannot change"
                 )
             if selected.status not in {RunStatus.QUEUED, RunStatus.IN_PROGRESS}:
-                if not options.remote:
-                    raise RunStateError(
-                        f"{pipeline_code}: run_id={selected.pipeline_run_id} is {selected.status}; "
-                        "use --task_code --rerun with a reason, or start a new run"
-                    )
-                transitions.reopen_run(
-                    conn,
-                    selected.pipeline_run_id,
-                    current_actor(),
-                    reason="orchestrator initialized its run again",
+                raise RunStateError(
+                    f"{pipeline_code}: run_id={selected.pipeline_run_id} is {selected.status}; "
+                    "use --task_code --rerun with a reason, or start a new run"
                 )
             if selected.status == RunStatus.QUEUED:
                 kind = None
@@ -303,11 +282,10 @@ def _resume_run(
             "a backfill never takes it over"
         )
     if options.run_date is not None and kind.run_date != options.run_date:
-        finalize = " --finalize-only" if options.remote else ""
         raise RunStateError(
             f"{pipeline_code} has a run in progress (pipeline_run_id={existing}) as of "
             f"{kind.run_date.isoformat()}, not {options.run_date.isoformat()}; finish it with "
-            f"`etl-craft run --pipeline_code {pipeline_code}{finalize}`, or cancel it, first"
+            f"`etl-craft run --pipeline_code {pipeline_code}`, or cancel it, first"
         )
     logger.info("%s: resuming pipeline_run_id=%d", pipeline_code, existing)
     return existing, None
@@ -364,7 +342,7 @@ def _admit_run(
             current_actor(),
             run_date=logical_date,
             run_key=options.selector.run_key,
-            trigger_kind="ORCHESTRATOR" if options.remote else "MANUAL",
+            trigger_kind="MANUAL",
         )
     else:
         created = transitions.create_active_run(

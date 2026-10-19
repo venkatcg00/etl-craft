@@ -96,7 +96,6 @@ def run(task):
 A single-task `run --task_code` performs one check and exits `23` (`WAITING`) if the event is
 not ready; it admits no agent or execution attempt. Resume with the same run identity or let
 the local pipeline runner or controller continue. `explain` reports its durable event wait.
-Remote mode refuses `EVENT_WAIT` in validation and DAG generation: its orchestrator would need
-a deferrable sensor to wait without using an agent. Use local mode for these event pipelines.
+
 
 See the [complete file-delivery example](../examples/event-wait.md).

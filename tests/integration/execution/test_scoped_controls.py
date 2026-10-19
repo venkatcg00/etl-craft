@@ -15,7 +15,6 @@ from etl_craft.core.enums import (
     AttemptStatus,
     ControlAction,
     ControlStatus,
-    Mode,
     RunStatus,
 )
 from etl_craft.core.errors import PermissionDeniedError, RunRefusedError, RunStateError, UsageError
@@ -194,8 +193,6 @@ def test_role_legacy_and_reason_refusals_are_explicit(ctx):
     _, run, _, _ = seed(ctx)
     with pytest.raises(PermissionDeniedError):
         ask(replace(ctx, role=ApiRole.VIEWER), run, ControlAction.HOLD)
-    with pytest.raises(RunRefusedError, match=r"external-orchestrator.*adapter"):
-        ask(replace(ctx, config=replace(ctx.config, mode=Mode.REMOTE)), run, ControlAction.STOP)
     with pytest.raises(UsageError, match="nonblank reason"):
         request_control(ctx, ControlRequest("P", ControlAction.STOP, " "))
 

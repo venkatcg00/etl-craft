@@ -48,7 +48,7 @@ def engine_config(profile: ConnectionProfile, config_path: Path | None = None) -
     config = parse_config(
         {
             "Secrets": {"Source_type": "environment"},
-            "Orchestration": {"Mode": "local"},
+            "Orchestration": {},
             "Engine": {
                 profile.name: {
                     "jdbc_url": profile.jdbc_url,

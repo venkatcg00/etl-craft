@@ -8,7 +8,7 @@ profile it declares, so none of them can drift from the loader.
 Every file follows the same layout, in this order (the loader refuses any other):
 
 1. **Secrets**: where the variable names below are looked up, and the default profile.
-2. **Orchestration**: execution mode, limits, scheduling defaults and the Email
+2. **Orchestration**: limits, scheduling defaults and the Email
    relay, per profile.
 3. **Engine**: the Engine DB, one block per profile.
 4. **Warehouse**: the one warehouse, one block per profile.
@@ -43,29 +43,29 @@ retry counts and delays are at least 0.
 
 ## Start here
 
-| File | Engine | Warehouse | Mode | Shows |
-|---|---|---|---|---|
-| `minimal-local.yml` | SQLite | DuckDB file | local | Nothing to install or set: one `dev` profile |
+| File | Engine | Warehouse | Shows |
+|---|---|---|---|
+| `minimal-local.yml` | SQLite | DuckDB file | Nothing to install or set: one `dev` profile |
 
 ## Secrets
 
-| File | Engine | Warehouse | Mode | Shows |
-|---|---|---|---|---|
-| `secrets-environment.yml` | PostgreSQL | PostgreSQL | local | Values from the process environment, and profile-specific names (`ENGINE_PROD_SECRET`) |
-| `secrets-file.yml` | PostgreSQL | PostgreSQL | local | Values from a `.env`-style file (`secrets-file.env`), resolved relative to the config |
+| File | Engine | Warehouse | Shows |
+|---|---|---|---|
+| `secrets-environment.yml` | PostgreSQL | PostgreSQL | Values from the process environment, and profile-specific names (`ENGINE_PROD_SECRET`) |
+| `secrets-file.yml` | PostgreSQL | PostgreSQL | Values from a `.env`-style file (`secrets-file.env`), resolved relative to the config |
 
 ## Orchestration
 
-| File | Engine | Warehouse | Mode | Shows |
-|---|---|---|---|---|
-| `orchestration-local.yml` | SQLite | DuckDB file | local | etl-craft dispatches ready tasks; per-profile limits and scheduling defaults |
+| File | Engine | Warehouse | Shows |
+|---|---|---|---|
+| `orchestration-local.yml` | SQLite | DuckDB file | etl-craft dispatches ready tasks; per-profile limits and scheduling defaults |
 
 ## Engine DB
 
-| File | Engine | Warehouse | Mode | Shows |
-|---|---|---|---|---|
-| `engine-sqlite.yml` | SQLite | PostgreSQL | local | One SQLite file per profile; nothing to authenticate |
-| `engine-postgres.yml` | PostgreSQL | PostgreSQL | remote | `password` or `key_file` auth |
+| File | Engine | Warehouse | Shows |
+|---|---|---|---|
+| `engine-sqlite.yml` | SQLite | PostgreSQL | One SQLite file per profile; nothing to authenticate |
+| `engine-postgres.yml` | PostgreSQL | PostgreSQL | `password` or `key_file` auth |
 
 ## Warehouse
 

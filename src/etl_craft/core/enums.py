@@ -258,13 +258,6 @@ class EmailFlavour(StrEnum):
     SUCCESS = "SUCCESS"
 
 
-class Mode(StrEnum):
-    """Who schedules the tasks: the engine itself, or an external orchestrator."""
-
-    LOCAL = "local"
-    REMOTE = "remote"
-
-
 class DeploymentProfile(StrEnum):
     """The deployment shape a team declares in ``Deployment.Profile``; never inferred."""
 

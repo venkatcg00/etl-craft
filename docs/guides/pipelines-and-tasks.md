@@ -29,30 +29,29 @@ writes five pipelines this way, and runs as written on SQLite and PostgreSQL.
 
 | Column | Holds |
 |---|---|
-| `PIPELINE_CODE` | the pipeline's code: one ASCII letter followed by letters, digits or `_`, at most 128 characters. It names the pipeline in every command, DAG id and log folder |
+| `PIPELINE_CODE` | the pipeline's code: one ASCII letter followed by letters, digits or `_`, at most 128 characters. It names the pipeline in every command and log folder |
 | `PIPELINE_NAME` | a readable name |
 | `DESCRIPTION` | what the pipeline is for; the [catalog](catalog.md) leads its page with it |
-| `RUN_SCHEDULE` | a five-field cron expression or supported macro for the local server and generated DAG (see [Schedules](../deploying/server.md#schedules-and-logical-dates)) |
+| `RUN_SCHEDULE` | a five-field cron expression or supported macro for the controller (see [Schedules](../deploying/server.md#schedules-and-logical-dates)) |
 | `SCHEDULE_TIMEZONE` | nullable IANA timezone; NULL uses `Orchestration.Timezone` (default `UTC`) |
 | `SCHEDULE_START_DATE` | nullable local date to begin scheduling; NULL uses the creation timestamp |
-| `CATCHUP` | local server: `Y` queues bounded missed ticks; `N` (default) queues only the latest |
+| `CATCHUP` | controller: `Y` queues bounded missed ticks; `N` (default) queues only the latest |
 | `MAX_CATCHUP_RUNS` | positive whole number, default 1; maximum retained ticks with catch-up enabled |
-| `OVERLAP_POLICY` | local server: `SKIP` (default) records ticks skipped while work is pending; `QUEUE` retains them |
+| `OVERLAP_POLICY` | controller: `SKIP` (default) records ticks skipped while work is pending; `QUEUE` retains them |
 | `SLA_IN_HOURS` | how long a run may take; each run is marked `MET` or `BREACHED` (see [Running a pipeline](running-pipelines.md#sla)) |
 | `REFRESH_TYPE` | `FULL` or `INCREMENTAL`; SQL tasks read it through [`$$pipeline_run_id_filter`](sql-tasks.md) |
-| `PIPELINE_PARAMETERS` | a JSON object of the generated DAG's settings (below) |
+| `PIPELINE_PARAMETERS` | a JSON object of pipeline tags and alert settings (below) |
 
-`PIPELINE_PARAMETERS` holds the settings of the pipeline's generated DAG, each overriding the
-`Orchestration` defaults in `craft-connector.yml`:
+`PIPELINE_PARAMETERS` accepts two keys, each a list of strings:
 
 | Key | Value |
 |---|---|
-| `CATCHUP`, `DEPENDS_ON_PAST`, `EMAIL_ON_FAILURE` | `true` or `false` |
-| `RETRIES`, `RETRY_DELAY_MINUTES` | a whole number, 0 or more |
-| `TAGS`, `EMAIL_RECIPIENTS` | a list of strings |
+| `TAGS` | labels for the pipeline, such as `["sales", "daily"]` |
+| `EMAIL_RECIPIENTS` | who receives the pipeline's alert and SLA emails, overriding `Orchestration.Email_recipients` |
 
-`EMAIL_RECIPIENTS` also receives the pipeline's SLA emails. A value of the wrong type fails
-`validate`; a key etl-craft does not read is a warning.
+Wrong types and unknown keys fail
+`validate` and are refused by `config apply`; remove an unknown key or use an allowed one.
+The pipeline's `CATCHUP` and `MAX_CATCHUP_RUNS` columns control schedule catch-up.
 
 ## `CFG_TASKS`
 

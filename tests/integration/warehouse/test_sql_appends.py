@@ -144,7 +144,7 @@ def test_upgrade_command_validates_then_adds_and_records_requests(sql_world, cap
         fields["secret"] = name
     raw = {
         "Secrets": {"Source_type": "environment"},
-        "Orchestration": {"Mode": "local"},
+        "Orchestration": {},
         "Engine": {
             "dev": {"jdbc_url": f"jdbc:sqlite:{w.engine_db.url.database}", "schema": "main"}
         },

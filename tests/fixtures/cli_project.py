@@ -189,7 +189,7 @@ def cli_project(empty_engine_db, tmp_path, monkeypatch):
         }
     raw = {
         "Secrets": {"Source_type": "environment"},
-        "Orchestration": {"Mode": "local", "Log_dir": "logs", "Api_address": "127.0.0.1:0"},
+        "Orchestration": {"Log_dir": "logs", "Api_address": "127.0.0.1:0"},
         "Engine": {"dev": block},
         "Warehouse": {
             "Name": "duckdb",

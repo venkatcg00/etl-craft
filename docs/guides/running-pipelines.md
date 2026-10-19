@@ -6,7 +6,7 @@
 etl-craft run --pipeline_code SALES_DAILY
 ```
 
-In local mode this runs every active task under one pipeline run. Each completion releases any
+This runs every active task under one pipeline run. Each completion releases any
 newly ready tasks immediately; a slow independent task does not hold back another branch.
 At most `Orchestration.Max_parallel_tasks` tasks run at once (8 unless set), each in its own
 process with the same logs, time limits and outcomes as [`run --task_code`](running-tasks.md).
@@ -82,35 +82,17 @@ See [run controls](run-control.md#mark-a-task) for grace periods and uncertain s
 
 `--force` runs every task after its same-pipeline upstreams finish, regardless of their outcomes
 or its previous status, and skips the
-pipeline's dependency check. It is only available in local mode.
+pipeline's dependency check. It requires local execution.
 
 To step in on a run (mark a task or the run, record a stand-in upstream run, cancel it, run a
 task again or without its dependencies, or relax dependency gates), see
 [Stepping in](run-control.md).
 
-## Under an orchestrator
+## Initialize for the controller
 
-In remote mode an orchestrator such as external scheduler runs the tasks and is the only source of truth for
-scheduling, so `run --pipeline_code` without `--task_code` is refused (exit status `10`). The
-orchestrator runs three kinds of step:
-
-```bash
-etl-craft run --pipeline_code SALES_DAILY --init-only              # first
-etl-craft run --pipeline_code SALES_DAILY --task_code load_orders  # one per task
-etl-craft run --pipeline_code SALES_DAILY --finalize-only          # last
-```
-
-- `--init-only` refuses rules the orchestrator does not support (exit status `18`), tests the
-  connections and starts the run (or resumes the one in progress). It prints
-  `pipeline_run_id=<id> IN-PROGRESS`. It does not check the pipeline's dependencies: the DAG's
-  sensors do.
-- `--finalize-only` records a task the orchestrator never ran as `SKIPPED`, and ends the run
-  `FAILED` when a task failed, `SKIPPED` when it ran none, and `SUCCESS` otherwise. It exits `1`
-  for a `FAILED` run and `9` (`RUN_STATE`) when there is no run in progress.
-
-In local mode, `--init-only` checks the pipeline's dependencies and prints `SKIPPED` with the
-reason when they are not satisfied, and `--finalize-only` records `SKIPPED` for tasks that can
-never run. See [Starting runs from another scheduler](../deploying/http-api.md#starting-runs-from-another-scheduler).
+`etl-craft run --pipeline_code SALES_DAILY --init-only` tests connections, checks pipeline
+dependencies and creates or resumes the selected run. A running controller picks it up.
+Another scheduler can [submit a run over HTTP](../deploying/http-api.md#starting-runs-from-another-scheduler).
 
 ## SLA
 

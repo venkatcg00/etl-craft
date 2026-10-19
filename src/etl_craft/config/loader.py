@@ -30,18 +30,19 @@ from etl_craft.config.loader_engine import parse_engine
 from etl_craft.config.loader_helpers import (
     CONNECTION_FIELDS,
     SECRETS_KEYS,
+    flag,
     mapping,
     parse_source,
     profiled_settings,
     reject_unknown,
     relative_to_config,
+    string_list,
+    whole_number,
 )
 from etl_craft.config.loader_orchestration import (
     ORCHESTRATION_KEYS,
-    parse_dag_defaults,
     parse_dependency_gates,
     parse_limits,
-    parse_mode,
     parse_retry_on,
 )
 from etl_craft.config.loader_warehouse import WAREHOUSE_SECTION_KEYS, parse_warehouse
@@ -163,8 +164,7 @@ def parse_config(raw: object, path: Path) -> ConnectorConfig:
 
     orchestration = profiled_settings("Orchestration", raw, global_profile, path, resolver)
     reject_unknown(orchestration.settings, ORCHESTRATION_KEYS, "Orchestration", path)
-    mode = parse_mode(orchestration, path)
-    dependency_gates = parse_dependency_gates(orchestration, mode, path)
+    dependency_gates = parse_dependency_gates(orchestration, path)
     limits = parse_limits(orchestration, path)
     project_timezone = orchestration.text("Timezone")
     project_timezone = "UTC" if project_timezone is None else project_timezone
@@ -174,8 +174,6 @@ def parse_config(raw: object, path: Path) -> ConnectorConfig:
         timezone(project_timezone)
     except MetadataError as error:
         raise ConfigurationError(f"{path}: Orchestration.Timezone: {error}") from error
-    dag_defaults = parse_dag_defaults(orchestration, path)
-    orchestrator_name = orchestration.text("Name")
     log_dir = relative_to_config(orchestration.text("Log_dir") or DEFAULT_LOG_DIR, path)
     email = parse_email(orchestration, path, resolver)
     engine = parse_engine(raw, global_profile, path, resolver)
@@ -194,7 +192,6 @@ def parse_config(raw: object, path: Path) -> ConnectorConfig:
     )
     config = ConnectorConfig(
         deployment=deployment,
-        mode=mode,
         api_address=api_address,
         timezone=project_timezone,
         source=source,
@@ -204,12 +201,13 @@ def parse_config(raw: object, path: Path) -> ConnectorConfig:
         docs_site=docs_site,
         warehouse=warehouse,
         warehouse_table_format=table_format,
-        dag_defaults=dag_defaults,
+        retries=whole_number(orchestration, "Retries", None, path),
+        email_recipients=string_list(orchestration, "Email_recipients", path),
+        allow_schedule=flag(orchestration, "Allow_schedule", True, path),
         retry_on=parse_retry_on(orchestration, path),
         email=email,
         limits=limits,
         config_path=path,
-        orchestrator_name=orchestrator_name,
         dependency_gates=dependency_gates,
         settings=tuple(resolver.sources),
         log_dir=log_dir,

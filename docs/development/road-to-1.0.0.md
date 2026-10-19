@@ -136,8 +136,11 @@ item's text, or work done early under another item.
 | S5.U Robustness before the cluster | Done | #176, #182, #183, #184 | Engine DB restarts ridden out; SLA breach writes retried; no single-writer guess; timing tests verified under load; subprocess code measured by coverage |
 | S5.W Retry only what can succeed | Done | #215 | Failure classification, retry policies and immutable attempt evidence; local and Snowflake acceptance passed, unavailable Databricks live acceptance waived by the owner |
 | S5.Z Controller and agent names | Done | #216 | Controller command/package/history, agent terminology and consistent deployment profiles; lossless Engine DB upgrades |
-| S5.Y A standalone orchestrator | In progress | #219 | Slice 1 removes the export and schedules controller catalog builds; remote-mode removal is slice 2 |
+| S5.Y A standalone orchestrator | Done | #219, #220 | Airflow export and remote mode removed; the controller always schedules; stale pipeline parameters migrated away and refused |
 | S5.AA One source for every action | Planned | | One action table for roles, audit and placement; generated API routes; one request per action; consistent names, folders and types |
+| S5.AB Pipeline tags and filters | Planned | | `TAGS` labels pipelines; one tag filter on list, status, history, catalog and UI views, and tag-selected bulk actions |
+| S5.AC Pipeline trigger tasks | Planned | | `RUN_PIPELINE` starts another pipeline's run as a task: `WAIT` hands the wait to the controller, `DETACH` ends once the run is recorded |
+| S5.AD Pipeline permission groups | Planned | | Groups of accounts, granted `viewer` or `operator` (and S7.M's `steward`) on pipelines or tags; one effective-role check per pipeline-scoped action |
 | S5.X Unmanaged SQL tasks | Planned | | `SQL_SCRIPT` runs any SQL as an ordinary dependent task with per-statement audit; pre- and post-SQL are upstream and downstream tasks |
 | S5.C and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
@@ -276,6 +279,10 @@ does not move worker work ahead of the metadata, account or operator-control cor
     come after S5.Z and before S5.X, S5.C and S7.A (owner, 19 October 2026). etl-craft is a
     standalone orchestrator from 1.0.0; the agent commands, the UI actions and S5.X's handler
     are built on S5.AA's action table.
+  - S5.AB (pipeline tags), S5.AC (pipeline trigger tasks) and S5.AD (pipeline permission
+    groups) follow S5.AA in that order and come before S5.X and S5.C (owner, 19 October 2026).
+    All three use the action table; S5.AC's controller-held wait must exist before agents, and
+    S5.AD's grants come before S7.A and S7.M, which use them.
   - None of these moves S5.S, S5.O.3 or S5.Q.
   - S5.V and S7.M add `validation_scripts/` and `uploads/` to the project directory, and the
     implementing pull requests update `AGENTS.md`'s design rules to match.
@@ -286,6 +293,10 @@ S5.Y.1 (#219) covers the controller's catalog ticks and immutable request/comple
 on both Engine DBs, preserved leadership and service roles, removal refusals, documentation,
 and complete remaining CI matrix accounting. No warehouse SQL or authentication changes;
 cloud acceptance does not apply. Remote execution remains for S5.Y.2.
+
+S5.Y.2 (#220) covers the stale-key refusals in the loader, `validate` and `config apply`, and
+the `0043` upgrade from every released schema on SQLite and PostgreSQL with remote-era audit
+rows read back. No warehouse SQL changes; cloud acceptance does not apply.
 
 S5.Z (#216) validates the controller command, both Engine DBs, preserved process history from
 released schemas, fresh/upgraded catalog equivalence, scheduling, leadership and local/API
@@ -532,6 +543,13 @@ The separate frozen 0.4 soak deployment is unchanged.
   The unused simulated-orchestrator fixture is removed with its sole export-based caller;
   remote-mode execution itself stays in slice 2. The now-unused jsonschema dependency is
   removed with its consumer.
+
+- S5.Y.2: `Orchestration.Retries` (automatic retries) and `Email_recipients` (alerts) stay,
+  because runs read them. The owner asked for this slice, the `Allow_schedule` and `TAGS`
+  changes to its text, and the S5.AB, S5.AC, S5.AD and S7.A.4 plans to ship in one pull request. `ExitCode.REMOTE_UNSUPPORTED`
+  (18) stays as a number so recorded exit codes keep their meaning; its error class is deleted.
+  Explicit task reruns shared a reopening helper with orchestrated finalization; the helper
+  stays for reruns with unchanged behaviour.
 
 - S5.Z: the owner approved consistent pre-1.0 names without aliases, including configuration:
   deployment profiles are `laptop`, `controller` and `controller-agents`. The table's key is
@@ -4045,14 +4063,18 @@ Branch: `refactor/execution-standalone-mode`.
   - `--finalize-only` and everything only it reaches. `--init-only` stays: it creates a run that
     a running controller picks up. `--standalone` stays;
   - the profile settings only the YAML read: `Global_dag`, `Tags`, `Retries`,
-    `Retry_delay_minutes`, `Depends_on_past`, `Email_on_failure`, `Allow_schedule` and
-    `Orchestration.Catchup`. Before deleting each one, confirm with `git grep` that only
+    `Retry_delay_minutes`, `Depends_on_past`, `Email_on_failure` and
+    `Orchestration.Catchup`. `Allow_schedule` stays (owner, 19 October 2026): `false` in an
+    environment's profile stops that environment's controller from creating scheduled runs,
+    while manual runs and catalog builds continue, so dev can run without schedules while prod
+    keeps them. Before deleting each one, confirm with `git grep` that only
     generated YAML read it. A setting the controller or a run reads stays and is listed in the
     pull request. `CFG_PIPELINES.CATCHUP` and `MAX_CATCHUP_RUNS` stay, because they drive the
     controller's catch-up;
-  - the `PIPELINE_PARAMETERS` keys `CATCHUP`, `DEPENDS_ON_PAST`, `EMAIL_ON_FAILURE`, `RETRIES`,
-    `RETRY_DELAY_MINUTES` and `TAGS`, from `PIPELINE_PARAMETER_KINDS` and `PipelineDetail`
-    (`engine/repository/pipelines.py`). `EMAIL_RECIPIENTS` stays;
+  - the `PIPELINE_PARAMETERS` keys `CATCHUP`, `DEPENDS_ON_PAST`, `EMAIL_ON_FAILURE`, `RETRIES`
+    and `RETRY_DELAY_MINUTES`, from `PIPELINE_PARAMETER_KINDS` and `PipelineDetail`
+    (`engine/repository/pipelines.py`). `EMAIL_RECIPIENTS` stays, and so does `TAGS`, which
+    S5.AB makes filterable;
   - `examples/demo/metadata/remote_mode.sql`, `tests/fixtures/orchestrator.py`, the remote-mode
     tests, and the remote-mode sections of `docs/guides/running-pipelines.md`,
     `running-tasks.md`, `run-control.md`, `dependencies.md`, `validating.md`,
@@ -4061,13 +4083,13 @@ Branch: `refactor/execution-standalone-mode`.
 - *Unknown pipeline parameters fail.* Today an unknown `PIPELINE_PARAMETERS` key is ignored with
   a warning. After this slice, `validate` reports it as `FAIL` and `config apply` refuses it,
   naming the pipeline, the key and the keys allowed. A key that silently does nothing would
-  break "fail rather than guess" once the six keys above are gone.
-- *Migration, both dialects.* A data migration removes the six keys from stored
+  break "fail rather than guess" once the five keys above are gone.
+- *Migration, both dialects.* A data migration removes the five keys from stored
   `CFG_PIPELINES.PIPELINE_PARAMETERS`, writing as etl-craft. `schema.sql` does not change,
   history rows are not rewritten, and the change shows in the next config export.
 - *Tests.*
   - `Orchestration.Mode` and each deleted setting are refused by name.
-  - A `TAGS` key fails `validate` and `config apply`.
+  - A `RETRIES` key fails `validate` and `config apply`; a `TAGS` key passes.
   - The migration strips the keys on SQLite and PostgreSQL from the 0.3.0 fixture schemas and
     the populated upgrade fixtures, and the upgrade test passes from every released schema.
   - Audit, status and history still read remote-era rows (an `orchestrator:` run key and the
@@ -4292,6 +4314,172 @@ Branch: `refactor/operations-typed`.
   (`git grep -n 'import _\|\._[a-z]' -- src`, then read each hit).
 - *Done when.* No status, action or kind is compared or returned as a string literal in
   `services/operations`, and audit, status and history read every released row.
+
+### S5.AB Pipeline tags and filters
+
+Branch: `feat/services-pipeline-tags`. After S5.AA, whose action table carries the filter.
+
+- *Problem.* `PIPELINE_PARAMETERS.TAGS` is stored and type-checked, but nothing reads it. A
+  deployment with hundreds of pipelines needs to find, watch and act on a group (a team, a
+  domain, a client, an SLA tier), as Airflow tags, Databricks job tags and PowerCenter folders
+  allow.
+- *Change.*
+  1. **Tag values.** `TAGS` stays a JSON list of strings in `PIPELINE_PARAMETERS`; no new
+     column or table. Each tag is 1 to 64 characters of lowercase ASCII letters, digits, `-`,
+     `_` and `:`, so `team:sales` style key/value tags work as one exact tag. At most 20 tags per
+     pipeline, no duplicates. `validate` fails any other value, naming the pipeline, the tag,
+     the rule and the remedy, and `config apply` refuses it. Nothing is normalized: `Sales`
+     fails rather than becoming `sales`.
+  2. **One filter.** A repeatable tag filter: a pipeline matches when it has every given tag.
+     It is one parameter in S5.AA's request types, so every read action that lists pipelines
+     or runs across pipelines takes it the same way. The pull request lists those actions; at
+     least `list`, `status`, `history`, `GET /api/v1/pipelines` and the API's run lists. The CLI
+     spells it `--tag` (repeatable) and the API `?tag=` (repeatable). The service filters after
+     reading the active pipelines, which is cheap at the thousands of pipelines a deployment
+     has. Unknown tags match nothing and are not an error.
+  3. **Shown everywhere a pipeline is.** `list` text and JSON (`tags`), the pipeline's catalog
+     page, and the catalog's DAGs overview, which gets tag chips and a client-side filter in
+     `catalog.js` held in the URL (`?tag=`), so a filtered view can be linked.
+  4. **Bulk actions by tag.** `pause` and `resume` take the same `--tag` filter in place of
+     `--pipeline_code`. The filter resolves to an explicit pipeline list before anything
+     changes: the CLI prints the list and needs `--yes`, the API request carries the resolved
+     codes, and the audit records the codes, not the tag, so a later tag edit never changes
+     what was done. Each pipeline gets its own outcome. S7.A.2's selected bulk actions use the
+     same request.
+- *Tests.* Tag validation failures by rule; AND filtering through the CLI and the API on both
+  Engine DBs; a filtered catalog link; `pause --tag` without `--yes` changes nothing; the audit
+  row holds the resolved codes.
+- *Done when.*
+  - Every list-type read action filters by tag in the CLI, the API and the catalog.
+  - `pause` and `resume` act on a tag's pipelines with one outcome each, and audit the codes.
+  - Invalid tags fail `validate` and `config apply` with their remedy.
+
+### S5.AC Pipeline trigger tasks
+
+Branch: `feat/handlers-run-pipeline`. After S5.AB and before S5.C.
+
+- *Problem.* A pipeline can wait for another (`CFG_PIPELINE_DEPENDENCY` pulls), but it cannot
+  start one. Teams want a parent pipeline that starts its children in order or fans them out,
+  as Databricks' Run Job task, Airflow's TriggerDagRunOperator and PowerCenter's worklets and
+  `pmcmd startworkflow` do. Today they need one schedule per child and timing guesses.
+- *Change.* An ordinary task with ordinary dependency rows, so run conditions, retries,
+  timeouts, holds and marks apply as to any task.
+  1. **A `RUN_PIPELINE` handler** (`core.enums`), `TASK_TYPE` `ETL`. Task parameters:
+     - `TRIGGER_PIPELINE_CODE`: required; an active pipeline other than the task's own.
+     - `TRIGGER_MODE`: `WAIT` (default) or `DETACH`.
+     - `TRIGGER_TIMEOUT_MINUTES`: `WAIT` only; default `NONE`, which waits until the child run
+       ends; `0` is refused.
+  2. **Starting the child run.** One service operation, also used by `etl-craft run
+     --init-only`, so admission rules are shared:
+     - The child runs as of the parent run's `RUN_DATE`, with
+       `RUN_KEY = trigger:<task_run_id>`. A retried attempt of the same task run finds that
+       key instead of creating a second run, which makes a crash between creation and
+       recording safe. A `--rerun` of the trigger task is a new task run, and so a new child.
+     - `TRIGGER_KIND = 'PIPELINE_TASK'` and a new nullable
+       `AUD_PIPELINES_RUN_LOG.TRIGGERED_BY_TASK_RUN_ID` (FK to `AUD_TASK_RUN_LOG`, indexed) link
+       the child to the task run that started it. The child is started by the parent run's
+       `STARTED_BY` actor, so the audit names who caused it.
+     - The child's own pipeline dependencies, gates and SLA apply. A child with a non-terminal
+       run is admitted `QUEUED` behind it. A paused child pipeline fails the task, naming the
+       pause and the remedy (`resume`, or mark the task).
+  3. **`TRIGGER_MODE = WAIT`: the controller takes the wait.** The agent attempt commits, in one
+     transaction, the child run, an `AUD_GATE_WAITS` row (`WAIT_KIND = 'PIPELINE_RUN'`, with the
+     deadline) and its own ending as `HANDED_OFF`, a new `AttemptStatus`. The agent slot is
+     free from then on. The task run stays `IN-PROGRESS`, owned by the controller as event
+     waits are, and the controller records its ending from the child run's ending:
+     - `SUCCESS` → `SUCCESS`; `SKIPPED` → `SKIPPED`;
+     - `FAILED` or `CANCELLED` → `FAILED`, naming the child run id, its status and the remedy;
+     - the deadline passing → `FAILED`; the child keeps running, and the message says so.
+     A child's ending brings the check forward through the finalization hook; a polling look
+     at the wait's next check covers a missed hook and a controller restart. A child's
+     failure is `PERMANENT` for `RETRY_ON`: the child had its own retries, and retrying would
+     only find the same run by key. A failure to create the run is classified as usual.
+  4. **`TRIGGER_MODE = DETACH`: the agent makes sure, then stops.** The attempt creates the
+     child run, reads it back committed as `QUEUED` or `IN-PROGRESS`, and ends `SUCCESS` with
+     the child run id in its task summary. The child's later outcome does not affect the
+     parent.
+  5. **Interventions.** Cancelling, stopping or aborting the parent run cancels the `WAIT`
+     children it is waiting on, each recorded as an intervention whose reason names the parent
+     run; `DETACH` children are left alone. Marking a waiting trigger task closes its wait and
+     leaves the child running. `explain` and `status` on a trigger task name its child run and
+     what it is waiting for.
+  6. **Validation.** `validate` fails a missing, inactive or self target, and any cycle in the
+     graph of trigger tasks together with `CFG_PIPELINE_DEPENDENCY` rows (A triggers B and B
+     triggers A, or A `WAIT`-triggers B while B depends on A), naming every pipeline in it. A
+     triggered pipeline keeps its own `RUN_SCHEDULE`; the guide says children usually have none.
+  7. **Shown.** The catalog's DAGs overview and pipeline pages draw trigger edges between
+     pipelines, labelled `WAIT` or `DETACH`. Run detail links parent and child runs both ways,
+     so an operator can step into a child run as into a PowerCenter worklet. S5.AB's tag
+     filter and S7.A.4's navigation treat a child run like any other run.
+  8. **Agents (S5.C).** The trigger step is an ordinary attempt and the wait is held by the
+     controller, so S5.C needs no new agent command.
+- *Engine DB.* One migration in both dialects: `TRIGGER_KIND` accepts `PIPELINE_TASK`;
+  `TRIGGERED_BY_TASK_RUN_ID` and its index; `WAIT_KIND` accepts `PIPELINE_RUN`; attempt status
+  accepts `HANDED_OFF`. Both `schema.sql` files match, and the upgrade test passes from every
+  released schema.
+- *Tests.* Both modes on both Engine DBs with explicit times: `WAIT` frees the agent slot while
+  the child runs, then takes each child ending; `DETACH` ends after the child is committed; an
+  agent killed between creating the child and ending its attempt creates no second child; a
+  controller restart during a wait; a parent cancel cancels `WAIT` children only; a paused
+  child; trigger and dependency cycles in `validate`; the timeout.
+- *Done when.*
+  - A parent pipeline runs its children through `RUN_PIPELINE` tasks in both modes, with no
+    agent slot held while a `WAIT` child runs.
+  - The child run is linked to its task run in the audit, the CLI, the API and the catalog.
+  - Cycles and invalid targets fail `validate` with their remedy.
+
+### S5.AD Pipeline permission groups
+
+Branch: `feat/services-pipeline-groups`. After S5.AC, and before S5.C, S7.A and S7.M.
+
+- *Problem.* An account has one role for the whole deployment (S5.S). Teams sharing a
+  deployment need narrower access: the sales team operates its pipelines and only views the
+  rest, and a client's analysts see only their client. Databricks grants permissions per job and
+  PowerCenter per folder; S7.M would otherwise add a separate, upload-only steward list.
+- *Change.*
+  1. **Groups.** `CFG_GROUPS` (`GROUP_NAME`, `DESCRIPTION`, `ACTIVE_FLAG`) and
+     `CFG_GROUP_MEMBERS` (group, account). They are identity, so they are managed like
+     accounts, by an admin: `etl-craft group add | disable | add-member | remove-member | list`
+     and the matching API routes, each an S5.AA action. With SSO (S5.S), an optional
+     `Auth.<provider>.Groups_claim` adds the token's groups whose names match active
+     `CFG_GROUPS` rows for that session; unmatched names are ignored and listed in the
+     session's audit row.
+  2. **Grants.** `CFG_PIPELINE_GRANTS` (group, exactly one of `PIPELINE_CODE` or `TAG`,
+     `ROLE`), kept in the config files (`grants.csv`) and applied by `etl-craft config apply`.
+     A change to grants needs `admin` even within a `config apply`, which refuses the whole
+     change otherwise, naming the rows. A tag grant covers every pipeline carrying the tag
+     (S5.AB), as a PowerCenter folder permission does. A grant's role is `viewer` or `operator`, and
+     `steward` once S7.M adds it; project-wide actions (`config apply`, accounts, tokens, pools) stay with the
+     deployment role.
+  3. **Effective role on a pipeline.** A pipeline with no grant, directly or through a tag, is
+     open: each account's deployment role applies, as today. A pipeline with any grant is
+     restricted: an account's role on it is the highest role its groups are granted, and no
+     grant means no access. `admin` always has full access. A grant may be above the account's
+     deployment role, which is how a viewer becomes an operator of their own pipelines.
+  4. **One check.** The S5.AA action table gives each action a scope (`deployment` or
+     `pipeline`), and the one role check reads the effective role for pipeline-scoped actions.
+     List actions leave out pipelines the account cannot view; a direct request for one fails
+     with the existing permission error, naming the pipeline and the role it needs. The
+     controller's SERVICE account and scheduled runs are unaffected.
+  5. **Cross-pipeline effects.** A `RUN_PIPELINE` task (S5.AC) starts its child only when the
+     parent run's starter may operate the child pipeline; otherwise the task fails, naming the
+     account, the child and the missing grant. Dependency and lineage views name a restricted
+     upstream or downstream pipeline but show none of its runs, tasks or logs.
+  6. **Stewards.** S7.M adds the `steward` role as a grant role and assigns stewards with
+     grants on stewardable pipelines, instead of a separate assignment table.
+  7. **The catalog.** The generated catalog is a static site for the whole project, so grants
+     cannot apply to it. `publish-docs` and the docs guide say so; the live UI and the API
+     apply grants.
+- *Engine DB.* One migration in both dialects: the three tables, their history tables and
+  actor guards as for every `CFG_` table, and `ACTIVE_FLAG` instead of deletes.
+- *Tests.* Open and restricted pipelines through the CLI, the API and list filtering, on both
+  Engine DBs; tag and direct grants; a viewer with an operator grant; refusals with their
+  message; a non-admin `config apply` that touches `grants.csv`; SSO group mapping; a trigger
+  task refused for its child.
+- *Done when.*
+  - Every pipeline-scoped action applies the effective role from the action table's one check.
+  - Groups and grants are audited, and their changes need `admin`.
+  - S7.M's plan assigns stewards through grants.
 
 ### S5.C The PostgreSQL queue and the agent
 
@@ -4731,6 +4919,26 @@ logs that attempt logs already provide.
   restart, compared with the audit rows; a run zip's manifest and contents, including a missing
   attempt log; a large log streamed within a bounded memory budget; role refusals.
 
+**S7.A.4 Workflow navigation is required.** Take every navigation element of Databricks
+Workflows and fit it to the PowerCenter Workflow Monitor model of S7.A.2: navigation selects an
+object, and actions apply to the selected object only. The [navigation design](metadata-and-ui.md#workflow-navigation-databricks-and-powercenter)
+lists each element, its source and its data.
+- *Rules.*
+  - **One selection, every view.** The navigator, lists, run matrix cells, graph nodes and
+    timeline bars select the same pipeline, run, task run or attempt. The right-click menu
+    and the side panel act on that selection through S5.Q's capabilities; no view has
+    actions of its own.
+  - **Read actions only.** Every view renders an S5.AA read action, and every filter is a
+    parameter of that action (S5.AB's tag filter among them), so the CLI and the API return
+    the same rows.
+  - **Addressable.** Every view, selection and filter is in the URL; a link opens the same view.
+  - **No definition editing.** Databricks' job editor and "Run as" are left out: definitions
+    change through the config files and `etl-craft config apply`. Per-pipeline permissions are
+    S5.AD's grants: views show only what the account may see, and menus only what it may do.
+  - **Bounded.** Lists and matrices page through repository queries; nothing loads every run.
+- *Tests.* Browser tests open each view from a link, select through each view and act from the
+  menu and the side panel; page tests compare each view's rows with the matching CLI JSON.
+
 - *Technology.* One package and one language for contributors. The UI is served by
   `etl-craft controller` from the `server` extra, with no Node toolchain for users, contributors or
   CI.
@@ -4761,6 +4969,8 @@ logs that attempt logs already provide.
   - Pipelines: list with schedule, next run, last status, pause state; a pipeline page with the DAG
     coloured by the selected run's task statuses.
   - Runs: a grid of runs × tasks (status per cell), filters by status, kind and date.
+  - Navigation (S7.A.4): the navigator, global search, breadcrumbs, run matrix, task timeline,
+    run-duration chart, side panel and tag filters of the navigation design.
   - Run detail: tasks with attempts, rows, durations, errors; per task the `explain` panel; actions
     allowed by the user's role through the complete S7.A.2 action/capability matrix.
   - Attempt: live log tail, exit code, owner, host; download (S7.A.3).
@@ -4770,7 +4980,7 @@ logs that attempt logs already provide.
   - Agents and pools: capacity, slots in use, queue, heartbeats.
   - Catalog: today's lineage, tables, rules and scripts pages, linked from runs.
   - Metadata: a read-only view of `CFG_` rows (pipelines, tasks, parameters, dependencies,
-    rules, stewardable pipelines and steward assignments), with each row's actor, history and `validate` findings, and a link
+    rules, stewardable pipelines, groups and grants), with each row's actor, history and `validate` findings, and a link
     to its CSV file in the configuration repository. The UI does not edit metadata. Changes
     are made in the config files and deployed by `etl-craft config apply`, so the UI and the
     reviewed files cannot drift apart.
@@ -4805,10 +5015,10 @@ after S5.S (accounts and roles) and S5.O.3 (protection of human writes).
          the remedy (upload a file);
        - automatic retries and operator reruns of an upload's run reuse that upload's stored
          file.
-     - `CFG_UPLOAD_STEWARDS` assigns accounts to stewardable pipelines, and only an admin
-       assigns.
-     - The `steward` role sits between `viewer` and `operator`. An upload needs both the role
-       and an assignment to the pipeline; no other role implies an assignment.
+     - S5.AD's `steward` grants assign groups to stewardable pipelines, and only an admin
+       changes grants.
+     - The `steward` role sits between `viewer` and `operator`. An upload needs a `steward` (or
+       higher) grant on the pipeline; no deployment role other than `admin` implies one.
   2. **The `FILE_VALIDATION` task**: a supported handler (`core.enums`), allowed only in
      stewardable pipelines.
      - `validate` refuses a stewardable pipeline unless:
@@ -5434,7 +5644,7 @@ Rules for building them:
 
 The metadata is code, kept in the configuration repository as one CSV file per `CFG_` table and
 merged by key.
-- A change to a pipeline, a rule, a stewardable pipeline or a steward assignment is a pull
+- A change to a pipeline, a rule, a stewardable pipeline or a grant is a pull
   request that edits those files. Retiring a row sets `ACTIVE_FLAG = 'N'`.
 - On a pull request, CI migrates an empty Engine DB to the candidate's schema, runs
   `etl-craft config plan` and `apply`, and runs `validate` for every pipeline.

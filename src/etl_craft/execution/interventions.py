@@ -1,6 +1,6 @@
 """Operator marks, definition pauses and dependency overrides for local runs.
 
-In local mode etl-craft is the orchestrator, so it is where an operator steps in:
+etl-craft is the orchestrator, so it is where an operator steps in:
 
 - ``mark`` sets a task of the selected run, or the run itself, to ``SUCCESS``,
   ``FAILED`` or ``SKIPPED``, with a reason. A marked ``SUCCESS`` satisfies a ``HAS_DATA``
@@ -16,8 +16,7 @@ In local mode etl-craft is the orchestrator, so it is where an operator steps in
   are recorded in ``AUD_PIPELINE_PAUSES``.
 
 Every change is recorded in ``AUD_RUN_INTERVENTIONS`` with what the row held before, who asked
-and why, and no attempt, log or error is erased. In remote mode the orchestrator is the only
-source of truth, so these are refused: mark or clear the task in the orchestrator instead.
+and why, and no attempt, log or error is erased.
 """
 
 from __future__ import annotations
@@ -36,7 +35,6 @@ from etl_craft.core.enums import (
     MARKABLE_STATUSES,
     GatePolicy,
     InterventionAction,
-    Mode,
     RunStatus,
 )
 from etl_craft.core.errors import RunRefusedError, RunStateError, UsageError
@@ -87,7 +85,7 @@ def mark_task(
     reset, so the next ``run --pipeline_code`` resumes it. A task that is ``IN-PROGRESS`` is
     refused while its lease is live. ``stale`` reconciles expired attempts before marking.
     Raises ``RunStateError`` when
-    the pipeline has no run, and ``RunRefusedError`` in remote mode or while the task is running.
+    the pipeline has no run, and ``RunRefusedError`` while the task is running.
     """
     status = _check(config, "mark", reason, status, rows)
     who = requested_by or current_actor().name
@@ -406,16 +404,10 @@ def record_change(
 
 
 def check_override(config: ConnectorConfig, option: str, reason: str | None) -> str:
-    """Return the reason for ``option``, an override of local mode's checks.
+    """Return the reason for ``option``, an override of the engine's checks.
 
-    Raises ``RunRefusedError`` in remote mode and ``UsageError`` without a reason.
+    Raises ``UsageError`` without a reason.
     """
-    if config.mode == Mode.REMOTE:
-        raise RunRefusedError(
-            f"{option} is only available in local mode: in remote mode run --task_code already "
-            "runs the task whenever the orchestrator says (clear it in the orchestrator to run "
-            "it again)"
-        )
     if reason is None or not reason.strip():
         raise UsageError(f"{option} needs a --reason: it is recorded with the run")
     return reason
@@ -448,12 +440,6 @@ def record_gate_bypass(
 def _check(
     config: ConnectorConfig, command: str, reason: str, status: str | None, rows: int | None
 ) -> RunStatus:
-    if config.mode == Mode.REMOTE:
-        raise RunRefusedError(
-            f"{command} is only available in local mode: in remote mode the orchestrator is the "
-            "only source of truth for runs, so mark, clear, stop or pause it in the orchestrator "
-            "instead (in external scheduler: Mark Success, Mark Failed, Clear, pausing the DAG)"
-        )
     if not reason.strip():
         raise UsageError(f"{command} needs a --reason: it is recorded with the change")
     if rows is not None and rows < 0:

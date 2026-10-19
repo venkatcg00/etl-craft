@@ -22,7 +22,7 @@ credentials. Password reset revokes all existing sessions.
 
 The same role policy holds for CLI, HTTP/UI and Python operations. The `scheduler` operator can
 run, pause and resume pipelines, but cannot apply configuration or administer tokens. Those
-require developer and admin respectively. For example, with external scheduler's operator token:
+require developer and admin respectively. For example, with the `scheduler` operator's token:
 
 ```bash
 etl-craft list                                      # viewer read: allowed
