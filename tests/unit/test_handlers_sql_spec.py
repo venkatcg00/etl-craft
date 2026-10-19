@@ -3,7 +3,7 @@
 import pytest
 
 from etl_craft.config import ConnectionProfile, ConnectorConfig, SourceConfig
-from etl_craft.core.enums import Mode, SqlAction
+from etl_craft.core.enums import SqlAction
 from etl_craft.core.errors import HandlerError, MetadataError
 from etl_craft.handlers.registry import TaskContext
 from etl_craft.handlers.sql.spec import parse_flag, read_sql_task
@@ -21,7 +21,6 @@ def project(tmp_path):
 def context(project, refresh_type="INCREMENTAL", **params):
     engine = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:e.db", "", "none")
     config = ConnectorConfig(
-        mode=Mode.LOCAL,
         source=SourceConfig(type="environment"),
         engine=engine,
         config_path=project / "craft-connector.yml",

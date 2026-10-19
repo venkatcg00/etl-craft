@@ -12,7 +12,7 @@ when none or several exist and lists candidates. A completed run is never select
 The whole-pipeline runner passes its selected run to every task. Use
 `history --pipeline_code SALES --all` to find completed run ids.
 
-In local mode, the task does not run when:
+The task does not run when:
 
 - it already ended `SUCCESS` or `SKIPPED` under this run: a retry never repeats finished work (exit `0`);
 - it is `IN-PROGRESS` under this run: it is never started twice (exit `22`, `INCOMPLETE`);
@@ -51,7 +51,7 @@ retain warehouse target locks and human-value protection. Finish or cancel the o
 exclusive run before starting them. Email-only selections can overlap other pipeline work.
 Python offsets, SQL watermarks, business-rule flags and event checkpoints currently have shared
 state: standalone execution refuses those tasks, naming the available explicit pipeline-run
-path. Legacy external-orchestrator mode requires that path too. Pipeline pause still blocks
+path. Pipeline pause still blocks
 manual dispatch; resume the definition before starting a selection.
 
 The API exposes `POST /api/v1/pipelines/{code}/tasks/{task}/run`, requiring operator role.
@@ -104,8 +104,7 @@ policy, because the old policy cannot be reconstructed.
 Cancelled attempts never retry. Lost leases and supervisor timeouts remain transient process
 failures. Lost attempts get a new owner only after reconciliation fences the old lease;
 their side effects can be uncertain, so use retry-safe ingestion scripts. A process that exits
-without reporting its outcome is unknown. Remote mode continues to delegate automatic retries
-to its orchestrator; the external scheduler governs retries.
+without reporting its outcome is unknown.
 
 
 Running a `FAILED` task again is a new attempt on the same `AUD_TASK_RUN_LOG` row: `ATTEMPT_COUNT`
@@ -119,8 +118,8 @@ Admission allows one active attempt per task run. A concurrent claim or a result
 attempt or wrong owner is refused with exit `20` (`STALE_TRANSITION`), naming the row, expected
 status and owner, and state found. Check the run's history before retrying the command.
 
-`--force` runs the task even if it already succeeded or its dependencies are not met. It is only
-available in local mode. When the explicitly selected run has already ended (`SKIPPED` included, except `CANCELLED`), the
+`--force` runs the task even if it already succeeded or its dependencies are not met.
+When the explicitly selected run has already ended (`SKIPPED` included, except `CANCELLED`), the
 run is reopened for the task, recorded as a `REOPEN` in its history, and ended again from its tasks'
 statuses once the task ends: a forced task that fails leaves the run `FAILED`. If tasks of the run
 have never run, the run stays `IN-PROGRESS` and `run --pipeline_code <code>` resumes it.
@@ -130,14 +129,6 @@ have never run, the run stays `IN-PROGRESS` and `run --pipeline_code <code>` res
 
 `--ignore-dependencies` and `--rerun` are the recorded, narrower overrides: see
 [Stepping in](run-control.md#run-a-task-without-its-dependencies).
-
-## In remote mode
-
-The orchestrator decides when a task runs, so `run --task_code` runs it whenever it is told to.
-Dependency and settled-task checks are delegated to it; the Engine DB still refuses a second
-active attempt for the same task run. Run again after it succeeded, it is a new attempt that skips
-nothing it did before; run after its run ended (a cleared task), it reopens that run. See
-[Starting runs from another scheduler](../deploying/http-api.md#starting-runs-from-another-scheduler).
 
 ## Time limits
 

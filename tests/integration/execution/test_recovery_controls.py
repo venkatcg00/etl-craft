@@ -8,7 +8,7 @@ from sqlalchemy import text
 
 from etl_craft.cli import main
 from etl_craft.core.actor import current_actor
-from etl_craft.core.enums import ApiRole, ControlAction, ControlStatus, Mode, RunStatus
+from etl_craft.core.enums import ApiRole, ControlAction, ControlStatus, RunStatus
 from etl_craft.core.errors import RunRefusedError, UsageError
 from etl_craft.engine import controls, run_scopes, runlog, transitions
 from etl_craft.engine.repository.offsets import StoredOffset, fetch_task_offset, save_task_offset
@@ -275,16 +275,6 @@ def test_bulk_rejects_implicit_identity_before_applying_any_object(ctx):
         )
     with ctx.engine.connect() as conn:
         assert controls.blocked(conn, run) == {}
-
-
-def test_capabilities_explain_legacy_worker_adapter(ctx):
-    _, run, _, _ = scene(ctx)
-    caps = control_capabilities(
-        replace(ctx, config=replace(ctx.config, mode=Mode.REMOTE)),
-        "P",
-        selector=RunSelector(run_id=run),
-    )
-    assert all(not a.available and "orchestrator" in a.reason for a in caps.actions)
 
 
 def test_real_cli_prepares_restart_and_reads_its_capabilities(ctx, capsys, monkeypatch):

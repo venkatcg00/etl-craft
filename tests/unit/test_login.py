@@ -105,7 +105,7 @@ def test_xdg_path_requires_an_absolute_directory(monkeypatch):
 def test_auth_settings_validate_lifetime_and_issuer(tmp_path):
     raw = {
         "Secrets": {"Source_type": "environment"},
-        "Orchestration": {"Mode": "local"},
+        "Orchestration": {},
         "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:e.db", "schema": "main"}},
     }
     assert parse_config(raw, tmp_path / "c.yml").auth.session_hours == 12
@@ -243,7 +243,7 @@ def test_removed_export_auth_setting_is_unknown(tmp_path):
     removed = "Air" + "flow_connection_id"
     raw = {
         "Secrets": {"Source_type": "environment"},
-        "Orchestration": {"Mode": "local"},
+        "Orchestration": {},
         "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:e.db", "schema": "main"}},
         "Auth": {removed: "scheduler"},
     }

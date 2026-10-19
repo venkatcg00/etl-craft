@@ -16,7 +16,6 @@ from etl_craft.core.enums import (
     ControlAction,
     ControlStatus,
     Handler,
-    Mode,
     RunStatus,
 )
 from etl_craft.core.errors import LockTimeoutError, RunRefusedError, RunStateError, UsageError
@@ -81,12 +80,6 @@ def request_control(ctx: OperationContext, request: ControlRequest) -> ControlVi
         "request_key": request.request_key,
     }
     with operation(ctx, command, args):
-        if ctx.config.mode != Mode.LOCAL:
-            raise RunRefusedError(
-                f"{request.pipeline_code}: legacy external-orchestrator mode has no owned "
-                "agent control adapter; stop/hold the exact task in that orchestrator. "
-                "Native controls require a local owning agent."
-            )
         if request.action == ControlAction.RUN_PAUSED and request.selector == runlog.ACTIVE_RUN:
             return _new_paused(ctx, request)
         with control_scope(ctx, request) as run_id, ctx.engine.begin() as conn:
@@ -121,11 +114,6 @@ def check_control(
 ) -> tuple[controls.ControlAttempt, ...]:
     """Share state/capability decisions between previews and accepted requests."""
     run_id = selected.pipeline_run_id
-    if ctx.config.mode != Mode.LOCAL:
-        raise RunRefusedError(
-            f"run_id={run_id}: legacy orchestrator has no native control adapter; act on "
-            f"the exact task in its orchestrator"
-        )
     if request.action in RECOVERY_ACTIONS:
         check_recovery(conn, selected, request.action, task_id)
     else:

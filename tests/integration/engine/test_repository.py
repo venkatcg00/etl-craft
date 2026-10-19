@@ -211,9 +211,9 @@ def test_pipeline_detail_reads_its_json_parameters(seeded):
             2.5,
             "INCREMENTAL",
         )
-        assert (detail.retries, detail.tags, detail.catchup) == (3, ["daily"], False)
+        assert detail.tags == ["daily"]
         assert detail.email_recipients is None
-        assert pipelines.fetch_pipeline_detail(conn, ids["beta"]).retries is None
+        assert pipelines.fetch_pipeline_detail(conn, ids["beta"]).tags is None
         assert pipelines.fetch_pipeline_handlers(conn, ids["alpha"]) == {
             "PYTHON",
             "SQL",

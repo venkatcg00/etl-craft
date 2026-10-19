@@ -102,7 +102,7 @@ class RunStateError(EtlCraftError):
 
 
 class RunRefusedError(EtlCraftError):
-    """The run is not allowed in the configured mode, for example ``--force`` in remote mode."""
+    """The requested run or intervention is refused by its current state."""
 
     retryable = False
     exit_code = ExitCode.RUN_REFUSED
@@ -148,13 +148,6 @@ class ServerError(EtlCraftError):
     """A server could not be reached, or answered with something that is not etl-craft JSON."""
 
     exit_code = ExitCode.SERVER
-
-
-class RemoteUnsupportedError(EtlCraftError):
-    """A pipeline has rules a remote orchestrator does not support; the message names each."""
-
-    retryable = False
-    exit_code = ExitCode.REMOTE_UNSUPPORTED
 
 
 class InjectedFaultError(EtlCraftError):

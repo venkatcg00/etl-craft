@@ -33,7 +33,7 @@ def scene(tmp_path):
     config = parse_config(
         {
             "Secrets": {"Source_type": "environment"},
-            "Orchestration": {"Mode": "local"},
+            "Orchestration": {},
             "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "main"}},
         },
         tmp_path / "craft-connector.yml",

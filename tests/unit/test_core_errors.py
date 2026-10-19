@@ -29,7 +29,6 @@ EXIT_CODES = {
     errors.LockTimeoutError: ExitCode.LOCK_TIMEOUT,
     errors.HandlerError: ExitCode.HANDLER,
     errors.CloningError: ExitCode.CLONING,
-    errors.RemoteUnsupportedError: ExitCode.REMOTE_UNSUPPORTED,
     errors.InjectedFaultError: ExitCode.INJECTED_FAULT,
     errors.StaleTransitionError: ExitCode.STALE_TRANSITION,
     errors.SqlGuardError: ExitCode.SQL_GUARD,

@@ -21,7 +21,6 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectionProfile, ConnectorConfig, SourceConfig
-from etl_craft.core.enums import Mode
 from etl_craft.core.text import qualify
 from etl_craft.engine import transitions
 from etl_craft.handlers import sql
@@ -172,7 +171,6 @@ def _config(tmp_path: Path, profile: ConnectionProfile) -> ConnectorConfig:
     (project / "sql_files").mkdir(parents=True, exist_ok=True)
     engine = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:engine.db", "", "none")
     return ConnectorConfig(
-        mode=Mode.LOCAL,
         source=SourceConfig(type="environment"),
         engine=engine,
         warehouse=profile,

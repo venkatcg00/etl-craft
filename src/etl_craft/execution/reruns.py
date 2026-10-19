@@ -47,7 +47,7 @@ def rerun_task(
 ) -> PipelineOutcome:
     """Run ``task_code`` again under the selected run: ``run --task_code --rerun``.
 
-    With ``with_downstream``, every task after it runs again too; local mode only. The task
+    With ``with_downstream``, every task after it runs again too. The task
     runs as it stands, without its dependencies checked again. Each task after it runs again,
     in dependency order, when its dependencies are satisfied by then; the others keep their
     rows. A run that had ended is reopened for this and then ended again from its tasks'
@@ -154,7 +154,7 @@ def force_task(
     hooks: RunHooks | None = None,
     selector: runlog.RunSelector = runlog.ACTIVE_RUN,
 ) -> PipelineOutcome:
-    """Run ``task_code`` past its checks: ``run --task_code --force``; local mode only.
+    """Run ``task_code`` past its checks: ``run --task_code --force``.
 
     Under the pipeline's active run the task just runs. A run that had ended is reopened for
     it and then ended again from its tasks' statuses, so a forced task that fails leaves the

@@ -214,21 +214,6 @@ def test_retry_budget_is_exhausted_for_failure_and_timeout(
     assert [r.status for r in attempts(engine, outcome.pipeline_run_id)] == [expected, expected]
 
 
-def test_remote_orchestrator_retains_retry_control(engine_db, config):
-    from dataclasses import replace
-
-    from etl_craft.core.enums import Mode
-
-    engine = engine_db.engine
-    with engine.begin() as conn:
-        pipeline = add_pipeline(conn, "P")
-        add_task(conn, pipeline, "load", BEHAVIOUR="fail", RETRIES="3", RETRY_DELAY_SECONDS="0")
-        run = start_run(conn, pipeline)
-    outcome = run_task(engine, replace(config, mode=Mode.REMOTE), "P", "load", child=CHILD)
-    assert outcome.status == "FAILED"
-    assert len(attempts(engine, run)) == 1
-
-
 def test_cancelled_attempt_never_retries(engine_db, config):
     engine = engine_db.engine
     with engine.begin() as conn:

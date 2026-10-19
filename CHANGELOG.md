@@ -8,6 +8,11 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- `Orchestration.Allow_schedule` now controls the controller: `false` in an environment's
+  profile stops that environment's controller from creating scheduled runs, without affecting
+  other environments. Manual runs and catalog builds continue. It was previously read only by
+  the Airflow export.
+
 - The controller rebuilds the catalog on `Docs_site.Schedule` in the project timezone,
   without blocking task supervision. Only one scheduled build runs at a time; missed ticks
   are skipped. Manual and scheduled builds record one immutable `REQUESTED` row and one
@@ -23,6 +28,22 @@ All notable changes are recorded here. The format follows
   Task execution uses agent terminology; the cluster agent itself remains S5.C.
 
 ### Removed
+
+- Remote mode: `Orchestration.Mode`, `Orchestration.Name`, the `etl-craft run --finalize-only`
+  flag and the orchestrated finalization it reached. The controller always schedules;
+  `--init-only` creates a run it picks up, and another scheduler starts work with
+  `etl-craft run --server` or `POST /api/v1/pipelines/{code}/runs`. The DAG-only settings
+  `Global_dag`, `Tags`, `Retry_delay_minutes`, `Depends_on_past`, `Email_on_failure` and
+  `Orchestration.Catchup` are removed; `Orchestration.Retries` and
+  `Email_recipients` stay because runs and alerts read them. Each removed setting fails as an
+  unknown key naming where it was found. `RemoteUnsupportedError` is gone; exit code `18`
+  stays reserved so recorded outcomes still read back.
+  With `Mode` gone, the `Orchestration` section is optional: every setting in it has a default.
+- `PIPELINE_PARAMETERS` keys `CATCHUP`, `DEPENDS_ON_PAST`, `EMAIL_ON_FAILURE`, `RETRIES` and
+  `RETRY_DELAY_MINUTES`; `TAGS` and `EMAIL_RECIPIENTS` stay. Migration `0043` removes the five
+  keys from stored pipelines as etl-craft, leaving history rows unchanged. Any unknown key now fails `validate` and
+  `config apply`, naming the pipeline, the key and the allowed keys, instead of warning.
+  Remote-era audit rows (`orchestrator:` run keys, `ORCHESTRATOR` kinds) still read back.
 
 - Airflow DAG export: `etl-craft generate-yml` (including `--pipeline_code`, `--global`,
   `--docs`, `--airflow-version` and `--output` on that command), the `etl-craft-airflow`

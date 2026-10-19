@@ -114,7 +114,7 @@ def profiled_settings(
     A mapping-valued key is a profile block unless it is in ``nested``, a structured setting
     that lives inside a profile, like Orchestration's Email.
     """
-    section = mapping(raw, name, path, required=name == "Orchestration")
+    section = mapping(raw, name, path, required=False)
     blocks = {
         key: value
         for key, value in section.items()

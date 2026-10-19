@@ -1,14 +1,11 @@
 # Stepping in: mark, cancel, pause, backfill, rerun and bypasses
 
-In local mode etl-craft is the orchestrator, so it is where you step in when a run needs a hand:
+etl-craft is the orchestrator, so it is where you step in when a run needs a hand:
 a failure you have fixed by other means, an upstream that cannot run where you are, a task to run
 again, a run that must stop now. Every change needs a reason, is recorded in `AUD_RUN_INTERVENTIONS` with who made
 it and when, and erases nothing: each attempt keeps its row, its log file and, in the
 intervention, the message it had before.
 
-In remote mode the orchestrator is the only source of truth for runs, so all of these are refused
-(exit status `10`): mark, clear or stop the task in the orchestrator instead. See
-[Starting runs from another scheduler](../deploying/http-api.md#starting-runs-from-another-scheduler).
 
 ## Choose the run
 
@@ -288,7 +285,6 @@ relaxes that per profile:
 
 ```yaml
 Orchestration:
-  Mode: local
   dev:
     Dependency_gates: warn     # enforce (the default) | warn | off
 ```
@@ -299,8 +295,7 @@ Orchestration:
 
 Each dependency let through is recorded against the run, or the task, as a `GATE_BYPASS`, and the
 run's summary says so. Only upstream runs that satisfied their dependency are consumed. `doctor`
-warns whenever gates are not enforced, and remote mode refuses anything but `enforce`: there the
-orchestrator's sensors are the gates.
+warns whenever gates are not enforced.
 
 ## What was changed
 

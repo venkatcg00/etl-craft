@@ -103,7 +103,6 @@ class Demo:
     root: Path
     engine_kind: str
     warehouse_kind: str
-    mode: str = "local"
     tag: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     catalog: str = ""
     cleanup: list[Any] = field(default_factory=list)
@@ -133,7 +132,6 @@ class Demo:
         raw = {
             "Secrets": {"Source_type": "environment"},
             "Orchestration": {
-                "Mode": self.mode,
                 "Task_timeout_seconds": 600,
                 "Max_parallel_tasks": 4,
                 "Enforce_sla": True,

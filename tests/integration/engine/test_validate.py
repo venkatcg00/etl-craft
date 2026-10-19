@@ -10,7 +10,6 @@ from sqlalchemy import text
 
 from etl_craft.cli import main
 from etl_craft.config import load_config
-from etl_craft.core.enums import Mode
 from etl_craft.core.errors import ExitCode, MetadataError
 from etl_craft.services.doctor import Status
 from etl_craft.services.validate import validate
@@ -53,7 +52,6 @@ def project(engine_db, tmp_path, monkeypatch):
     raw = {
         "Secrets": {"Source_type": "environment"},
         "Orchestration": {
-            "Mode": "local",
             "Email": {"host": "localhost", "port": 1025, "from_address": "etl@x.io"},
         },
         "Engine": {"dev": block},
@@ -370,16 +368,11 @@ def test_dependencies_and_pipeline_settings(project):
         "pipeline dependencies form a cycle (DOWN -> GOOD -> DOWN), so none of these pipelines "
         "can start",
     ) in got
-    assert (
-        "DOWN",
-        fail,
-        'PIPELINE_PARAMETERS.RETRIES="3" must be a whole number, 0 or more',
-    ) in got
-    assert (
-        "DOWN",
-        warn,
-        "PIPELINE_PARAMETERS TAG is not read by etl-craft, so it has no effect; did you mean TAGS",
-    ) in got
+    for key in ("RETRIES", "TAG"):
+        assert any(
+            where == "DOWN" and status is fail and key in message and "EMAIL_RECIPIENTS" in message
+            for where, status, message in got
+        )
     assert any(w == "DOWN" and "GONE, which is inactive" in m for w, _, m in got)
     assert any(
         w == "bad code" and m.startswith("PIPELINE_CODE='bad code' must start") for w, _, m in got
@@ -441,26 +434,6 @@ def test_an_alert_that_only_watches_for_failures_may_run_mid_run(project):
             EMAIL_ON_STATUS="FAILED",
         )
         add_dependency(conn, p, watcher, load, "FAILURE")
-    assert found(validate(engine, config)) == []
-
-
-def test_remote_mode_fails_the_rules_its_orchestrator_does_not_support(project):
-    engine, config, _ = project
-    with engine.begin() as conn:
-        good_pipeline(conn)
-    remote = replace(config, mode=Mode.REMOTE)
-    report = validate(engine, remote)
-    assert found(report) == [
-        (
-            "SALES.rules",
-            Status.FAIL,
-            "depends on load with DEPENDENCY_TYPE = 'HAS_DATA'; the remote orchestrator does not "
-            "support this. An orchestrator sees whether a step succeeded, not whether it wrote "
-            "rows. Use DEPENDENCY_TYPE 'SUCCESS' and let the task handle an empty input, or run "
-            "it in local mode (Orchestration.Mode: local), where etl-craft applies it.",
-        )
-    ]
-    # The same metadata is fine in local mode, where etl-craft applies the rule.
     assert found(validate(engine, config)) == []
 
 
@@ -595,3 +568,32 @@ def test_validate_refuses_repeated_merge_columns_with_the_handler_message(projec
     assert "SALES.load" in matching[0].message
     assert "repeats column 'ID'" in matching[0].message
     assert "keep each column once" in matching[0].message
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "CATCHUP",
+        "DEPENDS_ON_PAST",
+        "EMAIL_ON_FAILURE",
+        "RETRIES",
+        "RETRY_DELAY_MINUTES",
+        "TYPO",
+    ],
+)
+def test_unknown_pipeline_parameters_fail_with_allowed_keys_and_remedy(project, key):
+    engine, config, _ = project
+    with engine.begin() as conn:
+        pipeline = good_pipeline(conn, "P")
+        conn.execute(
+            text("UPDATE CFG_PIPELINES SET PIPELINE_PARAMETERS=:value WHERE PIPELINE_ID=:id"),
+            {"value": json.dumps({key: True}), "id": pipeline},
+        )
+    findings = [finding for finding in validate(engine, config).findings if finding.where == "P"]
+    assert any(
+        f.status is Status.FAIL
+        and key in f.message
+        and "EMAIL_RECIPIENTS" in f.message
+        and "remove" in f.message
+        for f in findings
+    )

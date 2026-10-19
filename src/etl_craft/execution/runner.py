@@ -1,13 +1,9 @@
 """``run --task_code``: run one task of a pipeline, in its own process.
 
-The caller selects the task's run by id or key, or by a single non-terminal identity. In
-local mode it runs only when it may: not again once ``SUCCESS`` or ``SKIPPED`` under the run, not
+The caller selects the task's run by id or key, or by a single non-terminal identity.
+It runs only when it may: not again once ``SUCCESS`` or ``SKIPPED`` under the run, not
 while it is already ``IN-PROGRESS``, and only when enough of its dependencies are satisfied. A
 task whose dependencies can never be satisfied under the run is recorded ``SKIPPED``.
-
-In remote mode the orchestrator decides, so the task runs whenever it is told to, with none of
-those checks (see ``remote``). Run again after it succeeded, it is a new attempt that skips
-nothing; run after the run ended, it reopens the run, which ``--finalize-only`` ends again.
 
 The task itself runs in a freshly started interpreter, supervised with its time limit. Its
 output goes to the attempt's log file, whose tail is kept in ``TASK_LOG``. When that process
@@ -32,13 +28,11 @@ from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
 from etl_craft.core.enums import (
     SETTLED_STATUSES,
     AttemptStatus,
-    Mode,
     RunStatus,
 )
 from etl_craft.core.errors import (
     ConfigurationError,
     EtlCraftError,
-    RunRefusedError,
     UsageError,
 )
 from etl_craft.core.faults import fault_point
@@ -128,9 +122,8 @@ def run_task(
     """Run one task under its pipeline's active run and return how it ended.
 
     ``force`` runs the task even when it already succeeded or its dependencies are not met, and
-    reopens an ended run; it is local mode's override, refused in remote mode, where the task
-    always runs as the orchestrator says. ``override`` is an operator's recorded override (see
-    ``Override``), also local mode's. Raises ``MetadataError`` for an unknown code and
+    reopens an ended run. ``override`` is an operator's recorded override (see ``Override``).
+    Raises ``MetadataError`` for an unknown code and
     ``RunStateError`` when there is no run to bind to.
     """
     with engine.connect() as conn:
@@ -141,25 +134,15 @@ def run_task(
         check_override(config, option, override.reason)
         if force:
             raise UsageError(f"{option} and --force are different overrides: choose one")
-    if config.mode == Mode.LOCAL:
-        paused = open_pause(engine, pipeline_code, selector=selector)
-        if paused is not None:
-            return _skipped(
-                f"{task_code}: {pipeline_code} is {paused.describe()}; nothing started or "
-                f"recorded. `etl-craft resume --pipeline_code {pipeline_code}` lets it run again"
-            )
+    paused = open_pause(engine, pipeline_code, selector=selector)
+    if paused is not None:
+        return _skipped(
+            f"{task_code}: {pipeline_code} is {paused.describe()}; nothing started or "
+            f"recorded. `etl-craft resume --pipeline_code {pipeline_code}` lets it run again"
+        )
     if override is not None:
         return _run_overridden(
             engine, config, pipeline_code, pipeline_id, task_code, override, child, selector
-        )
-    if force and config.mode == Mode.REMOTE:
-        raise RunRefusedError(
-            "--force is only allowed in local mode; in remote mode run --task_code already runs "
-            "the task whenever the orchestrator says, so there is nothing to override"
-        )
-    if config.mode == Mode.REMOTE:
-        return _run_for_orchestrator(
-            engine, config, pipeline_code, pipeline_id, task_code, child, selector
         )
     return _run_local(
         engine,
@@ -310,7 +293,7 @@ def _run_overridden(
         status = runlog.fetch_task_run_status(conn, task_id, pipeline_run_id)
         if override.rerun and status != RunStatus.IN_PROGRESS:
             pipeline_run_id, _ = transitions.resolve_run(
-                conn, pipeline_id, orchestrated=True, reason=override.reason, selector=selector
+                conn, pipeline_id, rerun=True, reason=override.reason, selector=selector
             )
     if status == RunStatus.IN_PROGRESS:
         return _skipped(
@@ -347,59 +330,6 @@ def _run_overridden(
         reason=override.reason,
     )
     return outcome
-
-
-def _run_for_orchestrator(
-    engine: Engine,
-    config: ConnectorConfig,
-    pipeline_code: str,
-    pipeline_id: int,
-    task_code: str,
-    child: ChildOptions | None,
-    selector: runlog.RunSelector,
-) -> TaskOutcome:
-    """Run the task as the orchestrator said, under the run it resolves; remote mode."""
-    with engine.begin() as conn:
-        task_id = resolve_task_id(conn, pipeline_id, task_code)
-        pipeline_run_id, reopened = transitions.resolve_run(
-            conn,
-            pipeline_id,
-            orchestrated=True,
-            reason="orchestrator requested a task under an ended run",
-            selector=selector,
-        )
-        status = runlog.fetch_task_run_status(conn, task_id, pipeline_run_id)
-    if reopened is not None:
-        logger.warning(
-            "%s: pipeline_run_id=%d had already ended %s; the orchestrator ran %s again, so the "
-            "run is IN-PROGRESS again until --finalize-only ends it",
-            pipeline_code,
-            pipeline_run_id,
-            reopened,
-            task_code,
-        )
-    if status == RunStatus.IN_PROGRESS:
-        logger.warning(
-            "%s: already IN-PROGRESS under pipeline_run_id=%d; the orchestrator started it again, "
-            "so this is a new attempt",
-            task_code,
-            pipeline_run_id,
-        )
-    rerun = status in SETTLED_STATUSES
-    if rerun:
-        logger.info(
-            "%s: already %s under pipeline_run_id=%d; the orchestrator runs it again",
-            task_code,
-            status,
-            pipeline_run_id,
-        )
-    return _run_attempt(
-        engine,
-        config,
-        _TaskRun(pipeline_code, task_code, task_id, pipeline_run_id, False),
-        child,
-        rerun=rerun,
-    )
 
 
 NO_CROSS = CrossPipelineCheck(0)

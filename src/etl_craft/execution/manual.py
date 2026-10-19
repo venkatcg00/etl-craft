@@ -9,7 +9,7 @@ from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import current_actor
-from etl_craft.core.enums import InterventionAction, Mode, RunStatus
+from etl_craft.core.enums import InterventionAction, RunStatus
 from etl_craft.core.errors import RunRefusedError, RunStateError, StaleTransitionError
 from etl_craft.core.graph import build_graph
 from etl_craft.engine import run_scopes, runlog
@@ -44,12 +44,6 @@ def run_manual(
     **options: Unpack[_ManualOptions],
 ) -> PipelineOutcome:
     """Create or explicitly resume a manual selection without adopting another run."""
-    if config.mode != Mode.LOCAL:
-        raise RunRefusedError(
-            f"{pipeline_code}: standalone execution needs a local owning agent; "
-            "legacy remote mode delegates agents to its orchestrator. Use an explicit "
-            "orchestrator run with --run-id or --run-key."
-        )
     selector = options.get("selector", runlog.ACTIVE_RUN)
     pause = open_pause(engine, pipeline_code, selector=selector)
     if pause is not None:

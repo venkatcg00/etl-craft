@@ -18,7 +18,6 @@ Secrets:
   Profile: dev                         # value — the only profile: nothing to set
 
 Orchestration:
-  Mode: local                          # value
   Task_timeout_seconds: 21600          # value
   Max_parallel_tasks: 8                # value
   Enforce_sla: false                   # value

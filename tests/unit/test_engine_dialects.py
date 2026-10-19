@@ -375,7 +375,7 @@ def test_config_checks_engine_auth_mode_and_fields(tmp_path, mode, error):
         parse_config(
             {
                 "Secrets": {"Source_type": "environment"},
-                "Orchestration": {"Mode": "local"},
+                "Orchestration": {},
                 "Engine": {
                     "dev": {
                         "jdbc_url": "jdbc:postgresql://db/etl",

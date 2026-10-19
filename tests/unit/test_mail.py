@@ -24,7 +24,6 @@ def config(**kwargs):
     profile = EmailProfile("EMAIL", "dev", "smtp.example.com", 587, "etl@example.com", **kwargs)
     engine = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:e.db", "main", "none")
     return ConnectorConfig(
-        mode="local",
         source=SourceConfig(type="environment"),
         engine=engine,
         email=profile,

@@ -54,7 +54,7 @@ def project(engine_db, tmp_path, monkeypatch):
     root = (engine_db.config.config_path or tmp_path / "craft-connector.yml").parent
     raw = {
         "Secrets": {"Source_type": "environment"},
-        "Orchestration": {"Mode": "local"},
+        "Orchestration": {},
         "Engine": {"dev": block},
         "Warehouse": {"dev": {"jdbc_url": "jdbc:duckdb:analytics.duckdb", "schema": "main"}},
     }

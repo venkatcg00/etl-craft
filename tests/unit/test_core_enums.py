@@ -68,7 +68,6 @@ EXPECTED = {
     enums.EmailFlavour: {"FAILED", "COMPLETED_WITH_ERRORS", "SUCCESS"},
     enums.EmailTransport: {"smtp", "sendmail"},
     enums.TlsMode: {"none", "starttls", "ssl"},
-    enums.Mode: {"local", "remote"},
     enums.DeploymentProfile: {"laptop", "controller", "controller-agents"},
     enums.AuthMode: {"none", "password", "token", "key_file", "oauth", "sso", "sts"},
     enums.TableFormat: {"native", "iceberg"},

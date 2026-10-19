@@ -24,7 +24,6 @@ Secrets:
   Source_type: environment
 
 Orchestration:
-  Mode: local
 
 Engine:
   dev:

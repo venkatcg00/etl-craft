@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import text
 
 from etl_craft.config import ConnectionProfile, ConnectorConfig, SourceConfig
-from etl_craft.core.enums import Mode, TableFormat
+from etl_craft.core.enums import TableFormat
 from etl_craft.core.errors import LockTimeoutError
 from etl_craft.warehouse.connection import (
     build_warehouse_engine,
@@ -36,7 +36,6 @@ def warehouse_config(jdbc_url, auth_mode="none", table_format=TableFormat.NATIVE
     engine = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:e.db", "", "none")
     warehouse = ConnectionProfile("WAREHOUSE", "dev", jdbc_url, user, auth_mode, fields)
     return ConnectorConfig(
-        mode=Mode.LOCAL,
         source=SourceConfig(type="environment"),
         engine=engine,
         warehouse=warehouse,

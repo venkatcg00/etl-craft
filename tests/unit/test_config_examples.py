@@ -84,7 +84,6 @@ class Expected:
 
     engine: str
     warehouse: str
-    mode: str
     warehouse_url: str | None = None
     table_format: str = "native"
     # auth-*.yml: one profile per authentication type, selected by ETL_CRAFT_AUTH,
@@ -93,74 +92,68 @@ class Expected:
 
 
 EXPECTED = {
-    "minimal-local.yml": Expected("sqlite", "duckdb", "local"),
-    "docs-site.yml": Expected("sqlite", "duckdb", "local"),
-    "docs-site-proxy.yml": Expected("sqlite", "duckdb", "local"),
-    "secrets-environment.yml": Expected("postgresql", "postgres", "local", POSTGRES_WAREHOUSE_URL),
+    "minimal-local.yml": Expected("sqlite", "duckdb"),
+    "docs-site.yml": Expected("sqlite", "duckdb"),
+    "docs-site-proxy.yml": Expected("sqlite", "duckdb"),
+    "secrets-environment.yml": Expected("postgresql", "postgres", POSTGRES_WAREHOUSE_URL),
     # Its values come from secrets-file.env, not from anything set here.
-    "secrets-file.yml": Expected("postgresql", "postgres", "local"),
-    "orchestration-local.yml": Expected("sqlite", "duckdb", "local"),
-    "engine-sqlite.yml": Expected("sqlite", "postgres", "local", POSTGRES_WAREHOUSE_URL),
-    "engine-postgres.yml": Expected("postgresql", "postgres", "remote", POSTGRES_WAREHOUSE_URL),
-    "warehouse-postgres.yml": Expected("postgresql", "postgres", "remote", POSTGRES_WAREHOUSE_URL),
-    "warehouse-duckdb.yml": Expected("sqlite", "duckdb", "remote"),
+    "secrets-file.yml": Expected("postgresql", "postgres"),
+    "orchestration-local.yml": Expected("sqlite", "duckdb"),
+    "engine-sqlite.yml": Expected("sqlite", "postgres", POSTGRES_WAREHOUSE_URL),
+    "engine-postgres.yml": Expected("postgresql", "postgres", POSTGRES_WAREHOUSE_URL),
+    "warehouse-postgres.yml": Expected("postgresql", "postgres", POSTGRES_WAREHOUSE_URL),
+    "warehouse-duckdb.yml": Expected("sqlite", "duckdb"),
     "warehouse-duckdb-iceberg.yml": Expected(
-        "postgresql", "duckdb_iceberg", "remote", table_format="iceberg"
+        "postgresql", "duckdb_iceberg", table_format="iceberg"
     ),
     "warehouse-trino-iceberg.yml": Expected(
         "postgresql",
         "trino_iceberg",
-        "remote",
         "jdbc:trino://trino:8080/iceberg/analytics",
         table_format="iceberg",
     ),
     "warehouse-databricks.yml": Expected(
         "postgresql",
         "databricks",
-        "remote",
         "jdbc:databricks://adb-1.azuredatabricks.net:443/default;httpPath=/sql/1.0/warehouses/a",
     ),
     "warehouse-databricks-iceberg.yml": Expected(
         "postgresql",
         "databricks_iceberg",
-        "remote",
         "jdbc:databricks://adb-1.azuredatabricks.net:443/default;httpPath=/sql/1.0/warehouses/a",
         table_format="iceberg",
     ),
-    "warehouse-snowflake.yml": Expected("postgresql", "snowflake", "remote"),
+    "warehouse-snowflake.yml": Expected("postgresql", "snowflake"),
     "warehouse-snowflake-iceberg.yml": Expected(
-        "postgresql", "snowflake_iceberg", "remote", table_format="iceberg"
+        "postgresql", "snowflake_iceberg", table_format="iceberg"
     ),
     "warehouse-snowflake-key-pair.yml": Expected(
         "postgresql",
         "snowflake",
-        "remote",
         "jdbc:snowflake://myorg-myaccount.snowflakecomputing.com/?db=ANALYTICS&schema=PUBLIC",
     ),
-    "cloning.yml": Expected("postgresql", "postgres", "local", POSTGRES_WAREHOUSE_URL),
+    "cloning.yml": Expected("postgresql", "postgres", POSTGRES_WAREHOUSE_URL),
     "auth-postgres.yml": Expected(
-        "postgresql", "postgres", "local", POSTGRES_WAREHOUSE_URL, auth_section="Warehouse"
+        "postgresql", "postgres", POSTGRES_WAREHOUSE_URL, auth_section="Warehouse"
     ),
-    "auth-snowflake.yml": Expected("sqlite", "snowflake", "local", auth_section="Warehouse"),
+    "auth-snowflake.yml": Expected("sqlite", "snowflake", auth_section="Warehouse"),
     "auth-databricks.yml": Expected(
         "sqlite",
         "databricks",
-        "local",
         "jdbc:databricks://adb-1.azuredatabricks.net:443/default;httpPath=/sql/1.0/warehouses/a",
         auth_section="Warehouse",
     ),
     "auth-trino.yml": Expected(
         "sqlite",
         "trino_iceberg",
-        "local",
         "jdbc:trino://trino:8443/iceberg/analytics",
         table_format="iceberg",
         auth_section="Warehouse",
     ),
     "auth-duckdb-iceberg.yml": Expected(
-        "sqlite", "duckdb_iceberg", "local", table_format="iceberg", auth_section="Warehouse"
+        "sqlite", "duckdb_iceberg", table_format="iceberg", auth_section="Warehouse"
     ),
-    "auth-email.yml": Expected("sqlite", "", "local", auth_section="Orchestration"),
+    "auth-email.yml": Expected("sqlite", "", auth_section="Orchestration"),
 }
 
 
@@ -225,7 +218,6 @@ def test_every_example_loads_for_every_profile(clean_environment, tmp_path, name
     config = load_config(path)
 
     assert engine_for_jdbc_url(config.engine.jdbc_url).name == expected.engine
-    assert config.mode == expected.mode
     if expected.auth_section == "Orchestration":
         assert config.email is not None and config.email.auth_mode == profile
         return

@@ -163,7 +163,6 @@ def test_the_command(engine_db, site, tmp_path, monkeypatch, capsys):
         "Secrets:",
         "  Source_type: environment",
         "Orchestration:",
-        "  Mode: local",
         "Engine:",
         "  dev:",
     ]

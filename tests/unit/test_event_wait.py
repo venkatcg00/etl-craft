@@ -17,7 +17,7 @@ def base_config():
     return parse_config(
         {
             "Secrets": {"Source_type": "environment"},
-            "Orchestration": {"Mode": "local"},
+            "Orchestration": {},
             "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "main"}},
         },
         Path("craft-connector.yml"),

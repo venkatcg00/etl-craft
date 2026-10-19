@@ -266,3 +266,12 @@ def test_sqlite_catchup_bound_requires_a_positive_whole_number(engine_db):
                 text("UPDATE CFG_PIPELINES SET MAX_CATCHUP_RUNS=:value WHERE PIPELINE_ID=:id"),
                 {"value": value, "id": pipeline},
             )
+
+
+def test_allow_schedule_false_starts_no_scheduled_runs(engine_db):
+    _, ctx = configure(engine_db)
+    off = replace(ctx, config=replace(ctx.config, allow_schedule=False))
+    Schedules().refresh(off, NOW)
+    with ctx.engine.connect() as conn:
+        count = conn.execute(text("SELECT COUNT(*) FROM AUD_PIPELINES_RUN_LOG")).scalar_one()
+    assert count == 0

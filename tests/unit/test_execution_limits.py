@@ -6,7 +6,6 @@ from etl_craft.config import (
     ExecutionLimits,
     SourceConfig,
 )
-from etl_craft.core.enums import Mode
 from etl_craft.core.errors import HandlerError
 from etl_craft.execution.limits import task_timeout_seconds
 from etl_craft.handlers import registry
@@ -15,7 +14,6 @@ from etl_craft.handlers.registry import HandlerResult, format_task_log
 pytestmark = pytest.mark.unit
 
 CONFIG = ConnectorConfig(
-    mode=Mode.LOCAL,
     source=SourceConfig("environment"),
     engine=ConnectionProfile("ENGINE", "d", "jdbc:sqlite:e", "", "none"),
     limits=ExecutionLimits(task_timeout_seconds=600),

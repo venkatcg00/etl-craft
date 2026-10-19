@@ -168,3 +168,22 @@ def set_task_target(conn, task_id, target):
         ),
         {"task": task_id, "target": add_table(conn, target) if target else None},
     )
+
+
+def finalize_pipeline(engine, config, pipeline_code, *, hooks=None):
+    """Finalize the explicit active run for outcome and publication fixtures."""
+    from etl_craft.engine.repository.pipelines import resolve_pipeline_id
+    from etl_craft.engine.runlog import select_run
+    from etl_craft.execution.run_finish import finalize
+    from etl_craft.execution.run_start import load_pipeline
+    from etl_craft.execution.run_types import PipelineRun, default_hooks
+
+    with engine.connect() as conn:
+        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+        run_id = select_run(conn, pipeline_id).pipeline_run_id
+        detail, graph, codes = load_pipeline(conn, pipeline_id, run_id=run_id)
+    return finalize(
+        engine,
+        PipelineRun(pipeline_code, pipeline_id, run_id, graph, codes, detail.sla_in_hours),
+        hooks or default_hooks(config, engine),
+    )

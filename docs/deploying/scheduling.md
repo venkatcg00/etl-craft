@@ -1,6 +1,6 @@
-# Local mode
+# Scheduling runs
 
-In local mode (`Orchestration.Mode: local`) etl-craft is the orchestrator. `etl-craft run
+etl-craft is the orchestrator. `etl-craft run
 --pipeline_code X` runs the whole pipeline by dispatching ready tasks, each task in a process of its
 own, at most `Orchestration.Max_parallel_tasks` at once, and checks every rule itself: run
 conditions, dependency types, and dependencies on other pipelines. Nothing else is needed but a
@@ -44,16 +44,7 @@ resumes it without repeating finished tasks. To mark a task or a run, record a s
 run, cancel a run, run a task again or without its dependencies, or relax dependency gates in an
 environment where some upstreams never run, see [Stepping in](../guides/run-control.md).
 
-## Moving to an orchestrator
+## Calling from another scheduler
 
-The same metadata runs under an orchestrator in remote mode, which then holds every rule; see
-[Starting runs from another scheduler](http-api.md#starting-runs-from-another-scheduler). A few rules have no equivalent in an
-orchestrator's DAG, and remote mode names them.
-
-## Selecting an existing run
-
-Pass `--run-id` or `--run-key` when addressing an existing run, especially a completed run.
-Without an identity, task and operator commands require the single non-terminal run; they
-never adopt the latest completed run. Whole-pipeline execution passes the selected id to its
-ready tasks. `history --all` lists runs; `history` and `steps` inspect the selected run.
-See [run controls](../guides/run-control.md#choose-the-run) for examples.
+Another scheduler can [submit a run over HTTP](http-api.md#starting-runs-from-another-scheduler).
+The controller applies every dependency and execution rule.

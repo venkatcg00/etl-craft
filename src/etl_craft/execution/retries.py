@@ -43,7 +43,7 @@ def task_retry_policy(params: Mapping[str, str], config: ConnectorConfig) -> Ret
     """Read and validate common task retry parameters, with orchestration defaults."""
     values = {}
     for name, default in (
-        ("RETRIES", config.dag_defaults.retries or 0),
+        ("RETRIES", config.retries or 0),
         ("RETRY_DELAY_SECONDS", 60),
     ):
         raw = params.get(name, str(default))

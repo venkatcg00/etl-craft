@@ -2,8 +2,7 @@
 # The proxy preserves the prefix and replaces X-Forwarded-For with its observed client IP.
 Secrets:
   Source_type: environment  # value
-Orchestration:
-  Mode: local  # value
+Orchestration: {}  # value
 Engine:
   dev:
     jdbc_url: jdbc:sqlite:engine.db  # value

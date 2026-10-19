@@ -18,7 +18,7 @@ def test_api_address(value):
     config = parse_config(
         {
             "Secrets": {"Source_type": "environment"},
-            "Orchestration": {"Mode": "local", "Api_address": value},
+            "Orchestration": {"Api_address": value},
             "Engine": {"test": {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "main"}},
         },
         Path("craft-connector.yml"),

@@ -11,7 +11,6 @@ CONFIG = """\
 Secrets:
   Source_type: environment
 Orchestration:
-  Mode: local
 Engine:
   dev:
     jdbc_url: {jdbc_url}

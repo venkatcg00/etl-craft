@@ -135,7 +135,7 @@ def test_written_settings_are_ceilings_never_requests():
 def write_config(tmp_path: Path, deployment: dict | None = None, **orchestration) -> Path:
     raw: dict = {
         "Secrets": {"Source_type": "environment"},
-        "Orchestration": {"Mode": "local", **orchestration},
+        "Orchestration": {**orchestration},
     }
     if deployment is not None:
         raw["Deployment"] = deployment

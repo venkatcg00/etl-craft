@@ -182,7 +182,6 @@ def test_recipient_refusal_is_recorded_on_the_alert_attempt(
     raw = {
         "Secrets": {"Source_type": "environment"},
         "Orchestration": {
-            "Mode": "local",
             "Email": {
                 "host": relay.host,
                 "port": relay.port,

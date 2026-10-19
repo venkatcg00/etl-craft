@@ -25,7 +25,6 @@ Secrets:
   Profile: ETL_CRAFT_AUTH              # variable — the profile names the authentication type to use
 
 Orchestration:
-  Mode: local                          # value
   Task_timeout_seconds: 21600          # value
   Max_parallel_tasks: 8                # value
   Enforce_sla: false                   # value

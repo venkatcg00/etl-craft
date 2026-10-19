@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import ClassVar
 
-from etl_craft.core.enums import ControlAction, Mode
+from etl_craft.core.enums import ControlAction
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.engine import run_scopes, runlog
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
@@ -95,6 +95,4 @@ def _reason(ctx: OperationContext, request: ControlRequest) -> str | None:
             f"account {ctx.actor.name!r}: role={ctx.role or 'unproven'}; {command!r} needs "
             f"the {required} role; ask an administrator to grant it"
         )
-    if ctx.config.mode != Mode.LOCAL:
-        return "legacy orchestrator has no native agent adapter; control its exact task there"
     return None

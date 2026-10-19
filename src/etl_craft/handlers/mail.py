@@ -242,7 +242,7 @@ def sla_recipients(config: ConnectorConfig, pipeline_recipients: Sequence[str] |
 
     ``HandlerError`` when neither is set, naming both places.
     """
-    recipients = list(pipeline_recipients or config.dag_defaults.email_recipients or [])
+    recipients = list(pipeline_recipients or config.email_recipients or [])
     if not recipients:
         raise HandlerError(
             "no one to send the SLA email to: set EMAIL_RECIPIENTS in the pipeline's "

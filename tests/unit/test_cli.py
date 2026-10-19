@@ -224,3 +224,14 @@ def test_removed_export_command_is_an_invalid_choice(capsys):
         main(["generate-yml"])
     assert result.value.code == 2
     assert "invalid choice: 'generate-yml'" in capsys.readouterr().err
+
+
+@pytest.mark.unit
+def test_unknown_run_option_is_refused_by_name(capsys):
+    from etl_craft.cli import main
+
+    option = "--finalize" + "-only"
+    with pytest.raises(SystemExit) as refused:
+        main(["run", "--pipeline_code", "P", option])
+    assert refused.value.code == 2
+    assert option in capsys.readouterr().err

@@ -14,7 +14,6 @@ from etl_craft.core.errors import (
     ConfigurationError,
     HandlerError,
     MetadataError,
-    RunRefusedError,
     RunStateError,
 )
 from etl_craft.engine import runlog, transitions
@@ -56,7 +55,7 @@ def project(engine_db, tmp_path):
         }
     raw = {
         "Secrets": {"Source_type": "environment"},
-        "Orchestration": {"Mode": "local", "Task_timeout_seconds": 60},
+        "Orchestration": {"Task_timeout_seconds": 60},
         "Engine": {"dev": block},
     }
     config_dir = (engine_db.config.config_path or tmp_path / "craft-connector.yml").parent
@@ -276,12 +275,9 @@ def test_a_task_in_progress_is_not_started_twice(project):
 
 
 def test_errors_before_running(project):
-    engine, config, ids = project
+    engine, _, ids = project
     with pytest.raises(MetadataError):
         run(project, "nope")
-    remote = config.__class__(**{**config.__dict__, "mode": "remote"})
-    with pytest.raises(RunRefusedError):
-        run_task(engine, remote, "P", "ok", force=True, child=CHILD)
     with engine.begin() as conn:
         transitions.finalize_pipeline_run(conn, ids["run"], RunStatus.SUCCESS)
     with pytest.raises(RunStateError, match="matched 0 runs"):

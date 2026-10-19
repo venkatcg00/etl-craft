@@ -26,7 +26,7 @@ It exits 1 when any check fails, so it can gate a deployment. It checks:
 | Settings | | a value used as written reads like a variable name that is not set |
 | Secrets | a profile's secret variable is not set | |
 | Auth | | an `auth_mode` has not been verified against a live service |
-| Engine DB connection | the database cannot be reached, or its `schema` does not exist | a SQLite Engine DB in remote mode |
+| Engine DB connection | the database cannot be reached, or its `schema` does not exist | — |
 | Engine DB tables and migrations | there are no Engine DB tables, a migration is pending, or an applied migration file has changed | |
 | Active admin | no active admin exists; run setup interactively with writer credentials | |
 | Engine DB write access | PostgreSQL grants writes to another login or PUBLIC | the SQLite file is writable by group or others |

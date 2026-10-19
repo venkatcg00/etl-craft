@@ -40,7 +40,7 @@ def write_config(engine_db, root, cloning):
         }
     raw = {
         "Secrets": {"Source_type": "environment"},
-        "Orchestration": {"Mode": "local"},
+        "Orchestration": {},
         "Engine": {"dev": block},
         "Warehouse": {"dev": {"jdbc_url": "jdbc:duckdb:analytics.duckdb", "schema": "main"}},
         "Cloning": {"dev": cloning},

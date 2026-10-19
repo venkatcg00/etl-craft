@@ -1,4 +1,4 @@
-"""``etl-craft run``: run a pipeline, one task of it, or its first or last step."""
+"""``etl-craft run``: run a pipeline, one task of it, or initialize its run."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from etl_craft.cli.commands.common import (
 from etl_craft.cli.output import Output
 from etl_craft.cli.remote import ServerClient, api_path, selector_query
 from etl_craft.core import interrupts
-from etl_craft.core.enums import Mode, RunStatus
+from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import ExitCode, UsageError
 from etl_craft.engine.runlog import RunSelector
 from etl_craft.services.operations import runs
@@ -34,13 +34,8 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     step.add_argument(
         "--init-only",
         action="store_true",
-        help="test connections, check the pipeline's dependencies and start its run; an "
-        "orchestrator's first step",
-    )
-    step.add_argument(
-        "--finalize-only",
-        action="store_true",
-        help="end the selected pipeline run from its tasks' statuses; an orchestrator's last step",
+        help="test connections, check the pipeline's dependencies and start its run; the "
+        "controller picks up the run",
     )
     parser.add_argument(
         "--standalone",
@@ -56,14 +51,14 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--ignore-dependencies",
         action="store_true",
-        help="with --task_code: run the task without checking its dependencies; local mode "
-        "only, with --reason, recorded",
+        help="with --task_code: run the task without checking its dependencies; "
+        "with --reason, recorded",
     )
     parser.add_argument(
         "--rerun",
         action="store_true",
         help="with --task_code: run the task again although it already succeeded, reopening "
-        "its run if it ended; local mode only, with --reason, recorded",
+        "its run if it ended; with --reason, recorded",
     )
     parser.add_argument(
         "--with-downstream",
@@ -73,7 +68,7 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--skip",
         action="store_true",
-        help="record a run SKIPPED on purpose, running nothing; local mode only, with --reason",
+        help="record a run SKIPPED on purpose, running nothing; with --reason",
     )
     parser.add_argument(
         "--run-date",
@@ -86,7 +81,7 @@ def _configure(parser: argparse.ArgumentParser) -> None:
         type=_date_range,
         metavar="FROM:TO",
         help="run the pipeline once for each date from FROM to TO (YYYY-MM-DD), as backfill "
-        "runs; local mode only, with --reason",
+        "runs; with --reason",
     )
     parser.add_argument(
         "--reason", help="remote action context, or why a local intervention is needed"
@@ -102,8 +97,7 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     # running, their rows IN-PROGRESS until their leases expire and reconciliation releases them.
     stopping = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
     with command_context(args, role="run") as ctx, interrupts.deferred(*stopping):
-        # Remote reasons describe the requester; local reasons justify an intervention.
-        request = _request(args, None if ctx.config.mode == Mode.REMOTE else args.reason)
+        request = _request(args, args.reason)
         done = runs.execute_run(ctx, request)
     out.result(done, args.output_format)
     return _exit_code(done, started_only=args.init_only)
@@ -117,7 +111,6 @@ def _request(args: argparse.Namespace, reason: str | None) -> RunRequest:
         task_code=args.task_code,
         standalone=args.standalone,
         init_only=args.init_only,
-        finalize_only=args.finalize_only,
         force=args.force,
         ignore_dependencies=args.ignore_dependencies,
         rerun=args.rerun,
@@ -139,7 +132,6 @@ def _remote(args: argparse.Namespace, out: Output, server: ServerClient) -> int:
         flag
         for flag, given in (
             ("--init-only", args.init_only),
-            ("--finalize-only", args.finalize_only),
             ("--force", args.force),
             ("--ignore-dependencies", args.ignore_dependencies and not args.standalone),
             ("--skip", args.skip),
@@ -230,7 +222,7 @@ def _date_range(text: str) -> tuple[date, date]:
 
 COMMAND = Command(
     name="run",
-    help="Run a pipeline in dependency waves, one task of it, or its first or last step.",
+    help="Run a pipeline in dependency waves, one task of it, or initialize its run.",
     configure=_configure,
     run=_run,
     remote=_remote,

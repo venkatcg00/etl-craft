@@ -24,7 +24,6 @@ Secrets:
   Profile: ETL_CRAFT_AUTH              # variable — the profile names the authentication type to use
 
 Orchestration:
-  Mode: local                          # value
   none:
     Email:
       host: EMAIL_HOST                 # variable

@@ -4,16 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from etl_craft.config.loader_helpers import Profiled, flag, string_list, whole_number
-from etl_craft.config.model import DagDefaults, ExecutionLimits
-from etl_craft.core.enums import GatePolicy, Mode, RetryOn, enum_value
+from etl_craft.config.loader_helpers import Profiled, flag, whole_number
+from etl_craft.config.model import ExecutionLimits
+from etl_craft.core.enums import GatePolicy, RetryOn, enum_value
 from etl_craft.core.errors import ConfigurationError
 
 ORCHESTRATION_KEYS = frozenset(
     {
         "Api_address",
-        "Mode",
-        "Name",
         "Log_dir",
         "Task_timeout_seconds",
         "Max_parallel_tasks",
@@ -24,14 +22,8 @@ ORCHESTRATION_KEYS = frozenset(
         "Timezone",
         "Enforce_sla",
         "Gate_wait_minutes",
-        "Global_dag",
-        "Catchup",
-        "Tags",
         "Retries",
         "Retry_on",
-        "Retry_delay_minutes",
-        "Depends_on_past",
-        "Email_on_failure",
         "Email_recipients",
         "Allow_schedule",
         "Dependency_gates",
@@ -40,21 +32,8 @@ ORCHESTRATION_KEYS = frozenset(
 )
 
 
-def parse_mode(orchestration: Profiled, path: Path) -> Mode:
-    """Read the required orchestration mode."""
-    return enum_value(
-        Mode,
-        orchestration.text("Mode") or "",
-        ConfigurationError(
-            f"{path}: Orchestration.Mode must be local or remote, got "
-            f"{orchestration.settings.get('Mode')!r}"
-            f"{orchestration.resolver.hint(orchestration.where('Mode'))}"
-        ),
-    )
-
-
-def parse_dependency_gates(orchestration: Profiled, mode: Mode, path: Path) -> GatePolicy:
-    """Read the dependency policy and refuse overrides in remote mode."""
+def parse_dependency_gates(orchestration: Profiled, path: Path) -> GatePolicy:
+    """Read the dependency policy."""
     raw = orchestration.text("Dependency_gates")
     if raw is None:
         return GatePolicy.ENFORCE
@@ -66,13 +45,6 @@ def parse_dependency_gates(orchestration: Profiled, mode: Mode, path: Path) -> G
             f"{orchestration.resolver.hint(orchestration.where('Dependency_gates'))}"
         ),
     )
-    if mode == Mode.REMOTE and policy != GatePolicy.ENFORCE:
-        raise ConfigurationError(
-            f"{path}: Orchestration.Dependency_gates is {policy}, but Mode is remote: in remote "
-            "mode etl-craft checks no dependency gate (the orchestrator's sensors do), so there "
-            "is nothing to relax. Remove Dependency_gates from the remote profile, or bypass the "
-            "sensor in the orchestrator"
-        )
     return policy
 
 
@@ -98,21 +70,6 @@ def parse_limits(settings: Profiled, path: Path) -> ExecutionLimits:
             settings, "Local_warehouse_slots", None, path, minimum=1
         ),
         max_parallel_tasks_written=settings.value("Max_parallel_tasks") is not None,
-    )
-
-
-def parse_dag_defaults(settings: Profiled, path: Path) -> DagDefaults:
-    """Read optional DAG defaults for exported orchestrator configuration."""
-    return DagDefaults(
-        global_dag=flag(settings, "Global_dag", False, path),
-        catchup=flag(settings, "Catchup", None, path),
-        tags=string_list(settings, "Tags", path),
-        retries=whole_number(settings, "Retries", None, path),
-        retry_delay_minutes=whole_number(settings, "Retry_delay_minutes", None, path),
-        depends_on_past=flag(settings, "Depends_on_past", None, path),
-        email_on_failure=flag(settings, "Email_on_failure", None, path),
-        email_recipients=string_list(settings, "Email_recipients", path),
-        allow_schedule=flag(settings, "Allow_schedule", True, path),
     )
 
 

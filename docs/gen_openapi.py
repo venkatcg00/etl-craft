@@ -14,7 +14,7 @@ from etl_craft.services.operations import OperationContext
 config = parse_config(
     {
         "Secrets": {"Source_type": "environment"},
-        "Orchestration": {"Mode": "local"},
+        "Orchestration": {},
         "Engine": {"docs": {"jdbc_url": "jdbc:sqlite::memory:", "schema": "main"}},
     },
     Path("craft-connector.yml"),

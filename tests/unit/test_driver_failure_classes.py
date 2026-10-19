@@ -155,7 +155,7 @@ def test_policy_classes_and_project_override(policy, allowed):
 def test_project_retry_policy_validation():
     raw = {
         "Secrets": {"Source_type": "environment"},
-        "Orchestration": {"Mode": "local", "Retry_on": "occasionally"},
+        "Orchestration": {"Retry_on": "occasionally"},
         "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:e.db", "schema": "main"}},
     }
     with pytest.raises(ConfigurationError, match=r"Retry_on.*occasionally.*TRANSIENT"):

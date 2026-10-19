@@ -89,7 +89,7 @@ def project(engine_db, tmp_path):
     (root / "ingestion_scripts" / "load.py").write_text(SCRIPT, encoding="utf-8")
     raw = {
         "Secrets": {"Source_type": "environment"},
-        "Orchestration": {"Mode": "local", "Task_timeout_seconds": 60},
+        "Orchestration": {"Task_timeout_seconds": 60},
         "Engine": {"dev": block},
         "Warehouse": {"dev": {"jdbc_url": "jdbc:duckdb:warehouse.duckdb", "schema": "main"}},
     }

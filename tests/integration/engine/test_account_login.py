@@ -34,7 +34,7 @@ def project(empty_engine_db, tmp_path, monkeypatch, cli_logging):
         yaml.safe_dump(
             {
                 "Secrets": {"Source_type": "environment"},
-                "Orchestration": {"Mode": "local"},
+                "Orchestration": {},
                 "Engine": {"dev": block},
             },
             sort_keys=False,
@@ -310,53 +310,6 @@ def test_cli_token_administration_cannot_escalate_a_viewer(project, monkeypatch,
     assert not any(a.name == "elevated" for a in accounts.list_accounts(ctx).accounts)
     assert main(["token", "list"]) == 26
     assert "admin role is required" in capsys.readouterr().err
-
-
-def test_remote_requester_reason_is_audited_without_an_intervention(project, monkeypatch, capsys):
-    from etl_craft.config import resolve_config_path
-    from etl_craft.core.actor import acting_as
-    from fixtures.metadata import add_pipeline
-
-    ctx = project
-    with acting_as(ctx.actor), ctx.engine.begin() as conn:
-        add_pipeline(conn, "P")
-    path = resolve_config_path()
-    raw = yaml.safe_load(path.read_text())
-    raw["Orchestration"]["Mode"] = "remote"
-    path.write_text(yaml.safe_dump(raw, sort_keys=False))
-    service = tokens.create_token(ctx, "scheduler", ApiRole.OPERATOR)
-    monkeypatch.setenv("ETL_CRAFT_TOKEN", service.token)
-    assert (
-        main(
-            [
-                "run",
-                "--pipeline_code",
-                "P",
-                "--init-only",
-                "--run-key",
-                "orchestrator:one",
-                "--reason",
-                "Scheduler user: alice",
-            ]
-        )
-        == 0
-    ), capsys.readouterr()
-    with ctx.engine.connect() as conn:
-        action = conn.execute(
-            text(
-                "SELECT ACTOR AS actor, ARGUMENTS AS arguments FROM AUD_ACTIONS "
-                "WHERE COMMAND='run' ORDER BY ACTION_ID DESC LIMIT 1"
-            )
-        ).one()
-        assert action.actor == "scheduler"
-        arguments = (
-            json.loads(action.arguments) if isinstance(action.arguments, str) else action.arguments
-        )
-        assert arguments["reason"] == "Scheduler user: alice"
-        assert (
-            conn.execute(text("SELECT COUNT(*) AS count FROM AUD_RUN_INTERVENTIONS")).scalar_one()
-            == 0
-        )
 
 
 def test_a_refused_password_costs_one_check_whether_or_not_the_account_exists(project, monkeypatch):

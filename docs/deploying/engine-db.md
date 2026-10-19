@@ -25,8 +25,7 @@ environment overrides. After installing this version, run `etl-craft setup` loca
 writer credentials to migrate and provision your first admin, then `etl-craft login`.
 Existing service tokens keep their values and inherited account roles. If all migrated
 accounts are non-admin, local interactive setup provisions a recovery admin; no HTTP route
-can do so. Replace actor overrides in CI with a registered service token in `ETL_CRAFT_TOKEN`
-and regenerate remote DAGs after configuring `Auth.external scheduler_connection_id`.
+can do so. Replace actor overrides in CI with a registered service token in `ETL_CRAFT_TOKEN`.
 
 After installing a new etl-craft version, and whenever your own migrations change, run:
 

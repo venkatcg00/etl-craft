@@ -8,8 +8,7 @@ read and checked, ingestion scripts are parsed, not imported. Active source defi
 compared with existing warehouse tables by the standalone validate command.
 
 Each finding is a ``FAIL`` (a run would fail, hang or silently do something else) or a ``WARN``
-(it works, but look at this, such as a parameter no handler reads). In remote mode, every rule
-the orchestrator does not support is a ``FAIL`` (see ``execution.remote``).
+(it works, but look at this, such as a parameter no handler reads).
 """
 
 from __future__ import annotations
@@ -27,7 +26,7 @@ from etl_craft.config import ConnectorConfig
 from etl_craft.config.project import ingestion_script
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.cron import parse, timezone
-from etl_craft.core.enums import DependencyType, EmailFlavour, Handler, Mode, SqlAction
+from etl_craft.core.enums import DependencyType, EmailFlavour, Handler, SqlAction
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.graph import build_graph
 from etl_craft.core.text import is_metadata_code, qualify, suggest
@@ -52,7 +51,6 @@ from etl_craft.engine.repository.validation import (
     fetch_task_dependency_edges,
 )
 from etl_craft.execution.limits import task_timeout_seconds
-from etl_craft.execution.remote import unsupported_rules
 from etl_craft.execution.retries import task_retry_policy
 from etl_craft.handlers import email_alert, event_wait, python_scripts
 from etl_craft.handlers.business_rules import check_rule
@@ -234,9 +232,11 @@ def _pipelines(conn: Connection, config: ConnectorConfig, data: _Metadata, repor
         for problem in problems:
             report.fail(code, problem)
         for name in unknown:
-            report.warn(
+            report.fail(
                 code,
-                _unknown("PIPELINE_PARAMETERS", name, list(PIPELINE_PARAMETER_KINDS)),
+                f"CFG_PIPELINES.PIPELINE_PARAMETERS contains unknown key {name!r}; "
+                f"allowed keys: {', '.join(PIPELINE_PARAMETER_KINDS)}; "
+                "remove the unknown key or replace it with an allowed key",
             )
         try:
             pipeline_id = resolve_pipeline_id(conn, code)
@@ -245,14 +245,6 @@ def _pipelines(conn: Connection, config: ConnectorConfig, data: _Metadata, repor
         except EtlCraftError as error:
             report.fail(code, str(error))
             continue
-        if config.mode == Mode.REMOTE:
-            for rule in unsupported_rules(
-                conn, pipeline_id, code, global_dag=config.dag_defaults.global_dag
-            ):
-                report.fail(
-                    rule.where,
-                    f"{rule.rule}; the remote orchestrator does not support this. {rule.remedy}",
-                )
     for edge in data.pipeline_edges:
         if not edge.depends_on_pipeline_active:
             report.fail(

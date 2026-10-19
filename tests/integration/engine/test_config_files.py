@@ -102,7 +102,10 @@ def test_exported_files_load_back_without_a_change(exported):
         "2026-11-01",
         "3",
     )
-    assert json.loads(daily["PIPELINE_PARAMETERS"])["TAGS"] == ["sales", "daily"]
+    assert json.loads(daily["PIPELINE_PARAMETERS"])["EMAIL_RECIPIENTS"] == [
+        "sales-data@example.com",
+        "sales-leads@example.com",
+    ]
 
 
 def test_apply_inserts_updates_and_retires_by_key(exported):
@@ -549,3 +552,30 @@ def test_rule_target_edit_updates_fk_keeps_id_and_rolls_back_plan(exported):
     )
     assert [row[0] for row in after] == [row[0] for row in before]
     assert after != before
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "CATCHUP",
+        "DEPENDS_ON_PAST",
+        "EMAIL_ON_FAILURE",
+        "RETRIES",
+        "RETRY_DELAY_MINUTES",
+        "TYPO",
+    ],
+)
+def test_config_apply_refuses_unknown_pipeline_parameter_without_writes(exported, key):
+    def obsolete(rows):
+        rows[0]["PIPELINE_PARAMETERS"] = json.dumps({key: True})
+        return rows
+
+    before = changes_logged(exported)
+    edit(exported.config_dir / "pipelines.csv", obsolete)
+    done = sync(exported)
+    assert done.failed and not done.applied
+    assert any(
+        key in f.message and "EMAIL_RECIPIENTS" in f.message and "remove" in f.message
+        for f in done.findings
+    )
+    assert changes_logged(exported) == before

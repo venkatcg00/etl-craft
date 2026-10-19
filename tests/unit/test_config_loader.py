@@ -1,6 +1,6 @@
 """craft-connector.yml: the one format, as a team writes it.
 
-Sections in order -- Secrets, Orchestration (DAG defaults and Email inside it),
+Sections in order -- Secrets, Orchestration (execution defaults and Email inside it),
 Engine, Warehouse, Cloning -- each with one block per profile. These are pure
 parsing tests: no database is touched.
 """
@@ -45,7 +45,7 @@ def _write(tmp_path: Path, raw: dict) -> Path:
 def _minimal(**sections) -> dict:
     raw = {
         "Secrets": {"Source_type": "environment"},
-        "Orchestration": {"Mode": "local"},
+        "Orchestration": {},
         "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "main"}},
     }
     raw.update(sections)
@@ -54,14 +54,12 @@ def _minimal(**sections) -> dict:
 
 def test_the_shipped_example_loads_for_dev_with_nothing_set():
     config = load_config(EXAMPLE)
-    assert config.mode == "local"
     assert config.engine.jdbc_url == "jdbc:sqlite:etl-craft-engine.db"
     assert config.engine.auth_mode == "none"
     assert config.warehouse is not None
     # A relative DuckDB file is found beside the config file.
     assert config.warehouse.jdbc_url == f"jdbc:duckdb:{EXAMPLE.parent / 'warehouse.duckdb'}"
     assert config.warehouse_table_format == "native"
-    assert config.dag_defaults.allow_schedule is False
     assert config.email is None
     assert config.cloning.enabled is False
 
@@ -156,15 +154,14 @@ def test_the_shipped_example_prod_profile_overrides_and_resolves(tmp_path, monke
     }.items():
         monkeypatch.setenv(name, value)
     config = load_config(example)
-    # A profile block overrides the section's own settings, Mode included.
-    assert config.mode == "remote"
+    # A profile block overrides the section's own settings.
     assert config.engine.secret_var == "ENGINE_SECRET"
     assert config.warehouse is not None and config.warehouse.user == "wh"
     assert config.email is not None
     assert config.email.host == "smtp.internal"
     assert config.email.port == 587
     assert config.email.secret_var == "EMAIL_SECRET"
-    assert config.dag_defaults.email_recipients == ["data-alerts@example.com"]
+    assert config.email_recipients == ["data-alerts@example.com"]
     assert config.cloning.enabled is True and config.cloning.scope == "all"
 
 
@@ -230,37 +227,28 @@ def test_a_missing_profile_names_the_ones_that_exist(tmp_path):
 def test_every_value_is_a_variable_when_one_is_set_and_the_text_otherwise(tmp_path, monkeypatch):
     raw = _minimal(
         Orchestration={
-            "Mode": "RUN_MODE",
             "Task_timeout_seconds": "TASK_TIMEOUT",
             "Max_parallel_tasks": 4,
-            "dev": {"Tags": "DAG_TAGS", "Allow_schedule": "ALLOW_SCHEDULE", "Retries": "2"},
+            "dev": {"Retries": "2"},
         }
     )
     path = _write(tmp_path, raw)
     for name, value in {
-        "RUN_MODE": "remote",
         "TASK_TIMEOUT": "3600",
-        "DAG_TAGS": "finance, daily",
-        "ALLOW_SCHEDULE": "false",
     }.items():
         monkeypatch.setenv(name, value)
     config = load_config(path)
     # Variables' values, typed as their setting needs.
-    assert config.mode == "remote"
     assert config.limits.task_timeout_seconds == 3600
-    assert config.dag_defaults.tags == ["finance", "daily"]
-    assert config.dag_defaults.allow_schedule is False
     # Values as written, whether YAML typed them or not.
     assert config.limits.max_parallel_tasks == 4
-    assert config.dag_defaults.retries == 2
+    assert config.retries == 2
     sources = {source.where: source for source in config.settings}
-    assert sources["Orchestration.dev.Mode"].variable == "RUN_MODE"
     assert sources["Orchestration.dev.Retries"].variable is None
 
-    # A variable that is not set leaves its name as the value -- here an
-    # invalid Mode, and the error names the missing variable.
-    monkeypatch.delenv("RUN_MODE")
-    with pytest.raises(ConfigurationError, match="no variable named RUN_MODE is set"):
+    # Missing numeric variables are refused by name.
+    monkeypatch.delenv("TASK_TIMEOUT")
+    with pytest.raises(ConfigurationError, match="no variable named TASK_TIMEOUT is set"):
         load_config(path)
 
 
@@ -430,7 +418,7 @@ def test_a_secret_variable_that_is_not_set_is_a_load_time_error(tmp_path, monkey
 
 
 def test_unknown_sections_and_profiles_are_refused_naming_the_expected_ones(tmp_path):
-    legacy = {"Execution": {"Mode": "local"}, "Source": {"Type": "environment"}}
+    legacy = {"Execution": {}, "Source": {"Type": "environment"}}
     with pytest.raises(ConfigurationError, match=r"unknown top-level section\(s\) \['Execution'"):
         load_config(_write(tmp_path, legacy))
     variables = _minimal(
@@ -463,7 +451,7 @@ def test_unknown_sections_and_keys_are_refused(tmp_path):
     with pytest.raises(ConfigurationError, match="unknown top-level section"):
         load_config(_write(tmp_path, _minimal(Warehosue={})))
     with pytest.raises(ConfigurationError, match=r"unknown key\(s\) \['Retires'\]"):
-        load_config(_write(tmp_path, _minimal(Orchestration={"Mode": "local", "Retires": 1})))
+        load_config(_write(tmp_path, _minimal(Orchestration={"Retires": 1})))
     typo = _minimal(Engine={"dev": {"jdbc_url": "jdbc:sqlite:e.db", "schema": "main", "usr": "X"}})
     with pytest.raises(ConfigurationError, match=r"unknown key\(s\) \['usr'\] in Engine.dev"):
         load_config(_write(tmp_path, typo))
@@ -695,11 +683,9 @@ def test_duckdb_iceberg_profile_carries_its_catalog_fields(tmp_path, monkeypatch
 
 
 def test_orchestration_settings_are_type_checked(tmp_path):
-    raw = _minimal(Orchestration={"Mode": "local", "dev": {"Retries": "three"}})
+    raw = _minimal(Orchestration={"dev": {"Retries": "three"}})
     with pytest.raises(ConfigurationError, match="Retries must be a whole number"):
         load_config(_write(tmp_path, raw))
-    with pytest.raises(ConfigurationError, match="Mode must be local or remote"):
-        load_config(_write(tmp_path, _minimal(Orchestration={"Mode": "cron"})))
 
 
 def test_cloning_scope_none_disables_it(tmp_path):
@@ -713,7 +699,6 @@ def test_email_needs_user_and_secret_for_password_auth(tmp_path, monkeypatch):
         monkeypatch.setenv(name, value)
     raw = _minimal(
         Orchestration={
-            "Mode": "local",
             "dev": {"Email": {"host": "H", "port": "P", "from_address": "F", "auth_mode": "A"}},
         }
     )
@@ -723,9 +708,9 @@ def test_email_needs_user_and_secret_for_password_auth(tmp_path, monkeypatch):
 
 def test_log_dir_defaults_beside_the_config_and_can_be_set(tmp_path):
     assert load_config(_write(tmp_path, _minimal())).log_dir == tmp_path.absolute() / "logs"
-    raw = _minimal(Orchestration={"Mode": "local", "Log_dir": "../task-logs"})
+    raw = _minimal(Orchestration={"Log_dir": "../task-logs"})
     assert load_config(_write(tmp_path, raw)).log_dir == tmp_path.absolute().parent / "task-logs"
-    raw = _minimal(Orchestration={"Mode": "local", "Log_dir": "/var/log/etl"})
+    raw = _minimal(Orchestration={"Log_dir": "/var/log/etl"})
     assert load_config(_write(tmp_path, raw)).log_dir == Path("/var/log/etl")
 
 
@@ -879,23 +864,18 @@ def test_docs_site_publishing_settings(tmp_path):
 def test_dependency_gates_default_to_enforce_and_relax_only_in_local_mode(tmp_path):
     assert load_config(_write(tmp_path, _minimal())).dependency_gates == "enforce"
     for policy in ("warn", "off", "WARN"):
-        raw = _minimal(Orchestration={"Mode": "local", "Dependency_gates": policy})
+        raw = _minimal(Orchestration={"Dependency_gates": policy})
         assert load_config(_write(tmp_path, raw)).dependency_gates == policy.lower()
-    raw = _minimal(Orchestration={"Mode": "local", "Dependency_gates": "sometimes"})
+    raw = _minimal(Orchestration={"Dependency_gates": "sometimes"})
     with pytest.raises(ConfigurationError, match="must be enforce, warn or off, got 'sometimes'"):
         load_config(_write(tmp_path, raw))
-    raw = _minimal(Orchestration={"Mode": "remote", "Dependency_gates": "off"})
-    with pytest.raises(ConfigurationError, match="Dependency_gates is off, but Mode is remote"):
-        load_config(_write(tmp_path, raw))
-    raw = _minimal(Orchestration={"Mode": "remote", "Dependency_gates": "enforce"})
-    assert load_config(_write(tmp_path, raw)).dependency_gates == "enforce"
 
 
 def test_how_long_a_gate_waits_is_a_setting(tmp_path):
     assert load_config(_write(tmp_path, _minimal())).limits.gate_wait_minutes == 60
-    raw = _minimal(Orchestration={"Mode": "local", "Gate_wait_minutes": 0})
+    raw = _minimal(Orchestration={"Gate_wait_minutes": 0})
     assert load_config(_write(tmp_path, raw)).limits.gate_wait_minutes == 0
-    raw = _minimal(Orchestration={"Mode": "local", "Gate_wait_minutes": -5})
+    raw = _minimal(Orchestration={"Gate_wait_minutes": -5})
     with pytest.raises(ConfigurationError, match="Gate_wait_minutes must be a whole number"):
         load_config(_write(tmp_path, raw))
 
@@ -947,7 +927,6 @@ def test_docs_annual_schedule_macros(tmp_path, schedule):
 def test_email_and_orchestration_enum_settings_ignore_case_and_surrounding_spaces(tmp_path):
     raw = _minimal(
         Orchestration={
-            "Mode": " LOCAL ",
             "Email": {
                 "transport": " SMTP ",
                 "tls_mode": " SSL ",
@@ -958,7 +937,6 @@ def test_email_and_orchestration_enum_settings_ignore_case_and_surrounding_space
         }
     )
     config = load_config(_write(tmp_path, raw))
-    assert config.mode == "local"
     assert config.email.transport == "smtp"
     assert config.email.tls_mode == "ssl"
 
@@ -1014,3 +992,34 @@ def test_organization_url_refuses_unsafe_values_without_echoing_secrets(tmp_path
     with pytest.raises(ConfigurationError, match=r"Docs_site\.External_url") as caught:
         load_config(_write(tmp_path, _minimal(Docs_site={"External_url": url})))
     assert "private" not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "Mode",
+        "Name",
+        "Global_dag",
+        "Catchup",
+        "Tags",
+        "Retry_delay_minutes",
+        "Depends_on_past",
+        "Email_on_failure",
+    ],
+)
+def test_unknown_orchestration_setting_names_the_key_and_file(tmp_path, key):
+    path = _write(tmp_path, _minimal(Orchestration={key: "obsolete"}))
+    with pytest.raises(ConfigurationError) as refused:
+        load_config(path)
+    assert str(path) in str(refused.value)
+    assert key in str(refused.value)
+    assert "Orchestration" in str(refused.value)
+    assert "unknown key" in str(refused.value)
+
+
+def test_allow_schedule_is_set_per_environment(tmp_path):
+    profiles = {"dev": {"Allow_schedule": False}, "prod": {}}
+    dev = _write(tmp_path, _minimal(Orchestration={"Profile": "dev", **profiles}))
+    assert load_config(dev).allow_schedule is False
+    prod = _write(tmp_path, _minimal(Orchestration={"Profile": "prod", **profiles}))
+    assert load_config(prod).allow_schedule is True

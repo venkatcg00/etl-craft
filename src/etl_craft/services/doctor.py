@@ -25,7 +25,7 @@ from etl_craft.config.auth import EMAIL_VERIFIED_AUTH_MODES, engine_for_jdbc_url
 from etl_craft.config.model import ConnectionProfile, EmailProfile
 from etl_craft.config.resolve import resolve_named_secret, source_values
 from etl_craft.config.sizing import ceilings
-from etl_craft.core.enums import CloningScope, DeploymentProfile, GatePolicy, Mode
+from etl_craft.core.enums import CloningScope, DeploymentProfile, GatePolicy
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.resources import (
     DEFAULT_POOL_SIZE,
@@ -102,7 +102,7 @@ def run_checks(config: ConnectorConfig, *, engine_state: bool = True) -> list[Ch
     return [
         ok(
             "Configuration",
-            f"{config.config_path} (mode {config.mode}, project {config.project_dir})",
+            f"{config.config_path} (project {config.project_dir})",
         ),
         *_settings(config),
         *_files(config),
@@ -318,16 +318,7 @@ def _engine(config: ConnectorConfig, *, engine_state: bool) -> list[Check]:
                 "a SQLite Engine DB suits one machine; its writes are serialized. Use "
                 "PostgreSQL in production"
             )
-            if config.mode == Mode.REMOTE:
-                checks.append(
-                    warn(
-                        "Engine DB kind",
-                        f"{detail}: in remote mode each orchestrator task process must run on this "
-                        "machine, because a process elsewhere cannot open the file",
-                    )
-                )
-            else:
-                checks.append(ok("Engine DB kind", detail))
+            checks.append(ok("Engine DB kind", detail))
         checks += _connection_budget(config, engine)
         if engine_state:
             checks += _engine_state(config, engine)

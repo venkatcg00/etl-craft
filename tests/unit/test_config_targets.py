@@ -13,7 +13,7 @@ from etl_craft.config.targets import (
     preferred_connection_url,
     strip_databricks_credentials,
 )
-from etl_craft.core.enums import Mode, TableFormat
+from etl_craft.core.enums import TableFormat
 from etl_craft.core.errors import ConfigurationError
 
 pytestmark = pytest.mark.unit
@@ -234,7 +234,6 @@ def config_for(
         profile = ConnectionProfile("WAREHOUSE", "dev", jdbc_url, "", "none", extra=extra)
         warehouse = profile
     return ConnectorConfig(
-        mode=Mode.LOCAL,
         source=SourceConfig(type="environment"),
         engine=engine,
         warehouse=warehouse,

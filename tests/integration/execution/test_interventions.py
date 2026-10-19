@@ -19,7 +19,7 @@ from sqlalchemy import text
 from etl_craft.cli import main as cli_main
 from etl_craft.config import load_config
 from etl_craft.core.actor import Actor, ActorKind, current_actor
-from etl_craft.core.enums import ApiRole, ControlAction, Mode, RunStatus
+from etl_craft.core.enums import ApiRole, ControlAction, RunStatus
 from etl_craft.core.errors import ExitCode, RunRefusedError, RunStateError, UsageError
 from etl_craft.engine import runlog, transitions
 from etl_craft.execution.attempt_records import attempt_log_path
@@ -83,7 +83,7 @@ def config(engine_db, tmp_path):
         }
     raw = {
         "Secrets": {"Source_type": "environment"},
-        "Orchestration": {"Mode": "local", "Task_timeout_seconds": 60, "Max_parallel_tasks": 2},
+        "Orchestration": {"Task_timeout_seconds": 60, "Max_parallel_tasks": 2},
         "Engine": {"dev": block},
     }
     path = (engine_db.config.config_path or tmp_path / "craft-connector.yml").parent / (
@@ -481,28 +481,6 @@ def test_what_mark_and_cancel_refuse(config, pipeline):
             selector=runlog.RunSelector(run_id=run_id),
         )
 
-    remote = replace(config, mode=Mode.REMOTE)
-    for refused in (
-        lambda: mark_task(
-            engine,
-            remote,
-            "P",
-            "broken",
-            "SUCCESS",
-            "why",
-            selector=runlog.RunSelector(run_id=run_id),
-        ),
-        lambda: mark_run(
-            engine, remote, "P", "SUCCESS", "why", selector=runlog.RunSelector(run_id=run_id)
-        ),
-        lambda: record_stand_in_run(engine, remote, "P", "SUCCESS", "why"),
-        lambda: abort(
-            OperationContext(engine, remote, current_actor(), role=ApiRole.OPERATOR), "P", "why"
-        ),
-    ):
-        with pytest.raises(RunRefusedError, match="orchestrator"):
-            refused()
-
     mark_task(
         engine,
         config,
@@ -636,8 +614,6 @@ def test_a_task_runs_without_its_dependencies_when_told_to(config, pipeline):
         run_task(engine, config, "P", "transform", child=CHILD, override=Override(""))
     with pytest.raises(UsageError, match="different overrides"):
         run_task(engine, config, "P", "transform", force=True, override=Override("x"))
-    with pytest.raises(RunRefusedError, match="--ignore-dependencies is only available in local"):
-        run_task(engine, replace(config, mode=Mode.REMOTE), "P", "x", override=Override("x"))
 
 
 def test_a_rerun_runs_a_task_and_what_follows_it_again(config, pipeline):
@@ -686,15 +662,6 @@ def test_a_rerun_runs_a_task_and_what_follows_it_again(config, pipeline):
         ("extract", "RERUN", "SUCCESS", "SUCCESS"),
         ("transform", "RERUN", "SUCCESS", "SUCCESS"),
     ]
-    with pytest.raises(RunRefusedError, match="--rerun is only available in local mode"):
-        rerun_task(
-            engine,
-            replace(config, mode=Mode.REMOTE),
-            "P",
-            "extract",
-            "x",
-            selector=runlog.RunSelector(run_id=run_id),
-        )
 
 
 def test_the_run_options(config, pipeline, capsys, monkeypatch, engine_db):
@@ -757,9 +724,6 @@ def test_a_paused_pipeline_starts_nothing_until_resumed(config, pipeline):
         "source is back",
     )
     assert row.resumed_at is not None
-    remote = replace(config, mode=Mode.REMOTE)
-    with pytest.raises(RunRefusedError, match="pausing the DAG"):
-        pause_pipeline(engine, remote, "P", "x")
 
 
 @pytest.mark.chaos
@@ -990,10 +954,6 @@ def test_what_a_backfill_refuses(config, pipeline):
         backfill(engine, config, "P", date(2025, 1, 1), date(2026, 1, 2), "x")
     with pytest.raises(UsageError, match="--backfill needs a --reason"):
         backfill(engine, config, "P", date(2026, 9, 1), date(2026, 9, 1), "")
-    with pytest.raises(RunRefusedError, match="--backfill is only available in local mode"):
-        backfill(
-            engine, replace(config, mode=Mode.REMOTE), "P", date(2026, 9, 1), date(2026, 9, 1), "x"
-        )
     with engine.begin() as conn:
         run_id = start_run(conn, ids["P"], run_date=date(2026, 9, 9))
     with pytest.raises(RunStateError, match=rf"run in progress \(pipeline_run_id={run_id}\)"):

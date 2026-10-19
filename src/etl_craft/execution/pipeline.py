@@ -1,6 +1,6 @@
-"""``run --pipeline_code``: run a whole pipeline; ``--init-only`` and ``--finalize-only``.
+"""``run --pipeline_code``: run a whole pipeline; ``--init-only`` creates a run.
 
-In local mode the engine runs every active task under one run, starting ready tasks after each
+The engine runs every active task under one run, starting ready tasks after each
 completion, at most ``Orchestration.Max_parallel_tasks`` at once. Each task goes through
 ``run_task`` in a process of its own. Gates wait cooperatively without an agent;
 a task whose dependencies can never be met is recorded ``SKIPPED``. Execution continues until
@@ -12,13 +12,6 @@ A new run starts only when the pipeline's dependencies on other pipelines are sa
 ``gates``); otherwise the run is recorded ``SKIPPED``. An ``IN-PROGRESS`` run is resumed instead,
 without that check, and its finished tasks are not run again. Before either, the connections the
 run uses are tested (see ``connections``).
-
-In remote mode the orchestrator is the only source of truth for scheduling (see ``remote``). It
-runs each task with ``run --task_code``, between ``run --init-only``, which refuses rules the
-orchestrator does not support, tests connections and starts the run, and ``run
---finalize-only``, which records its decisions and ends the run: a task it never ran is
-``SKIPPED``, and the run is ``FAILED`` when a data task failed, ``SKIPPED`` when it ran none.
-No gate is checked and no upstream run is consumed; the orchestrator's DAGs hold those rules.
 
 An operator may abort a local run (``etl-craft abort``): its running tasks are stopped, no
 other task starts, and the run ends ``CANCELLED``. ``etl-craft stop`` lets them finish first.
@@ -42,10 +35,9 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.enums import (
-    Mode,
     RunStatus,
 )
-from etl_craft.core.errors import RunRefusedError, RunStateError, UsageError
+from etl_craft.core.errors import RunStateError, UsageError
 from etl_craft.core.log import log_context
 from etl_craft.engine import controls, runlog
 from etl_craft.engine.repository.dependencies import PipelineGraphData
@@ -128,7 +120,7 @@ def pipeline_steps(
     graph_data: PipelineGraphData | None = None,
     pool: Pool | None = None,
 ) -> Generator[float, None, PipelineOutcome]:
-    """Advance ready tasks of ``pipeline_code`` cooperatively; local mode only.
+    """Advance ready tasks of ``pipeline_code`` cooperatively.
 
     ``force`` skips the pipeline's gate and runs every task after its upstreams finish, whatever its
     status or dependencies. ``run_date`` is the date a new run runs as of (today unless given),
@@ -136,12 +128,6 @@ def pipeline_steps(
     interrupted, the running task processes are stopped and recorded ``FAILED``, and the run
     stays ``IN-PROGRESS`` so the next run resumes it.
     """
-    if config.mode == Mode.REMOTE:
-        raise RunRefusedError(
-            "run --pipeline_code without --task_code runs the whole pipeline, which only local "
-            "mode does; in remote mode the orchestrator runs each task, between run --init-only "
-            "and run --finalize-only"
-        )
     paused = open_pause(engine, pipeline_code, selector=selector)
     if paused is not None:
         return paused_outcome(pipeline_code, paused)
@@ -201,7 +187,7 @@ class _ScheduleOptions:
 def _run_schedule(
     engine: Engine, config: ConnectorConfig, run: PipelineRun, options: _ScheduleOptions
 ) -> Generator[float, None, PipelineOutcome]:
-    """Drive admitted tasks, then finalize only when the supervisor is allowed to finish."""
+    """Drive admitted tasks, then finish only when the supervisor is allowed to finish."""
     scheduler = Scheduler(
         engine,
         config,
@@ -332,7 +318,7 @@ def backfill(
     ``task.run_date``), marked a backfill run: it checks no dependency on other pipelines,
     consumes no upstream run, and its scripts get no offset and store none, so the scheduled
     runs go on as before. The backfill stops at the first run that does not end ``SUCCESS`` or
-    ``SKIPPED``; a later backfill from that date takes up again. Local mode only, with a reason,
+    ``SKIPPED``; a later backfill from that date takes up again. With a reason,
     at most ``MAX_BACKFILL_DAYS`` dates, and not while the pipeline has a run in progress.
     """
     check_override(config, "--backfill", reason)

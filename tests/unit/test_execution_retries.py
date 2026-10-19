@@ -4,7 +4,6 @@ from dataclasses import replace
 
 import pytest
 
-from etl_craft.config import DagDefaults
 from etl_craft.core.errors import (
     ConfigurationError,
     HandlerError,
@@ -20,7 +19,7 @@ pytestmark = pytest.mark.unit
 
 def test_defaults_overrides_and_capped_backoff():
     assert task_retry_policy({}, CONFIG) == RetryPolicy(0, 60, 2.0)
-    config = replace(CONFIG, dag_defaults=DagDefaults(retries=3))
+    config = replace(CONFIG, retries=3)
     assert task_retry_policy({}, config).retries == 3
     assert task_retry_policy({"RETRIES": "0", "RETRY_DELAY_SECONDS": "0"}, config) == RetryPolicy(
         0, 0, 2.0

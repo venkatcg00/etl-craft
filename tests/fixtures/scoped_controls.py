@@ -29,7 +29,7 @@ def ctx(engine_db, tmp_path, monkeypatch):
         yaml.safe_dump(
             {
                 "Secrets": {"Source_type": "environment"},
-                "Orchestration": {"Mode": "local"},
+                "Orchestration": {},
                 "Engine": {"test": block},
             },
             sort_keys=False,
