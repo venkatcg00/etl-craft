@@ -211,8 +211,8 @@ and clear unsupported/unobserved-writer outcomes on each supported warehouse.
 
 The live UI uses a workflow monitor model: select a pipeline, run, task or attempt and act on
 that scope. Starting an individual task must not require rerunning the whole pipeline or an
-Airflow-style clear operation. Airflow remains an integration adapter, rather than the model
-that limits native controls. PowerCenter supports task-level stop and independent session
+Airflow-style clear operation. etl-craft does not support Airflow (S5.Y); no outside scheduler
+limits native controls. PowerCenter supports task-level stop and independent session
 recovery; use its [StopTask command](https://docs.informatica.com/data-integration/powercenter/10-4-0/command-reference/pmcmd-command-reference/stoptask.html)
 and [session recovery strategies](https://docs.informatica.com/data-integration/powercenter/10-5-7/advanced-workflow-guide/workflow-recovery/configuring-task-recovery/task-recovery-strategies/session-task-strategies.html)
 as concrete references for control granularity and recovery semantics.
@@ -242,8 +242,7 @@ invariant. Replace unnecessary whole-pipeline, paused-pipeline, remote-mode and 
 restrictions with scoped, audited operations. Review the one-active-run rule for independent
 manual executions and named instances, including target, checkpoint and consumption isolation,
 rather than keeping a blanket restriction merely because the scheduler was built that way.
-Local and owned remote workers use the same command contract; legacy external-orchestrator
-mode needs an adapter/capability outcome rather than an unconditional native-UI dead end.
+The local provider and agents use the same command contract.
 
 Retain exact run/attempt identities, permission checks, live ownership/fencing, target locks,
 immutable history, committed consumption decisions and SCD human-value protection. A force or
@@ -269,7 +268,8 @@ S7.A.2 verify those flows rather than only displaying buttons.
 
 ## UI elements and gap states
 
-Reuse the catalog's CSS, SVG lineage, service layer and server-rendered UI design. The generated
+Reuse the catalog's CSS, SVG lineage and server-rendered UI design. Pages render the documents
+of S5.AA read actions; every change goes through the same `/api/v1` route as the CLI. The generated
 project documentation exposes the same states as a dated snapshot; the live UI exposes a
 read-only warehouse comparison action. A check records time, warehouse identity, config/SQL
 version and per-object outcome. A failed or inaccessible check never means matched.

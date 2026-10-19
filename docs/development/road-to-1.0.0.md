@@ -136,6 +136,8 @@ item's text, or work done early under another item.
 | S5.U Robustness before the cluster | Done | #176, #182, #183, #184 | Engine DB restarts ridden out; SLA breach writes retried; no single-writer guess; timing tests verified under load; subprocess code measured by coverage |
 | S5.W Retry only what can succeed | Done | #215 | Failure classification, retry policies and immutable attempt evidence; local and Snowflake acceptance passed, unavailable Databricks live acceptance waived by the owner |
 | S5.Z Controller and agent names | Done | #216 | Controller command/package/history, agent terminology and consistent deployment profiles; lossless Engine DB upgrades |
+| S5.Y A standalone orchestrator | Planned | | Airflow export, `etl-craft-airflow` and remote mode deleted; the controller rebuilds the catalog on `Docs_site.Schedule` |
+| S5.AA One source for every action | Planned | | One action table for roles, audit and placement; generated API routes; one request per action; consistent names, folders and types |
 | S5.X Unmanaged SQL tasks | Planned | | `SQL_SCRIPT` runs any SQL as an ordinary dependent task with per-statement audit; pre- and post-SQL are upstream and downstream tasks |
 | S5.C and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
@@ -158,8 +160,7 @@ one-run permission under definition pause, selected bulk results and shared capa
 S5.O.3 cloud acceptance remains recorded below; probe provider availability rather than
 waiting for a human quota reset. S5.T is done (#212), which also split `cancel` into `stop` and
 `abort` and scoped `pause`/`resume` into `hold`/`release` at the owner's request. S5.V (#213)
-implements team-owned config and awaits Databricks acceptance; re-query provider availability
-before completing its handover. S5.W (#215) implements failure-aware retries; the owner approved merging with unavailable
+implements team-owned config; Databricks acceptance was unavailable on its try. S5.W (#215) implements failure-aware retries; the owner approved merging with unavailable
 Databricks live acceptance recorded as non-blocking.
 
 Item 2 includes the approved move of account administration, interactive first-admin bootstrap,
@@ -269,8 +270,12 @@ does not move worker work ahead of the metadata, account or operator-control cor
   - S7.O starts after the frozen 0.4 soak ends.
   - S5.W (retrying only failures that can succeed) follows S5.U item 5 and comes before
     S5.C.
-  - S5.Z (controller and agent names) comes right before S5.C. S7.Q (generic ANSI warehouse)
+  - S5.Z (controller and agent names) comes before S5.C. S7.Q (generic ANSI warehouse)
     follows S5.X.
+  - S5.Y (standalone: no Airflow, no remote mode) and then S5.AA (one source for every action)
+    come after S5.Z and before S5.X, S5.C and S7.A (owner, 19 October 2026). etl-craft is a
+    standalone orchestrator from 1.0.0; the agent commands, the UI actions and S5.X's handler
+    are built on S5.AA's action table.
   - None of these moves S5.S, S5.O.3 or S5.Q.
   - S5.V and S7.M add `validation_scripts/` and `uploads/` to the project directory, and the
     implementing pull requests update `AGENTS.md`'s design rules to match.
@@ -1429,9 +1434,9 @@ docs-site test records its build duration and has a 240-second timeout.
 
 etl-craft 1.0.0 is a standalone ETL orchestrator. A team describes its ETL as metadata (rows in the
 `CFG_` tables), SQL (one read-only SELECT per SQL task) and Python ingestion scripts. etl-craft
-derives the dependency graph, schedules runs, dispatches tasks to workers, records everything in the
+derives the dependency graph, schedules runs, dispatches tasks to agents, records everything in the
 Engine DB, and shows it through the CLI, an HTTP API and a web UI. Neither Airflow nor dbt is
-required. Airflow remains supported as an optional external orchestrator through the generated YAML.
+used or supported; another scheduler can start runs through the CLI or the HTTP API.
 
 **What it is modelled on.** etl-craft follows Informatica PowerCenter's operating model:
 - a metadata repository (the Engine DB's `CFG_` tables);
@@ -1470,28 +1475,27 @@ with the exact cause, as the design rules require.
 ```mermaid
 flowchart LR
     U[CLI / HTTP API / Web UI] --> SV[Service layer]
-    SV --> OV[Overseer: scheduler, dispatcher, monitor]
+    SV --> OV[Controller: scheduler, dispatcher, monitor]
     OV <--> DB[(Engine DB: one PostgreSQL for all projects)]
     OV --> PI[Pool interface]
-    PI --> LP[Local provider: child processes on the overseer host]
-    PI --> WA[Worker agents on other hosts or containers]
+    PI --> LP[Local provider: child processes on the controller host]
+    PI --> WA[Agents on other hosts or containers]
     WA <--> DB
     LP --> T1[Task process]
     WA --> T2[Task process]
     T1 --> WH[Project warehouse]
     T2 --> WH
     T2 --> SRC[Ingestion sources]
-    OV --> YAML[Generated YAML] --> AF[Airflow DAG factory, optional]
 ```
 
 | Component | Responsibility | Runs where |
 | --- | --- | --- |
-| Service layer | Every operation (run, mark, cancel, pause, backfill, status, explain, validate) as a Python function with typed inputs and outputs. The CLI, API and UI call it; nothing else implements an operation. | Inside the CLI process or the overseer |
-| Overseer | Creates runs from schedules and triggers, decides which tasks are ready, hands attempts to pools, watches leases, timeouts and cancellations, ends runs. Exactly one is active per Engine DB. | The largest node |
-| Pool interface | The only way the overseer starts work. Knows capacity, submits attempts, asks for status, cancels. No backend concepts leak through it. | Library inside the overseer |
-| Local provider | Implements the pool interface with child processes on the overseer's host (today's supervisor). Used for development and small deployments. | Overseer host |
-| Worker agent | `etl-craft worker`: registers with the Engine DB, claims attempts for its pool, runs each in a child process, sends heartbeats, records outcomes. | Any host or container |
-| Engine DB | All metadata and state: `CFG_` (what to run), `AUD_` (what happened), plus queue, lease and worker tables. One PostgreSQL database for every project. SQLite remains for single-user development. | PostgreSQL; on Snowflake or Databricks deployments, the platform's managed PostgreSQL |
+| Service layer | Every operation (run, mark, cancel, pause, backfill, status, explain, validate) as a Python function with typed inputs and outputs. The CLI, API and UI call it; nothing else implements an operation. | Inside the CLI process or the controller |
+| Controller | Creates runs from schedules and triggers, decides which tasks are ready, hands attempts to pools, watches leases, timeouts and cancellations, ends runs. Exactly one is active per Engine DB. | The largest node |
+| Pool interface | The only way the controller starts work. Knows capacity, submits attempts, asks for status, cancels. No backend concepts leak through it. | Library inside the controller |
+| Local provider | Implements the pool interface with child processes on the controller's host (today's supervisor). Used for development and small deployments. | Controller host |
+| Agent | `etl-craft agent`: registers with the Engine DB, claims attempts for its pool, runs each in a child process, sends heartbeats, records outcomes. | Any host or container |
+| Engine DB | All metadata and state: `CFG_` (what to run), `AUD_` (what happened), plus queue, lease and agent tables. One PostgreSQL database for every project. SQLite remains for single-user development. | PostgreSQL; on Snowflake or Databricks deployments, the platform's managed PostgreSQL |
 | Warehouse | Does the heavy SQL work. One warehouse connection per project. | The team's platform |
 
 ### Rules that hold in 1.0.0
@@ -1499,16 +1503,16 @@ flowchart LR
 1. Authors write metadata, SQL and Python ingestion only. The DAG is derived, never authored.
 2. Every run, attempt and operator action is addressed by its id. Nothing resolves "the active run,
    else the latest". Dates are attributes of a run, not its identity.
-3. A worker owns an attempt only through a lease recorded in the Engine DB. Every write about an
+3. A agent owns an attempt only through a lease recorded in the Engine DB. Every write about an
    attempt (status, counts, log, offset, consumption) is fenced by the attempt id and checked against
    the expected current state. A stale owner cannot change anything.
 4. Every status change is a compare-and-set: `UPDATE ... WHERE <id> AND STATUS = <expected>`, and the
    caller checks the row count.
 5. The core knows pools, slots and execution handles. Celery, Kubernetes or any other backend is a
    pool provider behind the interface.
-6. Generated YAML is the one-way interface to external orchestrators. The Airflow DAG factory reads
-   only the YAML.
-7. A `kill -9` of the overseer, a worker or a task process leaves the Engine DB telling the truth,
+6. Every action has one row in the action table (S5.AA): its function, role, audit and HTTP route.
+   The CLI, the API and the UI reach it only through that row.
+7. A `kill -9` of the controller, a agent or a task process leaves the Engine DB telling the truth,
    and a restart reconciles without an operator.
 8. Ingestion scripts belong to the team. etl-craft owns how they are loaded, what they receive, how
    their outcome and offset are recorded, and signalling the process group it started.
@@ -1522,25 +1526,25 @@ flowchart LR
 ### Non-goals for 1.0.0
 
 - No execution backend inside the core (Celery, Kubernetes): only pool providers.
-- No highly available overseer: one active overseer under a lease; it restarts and reconciles.
+- No highly available controller: one active controller under a lease; it restarts and reconciles.
 - No data-movement framework or connector library. A script that needs more compute starts its own
   container or job.
 - No macro or template language beyond the `$$` parameters.
-- No authored YAML DAGs, and no import from Airflow.
+- No Airflow support: no DAG export, no remote mode and no import from Airflow.
 - No database per project by default: one Engine DB with project namespaces. Separate Engine DBs
   stay possible for hard isolation (regulated data, or development kept apart from production).
 
 ### Sizing rules
 
 - [S5.T](#s5t-resource-discovery-and-deployment-profiles) measures usable process resources and
-  applies the team-selected deployment profile before S5.C adds workers. Without a profile,
+  applies the team-selected deployment profile before S5.C adds agents. Without a profile,
   existing installations keep their current sizing behavior.
-- The overseer runs on the largest node, with at least 1.5 times the memory of the largest worker
-  class (an 8 GiB worker means a 12 GiB overseer at minimum). This is a floor, not a sufficiency
+- The controller runs on the largest node, with at least 1.5 times the memory of the largest agent
+  class (an 8 GiB agent means a 12 GiB controller at minimum). This is a floor, not a sufficiency
   guarantee; [S6](#release-06-at-load) measures the real requirement.
 - A task process costs 42 MB of memory and about 150 ms of imports with only the engine loaded, and
   about 89 MB with the PostgreSQL and DuckDB drivers loaded. Measured orchestration overhead is about
-  240 ms per task. A worker's slot count is therefore bounded by memory, not CPU, for SQL tasks,
+  240 ms per task. A agent's slot count is therefore bounded by memory, not CPU, for SQL tasks,
   which mostly wait on the warehouse.
 - Every process that opens Engine DB connections does so from a budget (see `S5.H`). Raising
   PostgreSQL's `max_connections` is not a capacity plan.
@@ -1589,10 +1593,10 @@ Built in 0.3 (`S3.B`). Until then, 0.2.0 adds compare-and-set guards to the exis
 
 | From | To | Who | Guard |
 | --- | --- | --- | --- |
-| (none) | `QUEUED` | Overseer (schedule or trigger), CLI `run`, backfill | Insert; at most one non-terminal run per `(PIPELINE_ID, RUN_KEY)` |
-| `QUEUED` | `IN-PROGRESS` | Overseer when the pipeline gate passes | `STATUS = 'QUEUED'` |
-| `QUEUED` | `SKIPPED` | Overseer when the gate refuses | `STATUS = 'QUEUED'`, and only the run this call created |
-| `IN-PROGRESS` | `SUCCESS` or `FAILED` | Overseer finalize | `STATUS = 'IN-PROGRESS'` and no attempt of the run is `CLAIMED` or `RUNNING` |
+| (none) | `QUEUED` | Controller (schedule or trigger), CLI `run`, backfill | Insert; at most one non-terminal run per `(PIPELINE_ID, RUN_KEY)` |
+| `QUEUED` | `IN-PROGRESS` | Controller when the pipeline gate passes | `STATUS = 'QUEUED'` |
+| `QUEUED` | `SKIPPED` | Controller when the gate refuses | `STATUS = 'QUEUED'`, and only the run this call created |
+| `IN-PROGRESS` | `SUCCESS` or `FAILED` | Controller finalize | `STATUS = 'IN-PROGRESS'` and no attempt of the run is `CLAIMED` or `RUNNING` |
 | `IN-PROGRESS` | `CANCELLED` | Operator `cancel` | `STATUS = 'IN-PROGRESS'` |
 | `SUCCESS`, `FAILED`, `SKIPPED`, `CANCELLED` | `IN-PROGRESS` | Operator `reopen`, `mark` of a task, `--rerun` | Terminal, and no other run of the pipeline is non-terminal; records `REOPEN` |
 | any | `SUCCESS`, `FAILED`, `SKIPPED` | Operator `mark` of the run | Terminal or `IN-PROGRESS` with no claimed or running attempt |
@@ -1603,12 +1607,12 @@ Built in 0.3 (`S3.B`). Until then, 0.2.0 adds compare-and-set guards to the exis
 
 | From | To | Who | Guard |
 | --- | --- | --- | --- |
-| (none) | `QUEUED` | Overseer or CLI when the task is ready | Insert; at most one non-terminal attempt per task run |
-| `QUEUED` | `CLAIMED` | Worker or local provider | `STATUS = 'QUEUED'`; sets `OWNER_ID`, `LEASE_EXPIRES_AT` |
+| (none) | `QUEUED` | Controller or CLI when the task is ready | Insert; at most one non-terminal attempt per task run |
+| `QUEUED` | `CLAIMED` | Agent or local provider | `STATUS = 'QUEUED'`; sets `OWNER_ID`, `LEASE_EXPIRES_AT` |
 | `CLAIMED` | `RUNNING` | The owner, after the child process started | `STATUS = 'CLAIMED' AND OWNER_ID = :owner` |
 | `CLAIMED`, `RUNNING` | `SUCCESS`, `FAILED` | The owner (child, or parent on the child's behalf) | `STATUS IN ('CLAIMED','RUNNING') AND OWNER_ID = :owner AND ATTEMPT_ID = :attempt` |
-| `CLAIMED`, `RUNNING` | `LOST` | Overseer reconciler | Lease expired and the provider cannot confirm the process |
-| `QUEUED`, `CLAIMED`, `RUNNING` | `CANCELLED` | Operator `cancel`, or overseer on a run cancel | Not terminal |
+| `CLAIMED`, `RUNNING` | `LOST` | Controller reconciler | Lease expired and the provider cannot confirm the process |
+| `QUEUED`, `CLAIMED`, `RUNNING` | `CANCELLED` | Operator `cancel`, or controller on a run cancel | Not terminal |
 | `RUNNING` | `TIMED_OUT` | Owner on time limit | `STATUS = 'RUNNING' AND OWNER_ID = :owner` |
 
 `LOST` means "we don't know whether its side effects happened". It is terminal for the attempt and
@@ -3930,48 +3934,389 @@ name.
 - *Done when.* No user-facing name says "overseer" or "worker", apart from the CHANGELOG and
   old migration files.
 
-### S5.C The PostgreSQL queue and the worker agent
+### S5.Y A standalone orchestrator: remove Airflow and remote mode
 
-Branch: `feat/pools-worker`. Files: new `worker/` package (layer beside `overseer`),
-`cli/commands/worker.py`, migration for worker tables.
+Two slices, one pull request each, in order. They come after S5.Z and before S5.AA, S5.X and
+S5.C. Nobody runs a released version with Airflow or remote mode, so both slices delete outright.
+
+- *Problem.* etl-craft creates, dispatches, monitors and ends its own runs (`etl-craft
+  controller`). Remote mode keeps a second scheduler beside it:
+  - `generate-yml` exports DAG YAML, and the `etl-craft-airflow` package turns it into Airflow
+    DAGs;
+  - `execution/remote.py` translates run conditions into trigger rules, and `validate` refuses
+    rules Airflow cannot express;
+  - `--finalize-only` records what an orchestrator decided;
+  - `Orchestration.Mode` and a set of Airflow-only settings exist only for it.
+
+  Every feature has to behave twice. CI also pays for an Airflow 2.11/3.3 contract job, S7.G
+  would promise an Airflow version matrix, and "remote" means both "Airflow" and "a controller
+  over HTTP".
+- *Rules for both slices.*
+  - **Delete; keep nothing for compatibility.** No alias, no deprecation warning, no
+    "unsupported" branch and no per-key removal message. A removed setting, key, flag or command
+    fails through the error that already handles unknown input: the loader's unknown-setting
+    error, `validate`, or argparse's invalid choice. That error must name the exact key or
+    option and where it was found.
+  - **History stays.** Audit rows written in remote mode, such as `orchestrator:` run keys or the
+    `ORCHESTRATOR` actor and trigger kinds, stay as they are. Released migration files are
+    immutable. New code cannot write these values; reading them back must still work (see
+    S5.AA slice 4).
+  - **Outside callers stay possible without Airflow code.** Another scheduler starts work with
+    `etl-craft run --server` or `POST /api/v1/pipelines/{code}/runs` under a SERVICE account,
+    using the documented exit codes. `docs/deploying/http-api.md` gets a short "Starting runs
+    from another scheduler" section; nothing else is added for it.
+  - **Size first.** Before editing, run `git grep -il 'airflow\|generate.yml\|generate_yml\|Mode.REMOTE\|remote mode\|dag-yaml' -- src tests docs examples scripts .github release mkdocs.yml Makefile pyproject.toml ':!docs/development' ':!release/evidence'`.
+    Every file it lists is handled by one of the two slices.
+
+#### S5.Y.1 Remove the Airflow export
+
+Branch: `refactor/execution-standalone-export`.
+
+- *Delete:*
+  - `integrations/airflow/` (the `etl-craft-airflow` package and its tests);
+  - `scripts/export_airflow_contracts.py`, the `airflow` job in `.github/workflows/ci.yml`, and
+    its entries in `scripts/ci_shards.py`, `scripts/ci-durations.json` and
+    `release/required-suites.toml`;
+  - `services/generate_yml.py`, `cli/commands/generate_yml.py`, `documents.dag_yaml` in
+    `services/operations/documents.py`, and `generate-yml` in the role policy and the audited
+    command list;
+  - `src/etl_craft/schemas/` (`dag-yaml-v1.json`), `docs/gen_yaml_schema.py` and its `mkdocs.yml`
+    entries;
+  - `Auth.Airflow_connection_id` (`config/loader_auth.py`, `config/model.py`);
+  - `tests/integration/engine/test_generate_yml.py`, and the YAML parts of `tests/package`,
+    `tests/e2e`, `tests/unit/test_reference_pages.py` and `tests/integration/docs`;
+  - every `release/regressions.toml` entry whose test is deleted with its feature, each one
+    named in the pull request;
+  - `docs/deploying/orchestrator.md`, `docs/examples/orchestration-remote.yml`, and the YAML and
+    Airflow sections of `docs/guides/catalog.md`, `docs/quick-start.md`, `docs/index.md`,
+    `README.md`, `CONTRIBUTING.md` and `release/README.md`, together with their `mkdocs.yml`
+    navigation entries.
+- *The docs DAG becomes a controller job.* Today `Docs_site.Schedule` is read only by
+  `generate-yml --docs`. After this slice, the controller rebuilds the catalog on it:
+  - Only the leader builds, from the existing schedules loop in `controller/schedules.py`.
+    Builds call `services.operations.documents.generate_docs` under the controller's SERVICE
+    actor, and only one build runs at a time.
+  - The schedule is due from the latest recorded `generate-docs` request in `AUD_ACTIONS`, so
+    a restart or a leadership change builds once per tick. A missed tick is not replayed; the
+    next due tick builds. No new table or setting is added.
+  - A failed build is recorded with its outcome and exit code, logged with the folder and the
+    error, and tried again at the next tick. It never stops the controller.
+  - `docs/guides/catalog.md` documents the job. Running `etl-craft generate-docs` by hand stays.
+- *Tests.*
+  - With explicit times and no sleeps, the controller builds once per due tick across a
+    restart and a leadership change.
+  - A failing build records its outcome and the next tick tries again.
+  - `etl-craft generate-yml` is an invalid choice.
+  - `Auth.Airflow_connection_id` in `craft-connector.yml` is refused by name.
+- *Done when.*
+  - `git grep -il airflow -- src tests docs examples scripts .github release mkdocs.yml ':!docs/development' ':!release/evidence' ':!CHANGELOG.md'`
+    finds nothing.
+  - The catalog stays fresh on `Docs_site.Schedule` with only the controller running.
+  - Required CI has no Airflow job and stays under ten minutes.
+
+#### S5.Y.2 Remove remote mode
+
+Branch: `refactor/execution-standalone-mode`.
+
+- *Delete:*
+  - the `Mode` enum, `Orchestration.Mode` and `Orchestration.Name`, every `config.mode` branch,
+    and `controller`'s refusal of remote mode. Find them with `git grep -n 'Mode\.\|config.mode\|remote mode' -- src`.
+    Today they sit in `execution/remote.py`, `run_finish.py` (the orchestrated finalization),
+    `interventions.py` (the remote refusals), `run_start.py`, `runner.py`, `scheduler.py`,
+    `gates.py`, `pipeline.py`, `services/validate.py` (unsupported rules),
+    `services/doctor.py`, `services/operations/status.py` and `cli/commands/run.py`;
+  - `--finalize-only` and everything only it reaches. `--init-only` stays: it creates a run that
+    a running controller picks up. `--standalone` stays;
+  - the profile settings only the YAML read: `Global_dag`, `Tags`, `Retries`,
+    `Retry_delay_minutes`, `Depends_on_past`, `Email_on_failure`, `Allow_schedule` and
+    `Orchestration.Catchup`. Before deleting each one, confirm with `git grep` that only
+    generated YAML read it. A setting the controller or a run reads stays and is listed in the
+    pull request. `CFG_PIPELINES.CATCHUP` and `MAX_CATCHUP_RUNS` stay, because they drive the
+    controller's catch-up;
+  - the `PIPELINE_PARAMETERS` keys `CATCHUP`, `DEPENDS_ON_PAST`, `EMAIL_ON_FAILURE`, `RETRIES`,
+    `RETRY_DELAY_MINUTES` and `TAGS`, from `PIPELINE_PARAMETER_KINDS` and `PipelineDetail`
+    (`engine/repository/pipelines.py`). `EMAIL_RECIPIENTS` stays;
+  - `examples/demo/metadata/remote_mode.sql`, `tests/fixtures/orchestrator.py`, the remote-mode
+    tests, and the remote-mode sections of `docs/guides/running-pipelines.md`,
+    `running-tasks.md`, `run-control.md`, `dependencies.md`, `validating.md`,
+    `pipelines-and-tasks.md`, `docs/deploying/*` and `docs/craft-connector.example.yml`. The
+    `docs/examples/*.yml` files lose `Mode` and the deleted settings.
+- *Unknown pipeline parameters fail.* Today an unknown `PIPELINE_PARAMETERS` key is ignored with
+  a warning. After this slice, `validate` reports it as `FAIL` and `config apply` refuses it,
+  naming the pipeline, the key and the keys allowed. A key that silently does nothing would
+  break "fail rather than guess" once the six keys above are gone.
+- *Migration, both dialects.* A data migration removes the six keys from stored
+  `CFG_PIPELINES.PIPELINE_PARAMETERS`, writing as etl-craft. `schema.sql` does not change,
+  history rows are not rewritten, and the change shows in the next config export.
+- *Tests.*
+  - `Orchestration.Mode` and each deleted setting are refused by name.
+  - A `TAGS` key fails `validate` and `config apply`.
+  - The migration strips the keys on SQLite and PostgreSQL from the 0.3.0 fixture schemas and
+    the populated upgrade fixtures, and the upgrade test passes from every released schema.
+  - Audit, status and history still read remote-era rows (an `orchestrator:` run key and the
+    `ORCHESTRATOR` kinds).
+- *Done when.*
+  - `git grep -n 'Mode.REMOTE\|Mode.LOCAL\|remote mode\|finalize.only' -- src docs tests examples ':!docs/development' ':!CHANGELOG.md'`
+    finds nothing.
+  - `validate` and `config apply` refuse every stale key with its remedy.
+  - The CHANGELOG lists each deleted command, flag, setting and parameter key.
+
+### S5.AA One source for every action
+
+Four slices, one pull request each, in order. They come after S5.Y and before S5.X, S5.C and
+S7.A: S5.C adds agent commands and routes and S7.A adds UI actions, and both should be built on
+the action table instead of copied once more.
+
+- *Problem.* Each action has one service function, as `AGENTS.md` requires. Everything around it
+  is still written once per interface, and the copies disagree:
+  - **Four registries of action names.** The role policy (`ROLES`,
+    `services/operations/permissions.py`), the audited commands (`MUTATING_COMMANDS`,
+    `engine/audit.py`), the refusals against a server (`SERVER_SIDE`, `cli/__init__.py`) and
+    local provisioning (`LOCAL_PROVISIONING`, `services/operations/accounts.py`). They are keyed
+    by CLI command names. `operation_name()` builds role names from argparse attributes
+    (`account_verb`, `dry_run`, `print_grants`), and the "check-only" variants are written
+    twice (`permissions.py`, `audit.py`).
+  - **Role checks happen in three places.** Some operations check their own role (`inspect`,
+    `status`, `tokens`). Others rely on the interface: the CLI checks by command name in
+    `cli/authentication.py`, the API checks by a route string, and some API routes are then
+    checked a second time inside the operation.
+  - **Two code paths per command.** Each server-capable CLI command has a local `_run` and a
+    hand-written `_remote` with the API path typed into the CLI. `run --server` picks one of
+    four endpoints (`trigger_run`, `execute_run`, `rerun_task`, `run_backfill`), and the CLI
+    decides which flags work only locally (`cli/commands/run.py`).
+  - **Duplicate routes and entry points.**
+    - Routes: `mark` is `POST /runs/{id}/tasks/{t}/mark` (`tasks.mark_task`) and
+      `POST /pipelines/{code}/mark` (`runs.mark`); `rerun` and `explain` each have a `/runs/...`
+      and a `/pipelines/...` form; `pause` and `resume` have their own routes while the other
+      controls share `/controls`.
+    - Wrappers: `run_task`, `force_task`, `initialize_run`, `finalize_run`, `skip_run`,
+      `mark_run`, `stand_in_run` and `mark_task` wrap `execute_run` or `mark`, and `tasks.py`
+      imports the private `runs._run_request`.
+  - **The CLI and the API cover different actions.** The API has token routes, but
+    `token --server` is refused. `GET /pipelines` exists, but `list --server` is refused.
+    `status` does three jobs: status, `--capabilities` and `--request-id`.
+  - **Interface wording inside services.** About 137 messages outside `cli/` name CLI flags
+    (`--task_code needs --pipeline_code`), and API callers receive them.
+  - **Inconsistent names.**
+    - Flags: only `--pipeline_code` and `--task_code` use underscores.
+    - "Server": `--server`, `ServerClient`, `api/server.py` and `docs/deploying/server.md` all
+      name the controller.
+    - Modules: CLI module names differ from their commands (`config_files.py` is `config`,
+      `list_pipelines.py` is `list`); the read operations are spread over `api_reads.py`
+      (named after one interface), `inspect.py`, `status.py` and `snapshots.py`.
+    - Same name, different job: `execution/supervisor.py` and `controller/supervisor.py`;
+      `failures` in `core`, `execution` and `dialects`; `interventions` in `execution` and
+      `engine/repository`.
+    - Nine flat `services/catalog_*` modules; `docs/gen_ref_pages.py` beside
+      `docs/gen_reference_pages.py`.
+    - `craft-connector.yml` mixes `Capitalized_snake` keys with lowercase ones (`host`,
+      `jdbc_url`, `tls_mode`), and its closed values mix cases (`Dependency_gates: warn`,
+      `Retry_on: TRANSIENT`).
+    - Help lines mix sentences with lowercase fragments.
+  - **Untyped values.** View models and `mark` carry statuses as `str`, and `set_pause` takes
+    `verb="pause"`.
+- *Target.*
+  - **One action table.** A new module, `services/operations/actions.py`, defines one frozen
+    `Action` row per action:
+    - its name, from a new `core.enums.ActionName`;
+    - the function, the request dataclass and the result type;
+    - the role, and the role of any check-only variant;
+    - whether it is audited;
+    - where it may run (`ANYWHERE`, or `CONTROLLER_HOST` for Engine DB setup, migrations and
+      config apply), and whether it may run as local provisioning;
+    - its HTTP method and path.
+
+    `invoke(ctx, action, request)` checks the role, records the request once and calls the
+    function. Operations stop calling `authorize` and `operation()` themselves. Whether a
+    command is audited, how much role it needs and whether a server refuses it are read only
+    from this table.
+  - **Interfaces only parse and render.**
+    - CLI: each command parses its arguments into the action's request (argparse `dest` names
+      equal the request's field names) and calls `invoke` locally. With `--server` it calls
+      `ControllerClient.invoke(action, request)`, which sends the request as JSON to the action's
+      path, so no command has its own remote code.
+    - API: routes are generated from the table, one per action. The body or query is the request
+      (`from_json`) and the response is `to_json(result)`.
+    - UI (S7.A): pages render the documents of read actions. Every change goes through the same
+      `/api/v1` route, posted with htmx's `json-enc` extension. There are no UI-only routes that
+      change state.
+    - Python API: `docs/guides/service-operations.md` documents `invoke` and the request types.
+  - **Requests validate themselves.** Errors name request fields (`task_code is required with
+    stale`). The CLI turns a field name into its flag in one place (`task_code` to
+    `--task-code`), and the API returns the field name as it is.
+  - **Generated reference.** `docs/reference/actions.md` is generated from the table at docs
+    build time: each action's CLI command, HTTP route, role, whether it is audited and where it
+    may run. The CLI and OpenAPI pages link to it.
+- *Coordination.* Other agents may take slices in parallel with other workstreams. Before
+  starting a slice, check that its branch is not already on the remote
+  (`git ls-remote --heads origin <branch>`); an existing branch means another agent has the
+  slice. Slices change the same files, so take them only in order.
+
+#### S5.AA.1 The action table, with unchanged behaviour
+
+Branch: `refactor/operations-action-table`.
+
+- Add `ActionName`, `Action` and `invoke`. Every CLI command and every API route calls through
+  `invoke`. Delete `ROLES`, `MUTATING_COMMANDS`, `SERVER_SIDE`, `LOCAL_PROVISIONING`,
+  `operation_name`, the check-only special cases in `command_request`, and every `authorize` and
+  `operation()` call inside the operations.
+- Keep routes, flags and documents as they are. This slice is a refactor and states its `src/`
+  line delta.
+- Generate `docs/reference/actions.md`.
+- *Tests.*
+  - Every CLI subcommand and every route in `app.routes` maps to exactly one action. The test
+    reads the parser and the app; it does not list them by hand.
+  - A refused call writes one `REFUSED` audit row, not two.
+  - The same action called through the CLI and the API writes `AUD_ACTIONS` rows with the same
+    action name and the same argument keys.
+- *Done when.* Role, audit and placement rules exist only in the action table, and every
+  interface reaches operations only through `invoke`.
+
+#### S5.AA.2 One request per action, and generated routes
+
+Branch: `refactor/operations-requests`.
+
+- **Running.** `execute_run(RunRequest)` is the only run entry point. Backfills become a
+  `RunRequest` field or their own action, chosen in the pull request. Delete `trigger_run`,
+  `run_task`, `force_task`, `initialize_run`, `skip_run` and `rerun_task`, and repoint the
+  execution layer and the tests. A request option that only works on the controller host is
+  refused by the operation, using the transport recorded on the `OperationContext`; the CLI keeps
+  no list of local-only flags.
+- **Marking.** `mark(MarkRequest)` is the only mark entry point. Delete `mark_task`, `mark_run`,
+  `stand_in_run` and the `/runs/{id}/tasks/{t}/mark` route.
+- **Routes.**
+  - One route per action: reads are `GET`, changes are `POST`, and paths are resource nouns in
+    kebab-case under `/api/v1`.
+  - Run selection is always `run_id` or `run_key` in the query or body. Delete the
+    `/runs/{run_id}/tasks/...` variants of explain, mark and rerun. `GET /runs/{id}` and
+    `GET /attempts/{id}` stay, because they read by id.
+  - `pause` and `resume` move to `/controls` with a `ControlAction`.
+  - Delete `api/selected.py` and `api/control_capabilities.py`; the generated routes live in
+    `api/routes.py`. Sign-in routes stay in `api/login.py`.
+- **CLI.**
+  - Delete every `_remote` function. Each action marked `ANYWHERE` works with `--server`,
+    including `token`, `account`, `pipelines`, `graph`, `steps`, `audit`, `lineage` and
+    `validate`.
+  - `status --capabilities` becomes `capabilities`, and `status --request-id` becomes
+    `control-request`.
+- **Messages.** Service messages name request fields, not flags. `git grep` for `--` inside
+  string literals under `services/`, `execution/` and `engine/` lists the sites. Remedies that
+  name a whole command (`run etl-craft setup`) stay.
+- *Tests.*
+  - For every action, local and `--server` calls return the same document.
+  - A request option refused on the server names the option and the host where it works.
+  - `invoke` reports a missing field by its field name, and the CLI reports it as the flag.
+- *Done when.* No interface module contains an API path except the generated routes and
+  `ControllerClient`, and no operation is reached by two functions.
+
+#### S5.AA.3 Names and folders
+
+Branch: `refactor/names-consistent`. A rename only: no behaviour changes, and the CHANGELOG
+lists every user-facing rename.
+
+- **CLI.**
+  - Flags are kebab-case: `--pipeline-code` and `--task-code`, with `dest` unchanged.
+  - `list` becomes `pipelines`.
+  - Help lines are one sentence that starts with a capital and ends with a full stop. A test
+    checks this for every command and option.
+- **Controller vocabulary.**
+  - `--server` becomes `--controller`, and `ETL_CRAFT_SERVER` becomes `ETL_CRAFT_CONTROLLER`.
+  - `cli/remote.py` becomes `cli/client.py`, and `ServerClient` becomes `ControllerClient`.
+  - `api/server.py` becomes `api/serve.py`.
+  - `docs/deploying/server.md` becomes `controller.md`.
+  - The package extra stays as S7.F plans it (`server`, then `ui`).
+- **`craft-connector.yml`.**
+  - Every key is `Capitalized_snake`: `Host`, `Port`, `Jdbc_url`, `Schema`, `User`, `Secret`,
+    `Tls_mode`, `Auth_mode`, `From_address`, `From_name`, `Key_file`, and the rest.
+  - Every closed value is upper case, and the enums in `core.enums` match: `Dependency_gates:
+    ENFORCE|WARN|OFF`, `Source_type: ENVIRONMENT|FILE`, `Tls_mode: STARTTLS|SSL|NONE`.
+  - Any other case is refused by name, with no case folding.
+  - Every example and doc page is updated, and `tests/unit/test_config_examples.py` loads every
+    example.
+- **Modules.**
+  - CLI modules are named after their command; a group of commands shares one module (`controls`
+    for stop/abort/hold/release, `pause`, `login`). `config_files.py` becomes `config.py`, and
+    `list_pipelines.py` becomes `pipelines.py`.
+  - `services/operations/api_reads.py` merges into `inspect.py`. `snapshots.py` stays as the
+    row-to-view mapping, used by `inspect` and `status`.
+  - `bulk_controls.py` merges into `controls.py` if the result stays under the module size
+    limit; otherwise it stays, and the pull request says why.
+  - `execution/supervisor.py` becomes `execution/processes.py`.
+  - `execution/failures.py` becomes `execution/classify.py`, and `dialects/failures.py` becomes
+    `dialects/failure_evidence.py`.
+  - `engine/repository/interventions.py` becomes `engine/repository/intervention_rows.py`.
+  - The `services/catalog_*` modules move into a `services/catalog/` package beside
+    `catalog_assets/`.
+  - `docs/gen_ref_pages.py` becomes `docs/gen_python_api.py`.
+- **Order inside the slice.** Rename modules first, with `git mv` so history follows, then
+  flags and settings. Run `make quality` early: the baseline is compared file by file (see the
+  Handover notes trap).
+- *Tests.*
+  - The old spellings are refused: `--pipeline_code`, `--server`, `host:` and `Dependency_gates:
+    warn`.
+  - The help-style test passes.
+  - Every docs example loads.
+- *Done when.* `git grep -e '--pipeline_code' -e '--task_code' -e 'ETL_CRAFT_SERVER' -- . ':!docs/development' ':!CHANGELOG.md' ':!release/evidence'`
+  finds nothing, and every module name says what it holds.
+
+#### S5.AA.4 Typed values and residue
+
+Branch: `refactor/operations-typed`.
+
+- Status fields in `RunView`, `AttemptView`, `TaskRunView`, `StepView` and the status views use
+  `RunStatus` or `TaskStatus`. `MarkRequest.status` uses `MARKABLE_STATUSES`. JSON output does
+  not change, because enums serialize to the same strings.
+- `set_pause(verb=...)` is replaced by the `ControlAction` from slice 2.
+- Legacy actor and trigger kinds (`HUMAN`, `SCHEDULE`, `ORCHESTRATOR`, `WORKER`) stay allowed by
+  the `CHECK` constraints, because history is append-only. Reading them must not fail:
+  - add read-only members documented as historical, or map them at the repository boundary;
+  - a test writes nothing new with them.
+- Delete any import of a `_private` name across modules that the earlier slices left behind
+  (`git grep -n 'import _\|\._[a-z]' -- src`, then read each hit).
+- *Done when.* No status, action or kind is compared or returned as a string literal in
+  `services/operations`, and audit, status and history read every released row.
+
+### S5.C The PostgreSQL queue and the agent
+
+Branch: `feat/pools-agent`. Files: new `agent/` package (layer beside `controller`),
+`cli/commands/agent.py`, migration for agent tables.
 
 - *Provider selection.* Use S5.T's explicitly recorded deployment profile to select local
-  or cluster execution, separately from
-  `Orchestration.Mode`, which identifies who schedules tasks (engine or external orchestrator).
+  or cluster execution. The controller always schedules (S5.Y removed remote mode).
   Preserve local execution as the default. Do not infer a cluster from PostgreSQL, CPU count,
-  host names or the arrival of worker heartbeats: a single-machine deployment may use PostgreSQL,
-  and registered workers may share a host. Cluster execution requires PostgreSQL and uses worker
-  registration, pools, slot capacity and leases to dispatch. With no eligible workers, keep
-  attempts queued with a visible reason; never silently execute them on the overseer host.
-  Startup validation and `doctor` must distinguish the selected provider from worker availability.
-  Test local execution on PostgreSQL, explicit cluster execution with workers on the same host,
-  invalid cluster selection on SQLite and zero-worker queuing without local fallback.
-- *Resource integration and placement.* Reuse S5.T's shared discovery/sizing module at worker
+  host names or the arrival of agent heartbeats: a single-machine deployment may use PostgreSQL,
+  and registered agents may share a host. Cluster execution requires PostgreSQL and uses agent
+  registration, pools, slot capacity and leases to dispatch. With no eligible agents, keep
+  attempts queued with a visible reason; never silently execute them on the controller host.
+  Startup validation and `doctor` must distinguish the selected provider from agent availability.
+  Test local execution on PostgreSQL, explicit cluster execution with agents on the same host,
+  invalid cluster selection on SQLite and zero-agent queuing without local fallback.
+- *Resource integration and placement.* Reuse S5.T's shared discovery/sizing module at agent
   startup and restart, and publish its resource scope, effective allocation, configured ceilings,
-  reserves and unavailable reasons in the worker registry. Refresh available capacity and
-  pressure through the existing heartbeat, not a second polling loop. Doctor/status/worker UI
-  use the same resource report. Keep each worker's capacity separate: summed cluster memory
+  reserves and unavailable reasons in the agent registry. Refresh available capacity and
+  pressure through the existing heartbeat, not a second polling loop. Doctor/status/agent UI
+  use the same resource report. Keep each agent's capacity separate: summed cluster memory
   cannot satisfy a task that fits nowhere. Use one agent per unpartitioned resource scope by
   default; multiple agents on a host need shared reservation accounting or verified disjoint
-  allocations so CPU/RAM are never counted twice. Withdraw expired/draining workers from
+  allocations so CPU/RAM are never counted twice. Withdraw expired/draining agents from
   available capacity. Reservations are atomic with claims and released on terminal outcomes
   or fenced lease expiry. Apply S5.T's per-kind estimates and S5.E's warehouse admission limits;
   unknown task requirements use conservative defaults and explicit existing overrides.
-  Test several workers, overlapping same-host scopes, stale measurements, joins/departures,
-  reservation races and a task exceeding every worker's capacity, including visible missing
+  Test several agents, overlapping same-host scopes, stale measurements, joins/departures,
+  reservation races and a task exceeding every agent's capacity, including visible missing
   measurements. Distribute whole attempts: SQL partitioning, shuffles and skew remain the
   warehouse/runtime's job, including Databricks. Python scripts remain whole tasks unless their
-  own runtime implements parallelism. Worker resources govern placement; warehouse capacity
+  own runtime implements parallelism. Agent resources govern placement; warehouse capacity
   governs query admission separately.
-- *Schema.* `AUD_WORKERS (WORKER_ID, POOL, HOST, VERSION, INGESTION_SLOTS, WAREHOUSE_SLOTS, STARTED_AT, HEARTBEAT_AT, STATUS)`
+- *Schema.* `AUD_AGENTS (AGENT_ID, POOL, HOST, VERSION, INGESTION_SLOTS, WAREHOUSE_SLOTS, STARTED_AT, HEARTBEAT_AT, STATUS)`
   with `STATUS` in `ACTIVE`, `DRAINING`, `GONE`. `AUD_TASK_ATTEMPTS` gains `POOL`, `SLOT_KIND`,
   `PRIORITY`, `CANCEL_REQUESTED_AT`, `CANCEL_ACKNOWLEDGED_AT`.
-- *Dispatch.* The overseer's queue provider sets `STATUS = 'QUEUED'`, `POOL`, `SLOT_KIND` and
-  `PRIORITY` on the attempt. Workers claim:
+- *Dispatch.* The controller's queue provider sets `STATUS = 'QUEUED'`, `POOL`, `SLOT_KIND` and
+  `PRIORITY` on the attempt. Agents claim:
 
 ```sql
 UPDATE AUD_TASK_ATTEMPTS a
-SET STATUS = 'CLAIMED', OWNER_ID = :worker_id, CLAIMED_AT = now(),
+SET STATUS = 'CLAIMED', OWNER_ID = :agent_id, CLAIMED_AT = now(),
     LEASE_EXPIRES_AT = now() + make_interval(secs => :lease_seconds)
 WHERE a.ATTEMPT_ID = (
     SELECT q.ATTEMPT_ID FROM AUD_TASK_ATTEMPTS q
@@ -3984,45 +4329,45 @@ RETURNING a.ATTEMPT_ID
 ```
 
   The cluster provider requires PostgreSQL; `doctor` refuses it on SQLite.
-- *Worker loop* (`etl-craft worker --pool default --ingestion-slots 4 --warehouse-slots 16`):
-  1. Register (insert `AUD_WORKERS`), refusing to start when the Engine DB's applied migrations
-     don't match the worker's version.
-  2. Every 10 s: heartbeat the worker row and renew the leases of its running attempts in one
+- *Agent loop* (`etl-craft agent --pool default --ingestion-slots 4 --warehouse-slots 16`):
+  1. Register (insert `AUD_AGENTS`), refusing to start when the Engine DB's applied migrations
+     don't match the agent's version.
+  2. Every 10 s: heartbeat the agent row and renew the leases of its running attempts in one
      statement; read `CANCEL_REQUESTED_AT` for its attempts in one query and stop those children.
   3. While slots are free: claim, materialize the bundle (`S5.F`), start the child with
      `--attempt-id` and `--owner-id`, mark `RUNNING`.
   4. On SIGTERM: set `DRAINING`, stop claiming, wait up to `--drain-seconds` (default 300), then stop
-     the remaining children (their attempts end `FAILED` "worker drained") and set `GONE`.
-- *Overseer side.* Workers whose heartbeat is older than three intervals are `GONE`; their attempts'
+     the remaining children (their attempts end `FAILED` "agent drained") and set `GONE`.
+- *Controller side.* Agents whose heartbeat is older than three intervals are `GONE`; their attempts'
   leases expire and reconciliation marks them `LOST` (`S3.D`).
-- *Talking to workers.* The overseer and workers talk only through the Engine DB, never by direct
-  network calls. A worker container needs no overseer address and opens no port, so there is no
+- *Talking to agents.* The controller and agents talk only through the Engine DB, never by direct
+  network calls. A agent container needs no controller address and opens no port, so there is no
   service discovery, cross-container TLS or second authentication. Every exchange is a row.
   1. **Prompt wake-ups.**
-     - Queuing an attempt, requesting a cancellation and a worker command each send a
-       PostgreSQL `NOTIFY` on a channel per pool, and per worker for its commands.
-     - An idle worker waits on `LISTEN` and claims at once. The 10-second heartbeat poll stays
+     - Queuing an attempt, requesting a cancellation and a agent command each send a
+       PostgreSQL `NOTIFY` on a channel per pool, and per agent for its commands.
+     - An idle agent waits on `LISTEN` and claims at once. The 10-second heartbeat poll stays
        the fallback, so a missed notification delays work but never loses it.
      - Cancellation (S5.D) is acknowledged within seconds rather than one heartbeat interval.
   2. **Operator commands, PowerCenter-style.**
-     - `etl-craft worker drain|resume|stop --worker-id N`, the matching API routes and UI
-       actions write a row to `AUD_WORKER_COMMANDS`: `COMMAND_ID`, `WORKER_ID`, `COMMAND`,
+     - `etl-craft agent drain|resume|stop --agent-id N`, the matching API routes and UI
+       actions write a row to `AUD_AGENT_COMMANDS`: `COMMAND_ID`, `AGENT_ID`, `COMMAND`,
        the requesting actor, `REQUESTED_AT` and `ACKNOWLEDGED_AT`.
-     - The worker reads its pending commands on notification or at its next heartbeat, applies
+     - The agent reads its pending commands on notification or at its next heartbeat, applies
        them, and records the acknowledgement.
      - `drain` stops claiming and lets running attempts finish; `resume` undoes it; `stop`
        drains and then exits.
-     - Every command and its outcome is audited; a command to a `GONE` worker is refused, naming
-       the worker.
-  3. **The worker list.** `etl-craft workers`, `GET /api/v1/workers` and the S7.A Workers page
-     show each worker's status, pool, host, version, slots in use and free, measured resources,
+     - Every command and its outcome is audited; a command to a `GONE` agent is refused, naming
+       the agent.
+  3. **The agent list.** `etl-craft agents`, `GET /api/v1/agents` and the S7.A Agents page
+     show each agent's status, pool, host, version, slots in use and free, measured resources,
      running attempts, last heartbeat and pending commands. They are computed by one service
      shared with `doctor` and `status`.
 - *Tests* (`S5.J`).
   - A queued attempt is claimed promptly through `NOTIFY`, and with notifications suppressed it
     is still claimed by the heartbeat poll.
-  - Drain, resume and stop are applied and acknowledged, and refused for a `GONE` worker.
-  - The worker list matches the registry across joins, drains and departures.
+  - Drain, resume and stop are applied and acknowledged, and refused for a `GONE` agent.
+  - The agent list matches the registry across joins, drains and departures.
 
 ### S5.D Cancellation across the cluster
 
@@ -4038,7 +4383,7 @@ on SIGTERM.
 - Slot kinds: `ingestion` (PYTHON tasks) and `warehouse` (SQL, BUSINESS_RULES, EMAIL_ALERT).
 - New table `CFG_POOLS (POOL_NAME, DESCRIPTION, ACTIVE_FLAG)`; task parameter `POOL` (default: the
   project's `DEFAULT_POOL`).
-- Limits enforced by the overseer when queuing (counting `CLAIMED` and `RUNNING` attempts): per
+- Limits enforced by the controller when queuing (counting `CLAIMED` and `RUNNING` attempts): per
   pipeline (`CFG_PIPELINES.MAX_PARALLEL_TASKS`, replacing `Orchestration.Max_parallel_tasks`), per
   project (`CFG_PROJECTS.MAX_RUNNING_TASKS`), per warehouse connection
   (`MAX_WAREHOUSE_QUERIES` in the project's Warehouse section).
@@ -4050,7 +4395,7 @@ on SIGTERM.
 
 Branch: `feat/pools-bundles`.
 
-- *Problem.* Workers on other hosts need the project's `sql_files/`, `ingestion_scripts/` and config,
+- *Problem.* Agents on other hosts need the project's `sql_files/`, `ingestion_scripts/` and config,
   and every attempt of a run must use the same versions (today each task process re-reads files and
   `craft-connector.yml` when it starts).
 - *Change.*
@@ -4059,12 +4404,12 @@ Branch: `feat/pools-bundles`.
      names), uploads the files to the artifact store (`Artifacts.Store: file:///shared/etl-craft` or
      `s3://bucket/prefix`), and records `AUD_PROJECT_BUNDLES (BUNDLE_ID, PROJECT_ID, MANIFEST, CREATED_BY, CREATED_AT)`.
   2. Each run pins the project's latest bundle when it starts (`AUD_PIPELINES_RUN_LOG.BUNDLE_ID`);
-     every attempt runs that bundle. Workers cache bundles under `~/.cache/etl-craft/bundles/<id>`
+     every attempt runs that bundle. Agents cache bundles under `~/.cache/etl-craft/bundles/<id>`
      and verify every hash.
   3. The local provider can run from the working directory (development) or from bundles
      (`Artifacts.Store` set).
-  4. Python packages a script imports are the worker image's job; `doctor --worker` lists imports of
-     the bundle's scripts that the worker's interpreter can't find (parse with `ast`, never import).
+  4. Python packages a script imports are the agent image's job; `doctor --agent` lists imports of
+     the bundle's scripts that the agent's interpreter can't find (parse with `ast`, never import).
 - *Tests.* Editing a SQL file mid-run doesn't change the run; a corrupted cached file is detected.
 
 ### S5.G Projects in one Engine DB
@@ -4079,7 +4424,7 @@ Branch: `feat/engine-projects`.
      `default` created by the migration. `ux_pipelines_code_active` becomes
      `(PROJECT_ID, PIPELINE_CODE)`.
   3. Each project's bundle carries its own `craft-connector.yml` Warehouse, Email and Cloning
-     sections. The Engine section comes from the overseer's or worker's own config, and must be the
+     sections. The Engine section comes from the controller's or agent's own config, and must be the
      same database.
   4. CLI `--project` (default `Orchestration.Project`, else `default`); API paths get
      `/api/v1/projects/{project}/...`; every operation takes the project.
@@ -4090,15 +4435,15 @@ Branch: `feat/engine-projects`.
 
 ### S5.H The Engine DB connection budget
 
-- Reuse S5.T's role-size report and single-machine accounting; add registered worker
+- Reuse S5.T's role-size report and single-machine accounting; add registered agent
   contributions and deployment-wide enforcement here. Count API/UI process pools in the total.
 - Every process has one SQLAlchemy engine. Task processes use `NullPool` and open at most one
-  connection at a time. Workers use a pool of 2 plus one connection per 8 slots; the overseer a pool
+  connection at a time. Agents use a pool of 2 plus one connection per 8 slots; the controller a pool
   of `Orchestration.Db_pool_size` (default 10).
-- `doctor` prints the budget: `overseer + API/UI pools + workers × (2 + slots/8) + running tasks`,
+- `doctor` prints the budget: `controller + API/UI pools + agents × (2 + slots/8) + running tasks`,
   and warns when it exceeds 80% of `max_connections`.
-- PgBouncer in transaction mode can front workers and tasks, but advisory locks (the overseer's
-  leadership, target locks) need a session connection: the overseer connects directly. Document it.
+- PgBouncer in transaction mode can front agents and tasks, but advisory locks (the controller's
+  leadership, target locks) need a session connection: the controller connects directly. Document it.
 
 ### S5.I Managed PostgreSQL on Snowflake and Databricks
 
@@ -4114,16 +4459,16 @@ Branch: `feat/engine-projects`.
 One test module parametrized over the local and queue providers (marker `cluster`, PostgreSQL only):
 
 1. `submit` twice with the same attempt starts one process.
-2. A worker killed with `kill -9`: its attempts become `LOST` after the lease and are retried on
-   another worker.
-3. A lost acknowledgement (worker claims, then its database connection drops before `RUNNING`): the
+2. A agent killed with `kill -9`: its attempts become `LOST` after the lease and are retried on
+   another agent.
+3. A lost acknowledgement (agent claims, then its database connection drops before `RUNNING`): the
    attempt is reconciled, not run twice.
-4. The overseer restarts while workers run: nothing is lost or doubled.
+4. The controller restarts while agents run: nothing is lost or doubled.
 5. A late completion from a `LOST` attempt is rejected.
-6. Cancellation reaches the owning worker and is acknowledged.
+6. Cancellation reaches the owning agent and is acknowledged.
 7. Capacity and limits from `S5.E` hold.
-8. Draining a worker finishes its attempts and takes no new ones.
-9. A worker of another version refuses to start.
+8. Draining a agent finishes its attempts and takes no new ones.
+9. A agent of another version refuses to start.
 
 **Gate.** The contract tests pass for both providers 20 times in a row; ten projects share one Engine
 DB in the demo.
@@ -4143,7 +4488,7 @@ Branch: `feat/engine-retention`.
   `Interventions_days` and `Config_history_days`. An unset period keeps those rows forever: a
   team that wants a bounded Engine DB sets the periods it needs, and can replay its configuration
   from its config files in git.
-- `etl-craft purge [--dry-run] [--project P]`, also run daily by the overseer at a quiet hour
+- `etl-craft purge [--dry-run] [--project P]`, also run daily by the controller at a quiet hour
   (`Retention.Daily_at`, project time zone). Deletes in batches of 10,000 rows per transaction,
   oldest first: attempts, then task runs, then runs past their retention, keeping any row that a
   retained run's consumption or gate decisions reference. `--archive-to <warehouse schema>` copies the
@@ -4156,12 +4501,12 @@ Branch: `feat/engine-retention`.
 
 ### S6.B Logs outside the Engine DB
 
-- Attempt logs are files: on the local provider under `Log_dir`, on workers uploaded at the end of the
+- Attempt logs are files: on the local provider under `Log_dir`, on agents uploaded at the end of the
   attempt to `Logs.Store` (`file://` or `s3://`). `AUD_TASK_ATTEMPTS.LOG_PATH` holds the location.
 - `TASK_LOG` keeps a tail of `Logs.Tail_bytes` (default 8 KiB, down from 64 KiB) plus the reported
   values.
-- The API's log endpoint streams from the store; while an attempt runs, from the worker (workers
-  serve their running attempts' logs over an internal endpoint authenticated with the worker token).
+- The API's log endpoint streams from the store; while an attempt runs, from the agent (agents
+  serve their running attempts' logs over an internal endpoint authenticated with the agent token).
 
 ### S6.C Catalog at scale
 
@@ -4280,29 +4625,29 @@ Keep S6.D as one implementation PR.
 
 ### S6.F Metrics
 
-- `GET /metrics` on the overseer in Prometheus text format: runs by status and project, attempts by
+- `GET /metrics` on the controller in Prometheus text format: runs by status and project, attempts by
   status, queue depth and oldest queued age per pool and slot kind, admission latency, dispatch
-  latency, lease expiries, `LOST` attempts, active workers, Engine DB statement latency (histogram),
+  latency, lease expiries, `LOST` attempts, active agents, Engine DB statement latency (histogram),
   gate waits, retries.
-- Workers expose the same for their slots and children.
-- Document the alerting rules to start with (queue age, `LOST` attempts, no overseer heartbeat).
+- Agents expose the same for their slots and children.
+- Document the alerting rules to start with (queue age, `LOST` attempts, no controller heartbeat).
 
 ### S6.G Backup, restore, upgrade and the load benchmark
 
 1. **Backup and restore.** Document `pg_dump`/`pg_restore` (and managed-platform snapshots) for the
    Engine DB. CI test: dump a running demo database, restore it into a new database, run
    `etl-craft doctor` and `reconcile`, and finish the interrupted runs.
-2. **Upgrade.** Supported procedure for 1.0.0: drain workers, stop the overseer, `etl-craft migrate`,
-   start the new overseer, start new workers. Workers refuse to run against a database migrated to a
+2. **Upgrade.** Supported procedure for 1.0.0: drain agents, stop the controller, `etl-craft migrate`,
+   start the new controller, start new agents. Agents refuse to run against a database migrated to a
    different version. Rolling upgrades are not part of 1.0.0.
 3. **Load benchmark** (`benchmarks/`, run manually and before each release):
    - a generator for synthetic metadata: 100 projects × 100 pipelines × 10 tasks, with dependencies
      and schedules spread over the day;
    - fake handlers with configurable duration and failure rate;
-   - the reference cluster: overseer 4 vCPU / 12 GiB, 10 workers 2 vCPU / 8 GiB, PostgreSQL
+   - the reference cluster: controller 4 vCPU / 12 GiB, 10 agents 2 vCPU / 8 GiB, PostgreSQL
      4 vCPU / 16 GiB.
    Budgets to meet: admission latency p99 under 2 s; queue age p99 under 5 s while slots are free;
-   Engine DB CPU under 60%; connections within the budget; the overseer's memory under 4 GiB. Record
+   Engine DB CPU under 60%; connections within the budget; the controller's memory under 4 GiB. Record
    the results in `release/benchmarks/<version>.md`.
 
 **Gate.** The benchmark meets its budgets for 24 hours, and the restore test passes.
@@ -4322,7 +4667,8 @@ before 1.0.0.
 
 ### S7.A Web UI
 
-Branch: `feat/ui-*`, one per area. Served by `etl-craft server`.
+Branch: `feat/ui-*`, one per area. Served by `etl-craft controller`. Every UI change goes
+through the S5.AA action table and its `/api/v1` route; pages only render read actions.
 
 **S7.A.1 Pipeline Insights is required.** Implement the built-in operational dashboard panels,
 filters, metric definitions and drill-down in the [metadata and pipeline UI design](metadata-and-ui.md).
@@ -4334,8 +4680,7 @@ dashboard to see these engine metrics.
 reference. Implement S5.Q's scoped action/capability matrix in pipeline lists, run detail and
 DAG task menus: independent pipeline pause/resume, Run task only, Run from here, task holds,
 stop/abort, recover/restart, explicit overrides and selected bulk actions. Show precise scope,
-state and completion acknowledgement; do not inherit unnecessary Airflow or CLI flag
-restrictions. Browser tests must exercise the operations, not merely check visible buttons.
+state and completion acknowledgement; do not inherit unnecessary CLI flag restrictions. Browser tests must exercise the operations, not merely check visible buttons.
 
 **S7.A.3 Pipeline run logs and log downloads are required.** Use the PowerCenter workflow log
 as the reference: one readable, timestamped log per pipeline run, next to the per-task session
@@ -4351,7 +4696,7 @@ logs that attempt logs already provide.
   duration, counts per status).
   - **One source.** The log is rendered from the audit tables, not written as a second stream:
     it then matches `status`, `explain` and the audit exactly, and covers runs whose tasks
-    ran in several processes, under an external orchestrator or, after S5.C, on workers. An
+    ran in several processes or, after S5.C, on agents. An
     event the log needs that the audit does not record is added to the audit first.
   - **Interfaces.** One service operation produces it; the CLI (`etl-craft logs` with a run
     selector and no attempt), the HTTP API (text, streamed) and the UI (run detail, followed
@@ -4361,7 +4706,7 @@ logs that attempt logs already provide.
   - **Run zip.** The pipeline run log, every attempt log of the run (one folder per task), and
     the run's `status`, `explain` and intervention documents as JSON. A manifest lists every
     file with its size; an attempt log that cannot be read (deleted by retention, or not yet
-    uploaded from a worker under S6.B) is listed with the reason rather than silently left out.
+    uploaded from a agent under S6.B) is listed with the reason rather than silently left out.
   - **Same rules as viewing.** Downloads need the role that viewing needs (`viewer`), use the
     same path checks, and stream without loading a whole log or zip into memory. The CLI writes
     the same zip (`etl-craft logs ... --zip PATH`); the API serves it.
@@ -4370,11 +4715,11 @@ logs that attempt logs already provide.
   attempt log; a large log streamed within a bounded memory budget; role refusals.
 
 - *Technology.* One package and one language for contributors. The UI is served by
-  `etl-craft server` from the `server` extra, with no Node toolchain for users, contributors or
+  `etl-craft controller` from the `server` extra, with no Node toolchain for users, contributors or
   CI.
   - **Pages.** FastAPI serves server-rendered Jinja2 pages, adding `jinja2` to the `server`
-    extra. They call the same service layer as the API and reuse the catalog's CSS and SVG graph
-    rendering.
+    extra. They render the documents of S5.AA read actions, post every change to the same
+    `/api/v1` route (htmx `json-enc`), and reuse the catalog's CSS and SVG graph rendering.
   - **Live parts.** htmx handles partial updates, and server-sent events push run, task and log
     changes. htmx is vendored as one pinned static file.
   - **Behaviour per view.** Each view gets a plain JavaScript module shipped as a static asset,
@@ -4405,7 +4750,7 @@ logs that attempt logs already provide.
   - Run logs: the pipeline run log, followed live, and the run zip download (S7.A.3).
   - Backfills: start (pipeline, dates, reason), progress, stop.
   - Interventions: every recorded change with who, when and why.
-  - Workers and pools: capacity, slots in use, queue, heartbeats.
+  - Agents and pools: capacity, slots in use, queue, heartbeats.
   - Catalog: today's lineage, tables, rules and scripts pages, linked from runs.
   - Metadata: a read-only view of `CFG_` rows (pipelines, tasks, parameters, dependencies,
     rules, stewardable pipelines and steward assignments), with each row's actor, history and `validate` findings, and a link
@@ -4562,7 +4907,7 @@ S5.S delivers the accounts, the login, the roles and the role check on every act
 
 - The web UI's sign-in, on the same accounts and sessions, with password or SSO.
 - Roles per project once S5.G puts several projects in one Engine DB, with `admin` covering pools.
-- Worker service accounts that can claim only the attempts of their own pool.
+- Agent service accounts that can claim only the attempts of their own pool.
 
 ### S7.C Redaction (W13, B49)
 
@@ -4609,11 +4954,11 @@ S5.S delivers the accounts, the login, the roles and the role check on every act
     1.0.0, with the PyPI release. Nothing is published to a registry before 1.0.0.
   - A Docker Hub mirror is optional at 1.0.0.
   - Until then, the demo repository builds its own image from the pinned candidate wheel.
-- **A single-node Docker Compose template** (PostgreSQL, overseer, one worker) is published as a
+- **A single-node Docker Compose template** (PostgreSQL, controller, one agent) is published as a
   deployment example in the package's docs and tested in release validation only. The full
   Support Insights stack's Compose file stays in the demo repository (S8.A).
-- A documented cluster layout: the overseer on the largest node (at least 1.5 times a worker's
-  memory), N workers, the Engine DB, the artifact and log stores; systemd unit files for hosts without
+- A documented cluster layout: the controller on the largest node (at least 1.5 times a agent's
+  memory), N agents, the Engine DB, the artifact and log stores; systemd unit files for hosts without
   containers.
 - **Kubernetes example manifests** are published in the docs and checked in release validation:
   - a controller Deployment with one replica (its leadership lock already prevents a second
@@ -4629,12 +4974,11 @@ S5.S delivers the accounts, the login, the roles and the role check on every act
 
 Write `docs/reference/compatibility.md` and keep to it from 1.0.0:
 
-- Semantic versioning for the package, the CLI, the HTTP API (`/api/v1`), the YAML (`etl_craft_yaml_version`)
-  and the JSON documents (`"schema": "etl-craft/<kind>/<n>"`).
+- Semantic versioning for the package, the CLI, the HTTP API (`/api/v1`) and the JSON documents (`"schema": "etl-craft/<kind>/<n>"`).
 - Engine DB migrations are forward-only; every release migrates from every earlier 1.x release.
 - A deprecation stays one minor release before removal, with a warning.
 - The supported matrix: Python versions, PostgreSQL versions, warehouses and their tested table
-  formats, Airflow versions for the DAG factory.
+  formats.
 - Before declaring the 1.0 public surface, remove pre-1.0 aliases, compatibility branches and
   exported helpers with no external contract. Verify each runtime dependency has a direct runtime
   use or an explicitly documented driver/plugin role; move development-only packages out of the
@@ -4654,7 +4998,7 @@ volume, and the managed PostgreSQL Engine DBs (`S5.I`).
 Run the Support Insights example ([the release-candidate stage](#release-candidate-the-support-insights-example))
 for 30 days on the reference cluster:
 
-- daily `kill -9` of a random worker, a weekly `kill -9` of the overseer, one Engine DB failover or
+- daily `kill -9` of a random agent, a weekly `kill -9` of the controller, one Engine DB failover or
   restart, one warehouse outage of at least 15 minutes, one upgrade between two 0.9 patch releases;
 - operated only through the UI and CLI;
 - success: no run with a wrong final status, no duplicated or missing rows in the warehouse (checked
@@ -4733,7 +5077,7 @@ the documentation assets, the generated catalog templates and the web UI (`S7.A`
    ownership and license explicit and include concise usage guidance.
 2. Derive a readable ASCII terminal banner from that identity, including the installed package
    version. Define which interactive entry points display it and provide an explicit way to
-   suppress it. Render it once per invocation, never from library imports, workers or task children.
+   suppress it. Render it once per invocation, never from library imports, agents or task children.
 3. Keep JSON, generated files, piped output and other machine-readable command contracts free of
    the banner. Respect non-interactive terminals, narrow widths, `NO_COLOR` and `TERM=dumb`;
    use plain text when color or terminal capabilities are unavailable.
@@ -4811,8 +5155,7 @@ S8.G.
 
 - *Problem.*
   - `examples/demo` is the package's Quick Start, the project its installed-wheel tests copy,
-    the source of the Airflow contract exports (`scripts/export_airflow_contracts.py`) and the
-    soak's deployment (`scripts/soak.py`).
+    and the soak's deployment (`scripts/soak.py`).
   - The Support Insights demo is a separate repository (S8). Keeping a second demo here
     duplicates it.
   - Proving demo content in package CI ties every package change to demo data. The installed
@@ -4835,7 +5178,7 @@ S8.G.
        - server mode.
 
        It keeps only the data those checks need.
-     - `tests/e2e`, the Airflow contract export, the Quick Start and `release/README.md` keep
+     - `tests/e2e`, the Quick Start and `release/README.md` keep
        using it. The installed-wheel matrix stays a required PR check, with both Engine DBs,
        the four local warehouses, pip and uv, and the wheel and sdist (S7.N rule 4).
      - The pull request lists every current e2e assertion. Each is either kept as a package
@@ -4894,8 +5237,8 @@ release candidate.
      |---|---|---|
      | Engine DB restart or managed failover | Ridden out within `limits.engine_db_outage_seconds`; fails naming the outage after it | S5.U |
      | Warehouse connection drop or timeout mid-task | The attempt fails retryable and is retried; appends and replacements stay retry-safe | S3.G, S4.E |
-     | `kill -9` of a task, the overseer or a worker, or a host reboot | Reconciled as `LOST` and retried with no lost or doubled rows | S3.D, S4.B, S5.C |
-     | Two overseers started on one deployment | One leader; the other waits | S4.B |
+     | `kill -9` of a task, the controller or a agent, or a host reboot | Reconciled as `LOST` and retried with no lost or doubled rows | S3.D, S4.B, S5.C |
+     | Two controllers started on one deployment | One leader; the other waits | S4.B |
      | The same run requested twice | One run, through run keys and one in-progress run per pipeline | S3.C |
      | Downtime across schedules, DST or time zones | Bounded catch-up on the right logical dates | S4.C |
      | Missing or broken SQL file or script, unknown target, bad metadata | `validate` refuses it before a run, naming the object and the remedy | S2.D, S5.N, S5.P |
@@ -4906,7 +5249,7 @@ release candidate.
      | A bad stewardship file | Refused by its `FILE_VALIDATION` script before processing | S7.M |
      | A hung task or a run past its SLA | Task timeout; the SLA breach is recorded and alerted even if the first write fails | S2.A, S5.U |
      | The Engine DB growing without bound | Retention keeps it bounded | S6.A |
-     | A worker cut off from the Engine DB, or clocks that disagree | Lease expiry and fenced writes stop a cut-off worker. Lease times come from the Engine DB's clock, not the worker's | S5.C |
+     | A agent cut off from the Engine DB, or clocks that disagree | Lease expiry and fenced writes stop a cut-off agent. Lease times come from the Engine DB's clock, not the agent's | S5.C |
      | Upgrading from any 0.x release | Migrations upgrade, or refuse naming the object and the remedy | S2.K, S7.G |
      | A port already in use, or a second server on one host | The server refuses to start, naming the port or the running server | S7.P |
 
@@ -4985,7 +5328,7 @@ runs the demo itself.
 | --- | --- | --- |
 | Sources | MongoDB (client Alpha documents), Kafka (Beta events), MinIO (Gamma gzipped CSVs) | Kept: they are the sources |
 | Synthetic generators and their UI (port 1212) | `generators/*.py`, `infra/entrypoint/data_generator_orchestrator.py` | Kept and extended with S8.H's named mixed-quality cases: they stand in for real source systems |
-| Orchestration | Airflow (webserver, scheduler, its own database), three DAGs `Client_{Alpha,Beta,Gamma}_ETL_Task_Flow` | **Replaced** by the etl-craft overseer and workers |
+| Orchestration | Airflow (webserver, scheduler, its own database), three DAGs `Client_{Alpha,Beta,Gamma}_ETL_Task_Flow` | **Replaced** by the etl-craft controller and agents |
 | Processing | PySpark in local mode, writing to PostgreSQL over JDBC | **Replaced** by etl-craft SQL tasks running in the warehouse, and Python ingestion scripts |
 | Checkpoints | `get_current_checkpoint` and `aud.dag_runs.source_checkpoint` | **Replaced** by etl-craft offsets |
 | Run audit | `aud.dag_runs`, filled by each DAG's finalize task | **Replaced** by etl-craft's run, task and attempt tables |
@@ -5012,7 +5355,7 @@ Supports-Insights-Docker/
 ├── superset/                         dashboards export (re-exported in S8.D)
 ├── infra/
 │   ├── docker-compose.yml            postgres, mongo, kafka, minio, superset, generators UI,
-│   │                                 etl-craft overseer, two etl-craft workers
+│   │                                 etl-craft controller, two etl-craft agents
 │   └── sql/                          database, schemas, reference seed tables, vw views
 └── .github/workflows/                the CI pipelines (S8.E)
 
@@ -5067,8 +5410,8 @@ Rules for building them:
 3. The `dm.customer_support_fact` table is created by `SETUP_TABLE` with etl-craft's SCD2 audit
    columns. Its source-based partitions are dropped (the data is small); `is_active` becomes
    `ACTIVE_FLAG = 'Y'`, and validity comes from the business rules.
-4. Pools: ingestion tasks run in the `ingestion` pool on worker 1, SQL and rules in the `warehouse`
-   pool on worker 2, so the example exercises the cluster.
+4. Pools: ingestion tasks run in the `ingestion` pool on agent 1, SQL and rules in the `warehouse`
+   pool on agent 2, so the example exercises the cluster.
 
 ### S8.C Configuration through CI
 
@@ -5120,10 +5463,10 @@ In the example repository's `.github/workflows/`:
 | --- | --- | --- |
 | Repository | Workflow | When | What it does |
 | --- | --- | --- | --- |
-| configuration | `plan.yml` | every pull request | Install the pinned candidate wheel; start PostgreSQL; `etl-craft init-db`; `etl-craft config plan` and `apply` against the empty Engine DB with the demo commit's SQL files and scripts; `etl-craft validate` and `generate-yml` for every pipeline. Fails on any error. |
+| configuration | `plan.yml` | every pull request | Install the pinned candidate wheel; start PostgreSQL; `etl-craft init-db`; `etl-craft config plan` and `apply` against the empty Engine DB with the demo commit's SQL files and scripts; `etl-craft validate` for every pipeline. Fails on any error. |
 | configuration | `apply.yml` | merge to `main` | `etl-craft config apply` to the deployed Engine DB through a GitHub environment with the Engine DB secret and required reviewers; publishes the project bundle; records the deployed configuration and demo commits. |
 | demo | `validate.yml` | every pull request | Install the pinned candidate wheel; lint the scripts; apply the pinned configuration commit to an empty Engine DB and run `validate`. |
-| demo | `e2e.yml` | before release or manual dispatch | Brings up the whole stack with Docker Compose (sources, generators, warehouse, Engine DB, overseer, two workers, Superset); applies the pinned configuration; runs the generators for a fixed batch; waits for the scheduled runs; runs the checks of S8.F and S8.H; writes the S7.O results manifest. Uploads it with the logs, the catalog and dashboard screenshots. |
+| demo | `e2e.yml` | before release or manual dispatch | Brings up the whole stack with Docker Compose (sources, generators, warehouse, Engine DB, controller, two agents, Superset); applies the pinned configuration; runs the generators for a fixed batch; waits for the scheduled runs; runs the checks of S8.F and S8.H; writes the S7.O results manifest. Uploads it with the logs, the catalog and dashboard screenshots. |
 
 ### S8.F Acceptance checks
 
@@ -5140,7 +5483,7 @@ In the example repository's `.github/workflows/`:
    duplicates in `lnd` or `prs`.
 4. Failure and recovery: stop MongoDB during a run; the Alpha run fails, the alert arrives in Mailpit,
    and after MongoDB returns, `etl-craft run --pipeline_code SI_CLIENT_ALPHA --rerun` (or the next
-   scheduled run) completes with no lost or doubled rows. `kill -9` a worker mid-run; its attempt is
+   scheduled run) completes with no lost or doubled rows. `kill -9` a agent mid-run; its attempt is
    reconciled and retried.
 5. Dashboards: through the Superset API, every chart of both dashboards
    (`GET /api/v1/chart/{id}/data/`) returns rows, no error, and the values of the reference queries.
@@ -5214,7 +5557,7 @@ Every slice updates its runnable README walkthroughs and tests in the same examp
    roadmap and published CLI, API, config, JSON and warehouse contracts. Link the owning roadmap
    item, fixture, runnable test/demo, expected result and evidence. Cover happy paths,
    relevant failure/recovery paths, CLI/API/UI parity where available, schedules and waits,
-   repairs/backfills, lineage and schema gaps, roles/stewardship, deployment profiles/workers,
+   repairs/backfills, lineage and schema gaps, roles/stewardship, deployment profiles/agents,
    secrets/redaction, retention and operational metrics. As each feature ships, add its
    scenario to the example; the final candidate executes the complete matrix. Mutually
    exclusive deployment or provider modes use separate documented runs of the same project,
@@ -5294,19 +5637,19 @@ and the soak on the example passed. A partial coverage matrix cannot pass the re
 - [ ] Every run, attempt and operator action is addressed by id; nothing resolves a run by recency.
 - [ ] A duplicate submission can't start a second execution of an attempt, and stale owners can't
       change status, counts, logs, offsets or consumption.
-- [ ] `kill -9` of the overseer, a worker or a task process leaves the Engine DB truthful, and a
+- [ ] `kill -9` of the controller, a agent or a task process leaves the Engine DB truthful, and a
       restart reconciles without an operator.
 - [ ] Gate decisions and consumed upstream runs (with revisions) are explainable after repairs and
       backfills.
 - [ ] Each SQL action has a tested failure and retry contract on every supported warehouse, and the
       ingestion script contract is documented.
-- [ ] The overseer handles schedules with time zones, catch-up, overlap and retries; no cron or
+- [ ] The controller handles schedules with time zones, catch-up, overlap and retries; no cron or
       Airflow is needed.
 - [ ] The pool interface has two providers that pass the contract tests.
 - [ ] Many projects share one Engine DB, with per-project configuration, limits and pauses.
-- [ ] The API can do everything the CLI can, and the UI every operational action, under roles.
-      The UI edits no metadata.
-- [ ] Metadata, YAML, API and JSON are versioned under the compatibility policy, and upgrades from
+- [ ] The API can do everything the CLI can, and the UI every operational action, under roles,
+      each through its one action-table row. The UI edits no metadata. Airflow is not supported.
+- [ ] Metadata, API and JSON are versioned under the compatibility policy, and upgrades from
       every 0.x release pass the full schema diff.
 - [ ] Retention keeps the Engine DB bounded, and the load benchmark meets its budgets.
 - [ ] No secret etl-craft resolves reaches the catalog, the logs, the API or the clones.
@@ -5431,7 +5774,7 @@ change it only by updating this table and the documentation together.
 | All-skipped runs | End `SKIPPED` in both modes | S2.A.11 |
 | Alert task failures | Recorded and logged, but excluded from the run's status | S2.F.3 |
 | "Exactly once" | Not promised across warehouse and script side effects. Promised: one execution per attempt id, stale updates rejected, uncertain outcomes recorded as `LOST`, and documented retry behaviour per action | S3.B, S3.D, S3.G.7 |
-| Process per task | Kept, on workers and on the local provider, for isolation; revisit only if measured worker memory demands it | S5.B, S6.G |
+| Process per task | Kept, on agents and on the local provider, for isolation; revisit only if measured agent memory demands it | S5.B, S6.G |
 | Engine DBs | One PostgreSQL Engine DB for every project; separate databases only for hard isolation | S5.G |
 | Views | `CREATE_VIEW` replaces only views, never a table; a secure view is created only where the warehouse has one (Snowflake, PostgreSQL), and refused elsewhere rather than created as an ordinary view | SQL views |
 | Authoring pipelines | SQL files plus explicit `CFG_` rows, kept as one CSV file per `CFG_` table in `config/` and merged by key with `etl-craft config apply`; `ACTIVE_FLAG` switches rows off and on, and rows keep their ids. Project migrations write the same rows with SQL. No dbt models or Jinja, and no template language beyond `$$` | Non-goals; Configuration files guide |
@@ -5446,14 +5789,15 @@ change it only by updating this table and the documentation together.
 | Run date | The date a run runs as of (`$$run_date`); an attribute, not an identity |
 | Task run | One task within one run, a row of `AUD_TASK_RUN_LOG`, summarising its attempts |
 | Attempt | One execution of a task run, a row of `AUD_TASK_ATTEMPTS` |
-| Owner | The process (CLI supervisor, overseer or worker) that holds a lease on a run or attempt |
+| Owner | The process (CLI supervisor, controller or agent) that holds a lease on a run or attempt |
+| Controller | The single active scheduler, dispatcher and monitor (`etl-craft controller`) |
 | Lease | A time until which an owner's claim is valid; renewed by heartbeat; an expired lease is reconciled |
 | Fencing | Requiring the attempt id and owner on every write, so stale processes can't change anything |
 | `LOST` | An attempt whose owner stopped renewing its lease; its side effects are unknown |
 | Revision | A count of how many times a run has published output; a repair publishes a new revision |
 | Gate decision | The recorded result of judging one dependency on another pipeline when a run or attempt was admitted |
-| Overseer | The single active scheduler, dispatcher and monitor (`etl-craft server`) |
-| Pool | A named set of slots that attempts run on, served by a provider (local processes or worker agents) |
+| Pool | A named set of slots that attempts run on, served by a provider (local processes or agents) |
 | Slot kind | `ingestion` for Python tasks, `warehouse` for tasks that mostly wait on the warehouse |
+| Agent | A process on any host or container that claims attempts for its pool and runs them (`etl-craft agent`, S5.C) |
 | Bundle | A content-addressed snapshot of a project's SQL files, scripts and config that a run pins |
 | Project | A namespace in the Engine DB with its own pipelines, configuration, time zone, limits and pause |
