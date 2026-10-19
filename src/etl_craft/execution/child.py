@@ -1,6 +1,6 @@
 """The process one task attempt runs in: ``python -m etl_craft.execution.child``.
 
-``run --task_code`` starts it with the config file and the ``task_run_id`` of the attempt, and
+``run --task-code`` starts it with the config file and the ``task_run_id`` of the attempt, and
 everything it writes (its own log records and the handler's output) is captured into the
 attempt's log file. It runs the task's handler and records the outcome on the task's row. If it
 dies before recording anything, the process that started it records the task ``FAILED``.
@@ -38,9 +38,9 @@ from etl_craft.core.faults import fault_point
 from etl_craft.engine import controls, transitions
 from etl_craft.engine.connection import engine_db
 from etl_craft.engine.transitions import finish_task_run
+from etl_craft.execution.classify import classify_failure
 from etl_craft.execution.context import build_task_context
 from etl_craft.execution.control_flow import process_local_queries
-from etl_craft.execution.failures import classify_failure
 from etl_craft.execution.leases import process_start
 from etl_craft.handlers.registry import TaskContext, format_task_log, resolve_handler
 

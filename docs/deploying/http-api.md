@@ -58,52 +58,52 @@ even without a revocation timestamp. Storage uses the common `CREATE_DATE` and u
 the public token document retains `created_at`. Run `etl-craft migrate` before using the new
 version against an existing Engine DB.
 
-## Calling operations
+## Calling actions
+
+Every action has one route, generated from the action table; the
+[actions reference](../reference/actions.md) lists each action's method, path, role and audit.
+Reads are `GET` with their request in the query string; changes are `POST` with their request
+as a JSON object. Run selection is always `run_id` or `run_key` in the query or body, or neither
+for the pipeline's single non-terminal run. Only `GET /runs/{run_id}`, `GET /attempts/{attempt_id}`
+and its `/log` carry an id in the path.
 
 ```bash
 curl -H "Authorization: Bearer $ETL_CRAFT_API_TOKEN" \
-  http://127.0.0.1:8730/api/v1/pipelines
+  'http://127.0.0.1:8730/api/v1/status?pipeline_code=SALES'
 curl -X POST -H "Authorization: Bearer $ETL_CRAFT_API_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"run_date":"2026-10-01","reason":"manual refresh"}' \
-  http://127.0.0.1:8730/api/v1/pipelines/SALES/runs
+  -d '{"pipeline_code":"SALES","run_date":"2026-10-01","reason":"manual refresh"}' \
+  http://127.0.0.1:8730/api/v1/runs
 ```
 
-A trigger initializes or resumes the pipeline run and returns its exact identity; the controller
-executes its tasks. Backfills and task reruns call the same blocking service operations as the CLI.
-A disconnected client does not cancel committed work; inspect its exact run before retrying.
+A whole-pipeline run over HTTP initializes or resumes the run and returns its exact identity;
+the controller executes its tasks. Backfills and task runs execute in the request, as the CLI
+does. `force`, `skip` and `ignore_dependencies` (except with `standalone`) work only on the
+controller's host and are refused here, naming the field. A disconnected client does not cancel
+committed work; inspect its exact run before retrying.
 
-| Method | Path under `/api/v1` | Input or result |
+| Method | Path under `/api/v1` | Request |
 |---|---|---|
-| GET | `/catalog/gaps?compare=true` | Viewer read-only warehouse metadata comparison; omit `compare` for offline coverage |
-| GET | `/health` | Engine DB authentication and health |
-| GET | `/pipelines`, `/pipelines/{code}` | Active definitions and pause state |
-| GET | `/pipelines/{code}/runs?limit=20&before=123` | The `history` document `etl-craft history` prints: up to 100 runs, newest first, with interventions and the next page's exclusive run-id cursor in `before`. Optional `task_code`, `all=false` with `run_id` or `run_key` to select one run |
-| GET | `/pipelines/{code}/status?run_id=` | The selected run and every task; `run_key` instead, or neither for the active run |
-| GET | `/pipelines/{code}/tasks/{task}/explain?run_id=` | The selected run's explanation of the task |
-| POST | `/pipelines/{code}/mark` | `reason` and either `status` or `watermark`; optional `task_code`, `rows`, `stale`, `new_run`, `run_id`, `run_key`, as `etl-craft mark` takes them |
-| POST | `/pipelines/{code}/tasks/{task}/rerun` | `reason`; optional `with_downstream`, `run_id`, `run_key` |
-| POST | `/pipelines/{code}/controls` | `action` (`HOLD`, `RELEASE`, `STOP`, `ABORT`, `RECOVER`, `RESTART`, `RUN_PAUSED`) and `reason`; optional `run_id`, `run_key`, `task_code`, `request_key`. The `control` document |
-| GET | `/control-requests/{id}` | The `control` document `etl-craft status --request-id` prints |
-| GET | `/pipelines/{code}/capabilities?run_id=` | Viewer read: each control's availability, refusal reason and data effect for the selected run, or one `task_code` |
-| POST | `/controls/bulk` | `requests`: 1 to 100 controls, each with `pipeline_code`, an explicit `run_id` or `run_key` and a unique `request_key`; one result or refusal per object |
-| POST | `/pipelines/{code}/runs` | `run_date`, `reason`, both optional |
-| POST | `/pipelines/{code}/backfills` | Inclusive `first`, `last` dates and `reason` |
-| POST | `/pipelines/{code}/pause`, `/resume` | Nonblank `reason` |
-| GET | `/runs/{id}`, `/runs/{id}/tasks` | Exact run and configured task states |
-| GET | `/runs/{id}/tasks/{task}/explain` | Task code; shared explanation document |
-| POST | `/runs/{id}/tasks/{task}/mark` | `reason` and either `status` or `watermark`; optional `rows`, `stale` for a status mark |
-| POST | `/runs/{id}/tasks/{task}/rerun` | `reason`; optional `with_downstream` |
-| GET | `/attempts/{id}` | Stored attempt document |
-| GET | `/attempts/{id}/log?offset=0` | Log bytes from a nonnegative byte offset |
-| GET, POST | `/tokens` | Admin listing or creation: `name`, `role`, optional `expires` |
-| POST | `/tokens/{id}/revoke` | Admin revocation |
-| GET | `/whoami` | The caller's account and role |
+| GET | `/pipelines`, `/pipelines/{pipeline_code}` | Active definitions and pause state |
+| GET | `/graph`, `/steps`, `/status`, `/explanations` | `pipeline_code`; `run_id` or `run_key`; `task_code` for `/explanations` |
+| GET | `/history` | `pipeline_code`; optional `task_code`, `all`, `limit` (1 to 100), `before` (an exclusive run-id cursor) |
+| GET | `/capabilities` | `pipeline_code`, the selected run, optional `task_code`: each control's availability and reason |
+| GET | `/control-requests/{control_id}` | One control request and its acknowledgements |
+| GET | `/audit`, `/validation`, `/lineage`, `/catalog/gaps` | The `audit`, `validate`, `lineage` and catalog gap documents |
+| GET | `/runs/{run_id}`, `/attempts/{attempt_id}`, `/attempts/{attempt_id}/log?offset=0` | Exact run, attempt and log bytes |
+| POST | `/runs` | A `RunRequest`: `pipeline_code` and `task_code`, `standalone`, `rerun`, `with_downstream`, `run_date`, `backfill_from`/`backfill_to`, `reason` |
+| POST | `/marks` | `pipeline_code`, `reason`, and `status` or `watermark`; optional `task_code`, `rows`, `stale`, `new_run` |
+| POST | `/controls` | `pipeline_code`, `action` (`HOLD`, `RELEASE`, `STOP`, `ABORT`, `RECOVER`, `RESTART`, `RUN_PAUSED`, `PAUSE`, `RESUME`), `reason`; optional `task_code`, `request_key` |
+| POST | `/controls/bulk` | `requests`: 1 to 100 controls, each with an explicit `run_id` or `run_key` and a unique `request_key` |
+| POST | `/reconciliations` | Optional `pipeline_code`, `task_code` |
+| GET, POST | `/tokens`; POST `/tokens/revoke` | Admin: list, create (`name`, `role`, optional `expires`), revoke (`token_id`) |
+| GET, POST | `/accounts`; POST `/accounts/role`, `/accounts/disable`, `/accounts/password` | Admin account administration |
+| GET | `/health`, `/whoami` | Health; the caller's account and role |
 
 ### Sign-in routes
 
 These routes take no bearer token; each body is the proof. They call the same sign-in
-operations as a local `etl-craft login`, and `etl-craft login --server` uses them.
+operations as a local `etl-craft login`, and `etl-craft login --controller` uses them.
 
 | Method | Path under `/api/v1` | Input or result |
 |---|---|---|
@@ -119,8 +119,8 @@ JSON uses the same schema-versioned documents as the [CLI and Python operations]
 A successful HTTP response means the operation returned; inspect its `status` and run/task state
 for the execution outcome.
 
-Missing, expired or revoked credentials return 401; insufficient roles return 403. Invalid
-request bodies return 422, service usage errors 400, missing metadata or identities 404,
+Missing, expired or revoked credentials return 401; insufficient roles return 403. An unknown
+or malformed request field returns 400 naming the field, as do other usage errors; missing metadata or identities 404,
 other domain refusals 409, and unavailable Engine DB requests 503. Domain errors include the
 error class, message and CLI exit code.
 
@@ -128,9 +128,9 @@ The interactive contract is at `/api/v1/docs`; `/api/v1/openapi.json` supplies t
 contract. These two documentation endpoints are public and contain no deployment data or
 credentials. The documentation build also publishes the [generated OpenAPI contract](../reference/openapi.json).
 
-A task watermark reset uses `{"watermark":"0","reason":"reload corrected source"}` on the
-mark endpoint. It has the same type validation and live-attempt refusal as the CLI; the run id
-in the URL identifies its intervention record. Task and attempt documents include nullable
+A task watermark reset posts `{"pipeline_code":"SALES","task_code":"load","run_id":42,
+"watermark":"0","reason":"reload corrected source"}` to `/marks`. It has the same type
+validation and live-attempt refusal as the CLI. Task and attempt documents include nullable
 `watermark_from` and `watermark_to` fields.
 
 ## Catalog comparisons
@@ -153,25 +153,24 @@ curl -H "Authorization: Bearer $ETL_CRAFT_API_TOKEN" \
 
 ## Shared role enforcement
 
-HTTP dependencies authenticate bearer credentials and ask the shared services policy about the
-operation. They contain no separate role ordering or permission map. The same services enforce
-the policy for local CLI and Python callers; UI actions use these HTTP routes. Insufficient
-roles return HTTP 403 with `PermissionDeniedError`, exit code 26 and the account/role remedy,
-and append a `REFUSED` action record. Missing/invalid bearer credentials still return HTTP 401.
-See the [deployment role table](security.md#deployment-accounts).
+A route authenticates the bearer token, then calls `invoke`, which applies the role the action
+table gives the action; routes hold no role logic of their own. Insufficient roles return HTTP
+403 with `PermissionDeniedError`, exit code 26 and the account and role remedy, and append one
+`REFUSED` action record. Missing or invalid bearer credentials return HTTP 401. See the
+[deployment role table](security.md#deployment-accounts).
 
 ## Protected SCD values
 
-`POST /api/v1/pipelines/{code}/tasks/{task}/values` writes a reasoned value edit or insert
-(admin). The `/unlock` suffix releases selected locks (human admin), and `/provenance` reads
-known column writers and protection history (viewer). Each calls the shared Python operation.
+`POST /api/v1/values` writes a reasoned value edit or insert (admin); its body names
+`pipeline_code` and `task_code`. `/values/unlock` releases selected locks (human admin), and
+`/values/provenance` reads known column writers and protection history (viewer). Each calls the shared Python operation.
 See [Protecting human SCD edits](../guides/human-overrides.md) for request bodies, integration
 identities, atomic warehouse support and recovery.
 
 ## Starting runs from another scheduler
 
 Provision a SERVICE account with the operator role and keep its token in `ETL_CRAFT_TOKEN`.
-Call `etl-craft run --pipeline_code SALES --server https://etl.example.com`, or
-`POST /api/v1/pipelines/SALES/runs` with bearer authentication. The controller owns dispatch,
+Call `etl-craft run --pipeline-code SALES --controller https://etl.example.com`, or
+`POST /api/v1/runs` with `{"pipeline_code":"SALES"}` and bearer authentication. The controller owns dispatch,
 leases and finalization. Use the documented command exit codes and explicit run identities to
 inspect progress; no scheduler-specific package or exported DAG is needed.

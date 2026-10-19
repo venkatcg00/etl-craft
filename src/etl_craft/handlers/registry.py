@@ -16,6 +16,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
+from etl_craft.core import enums
 from etl_craft.core.actor import SYSTEM_ACTOR
 from etl_craft.core.counts import Counts
 from etl_craft.core.errors import HandlerError
@@ -85,10 +86,10 @@ def format_task_log(result: HandlerResult) -> str | None:
 Handler = Callable[[TaskContext, Engine], HandlerResult]
 
 HANDLERS: dict[str, str] = {
-    "SQL": "etl_craft.handlers.sql:run",
-    "BUSINESS_RULES": "etl_craft.handlers.business_rules:run",
-    "PYTHON": "etl_craft.handlers.python_scripts:run",
-    "EMAIL_ALERT": "etl_craft.handlers.email_alert:run",
+    enums.Handler.SQL: "etl_craft.handlers.sql:run",
+    enums.Handler.BUSINESS_RULES: "etl_craft.handlers.business_rules:run",
+    enums.Handler.PYTHON: "etl_craft.handlers.python_scripts:run",
+    enums.Handler.EMAIL_ALERT: "etl_craft.handlers.email_alert:run",
 }
 """Each ``HANDLER`` value and the ``module:function`` that runs it."""
 

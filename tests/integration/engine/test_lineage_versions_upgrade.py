@@ -113,8 +113,8 @@ def test_demo_lineage_graph_and_documentation_survive_the_cache_reset(
 
     from etl_craft.config import ConnectionProfile
     from etl_craft.core.enums import SqlAction
-    from etl_craft.services.catalog import build_catalog
-    from etl_craft.services.catalog_site import table_url, write_site
+    from etl_craft.services.catalog.collect import build_catalog
+    from etl_craft.services.catalog.site import table_url, write_site
     from etl_craft.services.lineage import LineageGraph
     from fixtures.demo import DEMO
 
@@ -131,7 +131,7 @@ def test_demo_lineage_graph_and_documentation_survive_the_cache_reset(
         db.config,
         config_path=project / "craft-connector.yml",
         warehouse=ConnectionProfile(
-            "WAREHOUSE", "test", "jdbc:duckdb:warehouse.duckdb", "", "none", schema="main"
+            "WAREHOUSE", "test", "jdbc:duckdb:warehouse.duckdb", "", "NONE", schema="main"
         ),
     )
     with db.engine.begin() as conn:

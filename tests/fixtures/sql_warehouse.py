@@ -21,6 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectionProfile, ConnectorConfig, SourceConfig
+from etl_craft.core.enums import SecretsSource, TableFormat
 from etl_craft.core.text import qualify
 from etl_craft.engine import transitions
 from etl_craft.handlers import sql
@@ -169,9 +170,9 @@ class SqlWorld:
 def _config(tmp_path: Path, profile: ConnectionProfile) -> ConnectorConfig:
     project = tmp_path / "etl-craft"
     (project / "sql_files").mkdir(parents=True, exist_ok=True)
-    engine = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:engine.db", "", "none")
+    engine = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:engine.db", "", "NONE")
     return ConnectorConfig(
-        source=SourceConfig(type="environment"),
+        source=SourceConfig(type=SecretsSource.ENVIRONMENT),
         engine=engine,
         warehouse=profile,
         config_path=project / "craft-connector.yml",
@@ -179,7 +180,7 @@ def _config(tmp_path: Path, profile: ConnectionProfile) -> ConnectorConfig:
 
 
 def _profile(
-    jdbc_url: str, user: str = "", auth_mode: str = "none", **extra: str
+    jdbc_url: str, user: str = "", auth_mode: str = "NONE", **extra: str
 ) -> ConnectionProfile:
     return ConnectionProfile("WAREHOUSE", "dev", jdbc_url, user, auth_mode, dict(extra))
 
@@ -224,7 +225,7 @@ def sql_world(
             _profile(
                 f"jdbc:postgresql://{pg.address}/{POSTGRES_DB}",
                 POSTGRES_USER,
-                "password",
+                "PASSWORD",
                 secret_var=SECRET_VAR,
             ),
         )
@@ -234,7 +235,7 @@ def sql_world(
         config = _config(
             tmp_path, _profile(f"jdbc:trino://{trino.address}/iceberg/{schema}", "etl")
         )
-        config = replace(config, warehouse_table_format="iceberg")
+        config = replace(config, warehouse_table_format=TableFormat.ICEBERG)
         catalog = "iceberg"
     else:
         rest = require("iceberg_rest")
@@ -254,7 +255,7 @@ def sql_world(
                 s3_secret="ETL_CRAFT_TEST_S3_SECRET",
             ),
         )
-        config = replace(config, warehouse_table_format="iceberg")
+        config = replace(config, warehouse_table_format=TableFormat.ICEBERG)
         catalog = "lake"
     monkeypatch.setenv("ETL_CRAFT_TEST_S3_SECRET", MINIO_PASSWORD)
     engine_db = prepared_sqlite_engine_db(config.project_dir, sqlite_schema_template).engine

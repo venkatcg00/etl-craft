@@ -39,7 +39,13 @@ from typing import TypeVar
 from sqlalchemy.engine import Engine
 
 from etl_craft.core import interrupts
-from etl_craft.core.enums import TERMINAL_STATUSES, DependencyType, GatePolicy, RunStatus
+from etl_craft.core.enums import (
+    TERMINAL_STATUSES,
+    DependencyType,
+    GateOutcome,
+    GatePolicy,
+    RunStatus,
+)
 from etl_craft.core.errors import GraphError
 from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
@@ -52,6 +58,21 @@ from etl_craft.engine.repository.dependencies import (
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+
+def gates_off(dependency_id: int, *, task: bool) -> trackers.GateDecision:
+    """Record a dependency bypassed unchecked because dependency gates are off."""
+    return trackers.GateDecision(
+        dependency_id, task, None, GateOutcome.BYPASSED, "dependency gates are off"
+    )
+
+
+def judged(satisfied: bool, policy: GatePolicy = GatePolicy.ENFORCE) -> GateOutcome:
+    """Return a definitive check's outcome: unsatisfied dependencies are bypassed under warn."""
+    if satisfied:
+        return GateOutcome.SATISFIED
+    return GateOutcome.BYPASSED if policy == GatePolicy.WARN else GateOutcome.UNSATISFIED
+
 
 FIRST_LOOK_FRACTION = 0.70
 """The first look at a running upstream is at this fraction of its average run length."""
@@ -260,12 +281,7 @@ class TrackedGate:
         if self.policy == GatePolicy.OFF:
             return CrossPipelineCheck(
                 needed,
-                decisions=tuple(
-                    trackers.GateDecision(
-                        edge.task_dependency_id, True, None, "BYPASSED", "dependency gates are off"
-                    )
-                    for edge in edges
-                ),
+                decisions=tuple(gates_off(edge.task_dependency_id, task=True) for edge in edges),
                 bypassed=tuple(
                     f"upstream task {edge.depends_on_label} ({edge.dependency_type}) not checked"
                     for edge in edges
@@ -302,11 +318,7 @@ class TrackedGate:
                     edge.task_dependency_id,
                     True,
                     run,
-                    "SATISFIED"
-                    if run_id is not None
-                    else "BYPASSED"
-                    if self.policy == GatePolicy.WARN
-                    else "UNSATISFIED",
+                    judged(run_id is not None, self.policy),
                     why,
                 )
             )
@@ -365,12 +377,7 @@ def check_pipeline_dependencies(
         edges = fetch_pipeline_dependency_edges(conn, pipeline_id)
     if policy == GatePolicy.OFF:
         return PipelineGateResult(
-            decisions=tuple(
-                trackers.GateDecision(
-                    edge.pipeline_dependency_id, False, None, "BYPASSED", "dependency gates are off"
-                )
-                for edge in edges
-            ),
+            decisions=tuple(gates_off(edge.pipeline_dependency_id, task=False) for edge in edges),
             bypassed=tuple(
                 f"upstream pipeline {edge.depends_on_pipeline_code} ({edge.dependency_type}) "
                 "not checked"
@@ -405,11 +412,7 @@ def check_pipeline_dependencies(
                 edge.pipeline_dependency_id,
                 False,
                 run,
-                "SATISFIED"
-                if run_id is not None
-                else "BYPASSED"
-                if policy == GatePolicy.WARN
-                else "UNSATISFIED",
+                judged(run_id is not None, policy),
                 why,
             )
         )
@@ -430,7 +433,7 @@ def check_pipeline_dependencies(
 class GateResult:
     """One nonblocking check: final judgement or the next persisted look."""
 
-    state: str
+    state: GateOutcome
     check: CrossPipelineCheck | PipelineGateResult
     next_check_at: datetime | None = None
 
@@ -522,7 +525,7 @@ def check_gate(
         else check.satisfied
     )
     return GateResult(
-        "WAIT" if check.next_check_at is not None else "SATISFIED" if satisfied else "UNSATISFIED",
+        GateOutcome.WAIT if check.next_check_at is not None else judged(satisfied),
         check,
         check.next_check_at,
     )

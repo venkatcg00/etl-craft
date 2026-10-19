@@ -39,6 +39,10 @@ class PostgresEngineDialect(EngineDialect):
         """Return ``table`` in lower case, as PostgreSQL folds unquoted names."""
         return table.lower()
 
+    def snapshot(self, conn: Connection) -> Connection:
+        """Read at REPEATABLE READ, so concurrent writes stay out of the snapshot."""
+        return conn.execution_options(isolation_level="REPEATABLE READ")
+
     def drop_trigger(self, conn: Connection, trigger: str, table: str) -> None:
         """Drop ``trigger`` from ``table``."""
         quoted = conn.dialect.identifier_preparer.quote(trigger)
@@ -225,8 +229,8 @@ def psycopg_auth_kwargs(
             kwargs["oauth_scope"] = str(extra["scope"])
         return kwargs
     raise ConfigurationError(
-        f"auth_mode {auth_mode!r} is not available for PostgreSQL — use one of "
-        f"{sorted(POSTGRES_AUTH_FIELDS)}"
+        f"Auth_mode {auth_mode!r} is not available for PostgreSQL — use one of "
+        f"{', '.join(sorted(POSTGRES_AUTH_FIELDS))}"
     )
 
 

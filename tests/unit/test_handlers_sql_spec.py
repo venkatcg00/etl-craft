@@ -19,7 +19,7 @@ def project(tmp_path):
 
 
 def context(project, refresh_type="INCREMENTAL", **params):
-    engine = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:e.db", "", "none")
+    engine = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:e.db", "", "NONE")
     config = ConnectorConfig(
         source=SourceConfig(type="environment"),
         engine=engine,

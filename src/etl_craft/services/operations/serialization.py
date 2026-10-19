@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from dataclasses import MISSING, fields, is_dataclass
 from datetime import date, datetime
 from enum import Enum
+from pathlib import Path, PurePath
 from typing import Any, TypeVar, Union, cast, get_args, get_origin, get_type_hints
 
 from etl_craft.core.errors import ServerError, UsageError
@@ -29,7 +30,19 @@ def to_json(obj: object) -> dict[str, Any]:
     return cast(dict[str, Any], _encode(obj))
 
 
+def encode(obj: object) -> object:
+    """Return any request or result as JSON values, without requiring a document schema."""
+    return _encode(obj)
+
+
+def decode(hint: object, document: object) -> object:
+    """Rebuild a value of ``hint``, which may be a union of documents, from its JSON form."""
+    return _decode(hint, document, getattr(hint, "__name__", str(hint)))
+
+
 def _encode(obj: object) -> object:
+    if isinstance(obj, PurePath):
+        return str(obj)
     if isinstance(obj, Enum):
         return _encode(obj.value)
     if isinstance(obj, date):
@@ -69,7 +82,7 @@ def _decode(hint: object, value: object, where: str) -> object:
     origin = get_origin(hint)
     if origin in (Union, types.UnionType):
         return _decode_union(get_args(hint), value, where)
-    if origin in (tuple, list, dict):
+    if origin in (tuple, list, dict, Mapping):
         return _decode_collection(origin, get_args(hint), value, where)
     if isinstance(hint, type) and is_dataclass(hint):
         return _decode_dataclass(hint, value, where)
@@ -79,7 +92,7 @@ def _decode(hint: object, value: object, where: str) -> object:
 def _decode_collection(
     origin: object, items: tuple[object, ...], value: object, where: str
 ) -> object:
-    if origin is dict:
+    if origin in (dict, Mapping):
         if not isinstance(value, dict):
             raise _unexpected(where, value, "an object")
         return {key: _decode(items[1], v, f"{where}.{key}") for key, v in value.items()}
@@ -102,6 +115,8 @@ def _decode_value(hint: object, value: object, where: str) -> object:
             return (datetime if hint is datetime else date).fromisoformat(str(value))
         except ValueError as error:
             raise _unexpected(where, value, "an ISO 8601 text") from error
+    if hint is Path and isinstance(value, str):
+        return Path(value)
     if hint is float and isinstance(value, int) and not isinstance(value, bool):
         return float(value)
     if isinstance(hint, type) and isinstance(value, hint):
@@ -140,7 +155,7 @@ def _decode_dataclass(cls: type, value: object, where: str) -> object:
             )
         elif field.default is MISSING and field.default_factory is MISSING:
             raise ServerError(
-                f"{where}.{field.name}: missing; the server and this etl-craft differ"
+                f"{where}.{field.name}: missing; the controller and this etl-craft differ"
             )
     return cls(**values)
 
@@ -148,5 +163,5 @@ def _decode_dataclass(cls: type, value: object, where: str) -> object:
 def _unexpected(where: str, value: object, expected: str) -> ServerError:
     return ServerError(
         f"{where}={value!r}; expected {expected}; "
-        "check that the server runs the same etl-craft version as this installation"
+        "check that the controller runs the same etl-craft version as this installation"
     )

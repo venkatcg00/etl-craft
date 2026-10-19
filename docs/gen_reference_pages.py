@@ -22,6 +22,10 @@ PAGES = {
         reference_pages.task_parameters_page,
         "../src/etl_craft/handlers/registry.py",
     ),
+    "reference/actions.md": (
+        reference_pages.actions_page,
+        "../src/etl_craft/services/operations/actions.py",
+    ),
     "reference/engine-db-schema.md": (
         reference_pages.schema_page,
         "../src/etl_craft/dialects/engine/postgres/schema.sql",

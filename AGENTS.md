@@ -82,7 +82,7 @@ that damages the package is not helpful; saying so, with a better option, is.
 
 ## Design rules that must hold
 
-- `etl-craft run` is the only execution verb. `--task_code` runs one task; without it the engine
+- `etl-craft run` is the only execution verb. `--task-code` runs one task; without it the engine
   starts ready tasks after each completion, one child process per task. Gate waits use no agent
   slots and retain their budget in `AUD_GATE_WAITS`.
 - A task is given its run by whoever starts it; nothing resolves a run by recency. Commands
@@ -142,7 +142,7 @@ Each package imports only the packages below it; `lint-imports` enforces the ord
 
 | Package | Responsibility |
 |---|---|
-| `cli` | argparse commands, output, exit codes, and the client for `--server`; the only package that prints |
+| `cli` | argparse commands, output, exit codes, and the client for `--controller`; the only package that prints |
 | `api` | optional FastAPI routes, sign-in routes, bearer authorization and HTTP server lifecycle |
 | `controller` | leadership, active-run working set, local supervision and shutdown |
 | `services` | actor-scoped operations, doctor, setup, validate, config files, cloning, lineage, docs site |

@@ -4,10 +4,10 @@ from datetime import UTC, datetime
 
 import pytest
 
-from etl_craft.services import catalog_graph
-from etl_craft.services.catalog import Catalog, TableAsset, TableEdge
-from etl_craft.services.catalog_graph import lineage_drawing, render_svg
-from etl_craft.services.catalog_site import slug
+from etl_craft.services.catalog import graph as catalog_graph
+from etl_craft.services.catalog.collect import Catalog, TableAsset, TableEdge
+from etl_craft.services.catalog.graph import lineage_drawing, render_svg
+from etl_craft.services.catalog.site import slug
 
 pytestmark = pytest.mark.unit
 

@@ -722,8 +722,8 @@ def export_config(
     existing = [table.file for table in TABLES if (directory / table.file).exists()]
     if existing and not overwrite:
         raise MetadataFileError(
-            f"{directory} already holds {', '.join(existing)}; move them away, or pass "
-            "--force to overwrite them with the Engine DB's rows"
+            f"{directory} already holds {', '.join(existing)}; move them away, or give "
+            "`force` to overwrite them with the Engine DB's rows"
         )
     current: dict[str, dict[Key, StoredRow]] = {}
     current_ids: dict[str, set[int]] = {}

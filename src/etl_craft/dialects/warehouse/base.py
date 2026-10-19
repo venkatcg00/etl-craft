@@ -24,7 +24,7 @@ from etl_craft.core.enums import AuthMode, TableFormat
 from etl_craft.core.errors import ConfigurationError, SqlGuardError
 from etl_craft.core.failures import Failure
 from etl_craft.dialects import credentials
-from etl_craft.dialects.failures import classify
+from etl_craft.dialects.failure_evidence import classify
 
 if TYPE_CHECKING:
     from etl_craft.config import CloningConfig, ConnectionProfile
@@ -132,6 +132,8 @@ class WarehouseDialect:
     identifier_case: str | None = None
     # How a private key is named in the driver's connect arguments: (path, passphrase).
     key_file_connect_args: tuple[str, str] | None = None
+    # The query naming a catalog's connector (:name), where the URL's catalog sets the format.
+    catalog_connector_sql: str | None = None
     # The username a bearer token is sent under, where the driver fixes it.
     token_username: str | None = None
     # Whether a bearer token (token, oauth) is sent under a username.
@@ -192,8 +194,8 @@ class WarehouseDialect:
                 connect_args[passphrase_arg] = secret
             return Presented(username=user, connect_args=connect_args)
         raise ConfigurationError(
-            f"auth_mode {mode!r} is not available for a {self.spec.display_name or self.spec.key} "
-            f"warehouse — use one of {sorted(self.spec.auth_modes)}"
+            f"Auth_mode {mode!r} is not available for a {self.spec.display_name or self.spec.key} "
+            f"warehouse — use one of {', '.join(sorted(self.spec.auth_modes))}"
         )
 
     def present_bearer(self, token: str, user: str | None) -> Presented:

@@ -36,6 +36,7 @@ from etl_craft.config.loader_helpers import (
     profiled_settings,
     reject_unknown,
     relative_to_config,
+    shown,
     string_list,
     whole_number,
 )
@@ -67,19 +68,21 @@ def settings_by_section() -> dict[str, frozenset[str]]:
     """Return every setting the loader accepts, by where it is written.
 
     ``Engine`` and ``Warehouse`` hold their section settings and the fields of a profile block;
-    a warehouse's own separate fields (such as Snowflake's ``account``) are included.
+    a warehouse's own separate fields (such as Snowflake's ``Account``) are included. Keys are
+    spelled as ``craft-connector.yml`` writes them.
     """
     warehouse_fields: set[str] = set()
     for spec in WAREHOUSES:
         warehouse_fields.update(spec.preferred_fields)
         warehouse_fields.update(spec.profile_fields)
+    fields = frozenset(map(shown, CONNECTION_FIELDS))
     return {
         "Secrets": SECRETS_KEYS,
         "Orchestration": ORCHESTRATION_KEYS - {"Email"},
-        "Orchestration.Email": EMAIL_KEYS,
+        "Orchestration.Email": frozenset(map(shown, EMAIL_KEYS)),
         "Deployment": DEPLOYMENT_KEYS,
-        "Engine": frozenset({"Name"}) | CONNECTION_FIELDS,
-        "Warehouse": WAREHOUSE_SECTION_KEYS | CONNECTION_FIELDS | warehouse_fields,
+        "Engine": frozenset({"Name"}) | fields,
+        "Warehouse": WAREHOUSE_SECTION_KEYS | fields | frozenset(map(shown, warehouse_fields)),
         "Cloning": CLONING_KEYS,
         "Docs_site": DOCS_SITE_KEYS,
         "Auth": AUTH_KEYS,

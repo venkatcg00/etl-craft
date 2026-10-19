@@ -9,11 +9,12 @@ from sqlalchemy.exc import DBAPIError
 
 from etl_craft.api.app import create_app
 from etl_craft.core.actor import Actor, ActorKind, acting_as
-from etl_craft.core.enums import ApiRole
+from etl_craft.core.enums import ActionName, ApiRole
 from etl_craft.core.errors import MigrationError, UsageError
 from etl_craft.core.text import sha256_hex
 from etl_craft.engine import migrations
 from etl_craft.services.operations import OperationContext, tokens
+from fixtures.actions import act
 from fixtures.released_schema import SCHEMAS, install
 
 OWNER = Actor("owner", ActorKind.USER)
@@ -25,8 +26,8 @@ def context(db):
 
 def test_tokens_share_current_account_role_and_disable_together(engine_db):
     ctx = context(engine_db)
-    first = tokens.create_token(ctx, "ci", "viewer")
-    second = tokens.create_token(ctx, "ci", "viewer")
+    first = act(ctx, ActionName.TOKEN_CREATE, name="ci", role="viewer")
+    second = act(ctx, ActionName.TOKEN_CREATE, name="ci", role="viewer")
     client = TestClient(create_app(ctx))
     headers = {"Authorization": "Bearer " + first.token}
     assert client.get("/api/v1/tokens", headers=headers).status_code == 403
@@ -35,21 +36,21 @@ def test_tokens_share_current_account_role_and_disable_together(engine_db):
         conn.execute(text("UPDATE CFG_ACCOUNTS SET ROLE='admin' WHERE ACCOUNT_NAME='ci'"))
     assert client.get("/api/v1/tokens", headers=headers).status_code == 200
     assert tokens.authenticate(ctx, second.token).role == "admin"
-    assert {t.role for t in tokens.list_tokens(ctx).tokens} == {"admin"}
+    assert {t.role for t in act(ctx, ActionName.TOKEN_LIST).tokens} == {"admin"}
     with pytest.raises(UsageError, match=r"account 'ci'.*expected an active account"):
-        tokens.create_token(ctx, "ci", "viewer")
+        act(ctx, ActionName.TOKEN_CREATE, name="ci", role="viewer")
     with acting_as(OWNER), ctx.engine.begin() as conn:
         conn.execute(text("UPDATE CFG_ACCOUNTS SET ACTIVE_FLAG='N' WHERE ACCOUNT_NAME='ci'"))
     assert client.get("/api/v1/health", headers=headers).status_code == 401
     assert tokens.authenticate(ctx, second.token) is None
     with pytest.raises(UsageError, match="ACTIVE_FLAG='N'"):
-        tokens.create_token(ctx, "ci", "admin")
-    assert len(tokens.list_tokens(ctx).tokens) == 2
+        act(ctx, ActionName.TOKEN_CREATE, name="ci", role="admin")
+    assert len(act(ctx, ActionName.TOKEN_LIST).tokens) == 2
 
 
 def test_account_history_never_contains_password_hashes(engine_db):
     ctx = context(engine_db)
-    tokens.create_token(ctx, "person", "developer")
+    act(ctx, ActionName.TOKEN_CREATE, name="person", role="developer")
     with acting_as(OWNER), ctx.engine.begin() as conn:
         conn.execute(
             text(
@@ -100,7 +101,7 @@ def test_account_history_never_contains_password_hashes(engine_db):
     ],
 )
 def test_account_constraints_refuse_invalid_values(engine_db, change):
-    tokens.create_token(context(engine_db), "ci", "viewer")
+    act(context(engine_db), ActionName.TOKEN_CREATE, name="ci", role="viewer")
     with engine_db.engine.connect() as conn:
         assert (
             conn.execute(text("SELECT ACCOUNT_NAME AS name FROM CFG_ACCOUNTS")).scalar_one() == "ci"
@@ -110,7 +111,7 @@ def test_account_constraints_refuse_invalid_values(engine_db, change):
 
 
 def test_account_identity_is_reserved_and_tokens_require_an_account(engine_db):
-    tokens.create_token(context(engine_db), "ci", "viewer")
+    act(context(engine_db), ActionName.TOKEN_CREATE, name="ci", role="viewer")
     with acting_as(OWNER), engine_db.engine.begin() as conn:
         conn.execute(text("UPDATE CFG_ACCOUNTS SET ACTIVE_FLAG='N', OIDC_SUBJECT='subject'"))
     for values in ("'ci', NULL", "'other', 'subject'"):

@@ -5,11 +5,12 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from etl_craft.cli.commands.common import Command, command_context, configure_output
+from etl_craft.cli.commands.common import Command, call, configure_output, request_from
 from etl_craft.cli.output import Output
+from etl_craft.core.enums import ActionName
 from etl_craft.core.errors import ExitCode
-from etl_craft.services.config_files import ConfigSync
-from etl_craft.services.operations.config_files import apply_config, export_config, plan_config
+from etl_craft.services.config_files import ConfigExport, ConfigSync
+from etl_craft.services.operations.config_files import ConfigDirectory, ConfigExportInput
 
 
 def _directory(parser: argparse.ArgumentParser) -> None:
@@ -17,7 +18,7 @@ def _directory(parser: argparse.ArgumentParser) -> None:
         "--config-dir",
         type=Path,
         metavar="PATH",
-        help="the config files (default: config/ in the project directory)",
+        help="The config files (default: config/ in the project directory).",
     )
     configure_output(parser)
 
@@ -28,27 +29,27 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     _directory(
         verbs.add_parser(
             "plan",
-            help="show what apply would change and validate it, changing nothing",
+            help="Show what apply would change and validate it, changing nothing.",
             allow_abbrev=False,
         )
     )
     _directory(
         verbs.add_parser(
-            "apply", help="make the CFG_ tables match the config files", allow_abbrev=False
+            "apply", help="Make the CFG_ tables match the config files.", allow_abbrev=False
         )
     )
     export = verbs.add_parser(
-        "export", help="write the CFG_ rows as config files", allow_abbrev=False
+        "export", help="Write the CFG_ rows as config files.", allow_abbrev=False
     )
     _directory(export)
     export.add_argument(
-        "--force", action="store_true", help="overwrite config files that already exist"
+        "--force", action="store_true", help="Overwrite config files that already exist."
     )
     export.add_argument(
         "--as-of",
         metavar="WHEN",
-        help="the rows as they stood at a pipeline_run_id's start or an ISO 8601 time "
-        "(UTC unless it names a zone), rebuilt from the change history",
+        help="The rows as they stood at a pipeline_run_id's start or an ISO 8601 time "
+        "(UTC unless it names a zone), rebuilt from the change history.",
     )
 
 
@@ -77,20 +78,19 @@ def _render(out: Output, done: ConfigSync, verb: str) -> None:
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    with command_context(args) as ctx:
-        if args.config_verb == "export":
-            written = export_config(ctx, args.config_dir, overwrite=args.force, as_of=args.as_of)
-            if args.output_format == "json":
-                out.document(written)
-            else:
-                counts = ", ".join(f"{name} {count}" for name, count in written.rows.items())
-                when = f" as of {written.as_of}" if written.as_of else ""
-                out.line(f"wrote {written.directory}{when}: {counts} row(s)")
-            return ExitCode.SUCCESS
-        if args.config_verb == "plan":
-            done = plan_config(ctx, args.config_dir)
+    if args.config_verb == "export":
+        written = call(args, ActionName.CONFIG_EXPORT, request_from(args, ConfigExportInput))
+        assert isinstance(written, ConfigExport)
+        if args.output_format == "json":
+            out.document(written)
         else:
-            done = apply_config(ctx, args.config_dir)
+            counts = ", ".join(f"{name} {count}" for name, count in written.rows.items())
+            when = f" as of {written.as_of}" if written.as_of else ""
+            out.line(f"wrote {written.directory}{when}: {counts} row(s)")
+        return ExitCode.SUCCESS
+    name = ActionName.CONFIG_PLAN if args.config_verb == "plan" else ActionName.CONFIG_APPLY
+    done = call(args, name, request_from(args, ConfigDirectory))
+    assert isinstance(done, ConfigSync)
     out.result(done, args.output_format, text=lambda: _render(out, done, args.config_verb))
     return ExitCode.FAILURE if done.failed else ExitCode.SUCCESS
 
@@ -100,4 +100,5 @@ COMMAND = Command(
     help="Load the project's config files into the CFG_ tables, plan that, or export them.",
     configure=_configure,
     run=_run,
+    actions=(ActionName.CONFIG_PLAN, ActionName.CONFIG_APPLY, ActionName.CONFIG_EXPORT),
 )

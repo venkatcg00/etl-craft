@@ -35,24 +35,24 @@ from fixtures.services import (
 
 pytestmark = pytest.mark.connections
 
-SQLITE_ENGINE = {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "main"}
+SQLITE_ENGINE = {"Jdbc_url": "jdbc:sqlite:engine.db", "Schema": "main"}
 
 MATRIX = {
-    ("Engine DB", "SQLite"): {"none"},
-    ("Engine DB", "PostgreSQL"): {"password", "key_file"},
-    ("Warehouse", "postgres"): {"password", "key_file"},
-    ("Warehouse", "duckdb"): {"none"},
-    ("Warehouse", "duckdb_iceberg"): {"none", "oauth"},
-    ("Warehouse", "trino_iceberg"): {"none"},
-    ("Email", "SMTP"): {"none", "password"},
+    ("Engine DB", "SQLite"): {"NONE"},
+    ("Engine DB", "PostgreSQL"): {"PASSWORD", "KEY_FILE"},
+    ("Warehouse", "postgres"): {"PASSWORD", "KEY_FILE"},
+    ("Warehouse", "duckdb"): {"NONE"},
+    ("Warehouse", "duckdb_iceberg"): {"NONE", "OAUTH"},
+    ("Warehouse", "trino_iceberg"): {"NONE"},
+    ("Email", "SMTP"): {"NONE", "PASSWORD"},
 }
 """What this suite connects with, by resource."""
 
 CLOUD = {
-    ("Warehouse", "databricks"): {"token"},
-    ("Warehouse", "databricks_iceberg"): {"token"},
-    ("Warehouse", "snowflake"): {"password", "token"},
-    ("Warehouse", "snowflake_iceberg"): {"password", "token"},
+    ("Warehouse", "databricks"): {"TOKEN"},
+    ("Warehouse", "databricks_iceberg"): {"TOKEN"},
+    ("Warehouse", "snowflake"): {"PASSWORD", "TOKEN"},
+    ("Warehouse", "snowflake_iceberg"): {"PASSWORD", "TOKEN"},
 }
 """What the cloud suites connect with, run with the team's own accounts."""
 
@@ -61,7 +61,7 @@ def write(tmp_path: Path, **sections) -> Path:
     """Write a craft-connector.yml with one ``dev`` profile per section."""
     settings = sections.pop("warehouse_settings", {})
     raw = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {**sections.pop("orchestration", {})},
         "Engine": {"dev": sections.pop("engine", SQLITE_ENGINE)},
         **{name: {"dev": block} for name, block in sections.items()},
@@ -87,7 +87,7 @@ def client_key(tmp_path: Path) -> dict[str, str]:
     key = tmp_path / "client.key"
     key.write_bytes((CERTS_DIR / "client.key").read_bytes())
     key.chmod(0o600)
-    return {"key_file": str(key), "cert_file": str(CERTS_DIR / "client.crt")}
+    return {"Key_file": str(key), "Cert_file": str(CERTS_DIR / "client.crt")}
 
 
 def tls_url(service) -> str:
@@ -107,18 +107,18 @@ def engine_profile(mode: str, tmp_path: Path, monkeypatch) -> dict:
         pg = require("postgres")
         monkeypatch.setenv("ETL_CRAFT_MATRIX_ENGINE_SECRET", POSTGRES_PASSWORD)
         return {
-            "jdbc_url": f"jdbc:postgresql://{pg.address}/{POSTGRES_DB}",
-            "schema": "public",
-            "user": POSTGRES_USER,
-            "auth_mode": "password",
-            "secret": "ETL_CRAFT_MATRIX_ENGINE_SECRET",
+            "Jdbc_url": f"jdbc:postgresql://{pg.address}/{POSTGRES_DB}",
+            "Schema": "public",
+            "User": POSTGRES_USER,
+            "Auth_mode": "PASSWORD",
+            "Secret": "ETL_CRAFT_MATRIX_ENGINE_SECRET",
         }
     pg = require("postgres_tls")
     return {
-        "jdbc_url": tls_url(pg),
-        "schema": "public",
-        "user": POSTGRES_USER,
-        "auth_mode": "key_file",
+        "Jdbc_url": tls_url(pg),
+        "Schema": "public",
+        "User": POSTGRES_USER,
+        "Auth_mode": "KEY_FILE",
         **client_key(tmp_path),
     }
 
@@ -132,9 +132,9 @@ def test_the_engine_db(mode, tmp_path, monkeypatch):
 
 
 def test_a_key_file_that_is_not_the_servers_client_fails_with_the_reason(tmp_path, monkeypatch):
-    profile = engine_profile("key_file", tmp_path, monkeypatch)
-    profile["jdbc_url"] = profile["jdbc_url"].replace("verify-full", "require")
-    del profile["cert_file"]
+    profile = engine_profile("KEY_FILE", tmp_path, monkeypatch)
+    profile["Jdbc_url"] = profile["Jdbc_url"].replace("verify-full", "require")
+    del profile["Cert_file"]
     config = load_config(write(tmp_path, engine=profile))
     checks = {c.name: c for c in run_checks(config, engine_state=False)}
     assert checks["Engine DB connection"].status is Status.FAIL
@@ -150,54 +150,54 @@ def warehouse_profile(case: str, tmp_path: Path, monkeypatch) -> tuple[dict, dic
         pg = require("postgres")
         monkeypatch.setenv("ETL_CRAFT_MATRIX_WAREHOUSE_SECRET", POSTGRES_PASSWORD)
         return {
-            "jdbc_url": f"jdbc:postgresql://{pg.address}/{POSTGRES_DB}",
-            "schema": "public",
-            "user": POSTGRES_USER,
-            "auth_mode": "password",
-            "secret": "ETL_CRAFT_MATRIX_WAREHOUSE_SECRET",
+            "Jdbc_url": f"jdbc:postgresql://{pg.address}/{POSTGRES_DB}",
+            "Schema": "public",
+            "User": POSTGRES_USER,
+            "Auth_mode": "PASSWORD",
+            "Secret": "ETL_CRAFT_MATRIX_WAREHOUSE_SECRET",
         }, {}
     if case == "postgres-key_file":
         return {
-            "jdbc_url": tls_url(require("postgres_tls")),
-            "schema": "public",
-            "user": POSTGRES_USER,
-            "auth_mode": "key_file",
+            "Jdbc_url": tls_url(require("postgres_tls")),
+            "Schema": "public",
+            "User": POSTGRES_USER,
+            "Auth_mode": "KEY_FILE",
             **client_key(tmp_path),
         }, {}
     if case == "duckdb-none":
-        return {"jdbc_url": f"jdbc:duckdb:{tmp_path / 'wh.duckdb'}", "schema": "main"}, {}
+        return {"Jdbc_url": f"jdbc:duckdb:{tmp_path / 'wh.duckdb'}", "Schema": "main"}, {}
     if case == "trino_iceberg-none":
         trino = require("trino")
         schema = f"m_{uuid.uuid4().hex[:8]}"
-        profile = {"jdbc_url": f"jdbc:trino://{trino.address}/iceberg/{schema}", "schema": schema}
-        profile |= {"user": "etl", "auth_mode": "none"}
-        return profile, {"Name": "Trino", "Table_format": "iceberg"}
+        profile = {"Jdbc_url": f"jdbc:trino://{trino.address}/iceberg/{schema}", "Schema": schema}
+        profile |= {"User": "etl", "Auth_mode": "NONE"}
+        return profile, {"Name": "Trino", "Table_format": "ICEBERG"}
     catalog = require("iceberg_rest")
     minio = require("minio")
     monkeypatch.setenv("ETL_CRAFT_MATRIX_S3_SECRET", MINIO_PASSWORD)
     profile = {
-        "jdbc_url": "jdbc:duckdb:",
-        "schema": f"m_{uuid.uuid4().hex[:8]}",
-        "catalog": "lake",
-        "catalog_uri": catalog.http_url,
-        "iceberg_warehouse": "s3://warehouse/",
-        "s3_endpoint": minio.address,
-        "s3_region": "us-east-1",
-        "s3_url_style": "path",
-        "s3_use_ssl": "false",
-        "s3_key_id": MINIO_USER,
-        "s3_secret": "ETL_CRAFT_MATRIX_S3_SECRET",
+        "Jdbc_url": "jdbc:duckdb:",
+        "Schema": f"m_{uuid.uuid4().hex[:8]}",
+        "Catalog": "lake",
+        "Catalog_uri": catalog.http_url,
+        "Iceberg_warehouse": "s3://warehouse/",
+        "S3_endpoint": minio.address,
+        "S3_region": "us-east-1",
+        "S3_url_style": "path",
+        "S3_use_ssl": "false",
+        "S3_key_id": MINIO_USER,
+        "S3_secret": "ETL_CRAFT_MATRIX_S3_SECRET",
     }
     if case == "duckdb_iceberg-oauth":
         monkeypatch.setenv("ETL_CRAFT_MATRIX_WAREHOUSE_SECRET", "secret")
         profile |= {
-            "auth_mode": "oauth",
-            "client_id": "etl-craft",
-            "token_url": f"{catalog.http_url}/v1/oauth/tokens",
-            "scope": "catalog",
-            "secret": "ETL_CRAFT_MATRIX_WAREHOUSE_SECRET",
+            "Auth_mode": "OAUTH",
+            "Client_id": "etl-craft",
+            "Token_url": f"{catalog.http_url}/v1/oauth/tokens",
+            "Scope": "catalog",
+            "Secret": "ETL_CRAFT_MATRIX_WAREHOUSE_SECRET",
         }
-    return profile, {"Name": "DuckDB", "Table_format": "iceberg"}
+    return profile, {"Name": "DuckDB", "Table_format": "ICEBERG"}
 
 
 def namespace(name: str, method: str) -> None:
@@ -249,7 +249,7 @@ def drop_schema(config, schema: str) -> None:
 def test_the_warehouse(case, tmp_path, monkeypatch):
     profile, settings = warehouse_profile(case, tmp_path, monkeypatch)
     config = load_config(write(tmp_path, Warehouse=profile, warehouse_settings=settings))
-    schema = profile["schema"]
+    schema = profile["Schema"]
     if case.startswith("trino"):
         create_schema(config, f"iceberg.{schema}")
     elif case.startswith("duckdb_iceberg"):
@@ -272,19 +272,19 @@ def test_the_warehouse(case, tmp_path, monkeypatch):
 def test_the_email_relay(mode, tmp_path, monkeypatch, tls_relay):
     smtp = tls_relay() if mode == "password" else require("mailpit_smtp")
     email = {
-        "host": smtp.host,
-        "port": smtp.port,
-        "from_address": "etl@example.com",
-        "tls_mode": "none",
-        "auth_mode": mode,
+        "Host": smtp.host,
+        "Port": smtp.port,
+        "From_address": "etl@example.com",
+        "Tls_mode": "NONE",
+        "Auth_mode": mode.upper(),
     }
     if mode == "password":
         monkeypatch.setenv("ETL_CRAFT_MATRIX_EMAIL_SECRET", "relay-password")
         email |= {
-            "user": "etl@example.com",
-            "secret": "ETL_CRAFT_MATRIX_EMAIL_SECRET",
-            "tls_mode": "starttls",
-            "ca_file": str(smtp.ca_file),
+            "User": "etl@example.com",
+            "Secret": "ETL_CRAFT_MATRIX_EMAIL_SECRET",
+            "Tls_mode": "STARTTLS",
+            "Ca_file": str(smtp.ca_file),
         }
     config = load_config(write(tmp_path, orchestration={"Email": email}))
     checks = checked(config, "Email")
@@ -319,21 +319,21 @@ def test_doctor_calls_verified_exactly_what_the_matrix_and_the_cloud_suites_exer
 
 
 def test_relative_tls_files_work_from_another_working_directory(tmp_path, monkeypatch):
-    profile = engine_profile("key_file", tmp_path, monkeypatch)
+    profile = engine_profile("KEY_FILE", tmp_path, monkeypatch)
     for name in ("client.crt", "ca.crt"):
         (tmp_path / name).write_bytes((CERTS_DIR / name).read_bytes())
-    profile["key_file"] = "client.key"
-    profile["cert_file"] = "client.crt"
-    profile["jdbc_url"] = (
-        profile["jdbc_url"].partition("?")[0] + "?sslmode=verify-full&sslrootcert=ca.crt"
+    profile["Key_file"] = "client.key"
+    profile["Cert_file"] = "client.crt"
+    profile["Jdbc_url"] = (
+        profile["Jdbc_url"].partition("?")[0] + "?sslmode=verify-full&sslrootcert=ca.crt"
     )
     path = write(tmp_path, engine=profile)
     monkeypatch.chdir(tmp_path.parent)
     config = load_config(path)
     checks = checked(config, "Engine DB")
     assert checks["Engine DB connection"][0] is Status.OK
-    assert str(tmp_path / "client.key") in checks["Engine DB key_file"][1]
+    assert str(tmp_path / "client.key") in checks["Engine DB Key_file"][1]
     (tmp_path / "client.key").unlink()
     checks = {check.name: check for check in run_checks(config, engine_state=False)}
-    assert checks["Engine DB key_file"].status is Status.FAIL
-    assert str(tmp_path / "client.key") in checks["Engine DB key_file"].detail
+    assert checks["Engine DB Key_file"].status is Status.FAIL
+    assert str(tmp_path / "client.key") in checks["Engine DB Key_file"].detail

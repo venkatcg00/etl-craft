@@ -2,139 +2,79 @@
 
 from __future__ import annotations
 
-from datetime import date
+from dataclasses import replace
 
-from etl_craft.core.enums import RunStatus
+from etl_craft.core.enums import RunStatus, Transport
 from etl_craft.core.errors import UsageError
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.repository.tasks import resolve_task_id
-from etl_craft.engine.runlog import ACTIVE_RUN, RunSelector
+from etl_craft.engine.runlog import RunSelector
 from etl_craft.execution import interventions, reruns, run_start, runner
 from etl_craft.execution import pipeline as execution
 from etl_craft.execution.attempt_types import Override
 from etl_craft.execution.reconcile import reconcile
 from etl_craft.execution.run_types import PipelineOutcome
 from etl_craft.services.cloning import run_hooks
-from etl_craft.services.operations.context import OperationContext, operation
+from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.models import BackfillView, OperationResult, ReconciliationView
-from etl_craft.services.operations.requests import RunRequest
+from etl_craft.services.operations.requests import MarkRequest, ReconcileInput, RunRequest
 from etl_craft.services.operations.results import prepare_execution, result, selected_date
 
 
-def trigger_run(
-    ctx: OperationContext,
-    pipeline_code: str,
-    *,
-    run_date: date | None = None,
-    reason: str | None = None,
-    force: bool = False,
-    init_only: bool = False,
-    selector: RunSelector = ACTIVE_RUN,
-) -> OperationResult:
-    """Run or resume a pipeline and return its exact stored state."""
-    request = RunRequest(
-        pipeline_code, run_date=run_date, force=force, init_only=init_only, selector=selector
-    )
-    with operation(ctx, "run", {**request.arguments(), "reason": reason}):
-        return _execute(ctx, request)
-
-
-def initialize_run(
-    ctx: OperationContext,
-    pipeline_code: str,
-    *,
-    run_date: date | None = None,
-    selector: RunSelector = ACTIVE_RUN,
-) -> OperationResult:
-    """Initialize or resume a run without running its tasks."""
-    return _run_request(
-        ctx, RunRequest(pipeline_code, init_only=True, run_date=run_date, selector=selector)
-    )
-
-
-def skip_run(ctx: OperationContext, pipeline_code: str, reason: str) -> OperationResult:
-    """Create a skipped run without running any task."""
-    return _run_request(ctx, RunRequest(pipeline_code, skip=True, reason=reason))
-
-
-def mark_run(
-    ctx: OperationContext,
-    pipeline_code: str,
-    status: str,
-    reason: str,
-    *,
-    selector: RunSelector = ACTIVE_RUN,
-) -> OperationResult:
-    """Mark the selected run independently of the marked status."""
-    return mark(ctx, pipeline_code, status, reason, selector=selector)
-
-
-def stand_in_run(
-    ctx: OperationContext,
-    pipeline_code: str,
-    status: str,
-    reason: str,
-    *,
-    task_code: str | None = None,
-    rows: int | None = None,
-) -> OperationResult:
-    """Record a stand-in run and optionally its stand-in task."""
-    return mark(ctx, pipeline_code, status, reason, new_run=True, task_code=task_code, rows=rows)
-
-
-def reconcile_runs(
-    ctx: OperationContext,
-    pipeline_code: str | None = None,
-    task_code: str | None = None,
-) -> ReconciliationView:
+def reconcile_runs(ctx: OperationContext, request: ReconcileInput) -> ReconciliationView:
     """Fence expired owners, optionally within one pipeline or task."""
-    if task_code and pipeline_code is None:
-        raise UsageError("--task_code needs --pipeline_code")
-    with operation(
-        ctx,
-        "reconcile",
-        {
-            "pipeline_code": pipeline_code,
-            "task_code": task_code,
-        },
-    ):
-        with ctx.engine.connect() as conn:
-            pipeline_id = (
-                None if pipeline_code is None else resolve_pipeline_id(conn, pipeline_code)
-            )
-            task_id = (
-                resolve_task_id(conn, pipeline_id, task_code)
-                if pipeline_id is not None and task_code
-                else None
-            )
-        report = reconcile(ctx.engine, pipeline_id=pipeline_id, task_id=task_id)
-        from etl_craft.execution import control_flow
+    pipeline_code, task_code = request.pipeline_code, request.task_code
+    with ctx.engine.connect() as conn:
+        pipeline_id = None if pipeline_code is None else resolve_pipeline_id(conn, pipeline_code)
+        task_id = (
+            resolve_task_id(conn, pipeline_id, task_code)
+            if pipeline_id is not None and task_code
+            else None
+        )
+    report = reconcile(ctx.engine, pipeline_id=pipeline_id, task_id=task_id)
+    from etl_craft.execution import control_flow
 
-        control_flow.reconcile_endings(
-            ctx.engine, ctx.config, tuple(report.lost), pipeline_id=pipeline_id, task_id=task_id
-        )
-        message = (
-            f"reconcile: {len(report.lost)} attempt(s) LOST; "
-            f"{len(report.released)} run lease(s) released"
-        )
-        return ReconciliationView(tuple(report.lost), tuple(report.released), message)
+    control_flow.reconcile_endings(
+        ctx.engine, ctx.config, tuple(report.lost), pipeline_id=pipeline_id, task_id=task_id
+    )
+    message = (
+        f"reconcile: {len(report.lost)} attempt(s) LOST; "
+        f"{len(report.released)} run lease(s) released"
+    )
+    return ReconciliationView(tuple(report.lost), tuple(report.released), message)
+
+
+HOST_ONLY = ("force", "skip", "ignore_dependencies")
+"""Run options that only the controller's host can apply; the API refuses them."""
 
 
 def execute_run(ctx: OperationContext, request: RunRequest) -> OperationResult | BackfillView:
-    """Dispatch one validated request without CLI argument objects."""
-    from etl_craft.services.operations import backfills
+    """Run, resume, initialize, skip or backfill, as the validated request says.
 
+    Over HTTP a whole-pipeline run is admitted for the controller, which runs it; the options in
+    ``HOST_ONLY`` are refused there, except ``ignore_dependencies`` with ``standalone``.
+    """
+    if ctx.transport == Transport.HTTP:
+        request = _over_http(request)
     if request.backfill is not None:
-        return backfills.run_backfill(
-            ctx, request.pipeline_code, *request.backfill, request.reason or ""
-        )
-    return _run_request(ctx, request)
+        from etl_craft.services.operations import backfills
+
+        return backfills.run_backfill(ctx, request)
+    return _execute(ctx, request)
 
 
-def _run_request(ctx: OperationContext, request: RunRequest) -> OperationResult:
-    """Audit a single-run request before dispatching its execution step."""
-    with operation(ctx, "run", request.arguments()):
-        return _execute(ctx, request)
+def _over_http(request: RunRequest) -> RunRequest:
+    for option in HOST_ONLY:
+        if getattr(request, option) and not (
+            option == "ignore_dependencies" and request.standalone
+        ):
+            raise UsageError(
+                f"`{option}` works only on the controller's host; run it there, or start a run, "
+                "a backfill or a rerun over the API"
+            )
+    if request.task_code is None and request.backfill is None:
+        return replace(request, init_only=True)
+    return request
 
 
 def _execute(ctx: OperationContext, request: RunRequest) -> OperationResult:
@@ -267,91 +207,55 @@ def _manual(ctx: OperationContext, request: RunRequest, pipeline_id: int) -> Ope
     )
 
 
-def mark(
-    ctx: OperationContext,
-    pipeline_code: str,
-    status: str | None,
-    reason: str,
-    *,
-    task_code: str | None = None,
-    rows: int | None = None,
-    watermark: str | None = None,
-    stale: bool = False,
-    new_run: bool = False,
-    selector: RunSelector = ACTIVE_RUN,
-) -> OperationResult:
-    """Mark a task, a run, or a new stand-in run with one request audit."""
-    if (status is None) == (watermark is None):
-        raise UsageError("mark needs exactly one of --status or --watermark")
-    if watermark is not None and (not task_code or rows is not None or stale or new_run):
-        raise UsageError(
-            "--watermark needs --task_code, without --status, --rows, --stale or --new-run"
-        )
-    if stale and (not task_code or new_run):
-        raise UsageError("--stale marks one task: pass --task_code, without --new-run")
-    if new_run and (selector.run_id is not None or selector.run_key is not None):
-        raise UsageError("--new-run creates a stand-in run; do not pass a run selector")
-    with operation(
-        ctx,
-        "mark",
-        {
-            "pipeline_code": pipeline_code,
-            "status": status,
-            "reason": reason,
-            "task_code": task_code,
-            "rows": rows,
-            "watermark": watermark,
-            "stale": stale,
-            "new_run": new_run,
-            "run_id": selector.run_id,
-            "run_key": selector.run_key,
-        },
-    ):
-        if watermark is not None:
-            assert task_code is not None
-            done = interventions.reset_watermark(
-                ctx.engine,
-                ctx.config,
-                pipeline_code,
-                task_code,
-                watermark,
-                reason,
-                selector=selector,
-            )
-        elif new_run:
-            assert status is not None
-            done = interventions.record_stand_in_run(
-                ctx.engine,
-                ctx.config,
-                pipeline_code,
-                status,
-                reason,
-                task_code=task_code,
-                rows=rows,
-            )
-        elif task_code is not None:
-            assert status is not None
-            done = interventions.mark_task(
-                ctx.engine,
-                ctx.config,
-                pipeline_code,
-                task_code,
-                status,
-                reason,
-                rows=rows,
-                stale=stale,
-                selector=selector,
-            )
-        else:
-            assert status is not None
-            done = interventions.mark_run(
-                ctx.engine, ctx.config, pipeline_code, status, reason, selector=selector
-            )
-        return result(
-            ctx,
+def mark(ctx: OperationContext, request: MarkRequest) -> OperationResult:
+    """Mark a task, a run, or a new stand-in run, or reset a task's watermark."""
+    pipeline_code, task_code, reason = request.pipeline_code, request.task_code, request.reason
+    selector = request.selector
+    if request.watermark is not None:
+        assert task_code is not None
+        done = interventions.reset_watermark(
+            ctx.engine,
+            ctx.config,
             pipeline_code,
-            RunStatus.SUCCESS,
-            done.message,
-            pipeline_run_id=done.pipeline_run_id,
-            task_code=task_code,
+            task_code,
+            request.watermark,
+            reason,
+            selector=selector,
         )
+    elif request.new_run:
+        assert request.status is not None
+        done = interventions.record_stand_in_run(
+            ctx.engine,
+            ctx.config,
+            pipeline_code,
+            request.status,
+            reason,
+            task_code=task_code,
+            rows=request.rows,
+        )
+    elif task_code is not None:
+        assert request.status is not None
+        done = interventions.mark_task(
+            ctx.engine,
+            ctx.config,
+            pipeline_code,
+            task_code,
+            request.status,
+            reason,
+            rows=request.rows,
+            stale=request.stale,
+            selector=selector,
+        )
+    else:
+        assert request.status is not None
+        done = interventions.mark_run(
+            ctx.engine, ctx.config, pipeline_code, request.status, reason, selector=selector
+        )
+    return result(
+        ctx,
+        pipeline_code,
+        RunStatus.SUCCESS,
+        done.message,
+        pipeline_run_id=done.pipeline_run_id,
+        task_code=task_code,
+    )

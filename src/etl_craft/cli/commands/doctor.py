@@ -5,11 +5,13 @@ from __future__ import annotations
 import argparse
 from collections.abc import Sequence
 
-from etl_craft.cli.commands.common import Command, configure_output, load_command_config
+from etl_craft.cli.commands.common import Command, call, configure_output
 from etl_craft.cli.output import Output
+from etl_craft.core.enums import ActionName
 from etl_craft.core.errors import ExitCode
 from etl_craft.services.doctor import Check, Status
-from etl_craft.services.operations.diagnostics import check_configuration
+from etl_craft.services.operations.diagnostics import DoctorView
+from etl_craft.services.operations.requests import NoInput
 
 
 def report(out: Output, checks: Sequence[Check]) -> bool:
@@ -24,7 +26,8 @@ def report(out: Output, checks: Sequence[Check]) -> bool:
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    done = check_configuration(load_command_config(args))
+    done = call(args, ActionName.DOCTOR, NoInput())
+    assert isinstance(done, DoctorView)
 
     def render() -> None:
         report(out, done.checks)
@@ -38,4 +41,5 @@ COMMAND = Command(
     help="Check the configuration, secrets, connections and Engine DB; exit 1 if any check fails.",
     configure=configure_output,
     run=_run,
+    actions=(ActionName.DOCTOR,),
 )

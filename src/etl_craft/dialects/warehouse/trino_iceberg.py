@@ -13,7 +13,7 @@ from etl_craft.config.auth import warehouse_by_key
 from etl_craft.core.enums import AuthMode, FailureClass
 from etl_craft.core.errors import SqlGuardError
 from etl_craft.core.failures import Failure
-from etl_craft.dialects.failures import driver_error
+from etl_craft.dialects.failure_evidence import driver_error
 from etl_craft.dialects.warehouse.base import (
     Presented,
     ReplaceStrategy,
@@ -55,6 +55,10 @@ class TrinoIcebergWarehouse(WarehouseDialect):
 
     spec = warehouse_by_key("trino_iceberg")
     sqlglot_dialect = "trino"
+    catalog_connector_sql = (
+        "SELECT connector_name AS connector_name FROM system.metadata.catalogs "
+        "WHERE catalog_name = :name"
+    )
     replace_strategy: ReplaceStrategy = "create_or_replace"
     overwrite_uses_ctas = True
     hash_metadata_columns = (

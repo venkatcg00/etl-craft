@@ -7,11 +7,12 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from etl_craft.core.actor import Actor, ActorKind
-from etl_craft.core.enums import ApiRole, ControlAction
+from etl_craft.core.enums import ActionName, ApiRole, ControlAction
 from etl_craft.engine import controls, migrations
-from etl_craft.engine.runlog import RunSelector
 from etl_craft.services.operations import OperationContext
-from etl_craft.services.operations.controls import ControlRequest, get_control, request_control
+from etl_craft.services.operations.actions import invoke
+from etl_craft.services.operations.controls import ControlRequest
+from fixtures.actions import act
 from fixtures.metadata import add_pipeline, add_task, start_run
 from fixtures.released_schema import install
 
@@ -39,14 +40,20 @@ def test_migrating_populated_controls_preserves_requests_fences_and_immutability
         p = add_pipeline(conn, "P")
         a = add_task(conn, p, "a")
         run = start_run(conn, p)
-    held = request_control(
+    held = invoke(
         ctx,
+        ActionName.CONTROL,
         ControlRequest(
-            "P", ControlAction.HOLD, "retained reason", RunSelector(run_id=run), "a", "retained-key"
+            pipeline_code="P",
+            action=ControlAction.HOLD,
+            reason="retained reason",
+            run_id=run,
+            task_code="a",
+            request_key="retained-key",
         ),
     )
     assert migrations.apply_pending_migrations(db.engine)
-    assert get_control(ctx, held.control_id) == held
+    assert act(ctx, ActionName.CONTROL_REQUEST, control_id=held.control_id) == held
     with db.engine.connect() as conn:
         assert controls.blocked(conn, run) == {a: ControlAction.HOLD}
     with pytest.raises(DBAPIError, match="immutable"), db.engine.begin() as conn:
@@ -54,8 +61,12 @@ def test_migrating_populated_controls_preserves_requests_fences_and_immutability
             text("UPDATE AUD_CONTROL_REQUESTS SET REASON='replacement' WHERE CONTROL_ID=:id"),
             {"id": held.control_id},
         )
-    permission = request_control(
-        ctx, ControlRequest("P", ControlAction.RUN_PAUSED, "one run", RunSelector(run_id=run))
+    permission = invoke(
+        ctx,
+        ActionName.CONTROL,
+        ControlRequest(
+            pipeline_code="P", action=ControlAction.RUN_PAUSED, reason="one run", run_id=run
+        ),
     )
     assert permission.control_id > held.control_id
     assert permission.execution_run_id == run

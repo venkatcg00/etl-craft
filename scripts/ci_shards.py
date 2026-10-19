@@ -217,8 +217,17 @@ def verify(directory: Path, wheel: Path, serial: bool = False) -> list[str]:
     return problems
 
 
+SUPERVISION_MODULES = (
+    "src/etl_craft/execution/reconcile.py",
+    "src/etl_craft/controller/supervisor.py",
+    "src/etl_craft/controller/leadership.py",
+    "src/etl_craft/api/serve.py",
+)
+"""Modules that must each reach 90% coverage, beyond the project total."""
+
+
 def coverage_report(profile: str, reports: list[Path], directory: Path) -> list[str]:
-    """Combine each complete Python/platform run before enforcing its unchanged 90% gate."""
+    """Combine each complete Python/platform run, then require 90% overall and per module."""
     files = [path.parent / "coverage.data" for path in reports]
     missing = [str(path) for path in files if not path.is_file()]
     if missing:
@@ -241,7 +250,17 @@ def coverage_report(profile: str, reports: list[Path], directory: Path) -> list[
         )
         if result.returncode:
             return [f"{profile}: coverage {' '.join(arguments[:1])} failed"]
-    return []
+    problems = []
+    for module in SUPERVISION_MODULES:
+        result = subprocess.run(
+            [sys.executable, "-m", "coverage", "report", f"--include={module}", "--fail-under=90"],
+            cwd=ROOT,
+            env=env,
+            check=False,
+        )
+        if result.returncode:
+            problems.append(f"{profile}: {module} is below 90% coverage; add tests for it")
+    return problems
 
 
 def main(argv: Sequence[str] | None = None) -> int:

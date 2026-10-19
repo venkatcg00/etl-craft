@@ -23,42 +23,6 @@ from etl_craft.engine.queries import statement
 
 logger = logging.getLogger(__name__)
 
-MUTATING_COMMANDS = frozenset(
-    {
-        "login",
-        "data edit",
-        "data unlock",
-        "logout",
-        "account add",
-        "account set-role",
-        "account disable",
-        "account reset-password",
-        "token create",
-        "token revoke",
-        "run",
-        "controller",
-        "mark",
-        "stop",
-        "abort",
-        "hold",
-        "release",
-        "reconcile",
-        "upgrade-targets",
-        "rehash",
-        "pause",
-        "resume",
-        "migrate",
-        "config apply",
-        "setup",
-        "init-db",
-        "clone",
-        "generate-docs",
-        "publish-docs",
-        "docs-version",
-        "lineage",
-    }
-)
-
 
 def mask_arguments(arguments: Mapping[str, Any]) -> dict[str, Any]:
     """Mask values of sensitive names, including nested arguments, before serialization."""
@@ -137,18 +101,8 @@ def register_engine(engine: Engine) -> None:
 
 
 @contextmanager
-def command_request(command: str, arguments: Mapping[str, Any]) -> Iterator[ActionRequest | None]:
-    """Record state-changing command requests; read-only commands make no audit writes."""
-    checking = (command == "docs-version" and arguments.get("check")) or (
-        command == "rehash" and arguments.get("dry_run")
-    )
-    if command not in MUTATING_COMMANDS or checking:
-        yield None
-        return
-    existing = _request.get()
-    if existing is not None and existing.command == command and existing.actor == current_actor():
-        yield existing
-        return
+def command_request(command: str, arguments: Mapping[str, Any]) -> Iterator[ActionRequest]:
+    """Record one audited request once its Engine DB is bound, whatever its outcome."""
     request = ActionRequest(command, mask_arguments(arguments), datetime.now(UTC))
     token = _request.set(request)
     try:
@@ -160,3 +114,8 @@ def command_request(command: str, arguments: Mapping[str, Any]) -> Iterator[Acti
             logger.exception("could not record %s request in the Engine DB", command)
         finally:
             _request.reset(token)
+
+
+def current_request() -> ActionRequest | None:
+    """Return the audited request being served, for an action that records its completion."""
+    return _request.get()

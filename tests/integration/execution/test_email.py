@@ -32,7 +32,7 @@ from fixtures.services import POSTGRES_DB, POSTGRES_PASSWORD, POSTGRES_USER, req
 
 def relay_config(config, host, port):
     profile = EmailProfile(
-        "EMAIL", "dev", host, port, "etl@example.com", tls_mode="none", from_name="ETL Craft"
+        "EMAIL", "dev", host, port, "etl@example.com", tls_mode="NONE", from_name="ETL Craft"
     )
     return replace(config, email=profile)
 
@@ -174,20 +174,20 @@ def test_recipient_refusal_is_recorded_on_the_alert_attempt(
     relay = tls_relay(refused={"bad@example.com"})
     profile = engine_db.config.engine
     block = {
-        "jdbc_url": profile.jdbc_url,
-        "schema": "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main",
+        "Jdbc_url": profile.jdbc_url,
+        "Schema": "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main",
     }
-    if profile.auth_mode != "none":
-        block.update(user=profile.user, auth_mode=profile.auth_mode, secret=profile.secret_var)
+    if profile.auth_mode != "NONE":
+        block.update(User=profile.user, Auth_mode=profile.auth_mode, Secret=profile.secret_var)
     raw = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {
             "Email": {
-                "host": relay.host,
-                "port": relay.port,
-                "from_address": "etl@example.com",
-                "tls_mode": "starttls",
-                "ca_file": str(relay.ca_file),
+                "Host": relay.host,
+                "Port": relay.port,
+                "From_address": "etl@example.com",
+                "Tls_mode": "STARTTLS",
+                "Ca_file": str(relay.ca_file),
             },
         },
         "Engine": {"dev": block},
@@ -313,7 +313,7 @@ def sendmail_config(config, tmp_path, code=0):
         "",
         0,
         "etl@example.com",
-        transport="sendmail",
+        transport="SENDMAIL",
         sendmail_path=str(program),
         from_name="ETL Craft",
     )

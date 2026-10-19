@@ -32,7 +32,7 @@ def wait_until(predicate, timeout=30):
 
 
 def admitted(project):
-    assert project.run("run", "--pipeline_code", "P", "--init-only")[0] == 0
+    assert project.run("run", "--pipeline-code", "P", "--init-only")[0] == 0
     with project.engine.connect() as conn:
         run_id = conn.execute(text("SELECT PIPELINE_RUN_ID FROM AUD_PIPELINES_RUN_LOG")).scalar()
     return admit_attempt(
@@ -100,7 +100,7 @@ def test_ingestion_slots_keep_python_tasks_from_overlapping(cli_project):
     (project.config.ingestion_scripts_dir / "second.py").write_text(script)
     with project.engine.begin() as conn:
         add_task(conn, project.pipeline_id, "second", "PYTHON", SCRIPT_NAME="second.py")
-    code, output = project.run("run", "--pipeline_code", "P")
+    code, output = project.run("run", "--pipeline-code", "P")
     assert code == 0, output
     with project.engine.connect() as conn:
         spans = conn.execute(

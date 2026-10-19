@@ -166,19 +166,19 @@ def test_pipeline_releases_downstream_scripts_and_sql(world):
     from etl_craft.config import load_config
 
     raw = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {},
         "Engine": {
             "dev": {
-                "jdbc_url": config.engine.jdbc_url,
-                "schema": config.engine.schema or "main",
-                "user": config.engine.user,
-                "auth_mode": config.engine.auth_mode,
+                "Jdbc_url": config.engine.jdbc_url,
+                "Schema": config.engine.schema or "main",
+                "User": config.engine.user,
+                "Auth_mode": config.engine.auth_mode,
             }
         },
     }
     if config.engine.secret_var:
-        raw["Engine"]["dev"]["secret"] = config.engine.secret_var
+        raw["Engine"]["dev"]["Secret"] = config.engine.secret_var
     config.config_path.write_text(yaml.safe_dump(raw, sort_keys=False))
     config = load_config(config.config_path)
     with engine.begin() as conn:
@@ -410,7 +410,7 @@ def test_sql_probe_and_evidence_use_either_engine_db(world):
     config = replace(
         config,
         warehouse=ConnectionProfile(
-            "WAREHOUSE", "test", "jdbc:duckdb:warehouse.duckdb", "", "none"
+            "WAREHOUSE", "test", "jdbc:duckdb:warehouse.duckdb", "", "NONE"
         ),
     )
     result = check_event(engine, config, run, task, datetime.now(UTC))

@@ -33,7 +33,7 @@ with a project migration (etl-craft migrate)`.
    next number, such as `0012_sales_mart.sql`. Files apply in filename order, so pad the numbers
    to one width.
 2. **Try it on a development Engine DB.** `etl-craft migrate` applies it; `etl-craft validate
-   --pipeline_code SALES_MART` reports what is still wrong, and `etl-craft graph --pipeline_code
+   --pipeline-code SALES_MART` reports what is still wrong, and `etl-craft graph --pipeline-code
    SALES_MART` shows the order the tasks run in.
 3. **Review it like code**, in a pull request, with the `validate` output.
 4. **Deploy it.** The deployment job runs `migrate` and then `validate` against each Engine DB,
@@ -47,7 +47,7 @@ with a project migration (etl-craft migrate)`.
 
     `etl-craft setup` applies the project's migrations too, when it creates a new Engine DB.
 
-5. **Check what changed.** `etl-craft audit --pipeline_code SALES_MART --since 2026-11-01` lists
+5. **Check what changed.** `etl-craft audit --pipeline-code SALES_MART --since 2026-11-01` lists
    each row the upload changed, with its values before and after, and the file that changed it.
 
 ## Rules for every upload
@@ -151,7 +151,7 @@ For pipelines that differ only in a few values, such as one per region or client
 existing pipeline's rows rather than writing each out. A temporary table lists the copies and
 what differs, and `REPLACE` rewrites the values that name the original. Rewrite exact spellings
 only (`'_uk'`, `'"uk"'`), so text that merely contains the letters stays as it is. Check the
-copies with `validate`, and their values with `etl-craft audit --pipeline_code SALES_DAILY_EU`,
+copies with `validate`, and their values with `etl-craft audit --pipeline-code SALES_DAILY_EU`,
 which lists every row the upload inserted.
 
 ```sql

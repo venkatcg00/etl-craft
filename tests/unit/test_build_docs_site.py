@@ -116,7 +116,7 @@ def test_mike_subprocess_finds_tools_beside_the_running_interpreter(tmp_path, mo
 def test_release_uses_shared_api_renderer_but_its_own_source(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     (repo / "docs").mkdir(parents=True)
-    (repo / "docs" / "gen_ref_pages.py").write_text("maintained renderer")
+    (repo / "docs" / "gen_python_api.py").write_text("maintained renderer")
     calls = []
 
     def run(command, cwd, env=None):

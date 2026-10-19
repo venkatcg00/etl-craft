@@ -75,7 +75,7 @@ def set_parameter(demo: Demo, pipeline: str, task: str, name: str, value: str) -
 
 def run_clients(demo: Demo) -> None:
     for pipeline in ("CLIENT_ALPHA", "CLIENT_BETA"):
-        assert "SUCCESS" in demo.ok("run", "--pipeline_code", pipeline)
+        assert "SUCCESS" in demo.ok("run", "--pipeline-code", pipeline)
 
 
 @pytest.mark.parametrize(("installer", "engine", "warehouse"), CASES)
@@ -88,26 +88,26 @@ def test_the_demo_runs_locally(make_demo, installer, engine, warehouse):
 
     # The mart's first run: the flaky feed fails, what needs it is skipped, and the alerts run.
     run_clients(demo)
-    first = demo.run("run", "--pipeline_code", "SUPPORT_DM")
+    first = demo.run("run", "--pipeline-code", "SUPPORT_DM")
     assert first.returncode == 1, first.stderr[-3000:]
     assert "flaky_feed (FAILED)" in first.stdout
     skipped = first.stdout.split("skipped because of the failure: ", 1)[1].split("\n")[0]
     assert set(skipped.split(", ")) >= {"interactions", "setup_fact", "fact", "quality"}
     # A failed run consumes nothing, so the next one builds on the same client runs; after that
     # the mart waits for both clients to succeed again.
-    assert "SUCCESS" in demo.ok("run", "--pipeline_code", "SUPPORT_DM")
-    assert "SKIPPED" in demo.ok("run", "--pipeline_code", "SUPPORT_DM")
+    assert "SUCCESS" in demo.ok("run", "--pipeline-code", "SUPPORT_DM")
+    assert "SKIPPED" in demo.ok("run", "--pipeline-code", "SUPPORT_DM")
     run_clients(demo)
-    assert "SUCCESS" in demo.ok("run", "--pipeline_code", "SUPPORT_DM")
+    assert "SUCCESS" in demo.ok("run", "--pipeline-code", "SUPPORT_DM")
 
     # The export overruns its time limit and its SLA.
-    export = demo.run("run", "--pipeline_code", "SUPPORT_EXPORT")
+    export = demo.run("run", "--pipeline-code", "SUPPORT_EXPORT")
     assert export.returncode == 1
     assert "export (FAILED)" in export.stdout and "BREACHED" in export.stdout
     assert "timed out after 2s" in export.stderr
 
     # A backfill stopped part way is resumed, without repeating what finished.
-    running = demo.popen("run", "--pipeline_code", "SUPPORT_BACKFILL")
+    running = demo.popen("run", "--pipeline-code", "SUPPORT_BACKFILL")
     deadline = time.monotonic() + 120
     while True:
         rows = demo.engine_rows(
@@ -128,7 +128,7 @@ def test_the_demo_runs_locally(make_demo, installer, engine, warehouse):
     }
     set_parameter(demo, "SUPPORT_BACKFILL", "backfill", "INPUT_PARAMS", '{"seconds": 0}')
     assert f"pipeline_run_id={run_id} SUCCESS" in demo.ok(
-        "run", "--pipeline_code", "SUPPORT_BACKFILL"
+        "run", "--pipeline-code", "SUPPORT_BACKFILL"
     )
     assert demo.task_runs("SUPPORT_BACKFILL", run_id) == {
         "prepare": ("SUCCESS", 1),
@@ -205,14 +205,14 @@ def check_the_emails(demo: Demo, *, failed: bool, outcome: str = "SUCCESS") -> N
 
 
 def check_the_reports(demo: Demo) -> None:
-    history = demo.ok("history", "--pipeline_code", "SUPPORT_DM", "--all").splitlines()
+    history = demo.ok("history", "--pipeline-code", "SUPPORT_DM", "--all").splitlines()
     assert [line.split("\t")[1] for line in history[1:]] == [
         "SUCCESS",
         "SKIPPED",
         "SUCCESS",
         "FAILED",
     ]
-    assert "wave" in demo.ok("graph", "--pipeline_code", "SUPPORT_DM").lower()
+    assert "wave" in demo.ok("graph", "--pipeline-code", "SUPPORT_DM").lower()
     target = f"{demo.prefix}dm.support_fact"
     lineage = demo.ok("lineage", "--table", target, "--column", "rating")
     assert f"{demo.prefix}lnd.client_alpha.rating" in lineage

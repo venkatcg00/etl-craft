@@ -22,10 +22,11 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectorConfig, profile_needs_secret, resolve_secret
 from etl_craft.config.auth import EMAIL_VERIFIED_AUTH_MODES, engine_for_jdbc_url
+from etl_craft.config.loader_helpers import shown
 from etl_craft.config.model import ConnectionProfile, EmailProfile
 from etl_craft.config.resolve import resolve_named_secret, source_values
 from etl_craft.config.sizing import ceilings
-from etl_craft.core.enums import CloningScope, DeploymentProfile, GatePolicy
+from etl_craft.core.enums import CloningScope, DeploymentProfile, EmailTransport, GatePolicy
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.resources import (
     DEFAULT_POOL_SIZE,
@@ -41,7 +42,6 @@ from etl_craft.core.text import quote_identifier
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine.connection import check_reachable, engine_db
 from etl_craft.engine.migrations import pending_migrations
-from etl_craft.engine.privileges import extra_write_grants
 from etl_craft.engine.schema import existing_engine_tables
 from etl_craft.execution.connections import probe_email_relay, probe_warehouse
 from etl_craft.handlers.mail import email_tls_problem
@@ -142,8 +142,8 @@ def resource_checks(config: ConnectorConfig, host: Host | None = None) -> list[C
             ok(
                 "Deployment profile",
                 "none: slots, threads and pools come from the Orchestration settings. "
-                "Recommended: laptop, because etl-craft cannot tell whether this host is shared; "
-                "declare controller for a dedicated host. Sizes below are what laptop would apply",
+                "Recommended: LAPTOP, because etl-craft cannot tell whether this host is shared; "
+                "declare CONTROLLER for a dedicated host. Sizes below are what LAPTOP would apply",
             )
         )
     elif config.deployment == DeploymentProfile.CONTROLLER_AGENTS:
@@ -250,16 +250,16 @@ def _files(config: ConnectorConfig) -> list[Check]:
         profile = section
         for key in ("key_file", "cert_file", "private_key_file"):
             if profile.extra.get(key):
-                paths.append((f"{label} {key}", str(profile.extra[key])))
+                paths.append((f"{label} {shown(key)}", str(profile.extra[key])))
         for key, value in parse_qsl(profile.jdbc_url.partition("?")[2]):
             if key.lower() in {"sslrootcert", "sslcert", "sslkey", "private_key_file"}:
                 paths.append((f"{label} {key}", value))
     if config.email is not None:
         email = config.email
         if email.ca_file is not None:
-            paths.append(("Email ca_file", str(email.ca_file)))
-        if email.transport == "sendmail":
-            paths.append(("Email sendmail_path", email.sendmail_path))
+            paths.append(("Email Ca_file", str(email.ca_file)))
+        if email.transport == EmailTransport.SENDMAIL:
+            paths.append(("Email Sendmail_path", email.sendmail_path))
     checks = []
     for label, written in paths:
         path = Path(written)
@@ -356,27 +356,28 @@ def _engine_state(config: ConnectorConfig, engine: Engine) -> list[Check]:
             "with the Engine DB writer credentials to provision or recover one",
         )
     )
-    if engine.dialect.name == "postgresql":
-        for table, role, privilege in extra_write_grants(engine):
-            quoted_role = quote_identifier(role) if role != "PUBLIC" else role
-            schema = config.engine.schema or "public"
-            qualified = f"{quote_identifier(schema)}.{quote_identifier(table)}"
-            checks.append(
-                fail(
-                    "Engine DB write grant",
-                    f"{role} holds {privilege} on {qualified}; "
-                    f"REVOKE {privilege} ON {qualified} FROM {quoted_role};",
-                )
+    dialect = for_engine(engine)
+    with engine.connect() as conn:
+        grants = dialect.extra_write_grants(conn)
+    for table, role, privilege in grants:
+        quoted_role = quote_identifier(role) if role != "PUBLIC" else role
+        schema = config.engine.schema or "public"
+        qualified = f"{quote_identifier(schema)}.{quote_identifier(table)}"
+        checks.append(
+            fail(
+                "Engine DB write grant",
+                f"{role} holds {privilege} on {qualified}; "
+                f"REVOKE {privilege} ON {qualified} FROM {quoted_role};",
             )
-    elif engine.url.database and engine.url.database != ":memory:":
-        path = Path(engine.url.database)
-        if path.stat().st_mode & 0o022:
-            checks.append(
-                warn(
-                    "Engine DB file permissions",
-                    f"{path} is writable by group or others; restrict access with chmod go-w",
-                )
+        )
+    path = dialect.exposed_file(engine)
+    if path is not None:
+        checks.append(
+            warn(
+                "Engine DB file permissions",
+                f"{path} is writable by group or others; restrict access with chmod go-w",
             )
+        )
     return checks
 
 
@@ -450,7 +451,7 @@ def _email(config: ConnectorConfig) -> list[Check]:
     if config.email is None:
         return [ok("Email", "no Email settings: only EMAIL_ALERT tasks and SLA emails need them")]
     profile = config.email
-    if profile.transport == "sendmail":
+    if profile.transport == EmailTransport.SENDMAIL:
         problem = probe_email_relay(config)
         if problem:
             return [fail("Email", problem)]
@@ -463,7 +464,7 @@ def _email(config: ConnectorConfig) -> list[Check]:
     checks.append(
         ok(
             "Email TLS",
-            f"tls_mode={profile.tls_mode}, ca_file={profile.ca_file or 'system trust'}",
+            f"Tls_mode={profile.tls_mode}, Ca_file={profile.ca_file or 'system trust'}",
         )
     )
     problem = probe_email_relay(config)

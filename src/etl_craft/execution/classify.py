@@ -8,7 +8,7 @@ from etl_craft.config import ConnectorConfig
 from etl_craft.core.enums import FailureClass
 from etl_craft.core.errors import EtlCraftError, PermanentError, TransientError
 from etl_craft.core.failures import Failure
-from etl_craft.dialects.failures import classify
+from etl_craft.dialects.failure_evidence import classify
 from etl_craft.warehouse.connection import warehouse_dialect
 
 

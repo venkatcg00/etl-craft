@@ -1,22 +1,22 @@
 # Scheduling runs
 
 etl-craft is the orchestrator. `etl-craft run
---pipeline_code X` runs the whole pipeline by dispatching ready tasks, each task in a process of its
+--pipeline-code X` runs the whole pipeline by dispatching ready tasks, each task in a process of its
 own, at most `Orchestration.Max_parallel_tasks` at once, and checks every rule itself: run
 conditions, dependency types, and dependencies on other pipelines. Nothing else is needed but a
 way to start runs on a schedule.
 
 ## Starting runs on a schedule
 
-The [controller](server.md) reads pipeline schedules directly from metadata, with timezone
+The [controller](controller.md) reads pipeline schedules directly from metadata, with timezone
 and catch-up policies. You can also use any scheduler that runs a command. Run the commands from the project directory, or pass
 `--config`, so they find `craft-connector.yml`:
 
 ```cron
 # crontab: the clients at 05:00, the data mart after them, the catalog at 02:00
-0 5 * * *  cd /srv/etl-craft && .venv/bin/etl-craft run --pipeline_code CLIENT_ALPHA
-0 5 * * *  cd /srv/etl-craft && .venv/bin/etl-craft run --pipeline_code CLIENT_BETA
-30 5 * * * cd /srv/etl-craft && .venv/bin/etl-craft run --pipeline_code SUPPORT_DM
+0 5 * * *  cd /srv/etl-craft && .venv/bin/etl-craft run --pipeline-code CLIENT_ALPHA
+0 5 * * *  cd /srv/etl-craft && .venv/bin/etl-craft run --pipeline-code CLIENT_BETA
+30 5 * * * cd /srv/etl-craft && .venv/bin/etl-craft run --pipeline-code SUPPORT_DM
 0 2 * * *  cd /srv/etl-craft && .venv/bin/etl-craft generate-docs
 ```
 

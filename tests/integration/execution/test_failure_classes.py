@@ -6,12 +6,11 @@ import pytest
 from sqlalchemy import text
 
 from etl_craft.core.actor import current_actor
-from etl_craft.core.enums import ApiRole, FailureClass, RetryOn, RunStatus
+from etl_craft.core.enums import ActionName, ApiRole, FailureClass, RetryOn, RunStatus
 from etl_craft.engine.repository.catalog import fetch_task_runs
-from etl_craft.engine.runlog import RunSelector
 from etl_craft.execution.pipeline import run_pipeline
 from etl_craft.services.operations.context import OperationContext
-from etl_craft.services.operations.status import explain_task, pipeline_status
+from fixtures.actions import act
 from fixtures.metadata import add_pipeline, add_task
 from integration.execution.test_pipeline import config as config
 
@@ -78,13 +77,13 @@ def test_script_failure_policy_and_historical_explanation(
     ctx = OperationContext(
         engine, replace(config, retry_on=RetryOn.NONE), current_actor(), role=ApiRole.VIEWER
     )
-    selector = RunSelector(run_id=outcome.pipeline_run_id)
-    explanation = explain_task(ctx, "P", "load", selector=selector)
+    run_id = outcome.pipeline_run_id
+    explanation = act(ctx, ActionName.EXPLAIN, pipeline_code="P", task_code="load", run_id=run_id)
     reason = explanation.task.attempts[0].retry_reason
     assert f"{kind}: {exception}" in reason
     assert f"RETRY_ON={policy}" in reason
     assert reason in history.failure_reasons[0]
-    status_view = pipeline_status(ctx, "P", selector=selector)
+    status_view = act(ctx, ActionName.STATUS, pipeline_code="P", run_id=run_id)
     assert status_view.tasks[0].explanation.task.attempts[0].retry_reason == reason
 
 

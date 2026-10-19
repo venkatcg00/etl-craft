@@ -31,18 +31,18 @@ def restore_logger():
 def write_config(engine_db, root, cloning):
     profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
-    block = {"jdbc_url": profile.jdbc_url, "schema": schema}
-    if profile.auth_mode != "none":
+    block = {"Jdbc_url": profile.jdbc_url, "Schema": schema}
+    if profile.auth_mode != "NONE":
         block |= {
-            "user": profile.user,
-            "auth_mode": profile.auth_mode,
-            "secret": profile.secret_var,
+            "User": profile.user,
+            "Auth_mode": profile.auth_mode,
+            "Secret": profile.secret_var,
         }
     raw = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {},
         "Engine": {"dev": block},
-        "Warehouse": {"dev": {"jdbc_url": "jdbc:duckdb:analytics.duckdb", "schema": "main"}},
+        "Warehouse": {"dev": {"Jdbc_url": "jdbc:duckdb:analytics.duckdb", "Schema": "main"}},
         "Cloning": {"dev": cloning},
     }
     (root / "craft-connector.yml").write_text(yaml.safe_dump(raw, sort_keys=False), "utf-8")
@@ -64,7 +64,7 @@ def project(engine_db, tmp_path, monkeypatch):
 
 
 def test_the_command_copies_the_scope_and_says_what_it_did(engine_db, project, capsys):
-    write_config(engine_db, project, {"Enabled": True, "Scope": "cfg"})
+    write_config(engine_db, project, {"Enabled": True, "Scope": "CFG"})
     assert main(["clone"]) == ExitCode.SUCCESS
     lines = capsys.readouterr().out.splitlines()
     assert "CFG_PIPELINES\tanalytics.main.CFG_PIPELINES\t1\tcreated" in lines
@@ -77,7 +77,7 @@ def test_the_command_copies_the_scope_and_says_what_it_did(engine_db, project, c
 
 
 @pytest.mark.parametrize(
-    "cloning", [{"Enabled": False, "Scope": "all"}, {"Enabled": True, "Scope": "none"}]
+    "cloning", [{"Enabled": False, "Scope": "ALL"}, {"Enabled": True, "Scope": "NONE"}]
 )
 def test_the_command_says_when_cloning_is_off(engine_db, project, capsys, cloning):
     write_config(engine_db, project, cloning)

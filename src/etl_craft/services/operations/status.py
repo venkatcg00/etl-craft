@@ -9,8 +9,14 @@ from typing import ClassVar
 
 from sqlalchemy.engine import Connection, RowMapping
 
-from etl_craft.core.actor import acting_as
-from etl_craft.core.enums import AttemptStatus, GatePolicy, RunStatus
+from etl_craft.core.enums import (
+    ADMITTED_OUTCOMES,
+    AttemptStatus,
+    GatePolicy,
+    RunCondition,
+    RunStatus,
+    WaitKind,
+)
 from etl_craft.core.graph import DependencyGraph, RunState, TaskRunState, build_graph
 from etl_craft.core.time import as_utc, elapsed_seconds
 from etl_craft.engine import runlog
@@ -28,7 +34,7 @@ from etl_craft.execution.gates import judge, satisfies
 from etl_craft.execution.readiness import BACKFILL_ASSUMED
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.models import PipelineView, RunView, TaskRunView
-from etl_craft.services.operations.permissions import authorize
+from etl_craft.services.operations.requests import RunSelection, TaskSelection
 from etl_craft.services.operations.snapshots import (
     pipeline_view,
     run_view,
@@ -63,7 +69,7 @@ class GateWaitView:
     next_check_at: datetime | None
     looks: int
     wait_until: datetime | None
-    wait_kind: str = "DEPENDENCY"
+    wait_kind: WaitKind = WaitKind.DEPENDENCY
 
 
 @dataclass(frozen=True)
@@ -135,7 +141,7 @@ def explain(snapshot: TaskSnapshot) -> Explanation:
             "blocked by failure",
             "Repair or retry the failed upstream to satisfy the dependencies.",
         )
-    elif any(w.wait_kind == "EVENT" and w.next_check_at for w in snapshot.gate_waits):
+    elif any(w.wait_kind == WaitKind.EVENT and w.next_check_at for w in snapshot.gate_waits):
         state, action = "waiting on an event", "Wait for the configured file or warehouse row."
     elif (
         met < snapshot.required_count
@@ -230,7 +236,7 @@ def _snapshots(
             timestamp(r.next_check_at),
             r.looks,
             timestamp(r.wait_until),
-            r.wait_kind,
+            WaitKind(r.wait_kind),
         )
         for r in conn.execute(
             statement(conn, "inspection_gate_waits"), {"pipeline_run_id": run.pipeline_run_id}
@@ -249,7 +255,7 @@ def _snapshots(
                     edge.depends_on_pipeline_code,
                     edge.dependency_type,
                     d["upstream_status"],
-                    d["result"] in {"SATISFIED", "BYPASSED"},
+                    d["result"] in ADMITTED_OUTCOMES,
                     d["reason"],
                     selected_pipeline_run_id=d["selected_pipeline_run_id"],
                     selected_revision=d["selected_revision"],
@@ -309,7 +315,7 @@ def _snapshots(
                 definition.task_id,
                 definition.task_code,
                 task,
-                definition.run_condition or "ALL",
+                definition.run_condition or RunCondition.ALL,
                 graph.required_edge_count(definition.task_id),
                 dependencies,
                 tuple(pipeline_dependencies),
@@ -363,7 +369,7 @@ def _dependencies(
                     cross.depends_on_label,
                     cross.dependency_type,
                     d["upstream_status"],
-                    d["result"] in {"SATISFIED", "BYPASSED"},
+                    d["result"] in ADMITTED_OUTCOMES,
                     d["reason"],
                     cross.task_dependency_id,
                     d["selected_pipeline_run_id"],
@@ -412,12 +418,10 @@ def _dependencies(
     return tuple(found)
 
 
-def pipeline_status(
-    ctx: OperationContext, pipeline_code: str, *, selector: runlog.RunSelector = runlog.ACTIVE_RUN
-) -> StatusView:
+def pipeline_status(ctx: OperationContext, request: RunSelection) -> StatusView:
     """Inspect an exact run; never reconcile or resolve it by recency."""
-    authorize(ctx, "status")
-    with acting_as(ctx.actor), read_snapshot(ctx.engine) as conn:
+    pipeline_code, selector = request.pipeline_code, request.selector
+    with read_snapshot(ctx.engine) as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         snapshots = _snapshots(conn, pipeline_id, selector, ctx.config.dependency_gates)
         selected = runlog.select_run(conn, pipeline_id, selector)
@@ -454,16 +458,10 @@ def pipeline_status(
     )
 
 
-def explain_task(
-    ctx: OperationContext,
-    pipeline_code: str,
-    task_code: str,
-    *,
-    selector: runlog.RunSelector = runlog.ACTIVE_RUN,
-) -> Explanation:
+def explain_task(ctx: OperationContext, request: TaskSelection) -> Explanation:
     """Capture the selected task's state and explain it without modifying the run."""
-    authorize(ctx, "explain")
-    with acting_as(ctx.actor), read_snapshot(ctx.engine) as conn:
+    pipeline_code, task_code, selector = request.pipeline_code, request.task_code, request.selector
+    with read_snapshot(ctx.engine) as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         resolve_task_id(conn, pipeline_id, task_code)
         snapshots = _snapshots(conn, pipeline_id, selector, ctx.config.dependency_gates, task_code)

@@ -13,9 +13,9 @@ from etl_craft.config import load_config
 from etl_craft.core.errors import ExitCode, UsageError
 from etl_craft.engine import runlog, transitions
 from etl_craft.execution.interventions import mark_task
-from etl_craft.services.catalog import build_catalog
-from etl_craft.services.catalog_graph import lineage_drawing
-from etl_craft.services.catalog_site import MARKER, table_url, write_site
+from etl_craft.services.catalog.collect import build_catalog
+from etl_craft.services.catalog.graph import lineage_drawing
+from etl_craft.services.catalog.site import MARKER, table_url, write_site
 from fixtures.auth import service_token
 from fixtures.metadata import (
     add_dependency,
@@ -44,19 +44,19 @@ def project(engine_db, tmp_path, monkeypatch):
     """crm → raw.orders (script) → staging.orders → sales.orders → mart.daily, plus gaps."""
     profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
-    block = {"jdbc_url": profile.jdbc_url, "schema": schema}
-    if profile.auth_mode != "none":
+    block = {"Jdbc_url": profile.jdbc_url, "Schema": schema}
+    if profile.auth_mode != "NONE":
         block |= {
-            "user": profile.user,
-            "auth_mode": profile.auth_mode,
-            "secret": profile.secret_var,
+            "User": profile.user,
+            "Auth_mode": profile.auth_mode,
+            "Secret": profile.secret_var,
         }
     root = (engine_db.config.config_path or tmp_path / "craft-connector.yml").parent
     raw = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {},
         "Engine": {"dev": block},
-        "Warehouse": {"dev": {"jdbc_url": "jdbc:duckdb:analytics.duckdb", "schema": "main"}},
+        "Warehouse": {"dev": {"Jdbc_url": "jdbc:duckdb:analytics.duckdb", "Schema": "main"}},
     }
     (root / "craft-connector.yml").write_text(yaml.safe_dump(raw, sort_keys=False), "utf-8")
     (root / "sql_files").mkdir(exist_ok=True)
@@ -379,7 +379,7 @@ def test_gap_snapshot_and_rows_show_both_directions_and_types(project, tmp_path)
 
 
 def test_offline_gap_pages_never_claim_checked_or_missing(project, tmp_path, monkeypatch):
-    from etl_craft.services import catalog as catalog_service
+    from etl_craft.services.catalog import collect as catalog_service
 
     def forbidden(*args, **kwargs):
         pytest.fail("offline generation opened the warehouse")
@@ -403,7 +403,7 @@ def test_offline_gap_pages_never_claim_checked_or_missing(project, tmp_path, mon
 def test_failed_comparison_is_unavailable_in_summary_and_table(project, tmp_path, monkeypatch):
     from sqlalchemy.exc import SQLAlchemyError
 
-    from etl_craft.services import catalog as catalog_service
+    from etl_craft.services.catalog import collect as catalog_service
 
     def inaccessible(*args, **kwargs):
         raise SQLAlchemyError("metadata access denied")
@@ -504,7 +504,7 @@ def test_graph_column_warnings_do_not_spread_to_other_columns(project):
 
     import duckdb
 
-    from etl_craft.services.catalog_graph import render_svg
+    from etl_craft.services.catalog.graph import render_svg
 
     engine, config, root = project
     with duckdb.connect(str(root / "analytics.duckdb")) as conn:

@@ -38,27 +38,27 @@ SECRET_AUTH_MODES = frozenset({AuthMode.PASSWORD, AuthMode.TOKEN, AuthMode.OAUTH
 
 POSTGRES_AUTH_FIELDS: AuthFields = {
     # A password.
-    "password": ("user", "secret"),
+    AuthMode.PASSWORD: ("user", "secret"),
     # A client certificate: key_file (and cert_file); secret, when named, is the key's
     # passphrase, and a key without one is used as it is.
-    "key_file": ("user", "key_file"),
+    AuthMode.KEY_FILE: ("user", "key_file"),
     # A stored bearer token presented as the password, such as a pre-issued Entra ID token.
-    "token": ("user", "secret"),
+    AuthMode.TOKEN: ("user", "secret"),
     # A token minted per connection by a client-credentials grant, presented as the password.
-    "oauth": ("user", "client_id", "secret", "token_url"),
+    AuthMode.OAUTH: ("user", "client_id", "secret", "token_url"),
     # libpq's OAuth device flow: someone completes the login, so it suits interactive use.
-    "sso": ("user", "issuer", "client_id"),
+    AuthMode.SSO: ("user", "issuer", "client_id"),
     # An AWS RDS or Aurora IAM auth token, optionally as an assumed role.
-    "sts": ("user", "region"),
+    AuthMode.STS: ("user", "region"),
 }
 
 EMAIL_AUTH_FIELDS: AuthFields = {
-    "none": (),
-    "password": ("user", "secret"),
+    AuthMode.NONE: (),
+    AuthMode.PASSWORD: ("user", "secret"),
     # SMTP XOAUTH2 with a client-credentials access token (Microsoft 365, Google).
-    "oauth": ("user", "client_id", "secret", "token_url"),
+    AuthMode.OAUTH: ("user", "client_id", "secret", "token_url"),
 }
-EMAIL_VERIFIED_AUTH_MODES = frozenset({"none", "password"})
+EMAIL_VERIFIED_AUTH_MODES = frozenset({AuthMode.NONE, AuthMode.PASSWORD})
 
 
 @dataclass(frozen=True)
@@ -85,15 +85,15 @@ ENGINES: tuple[EngineSpec, ...] = (
         display_name="PostgreSQL",
         jdbc_prefix="jdbc:postgresql:",
         auth_fields=POSTGRES_AUTH_FIELDS,
-        verified_auth_modes=frozenset({"password", "key_file"}),
+        verified_auth_modes=frozenset({AuthMode.PASSWORD, AuthMode.KEY_FILE}),
         shared_by_hosts=True,
     ),
     EngineSpec(
         name="sqlite",
         display_name="SQLite",
         jdbc_prefix="jdbc:sqlite:",
-        auth_fields={"none": ()},
-        verified_auth_modes=frozenset({"none"}),
+        auth_fields={AuthMode.NONE: ()},
+        verified_auth_modes=frozenset({AuthMode.NONE}),
     ),
 )
 
@@ -152,25 +152,25 @@ _DUCKDB_ICEBERG_PROFILE_FIELDS = (
 )
 
 _DATABRICKS_AUTH_FIELDS: AuthFields = {
-    "token": ("secret",),
+    AuthMode.TOKEN: ("secret",),
     # An OAuth machine-to-machine grant for a service principal.
-    "oauth": ("client_id", "secret"),
+    AuthMode.OAUTH: ("client_id", "secret"),
     # The connector's browser login: interactive only.
-    "sso": (),
+    AuthMode.SSO: (),
 }
 
 _SNOWFLAKE_AUTH_FIELDS: AuthFields = {
-    "password": ("user", "secret"),
+    AuthMode.PASSWORD: ("user", "secret"),
     # A programmatic access token.
-    "token": ("user", "secret"),
+    AuthMode.TOKEN: ("user", "secret"),
     # Key-pair login: key_file is the private key; secret, when named, its passphrase.
-    "key_file": ("user", "key_file"),
+    AuthMode.KEY_FILE: ("user", "key_file"),
     # The connector's own client-credentials flow.
-    "oauth": ("client_id", "secret", "token_url"),
+    AuthMode.OAUTH: ("client_id", "secret", "token_url"),
     # The external browser login: interactive only.
-    "sso": ("user",),
+    AuthMode.SSO: ("user",),
     # Workload identity through the ambient AWS identity: no stored secret.
-    "sts": (),
+    AuthMode.STS: (),
 }
 
 WAREHOUSES: tuple[WarehouseSpec, ...] = (
@@ -180,15 +180,15 @@ WAREHOUSES: tuple[WarehouseSpec, ...] = (
         sqlalchemy_name="postgresql",
         table_format=TableFormat.NATIVE,
         auth_fields=POSTGRES_AUTH_FIELDS,
-        verified_auth_modes=frozenset({"password", "key_file"}),
+        verified_auth_modes=frozenset({AuthMode.PASSWORD, AuthMode.KEY_FILE}),
     ),
     WarehouseSpec(
         key="duckdb",
         display_name="DuckDB",
         sqlalchemy_name="duckdb",
         table_format=TableFormat.NATIVE,
-        auth_fields={"none": ()},
-        verified_auth_modes=frozenset({"none"}),
+        auth_fields={AuthMode.NONE: ()},
+        verified_auth_modes=frozenset({AuthMode.NONE}),
         per_task_format=False,
     ),
     WarehouseSpec(
@@ -198,11 +198,11 @@ WAREHOUSES: tuple[WarehouseSpec, ...] = (
         table_format=TableFormat.ICEBERG,
         # How DuckDB authenticates to the REST catalog; object storage has its own s3_* fields.
         auth_fields={
-            "none": (),
-            "token": ("secret",),
-            "oauth": ("client_id", "secret", "token_url"),
+            AuthMode.NONE: (),
+            AuthMode.TOKEN: ("secret",),
+            AuthMode.OAUTH: ("client_id", "secret", "token_url"),
         },
-        verified_auth_modes=frozenset({"none", "oauth"}),
+        verified_auth_modes=frozenset({AuthMode.NONE, AuthMode.OAUTH}),
         profile_fields=_DUCKDB_ICEBERG_PROFILE_FIELDS,
         per_task_format=False,
     ),
@@ -212,16 +212,16 @@ WAREHOUSES: tuple[WarehouseSpec, ...] = (
         sqlalchemy_name="trino",
         table_format=TableFormat.ICEBERG,
         auth_fields={
-            "none": (),
-            "password": ("user", "secret"),
-            "token": ("secret",),
-            "oauth": ("client_id", "secret", "token_url"),
+            AuthMode.NONE: (),
+            AuthMode.PASSWORD: ("user", "secret"),
+            AuthMode.TOKEN: ("secret",),
+            AuthMode.OAUTH: ("client_id", "secret", "token_url"),
             # The cluster's OAuth 2.0 browser redirect: interactive only.
-            "sso": (),
+            AuthMode.SSO: (),
             # A client certificate; Trino's client takes no key passphrase.
-            "key_file": ("key_file", "cert_file"),
+            AuthMode.KEY_FILE: ("key_file", "cert_file"),
         },
-        verified_auth_modes=frozenset({"none"}),
+        verified_auth_modes=frozenset({AuthMode.NONE}),
         per_task_format=False,
     ),
     WarehouseSpec(
@@ -230,7 +230,7 @@ WAREHOUSES: tuple[WarehouseSpec, ...] = (
         sqlalchemy_name="databricks",
         table_format=TableFormat.NATIVE,
         auth_fields=_DATABRICKS_AUTH_FIELDS,
-        verified_auth_modes=frozenset({"token"}),
+        verified_auth_modes=frozenset({AuthMode.TOKEN}),
         preferred_fields=("jdbc_url", "catalog", "schema", "token"),
     ),
     WarehouseSpec(
@@ -239,7 +239,7 @@ WAREHOUSES: tuple[WarehouseSpec, ...] = (
         sqlalchemy_name="databricks",
         table_format=TableFormat.ICEBERG,
         auth_fields=_DATABRICKS_AUTH_FIELDS,
-        verified_auth_modes=frozenset({"token"}),
+        verified_auth_modes=frozenset({AuthMode.TOKEN}),
         preferred_fields=("jdbc_url", "catalog", "schema", "token"),
     ),
     WarehouseSpec(
@@ -248,7 +248,7 @@ WAREHOUSES: tuple[WarehouseSpec, ...] = (
         sqlalchemy_name="snowflake",
         table_format=TableFormat.NATIVE,
         auth_fields=_SNOWFLAKE_AUTH_FIELDS,
-        verified_auth_modes=frozenset({"password", "token"}),
+        verified_auth_modes=frozenset({AuthMode.PASSWORD, AuthMode.TOKEN}),
         preferred_fields=("user", "account", "database", "schema", "warehouse", "role", "token"),
     ),
     WarehouseSpec(
@@ -257,7 +257,7 @@ WAREHOUSES: tuple[WarehouseSpec, ...] = (
         sqlalchemy_name="snowflake",
         table_format=TableFormat.ICEBERG,
         auth_fields=_SNOWFLAKE_AUTH_FIELDS,
-        verified_auth_modes=frozenset({"password", "token"}),
+        verified_auth_modes=frozenset({AuthMode.PASSWORD, AuthMode.TOKEN}),
         preferred_fields=("user", "account", "database", "schema", "warehouse", "role", "token"),
     ),
 )

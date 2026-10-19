@@ -6,38 +6,27 @@ import argparse
 
 from etl_craft.cli.commands.common import (
     Command,
-    command_context,
+    call,
     configure_output,
     configure_run_selector,
+    request_from,
 )
 from etl_craft.cli.output import Output
-from etl_craft.cli.remote import ServerClient, api_path, selector_query
-from etl_craft.engine.runlog import RunSelector
-from etl_craft.services.operations.status import Explanation, explain_task
+from etl_craft.core.enums import ActionName
+from etl_craft.services.operations.requests import TaskSelection
+from etl_craft.services.operations.status import Explanation
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
     configure_output(parser)
     configure_run_selector(parser)
-    parser.add_argument("--pipeline_code", required=True)
-    parser.add_argument("--task_code", required=True)
+    parser.add_argument("--pipeline-code", required=True)
+    parser.add_argument("--task-code", required=True)
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    with command_context(args) as ctx:
-        done = explain_task(
-            ctx, args.pipeline_code, args.task_code, selector=RunSelector(args.run_id, args.run_key)
-        )
-    return _render(args, out, done)
-
-
-def _remote(args: argparse.Namespace, out: Output, server: ServerClient) -> int:
-    done = server.call(
-        "GET",
-        api_path("pipelines", args.pipeline_code, "tasks", args.task_code, "explain"),
-        Explanation,
-        query=selector_query(args),
-    )
+    done = call(args, ActionName.EXPLAIN, request_from(args, TaskSelection))
+    assert isinstance(done, Explanation)
     return _render(args, out, done)
 
 
@@ -86,5 +75,5 @@ COMMAND = Command(
     "Explain the selected task's state and what would let it run.",
     run=_run,
     configure=_configure,
-    remote=_remote,
+    actions=(ActionName.EXPLAIN,),
 )

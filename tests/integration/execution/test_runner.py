@@ -1,4 +1,4 @@
-"""``run --task_code`` end to end: real task processes against a real Engine DB, both dialects."""
+"""``run --task-code`` end to end: real task processes against a real Engine DB, both dialects."""
 
 import logging
 from pathlib import Path
@@ -17,7 +17,7 @@ from etl_craft.core.errors import (
     RunStateError,
 )
 from etl_craft.engine import runlog, transitions
-from etl_craft.execution import runner, supervisor
+from etl_craft.execution import processes, runner
 from etl_craft.execution.attempt_types import ChildOptions
 from etl_craft.execution.gates import CrossPipelineCheck
 from etl_craft.execution.runner import run_task
@@ -46,15 +46,15 @@ def project(engine_db, tmp_path):
     """A craft-connector.yml for the test Engine DB, and a pipeline P with tasks."""
     profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
-    block = {"jdbc_url": profile.jdbc_url, "schema": schema}
-    if profile.auth_mode != "none":
+    block = {"Jdbc_url": profile.jdbc_url, "Schema": schema}
+    if profile.auth_mode != "NONE":
         block |= {
-            "user": profile.user,
-            "auth_mode": profile.auth_mode,
-            "secret": profile.secret_var,
+            "User": profile.user,
+            "Auth_mode": profile.auth_mode,
+            "Secret": profile.secret_var,
         }
     raw = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {"Task_timeout_seconds": 60},
         "Engine": {"dev": block},
     }
@@ -362,7 +362,7 @@ def test_a_task_process_that_cannot_start_is_recorded_failed(project, monkeypatc
 
 def test_a_log_disk_without_room_fails_the_attempt_before_its_process_starts(project, monkeypatch):
     engine, config, ids = project
-    monkeypatch.setattr(supervisor, "MIN_FREE_LOG_BYTES", 2**62)
+    monkeypatch.setattr(processes, "MIN_FREE_LOG_BYTES", 2**62)
     with pytest.raises(ConfigurationError, match="MiB free; a task needs at least"):
         run(project, "ok")
     with engine.connect() as conn:

@@ -52,7 +52,6 @@ def check_reachable(engine: Engine, schema: str = "") -> None:
 def read_snapshot(engine: Engine) -> Iterator[Connection]:
     """Read related views in one stable transaction, including concurrent PostgreSQL writes."""
     with engine.connect() as conn:
-        if engine.dialect.name == "postgresql":
-            conn = conn.execution_options(isolation_level="REPEATABLE READ")
+        conn = for_engine(engine).snapshot(conn)
         with conn.begin():
             yield conn

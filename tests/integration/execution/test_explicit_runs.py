@@ -17,7 +17,7 @@ def test_mark_refuses_ambiguous_runs_and_lists_their_identity(cli_project):
         first = transitions.create_run(conn, project.pipeline_id, SYSTEM_ACTOR, run_key="first")
         second = transitions.create_run(conn, project.pipeline_id, SYSTEM_ACTOR, run_key="second")
     code, output = project.run(
-        "mark", "--pipeline_code", "P", "--status", "FAILED", "--reason", "repair"
+        "mark", "--pipeline-code", "P", "--status", "FAILED", "--reason", "repair"
     )
     assert code == 9, output
     for run_id, key in [(first, "first"), (second, "second")]:
@@ -36,7 +36,7 @@ def test_an_id_from_another_pipeline_is_refused(cli_project):
         other = add_pipeline(conn, "OTHER")
         foreign = transitions.create_run(conn, other, SYSTEM_ACTOR, run_key="foreign")
     for command, arguments in [
-        ("run", ["--task_code", "load"]),
+        ("run", ["--task-code", "load"]),
         ("run", ["--init-only"]),
         ("mark", ["--status", "FAILED", "--reason", "repair"]),
         ("abort", ["--reason", "repair"]),
@@ -44,7 +44,7 @@ def test_an_id_from_another_pipeline_is_refused(cli_project):
         ("steps", []),
     ]:
         code, output = project.run(
-            command, "--pipeline_code", "P", "--run-id", str(foreign), *arguments
+            command, "--pipeline-code", "P", "--run-id", str(foreign), *arguments
         )
         assert code == 9, output
         assert "matched 0 runs" in output
@@ -79,12 +79,12 @@ def test_a_mismatched_logical_date_refuses_before_reopening(cli_project):
     project = cli_project
     for step in [()]:
         code, output = project.run(
-            "run", "--pipeline_code", "P", *step, "--run-key", "dated", "--run-date", "2026-09-01"
+            "run", "--pipeline-code", "P", *step, "--run-key", "dated", "--run-date", "2026-09-01"
         )
         assert code == 0, output
-    for step in [("--init-only",), ("--task_code", "load"), ()]:
+    for step in [("--init-only",), ("--task-code", "load"), ()]:
         code, output = project.run(
-            "run", "--pipeline_code", "P", *step, "--run-key", "dated", "--run-date", "2026-09-02"
+            "run", "--pipeline-code", "P", *step, "--run-key", "dated", "--run-date", "2026-09-02"
         )
         assert code != 0 and "date cannot change" in output
     with project.engine.connect() as conn:

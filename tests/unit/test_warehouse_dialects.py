@@ -35,9 +35,9 @@ def config_for(
 ):
     return parse_config(
         {
-            "Secrets": {"Source_type": "environment"},
+            "Secrets": {"Source_type": "ENVIRONMENT"},
             "Orchestration": {},
-            "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:e.db", "schema": "main"}},
+            "Engine": {"dev": {"Jdbc_url": "jdbc:sqlite:e.db", "Schema": "main"}},
             "Warehouse": {
                 **(
                     {"Name": "DuckDB"}
@@ -46,21 +46,21 @@ def config_for(
                 ),
                 "Table_format": table_format,
                 "dev": {
-                    "jdbc_url": warehouse_profile.jdbc_url,
-                    "user": warehouse_profile.user,
-                    "auth_mode": warehouse_profile.auth_mode,
-                    "secret": warehouse_profile.extra.get(
+                    "Jdbc_url": warehouse_profile.jdbc_url,
+                    "User": warehouse_profile.user,
+                    "Auth_mode": warehouse_profile.auth_mode,
+                    "Secret": warehouse_profile.extra.get(
                         "secret_var", "ETL_CRAFT_DIALECT_TEST_SECRET"
                     ),
                     **(
-                        {"catalog": "iceberg"}
+                        {"Catalog": "iceberg"}
                         if table_format == TableFormat.ICEBERG
                         and warehouse_profile.jdbc_url.startswith("jdbc:duckdb:")
                         else {}
                     ),
-                    "schema": "analytics" if warehouse_profile.jdbc_url == TRINO else "main",
+                    "Schema": "analytics" if warehouse_profile.jdbc_url == TRINO else "main",
                     **{
-                        key: value
+                        key[:1].upper() + key[1:]: value
                         for key, value in warehouse_profile.extra.items()
                         if key != "secret_var"
                     },
@@ -116,14 +116,14 @@ def connect(auth_mode, jdbc_url, secret="", table_format=TableFormat.NATIVE, **k
 @pytest.mark.parametrize(
     ("name", "table_format", "key"),
     [
-        ("postgresql+psycopg", "native", "postgres"),
-        ("duckdb", "native", "duckdb"),
-        ("duckdb", "iceberg", "duckdb_iceberg"),
-        ("trino", "native", "trino_iceberg"),
-        ("databricks", "native", "databricks"),
-        ("databricks", "iceberg", "databricks_iceberg"),
-        ("snowflake", "native", "snowflake"),
-        ("snowflake", "iceberg", "snowflake_iceberg"),
+        ("postgresql+psycopg", "NATIVE", "postgres"),
+        ("duckdb", "NATIVE", "duckdb"),
+        ("duckdb", "ICEBERG", "duckdb_iceberg"),
+        ("trino", "NATIVE", "trino_iceberg"),
+        ("databricks", "NATIVE", "databricks"),
+        ("databricks", "ICEBERG", "databricks_iceberg"),
+        ("snowflake", "NATIVE", "snowflake"),
+        ("snowflake", "ICEBERG", "snowflake_iceberg"),
     ],
 )
 def test_resolve(name, table_format, key):
@@ -134,12 +134,12 @@ def test_a_database_without_a_dialect_is_refused_naming_the_supported_ones():
     with pytest.raises(
         ConfigurationError, match=r"'oracle' is not a supported warehouse; .*DuckDB"
     ):
-        resolve("oracle", "native")
+        resolve("oracle", "NATIVE")
 
 
 def test_postgres_has_no_iceberg_dialect():
     with pytest.raises(ConfigurationError, match="always native"):
-        resolve("postgresql", "iceberg")
+        resolve("postgresql", "ICEBERG")
 
 
 def test_every_dialect_is_registered_once_with_its_spec():
@@ -329,10 +329,10 @@ def test_snowflake_iceberg_mirrors_need_both_cloning_settings():
 @pytest.mark.parametrize(
     ("warehouse", "error"),
     [
-        (profile("key_file", "jdbc:duckdb:w.duckdb", key_file="k"), "DuckDB warehouse takes"),
-        (profile("key_file", SNOWFLAKE), "needs key_file"),
-        (profile("sts", POSTGRES), "needs region"),
-        (profile("token", POSTGRES, user=""), "needs user"),
+        (profile("KEY_FILE", "jdbc:duckdb:w.duckdb", key_file="k"), "DuckDB warehouse takes"),
+        (profile("KEY_FILE", SNOWFLAKE), "needs Key_file"),
+        (profile("STS", POSTGRES), "needs Region"),
+        (profile("TOKEN", POSTGRES, user=""), "needs User"),
     ],
 )
 def test_config_refuses_modes_and_missing_auth_fields(tmp_path, warehouse, error):
@@ -343,29 +343,29 @@ def test_config_refuses_modes_and_missing_auth_fields(tmp_path, warehouse, error
 def test_an_unsupported_mode_is_refused_when_presenting():
     duckdb = "jdbc:duckdb:w.duckdb"
     with pytest.raises(ConfigurationError, match="not available for a DuckDB warehouse"):
-        resolve("duckdb", "native").present(profile("sso", duckdb), "", parse_warehouse_url(duckdb))
+        resolve("duckdb", "NATIVE").present(profile("SSO", duckdb), "", parse_warehouse_url(duckdb))
     with pytest.raises(ConfigurationError, match="needs a `user`"):
-        resolve("postgresql", "native").present_bearer("t", None)
+        resolve("postgresql", "NATIVE").present_bearer("t", None)
 
 
 # What each connection hands the driver
 
 
 def test_a_databricks_token_is_sent_as_the_literal_user_token(captured):
-    connect("token", DATABRICKS + ";ConnCatalog=main", "dapi-secret", user="")
+    connect("TOKEN", DATABRICKS + ";ConnCatalog=main", "dapi-secret", user="")
     url = captured["url"]
     assert (url.drivername, url.username, url.password) == ("databricks", "token", "dapi-secret")
     assert url.query["http_path"] == "/sql/1.0/w/1"
 
 
 def test_the_postgres_warehouse_authenticates_like_the_engine_db(captured, minted):
-    connect("oauth", POSTGRES, "csecret", client_id="cid", token_url="https://idp/token")
+    connect("OAUTH", POSTGRES, "csecret", client_id="cid", token_url="https://idp/token")
     assert captured["args"] == {"password": "access-token-1"}
     assert captured["url"].password is None
-    connect("key_file", POSTGRES, "pp", key_file="/k.pem", cert_file="/c.pem")
+    connect("KEY_FILE", POSTGRES, "pp", key_file="/k.pem", cert_file="/c.pem")
     assert captured["args"] == {"sslkey": "/k.pem", "sslpassword": "pp", "sslcert": "/c.pem"}
     # sslmode is in the URL's query, so an sts token's default does not override it.
-    connect("password", POSTGRES, "pw")
+    connect("PASSWORD", POSTGRES, "pw")
     assert captured["args"] == {"password": "pw"}
 
 
@@ -379,9 +379,9 @@ def trino_auth(url: URL):
 def test_trino_token_and_oauth_are_jwts_without_a_user(captured, minted):
     from trino.auth import JWTAuthentication
 
-    connect("token", TRINO, "jwt", user="")
+    connect("TOKEN", TRINO, "jwt", user="")
     assert isinstance(trino_auth(captured["url"]), JWTAuthentication)
-    connect("oauth", TRINO, "cs", user="", client_id="cid", token_url="https://idp/token")
+    connect("OAUTH", TRINO, "cs", user="", client_id="cid", token_url="https://idp/token")
     assert isinstance(trino_auth(captured["url"]), JWTAuthentication)
     assert captured["url"].query["access_token"] == "access-token-1"
 
@@ -389,30 +389,30 @@ def test_trino_token_and_oauth_are_jwts_without_a_user(captured, minted):
 def test_trino_sso_and_key_file_select_the_clients_own_classes(captured):
     from trino.auth import CertificateAuthentication, OAuth2Authentication
 
-    connect("sso", TRINO)
+    connect("SSO", TRINO)
     assert isinstance(trino_auth(captured["url"]), OAuth2Authentication)
-    connect("key_file", TRINO, key_file="/k.pem", cert_file="/c.pem")
+    connect("KEY_FILE", TRINO, key_file="/k.pem", cert_file="/c.pem")
     assert isinstance(trino_auth(captured["url"]), CertificateAuthentication)
 
 
 def test_databricks_oauth_uses_the_workspace_token_endpoint_by_default(captured, minted):
     from databricks.sqlalchemy import DatabricksDialect
 
-    connect("oauth", DATABRICKS, "s", user="", client_id="sp")
+    connect("OAUTH", DATABRICKS, "s", user="", client_id="sp")
     assert minted == [("https://adb-1.azuredatabricks.net/oidc/v1/token", "sp", "s", "all-apis")]
     _, kwargs = DatabricksDialect().create_connect_args(captured["url"])
     assert kwargs["access_token"] == "access-token-1"
 
 
 def test_databricks_sso_asks_the_connector_for_its_browser_login(captured):
-    connect("sso", DATABRICKS, user="", client_id="app")
+    connect("SSO", DATABRICKS, user="", client_id="app")
     assert captured["args"] == {"auth_type": "databricks-oauth", "oauth_client_id": "app"}
     assert captured["url"].password is None
 
 
 def test_snowflake_oauth_is_the_connectors_own_flow(captured, minted):
     connect(
-        "oauth", SNOWFLAKE, "csecret", client_id="cid", token_url="https://idp/token", scope="r"
+        "OAUTH", SNOWFLAKE, "csecret", client_id="cid", token_url="https://idp/token", scope="r"
     )
     assert captured["args"] == {
         "authenticator": "OAUTH_CLIENT_CREDENTIALS",
@@ -425,20 +425,20 @@ def test_snowflake_oauth_is_the_connectors_own_flow(captured, minted):
 
 
 def test_snowflake_sso_sts_and_key_pair(captured):
-    connect("sso", SNOWFLAKE)
+    connect("SSO", SNOWFLAKE)
     assert captured["args"] == {"authenticator": "externalbrowser"}
-    connect("sts", SNOWFLAKE)
+    connect("STS", SNOWFLAKE)
     assert captured["args"] == {
         "authenticator": "WORKLOAD_IDENTITY",
         "workload_identity_provider": "AWS",
     }
-    connect("key_file", SNOWFLAKE, "passphrase", key_file="/keys/rsa_key.p8")
+    connect("KEY_FILE", SNOWFLAKE, "passphrase", key_file="/keys/rsa_key.p8")
     assert captured["args"] == {
         "private_key_file": "/keys/rsa_key.p8",
         "private_key_file_pwd": "passphrase",
     }
     assert captured["url"].password is None
-    connect("key_file", SNOWFLAKE, key_file="/keys/rsa_key.p8")
+    connect("KEY_FILE", SNOWFLAKE, key_file="/keys/rsa_key.p8")
     assert captured["args"] == {"private_key_file": "/keys/rsa_key.p8"}
 
 
@@ -447,7 +447,7 @@ def test_the_snowflake_connector_accepts_every_argument_the_dialect_sends():
 
     dialect = for_key("snowflake")
     url = parse_warehouse_url(SNOWFLAKE)
-    for mode in ("oauth", "sso", "sts", "key_file"):
+    for mode in ("OAUTH", "SSO", "STS", "KEY_FILE"):
         warehouse = profile(
             mode, SNOWFLAKE, client_id="c", token_url="https://idp/t", scope="s", key_file="/k"
         )
@@ -456,7 +456,7 @@ def test_the_snowflake_connector_accepts_every_argument_the_dialect_sends():
 
 
 def test_a_duckdb_file_is_addressed_by_its_path(captured):
-    connect("none", "jdbc:duckdb:/data/warehouse.duckdb")
+    connect("NONE", "jdbc:duckdb:/data/warehouse.duckdb")
     assert captured["url"].render_as_string() == "duckdb:////data/warehouse.duckdb"
 
 
@@ -465,7 +465,7 @@ def test_a_duckdb_file_is_addressed_by_its_path(captured):
 
 def test_the_engine_url_never_carries_the_secret(monkeypatch):
     monkeypatch.setenv("WH_SECRET", "s3cr3t")
-    warehouse = profile("password", POSTGRES, secret_var="WH_SECRET")
+    warehouse = profile("PASSWORD", POSTGRES, secret_var="WH_SECRET")
     engine = connection.build_warehouse_engine(config_for(warehouse))
     try:
         assert engine.url.password is None
@@ -478,7 +478,7 @@ def test_the_engine_url_never_carries_the_secret(monkeypatch):
 def test_a_minted_credential_recycles_pooled_connections(monkeypatch):
     monkeypatch.setenv("WH_SECRET", "s")
     warehouse = profile(
-        "oauth", POSTGRES, client_id="c", token_url="https://idp/t", secret_var="WH_SECRET"
+        "OAUTH", POSTGRES, client_id="c", token_url="https://idp/t", secret_var="WH_SECRET"
     )
     engine = connection.build_warehouse_engine(config_for(warehouse))
     try:
@@ -488,12 +488,12 @@ def test_a_minted_credential_recycles_pooled_connections(monkeypatch):
 
 
 def test_parsing_checks_the_profile_first():
-    with pytest.raises(ConfigurationError, match="needs region"):
-        connection.build_warehouse_engine(config_for(profile("sts", POSTGRES)))
+    with pytest.raises(ConfigurationError, match="needs Region"):
+        connection.build_warehouse_engine(config_for(profile("STS", POSTGRES)))
 
 
 def test_no_warehouse_section():
-    config = replace(config_for(profile("none", "jdbc:duckdb:w.duckdb")), warehouse=None)
+    config = replace(config_for(profile("NONE", "jdbc:duckdb:w.duckdb")), warehouse=None)
     with pytest.raises(ConfigurationError, match="no Warehouse section"):
         connection.build_warehouse_engine(config)
     assert connection.is_single_writer(config) is False
@@ -510,7 +510,7 @@ def test_no_warehouse_section():
     ],
 )
 def test_single_writer_and_in_memory(jdbc_url, table_format, single_writer, in_memory):
-    mode = "password" if jdbc_url == POSTGRES else "none"
+    mode = "PASSWORD" if jdbc_url == POSTGRES else "NONE"
     config = config_for(profile(mode, jdbc_url), table_format)
     assert connection.is_single_writer(config) is single_writer
     assert connection.is_in_memory(config) is in_memory
@@ -518,7 +518,7 @@ def test_single_writer_and_in_memory(jdbc_url, table_format, single_writer, in_m
 
 def test_an_unresolvable_warehouse_is_never_guessed_to_allow_many_writers():
     config = replace(
-        config_for(profile("none", "jdbc:duckdb:")), warehouse=profile("none", "nonsense")
+        config_for(profile("NONE", "jdbc:duckdb:")), warehouse=profile("NONE", "nonsense")
     )
     with pytest.raises(ConfigurationError):
         connection.is_single_writer(config)
@@ -529,7 +529,7 @@ def test_only_trino_has_a_catalog_to_verify():
         class dialect:  # noqa: N801 - mimics Engine.dialect
             name = "postgresql"
 
-    config = config_for(profile("password", POSTGRES))
+    config = config_for(profile("PASSWORD", POSTGRES))
     assert connection.verify_iceberg_catalog(config, Engine()) is None
 
 
@@ -545,9 +545,9 @@ def test_dialect_names_and_defaults():
 
 
 def test_databricks_sso_without_a_client_and_token_through_the_base(captured):
-    connect("sso", DATABRICKS, user="")
+    connect("SSO", DATABRICKS, user="")
     assert captured["args"] == {"auth_type": "databricks-oauth"}
-    connect("password", "jdbc:snowflake://a.snowflakecomputing.com/?db=D", "pw")
+    connect("PASSWORD", "jdbc:snowflake://a.snowflakecomputing.com/?db=D", "pw")
     assert captured["url"].password == "pw"
 
 
@@ -561,8 +561,8 @@ def test_duckdb_iceberg_secrets():
         "PROVIDER credential_chain",
         "USE_SSL true",
     ]
-    assert _catalog_secret("token", {}, "t0k") == ["TOKEN 't0k'"]
-    assert _catalog_secret("oauth", {"client_id": "c", "token_url": "u"}, "s") == [
+    assert _catalog_secret("TOKEN", {}, "t0k") == ["TOKEN 't0k'"]
+    assert _catalog_secret("OAUTH", {"client_id": "c", "token_url": "u"}, "s") == [
         "CLIENT_ID 'c'",
         "CLIENT_SECRET 's'",
         "OAUTH2_SERVER_URI 'u'",
@@ -591,7 +591,7 @@ def test_duckdb_iceberg_attaches_with_a_token():
 
     conn = Connection()
     warehouse = profile(
-        "token", "jdbc:duckdb:", catalog="lake", catalog_uri="http://c", iceberg_warehouse="s3://w/"
+        "TOKEN", "jdbc:duckdb:", catalog="lake", catalog_uri="http://c", iceberg_warehouse="s3://w/"
     )
     DuckDBIcebergWarehouse().on_connect(conn, warehouse, "t0k")
     statements = conn.cursor_.statements
@@ -614,11 +614,11 @@ def test_verify_iceberg_catalog_without_a_catalog_or_when_the_check_fails():
             raise OperationalError("SELECT", {}, Exception("unreachable"))
 
     no_catalog = replace(
-        config_for(profile("sso", TRINO)),
-        warehouse=profile("sso", "jdbc:trino://t:8080/"),
+        config_for(profile("SSO", TRINO)),
+        warehouse=profile("SSO", "jdbc:trino://t:8080/"),
     )
     assert connection.verify_iceberg_catalog(no_catalog, Trino()) is None
-    problem = connection.verify_iceberg_catalog(config_for(profile("sso", TRINO)), Trino())
+    problem = connection.verify_iceberg_catalog(config_for(profile("SSO", TRINO)), Trino())
     assert problem.startswith("could not check whether catalog 'iceberg' is an Iceberg catalog")
 
 

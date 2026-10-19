@@ -38,7 +38,7 @@ The demo provides the full migration as `metadata/event_waits.sql` and its scrip
 
 ```bash
 python prepare.py metadata metadata/event_waits.sql
-etl-craft run --pipeline_code FILE_DELIVERY
+etl-craft run --pipeline-code FILE_DELIVERY
 # In another terminal, deliver a new filename:
 mkdir -p inbox
 printf 'id\n1\n' > inbox/batch-001.csv

@@ -17,9 +17,9 @@ def test_api_address(value):
     assert host and 0 <= port <= 65535
     config = parse_config(
         {
-            "Secrets": {"Source_type": "environment"},
+            "Secrets": {"Source_type": "ENVIRONMENT"},
             "Orchestration": {"Api_address": value},
-            "Engine": {"test": {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "main"}},
+            "Engine": {"test": {"Jdbc_url": "jdbc:sqlite:engine.db", "Schema": "main"}},
         },
         Path("craft-connector.yml"),
     )

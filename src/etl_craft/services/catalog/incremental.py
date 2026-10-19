@@ -13,9 +13,9 @@ from etl_craft.config import ConnectorConfig
 from etl_craft.config.project import ingestion_script, sql_file
 from etl_craft.core.errors import ConfigurationError, EtlCraftError
 from etl_craft.core.text import sha256_hex
-from etl_craft.services.catalog import Catalog, TaskAsset
-from etl_craft.services.catalog_gaps import table_records
-from etl_craft.services.catalog_html import (
+from etl_craft.services.catalog.collect import Catalog, TaskAsset
+from etl_craft.services.catalog.gaps import table_records
+from etl_craft.services.catalog.html import (
     pipeline_url,
     rule_url,
     run_url,

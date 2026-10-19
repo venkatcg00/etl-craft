@@ -38,7 +38,22 @@ EXPECTED = {
         "CANCELLED",
         "LOST",
     },
-    enums.ControlAction: {"HOLD", "RELEASE", "STOP", "ABORT", "RECOVER", "RESTART", "RUN_PAUSED"},
+    enums.ControlAction: {
+        "HOLD",
+        "RELEASE",
+        "STOP",
+        "ABORT",
+        "RECOVER",
+        "RESTART",
+        "RUN_PAUSED",
+        "PAUSE",
+        "RESUME",
+    },
+    enums.Placement: {"ANYWHERE", "CONTROLLER_HOST"},
+    enums.Audit: {"NONE", "REQUEST", "BY_ACTION"},
+    enums.Transport: {"LOCAL", "HTTP"},
+    enums.HttpMethod: {"GET", "POST"},
+    enums.LineageDirection: {"BOTH", "UPSTREAM", "DOWNSTREAM"},
     enums.ControlStatus: {"REQUESTED", "ACKNOWLEDGED", "COMPLETED"},
     enums.ControlAcknowledgement: {"PROCESS", "QUERIES"},
     enums.TriggerKind: {"SCHEDULE", "MANUAL", "BACKFILL", "ORCHESTRATOR", "STAND_IN"},
@@ -66,12 +81,15 @@ EXPECTED = {
         "CREATE_VIEW",
     },
     enums.EmailFlavour: {"FAILED", "COMPLETED_WITH_ERRORS", "SUCCESS"},
-    enums.EmailTransport: {"smtp", "sendmail"},
-    enums.TlsMode: {"none", "starttls", "ssl"},
-    enums.DeploymentProfile: {"laptop", "controller", "controller-agents"},
-    enums.AuthMode: {"none", "password", "token", "key_file", "oauth", "sso", "sts"},
-    enums.TableFormat: {"native", "iceberg"},
-    enums.CloningScope: {"cfg", "aud", "all", "none"},
+    enums.EmailTransport: {"SMTP", "SENDMAIL"},
+    enums.TlsMode: {"NONE", "STARTTLS", "SSL"},
+    enums.DeploymentProfile: {"LAPTOP", "CONTROLLER", "CONTROLLER_AGENTS"},
+    enums.AuthMode: {"NONE", "PASSWORD", "TOKEN", "KEY_FILE", "OAUTH", "SSO", "STS"},
+    enums.TableFormat: {"NATIVE", "ICEBERG"},
+    enums.CloningScope: {"CFG", "AUD", "ALL", "NONE"},
+    enums.SecretsSource: {"ENVIRONMENT", "FILE"},
+    enums.GateOutcome: {"SATISFIED", "UNSATISFIED", "BYPASSED", "WAIT"},
+    enums.WaitKind: {"DEPENDENCY", "EVENT"},
     enums.InterventionAction: {
         "MARK",
         "NEW_RUN",
@@ -82,7 +100,7 @@ EXPECTED = {
         "IGNORE_DEPENDENCIES",
         "RERUN",
     },
-    enums.GatePolicy: {"enforce", "warn", "off"},
+    enums.GatePolicy: {"ENFORCE", "WARN", "OFF"},
 }
 
 
@@ -97,7 +115,8 @@ def test_every_enum_in_the_module_is_checked():
         for obj in vars(enums).values()
         if isinstance(obj, type) and issubclass(obj, enums.StrEnum) and obj is not enums.StrEnum
     }
-    assert defined == set(EXPECTED)
+    # Action names grow with the action table, whose own test covers every member.
+    assert defined - {enums.ActionName} == set(EXPECTED)
 
 
 def test_members_compare_equal_to_the_raw_strings():

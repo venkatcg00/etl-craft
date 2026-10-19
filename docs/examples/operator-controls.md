@@ -4,10 +4,10 @@ Use the exact run id returned by `etl-craft run --init-only`. These examples use
 control `17`; substitute the ids returned by your commands.
 
 ```bash
-etl-craft hold --pipeline_code SALES_DAILY --run-id 42 --task_code transform --reason "inspect input"
-etl-craft release --pipeline_code SALES_DAILY --run-id 42 --task_code transform --reason "ready"
-etl-craft stop --pipeline_code SALES_DAILY --run-id 42 --request-key drain-42 --reason "maintenance"
-etl-craft status --request-id 17 --format json
+etl-craft hold --pipeline-code SALES_DAILY --run-id 42 --task-code transform --reason "inspect input"
+etl-craft release --pipeline-code SALES_DAILY --run-id 42 --task-code transform --reason "ready"
+etl-craft stop --pipeline-code SALES_DAILY --run-id 42 --request-key drain-42 --reason "maintenance"
+etl-craft control-request --control-id 17 --format json
 ```
 
 The stop response pins affected attempt ids. Wait for `status=COMPLETED`; `REQUESTED` and
@@ -18,9 +18,9 @@ refuses there and names `stop` as the remedy. See the [control guide](../guides/
 Prepare recovery of the same run, or a new restart that retains current checkpoints:
 
 ```bash
-etl-craft run --pipeline_code SALES_DAILY --run-id 42 --recover --request-key repair-42 --reason "input fixed" --format json
-etl-craft run --pipeline_code SALES_DAILY --run-id 42 --restart --request-key fresh-42 --reason "fresh context" --format json
-etl-craft status --pipeline_code SALES_DAILY --run-id 42 --capabilities --format json
+etl-craft run --pipeline-code SALES_DAILY --run-id 42 --recover --request-key repair-42 --reason "input fixed" --format json
+etl-craft run --pipeline-code SALES_DAILY --run-id 42 --restart --request-key fresh-42 --reason "fresh context" --format json
+etl-craft capabilities --pipeline-code SALES_DAILY --run-id 42 --format json
 ```
 
 Use the returned `execution_run_id` with `run --run-id`; preparation completion is separate from

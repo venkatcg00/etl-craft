@@ -45,7 +45,7 @@ def upgrade_targets(
     """Upgrade configured targets under their mutation locks; preserve historical rows."""
     actions = {str(kind) for kind in SqlAction} - {SqlAction.DROP_TABLE, SqlAction.CREATE_VIEW}
     if action is not None and action not in actions:
-        raise HandlerError(f"upgrade-targets does not support --action {action}")
+        raise HandlerError(f"upgrade-targets does not support `action` {action}")
     if config.warehouse is None:
         raise ConfigurationError("upgrade-targets needs a Warehouse section in craft-connector.yml")
     catalog = active_catalog(config)
@@ -65,7 +65,7 @@ def upgrade_targets(
     with engine.connect() as conn:
         _plan_writers(conn, config, plan, selection)
     if selected is not None and selected not in plan.targets:
-        raise HandlerError(f"{target}: no active {action or 'SQL'} task writes this target")
+        raise HandlerError(f"{target}: no active {action or Handler.SQL} task writes this target")
     _check_writers(plan)
     return [_upgrade_target(engine, config, plan, key, selection) for key in sorted(plan.targets)]
 
@@ -108,11 +108,11 @@ def _plan_writers(
             continue
         params = fetch_task_parameters(conn, task.task_id)
         kind = (
-            "PYTHON"
+            Handler.PYTHON
             if task.handler == Handler.PYTHON
             else (params.get("SQL_ACTION") or "").strip().upper()
         )
-        if kind != "PYTHON" and kind not in actions:
+        if kind != Handler.PYTHON and kind not in actions:
             continue
         written = (params.get("TARGET_OBJECT") or "").strip()
         if not written:
@@ -124,7 +124,9 @@ def _plan_writers(
         key = qualified.lower()
         if selected is not None and key != selected:
             continue
-        merge = params.get("SETUP_FOR", "").strip().upper() if kind == "SETUP_TABLE" else kind
+        merge = (
+            params.get("SETUP_FOR", "").strip().upper() if kind == SqlAction.SETUP_TABLE else kind
+        )
         if merge in {SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE}:
             plan.merge_actions.setdefault(key, set()).add(merge)
         context = TaskContext(

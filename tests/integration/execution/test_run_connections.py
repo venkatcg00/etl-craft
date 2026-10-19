@@ -29,26 +29,26 @@ def configured_secret(monkeypatch):
 
 def config(warehouse_url=None, relay=None):
     raw = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {},
-        "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:e.db", "schema": "main"}},
+        "Engine": {"dev": {"Jdbc_url": "jdbc:sqlite:e.db", "Schema": "main"}},
     }
     if warehouse_url is not None:
         raw["Warehouse"] = {
             "dev": {
-                "jdbc_url": warehouse_url,
-                "schema": "main" if warehouse_url.startswith("jdbc:duckdb:") else "public",
-                "user": POSTGRES_USER,
-                "auth_mode": "none" if warehouse_url.startswith("jdbc:duckdb:") else "password",
-                "secret": SECRET_VAR,
+                "Jdbc_url": warehouse_url,
+                "Schema": "main" if warehouse_url.startswith("jdbc:duckdb:") else "public",
+                "User": POSTGRES_USER,
+                "Auth_mode": "NONE" if warehouse_url.startswith("jdbc:duckdb:") else "PASSWORD",
+                "Secret": SECRET_VAR,
             }
         }
     if relay is not None:
         raw["Orchestration"]["Email"] = {
-            "host": relay[0],
-            "port": relay[1],
-            "from_address": "e@x.io",
-            "tls_mode": "none",
+            "Host": relay[0],
+            "Port": relay[1],
+            "From_address": "e@x.io",
+            "Tls_mode": "NONE",
         }
     return parse_config(raw, Path("/tmp/craft-connector.yml"))
 

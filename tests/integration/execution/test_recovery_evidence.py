@@ -6,11 +6,11 @@ import pytest
 
 from etl_craft.controller.supervisor import WorkingSet
 from etl_craft.core.actor import current_actor
-from etl_craft.core.enums import ControlAction, RunStatus
+from etl_craft.core.enums import ActionName, ControlAction, RunStatus
 from etl_craft.core.errors import RunRefusedError
 from etl_craft.engine import controls, locks, transitions
 from etl_craft.execution.interventions import pause_pipeline
-from etl_craft.services.operations.controls import request_control
+from etl_craft.services.operations.actions import invoke
 from fixtures.metadata import finish_run
 from fixtures.scoped_controls import ctx as ctx
 from integration.execution.test_recovery_controls import request, scene
@@ -34,20 +34,20 @@ def test_recovery_needs_query_evidence_even_after_a_lost_worker_has_exited(ctx, 
         if action == ControlAction.RESTART:
             finish_run(conn, run, RunStatus.FAILED)
     with pytest.raises(RunRefusedError, match="process/query evidence"):
-        request_control(ctx, request(run, action, key="evidence"))
+        invoke(ctx, ActionName.CONTROL, request(run, action, key="evidence"))
     with ctx.engine.begin() as conn:
         controls.observe_exit(conn, attempt, queries_ended=True)
-    prepared = request_control(ctx, request(run, action, key="evidence"))
+    prepared = invoke(ctx, ActionName.CONTROL, request(run, action, key="evidence"))
     assert prepared.execution_run_id is not None
 
 
 def test_controller_only_admits_the_permitted_nonterminal_run_under_definition_pause(ctx):
     _, source, _, _ = scene(ctx)
-    restarted = request_control(ctx, request(source, ControlAction.RESTART, key="new"))
+    restarted = invoke(ctx, ActionName.CONTROL, request(source, ControlAction.RESTART, key="new"))
     pause_pipeline(ctx.engine, ctx.config, "P", "automatic starts paused")
     working = WorkingSet()
     assert working.refresh(ctx) == []
-    request_control(ctx, request(restarted.execution_run_id, ControlAction.RUN_PAUSED))
+    invoke(ctx, ActionName.CONTROL, request(restarted.execution_run_id, ControlAction.RUN_PAUSED))
     assert {r.pipeline_run_id for r in working.refresh(ctx)} == {restarted.execution_run_id}
 
 
@@ -76,11 +76,15 @@ def test_new_paused_context_is_idempotent_and_keeps_the_definition_pause(ctx, ta
         t = add_task(conn, p, "single", "SQL")
     pause_pipeline(ctx.engine, ctx.config, "P", "scheduled work paused")
     selected = ControlRequest(
-        "P", ControlAction.RUN_PAUSED, "one-off", task_code=task_code, request_key="one-off"
+        pipeline_code="P",
+        action=ControlAction.RUN_PAUSED,
+        reason="one-off",
+        task_code=task_code,
+        request_key="one-off",
     )
     left, right = two_at_once(
-        lambda: request_control(ctx, selected),
-        lambda: request_control(ctx, selected),
+        lambda: invoke(ctx, ActionName.CONTROL, selected),
+        lambda: invoke(ctx, ActionName.CONTROL, selected),
         at=(locks.EngineLock, "hold"),
     )
     assert left.control_id == right.control_id and left.execution_run_id == right.execution_run_id

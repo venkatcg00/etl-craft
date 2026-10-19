@@ -36,6 +36,10 @@ COMMITTER = {
 }
 
 
+RENDERERS = ("gen_python_api.py", "gen_ref_pages.py")
+"""The Python API renderer, under its current name and the name older releases call it."""
+
+
 def release_lines(tags: Iterable[str]) -> list[tuple[str, str]]:
     """Return ``(version, tag)`` per release line, oldest line first, using each newest tag.
 
@@ -91,7 +95,10 @@ def _build_release(
         _run(["git", "worktree", "add", "--detach", str(tree), tag], cwd=repo)
         try:
             # The renderer uses the release's modules and guides, with shared navigation text.
-            shutil.copy2(repo / "docs" / "gen_ref_pages.py", tree / "docs" / "gen_ref_pages.py")
+            # Releases before 1.0.0 name it gen_ref_pages.py in their mkdocs.yml.
+            for name in RENDERERS:
+                if (tree / "docs" / name).exists():
+                    shutil.copy2(repo / "docs" / RENDERERS[0], tree / "docs" / name)
             uv_mike = ["uv", "run", "--locked", "--no-default-groups", "--group", "docs", "mike"]
             _run([*uv_mike[:-1], "mkdocs", "build", "--strict"], cwd=tree, env=env)
             _run([*uv_mike, *deploy_args(version, latest=latest)], cwd=tree, env=env)

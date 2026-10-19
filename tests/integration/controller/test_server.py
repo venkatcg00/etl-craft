@@ -99,7 +99,7 @@ def test_server_picks_up_cli_run_and_second_server_is_refused(cli_project):
     p.wait_for("SELECT COUNT(*) FROM AUD_CONTROLLERS", expected=1)
     code, output = p.run("controller")
     assert code != 0 and "controller 1 on" in output and "is active" in output
-    code, output = p.run("run", "--pipeline_code", "P", "--init-only", "--run-key", "server:one")
+    code, output = p.run("run", "--pipeline-code", "P", "--init-only", "--run-key", "server:one")
     assert code == 0, output
     p.wait_for(
         "SELECT STATUS FROM AUD_PIPELINES_RUN_LOG WHERE RUN_KEY='server:one'", expected="SUCCESS"
@@ -146,7 +146,7 @@ def wait_for_script(project):
 def test_shutdown_stops_tasks_and_leaves_exact_run_resumable(cli_project):
     p = cli_project
     blocking_script(p)
-    code, output = p.run("run", "--pipeline_code", "P", "--init-only", "--run-key", "shutdown")
+    code, output = p.run("run", "--pipeline-code", "P", "--init-only", "--run-key", "shutdown")
     assert code == 0, output
     server = p.start("controller")
     p.wait_for("SELECT COUNT(*) FROM AUD_TASK_ATTEMPTS WHERE STATUS='RUNNING'", expected=1)
@@ -170,7 +170,7 @@ def test_shutdown_stops_tasks_and_leaves_exact_run_resumable(cli_project):
 def test_killed_server_reconciles_before_retrying_exact_task_run(cli_project):
     p = cli_project
     blocking_script(p)
-    assert p.run("run", "--pipeline_code", "P", "--init-only", "--run-key", "recover")[0] == 0
+    assert p.run("run", "--pipeline-code", "P", "--init-only", "--run-key", "recover")[0] == 0
     server = p.start("controller")
     p.wait_for("SELECT COUNT(*) FROM AUD_TASK_ATTEMPTS WHERE STATUS='RUNNING'", expected=1)
     wait_for_script(p)
@@ -233,8 +233,8 @@ def test_shutdown_interrupts_gate_wait_without_starting_a_task(cli_project):
         upstream_run = start_run(conn, upstream)
         task_run(conn, task, upstream_run, status="IN-PROGRESS")
         add_dependency(conn, p.pipeline_id, p.task_id, task, upstream_pipeline=upstream)
-    assert p.run("pause", "--pipeline_code", "UPSTREAM", "--reason", "maintenance")[0] == 0
-    assert p.run("run", "--pipeline_code", "P", "--init-only", "--run-key", "gate")[0] == 0
+    assert p.run("pause", "--pipeline-code", "UPSTREAM", "--reason", "maintenance")[0] == 0
+    assert p.run("run", "--pipeline-code", "P", "--init-only", "--run-key", "gate")[0] == 0
     server = p.start("controller")
     p.wait_for("SELECT COUNT(*) FROM AUD_GATE_WAITS WHERE NEXT_CHECK_AT IS NOT NULL", expected=1)
     started = time.monotonic()
@@ -259,10 +259,10 @@ def test_operator_cancellation_takes_precedence_over_shutdown_resume(cli_project
     with p.engine.begin() as conn:
         after = add_task(conn, p.pipeline_id, "after", "PYTHON", SCRIPT_NAME="load.py")
         add_dependency(conn, p.pipeline_id, after, p.task_id)
-    assert p.run("run", "--pipeline_code", "P", "--init-only", "--run-key", "cancel")[0] == 0
+    assert p.run("run", "--pipeline-code", "P", "--init-only", "--run-key", "cancel")[0] == 0
     server = p.start("controller")
     wait_for_script(p)
-    code, output = p.run("abort", "--pipeline_code", "P", "--run-key", "cancel", "--reason", "stop")
+    code, output = p.run("abort", "--pipeline-code", "P", "--run-key", "cancel", "--reason", "stop")
     assert code == 0, output
     p.wait_for("SELECT OWNER_ID FROM AUD_PIPELINES_RUN_LOG", expected=None)
     with p.engine.connect() as conn:
@@ -320,7 +320,7 @@ def released_script(project):
 def test_server_and_its_attempt_ride_out_an_engine_db_outage(cli_project):
     p = cli_project
     released_script(p)
-    assert p.run("run", "--pipeline_code", "P", "--init-only", "--run-key", "outage")[0] == 0
+    assert p.run("run", "--pipeline-code", "P", "--init-only", "--run-key", "outage")[0] == 0
     server = p.start("controller")
     started = p.config.project_dir / "started"
     deadline = time.monotonic() + 15

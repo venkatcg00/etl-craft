@@ -570,7 +570,7 @@ def test_force_cannot_reopen_a_cancelled_run(seeded):
         run = start_run(conn, ids["alpha"])
         transitions.finalize_pipeline_run(conn, run, "CANCELLED")
     with engine.begin() as conn:
-        with pytest.raises(RunStateError, match=r"CANCELLED.*start a new run.*init-only"):
+        with pytest.raises(RunStateError, match=r"CANCELLED.*start a new run.*init_only"):
             transitions.resolve_run(
                 conn, ids["alpha"], force=True, selector=runlog.RunSelector(run_id=run)
             )

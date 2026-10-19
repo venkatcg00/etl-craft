@@ -1,4 +1,4 @@
-"""``run --pipeline_code``: run a whole pipeline; ``--init-only`` creates a run.
+"""``run --pipeline-code``: run a whole pipeline; ``--init-only`` creates a run.
 
 The engine runs every active task under one run, starting ready tasks after each
 completion, at most ``Orchestration.Max_parallel_tasks`` at once. Each task goes through
@@ -321,16 +321,16 @@ def backfill(
     ``SKIPPED``; a later backfill from that date takes up again. With a reason,
     at most ``MAX_BACKFILL_DAYS`` dates, and not while the pipeline has a run in progress.
     """
-    check_override(config, "--backfill", reason)
+    check_override(config, "a backfill", reason)
     if last < first:
         raise UsageError(
-            f"--backfill runs from the first date to the last: {first.isoformat()} is after "
+            f"a backfill runs from `backfill_from` to `backfill_to`: {first.isoformat()} is after "
             f"{last.isoformat()}"
         )
     days = (last - first).days + 1
     if days > MAX_BACKFILL_DAYS:
         raise UsageError(
-            f"--backfill {first.isoformat()}:{last.isoformat()} is {days} dates; one backfill "
+            f"the backfill {first.isoformat()}:{last.isoformat()} is {days} dates; one backfill "
             f"runs at most {MAX_BACKFILL_DAYS}, so split it"
         )
     runs: list[PipelineOutcome] = []
@@ -362,7 +362,7 @@ def backfill(
                 raise
             message = (
                 f"{pipeline_code}: backfill stopped at {day.isoformat()} after {len(runs)} of "
-                f"{days} run(s): {error}. `etl-craft run --pipeline_code {pipeline_code} "
+                f"{days} run(s): {error}. `etl-craft run --pipeline-code {pipeline_code} "
                 f"--backfill {day.isoformat()}:{last.isoformat()} --reason ...` takes up from there"
             )
             logger.error("%s", message)
@@ -376,7 +376,7 @@ def backfill(
         if outcome.status not in (RunStatus.SUCCESS, RunStatus.SKIPPED):
             message = (
                 f"{pipeline_code}: backfill stopped at {day.isoformat()} after {len(runs)} of "
-                f"{days} run(s): {outcome.message}. `etl-craft run --pipeline_code "
+                f"{days} run(s): {outcome.message}. `etl-craft run --pipeline-code "
                 f"{pipeline_code} --backfill {day.isoformat()}:{last.isoformat()}` takes up "
                 "from there once it is fixed"
             )

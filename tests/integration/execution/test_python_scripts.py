@@ -77,21 +77,21 @@ def project(engine_db, tmp_path):
     """A project with a DuckDB warehouse, scripts in ingestion_scripts/, and task P.load."""
     profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
-    block = {"jdbc_url": profile.jdbc_url, "schema": schema}
-    if profile.auth_mode != "none":
+    block = {"Jdbc_url": profile.jdbc_url, "Schema": schema}
+    if profile.auth_mode != "NONE":
         block |= {
-            "user": profile.user,
-            "auth_mode": profile.auth_mode,
-            "secret": profile.secret_var,
+            "User": profile.user,
+            "Auth_mode": profile.auth_mode,
+            "Secret": profile.secret_var,
         }
     root = (engine_db.config.config_path or tmp_path / "craft-connector.yml").parent
     (root / "ingestion_scripts").mkdir()
     (root / "ingestion_scripts" / "load.py").write_text(SCRIPT, encoding="utf-8")
     raw = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {"Task_timeout_seconds": 60},
         "Engine": {"dev": block},
-        "Warehouse": {"dev": {"jdbc_url": "jdbc:duckdb:warehouse.duckdb", "schema": "main"}},
+        "Warehouse": {"dev": {"Jdbc_url": "jdbc:duckdb:warehouse.duckdb", "Schema": "main"}},
     }
     (root / "craft-connector.yml").write_text(yaml.safe_dump(raw, sort_keys=False), "utf-8")
     config = load_config(root / "craft-connector.yml")
@@ -459,7 +459,7 @@ def test_what_a_script_printed_is_kept_when_it_is_stopped(project):
 
 
 @pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGHUP])
-@pytest.mark.parametrize("how", [["--task_code", "load"], ["--task_code", "load", "--force"], []])
+@pytest.mark.parametrize("how", [["--task-code", "load"], ["--task-code", "load", "--force"], []])
 def test_a_signal_to_run_stops_the_task_process_and_records_it(project, tmp_path, sig, how):
     engine, config, _, task = project
     pid_file = tmp_path / "script.pid"
@@ -473,7 +473,7 @@ def test_a_signal_to_run_stops_the_task_process_and_records_it(project, tmp_path
     parent_log = tmp_path / "parent.log"
     with parent_log.open("wb") as output:
         parent = subprocess.Popen(
-            [sys.executable, "-m", "etl_craft", "run", "--pipeline_code", "P", *how],
+            [sys.executable, "-m", "etl_craft", "run", "--pipeline-code", "P", *how],
             env={
                 **os.environ,
                 "ETL_CRAFT_CONFIG": str(config.config_path),

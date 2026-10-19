@@ -25,8 +25,8 @@ run, pause and resume pipelines, but cannot apply configuration or administer to
 require developer and admin respectively. For example, with the `scheduler` operator's token:
 
 ```bash
-etl-craft list                                      # viewer read: allowed
-etl-craft pause --pipeline_code SALES --reason hold  # operator: allowed
+etl-craft pipelines                                      # viewer read: allowed
+etl-craft pause --pipeline-code SALES --reason hold  # operator: allowed
 etl-craft account list                              # refused, exit 26; AUD_ACTIONS: REFUSED
 ```
 
@@ -42,16 +42,16 @@ admin service token in `ETL_CRAFT_TOKEN`.
 ## From your own installation
 
 An analyst operates the server from their own installation, without its Engine DB or warehouse
-credentials. `login --server` stores a one-hour access token and a refresh token for that
+credentials. `login --controller` stores a one-hour access token and a refresh token for that
 server; the CLI renews access until the refresh token expires (`Auth.Refresh_days`) or is
 revoked:
 
 ```bash
-etl-craft login --server https://etl.example.com
-etl-craft whoami --server https://etl.example.com          # analyst operator
-etl-craft run --pipeline_code SALES --reason "late file" --server https://etl.example.com
-etl-craft --server https://etl.example.com config apply    # refused: apply config files on the server
-etl-craft logout --server https://etl.example.com
+etl-craft login --controller https://etl.example.com
+etl-craft whoami --controller https://etl.example.com          # analyst operator
+etl-craft run --pipeline-code SALES --reason "late file" --controller https://etl.example.com
+etl-craft --controller https://etl.example.com config apply    # refused: apply config files on the server
+etl-craft logout --controller https://etl.example.com
 ```
 
 See [operating a server](../../deploying/security.md#operating-a-server-from-your-own-installation)

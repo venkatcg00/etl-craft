@@ -6,30 +6,27 @@ import argparse
 
 from etl_craft.cli.commands.common import (
     Command,
-    command_context,
+    call,
     configure_output,
     configure_run_selector,
+    request_from,
 )
 from etl_craft.cli.output import Output
-from etl_craft.core.enums import RunCondition
+from etl_craft.core.enums import ActionName, RunCondition
 from etl_craft.core.errors import ExitCode
-from etl_craft.engine.runlog import RunSelector
-from etl_craft.services.operations import inspect
+from etl_craft.services.operations.models import StepsView
+from etl_craft.services.operations.requests import RunSelection
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
     configure_output(parser)
     configure_run_selector(parser)
-    parser.add_argument("--pipeline_code", required=True, help="the pipeline to show")
+    parser.add_argument("--pipeline-code", required=True, help="The pipeline to show.")
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    with command_context(args) as ctx:
-        done = inspect.pipeline_steps(
-            ctx,
-            args.pipeline_code,
-            selector=RunSelector(args.run_id, args.run_key),
-        )
+    done = call(args, ActionName.STEPS, request_from(args, RunSelection))
+    assert isinstance(done, StepsView)
 
     def render_text() -> None:
         steps = done.steps
@@ -61,4 +58,5 @@ COMMAND = Command(
     help="List a pipeline's active tasks and their parameters.",
     configure=_configure,
     run=_run,
+    actions=(ActionName.STEPS,),
 )

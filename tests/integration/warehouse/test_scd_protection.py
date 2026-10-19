@@ -7,16 +7,10 @@ import pytest
 from sqlalchemy import text
 
 from etl_craft.core.actor import Actor
-from etl_craft.core.enums import ActorKind, ApiRole
+from etl_craft.core.enums import ActionName, ActorKind, ApiRole
 from etl_craft.core.errors import HandlerError, PermissionDeniedError, UsageError
 from etl_craft.services.operations import OperationContext
-from etl_craft.services.operations.values import (
-    ValueEdit,
-    ValueUnlock,
-    provenance,
-    unlock_values,
-    write_values,
-)
+from fixtures.actions import act
 from fixtures.sql_warehouse import warehouses
 
 
@@ -52,8 +46,18 @@ def current(w):
 def test_value_locks_effective_hashes_provenance_and_unlock(sql_world, kind):
     w = sql_world
     ctx, params = prepare(w, kind)
-    assert not provenance(ctx, "P", "load", {"id": 1}).enabled
-    edited = write_values(ctx, "P", "load", ValueEdit({"id": 1}, {"name": "Manual"}, "fix name"))
+    assert not act(
+        ctx, ActionName.DATA_PROVENANCE, pipeline_code="P", task_code="load", key={"id": 1}
+    ).enabled
+    edited = act(
+        ctx,
+        ActionName.DATA_EDIT,
+        pipeline_code="P",
+        task_code="load",
+        key={"id": 1},
+        values={"name": "Manual"},
+        reason="fix name",
+    )
     state = {r["column_name"]: r for r in edited.records}
     assert state["name"]["locked"] and state["name"]["writer"] == "alice"
     assert state["amount"]["writer"] is None
@@ -67,14 +71,40 @@ def test_value_locks_effective_hashes_provenance_and_unlock(sql_world, kind):
     )
     assert changed.update_count == 1
     assert [(r["name"], r["amount"]) for r in current(w)] == [("Manual", 20)]
-    state = {r["column_name"]: r for r in provenance(ctx, "P", "load", {"id": 1}).records}
+    state = {
+        r["column_name"]: r
+        for r in act(
+            ctx, ActionName.DATA_PROVENANCE, pipeline_code="P", task_code="load", key={"id": 1}
+        ).records
+    }
     assert state["name"]["writer"] == "alice" and state["amount"]["writer"] == "etl-craft"
-    write_values(ctx, "P", "load", ValueEdit({"id": 1}, {"name": "Correction"}, "second fix"))
+    act(
+        ctx,
+        ActionName.DATA_EDIT,
+        pipeline_code="P",
+        task_code="load",
+        key={"id": 1},
+        values={"name": "Correction"},
+        reason="second fix",
+    )
     assert current(w)[0]["name"] == "Correction"
-    unlock_values(ctx, "P", "load", ValueUnlock({"id": 1}, "return to source", ("name",)))
+    act(
+        ctx,
+        ActionName.DATA_UNLOCK,
+        pipeline_code="P",
+        task_code="load",
+        key={"id": 1},
+        reason="return to source",
+        columns=("name",),
+    )
     w.run("load", **params)
     assert current(w)[0]["name"] == "Source"
-    state = {r["column_name"]: r for r in provenance(ctx, "P", "load", {"id": 1}).records}
+    state = {
+        r["column_name"]: r
+        for r in act(
+            ctx, ActionName.DATA_PROVENANCE, pipeline_code="P", task_code="load", key={"id": 1}
+        ).records
+    }
     assert not state["name"]["locked"] and state["name"]["writer"] == "etl-craft"
     if kind == "SCD2_MERGE":
         assert count_versions(w, "Y") == 1
@@ -88,8 +118,16 @@ def test_value_locks_effective_hashes_provenance_and_unlock(sql_world, kind):
 def test_human_insert_row_lock_delete_revival_and_service_writer(sql_world, kind):
     w = sql_world
     ctx, params = prepare(w, kind)
-    write_values(ctx, "P", "load", ValueEdit({"id": 2}, {"name": "Human", "amount": 30}, "insert"))
-    state = provenance(ctx, "P", "load", {"id": 2})
+    act(
+        ctx,
+        ActionName.DATA_EDIT,
+        pipeline_code="P",
+        task_code="load",
+        key={"id": 2},
+        values={"name": "Human", "amount": 30},
+        reason="insert",
+    )
+    state = act(ctx, ActionName.DATA_PROVENANCE, pipeline_code="P", task_code="load", key={"id": 2})
     assert any(r["column_name"] == "*" and r["locked"] for r in state.records)
     delete = {
         "SQL_ACTION": "DELETE_ROWS",
@@ -102,17 +140,44 @@ def test_human_insert_row_lock_delete_revival_and_service_writer(sql_world, kind
     incoming = {**params, "SOURCE_SQL": params["SOURCE_SQL"].replace("1 AS id", "2 AS id")}
     assert w.run("load", **incoming).update_count == 0
     assert current(w)[1]["name"] == "Human"
-    unlock_values(ctx, "P", "load", ValueUnlock({"id": 2}, "release insert"))
+    act(
+        ctx,
+        ActionName.DATA_UNLOCK,
+        pipeline_code="P",
+        task_code="load",
+        key={"id": 2},
+        reason="release insert",
+    )
     assert w.run("delete", **delete).delete_count == 1
     w.run("load", **incoming)
     assert current(w)[1]["name"] == "Source"
     robot = replace(ctx, actor=Actor("erp", ActorKind.SERVICE))
-    write_values(robot, "P", "load", ValueEdit({"id": 2}, {"name": "ERP"}, "integration"))
-    assert not any(r["locked"] for r in provenance(ctx, "P", "load", {"id": 2}).records)
+    act(
+        robot,
+        ActionName.DATA_EDIT,
+        pipeline_code="P",
+        task_code="load",
+        key={"id": 2},
+        values={"name": "ERP"},
+        reason="integration",
+    )
+    assert not any(
+        r["locked"]
+        for r in act(
+            ctx, ActionName.DATA_PROVENANCE, pipeline_code="P", task_code="load", key={"id": 2}
+        ).records
+    )
     w.run("load", **incoming)
     assert current(w)[1]["name"] == "Source"
     with pytest.raises(PermissionDeniedError, match="human admin"):
-        unlock_values(robot, "P", "load", ValueUnlock({"id": 2}, "not permitted"))
+        act(
+            robot,
+            ActionName.DATA_UNLOCK,
+            pipeline_code="P",
+            task_code="load",
+            key={"id": 2},
+            reason="not permitted",
+        )
 
 
 @warehouses("duckdb", "postgres")
@@ -121,20 +186,59 @@ def test_roles_validation_and_unobserved_writes_fail_closed(sql_world):
     ctx, params = prepare(w, "SCD1_MERGE")
     for role in (ApiRole.VIEWER, ApiRole.OPERATOR, ApiRole.DEVELOPER):
         with pytest.raises(PermissionDeniedError, match="admin"):
-            write_values(
-                replace(ctx, role=role), "P", "load", ValueEdit({"id": 1}, {"name": "X"}, "fix")
+            act(
+                replace(ctx, role=role),
+                ActionName.DATA_EDIT,
+                pipeline_code="P",
+                task_code="load",
+                key={"id": 1},
+                values={"name": "X"},
+                reason="fix",
             )
     with pytest.raises(UsageError, match="business columns"):
-        write_values(ctx, "P", "load", ValueEdit({"id": 1}, {"updated_by": "forged"}, "fix"))
+        act(
+            ctx,
+            ActionName.DATA_EDIT,
+            pipeline_code="P",
+            task_code="load",
+            key={"id": 1},
+            values={"updated_by": "forged"},
+            reason="fix",
+        )
     with pytest.raises(UsageError, match="non-NULL"):
-        write_values(ctx, "P", "load", ValueEdit({"id": None}, {"name": "X"}, "fix"))
-    assert not provenance(ctx, "P", "load", {"id": 1}).enabled
-    write_values(ctx, "P", "load", ValueEdit({"id": 1}, {"name": "Human"}, "fix"))
+        act(
+            ctx,
+            ActionName.DATA_EDIT,
+            pipeline_code="P",
+            task_code="load",
+            key={"id": None},
+            values={"name": "X"},
+            reason="fix",
+        )
+    assert not act(
+        ctx, ActionName.DATA_PROVENANCE, pipeline_code="P", task_code="load", key={"id": 1}
+    ).enabled
+    act(
+        ctx,
+        ActionName.DATA_EDIT,
+        pipeline_code="P",
+        task_code="load",
+        key={"id": 1},
+        values={"name": "Human"},
+        reason="fix",
+    )
     w.execute(f"UPDATE {w.name('protected')} SET amount=99")
     with pytest.raises(HandlerError, match="unobserved warehouse writes"):
         w.run("load", **params)
     with pytest.raises(HandlerError, match="unobserved warehouse writes"):
-        unlock_values(ctx, "P", "load", ValueUnlock({"id": 1}, "fix"))
+        act(
+            ctx,
+            ActionName.DATA_UNLOCK,
+            pipeline_code="P",
+            task_code="load",
+            key={"id": 1},
+            reason="fix",
+        )
     assert current(w)[0]["name"] == "Human"
 
 
@@ -142,7 +246,15 @@ def test_roles_validation_and_unobserved_writes_fail_closed(sql_world):
 def test_protected_replacement_and_atomic_evidence_rollback(sql_world, monkeypatch):
     w = sql_world
     ctx, params = prepare(w, "SCD2_MERGE")
-    write_values(ctx, "P", "load", ValueEdit({"id": 1}, {"name": "Human"}, "fix"))
+    act(
+        ctx,
+        ActionName.DATA_EDIT,
+        pipeline_code="P",
+        task_code="load",
+        key={"id": 1},
+        values={"name": "Human"},
+        reason="fix",
+    )
     before = w.rows(f"SELECT * FROM {w.name('protected')} ORDER BY row_id")
     for action in ("CREATE_TABLE", "OVERWRITE_TABLE", "APPEND_TABLE", "DROP_TABLE"):
         with pytest.raises(HandlerError, match="cannot replace protected"):
@@ -159,9 +271,22 @@ def test_protected_replacement_and_atomic_evidence_rollback(sql_world, monkeypat
 
     monkeypatch.setattr("etl_craft.handlers.sql.protection.fault_point", fail)
     with pytest.raises(HandlerError, match="injected evidence failure"):
-        write_values(ctx, "P", "load", ValueEdit({"id": 1}, {"name": "Lost"}, "fix"))
+        act(
+            ctx,
+            ActionName.DATA_EDIT,
+            pipeline_code="P",
+            task_code="load",
+            key={"id": 1},
+            values={"name": "Lost"},
+            reason="fix",
+        )
     assert w.rows(f"SELECT * FROM {w.name('protected')} ORDER BY row_id") == before
-    assert any(r["writer"] == "alice" for r in provenance(ctx, "P", "load", {"id": 1}).records)
+    assert any(
+        r["writer"] == "alice"
+        for r in act(
+            ctx, ActionName.DATA_PROVENANCE, pipeline_code="P", task_code="load", key={"id": 1}
+        ).records
+    )
 
 
 @warehouses("trino_iceberg", "duckdb_iceberg")
@@ -169,7 +294,15 @@ def test_nonatomic_warehouses_refuse_protection(sql_world):
     w = sql_world
     ctx, _params = prepare(w, "SCD1_MERGE")
     with pytest.raises(HandlerError, match=r"protected writes unsupported.*atomic"):
-        write_values(ctx, "P", "load", ValueEdit({"id": 1}, {"name": "Human"}, "fix"))
+        act(
+            ctx,
+            ActionName.DATA_EDIT,
+            pipeline_code="P",
+            task_code="load",
+            key={"id": 1},
+            values={"name": "Human"},
+            reason="fix",
+        )
     assert current(w)[0]["name"] == "Source"
 
 
@@ -188,17 +321,37 @@ def test_edit_and_unlock_race_with_etl(sql_world, kind, request, engine_kind):
         "load", **{**params, "SOURCE_SQL": params["SOURCE_SQL"].replace("10 AS", "20 AS")}
     )
     two_at_once(
-        lambda: write_values(ctx, "P", "load", ValueEdit({"id": 1}, {"name": "Human"}, "fix")),
+        lambda: act(
+            ctx,
+            ActionName.DATA_EDIT,
+            pipeline_code="P",
+            task_code="load",
+            key={"id": 1},
+            values={"name": "Human"},
+            reason="fix",
+        ),
         lambda: sql.run(context, w.engine_db),
         at="etl_craft.engine.locks.target",
     )
     assert [(r["name"], r["amount"]) for r in current(w)] == [("Human", 20)]
     two_at_once(
-        lambda: unlock_values(ctx, "P", "load", ValueUnlock({"id": 1}, "release")),
+        lambda: act(
+            ctx,
+            ActionName.DATA_UNLOCK,
+            pipeline_code="P",
+            task_code="load",
+            key={"id": 1},
+            reason="release",
+        ),
         lambda: sql.run(context, w.engine_db),
         at="etl_craft.engine.locks.target",
     )
-    assert not any(r["locked"] for r in provenance(ctx, "P", "load", {"id": 1}).records)
+    assert not any(
+        r["locked"]
+        for r in act(
+            ctx, ActionName.DATA_PROVENANCE, pipeline_code="P", task_code="load", key={"id": 1}
+        ).records
+    )
     sql.run(context, w.engine_db)
     assert current(w)[0]["name"] == "Source"
 
@@ -207,13 +360,46 @@ def test_edit_and_unlock_race_with_etl(sql_world, kind, request, engine_kind):
 def test_service_writes_respect_human_values_and_row_locks(sql_world):
     w = sql_world
     ctx, _params = prepare(w, "SCD2_MERGE")
-    write_values(ctx, "P", "load", ValueEdit({"id": 1}, {"name": "Human"}, "fix"))
+    act(
+        ctx,
+        ActionName.DATA_EDIT,
+        pipeline_code="P",
+        task_code="load",
+        key={"id": 1},
+        values={"name": "Human"},
+        reason="fix",
+    )
     robot = replace(ctx, actor=Actor("erp", ActorKind.SERVICE))
-    write_values(robot, "P", "load", ValueEdit({"id": 1}, {"name": "ERP", "amount": 42}, "refresh"))
+    act(
+        robot,
+        ActionName.DATA_EDIT,
+        pipeline_code="P",
+        task_code="load",
+        key={"id": 1},
+        values={"name": "ERP", "amount": 42},
+        reason="refresh",
+    )
     assert [(r["name"], r["amount"]) for r in current(w)] == [("Human", 42)]
-    write_values(ctx, "P", "load", ValueEdit({"id": 1}, {"name": "Human"}, "hold row", True))
+    act(
+        ctx,
+        ActionName.DATA_EDIT,
+        pipeline_code="P",
+        task_code="load",
+        key={"id": 1},
+        values={"name": "Human"},
+        reason="hold row",
+        row_lock=True,
+    )
     before = current(w)
-    write_values(robot, "P", "load", ValueEdit({"id": 1}, {"amount": 99}, "refresh"))
+    act(
+        robot,
+        ActionName.DATA_EDIT,
+        pipeline_code="P",
+        task_code="load",
+        key={"id": 1},
+        values={"amount": 99},
+        reason="refresh",
+    )
     assert current(w) == before
 
 
@@ -223,20 +409,29 @@ def test_values_api_uses_human_credentials_and_shared_role_policy(sql_world, req
     from fastapi.testclient import TestClient
 
     from etl_craft.api.app import create_app
-    from etl_craft.core.enums import AccountKind, YesNo
-    from etl_craft.services.operations import accounts, sessions
 
     w = sql_world
     if engine_kind == "postgresql":
         use_postgres_engine(w, request)
     ctx, params = prepare(w, "SCD2_MERGE")
-    account = accounts.Account(0, "alice", AccountKind.USER, ApiRole.ADMIN, None, None, YesNo.YES)
-    accounts.add_account(ctx, account, "correct horse battery")
-    token = sessions.sign_in(ctx, "alice", "correct horse battery").access_token
+    act(
+        ctx,
+        ActionName.ACCOUNT_ADD,
+        name="alice",
+        role=ApiRole.ADMIN,
+        password="correct horse battery",
+    )
+    token = act(ctx, ActionName.LOGIN, name="alice", password="correct horse battery").access_token
     headers = {"Authorization": "Bearer " + token}
-    path = "/api/v1/pipelines/P/tasks/load/values"
+    path = "/api/v1/values"
+    task = {"pipeline_code": "P", "task_code": "load"}
     with TestClient(create_app(ctx)) as client:
-        body = {"key": {"id": 1}, "values": {"name": "O'Connor"}, "reason": "verified spelling"}
+        body = {
+            **task,
+            "key": {"id": 1},
+            "values": {"name": "O'Connor"},
+            "reason": "verified spelling",
+        }
         assert client.post(path, json=body).status_code == 401
         response = client.post(path, json=body, headers=headers)
         assert response.status_code == 200, response.text
@@ -264,20 +459,22 @@ def test_values_api_uses_human_credentials_and_shared_role_policy(sql_world, req
         assert "O'Connor" not in json.dumps(arguments)
         assert current(w)[0]["name"] == "O'Connor"
         assert current(w)[0].get("UPDATED_BY", current(w)[0].get("updated_by")) == "alice"
-        assert client.post(path, json={**body, "unknown": True}, headers=headers).status_code == 422
-        accounts.set_role(ctx, "alice", ApiRole.OPERATOR)
+        assert client.post(path, json={**body, "unknown": True}, headers=headers).status_code == 400
+        act(ctx, ActionName.ACCOUNT_SET_ROLE, name="alice", role=ApiRole.OPERATOR)
         assert client.post(path, json=body, headers=headers).status_code == 403
         denied = client.post(
-            path + "/unlock", json={"key": {"id": 1}, "reason": "release"}, headers=headers
+            path + "/unlock", json={**task, "key": {"id": 1}, "reason": "release"}, headers=headers
         )
         assert denied.status_code == 403
         assert (
-            client.post(path + "/provenance", json={"key": {"id": 1}}, headers=headers).status_code
+            client.post(
+                path + "/provenance", json={**task, "key": {"id": 1}}, headers=headers
+            ).status_code
             == 200
         )
-        accounts.set_role(ctx, "alice", ApiRole.ADMIN)
+        act(ctx, ActionName.ACCOUNT_SET_ROLE, name="alice", role=ApiRole.ADMIN)
         response = client.post(
-            path + "/unlock", json={"key": {"id": 1}, "reason": "release"}, headers=headers
+            path + "/unlock", json={**task, "key": {"id": 1}, "reason": "release"}, headers=headers
         )
         assert response.status_code == 200, response.text
         w.run("load", **params)
@@ -288,7 +485,15 @@ def test_values_api_uses_human_credentials_and_shared_role_policy(sql_world, req
 def test_noncompare_edits_null_values_and_historical_tampering(sql_world):
     w = sql_world
     ctx, params = prepare(w, "SCD2_MERGE", compare="amount")
-    write_values(ctx, "P", "load", ValueEdit({"id": 1}, {"name": None}, "remove wrong name"))
+    act(
+        ctx,
+        ActionName.DATA_EDIT,
+        pipeline_code="P",
+        task_code="load",
+        key={"id": 1},
+        values={"name": None},
+        reason="remove wrong name",
+    )
     assert current(w)[0]["name"] is None
     incoming = {**params, "SOURCE_SQL": params["SOURCE_SQL"].replace("10 AS", "20 AS")}
     w.run("load", **incoming)
@@ -310,7 +515,15 @@ def count_versions(w, active):
 def test_evidence_cannot_be_a_task_target_and_partial_restore_fails(sql_world):
     w = sql_world
     ctx, params = prepare(w, "SCD1_MERGE")
-    write_values(ctx, "P", "load", ValueEdit({"id": 1}, {"name": "Human"}, "fix"))
+    act(
+        ctx,
+        ActionName.DATA_EDIT,
+        pipeline_code="P",
+        task_code="load",
+        key={"id": 1},
+        values={"name": "Human"},
+        reason="fix",
+    )
     journal = next(t for t in w.tables() if t.startswith("etl_protection_"))
     with pytest.raises(HandlerError, match="reserved SCD protection evidence"):
         w.run(
@@ -359,5 +572,13 @@ def test_manual_edit_refuses_conflicting_merge_lifecycles(sql_world):
             },
         )
     with pytest.raises(HandlerError, match="conflicts with an active SCD2_MERGE writer"):
-        write_values(ctx, "P", "load", ValueEdit({"id": 1}, {"name": "Human"}, "fix"))
+        act(
+            ctx,
+            ActionName.DATA_EDIT,
+            pipeline_code="P",
+            task_code="load",
+            key={"id": 1},
+            values={"name": "Human"},
+            reason="fix",
+        )
     assert current(w)[0]["name"] == "Source"

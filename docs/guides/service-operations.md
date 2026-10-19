@@ -1,8 +1,12 @@
 # Service operations
 
-The CLI and Python callers use the same functions in `etl_craft.services.operations`.
-Operations take a frozen `OperationContext` and a pipeline code, return frozen result
-dataclasses, and never print or dispose the caller's engine.
+Every action (a run, a mark, a control, a sign-in, a token, a docs build) is one row of the
+action table in `etl_craft.services.operations.actions`. The CLI, the HTTP API and Python
+callers reach it the same way: build the action's request and call
+`invoke(ctx, ActionName.X, request)`. `invoke` checks the caller's role, records the request
+once when the action is audited, and calls the operation. Operations never print or dispose the
+caller's engine. The [actions reference](../reference/actions.md) lists every action with its
+command, route, role, audit and placement, generated from the table.
 
 ## Calling from Python
 
@@ -18,11 +22,12 @@ from pathlib import Path
 
 from etl_craft.config import load_config
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
+from etl_craft.core.enums import ActionName
 from etl_craft.core.errors import ConfigurationError
 from etl_craft.engine.connection import check_reachable, engine_db
-from etl_craft.engine.runlog import RunSelector
-from etl_craft.services.operations import OperationContext, to_json
-from etl_craft.services.operations import runs, tokens
+from etl_craft.services.operations import OperationContext, to_json, tokens
+from etl_craft.services.operations.actions import invoke
+from etl_craft.services.operations.requests import RunRequest
 
 config = load_config(Path("craft-connector.yml"))
 engine = engine_db(config)
@@ -34,59 +39,55 @@ try:
     if identity is None:
         raise ConfigurationError("ETL_CRAFT_TOKEN is invalid; obtain a service token from an admin")
     ctx = replace(ctx, actor=identity.actor, role=identity.role)
-    done = runs.initialize_run(
-        ctx,
-        "SALES",
+    request = RunRequest(
+        pipeline_code="SALES",
+        init_only=True,
         run_date=date(2026, 10, 1),
-        selector=RunSelector(run_key="python:2026-10-01"),
+        run_key="python:2026-10-01",
     )
+    done = invoke(ctx, ActionName.RUN, request)
     print(json.dumps(to_json(done), indent=2))
 finally:
     engine.dispose()
 ```
 
-`initialize_run` performs the CLI's initialization step. `trigger_run` runs the pipeline
-in the foreground; task execution, gates, leases, reconciliation and finalization use the same
-execution functions as the CLI. `ctx.child` controls the child process's logging and execution
+Requests are frozen, keyword-only dataclasses that validate themselves when built; a refusal
+names the request field in backticks (`` `task_code` ``). The CLI shows that field as its flag,
+and the HTTP API returns it as it is. Run selection is always `run_id` or `run_key`, or neither
+for the pipeline's single non-terminal run.
+
+| Request | Actions |
+| --- | --- |
+| `RunRequest` | `run`: a whole run, one task, a standalone selection, a rerun, a skip or a backfill (`backfill_from`, `backfill_to`) |
+| `MarkRequest` | `mark`: a run, a task, a stand-in run (`new_run`) or a watermark reset |
+| `ControlRequest` | `control`: `STOP`, `ABORT`, `HOLD`, `RELEASE`, `RECOVER`, `RESTART`, `RUN_PAUSED`, and `PAUSE`/`RESUME` of a definition |
+| `BulkControlRequest` | `control bulk`: up to 100 keyed controls, each invoked and recorded on its own |
+| `RunSelection`, `TaskSelection`, `CapabilitiesInput`, `HistoryInput` | `status`, `steps`, `explain`, `capabilities`, `history` |
+| `PipelineInput`, `NoInput`, `AuditInput`, `ValidateInput`, `LineageInput` | `graph`, `pipeline`, `pipelines`, `audit`, `validate`, `lineage` |
+
+Over HTTP (`ctx.transport` is `HTTP`) a whole-pipeline run is admitted for the controller,
+which runs it, and `force`, `skip` and `ignore_dependencies` (except with `standalone`) are
+refused with where they work. `ctx.child` controls the child process's logging and execution
 options. Project files remain relative to `config.project_dir`.
 
-| Area | Operations |
-| --- | --- |
-| `runs` | `trigger_run`, `initialize_run`, `finalize_run`, `skip_run`, `mark`, `mark_run`, `stand_in_run`, `reconcile_runs` |
-| `tasks` | `run_task`, `force_task`, `rerun_task`, `mark_task` |
-| `pipelines` | `set_pause` |
-| `controls` | `request_control(ctx, ControlRequest(...))`, `get_control(ctx, control_id)` |
-| `backfills` | `run_backfill` |
-| `catalog` | `get_gaps(ctx, compare=False)` returns the read-only schema/lineage gap snapshot |
-| `inspect` | `list_pipelines`, `pipeline_graph`, `pipeline_steps`, `run_history`, `audit` |
+Long-running processes (`controller`, `publish-docs`) are started by their interface inside
+`actions.admitted(ctx, name, request)`, which applies the same role check and audit.
 
-`controls.ControlRequest` selects a run and optional task, action (`ControlAction`), reason and
-optional idempotency key. It returns `etl-craft/control/1` with acceptance, acknowledgement and
-completion separate from `run_status`. The `stop`, `abort`, `hold` and `release` commands each
-send one `ControlAction` through it. See [scoped controls](run-control.md#hold-or-release-dispatch-in-a-selected-run).
-
-Pass `verb="pause"` or `verb="resume"` to `pipelines.set_pause(ctx, pipeline_code, reason, ...)`.
-
-`execute_run(ctx, RunRequest(...))` dispatches the same request used by `etl-craft run`.
-`reason` on `tasks.run_task` requests the dependency override and must be non-empty; without
-one the task follows its normal dependency checks. Force, rerun, backfill, pause and intervention
-restrictions remain the same as their CLI equivalents.
-
-Domain refusals raise the existing `core.errors` classes. Read operations use one consistent
-database snapshot for related views and do not create action records.
+Domain refusals raise the existing `core.errors` classes. Read actions use one consistent
+database snapshot for related views and record nothing.
 
 ## Shared permissions
 
-`OperationContext.role` carries the role proven by the caller's token/session. Leaving it unset
-refuses normal operations; a claimed actor name supplies no permission. CLI and HTTP adapters
-use the same services policy as direct Python operations, so changing the central policy
-changes every transport. Do not implement role comparisons in a command or route.
+`OperationContext.role` carries the role proven by the caller's token or session. Leaving it
+unset refuses every action that needs a role; a claimed actor name supplies no permission. The
+role each action needs is a column of the action table, so changing it changes every interface.
+Do not compare roles in a command or a route.
 
 See the [deployment role table](../deploying/security.md#deployment-accounts). A role refusal
-raises `PermissionDeniedError` with exit code 26, records `AUD_ACTIONS.OUTCOME=REFUSED`, and
-names the account, current role, required role and remedy. Normal successful reads still make
-no action records. Low-level engine/warehouse helpers are internal building blocks under the
-Engine DB writer trust boundary; authenticated applications call the operation boundary.
+raises `PermissionDeniedError` with exit code 26, records one `AUD_ACTIONS.OUTCOME=REFUSED` row,
+and names the account, its role, the action, the role it needs and the remedy. Local
+provisioning (`setup`, `init-db`, `migrate`, `doctor` before any admin exists) skips only the
+role check of the actions the table marks as provisioning.
 
 ## Execution identities and outcomes
 
@@ -117,13 +118,13 @@ is never updated. This applies to manual and controller-scheduled catalog builds
 ## JSON on the command line
 
 These commands accept `--format json`: `run`, `mark`, `stop`, `abort`, `hold`, `release`, `pause`, `resume`,
-`reconcile`, `list`, `graph`, `steps`, `history` and `audit`. Text remains the default.
+`reconcile`, `pipelines`, `graph`, `steps`, `history` and `audit`. Text remains the default.
 
 ```bash
-etl-craft list --format json
-etl-craft history --pipeline_code SALES --run-id 42 --format json
-etl-craft history --pipeline_code SALES --task_code load --run-id 42 --format json
-etl-craft run --pipeline_code SALES --init-only --run-key daily:2026-10-01 --format json
+etl-craft pipelines --format json
+etl-craft history --pipeline-code SALES --run-id 42 --format json
+etl-craft history --pipeline-code SALES --task-code load --run-id 42 --format json
+etl-craft run --pipeline-code SALES --init-only --run-key daily:2026-10-01 --format json
 ```
 
 Standard output contains one JSON document produced by `to_json`, including empty lists.
@@ -153,20 +154,16 @@ context, requests and result fields.
 
 ## Execution inspection and diagnostics
 
-`operations.status.pipeline_status(ctx, code, selector=...)` returns `StatusView`;
-`explain_task(ctx, code, task_code, selector=...)` returns `Explanation`. The pure
-`explain(snapshot)` function computes the same explanation from a captured `TaskSnapshot`.
-These reads never modify run or admission state.
-
-`operations.diagnostics.validate_metadata(ctx, code)` returns the validation report;
-`check_configuration(config)` returns `DoctorView`, including unreachable-service findings;
-`trace_lineage(ctx, table=..., column=..., upstream=True, downstream=True, depth=..., refresh=False)`
-returns `LineageView`. Lineage retains its existing metadata cache behavior. All these documents
-use `to_json` and a versioned `schema` identifier, matching CLI `--format json` output.
+`status` returns `StatusView` and `explain` returns `Explanation`; the pure
+`operations.status.explain(snapshot)` computes the same explanation from a captured
+`TaskSnapshot`. `validate` returns the validation report, `doctor` returns `DoctorView`, and
+`lineage` (`LineageInput`, with `direction` `BOTH`, `UPSTREAM` or `DOWNSTREAM`) returns
+`LineageView`; `lineage refresh` works every task's lineage out again first. Every document uses
+`to_json` and a versioned `SCHEMA`, matching CLI `--format json` output.
 
 Run results include `waiting=True` when a single-task command recorded nothing because
 its dependencies were not met. That call exits 23; unfinished executions exit 22. Initializing
-a run with `--init-only` retains exit 0 for orchestrator first steps.
+a run with `--init-only` exits 0 while the controller runs it.
 
 ## Actor scopes and run writers
 
@@ -182,9 +179,8 @@ A handler receives the exact run's durable `TaskContext.writer`. SQL merge and r
 columns use this value; ordinary ETL runs retain `etl-craft`, including runs requested by users.
 The initiator remains in the action/run audit separately from the warehouse writer.
 
-`capabilities.control_capabilities` exposes exact-run/task action availability and data effects.
-`bulk_controls.request_bulk_controls` applies only explicit keyed selections, retaining individual
-refusals alongside accepted controls. `ControlAction.RECOVER`, `RESTART` and `RUN_PAUSED` use
-`controls.request_control`; preparation returns promptly with `execution_run_id`, separately from
-actual execution outcome. Recovery preserves successful work; restart keeps current checkpoints
+The `capabilities` action exposes exact-run and task control availability and data effects.
+`control bulk` applies only explicit keyed selections, retaining individual refusals beside
+accepted controls. `RECOVER`, `RESTART` and `RUN_PAUSED` go through `control`; preparation
+returns promptly with `execution_run_id`, separately from the actual execution outcome. Recovery preserves successful work; restart keeps current checkpoints
 in a new context. See the [control guide](run-control.md#recover-or-restart-an-exact-execution).

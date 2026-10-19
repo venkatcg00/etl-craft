@@ -15,11 +15,9 @@ from etl_craft.core.enums import AccountKind, ApiRole, TokenKind, YesNo
 from etl_craft.core.errors import UsageError
 from etl_craft.core.text import sha256_hex
 from etl_craft.engine.queries import statement
-from etl_craft.services.operations.context import OperationContext, operation
-from etl_craft.services.operations.permissions import authorize
+from etl_craft.services.operations.context import OperationContext
+from etl_craft.services.operations.requests import NoInput, Request
 from etl_craft.services.operations.snapshots import timestamp
-
-ROLES = tuple(ApiRole)
 
 
 @dataclass(frozen=True)
@@ -81,27 +79,39 @@ def _view(row: RowMapping) -> TokenView:
     return TokenView(**values)
 
 
-def create_token(
-    ctx: OperationContext, name: str, role: str, expires: str | None = None
-) -> CreatedToken:
+@dataclass(frozen=True, kw_only=True)
+class TokenCreate(Request):
+    """A service account's name, its role and an optional lifetime in days, such as ``90d``."""
+
+    name: str
+    role: ApiRole
+    expires: str | None = None
+
+    def __post_init__(self) -> None:
+        """Check the name and the lifetime before any account is created."""
+        Actor(self.name, ActorKind.SERVICE)
+        if self.expires is not None:
+            if re.fullmatch(r"[0-9]{1,5}d", self.expires) is None:
+                raise UsageError("`expires` must be a positive number of days, such as 90d")
+            if not 1 <= int(self.expires[:-1]) <= 36500:
+                raise UsageError("`expires` must be between 1d and 36500d")
+
+
+@dataclass(frozen=True, kw_only=True)
+class TokenRevoke(Request):
+    """One token, by id."""
+
+    token_id: int
+
+
+def create_token(ctx: OperationContext, request: TokenCreate) -> CreatedToken:
     """Print-once credentials contain 256 random bits; only their SHA-256 is stored."""
-    authorize(ctx, "token create")
-    Actor(name, ActorKind.SERVICE)
-    if role not in ROLES:
-        raise UsageError(f"token role={role!r}; expected {', '.join(ROLES)}")
+    name, role = request.name, request.role
     now = datetime.now(UTC)
-    expires_at = None
-    if expires is not None:
-        if re.fullmatch(r"[0-9]{1,5}d", expires) is None:
-            raise UsageError("token --expires must be a positive number of days, such as 90d")
-        days = int(expires[:-1])
-        if not 1 <= days <= 36500:
-            raise UsageError("token --expires must be between 1d and 36500d")
-        expires_at = now + timedelta(days=days)
-    with (
-        operation(ctx, "token create", {"name": name, "role": role, "expires": expires}),
-        ctx.engine.begin() as conn,
-    ):
+    expires_at = (
+        None if request.expires is None else now + timedelta(days=int(request.expires[:-1]))
+    )
+    with ctx.engine.begin() as conn:
         conn.execute(
             statement(conn, "api_token_account_create"),
             {"name": name, "kind": AccountKind.SERVICE, "role": role},
@@ -125,26 +135,25 @@ def create_token(
         )
 
 
-def list_tokens(ctx: OperationContext) -> TokensView:
+def list_tokens(ctx: OperationContext, request: NoInput) -> TokensView:
     """Return safe metadata; credential hashes never enter operation JSON."""
-    authorize(ctx, "token list")
     with ctx.engine.connect() as conn:
         return TokensView(
             tuple(_view(row._mapping) for row in conn.execute(statement(conn, "api_token_list")))
         )
 
 
-def revoke_token(ctx: OperationContext, token_id: int) -> TokensView:
+def revoke_token(ctx: OperationContext, request: TokenRevoke) -> TokensView:
     """Revoke a token immediately; each request authenticates against current storage."""
-    authorize(ctx, "token revoke")
-    with operation(ctx, "token revoke", {"token_id": token_id}), ctx.engine.begin() as conn:
+    token_id = request.token_id
+    with ctx.engine.begin() as conn:
         found = conn.execute(
             statement(conn, "api_token_revoke"),
             {"token_id": token_id, "now": datetime.now(UTC)},
         ).scalar_one_or_none()
         if found is None:
             raise UsageError(f"token_id={token_id}: token is missing or already revoked")
-    return list_tokens(ctx)
+    return list_tokens(ctx, NoInput())
 
 
 def authenticate(ctx: OperationContext, token: str) -> TokenView | None:

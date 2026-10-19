@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import replace
-from datetime import datetime
+from pathlib import Path
 
-from etl_craft.core.actor import acting_as
-from etl_craft.core.errors import UsageError
+from sqlalchemy import Boolean
+
+from etl_craft.core.enums import RunCondition, RunStatus
+from etl_craft.core.errors import ResourceNotFoundError
 from etl_craft.core.graph import build_graph
 from etl_craft.core.time import as_utc
 from etl_craft.engine.connection import read_snapshot
@@ -17,7 +20,7 @@ from etl_craft.engine.repository.dependencies import (
     fetch_pipeline_dependency_edges,
     fetch_pipeline_graph,
 )
-from etl_craft.engine.repository.interventions import fetch_interventions
+from etl_craft.engine.repository.intervention_rows import fetch_interventions
 from etl_craft.engine.repository.pauses import fetch_open_pauses
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.repository.tasks import (
@@ -25,13 +28,14 @@ from etl_craft.engine.repository.tasks import (
     fetch_task_parameters,
     resolve_task_id,
 )
-from etl_craft.engine.runlog import ACTIVE_RUN, RunSelector, select_run
+from etl_craft.engine.runlog import select_run
+from etl_craft.execution.attempt_records import attempt_log_path
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.models import (
     ActionView,
+    AttemptView,
     AuditView,
     GraphView,
-    HistoryQuery,
     HistoryView,
     MetadataChangeView,
     PipelineListView,
@@ -41,14 +45,28 @@ from etl_craft.services.operations.models import (
     StepView,
     TaskRunView,
 )
-from etl_craft.services.operations.permissions import authorize
-from etl_craft.services.operations.snapshots import run_document, task_document
+from etl_craft.services.operations.requests import (
+    AttemptId,
+    AuditInput,
+    HistoryInput,
+    LogInput,
+    NoInput,
+    PipelineInput,
+    RunId,
+    RunSelection,
+)
+from etl_craft.services.operations.snapshots import (
+    attempt_document,
+    pipeline_view,
+    run_document,
+    run_view,
+    task_document,
+)
 
 
-def list_pipelines(ctx: OperationContext) -> PipelineListView:
-    """List active definitions without recording a mutating action."""
-    authorize(ctx, "list")
-    with acting_as(ctx.actor), read_snapshot(ctx.engine) as conn:
+def list_pipelines(ctx: OperationContext, request: NoInput) -> PipelineListView:
+    """List the active definitions."""
+    with read_snapshot(ctx.engine) as conn:
         pauses = fetch_open_pauses(conn)
         views = []
         for row in conn.execute(statement(conn, "active_pipelines")):
@@ -69,10 +87,10 @@ def list_pipelines(ctx: OperationContext) -> PipelineListView:
         return PipelineListView(tuple(views))
 
 
-def pipeline_graph(ctx: OperationContext, pipeline_code: str) -> GraphView:
+def pipeline_graph(ctx: OperationContext, request: PipelineInput) -> GraphView:
     """Read the static graph with the pipeline's canonical definition id."""
-    authorize(ctx, "graph")
-    with acting_as(ctx.actor), read_snapshot(ctx.engine) as conn:
+    pipeline_code = request.pipeline_code
+    with read_snapshot(ctx.engine) as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         data = fetch_pipeline_graph(conn, pipeline_id)
         codes = fetch_task_codes(conn, pipeline_id)
@@ -95,7 +113,7 @@ def pipeline_graph(ctx: OperationContext, pipeline_code: str) -> GraphView:
                 sorted(
                     codes[task.task_id]
                     for task in data.tasks
-                    if (task.run_condition or "ALL") != "ALL"
+                    if (task.run_condition or RunCondition.ALL) != RunCondition.ALL
                 )
             ),
             {code: tuple(sorted(edges)) for code, edges in sorted(depends_on.items())},
@@ -106,17 +124,11 @@ def pipeline_graph(ctx: OperationContext, pipeline_code: str) -> GraphView:
         )
 
 
-def pipeline_steps(
-    ctx: OperationContext,
-    pipeline_code: str,
-    *,
-    selector: RunSelector = ACTIVE_RUN,
-) -> StepsView:
+def pipeline_steps(ctx: OperationContext, request: RunSelection) -> StepsView:
     """Read configured tasks under the exact selected run, including tasks not yet started."""
-    authorize(ctx, "steps")
-    with acting_as(ctx.actor), read_snapshot(ctx.engine) as conn:
-        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
-        selected = select_run(conn, pipeline_id, selector)
+    with read_snapshot(ctx.engine) as conn:
+        pipeline_id = resolve_pipeline_id(conn, request.pipeline_code)
+        selected = select_run(conn, pipeline_id, request.selector)
         steps = tuple(
             StepView(
                 pipeline_id,
@@ -129,7 +141,7 @@ def pipeline_steps(
                 row.run_condition,
                 row.run_condition_count,
                 dict(sorted(fetch_task_parameters(conn, row.task_id).items())),
-                row.status,
+                None if row.status is None else RunStatus(row.status),
             )
             for row in conn.execute(
                 statement(conn, "pipeline_steps"),
@@ -139,30 +151,15 @@ def pipeline_steps(
         return StepsView(pipeline_id, selected.pipeline_run_id, steps)
 
 
-def run_history(
-    ctx: OperationContext, pipeline_code: str, query: HistoryQuery | None = None
-) -> HistoryView:
+def run_history(ctx: OperationContext, request: HistoryInput) -> HistoryView:
     """Read bounded history; selection never falls back to the most recent ended run.
 
     Entries come newest run first; the view's ``before`` is the next page's cursor, or ``None``
     on the last page.
     """
-    authorize(ctx, "history")
-    query = query or HistoryQuery()
-    task_code, limit, all_runs, before, selector = (
-        query.task_code,
-        query.limit,
-        query.all_runs,
-        query.before,
-        query.selector,
-    )
-    if limit < 1:
-        raise UsageError(f"--limit must be 1 or more, got {limit}")
-    if before is not None and before < 1:
-        raise UsageError(f"before={before}; expected a positive run id")
-    if all_runs and (selector.run_id is not None or selector.run_key is not None):
-        raise UsageError("--all lists runs; do not pass a run selector")
-    with acting_as(ctx.actor), read_snapshot(ctx.engine) as conn:
+    pipeline_code, task_code, limit = request.pipeline_code, request.task_code, request.limit
+    all_runs, before, selector = request.all, request.before, request.selector
+    with read_snapshot(ctx.engine) as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         selected = None if all_runs else select_run(conn, pipeline_id, selector)
         parameters = {
@@ -205,16 +202,11 @@ def run_history(
         )
 
 
-def audit(
-    ctx: OperationContext,
-    pipeline_code: str | None = None,
-    *,
-    since: datetime | None = None,
-) -> AuditView:
+def audit(ctx: OperationContext, request: AuditInput) -> AuditView:
     """Read completed requests and immutable metadata captures without making an action."""
-    authorize(ctx, "audit")
-    since = None if since is None else as_utc(since)
-    with acting_as(ctx.actor), read_snapshot(ctx.engine) as conn:
+    pipeline_code = request.pipeline_code
+    since = None if request.since is None else as_utc(request.since)
+    with read_snapshot(ctx.engine) as conn:
         pipeline_id = None if pipeline_code is None else resolve_pipeline_id(conn, pipeline_code)
         actions, changes = fetch_audit_records(conn, pipeline_id, since)
         for row in (*actions, *changes):
@@ -223,3 +215,68 @@ def audit(
             tuple(ActionView(**row) for row in actions),
             tuple(MetadataChangeView(**row) for row in changes),
         )
+
+
+def get_pipeline(ctx: OperationContext, request: PipelineInput) -> PipelineView:
+    """Read one active definition without duplicating pipeline assembly."""
+    with read_snapshot(ctx.engine) as conn:
+        return pipeline_view(conn, resolve_pipeline_id(conn, request.pipeline_code))
+
+
+def get_run(ctx: OperationContext, request: RunId) -> RunView:
+    """Read one run by id, never an active or recent replacement."""
+    with read_snapshot(ctx.engine) as conn:
+        code = conn.execute(
+            statement(conn, "api_run_code"), {"run_id": request.run_id}
+        ).scalar_one_or_none()
+        if code is None:
+            raise ResourceNotFoundError(f"pipeline_run_id={request.run_id}: run does not exist")
+        return run_view(conn, resolve_pipeline_id(conn, str(code)), request.run_id)
+
+
+def get_attempt(ctx: OperationContext, request: AttemptId) -> AttemptView:
+    """Read one attempt with the same fields and conversions as CLI inspection."""
+    with read_snapshot(ctx.engine) as conn:
+        row = conn.execute(
+            statement(conn, "api_attempt").columns(retryable=Boolean),
+            {"attempt_id": request.attempt_id},
+        ).one_or_none()
+    if row is None:
+        raise ResourceNotFoundError(f"attempt_id={request.attempt_id}: attempt does not exist")
+    return attempt_document(row._mapping)
+
+
+def attempt_log(ctx: OperationContext, request: LogInput) -> Iterator[bytes]:
+    """Stream a stored attempt's canonical log in bounded chunks from a byte offset."""
+    attempt_id = request.attempt_id
+    attempt = get_attempt(ctx, request)
+    if attempt.log_path is None:
+        raise ResourceNotFoundError(f"attempt_id={attempt_id}: no log has been recorded")
+    with ctx.engine.connect() as conn:
+        row = conn.execute(
+            statement(conn, "api_attempt_identity"), {"attempt_id": attempt_id}
+        ).one()
+    expected = attempt_log_path(
+        ctx.config,
+        row.pipeline_code,
+        attempt.pipeline_run_id,
+        row.task_code,
+        attempt.attempt_number,
+    ).resolve()
+    path = Path(attempt.log_path).resolve()
+    if path != expected or not path.is_relative_to(ctx.config.log_dir.resolve()):
+        raise ResourceNotFoundError(
+            f"attempt_id={attempt_id}: log is outside its configured attempt path"
+        )
+    try:
+        stream = path.open("rb")
+    except OSError as error:
+        raise ResourceNotFoundError(f"attempt_id={attempt_id}: log file is unavailable") from error
+
+    def chunks() -> Iterator[bytes]:
+        with stream:
+            stream.seek(request.offset)
+            while data := stream.read(65536):
+                yield data
+
+    return chunks()

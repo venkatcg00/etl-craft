@@ -45,15 +45,15 @@ def rerun_task(
     hooks: RunHooks | None = None,
     selector: runlog.RunSelector = runlog.ACTIVE_RUN,
 ) -> PipelineOutcome:
-    """Run ``task_code`` again under the selected run: ``run --task_code --rerun``.
+    """Run ``task_code`` again under the selected run: ``run --task-code --rerun``.
 
     With ``with_downstream``, every task after it runs again too. The task
     runs as it stands, without its dependencies checked again. Each task after it runs again,
     in dependency order, when its dependencies are satisfied by then; the others keep their
     rows. A run that had ended is reopened for this and then ended again from its tasks'
-    statuses; a run still in progress is left for ``run --pipeline_code`` to finish.
+    statuses; a run still in progress is left for ``run --pipeline-code`` to finish.
     """
-    check_override(config, "--rerun", reason)
+    check_override(config, "`rerun`", reason)
     child = child or ChildOptions()
     with engine.connect() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
@@ -154,7 +154,7 @@ def force_task(
     hooks: RunHooks | None = None,
     selector: runlog.RunSelector = runlog.ACTIVE_RUN,
 ) -> PipelineOutcome:
-    """Run ``task_code`` past its checks: ``run --task_code --force``.
+    """Run ``task_code`` past its checks: ``run --task-code --force``.
 
     Under the pipeline's active run the task just runs. A run that had ended is reopened for
     it and then ended again from its tasks' statuses, so a forced task that fails leaves the
@@ -186,7 +186,7 @@ def _end_reopened(
     """End again a run reopened to run some of its tasks, or keep it open for the rest.
 
     A task with no row under the run has yet to run, so the run stays ``IN-PROGRESS`` for
-    ``run --pipeline_code`` to resume it.
+    ``run --pipeline-code`` to resume it.
     """
     with engine.connect() as conn:
         rows = runlog.fetch_run_state(conn, run.pipeline_run_id, list(run.graph.task_ids))
@@ -196,7 +196,7 @@ def _end_reopened(
             f"{run.pipeline_code}: pipeline_run_id={run.pipeline_run_id} "
             f"stays IN-PROGRESS ({summary}); "
             f"{len(not_run)} task(s) still need to run: {', '.join(not_run)}. "
-            f"`etl-craft run --pipeline_code {run.pipeline_code}` runs them"
+            f"`etl-craft run --pipeline-code {run.pipeline_code}` runs them"
         )
         logger.warning("%s", message)
         return PipelineOutcome(RunStatus.IN_PROGRESS, message, run.pipeline_run_id)

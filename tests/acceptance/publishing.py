@@ -19,7 +19,7 @@ from uuid import uuid4
 import pytest
 
 from etl_craft.config import DocsSiteConfig
-from etl_craft.services.catalog_site import MARKER
+from etl_craft.services.catalog.site import MARKER
 from etl_craft.services.docs_publish import published
 
 pytestmark = pytest.mark.harness

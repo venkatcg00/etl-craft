@@ -228,10 +228,10 @@ def test_other_warehouses_take_no_separate_fields(name):
 def config_for(
     jdbc_url: str | None, *, table_format=TableFormat.NATIVE, **extra
 ) -> ConnectorConfig:
-    engine = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:e.db", "", "none")
+    engine = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:e.db", "", "NONE")
     warehouse = None
     if jdbc_url is not None:
-        profile = ConnectionProfile("WAREHOUSE", "dev", jdbc_url, "", "none", extra=extra)
+        profile = ConnectionProfile("WAREHOUSE", "dev", jdbc_url, "", "NONE", extra=extra)
         warehouse = profile
     return ConnectorConfig(
         source=SourceConfig(type="environment"),
@@ -247,9 +247,9 @@ def config_for(
         ("jdbc:postgresql://h/wh", TableFormat.NATIVE, "postgres", "wh"),
         ("jdbc:duckdb:/data/warehouse.duckdb", TableFormat.NATIVE, "duckdb", "warehouse"),
         ("jdbc:trino://t:8080/iceberg/analytics", TableFormat.NATIVE, "trino_iceberg", "iceberg"),
-        ("jdbc:databricks://h/default;httpPath=/p;ConnCatalog=main", "iceberg",
+        ("jdbc:databricks://h/default;httpPath=/p;ConnCatalog=main", "ICEBERG",
          "databricks_iceberg", "main"),
-        ("jdbc:snowflake://a.snowflakecomputing.com/?db=DB&schema=S", "native", "snowflake", "DB"),
+        ("jdbc:snowflake://a.snowflakecomputing.com/?db=DB&schema=S", "NATIVE", "snowflake", "DB"),
     ],
 )  # fmt: skip
 def test_the_active_warehouse_and_its_catalog(jdbc_url, table_format, key, catalog):

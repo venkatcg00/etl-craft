@@ -119,7 +119,7 @@ def selected_graph(data: PipelineGraphData, scope: TaskSelection) -> PipelineGra
             f"manual selection={scope.task_ids}: inactive/missing tasks={sorted(missing)}, "
             f"dependencies outside selection={outside}: "
             f"cross-pipeline inputs={sorted(cross)}; select a pipeline run with recorded inputs "
-            "or explicitly use --ignore-dependencies with --reason for current inputs"
+            "or explicitly use `ignore_dependencies` with `reason` for current inputs"
         )
     return PipelineGraphData(
         [

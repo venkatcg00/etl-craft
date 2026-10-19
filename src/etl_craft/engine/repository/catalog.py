@@ -13,7 +13,7 @@ from etl_craft.core.enums import CatalogRunKind
 from etl_craft.core.failures import retry_reason
 from etl_craft.core.time import elapsed_seconds
 from etl_craft.engine.queries import statement
-from etl_craft.engine.repository.interventions import Intervention
+from etl_craft.engine.repository.intervention_rows import Intervention
 from etl_craft.engine.repository.normalization import ObjectIdentity
 from etl_craft.engine.runlog import as_date
 

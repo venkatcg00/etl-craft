@@ -34,6 +34,6 @@ error class has its own status; every error etl-craft raises on purpose belongs 
 | `24` | `RESOURCE_NOT_FOUND` | An exact execution resource or attempt log is unavailable. |
 | `25` | `METADATA_FILE` | A file in the project's `config/` folder cannot be read, or its rows cannot be loaded; the message names the file, line, column and value. |
 | `26` | `PERMISSION_DENIED` | The proven account lacks the operation’s required role (`PermissionDeniedError`). Ask an administrator to grant that role or a higher one; the refusal is recorded in `AUD_ACTIONS`. |
-| `27` | `SERVER` | A command run with `--server` could not reach the server, or the server answered with something that is not etl-craft JSON (`ServerError`). Check the URL, the network and that the server runs the same etl-craft version. |
+| `27` | `SERVER` | A command run with `--controller` could not reach the server, or the server answered with something that is not etl-craft JSON (`ServerError`). Check the URL, the network and that the server runs the same etl-craft version. |
 | `28` | `TRANSIENT` | A script explicitly raised `etl_craft.scripting.TransientError`; retries follow its recorded policy and budget. |
 | `29` | `PERMANENT` | A script explicitly raised `etl_craft.scripting.PermanentError`; correct its input or configuration before retrying, or explicitly select `RETRY_ON=ANY`. |

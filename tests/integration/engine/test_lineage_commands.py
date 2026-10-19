@@ -8,9 +8,10 @@ from sqlalchemy import text
 
 from etl_craft.cli import main
 from etl_craft.config import load_config
-from etl_craft.core.enums import ApiRole
+from etl_craft.core.enums import ActionName, ApiRole
 from etl_craft.core.errors import ExitCode
 from etl_craft.services.lineage import collect
+from fixtures.actions import act
 from fixtures.auth import service_token
 from fixtures.metadata import add_pipeline, add_source_column, add_task
 
@@ -30,19 +31,19 @@ def project(engine_db, tmp_path, monkeypatch):
     """INGEST stages raw orders, SALES converts them, MART sums them; one task cannot be traced."""
     profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
-    block = {"jdbc_url": profile.jdbc_url, "schema": schema}
-    if profile.auth_mode != "none":
+    block = {"Jdbc_url": profile.jdbc_url, "Schema": schema}
+    if profile.auth_mode != "NONE":
         block |= {
-            "user": profile.user,
-            "auth_mode": profile.auth_mode,
-            "secret": profile.secret_var,
+            "User": profile.user,
+            "Auth_mode": profile.auth_mode,
+            "Secret": profile.secret_var,
         }
     root = (engine_db.config.config_path or tmp_path / "craft-connector.yml").parent
     raw = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {},
         "Engine": {"dev": block},
-        "Warehouse": {"dev": {"jdbc_url": "jdbc:duckdb:analytics.duckdb", "schema": "main"}},
+        "Warehouse": {"dev": {"Jdbc_url": "jdbc:duckdb:analytics.duckdb", "Schema": "main"}},
     }
     (root / "craft-connector.yml").write_text(yaml.safe_dump(raw, sort_keys=False), "utf-8")
     (root / "sql_files").mkdir(exist_ok=True)
@@ -326,10 +327,10 @@ def test_history_selectors_read_stored_versions_without_computing(
             ("--as-of", "2026-10-12T00:00:00Z"),
             "earliest recorded time is 2026-10-13T08:00:00+00:00",
         ),
-        (("--version", "1"), "--version needs --table"),
+        (("--version", "1"), "`--version` needs `--table`"),
         (("--table", "staging.orders", "--version", "999"), "has no lineage version 999"),
         (("--table", "staging.orders", "--version", "0"), "positive version number"),
-        (("--as-of", "2026-10-13T08:00:00Z", "--refresh"), "--refresh cannot read history"),
+        (("--as-of", "2026-10-13T08:00:00Z", "--refresh"), "a lineage refresh cannot read history"),
         (("--as-of", "not-a-time"), "neither a pipeline_run_id nor an ISO 8601 time"),
     ],
 )
@@ -366,8 +367,8 @@ def test_concurrent_collectors_publish_one_table_version(project):
 def test_catalog_table_history_lists_versions_and_source_changes(project, lineage_clock, tmp_path):
     from datetime import timedelta
 
-    from etl_craft.services.catalog import build_catalog
-    from etl_craft.services.catalog_site import table_url, write_site
+    from etl_craft.services.catalog.collect import build_catalog
+    from etl_craft.services.catalog.site import table_url, write_site
 
     engine, config = project
     collect(engine, config)
@@ -439,8 +440,8 @@ def test_failed_writer_closes_current_history_and_reports_the_reason(
 ):
     from datetime import timedelta
 
-    from etl_craft.services.catalog import build_catalog
-    from etl_craft.services.catalog_site import table_url, write_site
+    from etl_craft.services.catalog.collect import build_catalog
+    from etl_craft.services.catalog.site import table_url, write_site
 
     engine, config = project
     if another_writer:
@@ -548,16 +549,15 @@ def test_python_lineage_query_validates_before_collecting(project):
     from etl_craft.core.actor import Actor, ActorKind
     from etl_craft.core.errors import UsageError
     from etl_craft.services.operations.context import OperationContext
-    from etl_craft.services.operations.diagnostics import LineageQuery, trace_lineage
 
     engine, config = project
     ctx = OperationContext(
         engine, config, Actor("lineage-test", ActorKind.USER), role=ApiRole.ADMIN
     )
     with pytest.raises(UsageError, match="mutually exclusive"):
-        trace_lineage(ctx, LineageQuery(as_of="2026-10-13T08:00:00Z", version=1))
+        act(ctx, ActionName.LINEAGE, as_of="2026-10-13T08:00:00Z", version=1)
     assert version_rows(engine) == []
-    done = trace_lineage(ctx, LineageQuery(table="staging.orders"))
+    done = act(ctx, ActionName.LINEAGE, table="staging.orders")
     assert done.table == "staging.orders" and done.upstream_tables
 
 

@@ -21,10 +21,10 @@ def test_installed_event_pipeline_records_rows_and_consumes_delivery(tmp_path):
     project = tmp_path / "project"
     project.mkdir()
     raw = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {},
-        "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "main"}},
-        "Warehouse": {"dev": {"jdbc_url": "jdbc:duckdb:warehouse.duckdb", "schema": "main"}},
+        "Engine": {"dev": {"Jdbc_url": "jdbc:sqlite:engine.db", "Schema": "main"}},
+        "Warehouse": {"dev": {"Jdbc_url": "jdbc:duckdb:warehouse.duckdb", "Schema": "main"}},
     }
     (project / "craft-connector.yml").write_text(yaml.safe_dump(raw, sort_keys=False))
     migrations = project / "migrations"
@@ -66,7 +66,7 @@ def test_installed_event_pipeline_records_rows_and_consumes_delivery(tmp_path):
     for verb, answers in (("setup", setup_answers()), ("login", login_answers())):
         done = terminal_run([str(cli), verb], cwd=project, env=environment, answers=answers)
         assert done.returncode == 0, done.stdout
-    for args in (("migrate",), ("run", "--pipeline_code", "FILE_DELIVERY")):
+    for args in (("migrate",), ("run", "--pipeline-code", "FILE_DELIVERY")):
         done = subprocess.run(
             [str(cli), *args],
             cwd=project,

@@ -11,10 +11,11 @@ from sqlalchemy import text
 
 from etl_craft.cli import main
 from etl_craft.core.actor import SYSTEM_ACTOR, Actor, ActorKind
-from etl_craft.core.enums import AccountKind, ApiRole, YesNo
+from etl_craft.core.enums import AccountKind, ActionName, ApiRole, YesNo
 from etl_craft.core.errors import PermissionDeniedError, UsageError
 from etl_craft.services import credentials
 from etl_craft.services.operations import OperationContext, accounts, sessions, tokens
+from fixtures.actions import act
 
 PASSWORD = "correct horse battery"
 
@@ -26,14 +27,14 @@ def project(empty_engine_db, tmp_path, monkeypatch, cli_logging):
     db = empty_engine_db
     init_db(db.engine)
     profile = db.config.engine
-    block = {"jdbc_url": profile.jdbc_url, "schema": profile.schema or "main"}
-    if profile.auth_mode != "none":
-        block.update(user=profile.user, auth_mode=profile.auth_mode, secret=profile.secret_var)
+    block = {"Jdbc_url": profile.jdbc_url, "Schema": profile.schema or "main"}
+    if profile.auth_mode != "NONE":
+        block.update(User=profile.user, Auth_mode=profile.auth_mode, Secret=profile.secret_var)
     path = tmp_path / "craft-connector.yml"
     path.write_text(
         yaml.safe_dump(
             {
-                "Secrets": {"Source_type": "environment"},
+                "Secrets": {"Source_type": "ENVIRONMENT"},
                 "Orchestration": {},
                 "Engine": {"dev": block},
             },
@@ -44,41 +45,53 @@ def project(empty_engine_db, tmp_path, monkeypatch, cli_logging):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "person"))
     monkeypatch.delenv("ETL_CRAFT_TOKEN", raising=False)
     ctx = OperationContext(db.engine, db.config, SYSTEM_ACTOR)
-    admin = accounts.Account(0, "owner", AccountKind.USER, ApiRole.ADMIN, None, None, YesNo.YES)
-    accounts.add_account(ctx, admin, PASSWORD, recovery=True)
+    act(
+        replace(ctx, provisioning=True),
+        ActionName.ACCOUNT_ADD,
+        name="owner",
+        role=ApiRole.ADMIN,
+        password=PASSWORD,
+        recovery=True,
+    )
     return replace(ctx, actor=Actor("owner", ActorKind.USER), role=ApiRole.ADMIN)
 
 
 def user(ctx, name="alice", subject=None):
-    account = accounts.Account(0, name, AccountKind.USER, ApiRole.VIEWER, None, subject, YesNo.YES)
-    accounts.add_account(ctx, account, None if subject else PASSWORD)
+    act(
+        ctx,
+        ActionName.ACCOUNT_ADD,
+        name=name,
+        role=ApiRole.VIEWER,
+        oidc_subject=subject,
+        password=None if subject else PASSWORD,
+    )
 
 
 def test_sessions_expire_revoke_and_follow_current_account_roles(project):
     ctx = project
     user(ctx)
     with pytest.raises(UsageError, match="sign-in refused"):
-        sessions.sign_in(ctx, "alice", "wrong")
-    created = sessions.sign_in(ctx, "alice", PASSWORD)
+        act(ctx, ActionName.LOGIN, name="alice", password="wrong")
+    created = act(ctx, ActionName.LOGIN, name="alice", password=PASSWORD)
     assert tokens.authenticate(ctx, created.access_token).name == "alice"
     assert created.metadata.expires_at <= datetime.now(UTC) + timedelta(hours=12)
-    accounts.set_role(ctx, "alice", ApiRole.OPERATOR)
+    act(ctx, ActionName.ACCOUNT_SET_ROLE, name="alice", role=ApiRole.OPERATOR)
     assert tokens.authenticate(ctx, created.access_token).role == ApiRole.OPERATOR
-    accounts.reset_password(ctx, "alice", "new password for alice")
+    act(ctx, ActionName.ACCOUNT_RESET_PASSWORD, name="alice", password="new password for alice")
     assert tokens.authenticate(ctx, created.access_token) is None
     with pytest.raises(UsageError):
-        sessions.sign_in(ctx, "alice", PASSWORD)
-    other = sessions.sign_in(ctx, "alice", "new password for alice")
-    sessions.sign_out(ctx, other.access_token)
+        act(ctx, ActionName.LOGIN, name="alice", password=PASSWORD)
+    other = act(ctx, ActionName.LOGIN, name="alice", password="new password for alice")
+    act(ctx, ActionName.LOGOUT, token=other.access_token)
     assert tokens.authenticate(ctx, other.access_token) is None
-    last = sessions.sign_in(ctx, "alice", "new password for alice")
-    accounts.disable(ctx, "alice")
+    last = act(ctx, ActionName.LOGIN, name="alice", password="new password for alice")
+    act(ctx, ActionName.ACCOUNT_DISABLE, name="alice")
     assert tokens.authenticate(ctx, last.access_token) is None
     with pytest.raises(UsageError):
-        sessions.sign_in(ctx, "alice", "new password for alice")
+        act(ctx, ActionName.LOGIN, name="alice", password="new password for alice")
     assert any(
         a.name == "alice" and a.active_flag == YesNo.NO
-        for a in accounts.list_accounts(ctx).accounts
+        for a in act(ctx, ActionName.ACCOUNT_LIST).accounts
     )
 
 
@@ -89,7 +102,7 @@ def test_sso_requires_a_registered_active_user(project):
     user(ctx, subject="external-id")
     session = sessions.sign_in_subject(ctx, "external-id")
     assert tokens.authenticate(ctx, session.access_token).name == "alice"
-    accounts.disable(ctx, "alice")
+    act(ctx, ActionName.ACCOUNT_DISABLE, name="alice")
     with pytest.raises(UsageError, match="no active registered"):
         sessions.sign_in_subject(ctx, "external-id")
 
@@ -97,24 +110,22 @@ def test_sso_requires_a_registered_active_user(project):
 def test_account_controls_require_a_proven_admin(project):
     ctx = project
     with pytest.raises(PermissionDeniedError, match="admin role is required"):
-        accounts.list_accounts(replace(ctx, role=None))
+        act(replace(ctx, role=None), ActionName.ACCOUNT_LIST)
     with pytest.raises(PermissionDeniedError, match="admin role is required"):
-        accounts.disable(replace(ctx, role=ApiRole.VIEWER), "owner")
+        act(replace(ctx, role=ApiRole.VIEWER), ActionName.ACCOUNT_DISABLE, name="owner")
     with pytest.raises(UsageError, match="active admin already exists"):
-        accounts.add_account(
+        act(
             ctx,
-            accounts.Account(0, "recovery", AccountKind.USER, ApiRole.ADMIN, None, None, YesNo.YES),
-            PASSWORD,
+            ActionName.ACCOUNT_ADD,
+            name="recovery",
+            role=ApiRole.ADMIN,
+            password=PASSWORD,
             recovery=True,
         )
     with pytest.raises(UsageError, match="already exists"):
-        accounts.add_account(
-            ctx,
-            accounts.Account(0, "owner", AccountKind.USER, ApiRole.ADMIN, None, None, YesNo.YES),
-            PASSWORD,
-        )
+        act(ctx, ActionName.ACCOUNT_ADD, name="owner", role=ApiRole.ADMIN, password=PASSWORD)
     with pytest.raises(UsageError, match="not found"):
-        accounts.set_role(ctx, "missing", ApiRole.VIEWER)
+        act(ctx, ActionName.ACCOUNT_SET_ROLE, name="missing", role=ApiRole.VIEWER)
 
 
 def test_cli_password_login_whoami_env_precedence_and_logout(project, monkeypatch, capsys):
@@ -143,7 +154,7 @@ def test_cli_password_login_whoami_env_precedence_and_logout(project, monkeypatc
 
 def test_session_expiry_is_enforced_on_the_next_command(project, capsys):
     ctx = project
-    session = sessions.sign_in(ctx, "owner", PASSWORD)
+    session = act(ctx, ActionName.LOGIN, name="owner", password=PASSWORD)
     credentials.store_session(
         credentials.database_key(ctx.engine, ctx.config.engine.schema), session.access_token
     )
@@ -161,7 +172,7 @@ def test_session_expiry_is_enforced_on_the_next_command(project, capsys):
 
 def test_account_cli_and_local_recovery(project, monkeypatch, capsys):
     ctx = project
-    service = tokens.create_token(ctx, "automation", ApiRole.ADMIN)
+    service = act(ctx, ActionName.TOKEN_CREATE, name="automation", role=ApiRole.ADMIN)
     monkeypatch.setenv("ETL_CRAFT_TOKEN", service.token)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr("getpass.getpass", lambda _: PASSWORD)
@@ -172,8 +183,8 @@ def test_account_cli_and_local_recovery(project, monkeypatch, capsys):
     assert main(["account", "reset-password", "--name", "alice"]) == 0
     assert main(["account", "disable", "--name", "alice"]) == 0
     capsys.readouterr()
-    accounts.disable(ctx, "owner")
-    accounts.disable(ctx, "automation")
+    act(ctx, ActionName.ACCOUNT_DISABLE, name="owner")
+    act(ctx, ActionName.ACCOUNT_DISABLE, name="automation")
     monkeypatch.delenv("ETL_CRAFT_TOKEN")
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     assert main(["setup"]) == 2
@@ -185,7 +196,7 @@ def test_account_cli_and_local_recovery(project, monkeypatch, capsys):
     assert "created admin recovery-owner" in capsys.readouterr().out
     assert accounts.has_admin(ctx.engine)
     assert tokens.authenticate(ctx, service.token) is None
-    session = sessions.sign_in(ctx, "recovery-owner", PASSWORD)
+    session = act(ctx, ActionName.LOGIN, name="recovery-owner", password=PASSWORD)
     assert tokens.authenticate(ctx, session.access_token).role == ApiRole.ADMIN
     from fastapi.testclient import TestClient
 
@@ -203,29 +214,36 @@ def test_password_reset_and_sign_in_cannot_escape_revocation(project):
 
     def login():
         try:
-            return sessions.sign_in(ctx, "alice", PASSWORD).access_token
+            return act(ctx, ActionName.LOGIN, name="alice", password=PASSWORD).access_token
         except UsageError:
             return None
 
     def reset():
-        accounts.reset_password(ctx, "alice", "new password for alice")
+        act(ctx, ActionName.ACCOUNT_RESET_PASSWORD, name="alice", password="new password for alice")
 
     token, _ = two_at_once(login, reset, at="etl_craft.engine.locks.for_engine")
     assert token is None or tokens.authenticate(ctx, token) is None
-    assert sessions.sign_in(ctx, "alice", "new password for alice").metadata.name == "alice"
+    assert (
+        act(ctx, ActionName.LOGIN, name="alice", password="new password for alice").metadata.name
+        == "alice"
+    )
 
 
 def test_two_recoveries_create_only_one_admin(engine_db):
     from fixtures.races import two_at_once
 
-    ctx = OperationContext(engine_db.engine, engine_db.config, SYSTEM_ACTOR)
+    ctx = OperationContext(engine_db.engine, engine_db.config, SYSTEM_ACTOR, provisioning=True)
 
     def recover(name):
-        admin = accounts.Account(
-            0, name, AccountKind.USER, ApiRole.ADMIN, None, "sso-" + name, YesNo.YES
-        )
         try:
-            accounts.add_account(ctx, admin, recovery=True)
+            act(
+                ctx,
+                ActionName.ACCOUNT_ADD,
+                name=name,
+                role=ApiRole.ADMIN,
+                oidc_subject="sso-" + name,
+                recovery=True,
+            )
             return True
         except UsageError as error:
             assert "active admin already exists" in str(error)
@@ -271,20 +289,20 @@ def test_user_sessions_and_service_credentials_keep_their_boundaries(project):
     ctx = project
     user(ctx)
     with pytest.raises(UsageError, match="kind=SERVICE"):
-        tokens.create_token(ctx, "alice", ApiRole.VIEWER)
-    service = tokens.create_token(ctx, "agent", ApiRole.OPERATOR)
+        act(ctx, ActionName.TOKEN_CREATE, name="alice", role=ApiRole.VIEWER)
+    service = act(ctx, ActionName.TOKEN_CREATE, name="agent", role=ApiRole.OPERATOR)
     with pytest.raises(UsageError, match="sign-in refused"):
-        sessions.sign_in(ctx, "agent", PASSWORD)
+        act(ctx, ActionName.LOGIN, name="agent", password=PASSWORD)
     with pytest.raises(UsageError, match="wrong kind"):
-        accounts.reset_password(ctx, "agent", PASSWORD)
+        act(ctx, ActionName.ACCOUNT_RESET_PASSWORD, name="agent", password=PASSWORD)
     assert tokens.authenticate(ctx, service.token)
-    bad = accounts.Account(0, "bad", AccountKind.SERVICE, ApiRole.VIEWER, None, None, YesNo.YES)
     with pytest.raises(UsageError, match="SERVICE expects a token"):
-        accounts.add_account(ctx, bad, PASSWORD)
-    empty = replace(bad, kind=AccountKind.USER)
-    with pytest.raises(UsageError, match="USER requires a password"):
-        accounts.add_account(ctx, empty)
-    session = sessions.sign_in(ctx, "alice", PASSWORD)
+        accounts.AccountAdd(
+            name="bad", kind=AccountKind.SERVICE, role=ApiRole.VIEWER, password=PASSWORD
+        )
+    with pytest.raises(UsageError, match="USER requires `password`"):
+        accounts.AccountAdd(name="bad", role=ApiRole.VIEWER)
+    session = act(ctx, ActionName.LOGIN, name="alice", password=PASSWORD)
     with ctx.engine.connect() as conn:
         hashes = (
             conn.execute(text("SELECT TOKEN_SHA256 AS digest FROM CFG_API_TOKENS")).scalars().all()
@@ -303,11 +321,11 @@ def test_user_sessions_and_service_credentials_keep_their_boundaries(project):
 
 def test_cli_token_administration_cannot_escalate_a_viewer(project, monkeypatch, capsys):
     ctx = project
-    viewer = tokens.create_token(ctx, "reader", ApiRole.VIEWER)
+    viewer = act(ctx, ActionName.TOKEN_CREATE, name="reader", role=ApiRole.VIEWER)
     monkeypatch.setenv("ETL_CRAFT_TOKEN", viewer.token)
     assert main(["token", "create", "--name", "elevated", "--role", "admin"]) == 26
     assert "admin role is required" in capsys.readouterr().err
-    assert not any(a.name == "elevated" for a in accounts.list_accounts(ctx).accounts)
+    assert not any(a.name == "elevated" for a in act(ctx, ActionName.ACCOUNT_LIST).accounts)
     assert main(["token", "list"]) == 26
     assert "admin role is required" in capsys.readouterr().err
 
@@ -315,7 +333,7 @@ def test_cli_token_administration_cannot_escalate_a_viewer(project, monkeypatch,
 def test_a_refused_password_costs_one_check_whether_or_not_the_account_exists(project, monkeypatch):
     ctx = project
     user(ctx, "sso-only", subject="external-id")
-    tokens.create_token(ctx, "robot", ApiRole.VIEWER)
+    act(ctx, ActionName.TOKEN_CREATE, name="robot", role=ApiRole.VIEWER)
     checks = []
     real = sessions.verify_password
     monkeypatch.setattr(
@@ -325,6 +343,6 @@ def test_a_refused_password_costs_one_check_whether_or_not_the_account_exists(pr
     )
     for name in ("nobody", "robot", "sso-only", "owner"):
         with pytest.raises(UsageError, match="sign-in refused"):
-            sessions.sign_in(ctx, name, "not the right password")
+            act(ctx, ActionName.LOGIN, name=name, password="not the right password")
     assert len(checks) == 4
     assert checks[:3] == [sessions.DECOY] * 3 and checks[3] != sessions.DECOY

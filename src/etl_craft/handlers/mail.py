@@ -28,7 +28,7 @@ from pathlib import Path
 
 from etl_craft.config import ConnectorConfig, resolve_secret
 from etl_craft.config.model import EmailProfile
-from etl_craft.core.enums import AuthMode
+from etl_craft.core.enums import AuthMode, EmailTransport, TlsMode
 from etl_craft.core.errors import EtlCraftError, HandlerError
 from etl_craft.dialects import credentials
 
@@ -81,7 +81,7 @@ def send_email(
     relay = f"{profile.host}:{profile.port}"
     destination = (
         f"sendmail program {profile.sendmail_path}"
-        if profile.transport == "sendmail"
+        if profile.transport == EmailTransport.SENDMAIL
         else f"relay {relay}"
     )
     step = "build headers"
@@ -92,7 +92,7 @@ def send_email(
         message["To"] = ", ".join(recipients)
         message.set_content("This email is HTML; open it in a client that shows HTML.")
         message.add_alternative(body_html, subtype="html")
-        if profile.transport == "sendmail":
+        if profile.transport == EmailTransport.SENDMAIL:
             step = "send"
             _send_with_sendmail(profile, message, recipients)
             logger.info(
@@ -101,7 +101,7 @@ def send_email(
             return None
         step = "connect"
         with open_smtp(profile, timeout=SMTP_TIMEOUT_SECONDS) as server:
-            if profile.tls_mode == "starttls":
+            if profile.tls_mode == TlsMode.STARTTLS:
                 step = "start TLS"
                 server.starttls(context=tls_context(profile))
             step = "log in"
@@ -141,12 +141,12 @@ def safe_subject(subject: str) -> str:
 def email_tls_problem(profile: EmailProfile) -> str | None:
     """Return unsafe or unusable TLS settings, naming the profile and the remedy."""
     mode = profile.tls_mode
-    if mode not in {"none", "starttls", "ssl"}:
-        return f"Email profile {profile.name!r} has tls_mode={mode!r}; use none, starttls or ssl"
-    if mode == "none" and profile.auth_mode != AuthMode.NONE:
+    if mode not in set(TlsMode):
+        return f"Email profile {profile.name!r} has Tls_mode={mode!r}; use NONE, STARTTLS or SSL"
+    if mode == TlsMode.NONE and profile.auth_mode != AuthMode.NONE:
         return (
-            f"Email profile {profile.name!r} has tls_mode=none with auth_mode={profile.auth_mode}; "
-            "set tls_mode to starttls or ssl before sending credentials"
+            f"Email profile {profile.name!r} has Tls_mode=NONE with Auth_mode={profile.auth_mode}; "
+            "set Tls_mode to STARTTLS or SSL before sending credentials"
         )
     if profile.ca_file is not None and (
         not profile.ca_file.is_file() or not os.access(profile.ca_file, os.R_OK)
@@ -168,7 +168,7 @@ def open_smtp(profile: EmailProfile, *, timeout: float) -> smtplib.SMTP:
     problem = email_tls_problem(profile)
     if problem:
         raise HandlerError(problem)
-    if profile.tls_mode == "ssl":
+    if profile.tls_mode == TlsMode.SSL:
         return smtplib.SMTP_SSL(
             profile.host, profile.port, timeout=timeout, context=tls_context(profile)
         )

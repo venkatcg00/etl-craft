@@ -82,7 +82,7 @@ def restore_logger():
 
 def _record(calls):
     def configure(parser):
-        parser.add_argument("--pipeline_code", required=True)
+        parser.add_argument("--pipeline-code", required=True)
 
     def run(args, out):
         calls.append(args)
@@ -102,7 +102,7 @@ def _raising(error):
 @pytest.mark.usefixtures("restore_logger")
 def test_a_command_runs_with_its_options_and_the_global_defaults(capsys):
     calls = []
-    assert main(["demo", "--pipeline_code", "P1"], commands=[_record(calls)]) == 0
+    assert main(["demo", "--pipeline-code", "P1"], commands=[_record(calls)]) == 0
     assert capsys.readouterr().out == "ran P1\n"
     (args,) = calls
     assert (args.config, args.log_level, args.log_format) == (None, "INFO", "text")
@@ -119,7 +119,7 @@ def test_a_command_runs_with_its_options_and_the_global_defaults(capsys):
 )
 def test_global_options_work_before_or_after_the_command(argv):
     calls = []
-    assert main([*argv, "--pipeline_code", "P1"], commands=[_record(calls)]) == 0
+    assert main([*argv, "--pipeline-code", "P1"], commands=[_record(calls)]) == 0
     (args,) = calls
     assert (args.config, args.log_level, args.log_format) == (Path("c.yml"), "DEBUG", "json")
 
@@ -127,7 +127,7 @@ def test_global_options_work_before_or_after_the_command(argv):
 @pytest.mark.usefixtures("restore_logger")
 def test_a_global_option_after_the_command_wins():
     calls = []
-    argv = ["--log-level", "ERROR", "demo", "--log-level", "DEBUG", "--pipeline_code", "P1"]
+    argv = ["--log-level", "ERROR", "demo", "--log-level", "DEBUG", "--pipeline-code", "P1"]
     main(argv, commands=[_record(calls)])
     assert calls[0].log_level == "DEBUG"
 
@@ -151,7 +151,7 @@ def test_the_log_options_configure_logging(capsys):
     ("error", "exit_code"),
     [
         (ConfigurationError("craft-connector.yml not found"), 3),
-        (UsageError("--pipeline_code is required with --task_code"), 2),
+        (UsageError("--pipeline-code is required with --task-code"), 2),
         (MetadataError("no active pipeline 'P9'"), 4),
     ],
 )
@@ -179,7 +179,7 @@ def test_no_command_with_commands_registered_prints_usage_and_exits_2(capsys):
     [
         (["--log-level", "loud", "demo"], "invalid choice: 'LOUD'"),
         (["demo", "--log-format", "xml"], "invalid choice: 'xml'"),
-        (["demo"], "the following arguments are required: --pipeline_code"),
+        (["demo"], "the following arguments are required: --pipeline-code"),
         (["nope"], "invalid choice: 'nope'"),
     ],
 )
@@ -204,7 +204,7 @@ def test_a_command_help_includes_the_global_options(capsys):
     with pytest.raises(SystemExit):
         main(["demo", "--help"], commands=[_record([])])
     text = capsys.readouterr().out
-    assert "--pipeline_code" in text
+    assert "--pipeline-code" in text
     assert "global options" in text
 
 
@@ -232,6 +232,6 @@ def test_unknown_run_option_is_refused_by_name(capsys):
 
     option = "--finalize" + "-only"
     with pytest.raises(SystemExit) as refused:
-        main(["run", "--pipeline_code", "P", option])
+        main(["run", "--pipeline-code", "P", option])
     assert refused.value.code == 2
     assert option in capsys.readouterr().err

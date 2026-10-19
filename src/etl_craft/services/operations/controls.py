@@ -7,18 +7,27 @@ from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import ClassVar
 from uuid import uuid4
 
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.enums import (
+    DEFINITION_CONTROLS,
+    ActionName,
     AttemptStatus,
     ControlAction,
     ControlStatus,
     Handler,
     RunStatus,
 )
-from etl_craft.core.errors import LockTimeoutError, RunRefusedError, RunStateError, UsageError
+from etl_craft.core.errors import (
+    EtlCraftError,
+    LockTimeoutError,
+    RunRefusedError,
+    RunStateError,
+    UsageError,
+)
 from etl_craft.engine import controls, locks, run_scopes, runlog, transitions
 from etl_craft.engine.controls import ControlView
 from etl_craft.engine.queries import statement
@@ -31,7 +40,8 @@ from etl_craft.engine.repository.tasks import (
 )
 from etl_craft.execution import control_flow
 from etl_craft.execution.manual import select_tasks
-from etl_craft.services.operations.context import OperationContext, operation
+from etl_craft.services.operations.context import OperationContext
+from etl_craft.services.operations.models import OperationResult
 from etl_craft.services.operations.recovery import (
     IMMEDIATE_ACTIONS,
     RECOVERY_ACTIONS,
@@ -39,70 +49,48 @@ from etl_craft.services.operations.recovery import (
     control_effect,
     prepare_recovery,
 )
+from etl_craft.services.operations.requests import BulkControlRequest, ControlId, ControlRequest
 
 
-@dataclass(frozen=True)
-class ControlRequest:
-    """One exact run or task scope; repeated keys retain the original request identity."""
+def control(ctx: OperationContext, request: ControlRequest) -> ControlView | OperationResult:
+    """Pause or resume a definition, or request a scoped control of one run or task."""
+    if request.action in DEFINITION_CONTROLS:
+        from etl_craft.services.operations.pipelines import set_pause
 
-    pipeline_code: str
-    action: ControlAction
-    reason: str
-    selector: runlog.RunSelector = runlog.ACTIVE_RUN
-    task_code: str | None = None
-    request_key: str | None = None
-
-    def __post_init__(self) -> None:
-        """Validate the action boundary before changing any admission or attempt state."""
-        if not isinstance(self.action, ControlAction):
+        if request.run_id is not None or request.run_key is not None or request.task_code:
             raise UsageError(
-                f"control action={self.action!r}; expected a ControlAction enum; "
-                "use a supported ControlAction value"
+                f"{request.action} applies to the pipeline definition; omit `run_id`, `run_key` "
+                "and `task_code`"
             )
-        if not self.reason.strip():
-            raise UsageError("control reason is empty; give a nonblank reason for this action")
-        if self.request_key is not None and (
-            not self.request_key.strip() or len(self.request_key) > 128
-        ):
-            raise UsageError("control request_key must contain 1 to 128 characters; use a new UUID")
+        return set_pause(ctx, request)
+    return request_control(ctx, request)
 
 
 def request_control(ctx: OperationContext, request: ControlRequest) -> ControlView:
     """Commit the dispatch fence first; return acceptance separately from agent completion."""
-    command = control_command(request.action)
-    args = {
-        "pipeline_code": request.pipeline_code,
-        "task_code": request.task_code,
-        "action": request.action,
-        "reason": request.reason,
-        "run_id": request.selector.run_id,
-        "run_key": request.selector.run_key,
-        "request_key": request.request_key,
-    }
-    with operation(ctx, command, args):
-        if request.action == ControlAction.RUN_PAUSED and request.selector == runlog.ACTIVE_RUN:
-            return _new_paused(ctx, request)
-        with control_scope(ctx, request) as run_id, ctx.engine.begin() as conn:
-            pipeline_id = resolve_pipeline_id(conn, request.pipeline_code)
-            controls.lock_run(conn, run_id)
-            selected = runlog.select_run(conn, pipeline_id, runlog.RunSelector(run_id=run_id))
-            task_id = (
-                None
-                if request.task_code is None
-                else resolve_task_id(conn, pipeline_id, request.task_code)
-            )
-            if task_id is not None:
-                run_scopes.check_task(conn, run_id, task_id)
-            existing = _existing(conn, request, run_id, task_id)
-            if existing is not None:
-                return controls.get(conn, existing)
-            attempts = check_control(conn, ctx, request, selected, task_id)
-            control_id = _insert(conn, ctx, request, run_id, task_id, attempts)
-            if request.action in RECOVERY_ACTIONS:
-                prepare_recovery(conn, ctx, selected, request, control_id)
-        control_flow.advance(ctx.engine, run_id)
-        with ctx.engine.connect() as conn:
-            return controls.get(conn, control_id)
+    if request.action == ControlAction.RUN_PAUSED and request.selector == runlog.ACTIVE_RUN:
+        return _new_paused(ctx, request)
+    with control_scope(ctx, request) as run_id, ctx.engine.begin() as conn:
+        pipeline_id = resolve_pipeline_id(conn, request.pipeline_code)
+        controls.lock_run(conn, run_id)
+        selected = runlog.select_run(conn, pipeline_id, runlog.RunSelector(run_id=run_id))
+        task_id = (
+            None
+            if request.task_code is None
+            else resolve_task_id(conn, pipeline_id, request.task_code)
+        )
+        if task_id is not None:
+            run_scopes.check_task(conn, run_id, task_id)
+        existing = _existing(conn, request, run_id, task_id)
+        if existing is not None:
+            return controls.get(conn, existing)
+        attempts = check_control(conn, ctx, request, selected, task_id)
+        control_id = _insert(conn, ctx, request, run_id, task_id, attempts)
+        if request.action in RECOVERY_ACTIONS:
+            prepare_recovery(conn, ctx, selected, request, control_id)
+    control_flow.advance(ctx.engine, run_id)
+    with ctx.engine.connect() as conn:
+        return controls.get(conn, control_id)
 
 
 def check_control(
@@ -266,17 +254,10 @@ def _insert(
     )
 
 
-def get_control(ctx: OperationContext, control_id: int) -> ControlView:
+def get_control(ctx: OperationContext, request: ControlId) -> ControlView:
     """Read durable evidence without turning observation into a control or a guessed outcome."""
-    with operation(ctx, "status", {"control_id": control_id}), ctx.engine.connect() as conn:
-        return controls.get(conn, control_id)
-
-
-def control_command(action: ControlAction) -> str:
-    """Name the operation whose role policy and audit record a control uses."""
-    if action in RECOVERY_ACTIONS or action == ControlAction.RUN_PAUSED:
-        return "run"
-    return action.lower()
+    with ctx.engine.connect() as conn:
+        return controls.get(conn, request.control_id)
 
 
 @contextmanager
@@ -325,7 +306,7 @@ def _new_paused(ctx: OperationContext, request: ControlRequest) -> ControlView:
     if request.request_key is None:
         raise UsageError(
             "RUN_PAUSED without a run selector creates a context; "
-            "supply --request-key for repeatable creation"
+            "supply `request_key` for repeatable creation"
         )
     key = request.request_key
     lock = locks.EngineLock("control-context", locks.advisory_key(f"control-context:{key}"))
@@ -367,3 +348,55 @@ def _new_paused(ctx: OperationContext, request: ControlRequest) -> ControlView:
             )
         control_id = _insert(conn, ctx, request, run_id, task_id, ())
         return controls.get(conn, control_id)
+
+
+@dataclass(frozen=True)
+class BulkOutcome:
+    """Keep the requested identity even when this object refuses its action."""
+
+    pipeline_code: str
+    task_code: str | None
+    request_key: str
+    action: ControlAction
+    control: ControlView | None
+    error: str | None
+
+
+@dataclass(frozen=True)
+class BulkControlView:
+    """Inspect each object independently; a partial failure never rolls back other objects."""
+
+    SCHEMA: ClassVar[str] = "etl-craft/bulk-controls/1"
+    outcomes: tuple[BulkOutcome, ...]
+    message: str
+
+
+def request_bulk_controls(ctx: OperationContext, request: BulkControlRequest) -> BulkControlView:
+    """Invoke the ordinary audited control once per object; one refusal never stops the rest."""
+    from etl_craft.services.operations.actions import invoke
+
+    outcomes = []
+    for selected in request.requests:
+        control, error = None, None
+        try:
+            done = invoke(ctx, ActionName.CONTROL, selected)
+            assert isinstance(done, ControlView)
+            control = done
+        except EtlCraftError as refused:
+            error = str(refused)
+        outcomes.append(
+            BulkOutcome(
+                selected.pipeline_code,
+                selected.task_code,
+                selected.request_key or "",
+                selected.action,
+                control,
+                error,
+            )
+        )
+    failures = sum(o.error is not None for o in outcomes)
+    return BulkControlView(
+        tuple(outcomes),
+        f"{len(outcomes) - failures} accepted; {failures} refused; "
+        "inspect each durable control for completion",
+    )

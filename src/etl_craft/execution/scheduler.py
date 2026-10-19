@@ -14,7 +14,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.core.enums import SETTLED_STATUSES, RunStatus
+from etl_craft.core.enums import SETTLED_STATUSES, Handler, RunStatus
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.graph import DependencyGraph, TaskRunState
 from etl_craft.core.outage import OutageBudget
@@ -33,7 +33,7 @@ from etl_craft.execution.pools import ExecutionHandle, HandleState, Pool, slot_k
 from etl_craft.execution.pools.local import LocalPool
 from etl_craft.execution.reconcile import reconcile
 from etl_craft.execution.retries import refresh_retries
-from etl_craft.execution.runner import _preflight, admit_attempt
+from etl_craft.execution.runner import admit_attempt, preflight
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +150,7 @@ class Scheduler:
             if task_id in retries and retries[task_id] > self.clock.now():
                 continue
             if (
-                self._handler(task_id) != "EVENT_WAIT"
+                self._handler(task_id) != Handler.EVENT_WAIT
                 and self.pool.capacity().free[slot_kind(self._handler(task_id))] == 0
             ):
                 continue
@@ -176,7 +176,7 @@ class Scheduler:
                         continue
                     assert isinstance(result.check, CrossPipelineCheck)
                     admission = result.check
-                blocked, cross = _preflight(
+                blocked, cross = preflight(
                     self.engine,
                     self.gate,
                     self.pipeline_id,
@@ -199,7 +199,7 @@ class Scheduler:
                         cross.bypassed,
                         task_id=task_id,
                     )
-            if self._handler(task_id) == "EVENT_WAIT":
+            if self._handler(task_id) == Handler.EVENT_WAIT:
                 event = self._event_check(task_id, decisions)
                 if event.next_check_at is not None:
                     waiting.append(event.next_check_at)

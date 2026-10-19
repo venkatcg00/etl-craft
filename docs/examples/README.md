@@ -27,7 +27,7 @@ with a `# variable` or `# value` comment:
 - Anything else is used exactly as written. `Profile: dev` is the profile `dev`.
   `Profile: ETL_CRAFT_PROFILE` is whatever `ETL_CRAFT_PROFILE` holds, and if that variable is
   not set, the text itself.
-- A secret (`secret`, `token`, `s3_secret`) must always name a variable that is set. A secret
+- A secret (`Secret`, `Token`, `S3_secret`) must always name a variable that is set. A secret
   is never taken as written. Every command checks this when it loads the file, for the selected
   profile only, and stops with a "not set" or "empty" error naming the variable. Missing
   variables include suggestions for similarly named keys; values are never shown.
@@ -65,7 +65,7 @@ retry counts and delays are at least 0.
 | File | Engine | Warehouse | Shows |
 |---|---|---|---|
 | `engine-sqlite.yml` | SQLite | PostgreSQL | One SQLite file per profile; nothing to authenticate |
-| `engine-postgres.yml` | PostgreSQL | PostgreSQL | `password` or `key_file` auth |
+| `engine-postgres.yml` | PostgreSQL | PostgreSQL | `PASSWORD` or `KEY_FILE` auth |
 
 ## Warehouse
 
@@ -73,18 +73,18 @@ One file per warehouse dialect, meaning each database paired with each table for
 
 | File | Dialect | Table format | Connection |
 |---|---|---|---|
-| `warehouse-postgres.yml` | `postgres` | native (always) | JDBC URL + password |
-| `warehouse-duckdb.yml` | `duckdb` | native | a local file, no auth |
-| `warehouse-duckdb-iceberg.yml` | `duckdb_iceberg` | iceberg | in-memory DuckDB attached to an Iceberg REST catalog |
-| `warehouse-trino-iceberg.yml` | `trino_iceberg` | iceberg (the catalog decides) | JDBC URL, `none` or `password` |
-| `warehouse-databricks.yml` | `databricks` | native (Delta) | separate fields + personal access token |
-| `warehouse-databricks-iceberg.yml` | `databricks_iceberg` | iceberg (Delta + UniForm) | separate fields + personal access token |
-| `warehouse-snowflake.yml` | `snowflake` | native | separate fields + Programmatic Access Token |
-| `warehouse-snowflake-iceberg.yml` | `snowflake_iceberg` | iceberg (Snowflake-managed storage) | separate fields + PAT, with Cloning's volume |
-| `warehouse-snowflake-key-pair.yml` | `snowflake` | native | JDBC URL + RSA key pair |
+| `warehouse-postgres.yml` | `postgres` | NATIVE (always) | JDBC URL + password |
+| `warehouse-duckdb.yml` | `duckdb` | NATIVE | a local file, no auth |
+| `warehouse-duckdb-iceberg.yml` | `duckdb_iceberg` | ICEBERG | in-memory DuckDB attached to an Iceberg REST catalog |
+| `warehouse-trino-iceberg.yml` | `trino_iceberg` | ICEBERG (the catalog decides) | JDBC URL, `NONE` or `PASSWORD` |
+| `warehouse-databricks.yml` | `databricks` | NATIVE (Delta) | separate fields + personal access token |
+| `warehouse-databricks-iceberg.yml` | `databricks_iceberg` | ICEBERG (Delta + UniForm) | separate fields + personal access token |
+| `warehouse-snowflake.yml` | `snowflake` | NATIVE | separate fields + Programmatic Access Token |
+| `warehouse-snowflake-iceberg.yml` | `snowflake_iceberg` | ICEBERG (Snowflake-managed storage) | separate fields + PAT, with Cloning's volume |
+| `warehouse-snowflake-key-pair.yml` | `snowflake` | NATIVE | JDBC URL + RSA key pair |
 
 There is no `postgres_iceberg`. PostgreSQL has no Iceberg tables without a third-party
-extension that this project neither ships nor tests, so `Table_format: iceberg` on a Postgres
+extension that this project neither ships nor tests, so `Table_format: ICEBERG` on a Postgres
 warehouse is refused rather than silently ignored.
 
 ## Authentication
@@ -96,21 +96,21 @@ is not guaranteed, and `etl-craft doctor` warns about them.
 
 | File | Types (verified in bold) |
 |---|---|
-| `auth-postgres.yml` | **password**, key_file, token, oauth (e.g. Entra ID), sso (libpq 18 OAuth), sts (AWS RDS IAM), for the Engine DB and a Postgres warehouse |
-| `auth-snowflake.yml` | **password**, **token** (PAT), key_file, oauth (client credentials), sso (external browser), sts (AWS workload identity) |
-| `auth-databricks.yml` | **token** (PAT), oauth (service principal, M2M), sso (browser U2M) |
-| `auth-trino.yml` | **none**, password, token (JWT), oauth, sso (OAuth 2.0 redirect), key_file (client certificate) |
-| `auth-duckdb-iceberg.yml` | **none**, token, **oauth**: the Iceberg REST catalog's login |
-| `auth-email.yml` | **none**, **password**, oauth (SMTP XOAUTH2) |
+| `auth-postgres.yml` | **PASSWORD**, KEY_FILE, TOKEN, OAUTH (e.g. Entra ID), SSO (libpq 18 OAuth), STS (AWS RDS IAM), for the Engine DB and a Postgres warehouse |
+| `auth-snowflake.yml` | **PASSWORD**, **TOKEN** (PAT), KEY_FILE, OAUTH (client credentials), SSO (external browser), STS (AWS workload identity) |
+| `auth-databricks.yml` | **TOKEN** (PAT), OAUTH (service principal, M2M), SSO (browser U2M) |
+| `auth-trino.yml` | **NONE**, PASSWORD, TOKEN (JWT), OAUTH, SSO (OAuth 2.0 redirect), KEY_FILE (client certificate) |
+| `auth-duckdb-iceberg.yml` | **NONE**, TOKEN, **OAUTH**: the Iceberg REST catalog's login |
+| `auth-email.yml` | **NONE**, **PASSWORD**, OAUTH (SMTP XOAUTH2) |
 
-`sso` is interactive: someone completes a browser or device login. It suits a person running
-etl-craft, not an unattended scheduler. `sts` needs `pip install etl-craft[aws]` on PostgreSQL.
+`SSO` is interactive: someone completes a browser or device login. It suits a person running
+etl-craft, not an unattended scheduler. `STS` needs `pip install etl-craft[aws]` on PostgreSQL.
 
 ## Cloning
 
 | File | Shows |
 |---|---|
-| `cloning.yml` | `Enabled`/`Scope` per profile, including `Scope: none` |
+| `cloning.yml` | `Enabled`/`Scope` per profile, including `Scope: NONE` |
 | `docs-site.yml` | `Docs_site`: when the catalog site is written again, where, and how it is published |
 | `docs-site-proxy.yml` | Organization-managed catalog URL, prefix and explicit proxy trust; no ngrok. |
 
@@ -168,7 +168,7 @@ for the upgrade procedure when old token names collide.
 After applying your metadata, use a non-watermarked SQL task with no outside dependencies:
 
 ```bash
-etl-craft run --pipeline_code SALES_DAILY --task_code load_orders --standalone
+etl-craft run --pipeline-code SALES_DAILY --task-code load_orders --standalone
 ```
 
 Add `--with-downstream` for its selected continuation, or explicitly justify current inputs

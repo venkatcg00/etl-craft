@@ -2,39 +2,37 @@
 
 import argparse
 
-from etl_craft.cli.commands.common import Command, command_context
+from etl_craft.cli.commands.common import Command, call, request_from
 from etl_craft.cli.output import Output
-from etl_craft.core.enums import SqlAction
+from etl_craft.core.enums import ActionName, SqlAction
 from etl_craft.core.errors import ExitCode
-from etl_craft.services.operations import maintenance
+from etl_craft.services.operations.maintenance import TargetUpgrades, UpgradeInput
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--action",
+        type=SqlAction,
         choices=[
-            str(kind)
-            for kind in SqlAction
-            if kind not in {SqlAction.DROP_TABLE, SqlAction.CREATE_VIEW}
+            kind for kind in SqlAction if kind not in {SqlAction.DROP_TABLE, SqlAction.CREATE_VIEW}
         ],
-        help="filter by SQL action; defaults to configured SQL and ingestion targets",
+        help="Filter by SQL action; defaults to configured SQL and ingestion targets.",
     )
     parser.add_argument(
         "--target",
-        help="one schema.table (or database.schema.table); defaults to all selected targets",
+        help="One schema.table (or database.schema.table); defaults to all selected targets.",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="validate targets and show additions without writing warehouse rows",
+        help="Validate targets and show additions without writing warehouse rows.",
     )
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    with command_context(args) as ctx:
-        results = maintenance.upgrade_audit_columns(
-            ctx, action=args.action, target=args.target, dry_run=args.dry_run
-        )
+    done = call(args, ActionName.UPGRADE_TARGETS, request_from(args, UpgradeInput))
+    assert isinstance(done, TargetUpgrades)
+    results = done.targets
     if not results:
         out.line("No active configured targets to upgrade")
     for result in results:
@@ -56,4 +54,5 @@ COMMAND = Command(
     "Upgrade execution identities and legacy SCD active state on existing targets.",
     configure=_configure,
     run=_run,
+    actions=(ActionName.UPGRADE_TARGETS,),
 )

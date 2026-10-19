@@ -178,22 +178,22 @@ def cli_project(empty_engine_db, tmp_path, monkeypatch):
     db = empty_engine_db
     profile = db.config.engine
     block = {
-        "jdbc_url": profile.jdbc_url,
-        "schema": "public" if profile.auth_mode != "none" else "main",
+        "Jdbc_url": profile.jdbc_url,
+        "Schema": "public" if profile.auth_mode != "NONE" else "main",
     }
-    if profile.auth_mode != "none":
+    if profile.auth_mode != "NONE":
         block |= {
-            "auth_mode": profile.auth_mode,
-            "user": profile.user,
-            "secret": profile.extra["secret_var"],
+            "Auth_mode": profile.auth_mode,
+            "User": profile.user,
+            "Secret": profile.extra["secret_var"],
         }
     raw = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {"Log_dir": "logs", "Api_address": "127.0.0.1:0"},
         "Engine": {"dev": block},
         "Warehouse": {
             "Name": "duckdb",
-            "dev": {"jdbc_url": "jdbc:duckdb:warehouse.duckdb", "schema": "main"},
+            "dev": {"Jdbc_url": "jdbc:duckdb:warehouse.duckdb", "Schema": "main"},
         },
     }
     path = tmp_path / "craft-connector.yml"

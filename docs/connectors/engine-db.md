@@ -2,11 +2,11 @@
 
 The Engine DB holds what to run (the `CFG_` tables) and what happened (the `AUD_` tables). It is
 separate from the warehouse the tasks write to. Choose it in the `Engine` section of
-`craft-connector.yml`, by its `jdbc_url`.
+`craft-connector.yml`, by its `Jdbc_url`.
 
 | | SQLite | PostgreSQL |
 |---|---|---|
-| `jdbc_url` | `jdbc:sqlite:<file>` | `jdbc:postgresql://host[:port]/database[?settings]` |
+| `Jdbc_url` | `jdbc:sqlite:<file>` | `jdbc:postgresql://host[:port]/database[?settings]` |
 | Suits | local development, one machine | production, agents on several machines |
 | Setup | nothing to install; the file is created on first use | an empty database and a role that can create tables |
 | Cross-process locks | a lock file beside the database file | PostgreSQL advisory locks |
@@ -26,27 +26,27 @@ is serialized; use PostgreSQL once either matters.
 Settings in the URL's query string, such as `sslmode=require`, are passed to the driver. The
 password is never part of the connection URL the engine logs.
 
-| `auth_mode` | Profile fields | Verified here |
+| `Auth_mode` | Profile fields | Verified here |
 |---|---|---|
-| `password` | `user`, `secret` | yes |
-| `token` | `user`, `secret`: a stored bearer token, sent as the password | |
-| `key_file` | `user`, `key_file`, optional `cert_file`, and `secret` for the key's passphrase when it has one | yes |
-| `oauth` | `user`, `client_id`, `secret`, `token_url`, optional `scope`: a client-credentials token, fetched for each new connection | |
-| `sso` | `user`, `issuer`, `client_id`: libpq's own OAuth login, for interactive use | |
-| `sts` | `user`, `region`, optional `role_arn`: an AWS RDS IAM token; needs `pip install etl-craft[aws]` | |
+| `PASSWORD` | `User`, `Secret` | yes |
+| `TOKEN` | `User`, `Secret`: a stored bearer token, sent as the password | |
+| `KEY_FILE` | `User`, `Key_file`, optional `Cert_file`, and `Secret` for the key's passphrase when it has one | yes |
+| `OAUTH` | `User`, `Client_id`, `Secret`, `Token_url`, optional `Scope`: a client-credentials token, fetched for each new connection | |
+| `SSO` | `User`, `Issuer`, `Client_id`: libpq's own OAuth login, for interactive use | |
+| `STS` | `User`, `Region`, optional `Role_arn`: an AWS RDS IAM token; needs `pip install etl-craft[aws]` | |
 
-`secret` always names a variable; it is never written into the file. Modes not verified here
+`Secret` always names a variable; it is never written into the file. Modes not verified here
 follow the vendor's documentation and can be used, but success is not guaranteed.
 
 ## Where the tables live
 
-Every Engine profile names a `schema`, the schema that holds the Engine DB's tables:
+Every Engine profile names a `Schema`, the schema that holds the Engine DB's tables:
 
 ```yaml
 Engine:
   prod:
-    jdbc_url: jdbc:postgresql://db:5432/etl_craft
-    schema: etl_craft                  # must already exist
+    Jdbc_url: jdbc:postgresql://db:5432/etl_craft
+    Schema: etl_craft                  # must already exist
 ```
 
 - **PostgreSQL:** the schema must already exist; etl-craft never creates PostgreSQL schemas. Every

@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import argparse
 
-from etl_craft.cli.commands.common import Command, command_context
+from etl_craft.cli.commands.common import Command, call
 from etl_craft.cli.output import Output
-from etl_craft.services.operations import maintenance
+from etl_craft.core.enums import ActionName
+from etl_craft.services.operations.maintenance import Clones
+from etl_craft.services.operations.requests import NoInput
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    with command_context(args) as ctx:
-        tables = maintenance.clone_tables(ctx)
-    for table in tables:
+    done = call(args, ActionName.CLONE, NoInput())
+    assert isinstance(done, Clones)
+    for table in done.tables:
         change = "\tcreated" if table.created else ""
         if table.added:
             change = f"\tadded {', '.join(table.added)}"
@@ -24,4 +26,5 @@ COMMAND = Command(
     name="clone",
     help="Copy the Engine DB tables Cloning.Scope names into the warehouse schema now.",
     run=_run,
+    actions=(ActionName.CLONE,),
 )

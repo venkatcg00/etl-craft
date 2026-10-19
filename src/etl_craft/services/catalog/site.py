@@ -24,35 +24,35 @@ from pathlib import Path
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.errors import UsageError
 from etl_craft.core.filelock import file_lock
-from etl_craft.services.catalog import (
+from etl_craft.services.catalog.collect import (
     Catalog,
     TaskAsset,
 )
-from etl_craft.services.catalog_gap_html import gaps_page
-from etl_craft.services.catalog_gaps import gap_snapshot
-from etl_craft.services.catalog_html import escape as _e
-from etl_craft.services.catalog_html import pipeline_url as pipeline_url
-from etl_craft.services.catalog_html import render_table as _table
-from etl_craft.services.catalog_html import rule_url as rule_url
-from etl_craft.services.catalog_html import run_url as run_url
-from etl_craft.services.catalog_html import script_url as script_url
-from etl_craft.services.catalog_html import slug as slug
-from etl_craft.services.catalog_html import table_url as table_url
-from etl_craft.services.catalog_html import task_url as task_url
-from etl_craft.services.catalog_incremental import (
+from etl_craft.services.catalog.gap_html import gaps_page
+from etl_craft.services.catalog.gaps import gap_snapshot
+from etl_craft.services.catalog.html import escape as _e
+from etl_craft.services.catalog.html import pipeline_url as pipeline_url
+from etl_craft.services.catalog.html import render_table as _table
+from etl_craft.services.catalog.html import rule_url as rule_url
+from etl_craft.services.catalog.html import run_url as run_url
+from etl_craft.services.catalog.html import script_url as script_url
+from etl_craft.services.catalog.html import slug as slug
+from etl_craft.services.catalog.html import table_url as table_url
+from etl_craft.services.catalog.html import task_url as task_url
+from etl_craft.services.catalog.incremental import (
     SqlFiles,
     page_versions,
     read_sql_files,
     reuse_pages,
     write_manifest,
 )
-from etl_craft.services.catalog_metrics import facts as _facts
-from etl_craft.services.catalog_metrics import kpi_values
-from etl_craft.services.catalog_metrics import status as _status
-from etl_craft.services.catalog_metrics import when as _when
-from etl_craft.services.catalog_pages import Pages, anchor
-from etl_craft.services.catalog_storage import MARKER as MARKER
-from etl_craft.services.catalog_storage import check_folder, swap_site
+from etl_craft.services.catalog.metrics import facts as _facts
+from etl_craft.services.catalog.metrics import kpi_values
+from etl_craft.services.catalog.metrics import status as _status
+from etl_craft.services.catalog.metrics import when as _when
+from etl_craft.services.catalog.pages import Pages, anchor
+from etl_craft.services.catalog.storage import MARKER as MARKER
+from etl_craft.services.catalog.storage import check_folder, swap_site
 from etl_craft.services.operations.serialization import to_json
 
 ASSETS = ("catalog.css", "catalog.js")

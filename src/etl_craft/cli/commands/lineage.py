@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 
-from etl_craft.cli.commands.common import Command, command_context, configure_output
+from etl_craft.cli.commands.common import Command, call, configure_output, request_from
 from etl_craft.cli.output import Output
+from etl_craft.core.enums import ActionName, LineageDirection
 from etl_craft.core.errors import ExitCode
 from etl_craft.services.lineage import COPY, Edge, TaskLineage
-from etl_craft.services.operations.diagnostics import LineageQuery, trace_lineage
+from etl_craft.services.operations.diagnostics import LineageView
+from etl_craft.services.operations.requests import LineageInput, LineageRefreshInput
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -17,42 +19,46 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     history.add_argument(
         "--as-of",
         metavar="TIME",
-        help="stored lineage at a run's start or ISO 8601 time (UTC unless zoned)",
+        help="Stored lineage at a run's start or ISO 8601 time (UTC unless zoned).",
     )
     history.add_argument(
         "--version",
         type=int,
-        help="stored version of --table; trace the graph when that version began",
+        help="Stored version of --table; trace the graph when that version began.",
     )
-    parser.add_argument("--table", help="schema.table (or database.schema.table) to trace")
-    parser.add_argument("--column", help="one column of --table to trace")
+    parser.add_argument("--table", help="The schema.table (or database.schema.table) to trace.")
+    parser.add_argument("--column", help="One column of --table to trace.")
     direction = parser.add_mutually_exclusive_group()
-    direction.add_argument("--upstream", action="store_true", help="only where it comes from")
-    direction.add_argument("--downstream", action="store_true", help="only where it goes")
-    parser.add_argument("--depth", type=int, help="stop after this many steps")
+    direction.add_argument(
+        "--upstream",
+        dest="direction",
+        action="store_const",
+        const=LineageDirection.UPSTREAM,
+        default=LineageDirection.BOTH,
+        help="Only where it comes from.",
+    )
+    direction.add_argument(
+        "--downstream",
+        dest="direction",
+        action="store_const",
+        const=LineageDirection.DOWNSTREAM,
+        help="Only where it goes.",
+    )
+    parser.add_argument("--depth", type=int, help="Stop after this many steps.")
     parser.add_argument(
-        "--refresh", action="store_true", help="work every task's lineage out again"
+        "--refresh", action="store_true", help="Work every task's lineage out again."
     )
     parser.add_argument(
-        "--strict", action="store_true", help="exit 1 when any SQL task cannot be traced"
+        "--strict", action="store_true", help="Exit 1 when any SQL task cannot be traced."
     )
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    with command_context(args) as ctx:
-        done = trace_lineage(
-            ctx,
-            LineageQuery(
-                table=args.table,
-                column=args.column,
-                upstream=not args.downstream,
-                downstream=not args.upstream,
-                depth=args.depth,
-                refresh=args.refresh,
-                as_of=args.as_of,
-                version=args.version,
-            ),
-        )
+    if args.refresh:
+        done = call(args, ActionName.LINEAGE_REFRESH, request_from(args, LineageRefreshInput))
+    else:
+        done = call(args, ActionName.LINEAGE, request_from(args, LineageInput))
+    assert isinstance(done, LineageView)
 
     def render() -> None:
         if done.table is None:
@@ -115,4 +121,5 @@ COMMAND = Command(
     help="Show where tables and columns come from and where they go.",
     configure=_configure,
     run=_run,
+    actions=(ActionName.LINEAGE, ActionName.LINEAGE_REFRESH),
 )

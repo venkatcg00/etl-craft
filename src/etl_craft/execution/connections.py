@@ -1,6 +1,6 @@
 """Connection tests run before a pipeline run starts.
 
-``run --pipeline_code`` and ``run --init-only`` test the connections the run will use before they
+``run --pipeline-code`` and ``run --init-only`` test the connections the run will use before they
 start or resume it. A warehouse failure stops the run before any task starts; email failures
 are logged and left to the alert task or SLA hook to report:
 
@@ -24,7 +24,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.core.enums import Handler
+from etl_craft.core.enums import EmailTransport, Handler, TlsMode
 from etl_craft.core.errors import ConnectionTestError, EtlCraftError
 from etl_craft.handlers.mail import open_smtp, sendmail_problem, tls_context
 from etl_craft.warehouse.connection import (
@@ -68,11 +68,11 @@ def probe_email_relay(config: ConnectorConfig) -> str | None:
     if config.email is None:
         return None
     profile = config.email
-    if profile.transport == "sendmail":
+    if profile.transport == EmailTransport.SENDMAIL:
         return sendmail_problem(profile)
     try:
         with open_smtp(profile, timeout=SMTP_TEST_TIMEOUT_SECONDS) as relay:
-            if profile.tls_mode == "starttls":
+            if profile.tls_mode == TlsMode.STARTTLS:
                 relay.starttls(context=tls_context(profile))
             relay.noop()
     except (smtplib.SMTPException, OSError, EtlCraftError, ValueError) as error:

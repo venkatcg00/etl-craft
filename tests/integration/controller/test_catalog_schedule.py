@@ -10,10 +10,11 @@ from sqlalchemy import text
 from etl_craft.controller.leadership import leadership
 from etl_craft.controller.schedules import Schedules
 from etl_craft.core.actor import Actor, ActorKind
-from etl_craft.core.enums import ActionOutcome, ApiRole
+from etl_craft.core.enums import ActionName, ActionOutcome, ApiRole
 from etl_craft.core.errors import ExitCode, MetadataError
 from etl_craft.engine import audit
 from etl_craft.services.operations import OperationContext, documents
+from fixtures.actions import act
 
 BASE = datetime(2026, 1, 2, 10, tzinfo=UTC)
 
@@ -182,7 +183,7 @@ def test_manual_build_is_the_durable_schedule_cursor(catalog_context, catalog_cl
     try:
         tick(schedules, ctx, clock, BASE)
         clock[0] = BASE + timedelta(hours=1)
-        documents.generate_docs(ctx, with_warehouse=False, output=None, strict=False)
+        act(ctx, ActionName.GENERATE_DOCS)
         tick(schedules, ctx, clock, clock[0])
         assert schedules.catalog.build is None
         assert len(rows(ctx)) == 2
@@ -192,7 +193,7 @@ def test_manual_build_is_the_durable_schedule_cursor(catalog_context, catalog_cl
 
 def test_restart_does_not_replay_missed_catalog_ticks(catalog_context, catalog_clock):
     ctx, clock = catalog_context, catalog_clock
-    documents.generate_docs(ctx, with_warehouse=False, output=None, strict=False)
+    act(ctx, ActionName.GENERATE_DOCS)
     schedules = Schedules()
     try:
         tick(schedules, ctx, clock, BASE + timedelta(hours=5, minutes=30))

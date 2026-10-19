@@ -15,7 +15,7 @@ pytestmark = pytest.mark.unit
 
 CONFIG = ConnectorConfig(
     source=SourceConfig("environment"),
-    engine=ConnectionProfile("ENGINE", "d", "jdbc:sqlite:e", "", "none"),
+    engine=ConnectionProfile("ENGINE", "d", "jdbc:sqlite:e", "", "NONE"),
     limits=ExecutionLimits(task_timeout_seconds=600),
 )
 

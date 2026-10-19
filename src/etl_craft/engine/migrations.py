@@ -131,7 +131,7 @@ def migration_streams(
         return streams
     if not project.is_dir():
         raise MigrationError(
-            f"migrations directory {str(project)!r} does not exist — pass --migrations-dir, "
+            f"migrations directory {str(project)!r} does not exist — give `migrations_dir`, "
             f"set ${MIGRATIONS_DIR_ENV_VAR}, or keep them in migrations/ in the project directory"
         )
     if project.resolve() != package_dir.resolve():
@@ -160,7 +160,7 @@ def verify_ledger(ledger: dict[tuple[str, str], str], streams: list[Stream]) -> 
             if source not in directories:
                 raise MigrationError(
                     f"applied {source.lower()} migration {version!r} cannot be verified because "
-                    "no project migrations directory is configured — pass --migrations-dir (or "
+                    "no project migrations directory is configured — give `migrations_dir` (or "
                     f"set ${MIGRATIONS_DIR_ENV_VAR})"
                 )
             raise MigrationError(

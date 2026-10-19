@@ -6,20 +6,44 @@ from typing import ClassVar
 
 from sqlalchemy.engine import Row
 
-from etl_craft.core.actor import Actor, ActorKind
-from etl_craft.core.enums import AccountKind, TokenKind, YesNo
+from etl_craft.core.actor import Actor, ActorKind, acting_as
+from etl_craft.core.enums import AccountKind, ActionName, AuthMode, TokenKind, Transport, YesNo
 from etl_craft.core.errors import EtlCraftError, UsageError
 from etl_craft.core.text import sha256_hex
 from etl_craft.engine import locks
 from etl_craft.engine.queries import statement
 from etl_craft.services import oidc
-from etl_craft.services.operations.context import OperationContext, operation
-from etl_craft.services.operations.permissions import authorize
+from etl_craft.services.operations.context import OperationContext
+from etl_craft.services.operations.recording import recorded
+from etl_craft.services.operations.requests import NoInput, Request
 from etl_craft.services.operations.tokens import TokenGrant, TokenView, find_token, issue_token
 from etl_craft.services.passwords import DECOY, verify_password
 
 ACCESS_LIFETIME = timedelta(hours=1)
 """How long a server session's access token lasts before its refresh token renews it."""
+
+
+@dataclass(frozen=True, kw_only=True)
+class SignIn(Request):
+    """An account name and its password, sent once."""
+
+    name: str
+    password: str
+
+
+@dataclass(frozen=True, kw_only=True)
+class SsoPollInput(Request):
+    """The device code and nonce returned by the SSO start."""
+
+    device_code: str
+    nonce: str
+
+
+@dataclass(frozen=True, kw_only=True)
+class TokenInput(Request):
+    """A refresh token to renew access with, or a session token to revoke."""
+
+    token: str
 
 
 @dataclass(frozen=True)
@@ -72,33 +96,34 @@ class SsoPoll:
     interval: int
 
 
-def sign_in(
-    ctx: OperationContext,
-    name: str,
-    password: str | None = None,
-    *,
-    subject: str | None = None,
-    refreshable: bool = False,
+def sign_in(ctx: OperationContext, request: SignIn) -> Session:
+    """Sign a registered user in with a password."""
+    return _sign_in(ctx, request.name, request.password)
+
+
+def _sign_in(
+    ctx: OperationContext, name: str, password: str | None = None, *, subject: str | None = None
 ) -> Session:
     """Require proof of a registered user; SSO subjects come only from the verified device flow.
 
-    A refreshable session is a server sign-in: a one-hour access token renewed by a refresh token
-    that lasts ``Auth.Refresh_days``. Otherwise the session is one access token that lasts
+    A sign-in over HTTP is a server session: a one-hour access token renewed by a refresh token
+    that lasts ``Auth.Refresh_days``. A local sign-in is one access token that lasts
     ``Auth.Session_hours``.
     """
+    refreshable = ctx.transport == Transport.HTTP
     with locks.ACCOUNTS.hold(ctx.engine, wait_seconds=30):
         with ctx.engine.connect() as conn:
             row = conn.execute(statement(conn, "account_find"), {"name": name}).one_or_none()
         proven = _proven(row, password, subject)
         if row is None or not proven:
-            with operation(ctx, "login", {"name": name}):
+            with recorded(ctx, ActionName.LOGIN, {"name": name}):
                 raise UsageError(
                     f"account {name!r}: sign-in refused; expected an active registered USER "
                     "with matching credentials; ask an administrator to check the account"
                 )
         caller = replace(ctx, actor=Actor(name, ActorKind.USER))
         now = datetime.now(UTC)
-        with operation(caller, "login", {"name": name}), ctx.engine.begin() as conn:
+        with recorded(caller, ActionName.LOGIN, {"name": name}), ctx.engine.begin() as conn:
             if not refreshable:
                 session_end = now + timedelta(hours=ctx.config.auth.session_hours)
                 created = issue_token(
@@ -135,26 +160,26 @@ def _proven(row: Row[tuple[object, ...]] | None, password: str | None, subject: 
     return user and matched and encoded != DECOY
 
 
-def sign_in_subject(ctx: OperationContext, subject: str, *, refreshable: bool = False) -> Session:
+def sign_in_subject(ctx: OperationContext, subject: str) -> Session:
     """Map a verified issuer subject to exactly one pre-registered account."""
     with ctx.engine.connect() as conn:
         name = conn.execute(
             statement(conn, "account_subject"), {"subject": subject}
         ).scalar_one_or_none()
     if name is None:
-        with operation(ctx, "login", {"oidc_subject": subject}):
+        with recorded(ctx, ActionName.LOGIN, {"oidc_subject": subject}):
             raise UsageError(
                 "SSO subject has no active registered USER account; ask an administrator"
             )
-    return sign_in(ctx, name, subject=subject, refreshable=refreshable)
+    return _sign_in(ctx, name, subject=subject)
 
 
-def start_sso(ctx: OperationContext) -> SsoStart:
+def start_sso(ctx: OperationContext, request: NoInput) -> SsoStart:
     """Begin the issuer's device authorization; the caller shows the code and polls."""
     try:
         grant = oidc.start_device(ctx.config.auth)
     except EtlCraftError:
-        with operation(ctx, "login", {"method": "SSO"}):
+        with recorded(ctx, ActionName.LOGIN, {"method": AuthMode.SSO}):
             raise
     return SsoStart(
         grant.user_code,
@@ -166,30 +191,27 @@ def start_sso(ctx: OperationContext) -> SsoStart:
     )
 
 
-def poll_sso(
-    ctx: OperationContext, device_code: str, nonce: str, *, refreshable: bool = False
-) -> SsoPoll:
+def poll_sso(ctx: OperationContext, request: SsoPollInput) -> SsoPoll:
     """Poll the issuer once; sign in the account its verified subject belongs to."""
     try:
-        found = oidc.poll_device(ctx.config.auth, device_code, nonce)
+        found = oidc.poll_device(ctx.config.auth, request.device_code, request.nonce)
     except EtlCraftError:
-        with operation(ctx, "login", {"method": "SSO"}):
+        with recorded(ctx, ActionName.LOGIN, {"method": AuthMode.SSO}):
             raise
     if isinstance(found, int):
         return SsoPoll(None, found)
-    return SsoPoll(sign_in_subject(ctx, found, refreshable=refreshable), 0)
+    return SsoPoll(sign_in_subject(ctx, found), 0)
 
 
-def refresh(ctx: OperationContext, refresh_token: str) -> Session:
+def refresh(ctx: OperationContext, request: TokenInput) -> Session:
     """Issue a new access token from a live refresh token of an active user."""
-    found = find_token(ctx, refresh_token)
+    found = find_token(ctx, request.token)
     if found is None or found.token_kind != TokenKind.REFRESH:
-        with operation(ctx, "refresh", {}):
-            raise UsageError(
-                "refresh token is unknown, expired or revoked; run `etl-craft login` again"
-            )
+        raise UsageError(
+            "refresh token is unknown, expired or revoked; run `etl-craft login` again"
+        )
     caller = replace(ctx, actor=found.actor)
-    with operation(caller, "refresh", {}), ctx.engine.begin() as conn:
+    with acting_as(caller.actor), ctx.engine.begin() as conn:
         account_id = (
             conn.execute(statement(conn, "api_token_account"), {"name": found.name})
             .one()
@@ -209,15 +231,16 @@ def refresh(ctx: OperationContext, refresh_token: str) -> Session:
     return Session(access.token, access.metadata, refresh_expires_at=found.expires_at)
 
 
-def sign_out(ctx: OperationContext, token: str) -> None:
+def sign_out(ctx: OperationContext, request: TokenInput) -> None:
     """Revoke a session token, and a refresh token's access tokens, as the token's own account.
 
     An expired or unknown token is revoked under the caller's actor, so signing out always
     succeeds.
     """
+    token = request.token
     found = find_token(ctx, token)
     caller = ctx if found is None else replace(ctx, actor=found.actor)
-    with operation(caller, "logout", {}), ctx.engine.begin() as conn:
+    with recorded(caller, ActionName.LOGOUT, {}), ctx.engine.begin() as conn:
         conn.execute(
             statement(conn, "session_revoke"),
             {
@@ -227,12 +250,11 @@ def sign_out(ctx: OperationContext, token: str) -> None:
         )
 
 
-def sign_in_methods(ctx: OperationContext) -> SignInMethods:
+def sign_in_methods(ctx: OperationContext, request: NoInput) -> SignInMethods:
     """Say whether SSO is configured, so a sign-in can offer it."""
     return SignInMethods(sso=bool(ctx.config.auth.oidc_issuer))
 
 
-def whoami(ctx: OperationContext) -> Identity:
+def whoami(ctx: OperationContext, request: NoInput) -> Identity:
     """Return the caller's account and its current role."""
-    authorize(ctx, "whoami")
     return Identity(ctx.actor.name, str(ctx.role))

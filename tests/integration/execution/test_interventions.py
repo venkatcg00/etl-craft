@@ -19,7 +19,7 @@ from sqlalchemy import text
 from etl_craft.cli import main as cli_main
 from etl_craft.config import load_config
 from etl_craft.core.actor import Actor, ActorKind, current_actor
-from etl_craft.core.enums import ApiRole, ControlAction, RunStatus
+from etl_craft.core.enums import ActionName, ApiRole, ControlAction, RunStatus
 from etl_craft.core.errors import ExitCode, RunRefusedError, RunStateError, UsageError
 from etl_craft.engine import runlog, transitions
 from etl_craft.execution.attempt_records import attempt_log_path
@@ -39,7 +39,8 @@ from etl_craft.execution.run_start import init_pipeline_run
 from etl_craft.execution.run_types import RunHooks
 from etl_craft.execution.runner import run_task
 from etl_craft.services.operations import OperationContext
-from etl_craft.services.operations.controls import ControlRequest, request_control
+from etl_craft.services.operations.actions import invoke
+from etl_craft.services.operations.controls import ControlRequest
 from fixtures.auth import service_token
 from fixtures.metadata import (
     add_dependency,
@@ -74,15 +75,15 @@ def config(engine_db, tmp_path):
     """A craft-connector.yml naming the test Engine DB, loaded."""
     profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
-    block = {"jdbc_url": profile.jdbc_url, "schema": schema}
-    if profile.auth_mode != "none":
+    block = {"Jdbc_url": profile.jdbc_url, "Schema": schema}
+    if profile.auth_mode != "NONE":
         block |= {
-            "user": profile.user,
-            "auth_mode": profile.auth_mode,
-            "secret": profile.secret_var,
+            "User": profile.user,
+            "Auth_mode": profile.auth_mode,
+            "Secret": profile.secret_var,
         }
     raw = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {"Task_timeout_seconds": 60, "Max_parallel_tasks": 2},
         "Engine": {"dev": block},
     }
@@ -117,8 +118,16 @@ def pipeline(engine_db):
 
 def abort(ctx, pipeline_code, reason, *, selector=runlog.ACTIVE_RUN):
     """Request an abort the way the ``abort`` command does."""
-    return request_control(
-        ctx, ControlRequest(pipeline_code, ControlAction.ABORT, reason, selector)
+    return invoke(
+        ctx,
+        ActionName.CONTROL,
+        ControlRequest(
+            pipeline_code=pipeline_code,
+            action=ControlAction.ABORT,
+            reason=reason,
+            run_id=selector.run_id,
+            run_key=selector.run_key,
+        ),
     )
 
 
@@ -178,7 +187,7 @@ def test_a_failed_task_marked_success_lets_its_dependents_run(config, pipeline):
     assert marked.message == (
         f"P.broken: marked SUCCESS under pipeline_run_id={run_id} (was FAILED); the run was "
         "FAILED and is IN-PROGRESS again; reset to run again: after_broken, alert. Run "
-        "`etl-craft run --pipeline_code P` to resume it"
+        "`etl-craft run --pipeline-code P` to resume it"
     )
     assert run_status(engine, run_id) == "IN-PROGRESS"
     assert interventions(engine) == [
@@ -312,7 +321,7 @@ def test_a_stand_in_run_passes_gates_where_the_upstream_cannot_run(config, pipel
         add_dependency(conn, down, load, publish, "HAS_DATA", upstream_pipeline=up)
     assert run_pipeline(engine, config, "DOWN", child=CHILD, clock=NO_WAIT).status == "SKIPPED"
 
-    with pytest.raises(UsageError, match="name the task with --task_code"):
+    with pytest.raises(UsageError, match="name the task with `task_code`"):
         record_stand_in_run(engine, config, "UP", "SUCCESS", "dev", rows=3, requested_by=WHO)
     stand_in = record_stand_in_run(
         engine,
@@ -415,7 +424,7 @@ def test_what_mark_and_cancel_refuse(config, pipeline):
     with pytest.raises(RunStateError, match="matched 0 runs"):
         mark_run(engine, config, "P", "SUCCESS", "why", requested_by=WHO)
     run_id = run_pipeline(engine, config, "P", child=CHILD).pipeline_run_id
-    with pytest.raises(UsageError, match="needs a --reason"):
+    with pytest.raises(UsageError, match="needs a `reason`"):
         mark_run(
             engine,
             config,
@@ -435,7 +444,7 @@ def test_what_mark_and_cancel_refuse(config, pipeline):
             requested_by=WHO,
             selector=runlog.RunSelector(run_id=run_id),
         )
-    with pytest.raises(UsageError, match="--rows goes with SUCCESS"):
+    with pytest.raises(UsageError, match="`rows` goes with SUCCESS"):
         mark_task(
             engine,
             config,
@@ -504,7 +513,7 @@ def test_the_commands(config, pipeline, capsys, monkeypatch, engine_db):
     code = cli_main(
         [
             "mark",
-            "--pipeline_code",
+            "--pipeline-code",
             "P",
             "--run-id",
             str(run_id),
@@ -517,16 +526,16 @@ def test_the_commands(config, pipeline, capsys, monkeypatch, engine_db):
     assert code == ExitCode.SUCCESS
     assert capsys.readouterr().out == f"P: pipeline_run_id={run_id} marked SUCCESS (was FAILED)\n"
 
-    assert cli_main(["history", "--pipeline_code", "P", "--all"]) == ExitCode.SUCCESS
+    assert cli_main(["history", "--pipeline-code", "P", "--all"]) == ExitCode.SUCCESS
     history = capsys.readouterr().out
     assert "Interventions:" in history
     assert "(the run)" in history and "fine as it is" in history
 
-    assert cli_main(["abort", "--pipeline_code", "P", "--reason", "x"]) == ExitCode.RUN_STATE
+    assert cli_main(["abort", "--pipeline-code", "P", "--reason", "x"]) == ExitCode.RUN_STATE
     assert "matched 0 runs" in capsys.readouterr().err
     # A reason is required.
     with pytest.raises(SystemExit) as usage:
-        cli_main(["mark", "--pipeline_code", "P", "--status", "SUCCESS", "--new-run"])
+        cli_main(["mark", "--pipeline-code", "P", "--status", "SUCCESS", "--new-run"])
     assert usage.value.code == ExitCode.USAGE
 
 
@@ -556,7 +565,7 @@ def downstream(engine_db):
     return engine
 
 
-@pytest.mark.parametrize("policy", ["warn", "off"])
+@pytest.mark.parametrize("policy", ["WARN", "OFF"])
 def test_relaxed_gates_let_a_run_through_and_record_it(config, downstream, policy):
     engine = downstream
     relaxed = replace(config, dependency_gates=policy)
@@ -569,15 +578,15 @@ def test_relaxed_gates_let_a_run_through_and_record_it(config, downstream, polic
         ("load", "GATE_BYPASS"),
     ]
     reason = changes[0][7]
-    if policy == "warn":
+    if policy == "WARN":
         assert reason == (
-            "Dependency_gates is warn: upstream pipeline UP (SUCCESS) has no finished run"
+            "Dependency_gates is WARN: upstream pipeline UP (SUCCESS) has no finished run"
         )
     else:
-        assert reason == "Dependency_gates is off: upstream pipeline UP (SUCCESS) not checked"
+        assert reason == "Dependency_gates is OFF: upstream pipeline UP (SUCCESS) not checked"
     assert changes[1][7].endswith(
         "upstream task UP.publish (SUCCESS) "
-        + ("has no finished run" if policy == "warn" else "not checked")
+        + ("has no finished run" if policy == "WARN" else "not checked")
     )
     # Nothing satisfied the dependencies, so nothing was consumed.
     with engine.connect() as conn:
@@ -608,9 +617,9 @@ def test_a_task_runs_without_its_dependencies_when_told_to(config, pipeline):
     )
     again = run_task(engine, config, "P", "transform", child=CHILD, override=Override("again"))
     assert again.message.endswith(
-        f"already SUCCESS under pipeline_run_id={run_id}; pass --rerun to run it again"
+        f"already SUCCESS under pipeline_run_id={run_id}; give `rerun` to run it again"
     )
-    with pytest.raises(UsageError, match="--ignore-dependencies needs a --reason"):
+    with pytest.raises(UsageError, match="`ignore_dependencies` needs a `reason`"):
         run_task(engine, config, "P", "transform", child=CHILD, override=Override(""))
     with pytest.raises(UsageError, match="different overrides"):
         run_task(engine, config, "P", "transform", force=True, override=Override("x"))
@@ -668,17 +677,19 @@ def test_the_run_options(config, pipeline, capsys, monkeypatch, engine_db):
     monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(engine_db.engine))
     monkeypatch.chdir(config.project_dir)
     for argv, message in (
-        (["--rerun"], "apply to one task: pass --task_code"),
-        (["--task_code", "extract", "--rerun", "--ignore-dependencies"], "already runs the task"),
-        (["--task_code", "extract", "--with-downstream"], "--with-downstream goes with --rerun"),
-        (["--task_code", "extract", "--reason", "x"], "--reason goes with"),
-        (["--task_code", "extract", "--rerun"], "--rerun needs a --reason"),
+        (["--rerun"], "apply to one task: give `--task-code`"),
+        (["--task-code", "extract", "--rerun", "--ignore-dependencies"], "already runs the task"),
         (
-            ["--task_code", "extract", "--rerun", "--force", "--reason", "x"],
+            ["--task-code", "extract", "--with-downstream"],
+            "`--with-downstream` goes with `--rerun`",
+        ),
+        (["--task-code", "extract", "--rerun"], "`--rerun` needs a `--reason`"),
+        (
+            ["--task-code", "extract", "--rerun", "--force", "--reason", "x"],
             "choose one",
         ),
     ):
-        assert cli_main(["run", "--pipeline_code", "P", *argv]) == ExitCode.USAGE
+        assert cli_main(["run", "--pipeline-code", "P", *argv]) == ExitCode.USAGE
         assert message in capsys.readouterr().err
 
 
@@ -795,16 +806,16 @@ def test_a_run_skipped_on_purpose_is_recorded_and_seen_downstream(config, pipeli
 def test_the_pause_and_skip_commands(config, pipeline, capsys, monkeypatch, engine_db):
     monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(engine_db.engine))
     monkeypatch.chdir(config.project_dir)
-    assert cli_main(["pause", "--pipeline_code", "P", "--reason", "hold"]) == ExitCode.SUCCESS
+    assert cli_main(["pause", "--pipeline-code", "P", "--reason", "hold"]) == ExitCode.SUCCESS
     assert capsys.readouterr().out.startswith("P: paused;")
-    assert cli_main(["run", "--pipeline_code", "P"]) == ExitCode.SUCCESS
+    assert cli_main(["run", "--pipeline-code", "P"]) == ExitCode.SUCCESS
     assert "nothing started" in capsys.readouterr().out
-    assert cli_main(["resume", "--pipeline_code", "P", "--reason", "go"]) == ExitCode.SUCCESS
+    assert cli_main(["resume", "--pipeline-code", "P", "--reason", "go"]) == ExitCode.SUCCESS
     assert capsys.readouterr().out == "P: resumed\n"
-    code = cli_main(["run", "--pipeline_code", "P", "--skip", "--reason", "holiday"])
+    code = cli_main(["run", "--pipeline-code", "P", "--skip", "--reason", "holiday"])
     assert code == ExitCode.SUCCESS
     assert "SKIPPED on purpose: holiday" in capsys.readouterr().out
-    assert cli_main(["run", "--pipeline_code", "P", "--skip", "--task_code", "x"]) == (
+    assert cli_main(["run", "--pipeline-code", "P", "--skip", "--task-code", "x"]) == (
         ExitCode.USAGE
     )
 
@@ -941,7 +952,7 @@ def test_a_backfill_stops_at_the_first_run_that_fails(config, pipeline):
     assert len(done.runs) == 1
     assert done.message.startswith("P: backfill stopped at 2026-09-01 after 1 of 5 run(s): ")
     assert done.message.endswith(
-        "`etl-craft run --pipeline_code P --backfill 2026-09-01:2026-09-05` takes up from there "
+        "`etl-craft run --pipeline-code P --backfill 2026-09-01:2026-09-05` takes up from there "
         "once it is fixed"
     )
 
@@ -952,7 +963,7 @@ def test_what_a_backfill_refuses(config, pipeline):
         backfill(engine, config, "P", date(2026, 9, 5), date(2026, 9, 1), "x")
     with pytest.raises(UsageError, match="is 367 dates; one backfill runs at most 366"):
         backfill(engine, config, "P", date(2025, 1, 1), date(2026, 1, 2), "x")
-    with pytest.raises(UsageError, match="--backfill needs a --reason"):
+    with pytest.raises(UsageError, match="a backfill needs a `reason`"):
         backfill(engine, config, "P", date(2026, 9, 1), date(2026, 9, 1), "")
     with engine.begin() as conn:
         run_id = start_run(conn, ids["P"], run_date=date(2026, 9, 9))
@@ -976,11 +987,11 @@ def test_the_run_date_and_backfill_options(config, engine_db, capsys, monkeypatc
         add_pipeline(conn, "P")
     monkeypatch.chdir(config.project_dir)
     both_days = ["--backfill", "2026-09-01:2026-09-02"]
-    assert cli_main(["run", "--pipeline_code", "P", *both_days, "--reason", "r"]) == 0
+    assert cli_main(["run", "--pipeline-code", "P", *both_days, "--reason", "r"]) == 0
     assert "backfill of 2 date(s)" in capsys.readouterr().out
-    assert cli_main(["run", "--pipeline_code", "P", "--run-date", "2026-08-30"]) == 0
+    assert cli_main(["run", "--pipeline-code", "P", "--run-date", "2026-08-30"]) == 0
     capsys.readouterr()
-    assert cli_main(["history", "--pipeline_code", "P", "--all"]) == ExitCode.SUCCESS
+    assert cli_main(["history", "--pipeline-code", "P", "--all"]) == ExitCode.SUCCESS
     history = capsys.readouterr().out.splitlines()
     assert history[0].startswith("PIPELINE_RUN_ID\tSTATUS\tRUN_DATE\t")
     assert history[1].split("\t")[2] == "2026-08-30"
@@ -990,9 +1001,9 @@ def test_the_run_date_and_backfill_options(config, engine_db, capsys, monkeypatc
         (["--run-date", "01/09/2026"], "is not a date: write YYYY-MM-DD"),
     ):
         with pytest.raises(SystemExit):
-            cli_main(["run", "--pipeline_code", "P", *argv])
+            cli_main(["run", "--pipeline-code", "P", *argv])
         assert message in capsys.readouterr().err
-    code = cli_main(["run", "--pipeline_code", "P", *both_days, "--task_code", "x"])
+    code = cli_main(["run", "--pipeline-code", "P", *both_days, "--task-code", "x"])
     assert code == ExitCode.USAGE
 
 
@@ -1005,7 +1016,7 @@ def test_a_task_left_running_by_a_dead_process_is_released_with_stale(config, pi
     assert held.status == RunStatus.IN_PROGRESS
     assert "--stale" in held.message
 
-    with pytest.raises(RunRefusedError, match="pass --stale"):
+    with pytest.raises(RunRefusedError, match="give `stale`"):
         mark_task(engine, config, "P", "extract", "FAILED", "process died", requested_by=WHO)
     with engine.begin() as conn:
         summary = transitions.find_or_create_task_run(conn, ids["extract"], run)
@@ -1165,7 +1176,7 @@ def test_a_forced_task_reopens_an_ended_run_and_ends_it_again(config, pipeline):
     assert [(action, frm, to) for _, _, action, frm, to, *_ in interventions(engine)] == [
         ("REOPEN", "SUCCESS", "IN-PROGRESS")
     ]
-    assert "--force: transform runs again" in interventions(engine)[0][7]
+    assert "force: transform runs again" in interventions(engine)[0][7]
 
 
 def test_a_forced_task_in_a_skipped_run_leaves_the_rest_to_run(config, pipeline):

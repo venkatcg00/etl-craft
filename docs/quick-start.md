@@ -62,10 +62,10 @@ etl-craft validate
 ## 4. Run the pipelines
 
 ```bash
-etl-craft run --pipeline_code CLIENT_ALPHA
-etl-craft run --pipeline_code CLIENT_BETA
-etl-craft run --pipeline_code SUPPORT_DM      # fails at flaky_feed, on purpose
-etl-craft run --pipeline_code SUPPORT_DM
+etl-craft run --pipeline-code CLIENT_ALPHA
+etl-craft run --pipeline-code CLIENT_BETA
+etl-craft run --pipeline-code SUPPORT_DM      # fails at flaky_feed, on purpose
+etl-craft run --pipeline-code SUPPORT_DM
 ```
 
 Each run prints its tasks in dependency waves, each in a process of its own, then a summary:
@@ -85,8 +85,8 @@ own log under `logs/`.
 ## 5. Look at what happened
 
 ```bash
-etl-craft history --pipeline_code SUPPORT_DM --all
-etl-craft graph --pipeline_code SUPPORT_DM
+etl-craft history --pipeline-code SUPPORT_DM --all
+etl-craft graph --pipeline-code SUPPORT_DM
 etl-craft lineage --table dm.support_fact --column rating --upstream
 etl-craft generate-docs
 ```

@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from sqlalchemy import Boolean
 from sqlalchemy.engine import Connection
 
+from etl_craft.core.enums import GateOutcome
 from etl_craft.engine.queries import statement
 
 
@@ -117,7 +118,7 @@ class GateDecision:
     dependency_id: int
     task: bool
     selected: FinishedRun | None
-    result: str
+    result: GateOutcome
     reason: str
     decided_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 

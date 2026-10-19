@@ -827,7 +827,7 @@ def test_event_waits_on_snowflake(tmp_path, table_format):
 
 def walk_source_definitions(w, folder):
     """Seed live source shapes and detect column drift without running a consumer."""
-    from etl_craft.services.catalog import build_catalog
+    from etl_craft.services.catalog.collect import build_catalog
     from etl_craft.services.config_files import export_config, read_config_files, sync_config
     from etl_craft.services.validate import validate
 

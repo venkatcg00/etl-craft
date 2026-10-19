@@ -4,15 +4,15 @@ from collections import Counter
 from collections.abc import Callable
 
 from etl_craft.core.enums import GapState
-from etl_craft.services.catalog import Catalog, TableAsset
-from etl_craft.services.catalog_gaps import (
+from etl_craft.services.catalog.collect import Catalog, TableAsset
+from etl_craft.services.catalog.gaps import (
     GapRecord,
     affected_tasks,
     gap_snapshot,
     lineage_records,
     table_records,
 )
-from etl_craft.services.catalog_html import escape, render_table
+from etl_craft.services.catalog.html import escape, render_table
 
 STYLES = {
     GapState.DEPLOYED_ONLY: "amber",

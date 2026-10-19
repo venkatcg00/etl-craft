@@ -242,7 +242,7 @@ def test_run_condition_any_is_satisfied_by_a_same_pipeline_edge_alone():
 
 def test_ready_treats_unevaluated_cross_pipeline_edges_optimistically():
     # The wave scheduler passes no cross-pipeline counts: the real gate runs inside the
-    # task's own `run --task_code` process. Counting them as unsatisfied would never start the
+    # task's own `run --task-code` process. Counting them as unsatisfied would never start the
     # task, so the gate that settles them would never run.
     tasks = [TaskNode(task_id=1), TaskNode(task_id=2, cross_pipeline_edge_count=1)]
     graph = build_graph(tasks, [edge(2, 1)])

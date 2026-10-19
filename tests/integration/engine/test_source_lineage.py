@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import text
 
 from etl_craft.core.errors import MetadataFileError
-from etl_craft.services.catalog import build_catalog
+from etl_craft.services.catalog.collect import build_catalog
 from etl_craft.services.config_files import export_config, read_config_files, sync_config
 from etl_craft.services.lineage import collect
 from fixtures.metadata import add_pipeline, add_source_column, add_task
@@ -36,7 +36,7 @@ def test_upstream_stars_join_resolution_and_schema_cache(engine_db, tmp_path, mo
     def no_warehouse(*args, **kwargs):
         raise AssertionError("lineage must stay offline")
 
-    monkeypatch.setattr("etl_craft.services.catalog.open_warehouse", no_warehouse)
+    monkeypatch.setattr("etl_craft.services.catalog.collect.open_warehouse", no_warehouse)
     monkeypatch.setattr("etl_craft.warehouse.connection.build_warehouse_engine", no_warehouse)
     first = collect(db.engine, db.config)
     assert all(result.error is None and not result.cached for result in first)
@@ -88,7 +88,7 @@ def test_demo_traces_every_task_before_warehouse_exists(engine_db, tmp_path, mon
         engine_db.config,
         config_path=project / "craft-connector.yml",
         warehouse=ConnectionProfile(
-            "WAREHOUSE", "test", "jdbc:duckdb:warehouse.duckdb", "", "none", schema="main"
+            "WAREHOUSE", "test", "jdbc:duckdb:warehouse.duckdb", "", "NONE", schema="main"
         ),
     )
     migrations = project / "migrations"
@@ -199,11 +199,11 @@ def test_catalog_reports_unavailable_warehouse_without_losing_definitions(engine
         raise MetadataError("warehouse unavailable")
         yield
 
-    monkeypatch.setattr("etl_craft.services.catalog.open_warehouse", unavailable)
+    monkeypatch.setattr("etl_craft.services.catalog.collect.open_warehouse", unavailable)
     config = replace(
         engine_db.config,
         warehouse=ConnectionProfile(
-            "WAREHOUSE", "test", "jdbc:duckdb:warehouse.duckdb", "", "none", schema="main"
+            "WAREHOUSE", "test", "jdbc:duckdb:warehouse.duckdb", "", "NONE", schema="main"
         ),
     )
     table = build_catalog(engine_db.engine, config, with_warehouse=True).tables["raw.orders"]

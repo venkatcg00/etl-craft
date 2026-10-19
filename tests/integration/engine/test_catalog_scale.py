@@ -4,9 +4,9 @@ from sqlalchemy import event, inspect, text
 
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
 from etl_craft.core.enums import InterventionAction
-from etl_craft.engine.repository.interventions import record_intervention
-from etl_craft.services.catalog import build_catalog
-from etl_craft.services.catalog_site import write_site
+from etl_craft.engine.repository.intervention_rows import record_intervention
+from etl_craft.services.catalog.collect import build_catalog
+from etl_craft.services.catalog.site import write_site
 from fixtures.catalog_scale import seed_catalog
 from fixtures.metadata import add_pipeline_dependency
 

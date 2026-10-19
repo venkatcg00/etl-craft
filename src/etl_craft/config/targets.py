@@ -218,7 +218,7 @@ def preferred_connection_url(name: str, fields: Mapping[str, str]) -> str:
             if not is_safe_identifier(fields[key]):
                 raise ConfigurationError(f"Databricks {key} must be an unquoted SQL identifier")
         if not fields["jdbc_url"].startswith("jdbc:databricks://"):
-            raise ConfigurationError("Databricks jdbc_url must start with jdbc:databricks://")
+            raise ConfigurationError("Databricks Jdbc_url must start with jdbc:databricks://")
         # The separate fields come last, so they win over any defaults in the copied URL.
         return (
             strip_databricks_credentials(fields["jdbc_url"]).rstrip(";")
@@ -271,7 +271,7 @@ def active_catalog(config: ConnectorConfig) -> str:
     catalog = parse_warehouse_url(profile.jdbc_url).catalog
     if not catalog:
         raise ConfigurationError(
-            "the active warehouse profile's jdbc_url names no catalog/database, so "
+            "the active warehouse profile's Jdbc_url names no catalog/database, so "
             "TARGET_OBJECT's schema.table cannot be resolved to a full name — add one "
             "(e.g. ConnCatalog=<catalog> for Databricks, db=<database> for Snowflake)"
         )

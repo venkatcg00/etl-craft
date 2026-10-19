@@ -1,4 +1,4 @@
-"""``run --pipeline_code``: whole pipelines in waves, init and finalize, gates, SLA and the CLI.
+"""``run --pipeline-code``: whole pipelines in waves, init and finalize, gates, SLA and the CLI.
 
 Tasks run in real task processes whose handlers are fakes (``fixtures.task_child``), against a
 real Engine DB on both dialects.
@@ -67,15 +67,15 @@ def config(engine_db, tmp_path):
     """A craft-connector.yml naming the test Engine DB, loaded."""
     profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
-    block = {"jdbc_url": profile.jdbc_url, "schema": schema}
-    if profile.auth_mode != "none":
+    block = {"Jdbc_url": profile.jdbc_url, "Schema": schema}
+    if profile.auth_mode != "NONE":
         block |= {
-            "user": profile.user,
-            "auth_mode": profile.auth_mode,
-            "secret": profile.secret_var,
+            "User": profile.user,
+            "Auth_mode": profile.auth_mode,
+            "Secret": profile.secret_var,
         }
     raw = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {"Task_timeout_seconds": 60, "Max_parallel_tasks": 2},
         "Engine": {"dev": block},
     }
@@ -340,7 +340,7 @@ def test_a_failed_warehouse_connection_test_starts_no_run(config, pipeline, monk
         name="down",
         jdbc_url="jdbc:postgresql://127.0.0.1:1/test",
         user="etl",
-        auth_mode="password",
+        auth_mode="PASSWORD",
         schema="public",
         extra={"secret_var": "ETL_CRAFT_TEST_CONNECTION_PASSWORD"},
     )
@@ -388,7 +388,7 @@ def test_a_relay_outage_does_not_prevent_data_tasks_from_running(config, engine_
         data = add_task(conn, pipeline_id, "data", BEHAVIOUR="succeed")
         notify = add_task(conn, pipeline_id, "notify", "EMAIL_ALERT", BEHAVIOUR="fail")
         add_dependency(conn, pipeline_id, notify, data, "ALWAYS")
-    profile = EmailProfile("EMAIL", "down", "127.0.0.1", 1, "etl@example.com", tls_mode="none")
+    profile = EmailProfile("EMAIL", "down", "127.0.0.1", 1, "etl@example.com", tls_mode="NONE")
     broken = replace(config, email=profile)
     outcome = run_pipeline(engine, broken, "MAIL", child=CHILD)
     assert outcome.status == RunStatus.SUCCESS
@@ -401,15 +401,15 @@ def test_a_relay_outage_does_not_prevent_data_tasks_from_running(config, engine_
 def test_the_command_line(config, pipeline, capsys, monkeypatch, engine_db):
     monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(engine_db.engine))
     monkeypatch.chdir(config.config_path.parent)
-    assert cli_main(["run", "--pipeline_code", "P", "--init-only"]) == ExitCode.SUCCESS
+    assert cli_main(["run", "--pipeline-code", "P", "--init-only"]) == ExitCode.SUCCESS
     assert capsys.readouterr().out.endswith("IN-PROGRESS\n")
     # The real task process has no handlers installed, so every task that runs fails.
-    assert cli_main(["run", "--pipeline_code", "P"]) == ExitCode.FAILURE
+    assert cli_main(["run", "--pipeline-code", "P"]) == ExitCode.FAILURE
     # alert runs because extract failed; transform and after_broken never can.
     out = capsys.readouterr().out
     assert "FAILED — 3 task(s) did not succeed" in out
     assert "skipped because of the failure: transform, after_broken" in out
-    assert cli_main(["run", "--pipeline_code", "P", "--init-only", "--force"]) == ExitCode.USAGE
+    assert cli_main(["run", "--pipeline-code", "P", "--init-only", "--force"]) == ExitCode.USAGE
     with pytest.raises(SystemExit) as usage:
-        cli_main(["run", "--pipeline_code", "P", "--init-only", "--task_code", "extract"])
+        cli_main(["run", "--pipeline-code", "P", "--init-only", "--task-code", "extract"])
     assert usage.value.code == ExitCode.USAGE

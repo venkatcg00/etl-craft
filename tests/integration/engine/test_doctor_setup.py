@@ -32,9 +32,9 @@ def config(empty_engine_db, tmp_path, monkeypatch):
     monkeypatch.delenv("ETL_CRAFT_MIGRATIONS_DIR", raising=False)
     relay = require("mailpit_smtp")
     warehouse = ConnectionProfile(
-        "WAREHOUSE", "dev", f"jdbc:duckdb:{tmp_path / 'wh.duckdb'}", "", "none", schema="main"
+        "WAREHOUSE", "dev", f"jdbc:duckdb:{tmp_path / 'wh.duckdb'}", "", "NONE", schema="main"
     )
-    email = EmailProfile("EMAIL", "dev", relay.host, relay.port, "etl@example.com", tls_mode="none")
+    email = EmailProfile("EMAIL", "dev", relay.host, relay.port, "etl@example.com", tls_mode="NONE")
     return replace(
         empty_engine_db.config,
         config_path=tmp_path / "craft-connector.yml",
@@ -96,7 +96,7 @@ def test_setup_changes_nothing_when_a_check_fails(config, empty_engine_db):
 
 def test_every_problem_is_reported_not_only_the_first(config):
     email = replace(config.email, port=1)
-    warehouse = ConnectionProfile("WAREHOUSE", "dev", "jdbc:duckdb:", "", "none", schema="main")
+    warehouse = ConnectionProfile("WAREHOUSE", "dev", "jdbc:duckdb:", "", "NONE", schema="main")
     broken = replace(
         config,
         warehouse=warehouse,
@@ -130,7 +130,7 @@ def test_email_secrets_auth_and_sendmail(config, monkeypatch):
     monkeypatch.delenv("ETL_CRAFT_TEST_UNSET_SECRET", raising=False)
     oauth = replace(
         config.email,
-        auth_mode="oauth",
+        auth_mode="OAUTH",
         user="etl@example.com",
         extra={"secret_var": "ETL_CRAFT_TEST_UNSET_SECRET"},
     )
@@ -139,9 +139,9 @@ def test_email_secrets_auth_and_sendmail(config, monkeypatch):
     assert "ETL_CRAFT_TEST_UNSET_SECRET" in checks["Email secret"][1]
     assert checks["Email auth"][0] is Status.WARN
     assert checks["Email TLS"][0] is Status.FAIL
-    assert "auth_mode=oauth" in checks["Email TLS"][1]
+    assert "Auth_mode=OAUTH" in checks["Email TLS"][1]
 
-    program = replace(config.email, transport="sendmail", sendmail_path=sys.executable)
+    program = replace(config.email, transport="SENDMAIL", sendmail_path=sys.executable)
     checks = found(run_checks(replace(config, email=program)))
     assert checks["Email"] == (Status.OK, f"sendmail at {sys.executable}, from etl@example.com")
     missing = replace(program, sendmail_path=str(config.project_dir / "no-sendmail"))
@@ -163,8 +163,8 @@ def test_the_commands(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv("ETL_CRAFT_CONFIG", raising=False)
     monkeypatch.delenv("ETL_CRAFT_MIGRATIONS_DIR", raising=False)
     (tmp_path / "craft-connector.yml").write_text(
-        "Secrets:\n  Source_type: environment\nOrchestration:\n"
-        "Engine:\n  dev:\n    jdbc_url: jdbc:sqlite:engine.db\n    schema: main\n",
+        "Secrets:\n  Source_type: ENVIRONMENT\nOrchestration:\n"
+        "Engine:\n  dev:\n    Jdbc_url: jdbc:sqlite:engine.db\n    Schema: main\n",
         encoding="utf-8",
     )
     assert main(["doctor"]) == ExitCode.FAILURE
@@ -198,7 +198,7 @@ def test_the_commands(tmp_path, monkeypatch, capsys):
     assert capsys.readouterr().out.splitlines()[-1] == "setup: applied 0001_owner.sql"
 
     with (tmp_path / "craft-connector.yml").open("a", encoding="utf-8") as config:
-        config.write("Warehouse:\n  dev:\n    jdbc_url: 'jdbc:duckdb:'\n    schema: main\n")
+        config.write("Warehouse:\n  dev:\n    Jdbc_url: 'jdbc:duckdb:'\n    Schema: main\n")
     assert main(["setup"]) == ExitCode.FAILURE
     out = capsys.readouterr().out.splitlines()
     assert out[-1] == "setup: nothing changed; fix the failed check(s) and run setup again"
@@ -221,11 +221,11 @@ def test_docs_site_publishing_is_only_warned_about(config, monkeypatch):
 
 def test_relaxed_dependency_gates_are_warned_about(config):
     assert "Dependency gates" not in found(run_checks(config))
-    status, detail = found(run_checks(replace(config, dependency_gates="off")))["Dependency gates"]
+    status, detail = found(run_checks(replace(config, dependency_gates="OFF")))["Dependency gates"]
     assert status is Status.WARN
-    assert detail.startswith("Orchestration.Dependency_gates is off: runs go ahead when")
+    assert detail.startswith("Orchestration.Dependency_gates is OFF: runs go ahead when")
     assert "(they are not checked at all)" in detail
-    warned = found(run_checks(replace(config, dependency_gates="warn")))["Dependency gates"]
+    warned = found(run_checks(replace(config, dependency_gates="WARN")))["Dependency gates"]
     assert "not checked at all" not in warned[1]
 
 

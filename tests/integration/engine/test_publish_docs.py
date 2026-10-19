@@ -14,8 +14,8 @@ from etl_craft.cli import main
 from etl_craft.cli.commands import publish_docs
 from etl_craft.config import DocsSiteConfig
 from etl_craft.core.errors import ConfigurationError, ExitCode
-from etl_craft.services.catalog import build_catalog
-from etl_craft.services.catalog_site import write_site
+from etl_craft.services.catalog.collect import build_catalog
+from etl_craft.services.catalog.site import write_site
 from etl_craft.services.docs_publish import published
 from fixtures.auth import service_token
 
@@ -161,20 +161,20 @@ def test_the_command(engine_db, site, tmp_path, monkeypatch, capsys):
     profile = engine_db.config.engine
     lines = [
         "Secrets:",
-        "  Source_type: environment",
+        "  Source_type: ENVIRONMENT",
         "Orchestration:",
         "Engine:",
         "  dev:",
     ]
     lines += [
-        f"    jdbc_url: {profile.jdbc_url}",
-        f"    schema: {'public' if 'postgresql' in profile.jdbc_url else 'main'}",
+        f"    Jdbc_url: {profile.jdbc_url}",
+        f"    Schema: {'public' if 'postgresql' in profile.jdbc_url else 'main'}",
     ]
-    if profile.auth_mode != "none":
+    if profile.auth_mode != "NONE":
         lines += [
-            f"    user: {profile.user}",
-            f"    auth_mode: {profile.auth_mode}",
-            f"    secret: {profile.secret_var}",
+            f"    User: {profile.user}",
+            f"    Auth_mode: {profile.auth_mode}",
+            f"    Secret: {profile.secret_var}",
         ]
     lines += ["Docs_site:", f"  Output: {site}"]
     (root / "craft-connector.yml").write_text("\n".join(lines) + "\n", "utf-8")

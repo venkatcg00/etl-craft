@@ -49,9 +49,9 @@ def start_role(
         return config
     if config.deployment == DeploymentProfile.CONTROLLER_AGENTS:
         raise ConfigurationError(
-            "Deployment.Profile is controller-agents: tasks run on registered agents, and this "
-            "version has no agent queue provider, so nothing runs here instead. Choose laptop "
-            "or controller until agents are available"
+            "Deployment.Profile is CONTROLLER_AGENTS: tasks run on registered agents, and this "
+            "version has no agent queue provider, so nothing runs here instead. Choose LAPTOP "
+            "or CONTROLLER until agents are available"
         )
     sizing = size(allocation, config.deployment, ceilings(config))
     _refuse_unaffordable(allocation, sizing, server=server)

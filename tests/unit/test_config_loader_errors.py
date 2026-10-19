@@ -9,9 +9,9 @@ from etl_craft.core.errors import ConfigurationError, ExitCode
 
 pytestmark = pytest.mark.unit
 
-SECRETS = {"Source_type": "environment"}
+SECRETS = {"Source_type": "ENVIRONMENT"}
 ORCHESTRATION = {}
-ENGINE = {"dev": {"jdbc_url": "jdbc:sqlite:e.db", "schema": "main"}}
+ENGINE = {"dev": {"Jdbc_url": "jdbc:sqlite:e.db", "Schema": "main"}}
 
 
 def config(**sections):
@@ -21,7 +21,7 @@ def config(**sections):
 
 
 def postgres_warehouse(**fields):
-    return {"dev": {"jdbc_url": "jdbc:postgresql://h/wh", "schema": "main", **fields}}
+    return {"dev": {"Jdbc_url": "jdbc:postgresql://h/wh", "Schema": "main", **fields}}
 
 
 @pytest.mark.parametrize(
@@ -32,15 +32,15 @@ def postgres_warehouse(**fields):
         (config(Secrets="environment"), "Secrets must be a mapping"),
         (config(Secrets={"Source_type": "vault"}), "Secrets.Source_type must be one of"),
         (
-            config(Secrets={"Source_type": "environment", "Path": "x.env"}),
-            "Secrets.Path is only used with Source_type: file",
+            config(Secrets={"Source_type": "ENVIRONMENT", "Path": "x.env"}),
+            "Secrets.Path is only used with Source_type: FILE",
         ),
-        (config(Secrets={"Source_type": "file"}), "Secrets.Path is required"),
-        (config(Engine={"dev": {"user": "u"}}), "Engine.dev needs jdbc_url"),
+        (config(Secrets={"Source_type": "FILE"}), "Secrets.Path is required"),
+        (config(Engine={"dev": {"User": "u"}}), "Engine.dev needs Jdbc_url"),
         (config(Engine={"Name": "Postgres"}), "Engine needs at least one profile block"),
         (
-            config(Warehouse=postgres_warehouse(user="u", auth_mode="password")),
-            r"needs secret \(a variable name\) for auth_mode password",
+            config(Warehouse=postgres_warehouse(User="u", Auth_mode="PASSWORD")),
+            r"needs Secret \(a variable name\) for Auth_mode PASSWORD",
         ),
         (
             config(Orchestration={"Email_recipients": 5}),
@@ -53,7 +53,7 @@ def postgres_warehouse(**fields):
         (
             config(
                 Orchestration={
-                    "Email": {"host": "h", "port": "twenty-five", "from_address": "a@b"},
+                    "Email": {"Host": "h", "Port": "twenty-five", "From_address": "a@b"},
                 }
             ),
             "port must be a whole number 1 to 65535, got 'twenty-five'",
@@ -61,14 +61,14 @@ def postgres_warehouse(**fields):
         (
             config(
                 Orchestration={
-                    "Email": {"host": "h", "port": 25, "from_address": "a@b", "auth_mode": "sso"},
+                    "Email": {"Host": "h", "Port": 25, "From_address": "a@b", "Auth_mode": "SSO"},
                 }
             ),
-            "auth_mode resolved to 'sso', which is not one of",
+            "Auth_mode resolved to 'SSO', which is not one of",
         ),
         (
             config(Warehouse={"Table_format": "delta", **postgres_warehouse()}),
-            "Warehouse.Table_format must be native or iceberg",
+            "Warehouse.Table_format must be NATIVE or ICEBERG",
         ),
         (
             config(Warehouse={"Name": "Oracle", **postgres_warehouse()}),
@@ -79,28 +79,28 @@ def postgres_warehouse(**fields):
                 Warehouse={
                     "Name": "Databricks",
                     "dev": {
-                        "jdbc_url": "jdbc:databricks://h/default;httpPath=/p",
-                        "catalog": "main",
-                        "schema": "s",
-                        "token": "T",
-                        "secret": "T",
+                        "Jdbc_url": "jdbc:databricks://h/default;httpPath=/p",
+                        "Catalog": "main",
+                        "Schema": "s",
+                        "Token": "T",
+                        "Secret": "T",
                     },
                 }
             ),
-            "names its token under `token`, not `secret`",
+            "names its token under `Token`, not `Secret`",
         ),
         (
             config(
                 Warehouse={
                     "Name": "Snowflake",
                     "dev": {
-                        "user": "u",
-                        "account": "https://acct.snowflakecomputing.com",
-                        "database": "D",
-                        "schema": "S",
-                        "warehouse": "W",
-                        "role": "R",
-                        "auth_mode": "sts",
+                        "User": "u",
+                        "Account": "https://acct.snowflakecomputing.com",
+                        "Database": "D",
+                        "Schema": "S",
+                        "Warehouse": "W",
+                        "Role": "R",
+                        "Auth_mode": "STS",
                     },
                 }
             ),
@@ -108,7 +108,7 @@ def postgres_warehouse(**fields):
         ),
         (
             config(
-                Warehouse={"dev": {"jdbc_url": "jdbc:duckdb:/d/my-wh.duckdb", "schema": "main"}}
+                Warehouse={"dev": {"Jdbc_url": "jdbc:duckdb:/d/my-wh.duckdb", "Schema": "main"}}
             ),
             r"Warehouse\.dev: DuckDB warehouse file",
         ),
@@ -143,7 +143,7 @@ def test_an_empty_file_is_missing_its_sections(tmp_path):
 @pytest.mark.parametrize(("written", "enabled"), [("", False), ("yes", True), ("0", False)])
 def test_boolean_spellings(tmp_path, written, enabled):
     path = tmp_path / "craft-connector.yml"
-    raw = config(Cloning={"Enabled": written, "Scope": "all"})
+    raw = config(Cloning={"Enabled": written, "Scope": "ALL"})
     path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     assert load_config(path).cloning.enabled is enabled
 

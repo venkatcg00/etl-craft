@@ -132,7 +132,7 @@ def test_outside_dependencies_require_explicit_current_inputs(engine_db):
         add_dependency(conn, pipeline, selected, before)
         add_dependency(conn, pipeline, after, selected)
         data = fetch_pipeline_graph(conn, pipeline)
-        with pytest.raises(RunRefusedError, match="--ignore-dependencies with --reason"):
+        with pytest.raises(RunRefusedError, match="`ignore_dependencies` with `reason`"):
             run_scopes.selected_graph(data, run_scopes.TaskSelection((selected, after)))
         scope = run_scopes.selected_graph(data, run_scopes.TaskSelection((selected, after), True))
         assert {task.task_id for task in scope.tasks} == {selected, after}

@@ -32,7 +32,7 @@ writes five pipelines this way, and runs as written on SQLite and PostgreSQL.
 | `PIPELINE_CODE` | the pipeline's code: one ASCII letter followed by letters, digits or `_`, at most 128 characters. It names the pipeline in every command and log folder |
 | `PIPELINE_NAME` | a readable name |
 | `DESCRIPTION` | what the pipeline is for; the [catalog](catalog.md) leads its page with it |
-| `RUN_SCHEDULE` | a five-field cron expression or supported macro for the controller (see [Schedules](../deploying/server.md#schedules-and-logical-dates)) |
+| `RUN_SCHEDULE` | a five-field cron expression or supported macro for the controller (see [Schedules](../deploying/controller.md#schedules-and-logical-dates)) |
 | `SCHEDULE_TIMEZONE` | nullable IANA timezone; NULL uses `Orchestration.Timezone` (default `UTC`) |
 | `SCHEDULE_START_DATE` | nullable local date to begin scheduling; NULL uses the creation timestamp |
 | `CATCHUP` | controller: `Y` queues bounded missed ticks; `N` (default) queues only the latest |
@@ -138,8 +138,8 @@ WHERE p.PIPELINE_CODE = 'SALES_DAILY'
   AND p.ACTIVE_FLAG = 'Y' AND c.ACTIVE_FLAG = 'Y' AND l.ACTIVE_FLAG = 'Y';
 ```
 
-`etl-craft graph --pipeline_code SALES_DAILY` shows its order. `etl-craft validate
---pipeline_code SALES_DAILY` says what is still missing before it can run:
+`etl-craft graph --pipeline-code SALES_DAILY` shows its order. `etl-craft validate
+--pipeline-code SALES_DAILY` says what is still missing before it can run:
 
 ```text
 [FAIL] SALES_DAILY.check_orders: task check_orders has HANDLER=BUSINESS_RULES but no active row in CFG_BUSINESS_RULES
@@ -148,5 +148,5 @@ checked 1 pipeline(s) and 2 task(s): 2 failed, 0 warning(s)
 ```
 
 Add `sql_files/orders.sql` with the SELECT (see [SQL tasks](sql-tasks.md)) and a rule for
-`check_orders` (see [Business rules](business-rules.md)), and `etl-craft run --pipeline_code
+`check_orders` (see [Business rules](business-rules.md)), and `etl-craft run --pipeline-code
 SALES_DAILY` runs it.

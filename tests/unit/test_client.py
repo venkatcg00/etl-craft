@@ -5,7 +5,7 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from etl_craft.cli.remote import _error, server_url
+from etl_craft.cli.client import _error, server_url
 from etl_craft.core.enums import AccountKind, RunStatus, TokenKind
 from etl_craft.core.errors import PermissionDeniedError, ServerError, UsageError
 from etl_craft.core.graph import CycleError

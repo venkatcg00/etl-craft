@@ -9,7 +9,7 @@ from dataclasses import dataclass, replace
 from typing import ClassVar
 
 from etl_craft.config.targets import active_catalog
-from etl_craft.core.enums import ActorKind, Handler, ProtectionEvent
+from etl_craft.core.enums import ActionName, ActorKind, Handler, ProtectionEvent
 from etl_craft.core.errors import PermissionDeniedError, SqlGuardError, UsageError
 from etl_craft.core.time import as_utc
 from etl_craft.engine import locks
@@ -25,25 +25,34 @@ from etl_craft.handlers.sql.actions import ACTIONS, ActionContext
 from etl_craft.handlers.sql.protection import MERGES, Protection, ProtectionRequest, exists
 from etl_craft.handlers.sql.session import Session
 from etl_craft.handlers.sql.spec import read_sql_task
-from etl_craft.services.operations.context import OperationContext, operation
+from etl_craft.services.operations.context import OperationContext
+from etl_craft.services.operations.recording import recorded
+from etl_craft.services.operations.requests import Request
 from etl_craft.warehouse.connection import open_warehouse, task_warehouse_dialect
 
 
-@dataclass(frozen=True)
-class ValueEdit:
-    """One business key and explicit values; omitted existing values are retained."""
+@dataclass(frozen=True, kw_only=True)
+class ValueKey(Request):
+    """One exact business key of a SQL task's target, cast by the warehouse's declared types."""
 
-    key: Mapping[str, object]
-    values: Mapping[str, object]
+    pipeline_code: str
+    task_code: str
+    key: dict[str, object]
+
+
+@dataclass(frozen=True, kw_only=True)
+class ValueEdit(ValueKey):
+    """Explicit values for one key; omitted existing values are retained."""
+
+    values: dict[str, object]
     reason: str
     row_lock: bool = False
 
 
-@dataclass(frozen=True)
-class ValueUnlock:
+@dataclass(frozen=True, kw_only=True)
+class ValueUnlock(ValueKey):
     """An explicit release; no columns means all active locks on the selected key."""
 
-    key: Mapping[str, object]
     reason: str
     columns: tuple[str, ...] = ()
 
@@ -240,8 +249,12 @@ def _result(guard: Protection, key_hash: str, request_id: str | None) -> ValueRe
     )
 
 
-def write_values(ctx: OperationContext, pipeline: str, task: str, edit: ValueEdit) -> ValueResult:
-    """Apply an admin's edit or authenticated integration write with accurate attribution."""
+def write_values(ctx: OperationContext, edit: ValueEdit) -> ValueResult:
+    """Apply an admin's edit or authenticated integration write with accurate attribution.
+
+    The audit row names the columns, not their values, and the protection request id.
+    """
+    pipeline, task = edit.pipeline_code, edit.task_code
     request = ProtectionRequest.create(ctx.actor, edit.reason)
     arguments = {
         "pipeline_code": pipeline,
@@ -250,7 +263,7 @@ def write_values(ctx: OperationContext, pipeline: str, task: str, edit: ValueEdi
         "reason": edit.reason,
         "request_id": request.request_id,
     }
-    with operation(ctx, "data edit", arguments):
+    with recorded(ctx, ActionName.DATA_EDIT, arguments):
         _check_reason(edit.reason)
         if ctx.actor.kind not in {ActorKind.USER, ActorKind.SERVICE}:
             raise PermissionDeniedError(
@@ -322,14 +335,13 @@ def _selected_key(guard: Protection, key: Mapping[str, object]) -> str:
     )
 
 
-def unlock_values(
-    ctx: OperationContext, pipeline: str, task: str, edit: ValueUnlock
-) -> ValueResult:
+def unlock_values(ctx: OperationContext, edit: ValueUnlock) -> ValueResult:
     """Release protection explicitly; integrations cannot unlock a person's values."""
+    pipeline, task = edit.pipeline_code, edit.task_code
     request = ProtectionRequest.create(ctx.actor, edit.reason)
-    with operation(
+    with recorded(
         ctx,
-        "data unlock",
+        ActionName.DATA_UNLOCK,
         {
             "pipeline_code": pipeline,
             "task_code": task,
@@ -376,14 +388,10 @@ def unlock_values(
             return _result(guard, key_hash, request.request_id)
 
 
-def provenance(
-    ctx: OperationContext, pipeline: str, task: str, key: Mapping[str, object]
-) -> ValueResult:
+def provenance(ctx: OperationContext, request: ValueKey) -> ValueResult:
     """Read known writers and lock evidence; never infer identity from actor-column strings."""
-    with (
-        operation(ctx, "data provenance", {"pipeline_code": pipeline, "task_code": task}),
-        _selected(ctx, pipeline, task) as (guard, _context),
-    ):
+    key = request.key
+    with _selected(ctx, request.pipeline_code, request.task_code) as (guard, _context):
         if not exists(guard.session):
             return ValueResult(guard.session.target, False, None, (), ())
         guard.check()

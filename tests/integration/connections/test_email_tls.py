@@ -17,8 +17,8 @@ pytestmark = pytest.mark.connections
 def config(tmp_path, relay, mode, *, trusted=True, host=None):
     path = tmp_path / "craft-connector.yml"
     path.write_text(
-        "Secrets:\n  Source_type: environment\nOrchestration:\n"
-        "Engine:\n  dev:\n    jdbc_url: jdbc:sqlite:engine.db\n    schema: main\n",
+        "Secrets:\n  Source_type: ENVIRONMENT\nOrchestration:\n"
+        "Engine:\n  dev:\n    Jdbc_url: jdbc:sqlite:engine.db\n    Schema: main\n",
         encoding="utf-8",
     )
     profile = EmailProfile(
@@ -33,7 +33,7 @@ def config(tmp_path, relay, mode, *, trusted=True, host=None):
     return replace(load_config(path), email=profile)
 
 
-@pytest.mark.parametrize("mode", ["starttls", "ssl"])
+@pytest.mark.parametrize("mode", ["STARTTLS", "SSL"])
 @pytest.mark.parametrize("problem", ["untrusted", "hostname"])
 def test_an_untrusted_or_wrong_hostname_certificate_is_refused(tmp_path, tls_relay, mode, problem):
     relay = tls_relay(mode)
@@ -51,7 +51,7 @@ def test_an_untrusted_or_wrong_hostname_certificate_is_refused(tmp_path, tls_rel
     assert not relay.messages
 
 
-@pytest.mark.parametrize("mode", ["starttls", "ssl"])
+@pytest.mark.parametrize("mode", ["STARTTLS", "SSL"])
 def test_a_matching_certificate_and_custom_ca_succeed(tmp_path, tls_relay, mode):
     relay = tls_relay(mode)
     settings = config(tmp_path, relay, mode)
@@ -66,22 +66,22 @@ def test_a_matching_certificate_and_custom_ca_succeed(tmp_path, tls_relay, mode)
 
 def test_doctor_and_delivery_refuse_login_without_tls(tmp_path, tls_relay):
     relay = tls_relay()
-    settings = config(tmp_path, relay, "none")
-    profile = replace(settings.email, auth_mode="password", user="etl@example.com")
+    settings = config(tmp_path, relay, "NONE")
+    profile = replace(settings.email, auth_mode="PASSWORD", user="etl@example.com")
     settings = replace(settings, email=profile)
     checks = {check.name: check for check in run_checks(settings, engine_state=False)}
     assert checks["Email TLS"].status == Status.FAIL
     assert (
-        "password" in checks["Email TLS"].detail and "starttls or ssl" in checks["Email TLS"].detail
+        "PASSWORD" in checks["Email TLS"].detail and "STARTTLS or SSL" in checks["Email TLS"].detail
     )
-    with pytest.raises(HandlerError, match="starttls or ssl"):
+    with pytest.raises(HandlerError, match="STARTTLS or SSL"):
         send_email(settings, ["ops@example.com"], "subject", "body")
     assert b"AUTH" not in relay.commands
 
 
 def test_a_missing_ca_file_names_the_resolved_file(tmp_path, tls_relay):
     relay = tls_relay()
-    settings = config(tmp_path, relay, "starttls")
+    settings = config(tmp_path, relay, "STARTTLS")
     missing = tmp_path / "no-ca.pem"
     profile = replace(settings.email, ca_file=missing)
     settings = replace(settings, email=profile)

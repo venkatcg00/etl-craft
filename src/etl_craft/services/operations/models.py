@@ -7,10 +7,9 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, ClassVar
 
-from etl_craft.core.enums import FailureClass, RunStatus
-from etl_craft.engine.repository.interventions import Intervention
+from etl_craft.core.enums import AttemptStatus, FailureClass, RunStatus, SlaStatus, TriggerKind
+from etl_craft.engine.repository.intervention_rows import Intervention
 from etl_craft.engine.repository.pauses import Pause
-from etl_craft.engine.runlog import ACTIVE_RUN, RunSelector
 
 
 @dataclass(frozen=True)
@@ -22,12 +21,12 @@ class RunView:
     pipeline_code: str
     pipeline_run_id: int
     run_key: str
-    trigger_kind: str
+    trigger_kind: TriggerKind
     run_date: date | None
-    status: str
+    status: RunStatus
     start_date: datetime | None
     end_date: datetime | None
-    sla_status: str | None
+    sla_status: SlaStatus | None
     backfill: bool
     started_by: str | None
     started_by_kind: str | None
@@ -49,7 +48,7 @@ class AttemptView:
     task_run_id: int
     attempt_id: int
     attempt_number: int
-    status: str
+    status: AttemptStatus
     owner_id: str | None
     lease_expires_at: datetime | None
     heartbeat_at: datetime | None
@@ -76,7 +75,7 @@ class AttemptView:
     requested_by_kind: str | None
     not_before: datetime | None
     retryable: bool
-    failure_class: str = FailureClass.UNKNOWN
+    failure_class: FailureClass = FailureClass.UNKNOWN
     failure_source: str | None = None
     failure_code: str | None = None
     retry_on: str | None = None
@@ -93,7 +92,7 @@ class TaskRunView:
     task_id: int
     task_code: str
     task_run_id: int
-    status: str
+    status: RunStatus
     start_date: datetime | None
     end_date: datetime | None
     attempt_count: int
@@ -194,7 +193,7 @@ class StepView:
     run_condition: str | None
     run_condition_count: int | None
     parameters: Mapping[str, str]
-    status: str | None
+    status: RunStatus | None
 
 
 @dataclass(frozen=True)
@@ -205,20 +204,6 @@ class StepsView:
     pipeline_id: int
     pipeline_run_id: int
     steps: tuple[StepView, ...]
-
-
-@dataclass(frozen=True)
-class HistoryQuery:
-    """Which history to read: a task's or the pipeline's, for one run or a page of runs.
-
-    ``before`` is an exclusive run-id cursor; ``all_runs`` lists runs instead of selecting one.
-    """
-
-    task_code: str | None = None
-    limit: int = 20
-    all_runs: bool = False
-    before: int | None = None
-    selector: RunSelector = ACTIVE_RUN
 
 
 @dataclass(frozen=True)
@@ -284,3 +269,11 @@ class AuditView:
     SCHEMA: ClassVar[str] = "etl-craft/audit/1"
     actions: tuple[ActionView, ...]
     changes: tuple[MetadataChangeView, ...]
+
+
+@dataclass(frozen=True)
+class Health:
+    """The API answers and its Engine DB request path works."""
+
+    SCHEMA: ClassVar[str] = "etl-craft/health/1"
+    status: str = "ok"

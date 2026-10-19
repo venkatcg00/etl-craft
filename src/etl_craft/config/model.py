@@ -17,9 +17,12 @@ from etl_craft.core.enums import (
     AuthMode,
     CloningScope,
     DeploymentProfile,
+    EmailTransport,
     GatePolicy,
     RetryOn,
+    SecretsSource,
     TableFormat,
+    TlsMode,
 )
 from etl_craft.core.errors import ConfigurationError
 from etl_craft.core.resources import Sizing
@@ -85,7 +88,7 @@ class ConnectionProfile:
 class SourceConfig:
     """Where the variables the file names are read from: the environment, or a ``.env`` file."""
 
-    type: str
+    type: SecretsSource
     path: str | None = None
 
 
@@ -161,10 +164,10 @@ class EmailProfile:
     auth_mode: str = AuthMode.NONE
     user: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
-    transport: str = "smtp"
+    transport: str = EmailTransport.SMTP
     sendmail_path: str = DEFAULT_SENDMAIL_PATH
     from_name: str = ""
-    tls_mode: str = "starttls"
+    tls_mode: str = TlsMode.STARTTLS
     ca_file: Path | None = None
 
     @property

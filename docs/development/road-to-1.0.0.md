@@ -137,7 +137,7 @@ item's text, or work done early under another item.
 | S5.W Retry only what can succeed | Done | #215 | Failure classification, retry policies and immutable attempt evidence; local and Snowflake acceptance passed, unavailable Databricks live acceptance waived by the owner |
 | S5.Z Controller and agent names | Done | #216 | Controller command/package/history, agent terminology and consistent deployment profiles; lossless Engine DB upgrades |
 | S5.Y A standalone orchestrator | Done | #219, #220 | Airflow export and remote mode removed; the controller always schedules; stale pipeline parameters migrated away and refused |
-| S5.AA One source for every action | Planned | | One action table for roles, audit and placement; generated API routes; one request per action; consistent names, folders and types |
+| S5.AA One source for every action | Done | #221 | One action table for roles, audit, placement and routes; one request per action; kebab-case flags, Capitalized_snake keys, upper-case values; typed statuses; no dialect branches or enum literals |
 | S5.AB Pipeline tags and filters | Planned | | `TAGS` labels pipelines; one tag filter on list, status, history, catalog and UI views, and tag-selected bulk actions |
 | S5.AC Pipeline trigger tasks | Planned | | `RUN_PIPELINE` starts another pipeline's run as a task: `WAIT` hands the wait to the controller, `DETACH` ends once the run is recorded |
 | S5.AD Pipeline permission groups | Planned | | Groups of accounts, granted `viewer` or `operator` (and S7.M's `steward`) on pipelines or tags; one effective-role check per pipeline-scoped action |
@@ -297,6 +297,12 @@ cloud acceptance does not apply. Remote execution remains for S5.Y.2.
 S5.Y.2 (#220) covers the stale-key refusals in the loader, `validate` and `config apply`, and
 the `0043` upgrade from every released schema on SQLite and PostgreSQL with remote-era audit
 rows read back. No warehouse SQL changes; cloud acceptance does not apply.
+
+S5.AA (#221) runs the unit suite and every integration directory locally on SQLite and
+PostgreSQL: the action table, generated routes and the remote CLI, every renamed
+`craft-connector.yml` key and value, and the connection matrix against local PostgreSQL (TLS),
+DuckDB, Iceberg REST, Trino and a TLS SMTP relay. Warehouse SQL is unchanged; the Trino catalog
+query moved into its dialect as written. Cloud acceptance does not apply.
 
 S5.Z (#216) validates the controller command, both Engine DBs, preserved process history from
 released schemas, fresh/upgraded catalog equivalence, scheduling, leadership and local/API
@@ -550,6 +556,24 @@ The separate frozen 0.4 soak deployment is unchanged.
   (18) stays as a number so recorded exit codes keep their meaning; its error class is deleted.
   Explicit task reruns shared a reopening helper with orchestrated finalization; the helper
   stays for reruns with unchanged behaviour.
+
+- S5.AA: the owner asked for all four slices and the S5.AA.4 and S5.D plan additions in one
+  pull request.
+  - A `reason` is accepted on any request. A malformed or unknown request field answers 400
+    naming the field. `GET /runs/{run_id}` and the attempt routes keep their path id.
+  - Reads are not audited: `lineage` without refresh and `setup --print-grants` record no
+    row, and `lineage refresh` is its own action. Pause and resume are recorded as `control`.
+  - `capabilities` and `control-request` are commands of their own, in place of `status`
+    flags, because each is one action.
+  - The `Request` base class carries the HTTP parser's `extra="forbid"` setting, so requests
+    stay plain dataclasses. `craft-connector.yml` keys convert to field names once, at the
+    YAML boundary.
+  - Actor kinds stay strings in the views, because history holds retired kinds (`HUMAN`,
+    `WORKER`); nothing converts them, so every released row reads. Statuses, trigger kinds,
+    SLA states and failure classes are enums.
+  - Gate decisions and wait kinds were string sets with schema `CHECK`s; they are now
+    `GateOutcome` and `WaitKind`.
+  - Doctor's file checks are named by their `craft-connector.yml` key (`Engine DB Key_file`).
 
 - S5.Z: the owner approved consistent pre-1.0 names without aliases, including configuration:
   deployment profiles are `laptop`, `controller` and `controller-agents`. The table's key is
@@ -4312,8 +4336,27 @@ Branch: `refactor/operations-typed`.
   - a test writes nothing new with them.
 - Delete any import of a `_private` name across modules that the earlier slices left behind
   (`git grep -n 'import _\|\._[a-z]' -- src`, then read each hit).
+- **Dialect branches.** Move the `dialect.name` checks left outside `dialects/` into dialect
+  methods: `engine/connection.py`, `engine/repository/normalization.py` (two),
+  `engine/repository/source_columns.py`, `services/doctor.py`, `services/validate.py` and
+  `warehouse/connection.py`. Most choose a table name's case for PostgreSQL; that becomes one
+  Engine DB dialect method. The `dialect-branch` metric then has no entries.
+- **Enum literals.** Replace the remaining string comparisons with `core.enums` members in
+  `engine/transitions.py`, `execution/interventions.py`, `execution/runner.py`,
+  `execution/scheduler.py`, `handlers/email_alert.py`, `handlers/registry.py`,
+  `services/catalog.py`, `services/catalog_graph.py`, `services/rehash.py` and
+  `services/upgrade_targets.py` (by then possibly renamed in slice 3). The `enum-literal`
+  metric then has no entries.
+- **Coverage of the supervision modules.** S5.U requires 90% coverage of each of
+  `execution/reconcile.py`, `controller/supervisor.py`, `controller/leadership.py` and the API
+  server module (`api/serve.py` after slice 3), but only the project total is enforced. Add the
+  per-module check to the combined coverage step in `scripts/ci_shards.py`
+  (`coverage report --include=<module> --fail-under=90` for each), and add tests where a module
+  is below it. CI time does not change.
 - *Done when.* No status, action or kind is compared or returned as a string literal in
-  `services/operations`, and audit, status and history read every released row.
+  `services/operations`, and audit, status and history read every released row. The
+  `dialect-branch` and `enum-literal` metrics in `scripts/quality-baseline.json` are empty, and
+  CI fails when one of the four supervision modules drops below 90%.
 
 ### S5.AB Pipeline tags and filters
 
@@ -4582,6 +4625,28 @@ Cancelling a run sets `CANCEL_REQUESTED_AT` on its non-terminal attempts. `QUEUE
 process does not prove the warehouse query stopped; the attempt log says so, and where the dialect
 can cancel a query (PostgreSQL `pg_cancel_backend`, Snowflake `SYSTEM$CANCEL_QUERY`), the child does it
 on SIGTERM.
+
+- **Query cancellation adapters.** S5.Q left three explicit refusals: a scoped `STOP` or
+  `ABORT` of a Python attempt whose queries run on the warehouse server, an abort of a SQL
+  attempt where ending the process does not end its query, and controls on a server-side
+  `EVENT_SQL` probe. Close them with one adapter per warehouse dialect:
+  - **Query identity.** Each warehouse statement records its identity on the attempt before it
+    runs: the backend PID for PostgreSQL, the query id for Snowflake, the statement id for
+    Databricks, the query id for Trino. DuckDB runs in the task process, so ending the process
+    ends the query. Python scripts get it through the `scripting` connection helper, and event
+    probes through the probe runner. One append-only table holds the identities
+    (`AUD_ATTEMPT_QUERIES`: attempt, statement number, dialect identity, started, ended); its
+    migration ships in both dialects.
+  - **Cancel and acknowledge.** A stop or abort calls the dialect's cancel (`pg_cancel_backend`,
+    `SYSTEM$CANCEL_QUERY`, the Databricks statement cancel API, Trino's `kill_query`), then
+    confirms the query ended before it sets `CANCEL_ACKNOWLEDGED_AT`. A cancel that fails or
+    cannot be confirmed leaves the control request pending, with the reason, and never shows
+    it as done.
+  - **Capabilities.** The S5.Q capability document reads the adapter, so a refusal remains only
+    where a dialect cannot cancel a query, and it names that dialect.
+  - *Tests.* Each local warehouse cancels a long query in a SQL attempt, a Python attempt and an
+    event probe, and records the acknowledgement. A cancel that cannot be confirmed stays
+    pending. The cloud suites cover Snowflake and Databricks.
 
 ### S5.E Slots, limits and priorities
 

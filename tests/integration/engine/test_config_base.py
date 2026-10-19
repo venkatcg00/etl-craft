@@ -7,12 +7,13 @@ from sqlalchemy import DateTime, inspect, text
 from sqlalchemy.exc import DBAPIError
 
 from etl_craft.core.actor import Actor, ActorKind, acting_as
-from etl_craft.core.enums import ApiRole
+from etl_craft.core.enums import ActionName, ApiRole
 from etl_craft.core.errors import MigrationError
 from etl_craft.core.text import sha256_hex
 from etl_craft.core.time import as_utc
 from etl_craft.engine import migrations
 from etl_craft.services.operations import OperationContext, tokens
+from fixtures.actions import act
 from fixtures.metadata import add_pipeline
 from fixtures.released_schema import install
 
@@ -76,7 +77,7 @@ def test_team_config_tables_do_not_need_the_package_base_contract(engine_db, tmp
 
 def test_token_lifecycle_is_attributed_without_credentials(engine_db):
     ctx = OperationContext(engine_db.engine, engine_db.config, ALICE, role=ApiRole.ADMIN)
-    created = tokens.create_token(ctx, "dashboard", "viewer")
+    created = act(ctx, ActionName.TOKEN_CREATE, name="dashboard", role="viewer")
     assert tokens.authenticate(ctx, created.token)
     with acting_as(BOB), engine_db.engine.begin() as conn:
         conn.execute(text("UPDATE CFG_API_TOKENS SET ACTIVE_FLAG='N'"))
@@ -92,7 +93,7 @@ def test_token_lifecycle_is_attributed_without_credentials(engine_db):
         )
     assert tokens.authenticate(ctx, created.token) is None
     assert tokens.authenticate(ctx, rotated)
-    tokens.revoke_token(replace(ctx, actor=BOB), created.metadata.token_id)
+    act(replace(ctx, actor=BOB), ActionName.TOKEN_REVOKE, token_id=created.metadata.token_id)
     assert tokens.authenticate(ctx, created.token) is None
     with engine_db.engine.connect() as conn:
         rows = conn.execute(
@@ -213,7 +214,7 @@ def test_upgrade_preserves_tokens_creation_history_and_rolls_back(empty_engine_d
     ctx = OperationContext(db.engine, db.config, BOB, role=ApiRole.ADMIN)
     assert tokens.authenticate(ctx, "old-token")
     assert tokens.authenticate(ctx, "revoked-token") is None
-    assert tokens.create_token(ctx, "next", "viewer").metadata.token_id > removed
+    assert act(ctx, ActionName.TOKEN_CREATE, name="next", role="viewer").metadata.token_id > removed
     with db.engine.connect() as conn:
         assert (
             conn.execute(

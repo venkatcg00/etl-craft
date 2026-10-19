@@ -35,16 +35,16 @@ def project(engine_db, tmp_path, monkeypatch):
     """Pipelines UP and SALES, with dependencies of every kind and two runs of SALES."""
     profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
-    block = {"jdbc_url": profile.jdbc_url, "schema": schema}
-    if profile.auth_mode != "none":
+    block = {"Jdbc_url": profile.jdbc_url, "Schema": schema}
+    if profile.auth_mode != "NONE":
         block |= {
-            "user": profile.user,
-            "auth_mode": profile.auth_mode,
-            "secret": profile.secret_var,
+            "User": profile.user,
+            "Auth_mode": profile.auth_mode,
+            "Secret": profile.secret_var,
         }
     root = (engine_db.config.config_path or tmp_path / "craft-connector.yml").parent
     raw = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {},
         "Engine": {"dev": block},
     }
@@ -84,21 +84,21 @@ def run(capsys, *args):
 
 
 def test_list(project, capsys):
-    code, out = run(capsys, "list")
+    code, out = run(capsys, "pipelines")
     assert code == ExitCode.SUCCESS
     assert out.splitlines() == [
         "PIPELINE_CODE\tPIPELINE_NAME\tREFRESH_TYPE\tRUN_SCHEDULE\tSLA_IN_HOURS\tPAUSED",
         "SALES\tSALES\tINCREMENTAL\t\t2.0\t",
         "UP\tUP\tFULL\t\t\t",
     ]
-    assert run(capsys, "pause", "--pipeline_code", "UP", "--reason", "source down")[0] == 0
-    code, out = run(capsys, "list")
+    assert run(capsys, "pause", "--pipeline-code", "UP", "--reason", "source down")[0] == 0
+    code, out = run(capsys, "pipelines")
     assert out.splitlines()[2].startswith("UP\tUP\tFULL\t\t\tpaused since ")
     assert out.splitlines()[2].endswith(": source down")
 
 
 def test_graph(project, capsys):
-    code, out = run(capsys, "graph", "--pipeline_code", "SALES")
+    code, out = run(capsys, "graph", "--pipeline-code", "SALES")
     assert code == ExitCode.SUCCESS
     assert out.splitlines() == [
         "Pipeline SALES",
@@ -117,7 +117,7 @@ def test_graph(project, capsys):
 
 
 def test_steps(project, capsys):
-    code, out = run(capsys, "steps", "--pipeline_code", "SALES")
+    code, out = run(capsys, "steps", "--pipeline-code", "SALES")
     assert code == ExitCode.SUCCESS
     assert out.splitlines() == [
         "TASK_CODE\tSTATUS\tHANDLER\tTASK_TYPE\tRUN_CONDITION\tPARAMETERS",
@@ -128,7 +128,7 @@ def test_steps(project, capsys):
 
 
 def test_history(project, capsys):
-    code, out = run(capsys, "history", "--pipeline_code", "SALES", "--all")
+    code, out = run(capsys, "history", "--pipeline-code", "SALES", "--all")
     lines = out.splitlines()
     assert code == ExitCode.SUCCESS
     assert lines[0] == (
@@ -139,7 +139,7 @@ def test_history(project, capsys):
     assert lines[2].split("\t")[5] == "MET"
 
     code, out = run(
-        capsys, "history", "--pipeline_code", "SALES", "--task_code", "extract", "--limit", "1"
+        capsys, "history", "--pipeline-code", "SALES", "--task-code", "extract", "--limit", "1"
     )
     lines = out.splitlines()
     assert len(lines) == 2
@@ -150,14 +150,14 @@ def test_history(project, capsys):
         "1",
         "source down",
     )
-    assert run(capsys, "history", "--pipeline_code", "UP", "--all") == (
+    assert run(capsys, "history", "--pipeline-code", "UP", "--all") == (
         ExitCode.SUCCESS,
         "(no runs yet)\n",
     )
 
 
 def test_unknown_codes_and_limits_are_named(project, capsys):
-    assert main(["graph", "--pipeline_code", "SALE"]) == ExitCode.METADATA
+    assert main(["graph", "--pipeline-code", "SALE"]) == ExitCode.METADATA
     assert "did you mean: SALES" in capsys.readouterr().err
-    assert main(["history", "--pipeline_code", "SALES", "--task_code", "lod"]) == ExitCode.METADATA
-    assert main(["history", "--pipeline_code", "SALES", "--limit", "0"]) == ExitCode.USAGE
+    assert main(["history", "--pipeline-code", "SALES", "--task-code", "lod"]) == ExitCode.METADATA
+    assert main(["history", "--pipeline-code", "SALES", "--limit", "0"]) == ExitCode.USAGE

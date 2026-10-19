@@ -11,6 +11,7 @@ from etl_craft.config.loader_helpers import (
     auth_extra,
     check_auth_mode,
     connection_block,
+    field_keys,
     profile_schema,
     reject_unknown,
 )
@@ -29,13 +30,14 @@ def parse_engine(
     profiled, block = selected
     where = f"Engine.{profiled.profile}"
     block.pop("Name", None)  # a per-profile Name is already in profiled.settings
-    reject_unknown(block, CONNECTION_FIELDS, where, path)
     reject_unknown(
         {k: v for k, v in profiled.settings.items() if k == "Name" or k not in block},
         {"Name"},
         "Engine",
         path,
     )
+    block = field_keys(block, where, path)
+    reject_unknown(block, CONNECTION_FIELDS, where, path, fields=True)
     fields = Fields(block, where, profiled.profile, resolver, path)
     jdbc_url = fields.value("jdbc_url", required=True) or ""
     try:
@@ -48,7 +50,7 @@ def parse_engine(
     declared = profiled.text("Name")
     if declared and ENGINE_NAMES.get(declared.lower()) != spec.name:
         raise ConfigurationError(
-            f"{path}: Engine.Name is {declared!r}, but its jdbc_url is a {spec.name} URL"
+            f"{path}: Engine.Name is {declared!r}, but its Jdbc_url is a {spec.name} URL"
         )
     # An Engine DB with nothing to authenticate (SQLite) needs no auth_mode.
     default_auth = AuthMode.NONE if spec.auth_modes == {AuthMode.NONE} else ""

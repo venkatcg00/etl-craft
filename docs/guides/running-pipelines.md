@@ -3,13 +3,13 @@
 ## Running every task
 
 ```bash
-etl-craft run --pipeline_code SALES_DAILY
+etl-craft run --pipeline-code SALES_DAILY
 ```
 
 This runs every active task under one pipeline run. Each completion releases any
 newly ready tasks immediately; a slow independent task does not hold back another branch.
 At most `Orchestration.Max_parallel_tasks` tasks run at once (8 unless set), each in its own
-process with the same logs, time limits and outcomes as [`run --task_code`](running-tasks.md).
+process with the same logs, time limits and outcomes as [`run --task-code`](running-tasks.md).
 `Orchestration.Local_ingestion_slots` caps how many of them run Python ingestion scripts, and
 `Orchestration.Local_warehouse_slots` how many run SQL, business-rule and alert tasks; unset,
 either kind may use every slot. A task waits for a free slot of its own kind, while tasks of the
@@ -75,7 +75,7 @@ interrupted transaction never leaves the Engine DB locked. A second signal while
 waits for a safe point stops it at once; one that arrives while the command is stopping its tasks
 takes effect when they have stopped.
 Those tasks are recorded `FAILED`, and the run stays `IN-PROGRESS` so the next run
-resumes it. The same holds for `run --task_code`, `--rerun` and `--backfill`. `SIGKILL` cannot be
+resumes it. The same holds for `run --task-code`, `--rerun` and `--backfill`. `SIGKILL` cannot be
 caught: the next run reconciles expired leases, records orphaned attempts `LOST`, stops
 verified local children and retries failed tasks. `etl-craft reconcile` also requests recovery.
 See [run controls](run-control.md#mark-a-task) for grace periods and uncertain side effects.
@@ -90,7 +90,7 @@ task again or without its dependencies, or relax dependency gates), see
 
 ## Initialize for the controller
 
-`etl-craft run --pipeline_code SALES_DAILY --init-only` tests connections, checks pipeline
+`etl-craft run --pipeline-code SALES_DAILY --init-only` tests connections, checks pipeline
 dependencies and creates or resumes the selected run. A running controller picks it up.
 Another scheduler can [submit a run over HTTP](../deploying/http-api.md#starting-runs-from-another-scheduler).
 
@@ -110,5 +110,5 @@ A whole-run command that leaves its run unfinished exits `22` (`INCOMPLETE`), in
 pause during execution or work owned by another process. A stopped backfill also exits `22`
 unless its stopping outcome failed or was cancelled (exit `1`). A paused pipeline that starts
 nothing retains exit `0`, as does `--init-only`, which deliberately initializes a run for later
-steps. Dependency waits that record nothing in `run --task_code` exit `23` (`WAITING`).
+steps. Dependency waits that record nothing in `run --task-code` exit `23` (`WAITING`).
 Use [`status` and `explain`](inspecting.md) to inspect the selected run before resuming it.

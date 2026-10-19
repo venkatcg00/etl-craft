@@ -5,7 +5,7 @@
 # source (here: the process environment); when it is not set, the text itself is used.
 
 Secrets:
-  Source_type: environment             # value
+  Source_type: ENVIRONMENT             # value
 
 Orchestration:
   Retry_on: TRANSIENT                 # value; retry only failures that can succeed
@@ -13,27 +13,27 @@ Orchestration:
   Max_parallel_tasks: 4                # value
   Enforce_sla: true                    # value — email the pipeline's EMAIL_RECIPIENTS on an SLA miss
   Email:
-    host: localhost                    # value
-    port: 51025                        # value — Mailpit's SMTP port
-    from_address: etl-craft@example.com  # value
-    from_name: Support Insights        # value
-    tls_mode: none                     # value
+    Host: localhost                    # value
+    Port: 51025                        # value — Mailpit's SMTP port
+    From_address: etl-craft@example.com  # value
+    From_name: Support Insights        # value
+    Tls_mode: NONE                     # value
 
 Engine:
   dev:
-    jdbc_url: jdbc:sqlite:engine.db    # value — created beside this file
-    schema: main                       # value
+    Jdbc_url: jdbc:sqlite:engine.db    # value — created beside this file
+    Schema: main                       # value
 
 Warehouse:
   Name: DuckDB                         # value
   dev:
-    jdbc_url: jdbc:duckdb:warehouse.duckdb  # value — beside this file
-    schema: aud                        # value — where cloning copies the Engine DB tables
+    Jdbc_url: jdbc:duckdb:warehouse.duckdb  # value — beside this file
+    Schema: aud                        # value — where cloning copies the Engine DB tables
 
 Cloning:
   dev:
     Enabled: true                      # value
-    Scope: all                         # value
+    Scope: ALL                         # value
 
 Docs_site:
   dev:

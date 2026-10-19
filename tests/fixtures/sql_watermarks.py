@@ -5,18 +5,16 @@ from datetime import datetime
 import pytest
 
 from etl_craft.core.actor import current_actor
-from etl_craft.core.enums import ApiRole
+from etl_craft.core.enums import ActionName, ApiRole
 from etl_craft.core.errors import InjectedFaultError
 from etl_craft.engine import transitions
 from etl_craft.engine.repository.offsets import fetch_task_offset
-from etl_craft.engine.runlog import RunSelector
 from etl_craft.execution.child import run_handler
 from etl_craft.scripting import Offset
-from etl_craft.services.catalog import build_catalog
+from etl_craft.services.catalog.collect import build_catalog
 from etl_craft.services.operations.context import OperationContext
-from etl_craft.services.operations.runs import mark
-from etl_craft.services.operations.status import explain_task
 from etl_craft.warehouse.connection import warehouse_dialect
+from fixtures.actions import act
 
 
 def check_watermarks(w, target):
@@ -57,8 +55,12 @@ def check_watermarks(w, target):
     assert run_handler(w.engine_db, context) == 0
     assert sorted(w.rows(f"SELECT id FROM {w.name(target)}")) == [(1,), (2,), (3,)]
     ctx = OperationContext(w.engine_db, w.config, current_actor(), role=ApiRole.ADMIN)
-    explanation = explain_task(
-        ctx, "P", "watermark_load", selector=RunSelector(run_id=w.pipeline_run_id)
+    explanation = act(
+        ctx,
+        ActionName.EXPLAIN,
+        pipeline_code="P",
+        task_code="watermark_load",
+        run_id=w.pipeline_run_id,
     )
     assert (explanation.task.watermark_from, explanation.task.watermark_to) == ("2", "3")
     catalog = build_catalog(w.engine_db, w.config)
@@ -71,14 +73,14 @@ def check_watermarks(w, target):
         transitions.finish_task_run(
             conn, context.task_run_id, status="SUCCESS", counts=result, offset=result.offset
         )
-    done = mark(
+    done = act(
         ctx,
-        "P",
-        None,
-        "reload source",
+        ActionName.MARK,
+        pipeline_code="P",
+        reason="reload source",
         task_code="watermark_load",
         watermark="1",
-        selector=RunSelector(run_id=w.pipeline_run_id),
+        run_id=w.pipeline_run_id,
     )
     assert "3 -> 1 (NUMBER)" in done.message
     with w.engine_db.connect() as conn:

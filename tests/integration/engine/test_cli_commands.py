@@ -9,12 +9,12 @@ from etl_craft.core.errors import ExitCode
 
 CONFIG = """\
 Secrets:
-  Source_type: environment
+  Source_type: ENVIRONMENT
 Orchestration:
 Engine:
   dev:
-    jdbc_url: {jdbc_url}
-    schema: main
+    Jdbc_url: {jdbc_url}
+    Schema: main
 """
 
 
@@ -97,7 +97,7 @@ def test_an_unreachable_engine_db_is_a_configuration_error(tmp_path, capsys, mon
     config = tmp_path / "craft-connector.yml"
     config.write_text(
         CONFIG.format(jdbc_url="jdbc:postgresql://127.0.0.1:1/etl?connect_timeout=2")
-        + "    user: etl\n    auth_mode: password\n    secret: ETL_CRAFT_TEST_UNREACHABLE_SECRET\n",
+        + "    User: etl\n    Auth_mode: PASSWORD\n    Secret: ETL_CRAFT_TEST_UNREACHABLE_SECRET\n",
         encoding="utf-8",
     )
     assert main(["--config", str(config), "migrate"]) == ExitCode.CONFIGURATION

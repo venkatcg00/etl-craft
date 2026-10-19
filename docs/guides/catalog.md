@@ -289,7 +289,7 @@ under a separate build lock. A publication lock held longer than five seconds yi
 503 response and a server log naming the lock and remedy, rather than serving a partial site.
 
 Two empty lock sidecars remain beside the output: `.catalog.build.lock` and
-`.catalog.publish.lock` for an output named `catalog`. Keep them while generators or servers
+`.catalog.publish.lock` for an output named `Catalog`. Keep them while generators or servers
 use that output. New generation creates them. Publishing an old site creates the publication
 sidecar when its parent is writable; for a read-only deployment regenerate once before the
 upgrade and grant the server read access to that sidecar. The server opens existing sidecars

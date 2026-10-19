@@ -1,16 +1,16 @@
 # Organization-hosted project catalog. No ngrok token or SDK is required.
 # The proxy preserves the prefix and replaces X-Forwarded-For with its observed client IP.
 Secrets:
-  Source_type: environment  # value
+  Source_type: ENVIRONMENT  # value
 Orchestration: {}  # value
 Engine:
   dev:
-    jdbc_url: jdbc:sqlite:engine.db  # value
-    schema: main  # value
+    Jdbc_url: jdbc:sqlite:engine.db  # value
+    Schema: main  # value
 Warehouse:
   dev:
-    jdbc_url: jdbc:duckdb:warehouse.duckdb  # value
-    schema: main  # value
+    Jdbc_url: jdbc:duckdb:warehouse.duckdb  # value
+    Schema: main  # value
 Docs_site:
   dev:
     Output: catalog  # value

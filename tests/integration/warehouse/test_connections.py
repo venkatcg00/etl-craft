@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import text
 
 from etl_craft.config import ConnectionProfile, ConnectorConfig, SourceConfig
-from etl_craft.core.enums import TableFormat
+from etl_craft.core.enums import SecretsSource, TableFormat
 from etl_craft.core.errors import LockTimeoutError
 from etl_craft.warehouse.connection import (
     build_warehouse_engine,
@@ -31,12 +31,12 @@ from fixtures.services import (
 SECRET_VAR = "ETL_CRAFT_TEST_WAREHOUSE_SECRET"
 
 
-def warehouse_config(jdbc_url, auth_mode="none", table_format=TableFormat.NATIVE, **fields):
+def warehouse_config(jdbc_url, auth_mode="NONE", table_format=TableFormat.NATIVE, **fields):
     user = fields.pop("user", "")
-    engine = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:e.db", "", "none")
+    engine = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:e.db", "", "NONE")
     warehouse = ConnectionProfile("WAREHOUSE", "dev", jdbc_url, user, auth_mode, fields)
     return ConnectorConfig(
-        source=SourceConfig(type="environment"),
+        source=SourceConfig(type=SecretsSource.ENVIRONMENT),
         engine=engine,
         warehouse=warehouse,
         warehouse_table_format=table_format,
@@ -121,7 +121,7 @@ def test_a_postgres_warehouse_with_a_password(monkeypatch):
     monkeypatch.setenv(SECRET_VAR, POSTGRES_PASSWORD)
     config = warehouse_config(
         f"jdbc:postgresql://{pg.address}/{POSTGRES_DB}?application_name=etl-craft-test",
-        "password",
+        "PASSWORD",
         user=POSTGRES_USER,
         secret_var=SECRET_VAR,
     )
@@ -192,7 +192,7 @@ def storage_secret(monkeypatch):
     monkeypatch.setenv("ETL_CRAFT_TEST_S3_SECRET", MINIO_PASSWORD)
 
 
-def duckdb_iceberg_config(auth_mode="none", **fields):
+def duckdb_iceberg_config(auth_mode="NONE", **fields):
     catalog = require("iceberg_rest")
     minio = require("minio")
     return warehouse_config(
@@ -254,7 +254,7 @@ def test_duckdb_attaches_the_iceberg_catalog_with_oauth(monkeypatch):
     monkeypatch.setenv(SECRET_VAR, "secret")
     round_trip(
         duckdb_iceberg_config(
-            "oauth",
+            "OAUTH",
             client_id="etl-craft",
             token_url=f"{catalog.http_url}/v1/oauth/tokens",
             scope="catalog",
@@ -270,7 +270,7 @@ def test_duckdb_iceberg_settings_are_checked_before_attaching():
     broken = replace(active, extra={**active.extra, "catalog_uri": ""})
     engine = build_warehouse_engine(replace(config, warehouse=broken))
     try:
-        with pytest.raises(Exception, match="needs catalog_uri"):
+        with pytest.raises(Exception, match="needs Catalog_uri"):
             engine.connect()
     finally:
         engine.dispose()

@@ -18,7 +18,7 @@ def tls_relay(tmp_path, monkeypatch):
     context, certificate = localhost_tls(tmp_path)
     servers = []
 
-    def start(mode="starttls", refused=()):
+    def start(mode="STARTTLS", refused=()):
         listener = socket.socket()
         listener.bind(("127.0.0.1", 0))
         listener.listen()
@@ -35,7 +35,7 @@ def tls_relay(tmp_path, monkeypatch):
 
         def serve(client):
             client.settimeout(5)
-            if mode == "ssl":
+            if mode == "SSL":
                 client = context.wrap_socket(client, server_side=True)
             stream = client.makefile("rb")
             try:

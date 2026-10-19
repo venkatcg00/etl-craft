@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from etl_craft.config.auth import warehouse_by_key
+from etl_craft.config.loader_helpers import shown
 from etl_craft.config.targets import attached_catalog_name
 from etl_craft.core.enums import AuthMode
 from etl_craft.core.errors import ConfigurationError, SqlGuardError
@@ -56,7 +57,7 @@ class DuckDBIcebergWarehouse(DuckDBWarehouse):
         """Load the extensions, register the storage and catalog credentials, and attach.
 
         The settings are written into DuckDB statements, so none may contain a quote. Object
-        storage uses ``s3_key_id`` and ``s3_secret`` when both are set, else the AWS credential
+        storage uses ``S3_key_id`` and ``S3_secret`` when both are set, else the AWS credential
         chain.
         """
         super().on_connect(dbapi_connection, profile, secret)
@@ -66,13 +67,15 @@ class DuckDBIcebergWarehouse(DuckDBWarehouse):
         warehouse = str(extra.get("iceberg_warehouse") or "").strip()
         if not uri or not warehouse:
             raise ConfigurationError(
-                "a DuckDB Iceberg warehouse needs catalog_uri (the REST catalog endpoint) and "
-                "iceberg_warehouse (e.g. s3://warehouse/)"
+                "a DuckDB Iceberg warehouse needs Catalog_uri (the REST catalog endpoint) and "
+                "Iceberg_warehouse (e.g. s3://warehouse/)"
             )
         values = {k: v for k, v in extra.items() if isinstance(v, str)}
         for name, value in [*values.items(), ("secret", secret)]:
             if "'" in value:
-                raise ConfigurationError(f"DuckDB Iceberg setting {name} must not contain a quote")
+                raise ConfigurationError(
+                    f"DuckDB Iceberg setting {shown(name)} must not contain a quote"
+                )
 
         cursor = dbapi_connection.cursor()
         for statement in ("INSTALL iceberg", "LOAD iceberg", "INSTALL httpfs", "LOAD httpfs"):

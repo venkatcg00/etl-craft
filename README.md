@@ -21,7 +21,7 @@ python -m venv .venv && . .venv/bin/activate
 pip install .                                   # extras: [trino], [databricks], [snowflake], [aws], [publish]
 cd examples/demo
 python prepare.py warehouse && etl-craft setup && python prepare.py metadata
-etl-craft run --pipeline_code CLIENT_ALPHA
+etl-craft run --pipeline-code CLIENT_ALPHA
 ```
 
 Requires Python 3.11 or newer. `uv build` builds the wheel and sdist into `dist/`.

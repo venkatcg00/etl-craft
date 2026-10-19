@@ -112,7 +112,7 @@ uv run pre-commit install    # optional: run the same checks on every commit
 
 `dev` documents `main`; each release line (such as `0.1`) documents its newest patch tag,
 and `latest` aliases the newest release line. The versioned builder uses each tag's source,
-guides and locked dependencies. All versions share `docs/gen_ref_pages.py`, which renders
+guides and locked dependencies. All versions share `docs/gen_python_api.py`, which renders
 API entry points and package navigation from the source in that release's worktree. Fixing
 that renderer updates released API pages without changing released code or documenting
 unreleased features as available in an older version.

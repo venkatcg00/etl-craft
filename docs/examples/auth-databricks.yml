@@ -1,11 +1,11 @@
 # Authentication types for Databricks.
 #
 # One profile per type: set ETL_CRAFT_AUTH to the one you use.
-#   token  verified: a personal access token
-#   oauth  machine-to-machine: a service principal's client id and secret,
+#   TOKEN  verified: a personal access token
+#   OAUTH  machine-to-machine: a service principal's client id and secret,
 #          exchanged at https://<host>/oidc/v1/token (scope all-apis) unless
 #          token_url/scope say otherwise
-#   sso    the connector's browser login (databricks-oauth): interactive only
+#   SSO    the connector's browser login (databricks-oauth): interactive only
 #
 # Types marked verified have run against a live service in this project. The
 # others follow the vendor's documentation and are untested here: they can be
@@ -21,7 +21,7 @@
 # file in this directory, for every profile it declares.
 
 Secrets:
-  Source_type: environment             # value
+  Source_type: ENVIRONMENT             # value
   Profile: ETL_CRAFT_AUTH              # variable — the profile names the authentication type to use
 
 Orchestration:
@@ -32,26 +32,26 @@ Orchestration:
 Engine:
   Profile: dev                         # value — this file varies only the login, not the Engine DB
   dev:
-    jdbc_url: jdbc:sqlite:etl-craft-engine.db  # value
-    schema: main                       # value — SQLite: the database file is the schema
+    Jdbc_url: jdbc:sqlite:etl-craft-engine.db  # value
+    Schema: main                       # value — SQLite: the database file is the schema
 
 Warehouse:
   Name: Databricks                     # value
-  Table_format: native                 # value
+  Table_format: NATIVE                 # value
   token:
-    jdbc_url: WAREHOUSE_JDBC_URL       # variable — host, port and httpPath only
-    catalog: WAREHOUSE_CATALOG         # variable
-    schema: WAREHOUSE_SCHEMA           # variable
-    token: WAREHOUSE_TOKEN             # variable, required: a secret is never used as written — auth_mode is token
+    Jdbc_url: WAREHOUSE_JDBC_URL       # variable — host, port and httpPath only
+    Catalog: WAREHOUSE_CATALOG         # variable
+    Schema: WAREHOUSE_SCHEMA           # variable
+    Token: WAREHOUSE_TOKEN             # variable, required: a secret is never used as written — Auth_mode is TOKEN
   oauth:
-    jdbc_url: WAREHOUSE_JDBC_URL       # variable — host, port and httpPath only
-    catalog: WAREHOUSE_CATALOG         # variable
-    schema: WAREHOUSE_SCHEMA           # variable
-    auth_mode: oauth                   # value
-    client_id: WAREHOUSE_CLIENT_ID     # variable
-    secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written — the service principal's OAuth secret
+    Jdbc_url: WAREHOUSE_JDBC_URL       # variable — host, port and httpPath only
+    Catalog: WAREHOUSE_CATALOG         # variable
+    Schema: WAREHOUSE_SCHEMA           # variable
+    Auth_mode: OAUTH                   # value
+    Client_id: WAREHOUSE_CLIENT_ID     # variable
+    Secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written — the service principal's OAuth secret
   sso:
-    jdbc_url: WAREHOUSE_JDBC_URL       # variable — host, port and httpPath only
-    catalog: WAREHOUSE_CATALOG         # variable
-    schema: WAREHOUSE_SCHEMA           # variable
-    auth_mode: sso                     # value
+    Jdbc_url: WAREHOUSE_JDBC_URL       # variable — host, port and httpPath only
+    Catalog: WAREHOUSE_CATALOG         # variable
+    Schema: WAREHOUSE_SCHEMA           # variable
+    Auth_mode: SSO                     # value

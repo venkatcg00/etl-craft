@@ -226,7 +226,7 @@ ignore_imports = [
     "etl_craft.cli.commands.doctor -> etl_craft.services.doctor",
     "etl_craft.cli.commands.validate -> etl_craft.services.doctor",
     "etl_craft.cli.commands.lineage -> etl_craft.services.lineage",
-    "etl_craft.cli.commands.config_files -> etl_craft.services.config_files",
+    "etl_craft.cli.commands.config -> etl_craft.services.config_files",
     # A long-running process the interface starts and stops, like `server`.
     "etl_craft.cli.commands.publish_docs -> etl_craft.services.docs_publish",
 ]

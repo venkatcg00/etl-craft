@@ -11,6 +11,7 @@ from sqlalchemy import text
 from etl_craft.config import ConnectionProfile
 from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import (
+    ActionName,
     ApiRole,
     AttemptStatus,
     ControlAction,
@@ -25,7 +26,9 @@ from etl_craft.execution.attempt_types import ChildOptions
 from etl_craft.execution.pipeline import run_pipeline
 from etl_craft.execution.runner import admit_attempt, execute_attempt
 from etl_craft.services.operations import from_json, to_json
-from etl_craft.services.operations.controls import ControlRequest, get_control, request_control
+from etl_craft.services.operations.actions import invoke
+from etl_craft.services.operations.controls import ControlRequest
+from fixtures.actions import act
 from fixtures.metadata import add_dependency, add_pipeline, add_task, start_run
 from fixtures.races import paused_after, two_at_once
 from fixtures.scoped_controls import ctx as ctx
@@ -43,8 +46,17 @@ def seed(ctx):
 
 
 def ask(ctx, run, action, task=None, key=None):
-    return request_control(
-        ctx, ControlRequest("P", action, "maintenance", RunSelector(run_id=run), task, key)
+    return invoke(
+        ctx,
+        ActionName.CONTROL,
+        ControlRequest(
+            pipeline_code="P",
+            action=action,
+            reason="maintenance",
+            run_id=run,
+            task_code=task,
+            request_key=key,
+        ),
     )
 
 
@@ -65,7 +77,10 @@ def test_task_hold_release_and_force_admission_are_scoped(ctx):
     released = ask(ctx, run, ControlAction.RELEASE, "first")
     assert released.status == ControlStatus.COMPLETED
     assert queue(ctx, run, first)
-    assert get_control(ctx, held.control_id).action == ControlAction.HOLD
+    assert (
+        act(ctx, ActionName.CONTROL_REQUEST, control_id=held.control_id).action
+        == ControlAction.HOLD
+    )
     assert from_json(type(held), to_json(held)) == held
 
 
@@ -92,7 +107,10 @@ def test_repeated_keys_and_concurrent_controls_keep_original_scope(ctx):
     assert results[0].control_id == results[1].control_id
     with pytest.raises(RunStateError, match="another scope/action"):
         ask(ctx, run, ControlAction.ABORT, "first", "same")
-    assert get_control(ctx, results[0].control_id).requested_by == "operator"
+    assert (
+        act(ctx, ActionName.CONTROL_REQUEST, control_id=results[0].control_id).requested_by
+        == "operator"
+    )
 
 
 def test_claim_racing_hold_is_either_owned_or_fenced(ctx):
@@ -156,7 +174,7 @@ def test_unknown_query_acknowledgement_stays_pending_after_lease_loss(ctx):
         )
         controls.observe_exit(conn, attempt, queries_ended=False)
     control_flow.advance(ctx.engine, run, observed=True)
-    pending = get_control(ctx, request.control_id)
+    pending = act(ctx, ActionName.CONTROL_REQUEST, control_id=request.control_id)
     assert pending.status == ControlStatus.ACKNOWLEDGED
     assert pending.run_status == RunStatus.IN_PROGRESS and pending.completed_at is None
     assert "expired lease is not completion" in pending.message
@@ -175,7 +193,7 @@ def test_server_query_abort_refuses_before_mutating_the_scope(ctx):
         config=replace(
             ctx.config,
             warehouse=ConnectionProfile(
-                "WAREHOUSE", "remote", "jdbc:postgresql://localhost/warehouse", "", "none"
+                "WAREHOUSE", "remote", "jdbc:postgresql://localhost/warehouse", "", "NONE"
             ),
         ),
     )
@@ -193,8 +211,12 @@ def test_role_legacy_and_reason_refusals_are_explicit(ctx):
     _, run, _, _ = seed(ctx)
     with pytest.raises(PermissionDeniedError):
         ask(replace(ctx, role=ApiRole.VIEWER), run, ControlAction.HOLD)
-    with pytest.raises(UsageError, match="nonblank reason"):
-        request_control(ctx, ControlRequest("P", ControlAction.STOP, " "))
+    with pytest.raises(UsageError, match="`reason` is required"):
+        invoke(
+            ctx,
+            ActionName.CONTROL,
+            ControlRequest(pipeline_code="P", action=ControlAction.STOP, reason=" "),
+        )
 
 
 def test_completed_summary_is_not_process_exit_evidence(ctx):
@@ -215,7 +237,7 @@ def test_completed_summary_is_not_process_exit_evidence(ctx):
         assert request.attempt_ids == (spec.attempt_id,)
         assert request.attempts[0].status == AttemptStatus.SUCCESS
         assert request.attempts[0].process_ended_at is None
-    done = get_control(ctx, request.control_id)
+    done = act(ctx, ActionName.CONTROL_REQUEST, control_id=request.control_id)
     assert done.status == ControlStatus.COMPLETED and done.run_status == RunStatus.CANCELLED
     assert done.attempts[0].status == AttemptStatus.SUCCESS
     assert done.attempts[0].process_ended_at and done.attempts[0].queries_ended_at
@@ -236,7 +258,10 @@ def test_task_hold_keeps_downstream_pending_but_runs_other_tasks(ctx):
     ask(ctx, run, ControlAction.RELEASE, "first")
     done = run_pipeline(ctx.engine, ctx.config, "P", child=CHILD, selector=RunSelector(run_id=run))
     assert done.status == RunStatus.SUCCESS
-    assert get_control(ctx, held.control_id).action == ControlAction.HOLD
+    assert (
+        act(ctx, ActionName.CONTROL_REQUEST, control_id=held.control_id).action
+        == ControlAction.HOLD
+    )
 
 
 def wait_for(check, timeout=20):
@@ -305,7 +330,7 @@ def test_task_control_observes_just_its_worker_and_preserves_other_work(ctx, tmp
             assert first_result.status == (
                 RunStatus.SUCCESS if action == ControlAction.STOP else RunStatus.CANCELLED
             )
-            done = get_control(ctx, request.control_id)
+            done = act(ctx, ActionName.CONTROL_REQUEST, control_id=request.control_id)
             assert done.status == ControlStatus.COMPLETED
             assert done.run_status == RunStatus.IN_PROGRESS
             assert done.attempts[0].process_ended_at and done.attempts[0].queries_ended_at
@@ -415,7 +440,7 @@ def test_control_identity_and_acknowledgements_are_immutable(ctx):
         conn.execute(
             text("DELETE FROM AUD_ATTEMPT_ACKNOWLEDGEMENTS WHERE ATTEMPT_ID=:id"), {"id": attempt}
         )
-    original = get_control(ctx, done.control_id)
+    original = act(ctx, ActionName.CONTROL_REQUEST, control_id=done.control_id)
     assert original.reason == "maintenance"
     assert original.attempts[0].process_ended_at and original.attempts[0].queries_ended_at
 
@@ -441,13 +466,14 @@ def test_request_key_racing_across_runs_has_one_owner(ctx):
 
     def submit(code, run_id):
         try:
-            return request_control(
+            return invoke(
                 ctx,
+                ActionName.CONTROL,
                 ControlRequest(
-                    code,
-                    ControlAction.HOLD,
-                    "test",
-                    RunSelector(run_id=run_id),
+                    pipeline_code=code,
+                    action=ControlAction.HOLD,
+                    reason="test",
+                    run_id=run_id,
                     request_key="global-key",
                 ),
             )
@@ -478,7 +504,7 @@ def test_server_query_acknowledgement_requires_handler_completion_not_just_exit(
         config=replace(
             ctx.config,
             warehouse=ConnectionProfile(
-                "WAREHOUSE", "remote", "jdbc:postgresql://localhost/warehouse", "", "none"
+                "WAREHOUSE", "remote", "jdbc:postgresql://localhost/warehouse", "", "NONE"
             ),
         ),
     )
@@ -542,7 +568,11 @@ def test_active_run_is_pinned_before_event_locks_and_never_reselected(ctx, monke
 
     monkeypatch.setattr(operations, "control_scope", replace_active)
     with pytest.raises(RunStateError, match="controls need a non-terminal run"):
-        request_control(ctx, ControlRequest("P", ControlAction.HOLD, "maintenance"))
+        invoke(
+            ctx,
+            ActionName.CONTROL,
+            ControlRequest(pipeline_code="P", action=ControlAction.HOLD, reason="maintenance"),
+        )
     with ctx.engine.connect() as conn:
         assert controls.blocked(conn, replacements[0]) == {}
         assert runlog.fetch_pipeline_run_status(conn, replacements[0]) == RunStatus.IN_PROGRESS
@@ -550,8 +580,6 @@ def test_active_run_is_pinned_before_event_locks_and_never_reselected(ctx, monke
 
 def test_reconcile_revisits_lost_workers_but_never_guesses_an_unreadable_identity(ctx, monkeypatch):
     import socket
-
-    from etl_craft.services.operations import runs
 
     _, run, first, _ = seed(ctx)
     attempt = queue(ctx, run, first)
@@ -580,15 +608,15 @@ def test_reconcile_revisits_lost_workers_but_never_guesses_an_unreadable_identit
         raise control_flow.psutil.AccessDenied(pid)
 
     monkeypatch.setattr(control_flow.psutil, "Process", unreadable)
-    assert runs.reconcile_runs(ctx, "P").lost_attempt_ids == ()
-    assert get_control(ctx, pending.control_id).completed_at is None
+    assert act(ctx, ActionName.RECONCILE, pipeline_code="P").lost_attempt_ids == ()
+    assert act(ctx, ActionName.CONTROL_REQUEST, control_id=pending.control_id).completed_at is None
 
     def gone(pid):
         raise control_flow.psutil.NoSuchProcess(pid)
 
     monkeypatch.setattr(control_flow.psutil, "Process", gone)
-    assert runs.reconcile_runs(ctx, "P").lost_attempt_ids == ()
-    done = get_control(ctx, pending.control_id)
+    assert act(ctx, ActionName.RECONCILE, pipeline_code="P").lost_attempt_ids == ()
+    done = act(ctx, ActionName.CONTROL_REQUEST, control_id=pending.control_id)
     assert done.status == ControlStatus.COMPLETED and done.run_status == RunStatus.CANCELLED
     assert done.attempts[0].status == AttemptStatus.LOST
 
@@ -602,7 +630,7 @@ def test_server_python_stop_exposes_missing_query_capability_before_acceptance(c
         config=replace(
             ctx.config,
             warehouse=ConnectionProfile(
-                "WAREHOUSE", "remote", "jdbc:postgresql://localhost/warehouse", "", "none"
+                "WAREHOUSE", "remote", "jdbc:postgresql://localhost/warehouse", "", "NONE"
             ),
         ),
     )
@@ -622,7 +650,6 @@ def test_reconcile_observes_exited_terminal_worker_without_rewriting_its_outcome
 
     from etl_craft.core.counts import Counts
     from etl_craft.core.enums import ControlAcknowledgement
-    from etl_craft.services.operations import runs
 
     _, run, first, _ = seed(ctx)
     attempt = queue(ctx, run, first)
@@ -645,8 +672,8 @@ def test_reconcile_observes_exited_terminal_worker_without_rewriting_its_outcome
     pending = ask(ctx, run, ControlAction.STOP)
     assert pending.completed_at is None and pending.attempt_ids == (attempt,)
     monkeypatch.setattr(control_flow, "process_start", lambda pid: "different-birth")
-    assert runs.reconcile_runs(ctx, "P").lost_attempt_ids == ()
-    done = get_control(ctx, pending.control_id)
+    assert act(ctx, ActionName.RECONCILE, pipeline_code="P").lost_attempt_ids == ()
+    done = act(ctx, ActionName.CONTROL_REQUEST, control_id=pending.control_id)
     assert done.status == ControlStatus.COMPLETED and done.run_status == RunStatus.CANCELLED
     assert done.attempts[0].status == outcome
     with ctx.engine.connect() as conn:

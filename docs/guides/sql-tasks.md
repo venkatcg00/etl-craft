@@ -346,7 +346,7 @@ GROUP BY REJECT_COLUMN, REJECT_REASON;
 | `PRESERVE_TARGET` | `SCD1_MERGE` | `true` keeps the target's value where the SELECT returns NULL |
 | `HARD_DELETE` | `DELETE_ROWS` | `true` deletes rows instead of flagging them |
 | `SECURE_VIEW` | `CREATE_VIEW` | `true` creates a secure view: `SECURE` on Snowflake, `security_barrier` on PostgreSQL; other warehouses have none, and the task fails |
-| `TABLE_FORMAT` | all | `native` or `iceberg`, for this task's target, where the warehouse lets a task choose |
+| `TABLE_FORMAT` | all | `NATIVE` or `ICEBERG`, for this task's target, where the warehouse lets a task choose |
 | `EXTERNAL_LOCATION` | tables it creates, on Databricks and Trino (Iceberg) | where the table's files live, such as `s3://lake/sales/orders` |
 | `EXTERNAL_VOLUME`, `BASE_LOCATION` | tables it creates, on Snowflake Iceberg | the customer volume and the path in it; set both, or neither for Snowflake-managed storage |
 | `CATALOG` | tables it creates, on Snowflake Iceberg | a catalog integration for an externally managed Iceberg catalog |
@@ -372,8 +372,8 @@ the source is staged or the target is changed, including a setup that would othe
 nothing. Set `TABLE_FORMAT` to the existing format, or choose another target. Changing the
 parameter is not a table migration.
 
-Databricks distinguishes ordinary Delta (`native`) from Delta with UniForm Iceberg reads
-(`iceberg`) using [table details](https://docs.databricks.com/aws/en/delta/iceberg-reads).
+Databricks distinguishes ordinary Delta (`NATIVE`) from Delta with UniForm Iceberg reads
+(`ICEBERG`) using [table details](https://docs.databricks.com/aws/en/delta/iceberg-reads).
 Snowflake reads [the table's `IS_ICEBERG` flag](https://docs.snowflake.com/en/sql-reference/info-schema/tables)
 in its own database. Warehouses with only one supported table format use that fixed format.
 

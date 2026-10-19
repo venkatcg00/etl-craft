@@ -7,13 +7,11 @@ import pytest
 from sqlalchemy import text
 
 from etl_craft.core.actor import SYSTEM_ACTOR
-from etl_craft.core.enums import ApiRole
+from etl_craft.core.enums import ActionName, ApiRole
 from etl_craft.engine import migrations
-from etl_craft.engine.runlog import RunSelector
-from etl_craft.services.operations.api_reads import get_run_status
+from etl_craft.services.operations.actions import invoke
 from etl_craft.services.operations.context import OperationContext
-from etl_craft.services.operations.inspect import run_history
-from etl_craft.services.operations.models import HistoryQuery
+from etl_craft.services.operations.requests import HistoryInput, RunId
 from fixtures.metadata import add_pipeline
 from fixtures.released_schema import SCHEMAS, install
 
@@ -133,10 +131,10 @@ def test_pipeline_parameter_upgrade_retains_history(
         )
     assert migrations.apply_pending_migrations(db.engine) == []
     ctx = OperationContext(db.engine, db.config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
-    history = run_history(
-        ctx, "P", HistoryQuery(selector=RunSelector(run_key="orchestrator:original"))
+    history = invoke(
+        ctx, ActionName.HISTORY, HistoryInput(pipeline_code="P", run_key="orchestrator:original")
     )
     assert history.entries[0].run_key == "orchestrator:original"
     assert history.entries[0].started_by_kind == "ORCHESTRATOR"
-    status = get_run_status(ctx, audit[0]["id"])
-    assert status.run.run_key == "orchestrator:original"
+    run = invoke(ctx, ActionName.RUN_DETAIL, RunId(run_id=audit[0]["id"]))
+    assert run.run_key == "orchestrator:original"

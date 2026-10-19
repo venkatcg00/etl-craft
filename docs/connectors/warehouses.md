@@ -2,10 +2,10 @@
 
 A deployment writes to one warehouse, named in the `Warehouse` section of `craft-connector.yml`.
 What the engine creates there depends on the warehouse and the table format:
-`Warehouse.Table_format` (`native` by default), which a task may override with its own
+`Warehouse.Table_format` (`NATIVE` by default), which a task may override with its own
 `TABLE_FORMAT` parameter where the warehouse allows it.
 
-| `Warehouse.Name` | `native` | `iceberg` | Extra to install |
+| `Warehouse.Name` | `NATIVE` | `ICEBERG` | Extra to install |
 |---|---|---|---|
 | Postgres | ordinary tables | not available | none |
 | DuckDB | tables in one local file | tables in an Iceberg REST catalog | none |
@@ -25,15 +25,15 @@ connection and a task cannot override it.
 
 ## The warehouse schema
 
-Every Warehouse profile names a `schema`. It is where cloning copies the Engine DB's tables, and
+Every Warehouse profile names a `Schema`. It is where cloning copies the Engine DB's tables, and
 the session's default schema on Databricks, Snowflake and DuckDB over Iceberg; DuckDB over Iceberg
 cannot connect at all while it is missing. It must already exist: etl-craft never
 creates warehouse schemas. A run with cloning on checks it before starting, and stops naming it
-when it is missing. On Trino, whose `jdbc_url` ends in `/<catalog>/<schema>`, the two must name the
+when it is missing. On Trino, whose `Jdbc_url` ends in `/<catalog>/<schema>`, the two must name the
 same schema.
 
 Tasks write wherever their own `TARGET_OBJECT` (`schema.table`) says, whatever this setting is.
-Every profile names its database (or catalog): in the `jdbc_url`, or in `database`/`catalog`
+Every profile names its database (or catalog): in the `Jdbc_url`, or in `Database`/`Catalog`
 where the warehouse takes separate fields. The engine connects in it, so SQL and `TARGET_OBJECT`
 can name tables as `schema.table` and move between environments unchanged; a
 `database.schema.table` name is used as written. A profile whose database cannot be told fails
@@ -41,18 +41,18 @@ when the file is loaded.
 
 ## Connecting and authenticating
 
-Each warehouse accepts the auth modes below. `secret` and `token` always name a variable, never a
+Each warehouse accepts the auth modes below. `Secret` and `Token` always name a variable, never a
 value. Modes not verified here follow the vendor's documentation and can be used, but success is
 not guaranteed.
 
-| Warehouse | `auth_mode` (verified here in bold) |
+| Warehouse | `Auth_mode` (verified here in bold) |
 |---|---|
-| Postgres | **`password`**, `token`, **`key_file`**, `oauth`, `sso`, `sts` (as for a [PostgreSQL Engine DB](engine-db.md)) |
-| DuckDB file | **`none`** |
-| DuckDB over Iceberg | **`none`**, `token`, **`oauth`**: how DuckDB logs in to the REST catalog |
-| Trino | **`none`**, `password`, `token`, `oauth`, `sso`, `key_file` |
-| Databricks | **`token`**, `oauth` (a service principal), `sso` (browser login) |
-| Snowflake | **`password`**, **`token`**, `key_file` (key pair), `oauth`, `sso` (browser), `sts` (workload identity) |
+| Postgres | **`PASSWORD`**, `TOKEN`, **`KEY_FILE`**, `OAUTH`, `SSO`, `STS` (as for a [PostgreSQL Engine DB](engine-db.md)) |
+| DuckDB file | **`NONE`** |
+| DuckDB over Iceberg | **`NONE`**, `TOKEN`, **`OAUTH`**: how DuckDB logs in to the REST catalog |
+| Trino | **`NONE`**, `PASSWORD`, `TOKEN`, `OAUTH`, `SSO`, `KEY_FILE` |
+| Databricks | **`TOKEN`**, `OAUTH` (a service principal), `SSO` (browser login) |
+| Snowflake | **`PASSWORD`**, **`TOKEN`**, `KEY_FILE` (key pair), `OAUTH`, `SSO` (browser), `STS` (workload identity) |
 
 Databricks and Snowflake can also be given as separate fields instead of one JDBC URL; see the
 [examples](../examples/README.md).

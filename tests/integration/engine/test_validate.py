@@ -41,21 +41,21 @@ def project(engine_db, tmp_path, monkeypatch):
     """A project with a DuckDB warehouse, email, a SQL file and an ingestion script."""
     profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
-    block = {"jdbc_url": profile.jdbc_url, "schema": schema}
-    if profile.auth_mode != "none":
+    block = {"Jdbc_url": profile.jdbc_url, "Schema": schema}
+    if profile.auth_mode != "NONE":
         block |= {
-            "user": profile.user,
-            "auth_mode": profile.auth_mode,
-            "secret": profile.secret_var,
+            "User": profile.user,
+            "Auth_mode": profile.auth_mode,
+            "Secret": profile.secret_var,
         }
     root = (engine_db.config.config_path or tmp_path / "craft-connector.yml").parent
     raw = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {
-            "Email": {"host": "localhost", "port": 1025, "from_address": "etl@x.io"},
+            "Email": {"Host": "localhost", "Port": 1025, "From_address": "etl@x.io"},
         },
         "Engine": {"dev": block},
-        "Warehouse": {"dev": {"jdbc_url": "jdbc:duckdb:analytics.duckdb", "schema": "main"}},
+        "Warehouse": {"dev": {"Jdbc_url": "jdbc:duckdb:analytics.duckdb", "Schema": "main"}},
     }
     (root / "craft-connector.yml").write_text(yaml.safe_dump(raw, sort_keys=False), "utf-8")
     (root / "sql_files").mkdir(exist_ok=True)
@@ -400,7 +400,7 @@ def test_the_command(project, capsys):
         good_pipeline(conn)
         p = add_pipeline(conn, "OTHER")
         add_task(conn, p, "bad", "PYTHON")
-    assert main(["validate", "--pipeline_code", "SALES"]) == ExitCode.SUCCESS
+    assert main(["validate", "--pipeline-code", "SALES"]) == ExitCode.SUCCESS
     assert (
         capsys.readouterr().out == "checked 1 pipeline(s) and 5 task(s): 0 failed, 0 warning(s)\n"
     )
@@ -410,7 +410,7 @@ def test_the_command(project, capsys):
         "ingestion_scripts/",
         "checked 2 pipeline(s) and 6 task(s): 1 failed, 0 warning(s)",
     ]
-    assert main(["validate", "--pipeline_code", "NOPE"]) == ExitCode.METADATA
+    assert main(["validate", "--pipeline-code", "NOPE"]) == ExitCode.METADATA
     with pytest.raises(MetadataError):
         validate(engine, load_config("craft-connector.yml"), "NOPE")
 
@@ -437,7 +437,7 @@ def test_an_alert_that_only_watches_for_failures_may_run_mid_run(project):
     assert found(validate(engine, config)) == []
 
 
-@pytest.mark.parametrize("default", ["native", "iceberg"])
+@pytest.mark.parametrize("default", ["NATIVE", "ICEBERG"])
 @pytest.mark.parametrize("conflicting", [False, True])
 @pytest.mark.parametrize("active", [False, True])
 def test_target_formats_are_compared_across_pipelines_and_qualified_names(
@@ -467,7 +467,7 @@ def test_target_formats_are_compared_across_pipelines_and_qualified_names(
             "append",
             SQL_ACTION="APPEND_TABLE",
             TARGET_OBJECT="ANALYTICS.SALES.ORDERS",
-            TABLE_FORMAT=("iceberg" if default == "native" else "native")
+            TABLE_FORMAT=("ICEBERG" if default == "NATIVE" else "NATIVE")
             if conflicting
             else default,
             SOURCE_SQL="SELECT 1 AS id",

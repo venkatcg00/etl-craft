@@ -2,6 +2,7 @@
 
 import copy
 import json
+import subprocess
 import threading
 from types import SimpleNamespace
 
@@ -291,6 +292,28 @@ def test_combined_real_partial_coverage_still_fails_the_ninety_percent_gate(tmp_
         "coverage report failed" in problem
         for problem in ci.coverage_report("coverage-test", [part / "results.json"], tmp_path)
     )
+
+
+def test_each_supervision_module_must_reach_ninety_percent(tmp_path, monkeypatch):
+    part = tmp_path / "part"
+    part.mkdir()
+    (part / "coverage.data").write_bytes(b"")
+    calls = []
+
+    def coverage(command, **_):
+        calls.append(command[3:])
+        low = "--include=src/etl_craft/controller/leadership.py" in command
+        return subprocess.CompletedProcess(command, 2 if low else 0)
+
+    monkeypatch.setattr(ci.subprocess, "run", coverage)
+    problems = ci.coverage_report("coverage-test", [part / "results.json"], tmp_path)
+    assert problems == [
+        "coverage-test: src/etl_craft/controller/leadership.py is below 90% coverage; "
+        "add tests for it"
+    ]
+    assert {f"--include={module}" for module in ci.SUPERVISION_MODULES} <= {
+        argument for call in calls for argument in call
+    }
 
 
 def test_environment_selection_cannot_omit_tests_from_ci(monkeypatch, tmp_path, capsys):

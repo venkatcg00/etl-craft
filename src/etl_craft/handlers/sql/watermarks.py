@@ -83,7 +83,7 @@ def read_watermark(
                 raise SqlGuardError(
                     f"WATERMARK_TYPE={start.datatype}, but the stored offset is "
                     f"{stored.offset_type} {stored.offset_value!r}; keep the stored type "
-                    "and set a value with mark --watermark"
+                    "and set a value with `etl-craft mark --watermark`"
                 )
             start = Offset.from_stored(stored.offset_type, stored.offset_value)
     except (HandlerError, ValueError) as error:

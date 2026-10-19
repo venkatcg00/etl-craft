@@ -3,9 +3,9 @@
 # One profile per type: set ETL_CRAFT_AUTH to the one you use. This is the
 # catalog's login; object storage uses the s3_* fields (or, without keys, the
 # ambient credential chain, which covers instance roles and STS).
-#   none   verified: an open catalog
-#   token  a stored bearer token
-#   oauth  verified: a client-credentials grant DuckDB runs itself against
+#   NONE   verified: an open catalog
+#   TOKEN  a stored bearer token
+#   OAUTH  verified: a client-credentials grant DuckDB runs itself against
 #          token_url (tested against the repo's own Iceberg REST catalog)
 #
 # Types marked verified have run against a live service in this project. The
@@ -22,7 +22,7 @@
 # file in this directory, for every profile it declares.
 
 Secrets:
-  Source_type: environment             # value
+  Source_type: ENVIRONMENT             # value
   Profile: ETL_CRAFT_AUTH              # variable — the profile names the authentication type to use
 
 Orchestration:
@@ -33,44 +33,44 @@ Orchestration:
 Engine:
   Profile: dev                         # value — this file varies only the login, not the Engine DB
   dev:
-    jdbc_url: jdbc:sqlite:etl-craft-engine.db  # value
-    schema: main                       # value — SQLite: the database file is the schema
+    Jdbc_url: jdbc:sqlite:etl-craft-engine.db  # value
+    Schema: main                       # value — SQLite: the database file is the schema
 
 Warehouse:
   Name: DuckDB                         # value
-  Table_format: iceberg                # value
+  Table_format: ICEBERG                # value
   none:
-    jdbc_url: "jdbc:duckdb:"           # value
-    schema: etl_craft                  # value — must already exist; cloning writes here
-    catalog: WAREHOUSE_CATALOG         # variable
-    catalog_uri: WAREHOUSE_CATALOG_URI  # variable
-    iceberg_warehouse: WAREHOUSE_ICEBERG_WAREHOUSE  # variable
-    s3_endpoint: WAREHOUSE_S3_ENDPOINT  # variable
-    s3_key_id: WAREHOUSE_S3_KEY_ID     # variable
-    s3_secret: WAREHOUSE_S3_SECRET     # variable, required: a secret is never used as written
-    auth_mode: none                    # value
+    Jdbc_url: "jdbc:duckdb:"           # value
+    Schema: etl_craft                  # value — must already exist; cloning writes here
+    Catalog: WAREHOUSE_CATALOG         # variable
+    Catalog_uri: WAREHOUSE_CATALOG_URI  # variable
+    Iceberg_warehouse: WAREHOUSE_ICEBERG_WAREHOUSE  # variable
+    S3_endpoint: WAREHOUSE_S3_ENDPOINT  # variable
+    S3_key_id: WAREHOUSE_S3_KEY_ID     # variable
+    S3_secret: WAREHOUSE_S3_SECRET     # variable, required: a secret is never used as written
+    Auth_mode: NONE                    # value
   token:
-    jdbc_url: "jdbc:duckdb:"           # value
-    schema: etl_craft                  # value — must already exist; cloning writes here
-    catalog: WAREHOUSE_CATALOG         # variable
-    catalog_uri: WAREHOUSE_CATALOG_URI  # variable
-    iceberg_warehouse: WAREHOUSE_ICEBERG_WAREHOUSE  # variable
-    s3_endpoint: WAREHOUSE_S3_ENDPOINT  # variable
-    s3_key_id: WAREHOUSE_S3_KEY_ID     # variable
-    s3_secret: WAREHOUSE_S3_SECRET     # variable, required: a secret is never used as written
-    auth_mode: token                   # value
-    secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
+    Jdbc_url: "jdbc:duckdb:"           # value
+    Schema: etl_craft                  # value — must already exist; cloning writes here
+    Catalog: WAREHOUSE_CATALOG         # variable
+    Catalog_uri: WAREHOUSE_CATALOG_URI  # variable
+    Iceberg_warehouse: WAREHOUSE_ICEBERG_WAREHOUSE  # variable
+    S3_endpoint: WAREHOUSE_S3_ENDPOINT  # variable
+    S3_key_id: WAREHOUSE_S3_KEY_ID     # variable
+    S3_secret: WAREHOUSE_S3_SECRET     # variable, required: a secret is never used as written
+    Auth_mode: TOKEN                   # value
+    Secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
   oauth:
-    jdbc_url: "jdbc:duckdb:"           # value
-    schema: etl_craft                  # value — must already exist; cloning writes here
-    catalog: WAREHOUSE_CATALOG         # variable
-    catalog_uri: WAREHOUSE_CATALOG_URI  # variable
-    iceberg_warehouse: WAREHOUSE_ICEBERG_WAREHOUSE  # variable
-    s3_endpoint: WAREHOUSE_S3_ENDPOINT  # variable
-    s3_key_id: WAREHOUSE_S3_KEY_ID     # variable
-    s3_secret: WAREHOUSE_S3_SECRET     # variable, required: a secret is never used as written
-    auth_mode: oauth                   # value
-    client_id: WAREHOUSE_CLIENT_ID     # variable
-    secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
-    token_url: WAREHOUSE_TOKEN_URL     # variable — e.g. http://iceberg-rest:8181/v1/oauth/tokens
-    scope: catalog                     # value
+    Jdbc_url: "jdbc:duckdb:"           # value
+    Schema: etl_craft                  # value — must already exist; cloning writes here
+    Catalog: WAREHOUSE_CATALOG         # variable
+    Catalog_uri: WAREHOUSE_CATALOG_URI  # variable
+    Iceberg_warehouse: WAREHOUSE_ICEBERG_WAREHOUSE  # variable
+    S3_endpoint: WAREHOUSE_S3_ENDPOINT  # variable
+    S3_key_id: WAREHOUSE_S3_KEY_ID     # variable
+    S3_secret: WAREHOUSE_S3_SECRET     # variable, required: a secret is never used as written
+    Auth_mode: OAUTH                   # value
+    Client_id: WAREHOUSE_CLIENT_ID     # variable
+    Secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
+    Token_url: WAREHOUSE_TOKEN_URL     # variable — e.g. http://iceberg-rest:8181/v1/oauth/tokens
+    Scope: catalog                     # value

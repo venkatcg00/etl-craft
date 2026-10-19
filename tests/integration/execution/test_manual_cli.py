@@ -37,9 +37,9 @@ def test_standalone_cli_runs_only_selected_sql_and_preserves_exact_key(
         add_dependency(conn, project.pipeline_id, downstream, selected_id)
     args = (
         "run",
-        "--pipeline_code",
+        "--pipeline-code",
         "P",
-        "--task_code",
+        "--task-code",
         "only",
         "--standalone",
         "--run-key",

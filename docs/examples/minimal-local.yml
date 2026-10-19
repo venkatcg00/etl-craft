@@ -14,7 +14,7 @@
 # file in this directory, for every profile it declares.
 
 Secrets:
-  Source_type: environment             # value
+  Source_type: ENVIRONMENT             # value
   Profile: dev                         # value — the only profile: nothing to set
 
 Orchestration:
@@ -24,11 +24,11 @@ Orchestration:
 
 Engine:
   dev:
-    jdbc_url: jdbc:sqlite:etl-craft-engine.db  # value — relative to this file
-    schema: main                       # value — SQLite: the database file is the schema
+    Jdbc_url: jdbc:sqlite:etl-craft-engine.db  # value — relative to this file
+    Schema: main                       # value — SQLite: the database file is the schema
 
 Warehouse:
   Name: DuckDB                         # value
   dev:
-    jdbc_url: jdbc:duckdb:warehouse.duckdb  # value — relative to this file
-    schema: main                       # value — must already exist; cloning writes here
+    Jdbc_url: jdbc:duckdb:warehouse.duckdb  # value — relative to this file
+    Schema: main                       # value — must already exist; cloning writes here

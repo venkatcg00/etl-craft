@@ -6,15 +6,12 @@ import argparse
 import json
 from pathlib import Path
 
-from etl_craft.cli.commands.common import command_context
+from etl_craft.cli.commands.common import call, request_from
 from etl_craft.cli.output import Output
-from etl_craft.cli.remote import ServerClient, api_path
-from etl_craft.core.enums import ControlAction
-from etl_craft.core.errors import ExitCode, UsageError
-from etl_craft.engine.controls import ControlView
-from etl_craft.engine.runlog import RunSelector
-from etl_craft.services.operations.bulk_controls import BulkControlView, request_bulk_controls
-from etl_craft.services.operations.controls import ControlRequest, request_control
+from etl_craft.core.enums import ActionName, ControlAction
+from etl_craft.core.errors import EtlCraftError, ExitCode, UsageError
+from etl_craft.services.operations.controls import BulkControlView
+from etl_craft.services.operations.requests import BulkControlRequest, ControlRequest
 
 
 def configure(parser: argparse.ArgumentParser) -> None:
@@ -23,25 +20,25 @@ def configure(parser: argparse.ArgumentParser) -> None:
     action.add_argument(
         "--recover",
         action="store_true",
-        help="prepare unfinished work in this run; keep SUCCESS/SKIPPED and checkpoints",
+        help="Prepare unfinished work in this run; keep SUCCESS/SKIPPED and checkpoints.",
     )
     action.add_argument(
         "--restart",
         action="store_true",
-        help="prepare a new run retaining current checkpoints; source history is kept",
+        help="Prepare a new run retaining current checkpoints; source history is kept.",
     )
     action.add_argument(
         "--allow-paused",
         action="store_true",
-        help="permit the exact selected run while its automatic schedule stays paused",
+        help="Permit the exact selected run while its automatic schedule stays paused.",
     )
     action.add_argument(
         "--controls-file",
         type=Path,
-        help="JSON list of explicit scoped controls with per-object request keys; prepare only",
+        help="JSON list of explicit scoped controls with per-object request keys; prepare only.",
     )
     parser.add_argument(
-        "--request-key", help="idempotency key for recovery/restart/one-run permission"
+        "--request-key", help="Idempotency key for recovery/restart/one-run permission."
     )
 
 
@@ -50,8 +47,8 @@ def selected(args: argparse.Namespace) -> bool:
     return bool(args.recover or args.restart or args.allow_paused or args.controls_file)
 
 
-def execute(args: argparse.Namespace, out: Output, server: ServerClient | None = None) -> int:
-    """Submit through the shared operation locally or through its HTTP transport."""
+def execute(args: argparse.Namespace, out: Output) -> int:
+    """Submit a recovery, a restart, a one-run permission or a selection of controls."""
     if any(
         (
             args.standalone,
@@ -70,14 +67,14 @@ def execute(args: argparse.Namespace, out: Output, server: ServerClient | None =
             "then run the returned execution_run_id explicitly"
         )
     if args.controls_file is not None:
-        return _bulk(args, out, server)
+        return _bulk(args, out)
     if args.pipeline_code is None or not args.reason:
         raise UsageError(
-            "recovery/restart/one-run permission needs --pipeline_code and a nonblank --reason"
+            "recovery/restart/one-run permission needs `pipeline_code` and a nonblank `reason`"
         )
     if args.run_id is None and args.run_key is None and not args.allow_paused:
         raise UsageError(
-            "recovery/restart/one-run permission needs an explicit --run-id or --run-key"
+            "recovery/restart/one-run permission needs an explicit `run_id` or `run_key`"
         )
     action = (
         ControlAction.RECOVER
@@ -86,24 +83,7 @@ def execute(args: argparse.Namespace, out: Output, server: ServerClient | None =
         if args.restart
         else ControlAction.RUN_PAUSED
     )
-    request = ControlRequest(
-        args.pipeline_code,
-        action,
-        args.reason,
-        RunSelector(args.run_id, args.run_key),
-        args.task_code,
-        args.request_key,
-    )
-    if server is None:
-        with command_context(args) as ctx:
-            control = request_control(ctx, request)
-    else:
-        control = server.call(
-            "POST",
-            api_path("pipelines", args.pipeline_code, "controls"),
-            ControlView,
-            body=_body(request),
-        )
+    control = call(args, ActionName.CONTROL, request_from(args, ControlRequest, action=action))
     out.result(control, args.output_format)
     return ExitCode.SUCCESS
 
@@ -123,54 +103,17 @@ def read_selection(path: Path) -> tuple[ControlRequest, ...]:
     for index, row in enumerate(data):
         if not isinstance(row, dict) or set(row) - allowed:
             raise UsageError(f"control selection {path}[{index}]: expected only {sorted(allowed)}")
+        if row.get("run_id") is not None and type(row["run_id"]) is not int:
+            raise UsageError(f"control selection {path}[{index}]: run_id must be a whole number")
         try:
             action = ControlAction(str(row.get("action")))
-        except (TypeError, ValueError) as error:
-            raise UsageError(
-                f"control selection {path}[{index}]: action={row.get('action')!r}; "
-                "use a supported control action"
-            ) from error
-        if not all(
-            isinstance(row.get(name), str) and row[name].strip()
-            for name in ("pipeline_code", "reason", "request_key")
-        ):
-            raise UsageError(
-                f"control selection {path}[{index}]: pipeline_code, reason and request_key "
-                "must be nonblank strings"
-            )
-        if row.get("task_code") is not None and not isinstance(row["task_code"], str):
-            raise UsageError(f"control selection {path}[{index}]: task_code must be a string")
-        if (
-            row.get("run_id") is not None and (type(row["run_id"]) is not int or row["run_id"] < 1)
-        ) or (row.get("run_key") is not None and not isinstance(row["run_key"], str)):
-            raise UsageError(
-                f"control selection {path}[{index}]: use a positive run_id or nonblank run_key"
-            )
-        requests.append(
-            ControlRequest(
-                row["pipeline_code"],
-                action,
-                row["reason"],
-                RunSelector(row.get("run_id"), row.get("run_key")),
-                row.get("task_code"),
-                row["request_key"],
-            )
-        )
+            requests.append(ControlRequest(**{**row, "action": action}))
+        except (EtlCraftError, TypeError, ValueError) as error:
+            raise UsageError(f"control selection {path}[{index}]: {error}") from error
     return tuple(requests)
 
 
-def _body(request: ControlRequest) -> dict[str, object]:
-    return {
-        "action": request.action,
-        "reason": request.reason,
-        "run_id": request.selector.run_id,
-        "run_key": request.selector.run_key,
-        "task_code": request.task_code,
-        "request_key": request.request_key,
-    }
-
-
-def _bulk(args: argparse.Namespace, out: Output, server: ServerClient | None) -> int:
+def _bulk(args: argparse.Namespace, out: Output) -> int:
     """Submit a fully parsed selection through the ordinary bulk operation."""
     if any(
         v is not None
@@ -184,19 +127,11 @@ def _bulk(args: argparse.Namespace, out: Output, server: ServerClient | None) ->
         )
     ):
         raise UsageError(
-            "--controls-file contains its own selection/reasons/keys; omit other selectors"
+            "`controls_file` contains its own selection, reasons and keys; omit other selectors"
         )
-    requests = read_selection(args.controls_file)
-    if server is None:
-        with command_context(args) as ctx:
-            done = request_bulk_controls(ctx, requests)
-    else:
-        done = server.call(
-            "POST",
-            api_path("controls", "bulk"),
-            BulkControlView,
-            body={"requests": [_body(r) | {"pipeline_code": r.pipeline_code} for r in requests]},
-        )
+    request = BulkControlRequest(requests=read_selection(args.controls_file))
+    done = call(args, ActionName.CONTROL_BULK, request)
+    assert isinstance(done, BulkControlView)
     out.result(done, args.output_format, text=lambda: _render_bulk(out, done))
     return ExitCode.FAILURE if any(o.error for o in done.outcomes) else ExitCode.SUCCESS
 

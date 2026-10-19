@@ -15,6 +15,7 @@ from etl_craft.core.counts import NO_COUNTS, Counts
 from etl_craft.core.enums import (
     FINISHED_RUN_STATUSES,
     AttemptStatus,
+    InterventionAction,
     RunStatus,
     SlaStatus,
     TriggerKind,
@@ -30,9 +31,7 @@ from etl_craft.engine.attempts import (
 from etl_craft.engine.attempts import (
     active_attempt as active_attempt,
 )
-from etl_craft.engine.attempts import (
-    record_attempt_ending,
-)
+from etl_craft.engine.attempts import record_attempt_ending
 from etl_craft.engine.attempts import (
     record_attempt_failure as record_attempt_failure,
 )
@@ -104,7 +103,7 @@ def resolve_run(
     if not rerun and (not force or selected.status == RunStatus.CANCELLED):
         raise RunStateError(
             f"pipeline_id={pipeline_id}: pipeline_run_id={selected.pipeline_run_id} "
-            f"is {selected.status}; start a new run with --init-only, or use --force "
+            f"is {selected.status}; start a new run with `init_only`, or use `force` "
             "with an explicit run identity for an ended, non-cancelled run"
         )
     reopen_run(conn, selected.pipeline_run_id, current_actor(), reason=reason)
@@ -405,7 +404,7 @@ def admit_run(conn: Connection, pipeline_run_id: int, actor: Actor) -> None:
 
 def lock_active_run(conn: Connection, pipeline_run_id: int) -> None:
     """Serialize an event check's commit with cancellation, requiring an active run."""
-    _guard(conn, "lock_active_run", "run", pipeline_run_id, "IN-PROGRESS", None, {})
+    _guard(conn, "lock_active_run", "run", pipeline_run_id, RunStatus.IN_PROGRESS, None, {})
 
 
 def start_run(
@@ -478,7 +477,7 @@ def reopen_run(
                     "pipeline_id": row.pipeline_id,
                     "pipeline_run_id": pipeline_run_id,
                     "task_id": None,
-                    "action": "REOPEN",
+                    "action": InterventionAction.REOPEN,
                     "from_status": row.status,
                     "to_status": RunStatus.IN_PROGRESS,
                     "target_count": None,

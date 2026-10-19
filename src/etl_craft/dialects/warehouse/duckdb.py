@@ -10,7 +10,7 @@ from sqlalchemy.engine import Connection
 from etl_craft.config.auth import warehouse_by_key
 from etl_craft.core.enums import FailureClass
 from etl_craft.core.failures import Failure
-from etl_craft.dialects.failures import driver_error
+from etl_craft.dialects.failure_evidence import driver_error
 from etl_craft.dialects.warehouse.base import ReplaceStrategy, SurrogateKey, WarehouseDialect
 
 

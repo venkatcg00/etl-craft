@@ -4,21 +4,23 @@ from __future__ import annotations
 
 import argparse
 
-from etl_craft.cli.commands.common import Command, command_context, configure_output
+from etl_craft.cli.commands.common import Command, call, configure_output, request_from
 from etl_craft.cli.output import Output
+from etl_craft.core.enums import ActionName
 from etl_craft.core.errors import ExitCode
 from etl_craft.services.doctor import Status
-from etl_craft.services.operations.diagnostics import validate_metadata
+from etl_craft.services.operations.diagnostics import Report
+from etl_craft.services.operations.requests import ValidateInput
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
     configure_output(parser)
-    parser.add_argument("--pipeline_code", help="check only this pipeline")
+    parser.add_argument("--pipeline-code", help="Check only this pipeline.")
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    with command_context(args) as ctx:
-        done = validate_metadata(ctx, args.pipeline_code)
+    done = call(args, ActionName.VALIDATE, request_from(args, ValidateInput))
+    assert isinstance(done, Report)
 
     def render() -> None:
         for finding in done.findings:
@@ -38,4 +40,5 @@ COMMAND = Command(
     help="Check every active pipeline's tasks, parameters and dependencies; exit 1 on a problem.",
     configure=_configure,
     run=_run,
+    actions=(ActionName.VALIDATE,),
 )

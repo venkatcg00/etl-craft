@@ -17,30 +17,30 @@ from etl_craft.core.errors import ConfigurationError
 
 pytestmark = pytest.mark.unit
 
-ENGINE_VARS = "TEST_ENGINE_USER=etl_engine\nTEST_ENGINE_AUTH_MODE=password\n"
+ENGINE_VARS = "TEST_ENGINE_USER=etl_engine\nTEST_ENGINE_AUTH_MODE=PASSWORD\n"
 
 VALID_YAML = """
 Secrets:
-  Source_type: environment
+  Source_type: ENVIRONMENT
 
 Orchestration:
 
 Engine:
   dev:
-    jdbc_url: jdbc:postgresql://localhost:5432/etl_craft
-    schema: public
-    user: TEST_ENGINE_USER
-    auth_mode: TEST_ENGINE_AUTH_MODE
-    secret: ETL_CRAFT_POSTGRES_DEV_SECRET
+    Jdbc_url: jdbc:postgresql://localhost:5432/etl_craft
+    Schema: public
+    User: TEST_ENGINE_USER
+    Auth_mode: TEST_ENGINE_AUTH_MODE
+    Secret: ETL_CRAFT_POSTGRES_DEV_SECRET
 """
 
-SQLITE_ENGINE = "  dev:\n    jdbc_url: jdbc:sqlite:e.db\n    schema: main\n"
+SQLITE_ENGINE = "  dev:\n    Jdbc_url: jdbc:sqlite:e.db\n    Schema: main\n"
 
 
 @pytest.fixture(autouse=True)
 def engine_variables(monkeypatch):
     monkeypatch.setenv("TEST_ENGINE_USER", "etl_engine")
-    monkeypatch.setenv("TEST_ENGINE_AUTH_MODE", "password")
+    monkeypatch.setenv("TEST_ENGINE_AUTH_MODE", "PASSWORD")
 
 
 def write_config(tmp_path: Path, contents: str) -> Path:
@@ -69,7 +69,7 @@ def test_a_secret_is_checked_at_load_and_again_when_resolved(tmp_path, monkeypat
 
 def test_a_secret_can_name_any_variable(tmp_path, monkeypatch):
     overridden = VALID_YAML.replace(
-        "secret: ETL_CRAFT_POSTGRES_DEV_SECRET", "secret: MY_CUSTOM_SECRET"
+        "Secret: ETL_CRAFT_POSTGRES_DEV_SECRET", "Secret: MY_CUSTOM_SECRET"
     )
     monkeypatch.setenv("MY_CUSTOM_SECRET", "hunter2")
     config = load_config(write_config(tmp_path, overridden))
@@ -83,8 +83,8 @@ def test_resolve_secret_from_a_file_source(tmp_path):
         encoding="utf-8",
     )
     file_source_yaml = VALID_YAML.replace(
-        "Secrets:\n  Source_type: environment\n",
-        f"Secrets:\n  Source_type: file\n  Path: {env_file}\n",
+        "Secrets:\n  Source_type: ENVIRONMENT\n",
+        f"Secrets:\n  Source_type: FILE\n  Path: {env_file}\n",
     )
     config = load_config(write_config(tmp_path, file_source_yaml))
     assert resolve_secret(config, config.engine) == "filesecret"
@@ -98,8 +98,8 @@ def test_the_file_source_path_is_relative_to_the_config_file(tmp_path, monkeypat
     connector = connector_dir / "craft-connector.yml"
     connector.write_text(
         VALID_YAML.replace(
-            "Secrets:\n  Source_type: environment\n",
-            "Secrets:\n  Source_type: file\n  Path: ../secrets.env\n",
+            "Secrets:\n  Source_type: ENVIRONMENT\n",
+            "Secrets:\n  Source_type: FILE\n  Path: ../secrets.env\n",
         ),
         encoding="utf-8",
     )
@@ -119,13 +119,13 @@ def test_read_secrets_file_errors(tmp_path):
 @pytest.mark.parametrize(
     ("auth_mode", "extra", "needs"),
     [
-        ("password", {}, True),
-        ("token", {}, True),
-        ("oauth", {}, True),
-        ("none", {}, False),
-        ("sts", {}, False),
-        ("sso", {}, False),
-        ("key_file", {"secret_var": "KEY_PASSPHRASE"}, True),
+        ("PASSWORD", {}, True),
+        ("TOKEN", {}, True),
+        ("OAUTH", {}, True),
+        ("NONE", {}, False),
+        ("STS", {}, False),
+        ("SSO", {}, False),
+        ("KEY_FILE", {"secret_var": "KEY_PASSPHRASE"}, True),
     ],
 )
 def test_profile_needs_secret(auth_mode, extra, needs):

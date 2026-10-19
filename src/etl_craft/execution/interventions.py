@@ -34,13 +34,14 @@ from etl_craft.core.enums import (
     FINISHED_RUN_STATUSES,
     MARKABLE_STATUSES,
     GatePolicy,
+    Handler,
     InterventionAction,
     RunStatus,
 )
 from etl_craft.core.errors import RunRefusedError, RunStateError, UsageError
 from etl_craft.engine import controls, locks, runlog, transitions
 from etl_craft.engine.queries import statement
-from etl_craft.engine.repository import interventions as record
+from etl_craft.engine.repository import intervention_rows as record
 from etl_craft.engine.repository import pauses
 from etl_craft.engine.repository.offsets import StoredOffset, fetch_task_offset, save_task_offset
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
@@ -82,7 +83,7 @@ def mark_task(
     """Mark ``task_code`` ``status`` under the selected run.
 
     A run that has ended is reopened, and the tasks the engine skipped without running are
-    reset, so the next ``run --pipeline_code`` resumes it. A task that is ``IN-PROGRESS`` is
+    reset, so the next ``run --pipeline-code`` resumes it. A task that is ``IN-PROGRESS`` is
     refused while its lease is live. ``stale`` reconciles expired attempts before marking.
     Raises ``RunStateError`` when
     the pipeline has no run, and ``RunRefusedError`` while the task is running.
@@ -104,7 +105,7 @@ def mark_task(
             raise RunRefusedError(
                 f"{pipeline_code}.{task_code} is running under pipeline_run_id={run_id}; wait "
                 "for it to end, or end the run with `etl-craft stop` or `abort`. If the process "
-                "running it is gone, pass --stale after its lease expires to record its outcome"
+                "running it is gone, give `stale` after its lease expires to record its outcome"
             )
         if before == status and rows is None and not lost:
             raise UsageError(
@@ -150,7 +151,7 @@ def mark_task(
         if kept:
             message += f"; kept SKIPPED: {', '.join(kept)}"
     if run_status != RunStatus.IN_PROGRESS or reset:
-        message += f". Run `etl-craft run --pipeline_code {pipeline_code}` to resume it"
+        message += f". Run `etl-craft run --pipeline-code {pipeline_code}` to resume it"
     logger.warning("%s (by %s: %s)", message, who, reason)
     return Intervened(message, run_id)
 
@@ -222,9 +223,9 @@ def record_stand_in_run(
     which gets ``status`` and ``rows``. Raises ``RunStateError`` while the pipeline has a run in
     progress.
     """
-    status = _check(config, "mark --new-run", reason, status, rows)
+    status = _check(config, "a stand-in run", reason, status, rows)
     if rows is not None and task_code is None:
-        raise UsageError("--rows states a task's row count: name the task with --task_code")
+        raise UsageError("`rows` states a task's row count: name the task with `task_code`")
     who = requested_by or current_actor().name
     with engine.begin() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
@@ -348,7 +349,7 @@ def resume_pipeline(
     message = f"{pipeline_code}: resumed"
     if active is not None:
         message += (
-            f"; `etl-craft run --pipeline_code {pipeline_code}` goes on with "
+            f"; `etl-craft run --pipeline-code {pipeline_code}` goes on with "
             f"pipeline_run_id={active}"
         )
     logger.warning("%s (by %s: %s)", message, who, reason)
@@ -409,7 +410,7 @@ def check_override(config: ConnectorConfig, option: str, reason: str | None) -> 
     Raises ``UsageError`` without a reason.
     """
     if reason is None or not reason.strip():
-        raise UsageError(f"{option} needs a --reason: it is recorded with the run")
+        raise UsageError(f"{option} needs a `reason`: it is recorded with the run")
     return reason
 
 
@@ -441,16 +442,16 @@ def _check(
     config: ConnectorConfig, command: str, reason: str, status: str | None, rows: int | None
 ) -> RunStatus:
     if not reason.strip():
-        raise UsageError(f"{command} needs a --reason: it is recorded with the change")
+        raise UsageError(f"{command} needs a `reason`: it is recorded with the change")
     if rows is not None and rows < 0:
-        raise UsageError(f"--rows is a row count, so it cannot be negative (got {rows})")
+        raise UsageError(f"`rows` is a row count, so it cannot be negative (got {rows})")
     if status is None:
         return RunStatus.IN_PROGRESS
     if status not in MARKABLE_STATUSES:
         raise UsageError(f"cannot mark {status!r}: choose one of {', '.join(MARKABLE_STATUSES)}")
     if rows is not None and status != RunStatus.SUCCESS:
         raise UsageError(
-            "--rows goes with SUCCESS: it is the row count a HAS_DATA dependency reads"
+            "`rows` goes with SUCCESS: it is the row count a HAS_DATA dependency reads"
         )
     return RunStatus(status)
 
@@ -543,7 +544,7 @@ def reset_watermark(
     selector: runlog.RunSelector = runlog.ACTIVE_RUN,
 ) -> Intervened:
     """Set a SQL task's typed offset, recording the before and after values as an intervention."""
-    _check(config, "mark --watermark", reason, None, None)
+    _check(config, "a watermark reset", reason, None, None)
     with engine.connect() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         task_id = resolve_task_id(conn, pipeline_id, task_code)
@@ -557,10 +558,10 @@ def reset_watermark(
             f"{pipeline_code}.{task_code} has {active} active attempt(s); wait for them "
             "to end or cancel and reconcile before resetting its watermark"
         )
-    if detail.handler != "SQL":
+    if detail.handler != Handler.SQL:
         raise UsageError(
             f"{pipeline_code}.{task_code} has HANDLER={detail.handler}; "
-            "--watermark needs a SQL task"
+            "`watermark` needs a SQL task"
         )
     task = read_sql_task(
         TaskContext(
@@ -572,7 +573,7 @@ def reset_watermark(
             0,
             0,
             0,
-            "SQL",
+            Handler.SQL,
             detail.refresh_type,
             params,
         )

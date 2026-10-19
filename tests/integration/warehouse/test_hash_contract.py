@@ -13,6 +13,7 @@ from etl_craft.handlers import sql
 from etl_craft.services.rehash import rehash
 from etl_craft.warehouse.connection import warehouse_dialect
 from fixtures.auth import service_token
+from fixtures.engine_db import profile_block
 from fixtures.hash_contract import golden_sql
 
 
@@ -143,20 +144,12 @@ def test_rehash_command_validates_dry_run_then_upgrades(sql_world, capsys, monke
         MERGE_COMPARE_COLUMNS="name",
     )
     profile = w.config.warehouse
-    fields = {
-        "jdbc_url": profile.jdbc_url,
-        "schema": profile.schema,
-        "user": profile.user,
-        "auth_mode": str(profile.auth_mode),
-        **profile.extra,
-    }
-    if name := fields.pop("secret_var", None):
-        fields["secret"] = name
+    fields = profile_block(profile, profile.schema)
     raw = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {},
         "Engine": {
-            "dev": {"jdbc_url": f"jdbc:sqlite:{w.engine_db.url.database}", "schema": "main"}
+            "dev": {"Jdbc_url": f"jdbc:sqlite:{w.engine_db.url.database}", "Schema": "main"}
         },
         "Warehouse": {
             "Name": {

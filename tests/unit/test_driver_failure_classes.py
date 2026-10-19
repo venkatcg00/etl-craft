@@ -15,7 +15,7 @@ from etl_craft.config import parse_config
 from etl_craft.core.enums import FailureClass, RetryOn
 from etl_craft.core.errors import ConfigurationError, HandlerError, PermanentError, TransientError
 from etl_craft.dialects.warehouse import for_key
-from etl_craft.execution.failures import classify_failure
+from etl_craft.execution.classify import classify_failure
 from etl_craft.execution.retries import task_retry_policy
 from unit.test_execution_limits import CONFIG
 
@@ -154,9 +154,9 @@ def test_policy_classes_and_project_override(policy, allowed):
 
 def test_project_retry_policy_validation():
     raw = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {"Retry_on": "occasionally"},
-        "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:e.db", "schema": "main"}},
+        "Engine": {"dev": {"Jdbc_url": "jdbc:sqlite:e.db", "Schema": "main"}},
     }
     with pytest.raises(ConfigurationError, match=r"Retry_on.*occasionally.*TRANSIENT"):
         parse_config(raw, Path("craft-connector.yml"))
