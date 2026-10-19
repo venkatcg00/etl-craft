@@ -62,3 +62,11 @@ Each Engine DB ships its own `schema.sql` with the same tables and columns, and 
 one active row per code, one `IN-PROGRESS` run per pipeline, one task-run row per task per run,
 and the value lists every `CHECK` constraint enforces. See
 [Dependencies and run conditions](../guides/dependencies.md) for what the dependency tables mean.
+
+## Team-owned configuration tables
+
+The package owns the config names listed in `dialects/engine/tables.py`. Extra `CFG_` tables
+belong to your team and accept writes from its scripts without etl-craft actors or base fields.
+They are omitted from package config files, history capture, catalog documentation and warehouse
+cloning. Package-owned tables retain their guards. `AUD_` remains reserved, and existing team
+history is retained read-only on upgrade. See [Project configuration tables](../guides/configuration-migrations.md#project-configuration-tables).

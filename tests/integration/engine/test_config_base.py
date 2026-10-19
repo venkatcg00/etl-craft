@@ -39,7 +39,7 @@ def test_all_config_tables_have_mandatory_base_fields_and_one_key(engine_db):
 @pytest.mark.parametrize(
     "problem", ["missing", "nullable", "date_type", "no_key", "two_keys", "nullable_key"]
 )
-def test_invalid_project_config_contract_rolls_back(engine_db, tmp_path, problem):
+def test_team_config_tables_do_not_need_the_package_base_contract(engine_db, tmp_path, problem):
     date = "TIMESTAMPTZ" if engine_db.engine.dialect.name == "postgresql" else "TIMESTAMP"
     columns = (
         "ID BIGINT PRIMARY KEY NOT NULL, CREATED_BY VARCHAR NOT NULL, "
@@ -68,16 +68,10 @@ def test_invalid_project_config_contract_rolls_back(engine_db, tmp_path, problem
     (project / "0001_config.sql").write_text(f"CREATE TABLE CFG_PROJECT ({columns});")
     with engine_db.engine.begin() as conn:
         migrations.mark_packaged_migrations_applied(conn)
-    with pytest.raises(MigrationError, match="common config fields and key"):
-        migrations.apply_pending_migrations(engine_db.engine, project)
+    applied = migrations.apply_pending_migrations(engine_db.engine, project)
+    assert "0001_config.sql" in applied
     with engine_db.engine.connect() as conn:
-        assert "CFG_PROJECT" not in {name.upper() for name in inspect(conn).get_table_names()}
-        assert (
-            conn.execute(
-                text("SELECT COUNT(*) FROM SCHEMA_MIGRATIONS WHERE SOURCE='PROJECT'")
-            ).scalar_one()
-            == 0
-        )
+        assert "CFG_PROJECT" in {name.upper() for name in inspect(conn).get_table_names()}
 
 
 def test_token_lifecycle_is_attributed_without_credentials(engine_db):

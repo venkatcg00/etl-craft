@@ -1,6 +1,6 @@
 """Keep the metadata change triggers complete when a migration adds tables or columns.
 
-Every change to a ``CFG_`` row is kept as a version in its typed history table,
+Every change to a package-owned ``CFG_`` row is kept as a version in its typed history table,
 ``AUD_<table>_HISTORY``: the row's values after an insert or update, or when deleted, with who
 changed it and under which project migration. A version is valid from ``VALID_FROM`` until
 ``VALID_TO``; the current one has ``CURRENT_FLAG`` ``'Y'`` and ``VALID_TO`` 9999-12-31, and the
@@ -23,7 +23,15 @@ from etl_craft.core.text import quote_identifier as quote
 from etl_craft.dialects.engine.metadata import (
     CREDENTIAL_COLUMNS,
     config_base_enabled,
+    legacy_team_tables,
     require_config_base,
+)
+from etl_craft.dialects.engine.tables import (
+    CONFIG_TABLES,
+    OWNED_CONFIG_TABLES,
+    retired_history,
+    team_config,
+    validate_audit_table,
 )
 
 NOW = "(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00')"
@@ -80,16 +88,18 @@ def refresh_metadata_triggers(conn: Connection) -> None:
             "OR upper(name) LIKE 'AUD\\_%' ESCAPE '\\')"
         )
     ]
+    archived = _release_team_tables(conn, tables)
     for table in tables:
         name = table.upper()
         history_of_config = name.startswith("AUD_CFG_") and name.endswith("_HISTORY")
         if (name.startswith("AUD_") and not history_of_config) or name == "CFG_API_TOKENS":
             _guard_writes(conn, table)
     # Sorted, so a migrated Engine DB gets the same triggers and view as a new one.
+    owned = CONFIG_TABLES if _exists(conn, "CFG_TABLES") else OWNED_CONFIG_TABLES
     configs = sorted(
         table
         for table in tables
-        if table.upper().startswith("CFG_") and (history or table.upper() != "CFG_API_TOKENS")
+        if table.upper() in owned and (history or table.upper() != "CFG_API_TOKENS")
     )
     if config_base_enabled(conn):
         for table in configs:
@@ -102,11 +112,11 @@ def refresh_metadata_triggers(conn: Connection) -> None:
         _ensure_history(conn, table)
         _history_guards(conn, history_table(table))
     if log:
-        _move_log(conn, configs)
+        archived.extend(_copy_legacy_team_log(conn, tables, configs))
     histories = configs + (
         ["CFG_SOURCE_COLUMNS"]
         if _exists(conn, history_table("CFG_SOURCE_COLUMNS"))
-        and not _exists(conn, "CFG_SOURCE_COLUMNS")
+        and "CFG_SOURCE_COLUMNS" not in {table.upper() for table in configs}
         else []
     )
     for table in histories:
@@ -114,7 +124,8 @@ def refresh_metadata_triggers(conn: Connection) -> None:
     next_id = (
         "(SELECT COALESCE(MAX(m), 0) + 1 FROM ("
         + " UNION ALL ".join(
-            f"SELECT MAX(CHANGE_ID) AS m FROM {quote(history_table(table))}" for table in histories
+            f"SELECT MAX(CHANGE_ID) AS m FROM {quote(table)}"
+            for table in [history_table(name) for name in histories] + archived
         )
         + "))"
     )
@@ -123,6 +134,7 @@ def refresh_metadata_triggers(conn: Connection) -> None:
     if log:
         conn.exec_driver_sql("DROP TABLE AUD_METADATA_CHANGES")
     _change_view(conn, histories)
+    _freeze_histories(conn, archived)
 
 
 def _guard_writes(conn: Connection, table: str) -> None:
@@ -209,7 +221,7 @@ def _move_log(conn: Connection, configs: list[str]) -> None:
     for table in configs:
         names = [name for name, _, _ in _columns(conn, table)]
         values = ", ".join(
-            f"json_extract(COALESCE(c.AFTER_JSON, c.BEFORE_JSON), '$.\"{name.lower()}\"')"
+            "(SELECT value FROM json_each(COALESCE(c.AFTER_JSON, c.BEFORE_JSON)) WHERE key=?)"
             for name in names
         )
         conn.exec_driver_sql(
@@ -222,7 +234,7 @@ def _move_log(conn: Connection, configs: list[str]) -> None:
             f"c.OPERATION, c.ACTOR, c.ACTOR_KIND, c.MIGRATION, {values} "
             "FROM AUD_METADATA_CHANGES c WHERE c.TABLE_NAME=? "
             "WINDOW w AS (PARTITION BY c.ROW_KEY ORDER BY c.CHANGE_ID) ORDER BY c.CHANGE_ID",
-            (table.upper(),),
+            (*[name.lower() for name in names], table.upper()),
         )
 
 
@@ -354,8 +366,8 @@ def _change_view(conn: Connection, configs: list[str]) -> None:
     parts = []
     for table in configs:
         history = history_table(table)
-        columns = _columns(conn, table)
-        if not columns and table == "CFG_SOURCE_COLUMNS":
+        columns = [] if table.upper() == "CFG_SOURCE_COLUMNS" else _columns(conn, table)
+        if not columns and table.upper() == "CFG_SOURCE_COLUMNS":
             columns = [
                 (name, kind, name.upper() == "SOURCE_COLUMN_ID")
                 for name, kind, _ in _columns(conn, history)
@@ -383,3 +395,59 @@ def _change_view(conn: Connection, configs: list[str]) -> None:
             f"FROM {quote(history)}"
         )
     conn.exec_driver_sql(f"CREATE VIEW AUD_METADATA_CHANGES AS {' UNION ALL '.join(parts)}")
+
+
+def _release_team(conn: Connection, table: str, triggers: set[str]) -> None:
+    """Remove only trigger names installed by etl-craft, leaving the team's triggers alone."""
+    for event in ("insert", "update", "delete"):
+        for prefix in ("trg_actor_guard_", "trg_audit_"):
+            trigger = f"{prefix}{table.lower()}_{event}"
+            if trigger in triggers:
+                conn.exec_driver_sql(f"DROP TRIGGER {quote(trigger)}")
+
+
+def _freeze_history(conn: Connection, table: str) -> None:
+    """Retain former team history as read-only evidence, including for engine actors."""
+    literal = table.replace("'", "''")
+    for event in ("INSERT", "UPDATE", "DELETE"):
+        trigger = quote(f"trg_frozen_{table.lower()}_{event.lower()}")
+        conn.exec_driver_sql(
+            f"CREATE TRIGGER IF NOT EXISTS {trigger} BEFORE {event} ON {quote(table)} "
+            f"BEGIN SELECT RAISE(ABORT, '{literal}: retired team history is read-only; "
+            "query preserved records and write the team CFG_ table instead'); END"
+        )
+
+
+def _release_team_tables(conn: Connection, tables: list[str]) -> list[str]:
+    """Release team triggers and validate the reserved audit namespace before installing guards."""
+    archived = []
+    for table in tables:
+        triggers = {
+            row.name
+            for row in conn.exec_driver_sql(
+                "SELECT name AS name FROM sqlite_schema WHERE type='trigger' AND tbl_name=? "
+                "AND (sql LIKE '%etl_craft_%' OR name LIKE 'trg_frozen_%')",
+                (table,),
+            )
+        }
+        validate_audit_table(table, triggers)
+        if team_config(table, legacy=not _exists(conn, "CFG_TABLES")):
+            _release_team(conn, table, triggers)
+        if retired_history(table):
+            archived.append(table)
+    return archived
+
+
+def _freeze_histories(conn: Connection, tables: list[str]) -> None:
+    """Keep every retired history table read-only after refresh."""
+    for table in tables:
+        _freeze_history(conn, table)
+
+
+def _copy_legacy_team_log(conn: Connection, tables: list[str], configs: list[str]) -> list[str]:
+    """Convert recorded team changes before retiring the legacy log table."""
+    team_logs = legacy_team_tables(conn, set(tables))
+    for table in team_logs:
+        _ensure_history(conn, table)
+    _move_log(conn, configs + team_logs)
+    return [history_table(table) for table in team_logs]

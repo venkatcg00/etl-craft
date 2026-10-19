@@ -132,7 +132,7 @@ item's text, or work done early under another item.
 | S5.O.3 SCD human override protection | In progress | #208 | Native PostgreSQL/DuckDB protection, admin edits/unlocks and column provenance implemented; cloud acceptance unavailable |
 | S5.Q Scoped operator controls | Done | #209, #210, #211 | Isolated manual selections, scoped holds/stop/abort, durable recovery/restart preparation, one-run pause permission, selected bulk outcomes and shared capabilities |
 | S5.T Resource discovery and deployment profiles | Done | #212 | `core/resources.py` measures affinity, cgroup v1/v2 quotas and memory limits; `Deployment.Profile` sizes `run` and `server` slots, server threads and the Engine DB pool within written ceilings; doctor/setup report measurements, sizes, fallbacks and the PostgreSQL connection budget |
-| S5.V Team-owned config tables | Planned | | Teams' own `CFG_` tables carry no etl-craft guards, contract, history or config files; etl-craft's tables keep them |
+| S5.V Team-owned config tables | In progress | #213 | Fixed package ownership, unrestricted team config, retained read-only team history and collision preflight implemented; Databricks acceptance unavailable |
 | S5.U Robustness before the cluster | Done | #176, #182, #183, #184 | Engine DB restarts ridden out; SLA breach writes retried; no single-writer guess; timing tests verified under load; subprocess code measured by coverage |
 | S5.W Retry only what can succeed | Planned | | Transient, permanent and unknown failure classes per dialect; `Retry_on` / `RETRY_ON` of `NONE`, `TRANSIENT` (default), `TRANSIENT_AND_UNKNOWN` or `ANY`; each attempt records why it was or was not retried |
 | S5.Z Controller and agent names | Planned | | The overseer becomes the controller (`etl-craft controller`, `AUD_CONTROLLERS`) and S5.C's worker the agent, before S5.C |
@@ -157,8 +157,9 @@ holds/stop/abort and physical completion evidence; #211 adds recovery/restart pr
 one-run permission under definition pause, selected bulk results and shared capabilities.
 S5.O.3 cloud acceptance remains recorded below; probe provider availability rather than
 waiting for a human quota reset. S5.T is done (#212), which also split `cancel` into `stop` and
-`abort` and scoped `pause`/`resume` into `hold`/`release` at the owner's request. S5.V is the
-next planned implementation item.
+`abort` and scoped `pause`/`resume` into `hold`/`release` at the owner's request. S5.V (#213)
+implements team-owned config and awaits Databricks acceptance; re-query provider availability
+before completing its handover. S5.W follows it as the next planned implementation item.
 
 Item 2 includes the approved move of account administration, interactive first-admin bootstrap,
 the no-active-admin doctor check and scrypt password hashing from item 1. Sessions reuse
@@ -274,6 +275,14 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.V (#213) has SQLite/PostgreSQL acceptance for plain team writes, package guards, config
+exports, preserved team triggers, frozen typed history, lossless legacy JSON history and
+migration-name collisions. Local cloning covers the four warehouses; the affected Snowflake
+cloud cloning test passed. A fresh Databricks statement request failed before SQL execution
+with HTTP 400 and the warehouse reported STOPPED, so Databricks cloning acceptance is
+unavailable and the PR stays unmerged. This is not confirmation of a quota reset or a request
+for human approval; probe the provider again in a later session.
 
 S5.T (#212) runs discovery and sizing from supplied measurements in unit tests, and role
 startup, the sized Engine DB pool, a zero-slot pool and the connection budget on both Engine
@@ -490,6 +499,18 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- S5.V: config CSVs and generated catalog pages already selected package metadata explicitly;
+  preserve that scope instead of adding a second file format or discovering team tables.
+  The schema-side ownership list includes current config names and the retired source-column
+  name only during upgrades before its replacement registry exists. Migration `0040` uses the
+  existing trigger-refresh path, without
+  a new migration marker or filename-specific Python branch. Only recognized generated
+  triggers are removed; team triggers remain. Retained typed team history is frozen, omitted
+  from current metadata views, and legacy JSON team records are converted before log removal.
+  Missing definitions needed for that conversion fail with a remedy. Cloning and doctor grant
+  checks exclude team config. Package-name collision checks run before pending migration
+  writes; namespace violations in project DDL roll back that project file.
 
 - S5.T: `Deployment` is a flat section without profile blocks, because a profiled section's
   `Profile` key already selects a block; a per-environment value comes from a variable. The

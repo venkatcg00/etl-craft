@@ -1,0 +1,3 @@
+-- Teams maintain extra CFG_ tables through their own scripts or project migrations.
+CREATE TABLE CFG_TEAM_ROUTING (CHANNEL_CODE VARCHAR, DESTINATION VARCHAR);
+INSERT INTO CFG_TEAM_ROUTING (CHANNEL_CODE, DESTINATION) VALUES ('EMAIL', 'ops');

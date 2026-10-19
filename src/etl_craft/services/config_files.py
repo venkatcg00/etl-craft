@@ -1,4 +1,4 @@
-"""The project's config files: one CSV file per ``CFG_`` table, loaded into the Engine DB.
+"""Merge package-owned configuration from the project's CSV files into the Engine DB.
 
 The files in ``config/`` are the whole configuration, inactive rows included: each row has an
 ``ACTIVE_FLAG``. ``read_config_files`` reads and checks every file. ``sync_config`` merges them by

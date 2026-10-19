@@ -115,8 +115,11 @@ that damages the package is not helpful; saying so, with a better option, is.
 - `craft-connector.yml` is written by the team and only read by the engine. Secrets are always
   variable names, never values. Its directory is the project directory, holding `sql_files/`,
   `ingestion_scripts/`, `config/`, `migrations/` and `logs/`; relative paths start there.
-- Every write to the Engine DB goes through etl-craft and names its actor; the Engine DB refuses
-  any other. Metadata edits use the project's config files (one CSV file per `CFG_` table,
+- Every write to etl-craft's Engine DB tables goes through etl-craft and names its actor; the
+  Engine DB refuses any other. Extra team-owned `CFG_` tables are outside this rule: teams
+  maintain them with their own scripts, without package guards, history or field requirements.
+  `AUD_` stays reserved for etl-craft. Metadata edits use the project's config files
+  (one CSV file per package-owned config table,
   merged by key with `etl-craft config apply`) or project migrations. Audit history is
   append-only and audit tables take no outside writes.
 - **Fail rather than guess.** When metadata, files, connections or data are not what the engine

@@ -1466,3 +1466,6 @@ BEGIN SELECT RAISE(ABORT, 'control request identity and completed outcome are im
 CREATE TRIGGER trg_control_identity_delete BEFORE DELETE ON AUD_CONTROL_REQUESTS
 WHEN etl_craft_purpose() <> 'retention'
 BEGIN SELECT RAISE(ABORT, 'control request is immutable; use etl-craft retention'); END;
+
+-- Only the package config tables listed in dialects/engine/tables.py receive metadata guards.
+-- Other CFG_ tables are team-owned; AUD_ remains reserved for package audit records.

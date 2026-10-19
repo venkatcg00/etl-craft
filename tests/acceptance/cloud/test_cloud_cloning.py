@@ -33,6 +33,8 @@ def gains_columns(tmp_path, name, fields, table_format, schema):
     apply_schema(engine_db)
     with engine_db.begin() as conn:
         add_pipeline(conn, "SALES")
+        conn.execute(text("CREATE TABLE CFG_TEAM (PASSWORD_HASH VARCHAR)"))
+        conn.execute(text("INSERT INTO CFG_TEAM VALUES ('team-owned')"))
         conn.execute(
             text(
                 "INSERT INTO CFG_ACCOUNTS (ACCOUNT_NAME,ACCOUNT_KIND,ROLE,PASSWORD_HASH) "
@@ -44,6 +46,7 @@ def gains_columns(tmp_path, name, fields, table_format, schema):
     mirror = f"{active_catalog(config)}.{schema}.etl_craft_mirror_{uuid.uuid4().hex[:8]}"
     accounts_mirror = mirror + "_accounts"
     inventory = dict(cloning._engine_tables(engine_db, config, ("CFG_",)))
+    assert "CFG_TEAM" not in inventory
     columns = next(
         cols
         for table, cols in cloning._engine_tables(engine_db, config, ("CFG_",))

@@ -130,7 +130,7 @@ one for that profile.
 ## Pipelines
 
 `config/` holds [configuration files](../guides/configuration-files.md) for an example sales
-project, one CSV file per `CFG_` table: copy the folder into your project and change the rows.
+project, one CSV file per supported package-owned config table: copy the folder into your project and change the rows.
 `migrations/` holds the same configuration written as
 [configuration migrations](../guides/configuration-migrations.md), one file per kind of change.
 `config/` is exactly what `etl-craft config export` writes once the migrations are applied, and

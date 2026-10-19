@@ -1,7 +1,7 @@
 """Cloning: copying the Engine DB tables into the warehouse after each pipeline run.
 
 With ``Cloning.Enabled``, every run ends by mirroring the Engine DB tables its ``Scope`` names
-(``cfg``: the ``CFG_`` tables, ``aud``: the ``AUD_`` tables, ``all``, or ``none``) into the
+(``cfg``: package config, ``aud``: audit tables, ``all``, or ``none``) into the
 warehouse profile's ``schema``, so a team can query its pipelines' configuration and history
 from inside its own warehouse.
 
@@ -44,6 +44,7 @@ from etl_craft.core.enums import CloningScope
 from etl_craft.core.errors import CloningError, ConfigurationError
 from etl_craft.core.text import parse_jdbc_url, qualify
 from etl_craft.dialects.engine.metadata import CREDENTIAL_COLUMNS
+from etl_craft.dialects.engine.tables import CONFIG_TABLES
 from etl_craft.dialects.warehouse import WarehouseDialect
 from etl_craft.engine import locks
 from etl_craft.execution.run_types import PipelineOutcome, RunHooks, default_hooks
@@ -168,7 +169,11 @@ def _engine_tables(
     inspector = inspect(engine)
     found = []
     for name in sorted(inspector.get_table_names(schema=schema), key=str.upper):
-        if name.upper().startswith(prefixes) and name.upper() != "CFG_API_TOKENS":
+        if (
+            name.upper().startswith(prefixes)
+            and name.upper() != "CFG_API_TOKENS"
+            and (not name.upper().startswith("CFG_") or name.upper() in CONFIG_TABLES)
+        ):
             columns = [
                 c
                 for c in inspector.get_columns(name, schema=schema)

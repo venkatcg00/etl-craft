@@ -1,9 +1,10 @@
 """The required shape of engine and project configuration tables."""
 
-from sqlalchemy import DateTime, String, inspect
+from sqlalchemy import DateTime, String, inspect, text
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.errors import MetadataError
+from etl_craft.dialects.engine.tables import team_config
 
 CREDENTIAL_COLUMNS = {
     "CFG_API_TOKENS": frozenset({"TOKEN_SHA256"}),
@@ -57,3 +58,23 @@ def require_config_base(conn: Connection, table: str) -> None:
             f"{table}: {'; '.join(problems)}; define the common config fields and key "
             "in the table's CREATE TABLE statement before applying the project migration"
         )
+
+
+def legacy_team_tables(conn: Connection, tables: set[str]) -> list[str]:
+    """Preserve old team log records when converting the legacy metadata log."""
+    found = {name.upper(): name for name in tables}
+    recorded = {
+        row.table_name.upper()
+        for row in conn.execute(
+            text("SELECT DISTINCT TABLE_NAME AS table_name FROM AUD_METADATA_CHANGES")
+        )
+        if team_config(row.table_name)
+    }
+    missing = recorded - set(found)
+    if missing:
+        raise MetadataError(
+            f"legacy metadata history refers to missing team tables {sorted(missing)}; "
+            "restore those table definitions before upgrading so "
+            "their audit records can be retained"
+        )
+    return [found[name] for name in sorted(recorded)]
