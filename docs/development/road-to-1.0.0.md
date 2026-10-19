@@ -129,10 +129,10 @@ item's text, or work done early under another item.
 | S5.P Project documentation gap UI | Done | #165 | Structured schema/lineage gaps, accessible column/graph warnings and read-only comparison API |
 | S5.R Consolidate before the cluster | Done | #179, #185, #188 to #193, #195, #201 | Items 1 to 8 complete: the execution core and configuration loader are split by responsibility; the moved execution functions are shortened with shared run records and unchanged transactions and retries |
 | S5.S Accounts, login and roles | Done | #203, #204, #205, #206, #207 | Account identities, local and server sign-in with refresh tokens, one service-role policy, explicit actors with an `etl-craft` writer on every run, and a local installation operating a server over HTTPS; every action has one implementation that the CLI, the API and later the UI call |
-| S5.O.3 SCD human override protection | In progress | #208 | Native PostgreSQL/DuckDB protection, admin edits/unlocks and column provenance implemented; cloud acceptance unavailable |
+| S5.O.3 SCD human override protection | Done | #208 | Native PostgreSQL/DuckDB protection, admin edits/unlocks and column provenance; cloud acceptance unavailable on its try |
 | S5.Q Scoped operator controls | Done | #209, #210, #211 | Isolated manual selections, scoped holds/stop/abort, durable recovery/restart preparation, one-run pause permission, selected bulk outcomes and shared capabilities |
 | S5.T Resource discovery and deployment profiles | Done | #212 | `core/resources.py` measures affinity, cgroup v1/v2 quotas and memory limits; `Deployment.Profile` sizes `run` and `server` slots, server threads and the Engine DB pool within written ceilings; doctor/setup report measurements, sizes, fallbacks and the PostgreSQL connection budget |
-| S5.V Team-owned config tables | In progress | #213 | Fixed package ownership, unrestricted team config, retained read-only team history and collision preflight implemented; Databricks acceptance unavailable |
+| S5.V Team-owned config tables | Done | #213 | Fixed package ownership, unrestricted team config, retained read-only team history and collision preflight; Databricks acceptance unavailable on its try |
 | S5.U Robustness before the cluster | Done | #176, #182, #183, #184 | Engine DB restarts ridden out; SLA breach writes retried; no single-writer guess; timing tests verified under load; subprocess code measured by coverage |
 | S5.W Retry only what can succeed | Done | #215 | Failure classification, retry policies and immutable attempt evidence; local and Snowflake acceptance passed, unavailable Databricks live acceptance waived by the owner |
 | S5.Z Controller and agent names | Done | #216 | Controller command/package/history, agent terminology and consistent deployment profiles; lossless Engine DB upgrades |
@@ -292,8 +292,8 @@ exports, preserved team triggers, frozen typed history, lossless legacy JSON his
 migration-name collisions. Local cloning covers the four warehouses; the affected Snowflake
 cloud cloning test passed. A fresh Databricks statement request failed before SQL execution
 with HTTP 400 and the warehouse reported STOPPED, so Databricks cloning acceptance is
-unavailable and the PR stays unmerged. This is not confirmation of a quota reset or a request
-for human approval; probe the provider again in a later session.
+unavailable; under the one-try cloud rule (`AGENTS.md`, "Validation") it did not hold the
+merge. Databricks cloning is unverified on a live warehouse until release evidence runs it.
 
 S5.T (#212) runs discovery and sizing from supplied measurements in unit tests, and role
 startup, the sized Engine DB pool, a zero-slot pool and the connection budget on both Engine

@@ -274,8 +274,11 @@ make services-up          # local PostgreSQL, MinIO, Iceberg REST, Trino, Mailpi
 - **CI time:** required pull-request CI stays under ten minutes. A change that would take it
   over is a stop-and-ask.
 - **Cloud suites:** CI never runs the Databricks and Snowflake suites. A change to their dialects
-  or to SQL every warehouse runs needs them (see the skill). If you cannot run them, say so and
-  leave the pull request unmerged for the owner.
+  or to SQL every warehouse runs needs them (see the skill). Try each affected cloud once. When
+  it is unavailable (no credentials, compute will not start, the provider refuses before any SQL
+  runs), record that in the pull request and the roadmap's "Acceptance availability" note and
+  merge as usual. A cloud test that ran and failed is a failure: fix it. Release evidence still
+  needs every cloud suite to pass.
 - **Workflows:** a change under `.github/workflows/` needs `uvx --from actionlint-py actionlint`.
 
 ### The quality baseline
