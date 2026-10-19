@@ -42,6 +42,7 @@ from etl_craft.config.loader_orchestration import (
     parse_dependency_gates,
     parse_limits,
     parse_mode,
+    parse_retry_on,
 )
 from etl_craft.config.loader_warehouse import WAREHOUSE_SECTION_KEYS, parse_warehouse
 from etl_craft.config.model import DEFAULT_LOG_DIR, EXAMPLE_PATH, ConnectorConfig
@@ -204,6 +205,7 @@ def parse_config(raw: object, path: Path) -> ConnectorConfig:
         warehouse=warehouse,
         warehouse_table_format=table_format,
         dag_defaults=dag_defaults,
+        retry_on=parse_retry_on(orchestration, path),
         email=email,
         limits=limits,
         config_path=path,

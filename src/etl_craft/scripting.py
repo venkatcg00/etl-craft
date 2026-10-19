@@ -43,7 +43,15 @@ from sqlalchemy.engine import Engine
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.enums import OffsetType
-from etl_craft.core.errors import HandlerError
+from etl_craft.core.errors import (
+    HandlerError,
+)
+from etl_craft.core.errors import (
+    PermanentError as PermanentError,
+)
+from etl_craft.core.errors import (
+    TransientError as TransientError,
+)
 from etl_craft.core.text import qualify
 from etl_craft.warehouse.connection import open_warehouse
 

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, ClassVar
 
-from etl_craft.core.enums import RunStatus
+from etl_craft.core.enums import FailureClass, RunStatus
 from etl_craft.engine.repository.interventions import Intervention
 from etl_craft.engine.repository.pauses import Pause
 from etl_craft.engine.runlog import ACTIVE_RUN, RunSelector
@@ -76,6 +76,11 @@ class AttemptView:
     requested_by_kind: str | None
     not_before: datetime | None
     retryable: bool
+    failure_class: str = FailureClass.UNKNOWN
+    failure_source: str | None = None
+    failure_code: str | None = None
+    retry_on: str | None = None
+    retry_reason: str | None = None
 
 
 @dataclass(frozen=True)

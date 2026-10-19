@@ -8,6 +8,14 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Failure-aware automatic retries: `Orchestration.Retry_on` and task `RETRY_ON` select
+  `NONE`, `TRANSIENT` (default), `TRANSIENT_AND_UNKNOWN` or `ANY`. Permanent warehouse errors
+  stop after one attempt by default. Scripts can declare `TransientError` or `PermanentError`
+  from `etl_craft.scripting` (exit codes 28/29). Migration `0041` records each attempt's failure
+  class, original exception, SQLSTATE/driver code and effective retry policy on both Engine DBs;
+  explain, status JSON, the API and catalog run detail expose the evidence. Existing attempts
+  remain `UNKNOWN` with no reconstructed policy.
+
 - Team-owned extra `CFG_` tables accept ordinary SQL writes without package base fields,
   actor guards or history capture. They stay outside config CSVs, catalog documentation and
   warehouse cloning. Package-owned config tables use a fixed schema-side ownership list and

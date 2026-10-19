@@ -77,12 +77,35 @@ its due time and attempt budget. Waiting occupies no pipeline worker slot. Failu
 dependencies wait for this retry to settle. Retry budgets count persisted attempt numbers under
 one task-run identity; restarting a supervisor does not grant extra attempts.
 
-Configuration, metadata, usage and SQL input/target guards are not retryable. The child stores
-that decision in `AUD_TASK_ATTEMPTS.RETRYABLE`; a NULL merge key, for example, requires source
-correction and ends after one attempt. Cancelled attempts never retry. Lost attempts get a new
-owner only after reconciliation fences the old lease; their side effects can be uncertain, so
-use retry-safe ingestion scripts. Remote mode continues to delegate retries to its orchestrator
-and generated DAGs retain their Airflow retry settings.
+Automatic retries also require an eligible failure class. `Orchestration.Retry_on` defaults to
+`TRANSIENT`; the task parameter `RETRY_ON` overrides it:
+
+| Policy | Eligible failures |
+|---|---|
+| `NONE` | none, including dropped connections |
+| `TRANSIENT` | connection drops, serialization/deadlocks, resource shortages and timeouts |
+| `TRANSIENT_AND_UNKNOWN` | transient failures and unclassified exceptions |
+| `ANY` | every failure, including permanent errors; use deliberately |
+
+Syntax, missing objects, privileges, invalid data and constraints are `PERMANENT`.
+Configuration, metadata, usage and SQL input/target guards are also permanent. Unknown driver
+errors and ordinary script exceptions are `UNKNOWN`. Trino internal errors remain unknown;
+its external and resource errors are transient. Scripts can raise `TransientError` or
+`PermanentError` from `etl_craft.scripting` (exit codes `28` and `29`) to declare their class.
+A failure still needs budget under `RETRIES`; eligibility alone does not schedule another attempt.
+
+Each attempt captures its effective `RETRY_ON` before execution and records `FAILURE_CLASS`,
+`FAILURE_SOURCE`, `FAILURE_CODE` and derived `RETRYABLE` with its failure. `explain`,
+`status --json`, the API attempt/run documents and catalog run details show the stored evidence,
+such as `PERMANENT: UndefinedTable 42P01; RETRY_ON=TRANSIENT`. Later config edits do not rewrite
+that decision. Upgraded attempts retain their old `RETRYABLE`, class `UNKNOWN` and an unrecorded
+policy, because the old policy cannot be reconstructed.
+
+Cancelled attempts never retry. Lost leases and supervisor timeouts remain transient process
+failures. Lost attempts get a new owner only after reconciliation fences the old lease;
+their side effects can be uncertain, so use retry-safe ingestion scripts. A process that exits
+without reporting its outcome is unknown. Remote mode continues to delegate automatic retries
+to its orchestrator; generated DAGs retain their Airflow retry settings.
 
 
 Running a `FAILED` task again is a new attempt on the same `AUD_TASK_RUN_LOG` row: `ATTEMPT_COUNT`

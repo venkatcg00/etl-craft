@@ -98,7 +98,11 @@ keys. Engine inserts default to a generated manual key and `MANUAL`; other trigg
 are supplied explicitly by the engine.
 
 `AUD_TASK_ATTEMPTS` stores attempt identities, lifecycle timestamps, ownership, process details,
-counts and logs. The migration copies each non-skipped task summary into one attempt at its
+counts and logs. Migration `0041` adds `FAILURE_CLASS`, `FAILURE_SOURCE`, `FAILURE_CODE` and
+`RETRY_ON`: the attempt's original failure evidence and effective retry policy. These are written
+with the outcome and remain immutable afterwards. Historical attempts retain `UNKNOWN` and no
+policy; queued attempts from an earlier version capture the policy when first admitted after
+upgrade. The initial attempt migration copies each non-skipped task summary into one attempt at its
 current `ATTEMPT_COUNT`, mapping `IN-PROGRESS` to `RUNNING`. Earlier retry outcomes cannot be
 reconstructed from a summary. Skipped tasks retain their summaries without an execution attempt.
 There can be only one queued, claimed or running attempt per task run.

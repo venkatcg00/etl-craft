@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from etl_craft.config.auth import warehouse_by_key
-from etl_craft.core.enums import AuthMode
+from etl_craft.core.enums import AuthMode, FailureClass
 from etl_craft.core.errors import SqlGuardError
+from etl_craft.core.failures import Failure
+from etl_craft.dialects.failures import driver_error
 from etl_craft.dialects.warehouse.base import (
     Presented,
     ReplaceStrategy,
@@ -27,6 +30,28 @@ if TYPE_CHECKING:
 
 class TrinoIcebergWarehouse(WarehouseDialect):
     """Trino, Iceberg catalog: no temporary tables, no alias on UPDATE or DELETE targets."""
+
+    def classify_failure(self, error: BaseException) -> Failure:
+        """Keep Trino's user errors distinct from resource, external and internal errors."""
+        error = driver_error(error)
+        failure = super().classify_failure(error)
+        if type(error).__name__ == "TrinoAuthError":
+            return replace(failure, kind=FailureClass.PERMANENT)
+        if type(error).__name__ in {"Http502Error", "Http503Error", "Http504Error"}:
+            return replace(failure, kind=FailureClass.TRANSIENT)
+        if getattr(error, "error_name", None) in {
+            "EXCEEDED_TIME_LIMIT",
+            "SERVER_STARTING_UP",
+            "SERVER_SHUTTING_DOWN",
+        }:
+            return replace(failure, kind=FailureClass.TRANSIENT)
+        kind = {
+            "USER_ERROR": FailureClass.PERMANENT,
+            "EXTERNAL": FailureClass.TRANSIENT,
+            "INSUFFICIENT_RESOURCES": FailureClass.TRANSIENT,
+            "INTERNAL_ERROR": FailureClass.UNKNOWN,
+        }.get(str(getattr(error, "error_type", "")), failure.kind)
+        return replace(failure, kind=kind)
 
     spec = warehouse_by_key("trino_iceberg")
     sqlglot_dialect = "trino"

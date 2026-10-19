@@ -134,7 +134,7 @@ item's text, or work done early under another item.
 | S5.T Resource discovery and deployment profiles | Done | #212 | `core/resources.py` measures affinity, cgroup v1/v2 quotas and memory limits; `Deployment.Profile` sizes `run` and `server` slots, server threads and the Engine DB pool within written ceilings; doctor/setup report measurements, sizes, fallbacks and the PostgreSQL connection budget |
 | S5.V Team-owned config tables | In progress | #213 | Fixed package ownership, unrestricted team config, retained read-only team history and collision preflight implemented; Databricks acceptance unavailable |
 | S5.U Robustness before the cluster | Done | #176, #182, #183, #184 | Engine DB restarts ridden out; SLA breach writes retried; no single-writer guess; timing tests verified under load; subprocess code measured by coverage |
-| S5.W Retry only what can succeed | Planned | | Transient, permanent and unknown failure classes per dialect; `Retry_on` / `RETRY_ON` of `NONE`, `TRANSIENT` (default), `TRANSIENT_AND_UNKNOWN` or `ANY`; each attempt records why it was or was not retried |
+| S5.W Retry only what can succeed | In progress | #215 | Failure classification, retry policies and immutable attempt evidence implemented; local and Snowflake acceptance passed, Databricks unavailable |
 | S5.Z Controller and agent names | Planned | | The overseer becomes the controller (`etl-craft controller`, `AUD_CONTROLLERS`) and S5.C's worker the agent, before S5.C |
 | S5.X Unmanaged SQL tasks | Planned | | `SQL_SCRIPT` runs any SQL as an ordinary dependent task with per-statement audit; pre- and post-SQL are upstream and downstream tasks |
 | S5.C and later | Not started | | |
@@ -159,7 +159,7 @@ S5.O.3 cloud acceptance remains recorded below; probe provider availability rath
 waiting for a human quota reset. S5.T is done (#212), which also split `cancel` into `stop` and
 `abort` and scoped `pause`/`resume` into `hold`/`release` at the owner's request. S5.V (#213)
 implements team-owned config and awaits Databricks acceptance; re-query provider availability
-before completing its handover. S5.W follows it as the next planned implementation item.
+before completing its handover. S5.W (#215) implements failure-aware retries and awaits Databricks acceptance.
 
 Item 2 includes the approved move of account administration, interactive first-admin bootstrap,
 the no-active-admin doctor check and scrypt password hashing from item 1. Sessions reuse
@@ -275,6 +275,12 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.W (#215): all four local warehouses passed the real syntax-error and interrupted-connection
+retry contracts. Snowflake passed the same live pair. A fresh Databricks SELECT probe returned
+HTTP 400 before execution and the warehouse reported STOPPED, so its live pair remains unverified;
+leave the PR unmerged until acceptance is available. This is provider availability, not a request
+for a human quota reset.
 
 S5.V (#213) has SQLite/PostgreSQL acceptance for plain team writes, package guards, config
 exports, preserved team triggers, frozen typed history, lossless legacy JSON history and
@@ -499,6 +505,17 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- S5.W: the owner approved an additional `AUD_TASK_ATTEMPTS.RETRY_ON` column so each decision
+  retains its effective policy after configuration edits. Historical attempts keep an unrecorded
+  policy; queued attempts from an older schema capture it when admitted after upgrade. Lost
+  leases and supervisor timeouts retain transient retry semantics; unexplained process exits
+  are unknown. Trino internal errors are unknown, while external/resource errors are transient.
+  The Trino interruption test uses a real refused HTTP connection; embedded DuckDB closes its
+  live driver connection. The existing SQL session already stopped some DB-API permanent errors;
+  classification now handles the remaining drivers consistently and retains original evidence.
+  S7.P's existing manifest row is closed in `release/regressions.toml`, following its recorded
+  handover convention rather than editing the item's table.
 
 - S5.V: config CSVs and generated catalog pages already selected package metadata explicitly;
   preserve that scope instead of adding a second file format or discovering team tables.

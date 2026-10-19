@@ -32,7 +32,7 @@ from typing import Any
 from sqlalchemy.engine import Engine
 
 from etl_craft.config.project import ingestion_script
-from etl_craft.core.errors import HandlerError
+from etl_craft.core.errors import HandlerError, PermanentError, TransientError
 from etl_craft.core.log import capture_all_loggers
 from etl_craft.engine.repository.offsets import StoredOffset, fetch_task_offset
 from etl_craft.handlers.registry import HandlerResult, TaskContext
@@ -248,7 +248,7 @@ def _call(entry: Callable[..., Any], task: ScriptTask, name: str) -> Any:
     with_task = _takes_the_task(entry, name)
     try:
         return entry(task) if with_task else entry()
-    except HandlerError:
+    except (HandlerError, TransientError, PermanentError):
         raise
     except SystemExit as error:
         raise HandlerError(

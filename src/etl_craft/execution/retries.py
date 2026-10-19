@@ -12,7 +12,7 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
-from etl_craft.core.enums import AttemptStatus
+from etl_craft.core.enums import AttemptStatus, RetryOn, enum_value
 from etl_craft.core.errors import MetadataError, StaleTransitionError
 from etl_craft.core.time import as_utc
 from etl_craft.engine import transitions
@@ -27,6 +27,7 @@ class RetryPolicy:
     retries: int
     delay_seconds: int
     backoff: float
+    retry_on: RetryOn = RetryOn.TRANSIENT
 
     def delay(self, attempt_number: int) -> float:
         """Return the delay after this attempt, capped at one hour."""
@@ -64,7 +65,15 @@ def task_retry_policy(params: Mapping[str, str], config: ConnectorConfig) -> Ret
         raise MetadataError(
             f"CFG_TASK_PARAMETERS.RETRY_BACKOFF={raw!r} must be a finite number, 1 or more"
         ) from error
-    return RetryPolicy(values["RETRIES"], values["RETRY_DELAY_SECONDS"], backoff)
+    retry_on = enum_value(
+        RetryOn,
+        params.get("RETRY_ON", config.retry_on),
+        MetadataError(
+            f"CFG_TASK_PARAMETERS.RETRY_ON={params.get('RETRY_ON')!r}; expected "
+            f"{', '.join(RetryOn)}; set RETRY_ON to one of these values"
+        ),
+    )
+    return RetryPolicy(values["RETRIES"], values["RETRY_DELAY_SECONDS"], backoff, retry_on)
 
 
 @acting_as(SYSTEM_ACTOR)
@@ -99,13 +108,14 @@ def refresh_retries(
                 continue
             due = datetime.now(UTC) + timedelta(seconds=policy.delay(row.attempt_number))
             try:
-                transitions.queue_attempt(
+                queued = transitions.queue_attempt(
                     conn,
                     row.task_run_id,
                     current_actor(),
                     not_before=due,
                     previous_attempt_id=row.attempt_id,
                 )
+                transitions.set_attempt_retry_policy(conn, queued, policy.retry_on)
             except StaleTransitionError:
                 continue
             waiting[row.task_id] = due

@@ -143,3 +143,23 @@ See [Event waits](event-waits.md) for settling, evidence and consumption.
 
 Scripts receive optional `TARGET_OBJECT` from the task's active `TARGET_TABLE_ID` reference.
 Set the separate target components in `tasks.csv`; do not write a target parameter row.
+
+
+## Declaring a retryable failure
+
+An ordinary script exception is `UNKNOWN`, including a driver exception raised by a script,
+so the default retry policy stops after that attempt.
+Raise `TransientError` for a failure another attempt can resolve, or `PermanentError` when the
+input or configuration must change:
+
+```python
+from etl_craft.scripting import PermanentError, TransientError
+
+# In run(task), after checking the source response:
+# raise TransientError("orders source: HTTP 503; retry after the source recovers")
+# raise PermanentError("orders.csv: missing order_id; supply the required column")
+```
+
+The [retry policy](running-tasks.md#retries-and-force) still controls whether that class is
+eligible and how many additional attempts are allowed. The attempt retains the original
+exception class even when the script handler adds its script-name diagnostic.

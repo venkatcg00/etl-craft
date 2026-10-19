@@ -143,7 +143,7 @@
       "src/etl_craft/services/validate.py": 1
     },
     "module-lines": {
-      "src/etl_craft/engine/transitions.py": 132,
+      "src/etl_craft/engine/transitions.py": 126,
       "src/etl_craft/services/config_files.py": 13
     },
     "no-cover": {

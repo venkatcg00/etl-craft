@@ -631,3 +631,31 @@ def test_recovery_capabilities_and_bulk_routes_share_exact_requests(api):
         headers=operator,
     )
     assert rejected.status_code == 422
+
+
+def test_attempt_endpoint_retains_failure_evidence_and_retry_policy(api):
+    from etl_craft.core.enums import FailureClass
+    from etl_craft.core.failures import Failure
+
+    ctx, client, creds, _run, attempt = api
+    with ctx.engine.begin() as conn:
+        transitions.claim_attempt(
+            conn,
+            attempt,
+            current_actor(),
+            owner="test",
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+        )
+        transitions.record_attempt_failure(
+            conn, attempt, Failure(FailureClass.PERMANENT, "ProgrammingError", "42P01")
+        )
+        transitions.finish_attempt(conn, attempt, "FAILED", current_actor(), owner="test")
+    response = client.get(f"/api/v1/attempts/{attempt}", headers=headers(creds[ApiRole.VIEWER]))
+    assert response.status_code == 200
+    body = response.json()
+    assert body["failure_class"] == "PERMANENT"
+    assert body["failure_source"] == "ProgrammingError"
+    assert body["failure_code"] == "42P01"
+    assert body["retry_on"] == "TRANSIENT"
+    assert not body["retryable"]
+    assert "RETRY_ON=TRANSIENT" in body["retry_reason"]

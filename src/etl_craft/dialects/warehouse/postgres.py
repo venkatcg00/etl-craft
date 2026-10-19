@@ -9,6 +9,7 @@ from sqlalchemy.engine import Connection
 
 from etl_craft.config.auth import warehouse_by_key
 from etl_craft.core.errors import SqlGuardError
+from etl_craft.core.failures import Failure
 from etl_craft.dialects.engine.postgres import DEFAULT_PORT, psycopg_auth_kwargs
 from etl_craft.dialects.warehouse.base import Presented, ReplaceStrategy, WarehouseDialect
 
@@ -19,6 +20,10 @@ if TYPE_CHECKING:
 
 class PostgresWarehouse(WarehouseDialect):
     """PostgreSQL, native tables."""
+
+    def classify_failure(self, error: BaseException) -> Failure:
+        """PostgreSQL supplies DB-API classes and SQLSTATE, including lock timeouts."""
+        return super().classify_failure(error)
 
     spec = warehouse_by_key("postgres")
     atomic_protection = True

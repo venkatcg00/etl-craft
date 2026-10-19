@@ -597,16 +597,17 @@ def admit_attempt(
         params = fetch_task_parameters(conn, task_id)
         handler = fetch_task_execution_detail(conn, task_id).handler
     timeout = task_timeout_seconds(params, config)
-    task_retry_policy(params, config)
+    policy = task_retry_policy(params, config)
     fault_point("runner.after_timeout")
     with engine.begin() as conn:
         binding = transitions.find_or_create_task_run(conn, task_id, pipeline_run_id)
         active = transitions.active_attempt(conn, binding.task_run_id)
-        attempt_id = (
-            active.attempt_id
-            if active is not None and active.status == AttemptStatus.QUEUED
-            else transitions.queue_attempt(conn, binding.task_run_id, current_actor())
-        )
+        if active is not None and active.status == AttemptStatus.QUEUED:
+            attempt_id = active.attempt_id
+            transitions.set_attempt_retry_policy(conn, attempt_id, policy.retry_on, overwrite=False)
+        else:
+            attempt_id = transitions.queue_attempt(conn, binding.task_run_id, current_actor())
+            transitions.set_attempt_retry_policy(conn, attempt_id, policy.retry_on)
         trackers.record_decisions(conn, pipeline_run_id, decisions, attempt_id=attempt_id)
         active = transitions.active_attempt(conn, binding.task_run_id)
         assert active is not None
@@ -650,20 +651,12 @@ def execute_attempt(
         fault_point("runner.after_bind")
         return _start_and_record(engine, config, spec, child, owner)
     except BaseException as error:
-        _fail_after_bind(
-            engine, spec.task_run_id, spec.task_code, error, attempt_id=spec.attempt_id, owner=owner
-        )
+        _fail_after_bind(engine, spec, error, config, owner)
         raise
 
 
 def _fail_after_bind(
-    engine: Engine,
-    task_run_id: int,
-    task_code: str,
-    error: BaseException,
-    *,
-    attempt_id: int,
-    owner: str,
+    engine: Engine, spec: AttemptSpec, error: BaseException, config: ConnectorConfig, owner: str
 ) -> None:
     """Record an attempt that could not run to its end; never hide the error being raised."""
     if isinstance(error, KeyboardInterrupt):
@@ -673,11 +666,20 @@ def _fail_after_bind(
         message = f"could not run the task process: {type(error).__name__}: {error}"
     try:
         with engine.begin() as conn:
-            active = transitions.active_attempt(conn, task_run_id)
-            if active is not None and active.attempt_id == attempt_id and active.owner == owner:
+            active = transitions.active_attempt(conn, spec.task_run_id)
+            if (
+                active is not None
+                and active.attempt_id == spec.attempt_id
+                and active.owner == owner
+            ):
+                from etl_craft.execution.failures import classify_failure
+
+                transitions.record_attempt_failure(
+                    conn, spec.attempt_id, classify_failure(error, config)
+                )
                 transitions.finish_attempt(
                     conn,
-                    attempt_id,
+                    spec.attempt_id,
                     AttemptStatus.FAILED,
                     current_actor(),
                     owner=owner,
@@ -686,9 +688,9 @@ def _fail_after_bind(
                     if isinstance(error, EtlCraftError)
                     else not isinstance(error, KeyboardInterrupt),
                 )
-                logger.error("%s: FAILED — %s", task_code, message)
+                logger.error("%s: FAILED — %s", spec.task_code, message)
     except Exception:
-        logger.exception("%s: could not record that its attempt failed", task_code)
+        logger.exception("%s: could not record that its attempt failed", spec.task_code)
 
 
 def _start_and_record(

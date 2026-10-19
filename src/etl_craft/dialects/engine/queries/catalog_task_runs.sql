@@ -1,5 +1,5 @@
 -- The latest :limit runs of every active task of an active pipeline, newest first.
-SELECT r.TASK_ID AS task_id, r.PIPELINE_RUN_ID AS pipeline_run_id, r.STATUS AS status,
+SELECT r.TASK_RUN_ID AS task_run_id, r.TASK_ID AS task_id, r.PIPELINE_RUN_ID AS pipeline_run_id, r.STATUS AS status,
        CASE WHEN pr.OUTPUT_REVISION > 1 OR pr.REPAIR_PENDING = 'Y' THEN 'REPAIR'
             WHEN pr.BACKFILL = 'Y' THEN 'BACKFILL'
             WHEN pr.TRIGGER_KIND = 'SCHEDULE' THEN 'SCHEDULED' ELSE 'OTHER' END AS run_kind,

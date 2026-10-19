@@ -84,6 +84,7 @@ handler's guide lists the ones it reads. Every task may also set:
 | Parameter | Value |
 |---|---|
 | `TASK_TIMEOUT_SECONDS` | the task's time limit, overriding `Orchestration.Task_timeout_seconds`; `0` for none |
+| `RETRY_ON` | `NONE`, `TRANSIENT` (default), `TRANSIENT_AND_UNKNOWN` or `ANY`; overrides `Orchestration.Retry_on` |
 | `RETRIES` | additional local attempts; defaults to `Orchestration.Retries`, or `0` |
 | `RETRY_DELAY_SECONDS` | first retry delay in seconds; default `60`, `0` for immediate |
 | `RETRY_BACKOFF` | finite multiplier of at least `1`; default `2.0`, delay capped at `3600` seconds |

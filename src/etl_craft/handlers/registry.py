@@ -93,7 +93,14 @@ HANDLERS: dict[str, str] = {
 """Each ``HANDLER`` value and the ``module:function`` that runs it."""
 
 COMMON_PARAMETERS = frozenset(
-    {"TASK_TIMEOUT_SECONDS", "DOCUMENTATION", "RETRIES", "RETRY_DELAY_SECONDS", "RETRY_BACKOFF"}
+    {
+        "TASK_TIMEOUT_SECONDS",
+        "DOCUMENTATION",
+        "RETRIES",
+        "RETRY_DELAY_SECONDS",
+        "RETRY_BACKOFF",
+        "RETRY_ON",
+    }
 )
 """The task parameters every handler's tasks may set."""
 

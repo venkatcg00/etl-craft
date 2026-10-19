@@ -19,6 +19,7 @@ Secrets:
   Profile: ETL_CRAFT_PROFILE           # variable — dev | sit | uat | prod, set in each environment
 
 Orchestration:
+  Retry_on: TRANSIENT                 # value; retry only failures that can succeed
   Mode: local                          # value
   Task_timeout_seconds: 21600          # value — 0 disables; a task's TASK_TIMEOUT_SECONDS overrides
   Max_parallel_tasks: 8                # value

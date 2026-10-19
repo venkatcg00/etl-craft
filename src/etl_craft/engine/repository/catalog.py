@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import date, datetime
 
@@ -9,6 +10,7 @@ from sqlalchemy import Boolean
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.enums import CatalogRunKind
+from etl_craft.core.failures import retry_reason
 from etl_craft.core.time import elapsed_seconds
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.interventions import Intervention
@@ -192,6 +194,7 @@ class TaskRunSummary:
     watermark_from: str | None = None
     watermark_to: str | None = None
     run_kind: CatalogRunKind = CatalogRunKind.OTHER
+    failure_reasons: tuple[str, ...] = ()
 
     @property
     def seconds(self) -> float | None:
@@ -227,9 +230,25 @@ def fetch_pipeline_runs(conn: Connection, limit: int = RUN_HISTORY) -> dict[str,
 def fetch_task_runs(conn: Connection, limit: int = RUN_HISTORY) -> dict[int, list[TaskRunSummary]]:
     """Return the latest ``limit`` runs of every active task, by task id, newest first."""
     runs: dict[int, list[TaskRunSummary]] = {}
-    for row in conn.execute(statement(conn, "catalog_task_runs"), {"limit": limit}):
+    rows = conn.execute(statement(conn, "catalog_task_runs"), {"limit": limit}).all()
+    failures: dict[int, list[str]] = {}
+    if rows:
+        query = statement(conn, "catalog_attempt_failures").columns(retryable=Boolean)
+        task_runs = json.dumps([r.task_run_id for r in rows])
+        for attempt in conn.execute(query, {"task_run_ids": task_runs}):
+            reason = retry_reason(
+                attempt.failure_class,
+                attempt.failure_source,
+                attempt.failure_code,
+                attempt.retry_on,
+            )
+            failures.setdefault(attempt.task_run_id, []).append(
+                f"Attempt {attempt.attempt_number}: {reason}; retry eligible={attempt.retryable}"
+            )
+    for row in rows:
         values = dict(row._mapping)
         task_id = values.pop("task_id")
+        values["failure_reasons"] = tuple(failures.get(values.pop("task_run_id"), []))
         values["run_kind"] = CatalogRunKind(row.run_kind)
         runs.setdefault(task_id, []).append(TaskRunSummary(**values))
     return runs
