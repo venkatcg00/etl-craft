@@ -1,6 +1,6 @@
 ---
 name: pre-pr-checks
-description: Run etl-craft's validation before a pull request - make static docs, the tests for the code the change touches, repeated races for concurrency changes, actionlint, live-cloud acceptance when warehouse SQL changes and the owner made cloud budget available, and a self-review of the diff; the wheel demos and Airflow contracts run in CI. CI runs the complete suite in under ten minutes. Use before opening a PR or when asked to check the state of a branch.
+description: Run etl-craft's validation before a pull request - make static docs, the tests for the code the change touches, repeated races for concurrency changes, actionlint, live-cloud acceptance (one try; unavailable compute is recorded, not blocking) when warehouse SQL changes and the owner made cloud budget available, and a self-review of the diff; the wheel demos and Airflow contracts run in CI. CI runs the complete suite in under ten minutes. Use before opening a PR or when asked to check the state of a branch.
 ---
 
 # Pre-PR checks
@@ -167,8 +167,8 @@ the SQL every warehouse runs:
 - warehouse authentication.
 
 Cloud compute has a usage budget: run them only when the owner has made it available, and
-otherwise treat the cloud as unable to run (below). Never retry a cloud run that failed on
-compute or credentials. Skip them for refactors whose paths the four local warehouses already
+otherwise treat the cloud as unable to run (below). Try each affected cloud once; never retry a
+cloud run that failed on compute or credentials. Skip them for refactors whose paths the four local warehouses already
 run. For a pull request,
 run only the cloud tests that exercise the change, on the cloud whose code changed (or both for
 shared SQL). `-k` selects them. Credentials live in a gitignored env file:
@@ -199,9 +199,11 @@ Each suite's pytest output goes to `dist/acceptance/<suite>.log`.
 - **Evidence files:** a whole-suite run rewrites `release/evidence/<version>/cloud-*.json`.
   Leave those files out of feature commits; only release pull requests record evidence. Ask
   before restoring them.
-- **When a cloud cannot run** (no credentials, compute will not start): say so in the pull
-  request and the roadmap's "Acceptance availability" note, and leave the pull request
-  unmerged for the owner. Never skip it silently.
+- **When a cloud cannot run** on the first try (no credentials, compute will not start, the
+  provider refuses before any SQL runs): say so in the pull request's Validation section and the
+  roadmap's "Acceptance availability" note, and merge as usual. Never skip it silently. A test
+  that ran and failed is a code failure, not unavailability. Release evidence
+  (`make acceptance-cloud`) still needs every cloud suite to pass.
 
 ## 6. Self-review
 

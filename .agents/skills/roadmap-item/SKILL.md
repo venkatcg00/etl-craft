@@ -110,11 +110,12 @@ after it is green.
 
 ## 7. Hand the merge to GitHub
 
-- Unless a required suite could not run, turn on auto-merge and end the session:
+- Unless a required local suite could not run, turn on auto-merge and end the session:
   `gh pr merge <n> --squash --auto`. GitHub squash-merges once every required check passes and
   keeps the branch. Never pass `--delete-branch`.
 - Do not watch CI, poll checks or wait for logs: every check re-sends the whole session. The next
   session finds the pull request in step 1 if CI failed.
-- When a required suite could not run (`AGENTS.md`, "Validation"), leave the pull request
-  unmerged with the reason in it, and do not turn on auto-merge.
+- When a required local suite could not run (`AGENTS.md`, "Validation"), leave the pull
+  request unmerged with the reason in it, and do not turn on auto-merge. A cloud suite that was
+  unavailable on its one try does not hold the merge: record it and merge.
 - Rerun a failed job only for a cause outside the change, after reading its log, and say which.
