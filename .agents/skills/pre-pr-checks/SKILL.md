@@ -33,9 +33,9 @@ systemd-run --user --scope --quiet -- \
 | 1. Static checks and touched tests | always | a few minutes |
 | 1b. Repeated races | concurrency code changed | a few minutes |
 | 2. Installed-wheel demos | only to reproduce a CI failure in them | about 15 min |
-| 4. actionlint | `.github/workflows/` changed | seconds |
-| 5. Cloud tests | Snowflake or Databricks code changed, or the SQL every warehouse runs, and the owner made cloud budget available | about 15 min for the affected tests |
-| 6. Self-review | always | |
+| 3. actionlint | `.github/workflows/` changed | seconds |
+| 4. Cloud tests | Snowflake or Databricks code changed, or the SQL every warehouse runs, and the owner made cloud budget available | about 15 min for the affected tests |
+| 5. Self-review | always | |
 
 The local services must be up for the touched tests and step 2: `docker ps` lists the
 `etl-craft-*` containers as healthy; otherwise run `make services-up`. Without Docker (a cloud
@@ -60,7 +60,7 @@ old behaviour: the CI-only suites are the first to run them.
 
 `examples/demo/` is the project the installed-wheel demos copy. The local gate never runs
 `tests/acceptance/cloud/`: search it too for the behaviour you change, and run the cloud tests
-that use it (step 5).
+that use it (step 4).
 
 ## 1. Static checks and touched tests
 
@@ -127,7 +127,7 @@ This covers all four local warehouses on both Engine DBs, pip and uv, the sdist 
 there needs only a rerun; a change under `src/` needs a rebuild. Run demo sessions one at a
 time, because the local Iceberg demos share fixed namespaces.
 
-## 4. actionlint
+## 3. actionlint
 
 ```bash
 uvx --from actionlint-py actionlint      # no output means clean
@@ -135,7 +135,7 @@ uvx --from actionlint-py actionlint      # no output means clean
 
 Python tests do not validate GitHub expression contexts such as `runner.temp`.
 
-## 5. Cloud tests
+## 4. Cloud tests
 
 Run them when `dialects/warehouse/snowflake*.py` or `databricks*.py` change, or code that shapes
 the SQL every warehouse runs:
@@ -184,7 +184,7 @@ Each suite's pytest output goes to `dist/acceptance/<suite>.log`.
   that ran and failed is a code failure, not unavailability. Release evidence
   (`make acceptance-cloud`) still needs every cloud suite to pass.
 
-## 6. Self-review
+## 5. Self-review
 
 Read the whole diff (`git diff origin/main...`) as a reviewer who has to maintain it:
 
