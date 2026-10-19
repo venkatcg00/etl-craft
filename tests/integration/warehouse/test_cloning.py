@@ -10,8 +10,9 @@ from sqlalchemy import text
 
 from etl_craft.config import CloningConfig
 from etl_craft.core.actor import current_actor
-from etl_craft.core.enums import CloningScope
+from etl_craft.core.enums import CloningScope, FailureClass
 from etl_craft.core.errors import CloningError, ConfigurationError
+from etl_craft.core.failures import Failure
 from etl_craft.engine import transitions
 from etl_craft.execution.run_finish import finalize_active_run
 from etl_craft.services.cloning import clone, run_hooks
@@ -129,7 +130,7 @@ def test_attempt_retryability_is_cloned_as_boolean(sql_world):
     with world.engine_db.begin() as conn:
         task = add_task(conn, world.pipeline_id, "typed_attempt")
         summary = transitions.find_or_create_task_run(conn, task, world.pipeline_run_id).task_run_id
-        for retryable in (False, True):
+        for kind in (FailureClass.PERMANENT, FailureClass.TRANSIENT):
             attempt = transitions.queue_attempt(conn, summary, current_actor())
             transitions.claim_attempt(
                 conn,
@@ -138,8 +139,9 @@ def test_attempt_retryability_is_cloned_as_boolean(sql_world):
                 owner="typed-worker",
                 lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
             )
+            transitions.record_attempt_failure(conn, attempt, Failure(kind, "HandlerError"))
             transitions.finish_attempt(
-                conn, attempt, "FAILED", current_actor(), owner="typed-worker", retryable=retryable
+                conn, attempt, "FAILED", current_actor(), owner="typed-worker"
             )
     clone(world.engine_db, cloning(world, CloningScope.AUD))
     assert world.rows(

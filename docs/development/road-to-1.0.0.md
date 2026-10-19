@@ -134,7 +134,7 @@ item's text, or work done early under another item.
 | S5.T Resource discovery and deployment profiles | Done | #212 | `core/resources.py` measures affinity, cgroup v1/v2 quotas and memory limits; `Deployment.Profile` sizes `run` and `server` slots, server threads and the Engine DB pool within written ceilings; doctor/setup report measurements, sizes, fallbacks and the PostgreSQL connection budget |
 | S5.V Team-owned config tables | In progress | #213 | Fixed package ownership, unrestricted team config, retained read-only team history and collision preflight implemented; Databricks acceptance unavailable |
 | S5.U Robustness before the cluster | Done | #176, #182, #183, #184 | Engine DB restarts ridden out; SLA breach writes retried; no single-writer guess; timing tests verified under load; subprocess code measured by coverage |
-| S5.W Retry only what can succeed | In progress | #215 | Failure classification, retry policies and immutable attempt evidence implemented; local and Snowflake acceptance passed, Databricks unavailable |
+| S5.W Retry only what can succeed | Done | #215 | Failure classification, retry policies and immutable attempt evidence; local and Snowflake acceptance passed, unavailable Databricks live acceptance waived by the owner |
 | S5.Z Controller and agent names | Planned | | The overseer becomes the controller (`etl-craft controller`, `AUD_CONTROLLERS`) and S5.C's worker the agent, before S5.C |
 | S5.X Unmanaged SQL tasks | Planned | | `SQL_SCRIPT` runs any SQL as an ordinary dependent task with per-statement audit; pre- and post-SQL are upstream and downstream tasks |
 | S5.C and later | Not started | | |
@@ -159,7 +159,8 @@ S5.O.3 cloud acceptance remains recorded below; probe provider availability rath
 waiting for a human quota reset. S5.T is done (#212), which also split `cancel` into `stop` and
 `abort` and scoped `pause`/`resume` into `hold`/`release` at the owner's request. S5.V (#213)
 implements team-owned config and awaits Databricks acceptance; re-query provider availability
-before completing its handover. S5.W (#215) implements failure-aware retries and awaits Databricks acceptance.
+before completing its handover. S5.W (#215) implements failure-aware retries; the owner approved merging with unavailable
+Databricks live acceptance recorded as non-blocking.
 
 Item 2 includes the approved move of account administration, interactive first-admin bootstrap,
 the no-active-admin doctor check and scrypt password hashing from item 1. Sessions reuse
@@ -279,8 +280,8 @@ does not move worker work ahead of the metadata, account or operator-control cor
 S5.W (#215): all four local warehouses passed the real syntax-error and interrupted-connection
 retry contracts. Snowflake passed the same live pair. A fresh Databricks SELECT probe returned
 HTTP 400 before execution and the warehouse reported STOPPED, so its live pair remains unverified;
-leave the PR unmerged until acceptance is available. This is provider availability, not a request
-for a human quota reset.
+the owner explicitly approved treating unavailable cloud acceptance as non-blocking for merging
+#215. This is provider availability, not a request for a human quota reset.
 
 S5.V (#213) has SQLite/PostgreSQL acceptance for plain team writes, package guards, config
 exports, preserved team triggers, frozen typed history, lossless legacy JSON history and
@@ -4323,6 +4324,38 @@ stop/abort, recover/restart, explicit overrides and selected bulk actions. Show 
 state and completion acknowledgement; do not inherit unnecessary Airflow or CLI flag
 restrictions. Browser tests must exercise the operations, not merely check visible buttons.
 
+**S7.A.3 Pipeline run logs and log downloads are required.** Use the PowerCenter workflow log
+as the reference: one readable, timestamped log per pipeline run, next to the per-task session
+logs that attempt logs already provide.
+
+- *Pipeline run log.* One line per run event, in time order, each with a timestamp, a stable
+  message code, the run, the task where one applies, and the actor where a person or service
+  caused it: run created and started (trigger, logical date, run key); each task queued,
+  admitted, started (attempt, owner, host), retried (failure class, due time) and ended (status,
+  rows, duration, error); gate and event waits opened, satisfied, overridden or timed out;
+  holds, stops, aborts, recoveries and restarts with their acknowledgements; marks, reruns and
+  dependency overrides; SLA met or breached; leases lost and reconciled; run ended (status,
+  duration, counts per status).
+  - **One source.** The log is rendered from the audit tables, not written as a second stream:
+    it then matches `status`, `explain` and the audit exactly, and covers runs whose tasks
+    ran in several processes, under an external orchestrator or, after S5.C, on workers. An
+    event the log needs that the audit does not record is added to the audit first.
+  - **Interfaces.** One service operation produces it; the CLI (`etl-craft logs` with a run
+    selector and no attempt), the HTTP API (text, streamed) and the UI (run detail, followed
+    live while the run is active) call it.
+- *Downloads.* The UI offers each log as a download: a task attempt's log, the pipeline run log,
+  and a zip of the whole run.
+  - **Run zip.** The pipeline run log, every attempt log of the run (one folder per task), and
+    the run's `status`, `explain` and intervention documents as JSON. A manifest lists every
+    file with its size; an attempt log that cannot be read (deleted by retention, or not yet
+    uploaded from a worker under S6.B) is listed with the reason rather than silently left out.
+  - **Same rules as viewing.** Downloads need the role that viewing needs (`viewer`), use the
+    same path checks, and stream without loading a whole log or zip into memory. The CLI writes
+    the same zip (`etl-craft logs ... --zip PATH`); the API serves it.
+- *Tests.* Run logs for success, failure with retries, gate waits, stop/abort, recovery and a
+  restart, compared with the audit rows; a run zip's manifest and contents, including a missing
+  attempt log; a large log streamed within a bounded memory budget; role refusals.
+
 - *Technology.* One package and one language for contributors. The UI is served by
   `etl-craft server` from the `server` extra, with no Node toolchain for users, contributors or
   CI.
@@ -4355,7 +4388,8 @@ restrictions. Browser tests must exercise the operations, not merely check visib
   - Runs: a grid of runs × tasks (status per cell), filters by status, kind and date.
   - Run detail: tasks with attempts, rows, durations, errors; per task the `explain` panel; actions
     allowed by the user's role through the complete S7.A.2 action/capability matrix.
-  - Attempt: live log tail, exit code, owner, host.
+  - Attempt: live log tail, exit code, owner, host; download (S7.A.3).
+  - Run logs: the pipeline run log, followed live, and the run zip download (S7.A.3).
   - Backfills: start (pipeline, dates, reason), progress, stop.
   - Interventions: every recorded change with who, when and why.
   - Workers and pools: capacity, slots in use, queue, heartbeats.

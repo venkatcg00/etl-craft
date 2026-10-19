@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import event, text
 
 from etl_craft.core.actor import current_actor
-from etl_craft.core.enums import ApiRole
+from etl_craft.core.enums import ApiRole, FailureClass, RetryOn
 from etl_craft.core.errors import MetadataError, RunStateError
 from etl_craft.engine import transitions
 from etl_craft.engine.repository import trackers
@@ -66,7 +66,10 @@ def test_status_includes_unrun_tasks_and_transitive_failure_blocks(engine_db):
         assert status.tasks[0].explanation.task is None
         doc = to_json(status)
         assert doc["run"]["pipeline_run_id"] == run
-        assert doc["tasks"][1]["explanation"]["task"]["attempts"][0]["retryable"] is True
+        recorded = doc["tasks"][1]["explanation"]["task"]["attempts"][0]
+        assert recorded["failure_class"] == FailureClass.UNKNOWN
+        assert recorded["retry_on"] == RetryOn.TRANSIENT
+        assert recorded["retryable"] is False
         assert explain_task(ctx, "P", "after").state == "blocked by failure"
         with pytest.raises(MetadataError):
             explain_task(ctx, "P", "missing")
