@@ -4306,6 +4306,38 @@ stop/abort, recover/restart, explicit overrides and selected bulk actions. Show 
 state and completion acknowledgement; do not inherit unnecessary Airflow or CLI flag
 restrictions. Browser tests must exercise the operations, not merely check visible buttons.
 
+**S7.A.3 Pipeline run logs and log downloads are required.** Use the PowerCenter workflow log
+as the reference: one readable, timestamped log per pipeline run, next to the per-task session
+logs that attempt logs already provide.
+
+- *Pipeline run log.* One line per run event, in time order, each with a timestamp, a stable
+  message code, the run, the task where one applies, and the actor where a person or service
+  caused it: run created and started (trigger, logical date, run key); each task queued,
+  admitted, started (attempt, owner, host), retried (failure class, due time) and ended (status,
+  rows, duration, error); gate and event waits opened, satisfied, overridden or timed out;
+  holds, stops, aborts, recoveries and restarts with their acknowledgements; marks, reruns and
+  dependency overrides; SLA met or breached; leases lost and reconciled; run ended (status,
+  duration, counts per status).
+  - **One source.** The log is rendered from the audit tables, not written as a second stream:
+    it then matches `status`, `explain` and the audit exactly, and covers runs whose tasks
+    ran in several processes, under an external orchestrator or, after S5.C, on workers. An
+    event the log needs that the audit does not record is added to the audit first.
+  - **Interfaces.** One service operation produces it; the CLI (`etl-craft logs` with a run
+    selector and no attempt), the HTTP API (text, streamed) and the UI (run detail, followed
+    live while the run is active) call it.
+- *Downloads.* The UI offers each log as a download: a task attempt's log, the pipeline run log,
+  and a zip of the whole run.
+  - **Run zip.** The pipeline run log, every attempt log of the run (one folder per task), and
+    the run's `status`, `explain` and intervention documents as JSON. A manifest lists every
+    file with its size; an attempt log that cannot be read (deleted by retention, or not yet
+    uploaded from a worker under S6.B) is listed with the reason rather than silently left out.
+  - **Same rules as viewing.** Downloads need the role that viewing needs (`viewer`), use the
+    same path checks, and stream without loading a whole log or zip into memory. The CLI writes
+    the same zip (`etl-craft logs ... --zip PATH`); the API serves it.
+- *Tests.* Run logs for success, failure with retries, gate waits, stop/abort, recovery and a
+  restart, compared with the audit rows; a run zip's manifest and contents, including a missing
+  attempt log; a large log streamed within a bounded memory budget; role refusals.
+
 - *Technology.* One package and one language for contributors. The UI is served by
   `etl-craft server` from the `server` extra, with no Node toolchain for users, contributors or
   CI.
@@ -4338,7 +4370,8 @@ restrictions. Browser tests must exercise the operations, not merely check visib
   - Runs: a grid of runs × tasks (status per cell), filters by status, kind and date.
   - Run detail: tasks with attempts, rows, durations, errors; per task the `explain` panel; actions
     allowed by the user's role through the complete S7.A.2 action/capability matrix.
-  - Attempt: live log tail, exit code, owner, host.
+  - Attempt: live log tail, exit code, owner, host; download (S7.A.3).
+  - Run logs: the pipeline run log, followed live, and the run zip download (S7.A.3).
   - Backfills: start (pipeline, dates, reason), progress, stop.
   - Interventions: every recorded change with who, when and why.
   - Workers and pools: capacity, slots in use, queue, heartbeats.
