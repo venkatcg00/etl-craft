@@ -17,13 +17,15 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from sqlalchemy import inspect
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.core.actor import migration as current_migration
 from etl_craft.core.errors import MigrationError
-from etl_craft.core.text import sha256_hex
+from etl_craft.core.text import sha256_hex, strip_comments_and_literals
 from etl_craft.dialects.engine import for_engine
+from etl_craft.dialects.engine.tables import AUDIT_TABLES, OWNED_CONFIG_TABLES
 from etl_craft.engine import locks
 from etl_craft.engine.migration_steps import MARKERS, NO_TARGET, STEPS, MarkerStep, Target
 from etl_craft.engine.queries import run_script, statement
@@ -289,6 +291,8 @@ def apply_pending_migrations(
             for file in stream.files
             if (file.source, file.version) not in ledger
         ]
+        with engine.connect() as conn:
+            _check_package_collisions(conn, pending)
         for marker, step in STEPS.items():
             if step.check is not None and any(marker in file.markers for file in pending):
                 with engine.connect() as conn:
@@ -319,3 +323,26 @@ def mark_packaged_migrations_applied(conn: Connection) -> list[str]:
         if (migration.source, migration.version) not in ledger:
             _record(conn, migration)
     return [migration.version for migration in stream.files]
+
+
+def _check_package_collisions(conn: Connection, pending: list[MigrationFile]) -> None:
+    """Refuse conflicting package table creation before any pending migration can write."""
+    present = {name.upper() for name in inspect(conn).get_table_names()}
+    owned = OWNED_CONFIG_TABLES | AUDIT_TABLES
+    for file in pending:
+        if file.source != ENGINE:
+            continue
+        for sql in for_engine(conn).split_statements(file.sql):
+            sql = strip_comments_and_literals(sql).strip()
+            dropped = re.match(r'DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?"?(\w+)"?', sql, re.IGNORECASE)
+            if dropped:
+                present.discard(dropped[1].upper())
+            created = re.match(
+                r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"?(\w+)"?', sql, re.IGNORECASE
+            )
+            if created and created[1].upper() in owned and created[1].upper() in present:
+                raise MigrationError(
+                    f"engine/{file.version} creates {created[1]}, but that table already exists; "
+                    "rename the conflicting team table before upgrading. "
+                    "No pending migration was applied."
+                )

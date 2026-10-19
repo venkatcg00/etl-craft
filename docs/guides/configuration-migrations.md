@@ -14,7 +14,8 @@ and the test suite applies them in order on SQLite and PostgreSQL, running `vali
 
 ## Why a migration
 
-The Engine DB accepts writes only from etl-craft. A plain connection, such as the `sqlite3`
+Etl-craft's package-owned tables accept writes only from etl-craft. Team-owned extra `CFG_`
+tables are outside that guard. A plain connection, such as the `sqlite3`
 shell, `psql`, a BI tool or a CSV import, is refused: SQLite reports `no such function:
 etl_craft_actor`, and PostgreSQL reports `CFG_TASKS is written only by etl-craft; ... metadata
 with a project migration (etl-craft migrate)`.
@@ -80,33 +81,35 @@ with a project migration (etl-craft migrate)`.
 
 ## Project configuration tables
 
-Every project table whose name starts with `CFG_` must declare one non-null primary-key column and
-`CREATED_BY`, `CREATE_DATE`, `UPDATED_BY`, `UPDATED_DATE`, `ACTIVE_FLAG`, all `NOT NULL`.
-Actors and active flags use text types; dates use `TIMESTAMP` on SQLite and `TIMESTAMPTZ`
-on PostgreSQL. Include defaults on SQLite so inserts can omit the fields; etl-craft replaces
-these placeholders with the actor and UTC timestamp. PostgreSQL's before-insert trigger stamps
-them before constraints run. Updates preserve creation fields and stamp the update fields.
-An active flag outside `Y`/`N` fails the transaction.
+Etl-craft's own config tables are listed with the schema in
+`dialects/engine/tables.py`. They keep their required base fields, actor attribution, history
+and supported config CSV interfaces. Adding columns to a package-owned table does not change
+that ownership or bypass its contract.
 
-For example, use this definition on SQLite (replace the date type with `TIMESTAMPTZ` on
-PostgreSQL):
+Any extra `CFG_` table belongs entirely to your team. It needs no etl-craft key, audit fields,
+active flag or actor. Your own scripts and plain database connections can create, change and
+use it; project migrations can also maintain its DDL and data. The package does not capture
+its changes, include it in config CSVs or catalog pages, or clone it into the warehouse.
+For example:
 
 ```sql
-CREATE TABLE CFG_CHANNELS (
-    CHANNEL_ID INTEGER PRIMARY KEY,
-    CHANNEL_CODE VARCHAR NOT NULL UNIQUE,
-    ACTIVE_FLAG VARCHAR NOT NULL DEFAULT 'Y' CHECK (ACTIVE_FLAG IN ('Y','N')),
-    CREATED_BY VARCHAR NOT NULL DEFAULT 'etl-craft',
-    CREATE_DATE TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UPDATED_BY VARCHAR NOT NULL DEFAULT 'etl-craft',
-    UPDATED_DATE TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-INSERT INTO CFG_CHANNELS (CHANNEL_ID, CHANNEL_CODE) VALUES (1, 'EMAIL');
+CREATE TABLE CFG_CHANNELS (CHANNEL_CODE VARCHAR, DESTINATION VARCHAR);
+INSERT INTO CFG_CHANNELS VALUES ('EMAIL', 'ops');
 ```
 
-Incomplete config DDL is refused before later statements execute, and the file rolls back.
-Audit tables follow their event or lifecycle purpose; they do not need these mutable config
-fields merely because their names start with `AUD_`.
+Your team owns the constraints, access permissions and contents of these tables. The
+variable-name requirement for connector secrets remains unchanged. `AUD_` is reserved:
+rename team tables outside that prefix before migrating.
+
+On upgrade, migration `0040` removes etl-craft's generated triggers from team tables while
+preserving team-defined triggers. Existing typed history stays as read-only audit evidence;
+it receives no new versions and is omitted from the package's metadata change view. Earlier
+JSON audit records are converted before the old log is retired; missing definitions that
+prevent lossless conversion cause an actionable failure rather than discarded history.
+
+If a later package migration needs a config table name your team already uses, migration
+preflight stops before applying pending changes, naming the table and the package migration.
+Rename that team table and update its scripts before retrying the upgrade.
 
 ## The examples
 

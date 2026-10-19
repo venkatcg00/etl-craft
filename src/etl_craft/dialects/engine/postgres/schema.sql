@@ -1335,3 +1335,6 @@ CREATE TRIGGER trg_attempt_ack_truncate BEFORE TRUNCATE ON AUD_ATTEMPT_ACKNOWLED
 FOR EACH STATEMENT EXECUTE FUNCTION etl_craft_attempt_ack_guard();
 CREATE TRIGGER trg_control_identity_truncate BEFORE TRUNCATE ON AUD_CONTROL_REQUESTS
 FOR EACH STATEMENT EXECUTE FUNCTION etl_craft_control_identity_guard();
+
+-- Only the package config tables listed in dialects/engine/tables.py receive metadata guards.
+-- Other CFG_ tables are team-owned; AUD_ remains reserved for package audit records.

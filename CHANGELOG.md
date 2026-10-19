@@ -8,6 +8,13 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Team-owned extra `CFG_` tables accept ordinary SQL writes without package base fields,
+  actor guards or history capture. They stay outside config CSVs, catalog documentation and
+  warehouse cloning. Package-owned config tables use a fixed schema-side ownership list and
+  retain their protections. Migration `0040` releases generated team triggers on both Engine DBs,
+  preserves team triggers and retains old history read-only. Reserved `AUD_` names and future
+  package-table collisions fail with a rename remedy before the conflicting migration writes.
+
 - Deployment profiles: an optional `Deployment` section with `Profile: laptop | server |
   server-workers`. Without it nothing changes. With it, `run` and `server` measure the CPU and
   memory the process may use (CPU affinity, cgroup v2 or v1 quotas and memory limits including

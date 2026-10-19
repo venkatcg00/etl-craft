@@ -146,3 +146,14 @@ def test_attempt_retryability_is_cloned_as_boolean(sql_world):
         f"SELECT attempt_number, retryable FROM {world.name('AUD_TASK_ATTEMPTS')} "
         "ORDER BY attempt_number"
     ) == [(1, False), (2, True)]
+
+
+def test_team_configuration_is_not_read_or_mirrored(sql_world):
+    world = sql_world
+    with world.engine_db.begin() as conn:
+        conn.execute(text("CREATE TABLE CFG_TEAM (PASSWORD_HASH VARCHAR)"))
+        conn.execute(text("INSERT INTO CFG_TEAM VALUES ('team-owned')"))
+    copied = clone(world.engine_db, cloning(world, CloningScope.CFG))
+    assert "CFG_TEAM" not in {table.table for table in copied}
+    assert "cfg_team" not in world.tables()
+    assert "CFG_PIPELINES" in {table.table for table in copied}

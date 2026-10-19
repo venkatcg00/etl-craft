@@ -6,6 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from etl_craft.core.text import quote_identifier
+from etl_craft.dialects.engine.tables import team_config
 
 
 def extra_write_grants(engine: Engine) -> list[tuple[str, str, str]]:
@@ -30,7 +31,11 @@ def extra_write_grants(engine: Engine) -> list[tuple[str, str, str]]:
                 "ORDER BY table_name, role_name, privilege"
             )
         ).all()
-    return [(row.table_name, row.role_name, row.privilege) for row in rows]
+    return [
+        (row.table_name, row.role_name, row.privilege)
+        for row in rows
+        if not team_config(row.table_name)
+    ]
 
 
 def grants_sql(schema: str) -> str:

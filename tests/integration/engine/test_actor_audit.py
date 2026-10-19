@@ -389,6 +389,10 @@ def test_postgres_extra_write_grant_is_reported(engine_db):
             conn.exec_driver_sql(f'CREATE ROLE "{role}" LOGIN')
             conn.exec_driver_sql(f'GRANT UPDATE ON CFG_TASKS TO "{role}"')
         assert ("cfg_tasks", role, "UPDATE") in extra_write_grants(engine_db.engine)
+        with engine_db.engine.begin() as conn:
+            conn.exec_driver_sql("CREATE TABLE CFG_TEAM (VALUE VARCHAR)")
+            conn.exec_driver_sql(f'GRANT UPDATE ON CFG_TEAM TO "{role}"')
+        assert not any(table == "cfg_team" for table, _, _ in extra_write_grants(engine_db.engine))
         group = role + "_group"
         with engine_db.engine.begin() as conn:
             conn.exec_driver_sql(f'CREATE ROLE "{group}" NOLOGIN')
@@ -527,71 +531,6 @@ def test_cli_actor_requests_and_read_only_audit(
     assert "no signed-in account" in capsys.readouterr().err
     with engine_db.engine.connect() as conn:
         assert conn.execute(text("SELECT COUNT(*) FROM AUD_ACTIONS")).scalar_one() == 5
-
-
-def test_project_created_tables_keep_guards_and_capture(engine_db, tmp_path):
-    project = tmp_path / "migrations"
-    project.mkdir()
-    date_type = "TIMESTAMPTZ" if engine_db.engine.dialect.name == "postgresql" else "TIMESTAMP"
-    (project / "0001_tables.sql").write_text(
-        "CREATE TABLE CFG_PROJECT (ID BIGINT PRIMARY KEY NOT NULL, VALUE VARCHAR, "
-        "ACTIVE_FLAG VARCHAR NOT NULL DEFAULT 'Y', "
-        "CREATED_BY VARCHAR NOT NULL DEFAULT 'etl-craft', "
-        f"CREATE_DATE {date_type} NOT NULL DEFAULT CURRENT_TIMESTAMP, "
-        "UPDATED_BY VARCHAR NOT NULL DEFAULT 'etl-craft', "
-        f"UPDATED_DATE {date_type} NOT NULL DEFAULT CURRENT_TIMESTAMP);\n"
-        "INSERT INTO CFG_PROJECT (ID, VALUE) VALUES (1, 'first');\n"
-        "UPDATE CFG_PROJECT SET VALUE='second' WHERE ID=1;\n"
-        "CREATE TABLE AUD_PROJECT (ID BIGINT PRIMARY KEY, VALUE VARCHAR);\n"
-        "INSERT INTO AUD_PROJECT VALUES (1, 'audit');\n"
-    )
-    with engine_db.engine.begin() as conn:
-        migrations.mark_packaged_migrations_applied(conn)
-    with acting_as(ALICE):
-        migrations.apply_pending_migrations(engine_db.engine, project)
-    with engine_db.engine.connect() as conn:
-        changes = conn.execute(
-            text(
-                "SELECT ACTOR, MIGRATION, OPERATION, AFTER_JSON FROM AUD_METADATA_CHANGES "
-                "WHERE TABLE_NAME='CFG_PROJECT' ORDER BY CHANGE_ID"
-            )
-        ).all()
-        assert [tuple(row)[:3] for row in changes] == [
-            ("alice", "0001_tables.sql", "INSERT"),
-            ("alice", "0001_tables.sql", "UPDATE"),
-        ]
-        after = changes[-1][3]
-        assert (after if isinstance(after, dict) else json.loads(after))["value"] == "second"
-    with (
-        pytest.raises(DBAPIError, match=r"expected Y or N|expects Y or N"),
-        engine_db.engine.begin() as conn,
-    ):
-        conn.execute(text("UPDATE CFG_PROJECT SET ACTIVE_FLAG='?' WHERE ID=1"))
-    if engine_db.engine.dialect.name == "sqlite":
-        plain = sqlite3.connect(engine_db.engine.url.database)
-        error = sqlite3.DatabaseError
-        # A connection without etl-craft has none of its SQL functions, so the triggers fail.
-        expected = "no such function: etl_craft_"
-    else:
-        service = require("postgres")
-        plain = psycopg.connect(
-            host=service.host,
-            port=service.port,
-            dbname=engine_db.engine.url.database,
-            user=POSTGRES_USER,
-            password=POSTGRES_PASSWORD,
-        )
-        plain.execute(f'SET search_path TO "{engine_db.config.engine.schema or "public"}"')
-        plain.commit()
-        error = psycopg.Error
-        expected = "written only by etl-craft"
-    try:
-        for table in ("CFG_PROJECT", "AUD_PROJECT"):
-            with pytest.raises(error, match=expected):
-                plain.execute(f"UPDATE {table} SET VALUE='external'")
-            plain.rollback()
-    finally:
-        plain.close()
 
 
 def test_terminal_attempts_and_append_only_rows_are_immutable(engine_db):

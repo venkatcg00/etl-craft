@@ -1,0 +1,2 @@
+-- Release team-owned CFG_ tables from package guards and preserve their existing history.
+-- The standard metadata-trigger refresh applies the package table ownership boundary.

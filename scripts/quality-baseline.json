@@ -112,7 +112,6 @@
     },
     "function-lines": {
       "src/etl_craft/core/text.py": 19,
-      "src/etl_craft/dialects/engine/postgres/audit.py": 38,
       "src/etl_craft/engine/repository/source_contracts.py": 7,
       "src/etl_craft/execution/gates.py": 11,
       "src/etl_craft/execution/interventions.py": 11,

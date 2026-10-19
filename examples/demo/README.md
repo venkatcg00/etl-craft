@@ -201,3 +201,8 @@ etl-craft status --pipeline_code SUPPORT_DM --run-id RUN_ID --capabilities --for
 Run the returned `execution_run_id` explicitly. Restart retains current checkpoints and human
 locks; it can repeat data writes. Use `run --controls-file selected-controls.json --format json`
 for an explicit selection with per-object outcomes; see `docs/examples/operator-controls.md`.
+
+Team-owned config is independent of package metadata. The optional
+`metadata/team_config.sql` creates `CFG_TEAM_ROUTING` without package base fields. Apply it
+with your team's database scripts or as a project migration. Plain SQL can maintain it;
+etl-craft does not guard, capture, export, document or clone its rows. `AUD_` stays reserved.
