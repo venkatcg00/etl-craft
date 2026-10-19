@@ -446,7 +446,7 @@ def check_gate(
     policy: GatePolicy = GatePolicy.ENFORCE,
     wait_seconds: float = WAIT_LIMIT_SECONDS,
 ) -> GateResult:
-    """Check without sleeping or holding a worker; resume the run's durable wait budget."""
+    """Check without sleeping or holding an agent; resume the run's durable wait budget."""
     clock = clock or Clock()
     now = clock.now()
     params = {"pipeline_run_id": pipeline_run_id, "task_id": task_id}

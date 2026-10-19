@@ -12,21 +12,21 @@ from datetime import UTC, datetime
 
 from sqlalchemy.exc import SQLAlchemyError
 
+from etl_craft.controller.leadership import leadership
+from etl_craft.controller.schedules import Schedules
 from etl_craft.core.actor import ActorKind, acting_as
 from etl_craft.core.enums import Mode, RunStatus, YesNo
 from etl_craft.core.errors import ConfigurationError, EngineDbError, EtlCraftError, RunRefusedError
 from etl_craft.core.outage import OutageBudget
 from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
-from etl_craft.engine.repository import overseers
+from etl_craft.engine.repository import controllers
 from etl_craft.engine.repository.dependencies import PipelineGraphData, fetch_pipeline_graph
 from etl_craft.engine.retry import TRANSIENT_ERRORS
 from etl_craft.engine.runlog import RunSelector, fetch_pipeline_run_status
 from etl_craft.execution import pipeline, run_types
 from etl_craft.execution.pools.local import LocalPool
 from etl_craft.execution.reconcile import reconcile
-from etl_craft.overseer.leadership import leadership
-from etl_craft.overseer.schedules import Schedules
 from etl_craft.services.cloning import run_hooks
 from etl_craft.services.operations import OperationContext
 
@@ -54,7 +54,7 @@ class WorkingSet:
     def refresh(self, ctx: OperationContext) -> list[ActiveRun]:
         """Read active unpaused runs; never scan or retain terminal history."""
         with ctx.engine.connect() as conn:
-            rows = conn.execute(statement(conn, "overseer_active_runs")).all()
+            rows = conn.execute(statement(conn, "controller_active_runs")).all()
             active = {row.pipeline_id for row in rows}
             self.graphs = {key: value for key, value in self.graphs.items() if key in active}
             result = []
@@ -86,7 +86,7 @@ Jobs = dict[int, tuple[Generator[float, None, run_types.PipelineOutcome], contex
 
 @dataclass
 class _Supervisor:
-    """The server's working state: cached graphs, schedules and the runs it advances."""
+    """The controller's working state: cached graphs, schedules and the runs it advances."""
 
     ctx: OperationContext
     stop: threading.Event
@@ -106,13 +106,13 @@ class _Supervisor:
             logger.info("%s", done.value.message)
         except (EtlCraftError, InterruptedError, SQLAlchemyError, OSError):
             del self.jobs[run_id]
-            logger.exception("pipeline_run_id=%s: overseer could not finish run", run_id)
+            logger.exception("pipeline_run_id=%s: controller could not finish run", run_id)
             context.run(steps.close)
 
-    def supervise_once(self, overseer_id: int) -> None:
+    def supervise_once(self, controller_id: int) -> None:
         """Heartbeat, reconcile, admit due schedules, advance runs and adopt unowned ones."""
         if time.monotonic() >= self.next_heartbeat:
-            overseers.heartbeat(self.ctx.engine, overseer_id)
+            controllers.heartbeat(self.ctx.engine, controller_id)
             self.next_heartbeat = time.monotonic() + 15
         reconcile(self.ctx.engine)
         self.schedules.refresh(self.ctx, datetime.now(UTC), self.stop)
@@ -135,7 +135,7 @@ class _Supervisor:
             self.ctx.config,
             run.pipeline_code,
             selector=RunSelector(run_id=run.pipeline_run_id),
-            backfill="overseer resumes backfill" if run.backfill else None,
+            backfill="controller resumes backfill" if run.backfill else None,
             child=self.ctx.child,
             hooks=run_hooks(self.ctx.config, self.ctx.engine),
             stop_dispatch=self.stop,
@@ -145,7 +145,7 @@ class _Supervisor:
         self.jobs[run.pipeline_run_id] = (steps, contextvars.copy_context())
         self.advance(run.pipeline_run_id)
 
-    def drain(self, overseer_id: int) -> None:
+    def drain(self, controller_id: int) -> None:
         """Stop admitting, let running work end within the grace period, then record the stop."""
         self.stop.set()
         deadline = time.monotonic() + self.ctx.config.limits.shutdown_grace_seconds
@@ -164,40 +164,42 @@ class _Supervisor:
         for steps, context in self.jobs.values():
             context.run(steps.close)
         self.pool.close()
-        overseers.heartbeat(self.ctx.engine, overseer_id, stopped=True)
-        logger.info("overseer_id=%s: server stopped", overseer_id)
+        controllers.heartbeat(self.ctx.engine, controller_id, stopped=True)
+        logger.info("controller_id=%s: controller stopped", controller_id)
 
 
 def serve(ctx: OperationContext, stop: threading.Event) -> None:
     """Run until shutdown; ride out Engine DB outages within their budget."""
     if ctx.config.mode != Mode.LOCAL:
-        raise RunRefusedError("server supervises local execution; set Orchestration.Mode to local")
+        raise RunRefusedError(
+            "controller supervises local execution; set Orchestration.Mode to local"
+        )
     if ctx.actor.kind != ActorKind.SERVICE:
         raise ConfigurationError(
-            f"server account={ctx.actor.name!r}, kind={ctx.actor.kind}; expected SERVICE; "
+            f"controller account={ctx.actor.name!r}, kind={ctx.actor.kind}; expected SERVICE; "
             "set ETL_CRAFT_TOKEN to an administrator service account token"
         )
     supervisor = _Supervisor(ctx, stop, LocalPool(ctx.engine, ctx.config, child=ctx.child))
     outage = OutageBudget(ctx.config.limits.engine_db_outage_seconds)
     try:
         with acting_as(ctx.actor), leadership(ctx.engine) as leader:
-            overseer_id = overseers.start(ctx.engine)
-            logger.info("overseer_id=%s: server active", overseer_id)
+            controller_id = controllers.start(ctx.engine)
+            logger.info("controller_id=%s: controller active", controller_id)
             try:
                 while not stop.is_set():
                     try:
                         leader.hold()
-                        supervisor.supervise_once(overseer_id)
+                        supervisor.supervise_once(controller_id)
                         leader.wait(stop)
                     except TRANSIENT_ERRORS as error:
                         stop.wait(outage.failed("supervising runs", error))
                         continue
                     outage.recovered("supervising runs")
             finally:
-                supervisor.drain(overseer_id)
+                supervisor.drain(controller_id)
     except SQLAlchemyError as error:
         raise EngineDbError(
-            f"server lost its Engine DB connection: {error}; restore it and restart server"
+            f"controller lost its Engine DB connection: {error}; restore it and restart controller"
         ) from error
     finally:
         supervisor.pool.close()

@@ -135,7 +135,7 @@ item's text, or work done early under another item.
 | S5.V Team-owned config tables | In progress | #213 | Fixed package ownership, unrestricted team config, retained read-only team history and collision preflight implemented; Databricks acceptance unavailable |
 | S5.U Robustness before the cluster | Done | #176, #182, #183, #184 | Engine DB restarts ridden out; SLA breach writes retried; no single-writer guess; timing tests verified under load; subprocess code measured by coverage |
 | S5.W Retry only what can succeed | Done | #215 | Failure classification, retry policies and immutable attempt evidence; local and Snowflake acceptance passed, unavailable Databricks live acceptance waived by the owner |
-| S5.Z Controller and agent names | Planned | | The overseer becomes the controller (`etl-craft controller`, `AUD_CONTROLLERS`) and S5.C's worker the agent, before S5.C |
+| S5.Z Controller and agent names | Done | #216 | Controller command/package/history, agent terminology and consistent deployment profiles; lossless Engine DB upgrades |
 | S5.X Unmanaged SQL tasks | Planned | | `SQL_SCRIPT` runs any SQL as an ordinary dependent task with per-statement audit; pre- and post-SQL are upstream and downstream tasks |
 | S5.C and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
@@ -276,6 +276,10 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.Z (#216) validates the controller command, both Engine DBs, preserved process history from
+released schemas, fresh/upgraded catalog equivalence, scheduling, leadership and local/API
+startup. Warehouse SQL and cloud authentication are unchanged; cloud acceptance does not apply.
 
 S5.W (#215): all four local warehouses passed the real syntax-error and interrupted-connection
 retry contracts. Snowflake passed the same live pair. A fresh Databricks SELECT probe returned
@@ -506,6 +510,15 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- S5.Z: the owner approved consistent pre-1.0 names without aliases, including configuration:
+  deployment profiles are `laptop`, `controller` and `controller-agents`. The table's key is
+  `CONTROLLER_ID`; the package is `controller`, with the loop in `supervisor.py`. Stop the old
+  process before upgrading. Historical `WORKER` actor values and old migrations remain intact;
+  they are audit evidence, not current process names. The HTTP `server` extra and `--server`
+  address option continue to name HTTP server functionality. Existing SQL is moved into the
+  query catalog, leadership lock-path selection into the dialects, and schedule cursor
+  validation into a helper so the package move reduces the quality baseline.
 
 - S5.W: the owner approved an additional `AUD_TASK_ATTEMPTS.RETRY_ON` column so each decision
   retains its effective policy after configuration edits. Historical attempts keep an unrecorded

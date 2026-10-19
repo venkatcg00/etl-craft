@@ -69,7 +69,7 @@ class ControlRequest:
 
 
 def request_control(ctx: OperationContext, request: ControlRequest) -> ControlView:
-    """Commit the dispatch fence first; return acceptance separately from worker completion."""
+    """Commit the dispatch fence first; return acceptance separately from agent completion."""
     command = control_command(request.action)
     args = {
         "pipeline_code": request.pipeline_code,
@@ -84,8 +84,8 @@ def request_control(ctx: OperationContext, request: ControlRequest) -> ControlVi
         if ctx.config.mode != Mode.LOCAL:
             raise RunRefusedError(
                 f"{request.pipeline_code}: legacy external-orchestrator mode has no owned "
-                "worker control adapter; stop/hold the exact task in that orchestrator. "
-                "Native controls require a local owning worker."
+                "agent control adapter; stop/hold the exact task in that orchestrator. "
+                "Native controls require a local owning agent."
             )
         if request.action == ControlAction.RUN_PAUSED and request.selector == runlog.ACTIVE_RUN:
             return _new_paused(ctx, request)
@@ -263,7 +263,7 @@ def _insert(
                 f"{request.action}: {control_effect(request.action)} "
                 "Preparation committed; inspect execution_run_id separately from execution outcome."
                 if immediate
-                else f"{request.action} requested; waiting for actual worker/query endings"
+                else f"{request.action} requested; waiting for actual agent/query endings"
             ),
         },
     ).scalar_one_or_none()

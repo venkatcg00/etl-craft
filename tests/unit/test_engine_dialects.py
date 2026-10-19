@@ -139,7 +139,7 @@ def test_both_schemas_define_the_same_tables_and_columns_in_order():
         "AUD_GATE_DECISIONS",
         "AUD_TARGET_HASH_VERSION",
         "AUD_TARGET_VIEW_STATEMENT",
-        "AUD_OVERSEERS",
+        "AUD_CONTROLLERS",
         "AUD_GATE_WAITS",
         "AUD_LINEAGE_VERSIONS",
         "AUD_LINEAGE_VERSION_EDGES",

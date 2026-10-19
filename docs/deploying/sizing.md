@@ -1,7 +1,7 @@
 # Deployment profiles and sizing
 
 etl-craft measures the CPU and memory its process may use. With a declared deployment profile,
-`run` and `server` size their task slots, HTTP server threads and Engine DB pool from that
+`run` and `controller` size their task slots, HTTP server threads and Engine DB pool from that
 measurement. Without one, nothing changes: the sizes come from the `Orchestration` settings, as
 before, and the measurement is only logged and shown by `doctor`.
 
@@ -9,7 +9,7 @@ before, and the measurement is only logged and shown by `doctor`.
 
 ```yaml
 Deployment:
-  Profile: server        # laptop | server | server-workers
+  Profile: controller        # laptop | controller | controller-agents
 ```
 
 The `Deployment` section goes after `Orchestration`. It has no profile blocks: `Profile` names
@@ -19,16 +19,16 @@ in each environment.
 | Profile | For | Reserve for the rest of the host | Task slots | Server threads |
 |---|---|---|---|---|
 | `laptop` | a machine a person also uses | half the CPUs (at least 1) and half the memory (at least 2 GB) | from what is left | 4 per CPU, at most 4 |
-| `server` | a dedicated host running every role | a tenth of the CPUs (at least 0.5) and of the memory (at least 1 GB) | from what is left | 4 per CPU, at most 40 |
-| `server-workers` | a controller with separate workers | as `server` | none: workers run tasks | as `server` |
+| `controller` | a dedicated host running every role | a tenth of the CPUs (at least 0.5) and of the memory (at least 1 GB) | from what is left | 4 per CPU, at most 40 |
+| `controller-agents` | a controller with separate agents | as `controller` | none: agents run tasks | as `controller` |
 
-`laptop` also requires `Orchestration.Api_address` to be a loopback address. `server-workers`
-requires a PostgreSQL Engine DB. Workers arrive in a later release: until then, `run` and
-`server` refuse to start with `server-workers` instead of running tasks locally.
+`laptop` also requires `Orchestration.Api_address` to be a loopback address. `controller-agents`
+requires a PostgreSQL Engine DB. Agents arrive in a later release: until then, `run` and
+`controller` refuse to start with `controller-agents` instead of running tasks locally.
 
 etl-craft never picks a profile for you and never writes `craft-connector.yml`. `doctor`
 recommends `laptop` when no profile is set, because it cannot tell whether the host is shared;
-choose `server` for a dedicated host.
+choose `controller` for a dedicated host.
 
 ## How sizes are derived
 
@@ -37,7 +37,7 @@ choose `server` for a dedicated host.
    the smallest cgroup memory limit, else the host total. Each value is reported with the file
    or call it came from.
 2. **Reserve.** The profile's reserve is set aside, and the etl-craft process itself (the
-   overseer and the HTTP server, counted once) takes 0.5 CPU and 256 MB.
+   controller and the HTTP server, counted once) takes 0.5 CPU and 256 MB.
 3. **Divide.** What is left becomes task slots at these estimates per task process:
 
    | Kind | CPU | Memory |
@@ -59,7 +59,7 @@ choose `server` for a dedicated host.
 
 - **CPU unavailable:** sized as one CPU, with at most one server thread.
 - **Memory unavailable:** task slots are not limited by memory.
-- **No task slot fits:** `server` starts with no slots and logs why; runs stay queued. `run`
+- **No task slot fits:** `controller` starts with no slots and logs why; runs stay queued. `run`
   refuses to start, naming the allocation, the need and the remedy.
 - **Less memory than the etl-craft process needs (256 MB):** both refuse to start.
 

@@ -162,7 +162,7 @@ def test_pending_stop_is_not_released_by_recovery_or_pause_permission(ctx):
             conn,
             attempt,
             current_actor(),
-            owner="worker",
+            owner="agent",
             lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
         )
     stop = request_control(ctx, request(run, ControlAction.STOP))

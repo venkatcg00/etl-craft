@@ -83,7 +83,7 @@ that damages the package is not helpful; saying so, with a better option, is.
 ## Design rules that must hold
 
 - `etl-craft run` is the only execution verb. `--task_code` runs one task; without it the engine
-  starts ready tasks after each completion, one child process per task. Gate waits use no worker
+  starts ready tasks after each completion, one child process per task. Gate waits use no agent
   slots and retain their budget in `AUD_GATE_WAITS`.
 - A task is given its run by whoever starts it; nothing resolves a run by recency. Commands
   select an explicit `--run-id` or `--run-key`, or the single non-terminal whole-pipeline run.
@@ -131,20 +131,20 @@ that damages the package is not helpful; saying so, with a better option, is.
   checks the role and records the request. The CLI, the HTTP API, the UI and orchestrators only
   parse input, call that function and render its result; a CLI command against a server calls
   the API, which calls the same function. `lint-imports` refuses an interface that imports
-  another service module. Only long-running processes (`server`, `publish-docs`) are started by
+  another service module. Only long-running processes (`controller`, `publish-docs`) are started by
   the interface itself.
 
 ## Architecture
 
 Each package imports only the packages below it; `lint-imports` enforces the order
-`cli` → `api` → `overseer` → `services` → `execution` → `handlers` → `scripting` →
+`cli` → `api` → `controller` → `services` → `execution` → `handlers` → `scripting` →
 `engine` | `warehouse` → `dialects` → `config` → `core`.
 
 | Package | Responsibility |
 |---|---|
 | `cli` | argparse commands, output, exit codes, and the client for `--server`; the only package that prints |
 | `api` | optional FastAPI routes, sign-in routes, bearer authorization and HTTP server lifecycle |
-| `overseer` | leadership, active-run working set, local supervision and shutdown |
+| `controller` | leadership, active-run working set, local supervision and shutdown |
 | `services` | actor-scoped operations, doctor, setup, validate, config files, cloning, DAG YAML, lineage, docs site |
 | `execution` | task runner, process supervisor, ready-task scheduler, run lifecycle, cross-pipeline gates |
 | `handlers` | SQL actions, business rules, Python ingestion scripts, email alerts |

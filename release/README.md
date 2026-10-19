@@ -77,7 +77,7 @@ uploads its JUnit artifact; it adds no job to pull-request CI and does not repla
 
 ## The soak
 
-Release 0.4's gate runs the demo for seven days under `etl-craft server`, with no cron or
+Release 0.4's gate runs the demo for seven days under `etl-craft controller`, with no cron or
 Airflow, while the server is killed with SIGKILL at random times. `scripts/soak.py` prepares and
 runs it against a built wheel:
 

@@ -69,7 +69,7 @@ EXPECTED = {
     enums.EmailTransport: {"smtp", "sendmail"},
     enums.TlsMode: {"none", "starttls", "ssl"},
     enums.Mode: {"local", "remote"},
-    enums.DeploymentProfile: {"laptop", "server", "server-workers"},
+    enums.DeploymentProfile: {"laptop", "controller", "controller-agents"},
     enums.AuthMode: {"none", "password", "token", "key_file", "oauth", "sso", "sts"},
     enums.TableFormat: {"native", "iceberg"},
     enums.CloningScope: {"cfg", "aud", "all", "none"},

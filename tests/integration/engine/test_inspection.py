@@ -40,7 +40,7 @@ def test_status_includes_unrun_tasks_and_transitive_failure_blocks(engine_db):
             conn,
             attempt,
             current_actor(),
-            owner="worker",
+            owner="agent",
             lease_expires_at=datetime.now(UTC) + timedelta(minutes=1),
         )
         transitions.finish_attempt(
@@ -48,7 +48,7 @@ def test_status_includes_unrun_tasks_and_transitive_failure_blocks(engine_db):
             attempt,
             "FAILED",
             current_actor(),
-            owner="worker",
+            owner="agent",
             error_message="first line\nsecond line",
         )
     statements = []
@@ -208,7 +208,7 @@ def test_pending_cross_pipeline_gates_follow_runtime_policy(engine_db, policy):
             conn,
             live_attempt,
             current_actor(),
-            owner="worker",
+            owner="agent",
             lease_expires_at=datetime.now(UTC) + timedelta(minutes=1),
         )
         pipeline = add_pipeline(conn, "P")
@@ -225,7 +225,7 @@ def test_pending_cross_pipeline_gates_follow_runtime_policy(engine_db, policy):
         assert all(gate.status == "IN-PROGRESS" for gate in gates)
         assert all(gate.selected_pipeline_run_id is None for gate in gates)
     with engine.begin() as conn:
-        transitions.finish_attempt(conn, live_attempt, "FAILED", current_actor(), owner="worker")
+        transitions.finish_attempt(conn, live_attempt, "FAILED", current_actor(), owner="agent")
         transitions.finalize_pipeline_run(conn, live_run, "FAILED")
     done = explain_task(ctx, "P", "load")
     assert all(

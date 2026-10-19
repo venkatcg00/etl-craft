@@ -272,11 +272,11 @@ def test_user_sessions_and_service_credentials_keep_their_boundaries(project):
     user(ctx)
     with pytest.raises(UsageError, match="kind=SERVICE"):
         tokens.create_token(ctx, "alice", ApiRole.VIEWER)
-    service = tokens.create_token(ctx, "worker", ApiRole.OPERATOR)
+    service = tokens.create_token(ctx, "agent", ApiRole.OPERATOR)
     with pytest.raises(UsageError, match="sign-in refused"):
-        sessions.sign_in(ctx, "worker", PASSWORD)
+        sessions.sign_in(ctx, "agent", PASSWORD)
     with pytest.raises(UsageError, match="wrong kind"):
-        accounts.reset_password(ctx, "worker", PASSWORD)
+        accounts.reset_password(ctx, "agent", PASSWORD)
     assert tokens.authenticate(ctx, service.token)
     bad = accounts.Account(0, "bad", AccountKind.SERVICE, ApiRole.VIEWER, None, None, YesNo.YES)
     with pytest.raises(UsageError, match="SERVICE expects a token"):

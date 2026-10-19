@@ -222,7 +222,7 @@ def test_scheduler_checks_events_with_no_available_worker_and_resumes(world):
             return Capacity({"ingestion": 1, "warehouse": 1}, {"ingestion": 0, "warehouse": 0})
 
         def submit(self, spec):
-            pytest.fail("an event wait must never submit to a worker")
+            pytest.fail("an event wait must never submit to an agent")
 
     def scheduler():
         return Scheduler(
@@ -303,7 +303,7 @@ def test_timeout_dependents_follow_normal_dependency_types(world, policy, expect
             return Capacity({"ingestion": 1, "warehouse": 1}, {"ingestion": 0, "warehouse": 0})
 
         def submit(self, spec):
-            pytest.fail("event waits never use a worker")
+            pytest.fail("event waits never use an agent")
 
     outcome = run_pipeline(engine, config, "P", pool=Pool())
     assert outcome.status == expected

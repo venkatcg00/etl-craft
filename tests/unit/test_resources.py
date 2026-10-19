@@ -83,7 +83,7 @@ def test_unreadable_measurements_are_unavailable_and_sizing_states_its_fallbacks
     allocation = discover(host())
     assert allocation.cpus.value is None and allocation.memory.value is None
     assert "no affinity" in allocation.cpus.detail
-    sizing = size(allocation, DeploymentProfile.SERVER)
+    sizing = size(allocation, DeploymentProfile.CONTROLLER)
     assert "sized as one CPU" in sizing.fallbacks[0]
     assert "not limited by memory" in sizing.fallbacks[1]
     assert sizing.server_threads.value == 1
@@ -108,15 +108,15 @@ def test_laptop_reserves_half_the_host_and_caps_server_threads():
 
 def test_server_uses_the_dedicated_host_and_workers_profile_runs_no_tasks():
     allocation = discover(machine(8, 16 * GIB))
-    server = size(allocation, DeploymentProfile.SERVER)
+    server = size(allocation, DeploymentProfile.CONTROLLER)
     assert server.task_slots.value == 26 and server.ingestion_slots.value == 6
     assert server.server_threads.value == 32
-    controller = size(allocation, DeploymentProfile.SERVER_WORKERS)
+    controller = size(allocation, DeploymentProfile.CONTROLLER_AGENTS)
     assert controller.task_slots.value == 0 and "runs no tasks" in controller.task_slots.reason
 
 
 def test_memory_binds_when_it_is_tighter_than_cpu():
-    sizing = size(discover(machine(16, 3 * GIB)), DeploymentProfile.SERVER)
+    sizing = size(discover(machine(16, 3 * GIB)), DeploymentProfile.CONTROLLER)
     # 3 GB less the 1 GB reserve and the 256 MB process leaves 1792 MB: 14 tasks of 128 MB.
     assert sizing.task_slots.value == 14 and sizing.task_slots.reason.startswith("memory")
     assert sizing.ingestion_slots.value == 3
@@ -124,11 +124,11 @@ def test_memory_binds_when_it_is_tighter_than_cpu():
 
 def test_written_settings_are_ceilings_never_requests():
     allocation = discover(machine(8, 16 * GIB))
-    sizing = size(allocation, DeploymentProfile.SERVER, Ceilings(4, 1, 2))
+    sizing = size(allocation, DeploymentProfile.CONTROLLER, Ceilings(4, 1, 2))
     assert (sizing.task_slots.value, sizing.ingestion_slots.value) == (4, 1)
     assert sizing.warehouse_slots.value == 2
     assert sizing.task_slots.reason == "Orchestration.Max_parallel_tasks ceiling"
-    roomy = size(allocation, DeploymentProfile.SERVER, Ceilings(500))
+    roomy = size(allocation, DeploymentProfile.CONTROLLER, Ceilings(500))
     assert roomy.task_slots.value == 26
 
 
@@ -153,14 +153,14 @@ def test_no_profile_keeps_the_configuration_and_only_logs_the_measurement(tmp_pa
 
 
 def test_a_profile_sizes_the_role_within_written_ceilings(tmp_path):
-    path = write_config(tmp_path, {"Profile": "server"}, Local_ingestion_slots=2)
+    path = write_config(tmp_path, {"Profile": "controller"}, Local_ingestion_slots=2)
     before = path.read_bytes()
     config = start_role(load_config(path), server=False, host=machine(8, 16 * GIB))
-    assert config.sizing is not None and config.deployment == DeploymentProfile.SERVER
+    assert config.sizing is not None and config.deployment == DeploymentProfile.CONTROLLER
     assert config.limits.max_parallel_tasks == 26
     assert config.limits.local_ingestion_slots == 2
     assert path.read_bytes() == before
-    capped = write_config(tmp_path, {"Profile": "server"}, Max_parallel_tasks=4)
+    capped = write_config(tmp_path, {"Profile": "controller"}, Max_parallel_tasks=4)
     sized = start_role(load_config(capped), server=False, host=machine(8, 16 * GIB))
     assert sized.limits.max_parallel_tasks == 4
 
@@ -169,9 +169,9 @@ def test_server_workers_refuses_to_run_here(tmp_path):
     config = load_config(write_config(tmp_path))
     from dataclasses import replace
 
-    workers = replace(config, deployment=DeploymentProfile.SERVER_WORKERS)
-    with pytest.raises(ConfigurationError, match="no worker queue provider"):
-        start_role(workers, server=True, host=machine(8, 16 * GIB))
+    agents = replace(config, deployment=DeploymentProfile.CONTROLLER_AGENTS)
+    with pytest.raises(ConfigurationError, match="no agent queue provider"):
+        start_role(agents, server=True, host=machine(8, 16 * GIB))
 
 
 def test_an_allocation_too_small_for_a_slot_refuses_run_and_queues_on_the_server(tmp_path, caplog):
@@ -191,7 +191,7 @@ def test_an_allocation_too_small_for_a_slot_refuses_run_and_queues_on_the_server
     ("deployment", "extra", "message"),
     [
         ({"Profile": "cluster"}, {}, r"Deployment.Profile='cluster'; expected one of"),
-        ({"Profile": "server-workers"}, {}, "workers share one PostgreSQL Engine DB"),
+        ({"Profile": "controller-agents"}, {}, "agents share one PostgreSQL Engine DB"),
         ({"Profile": "laptop"}, {"Api_address": "0.0.0.0:8730"}, "binds to loopback"),
         ({"dev": {"Profile": "laptop"}}, {}, r"unknown key\(s\) \['dev'\] in Deployment"),
     ],
@@ -213,3 +213,12 @@ def test_doctor_reports_measurements_recommendation_and_sizes_without_a_profile(
     assert blind["Resources: memory"].status is Status.WARN
     assert "no automatic task-memory admission" in blind["Resources: memory"].detail
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("profile", ["server", "server-workers"])
+def test_removed_deployment_profiles_are_refused(tmp_path, profile):
+    path = write_config(tmp_path, {"Profile": profile})
+    with pytest.raises(
+        ConfigurationError, match=r"Deployment.Profile=.*expected one of.*controller"
+    ):
+        load_config(path)

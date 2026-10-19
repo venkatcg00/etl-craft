@@ -224,7 +224,7 @@ def _run_with_retries(
     gate: TrackedGate,
     options: _LocalOptions,
 ) -> TaskOutcome:
-    """Wait for durable retry deadlines outside the worker, preserving each attempt's outcome."""
+    """Wait for durable retry deadlines outside the agent, preserving each attempt's outcome."""
     if options.automatic_retries:
         waiting, _ = refresh_retries(engine, config, task.pipeline_run_id, {task.task_id})
         if task.task_id in waiting and not _wait_retry(
@@ -273,7 +273,7 @@ def _wait_retry(
     gate: TrackedGate,
     child: ChildOptions | None,
 ) -> bool:
-    """Wait outside a worker pool; interruption leaves the delayed attempt durable."""
+    """Wait outside an agent pool; interruption leaves the delayed attempt durable."""
     while True:
         if (child is not None and child.cancel is not None and child.cancel.is_set()) or (
             run_cancelled(engine, pipeline_run_id)

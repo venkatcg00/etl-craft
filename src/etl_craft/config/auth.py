@@ -71,7 +71,7 @@ class EngineSpec:
     auth_fields: AuthFields
     verified_auth_modes: frozenset[str]
     shared_by_hosts: bool = False
-    """Whether processes on several hosts can share it, as workers need."""
+    """Whether processes on several hosts can share it, as agents need."""
 
     @property
     def auth_modes(self) -> frozenset[str]:

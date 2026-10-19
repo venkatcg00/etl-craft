@@ -80,6 +80,10 @@ class EngineDialect(ABC):
     def refresh_metadata_triggers(self, conn: Connection) -> None:
         """Install metadata capture and write guards for the current table definitions."""
 
+    def controller_lock_path(self, engine: Engine) -> str | None:
+        """Return the local leadership lock path, or None for session leadership."""
+        return None
+
     def max_connections(self, conn: Connection) -> int | None:
         """Return the server's connection limit; ``None`` for a database without one."""
         return None

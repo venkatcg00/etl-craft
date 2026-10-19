@@ -36,7 +36,7 @@ MUTATING_COMMANDS = frozenset(
         "token create",
         "token revoke",
         "run",
-        "server",
+        "controller",
         "mark",
         "stop",
         "abort",

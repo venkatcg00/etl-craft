@@ -371,7 +371,7 @@ def test_engine_unavailable_response_does_not_echo_storage_parameters(api, monke
     assert "secret" not in response.text
 
 
-def test_live_http_trigger_is_executed_by_overseer_and_shutdown_is_clean(cli_project):
+def test_live_http_trigger_is_executed_by_controller_and_shutdown_is_clean(cli_project):
     import signal
     import socket
     import time
@@ -393,8 +393,8 @@ def test_live_http_trigger_is_executed_by_overseer_and_shutdown_is_clean(cli_pro
     )
     assert code == 0, output
     credential = json.loads(output)["token"]
-    server = p.start("server")
-    p.wait_for("SELECT COUNT(*) FROM AUD_OVERSEERS", expected=1)
+    server = p.start("controller")
+    p.wait_for("SELECT COUNT(*) FROM AUD_CONTROLLERS", expected=1)
     base = f"http://127.0.0.1:{port}/api/v1"
     deadline = time.monotonic() + 10
     while True:
@@ -424,7 +424,7 @@ def test_live_http_trigger_is_executed_by_overseer_and_shutdown_is_clean(cli_pro
     )
     server.signal(signal.SIGTERM)
     assert server.wait() == 0, server.output
-    p.wait_for("SELECT COUNT(*) FROM AUD_OVERSEERS WHERE STOPPED_AT IS NOT NULL", expected=1)
+    p.wait_for("SELECT COUNT(*) FROM AUD_CONTROLLERS WHERE STOPPED_AT IS NOT NULL", expected=1)
     with p.engine.connect() as conn:
         assert (
             conn.execute(
@@ -530,12 +530,12 @@ def test_server_refuses_an_api_address_in_use_before_taking_leadership(cli_proje
         config = yaml.safe_load(path.read_text())
         config["Orchestration"]["Api_address"] = f"127.0.0.1:{port}"
         path.write_text(yaml.safe_dump(config, sort_keys=False))
-        code, output = p.run("server")
+        code, output = p.run("controller")
     assert code == 10, output
     assert f"Orchestration.Api_address 127.0.0.1:{port} cannot be used" in output
     assert "set Api_address to a free port" in output
     with p.engine.connect() as conn:
-        assert conn.execute(text("SELECT COUNT(*) FROM AUD_OVERSEERS")).scalar_one() == 0
+        assert conn.execute(text("SELECT COUNT(*) FROM AUD_CONTROLLERS")).scalar_one() == 0
 
 
 def test_task_run_refuses_unknown_control_fields(api):

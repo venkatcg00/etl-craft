@@ -8,7 +8,7 @@ way to start runs on a schedule.
 
 ## Starting runs on a schedule
 
-The [local server](server.md) reads pipeline schedules directly from metadata, with timezone
+The [controller](server.md) reads pipeline schedules directly from metadata, with timezone
 and catch-up policies. You can also use any scheduler that runs a command. Run the commands from the project directory, or pass
 `--config`, so they find `craft-connector.yml`:
 

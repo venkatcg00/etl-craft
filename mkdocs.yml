@@ -125,7 +125,7 @@ nav:
       - deploying/index.md
       - The project directory: deploying/project-layout.md
       - Local mode: deploying/local-mode.md
-      - Local server: deploying/server.md
+      - Controller: deploying/server.md
       - Deployment profiles and sizing: deploying/sizing.md
       - HTTP API: deploying/http-api.md
       - Running under an orchestrator: deploying/orchestrator.md

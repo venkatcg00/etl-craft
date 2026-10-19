@@ -195,7 +195,7 @@ def single_writer_lock(
     """Queue behind other writers when the warehouse admits one writing process; else nothing.
 
     The lock is held in the Engine DB, which every process that could contend can reach,
-    including workers on other machines. Waiters queue in order rather than retrying against
+    including agents on other machines. Waiters queue in order rather than retrying against
     the warehouse's own lock error. ``wait_seconds`` 0 waits indefinitely; otherwise a
     ``LockTimeoutError`` says another task is still using the warehouse. A task whose own
     script writes to the warehouse is wrapped in this lock too, without an engine being opened

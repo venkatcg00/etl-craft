@@ -96,5 +96,5 @@ def _reason(ctx: OperationContext, request: ControlRequest) -> str | None:
             f"the {required} role; ask an administrator to grant it"
         )
     if ctx.config.mode != Mode.LOCAL:
-        return "legacy orchestrator has no native worker adapter; control its exact task there"
+        return "legacy orchestrator has no native agent adapter; control its exact task there"
     return None

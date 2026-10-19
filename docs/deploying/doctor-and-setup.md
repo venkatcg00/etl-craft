@@ -33,7 +33,7 @@ It exits 1 when any check fails, so it can gate a deployment. It checks:
 | Warehouse | the database cannot be reached, its `schema` does not exist, it is an in-memory DuckDB, or a Trino catalog is not Iceberg | |
 | Email | the relay does not answer, TLS certificate or hostname verification fails, the CA file is unreadable, a login uses `tls_mode: none`, or the `sendmail` program cannot be run | |
 | Engine DB connection budget | | a PostgreSQL Engine DB's `max_connections` is less than 1.25 times the server pool, its overflow and one connection per task slot |
-| Resources and sizing | | a CPU or memory measurement is unavailable, so a stated fallback applies, or the profile is `server-workers` |
+| Resources and sizing | | a CPU or memory measurement is unavailable, so a stated fallback applies, or the profile is `controller-agents` |
 
 The resource lines show the CPU and memory this process may use, where each was measured, the
 `Deployment.Profile` (or the recommended one when none is set) and every size it implies; see

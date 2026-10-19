@@ -14,7 +14,7 @@ process with the same logs, time limits and outcomes as [`run --task_code`](runn
 `Orchestration.Local_warehouse_slots` how many run SQL, business-rule and alert tasks; unset,
 either kind may use every slot. A task waits for a free slot of its own kind, while tasks of the
 other kind keep starting.
-Cross-pipeline gate waits persist their deadline and next look without holding a worker slot.
+Cross-pipeline gate waits persist their deadline and next look without holding an agent slot.
 
 ```
 INFO etl_craft.execution.scheduler [pipeline=SALES_DAILY pipeline_run_id=97]: SALES_DAILY: dispatch extract_orders

@@ -4,12 +4,12 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from etl_craft.controller.supervisor import WorkingSet
 from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import ControlAction, RunStatus
 from etl_craft.core.errors import RunRefusedError
 from etl_craft.engine import controls, locks, transitions
 from etl_craft.execution.interventions import pause_pipeline
-from etl_craft.overseer.server import WorkingSet
 from etl_craft.services.operations.controls import request_control
 from fixtures.metadata import finish_run
 from fixtures.scoped_controls import ctx as ctx
@@ -41,7 +41,7 @@ def test_recovery_needs_query_evidence_even_after_a_lost_worker_has_exited(ctx, 
     assert prepared.execution_run_id is not None
 
 
-def test_overseer_only_admits_the_permitted_nonterminal_run_under_definition_pause(ctx):
+def test_controller_only_admits_the_permitted_nonterminal_run_under_definition_pause(ctx):
     _, source, _, _ = scene(ctx)
     restarted = request_control(ctx, request(source, ControlAction.RESTART, key="new"))
     pause_pipeline(ctx.engine, ctx.config, "P", "automatic starts paused")

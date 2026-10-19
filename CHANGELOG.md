@@ -6,6 +6,16 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The scheduling process is the controller: start it with `etl-craft controller`.
+  `etl_craft.controller` replaces `etl_craft.overseer`; migration `0042` renames
+  `AUD_OVERSEERS.OVERSEER_ID` to `AUD_CONTROLLERS.CONTROLLER_ID` without losing process history.
+  Deployment profiles are `laptop`, `controller` and `controller-agents`; the old `server`
+  command and `server`/`server-workers` profile values have no aliases. Update launch commands
+  and configuration files, stop the old process, then migrate before starting the controller.
+  Task execution uses agent terminology; the cluster agent itself remains S5.C.
+
 ### Added
 
 - Failure-aware automatic retries: `Orchestration.Retry_on` and task `RETRY_ON` select

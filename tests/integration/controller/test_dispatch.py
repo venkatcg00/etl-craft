@@ -1,4 +1,4 @@
-"""Ready-task progress, worker-free waits and durable admission budgets."""
+"""Ready-task progress, agent-free waits and durable admission budgets."""
 
 import signal
 import threading
@@ -55,7 +55,7 @@ def test_fast_branch_starts_its_downstream_before_the_slow_branch_finishes(
         add_dependency(conn, p.pipeline_id, following, p.task_id)
     if server_mode:
         assert p.run("run", "--pipeline_code", "P", "--init-only")[0] == 0
-        server = p.start("server")
+        server = p.start("controller")
         p.wait_for("SELECT STATUS FROM AUD_PIPELINES_RUN_LOG", expected="SUCCESS", timeout=20)
         server.signal(signal.SIGTERM)
         assert server.wait() == 0, server.output
@@ -88,7 +88,7 @@ def test_one_hundred_waiting_tasks_create_no_worker_jobs_and_resume_the_same_bud
     now = datetime.now(UTC)
     clock = Clock(now=lambda: now, sleep=lambda _: pytest.fail("gate slept"))
     config = replace(db.config, limits=replace(db.config.limits, max_parallel_tasks=1))
-    workers = [t for t in threading.enumerate() if t.name.startswith("etl-craft-task")]
+    agents = [t for t in threading.enumerate() if t.name.startswith("etl-craft-task")]
     scheduler = Scheduler(
         db.engine,
         config,
@@ -108,7 +108,7 @@ def test_one_hundred_waiting_tasks_create_no_worker_jobs_and_resume_the_same_bud
         assert not scheduler.step()
         assert scheduler.jobs == {}
         assert scheduler.attempted == set()
-        assert [t for t in threading.enumerate() if t.name.startswith("etl-craft-task")] == workers
+        assert [t for t in threading.enumerate() if t.name.startswith("etl-craft-task")] == agents
     finally:
         scheduler.close()
     with db.engine.connect() as conn:
@@ -162,7 +162,7 @@ def test_pipeline_gate_wait_is_persisted_before_admission_and_resumes_after_rest
             text("UPDATE AUD_PIPELINES_RUN_LOG SET STATUS='QUEUED' WHERE PIPELINE_RUN_ID=:id"),
             {"id": queued},
         )
-    server = p.start("server")
+    server = p.start("controller")
     p.wait_for("SELECT COUNT(*) FROM AUD_GATE_WAITS WHERE TASK_ID IS NULL", expected=1)
     server.signal(signal.SIGTERM)
     assert server.wait() == 0, server.output
@@ -170,8 +170,8 @@ def test_pipeline_gate_wait_is_persisted_before_admission_and_resumes_after_rest
         before = conn.execute(
             text("SELECT FIRST_CHECK_AT, WAIT_UNTIL, LOOKS FROM AUD_GATE_WAITS")
         ).one()
-    server = p.start("server")
-    p.wait_for("SELECT COUNT(*) FROM AUD_OVERSEERS WHERE STOPPED_AT IS NULL", expected=1)
+    server = p.start("controller")
+    p.wait_for("SELECT COUNT(*) FROM AUD_CONTROLLERS WHERE STOPPED_AT IS NULL", expected=1)
     server.signal(signal.SIGTERM)
     assert server.wait() == 0, server.output
     with p.engine.connect() as conn:
@@ -237,7 +237,7 @@ def test_cancelled_pipeline_admission_stops_waiting_without_starting_a_worker(cl
             text("UPDATE AUD_PIPELINES_RUN_LOG SET STATUS='QUEUED' WHERE PIPELINE_RUN_ID=:id"),
             {"id": run_id},
         )
-    server = p.start("server")
+    server = p.start("controller")
     p.wait_for("SELECT COUNT(*) FROM AUD_GATE_WAITS WHERE TASK_ID IS NULL", expected=1)
     code, output = p.run(
         "abort",
@@ -299,7 +299,7 @@ def test_shutdown_cancels_all_runs_before_joining_the_shared_pool(cli_project):
         add_task(conn, other, "block", "PYTHON", SCRIPT_NAME="block.py")
     assert p.run("run", "--pipeline_code", "P", "--init-only")[0] == 0
     assert p.run("run", "--pipeline_code", "OTHER", "--init-only")[0] == 0
-    server = p.start("server")
+    server = p.start("controller")
     deadline = time.monotonic() + 15
     while not (p.config.project_dir / "other-run-started").exists() and time.monotonic() < deadline:
         time.sleep(0.05)

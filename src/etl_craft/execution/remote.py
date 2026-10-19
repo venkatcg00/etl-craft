@@ -96,7 +96,7 @@ def unsupported_rules(
                 UnsupportedRule(
                     where,
                     "HANDLER = 'EVENT_WAIT'",
-                    "Durable event waits are scheduled without workers in local mode; "
+                    "Durable event waits are scheduled without agents in local mode; "
                     f"{LOCAL_MODE_REMEDY}.",
                 )
             )

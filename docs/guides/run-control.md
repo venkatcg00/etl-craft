@@ -156,7 +156,7 @@ independent manual runs keep running. Abort does not undo warehouse commits. Suc
 counts, logs, checkpoints and recorded consumption remain intact.
 
 The response is `etl-craft/control/1`, with a durable `control_id`, exact scope, pinned attempt
-ids, actor and reason. `REQUESTED` means the fence is committed; `ACKNOWLEDGED` means the worker
+ids, actor and reason. `REQUESTED` means the fence is committed; `ACKNOWLEDGED` means the agent
 has observed it but process/query endings are still pending; `COMPLETED` requires actual exit
 and query-ending observations. The separate `run_status` always shows the stored run outcome.
 A run-scope stop ends the run `CANCELLED` only after those observations; a task-scope stop leaves
@@ -347,7 +347,7 @@ etl-craft run --pipeline_code SALES_DAILY --run-id 42 --restart \
 These commands **prepare** work and return promptly with a durable `control_id` and
 `execution_run_id`. `COMPLETED` means preparation committed, not that any task succeeded.
 `pipeline_run_id` remains the source identity; inspect the execution run separately. On a server,
-the overseer picks up eligible whole-pipeline contexts. Locally, execute the returned identity
+the controller picks up eligible whole-pipeline contexts. Locally, execute the returned identity
 with `etl-craft run --pipeline_code SALES_DAILY --run-id EXECUTION_ID`; add `--task_code TASK`
 when recovering only a task in an existing run. An independent restart selection can be driven
 with `run --run-id EXECUTION_ID` without recreating its selection. Reusing a request key returns
@@ -411,11 +411,11 @@ Only selected objects are affected. Results include each accepted control or its
 refusal; this is not an all-or-nothing transaction. A nonzero CLI exit means at least one object
 refused, while earlier accepted actions remain committed. Retry the same selection with the
 same keys to inspect accepted requests safely. Bulk preparation does not wait for task execution
-or worker/query endings. The same flags support `--server`.
+or agent/query endings. The same flags support `--server`.
 
 The shared HTTP routes are `GET /api/v1/pipelines/{code}/capabilities`,
 `POST /api/v1/pipelines/{code}/controls` (including `RECOVER`, `RESTART`, `RUN_PAUSED`) and
 `POST /api/v1/controls/bulk` with `{"requests": [...]}`. Viewers can inspect capabilities and
 requests; operators can submit actions. `execution_run_id` is additive in `etl-craft/control/1`.
-Legacy external orchestrators still require their own worker/query adapter; capabilities name
+Legacy external orchestrators still require their own agent/query adapter; capabilities name
 that limitation rather than claiming a native action completed.

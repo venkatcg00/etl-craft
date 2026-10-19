@@ -1,0 +1,1 @@
+LISTEN etl_craft_events

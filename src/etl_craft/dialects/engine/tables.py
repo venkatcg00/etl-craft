@@ -41,7 +41,7 @@ AUDIT_TABLES = frozenset(
         "AUD_CFG_BUSINESS_RULES_HISTORY",
         "AUD_TARGET_HASH_VERSION",
         "AUD_TARGET_VIEW_STATEMENT",
-        "AUD_OVERSEERS",
+        "AUD_CONTROLLERS",
         "AUD_GATE_WAITS",
         "AUD_TASK_EVENTS",
         "AUD_EVENT_FILES",
@@ -74,7 +74,9 @@ def retired_history(table: str) -> bool:
     return name.startswith("AUD_CFG_") and name.endswith("_HISTORY") and name not in AUDIT_TABLES
 
 
-LEGACY_AUDIT_TABLES = frozenset({"AUD_PIPELINE_DEPENDENCY_TRACKER", "AUD_TASK_DEPENDENCY_TRACKER"})
+LEGACY_AUDIT_TABLES = frozenset(
+    {"AUD_PIPELINE_DEPENDENCY_TRACKER", "AUD_TASK_DEPENDENCY_TRACKER", "AUD_OVERSEERS"}
+)
 
 
 def validate_audit_table(table: str, triggers: set[str]) -> None:

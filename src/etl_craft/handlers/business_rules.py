@@ -180,8 +180,8 @@ class _RuleRunner:
         """Run one wave's rules in parallel; ``HandlerError`` naming every rule that failed."""
         names = ", ".join(rule.rule.business_rule_name for rule in rules)
         logger.info("wave SEQUENCE_NUMBER=%d: %s", number, names)
-        workers = min(max(self.context.config.limits.max_parallel_tasks, 1), len(rules))
-        with ThreadPoolExecutor(workers, thread_name_prefix="etl-craft-rule") as pool:
+        agents = min(max(self.context.config.limits.max_parallel_tasks, 1), len(rules))
+        with ThreadPoolExecutor(agents, thread_name_prefix="etl-craft-rule") as pool:
             futures = [
                 pool.submit(contextvars.copy_context().run, self._run_rule, rule) for rule in rules
             ]

@@ -31,7 +31,7 @@ def test_server_workers_refuses_execution_and_starts_nothing(ctx, capsys, monkey
             {
                 "Secrets": raw["Secrets"],
                 "Orchestration": raw["Orchestration"],
-                "Deployment": {"Profile": "server-workers"},
+                "Deployment": {"Profile": "controller-agents"},
                 "Engine": raw["Engine"],
             },
             sort_keys=False,
@@ -41,14 +41,14 @@ def test_server_workers_refuses_execution_and_starts_nothing(ctx, capsys, monkey
     error = capsys.readouterr().err
     assert code == ConfigurationError.exit_code
     shared = ctx.engine.dialect.name == "postgresql"
-    assert ("no worker queue provider" if shared else "share one PostgreSQL") in error
+    assert ("no agent queue provider" if shared else "share one PostgreSQL") in error
     with ctx.engine.connect() as conn:
         assert conn.execute(text("SELECT COUNT(*) FROM AUD_PIPELINES_RUN_LOG")).scalar() == 0
 
 
 def test_a_sized_role_builds_its_pool_and_a_server_without_slots_admits_nothing(ctx):
     config = start_role(
-        replace(ctx.config, deployment=DeploymentProfile.SERVER), server=True, host=MACHINE
+        replace(ctx.config, deployment=DeploymentProfile.CONTROLLER), server=True, host=MACHINE
     )
     assert config.sizing is not None
     engine = engine_db(config)

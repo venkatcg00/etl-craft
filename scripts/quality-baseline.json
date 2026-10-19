@@ -53,7 +53,6 @@
       "src/etl_craft/execution/remote.py": 3,
       "src/etl_craft/execution/scheduler.py": 7,
       "src/etl_craft/handlers/sql/spec.py": 2,
-      "src/etl_craft/overseer/schedules.py": 3,
       "src/etl_craft/services/config_files.py": 12
     },
     "broad-except": {
@@ -75,7 +74,6 @@
       "src/etl_craft/engine/repository/normalization.py": 2,
       "src/etl_craft/engine/repository/source_contracts.py": 1,
       "src/etl_craft/execution/retries.py": 2,
-      "src/etl_craft/overseer/schedules.py": 1,
       "src/etl_craft/services/docs_publish.py": 1,
       "src/etl_craft/services/source_columns.py": 1
     },
@@ -91,7 +89,6 @@
       "src/etl_craft/engine/connection.py": 1,
       "src/etl_craft/engine/repository/normalization.py": 2,
       "src/etl_craft/engine/repository/source_columns.py": 1,
-      "src/etl_craft/overseer/leadership.py": 1,
       "src/etl_craft/services/doctor.py": 1,
       "src/etl_craft/services/validate.py": 1,
       "src/etl_craft/warehouse/connection.py": 1
@@ -121,7 +118,6 @@
       "src/etl_craft/handlers/python_scripts.py": 3,
       "src/etl_craft/handlers/sql/actions.py": 2,
       "src/etl_craft/handlers/sql/spec.py": 3,
-      "src/etl_craft/overseer/schedules.py": 3,
       "src/etl_craft/services/catalog.py": 31,
       "src/etl_craft/services/config_files.py": 27,
       "src/etl_craft/services/lineage.py": 35,
@@ -134,10 +130,8 @@
       "src/etl_craft/engine/repository/audit_reads.py": 4,
       "src/etl_craft/engine/repository/config_rows.py": 1,
       "src/etl_craft/engine/repository/normalization.py": 2,
-      "src/etl_craft/engine/repository/overseers.py": 3,
       "src/etl_craft/engine/repository/source_columns.py": 1,
       "src/etl_craft/execution/connections.py": 1,
-      "src/etl_craft/overseer/leadership.py": 4,
       "src/etl_craft/services/catalog.py": 1,
       "src/etl_craft/services/cloning.py": 4,
       "src/etl_craft/services/validate.py": 1

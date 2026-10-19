@@ -1,8 +1,8 @@
 # HTTP API
 
-Install `etl-craft[server]`, initialize or migrate the Engine DB, and run `etl-craft server`.
-The API and local overseer share the same configuration and shutdown lifecycle. Without the
-server extra, `etl-craft server` supervises runs without opening an HTTP listener.
+Install `etl-craft[server]`, initialize or migrate the Engine DB, and run `etl-craft controller`.
+The API and local controller share the same configuration and shutdown lifecycle. Without the
+server extra, `etl-craft controller` supervises runs without opening an HTTP listener.
 
 `Orchestration.Api_address` defaults to `127.0.0.1:8730`. Set it to a `host:port`, or
 `[IPv6-address]:port`. For a team URL, place a TLS reverse proxy in front of the listener.
@@ -69,7 +69,7 @@ curl -X POST -H "Authorization: Bearer $ETL_CRAFT_API_TOKEN" \
   http://127.0.0.1:8730/api/v1/pipelines/SALES/runs
 ```
 
-A trigger initializes or resumes the pipeline run and returns its exact identity; the overseer
+A trigger initializes or resumes the pipeline run and returns its exact identity; the controller
 executes its tasks. Backfills and task reruns call the same blocking service operations as the CLI.
 A disconnected client does not cancel committed work; inspect its exact run before retrying.
 

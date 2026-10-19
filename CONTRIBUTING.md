@@ -33,7 +33,7 @@ repeated runs for concurrency changes, `actionlint` for workflow changes, and th
 when warehouse SQL changes. CI runs the complete suite on the pull request in under ten minutes
 and is its authority. Fix failures before asking for a merge.
 
-CI partitions complete collections across jobs and isolated worker processes. Demo workers in
+CI partitions complete collections across jobs and isolated agent processes. Demo agents in
 one job share their warehouse service; each owns its databases, Iceberg namespaces and email
 addresses. The final **every test and matrix accounted for** check requires each shard, its test
 outcomes and the package/Airflow

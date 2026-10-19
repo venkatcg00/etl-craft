@@ -200,7 +200,7 @@ type = "layers"
 layers = [
     "etl_craft.cli",
     "etl_craft.api",
-    "etl_craft.overseer",
+    "etl_craft.controller",
     "etl_craft.services",
     "etl_craft.execution",
     "etl_craft.handlers",
@@ -238,7 +238,7 @@ name = "The server extra (FastAPI, Pydantic, uvicorn) is imported only by etl_cr
 type = "forbidden"
 source_modules = [
     "etl_craft.cli",
-    "etl_craft.overseer",
+    "etl_craft.controller",
     "etl_craft.services",
     "etl_craft.execution",
     "etl_craft.handlers",

@@ -97,7 +97,7 @@ def default_hooks(config: ConnectorConfig, engine: Engine) -> RunHooks:
 
 
 def drive(steps: Generator[float, None, T], clock: Clock) -> T:
-    """Wait only in the foreground supervisor; workers never wait on gate deadlines.
+    """Wait only in the foreground supervisor; agents never wait on gate deadlines.
 
     A signal held while a step worked is raised between steps, so it never interrupts one.
     """

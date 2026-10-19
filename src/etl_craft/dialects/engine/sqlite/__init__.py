@@ -1,7 +1,7 @@
 """SQLite: the default Engine DB, one file and nothing to install.
 
 It suits local development and single-machine deployments. PostgreSQL remains the production
-recommendation: a SQLite file cannot be reached by workers on other hosts, and every write is
+recommendation: a SQLite file cannot be reached by agents on other hosts, and every write is
 serialized.
 """
 
@@ -20,7 +20,12 @@ from sqlalchemy.engine import URL, Connection, Engine
 
 from etl_craft.config.auth import engine_for_jdbc_url
 from etl_craft.core.enums import AuthMode
-from etl_craft.core.errors import ConfigurationError, LockTimeoutError, MigrationError
+from etl_craft.core.errors import (
+    ConfigurationError,
+    LockTimeoutError,
+    MigrationError,
+    RunRefusedError,
+)
 from etl_craft.core.filelock import file_lock
 from etl_craft.core.text import is_only_comments
 from etl_craft.dialects.engine.base import EngineDialect
@@ -42,6 +47,13 @@ class SqliteEngineDialect(EngineDialect):
 
     spec = engine_for_jdbc_url(JDBC_PREFIX)
     directory = Path(__file__).parent
+
+    def controller_lock_path(self, engine: Engine) -> str:
+        """SQLite leadership needs one file shared by every local task process."""
+        database = engine.url.database
+        if not database or database == ":memory:":
+            raise RunRefusedError("controller requires a file-backed SQLite Engine DB")
+        return f"{database}.controller.lock"
 
     def index_names(self, conn: Connection, table: str) -> list[str]:
         """Return the names of the indexes on ``table``, its primary key's excluded."""

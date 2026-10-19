@@ -1,4 +1,4 @@
-"""PostgreSQL: the recommended Engine DB for production, shared by every worker."""
+"""PostgreSQL: the recommended Engine DB for production, shared by every agent."""
 
 from __future__ import annotations
 

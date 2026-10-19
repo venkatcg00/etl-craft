@@ -136,12 +136,12 @@ def test_attempt_retryability_is_cloned_as_boolean(sql_world):
                 conn,
                 attempt,
                 current_actor(),
-                owner="typed-worker",
+                owner="typed-agent",
                 lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
             )
             transitions.record_attempt_failure(conn, attempt, Failure(kind, "HandlerError"))
             transitions.finish_attempt(
-                conn, attempt, "FAILED", current_actor(), owner="typed-worker"
+                conn, attempt, "FAILED", current_actor(), owner="typed-agent"
             )
     clone(world.engine_db, cloning(world, CloningScope.AUD))
     assert world.rows(

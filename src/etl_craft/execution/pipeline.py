@@ -2,7 +2,7 @@
 
 In local mode the engine runs every active task under one run, starting ready tasks after each
 completion, at most ``Orchestration.Max_parallel_tasks`` at once. Each task goes through
-``run_task`` in a process of its own. Gates wait cooperatively without a worker;
+``run_task`` in a process of its own. Gates wait cooperatively without an agent;
 a task whose dependencies can never be met is recorded ``SKIPPED``. Execution continues until
 every task is settled or none can start. Data tasks determine the run's outcome; failed alerts
 are logged and recorded on their own tasks. A pipeline containing only alerts uses those

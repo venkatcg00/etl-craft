@@ -1,4 +1,4 @@
-"""Serve HTTP and the existing local overseer within one shutdown lifecycle."""
+"""Serve HTTP and the existing local controller within one shutdown lifecycle."""
 
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ from fastapi import FastAPI
 
 from etl_craft.api.app import create_app
 from etl_craft.config.model import parse_api_address
+from etl_craft.controller.supervisor import serve
 from etl_craft.core.errors import RunRefusedError
-from etl_craft.overseer.server import serve
 from etl_craft.services.operations.context import OperationContext
 
 
@@ -36,7 +36,7 @@ def bind_api_address(host: str, port: int) -> socket.socket:
 
 
 def serve_http(ctx: OperationContext, stop: threading.Event) -> None:
-    """Run HTTP in the main thread; stop and join the overseer before disposing its DB.
+    """Run HTTP in the main thread; stop and join the controller before disposing its DB.
 
     The address is bound first, so a port in use refuses the server before it takes leadership
     or supervises anything.
@@ -57,7 +57,7 @@ def serve_http(ctx: OperationContext, stop: threading.Event) -> None:
         if ctx.config.sizing is not None:
             limiter = anyio.to_thread.current_default_thread_limiter()
             limiter.total_tokens = ctx.config.sizing.server_threads.value
-        thread = threading.Thread(target=supervise, name="etl-craft-overseer")
+        thread = threading.Thread(target=supervise, name="etl-craft-controller")
         thread.start()
         try:
             yield

@@ -1,4 +1,4 @@
-"""Event conditions checked by the scheduler without occupying a task worker."""
+"""Event conditions checked by the scheduler without occupying a task agent."""
 
 from __future__ import annotations
 

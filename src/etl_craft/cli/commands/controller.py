@@ -1,4 +1,4 @@
-"""Run the local overseer until interrupted."""
+"""Run the local controller until interrupted."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from types import FrameType
 
 from etl_craft.cli.commands.common import Command, command_context
 from etl_craft.cli.output import Output
+from etl_craft.controller.supervisor import serve
 from etl_craft.core.errors import ExitCode
-from etl_craft.overseer.server import serve
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -28,7 +28,7 @@ def _run(args: argparse.Namespace, out: Output) -> int:
         number: signal.signal(number, stopping) for number in (signal.SIGTERM, signal.SIGINT)
     }
     try:
-        with command_context(args, role="server") as ctx:
+        with command_context(args, role="controller") as ctx:
             if find_spec("fastapi") is None or find_spec("uvicorn") is None:
                 serve(ctx, stop)
             else:
@@ -41,4 +41,6 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     return ExitCode.SUCCESS
 
 
-COMMAND = Command("server", "supervise active local pipeline runs", run=_run, configure=_configure)
+COMMAND = Command(
+    "controller", "supervise active local pipeline runs", run=_run, configure=_configure
+)

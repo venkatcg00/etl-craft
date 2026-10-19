@@ -6,10 +6,10 @@ when nothing tighter is found. A measurement that cannot be read is reported una
 the reason, never as zero.
 
 Sizing is opt-in through a declared ``DeploymentProfile``. Each profile reserves a share of the
-allocation for whatever else runs on the host, counts the controller (the overseer and the
-HTTP server, one process) once, and divides the rest into task slots by per-kind cost
-estimates. Configured settings stay ceilings: a derived size never exceeds them, and a size is
-never rounded up past what the allocation holds.
+allocation for whatever else runs on the host, counts the controller and HTTP server as one
+process, and divides the rest into task slots by per-kind cost estimates. Configured settings
+stay ceilings: a derived size never exceeds them, and a size is never rounded up past what the
+allocation holds.
 """
 
 from __future__ import annotations
@@ -212,8 +212,8 @@ class Policy:
 
 POLICIES = {
     DeploymentProfile.LAPTOP: Policy(0.5, 1.0, 0.5, 2 * GIB, 4),
-    DeploymentProfile.SERVER: Policy(0.1, 0.5, 0.1, 1 * GIB, 40),
-    DeploymentProfile.SERVER_WORKERS: Policy(0.1, 0.5, 0.1, 1 * GIB, 40, runs_tasks=False),
+    DeploymentProfile.CONTROLLER: Policy(0.1, 0.5, 0.1, 1 * GIB, 40),
+    DeploymentProfile.CONTROLLER_AGENTS: Policy(0.1, 0.5, 0.1, 1 * GIB, 40, runs_tasks=False),
 }
 CONTROLLER_CPUS = 0.5
 CONTROLLER_MEMORY = 256 * MIB
@@ -288,7 +288,7 @@ def size(
     if policy.runs_tasks:
         total, ingestion, warehouse = _slots(free_cpus, free_memory, ceilings)
     else:
-        none = Size(0, f"{profile}: the controller runs no tasks; workers do")
+        none = Size(0, f"{profile}: the controller runs no tasks; agents do")
         total, ingestion, warehouse = none, none, none
     threads = (
         Size(1, "CPU allocation unavailable: at most one server thread")

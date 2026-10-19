@@ -1,4 +1,4 @@
-"""Durable scoped control records and the admission fence shared by every worker."""
+"""Durable scoped control records and the admission fence shared by every agent."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from etl_craft.engine.queries import statement
 
 @dataclass(frozen=True)
 class ControlAttempt:
-    """The process identity and observed query/worker endings of an affected attempt."""
+    """The process identity and observed query/agent endings of an affected attempt."""
 
     attempt_id: int
     status: str
@@ -118,7 +118,7 @@ def affected(conn: Connection, attempt_ids: tuple[int, ...]) -> tuple[ControlAtt
 
 
 def get(conn: Connection, control_id: int) -> ControlView:
-    """Read a request and its observed evidence, including after its worker disconnects."""
+    """Read a request and its observed evidence, including after its agent disconnects."""
     row = conn.execute(statement(conn, "control_get"), {"control_id": control_id}).one_or_none()
     if row is None:
         raise ResourceNotFoundError(
@@ -173,7 +173,7 @@ def update(conn: Connection, control_id: int, status: ControlStatus, message: st
 def scope_attempts(
     conn: Connection, run_id: int, task_id: int | None
 ) -> tuple[ControlAttempt, ...]:
-    """Read candidate workers before pinning the exact affected attempt identities."""
+    """Read candidate agents before pinning the exact affected attempt identities."""
     rows = conn.execute(
         statement(conn, "control_scope_attempts"), {"run_id": run_id, "task_id": task_id}
     )

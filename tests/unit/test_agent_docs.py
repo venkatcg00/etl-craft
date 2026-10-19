@@ -16,7 +16,7 @@ CLAUDE_SKILLS = REPO_ROOT / ".claude" / "skills"
 # Codex reads at most 32 KiB of AGENTS.md text; keep room for nested files.
 AGENTS_BUDGET = 24 * 1024
 LAYERS = (
-    "core|config|dialects|engine|warehouse|scripting|handlers|execution|services|overseer|api|cli"
+    "core|config|dialects|engine|warehouse|scripting|handlers|execution|services|controller|api|cli"
 )
 DOTTED_NAME = re.compile(rf"^(?:etl_craft\.)?(?:{LAYERS})(?:\.[A-Za-z_]\w*)+$")
 FENCE = re.compile(r"^```.*?^```", re.MULTILINE | re.DOTALL)
