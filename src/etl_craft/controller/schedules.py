@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.engine import Engine, RowMapping
 
+from etl_craft.controller.catalog import CatalogSchedule
 from etl_craft.core.actor import acting_as, current_actor
 from etl_craft.core.cron import next_after, timezone
 from etl_craft.core.enums import InterventionAction, RunStatus, YesNo
@@ -26,12 +27,14 @@ class Schedules:
 
     def __init__(self) -> None:
         """Start with no deadlines until the Engine DB has been read."""
+        self.catalog = CatalogSchedule()
         self.deadlines: dict[int, tuple[tuple[object, ...], datetime]] = {}
 
     def refresh(
         self, ctx: OperationContext, now: datetime, stop: threading.Event | None = None
     ) -> None:
         """Record missed ticks and enqueue due work in short transactions."""
+        self.catalog.refresh(ctx, now, stop)
         with ctx.engine.connect() as conn:
             rows = conn.execute(statement(conn, "controller_schedules")).all()
         active = {r.pipeline_id for r in rows if r.run_schedule is not None}

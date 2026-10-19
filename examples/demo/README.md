@@ -73,13 +73,9 @@ Other; a repaired logical run is counted once in its current group. History disp
 
 ## Under an orchestrator
 
-In remote mode (`Orchestration.Mode: remote`) the orchestrator is the only source of truth for
-scheduling: `etl-craft generate-yml --pipeline_code <code>` writes each pipeline as a DAG holding
-every rule, and etl-craft runs each task when the DAG says. Two of the demo's rules have no
-equivalent in an orchestrator (`HAS_DATA` dependencies and a `2 of 3` run condition), so
-`etl-craft validate` fails on them in remote mode and names each one. Load
-`metadata/remote_mode.sql` after the demo's metadata (`python prepare.py metadata
-metadata/remote_mode.sql`) to turn them into rules an orchestrator applies.
+The controller schedules and supervises these pipelines. External schedulers can submit runs
+through the authenticated HTTP API.
+
 
 ## Files
 

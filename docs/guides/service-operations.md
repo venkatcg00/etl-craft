@@ -110,6 +110,10 @@ request inserts one complete `REQUESTED` action, including domain refusals after
 is available. Delegation from the CLI does not insert another copy. Flow outcomes remain in run
 and attempt history; action records are never updated.
 
+Catalog generation also appends an immutable completion row: `SUCCESS` or `FAILURE`,
+with an exit code and the same start timestamp and arguments as its request. The request row
+is never updated. This applies to manual and controller-scheduled catalog builds.
+
 ## JSON on the command line
 
 These commands accept `--format json`: `run`, `mark`, `stop`, `abort`, `hold`, `release`, `pause`, `resume`,

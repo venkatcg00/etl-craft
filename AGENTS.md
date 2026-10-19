@@ -145,7 +145,7 @@ Each package imports only the packages below it; `lint-imports` enforces the ord
 | `cli` | argparse commands, output, exit codes, and the client for `--server`; the only package that prints |
 | `api` | optional FastAPI routes, sign-in routes, bearer authorization and HTTP server lifecycle |
 | `controller` | leadership, active-run working set, local supervision and shutdown |
-| `services` | actor-scoped operations, doctor, setup, validate, config files, cloning, DAG YAML, lineage, docs site |
+| `services` | actor-scoped operations, doctor, setup, validate, config files, cloning, lineage, docs site |
 | `execution` | task runner, process supervisor, ready-task scheduler, run lifecycle, cross-pipeline gates |
 | `handlers` | SQL actions, business rules, Python ingestion scripts, email alerts |
 | `scripting` | the helper module ingestion scripts import |

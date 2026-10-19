@@ -108,9 +108,9 @@ class CloningConfig:
 class DocsSiteConfig:
     """The catalog site ``generate-docs`` writes and ``publish-docs`` serves.
 
-    ``schedule`` is when it is written again, as a cron expression, for the DAG
-    ``generate-yml --docs`` writes; ``output`` is its folder, ``catalog/`` in the project
-    directory when not set. ``authtoken_var`` names the variable holding the ngrok authtoken,
+    ``schedule`` is when the controller writes it again, as a cron expression; ``output`` is
+    its folder, ``catalog/`` in the project directory when not set. ``authtoken_var`` names the
+    variable holding the ngrok authtoken,
     read only when the site is published; ``domain`` is the team's reserved ngrok domain, and
     ``allowed_ips`` the CIDR ranges ``publish-docs`` serves, every address when empty.
     ``external_url`` selects organization hosting, including its path prefix, without ngrok;
@@ -176,12 +176,7 @@ class EmailProfile:
 
 @dataclass(frozen=True)
 class DagDefaults:
-    """Defaults for the DAGs ``generate-yml`` writes.
-
-    ``None`` means not set, so the generator uses its own default. ``allow_schedule`` false
-    writes ``schedule: null``, so an environment holds every pipeline but runs one only when
-    triggered.
-    """
+    """External scheduling options from the project configuration."""
 
     global_dag: bool = False
     catchup: bool | None = None
@@ -231,7 +226,6 @@ class AuthConfig:
     session_hours: int = 12
     oidc_issuer: str | None = None
     oidc_client_id: str | None = None
-    airflow_connection_id: str | None = None
     refresh_days: int = 30
 
 

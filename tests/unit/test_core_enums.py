@@ -46,7 +46,7 @@ EXPECTED = {
     enums.ActorKind: {"USER", "SERVICE", "SYSTEM"},
     enums.TokenKind: {"SERVICE", "ACCESS", "REFRESH"},
     enums.AccountKind: {"USER", "SERVICE"},
-    enums.ActionOutcome: {"REQUESTED", "REFUSED"},
+    enums.ActionOutcome: {"REQUESTED", "REFUSED", "SUCCESS", "FAILURE"},
     enums.ApiRole: {"viewer", "operator", "developer", "admin"},
     enums.SlaStatus: {"MET", "BREACHED"},
     enums.RefreshType: {"FULL", "INCREMENTAL"},

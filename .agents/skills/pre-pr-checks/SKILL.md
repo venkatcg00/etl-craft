@@ -1,6 +1,6 @@
 ---
 name: pre-pr-checks
-description: Run etl-craft's validation before a pull request - make static docs, the tests for the code the change touches, repeated races for concurrency changes, actionlint, live-cloud acceptance (one try; unavailable compute is recorded, not blocking) when warehouse SQL changes and the owner made cloud budget available, and a self-review of the diff; the wheel demos and Airflow contracts run in CI. CI runs the complete suite in under ten minutes. Use before opening a PR or when asked to check the state of a branch.
+description: Run etl-craft's validation before a pull request - make static docs, the tests for the code the change touches, repeated races for concurrency changes, actionlint, live-cloud acceptance (one try; unavailable compute is recorded, not blocking) when warehouse SQL changes and the owner made cloud budget available, and a self-review of the diff; the wheel demos run in CI. CI runs the complete suite in under ten minutes. Use before opening a PR or when asked to check the state of a branch.
 ---
 
 # Pre-PR checks
@@ -33,10 +33,9 @@ systemd-run --user --scope --quiet -- \
 | 1. Static checks and touched tests | always | a few minutes |
 | 1b. Repeated races | concurrency code changed | a few minutes |
 | 2. Installed-wheel demos | only to reproduce a CI failure in them | about 15 min |
-| 3. Airflow contracts | only to reproduce a CI failure in them | a few min per version |
-| 4. actionlint | `.github/workflows/` changed | seconds |
-| 5. Cloud tests | Snowflake or Databricks code changed, or the SQL every warehouse runs, and the owner made cloud budget available | about 15 min for the affected tests |
-| 6. Self-review | always | |
+| 3. actionlint | `.github/workflows/` changed | seconds |
+| 4. Cloud tests | Snowflake or Databricks code changed, or the SQL every warehouse runs, and the owner made cloud budget available | about 15 min for the affected tests |
+| 5. Self-review | always | |
 
 The local services must be up for the touched tests and step 2: `docker ps` lists the
 `etl-craft-*` containers as healthy; otherwise run `make services-up`. Without Docker (a cloud
@@ -61,7 +60,7 @@ old behaviour: the CI-only suites are the first to run them.
 
 `examples/demo/` is the project the installed-wheel demos copy. The local gate never runs
 `tests/acceptance/cloud/`: search it too for the behaviour you change, and run the cloud tests
-that use it (step 5).
+that use it (step 4).
 
 ## 1. Static checks and touched tests
 
@@ -128,27 +127,7 @@ This covers all four local warehouses on both Engine DBs, pip and uv, the sdist 
 there needs only a rerun; a change under `src/` needs a rebuild. Run demo sessions one at a
 time, because the local Iceberg demos share fixed namespaces.
 
-## 3. Airflow contracts
-
-CI's `airflow` job runs them on every pull request. Run them locally only to reproduce a failure
-of that job that its log does not explain, mirroring the job and taking the versions from its
-matrix:
-
-```bash
-export ETL_CRAFT_AIRFLOW_CONTRACTS="$SCRATCH/airflow-contracts" \
-  AIRFLOW_HOME="$SCRATCH/airflow-home" AIRFLOW__CORE__LOAD_EXAMPLES=false
-uv run python scripts/export_airflow_contracts.py "$ETL_CRAFT_AIRFLOW_CONTRACTS"
-for v in 2.11.0 3.3.2; do
-  uv venv "$SCRATCH/airflow-$v" --python 3.11
-  uv pip install --python "$SCRATCH/airflow-$v/bin/python" "apache-airflow==$v" pytest mypy \
-    types-pyyaml types-jsonschema ./integrations/airflow
-  "$SCRATCH/airflow-$v/bin/python" -m pytest -q integrations/airflow/tests
-  "$SCRATCH/airflow-$v/bin/python" -m mypy --strict --follow-imports=skip \
-    --ignore-missing-imports integrations/airflow/src
-done
-```
-
-## 4. actionlint
+## 3. actionlint
 
 ```bash
 uvx --from actionlint-py actionlint      # no output means clean
@@ -156,7 +135,7 @@ uvx --from actionlint-py actionlint      # no output means clean
 
 Python tests do not validate GitHub expression contexts such as `runner.temp`.
 
-## 5. Cloud tests
+## 4. Cloud tests
 
 Run them when `dialects/warehouse/snowflake*.py` or `databricks*.py` change, or code that shapes
 the SQL every warehouse runs:
@@ -205,7 +184,7 @@ Each suite's pytest output goes to `dist/acceptance/<suite>.log`.
   that ran and failed is a code failure, not unavailability. Release evidence
   (`make acceptance-cloud`) still needs every cloud suite to pass.
 
-## 6. Self-review
+## 5. Self-review
 
 Read the whole diff (`git diff origin/main...`) as a reviewer who has to maintain it:
 

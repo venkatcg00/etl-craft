@@ -1,6 +1,6 @@
 """Remote mode: the orchestrator is the only source of truth for scheduling.
 
-``generate-yml`` writes every scheduling rule into the orchestrator's DAGs, and the engine checks
+The external orchestrator supplies every scheduling decision, and the engine checks
 none of them itself: ``run --task_code`` runs what it is told. A task's run condition and its
 dependencies' types become one trigger rule on its upstream steps. A dependency on a task in
 another pipeline becomes a sensor step that succeeds when the dependency is satisfied, and so
@@ -9,7 +9,7 @@ the pipelines in dependency order instead. ``__init__`` starts the run before an
 every task the orchestrator runs has a run to bind to.
 
 Some rules have no equivalent in an orchestrator. Rather than drop them, remote mode fails
-wherever they would be dropped (``validate``, ``generate-yml`` and ``run --init-only``), naming
+wherever they would be dropped (``validate`` and ``run --init-only``), naming
 each one with its remedy:
 
 - run condition ``N``: a trigger rule counts all or one of the upstream steps, never N of them;
@@ -42,22 +42,6 @@ from etl_craft.engine.repository.tasks import fetch_task_codes, fetch_task_execu
 LOCAL_MODE_REMEDY = (
     "or run it in local mode (Orchestration.Mode: local), where etl-craft applies it"
 )
-
-TASK_SENSOR_STATES: dict[str, tuple[list[str], list[str]]] = {
-    DependencyType.SUCCESS: (["success"], ["failed", "upstream_failed", "skipped"]),
-    DependencyType.FAILURE: (["failed", "upstream_failed"], ["success", "skipped"]),
-    DependencyType.ALWAYS: (["success", "failed", "upstream_failed", "skipped"], []),
-}
-"""For a dependency on another pipeline's task: the upstream task states that satisfy it, and
-those that never will, as a sensor's ``allowed_states`` and ``failed_states``."""
-
-DAG_SENSOR_STATES: dict[str, tuple[list[str], list[str]]] = {
-    DependencyType.SUCCESS: (["success"], ["failed"]),
-    DependencyType.FAILURE: (["failed"], ["success"]),
-    DependencyType.ALWAYS: (["success", "failed"], []),
-}
-"""For a dependency on another pipeline: the upstream DAG run states that satisfy it, and those
-that never will."""
 
 SENSOR_TYPE = DependencyType.SUCCESS
 """The dependency type a sensor step counts as for the trigger rule of the task after it."""

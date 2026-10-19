@@ -20,7 +20,6 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "jsonschema>=4.23",
     "psutil>=6.0",
     "duckdb-engine>=0.13",
     "psycopg[binary]>=3.3.6",
@@ -80,7 +79,6 @@ dev = [
     "pytest-cov>=6",
     "pytest-timeout>=2.3",
     "ruff>=0.16.8",
-    "types-jsonschema>=4.23",
     "types-psutil>=6.0",
     "types-pyyaml>=6.0.12",
 ]

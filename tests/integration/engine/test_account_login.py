@@ -324,7 +324,7 @@ def test_remote_requester_reason_is_audited_without_an_intervention(project, mon
     raw = yaml.safe_load(path.read_text())
     raw["Orchestration"]["Mode"] = "remote"
     path.write_text(yaml.safe_dump(raw, sort_keys=False))
-    service = tokens.create_token(ctx, "airflow", ApiRole.OPERATOR)
+    service = tokens.create_token(ctx, "scheduler", ApiRole.OPERATOR)
     monkeypatch.setenv("ETL_CRAFT_TOKEN", service.token)
     assert (
         main(
@@ -336,7 +336,7 @@ def test_remote_requester_reason_is_audited_without_an_intervention(project, mon
                 "--run-key",
                 "orchestrator:one",
                 "--reason",
-                "Airflow user: alice",
+                "Scheduler user: alice",
             ]
         )
         == 0
@@ -348,11 +348,11 @@ def test_remote_requester_reason_is_audited_without_an_intervention(project, mon
                 "WHERE COMMAND='run' ORDER BY ACTION_ID DESC LIMIT 1"
             )
         ).one()
-        assert action.actor == "airflow"
+        assert action.actor == "scheduler"
         arguments = (
             json.loads(action.arguments) if isinstance(action.arguments, str) else action.arguments
         )
-        assert arguments["reason"] == "Airflow user: alice"
+        assert arguments["reason"] == "Scheduler user: alice"
         assert (
             conn.execute(text("SELECT COUNT(*) AS count FROM AUD_RUN_INTERVENTIONS")).scalar_one()
             == 0

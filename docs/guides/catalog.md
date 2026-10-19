@@ -156,38 +156,27 @@ Docs_site:
     Output: /srv/etl-craft-docs  # optional: the folder generate-docs writes; default catalog/
 ```
 
-**Under an orchestrator**, `etl-craft generate-yml --docs` writes the `etl_craft_docs` DAG,
-which runs `etl-craft generate-docs` on `Schedule` (with no schedule when `Allow_schedule` is
-false, like every other DAG):
+Run `etl-craft controller` with a SERVICE account. The leader builds the catalog on
+`Docs_site.Schedule` in the project's timezone, using the configured output folder or
+`catalog/`. Without a schedule, only explicit `generate-docs` calls build the site.
+
+Only one scheduled build runs at a time. It runs in a background thread so task leases and
+pipeline dispatch continue. The controller waits for an admitted build before releasing
+leadership at shutdown. Builds use metadata and local source files, without warehouse access;
+use `generate-docs --with-warehouse` explicitly for a deployed-schema comparison.
+
+The latest `generate-docs` request in `AUD_ACTIONS` is the restart cursor, including manual
+requests. Missed ticks are not replayed, and ticks reached during a build are skipped. On a
+first start without a recorded request, the first build is at the next tick. A failed build
+is logged with its output folder and retried at the next tick. Each build records a
+`REQUESTED` audit row followed by an immutable `SUCCESS` or `FAILURE` completion row with its
+exit code, under the requesting account. A failure does not stop the controller.
+
+Manual generation remains available:
 
 ```bash
-etl-craft generate-yml --docs --output dags/etl_craft_docs.yml
+etl-craft generate-docs
 ```
-
-**Without one**, schedule the command on the machine itself, from the project directory:
-
-```text
-0 2 * * *  cd /srv/etl-craft && etl-craft generate-docs      # crontab on Linux or macOS
-schtasks /Create /SC DAILY /ST 02:00 /TN etl-craft-docs /TR "cmd /c cd /d C:\etl-craft && etl-craft generate-docs"
-```
-
-Regeneration stores per-page input versions and HTML hashes in `.etl-craft-manifest.json`.
-Unchanged pipeline, task, run, table, rule and script pages reuse their verified HTML and keep
-their generation timestamp and file modification time. Changed metadata, run history, referenced
-SQL/script files, lineage or rendering code invalidate affected pages. SQL file contents are
-captured once for both the version and the rendered page. Shared lineage components and linked
-runs can also invalidate dependent pages. Search, overview and gap outputs are refreshed each
-build. An older page's age notice describes its original render time and points to Search for
-the latest build time. A fresh warehouse comparison supplies a new comparison timestamp and
-invalidates reused comparison pages.
-
-A legacy site without a manifest gets a full build automatically. An invalid manifest, missing
-cached page or changed cached HTML fails generation and preserves the published site. Remove
-only `.etl-craft-manifest.json` from the output folder and regenerate to rebuild derived pages;
-keep the `.etl-craft-catalog` ownership marker and the publication/build lock sidecars.
-
-Writing the site again never leaves it half written: the new site is built beside the old one
-and swapped in once it is complete, so a server publishing the folder keeps serving whole pages.
 
 ## Publishing the site
 

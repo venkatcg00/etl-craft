@@ -12,7 +12,7 @@ from sqlalchemy.engine import Engine
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import Actor, acting_as
 from etl_craft.core.enums import ApiRole
-from etl_craft.engine.audit import command_request, register_engine
+from etl_craft.engine.audit import ActionRequest, command_request, register_engine
 from etl_craft.execution.attempt_types import ChildOptions
 from etl_craft.services.operations.permissions import authorize
 
@@ -38,7 +38,7 @@ def operation(
     arguments: Mapping[str, Any],
     *,
     provisioning: bool = False,
-) -> Iterator[None]:
+) -> Iterator[ActionRequest | None]:
     """Record one request before executing it, including domain refusals.
 
     ``provisioning`` is local Engine DB setup before any admin exists; it skips only the role
@@ -46,6 +46,6 @@ def operation(
     """
     if not provisioning:
         authorize(ctx, command, arguments)
-    with acting_as(ctx.actor), command_request(command, arguments):
+    with acting_as(ctx.actor), command_request(command, arguments) as request:
         register_engine(ctx.engine)
-        yield
+        yield request

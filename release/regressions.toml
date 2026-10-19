@@ -104,7 +104,7 @@ B46 = [
     "tests/integration/warehouse/test_sql_actions.py::test_a_soft_delete_leaves_rows_already_deleted_alone",
 ]
 B47 = [
-    "tests/integration/engine/test_metadata_codes.py::test_generation_refuses_legacy_codes_even_without_database_checks",
+    "tests/integration/engine/test_metadata_codes.py::test_migration_lists_all_invalid_codes_before_changing_anything",
 ]
 B48 = [
     "tests/unit/test_config_strictness.py::test_jdbc_query_credentials_are_refused_without_echoing_value",
@@ -154,7 +154,6 @@ B63 = [
 ]
 B64 = [
     "tests/integration/engine/test_metadata_codes.py::test_database_refuses_invalid_metadata_codes",
-    "tests/integration/engine/test_metadata_codes.py::test_generated_dags_have_controls_and_no_self_dependency",
 ]
 B65 = [
     "tests/integration/engine/test_publish_docs.py::test_hidden_and_parent_paths_are_refused",

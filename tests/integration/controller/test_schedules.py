@@ -7,16 +7,13 @@ from datetime import UTC, date, datetime
 import pytest
 from sqlalchemy import text
 
-from etl_craft.config import AuthConfig
 from etl_craft.controller.schedules import Schedules
 from etl_craft.controller.supervisor import WorkingSet
 from etl_craft.core.actor import SYSTEM_ACTOR, Actor, ActorKind
-from etl_craft.core.cron import timezone
 from etl_craft.core.enums import ApiRole
 from etl_craft.core.errors import StaleTransitionError
 from etl_craft.engine import runlog, transitions
 from etl_craft.execution.run_start import init_pipeline_run
-from etl_craft.services.generate_yml import pipeline_dag
 from etl_craft.services.operations import OperationContext
 from etl_craft.services.validate import validate
 from fixtures.metadata import add_pipeline, start_run
@@ -175,7 +172,7 @@ def test_default_manual_run_date_uses_project_timezone_without_changing_audit_ti
         )
 
 
-def test_validation_reports_bad_cron_and_zone_and_remote_yaml_localizes_date(cli_project):
+def test_validation_reports_bad_cron_and_zone(cli_project):
     p = cli_project
     with p.engine.begin() as conn:
         conn.execute(
@@ -188,39 +185,6 @@ def test_validation_reports_bad_cron_and_zone_and_remote_yaml_localizes_date(cli
     messages = [f.message for f in report.findings]
     assert any("RUN_SCHEDULE" in m for m in messages)
     assert any("SCHEDULE_TIMEZONE" in m for m in messages)
-    with p.engine.begin() as conn:
-        conn.execute(
-            text(
-                "UPDATE CFG_PIPELINES SET RUN_SCHEDULE='@daily', "
-                "SCHEDULE_TIMEZONE='America/New_York', SCHEDULE_START_DATE='2026-01-01'"
-            )
-        )
-    with p.engine.connect() as conn:
-        dag = pipeline_dag(
-            conn,
-            replace(p.config, mode="remote", auth=AuthConfig(airflow_connection_id="etl_craft")),
-            "P",
-        )
-    assert dag["timezone"] == "America/New_York"
-    assert dag["start_date"] == "2026-01-01"
-    assert (
-        'data_interval_end.in_timezone("America/New_York")'
-        in dag["tasks"]["__init__"]["bash_command"]
-    )
-    from shlex import split
-    from types import SimpleNamespace
-
-    from jinja2 import Environment
-
-    env = Environment()
-    env.filters["ds"] = lambda value: value.strftime("%Y-%m-%d")
-    instant = datetime(2026, 1, 2, 2, tzinfo=UTC)
-    interval = SimpleNamespace(in_timezone=lambda name: instant.astimezone(timezone(name)))
-    rendered = env.from_string(dag["tasks"]["__init__"]["bash_command"]).render(
-        data_interval_end=interval, run_id="one", dag_run=SimpleNamespace()
-    )
-    command = split(rendered)
-    assert command[command.index("--run-date") + 1] == "2026-01-01"
 
 
 def test_a_queued_scheduled_run_can_be_cancelled_before_admission(cli_project):

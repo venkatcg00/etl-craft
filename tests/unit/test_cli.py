@@ -217,3 +217,10 @@ def test_controller_is_the_only_supervisor_command(capsys):
         main(["server"])
     assert old_exit.value.code == 2
     assert "invalid choice: 'server'" in capsys.readouterr().err
+
+
+def test_removed_export_command_is_an_invalid_choice(capsys):
+    with pytest.raises(SystemExit) as result:
+        main(["generate-yml"])
+    assert result.value.code == 2
+    assert "invalid choice: 'generate-yml'" in capsys.readouterr().err

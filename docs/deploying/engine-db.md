@@ -26,7 +26,7 @@ writer credentials to migrate and provision your first admin, then `etl-craft lo
 Existing service tokens keep their values and inherited account roles. If all migrated
 accounts are non-admin, local interactive setup provisions a recovery admin; no HTTP route
 can do so. Replace actor overrides in CI with a registered service token in `ETL_CRAFT_TOKEN`
-and regenerate remote DAGs after configuring `Auth.Airflow_connection_id`.
+and regenerate remote DAGs after configuring `Auth.external scheduler_connection_id`.
 
 After installing a new etl-craft version, and whenever your own migrations change, run:
 
@@ -149,6 +149,10 @@ means the action was to request work, whether the flow subsequently runs or is r
 start and end timestamps describe recording that request, and `EXIT_CODE` remains empty. No
 completion update is required: run and attempt tables hold execution outcomes. Sensitive argument
 names are masked before recording. Read-only commands, including `audit`, make no audit writes.
+Catalog generation also appends an immutable completion row: `SUCCESS` or `FAILURE`,
+with an exit code and the same start timestamp and arguments as its request. The request row
+is never updated. This applies to manual and controller-scheduled catalog builds.
+
 For an empty or older database, initialization or migration records its request after the audit
 table becomes available.
 

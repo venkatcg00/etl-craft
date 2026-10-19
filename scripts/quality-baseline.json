@@ -1,7 +1,6 @@
 {
   "dependencies": [
     "duckdb-engine",
-    "jsonschema",
     "psutil",
     "psycopg",
     "pyyaml",
@@ -103,7 +102,6 @@
       "src/etl_craft/handlers/registry.py": 4,
       "src/etl_craft/services/catalog.py": 1,
       "src/etl_craft/services/catalog_graph.py": 3,
-      "src/etl_craft/services/generate_yml.py": 8,
       "src/etl_craft/services/rehash.py": 2,
       "src/etl_craft/services/upgrade_targets.py": 4
     },

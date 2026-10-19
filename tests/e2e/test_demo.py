@@ -1,8 +1,8 @@
 """The Support Insights demo, end to end, from the built wheel installed with pip and with uv.
 
 With pip, every Engine DB with every local warehouse; with uv, SQLite and DuckDB, since the
-installer changes how the package got there, not what it does. Each case runs in local mode and
-under a simulated orchestrator that runs the DAGs ``generate-yml`` writes. The runs cover
+installer changes how the package got there, not what it does. Each case runs through the engine.
+The runs cover
 ingestion with offsets, the eight SQL actions, business rules in two waves, alerts and a failure
 watcher, the SLA email, a task that fails once, a timeout, a stopped run resumed, cross-pipeline
 gates and cloning; then the warehouse's data, the audit rows, the emails, and what ``validate``,
@@ -16,13 +16,11 @@ import time
 from pathlib import Path
 
 import pytest
-import yaml
 from sqlalchemy import text
 
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
 from etl_craft.engine.connection import engine_db
 from fixtures.demo import Demo, demos, installed_cli
-from fixtures.orchestrator import SKIPPED, SUCCESS, run_dag
 
 INSTALLERS = {"pip": pytest.mark.e2e_pip, "uv": pytest.mark.e2e_uv}
 CASES = list(demos(INSTALLERS, smoke=frozenset({"uv"})))
@@ -222,74 +220,3 @@ def check_the_reports(demo: Demo) -> None:
     assert "generate-docs: wrote" in demo.ok("generate-docs", "--strict", "--with-warehouse")
     fact = (demo.root / "catalog" / "tables" / f"{target}.html").read_text("utf-8")
     assert "unknown agent" in fact and f'data-col="{target}|rating"' in fact
-
-
-@pytest.mark.parametrize(("installer", "engine", "warehouse"), CASES)
-def test_the_demo_runs_under_an_orchestrator(make_demo, installer, engine, warehouse):
-    demo = make_demo(installer, engine, warehouse, mode="remote")
-    demo.ok("setup")
-    demo.seed()
-    refused = demo.run("run", "--pipeline_code", "SUPPORT_DM")
-    assert refused.returncode == 10, refused.stderr[-2000:]
-    # The orchestrator is the only source of truth, and it has no equivalent of HAS_DATA or of
-    # a 2-of-3 run condition: remote mode names each one rather than drop it.
-    invalid = demo.run("validate")
-    assert invalid.returncode == 1, invalid.stdout
-    for rule in (
-        "CLIENT_ALPHA.parse: depends on land with DEPENDENCY_TYPE = 'HAS_DATA'",
-        "SUPPORT_DM.setup_fact: depends on interactions with DEPENDENCY_TYPE = 'HAS_DATA'",
-        "SUPPORT_DM.source_counts: RUN_CONDITION = 'N' (RUN_CONDITION_COUNT = 2)",
-    ):
-        assert rule in " ".join(invalid.stdout.split()), (rule, invalid.stdout)
-    unsupported = demo.run("run", "--pipeline_code", "SUPPORT_DM", "--init-only")
-    assert unsupported.returncode == 18, unsupported.stderr[-2000:]
-    assert "the remote orchestrator does not support this" in unsupported.stderr
-    demo.seed("remote_mode.sql")
-    assert demo.ok("validate").endswith("0 failed, 0 warning(s)\n")
-
-    def execute(command: list[str]) -> int:
-        assert command[0] == "etl-craft", command
-        return demo.run(*command[1:]).returncode
-
-    runs = {}
-
-    def sense(sensor: dict) -> str | None:
-        upstream = runs.get(sensor["external_dag_id"])
-        if upstream is None:
-            return None
-        if sensor["external_task_id"] is None:
-            return upstream.state
-        return upstream.states.get(sensor["external_task_id"])
-
-    for pipeline in ("CLIENT_ALPHA", "CLIENT_BETA", "SUPPORT_DM"):
-        dag = yaml.safe_load(demo.ok("generate-yml", "--pipeline_code", pipeline))
-        assert dag["max_active_runs"] == 1
-        runs[pipeline] = run_dag(dag, execute, sense)
-        run_id, status = demo.latest_run(pipeline)
-        assert status == "SUCCESS", (pipeline, runs[pipeline].states)
-        assert runs[pipeline].state == SUCCESS
-
-    dm = runs["SUPPORT_DM"]
-    # The dependencies on both clients' pipelines and tasks were the orchestrator's sensors.
-    assert {name for name in dm.states if name.startswith("__wait_for_")} == {
-        "__wait_for_CLIENT_ALPHA__",
-        "__wait_for_CLIENT_BETA__",
-        "__wait_for_CLIENT_ALPHA.purge_test_calls__",
-        "__wait_for_CLIENT_BETA.parse__",
-    }
-    # The flaky feed failed its first try; the orchestrator's retry succeeded, and nothing that
-    # finished was run again.
-    assert dm.tries["flaky_feed"] == 2
-    assert dm.states["on_failure"] == SKIPPED
-    assert {
-        name: state for name, state in dm.states.items() if name != "on_failure"
-    } == dict.fromkeys((n for n in dm.states if n != "on_failure"), SUCCESS)
-    run_id, _ = demo.latest_run("SUPPORT_DM")
-    attempts = {task: tries for task, (_, tries) in demo.task_runs("SUPPORT_DM", run_id).items()}
-    assert attempts["flaky_feed"] == 2 and attempts["interactions"] == 1
-    assert demo.rows(
-        "SELECT source_system, COUNT(*) FROM {c}.dm.support_fact GROUP BY source_system "
-        "ORDER BY source_system"
-    ) == [("ALPHA", 11), ("BETA", 8)]
-    # A run whose task needed a retry did not run cleanly, and its alert says so.
-    check_the_emails(demo, failed=False, outcome="COMPLETED_WITH_ERRORS")

@@ -196,10 +196,14 @@ def serve(ctx: OperationContext, stop: threading.Event) -> None:
                         continue
                     outage.recovered("supervising runs")
             finally:
-                supervisor.drain(controller_id)
+                try:
+                    supervisor.drain(controller_id)
+                finally:
+                    supervisor.schedules.catalog.close()
     except SQLAlchemyError as error:
         raise EngineDbError(
             f"controller lost its Engine DB connection: {error}; restore it and restart controller"
         ) from error
     finally:
+        supervisor.schedules.catalog.close()
         supervisor.pool.close()

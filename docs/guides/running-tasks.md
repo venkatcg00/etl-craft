@@ -105,7 +105,7 @@ Cancelled attempts never retry. Lost leases and supervisor timeouts remain trans
 failures. Lost attempts get a new owner only after reconciliation fences the old lease;
 their side effects can be uncertain, so use retry-safe ingestion scripts. A process that exits
 without reporting its outcome is unknown. Remote mode continues to delegate automatic retries
-to its orchestrator; generated DAGs retain their Airflow retry settings.
+to its orchestrator; the external scheduler governs retries.
 
 
 Running a `FAILED` task again is a new attempt on the same `AUD_TASK_RUN_LOG` row: `ATTEMPT_COUNT`
@@ -137,7 +137,7 @@ The orchestrator decides when a task runs, so `run --task_code` runs it whenever
 Dependency and settled-task checks are delegated to it; the Engine DB still refuses a second
 active attempt for the same task run. Run again after it succeeded, it is a new attempt that skips
 nothing it did before; run after its run ended (a cleared task), it reopens that run. See
-[Running under an orchestrator](../deploying/orchestrator.md).
+[Starting runs from another scheduler](../deploying/http-api.md#starting-runs-from-another-scheduler).
 
 ## Time limits
 

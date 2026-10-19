@@ -36,7 +36,7 @@ and is its authority. Fix failures before asking for a merge.
 CI partitions complete collections across jobs and isolated agent processes. Demo agents in
 one job share their warehouse service; each owns its databases, Iceberg namespaces and email
 addresses. The final **every test and matrix accounted for** check requires each shard, its test
-outcomes and the package/Airflow
+outcomes and the package
 matrix results. It combines coverage separately for each Python/platform pair before enforcing
 the same 90% threshold. Individual shard coverage is not an acceptance result.
 

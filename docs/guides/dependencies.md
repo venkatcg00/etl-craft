@@ -47,8 +47,8 @@ during a run.
 ## During a run
 
 This section is local mode, where etl-craft is the orchestrator. In remote mode the orchestrator
-applies these rules instead, from the DAGs `generate-yml` writes; see
-[Running under an orchestrator](../deploying/orchestrator.md).
+applies these rules instead, using explicit run and task requests; see
+[Starting runs from another scheduler](../deploying/http-api.md#starting-runs-from-another-scheduler).
 
 The engine starts every task that is ready, runs it, and looks again, until nothing is left
 to start.
@@ -117,7 +117,7 @@ itself, so a pipeline that depends on it with `SUCCESS` is skipped in turn.
 
 In remote mode none of this is checked by etl-craft and no tracker moves: the orchestrator's
 sensors wait for the upstream instead (see
-[Running under an orchestrator](../deploying/orchestrator.md)).
+[Starting runs from another scheduler](../deploying/http-api.md#starting-runs-from-another-scheduler)).
 
 A successful pipeline ending records its status, SLA result and admitted pipeline-dependency
 consumption in one Engine DB transaction. A successful task attempt records its outcome, summary,

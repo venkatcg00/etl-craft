@@ -452,7 +452,7 @@ def _check(
         raise RunRefusedError(
             f"{command} is only available in local mode: in remote mode the orchestrator is the "
             "only source of truth for runs, so mark, clear, stop or pause it in the orchestrator "
-            "instead (in Airflow: Mark Success, Mark Failed, Clear, pausing the DAG)"
+            "instead (in external scheduler: Mark Success, Mark Failed, Clear, pausing the DAG)"
         )
     if not reason.strip():
         raise UsageError(f"{command} needs a --reason: it is recorded with the change")

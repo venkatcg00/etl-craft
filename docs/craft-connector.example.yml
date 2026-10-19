@@ -42,9 +42,6 @@ Orchestration:
   # Profile: prod                 # overrides Secrets.Profile for this section only
   Mode: local                          # value — local: etl-craft dispatches ready tasks itself.
                                        # remote: an orchestrator runs one task at a time
-                                       #   from the YAML `etl-craft generate-yml` emits.
-  # Name: Airflow                 # informational: generate-yml emits one YAML DAG shape;
-  #                               # teams convert it for their scheduler with their own scripts
   # Log_dir: logs                 # where each task attempt's log file goes; relative to this file
   Task_timeout_seconds: 21600          # value — 0 disables; a task's TASK_TIMEOUT_SECONDS overrides
   # Api_address: 127.0.0.1:8730    # HTTP listener with etl-craft[server]
@@ -63,7 +60,6 @@ Orchestration:
                                        # run misses its pipeline's SLA_IN_HOURS. Runs are
                                        # marked MET or BREACHED either way.
 
-  # DAG defaults for `generate-yml`, per environment. A pipeline's own
   # CFG_PIPELINES.PIPELINE_PARAMETERS values (CATCHUP, TAGS, RETRIES, ...)
   # override these; anything unset falls back to a built-in default.
   dev:
@@ -81,7 +77,7 @@ Orchestration:
                                        # when the pipeline has a RUN_SCHEDULE
   sit:
     Mode: remote                       # value — any setting above can be overridden per profile
-    Name: Airflow                      # value
+    Name: external scheduler                      # value
     Global_dag: false                  # value
     Catchup: false                     # value
     Tags: [analytics]                  # value
@@ -109,7 +105,7 @@ Orchestration:
       # scope: EMAIL_SCOPE             #   secret is then the client secret
   uat:
     Mode: remote                       # value
-    Name: Airflow                      # value
+    Name: external scheduler                      # value
     Global_dag: false                  # value
     Catchup: false                     # value
     Tags: [analytics]                  # value
@@ -128,7 +124,7 @@ Orchestration:
       secret: EMAIL_SECRET             # variable, required: a secret is never used as written
   prod:
     Mode: remote                       # value
-    Name: Airflow                      # value
+    Name: external scheduler                      # value
     Global_dag: true                   # value
     Catchup: false                     # value
     Tags: [analytics]                  # value
@@ -250,4 +246,3 @@ Cloning:
 #   Refresh_days: 30                    # value — integer 1..365; server sign-in refresh lifetime
 #   Oidc_issuer: https://sso.example.com # value — exact HTTPS issuer, paired with Oidc_client_id
 #   Oidc_client_id: etl-craft            # value — public device-flow client, RS256 ID tokens
-#   Airflow_connection_id: etl_craft     # value — Airflow connection password holds a service token

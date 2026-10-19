@@ -47,7 +47,7 @@ environment where some upstreams never run, see [Stepping in](../guides/run-cont
 ## Moving to an orchestrator
 
 The same metadata runs under an orchestrator in remote mode, which then holds every rule; see
-[Running under an orchestrator](orchestrator.md). A few rules have no equivalent in an
+[Starting runs from another scheduler](http-api.md#starting-runs-from-another-scheduler). A few rules have no equivalent in an
 orchestrator's DAG, and remote mode names them.
 
 ## Selecting an existing run

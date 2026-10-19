@@ -32,7 +32,7 @@ SHARDS = {
     "connections": 1,
     "e2e": 4,
 }
-VALIDATIONS = {"package-ubuntu-latest", "package-macos-latest", "airflow-2.11.0", "airflow-3.3.2"}
+VALIDATIONS = {"package-ubuntu-latest", "package-macos-latest"}
 
 
 def combinations() -> dict[str, list[dict[str, str]]]:
@@ -209,7 +209,7 @@ def verify(directory: Path, wheel: Path, serial: bool = False) -> list[str]:
             problems.append(f"{path}: duplicate or wrong-source validation")
         validations[name] = report
     if set(validations) != VALIDATIONS:
-        problems.append("package/Airflow matrix results are missing or unexpected")
+        problems.append("package matrix results are missing or unexpected")
     if not problems:
         for profile in expected:
             if profile.startswith("coverage-"):
@@ -291,7 +291,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         (args.output / "validation.json").write_text(json.dumps(report), encoding="utf-8")
         return 0
     jobs = json.loads(os.environ.get("ETL_CRAFT_CI_JOBS", "{}"))
-    required_jobs = {"prepare", "static", "test", "service", "e2e", "package", "airflow"}
+    required_jobs = {"prepare", "static", "test", "service", "e2e", "package"}
     if set(jobs) != required_jobs or any(job.get("result") != "success" for job in jobs.values()):
         print("CI jobs are missing, failed, cancelled or skipped", file=sys.stderr)
         return 1

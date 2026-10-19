@@ -8,6 +8,12 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- The controller rebuilds the catalog on `Docs_site.Schedule` in the project timezone,
+  without blocking task supervision. Only one scheduled build runs at a time; missed ticks
+  are skipped. Manual and scheduled builds record one immutable `REQUESTED` row and one
+  `SUCCESS`/`FAILURE` completion row, sharing timestamp and arguments, with the completion's
+  exit code. Failed builds are logged and tried again at the next tick.
+
 - The scheduling process is the controller: start it with `etl-craft controller`.
   `etl_craft.controller` replaces `etl_craft.overseer`; migration `0042` renames
   `AUD_OVERSEERS.OVERSEER_ID` to `AUD_CONTROLLERS.CONTROLLER_ID` without losing process history.
@@ -15,6 +21,15 @@ All notable changes are recorded here. The format follows
   command and `server`/`server-workers` profile values have no aliases. Update launch commands
   and configuration files, stop the old process, then migrate before starting the controller.
   Task execution uses agent terminology; the cluster agent itself remains S5.C.
+
+### Removed
+
+- Airflow DAG export: `etl-craft generate-yml` (including `--pipeline_code`, `--global`,
+  `--docs`, `--airflow-version` and `--output` on that command), the `etl-craft-airflow`
+  integration package, `services.generate_yml`, `documents.dag_yaml`, the packaged DAG YAML
+  schema and `Auth.Airflow_connection_id`. Removed inputs use the ordinary unknown-input
+  errors; there are no compatibility aliases. The unused `jsonschema` runtime dependency
+  and its development stubs are removed, together with export-only tests and CI jobs.
 
 ### Added
 

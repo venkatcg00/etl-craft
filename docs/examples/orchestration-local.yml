@@ -2,8 +2,7 @@
 #
 # `etl-craft run --pipeline_code X` resolves each ready wave from
 # CFG_TASK_DEPENDENCY and runs one subprocess per task, at most
-# Max_parallel_tasks at a time. The DAG defaults still shape `generate-yml`
-# output, so a local environment can preview the DAGs it would ship.
+# Max_parallel_tasks limits how many task subprocesses run at once.
 #
 # Each setting is marked `# variable` or `# value`. A variable is looked up in
 # the secrets source (here: the process environment); when it is not set, the
