@@ -1,5 +1,8 @@
 # The catalog site
 
+The generated catalog contains the whole project. Pipeline permission groups do not filter this
+static site; restrict its hosting access. The API and live UI apply grants.
+
 `etl-craft generate-docs` writes a searchable catalog of everything etl-craft runs: every
 pipeline, task, table, business rule and ingestion script, with lineage graphs that follow each
 table and column from its first sources to its last consumers, across tasks and pipelines.

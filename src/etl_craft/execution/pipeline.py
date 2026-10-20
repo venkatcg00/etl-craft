@@ -145,6 +145,7 @@ def pipeline_steps(
             run_date=run_date,
             backfill=backfill,
             selector=selector,
+            before_admission=hooks.before_admission,
         ),
     )
     if run_cancelled(engine, pipeline_run_id):

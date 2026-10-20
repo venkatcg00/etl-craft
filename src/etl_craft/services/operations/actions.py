@@ -9,13 +9,18 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
-from etl_craft.core.actor import acting_as
-from etl_craft.core.enums import ActionName, ApiRole, Audit, HttpMethod, Placement
+from sqlalchemy.engine import Connection
+
+from etl_craft.core.actor import acting_as, sso_groups
+from etl_craft.core.enums import ActionName, ActionScope, ApiRole, Audit, HttpMethod, Placement
 from etl_craft.core.errors import PermissionDeniedError, UsageError
 from etl_craft.engine.controls import ControlView
 from etl_craft.engine.migrations import pending_migrations
+from etl_craft.engine.queries import statement
+from etl_craft.engine.repository.group_claims import token_groups
+from etl_craft.engine.repository.tasks import fetch_task_parameters
 from etl_craft.engine.schema import InitResult
 from etl_craft.services.catalog.gaps import GapSnapshot
 from etl_craft.services.config_files import ConfigExport, ConfigSync
@@ -27,6 +32,7 @@ from etl_craft.services.operations import (
     controls,
     diagnostics,
     documents,
+    groups,
     inspect,
     maintenance,
     models,
@@ -38,6 +44,7 @@ from etl_craft.services.operations import (
     values,
 )
 from etl_craft.services.operations.context import OperationContext
+from etl_craft.services.operations.permissions import pipeline_access, require_child_groups
 from etl_craft.services.operations.recording import record_refusal, recorded
 from etl_craft.services.operations.requests import (
     AttemptId,
@@ -64,8 +71,10 @@ from etl_craft.services.operations.requests import (
     ValidateInput,
     arguments,
 )
+from etl_craft.services.operations.visibility import visible_result
 from etl_craft.services.rehash import RehashResult
 from etl_craft.services.setup import SetupResult
+from etl_craft.services.trigger_validation import trigger_definition
 from etl_craft.services.validate import Report
 
 ON_HOST = "run it on the controller's host"
@@ -103,6 +112,7 @@ class Action:
     remedy: str | None = None
     provisioning: bool = False
     streams: bool = False
+    scope: ActionScope = ActionScope.DEPLOYMENT
     escalate: Callable[[OperationContext, object], ApiRole] | None = None
 
     def required_role(self, ctx: OperationContext, request: object) -> ApiRole | None:
@@ -146,68 +156,105 @@ _ROWS = (
     Action(ActionName.HEALTH, lambda ctx, request: models.Health(), NoInput, models.Health, VIEWER,
            GET, f"{API}/health"),
     Action(ActionName.PIPELINES, inspect.list_pipelines, TagFilter, models.PipelineListView, VIEWER,
-           GET, f"{API}/pipelines"),
+           GET, f"{API}/pipelines",
+           scope=ActionScope.PIPELINE),
     Action(ActionName.PIPELINE, inspect.get_pipeline, PipelineInput, models.PipelineView, VIEWER,
-           GET, f"{API}/pipelines/{{pipeline_code}}"),
+           GET, f"{API}/pipelines/{{pipeline_code}}",
+           scope=ActionScope.PIPELINE),
     Action(ActionName.GRAPH, inspect.pipeline_graph, PipelineInput, models.GraphView, VIEWER, GET,
-           f"{API}/graph"),
+           f"{API}/graph",
+           scope=ActionScope.PIPELINE),
     Action(ActionName.STEPS, inspect.pipeline_steps, RunSelection, models.StepsView, VIEWER, GET,
-           f"{API}/steps"),
+           f"{API}/steps",
+           scope=ActionScope.PIPELINE),
     Action(ActionName.STATUS, status.pipeline_status, RunFilter,
            status.StatusView | status.StatusListView, VIEWER, GET,
-           f"{API}/status"),
+           f"{API}/status",
+           scope=ActionScope.PIPELINE),
     Action(ActionName.RUN_DETAIL, inspect.get_run, RunId, models.RunView, VIEWER, GET,
-           f"{API}/runs/{{run_id}}"),
+           f"{API}/runs/{{run_id}}",
+           scope=ActionScope.PIPELINE),
     Action(ActionName.CAPABILITIES, capabilities.control_capabilities, CapabilitiesInput,
-           capabilities.CapabilitiesView, VIEWER, GET, f"{API}/capabilities"),
+           capabilities.CapabilitiesView, VIEWER, GET, f"{API}/capabilities",
+           scope=ActionScope.PIPELINE),
     Action(ActionName.CONTROL_REQUEST, controls.get_control, ControlId, ControlView, VIEWER, GET,
-           f"{API}/control-requests/{{control_id}}"),
+           f"{API}/control-requests/{{control_id}}",
+           scope=ActionScope.PIPELINE),
     Action(ActionName.EXPLAIN, status.explain_task, TaskSelection, status.Explanation, VIEWER, GET,
-           f"{API}/explanations"),
+           f"{API}/explanations",
+           scope=ActionScope.PIPELINE),
     Action(ActionName.HISTORY, inspect.run_history, HistoryInput, models.HistoryView, VIEWER, GET,
-           f"{API}/history"),
+           f"{API}/history",
+           scope=ActionScope.PIPELINE),
     Action(ActionName.AUDIT, inspect.audit, AuditInput, models.AuditView, VIEWER, GET,
-           f"{API}/audit"),
+           f"{API}/audit",
+           scope=ActionScope.PIPELINE),
     Action(ActionName.ATTEMPT, inspect.get_attempt, AttemptId, models.AttemptView, VIEWER, GET,
-           f"{API}/attempts/{{attempt_id}}"),
+           f"{API}/attempts/{{attempt_id}}",
+           scope=ActionScope.PIPELINE),
     Action(ActionName.LOGS, inspect.attempt_log, LogInput, None, VIEWER, GET,
-           f"{API}/attempts/{{attempt_id}}/log", streams=True),
+           f"{API}/attempts/{{attempt_id}}/log", streams=True,
+           scope=ActionScope.PIPELINE),
     Action(ActionName.CATALOG_GAPS, catalog.get_gaps, catalog.GapsInput, GapSnapshot, VIEWER, GET,
-           f"{API}/catalog/gaps"),
+           f"{API}/catalog/gaps",
+           scope=ActionScope.PIPELINE),
     Action(ActionName.VALIDATE, diagnostics.validate_metadata, ValidateInput, Report, VIEWER, GET,
-           f"{API}/validation"),
+           f"{API}/validation",
+           scope=ActionScope.PIPELINE),
     Action(ActionName.LINEAGE, diagnostics.trace_lineage, LineageInput, diagnostics.LineageView,
-           VIEWER, GET, f"{API}/lineage"),
+           VIEWER, GET, f"{API}/lineage",
+           scope=ActionScope.PIPELINE),
     Action(ActionName.DATA_PROVENANCE, values.provenance, values.ValueKey, values.ValueResult,
-           VIEWER, POST, f"{API}/values/provenance"),
+           VIEWER, POST, f"{API}/values/provenance",
+           scope=ActionScope.PIPELINE),
     Action(ActionName.DOCS_VERSION_CHECK, documents.check_versions, NoInput,
-           documents.DocsVersions, VIEWER, GET, f"{API}/docs/versions"),
+           documents.DocsVersions, VIEWER, GET, f"{API}/docs/versions",
+           scope=ActionScope.PIPELINE),
     Action(ActionName.REHASH_PLAN, maintenance.plan_rehash, maintenance.RehashInput,
            RehashResult, VIEWER, GET, f"{API}/rehash"),
     # Runs and controls.
     Action(ActionName.TRIGGER_PIPELINE, triggers.initialize, triggers.TriggerRequest,
-           triggers.TriggerView, OPERATOR, POST, f"{API}/triggers", REQUEST),
+           triggers.TriggerView, OPERATOR, POST, f"{API}/triggers", REQUEST,
+           scope=ActionScope.PIPELINE),
     Action(ActionName.RUN, runs.execute_run, RunRequest,
-           models.OperationResult | models.BackfillView, OPERATOR, POST, f"{API}/runs", REQUEST),
+           models.OperationResult | models.BackfillView, OPERATOR, POST, f"{API}/runs", REQUEST,
+           scope=ActionScope.PIPELINE),
     Action(ActionName.MARK, runs.mark, MarkRequest, models.OperationResult, OPERATOR, POST,
-           f"{API}/marks", REQUEST),
+           f"{API}/marks", REQUEST,
+           scope=ActionScope.PIPELINE),
     Action(ActionName.CONTROL, controls.control, ControlRequest,
-           ControlView | models.OperationResult, OPERATOR, POST, f"{API}/controls", REQUEST),
+           ControlView | models.OperationResult, OPERATOR, POST, f"{API}/controls", REQUEST,
+           scope=ActionScope.PIPELINE),
     Action(ActionName.CONTROL_BULK, controls.request_bulk_controls, BulkControlRequest,
-           controls.BulkControlView, OPERATOR, POST, f"{API}/controls/bulk"),
+           controls.BulkControlView, OPERATOR, POST, f"{API}/controls/bulk",
+           scope=ActionScope.PIPELINE),
     Action(ActionName.RECONCILE, runs.reconcile_runs, ReconcileInput, models.ReconciliationView,
-           OPERATOR, POST, f"{API}/reconciliations", REQUEST),
+           OPERATOR, POST, f"{API}/reconciliations", REQUEST,
+           scope=ActionScope.PIPELINE),
+    Action(ActionName.GROUP_LIST, groups.list_groups, NoInput, groups.Groups, ADMIN, GET,
+           f"{API}/groups"),
+    Action(ActionName.GROUP_ADD, groups.add_group, groups.GroupAdd, groups.Groups, ADMIN, POST,
+           f"{API}/groups", REQUEST),
+    Action(ActionName.GROUP_DISABLE, groups.disable_group, groups.GroupName, groups.Groups,
+           ADMIN, POST, f"{API}/groups/disable", REQUEST),
+    Action(ActionName.GROUP_ADD_MEMBER, groups.add_member, groups.GroupMember, groups.Groups,
+           ADMIN, POST, f"{API}/groups/members", REQUEST),
+    Action(ActionName.GROUP_REMOVE_MEMBER, groups.remove_member, groups.GroupMember, groups.Groups,
+           ADMIN, POST, f"{API}/groups/members/remove", REQUEST),
     # Development and administration.
     Action(ActionName.LINEAGE_REFRESH, diagnostics.refresh_lineage, LineageRefreshInput,
-           diagnostics.LineageView, DEVELOPER, POST, f"{API}/lineage/refresh", REQUEST),
+           diagnostics.LineageView, DEVELOPER, POST, f"{API}/lineage/refresh", REQUEST,
+           scope=ActionScope.PIPELINE),
     Action(ActionName.GENERATE_DOCS, documents.generate_docs, documents.DocsInput,
            documents.DocsBuild, DEVELOPER, POST, f"{API}/docs", REQUEST),
     Action(ActionName.DOCS_VERSION, documents.record_versions, NoInput, documents.DocsVersions,
            ADMIN, POST, f"{API}/docs/versions", REQUEST),
     Action(ActionName.DATA_EDIT, values.write_values, values.ValueEdit, values.ValueResult, ADMIN,
-           POST, f"{API}/values", BY_ACTION),
+           POST, f"{API}/values", BY_ACTION,
+           scope=ActionScope.PIPELINE),
     Action(ActionName.DATA_UNLOCK, values.unlock_values, values.ValueUnlock, values.ValueResult,
-           ADMIN, POST, f"{API}/values/unlock", BY_ACTION),
+           ADMIN, POST, f"{API}/values/unlock", BY_ACTION,
+           scope=ActionScope.PIPELINE),
     Action(ActionName.ACCOUNT_LIST, accounts.list_accounts, NoInput, accounts.Accounts, ADMIN, GET,
            f"{API}/accounts"),
     Action(ActionName.ACCOUNT_ADD, accounts.add_account, accounts.AccountAdd, accounts.Accounts,
@@ -280,14 +327,11 @@ def admitted(ctx: OperationContext, name: ActionName, request: object) -> Iterat
         )
     given = arguments(request)
     required = action.required_role(ctx, request)
-    if not (action.provisioning and ctx.provisioning) and not has_role(ctx.role, required):
-        error = PermissionDeniedError(
-            f"account {ctx.actor.name!r}: role={ctx.role or 'unproven'}; action '{name}': "
-            f"{required} role is required; ask an administrator to grant {required} or a higher "
-            "role"
-        )
+    try:
+        _authorize(ctx, action, request, required)
+    except PermissionDeniedError as error:
         record_refusal(ctx, name, given, error)
-        raise error
+        raise
     if action.audit == Audit.REQUEST:
         with recorded(ctx, name, given):
             yield
@@ -296,10 +340,105 @@ def admitted(ctx: OperationContext, name: ActionName, request: object) -> Iterat
             yield
 
 
+def _authorize(
+    ctx: OperationContext, action: Action, request: object, required: ApiRole | None
+) -> None:
+    _require_trigger_groups(ctx, action, request)
+    if ctx.role == ApiRole.ADMIN or (action.provisioning and ctx.provisioning):
+        return
+    if action.scope == ActionScope.PIPELINE and required is not None:
+        with ctx.engine.connect() as conn:
+            access = pipeline_access(conn, ctx)
+            if isinstance(request, BulkControlRequest):
+                if has_role(ctx.role, required) or any(
+                    access.permits(selection.pipeline_code, required)
+                    for selection in request.requests
+                ):
+                    return
+                access.require(ctx, request.requests[0].pipeline_code, required)
+            codes = _request_codes(conn, action, request)
+            existing = [selected for selected in codes if selected in access.roles]
+            for selected in existing:
+                access.require(ctx, selected, required)
+            if existing:
+                return
+            if action.name in (ActionName.RECONCILE, ActionName.LINEAGE_REFRESH):
+                for selected in access.roles:
+                    access.require(ctx, selected, required)
+                if access.roles:
+                    return
+            # Aggregate reads filter their selections; bulk controls invoke CONTROL per object.
+            if not codes and required == ApiRole.VIEWER and ctx.role is not None:
+                return
+    if not has_role(ctx.role, required):
+        raise PermissionDeniedError(
+            f"account {ctx.actor.name!r}: role={ctx.role or 'unproven'}; action '{action.name}': "
+            f"{required} role is required; ask an administrator to grant {required} or a higher "
+            "role"
+        )
+
+
+def _require_trigger_groups(ctx: OperationContext, action: Action, request: object) -> None:
+    """Check retained groups even when the initiating account is currently an admin."""
+    if isinstance(request, triggers.TriggerRequest) and ctx.sso_group_ids:
+        with ctx.engine.connect() as conn:
+            for selected in _request_codes(conn, action, request):
+                require_child_groups(conn, ctx, selected)
+
+
 def invoke(ctx: OperationContext, name: ActionName, request: object) -> object:
     """Run one action for ``ctx``'s caller: the only way an interface reaches an operation."""
     call = ACTIONS[name].call
     if call is None:
         raise UsageError(f"{name} is a long-running process; its interface starts it")
-    with admitted(ctx, name, request):
-        return call(ctx, request)
+    ctx = _request_context(ctx, name, request)
+    claims = sso_groups.set(ctx.sso_group_ids)
+    try:
+        with admitted(ctx, name, request):
+            result = call(ctx, request)
+        return (
+            visible_result(ctx, result) if ACTIONS[name].scope == ActionScope.PIPELINE else result
+        )
+    finally:
+        sso_groups.reset(claims)
+
+
+def _request_context(ctx: OperationContext, name: ActionName, request: object) -> OperationContext:
+    """Restore admitted claims for trigger tasks, and authenticated claims for other callers."""
+    if ACTIONS[name].scope == ActionScope.PIPELINE and ctx.credential_token_id is not None:
+        with ctx.engine.connect() as conn:
+            ctx = replace(ctx, sso_group_ids=token_groups(conn, ctx.credential_token_id))
+    if name == ActionName.TRIGGER_PIPELINE and isinstance(request, triggers.TriggerRequest):
+        from etl_craft.services.operations.child_admission import initiating_context
+
+        with ctx.engine.connect() as conn:
+            row = conn.execute(
+                statement(conn, "trigger_context"), {"task_run_id": request.task_run_id}
+            ).one_or_none()
+            if row is not None:
+                initiator = initiating_context(conn, ctx, row.pipeline_run_id)
+                if ctx.actor == initiator.actor:
+                    ctx = initiator
+    return ctx
+
+
+def _request_codes(conn: Connection, action: Action, request: object) -> list[str]:
+    """Resolve exact identities, and the requested child rather than an implicit parent run."""
+    if isinstance(request, triggers.TriggerRequest):
+        row = conn.execute(
+            statement(conn, "trigger_context"), {"task_run_id": request.task_run_id}
+        ).one_or_none()
+        if row is None:
+            return []
+        child = trigger_definition(conn, row.pipeline_id, fetch_task_parameters(conn, row.task_id))
+        return [child.pipeline_code]
+    code = getattr(request, "pipeline_code", None)
+    if code is not None:
+        return [code]
+    identities = {
+        key: getattr(request, key, None)
+        for key in ("run_id", "attempt_id", "control_id", "task_run_id")
+    }
+    if any(value is not None for value in identities.values()):
+        return list(conn.execute(statement(conn, "permission_scope"), identities).scalars())
+    return []

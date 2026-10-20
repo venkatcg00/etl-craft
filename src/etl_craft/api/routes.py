@@ -15,10 +15,11 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import TypeAdapter, ValidationError
 from starlette.concurrency import run_in_threadpool
 
-from etl_craft.core.enums import ActionName, ApiRole, HttpMethod, Transport
+from etl_craft.core.enums import ActionName, HttpMethod, Transport
 from etl_craft.core.errors import UsageError
 from etl_craft.services.operations import OperationContext, to_json
 from etl_craft.services.operations.actions import ACTIONS, Action, invoke
+from etl_craft.services.operations.identity import authenticated_context
 from etl_craft.services.operations.tokens import authenticate
 
 BEARER = HTTPBearer(auto_error=False)
@@ -81,7 +82,7 @@ def _caller(
         raise HTTPException(
             401, "a valid bearer token is required", headers={"WWW-Authenticate": "Bearer"}
         )
-    return replace(ctx, actor=identity.actor, role=ApiRole(identity.role), transport=Transport.HTTP)
+    return replace(authenticated_context(ctx, identity), transport=Transport.HTTP)
 
 
 async def _answer(caller: OperationContext, action: Action, request: Request) -> Response:

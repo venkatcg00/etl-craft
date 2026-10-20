@@ -1,9 +1,11 @@
 """The OIDC device grant against an actual local TLS issuer."""
 
+from dataclasses import replace
+
 import pytest
 
 from etl_craft.core.errors import ConfigurationError
-from etl_craft.services.oidc import poll_device, start_device
+from etl_craft.services.oidc import IdentityClaims, poll_device, start_device
 
 pytestmark = pytest.mark.unit
 
@@ -13,7 +15,7 @@ def test_device_sign_in_checks_tls_and_returns_only_a_verified_subject(issuer):
     grant = start_device(auth)
     assert grant.user_code == "ABCD-EFGH"
     assert grant.verification_uri.endswith("/verify")
-    assert poll_device(auth, grant.device_code, grant.nonce) == "known-subject"
+    assert poll_device(auth, grant.device_code, grant.nonce) == IdentityClaims("known-subject")
     assert state["requests"][0][1]["scope"] == ["openid"]
     assert state["requests"][1][1]["grant_type"] == ["urn:ietf:params:oauth:grant-type:device_code"]
     assert state["requests"][1][1]["device_code"] == ["private-device-code"]
@@ -25,7 +27,7 @@ def test_polling_waits_while_pending_and_backs_off_when_asked(issuer):
     state["errors"] = ["authorization_pending", "slow_down"]
     assert poll_device(auth, grant.device_code, grant.nonce) == 0
     assert poll_device(auth, grant.device_code, grant.nonce) == 5
-    assert poll_device(auth, grant.device_code, grant.nonce) == "known-subject"
+    assert poll_device(auth, grant.device_code, grant.nonce) == IdentityClaims("known-subject")
 
 
 def test_a_refused_or_expired_code_fails_and_a_foreign_nonce_is_rejected(issuer):
@@ -53,3 +55,25 @@ def test_tls_verification_is_mandatory(issuer, monkeypatch):
     monkeypatch.delenv("SSL_CERT_FILE")
     with pytest.raises(ConfigurationError, match="connectivity and TLS"):
         start_device(auth)
+
+
+def test_configured_group_claim_is_returned_only_after_subject_validation(issuer):
+    auth, state = issuer
+    auth = replace(auth, oidc_groups_claim="groups")
+    state["extra_claims"] = {"groups": ["sales", "unmatched"]}
+    grant = start_device(auth)
+    assert poll_device(auth, grant.device_code, grant.nonce) == IdentityClaims(
+        "known-subject", ("sales", "unmatched")
+    )
+    with pytest.raises(ConfigurationError, match="nonce"):
+        poll_device(auth, grant.device_code, "another-login")
+
+
+@pytest.mark.parametrize("groups", [None, "sales", ["sales", 7], [""], {"sales": True}])
+def test_configured_group_claim_refuses_missing_or_malformed_values(issuer, groups):
+    auth, state = issuer
+    auth = replace(auth, oidc_groups_claim="groups")
+    state["extra_claims"] = {} if groups is None else {"groups": groups}
+    grant = start_device(auth)
+    with pytest.raises(ConfigurationError, match=r"groups.*expected a list of group names"):
+        poll_device(auth, grant.device_code, grant.nonce)

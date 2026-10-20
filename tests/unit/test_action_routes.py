@@ -4,7 +4,7 @@ import enum
 import re
 import types
 import typing
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import MISSING, fields, is_dataclass, replace
 from urllib.parse import urlsplit
 
@@ -19,6 +19,7 @@ from etl_craft.core.enums import ApiRole, Audit, HttpMethod, RunStatus
 from etl_craft.core.errors import PermissionDeniedError, UsageError
 from etl_craft.services.operations import OperationContext, actions
 from etl_craft.services.operations.actions import ACTIONS, invoke
+from etl_craft.services.operations.permissions import PipelineAccess
 from etl_craft.services.operations.serialization import encode
 
 pytestmark = pytest.mark.unit
@@ -64,7 +65,9 @@ def build(cls):
 
 
 def context(role=ApiRole.ADMIN):
-    return OperationContext(None, None, ADMIN, role=role)
+    return OperationContext(
+        types.SimpleNamespace(connect=lambda: nullcontext(None)), None, ADMIN, role=role
+    )
 
 
 class CapturedError(Exception):
@@ -84,7 +87,7 @@ def server(monkeypatch):
     monkeypatch.setattr(
         routes,
         "authenticate",
-        lambda ctx, token: types.SimpleNamespace(actor=ADMIN, role=ApiRole.ADMIN.value),
+        lambda ctx, token: types.SimpleNamespace(actor=ADMIN, role=ApiRole.ADMIN.value, token_id=1),
     )
     return TestClient(create_app(context())), calls
 
@@ -186,6 +189,12 @@ def test_a_malformed_value_is_refused_by_name_before_the_operation_runs(server, 
 def operations(monkeypatch):
     """Every action's operation replaced by one that records it ran."""
     ran = []
+    # Transport tests isolate identity lookup; grant resolution is exercised on both Engine DBs.
+    monkeypatch.setattr(actions, "_request_context", lambda ctx, name, request: ctx)
+    monkeypatch.setattr(actions, "_request_codes", lambda conn, action, request: ["x"])
+    monkeypatch.setattr(
+        actions, "pipeline_access", lambda conn, ctx: PipelineAccess({"x": ctx.role})
+    )
     for name in CALLED:
         monkeypatch.setitem(
             ACTIONS, name, replace(ACTIONS[name], call=lambda ctx, request, n=name: ran.append(n))
@@ -231,7 +240,7 @@ def test_an_audited_change_is_recorded_once_and_a_refusal_never_runs(operations,
     assert (entered, operations) == ([name], [name])
     below = tuple(ApiRole)[: tuple(ApiRole).index(action.role)]
     for role in (None, *below):
-        with pytest.raises(PermissionDeniedError, match=f"{action.role} role is required"):
+        with pytest.raises(PermissionDeniedError, match=rf"{action.role}( role is required| role)"):
             invoke(context(role), name, build(action.request))
     assert operations == [name]
     assert refused == [name] * (1 + len(below))

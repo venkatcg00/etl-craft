@@ -140,8 +140,9 @@ item's text, or work done early under another item.
 | S5.AA One source for every action | Done | #221 | One action table for roles, audit, placement and routes; one request per action; kebab-case flags, Capitalized_snake keys, upper-case values; typed statuses; no dialect branches or enum literals |
 | S5.AB Pipeline tags and filters | Done | #222 | `TAGS` labels pipelines; one tag filter on list, status, history, catalog and UI views, and tag-selected bulk actions |
 | S5.AC Pipeline trigger tasks | Done | #223 | Durable child admission, controller-held WAIT outcomes, DETACH at QUEUED admission and linked run inspection |
-| S5.AD Pipeline permission groups | Planned | | Groups of accounts, granted `viewer` or `operator` (and S7.M's `steward`) on pipelines or tags; one effective-role check per pipeline-scoped action |
+| S5.AD Pipeline permission groups | Done | #225 | Admin-managed groups, audited direct/tag grants, effective pipeline roles, retained SSO group IDs and child-start permission checks |
 | S5.AE One gateway | Planned | | `etl-craft ui` as stateless API copies, a headless controller, agents through the API only, `ui` and `all` extras, `--api` |
+| S5.AF Indexes for every query | Planned | | Catalog query plans avoid full scans of growing tables; measured indexes, write overhead and a PostgreSQL guard |
 | S5.X Unmanaged SQL tasks | Planned | | `SQL_SCRIPT` runs any SQL as an ordinary dependent task with per-statement audit; pre- and post-SQL are upstream and downstream tasks |
 | S5.C and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
@@ -288,11 +289,21 @@ does not move worker work ahead of the metadata, account or operator-control cor
     S5.C and S7.A (owner, 20 October 2026). Only the controller and the `ui` copies hold Engine
     DB credentials; agents, the UI and remote CLI calls go through the API. S5.C builds the
     agent API on it.
+  - S5.AF (indexes for every query) follows S5.AE and comes before S5.C (owner,
+    20 October 2026), because the `ui` copies and agents multiply query load.
   - None of these moves S5.S, S5.O.3 or S5.Q.
   - S5.V and S7.M add `validation_scripts/` and `uploads/` to the project directory, and the
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.AD (#225) covers open/restricted pipeline reads, direct and tag grants, viewer elevation,
+CLI/API refusals, filtered history and private dependency/lineage/catalog details on SQLite
+and PostgreSQL. Group/grant histories, atomic config refusal, flat OIDC claims, group rename
+and name reuse, refresh expiry, retained run claims, child/grandchild propagation and queued
+child permission withdrawal are covered locally. Upgrades from every released schema and
+fresh/upgraded schema equivalence pass. No warehouse SQL or cloud authentication changes;
+cloud acceptance does not apply.
 
 S5.AC (#223) covers WAIT/DETACH admission and real controller execution with one agent slot,
 restart recovery, every child ending, deadline recovery, explicit reruns, ownership refusals,
@@ -556,6 +567,16 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- S5.AD: the owner approved flat, optional `Auth.Oidc_groups_claim` beside
+  `Auth.Oidc_issuer` and `Auth.Oidc_client_id`, rather than `Auth.<provider>` blocks.
+  Admitted runs retain claims in JSON-text `SSO_GROUP_IDS` on `CFG_API_TOKENS` and
+  `AUD_PIPELINES_RUN_LOG`, storing group IDs rather than names. Each child start rechecks
+  the active account, the kept groups' `ACTIVE_FLAG='Y'` and current grants. Children copy
+  the parent's `SSO_GROUP_IDS`, so grandchildren use the same set. The guides explain that
+  identity-provider group removal applies from the next SSO sign-in; refreshed access tokens
+  retain the last sign-in's groups until the refresh token expires. S7.M already assigns
+  stewards through grants, so its plan needs no replacement assignment design.
 
 - S5.AC: the owner approved retaining the existing task-run identity on explicit reruns,
   advancing `AUD_TASK_RUN_LOG.TRIGGER_GENERATION` instead. The child key is
@@ -4685,6 +4706,38 @@ Branch: `feat/api-gateway-roles`, one per slice. After S5.AD and before S5.C and
   - The `ui` and `all` extras replace `server`, and `--api` replaces `--controller`.
   - The controller's tick duration is recorded and S7.I's soak checks it.
 
+### S5.AF Indexes for every query
+
+After S5.AE and before S5.C.
+
+- *Problem.* No check ensures that catalog queries (`dialects/engine/queries/` and the
+  per-dialect overrides) avoid full scans of growing tables. For example,
+  `controller_schedules.sql` runs a per-pipeline `MAX(RUN_KEY)` and `EXISTS` for every
+  active pipeline on every tick.
+- *Change.*
+  1. Seed a PostgreSQL Engine DB with 10,000 pipelines of 20 tasks each and a year of daily
+     runs, attempts, gate decisions, audit and history rows, using set-based inserts
+     (`generate_series`). Run `ANALYZE`, then `EXPLAIN (FORMAT JSON)` every catalog query.
+  2. Add only the indexes those plans need: composite indexes in the queries' column order,
+     partial indexes for status and active-row filters, and none on small, fixed-size tables.
+     Rewrite a query instead where the query is the problem, without changing its results.
+  3. Justify each index by its plan before and after, and measure the write overhead on
+     `AUD_TASK_ATTEMPTS` updates.
+  4. Ship one migration in both dialects, with both `schema.sql` files updated, and an upgrade
+     test that passes from every released schema.
+- Index support: `(PIPELINE_ID, START_DATE)` on runs, `(TASK_RUN_ID)` on attempts, `(CONSUMED_AT)` on
+  consumption.
+- *Tests.* A PostgreSQL integration test seeds a smaller volume, runs `EXPLAIN` on every
+  catalog query and fails on a full scan of a growing table (every `AUD_` table, every history
+  table, `CFG_PIPELINES`), naming the query, the table and the plan node. Allow-listed full
+  reads carry a one-line reason. It costs under a minute of CI, and it fails on the code
+  before the change.
+- *Done when.*
+  - No catalog query scans a growing table in full at the seeded volume, except the
+    allow-listed ones.
+  - The guard test runs in CI.
+  - No behaviour, result or public surface changes.
+
 ### S5.C The PostgreSQL queue and the agent
 
 Branch: `feat/pools-agent`. Files: new `agent/` package (layer beside `controller`),
@@ -4832,6 +4885,10 @@ Branch: `feat/pools-bundles`.
 - *Problem.* Agents on other hosts need the project's `sql_files/`, `ingestion_scripts/` and config,
   and every attempt of a run must use the same versions (today each task process re-reads files and
   `craft-connector.yml` when it starts).
+- **Metadata point today.** `WorkingSet.refresh` in `controller/supervisor.py` reloads an
+  active run's graph when its pipeline's metadata version changes, so a config apply during
+  a run changes that run. PowerCenter runs a workflow with its starting version, and Airflow 3
+  pins each run to its DAG version.
 - *Change.*
   1. `etl-craft bundle publish [--project P]` builds a manifest (relative path to SHA-256) of
      `sql_files/`, `ingestion_scripts/` and the project's `craft-connector.yml` (secrets stay variable
@@ -4844,7 +4901,15 @@ Branch: `feat/pools-bundles`.
      (`Artifacts.Store` set).
   4. Python packages a script imports are the agent image's job; `doctor --agent` lists imports of
      the bundle's scripts that the agent's interpreter can't find (parse with `ast`, never import).
+  5. **Run-pinned metadata.** Record the metadata version used at admission on
+     `AUD_PIPELINES_RUN_LOG`, with a migration in both dialects, and keep that graph until the
+     run ends. Retries and recovery of the same run use the pinned graph; edits apply from
+     the next run. `status`, `explain` and the UI show the pinned version and say when a
+     newer version exists.
 - *Tests.* Editing a SQL file mid-run doesn't change the run; a corrupted cached file is detected.
+  A config apply that adds, removes and rewires tasks during an active run leaves its graph
+  unchanged; the next run uses the new graph. Restarting the controller mid-run keeps the
+  pinned graph.
 
 ### S5.G Projects in one Engine DB
 
@@ -4931,8 +4996,26 @@ Branch: `feat/engine-retention`.
   oldest first: attempts, then task runs, then runs past their retention, keeping any row that a
   retained run's consumption or gate decisions reference. `--archive-to <warehouse schema>` copies the
   rows to the warehouse before deleting.
-- Index support: `(PIPELINE_ID, START_DATE)` on runs, `(TASK_RUN_ID)` on attempts, `(CONSUMED_AT)` on
-  consumption.
+- **Files follow retention.** The same periods delete attempt log files in `Logs.Store` and
+  `Log_dir`, and S7.M's stored uploads, not only Engine DB rows. Delete a file only after its
+  rows are purged or archived; no retained row points to a missing file without saying so.
+  The log view shows `removed by retention on <date>` rather than a read error.
+- **Archiving that survives a crash.** `--archive-to <warehouse schema>` works batch by batch:
+  merge the batch into the archive table keyed by the source primary key, confirm its row
+  count in the warehouse, then delete it from the Engine DB in one transaction that records
+  the batch in `AUD_ACTIONS`. An interrupted purge can be re-run without lost or duplicated
+  rows. Kill the purge between the warehouse write and Engine DB delete, and once in each
+  step; re-run it and verify that the counts match exactly.
+- **Archive schema follows migrations.** Archive tables mirror the `AUD_` tables' names and
+  columns. When a migration has added a column, purge adds it to the archive table first,
+  using ALTER-based schema evolution as targets do. Refuse changes it cannot apply, such as
+  a narrowed type, naming the table, column and type. Each archived batch records the Engine
+  DB schema version.
+- **Defaults.** An unset period keeps rows forever, so existing projects do not change.
+  `etl-craft setup` writes recommended periods into new projects' `craft-connector.yml`;
+  `doctor` reports a PostgreSQL Engine DB with no retention period set. Archives go to the
+  warehouse only; Parquet or Iceberg exports to object storage wait until a team needs
+  archives outside the warehouse.
 - *Tests.* Purge keeps referenced rows; a dry run deletes nothing and reports counts; purge of
   1 million synthetic attempt rows on PostgreSQL finishes within 5 minutes and doesn't block a
   concurrent run.
@@ -4943,8 +5026,13 @@ Branch: `feat/engine-retention`.
   attempt to `Logs.Store` (`file://` or `s3://`). `AUD_TASK_ATTEMPTS.LOG_PATH` holds the location.
 - `TASK_LOG` keeps a tail of `Logs.Tail_bytes` (default 8 KiB, down from 64 KiB) plus the reported
   values.
-- The API's log endpoint streams from the store; while an attempt runs, from the agent (agents
-  serve their running attempts' logs over an internal endpoint authenticated with the agent token).
+- The API's log endpoint streams stored logs and the live log chunks that agents upload
+  through the agent API while an attempt runs. Agents open no port (S5.AE).
+- Files follow S6.A's retention periods in both `Logs.Store` and `Log_dir`, including S7.M's
+  stored uploads. Delete files only after their rows are purged or archived; the log view
+  explicitly shows `removed by retention on <date>` instead of a missing-file read error.
+  S6.A owns crash-safe archive batching and archive schema evolution; archives remain in the
+  warehouse until a team needs another destination.
 
 ### S6.C Catalog at scale
 
@@ -5169,6 +5257,15 @@ lists each element, its source and its data.
   - **No definition editing.** Databricks' job editor and "Run as" are left out: definitions
     change through the config files and `etl-craft config apply`. Per-pipeline permissions are
     S5.AD's grants: views show only what the account may see, and menus only what it may do.
+  - **Links between objects open in a new tab.** This includes a table in lineage, a child
+    or parent pipeline, the run linked from a trigger task, an upstream or downstream
+    dependency, a table's catalog page and a full log view.
+  - **Drilling into the same object stays in the same tab.** This includes a task in this
+    run's graph, run-page tabs, filters, sorting and pagination. Back works.
+  - **Actions are buttons, never links.** Run, stop, mark and apply never open a tab.
+  - **Accessible new-tab links.** Use a real `<a href>` with `target="_blank" rel="noopener"`,
+    an icon and visually hidden text "(opens in a new tab)". Browser tests check these rules,
+    and `fixing-accessibility` reviews them.
   - **Bounded.** Lists and matrices page through repository queries; nothing loads every run.
 - *Tests.* Browser tests open each view from a link, select through each view and act from the
   menu and the side panel; page tests compare each view's rows with the matching CLI JSON.

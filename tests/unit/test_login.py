@@ -117,7 +117,10 @@ def test_auth_settings_validate_lifetime_and_issuer(tmp_path):
     assert parse_config(raw, tmp_path / "c.yml").auth == AuthConfig(
         2, "https://issuer.example", "etl"
     )
+    raw["Auth"]["Oidc_groups_claim"] = "groups"
+    assert parse_config(raw, tmp_path / "c.yml").auth.oidc_groups_claim == "groups"
     for broken in (
+        {"Oidc_groups_claim": "groups"},
         {"Session_hours": True},
         {"Session_hours": 0},
         {"Oidc_client_id": "etl"},
@@ -162,7 +165,7 @@ def jwt(**changes):
 )
 def test_device_token_requires_issuer_client_nonce_and_fresh_lifetime(claims):
     with pytest.raises(ConfigurationError):
-        oidc._subject(jwt(**claims), "https://issuer", "etl", "nonce")
+        oidc._claims(jwt(**claims), "https://issuer", "etl", "nonce")
 
 
 def _sso(expires_in=60, interval=2):

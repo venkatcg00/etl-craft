@@ -12,6 +12,7 @@ from etl_craft.core.errors import EtlCraftError, UsageError
 from etl_craft.core.text import sha256_hex
 from etl_craft.engine import locks
 from etl_craft.engine.queries import statement
+from etl_craft.engine.repository.group_claims import token_groups
 from etl_craft.services import oidc
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.recording import recorded
@@ -102,7 +103,11 @@ def sign_in(ctx: OperationContext, request: SignIn) -> Session:
 
 
 def _sign_in(
-    ctx: OperationContext, name: str, password: str | None = None, *, subject: str | None = None
+    ctx: OperationContext,
+    name: str,
+    password: str | None = None,
+    *,
+    claims: oidc.IdentityClaims | None = None,
 ) -> Session:
     """Require proof of a registered user; SSO subjects come only from the verified device flow.
 
@@ -114,7 +119,7 @@ def _sign_in(
     with locks.ACCOUNTS.hold(ctx.engine, wait_seconds=30):
         with ctx.engine.connect() as conn:
             row = conn.execute(statement(conn, "account_find"), {"name": name}).one_or_none()
-        proven = _proven(row, password, subject)
+        proven = _proven(row, password, None if claims is None else claims.subject)
         if row is None or not proven:
             with recorded(ctx, ActionName.LOGIN, {"name": name}):
                 raise UsageError(
@@ -123,16 +128,36 @@ def _sign_in(
                 )
         caller = replace(ctx, actor=Actor(name, ActorKind.USER))
         now = datetime.now(UTC)
-        with recorded(caller, ActionName.LOGIN, {"name": name}), ctx.engine.begin() as conn:
+        with ctx.engine.connect() as conn:
+            active_groups = {
+                r.name: r.group_id
+                for r in conn.execute(statement(conn, "group_list"))
+                if r.active_flag == YesNo.YES
+            }
+        named = () if claims is None else claims.groups
+        matched = tuple(sorted({active_groups[n] for n in named if n in active_groups}))
+        unmatched = tuple(sorted({n for n in named if n not in active_groups}))
+        with (
+            recorded(caller, ActionName.LOGIN, {"name": name, "unmatched_groups": unmatched}),
+            ctx.engine.begin() as conn,
+        ):
             if not refreshable:
                 session_end = now + timedelta(hours=ctx.config.auth.session_hours)
                 created = issue_token(
-                    conn, name, TokenGrant(row.account_id, name, TokenKind.ACCESS, session_end)
+                    conn,
+                    name,
+                    TokenGrant(
+                        row.account_id, name, TokenKind.ACCESS, session_end, sso_group_ids=matched
+                    ),
                 )
                 return Session(created.token, created.metadata)
             refresh_end = now + timedelta(days=ctx.config.auth.refresh_days)
             refresh = issue_token(
-                conn, name, TokenGrant(row.account_id, name, TokenKind.REFRESH, refresh_end)
+                conn,
+                name,
+                TokenGrant(
+                    row.account_id, name, TokenKind.REFRESH, refresh_end, sso_group_ids=matched
+                ),
             )
             access = issue_token(
                 conn,
@@ -143,6 +168,7 @@ def _sign_in(
                     TokenKind.ACCESS,
                     now + ACCESS_LIFETIME,
                     refresh.metadata.token_id,
+                    matched,
                 ),
             )
             return Session(
@@ -160,18 +186,18 @@ def _proven(row: Row[tuple[object, ...]] | None, password: str | None, subject: 
     return user and matched and encoded != DECOY
 
 
-def sign_in_subject(ctx: OperationContext, subject: str) -> Session:
+def sign_in_subject(ctx: OperationContext, claims: oidc.IdentityClaims) -> Session:
     """Map a verified issuer subject to exactly one pre-registered account."""
     with ctx.engine.connect() as conn:
         name = conn.execute(
-            statement(conn, "account_subject"), {"subject": subject}
+            statement(conn, "account_subject"), {"subject": claims.subject}
         ).scalar_one_or_none()
     if name is None:
-        with recorded(ctx, ActionName.LOGIN, {"oidc_subject": subject}):
+        with recorded(ctx, ActionName.LOGIN, {"oidc_subject": claims.subject}):
             raise UsageError(
                 "SSO subject has no active registered USER account; ask an administrator"
             )
-    return _sign_in(ctx, name, subject=subject)
+    return _sign_in(ctx, name, claims=claims)
 
 
 def start_sso(ctx: OperationContext, request: NoInput) -> SsoStart:
@@ -206,7 +232,7 @@ def poll_sso(ctx: OperationContext, request: SsoPollInput) -> SsoPoll:
 def refresh(ctx: OperationContext, request: TokenInput) -> Session:
     """Issue a new access token from a live refresh token of an active user."""
     found = find_token(ctx, request.token)
-    if found is None or found.token_kind != TokenKind.REFRESH:
+    if found is None or found.token_kind != TokenKind.REFRESH or found.expires_at is None:
         raise UsageError(
             "refresh token is unknown, expired or revoked; run `etl-craft login` again"
         )
@@ -224,8 +250,9 @@ def refresh(ctx: OperationContext, request: TokenInput) -> Session:
                 account_id,
                 found.name,
                 TokenKind.ACCESS,
-                datetime.now(UTC) + ACCESS_LIFETIME,
+                min(datetime.now(UTC) + ACCESS_LIFETIME, found.expires_at),
                 found.token_id,
+                token_groups(conn, found.token_id),
             ),
         )
     return Session(access.token, access.metadata, refresh_expires_at=found.expires_at)

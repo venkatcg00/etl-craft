@@ -142,8 +142,13 @@ def clone(engine: Engine, config: ConnectorConfig) -> list[ClonedTable]:
 
 
 def run_hooks(config: ConnectorConfig, engine: Engine) -> RunHooks:
-    """Return the hooks a run gets: ``default_hooks``, then a clone once it has ended."""
-    hooks = default_hooks(config, engine)
+    """Compose child admission checks, SLA/finalization hooks and optional post-run cloning."""
+    from etl_craft.services.operations.child_admission import check_child_start
+
+    hooks = replace(
+        default_hooks(config, engine),
+        before_admission=lambda conn, run_id: check_child_start(engine, config, conn, run_id),
+    )
     if not config.cloning.enabled or config.cloning.scope == CloningScope.NONE:
         return hooks
     before = hooks.on_finalized

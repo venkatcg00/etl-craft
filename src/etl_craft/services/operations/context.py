@@ -29,3 +29,5 @@ class OperationContext:
     role: ApiRole | None = None
     transport: Transport = Transport.LOCAL
     provisioning: bool = False
+    sso_group_ids: tuple[int, ...] = ()
+    credential_token_id: int | None = None

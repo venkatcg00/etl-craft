@@ -63,6 +63,7 @@ def issuer(tmp_path, monkeypatch):
                     "nonce": state["nonce"],
                     "iat": time.time() - 1,
                     "exp": time.time() + 60,
+                    **state.get("extra_claims", {}),
                 }
                 self.reply(
                     {"id_token": encode({"alg": "RS256"}) + "." + encode(claims) + ".signature"}

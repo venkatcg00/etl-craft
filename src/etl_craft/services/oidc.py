@@ -137,7 +137,15 @@ def start_device(auth: AuthConfig) -> DeviceGrant:
     )
 
 
-def poll_device(auth: AuthConfig, device_code: str, nonce: str) -> str | int:
+@dataclass(frozen=True)
+class IdentityClaims:
+    """The subject and group names from the validated issuer response."""
+
+    subject: str
+    groups: tuple[str, ...] = ()
+
+
+def poll_device(auth: AuthConfig, device_code: str, nonce: str) -> IdentityClaims | int:
     """Poll once: the validated subject, or the seconds to wait before polling again."""
     issuer, client, metadata = _client(auth)
     response = _request(
@@ -155,10 +163,17 @@ def poll_device(auth: AuthConfig, device_code: str, nonce: str) -> str | int:
         return 5
     if error is not None:
         raise ConfigurationError("OIDC sign-in refused or expired; run `etl-craft login` again")
-    return _subject(_text(response, "id_token"), issuer, client, nonce)
+    claims = _claims(_text(response, "id_token"), issuer, client, nonce)
+    groups = claims.get(auth.oidc_groups_claim) if auth.oidc_groups_claim else []
+    if not isinstance(groups, list) or any(not isinstance(g, str) or not g.strip() for g in groups):
+        raise ConfigurationError(
+            f"OIDC claim {auth.oidc_groups_claim!r}={groups!r}; expected a list of group names; "
+            "correct the provider claim mapping"
+        )
+    return IdentityClaims(_text(claims, "sub"), tuple(groups))
 
 
-def _subject(token: str, issuer: str, client: str, nonce: str) -> str:
+def _claims(token: str, issuer: str, client: str, nonce: str) -> dict[str, object]:
     # OIDC Core 3.1.3.7 permits authenticated token-endpoint TLS instead of a signature check.
     try:
         header, payload, signature = token.split(".")
@@ -188,7 +203,8 @@ def _subject(token: str, issuer: str, client: str, nonce: str) -> str:
                 f"OIDC ID token {key}={value!r}; "
                 f"expected a finite timestamp {expected} {now}; login again"
             )
-    return _text(claims, "sub")
+    _text(claims, "sub")
+    return claims
 
 
 def _check_claim(key: str, found: object, expected: str) -> None:

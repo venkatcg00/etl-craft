@@ -103,6 +103,17 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Pipeline permission groups: admin-only `group add|disable|add-member|remove-member|list`
+  and matching API actions, plus `grants.csv` for direct/tag viewer/operator grants. Restricted
+  pipelines use current group grants, lists omit inaccessible pipelines, and a grant can elevate
+  a deployment viewer to pipeline operator. Grant changes require admin and config apply is atomic.
+- Optional flat `Auth.Oidc_groups_claim` maps SSO names to durable group IDs. Sessions retain
+  claims through refresh within its lifetime; admitted runs retain them for children and
+  grandchildren. Each child admission/start rechecks the active account, groups and current grants.
+  Provider membership removal is reflected at the next SSO sign-in. Engine migration 0045 adds
+  groups, memberships, grants, typed histories and JSON-text token/run claim columns on both DBs.
+  Static generated catalogs remain whole-project and now state that grants cannot filter them.
+
 - `RUN_PIPELINE` tasks start child pipelines in `WAIT` or `DETACH` mode. DETACH succeeds at
   durable QUEUED admission; WAIT hands off to the controller without retaining an agent slot,
   then mirrors child status and failure details without aggregating row counts. Timeouts and parent

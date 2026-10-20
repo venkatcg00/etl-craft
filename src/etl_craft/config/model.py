@@ -214,6 +214,7 @@ class AuthConfig:
     oidc_issuer: str | None = None
     oidc_client_id: str | None = None
     refresh_days: int = 30
+    oidc_groups_claim: str | None = None
 
 
 @dataclass(frozen=True)

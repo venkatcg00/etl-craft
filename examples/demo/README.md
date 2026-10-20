@@ -225,3 +225,13 @@ ordinary task dependencies for ordering and run the controller. WAIT frees the a
 explicit reruns launch a new child while automatic retries retain its identity. See the
 [pipeline-trigger configuration example](../../docs/guides/pipeline-triggers.md#configuration-file-example)
 for the CSV rows to apply to a project copy; the default demo scenario remains unchanged.
+
+### Pipeline groups in a shared deployment
+
+The demo starts with open pipelines. An admin can create a group with
+`etl-craft group add --name support` and add an account with
+`etl-craft group add-member --name support --account alice`. Export the config files, then
+edit `config/grants.csv` and apply it as admin to grant `viewer` or `operator` on one
+`PIPELINE_CODE` or `TAG` per row. Deployment viewers can then operate only their granted
+pipelines. The [permission guide](../../docs/deploying/security.md#pipeline-permission-groups)
+explains SSO group IDs, retained run claims and the whole-project static catalog boundary.

@@ -60,6 +60,7 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     on_host(args, ActionName.PUBLISH_DOCS)
     request = request_from(args, PublishInput)
     with command_context(args) as ctx, admitted(ctx, ActionName.PUBLISH_DOCS, request):
+        out.line("publish-docs: this whole-project static catalog does not enforce pipeline grants")
         folder = docs_folder(ctx.config, request.output)
         with published(
             ctx.engine,

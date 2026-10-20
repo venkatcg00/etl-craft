@@ -14,6 +14,7 @@ from etl_craft.cli.commands import (
     explain,
     generate_docs,
     graph,
+    group,
     history,
     init_db,
     lineage,
@@ -42,6 +43,7 @@ CONTROL_VERBS = (ControlAction.STOP, ControlAction.ABORT, ControlAction.HOLD, Co
 COMMANDS: tuple[Command, ...] = (
     *login.COMMANDS,
     account.COMMAND,
+    group.COMMAND,
     run.COMMAND,
     controller.COMMAND,
     token.COMMAND,

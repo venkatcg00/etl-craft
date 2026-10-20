@@ -240,7 +240,7 @@ def schema_page() -> str:
 
 
 def actions_page() -> str:
-    """Render every action from the action table: its command, route, role, audit and placement."""
+    """Render each action's command, route, scope, role, audit and placement from its row."""
     from etl_craft.cli.commands import COMMANDS
     from etl_craft.core.enums import Audit, Placement
     from etl_craft.services.operations.actions import ACTIONS
@@ -256,8 +256,8 @@ def actions_page() -> str:
         "HTTP API reach it through `invoke`, which checks the role and records the request; this",
         "page is generated from that table.",
         "",
-        "| Action | Command | HTTP route | Role | Audited | Runs |",
-        "| --- | --- | --- | --- | --- | --- |",
+        "| Action | Command | HTTP route | Scope | Role | Audited | Runs |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for name, action in sorted(ACTIONS.items()):
         route = f"`{action.method} {action.path}`" if action.path else "—"
@@ -265,6 +265,6 @@ def actions_page() -> str:
         where = "anywhere" if action.placement == Placement.ANYWHERE else "controller's host"
         lines.append(
             f"| `{name}` | {', '.join(commands.get(name, [])) or '—'} | {route} | "
-            f"{action.role or 'none'} | {audited[action.audit]} | {where} |"
+            f"{action.scope} | {action.role or 'none'} | {audited[action.audit]} | {where} |"
         )
     return "\n".join(lines) + "\n"

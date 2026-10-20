@@ -25,7 +25,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.types import TypeEngine
 
-from etl_craft.core.enums import DependencyType, Handler, RefreshType, RunCondition, YesNo
+from etl_craft.core.enums import ApiRole, DependencyType, Handler, RefreshType, RunCondition, YesNo
 from etl_craft.core.errors import MetadataFileError
 
 Kind = Literal["code", "text", "choice", "int", "float", "date", "json"]
@@ -419,8 +419,34 @@ SOURCE_COLUMNS = ConfigTable(
     "FROM CFG_COLUMNS c JOIN CFG_TABLES t ON t.TABLE_ID=c.TABLE_ID",
 )
 
+PIPELINE_GRANTS = ConfigTable(
+    file="grants.csv",
+    table="CFG_PIPELINE_GRANTS",
+    id_column="PIPELINE_GRANT_ID",
+    key=("GROUP_NAME", "PIPELINE_CODE", "TAG"),
+    columns=(
+        Column("GROUP_NAME", required=True),
+        Column("PIPELINE_CODE", "code"),
+        Column("TAG"),
+        Column(
+            "ROLE", "choice", required=True, choices=(ApiRole.VIEWER.value, ApiRole.OPERATOR.value)
+        ),
+        ACTIVE_FLAG,
+    ),
+    stored=("PIPELINE_CODE", "TAG", "ROLE"),
+    parents=(),
+    links=("GROUP_ID",),
+    label_format="{GROUP_NAME} pipeline={PIPELINE_CODE} tag={TAG}",
+    read_sql="SELECT x.PIPELINE_GRANT_ID AS row_id, x.ACTIVE_FLAG AS active_flag, "
+    "'Y' AS well_formed, g.GROUP_NAME AS group_name, x.PIPELINE_CODE AS pipeline_code, "
+    "x.TAG AS tag, x.ROLE AS role FROM CFG_PIPELINE_GRANTS x "
+    "JOIN CFG_GROUPS g ON g.GROUP_ID=x.GROUP_ID",
+)
+
+
 TABLES = (
     PIPELINES,
+    PIPELINE_GRANTS,
     OBJECT_TABLES,
     TASKS,
     TASK_PARAMETERS,

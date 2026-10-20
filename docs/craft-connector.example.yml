@@ -212,3 +212,5 @@ Cloning:
 #   Refresh_days: 30                    # value — integer 1..365; server sign-in refresh lifetime
 #   Oidc_issuer: https://sso.example.com # value — exact HTTPS issuer, paired with Oidc_client_id
 #   Oidc_client_id: etl-craft            # value — public device-flow client, RS256 ID tokens
+
+#   Oidc_groups_claim: groups             # optional claim of group names; needs OIDC settings above
