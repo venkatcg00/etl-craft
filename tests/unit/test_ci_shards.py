@@ -172,7 +172,10 @@ def test_each_demo_warehouse_uses_one_job_with_all_logical_workers():
 
 def test_complete_matrix_verifies_and_a_missing_shard_or_wrong_wheel_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(ci, "git", lambda *args: SimpleNamespace(stdout="same-source"))
-    monkeypatch.setattr(ci, "coverage_report", lambda *args: [])
+    combined = {}
+    monkeypatch.setattr(
+        ci, "coverage_report", lambda profile, reports, _: combined.update({profile: reports}) or []
+    )
     wheel = tmp_path / "package.whl"
     wheel.write_bytes(b"wheel")
     paths = []
@@ -218,6 +221,9 @@ def test_complete_matrix_verifies_and_a_missing_shard_or_wrong_wheel_fails(tmp_p
         folder.mkdir()
         (folder / "validation.json").write_text(json.dumps({"name": name, "commit": "same-source"}))
     assert ci.verify(tmp_path, wheel) == []
+    # Every combination's coverage also counts what the Engine DB shards reach.
+    engine = {path for path in paths if path.parent.name.startswith("engine-")}
+    assert engine and all(engine <= set(reports) for reports in combined.values())
     original = installed.read_text()
     wrong = json.loads(original)
     wrong["wheel_sha256"] = "different-wheel"
@@ -314,6 +320,24 @@ def test_each_supervision_module_must_reach_ninety_percent(tmp_path, monkeypatch
     assert {f"--include={module}" for module in ci.SUPERVISION_MODULES} <= {
         argument for call in calls for argument in call
     }
+
+
+@pytest.mark.parametrize("profile,measured", [("engine", True), ("connections", False)])
+def test_the_engine_shards_measure_only_the_supervision_modules(
+    tmp_path, monkeypatch, profile, measured
+):
+    commands = []
+    monkeypatch.delenv("PYTEST_ADDOPTS", raising=False)
+    monkeypatch.setattr(
+        ci.subprocess,
+        "run",
+        lambda command, **_: commands.append(command) or SimpleNamespace(returncode=0, stdout=""),
+    )
+    assert ci.run(profile, 0, 1, tmp_path) == 0
+    sources = [argument for argument in commands[0] if argument.startswith("--cov=")]
+    expected = {"--cov=etl_craft.controller.leadership", "--cov=etl_craft.api.serve"}
+    assert (set(sources) >= expected) == measured
+    assert len(sources) == (len(ci.SUPERVISION_MODULES) if measured else 0)
 
 
 def test_environment_selection_cannot_omit_tests_from_ci(monkeypatch, tmp_path, capsys):

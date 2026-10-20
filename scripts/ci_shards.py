@@ -87,6 +87,10 @@ def run(profile: str, index: int, count: int, output: Path) -> int:
     else:
         marker = "e2e_pip or e2e_uv" if profile.startswith("e2e-") else SERVICE_MARKERS[profile]
         command += ["-m", marker]
+        if profile == MEASURED_SERVICE:
+            # Only PostgreSQL reaches parts of the supervision modules: measure just those.
+            command += [f"--cov={_module(path)}" for path in SUPERVISION_MODULES]
+            command += ["--cov-report=", "--cov-fail-under=0"]
     command += [f"--evidence={output / 'results.json'}"]
     command += [f"--ci-shard={index}/{count}"]
     if wheel := os.environ.get("ETL_CRAFT_TEST_WHEEL"):
@@ -213,7 +217,8 @@ def verify(directory: Path, wheel: Path, serial: bool = False) -> list[str]:
     if not problems:
         for profile in expected:
             if profile.startswith("coverage-"):
-                problems.extend(coverage_report(profile, paths[profile], directory))
+                measured = paths[profile] + paths.get(MEASURED_SERVICE, [])
+                problems.extend(coverage_report(profile, measured, directory))
     return problems
 
 
@@ -224,10 +229,21 @@ SUPERVISION_MODULES = (
     "src/etl_craft/api/serve.py",
 )
 """Modules that must each reach 90% coverage, beyond the project total."""
+MEASURED_SERVICE = "engine"
+"""The service profile whose coverage of the supervision modules joins every combination's."""
+
+
+def _module(path: str) -> str:
+    """Return the import name of a module under ``src/``."""
+    return path.removeprefix("src/").removesuffix(".py").replace("/", ".")
 
 
 def coverage_report(profile: str, reports: list[Path], directory: Path) -> list[str]:
-    """Combine each complete Python/platform run, then require 90% overall and per module."""
+    """Combine each complete Python/platform run, then require 90% overall and per module.
+
+    ``reports`` also holds the Engine DB service shards, which measure only the supervision
+    modules, so code that only PostgreSQL reaches counts toward them.
+    """
     files = [path.parent / "coverage.data" for path in reports]
     missing = [str(path) for path in files if not path.is_file()]
     if missing:

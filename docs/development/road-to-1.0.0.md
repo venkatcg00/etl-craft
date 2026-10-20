@@ -574,6 +574,11 @@ The separate frozen 0.4 soak deployment is unchanged.
   - Gate decisions and wait kinds were string sets with schema `CHECK`s; they are now
     `GateOutcome` and `WaitKind`.
   - Doctor's file checks are named by their `craft-connector.yml` key (`Engine DB Key_file`).
+  - The per-module coverage gate adds the Engine DB service shards' coverage of the four
+    supervision modules to each Python/platform combination, because only PostgreSQL reaches
+    `controller/leadership.py`'s session lock. Those shards measure only those modules.
+  - The baseline comparison carries a renamed module's allowance to its new path, as git
+    detects the rename, so a rename is not growth.
 
 - S5.Z: the owner approved consistent pre-1.0 names without aliases, including configuration:
   deployment profiles are `laptop`, `controller` and `controller-agents`. The table's key is

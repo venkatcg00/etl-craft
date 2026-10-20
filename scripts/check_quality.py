@@ -511,7 +511,8 @@ def compare_to(root: Path, baseline_path: Path, ref: str, *, allow_growth: bool)
         print(f"quality: {ref} has no baseline to compare with")
         return 0
     grown, _ = compare(
-        Baseline.parse(baseline_path.read_text(encoding="utf-8")), Baseline.parse(shown.stdout)
+        Baseline.parse(baseline_path.read_text(encoding="utf-8")),
+        _renamed(Baseline.parse(shown.stdout), _renames(root, ref)),
     )
     if not grown:
         print(f"quality: the baseline does not grow against {ref}")
@@ -523,6 +524,27 @@ def compare_to(root: Path, baseline_path: Path, ref: str, *, allow_growth: bool)
         return 0
     print("Only the owner's quality-exception label allows this; fix the code instead.")
     return 1
+
+
+def _renames(root: Path, ref: str) -> dict[str, str]:
+    """Return the modules renamed since ``ref``, old path to new, as git detects them."""
+    listed = subprocess.run(
+        ["git", "diff", "-M", "--name-status", "--diff-filter=R", ref, "--", PACKAGE],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return {old: new for _, old, new in (line.split("\t") for line in listed.stdout.splitlines())}
+
+
+def _renamed(baseline: Baseline, renames: Mapping[str, str]) -> Baseline:
+    """Move a renamed module's allowance to its new path, so a rename is not growth."""
+    metrics = {
+        metric: {renames.get(path, path): value for path, value in scores.items()}
+        for metric, scores in baseline.metrics.items()
+    }
+    return Baseline(metrics, baseline.dependencies)
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:

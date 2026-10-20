@@ -1,7 +1,7 @@
 """Real token authorization and shared operation documents on both Engine DBs."""
 
 import json
-from dataclasses import replace
+from dataclasses import fields, replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -111,6 +111,32 @@ def test_read_routes_require_token_and_share_cli_documents(api, role):
         ]
         == "bearer"
     )
+
+
+def audit_counts(engine):
+    with engine.connect() as conn:
+        names = [n for n in sql_inspect(conn).get_table_names() if n.upper().startswith("AUD_")]
+        return {n: conn.execute(text(f'SELECT COUNT(*) FROM "{n}"')).scalar_one() for n in names}
+
+
+def test_no_read_route_records_an_audit_row(api):
+    ctx, client, creds, run, attempt = api
+    given = {"pipeline_code": "P", "task_code": "T", "run_id": run, "attempt_id": attempt}
+    given |= {"control_id": 1, "target": "staging.t"}
+    reads = [action for action in ACTIONS.values() if action.method == "GET"]
+    before = audit_counts(ctx.engine)
+    answered = {}
+    for action in reads:
+        names = {f.name for f in fields(action.request)}
+        values = {k: v for k, v in given.items() if k in names}
+        path = action.path.format(**values)
+        query = {k: v for k, v in values.items() if "{" + k + "}" not in action.path}
+        response = client.get(path, params=query, headers=headers(creds[ApiRole.ADMIN]))
+        answered[action.name] = response.status_code
+        assert audit_counts(ctx.engine) == before, action.name
+    # Most reads answer; the rest refuse this fixture's data, and neither records a row.
+    assert sum(code == 200 for code in answered.values()) > len(reads) // 2, answered
+    assert all(code < 500 for code in answered.values()), answered
 
 
 @pytest.mark.parametrize("role", ROLES)
