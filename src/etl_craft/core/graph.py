@@ -425,3 +425,28 @@ def _check_acyclic(graph: DependencyGraph) -> None:
                 stack.pop()
                 path.pop()
                 color[task_id] = black
+
+
+def cycles(edges: set[tuple[str, str]]) -> list[list[str]]:
+    """Return each cycle in the ``(dependent, upstream)`` graph once, from its smallest code."""
+    graph: dict[str, list[str]] = {}
+    for dependent, upstream in sorted(edges):
+        graph.setdefault(dependent, []).append(upstream)
+    found: list[list[str]] = []
+    seen: set[tuple[str, ...]] = set()
+
+    def walk(node: str, path: list[str]) -> None:
+        for upstream in graph.get(node, []):
+            if upstream in path:
+                cycle = path[path.index(upstream) :]
+                start = cycle.index(min(cycle))
+                key = tuple(cycle[start:] + cycle[:start])
+                if key not in seen:
+                    seen.add(key)
+                    found.append(list(key))
+            elif upstream > path[0]:
+                walk(upstream, [*path, upstream])
+
+    for node in sorted(graph):
+        walk(node, [node])
+    return found

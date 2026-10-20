@@ -59,7 +59,7 @@ from etl_craft.execution.attempt_records import (
     record_attempt,
     run_cancelled,
 )
-from etl_craft.execution.attempt_types import ChildOptions, Override, TaskOutcome
+from etl_craft.execution.attempt_types import CHILD_MODULE, ChildOptions, Override, TaskOutcome
 from etl_craft.execution.events import check_event
 from etl_craft.execution.gates import CrossPipelineCheck, TrackedGate
 from etl_craft.execution.interventions import (
@@ -537,6 +537,14 @@ def admit_attempt(
             attempt_id = active.attempt_id
             transitions.set_attempt_retry_policy(conn, attempt_id, policy.retry_on, overwrite=False)
         else:
+            if rerun and handler == Handler.RUN_PIPELINE:
+                conn.execute(
+                    statement(conn, "trigger_generation"), {"task_run_id": binding.task_run_id}
+                )
+                conn.execute(
+                    statement(conn, "trigger_wait_reset"),
+                    {"pipeline_run_id": pipeline_run_id, "task_id": task_id},
+                )
             attempt_id = transitions.queue_attempt(conn, binding.task_run_id, current_actor())
             transitions.set_attempt_retry_policy(conn, attempt_id, policy.retry_on)
         trackers.record_decisions(conn, pipeline_run_id, decisions, attempt_id=attempt_id)
@@ -687,7 +695,9 @@ def _child_argv(
     """Build the child invocation for this exact claimed attempt."""
     argv = [
         "-m",
-        child.module,
+        "etl_craft.services.operations.task_process"
+        if spec.handler == Handler.RUN_PIPELINE and child.module == CHILD_MODULE
+        else child.module,
         "--config",
         str(config.config_path),
         "--task-run-id",

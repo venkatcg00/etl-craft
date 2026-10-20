@@ -8,6 +8,8 @@ from etl_craft.core.enums import RunStatus
 pytestmark = pytest.mark.unit
 
 EXPECTED = {
+    enums.TriggerMode: {"WAIT", "DETACH"},
+    enums.TaskType: {"INGESTION", "ETL"},
     enums.FailureClass: {"TRANSIENT", "PERMANENT", "UNKNOWN"},
     enums.RetryOn: {"NONE", "TRANSIENT", "TRANSIENT_AND_UNKNOWN", "ANY"},
     enums.CatalogRunKind: {"SCHEDULED", "BACKFILL", "REPAIR", "OTHER"},
@@ -37,6 +39,7 @@ EXPECTED = {
         "TIMED_OUT",
         "CANCELLED",
         "LOST",
+        "HANDED_OFF",
     },
     enums.ControlAction: {
         "HOLD",
@@ -56,7 +59,14 @@ EXPECTED = {
     enums.LineageDirection: {"BOTH", "UPSTREAM", "DOWNSTREAM"},
     enums.ControlStatus: {"REQUESTED", "ACKNOWLEDGED", "COMPLETED"},
     enums.ControlAcknowledgement: {"PROCESS", "QUERIES"},
-    enums.TriggerKind: {"SCHEDULE", "MANUAL", "BACKFILL", "ORCHESTRATOR", "STAND_IN"},
+    enums.TriggerKind: {
+        "SCHEDULE",
+        "MANUAL",
+        "BACKFILL",
+        "ORCHESTRATOR",
+        "STAND_IN",
+        "PIPELINE_TASK",
+    },
     enums.ProtectionEvent: {"ENABLE", "BASELINE", "WRITE", "DELETE", "LOCK", "UNLOCK"},
     enums.ActorKind: {"USER", "SERVICE", "SYSTEM"},
     enums.TokenKind: {"SERVICE", "ACCESS", "REFRESH"},
@@ -66,7 +76,7 @@ EXPECTED = {
     enums.SlaStatus: {"MET", "BREACHED"},
     enums.RefreshType: {"FULL", "INCREMENTAL"},
     enums.DependencyType: {"SUCCESS", "FAILURE", "ALWAYS", "HAS_DATA"},
-    enums.Handler: {"PYTHON", "SQL", "BUSINESS_RULES", "EMAIL_ALERT", "EVENT_WAIT"},
+    enums.Handler: {"PYTHON", "SQL", "BUSINESS_RULES", "EMAIL_ALERT", "EVENT_WAIT", "RUN_PIPELINE"},
     enums.RunCondition: {"ALL", "ANY", "N"},
     enums.OffsetType: {"NUMBER", "TEXT", "TIMESTAMP"},
     enums.SqlAction: {
@@ -89,7 +99,7 @@ EXPECTED = {
     enums.CloningScope: {"CFG", "AUD", "ALL", "NONE"},
     enums.SecretsSource: {"ENVIRONMENT", "FILE"},
     enums.GateOutcome: {"SATISFIED", "UNSATISFIED", "BYPASSED", "WAIT"},
-    enums.WaitKind: {"DEPENDENCY", "EVENT"},
+    enums.WaitKind: {"DEPENDENCY", "EVENT", "PIPELINE_RUN"},
     enums.InterventionAction: {
         "MARK",
         "NEW_RUN",

@@ -10,6 +10,9 @@ SELECT r.TASK_RUN_ID AS task_run_id, r.TASK_ID AS task_id, t.TASK_CODE AS task_c
        CASE WHEN EXISTS (
            SELECT 1 FROM AUD_BUSINESS_RULES_RUN_LOG b WHERE b.TASK_RUN_ID = r.TASK_RUN_ID
        ) THEN 1 ELSE 0 END AS has_rule_runs,
+       CASE WHEN EXISTS (
+           SELECT 1 FROM AUD_TASK_ATTEMPTS a WHERE a.TASK_RUN_ID=r.TASK_RUN_ID
+       ) THEN 1 ELSE 0 END AS has_attempts,
        (SELECT MIN(dp.PIPELINE_CODE || '.' || COALESCE(dt.TASK_CODE, '') || ' run ' ||
                c.PIPELINE_RUN_ID)
         FROM AUD_DEPENDENCY_CONSUMPTION c

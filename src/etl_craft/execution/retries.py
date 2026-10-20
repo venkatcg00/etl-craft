@@ -12,7 +12,7 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
-from etl_craft.core.enums import AttemptStatus, RetryOn, enum_value
+from etl_craft.core.enums import AttemptStatus, RetryOn, RunStatus, enum_value
 from etl_craft.core.errors import MetadataError, StaleTransitionError
 from etl_craft.core.time import as_utc
 from etl_craft.engine import transitions
@@ -94,10 +94,16 @@ def refresh_retries(
             if row.status == AttemptStatus.QUEUED and row.not_before is not None:
                 waiting[row.task_id] = as_utc(row.not_before)
                 continue
+            if row.status == AttemptStatus.HANDED_OFF and (
+                row.marked or row.task_status != RunStatus.FAILED or row.retry_on != RetryOn.ANY
+            ):
+                exhausted.add(row.task_id)
+                continue
             if row.status not in {
                 AttemptStatus.FAILED,
                 AttemptStatus.TIMED_OUT,
                 AttemptStatus.LOST,
+                AttemptStatus.HANDED_OFF,
             }:
                 continue
             policy = task_retry_policy(fetch_task_parameters(conn, row.task_id), config)

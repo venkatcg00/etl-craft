@@ -91,7 +91,7 @@ def rerun_task(
         summary += f"; not run again, their dependencies are not met: {', '.join(left)}"
     if kept:
         summary += f"; kept SKIPPED: {', '.join(kept)}"
-    if before is not None:
+    if before is not None or first.waiting:
         status = (
             RunStatus.FAILED
             if any(o.status == RunStatus.FAILED for o in ran)

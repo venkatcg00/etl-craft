@@ -216,3 +216,12 @@ etl-craft resume --tag support --reason "demo ready" --yes
 
 Omit `--yes` from pause or resume to print the selection without changing it. The generated
 catalog shows the same labels, with shareable filtered links from its DAGs overview.
+
+### Running a child from a task
+
+A parent ETL task can use `HANDLER=RUN_PIPELINE`, `TRIGGER_PIPELINE_CODE=CLIENT_ALPHA` and
+`TRIGGER_MODE=WAIT` (or `DETACH`) instead of relying on independently timed schedules. Keep
+ordinary task dependencies for ordering and run the controller. WAIT frees the agent slot;
+explicit reruns launch a new child while automatic retries retain its identity. See the
+[pipeline-trigger configuration example](../../docs/guides/pipeline-triggers.md#configuration-file-example)
+for the CSV rows to apply to a project copy; the default demo scenario remains unchanged.

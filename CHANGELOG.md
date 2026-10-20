@@ -103,6 +103,14 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- `RUN_PIPELINE` tasks start child pipelines in `WAIT` or `DETACH` mode. DETACH succeeds at
+  durable QUEUED admission; WAIT hands off to the controller without retaining an agent slot,
+  then mirrors child status and failure details without aggregating row counts. Timeouts and parent
+  interventions are durable. Children inherit the parent's logical date and initiating actor.
+  Automatic retries reuse the child; explicit reruns advance a trigger generation. Validation
+  rejects invalid targets and trigger/dependency cycles. Status, explanations, run-detail JSON
+  and catalog pages expose parent/child links. Both Engine DBs migrate existing audit history.
+
 - Pipeline tags: at most 20 unique labels of 1–64 lowercase ASCII letters, digits, `-`, `_`
   or `:`. Invalid metadata fails `validate` and is refused by `config apply`, without normalization.
 - Repeatable `--tag`/`?tag=` AND filters on the existing pipeline list, status, history, audit,

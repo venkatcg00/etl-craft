@@ -27,8 +27,10 @@ from etl_craft.engine.runlog import RunSelector, fetch_pipeline_run_status
 from etl_craft.execution import pipeline, run_types
 from etl_craft.execution.pools.local import LocalPool
 from etl_craft.execution.reconcile import reconcile
+from etl_craft.execution.trigger_waits import settle_ended_parent_waits
 from etl_craft.services.cloning import run_hooks
 from etl_craft.services.operations import OperationContext
+from etl_craft.services.operations.trigger_controls import cascade_children
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +117,8 @@ class _Supervisor:
             controllers.heartbeat(self.ctx.engine, controller_id)
             self.next_heartbeat = time.monotonic() + 15
         reconcile(self.ctx.engine)
+        cascade_children(self.ctx)
+        settle_ended_parent_waits(self.ctx.engine, datetime.now(UTC))
         self.schedules.refresh(self.ctx, datetime.now(UTC), self.stop)
         for run_id in list(self.jobs):
             self.advance(run_id)

@@ -1,0 +1,12 @@
+SELECT w.PIPELINE_RUN_ID AS pipeline_run_id, w.TASK_ID AS task_id,
+       w.WAIT_UNTIL AS deadline, w.EVENT_OBSERVATIONS AS observations,
+       t.TASK_RUN_ID AS task_run_id, t.STATUS AS task_status,
+       a.ATTEMPT_ID AS attempt_id, a.STATUS AS attempt_status,
+       r.PIPELINE_RUN_ID AS child_run_id, r.PIPELINE_ID AS child_pipeline_id, r.STATUS AS child_status, r.END_DATE AS child_ended_at
+FROM AUD_GATE_WAITS w
+JOIN AUD_TASK_RUN_LOG t ON t.PIPELINE_RUN_ID=w.PIPELINE_RUN_ID AND t.TASK_ID=w.TASK_ID
+JOIN AUD_TASK_ATTEMPTS a ON a.TASK_RUN_ID=t.TASK_RUN_ID AND a.ATTEMPT_NUMBER=t.ATTEMPT_COUNT
+JOIN AUD_PIPELINES_RUN_LOG r ON r.TRIGGERED_BY_TASK_RUN_ID=t.TASK_RUN_ID
+ AND r.RUN_KEY='trigger:' || CAST(t.TASK_RUN_ID AS varchar) || ':' || CAST(t.TRIGGER_GENERATION AS varchar)
+WHERE w.PIPELINE_RUN_ID=:pipeline_run_id AND w.WAIT_KIND='PIPELINE_RUN'
+AND w.NEXT_CHECK_AT IS NOT NULL

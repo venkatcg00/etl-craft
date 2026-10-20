@@ -117,6 +117,7 @@ nav:
       - The catalog site: guides/catalog.md
       - Running a pipeline: guides/running-pipelines.md
       - Event waits: guides/event-waits.md
+      - Pipeline triggers: guides/pipeline-triggers.md
       - Running a task and reading its logs: guides/running-tasks.md
       - "Stepping in: mark, cancel, pause, backfill, rerun and bypasses": guides/run-control.md
   - Deploying:

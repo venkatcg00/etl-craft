@@ -28,13 +28,9 @@ from etl_craft.engine import controls, run_scopes, runlog
 from etl_craft.engine.attempts import (
     ActiveAttempt as ActiveAttempt,
 )
-from etl_craft.engine.attempts import (
-    active_attempt as active_attempt,
-)
+from etl_craft.engine.attempts import active_attempt as active_attempt
 from etl_craft.engine.attempts import record_attempt_ending
-from etl_craft.engine.attempts import (
-    record_attempt_failure as record_attempt_failure,
-)
+from etl_craft.engine.attempts import record_attempt_failure as record_attempt_failure
 from etl_craft.engine.attempts import (
     set_attempt_retry_policy as set_attempt_retry_policy,
 )
@@ -268,6 +264,8 @@ def mark_task_run(
 
     if result.rowcount != 1:
         raise _stale(conn, "task", task_run_id, "existing summary; no active attempt", None)
+
+    conn.execute(statement(conn, "trigger_close_task_wait"), {"task_run_id": task_run_id})
 
 
 def cancel_pipeline_run(conn: Connection, pipeline_run_id: int) -> None:
@@ -652,8 +650,8 @@ def finish_attempt(
     retryable: bool = True,
 ) -> None:
     """Record the owned outcome, summary, offset and admitted consumption atomically."""
-    if status not in {AttemptStatus.SUCCESS, AttemptStatus.FAILED}:
-        raise _stale(conn, "attempt", attempt_id, "SUCCESS or FAILED outcome", owner)
+    if status not in {AttemptStatus.SUCCESS, AttemptStatus.FAILED, AttemptStatus.HANDED_OFF}:
+        raise _stale(conn, "attempt", attempt_id, "SUCCESS, FAILED or HANDED_OFF outcome", owner)
     with conn.begin_nested():
         _end_attempt(
             conn,

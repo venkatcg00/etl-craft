@@ -46,6 +46,7 @@ class TaskRow:
     marked: bool
     has_rule_runs: bool
     consumed_by: str | None = None
+    has_attempts: bool = False
 
 
 def record_intervention(
@@ -87,7 +88,9 @@ def fetch_task_rows(conn: Connection, pipeline_run_id: int) -> list[TaskRow]:
     return [
         TaskRow(**row._mapping)
         for row in conn.execute(
-            statement(conn, "run_task_rows").columns(marked=Boolean, has_rule_runs=Boolean),
+            statement(conn, "run_task_rows").columns(
+                marked=Boolean, has_rule_runs=Boolean, has_attempts=Boolean
+            ),
             {"pipeline_run_id": pipeline_run_id},
         )
     ]

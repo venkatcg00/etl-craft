@@ -101,6 +101,7 @@ class AttemptStatus(StrEnum):
     TIMED_OUT = "TIMED_OUT"
     CANCELLED = "CANCELLED"
     LOST = "LOST"
+    HANDED_OFF = "HANDED_OFF"
 
 
 class ControlAction(StrEnum):
@@ -137,6 +138,7 @@ class TriggerKind(StrEnum):
     BACKFILL = "BACKFILL"
     ORCHESTRATOR = "ORCHESTRATOR"
     STAND_IN = "STAND_IN"
+    PIPELINE_TASK = "PIPELINE_TASK"
 
 
 class ActorKind(StrEnum):
@@ -204,6 +206,7 @@ class ActionName(StrEnum):
     CONFIG_EXPORT = "config export"
     CONFIG_APPLY = "config apply"
     RUN = "run"
+    TRIGGER_PIPELINE = "trigger-pipeline"
     MARK = "mark"
     CONTROL = "control"
     CONTROL_BULK = "control bulk"
@@ -325,6 +328,7 @@ class Handler(StrEnum):
     BUSINESS_RULES = "BUSINESS_RULES"
     EMAIL_ALERT = "EMAIL_ALERT"
     EVENT_WAIT = "EVENT_WAIT"
+    RUN_PIPELINE = "RUN_PIPELINE"
 
 
 class GateOutcome(StrEnum):
@@ -345,6 +349,7 @@ class WaitKind(StrEnum):
 
     DEPENDENCY = "DEPENDENCY"
     EVENT = "EVENT"
+    PIPELINE_RUN = "PIPELINE_RUN"
 
 
 class RunCondition(StrEnum):
@@ -508,3 +513,17 @@ class RetryOn(StrEnum):
             or (self != RetryOn.NONE and failure == FailureClass.TRANSIENT)
             or (self == RetryOn.TRANSIENT_AND_UNKNOWN and failure == FailureClass.UNKNOWN)
         )
+
+
+class TriggerMode(StrEnum):
+    """Whether a trigger task waits for its child run."""
+
+    WAIT = "WAIT"
+    DETACH = "DETACH"
+
+
+class TaskType(StrEnum):
+    """The execution category written on a task definition."""
+
+    INGESTION = "INGESTION"
+    ETL = "ETL"

@@ -128,7 +128,19 @@ def explain(snapshot: TaskSnapshot) -> Explanation:
         if retry_at <= snapshot.now:
             action = "The retry is due; an available supervisor can claim it."
     elif task is not None and task.status == RunStatus.IN_PROGRESS:
-        state, action = "running", "Wait for the current attempt to finish."
+        state, action = (
+            (
+                "waiting on child",
+                f"Wait for child pipeline_run_id(s)={task.child_run_ids}; "
+                "the controller owns this wait.",
+            )
+            if task.child_run_ids
+            and any(
+                w.wait_kind == WaitKind.PIPELINE_RUN and w.next_check_at
+                for w in snapshot.gate_waits
+            )
+            else ("running", "Wait for the current attempt to finish.")
+        )
     elif snapshot.unsatisfiable:
         state, action = (
             "unsatisfiable",

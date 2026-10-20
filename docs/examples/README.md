@@ -182,3 +182,9 @@ The config-file pipelines carry `TAGS` such as `sales` and `daily`.
 `etl-craft pipelines --tag sales --tag daily` requires both tags. Use the same filters with
 `status`, `history`, `audit` and `validate`, or with `pause`/`resume` and explicit `--yes`
 confirmation. Tags are current metadata labels, independent of schedules and permissions.
+
+### Triggering a child
+
+The [pipeline trigger configuration example](../guides/pipeline-triggers.md#configuration-file-example)
+adds an ETL `RUN_PIPELINE` task and its three parameters through the existing config CSV files.
+It covers controller execution, WAIT/DETACH modes and explicit rerun generations.

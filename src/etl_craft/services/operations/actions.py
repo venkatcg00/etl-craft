@@ -34,6 +34,7 @@ from etl_craft.services.operations import (
     sessions,
     status,
     tokens,
+    triggers,
     values,
 )
 from etl_craft.services.operations.context import OperationContext
@@ -184,6 +185,8 @@ _ROWS = (
     Action(ActionName.REHASH_PLAN, maintenance.plan_rehash, maintenance.RehashInput,
            RehashResult, VIEWER, GET, f"{API}/rehash"),
     # Runs and controls.
+    Action(ActionName.TRIGGER_PIPELINE, triggers.initialize, triggers.TriggerRequest,
+           triggers.TriggerView, OPERATOR, POST, f"{API}/triggers", REQUEST),
     Action(ActionName.RUN, runs.execute_run, RunRequest,
            models.OperationResult | models.BackfillView, OPERATOR, POST, f"{API}/runs", REQUEST),
     Action(ActionName.MARK, runs.mark, MarkRequest, models.OperationResult, OPERATOR, POST,

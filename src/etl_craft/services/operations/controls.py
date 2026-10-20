@@ -88,6 +88,9 @@ def request_control(ctx: OperationContext, request: ControlRequest) -> ControlVi
         control_id = _insert(conn, ctx, request, run_id, task_id, attempts)
         if request.action in RECOVERY_ACTIONS:
             prepare_recovery(conn, ctx, selected, request, control_id)
+    from etl_craft.services.operations.trigger_controls import cascade_children
+
+    cascade_children(ctx, run_id)
     control_flow.advance(ctx.engine, run_id)
     with ctx.engine.connect() as conn:
         return controls.get(conn, control_id)

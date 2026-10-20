@@ -139,7 +139,7 @@ item's text, or work done early under another item.
 | S5.Y A standalone orchestrator | Done | #219, #220 | Airflow export and remote mode removed; the controller always schedules; stale pipeline parameters migrated away and refused |
 | S5.AA One source for every action | Done | #221 | One action table for roles, audit, placement and routes; one request per action; kebab-case flags, Capitalized_snake keys, upper-case values; typed statuses; no dialect branches or enum literals |
 | S5.AB Pipeline tags and filters | Done | #222 | `TAGS` labels pipelines; one tag filter on list, status, history, catalog and UI views, and tag-selected bulk actions |
-| S5.AC Pipeline trigger tasks | Planned | | `RUN_PIPELINE` starts another pipeline's run as a task: `WAIT` hands the wait to the controller, `DETACH` ends once the run is recorded |
+| S5.AC Pipeline trigger tasks | Done | #223 | Durable child admission, controller-held WAIT outcomes, DETACH at QUEUED admission and linked run inspection |
 | S5.AD Pipeline permission groups | Planned | | Groups of accounts, granted `viewer` or `operator` (and S7.M's `steward`) on pipelines or tags; one effective-role check per pipeline-scoped action |
 | S5.X Unmanaged SQL tasks | Planned | | `SQL_SCRIPT` runs any SQL as an ordinary dependent task with per-statement audit; pre- and post-SQL are upstream and downstream tasks |
 | S5.C and later | Not started | | |
@@ -288,6 +288,14 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.AC (#223) covers WAIT/DETACH admission and real controller execution with one agent slot,
+restart recovery, every child ending, deadline recovery, explicit reruns, ownership refusals,
+interventions and captured dependency consumption on SQLite and PostgreSQL. Repeated
+admission/control races and upgrades from every released schema pass, including fresh/upgraded
+catalog equivalence. CLI/API/catalog links, parameter validation and reference documentation
+are covered locally. No warehouse SQL or cloud authentication changes; cloud acceptance does
+not apply.
 
 S5.AB (#222) covers tag metadata and atomic config-file refusals, AND filtering through the
 CLI and generated HTTP routes on both Engine DBs, bounded cross-pipeline history, explicit
@@ -543,6 +551,14 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- S5.AC: the owner approved retaining the existing task-run identity on explicit reruns,
+  advancing `AUD_TASK_RUN_LOG.TRIGGER_GENERATION` instead. The child key is
+  `trigger:<task_run_id>:<generation>`; automatic retries retain the generation and child.
+  The owner clarified that WAIT mirrors every child final status, including CANCELLED,
+  with failure details but no aggregated child row counts. DETACH succeeds at durable
+  QUEUED admission, leaves subsequent monitoring to the controller and does not propagate
+  later child failures. Its worker slot is released immediately.
 
 - S5.AB: `pipelines` is the list command after S5.AA. The existing filtered reads are
   `pipelines`, `status`, `history`, `audit`, `validate` and `catalog gaps`; no route or action

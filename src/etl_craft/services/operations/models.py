@@ -35,6 +35,9 @@ class RunView:
     selected_task_ids: tuple[int, ...] | None = None
     ignore_dependencies: bool = False
     exclusive_run: bool = True
+    triggered_by_task_run_id: int | None = None
+    parent_run_id: int | None = None
+    child_run_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -107,6 +110,7 @@ class TaskRunView:
     watermark_to: str | None
     error_message: str | None
     attempts: tuple[AttemptView, ...]
+    child_run_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
