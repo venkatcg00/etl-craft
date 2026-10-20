@@ -4721,12 +4721,12 @@ After S5.AE and before S5.C.
   2. Add only the indexes those plans need: composite indexes in the queries' column order,
      partial indexes for status and active-row filters, and none on small, fixed-size tables.
      Rewrite a query instead where the query is the problem, without changing its results.
+     Include the indexes S6.A needs for purge: `(PIPELINE_ID, START_DATE)` on runs,
+     `(TASK_RUN_ID)` on attempts, `(CONSUMED_AT)` on consumption.
   3. Justify each index by its plan before and after, and measure the write overhead on
      `AUD_TASK_ATTEMPTS` updates.
   4. Ship one migration in both dialects, with both `schema.sql` files updated, and an upgrade
      test that passes from every released schema.
-- Index support: `(PIPELINE_ID, START_DATE)` on runs, `(TASK_RUN_ID)` on attempts, `(CONSUMED_AT)` on
-  consumption.
 - *Tests.* A PostgreSQL integration test seeds a smaller volume, runs `EXPLAIN` on every
   catalog query and fails on a full scan of a growing table (every `AUD_` table, every history
   table, `CFG_PIPELINES`), naming the query, the table and the plan node. Allow-listed full
@@ -5028,11 +5028,7 @@ Branch: `feat/engine-retention`.
   values.
 - The API's log endpoint streams stored logs and the live log chunks that agents upload
   through the agent API while an attempt runs. Agents open no port (S5.AE).
-- Files follow S6.A's retention periods in both `Logs.Store` and `Log_dir`, including S7.M's
-  stored uploads. Delete files only after their rows are purged or archived; the log view
-  explicitly shows `removed by retention on <date>` instead of a missing-file read error.
-  S6.A owns crash-safe archive batching and archive schema evolution; archives remain in the
-  warehouse until a team needs another destination.
+- Files follow S6.A's retention.
 
 ### S6.C Catalog at scale
 

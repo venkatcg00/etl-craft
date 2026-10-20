@@ -189,6 +189,7 @@ def seeded_tables(db):
             "account_kind": AccountKind.SERVICE,
             "token_sha256": "0" * 64,
             "pipeline_id": p1,
+            "pipeline_code": "DOWN",
             "task_id": t1,
             "depends_on_pipeline_id": p2,
             "depends_on_task_id": t2,
@@ -315,6 +316,12 @@ def test_plain_connections_cannot_mutate_any_protected_table(engine_db):
                 refusal = expected
                 if table.upper() == "CFG_ACCOUNTS" and sql.startswith(("DELETE", "TRUNCATE")):
                     refusal = rf"{expected}|CFG_ACCOUNTS cannot be deleted"
+                if table.upper() in (
+                    "CFG_GROUPS",
+                    "CFG_GROUP_MEMBERS",
+                    "CFG_PIPELINE_GRANTS",
+                ) and sql.startswith(("DELETE", "TRUNCATE")):
+                    refusal = rf"{expected}|{table.upper()}: use ACTIVE_FLAG=N instead of deleting"
                 with pytest.raises(error, match=refusal):
                     plain.execute(sql)
                 plain.rollback()

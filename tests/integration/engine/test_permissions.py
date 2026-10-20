@@ -169,7 +169,9 @@ def test_changing_the_shared_policy_changes_every_transport(project, monkeypatch
         )
     monkeypatch.setenv("ETL_CRAFT_TOKEN", credential.token)
     assert main(["pause", "--pipeline-code", "P", "--reason", "policy test"]) == 26
-    assert "admin role is required" in capsys.readouterr().err
+    message = capsys.readouterr().err
+    assert "pipeline 'P' needs admin role" in message
+    assert "effective role=operator" in message
     response = TestClient(create_app(ctx)).post(
         "/api/v1/controls",
         json={"pipeline_code": "P", "action": "PAUSE", "reason": "policy test"},
