@@ -29,6 +29,7 @@ from etl_craft.services.catalog.html import run_url as run_url
 from etl_craft.services.catalog.html import script_url as script_url
 from etl_craft.services.catalog.html import slug as slug
 from etl_craft.services.catalog.html import table_url as table_url
+from etl_craft.services.catalog.html import tag_chips
 from etl_craft.services.catalog.html import task_url as task_url
 from etl_craft.services.catalog.incremental import (
     SqlFiles,
@@ -149,44 +150,13 @@ class Pages:
     def _pipeline(self, code: str) -> str:
         p = self.catalog.pipelines[code]
         row = p.row
-        run = row.last_run
         description = (
             f'<p class="doc">{_e(row.description)}</p>'
             if row.description
             else '<p class="note">No description: set <code>CFG_PIPELINES.DESCRIPTION</code> '
             "to document this pipeline.</p>"
         )
-        facts = _facts(
-            [
-                ("Name", _e(row.pipeline_name)),
-                ("Schedule", _e(row.run_schedule)),
-                ("Refresh", _e(row.refresh_type)),
-                ("SLA", _e(f"{row.sla_in_hours:g} hours") if row.sla_in_hours else ""),
-                (
-                    "Paused",
-                    f'<span class="status PAUSED">{_e(p.paused.describe())}</span>'
-                    if p.paused
-                    else "",
-                ),
-                (
-                    "Last run",
-                    f"{_status(run.status)} {_e(_when(run.start))} → {_e(_when(run.end))}"
-                    + (f" · SLA {_e(run.sla_status)}" if run.sla_status else "")
-                    if run
-                    else "never run",
-                ),
-                (
-                    "Depends on",
-                    ", ".join(
-                        f"{self._link(pipeline_url(u), u)} ({_e(kind)})" for u, kind in p.depends_on
-                    ),
-                ),
-                (
-                    "Needed by",
-                    ", ".join(self._link(pipeline_url(d), d) for d in p.depended_on_by),
-                ),
-            ]
-        )
+        facts = self._pipeline_facts(p)
         tasks = _table(
             ["Task", "Handler", "Waits for", "Writes", "Reads", "Last run", "Counts"],
             (
@@ -225,6 +195,42 @@ class Pages:
         return (
             f"{description}{facts}{self._dag(code)}<h2>Tasks</h2>{tasks}{changes}"
             f"{self._pipeline_runs(p)}"
+        )
+
+    def _pipeline_facts(self, p: PipelineAsset) -> str:
+        """Describe the definition, tags, pause and most recent run."""
+        row, run = p.row, p.row.last_run
+        return _facts(
+            [
+                ("Name", _e(row.pipeline_name)),
+                ("Tags", tag_chips(row.tags, "../")),
+                ("Schedule", _e(row.run_schedule)),
+                ("Refresh", _e(row.refresh_type)),
+                ("SLA", _e(f"{row.sla_in_hours:g} hours") if row.sla_in_hours else ""),
+                (
+                    "Paused",
+                    f'<span class="status PAUSED">{_e(p.paused.describe())}</span>'
+                    if p.paused
+                    else "",
+                ),
+                (
+                    "Last run",
+                    f"{_status(run.status)} {_e(_when(run.start))} → {_e(_when(run.end))}"
+                    + (f" · SLA {_e(run.sla_status)}" if run.sla_status else "")
+                    if run
+                    else "never run",
+                ),
+                (
+                    "Depends on",
+                    ", ".join(
+                        f"{self._link(pipeline_url(u), u)} ({_e(kind)})" for u, kind in p.depends_on
+                    ),
+                ),
+                (
+                    "Needed by",
+                    ", ".join(self._link(pipeline_url(d), d) for d in p.depended_on_by),
+                ),
+            ]
         )
 
     # Runs

@@ -579,3 +579,25 @@ def test_config_apply_refuses_unknown_pipeline_parameter_without_writes(exported
         for f in done.findings
     )
     assert changes_logged(exported) == before
+
+
+@pytest.mark.parametrize(
+    "tags",
+    [None, ["Sales"], ["sales", "sales"], ["bad space"], ["a" * 65], [f"t{i}" for i in range(21)]],
+)
+def test_config_apply_refuses_invalid_tags_with_no_history_changes(exported, tags):
+    def invalid(rows):
+        rows[0]["PIPELINE_PARAMETERS"] = json.dumps({"TAGS": tags})
+        return rows
+
+    before = changes_logged(exported)
+    edit(exported.config_dir / "pipelines.csv", invalid)
+    done = sync(exported)
+    assert done.failed and not done.applied
+    assert any(
+        "TAGS" in f.message
+        and f.where == "SALES_DAILY"
+        and any(remedy in f.message for remedy in ("write", "remove", "replace"))
+        for f in done.findings
+    )
+    assert changes_logged(exported) == before

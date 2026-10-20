@@ -38,6 +38,7 @@ from etl_craft.services.catalog.html import run_url as run_url
 from etl_craft.services.catalog.html import script_url as script_url
 from etl_craft.services.catalog.html import slug as slug
 from etl_craft.services.catalog.html import table_url as table_url
+from etl_craft.services.catalog.html import tag_chips
 from etl_craft.services.catalog.html import task_url as task_url
 from etl_craft.services.catalog.incremental import (
     SqlFiles,
@@ -330,6 +331,7 @@ class _Writer(Pages):
             [
                 "Pipeline",
                 "Name",
+                "Tags",
                 "Description",
                 "Schedule",
                 "Refresh",
@@ -343,6 +345,8 @@ class _Writer(Pages):
                 [
                     self._link(pipeline_url(code), code, ""),
                     _e(p.row.pipeline_name),
+                    f'<span data-pipeline-tags="{_e(" ".join(p.row.tags))}">'
+                    f"{tag_chips(p.row.tags)}</span>",
                     _e(p.row.description),
                     _e(p.row.run_schedule),
                     _e(p.row.refresh_type),
@@ -376,8 +380,21 @@ class _Writer(Pages):
             ([self._task_link(t.label, ""), _e(t.lineage_error)] for t in c.untraced),
             "Every SQL task's columns are traced.",
         )
+        labels = sorted({tag for p in c.pipelines.values() for tag in p.row.tags})
+        filters = (
+            '<form class="tag-filter"><fieldset><legend>Filter pipelines by tags</legend>'
+            '<p id="tag-help">Show pipelines carrying every selected tag.</p>'
+            + " ".join(
+                f'<label><input type="checkbox" name="tag" value="{_e(tag)}" '
+                f'aria-describedby="tag-help"> {_e(tag)}</label>'
+                for tag in labels
+            )
+            + '<button type="submit">Apply tags</button></fieldset></form>'
+            '<p class="tag-result" role="status"></p>'
+        )
         return (
-            f'{pipelines}<h2 id="scripts">Ingestion scripts</h2>{scripts}'
+            f'{filters}<div class="tag-pipelines">{pipelines}</div>'
+            f'<h2 id="scripts">Ingestion scripts</h2>{scripts}'
             f'<h2 id="untraced">Column lineage unavailable</h2>{untraced}'
         )
 

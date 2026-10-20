@@ -201,3 +201,18 @@ Team-owned config is independent of package metadata. The optional
 `metadata/team_config.sql` creates `CFG_TEAM_ROUTING` without package base fields. Apply it
 with your team's database scripts or as a project migration. Plain SQL can maintain it;
 etl-craft does not guard, capture, export, document or clone its rows. `AUD_` stays reserved.
+
+## Find and operate a tagged group
+
+The client pipelines carry `support` and their client tag; the mart carries `support` and `mart`.
+
+```bash
+etl-craft pipelines --tag support --tag client-alpha
+etl-craft status --tag support
+etl-craft history --tag support --limit 20
+etl-craft pause --tag support --reason "demo maintenance" --yes
+etl-craft resume --tag support --reason "demo ready" --yes
+```
+
+Omit `--yes` from pause or resume to print the selection without changing it. The generated
+catalog shows the same labels, with shareable filtered links from its DAGs overview.

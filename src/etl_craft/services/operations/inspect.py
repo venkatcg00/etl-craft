@@ -22,7 +22,7 @@ from etl_craft.engine.repository.dependencies import (
 )
 from etl_craft.engine.repository.intervention_rows import fetch_interventions
 from etl_craft.engine.repository.pauses import fetch_open_pauses
-from etl_craft.engine.repository.pipelines import resolve_pipeline_id
+from etl_craft.engine.repository.pipelines import read_tags, resolve_pipeline_id, tagged_pipelines
 from etl_craft.engine.repository.tasks import (
     fetch_task_codes,
     fetch_task_parameters,
@@ -50,10 +50,10 @@ from etl_craft.services.operations.requests import (
     AuditInput,
     HistoryInput,
     LogInput,
-    NoInput,
     PipelineInput,
     RunId,
     RunSelection,
+    TagFilter,
 )
 from etl_craft.services.operations.snapshots import (
     attempt_document,
@@ -64,12 +64,15 @@ from etl_craft.services.operations.snapshots import (
 )
 
 
-def list_pipelines(ctx: OperationContext, request: NoInput) -> PipelineListView:
+def list_pipelines(ctx: OperationContext, request: TagFilter) -> PipelineListView:
     """List the active definitions."""
     with read_snapshot(ctx.engine) as conn:
         pauses = fetch_open_pauses(conn)
         views = []
         for row in conn.execute(statement(conn, "active_pipelines")):
+            tags = read_tags(row.pipeline_parameters, row.pipeline_code)
+            if not set(request.tag) <= set(tags):
+                continue
             pause = pauses.get(row.pipeline_code)
             if pause is not None:
                 pause = replace(pause, paused_at=as_utc(pause.paused_at))
@@ -82,6 +85,7 @@ def list_pipelines(ctx: OperationContext, request: NoInput) -> PipelineListView:
                     row.run_schedule,
                     None if row.sla_in_hours is None else float(row.sla_in_hours),
                     pause,
+                    tags,
                 )
             )
         return PipelineListView(tuple(views))
@@ -152,6 +156,45 @@ def pipeline_steps(ctx: OperationContext, request: RunSelection) -> StepsView:
 
 
 def run_history(ctx: OperationContext, request: HistoryInput) -> HistoryView:
+    """Read one pipeline's history, or a bounded page across matching active pipelines."""
+    if request.pipeline_code is not None and not request.tag:
+        return _pipeline_history(ctx, request)
+    with read_snapshot(ctx.engine) as conn:
+        pipeline_id = (
+            None
+            if request.pipeline_code is None
+            else resolve_pipeline_id(conn, request.pipeline_code)
+        )
+        codes = tagged_pipelines(conn, request.tag)
+    if request.pipeline_code is not None:
+        if request.tag and request.pipeline_code not in codes:
+            return HistoryView(pipeline_id, request.pipeline_code, request.task_code, (), ())
+        return _pipeline_history(ctx, request)
+    histories = [
+        _pipeline_history(ctx, replace(request, pipeline_code=code, tag=(), all=True))
+        for code in codes
+    ]
+    entries = sorted(
+        (entry for h in histories for entry in h.entries),
+        key=lambda r: r.pipeline_run_id,
+        reverse=True,
+    )
+    more = len(entries) > request.limit or any(h.before is not None for h in histories)
+    entries = entries[: request.limit]
+    listed = {entry.pipeline_run_id for entry in entries}
+    return HistoryView(
+        None,
+        None,
+        None,
+        tuple(entries),
+        tuple(
+            change for h in histories for change in h.changes if change.pipeline_run_id in listed
+        ),
+        entries[-1].pipeline_run_id if more and entries else None,
+    )
+
+
+def _pipeline_history(ctx: OperationContext, request: HistoryInput) -> HistoryView:
     """Read bounded history; selection never falls back to the most recent ended run.
 
     Entries come newest run first; the view's ``before`` is the next page's cursor, or ``None``
@@ -159,6 +202,7 @@ def run_history(ctx: OperationContext, request: HistoryInput) -> HistoryView:
     """
     pipeline_code, task_code, limit = request.pipeline_code, request.task_code, request.limit
     all_runs, before, selector = request.all, request.before, request.selector
+    assert pipeline_code is not None
     with read_snapshot(ctx.engine) as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         selected = None if all_runs else select_run(conn, pipeline_id, selector)
@@ -208,7 +252,12 @@ def audit(ctx: OperationContext, request: AuditInput) -> AuditView:
     since = None if request.since is None else as_utc(request.since)
     with read_snapshot(ctx.engine) as conn:
         pipeline_id = None if pipeline_code is None else resolve_pipeline_id(conn, pipeline_code)
-        actions, changes = fetch_audit_records(conn, pipeline_id, since)
+        ids = set(tagged_pipelines(conn, request.tag).values()) if request.tag else None
+        if ids is not None and pipeline_id is not None:
+            ids &= {pipeline_id}
+        actions, changes = fetch_audit_records(
+            conn, pipeline_id if ids is None else None, since, pipeline_ids=ids
+        )
         for row in (*actions, *changes):
             row["at"] = as_utc(row["at"])
         return AuditView(

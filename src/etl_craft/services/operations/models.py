@@ -121,6 +121,7 @@ class PipelineView:
     run_schedule: str | None
     sla_in_hours: float | None
     paused: Pause | None
+    tags: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -211,8 +212,8 @@ class HistoryView:
     """Bounded run or task history and the interventions on the runs shown."""
 
     SCHEMA: ClassVar[str] = "etl-craft/history/1"
-    pipeline_id: int
-    pipeline_code: str
+    pipeline_id: int | None
+    pipeline_code: str | None
     task_code: str | None
     entries: tuple[RunView | TaskRunView, ...]
     changes: tuple[Intervention, ...]

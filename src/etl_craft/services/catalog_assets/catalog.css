@@ -182,3 +182,9 @@ svg.lineage .has-gap .badge { fill: var(--warn); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 svg.lineage .edge.gap-edge:not(.on) { stroke: var(--warn); stroke-width: 2; }
+
+.tag-chip { display: inline-block; padding: .15rem .45rem; border: 1px solid currentColor; border-radius: .4rem; margin: .1rem; }
+.tag-filter fieldset { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; }
+.tag-filter p { flex-basis: 100%; }
+.tag-filter input:focus-visible, .tag-chip:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.tag-pipelines tr[hidden] { display: none; }

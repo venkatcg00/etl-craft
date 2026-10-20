@@ -11,6 +11,7 @@ from typing import Any
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.errors import MetadataError
+from etl_craft.core.tags import tag_problems
 from etl_craft.core.text import suggest
 from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
@@ -72,10 +73,10 @@ def fetch_pipeline_detail(conn: Connection, pipeline_id: int) -> PipelineDetail:
         if row.schedule_start_date is None
         else date.fromisoformat(str(row.schedule_start_date))
     )
-    return PipelineDetail(
-        **values,
-        **{name.lower(): params.get(name) for name in PIPELINE_PARAMETER_KINDS},
-    )
+    fields = {name.lower(): params.get(name) for name in PIPELINE_PARAMETER_KINDS}
+    if "TAGS" in params:
+        fields["tags"] = list(read_tags(params, str(values["pipeline_code"])))
+    return PipelineDetail(**values, **fields)
 
 
 def _is_strings(value: object) -> bool:
@@ -108,6 +109,8 @@ def pipeline_parameter_problems(stored: object) -> tuple[list[str], list[str]]:
         kind = PIPELINE_PARAMETER_KINDS.get(name)
         if kind is None:
             unknown.append(name)
+        elif name == "TAGS":
+            problems.extend(tag_problems(value))
         elif not kind[1](value):
             problems.append(f"PIPELINE_PARAMETERS.{name}={json.dumps(value)} must be {kind[0]}")
     return problems, unknown
@@ -117,3 +120,35 @@ def fetch_pipeline_handlers(conn: Connection, pipeline_id: int) -> set[str]:
     """Return the handler of every active task in ``pipeline_id``: what a run will connect to."""
     rows = conn.execute(statement(conn, "pipeline_handlers"), {"pipeline_id": pipeline_id})
     return {row.handler for row in rows}
+
+
+def read_tags(stored: object, pipeline_code: str) -> tuple[str, ...]:
+    """Read current labels, refusing invalid metadata rather than hiding pipelines."""
+    try:
+        params = json.loads(stored) if isinstance(stored, str) else stored
+    except json.JSONDecodeError as error:
+        raise MetadataError(
+            f"{pipeline_code}: PIPELINE_PARAMETERS={stored!r}; expected a JSON object; "
+            "correct the config and apply it"
+        ) from error
+    if params is None:
+        return ()
+    if not isinstance(params, dict):
+        raise MetadataError(
+            f"{pipeline_code}: PIPELINE_PARAMETERS={params!r}; expected a JSON object; "
+            "correct the config and apply it"
+        )
+    values = params.get("TAGS", [])
+    problems = tag_problems(values)
+    if problems:
+        raise MetadataError(f"{pipeline_code}: " + "; ".join(problems))
+    return tuple(values)
+
+
+def tagged_pipelines(conn: Connection, tags: tuple[str, ...]) -> dict[str, int]:
+    """Resolve an AND filter against current active definitions in code order."""
+    return {
+        row.pipeline_code: row.pipeline_id
+        for row in conn.execute(statement(conn, "active_pipelines"))
+        if set(tags) <= set(read_tags(row.pipeline_parameters, row.pipeline_code))
+    }

@@ -20,10 +20,10 @@ from etl_craft.services.operations.actions import ACTIONS, invoke
 from etl_craft.services.operations.requests import (
     AttemptId,
     HistoryInput,
-    NoInput,
     PipelineInput,
     RunId,
     RunSelection,
+    TagFilter,
     TaskSelection,
 )
 from fixtures.metadata import add_pipeline, add_task, start_run
@@ -67,7 +67,7 @@ def test_read_routes_require_token_and_share_cli_documents(api, role):
     selected = f"pipeline_code=P&run_id={run}"
     docs = {
         "/api/v1/health": {"schema": "etl-craft/health/1", "status": "ok"},
-        "/api/v1/pipelines": to_json(invoke(ctx, ActionName.PIPELINES, NoInput())),
+        "/api/v1/pipelines": to_json(invoke(ctx, ActionName.PIPELINES, TagFilter())),
         "/api/v1/pipelines/P": to_json(
             invoke(ctx, ActionName.PIPELINE, PipelineInput(pipeline_code="P"))
         ),
@@ -197,7 +197,7 @@ def test_every_write_route_enforces_role_and_passes_actor_to_service(api, role, 
 
     def done(caller, request):
         calls.append((caller.actor.name, request))
-        return invoke(ctx, ActionName.PIPELINES, NoInput())
+        return invoke(ctx, ActionName.PIPELINES, TagFilter())
 
     cases = [
         (

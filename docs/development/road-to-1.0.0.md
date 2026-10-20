@@ -138,7 +138,7 @@ item's text, or work done early under another item.
 | S5.Z Controller and agent names | Done | #216 | Controller command/package/history, agent terminology and consistent deployment profiles; lossless Engine DB upgrades |
 | S5.Y A standalone orchestrator | Done | #219, #220 | Airflow export and remote mode removed; the controller always schedules; stale pipeline parameters migrated away and refused |
 | S5.AA One source for every action | Done | #221 | One action table for roles, audit, placement and routes; one request per action; kebab-case flags, Capitalized_snake keys, upper-case values; typed statuses; no dialect branches or enum literals |
-| S5.AB Pipeline tags and filters | Planned | | `TAGS` labels pipelines; one tag filter on list, status, history, catalog and UI views, and tag-selected bulk actions |
+| S5.AB Pipeline tags and filters | Done | #222 | `TAGS` labels pipelines; one tag filter on list, status, history, catalog and UI views, and tag-selected bulk actions |
 | S5.AC Pipeline trigger tasks | Planned | | `RUN_PIPELINE` starts another pipeline's run as a task: `WAIT` hands the wait to the controller, `DETACH` ends once the run is recorded |
 | S5.AD Pipeline permission groups | Planned | | Groups of accounts, granted `viewer` or `operator` (and S7.M's `steward`) on pipelines or tags; one effective-role check per pipeline-scoped action |
 | S5.X Unmanaged SQL tasks | Planned | | `SQL_SCRIPT` runs any SQL as an ordinary dependent task with per-statement audit; pre- and post-SQL are upstream and downstream tasks |
@@ -288,6 +288,12 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.AB (#222) covers tag metadata and atomic config-file refusals, AND filtering through the
+CLI and generated HTTP routes on both Engine DBs, bounded cross-pipeline history, explicit
+definition-control batches and immutable audit selections. Catalog labels and linked filters
+are checked with cached-page invalidation. No warehouse SQL or schema changes; cloud
+acceptance does not apply.
 
 S5.Y.1 (#219) covers the controller's catalog ticks and immutable request/completion audit
 on both Engine DBs, preserved leadership and service roles, removal refusals, documentation,
@@ -537,6 +543,16 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- S5.AB: `pipelines` is the list command after S5.AA. The existing filtered reads are
+  `pipelines`, `status`, `history`, `audit`, `validate` and `catalog gaps`; no route or action
+  is added. Direct run-id, task, graph and lineage reads keep their explicit scope. Without a
+  pipeline, status returns all non-terminal runs and history pages across current active
+  tagged definitions. Existing single-pipeline results stay intact. Definition controls extend
+  the existing explicit bulk request without weakening run/task identity requirements; the
+  CLI resolves the entire selection before confirmation and sends batches of at most 100.
+  JSON previews go to stderr. Historical audits are filtered using current and captured task
+  ownership, without changing any stored row.
 
 - S5.Y.1: the owner approved one REQUESTED row and one SUCCESS/FAILURE completion row per
   catalog build, using the existing audit table. The rows share request time and arguments;

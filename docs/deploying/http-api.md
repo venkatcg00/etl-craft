@@ -174,3 +174,14 @@ Call `etl-craft run --pipeline-code SALES --controller https://etl.example.com`,
 `POST /api/v1/runs` with `{"pipeline_code":"SALES"}` and bearer authentication. The controller owns dispatch,
 leases and finalization. Use the documented command exit codes and explicit run identities to
 inspect progress; no scheduler-specific package or exported DAG is needed.
+
+## Tag filters
+
+The existing GET actions `/api/v1/pipelines`, `/api/v1/status`, `/api/v1/history`,
+`/api/v1/audit`, `/api/v1/validation` and `/api/v1/catalog/gaps` accept repeated `tag` query
+parameters, such as `?tag=team:sales&tag=tier:gold`. All tags must match exactly; an unknown tag
+returns an empty selection. The tag values and request fields are validated at the shared
+operation boundary. `history` provides the cross-pipeline run list with its existing `limit`
+and `before` cursor. `status` without `pipeline_code` lists all non-terminal matching runs.
+Direct run-id and task reads keep their existing selectors. See [tagged group controls](../guides/run-control.md#pause-or-resume-a-tagged-group)
+for resolving a group before submitting explicit bulk controls.

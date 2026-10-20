@@ -10,8 +10,15 @@ from dataclasses import dataclass, fields
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from etl_craft.core.enums import MARKABLE_STATUSES, ControlAction, LineageDirection, RunStatus
+from etl_craft.core.enums import (
+    DEFINITION_CONTROLS,
+    MARKABLE_STATUSES,
+    ControlAction,
+    LineageDirection,
+    RunStatus,
+)
 from etl_craft.core.errors import UsageError
+from etl_craft.core.tags import TAG_RULE, valid_tag
 from etl_craft.engine.runlog import RunSelector
 
 if TYPE_CHECKING:
@@ -56,6 +63,60 @@ class NoInput(Request):
 
 
 @dataclass(frozen=True, kw_only=True)
+class TagFilter(Request):
+    """Active pipelines carrying every requested tag; an unknown tag matches nothing."""
+
+    tag: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Refuse malformed filters at every interface boundary."""
+        if not isinstance(self.tag, (tuple, list)):
+            raise UsageError(
+                f"`tag`={self.tag!r}; expected a list of tags; give a sequence of exact tags"
+            )
+        object.__setattr__(self, "tag", tuple(self.tag))
+        for value in self.tag:
+            if not valid_tag(value):
+                raise UsageError(
+                    f"`tag`={value!r}; expected {TAG_RULE}; replace or remove this filter"
+                )
+
+
+@dataclass(frozen=True, kw_only=True)
+class RunIdentity(Request):
+    """Shared exact run identity for read selections and execution requests."""
+
+    run_id: int | None = None
+    run_key: str | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse conflicting or malformed identities."""
+        RunSelector(self.run_id, self.run_key)
+
+    @property
+    def selector(self) -> RunSelector:
+        """Select the exact run, or the single non-terminal whole-pipeline run."""
+        return RunSelector(self.run_id, self.run_key)
+
+
+@dataclass(frozen=True, kw_only=True)
+class RunFilter(TagFilter, RunIdentity):
+    """One selected run, or non-terminal runs across the matching active pipelines."""
+
+    pipeline_code: str | None = None
+
+    def __post_init__(self) -> None:
+        """Keep explicit run identities scoped to their pipeline."""
+        super().__post_init__()
+        RunIdentity.__post_init__(self)
+        optional_text("pipeline_code", self.pipeline_code)
+        if self.pipeline_code is None and (self.run_id is not None or self.run_key is not None):
+            raise UsageError(
+                "`run_id` and `run_key` need `pipeline_code`; select its exact pipeline"
+            )
+
+
+@dataclass(frozen=True, kw_only=True)
 class PipelineInput(Request):
     """One pipeline, by code."""
 
@@ -67,22 +128,15 @@ class PipelineInput(Request):
 
 
 @dataclass(frozen=True, kw_only=True)
-class RunSelection(Request):
-    """A pipeline's run by exact id or key; neither selects its single non-terminal run."""
+class RunSelection(RunIdentity):
+    """One pipeline's selected run; execution requests never accept a tag selection."""
 
     pipeline_code: str
-    run_id: int | None = None
-    run_key: str | None = None
 
     def __post_init__(self) -> None:
-        """Refuse a blank code or a conflicting selector."""
+        """Refuse a blank code as well as invalid run identities."""
+        super().__post_init__()
         require_text("pipeline_code", self.pipeline_code)
-        RunSelector(self.run_id, self.run_key)
-
-    @property
-    def selector(self) -> RunSelector:
-        """The run this request selects."""
-        return RunSelector(self.run_id, self.run_key)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -159,7 +213,7 @@ class ControlId(Request):
 
 
 @dataclass(frozen=True, kw_only=True)
-class HistoryInput(RunSelection):
+class HistoryInput(RunFilter):
     """Which history to read: a task's or the pipeline's, for one run or a page of runs.
 
     ``before`` is an exclusive run-id cursor; ``all`` lists runs instead of selecting one.
@@ -174,6 +228,8 @@ class HistoryInput(RunSelection):
         """Bound the page before reading it."""
         super().__post_init__()
         optional_text("task_code", self.task_code)
+        if self.task_code is not None and self.pipeline_code is None:
+            raise UsageError("`task_code` needs `pipeline_code`; choose its pipeline")
         if not 1 <= self.limit <= 100:
             raise UsageError(f"`limit` is {self.limit}; give 1 to 100")
         if self.before is not None and self.before < 1:
@@ -183,7 +239,7 @@ class HistoryInput(RunSelection):
 
 
 @dataclass(frozen=True, kw_only=True)
-class AuditInput(Request):
+class AuditInput(TagFilter):
     """Recorded requests, optionally for one pipeline and since a moment."""
 
     pipeline_code: str | None = None
@@ -191,17 +247,19 @@ class AuditInput(Request):
 
     def __post_init__(self) -> None:
         """Refuse a blank code."""
+        super().__post_init__()
         optional_text("pipeline_code", self.pipeline_code)
 
 
 @dataclass(frozen=True, kw_only=True)
-class ValidateInput(Request):
+class ValidateInput(TagFilter):
     """Every active pipeline's metadata, or one pipeline's."""
 
     pipeline_code: str | None = None
 
     def __post_init__(self) -> None:
         """Refuse a blank code."""
+        super().__post_init__()
         optional_text("pipeline_code", self.pipeline_code)
 
 
@@ -401,10 +459,23 @@ class BulkControlRequest(Request):
                 f"`requests` has {len(self.requests)} objects; give 1 to 100 explicit objects"
             )
         for request in self.requests:
+            if request.action in DEFINITION_CONTROLS:
+                if (
+                    request.run_id is not None
+                    or request.run_key is not None
+                    or request.task_code is not None
+                ):
+                    raise UsageError(
+                        "definition controls name only `pipeline_code`; "
+                        "omit run and task identities"
+                    )
+                continue
             if request.request_key is None or (request.run_id is None and request.run_key is None):
                 raise UsageError(
                     "every object in `requests` needs `run_id` or `run_key` and `request_key`; "
                     "implicit active-run selection is unsafe across a batch"
                 )
-        if len({r.request_key for r in self.requests}) != len(self.requests):
+        if len({r.request_key for r in self.requests if r.request_key is not None}) != sum(
+            r.request_key is not None for r in self.requests
+        ):
             raise UsageError("`request_key` values repeat; give each selected object a unique key")

@@ -13,7 +13,11 @@ from etl_craft.core.errors import ExitCode
 from etl_craft.engine.repository.pauses import Pause
 from etl_craft.services.operations import to_json
 from etl_craft.services.operations.actions import invoke
-from etl_craft.services.operations.requests import ControlRequest, MarkRequest, RunSelection
+from etl_craft.services.operations.requests import (
+    ControlRequest,
+    MarkRequest,
+    RunFilter,
+)
 from etl_craft.services.operations.status import (
     DependencyView,
     GateWaitView,
@@ -30,7 +34,7 @@ NOW = datetime(2026, 10, 9, tzinfo=UTC)
 @pytest.fixture
 def snapshot(ctx):
     seed(ctx, active=True, task=True)
-    view = invoke(ctx, ActionName.STATUS, RunSelection(pipeline_code="P"))
+    view = invoke(ctx, ActionName.STATUS, RunFilter(pipeline_code="P"))
     return TaskSnapshot(
         view.pipeline,
         view.run,

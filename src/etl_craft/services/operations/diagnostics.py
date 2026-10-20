@@ -8,7 +8,9 @@ from typing import ClassVar
 
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.errors import ResourceNotFoundError, UsageError
+from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.lineage import fetch_lineage_versions
+from etl_craft.engine.repository.pipelines import tagged_pipelines
 from etl_craft.services import doctor, lineage, validate
 from etl_craft.services.operations.config_files import resolve_as_of
 from etl_craft.services.operations.context import OperationContext
@@ -38,7 +40,22 @@ def check_configuration(ctx: OperationContext, request: NoInput) -> DoctorView:
 
 def validate_metadata(ctx: OperationContext, request: ValidateInput) -> validate.Report:
     """Validate metadata and files under the caller's actor without running tasks."""
-    return validate.validate(ctx.engine, ctx.config, request.pipeline_code)
+    report = validate.validate(ctx.engine, ctx.config, request.pipeline_code)
+    if request.tag:
+        with ctx.engine.connect() as conn:
+            codes = tagged_pipelines(conn, request.tag)
+            if request.pipeline_code is not None:
+                codes = {code: i for code, i in codes.items() if code == request.pipeline_code}
+            tasks = sum(
+                1
+                for row in conn.execute(statement(conn, "catalog_tasks"))
+                if row.pipeline_code in codes
+            )
+        report.findings = [
+            finding for finding in report.findings if finding.where.partition(".")[0] in codes
+        ]
+        report.pipelines, report.tasks = len(codes), tasks
+    return report
 
 
 @dataclass(frozen=True)

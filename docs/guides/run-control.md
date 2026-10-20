@@ -414,3 +414,26 @@ The shared HTTP routes are `GET /api/v1/capabilities`,
 requests; operators can submit actions. `execution_run_id` is additive in `etl-craft/control/1`.
 Server-side queries without a cancellation adapter are named as a limitation in the
 capabilities rather than claimed as stopped.
+
+## Pause or resume a tagged group
+
+A tag selection uses the same exact AND filter as `pipelines`:
+
+```bash
+etl-craft pause --tag team:sales --tag tier:gold --reason "source outage"
+etl-craft pause --tag team:sales --tag tier:gold --reason "source outage" --yes
+etl-craft resume --tag team:sales --tag tier:gold --reason "source returned" --yes
+```
+
+The first command prints the resolved codes and exits with usage status 2 without changing
+anything. Review that list before repeating with `--yes`. Use either `--pipeline-code` or
+`--tag`. Each pipeline succeeds or fails independently; a partial refusal exits 1. Unknown
+tags select nothing. With JSON output, the preview goes to stderr and stdout remains one JSON
+document containing every selected code and outcome. Large CLI selections use the existing
+bulk action in batches of at most 100, after resolving the whole selection.
+
+The API first reads `/api/v1/pipelines?tag=team:sales&tag=tier:gold`, then posts explicit
+`pipeline_code`, `action` (`PAUSE` or `RESUME`) and `reason` objects in `requests` to
+`/api/v1/controls/bulk`. Definition controls need no run id or request key. Run and task controls
+still need their explicit run identity and unique request key. The audit records a `control`
+request for each code; editing tags later cannot change that selection.

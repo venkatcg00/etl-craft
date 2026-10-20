@@ -98,7 +98,7 @@
     },
     "inline-sql": {
       "src/etl_craft/engine/connection.py": 1,
-      "src/etl_craft/engine/repository/audit_reads.py": 4,
+      "src/etl_craft/engine/repository/audit_reads.py": 3,
       "src/etl_craft/engine/repository/config_rows.py": 1,
       "src/etl_craft/engine/repository/normalization.py": 2,
       "src/etl_craft/engine/repository/source_columns.py": 1,

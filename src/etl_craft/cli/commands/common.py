@@ -78,6 +78,16 @@ def configure_run_selector(parser: argparse.ArgumentParser) -> None:
     selection.add_argument("--run-key", help="The exact run key within this pipeline.")
 
 
+def configure_tags(parser: argparse.ArgumentParser) -> None:
+    """Offer the shared repeatable AND filter."""
+    parser.add_argument(
+        "--tag",
+        action="append",
+        default=[],
+        help="Carry every given tag (repeatable; exact match).",
+    )
+
+
 def configure_output(parser: argparse.ArgumentParser) -> None:
     """Offer one schema-versioned operation document instead of text output."""
     parser.add_argument(
