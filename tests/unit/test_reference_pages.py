@@ -17,6 +17,7 @@ GUIDE_FILES = {
     "PYTHON": "ingestion-scripts.md",
     "EMAIL_ALERT": "email-alerts.md",
     "EVENT_WAIT": "event-waits.md",
+    "RUN_PIPELINE": "pipeline-triggers.md",
 }
 SCHEMAS = pages.REPO / "src" / "etl_craft" / "dialects" / "engine"
 

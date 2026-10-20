@@ -22,6 +22,7 @@ from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.pauses import fetch_open_pause
 from etl_craft.engine.repository.pipelines import fetch_pipeline_detail
+from etl_craft.engine.repository.triggers import fetch_trigger_links
 from etl_craft.engine.run_scopes import TaskSelection
 from etl_craft.engine.runlog import as_date
 from etl_craft.services.operations.models import AttemptView, PipelineView, RunView, TaskRunView
@@ -63,7 +64,16 @@ def run_view(conn: Connection, pipeline_id: int, pipeline_run_id: int) -> RunVie
             f"pipeline_id={pipeline_id}: no pipeline_run_id={pipeline_run_id}; "
             "select a run belonging to this pipeline"
         )
-    return run_document(row._mapping)
+    links = fetch_trigger_links(conn, [pipeline_run_id])
+    parent = next((link for link in links if link.child_run_id == pipeline_run_id), None)
+    return replace(
+        run_document(row._mapping),
+        triggered_by_task_run_id=None if parent is None else parent.task_run_id,
+        parent_run_id=None if parent is None else parent.parent_run_id,
+        child_run_ids=tuple(
+            link.child_run_id for link in links if link.parent_run_id == pipeline_run_id
+        ),
+    )
 
 
 def run_document(row: RowMapping) -> RunView:
@@ -126,7 +136,15 @@ def task_document(conn: Connection, row: RowMapping) -> TaskRunView:
         {"task_run_id": values["task_run_id"]},
     ):
         attempts.append(attempt_document(attempt._mapping))
-    return TaskRunView(**values, attempts=tuple(attempts))
+    return TaskRunView(
+        **values,
+        attempts=tuple(attempts),
+        child_run_ids=tuple(
+            link.child_run_id
+            for link in fetch_trigger_links(conn, [row.pipeline_run_id])
+            if link.task_run_id == row.task_run_id
+        ),
+    )
 
 
 def attempt_document(row: RowMapping) -> AttemptView:

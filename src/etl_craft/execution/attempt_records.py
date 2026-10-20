@@ -8,7 +8,7 @@ import socket
 import threading
 from pathlib import Path
 
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectorConfig
@@ -138,6 +138,9 @@ def record_attempt(
     """
     with engine.begin() as conn:
         transitions.assert_attempt(conn, attempt_id, task_run_id, owner)
+        handoff = _handoff_outcome(conn, attempt_id, task_run_id, task_code)
+        if handoff is not None:
+            return handoff
         recorded = runlog.fetch_task_run_result(conn, task_run_id)
         status = RunStatus(recorded.status)
         message = recorded.error_message
@@ -216,3 +219,23 @@ def attempt_started(engine: Engine, attempt_id: int, owner: str, pid: int) -> No
             completed=True,
             process_start=leases.process_start(pid),
         )
+
+
+def _handoff_outcome(
+    conn: Connection, attempt_id: int, task_run_id: int, task_code: str
+) -> TaskOutcome | None:
+    """Observe a handed-off process without overwriting the controller's task outcome."""
+    attempt = conn.execute(
+        statement(conn, "trigger_attempt"),
+        {"attempt_id": attempt_id, "task_run_id": task_run_id},
+    ).one()
+    if attempt.status == AttemptStatus.HANDED_OFF:
+        controls.observe_exit(conn, attempt_id, queries_ended=True)
+        recorded = runlog.fetch_task_run_result(conn, task_run_id)
+        return TaskOutcome(
+            RunStatus(recorded.status),
+            f"{task_code}: controller owns child wait",
+            task_run_id,
+            waiting=recorded.status == RunStatus.IN_PROGRESS,
+        )
+    return None

@@ -185,3 +185,11 @@ operation boundary. `history` provides the cross-pipeline run list with its exis
 and `before` cursor. `status` without `pipeline_code` lists all non-terminal matching runs.
 Direct run-id and task reads keep their existing selectors. See [tagged group controls](../guides/run-control.md#pause-or-resume-a-tagged-group)
 for resolving a group before submitting explicit bulk controls.
+
+Pipeline-trigger run details use the existing run and task read actions. Run documents add
+`parent_run_id`, `triggered_by_task_run_id` and `child_run_ids`; task-run documents add
+`child_run_ids`. A waiting trigger's explanation identifies its child and controller ownership.
+The generated `POST /api/v1/triggers` action is used by an owned trigger attempt. It requires
+`task_run_id`, `attempt_id` and `owner`, checks the initiating account and ownership lease,
+and returns `etl-craft/trigger/1`. Configure tasks and start their parent for ordinary usage;
+there is no additional CLI execution command.

@@ -55,6 +55,16 @@ def _text_status(out: Output, done: StatusView) -> None:
         f"start={run.start_date} duration_seconds={done.duration_seconds} SLA={run.sla_status} "
         f"sla_hours={done.pipeline.sla_in_hours}"
     )
+    if run.parent_run_id is not None:
+        out.line(
+            f"parent pipeline_run_id={run.parent_run_id}; "
+            f"trigger task_run_id={run.triggered_by_task_run_id}"
+        )
+    if run.child_run_ids:
+        out.line(f"triggered child pipeline_run_ids={run.child_run_ids}")
+    for task in done.tasks:
+        if task.explanation.state == "waiting on child":
+            out.line(f"{task.task_code}: {task.explanation.next_action}")
     if done.pipeline.paused is not None:
         out.line(done.pipeline.paused.describe())
     headers = ("TASK", "STATUS", "ATTEMPTS", "ROWS_WRITTEN", "REJECTED", "DURATION_SECONDS")

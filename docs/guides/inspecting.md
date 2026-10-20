@@ -103,3 +103,10 @@ Its `pipeline_id` and `pipeline_code` are null for a cross-pipeline page. The AP
 cursor continues this page. A task or explicit run selector still needs `--pipeline-code`.
 Single-pipeline calls retain their existing response shape. These commands also work without
 a tag to inspect all active pipelines.
+
+### Triggered pipeline runs
+
+For a `RUN_PIPELINE` task, `status` and `explain` show the child run ID and the controller-held
+wait. Run-detail JSON includes `parent_run_id`, `triggered_by_task_run_id` and `child_run_ids`;
+a task-run document includes its `child_run_ids`. Attempts that transferred a wait retain their
+immutable `HANDED_OFF` ending even after the controller settles the task summary.

@@ -15,7 +15,7 @@ from pathlib import Path
 
 from etl_craft.config.loader import settings_by_section
 from etl_craft.dialects.warehouse.base import STORAGE_PARAMETERS
-from etl_craft.handlers import email_alert, event_wait, python_scripts
+from etl_craft.handlers import email_alert, event_wait, python_scripts, run_pipeline
 from etl_craft.handlers.registry import COMMON_PARAMETERS
 from etl_craft.handlers.sql.spec import FLAGS, SCREENED
 from etl_craft.handlers.sql.spec import PARAMETERS as SQL_PARAMETERS
@@ -30,6 +30,7 @@ HANDLER_GUIDES = {
     "PYTHON": "../guides/ingestion-scripts.md",
     "EMAIL_ALERT": "../guides/email-alerts.md",
     "EVENT_WAIT": "../guides/event-waits.md",
+    "RUN_PIPELINE": "../guides/pipeline-triggers.md",
 }
 OUTCOME_PATTERNS = {
     f"EMAIL_{part}_{outcome}": f"EMAIL_{part}_<OUTCOME>"
@@ -103,6 +104,7 @@ def handler_parameters() -> dict[str, list[tuple[str, str]]]:
         "PYTHON": [(name, "") for name in sorted(python_scripts.PARAMETERS)],
         "EMAIL_ALERT": alert,
         "EVENT_WAIT": [(name, "local mode") for name in sorted(event_wait.PARAMETERS)],
+        "RUN_PIPELINE": [(name, "") for name in sorted(run_pipeline.PARAMETERS)],
     }
 
 

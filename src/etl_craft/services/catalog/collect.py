@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from sqlalchemy import text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectorConfig
@@ -69,6 +69,7 @@ from etl_craft.engine.repository.normalization import ObjectIdentity
 from etl_craft.engine.repository.pauses import Pause, fetch_open_pauses
 from etl_craft.engine.repository.source_columns import fetch_source_columns
 from etl_craft.engine.repository.tasks import TargetTask, fetch_all_task_parameters
+from etl_craft.engine.repository.triggers import TriggerLink, fetch_trigger_links
 from etl_craft.engine.repository.validation import (
     fetch_pipeline_edges,
     fetch_task_dependency_edges,
@@ -249,6 +250,7 @@ class Catalog:
     warehouse_identity: str | None = None
     contract_version: str = ""
     sql_dialect: str | None = None
+    trigger_links: list[TriggerLink] = field(default_factory=list)
 
     def where(self, table: str) -> tuple[str, str, str]:
         """Return a table's ``(database, schema, table)``; the active database when unnamed."""
@@ -267,6 +269,15 @@ class Catalog:
         return [task for task in self.tasks.values() if task.lineage_error is not None]
 
 
+def _pipeline_history(conn: Connection) -> tuple[dict[str, list[RunSummary]], list[TriggerLink]]:
+    """Bound trigger links to the same recent runs as catalog history."""
+    runs = fetch_pipeline_runs(conn)
+    links = fetch_trigger_links(
+        conn, [run.pipeline_run_id for rows in runs.values() for run in rows]
+    )
+    return runs, links
+
+
 def collect_catalog(
     engine: Engine,
     config: ConnectorConfig,
@@ -276,7 +287,6 @@ def collect_catalog(
 ) -> Catalog:
     """Read the Engine DB and return the catalog; lineage is stored as ``lineage`` stores it."""
     catalog_name = active_catalog(config) if config.warehouse is not None else None
-    database = catalog_name
     with engine.connect() as conn:
         definitions = fetch_source_columns(conn)
         objects = fetch_catalog_tables(conn)
@@ -288,7 +298,7 @@ def collect_catalog(
         pipeline_edges = fetch_pipeline_edges(conn)
         task_edges = fetch_task_dependency_edges(conn)
         paused = fetch_open_pauses(conn)
-        pipeline_runs = fetch_pipeline_runs(conn)
+        pipeline_runs, trigger_links = _pipeline_history(conn)
         task_runs = fetch_task_runs(conn)
         consumption = fetch_consumption(conn)
         interventions = fetch_catalog_interventions(conn)
@@ -307,6 +317,7 @@ def collect_catalog(
 
     catalog = Catalog(
         generated_at=datetime.now(UTC),
+        trigger_links=trigger_links,
         pipelines={
             row.pipeline_code: PipelineAsset(
                 row,
@@ -322,7 +333,7 @@ def collect_catalog(
         scripts={},
         column_edges=[],
         table_edges=[],
-        database=database,
+        database=catalog_name,
     )
     for used in consumption:
         catalog.built_from.setdefault(used.pipeline_run_id, []).append(used)

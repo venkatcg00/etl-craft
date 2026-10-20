@@ -19,7 +19,7 @@ import signal
 import socket
 import sys
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import suppress
 from contextvars import ContextVar
 from dataclasses import replace
@@ -66,7 +66,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    trigger: Callable[[Engine, TaskContext], int] | None = None,
+) -> int:
     """Run one task attempt; return 0 on success, else the exit status of what failed."""
     args = parse_args(argv)
     log.configure(args.log_level, args.log_format)
@@ -78,13 +82,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     token = _identity.set(identity)
     try:
         with acting_as(SYSTEM_ACTOR):
-            return _run_bound(engine, config, args)
+            return _run_bound(engine, config, args, trigger=trigger)
     finally:
         _identity.reset(token)
         engine.dispose()
 
 
-def _run_bound(engine: Engine, config: ConnectorConfig, args: argparse.Namespace) -> int:
+def _run_bound(
+    engine: Engine,
+    config: ConnectorConfig,
+    args: argparse.Namespace,
+    *,
+    trigger: Callable[[Engine, TaskContext], int] | None = None,
+) -> int:
     with log.log_context(task_run_id=args.task_run_id):
         identity = _identity.get()
         if identity is not None:
@@ -118,19 +128,26 @@ def _run_bound(engine: Engine, config: ConnectorConfig, args: argparse.Namespace
             attempt=context.attempt,
         ):
             try:
-                return run_handler(engine, context)
+                return run_handler(engine, context, trigger=trigger)
             except EtlCraftError as error:
                 logger.error("attempt outcome refused: %s", error)
                 return error.exit_code
 
 
-def run_handler(engine: Engine, context: TaskContext) -> int:
+def run_handler(
+    engine: Engine,
+    context: TaskContext,
+    *,
+    trigger: Callable[[Engine, TaskContext], int] | None = None,
+) -> int:
     """Run ``context``'s handler and record its outcome on the task's row."""
     identity = _identity.get()
     if identity is not None:
         context = replace(context, attempt_id=identity[0], owner=identity[1])
     logger.info("running the %s handler", context.handler)
     try:
+        if context.handler == Handler.RUN_PIPELINE and trigger is not None:
+            return trigger(engine, context)
         result = resolve_handler(context.handler)(context, engine)
     except EtlCraftError as error:
         logger.error("task failed: %s", error)
@@ -213,10 +230,14 @@ def _record_failure(
             )
 
 
-def run_as_process(argv: Sequence[str] | None = None) -> NoReturn:
+def run_as_process(
+    argv: Sequence[str] | None = None,
+    *,
+    trigger: Callable[[Engine, TaskContext], int] | None = None,
+) -> NoReturn:
     """Run ``main`` as the task process and exit with its status as soon as it returns."""
     signal.signal(signal.SIGTERM, _interrupt)
-    exit_now(main(argv))
+    exit_now(main(argv, trigger=trigger))
 
 
 def exit_now(code: int) -> NoReturn:

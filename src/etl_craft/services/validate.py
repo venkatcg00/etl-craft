@@ -28,7 +28,7 @@ from etl_craft.config.targets import active_catalog
 from etl_craft.core.cron import parse, timezone
 from etl_craft.core.enums import DependencyType, EmailFlavour, Handler, SqlAction
 from etl_craft.core.errors import EtlCraftError
-from etl_craft.core.graph import build_graph
+from etl_craft.core.graph import build_graph, cycles
 from etl_craft.core.text import is_metadata_code, qualify, suggest
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine.queries import statement
@@ -53,7 +53,7 @@ from etl_craft.engine.repository.validation import (
 )
 from etl_craft.execution.limits import task_timeout_seconds
 from etl_craft.execution.retries import task_retry_policy
-from etl_craft.handlers import email_alert, event_wait, python_scripts
+from etl_craft.handlers import email_alert, event_wait, python_scripts, run_pipeline
 from etl_craft.handlers.business_rules import check_rule
 from etl_craft.handlers.registry import COMMON_PARAMETERS, TaskContext
 from etl_craft.handlers.sql import task_dialect
@@ -65,6 +65,7 @@ from etl_craft.handlers.sql.tables import ENGINE_COLUMNS
 from etl_craft.services.doctor import Status
 from etl_craft.services.lineage import dialect_and_catalog, output_columns, table_name
 from etl_craft.services.source_columns import definition_problem, drift, warehouse_columns
+from etl_craft.services.trigger_validation import trigger_definition, trigger_graph_problems
 from etl_craft.warehouse.connection import open_warehouse
 
 ROWS_REPORTED = frozenset(WRITERS)
@@ -75,6 +76,7 @@ FULL_REPLACE = frozenset({SqlAction.CREATE_TABLE, SqlAction.OVERWRITE_TABLE})
 
 KNOWN_PARAMETERS: dict[str, frozenset[str]] = {
     Handler.EVENT_WAIT: event_wait.PARAMETERS,
+    Handler.RUN_PIPELINE: run_pipeline.PARAMETERS,
     Handler.SQL: SQL_PARAMETERS,
     Handler.BUSINESS_RULES: frozenset(),
     Handler.EMAIL_ALERT: email_alert.PARAMETERS,
@@ -253,7 +255,7 @@ def _pipelines(conn: Connection, config: ConnectorConfig, data: _Metadata, repor
                 "no longer runs, so once its last run is consumed the dependency is never "
                 "satisfied again; deactivate the dependency too, or reactivate the pipeline",
             )
-    for cycle in _cycles(
+    for cycle in cycles(
         {
             (edge.pipeline_code, edge.depends_on_pipeline_code)
             for edge in data.pipeline_edges
@@ -265,6 +267,9 @@ def _pipelines(conn: Connection, config: ConnectorConfig, data: _Metadata, repor
             f"pipeline dependencies form a cycle ({' -> '.join([*cycle, cycle[0]])}), so none "
             "of these pipelines can start",
         )
+
+    for code, problem in trigger_graph_problems(conn):
+        report.fail(code, problem)
 
 
 def _dependencies(data: _Metadata, report: Report) -> None:
@@ -559,8 +564,14 @@ def _event_wait(conn: Connection, context: TaskContext, data: _Metadata) -> list
     return []
 
 
+def _run_pipeline(conn: Connection, context: TaskContext, data: _Metadata) -> list[str]:
+    trigger_definition(conn, context.pipeline_id, context.task_params)
+    return []
+
+
 CHECKS: dict[str, Callable[[Connection, TaskContext, _Metadata], list[str]]] = {
     Handler.EVENT_WAIT: _event_wait,
+    Handler.RUN_PIPELINE: _run_pipeline,
     Handler.SQL: _sql,
     Handler.BUSINESS_RULES: _business_rules,
     Handler.PYTHON: _python,
@@ -580,28 +591,3 @@ def _unknown(what: str, name: str, known: Sequence[str]) -> str:
     hints = suggest(name, list(known))
     hint = f"; did you mean {', '.join(hints)}" if hints else ""
     return f"{what} {name} is not read by etl-craft, so it has no effect{hint}"
-
-
-def _cycles(edges: set[tuple[str, str]]) -> list[list[str]]:
-    """Return each cycle in the ``(dependent, upstream)`` graph once, from its smallest code."""
-    graph: dict[str, list[str]] = {}
-    for dependent, upstream in sorted(edges):
-        graph.setdefault(dependent, []).append(upstream)
-    found: list[list[str]] = []
-    seen: set[tuple[str, ...]] = set()
-
-    def walk(node: str, path: list[str]) -> None:
-        for upstream in graph.get(node, []):
-            if upstream in path:
-                cycle = path[path.index(upstream) :]
-                start = cycle.index(min(cycle))
-                key = tuple(cycle[start:] + cycle[:start])
-                if key not in seen:
-                    seen.add(key)
-                    found.append(list(key))
-            elif upstream > path[0]:
-                walk(upstream, [*path, upstream])
-
-    for node in sorted(graph):
-        walk(node, [node])
-    return found

@@ -34,6 +34,7 @@ from etl_craft.execution.pools.local import LocalPool
 from etl_craft.execution.reconcile import reconcile
 from etl_craft.execution.retries import refresh_retries
 from etl_craft.execution.runner import admit_attempt, preflight
+from etl_craft.execution.trigger_waits import check_trigger_waits
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +145,7 @@ class Scheduler:
             and (self.force or state.get(t, TaskRunState()).status not in SETTLED_STATUSES)
         ]
         ready = self._ready(state, pending, retries)
-        waiting = [due for due in retries.values() if due > self.clock.now()]
+        waiting = self._waiting(retries)
         ready = [task_id for task_id in ready if task_id not in fences]
         for task_id in ready:
             if task_id in retries and retries[task_id] > self.clock.now():
@@ -225,6 +226,12 @@ class Scheduler:
             return False
         self.never_ready = pending
         return True
+
+    def _waiting(self, retries: dict[int, datetime]) -> list[datetime]:
+        """Collect retry deadlines and durable child waits without occupying the pool."""
+        return [due for due in retries.values() if due > self.clock.now()] + check_trigger_waits(
+            self.engine, self.pipeline_run_id, self.clock.now()
+        )
 
     def _refresh_retries(self) -> dict[int, datetime]:
         """Reconsider only eligible tasks after their durable retry deadline."""

@@ -77,8 +77,15 @@ def default_hooks(config: ConnectorConfig, engine: Engine) -> RunHooks:
     The email goes to the pipeline's ``EMAIL_RECIPIENTS``, else the DAG default recipients,
     through the Email settings.
     """
+
+    def finalized(outcome: PipelineOutcome) -> None:
+        from etl_craft.execution.trigger_waits import wake_child_waits
+
+        if outcome.pipeline_run_id is not None:
+            wake_child_waits(engine, outcome.pipeline_run_id)
+
     if not config.limits.enforce_sla:
-        return RunHooks()
+        return RunHooks(on_finalized=finalized)
 
     def email_the_lapse(lapse: SlaLapse) -> None:
         with engine.connect() as conn:
@@ -93,7 +100,7 @@ def default_hooks(config: ConnectorConfig, engine: Engine) -> RunHooks:
             elapsed_hours=lapse.elapsed_hours,
         )
 
-    return RunHooks(on_sla_lapse=email_the_lapse)
+    return RunHooks(on_sla_lapse=email_the_lapse, on_finalized=finalized)
 
 
 def drive(steps: Generator[float, None, T], clock: Clock) -> T:

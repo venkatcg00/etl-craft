@@ -9,7 +9,7 @@ from etl_craft.core.errors import UsageError
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.repository.tasks import resolve_task_id
 from etl_craft.engine.runlog import RunSelector
-from etl_craft.execution import interventions, reruns, run_start, runner
+from etl_craft.execution import interventions, reruns, runner
 from etl_craft.execution import pipeline as execution
 from etl_craft.execution.attempt_types import Override
 from etl_craft.execution.reconcile import reconcile
@@ -156,14 +156,9 @@ def _run_step(ctx: OperationContext, request: RunRequest, selector: RunSelector)
             selector=selector,
         )
     elif request.init_only:
-        done = run_start.init_pipeline_run(
-            ctx.engine,
-            ctx.config,
-            pipeline_code,
-            hooks=hooks,
-            run_date=request.run_date,
-            selector=selector,
-        )
+        from etl_craft.services.operations.triggers import initialize
+
+        done = initialize(ctx, request)
     else:
         done = execution.run_pipeline(
             ctx.engine,

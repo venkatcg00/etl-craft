@@ -42,6 +42,7 @@ from etl_craft.services.catalog.metrics import kpi_summary
 from etl_craft.services.catalog.metrics import status as _status
 from etl_craft.services.catalog.metrics import when as _when
 from etl_craft.services.catalog.storage import MARKER as MARKER
+from etl_craft.services.catalog.trigger_html import trigger_edges
 from etl_craft.services.lineage import COPY
 
 SQL_PARAMETERS = frozenset({"SOURCE_SQL"})
@@ -193,7 +194,8 @@ class Pages:
                 "",
             )
         return (
-            f"{description}{facts}{self._dag(code)}<h2>Tasks</h2>{tasks}{changes}"
+            f"{description}{facts}{trigger_edges(self.catalog, code, root='../')}{self._dag(code)}"
+            f"<h2>Tasks</h2>{tasks}{changes}"
             f"{self._pipeline_runs(p)}"
         )
 
@@ -371,7 +373,33 @@ class Pages:
                 ),
                 "",
             )
-        return f"{facts}<h2>Tasks</h2>{tasks}{interventions}"
+        return (
+            f"{facts}{self._trigger_runs(run.pipeline_run_id)}<h2>Tasks</h2>{tasks}{interventions}"
+        )
+
+    def _trigger_runs(self, run_id: int) -> str:
+        """Link the exact parent task and every child, including earlier trigger generations."""
+        links = []
+        for link in self.catalog.trigger_links:
+            if link.child_run_id == run_id:
+                links.append(
+                    "Triggered by "
+                    + self._run_link(link.parent_run_id, link.parent_code)
+                    + " / "
+                    + self._task_link(f"{link.parent_code}.{link.task_code}")
+                )
+            if link.parent_run_id == run_id:
+                links.append(
+                    "Triggered child "
+                    + self._run_link(link.child_run_id, link.child_code)
+                    + " / "
+                    + self._task_link(f"{link.parent_code}.{link.task_code}")
+                )
+        return (
+            "<h2>Triggered runs</h2><ul>" + "".join(f"<li>{link}</li>" for link in links) + "</ul>"
+            if links
+            else ""
+        )
 
     def _task_runs(self, task: TaskAsset) -> str:
         if not task.runs:

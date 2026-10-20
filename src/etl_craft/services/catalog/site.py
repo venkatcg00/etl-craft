@@ -54,6 +54,7 @@ from etl_craft.services.catalog.metrics import when as _when
 from etl_craft.services.catalog.pages import Pages, anchor
 from etl_craft.services.catalog.storage import MARKER as MARKER
 from etl_craft.services.catalog.storage import check_folder, swap_site
+from etl_craft.services.catalog.trigger_html import trigger_edges
 from etl_craft.services.operations.serialization import to_json
 
 ASSETS = ("catalog.css", "catalog.js")
@@ -393,7 +394,7 @@ class _Writer(Pages):
             '<p class="tag-result" role="status"></p>'
         )
         return (
-            f'{filters}<div class="tag-pipelines">{pipelines}</div>'
+            f'{filters}<div class="tag-pipelines">{pipelines}</div>{trigger_edges(c)}'
             f'<h2 id="scripts">Ingestion scripts</h2>{scripts}'
             f'<h2 id="untraced">Column lineage unavailable</h2>{untraced}'
         )

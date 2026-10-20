@@ -79,6 +79,7 @@ See [tag filters](inspecting.md#filter-by-tags) and [group controls](run-control
 | `BUSINESS_RULES` | the task's rows of `CFG_BUSINESS_RULES`, flagging the rows that break them | [Business rules](business-rules.md) |
 | `EVENT_WAIT` | a durable file or warehouse-row condition without an agent slot | [Event waits](event-waits.md) |
 | `EMAIL_ALERT` | an email about the run so far | [Email alerts](email-alerts.md) |
+| `RUN_PIPELINE` | starts a child pipeline; controller-held WAIT or DETACH at QUEUED admission | [Pipeline triggers](pipeline-triggers.md) |
 
 A task's optional `TARGET_TABLE_ID` references `CFG_TABLES`. `TARGET_ACTIVE_FLAG` defaults to `Y`;
 `N` preserves the reference while disabling the derived `TARGET_OBJECT` setting. Config files
@@ -159,3 +160,9 @@ checked 1 pipeline(s) and 2 task(s): 2 failed, 0 warning(s)
 Add `sql_files/orders.sql` with the SELECT (see [SQL tasks](sql-tasks.md)) and a rule for
 `check_orders` (see [Business rules](business-rules.md)), and `etl-craft run --pipeline-code
 SALES_DAILY` runs it.
+
+## Starting child pipelines
+
+Use an ETL task with `HANDLER=RUN_PIPELINE` to launch another pipeline. `WAIT` frees the
+agent while the controller waits for the child's ending; `DETACH` ends after admission.
+See [Pipeline trigger tasks](pipeline-triggers.md) for parameters, rerun identities and controls.

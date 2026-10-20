@@ -2,10 +2,10 @@
 
 import pytest
 
+from etl_craft.core.graph import cycles
 from etl_craft.engine.repository.pipelines import pipeline_parameter_problems
 from etl_craft.handlers.email_alert import alert_parameter_problems
 from etl_craft.handlers.python_scripts import script_definition_problem
-from etl_craft.services.validate import _cycles
 
 pytestmark = pytest.mark.unit
 
@@ -80,5 +80,5 @@ def test_pipeline_parameters_are_typed():
 
 def test_each_cycle_is_reported_once_from_its_smallest_code():
     edges = {("B", "C"), ("C", "B"), ("A", "B"), ("X", "Y"), ("Y", "Z"), ("Z", "X")}
-    assert _cycles(edges) == [["B", "C"], ["X", "Y", "Z"]]
-    assert _cycles({("A", "B"), ("B", "C")}) == []
+    assert cycles(edges) == [["B", "C"], ["X", "Y", "Z"]]
+    assert cycles({("A", "B"), ("B", "C")}) == []

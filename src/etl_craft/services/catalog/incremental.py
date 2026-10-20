@@ -160,6 +160,16 @@ def _pipeline_versions(
                 pipeline.run_changes,
                 history,
                 consumption,
+                [
+                    link
+                    for link in catalog.trigger_links
+                    if code in {link.parent_code, link.child_code}
+                ],
+                [
+                    (label, task.params)
+                    for label, task in catalog.tasks.items()
+                    if task.params.get("TRIGGER_PIPELINE_CODE") == code
+                ],
             )
         )
         versions[pipeline_url(code)] = version

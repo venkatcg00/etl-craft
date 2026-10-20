@@ -80,13 +80,10 @@ def mark_task(
     requested_by: str | None = None,
     selector: runlog.RunSelector = runlog.ACTIVE_RUN,
 ) -> Intervened:
-    """Mark ``task_code`` ``status`` under the selected run.
+    """Mark the exact task, refusing a live attempt and closing a handed-off child wait.
 
-    A run that has ended is reopened, and the tasks the engine skipped without running are
-    reset, so the next ``run --pipeline-code`` resumes it. A task that is ``IN-PROGRESS`` is
-    refused while its lease is live. ``stale`` reconciles expired attempts before marking.
-    Raises ``RunStateError`` when
-    the pipeline has no run, and ``RunRefusedError`` while the task is running.
+    Ended runs reopen and engine-skipped downstream tasks reset. A marked trigger leaves
+    its child running. Stale attempts must be reconciled before their outcomes can change.
     """
     status = _check(config, "mark", reason, status, rows)
     who = requested_by or current_actor().name
@@ -101,7 +98,10 @@ def mark_task(
         task_id = resolve_task_id(conn, pipeline_id, task_code)
         run_id, run_status = _selected_run(conn, pipeline_id, selector)
         before = runlog.fetch_task_run_status(conn, task_id, run_id)
-        if before == RunStatus.IN_PROGRESS:
+        handed_off = conn.execute(
+            statement(conn, "trigger_task_handoff"), {"task_id": task_id, "run_id": run_id}
+        ).scalar_one_or_none()
+        if before == RunStatus.IN_PROGRESS and handed_off is None:
             raise RunRefusedError(
                 f"{pipeline_code}.{task_code} is running under pipeline_run_id={run_id}; wait "
                 "for it to end, or end the run with `etl-craft stop` or `abort`. If the process "
@@ -510,7 +510,7 @@ def _reset_skipped(
     reset = []
     kept = []
     for row in record.fetch_task_rows(conn, run_id):
-        if row.status != RunStatus.SKIPPED or row.marked or row.has_rule_runs:
+        if row.status != RunStatus.SKIPPED or row.marked or row.has_rule_runs or row.has_attempts:
             continue
         if only is not None and row.task_id not in only:
             continue
