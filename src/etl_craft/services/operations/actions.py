@@ -36,6 +36,7 @@ from etl_craft.services.operations import (
     inspect,
     maintenance,
     models,
+    processes,
     runs,
     sessions,
     status,
@@ -93,8 +94,9 @@ STARTED_ON_HOST = "start it on the host that serves it"
 class Action:
     """One action and every rule an interface needs about it.
 
-    ``call`` is ``None`` for a long-running process its interface starts itself inside
-    ``admitted``. ``result`` is the document type, or ``None`` for no content; ``streams`` marks
+    ``call`` performs the operation or validates a process startup. It is ``None`` when an
+    interface owns the complete process inside ``admitted``. ``result`` is the document type,
+    or ``None`` for no content; ``streams`` marks
     an action that returns bytes. ``escalate`` raises the role from what the request would
     change, as ``migrate`` does for packaged migrations. ``remedy`` says how to run a
     ``CONTROLLER_HOST`` action, for an interface that refuses it elsewhere.
@@ -296,7 +298,9 @@ _ROWS = (
     Action(ActionName.MIGRATE, maintenance.migrate, maintenance.MigrateInput, list, DEVELOPER,
            audit=REQUEST, placement=HOST, remedy=MIGRATION_ON_HOST, provisioning=True,
            escalate=_migration_role),
-    Action(ActionName.CONTROLLER, None, NoInput, None, ADMIN, audit=REQUEST, placement=HOST,
+    Action(ActionName.CONTROLLER, processes.controller, NoInput, None, ADMIN, audit=REQUEST,
+           placement=HOST, remedy=STARTED_ON_HOST),
+    Action(ActionName.UI, processes.ui, NoInput, None, ADMIN, audit=REQUEST, placement=HOST,
            remedy=STARTED_ON_HOST),
     Action(ActionName.PUBLISH_DOCS, None, documents.PublishInput, None, ADMIN, audit=REQUEST,
            placement=HOST, remedy=STARTED_ON_HOST),

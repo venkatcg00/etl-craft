@@ -131,7 +131,7 @@ that damages the package is not helpful; saying so, with a better option, is.
   checks the role and records the request. The CLI, the HTTP API, the UI and orchestrators only
   parse input, call that function and render its result; a CLI command against a server calls
   the API, which calls the same function. `lint-imports` refuses an interface that imports
-  another service module. Only long-running processes (`controller`, `publish-docs`) are started by
+  another service module. Only long-running processes (`controller`, `ui`, `publish-docs`) are started by
   the interface itself.
 
 ## Architecture
@@ -142,7 +142,7 @@ Each package imports only the packages below it; `lint-imports` enforces the ord
 
 | Package | Responsibility |
 |---|---|
-| `cli` | argparse commands, output, exit codes, and the client for `--controller`; the only package that prints |
+| `cli` | argparse commands, output, exit codes, and the client for `--api`; the only package that prints |
 | `api` | optional FastAPI routes, sign-in routes, bearer authorization and HTTP server lifecycle |
 | `controller` | leadership, active-run working set, local supervision and shutdown |
 | `services` | actor-scoped operations, doctor, setup, validate, config files, cloning, lineage, docs site |

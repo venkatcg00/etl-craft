@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Literal, TypeVar
 from sqlalchemy.engine import Engine
 
 from etl_craft.cli.authentication import command_identity
-from etl_craft.cli.client import ControllerClient
+from etl_craft.cli.client import ApiClient
 from etl_craft.cli.output import Output
 from etl_craft.config import ConnectorConfig, load_config, resolve_config_path
 from etl_craft.config.sizing import start_role
@@ -102,7 +102,7 @@ def configure_output(parser: argparse.ArgumentParser) -> None:
 
 @contextmanager
 def command_context(
-    args: argparse.Namespace, *, role: Literal["run", "controller"] | None = None
+    args: argparse.Namespace, *, role: Literal["run", "controller", "ui"] | None = None
 ) -> Iterator[OperationContext]:
     """Load command resources and dispose them after the service operation.
 
@@ -111,7 +111,7 @@ def command_context(
     """
     config = load_command_config(args)
     if role is not None:
-        config = start_role(config, server=role == "controller")
+        config = start_role(config, server=role in ("controller", "ui"))
     engine = connect_engine_db(config)
     try:
         context = OperationContext(
@@ -146,17 +146,17 @@ def call(
     name: ActionName,
     request: object,
     *,
-    role: Literal["run", "controller"] | None = None,
+    role: Literal["run", "controller", "ui"] | None = None,
 ) -> object:
-    """Run one action: on the controller with ``--controller``, else on this project."""
-    if args.controller:
-        return ControllerClient(args.controller).invoke(name, request)
+    """Run one action: through the API with ``--api``, else on this project."""
+    if args.api:
+        return ApiClient(args.api).invoke(name, request)
     with command_context(args, role=role) as ctx:
         return invoke(ctx, name, request)
 
 
 def on_host(args: argparse.Namespace, name: ActionName) -> None:
-    """Refuse ``--controller`` for an action that runs only on the controller's host."""
-    if args.controller:
+    """Refuse ``--api`` for an action that runs only on the controller's host."""
+    if args.api:
         remedy = ACTIONS[name].remedy
         raise UsageError(f"`{name}` runs on the controller's host only: {remedy}")

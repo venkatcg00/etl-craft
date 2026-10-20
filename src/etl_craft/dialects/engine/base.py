@@ -39,6 +39,8 @@ SHARED_QUERIES = Path(__file__).parent / "queries"
 class EngineDialect(ABC):
     """One Engine DB: how to connect, lock, split scripts, and which SQL to run."""
 
+    supports_api_replicas = False
+
     spec: EngineSpec
     directory: Path
 

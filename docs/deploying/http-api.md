@@ -1,8 +1,34 @@
 # HTTP API
 
-Install `etl-craft[server]`, initialize or migrate the Engine DB, and run `etl-craft controller`.
-The API and local controller share the same configuration and shutdown lifecycle. Without the
-server extra, `etl-craft controller` supervises runs without opening an HTTP listener.
+Install `etl-craft[ui]`, initialize or migrate the Engine DB, and run `etl-craft controller`
+for an all-in-one deployment. With PostgreSQL, split supervision from HTTP:
+
+```bash
+etl-craft controller --no-ui
+etl-craft ui
+```
+
+Each process reads its project's configuration; set `Orchestration.Api_address` to a distinct
+address for each process on the same host. Run two or more `ui` copies behind your TLS proxy.
+Copies hold no session or run state: requests can alternate between them without sticky
+sessions. Both controller and API copies hold Engine DB credentials and use the same
+actor-scoped operations. The API copies admit whole-pipeline runs; the controller supervises those runs.
+Task-scoped actions keep their existing synchronous operation behaviour.
+SQLite supports all-in-one only; `ui` refuses it with the PostgreSQL remedy.
+
+`controller --no-ui`, and a plain install without the `ui` extra, serve only the unsigned
+`GET /health` probe using the standard library. They expose no API or documentation routes.
+All-in-one and `ui` also expose `/health`; `/api/v1/health` still requires a bearer token.
+On `ui`, `/health` is readiness: it returns 503 with the cause during database/schema failure
+or shutdown, and recovers without restarting. On the controller it remains liveness.
+See [Behind a load balancer](load-balancer.md) for trust, draining and deployment fragments.
+Every role refuses to start unless the applied Engine DB migration names and checksums match
+its installed package. Apply pending migrations with `etl-craft migrate`; an older package
+against a newer schema must be upgraded. No automatic migration runs at process startup.
+
+The `ui` extra includes FastAPI, uvicorn, Pydantic and Jinja2. `etl-craft[all]` adds `ui` and
+every warehouse extra (including AWS support). The former `server` extra is removed without
+an alias. UI pages are delivered separately; this role serves the shared HTTP actions.
 
 `Orchestration.Api_address` defaults to `127.0.0.1:8730`. Set it to a `host:port`, or
 `[IPv6-address]:port`. For a team URL, place a TLS reverse proxy in front of the listener.
@@ -44,7 +70,7 @@ continue working with their original roles. It never silently merges or renames 
 The token-local `ROLE` column is removed; join `CFG_API_TOKENS.ACCOUNT_ID` to `CFG_ACCOUNTS`
 to read the current role.
 
-Every resource endpoint, including health, requires `Authorization: Bearer <token>`.
+Except for sign-in and `/health`, every resource endpoint requires `Authorization: Bearer <token>`.
 `viewer` can read, `operator` can also trigger, cancel, pause, resume, mark, rerun and backfill,
 `developer` includes operator access, and `admin` can also create, list and revoke tokens
 through `/api/v1/tokens`.
@@ -103,7 +129,7 @@ committed work; inspect its exact run before retrying.
 ### Sign-in routes
 
 These routes take no bearer token; each body is the proof. They call the same sign-in
-operations as a local `etl-craft login`, and `etl-craft login --controller` uses them.
+operations as a local `etl-craft login`, and `etl-craft login --api` uses them.
 
 | Method | Path under `/api/v1` | Input or result |
 |---|---|---|
@@ -170,7 +196,7 @@ identities, atomic warehouse support and recovery.
 ## Starting runs from another scheduler
 
 Provision a SERVICE account with the operator role and keep its token in `ETL_CRAFT_TOKEN`.
-Call `etl-craft run --pipeline-code SALES --controller https://etl.example.com`, or
+Call `etl-craft run --pipeline-code SALES --api https://etl.example.com`, or
 `POST /api/v1/runs` with `{"pipeline_code":"SALES"}` and bearer authentication. The controller owns dispatch,
 leases and finalization. Use the documented command exit codes and explicit run identities to
 inspect progress; no scheduler-specific package or exported DAG is needed.

@@ -61,7 +61,7 @@ include every lower role; transports name operations, not their own permission r
 | viewer | SCD provenance, reads, inspection, validation, configuration plan/export, YAML export, `docs-version --check`, `rehash --dry-run`, `setup --print-grants` |
 | operator | Run, backfill, mark, cancel, pause/resume and reconcile |
 | developer | `config apply`, project migrations, `generate-docs`, `lineage --refresh` |
-| admin | SCD value edits and human unlocks, accounts/tokens, setup/init-db, packaged Engine DB migrations, upgrade-targets, rehash, clone, controller startup, publish-docs and docs-version writes |
+| admin | SCD value edits and human unlocks, accounts/tokens, setup/init-db, packaged Engine DB migrations, upgrade-targets, rehash, clone, controller/UI startup, publish-docs and docs-version writes |
 
 `migrate` can apply project migrations as developer only when no packaged Engine DB migration
 is pending. An admin must apply pending engine upgrades first. A refused operation names the
@@ -106,6 +106,10 @@ The session stores **group IDs**, so a rename keeps the identity and reusing a n
 transfer an old session's access to another group. Explicit Engine DB memberships are checked
 on every request as well.
 
+Refresh tokens are not rotated: the same token works until it expires or its session is
+signed out. A stolen refresh token can be used for that entire time. Use a short
+`Auth.Refresh_days` lifetime and run `etl-craft logout` for a lost device.
+
 Refreshed access tokens retain the group set from the last SSO sign-in; they do not fetch new
 provider claims. Access expiry is capped at the refresh token's expiry, so `Auth.Refresh_days`
 bounds retained claims in a server session. A local session is bounded by `Auth.Session_hours`.
@@ -145,28 +149,28 @@ server installation they sign in to it instead, and never hold its Engine DB or 
 credentials:
 
 ```bash
-etl-craft login --controller https://etl.example.com      # password, or SSO when it is configured
-etl-craft status --pipeline-code SALES --controller https://etl.example.com
-export ETL_CRAFT_CONTROLLER=https://etl.example.com      # or name the server once per session
+etl-craft login --api https://etl.example.com      # password, or SSO when it is configured
+etl-craft status --pipeline-code SALES --api https://etl.example.com
+export ETL_CRAFT_API=https://etl.example.com      # or name the server once per session
 etl-craft history --pipeline-code SALES --all
 etl-craft logs --attempt-id 4812
 etl-craft logout
 ```
 
-- **Sign-in.** `login --controller` sends the password once to the server, or, for SSO, shows the
+- **Sign-in.** `login --api` sends the password once to the server, or, for SSO, shows the
   issuer's code while the server runs the device flow and verifies the ID token. The server
   issues a one-hour access token and a refresh token that lasts `Auth.Refresh_days` (default
   30). The credential file keeps both, under the server's address, and the CLI renews the access
   token when it expires. `logout`, disabling the account or revoking the refresh token ends the
   session.
-- **Only HTTPS.** `--controller` refuses plain HTTP except to `localhost`, and refuses redirects.
+- **Only HTTPS.** `--api` refuses plain HTTP except to `localhost`, and refuses redirects.
 - **What works.** Every action the [actions reference](../reference/actions.md) marks as
   running anywhere: `run` (a run, a backfill with `--backfill`, or a rerun with `--rerun
   --task-code`), `mark`, `stop`, `abort`, `hold`, `release`, `pause`, `resume`, `status`,
   `explain`, `history`, `steps`, `graph`, `pipelines`, `audit`, `lineage`, `validate`,
   `logs`, `whoami`, `account`, `token` and the maintenance commands, within the account's role,
   with the same text and JSON output and exit codes as on the controller's own project.
-- **What does not.** `config`, `migrate`, `init-db`, `setup`, `doctor`, `controller` and
+- **What does not.** `config`, `migrate`, `init-db`, `setup`, `doctor`, `controller`, `ui` and
   `publish-docs` run on the controller's host only and are refused against a controller,
   naming where to run them: config files and migrations reach a controller only through its own
   deployment, by CI or an admin.

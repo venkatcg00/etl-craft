@@ -74,7 +74,10 @@ Other; a repaired logical run is counted once in its current group. History disp
 ## Under an orchestrator
 
 The controller schedules and supervises these pipelines. External schedulers can submit runs
-through the authenticated HTTP API.
+through the authenticated HTTP API. Install `etl-craft[ui]` for all-in-one HTTP, or run
+`etl-craft controller --no-ui` for the standard-library `/health` probe only. This SQLite demo
+does not support separate `etl-craft ui` copies; those require PostgreSQL. Remote commands
+use `--api https://etl.example.com` or `ETL_CRAFT_API`, with the usual service token or login.
 
 
 ## Files

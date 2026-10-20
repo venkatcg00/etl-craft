@@ -141,7 +141,7 @@ item's text, or work done early under another item.
 | S5.AB Pipeline tags and filters | Done | #222 | `TAGS` labels pipelines; one tag filter on list, status, history, catalog and UI views, and tag-selected bulk actions |
 | S5.AC Pipeline trigger tasks | Done | #223 | Durable child admission, controller-held WAIT outcomes, DETACH at QUEUED admission and linked run inspection |
 | S5.AD Pipeline permission groups | Done | #225 | Admin-managed groups, audited direct/tag grants, effective pipeline roles, retained SSO group IDs and child-start permission checks |
-| S5.AE One gateway | Planned | | `etl-craft ui` as stateless API copies, a headless controller, agents through the API only, `ui` and `all` extras, `--api` |
+| S5.AE One gateway | In progress | #227 | Slice 1: stateless PostgreSQL `ui`, headless health-only controller, package schema checks, `ui`/`all` extras and `--api`; agent API and deployment layouts remain with S5.C/S7.F |
 | S5.AF Indexes for every query | Planned | | Catalog query plans avoid full scans of growing tables; measured indexes, write overhead and a PostgreSQL guard |
 | S5.X Unmanaged SQL tasks | Planned | | `SQL_SCRIPT` runs any SQL as an ordinary dependent task with per-statement audit; pre- and post-SQL are upstream and downstream tasks |
 | S5.C and later | Not started | | |
@@ -152,6 +152,7 @@ item's text, or work done early under another item.
 | S7.O Package, demo and configuration repositories | Planned | | A very small demo stays in package CI; the Support Insights demo and its configuration repository supply release evidence the package gate validates |
 | S7.P Obvious failures do not stop 1.0.0 | In progress | #173, #178 | Audit done (#173); the log-folder and port checks close their catalog rows (#178); item 4 keeps the catalog current |
 | S7.Q A generic ANSI SQL warehouse | Planned | | A `generic` dialect over SQLAlchemy for rare databases: ANSI SQL only, NULL-safe column comparison for merges, refusals for anything without an ANSI form |
+| S7.R Complete the test suite | Planned | | Two slices: known gaps after S5.AE/before S5.AF; six-skill coverage audit after S7.A/before the first 1.0.0 release candidate |
 | S7.N Faster complete pull-request CI | Done | #170 | Fail-closed collection/shard accounting, isolated schema templates and shared demo workers; complete checks in 6m33s-8m15s (owner-approved ten-minute target) |
 | S8.H Support Insights scenario coverage | Planned | | Deterministic mixed-quality generators, every-feature demonstrations, business-rule and stewardship cases, and runnable README coverage |
 
@@ -291,11 +292,21 @@ does not move worker work ahead of the metadata, account or operator-control cor
     agent API on it.
   - S5.AF (indexes for every query) follows S5.AE and comes before S5.C (owner,
     20 October 2026), because the `ui` copies and agents multiply query load.
+  - S7.R.1 (known test gaps) follows S5.AE and comes before S5.AF (owner,
+    20 October 2026). S7.R.2 (the six-skill audit) follows S7.A and comes before the first
+    1.0.0 release candidate (owner, 20 October 2026).
   - None of these moves S5.S, S5.O.3 or S5.Q.
   - S5.V and S7.M add `validation_scripts/` and `uploads/` to the project directory, and the
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.AE slice 1 (#227) covers two PostgreSQL UI processes sharing sign-in, refresh, run reads
+and revocation, including the loss of one copy. Database/schema readiness recovers without
+restarting a UI copy; shutdown draining and trusted forwarding metadata are covered. Health-only controller supervision excludes
+web dependencies, and SQLite UI, missing-extra and package-schema mismatch refusals are
+covered on the affected Engine DBs. No Engine DB schema or warehouse SQL changes; cloud
+acceptance does not apply.
 
 S5.AD (#225) covers open/restricted pipeline reads, direct and tag grants, viewer elevation,
 CLI/API refusals, filtered history and private dependency/lineage/catalog details on SQLite
@@ -567,6 +578,23 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- S5.AE slice 1: acceptance is the standalone PostgreSQL UI, standard-library health-only
+  controller, durable cross-copy session sequence, renamed extras/address and package-schema
+  startup refusals. The package check uses the existing applied migration names/checksums;
+  no version column is added. Existing task-scoped HTTP actions retain their synchronous
+  behaviour; whole-pipeline submissions are admitted for the controller. Sessions were
+  already Engine DB-backed, so no session-state migration was needed. Agent delivery remains
+  in S5.C and deployment layouts in S7.F; S7.R.1 follows this standalone slice before S5.AF.
+  The owner also added readiness, graceful shutdown, explicit proxy trust and short load-balancer
+  examples to slice 1. HTTP origin is stored in existing audit arguments, with no new column.
+  A shared shutdown signal is exercised with an early-empty test poll; S5.C connects its agent
+  claim handler to that signal when the route is built.
+
+- S7.R: refresh tokens stay unrotated until they expire (owner, 20 October 2026).
+  Signing out the session revokes them. The security guide documents that a stolen refresh
+  token works until expiry or sign-out, and recommends short refresh lifetimes and
+  `etl-craft logout` for a lost device.
 
 - S5.AD: the owner approved flat, optional `Auth.Oidc_groups_claim` beside
   `Auth.Oidc_issuer` and `Auth.Oidc_client_id`, rather than `Auth.<provider>` blocks.
@@ -4668,6 +4696,26 @@ Branch: `feat/api-gateway-roles`, one per slice. After S5.AD and before S5.C and
   8. **One name for the address of a server.** The CLI's `--controller` flag and
      `ETL_CRAFT_CONTROLLER` become `--api` and `ETL_CRAFT_API`, because they name the API tier,
      not the controller. Agents use the same setting. No alias is kept.
+  9. **Load-balanced UI copies** (owner, 20 October 2026; part of slice 1).
+     - **Readiness.** A UI copy's `/health` returns 200 only while it can reach the Engine DB
+       and its package matches the applied migrations; otherwise 503 names the cause.
+       A database stopped and restarted returns to 200 without restarting the copy. The
+       controller's `/health` keeps its existing process-liveness meaning.
+     - **Graceful shutdown.** SIGTERM immediately makes UI health 503 and refuses new
+       requests. In-flight requests, including streamed logs, can finish; agent claim polls
+       end early with an empty answer so they retry elsewhere. Close what remains and exit
+       within the existing `Orchestration.Shutdown_grace_seconds`; add no new setting.
+       Tests keep a request and stream open at SIGTERM, prove the request finishes and new
+       work is refused, and bound process exit while the stream is still open.
+     - **Proxy trust.** Reuse S7.K's explicit proxy trust: believe `X-Forwarded-For` and
+       `X-Forwarded-Proto` only from configured proxies, and record the real client address
+       in audit rows. Test the rule through the UI role.
+     - **Deployment guide.** Add a short "Behind a load balancer" page in `docs/deploying/`:
+       Kubernetes Service/Ingress, Compose `--scale ui=N` behind Caddy or nginx, a cloud
+       load balancer, and nginx/HAProxy on servers. Include `/health`, an idle timeout above
+       the 30-second claim poll and long enough for log streams (ALB's 60-second default
+       suffices for claims), no sticky sessions, TLS at the balancer or through to copies,
+       and explicit proxy trust. Full Compose/Kubernetes layouts remain in S7.F.
 - *Controller load.* The supervision loop runs in one thread, so a bigger controller means a
   faster core, more memory for the active runs' graphs and low latency to the Engine DB
   primary, not more cores. Keep the controller in the same zone as the primary. The controller
@@ -5845,6 +5893,56 @@ Branch: `feat/dialects-generic-ansi`. After S5.X.
   targets, with no new CI service. It covers the refusals.
 - *Done when.* A database with an ANSI SQL SQLAlchemy dialect runs every managed action
   except the refused ones, with the same audit and failure messages.
+
+### S7.R Complete the test suite
+
+Two slices. S7.R.1 follows S5.AE and precedes S5.AF; S7.R.2 follows S7.A and precedes the
+first 1.0.0 release candidate (owner, 20 October 2026).
+
+- *Problem.* The six test skills in `.agents/skills/test-*/SKILL.md` list the failure modes
+  etl-craft must prove impossible. Nothing yet records which rows have a test, and writing
+  the skills turned up four likely gaps.
+
+#### S7.R.1 Known gaps
+
+One PR.
+
+1. **Secret masking.** `engine/audit.py`'s `mask_arguments` masks by key name only. Mask
+   secret-named keys inside lists of mappings too. Add a test recording an action whose
+   arguments nest a password in a list and inside a connection URL. Prove no secret value
+   reaches `AUD_` rows, logs, `--json` output or API responses. Mask URL passwords with the
+   existing `core.text` helpers, never a second implementation.
+2. **Merge crash windows.** Add named `fault_point` calls at each commit boundary of the
+   SCD1 and SCD2 merge paths in `handlers/sql/actions.py`. Add chaos tests using their `:kill`
+   variants: after recovery, the target equals the expected rows and nothing is doubled.
+3. **Upgrade test depth.** Extend `tests/integration/engine/test_upgrade.py` so the upgraded
+   database matches a fresh `init-db` in indexes (including partial ones), unique, check and
+   foreign-key constraints, and PostgreSQL triggers, not only columns. Seed every released
+   schema in `tests/fixtures/schemas/` with representative rows and assert each row after
+   upgrade by named column.
+4. Leave refresh-token rotation alone; the owner decides it separately.
+
+*Done when:* each of 1–3 has tests that fail on the code before the change
+(`git stash push src`), on both Engine DBs where an Engine DB is involved.
+
+#### S7.R.2 The audit
+
+One PR per skill, in this order: security, run state, ETL correctness, chaos and recovery,
+upgrades, failure messages.
+
+1. For each checklist row of the skill, name the existing test that covers it, or write it.
+   Record the mapping in the skill's own folder as `COVERAGE.md` (row → test node ids). A row
+   with no passing test is an open defect, not a pass.
+2. Every new test has an independent oracle and fails under a deliberate break of the code
+   it guards, both named in the PR.
+3. CI stays under ten minutes; anything slower goes to the release gate, named in the PR.
+4. Refresh tokens stay unrotated until they expire (owner, 20 October 2026); record this in
+   Handover notes → Choices that differ from the item text and in `docs/deploying/security.md`.
+   A stolen refresh token works until expiry or session sign-out; recommend short refresh
+   lifetimes and `etl-craft logout` for a lost device.
+
+*Done when:* every checklist row in all six skills maps to a passing test, and S7.P's
+catalog rows name theirs.
 
 ## Release candidate: the Support Insights example
 

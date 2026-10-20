@@ -15,7 +15,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import TypeAdapter, ValidationError
 from starlette.concurrency import run_in_threadpool
 
-from etl_craft.core.enums import ActionName, HttpMethod, Transport
+from etl_craft.core.enums import ActionName, HttpMethod, HttpScheme, Transport
 from etl_craft.core.errors import UsageError
 from etl_craft.services.operations import OperationContext, to_json
 from etl_craft.services.operations.actions import ACTIONS, Action, invoke
@@ -86,6 +86,11 @@ def _caller(
 
 
 async def _answer(caller: OperationContext, action: Action, request: Request) -> Response:
+    caller = replace(
+        caller,
+        client_address=request.client.host if request.client else None,
+        client_scheme=HttpScheme(request.scope["scheme"]),
+    )
     given: dict[str, object] = dict(request.path_params)
     if action.method == HttpMethod.GET:
         properties = _adapter(action.name).json_schema().get("properties", {})

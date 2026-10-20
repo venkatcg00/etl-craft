@@ -116,7 +116,8 @@ class DocsSiteConfig:
     read only when the site is published; ``domain`` is the team's reserved ngrok domain, and
     ``allowed_ips`` the CIDR ranges ``publish-docs`` serves, every address when empty.
     ``external_url`` selects organization hosting, including its path prefix, without ngrok;
-    ``trusted_proxies`` names the source networks allowed to supply visitor addresses.
+    ``trusted_proxies`` names the source networks allowed to supply catalog visitor and
+    API client addresses and the API request protocol.
     """
 
     schedule: str | None = None

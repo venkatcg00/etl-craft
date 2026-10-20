@@ -38,7 +38,8 @@ Repository = "https://github.com/venkatcg00/etl-craft"
 Issues = "https://github.com/venkatcg00/etl-craft/issues"
 
 [project.optional-dependencies]
-server = ["fastapi>=0.115", "pydantic>=2", "uvicorn>=0.35"]
+ui = ["fastapi>=0.115", "pydantic>=2", "uvicorn>=0.35", "jinja2>=3.1"]
+all = ["etl-craft[ui,aws,databricks,snowflake,trino]"]
 aws = [
     "boto3>=1.28",
 ]
@@ -70,7 +71,7 @@ etl-craft = { workspace = true }
 [dependency-groups]
 dev = [
     "httpx>=0.28",
-    "etl-craft[aws,databricks,server,snowflake,trino]",
+    "etl-craft[aws,databricks,ui,snowflake,trino]",
     "import-linter>=2.1",
     "mypy>=1.11",
     "pre-commit>=4",
@@ -83,7 +84,7 @@ dev = [
     "types-pyyaml>=6.0.12",
 ]
 docs = [
-    "etl-craft[server]",
+    "etl-craft[ui]",
     "mike>=2.2",
     "mkdocs>=1.6.1,<2",
     "mkdocs-gen-files>=0.6",
@@ -227,12 +228,12 @@ ignore_imports = [
     "etl_craft.cli.commands.validate -> etl_craft.services.doctor",
     "etl_craft.cli.commands.lineage -> etl_craft.services.lineage",
     "etl_craft.cli.commands.config -> etl_craft.services.config_files",
-    # A long-running process the interface starts and stops, like `server`.
+    # A long-running process the interface starts and stops, like `controller`.
     "etl_craft.cli.commands.publish_docs -> etl_craft.services.docs_publish",
 ]
 
 [[tool.importlinter.contracts]]
-name = "The server extra (FastAPI, Pydantic, uvicorn) is imported only by etl_craft.api"
+name = "The ui extra (FastAPI, Pydantic, uvicorn, Jinja2) is imported only by etl_craft.api"
 type = "forbidden"
 source_modules = [
     "etl_craft.cli",
@@ -247,7 +248,7 @@ source_modules = [
     "etl_craft.config",
     "etl_craft.core",
 ]
-forbidden_modules = ["fastapi", "pydantic", "uvicorn"]
+forbidden_modules = ["fastapi", "pydantic", "uvicorn", "jinja2"]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]

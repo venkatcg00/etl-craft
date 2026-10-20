@@ -40,7 +40,8 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig, DocsSiteConfig
 from etl_craft.config.resolve import source_values
-from etl_craft.core.errors import ConfigurationError, LockTimeoutError
+from etl_craft.core.errors import ConfigurationError, LockTimeoutError, UsageError
+from etl_craft.core.http import forwarded_visitor
 from etl_craft.engine.repository.docs_site import fetch_publication, record_publication
 from etl_craft.services.catalog.storage import MARKER, prepare_site_lock, site_lock
 
@@ -80,17 +81,15 @@ class _Handler(SimpleHTTPRequestHandler):
         if not allowed:
             return True
         try:
-            visitor = ip_address(self.client_address[0])
-            trusted = self.server.trusted_proxies
-            if any(visitor in network for network in trusted):
-                headers = self.headers.get_all("X-Forwarded-For", [])
-                if len(headers) != 1:
-                    return False
-                forwarded = [ip_address(part.strip()) for part in headers[0].split(",")]
-                for visitor in reversed(forwarded):
-                    if not any(visitor in network for network in trusted):
-                        break
-        except ValueError:
+            visitor = ip_address(
+                forwarded_visitor(
+                    self.client_address[0],
+                    self.headers.get_all("X-Forwarded-For", []),
+                    self.server.trusted_proxies,
+                    required=True,
+                ).address
+            )
+        except (ValueError, UsageError):
             return False
         return any(visitor in network for network in allowed)
 

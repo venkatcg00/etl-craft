@@ -235,3 +235,21 @@ def test_unknown_run_option_is_refused_by_name(capsys):
         main(["run", "--pipeline-code", "P", option])
     assert refused.value.code == 2
     assert option in capsys.readouterr().err
+
+
+def test_api_address_flag_and_environment_have_no_controller_alias(monkeypatch, capsys):
+    seen = []
+    probe = Command("probe", "probe", lambda args, out: seen.append(args.api) or 0)
+    monkeypatch.setenv("ETL_CRAFT_API", "https://api.example.com")
+    assert main(["probe"], commands=[probe]) == 0
+    assert seen[-1] == "https://api.example.com"
+    assert main(["--api", "https://other.example.com", "probe"], commands=[probe]) == 0
+    assert seen[-1] == "https://other.example.com"
+    with pytest.raises(SystemExit) as error:
+        main(["probe", "--controller", "https://old.example.com"], commands=[probe])
+    assert error.value.code == 2
+    assert "unrecognized arguments: --controller" in capsys.readouterr().err
+    monkeypatch.delenv("ETL_CRAFT_API")
+    monkeypatch.setenv("ETL_CRAFT_CONTROLLER", "https://old.example.com")
+    assert main(["probe"], commands=[probe]) == 0
+    assert seen[-1] is None

@@ -42,16 +42,16 @@ admin service token in `ETL_CRAFT_TOKEN`.
 ## From your own installation
 
 An analyst operates the server from their own installation, without its Engine DB or warehouse
-credentials. `login --controller` stores a one-hour access token and a refresh token for that
+credentials. `login --api` stores a one-hour access token and a refresh token for that
 server; the CLI renews access until the refresh token expires (`Auth.Refresh_days`) or is
 revoked:
 
 ```bash
-etl-craft login --controller https://etl.example.com
-etl-craft whoami --controller https://etl.example.com          # analyst operator
-etl-craft run --pipeline-code SALES --reason "late file" --controller https://etl.example.com
-etl-craft --controller https://etl.example.com config apply    # refused: apply config files on the server
-etl-craft logout --controller https://etl.example.com
+etl-craft login --api https://etl.example.com
+etl-craft whoami --api https://etl.example.com          # analyst operator
+etl-craft run --pipeline-code SALES --reason "late file" --api https://etl.example.com
+etl-craft --api https://etl.example.com config apply    # refused: apply config files on the server
+etl-craft logout --api https://etl.example.com
 ```
 
 See [operating a server](../../deploying/security.md#operating-a-server-from-your-own-installation)

@@ -47,6 +47,7 @@ def test_every_action_is_reachable_from_the_cli_or_a_route():
         (ActionName.PUBLISH_DOCS, ApiRole.ADMIN),
         (ActionName.CLONE, ApiRole.ADMIN),
         (ActionName.CONTROLLER, ApiRole.ADMIN),
+        (ActionName.UI, ApiRole.ADMIN),
         (ActionName.LOGIN, None),
         (ActionName.LOGOUT, None),
     ],

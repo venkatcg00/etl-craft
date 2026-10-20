@@ -4,10 +4,8 @@ import signal
 import sys
 import threading
 import time
-from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 
-import psycopg
 import pytest
 import yaml
 from sqlalchemy import text
@@ -19,7 +17,7 @@ from etl_craft.core.enums import ApiRole
 from etl_craft.core.errors import RunRefusedError
 from etl_craft.engine.repository import controllers
 from etl_craft.services.operations import OperationContext
-from fixtures.engine_db import postgres_admin
+from fixtures.engine_db import engine_db_cut_off, postgres_admin
 from fixtures.metadata import add_pipeline, add_task, start_run
 
 
@@ -281,23 +279,6 @@ POSTGRES_ONLY = pytest.mark.parametrize(
     [pytest.param("postgresql", marks=pytest.mark.engine_postgres)],
     indirect=True,
 )
-
-
-@contextmanager
-def engine_db_cut_off(engine):
-    """Refuse new connections to this test's database and end its sessions, as a restart does."""
-    name = psycopg.sql.Identifier(engine.url.database)
-    with postgres_admin() as admin:
-        admin.execute(psycopg.sql.SQL("ALTER DATABASE {} ALLOW_CONNECTIONS false").format(name))
-        admin.execute(
-            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-            "WHERE datname = %s AND pid <> pg_backend_pid()",
-            (engine.url.database,),
-        )
-        try:
-            yield
-        finally:
-            admin.execute(psycopg.sql.SQL("ALTER DATABASE {} ALLOW_CONNECTIONS true").format(name))
 
 
 def wait_for_output(command, text_, timeout=15):

@@ -1,4 +1,4 @@
-"""Send an action to an etl-craft controller's API, as the signed-in person or a service token."""
+"""Send an action to an etl-craft deployment's API, as the signed-in person or a service token."""
 
 from __future__ import annotations
 
@@ -36,9 +36,7 @@ def server_url(value: str) -> str:
         url = urlsplit(value)
         port = url.port
     except ValueError as error:
-        raise UsageError(
-            f"--controller {value!r} is malformed; expected https://<host>[:port]"
-        ) from error
+        raise UsageError(f"--api {value!r} is malformed; expected https://<host>[:port]") from error
     if (
         url.scheme not in {"https", "http"}
         or not url.hostname
@@ -48,19 +46,17 @@ def server_url(value: str) -> str:
         or url.query
         or url.fragment
     ):
-        raise UsageError(
-            f"--controller {value!r}; expected https://<host>[:port] with nothing after it"
-        )
+        raise UsageError(f"--api {value!r}; expected https://<host>[:port] with nothing after it")
     if url.scheme == "http" and url.hostname not in LOCAL_HOSTS:
         raise UsageError(
-            f"--controller {value!r}: plain HTTP is refused except to localhost; use https://"
+            f"--api {value!r}: plain HTTP is refused except to localhost; use https://"
         )
     host = f"[{url.hostname}]" if ":" in url.hostname else url.hostname
     return f"{url.scheme}://{host}" + (f":{port}" if port else "")
 
 
 def _error(status: int, body: bytes, url: str) -> EtlCraftError:
-    """Rebuild the controller's error class from its exit code, so local and remote exits match."""
+    """Rebuild the API's error class from its exit code, so local and remote exits match."""
     try:
         document = json.loads(body)
     except ValueError:
@@ -81,8 +77,8 @@ def _subclasses(cls: type[EtlCraftError]) -> Iterator[type[EtlCraftError]]:
         yield from _subclasses(sub)
 
 
-class ControllerClient:
-    """One controller, and the credential that proves who calls it."""
+class ApiClient:
+    """One API endpoint, and the credential that proves who calls it."""
 
     def __init__(self, url: str) -> None:
         """Use ``ETL_CRAFT_TOKEN`` for a service account, else this person's stored session."""
@@ -162,7 +158,7 @@ class ControllerClient:
             raise  # an answer from the server; _open turns it into the server's own error
         except (URLError, OSError) as error:
             raise ServerError(
-                f"{self.url}: cannot reach the controller ({error}); check the URL and the network"
+                f"{self.url}: cannot reach the API ({error}); check the URL and the network"
             ) from error
         return response
 
@@ -171,9 +167,7 @@ class ControllerClient:
             return self._service_token
         stored = credentials.read_server(self.url)
         if stored is None:
-            raise UsageError(
-                f"not signed in to {self.url}; run `etl-craft login --controller {self.url}`"
-            )
+            raise UsageError(f"not signed in to {self.url}; run `etl-craft login --api {self.url}`")
         expires = datetime.fromisoformat(stored["access_expires_at"])
         if not renew and expires > datetime.now(UTC):
             return stored["access"]

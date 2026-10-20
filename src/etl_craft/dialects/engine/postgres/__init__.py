@@ -32,6 +32,7 @@ C = TypeVar("C")
 class PostgresEngineDialect(EngineDialect):
     """PostgreSQL: transactional DDL and advisory locks."""
 
+    supports_api_replicas = True
     spec = engine_for_jdbc_url("jdbc:postgresql:")
     directory = Path(__file__).parent
 

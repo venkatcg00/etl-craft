@@ -32,6 +32,7 @@ from etl_craft.cli.commands import (
     status,
     steps,
     token,
+    ui,
     upgrade_targets,
     validate,
 )
@@ -46,6 +47,7 @@ COMMANDS: tuple[Command, ...] = (
     group.COMMAND,
     run.COMMAND,
     controller.COMMAND,
+    ui.COMMAND,
     token.COMMAND,
     mark.COMMAND,
     *(controls.command(a) for a in CONTROL_VERBS),
