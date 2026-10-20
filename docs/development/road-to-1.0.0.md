@@ -141,6 +141,7 @@ item's text, or work done early under another item.
 | S5.AB Pipeline tags and filters | Done | #222 | `TAGS` labels pipelines; one tag filter on list, status, history, catalog and UI views, and tag-selected bulk actions |
 | S5.AC Pipeline trigger tasks | Done | #223 | Durable child admission, controller-held WAIT outcomes, DETACH at QUEUED admission and linked run inspection |
 | S5.AD Pipeline permission groups | Planned | | Groups of accounts, granted `viewer` or `operator` (and S7.M's `steward`) on pipelines or tags; one effective-role check per pipeline-scoped action |
+| S5.AE One gateway | Planned | | `etl-craft ui` as stateless API copies, a headless controller, agents through the API only, `ui` and `all` extras, `--api` |
 | S5.X Unmanaged SQL tasks | Planned | | `SQL_SCRIPT` runs any SQL as an ordinary dependent task with per-statement audit; pre- and post-SQL are upstream and downstream tasks |
 | S5.C and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
@@ -283,6 +284,10 @@ does not move worker work ahead of the metadata, account or operator-control cor
     groups) follow S5.AA in that order and come before S5.X and S5.C (owner, 19 October 2026).
     All three use the action table; S5.AC's controller-held wait must exist before agents, and
     S5.AD's grants come before S7.A and S7.M, which use them.
+  - S5.AE (one gateway: the controller, `ui` and agent roles) follows S5.AD and comes before
+    S5.C and S7.A (owner, 20 October 2026). Only the controller and the `ui` copies hold Engine
+    DB credentials; agents, the UI and remote CLI calls go through the API. S5.C builds the
+    agent API on it.
   - None of these moves S5.S, S5.O.3 or S5.Q.
   - S5.V and S7.M add `validation_scripts/` and `uploads/` to the project directory, and the
     implementing pull requests update `AGENTS.md`'s design rules to match.
@@ -1570,13 +1575,14 @@ with the exact cause, as the design rules require.
 
 ```mermaid
 flowchart LR
-    U[CLI / HTTP API / Web UI] --> SV[Service layer]
-    SV --> OV[Controller: scheduler, dispatcher, monitor]
-    OV <--> DB[(Engine DB: one PostgreSQL for all projects)]
+    U[CLI / Web UI / other schedulers] --> API[API and UI tier: etl-craft ui, stateless copies]
+    API --> SV[Service layer]
+    SV <--> DB[(Engine DB: one PostgreSQL for all projects)]
+    OV[Controller: scheduler, dispatcher, monitor] --> SV
     OV --> PI[Pool interface]
     PI --> LP[Local provider: child processes on the controller host]
     PI --> WA[Agents on other hosts or containers]
-    WA <--> DB
+    WA -->|agent API| API
     LP --> T1[Task process]
     WA --> T2[Task process]
     T1 --> WH[Project warehouse]
@@ -1586,11 +1592,12 @@ flowchart LR
 
 | Component | Responsibility | Runs where |
 | --- | --- | --- |
-| Service layer | Every operation (run, mark, cancel, pause, backfill, status, explain, validate) as a Python function with typed inputs and outputs. The CLI, API and UI call it; nothing else implements an operation. | Inside the CLI process or the controller |
+| Service layer | Every operation (run, mark, cancel, pause, backfill, status, explain, validate) as a Python function with typed inputs and outputs. The CLI, API and UI call it; nothing else implements an operation. | Inside the CLI process, the controller or a `ui` copy |
+| API and UI tier | `etl-craft ui` (S5.AE): the HTTP API, the web UI and the agent API. Holds no state between requests; the only gateway for agents, the UI and remote CLI calls. | Two or more copies behind a load balancer; inside the controller in an all-in-one deployment |
 | Controller | Creates runs from schedules and triggers, decides which tasks are ready, hands attempts to pools, watches leases, timeouts and cancellations, ends runs. Exactly one is active per Engine DB. | The largest node |
 | Pool interface | The only way the controller starts work. Knows capacity, submits attempts, asks for status, cancels. No backend concepts leak through it. | Library inside the controller |
 | Local provider | Implements the pool interface with child processes on the controller's host (today's supervisor). Used for development and small deployments. | Controller host |
-| Agent | `etl-craft agent`: registers with the Engine DB, claims attempts for its pool, runs each in a child process, sends heartbeats, records outcomes. | Any host or container |
+| Agent | `etl-craft agent`: registers through the agent API, claims attempts for its pool, runs each in a child process, renews its leases and reports outcomes. Holds no Engine DB credentials. | Any host or container |
 | Engine DB | All metadata and state: `CFG_` (what to run), `AUD_` (what happened), plus queue, lease and agent tables. One PostgreSQL database for every project. SQLite remains for single-user development. | PostgreSQL; on Snowflake or Databricks deployments, the platform's managed PostgreSQL |
 | Warehouse | Does the heavy SQL work. One warehouse connection per project. | The team's platform |
 
@@ -1622,7 +1629,8 @@ flowchart LR
 ### Non-goals for 1.0.0
 
 - No execution backend inside the core (Celery, Kubernetes): only pool providers.
-- No highly available controller: one active controller under a lease; it restarts and reconciles.
+- No highly available controller: one active controller under a lease; it restarts and reconciles,
+  and scales vertically. The API tier (S5.AE) is the part that runs as several copies.
 - No data-movement framework or connector library. A script that needs more compute starts its own
   container or job.
 - No macro or template language beyond the `$$` parameters.
@@ -4561,10 +4569,128 @@ Branch: `feat/services-pipeline-groups`. After S5.AC, and before S5.C, S7.A and 
   - Groups and grants are audited, and their changes need `admin`.
   - S7.M's plan assigns stewards through grants.
 
+### S5.AE One gateway: the controller, ui and agent roles
+
+Branch: `feat/api-gateway-roles`, one per slice. After S5.AD and before S5.C and S7.A.
+
+- *Problem.* Today one process does everything. `etl-craft controller` schedules, supervises
+  and, when FastAPI is installed, serves the API on the same process. That makes three
+  bottlenecks before 1.0.0:
+  - **The API shares the controller's process.** The UI's reads, log streams and downloads
+    compete with supervision, and the API cannot have a second copy, because only one
+    controller may be active.
+  - **Every agent needs Engine DB credentials and connections** (S5.C as planned). Each agent
+    host can then write any table, and the connection budget grows with every agent.
+  - **One install for every role.** A headless agent installs the API and UI dependencies.
+- *Reference.* Established orchestrators split the same way:
+  - Airflow 3 runs its API server as stateless replicas, and its workers reach the metadata
+    database only through the Task Execution API.
+  - Temporal's frontend service and Prefect's server are stateless gateways; Temporal and
+    Prefect workers poll outbound and never hold database credentials.
+  - Kubernetes keeps one active controller manager behind a lease, off the request path, while
+    the API server scales out.
+- *Change.*
+  1. **Three roles, one package and one version.**
+
+     | Role | Command | Copies | Talks to |
+     | --- | --- | --- | --- |
+     | Controller | `etl-craft controller` | One active (leadership lock), others wait | The Engine DB directly |
+     | API and UI | `etl-craft ui` | Two or more, stateless | The Engine DB directly |
+     | Agent | `etl-craft agent` (S5.C) | Any number | The API only; no Engine DB credentials |
+
+     - **Only the controller and the API tier hold Engine DB credentials.** Both write through
+       the same `services/operations` functions, so the write rules stay in one place. Every
+       other caller (the CLI against a server, the UI, agents, other schedulers) uses the API.
+     - **The controller is off the request path.** Run a split deployment with
+       `etl-craft controller --no-ui`: it serves only `/health` at `Orchestration.Api_address`,
+       with the standard library, for probes. It scales vertically (see *Controller load*).
+     - **All-in-one stays the default.** `etl-craft controller` with the `ui` extra installed
+       serves the API and UI in its own process, with the local pool, as today. It is the only
+       layout SQLite supports; `etl-craft ui` refuses SQLite, naming the setting.
+  2. **The API tier holds no state between requests.** Sign-in throttling, refresh tokens,
+     streamed-log positions and anything else a request needs again lives in the Engine DB, so
+     any copy can serve any request and copies behind a load balancer need no sticky sessions.
+     A test runs the same signed-in sequence across two copies, alternating per request.
+  3. **One version on every role.** The controller and every `ui` copy refuse to start when
+     the Engine DB's applied migrations do not match their package version, as today. Agents
+     send their version with every request; the API refuses another version with an error
+     naming both versions and the remedy (upgrade the agent), and the agent exits.
+  4. **The agent API** (`/api/v1/agent/...`). Each route is an S5.AA action with a new
+     `agent` role that only agent tokens carry, and that no person's account can be given:
+     - *register* and *deregister* (the `AUD_AGENTS` row, S5.C);
+     - *claim*: a long poll. The API copy runs S5.C's `FOR UPDATE SKIP LOCKED` claim, and
+       while nothing is queued it waits on `LISTEN` for the pool's notification, up to 30
+       seconds, then returns empty. Agents poll outbound only and open no port;
+     - *renew*: one call per agent renews the agent's heartbeat and every running attempt's
+       lease, and returns its cancellations and pending commands (S5.C, S5.D);
+     - *report*: status, counts, offsets and the attempt ending, each fenced (*Fencing*);
+     - *log upload*: the attempt log in chunks, appended in order by sequence number.
+  5. **Fencing over HTTP.** The API takes the agent's id from its token, never from the
+     request body, and applies a change only with
+     `WHERE ATTEMPT_ID = :id AND OWNER_ID = :agent AND STATUS = :expected`. A retry is a new
+     attempt row, so the attempt id and owner identify one claim, and no new column is needed.
+     A late request
+     from an agent whose lease expired, which reconciliation marked `LOST`, changes nothing and
+     gets a refusal naming the attempt and its current owner. Retried requests are idempotent: a
+     repeated report of the same ending, or a log chunk with a sequence number already
+     stored, succeeds without a second write.
+  6. **When the API is unreachable.** An agent keeps its children running and retries with
+     backoff until its leases would expire; then it stops them, and reconciliation marks the
+     attempts `LOST` and retries them (S3.D, S5.W). This is the same budget as an Engine DB
+     outage, so production runs at least two API copies; the deployment docs say so.
+  7. **Packaging.** Two extras, one distribution:
+     - plain `etl-craft`: the controller (headless) and the agent;
+     - `etl-craft[ui]`: adds FastAPI, uvicorn, Jinja2 and the vendored UI assets, for
+       `etl-craft ui` and all-in-one. It replaces the `server` extra, with no alias;
+     - `etl-craft[all]`: `ui` plus every warehouse extra, for one image that can play any role.
+       An extra cannot be installed by default, so all-in-one is `etl-craft[ui]`.
+  8. **One name for the address of a server.** The CLI's `--controller` flag and
+     `ETL_CRAFT_CONTROLLER` become `--api` and `ETL_CRAFT_API`, because they name the API tier,
+     not the controller. Agents use the same setting. No alias is kept.
+- *Controller load.* The supervision loop runs in one thread, so a bigger controller means a
+  faster core, more memory for the active runs' graphs and low latency to the Engine DB
+  primary, not more cores. Keep the controller in the same zone as the primary. The controller
+  records each tick's duration; S7.I's soak reports it at 200 active runs, and the release
+  fails when the 95th percentile exceeds one second. The fix then is cheaper work per tick,
+  not a second controller.
+- *The Engine DB in production.*
+  - PostgreSQL with synchronous replication, or a managed service with zero-data-loss
+    failover. The controller already retakes leadership after a failover (`Leadership.hold`).
+  - The API tier may connect through PgBouncer in transaction mode. The controller connects
+    directly or through a session-mode pool, because its leadership lock and `LISTEN` need a
+    session. A `ui` copy's claim long-poll holds its `LISTEN` on one session connection per
+    copy, shared by every waiting claim.
+  - Read replicas for the UI's heavy reads are left until S6 measures a need.
+- *Slices.*
+  1. **The `ui` role.** `etl-craft ui`, `controller --no-ui`, the stateless-API test, the
+     `ui` and `all` extras, the `--api` rename and the version check. No agent work.
+  2. **The agent API, in S5.C.** Its routes need S5.C's `AUD_AGENTS`, so S5.C builds the
+     `agent` role, the five routes and the fencing tests (run 20 times, the concurrency rule)
+     with the agent itself. Agents never open an Engine DB connection.
+  3. **Deployment layouts, in S7.F.** S7.F's Compose and Kubernetes examples gain the `ui` Deployment
+     with two replicas behind a Service, and the controller with `--no-ui`.
+- *Tests.*
+  - Two `ui` copies serve one signed-in session, alternating per request.
+  - `etl-craft ui` on SQLite, and any role of another version, refuse to start with the remedy.
+  - An agent token cannot call a person's action, and a person's token cannot call an agent
+    route.
+  - A late report from a `LOST` attempt, a repeated ending and a duplicated log chunk each write
+    nothing new.
+  - Killing one `ui` copy mid-claim loses no attempt; killing every copy for longer than the
+    lease marks the attempts `LOST` and retries them.
+- *Done when.*
+  - `etl-craft ui` runs as two or more stateless copies, and `controller --no-ui` serves only
+    `/health`.
+  - Agents run, report and are fenced through the API alone, with no Engine DB credentials.
+  - The `ui` and `all` extras replace `server`, and `--api` replaces `--controller`.
+  - The controller's tick duration is recorded and S7.I's soak checks it.
+
 ### S5.C The PostgreSQL queue and the agent
 
 Branch: `feat/pools-agent`. Files: new `agent/` package (layer beside `controller`),
-`cli/commands/agent.py`, migration for agent tables.
+`cli/commands/agent.py`, migration for agent tables. After S5.AE slice 1; it builds S5.AE's
+agent API (slice 2), and every agent step below is a call to that API, never an Engine DB
+connection.
 
 - *Provider selection.* Use S5.T's explicitly recorded deployment profile to select local
   or cluster execution. The controller always schedules (S5.Y removed remote mode).
@@ -4615,24 +4741,25 @@ RETURNING a.ATTEMPT_ID
 
   The cluster provider requires PostgreSQL; `doctor` refuses it on SQLite.
 - *Agent loop* (`etl-craft agent --pool default --ingestion-slots 4 --warehouse-slots 16`):
-  1. Register (insert `AUD_AGENTS`), refusing to start when the Engine DB's applied migrations
-     don't match the agent's version.
-  2. Every 10 s: heartbeat the agent row and renew the leases of its running attempts in one
-     statement; read `CANCEL_REQUESTED_AT` for its attempts in one query and stop those children.
+  1. Register (the API inserts `AUD_AGENTS`); the API refuses an agent of another package
+     version (S5.AE).
+  2. Every 10 s: one *renew* call heartbeats the agent row, renews the leases of its running
+     attempts and returns their cancellations and its pending commands; stop those children.
   3. While slots are free: claim, materialize the bundle (`S5.F`), start the child with
      `--attempt-id` and `--owner-id`, mark `RUNNING`.
   4. On SIGTERM: set `DRAINING`, stop claiming, wait up to `--drain-seconds` (default 300), then stop
      the remaining children (their attempts end `FAILED` "agent drained") and set `GONE`.
 - *Controller side.* Agents whose heartbeat is older than three intervals are `GONE`; their attempts'
   leases expire and reconciliation marks them `LOST` (`S3.D`).
-- *Talking to agents.* The controller and agents talk only through the Engine DB, never by direct
-  network calls. A agent container needs no controller address and opens no port, so there is no
-  service discovery, cross-container TLS or second authentication. Every exchange is a row.
+- *Talking to agents.* The controller and agents never call each other: the controller writes
+  rows, and agents reach them only through the API tier (S5.AE). An agent needs the API's
+  address and an agent token, and opens no port. Every exchange is still a row in the Engine DB.
   1. **Prompt wake-ups.**
      - Queuing an attempt, requesting a cancellation and a agent command each send a
        PostgreSQL `NOTIFY` on a channel per pool, and per agent for its commands.
-     - An idle agent waits on `LISTEN` and claims at once. The 10-second heartbeat poll stays
-       the fallback, so a missed notification delays work but never loses it.
+     - An idle agent waits in the *claim* long poll, and the API copy serving it waits on
+       `LISTEN`, so it claims at once. The 10-second renew stays the fallback, so a missed
+       notification delays work but never loses it.
      - Cancellation (S5.D) is acknowledged within seconds rather than one heartbeat interval.
   2. **Operator commands, PowerCenter-style.**
      - `etl-craft agent drain|resume|stop --agent-id N`, the matching API routes and UI
@@ -4744,13 +4871,16 @@ Branch: `feat/engine-projects`.
 
 - Reuse S5.T's role-size report and single-machine accounting; add registered agent
   contributions and deployment-wide enforcement here. Count API/UI process pools in the total.
-- Every process has one SQLAlchemy engine. Task processes use `NullPool` and open at most one
-  connection at a time. Agents use a pool of 2 plus one connection per 8 slots; the controller a pool
-  of `Orchestration.Db_pool_size` (default 10).
-- `doctor` prints the budget: `controller + API/UI pools + agents × (2 + slots/8) + running tasks`,
-  and warns when it exceeds 80% of `max_connections`.
-- PgBouncer in transaction mode can front agents and tasks, but advisory locks (the controller's
-  leadership, target locks) need a session connection: the controller connects directly. Document it.
+- Every process has one SQLAlchemy engine. Agents and the task processes on agent hosts open no
+  Engine DB connection (S5.AE); task processes on the controller's local pool use `NullPool` and
+  open at most one connection at a time. The controller uses a pool of
+  `Orchestration.Db_pool_size` (default 10), and each `ui` copy its own pool plus one session
+  connection for the claim `LISTEN`.
+- `doctor` prints the budget: `controller + ui copies × (pool + 1) + local running tasks`, and
+  warns when it exceeds 80% of `max_connections`. Adding agents does not change it.
+- PgBouncer in transaction mode can front the `ui` copies, but advisory locks (the controller's
+  leadership, target locks) and `LISTEN` need a session connection: the controller connects
+  directly. Document it.
 
 ### S5.I Managed PostgreSQL on Snowflake and Databricks
 
@@ -4776,6 +4906,7 @@ One test module parametrized over the local and queue providers (marker `cluster
 7. Capacity and limits from `S5.E` hold.
 8. Draining a agent finishes its attempts and takes no new ones.
 9. A agent of another version refuses to start.
+10. One of two `ui` copies is killed mid-claim: no attempt is lost or claimed twice.
 
 **Gate.** The contract tests pass for both providers 20 times in a row; ten projects share one Engine
 DB in the demo.
@@ -4974,7 +5105,8 @@ before 1.0.0.
 
 ### S7.A Web UI
 
-Branch: `feat/ui-*`, one per area. Served by `etl-craft controller`. Every UI change goes
+Branch: `feat/ui-*`, one per area. Served by `etl-craft ui` (S5.AE), and by
+`etl-craft controller` in an all-in-one deployment. Every UI change goes
 through the S5.AA action table and its `/api/v1` route; pages only render read actions.
 
 **S7.A.1 Pipeline Insights is required.** Implement the built-in operational dashboard panels,
@@ -5265,17 +5397,13 @@ S5.S delivers the accounts, the login, the roles and the role check on every act
 
 ### S7.F Packaging and deployment
 
-- **Two install versions of one package.** They share one distribution, one version and one
-  codebase, so the controller and agents never come from different releases.
-  - **`pip install etl-craft`, without a UI:** for agents, a headless controller, or a single
-    machine that needs no UI.
-  - **`pip install etl-craft[ui]`, with a UI:** adds FastAPI, uvicorn and Jinja2 with the
-    vendored UI assets. It is for the controller's HTTP API and web UI, or a single machine that
-    wants the UI.
-  - **The `server` extra becomes `ui`.** The CHANGELOG notes the changed install command; no
-    alias is kept, because this is before 1.0.0.
+- **One package, three roles.** S5.AE adds the `ui` and `all` extras and the `ui` role; the
+  controller, the `ui` copies and agents never come from different releases.
+  - **`pip install etl-craft`:** agents and a headless controller.
+  - **`pip install etl-craft[ui]`:** `etl-craft ui`, or an all-in-one controller with the UI.
+  - **`pip install etl-craft[all]`:** `ui` plus every warehouse extra.
 - **Container images.** The two versions ship as `etl-craft:<version>` and
-  `etl-craft:<version>-ui`, run with role commands (`controller`, `agent`, `run`). Their
+  `etl-craft:<version>-ui`, run with role commands (`controller`, `ui`, `agent`, `run`). Their
   Dockerfile lives in this repository.
   - Every release candidate's release workflow builds both images and smoke-tests them. It is not
     built in pull-request CI, so that CI stays under ten minutes.
@@ -5283,20 +5411,22 @@ S5.S delivers the accounts, the login, the roles and the role check on every act
     1.0.0, with the PyPI release. Nothing is published to a registry before 1.0.0.
   - A Docker Hub mirror is optional at 1.0.0.
   - Until then, the demo repository builds its own image from the pinned candidate wheel.
-- **A single-node Docker Compose template** (PostgreSQL, controller, one agent) is published as a
+- **A single-node Docker Compose template** (PostgreSQL, a controller with `--no-ui`, two `ui`
+  copies, one agent) is published as a
   deployment example in the package's docs and tested in release validation only. The full
   Support Insights stack's Compose file stays in the demo repository (S8.A).
 - A documented cluster layout: the controller on the largest node (at least 1.5 times a agent's
-  memory), N agents, the Engine DB, the artifact and log stores; systemd unit files for hosts without
-  containers.
+  memory), two or more `ui` copies, N agents, the Engine DB, the artifact and log stores; systemd
+  unit files for hosts without containers.
 - **Kubernetes example manifests** are published in the docs and checked in release validation:
-  - a controller Deployment with one replica (its leadership lock already prevents a second
-    active controller);
-  - an agent Deployment that can be scaled;
-  - an external PostgreSQL Engine DB.
+  - a controller Deployment with one replica and `--no-ui` (its leadership lock already
+    prevents a second active controller);
+  - a `ui` Deployment with two or more replicas behind a Service;
+  - an agent Deployment that can be scaled, holding an agent token and no Engine DB secret;
+  - an external PostgreSQL Engine DB, with S5.AE's durability requirements.
 
-  The controller's readiness and liveness use `/health`. Agents open no ports, so theirs use a
-  command probe of the agent's own recorded heartbeat. There is no Helm chart until someone
+  The controller's and the `ui` copies' readiness and liveness use `/health`. Agents open no
+  ports, so theirs use a command probe of the agent's last successful renew. There is no Helm chart until someone
   needs one, and no pod-per-task pool provider.
 
 ### S7.G Compatibility policy
@@ -5578,7 +5708,7 @@ release candidate.
      | A bad stewardship file | Refused by its `FILE_VALIDATION` script before processing | S7.M |
      | A hung task or a run past its SLA | Task timeout; the SLA breach is recorded and alerted even if the first write fails | S2.A, S5.U |
      | The Engine DB growing without bound | Retention keeps it bounded | S6.A |
-     | A agent cut off from the Engine DB, or clocks that disagree | Lease expiry and fenced writes stop a cut-off agent. Lease times come from the Engine DB's clock, not the agent's | S5.C |
+     | A agent cut off from the API, or clocks that disagree | Lease expiry and fenced writes stop a cut-off agent. Lease times come from the Engine DB's clock, not the agent's | S5.C |
      | Upgrading from any 0.x release | Migrations upgrade, or refuse naming the object and the remedy | S2.K, S7.G |
      | A port already in use, or a second server on one host | The server refuses to start, naming the port or the running server | S7.P |
 
