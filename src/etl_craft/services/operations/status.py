@@ -34,6 +34,7 @@ from etl_craft.execution.gates import judge, satisfies
 from etl_craft.execution.readiness import BACKFILL_ASSUMED
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.models import PipelineView, RunView, TaskRunView
+from etl_craft.services.operations.permissions import visible_codes
 from etl_craft.services.operations.requests import RunFilter, RunSelection, TaskSelection
 from etl_craft.services.operations.snapshots import (
     pipeline_view,
@@ -450,7 +451,7 @@ def pipeline_status(ctx: OperationContext, request: RunFilter) -> StatusView | S
     with read_snapshot(ctx.engine) as conn:
         if request.pipeline_code is not None:
             resolve_pipeline_id(conn, request.pipeline_code)
-        codes = tagged_pipelines(conn, request.tag)
+        codes = visible_codes(conn, ctx, tagged_pipelines(conn, request.tag))
         selections = [
             RunSelection(pipeline_code=code, run_id=run.pipeline_run_id)
             for code, pipeline_id in codes.items()

@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from etl_craft.engine import migrations, transitions
-from fixtures.metadata import add_pipeline, add_task, start_run
+from fixtures.metadata import add_pipeline, add_task, insert
 from fixtures.released_schema import SCHEMAS, install
 
 
@@ -31,7 +31,13 @@ def test_existing_attempts_keep_unknown_class_and_original_decision(
     with db.engine.begin() as conn:
         pipeline = add_pipeline(conn, "P")
         task = add_task(conn, pipeline, "old_task")
-        run = start_run(conn, pipeline)
+        run = insert(
+            conn,
+            "INSERT INTO AUD_PIPELINES_RUN_LOG (PIPELINE_ID,STATUS,RUN_KEY,TRIGGER_KIND,RUN_DATE) "
+            "VALUES (:pipeline,'IN-PROGRESS','retained-retry','MANUAL','2026-01-01')",
+            "PIPELINE_RUN_ID",
+            pipeline=pipeline,
+        )
         task_run = transitions.find_or_create_task_run(conn, task, run).task_run_id
         conn.execute(
             text(

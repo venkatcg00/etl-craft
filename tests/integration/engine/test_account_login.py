@@ -14,6 +14,7 @@ from etl_craft.core.actor import SYSTEM_ACTOR, Actor, ActorKind
 from etl_craft.core.enums import AccountKind, ActionName, ApiRole, YesNo
 from etl_craft.core.errors import PermissionDeniedError, UsageError
 from etl_craft.services import credentials
+from etl_craft.services.oidc import IdentityClaims
 from etl_craft.services.operations import OperationContext, accounts, sessions, tokens
 from fixtures.actions import act
 
@@ -98,13 +99,13 @@ def test_sessions_expire_revoke_and_follow_current_account_roles(project):
 def test_sso_requires_a_registered_active_user(project):
     ctx = project
     with pytest.raises(UsageError, match="no active registered"):
-        sessions.sign_in_subject(ctx, "external-id")
+        sessions.sign_in_subject(ctx, IdentityClaims("external-id"))
     user(ctx, subject="external-id")
-    session = sessions.sign_in_subject(ctx, "external-id")
+    session = sessions.sign_in_subject(ctx, IdentityClaims("external-id"))
     assert tokens.authenticate(ctx, session.access_token).name == "alice"
     act(ctx, ActionName.ACCOUNT_DISABLE, name="alice")
     with pytest.raises(UsageError, match="no active registered"):
-        sessions.sign_in_subject(ctx, "external-id")
+        sessions.sign_in_subject(ctx, IdentityClaims("external-id"))
 
 
 def test_account_controls_require_a_proven_admin(project):

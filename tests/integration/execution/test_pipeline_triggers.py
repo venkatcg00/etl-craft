@@ -1,5 +1,6 @@
 """Durable child admission, immutable handoff and explicit trigger generations."""
 
+import json
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -8,6 +9,7 @@ from sqlalchemy import text
 from etl_craft.core.actor import Actor, ActorKind
 from etl_craft.core.enums import ActionName, ApiRole, AttemptStatus, Handler, RunStatus
 from etl_craft.engine import transitions
+from etl_craft.engine.runlog import RunSelector
 from etl_craft.execution import leases
 from etl_craft.execution.attempt_types import ChildOptions
 from etl_craft.execution.runner import admit_attempt, execute_attempt
@@ -940,3 +942,138 @@ def test_inactive_trigger_parameters_do_not_create_phantom_cycles(trigger_scene)
     findings = validate(project.engine, project.config).findings
     assert any("TRIGGER_PIPELINE_CODE" in finding.message for finding in findings)
     assert not any("cycle" in finding.message for finding in findings)
+
+
+@pytest.mark.parametrize("disabled", ["account", "group", "grant", "other-group"])
+def test_retained_claims_recheck_current_restrictions_before_each_child(trigger_scene, disabled):
+    from etl_craft.core.errors import PermissionDeniedError
+    from fixtures.actions import act
+
+    scene = trigger_scene()
+    project, ctx, _, _, parent = scene
+    group = act(ctx, ActionName.GROUP_ADD, name="team").groups[0]
+    other = act(ctx, ActionName.GROUP_ADD, name="other").groups[0]
+    with project.engine.begin() as conn:
+        conn.execute(text("UPDATE CFG_ACCOUNTS SET ROLE='viewer' WHERE ACCOUNT_NAME='test-admin'"))
+        conn.execute(
+            text("UPDATE AUD_PIPELINES_RUN_LOG SET SSO_GROUP_IDS=:ids WHERE PIPELINE_RUN_ID=:id"),
+            {"ids": f"[{group.group_id},{other.group_id}]", "id": parent},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO CFG_PIPELINE_GRANTS (GROUP_ID, PIPELINE_CODE, ROLE) "
+                "VALUES (:id, 'CHILD', 'operator')"
+            ),
+            {"id": group.group_id},
+        )
+        target = {
+            "other-group": "CFG_GROUPS",
+            "account": "CFG_ACCOUNTS",
+            "group": "CFG_GROUPS",
+            "grant": "CFG_PIPELINE_GRANTS",
+        }[disabled]
+        condition = f" WHERE GROUP_ID={other.group_id}" if disabled == "other-group" else ""
+        conn.execute(text(f"UPDATE {target} SET ACTIVE_FLAG='N'{condition}"))
+    request = owned(scene)
+    with pytest.raises(PermissionDeniedError, match=r"test-admin.*CHILD.*operator.*group grant"):
+        invoke(ctx, ActionName.TRIGGER_PIPELINE, request)
+    with project.engine.connect() as conn:
+        assert (
+            conn.execute(
+                text(
+                    "SELECT COUNT(*) AS n FROM AUD_PIPELINES_RUN_LOG "
+                    "WHERE TRIGGERED_BY_TASK_RUN_ID=:id"
+                ),
+                {"id": request.task_run_id},
+            ).scalar_one()
+            == 0
+        )
+
+
+def test_children_and_grandchildren_copy_the_admitted_group_ids(trigger_scene):
+    from fixtures.actions import act
+
+    scene = trigger_scene()
+    project, ctx, child, _, parent = scene
+    group = act(ctx, ActionName.GROUP_ADD, name="team").groups[0]
+    with project.engine.begin() as conn:
+        conn.execute(text("UPDATE CFG_ACCOUNTS SET ROLE='viewer' WHERE ACCOUNT_NAME='test-admin'"))
+        conn.execute(
+            text("UPDATE AUD_PIPELINES_RUN_LOG SET SSO_GROUP_IDS=:ids WHERE PIPELINE_RUN_ID=:id"),
+            {"ids": f"[{group.group_id}]", "id": parent},
+        )
+        grand = add_pipeline(conn, "GRANDCHILD")
+        task = add_task(
+            conn, child, "grand", Handler.RUN_PIPELINE, TRIGGER_PIPELINE_CODE="GRANDCHILD"
+        )
+        for code in ("CHILD", "GRANDCHILD"):
+            conn.execute(
+                text(
+                    "INSERT INTO CFG_PIPELINE_GRANTS (GROUP_ID, PIPELINE_CODE, ROLE) "
+                    "VALUES (:id, :code, 'operator')"
+                ),
+                {"id": group.group_id, "code": code},
+            )
+    first = invoke(ctx, ActionName.TRIGGER_PIPELINE, owned(scene))
+    with project.engine.begin() as conn:
+        transitions.admit_run(conn, first.pipeline_run_id, ctx.actor)
+    second_scene = (project, ctx, grand, task, first.pipeline_run_id)
+    second = invoke(ctx, ActionName.TRIGGER_PIPELINE, owned(second_scene))
+    with project.engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT SSO_GROUP_IDS AS ids FROM AUD_PIPELINES_RUN_LOG "
+                "WHERE PIPELINE_RUN_ID IN (:child, :grand)"
+            ),
+            {"child": first.pipeline_run_id, "grand": second.pipeline_run_id},
+        ).all()
+        assert len(rows) == 2 and all(json.loads(row.ids) == [group.group_id] for row in rows)
+
+
+@pytest.mark.parametrize("disabled", ["account", "group", "grant", "other-group"])
+def test_queued_child_rechecks_permission_when_it_reaches_admission(trigger_scene, disabled):
+    from etl_craft.execution.pipeline import run_pipeline
+    from etl_craft.services.cloning import run_hooks
+    from fixtures.actions import act
+
+    scene = trigger_scene()
+    project, ctx, _, _, parent = scene
+    group = act(ctx, ActionName.GROUP_ADD, name="team").groups[0]
+    other = act(ctx, ActionName.GROUP_ADD, name="other").groups[0]
+    with project.engine.begin() as conn:
+        conn.execute(text("UPDATE CFG_ACCOUNTS SET ROLE='viewer' WHERE ACCOUNT_NAME='test-admin'"))
+        conn.execute(
+            text("UPDATE AUD_PIPELINES_RUN_LOG SET SSO_GROUP_IDS=:ids WHERE PIPELINE_RUN_ID=:id"),
+            {"ids": f"[{group.group_id},{other.group_id}]", "id": parent},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO CFG_PIPELINE_GRANTS (GROUP_ID, PIPELINE_CODE, ROLE) "
+                "VALUES (:id, 'CHILD', 'operator')"
+            ),
+            {"id": group.group_id},
+        )
+    child = invoke(ctx, ActionName.TRIGGER_PIPELINE, owned(scene))
+    with project.engine.begin() as conn:
+        target = {
+            "other-group": "CFG_GROUPS",
+            "account": "CFG_ACCOUNTS",
+            "group": "CFG_GROUPS",
+            "grant": "CFG_PIPELINE_GRANTS",
+        }[disabled]
+        condition = f" WHERE GROUP_ID={other.group_id}" if disabled == "other-group" else ""
+        conn.execute(text(f"UPDATE {target} SET ACTIVE_FLAG='N'{condition}"))
+    outcome = run_pipeline(
+        project.engine,
+        project.config,
+        "CHILD",
+        selector=RunSelector(run_id=child.pipeline_run_id),
+        hooks=run_hooks(project.config, project.engine),
+    )
+    assert outcome.status == RunStatus.CANCELLED
+    with project.engine.connect() as conn:
+        reason = conn.execute(
+            text("SELECT REASON AS reason FROM AUD_RUN_INTERVENTIONS WHERE PIPELINE_RUN_ID=:id"),
+            {"id": child.pipeline_run_id},
+        ).scalar_one()
+        assert "test-admin" in reason and "CHILD" in reason and "operator" in reason

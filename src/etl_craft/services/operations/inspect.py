@@ -8,7 +8,7 @@ from pathlib import Path
 
 from sqlalchemy import Boolean
 
-from etl_craft.core.enums import RunCondition, RunStatus
+from etl_craft.core.enums import ApiRole, RunCondition, RunStatus
 from etl_craft.core.errors import ResourceNotFoundError
 from etl_craft.core.graph import build_graph
 from etl_craft.core.time import as_utc
@@ -45,6 +45,7 @@ from etl_craft.services.operations.models import (
     StepView,
     TaskRunView,
 )
+from etl_craft.services.operations.permissions import pipeline_access, visible_codes
 from etl_craft.services.operations.requests import (
     AttemptId,
     AuditInput,
@@ -68,10 +69,11 @@ def list_pipelines(ctx: OperationContext, request: TagFilter) -> PipelineListVie
     """List the active definitions."""
     with read_snapshot(ctx.engine) as conn:
         pauses = fetch_open_pauses(conn)
+        access = pipeline_access(conn, ctx)
         views = []
         for row in conn.execute(statement(conn, "active_pipelines")):
             tags = read_tags(row.pipeline_parameters, row.pipeline_code)
-            if not set(request.tag) <= set(tags):
+            if not access.permits(row.pipeline_code) or not set(request.tag) <= set(tags):
                 continue
             pause = pauses.get(row.pipeline_code)
             if pause is not None:
@@ -165,7 +167,7 @@ def run_history(ctx: OperationContext, request: HistoryInput) -> HistoryView:
             if request.pipeline_code is None
             else resolve_pipeline_id(conn, request.pipeline_code)
         )
-        codes = tagged_pipelines(conn, request.tag)
+        codes = visible_codes(conn, ctx, tagged_pipelines(conn, request.tag))
     if request.pipeline_code is not None:
         if request.tag and request.pipeline_code not in codes:
             return HistoryView(pipeline_id, request.pipeline_code, request.task_code, (), ())
@@ -252,7 +254,11 @@ def audit(ctx: OperationContext, request: AuditInput) -> AuditView:
     since = None if request.since is None else as_utc(request.since)
     with read_snapshot(ctx.engine) as conn:
         pipeline_id = None if pipeline_code is None else resolve_pipeline_id(conn, pipeline_code)
-        ids = set(tagged_pipelines(conn, request.tag).values()) if request.tag else None
+        ids = (
+            set(visible_codes(conn, ctx, tagged_pipelines(conn, request.tag)).values())
+            if request.tag or ctx.role != ApiRole.ADMIN
+            else None
+        )
         if ids is not None and pipeline_id is not None:
             ids &= {pipeline_id}
         actions, changes = fetch_audit_records(

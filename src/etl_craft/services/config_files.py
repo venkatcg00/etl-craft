@@ -36,9 +36,9 @@ from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import migration as current_migration
-from etl_craft.core.enums import RunCondition, YesNo
-from etl_craft.core.errors import EngineDbError, MetadataFileError
-from etl_craft.core.text import is_metadata_code, is_safe_identifier
+from etl_craft.core.enums import YesNo
+from etl_craft.core.errors import EngineDbError, MetadataFileError, PermissionDeniedError
+from etl_craft.core.text import is_metadata_code
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine import locks
 from etl_craft.engine.repository.config_history import config_as_of
@@ -47,6 +47,7 @@ from etl_craft.engine.repository.config_rows import (
     BUSINESS_RULES,
     OBJECT_TABLES,
     PIPELINE_DEPENDENCIES,
+    PIPELINE_GRANTS,
     PIPELINES,
     SOURCE_COLUMNS,
     TABLES,
@@ -63,6 +64,7 @@ from etl_craft.engine.repository.config_rows import (
     retire_row,
     update_row,
 )
+from etl_craft.services.config_validation import row_problem
 from etl_craft.services.doctor import Status
 from etl_craft.services.source_columns import seed_sources
 from etl_craft.services.validate import Finding, validate_on
@@ -147,7 +149,7 @@ def config_directory(config: ConnectorConfig, directory: Path | None = None) -> 
 def read_config_files(directory: Path) -> ConfigFiles:
     """Read and check the config files; raise ``MetadataFileError`` naming every problem.
 
-    The six pipeline/task files must exist; tables.csv and columns.csv may be omitted
+    The pipeline/task files and grants.csv must exist; tables.csv and columns.csv may be omitted
     together to leave their contracts unchanged. A file with only its header row holds no rows.
     """
     if not directory.is_dir():
@@ -251,7 +253,7 @@ def _read_table(
                 problems.append(f"{path} line {line}, column {column.name}: {error}")
         if len(values) != len(table.columns):
             continue
-        problem = _row_problem(table, values)
+        problem = row_problem(table, values)
         if problem is not None:
             problems.append(f"{path} line {line}: {problem}")
             continue
@@ -332,54 +334,6 @@ def _parse(column: Column, cell: str) -> Value:
     return cell
 
 
-def _row_problem(table: ConfigTable, values: dict[str, Value]) -> str | None:
-    if table in (OBJECT_TABLES, SOURCE_COLUMNS, BUSINESS_RULES, TASKS):
-        names = (
-            ("TARGET_CATALOG_NAME", "TARGET_SCHEMA_NAME", "TARGET_TABLE_NAME")
-            if table is TASKS
-            else ("CATALOG_NAME", "SCHEMA_NAME", "TABLE_NAME", "COLUMN_NAME")
-        )
-        for name in names:
-            if name not in values or values[name] is None:
-                continue
-            value = str(values[name])
-            if not is_safe_identifier(value):
-                return f"{name}={value!r}: expected a separate unquoted SQL identifier"
-    if (
-        table is TASK_PARAMETERS
-        and str(values["PARAMETER_NAME"]).strip().upper() == "TARGET_OBJECT"
-    ):
-        return (
-            "TARGET_OBJECT is derived; set TARGET_CATALOG_NAME, TARGET_SCHEMA_NAME and"
-            " TARGET_TABLE_NAME in tasks.csv"
-        )
-    if table is TASKS:
-        schema, target = values["TARGET_SCHEMA_NAME"], values["TARGET_TABLE_NAME"]
-        if (schema is None) != (target is None) or (
-            schema is None and values["TARGET_CATALOG_NAME"] is not None
-        ):
-            return (
-                "a target needs both TARGET_SCHEMA_NAME and TARGET_TABLE_NAME; leave "
-                "all target components empty for a task without one"
-            )
-        condition, count = values["RUN_CONDITION"], values["RUN_CONDITION_COUNT"]
-        if condition == RunCondition.N and count is None:
-            return "RUN_CONDITION N needs a RUN_CONDITION_COUNT"
-        if condition != RunCondition.N and count is not None:
-            return "RUN_CONDITION_COUNT goes with RUN_CONDITION N only; leave it empty"
-    if table is TASK_DEPENDENCIES and (values["PIPELINE_CODE"], values["TASK_CODE"]) == (
-        values["DEPENDS_ON_PIPELINE_CODE"],
-        values["DEPENDS_ON_TASK_CODE"],
-    ):
-        return f"{values['PIPELINE_CODE']}.{values['TASK_CODE']} depends on itself"
-    if (
-        table is PIPELINE_DEPENDENCIES
-        and values["PIPELINE_CODE"] == values["DEPENDS_ON_PIPELINE_CODE"]
-    ):
-        return f"pipeline {values['PIPELINE_CODE']} depends on itself"
-    return None
-
-
 def _check_references(rows: dict[str, dict[Key, FileRow]], problems: list[str]) -> None:
     """Report every row that names a pipeline or task the files do not hold."""
     pipelines = set(rows[PIPELINES.file])
@@ -410,7 +364,7 @@ def _check_references(rows: dict[str, dict[Key, FileRow]], problems: list[str]) 
 
 def _ends(table: ConfigTable, values: Mapping[str, Value]) -> list[tuple[str, Key]]:
     """Return the pipelines and tasks a row names, by code."""
-    if table in (PIPELINES, OBJECT_TABLES):
+    if table in (PIPELINES, OBJECT_TABLES, PIPELINE_GRANTS):
         return []
     if table is SOURCE_COLUMNS:
         return [("table", tuple(values[name] for name in OBJECT_TABLES.key))]
@@ -474,11 +428,24 @@ def _current(
 
 
 def _links(
+    conn: Connection,
     table: ConfigTable,
     file_row: FileRow,
     current: Mapping[str, Mapping[Key, StoredRow]],
 ) -> dict[str, int | None]:
     """Return the ids an insert of ``file_row`` sets, from the current pipelines and tasks."""
+    if table is PIPELINE_GRANTS:
+        from etl_craft.engine.queries import statement
+
+        group_id = conn.execute(
+            statement(conn, "group_identity"), {"name": file_row.values["GROUP_NAME"]}
+        ).scalar_one_or_none()
+        if group_id is None:
+            raise MetadataFileError(
+                f"grants.csv line {file_row.line}: group {file_row.values['GROUP_NAME']!r} "
+                "does not exist; ask an administrator to use `etl-craft group add`"
+            )
+        return {"GROUP_ID": group_id}
     found: list[StoredRow] = []
     for kind, end in _ends(table, file_row.values):
         file = {"pipeline": PIPELINES.file, "task": TASKS.file, "table": OBJECT_TABLES.file}[kind]
@@ -491,7 +458,7 @@ def _links(
                 f"set the {kind}'s ACTIVE_FLAG to Y, or this row's to N"
             )
         found.append(parent)
-    if table in (PIPELINES, OBJECT_TABLES):
+    if table in (PIPELINES, OBJECT_TABLES, PIPELINE_GRANTS):
         return {}
     if table is SOURCE_COLUMNS:
         return {"TABLE_ID": found[0].row_id}
@@ -586,7 +553,7 @@ def _merge(conn: Connection, files: ConfigFiles) -> list[Change]:
                     retire(existing, "ACTIVE_FLAG is N")
                 continue
             if existing is None:
-                insert_row(conn, table, file_row.values, _links(table, file_row, current))
+                insert_row(conn, table, file_row.values, _links(conn, table, file_row, current))
                 changes.append(Change(table.file, table.table, "insert", label))
                 continue
             differ = tuple(
@@ -596,7 +563,11 @@ def _merge(conn: Connection, files: ConfigFiles) -> list[Change]:
             )
             if not existing.active:
                 update_row(
-                    conn, table, existing.row_id, file_row.values, _links(table, file_row, current)
+                    conn,
+                    table,
+                    existing.row_id,
+                    file_row.values,
+                    _links(conn, table, file_row, current),
                 )
                 flag = ColumnChange(ACTIVE_FLAG.name, "N", "Y")
                 changes.append(
@@ -604,7 +575,11 @@ def _merge(conn: Connection, files: ConfigFiles) -> list[Change]:
                 )
             elif differ:
                 update_row(
-                    conn, table, existing.row_id, file_row.values, _links(table, file_row, current)
+                    conn,
+                    table,
+                    existing.row_id,
+                    file_row.values,
+                    _links(conn, table, file_row, current),
                 )
                 changes.append(Change(table.file, table.table, "update", label, differ))
         current[table.file], _ = _current(table, read_rows(conn, table), current_ids)
@@ -652,7 +627,12 @@ def _resolved_files(files: ConfigFiles, config: ConnectorConfig) -> ConfigFiles:
 
 
 def sync_config(
-    engine: Engine, config: ConnectorConfig, files: ConfigFiles, *, apply: bool
+    engine: Engine,
+    config: ConnectorConfig,
+    files: ConfigFiles,
+    *,
+    apply: bool,
+    allow_grants: bool = True,
 ) -> ConfigSync:
     """Merge ``files`` into the ``CFG_`` tables; with ``apply`` false, roll it all back.
 
@@ -689,6 +669,13 @@ def sync_config(
                         )
                     )
                 changes.extend(_merge(conn, files))
+                denied = [change.row for change in changes if change.file == "grants.csv"]
+                if apply and denied and not allow_grants:
+                    raise PermissionDeniedError(
+                        "grants.csv: admin role required to change "
+                        + "; ".join(denied)
+                        + "; ask an administrator to apply these files; no changes were committed"
+                    )
                 findings = tuple(validate_on(conn, config).findings)
                 if not apply or any(f.status is Status.FAIL for f in findings):
                     raise _RollBackError

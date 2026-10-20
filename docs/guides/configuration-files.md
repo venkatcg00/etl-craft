@@ -65,6 +65,7 @@ development, test and production.
 
 | File | Key |
 |---|---|
+| `grants.csv` | `GROUP_NAME`, `PIPELINE_CODE`, `TAG` (exactly one pipeline or tag) |
 | `pipelines.csv` | `PIPELINE_CODE` |
 | `tasks.csv` | `PIPELINE_CODE`, `TASK_CODE` |
 | `task_parameters.csv` | `PIPELINE_CODE`, `TASK_CODE`, `PARAMETER_NAME` |
@@ -240,3 +241,12 @@ catalog/schema/table fields in `business_rules.csv` and `tables.csv`. Old CSV he
 rejected. Pending project SQL must write `TARGET_TABLE_ID`; already-applied migration files
 must remain unchanged. Original tutorial files are retained under `legacy-migrations/`, and
 new projects use the current `*_contracts.sql` examples.
+
+## Pipeline grants
+
+`grants.csv` holds `GROUP_NAME,PIPELINE_CODE,TAG,ROLE,ACTIVE_FLAG`. Create groups with the
+admin-only `group` commands first. Choose one pipeline code or tag per row and `viewer` or
+`operator` as the role. Changing grants through `config apply` requires admin; a developer's
+entire apply is refused, including changes in other files. The file must exist, like the pipeline/task files; an empty file with its header retires
+the existing grants. Export the configuration to create it when upgrading.
+See [Pipeline permission groups](../deploying/security.md#pipeline-permission-groups).

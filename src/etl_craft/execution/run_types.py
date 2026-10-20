@@ -7,7 +7,7 @@ from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from typing import TypeVar
 
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core import interrupts
@@ -64,11 +64,14 @@ class RunHooks:
 
     ``on_sla_lapse`` is called once per run, when it is first seen past its SLA.
     ``on_finalized`` is called after the run has ended. A hook that raises is logged and does
-    not change how the run ended. A run given no hooks uses ``default_hooks``.
+    not change how the run ended. ``before_admission`` returns a refusal reason before a queued
+    run starts; it runs inside the admission transaction and errors propagate. A run given no
+    hooks uses ``default_hooks``.
     """
 
     on_sla_lapse: Callable[[SlaLapse], None] | None = None
     on_finalized: Callable[[PipelineOutcome], None] | None = None
+    before_admission: Callable[[Connection, int], str | None] | None = None
 
 
 def default_hooks(config: ConnectorConfig, engine: Engine) -> RunHooks:

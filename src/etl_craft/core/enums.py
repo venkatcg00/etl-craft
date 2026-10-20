@@ -173,6 +173,13 @@ class ApiRole(StrEnum):
     ADMIN = "admin"
 
 
+class ActionScope(StrEnum):
+    """Whether authorization uses deployment or pipeline roles."""
+
+    DEPLOYMENT = "deployment"
+    PIPELINE = "pipeline"
+
+
 class ActionName(StrEnum):
     """Every action an interface can request; the value is its audit and role-policy name."""
 
@@ -182,6 +189,11 @@ class ActionName(StrEnum):
     LOGIN_SSO_POLL = "login sso poll"
     REFRESH = "refresh"
     LOGOUT = "logout"
+    GROUP_LIST = "group list"
+    GROUP_ADD = "group add"
+    GROUP_DISABLE = "group disable"
+    GROUP_ADD_MEMBER = "group add-member"
+    GROUP_REMOVE_MEMBER = "group remove-member"
     WHOAMI = "whoami"
     HEALTH = "health"
     PIPELINES = "pipelines"

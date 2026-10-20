@@ -1,6 +1,6 @@
 INSERT INTO AUD_PIPELINES_RUN_LOG
 (PIPELINE_ID, STATUS, RUN_DATE, BACKFILL, RUN_KEY, TRIGGER_KIND, STARTED_BY, STARTED_BY_KIND,
-END_DATE, ENDED_BY, ENDED_BY_KIND)
+END_DATE, ENDED_BY, ENDED_BY_KIND, SSO_GROUP_IDS)
 VALUES (:pipeline_id, :status, :run_date, :backfill, :run_key, :trigger_kind, :actor, :actor_kind,
-:end_date, :ended_by, :ended_by_kind)
+:end_date, :ended_by, :ended_by_kind, :sso_group_ids)
 RETURNING PIPELINE_RUN_ID AS pipeline_run_id

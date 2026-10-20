@@ -248,7 +248,8 @@ def test_remote_controls_follow_the_role_and_record_refusals(server, monkeypatch
         capsys, "pause", "--pipeline-code", "P", "--reason", "x", "--controller", url
     )
     assert code == ExitCode.PERMISSION_DENIED
-    assert "action 'control': operator role is required" in err
+    assert "pipeline 'P' needs operator role" in err
+    assert "group grant" in err
     with ctx.engine.connect() as conn:
         refused = conn.execute(
             text("SELECT ACTOR AS actor FROM AUD_ACTIONS WHERE OUTCOME='REFUSED'")

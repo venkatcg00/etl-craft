@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from datetime import date
 
 from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.core.actor import current_actor
+from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
 from etl_craft.core.enums import (
     InterventionAction,
     RunStatus,
@@ -21,6 +21,7 @@ from etl_craft.core.graph import DependencyGraph, build_graph
 from etl_craft.engine import run_scopes, runlog, transitions
 from etl_craft.engine.repository import trackers
 from etl_craft.engine.repository.dependencies import PipelineGraphData, fetch_pipeline_graph
+from etl_craft.engine.repository.intervention_rows import record_intervention
 from etl_craft.engine.repository.pauses import Pause
 from etl_craft.engine.repository.pipelines import (
     PipelineDetail,
@@ -80,6 +81,7 @@ def init_pipeline_run(
                 run_date=run_date,
                 selector=selector,
                 initialize_only=True,
+                before_admission=(hooks or default_hooks(config, engine)).before_admission,
             ),
         ),
         selected_clock,
@@ -149,6 +151,7 @@ class StartOptions:
     backfill: str | None = None
     selector: runlog.RunSelector = runlog.ACTIVE_RUN
     initialize_only: bool = False
+    before_admission: Callable[[Connection, int], str | None] | None = None
 
 
 def start_steps(
@@ -197,6 +200,9 @@ def start_steps(
         if not gate.satisfied:
             reason = "; ".join(gate.reasons)
     with engine.begin() as conn:
+        if _refuse_admission(conn, options, pipeline_id, queued):
+            assert queued is not None
+            return queued, None
         created = _admit_run(conn, pipeline_code, pipeline_id, queued, logical_date, options)
         if created is None:
             assert queued is not None
@@ -404,3 +410,28 @@ def cancelled_run(
     logger.warning("%s", message)
     call_hook("on_finalized", hooks.on_finalized, outcome)
     return outcome
+
+
+def _refuse_admission(
+    conn: Connection, options: StartOptions, pipeline_id: int, queued: int | None
+) -> bool:
+    """Cancel a queued run atomically when its admission check withdraws permission."""
+    if queued is None or options.before_admission is None:
+        return False
+    refusal = options.before_admission(conn, queued)
+    if refusal is None:
+        return False
+    with acting_as(SYSTEM_ACTOR):
+        transitions.finish_run(conn, queued, RunStatus.CANCELLED, SYSTEM_ACTOR)
+        record_intervention(
+            conn,
+            pipeline_id=pipeline_id,
+            pipeline_run_id=queued,
+            action=InterventionAction.CANCEL,
+            reason=refusal,
+            requested_by=SYSTEM_ACTOR.name,
+            from_status=RunStatus.QUEUED,
+            to_status=RunStatus.CANCELLED,
+        )
+    logger.error("pipeline_run_id=%s: %s", queued, refusal)
+    return True

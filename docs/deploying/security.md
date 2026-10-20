@@ -69,6 +69,64 @@ account, its current role, the required role and the administrator who can grant
 returns exit **26**, HTTP returns **403**, and the immutable action record has outcome
 `REFUSED` with the same exit code. No operation runs after refusal. The permission check adds no records for allowed reads. Unregistered operations fail closed until the shared policy names them.
 
+### Pipeline permission groups
+
+Admins manage groups with `etl-craft group add --name sales`, `group disable --name sales`,
+`group add-member --name sales --account alice`, `group remove-member --name sales --account
+alice`, and `group list`. Matching HTTP actions use `/api/v1/groups` and its `disable`,
+`members`, and `members/remove` routes. Group identities and memberships are retired with
+`ACTIVE_FLAG=N`, never deleted; all changes have typed, actor-attributed history.
+
+Keep grants in `config/grants.csv`:
+
+```csv
+GROUP_NAME,PIPELINE_CODE,TAG,ROLE,ACTIVE_FLAG
+sales,SALES,,operator,Y
+analysts,,reporting,viewer,Y
+```
+
+Create the groups first, then apply the files as an admin. Set exactly one of `PIPELINE_CODE`
+or `TAG`; roles are `viewer` or `operator`. Tag grants apply to every pipeline with that exact
+tag. A developer's `config apply` refuses the entire transaction when any grant would change,
+naming the rows; configuration changes in other files are rolled back too.
+
+A pipeline with no active direct or tag grant uses the deployment role. With any active grant,
+it is restricted: the highest role from the account's active groups applies, and no matching
+group grant means no access. Disabling a group does not make its pipelines open. An admin
+always has access. A pipeline operator grant can elevate a deployment viewer on that pipeline;
+project-wide configuration, identity and maintenance actions still use the deployment role.
+Lists omit inaccessible pipelines before pagination. Direct reads, logs and changes fail with
+exit 26 / HTTP 403. Dependency and lineage views may name restricted related pipelines, but
+withhold their tasks, runs and logs.
+
+With SSO, set optional `Auth.Oidc_groups_claim: groups` beside `Auth.Oidc_issuer` and
+`Auth.Oidc_client_id`. The configured claim must be a list of group names. Only names matching
+active groups at sign-in are retained; unmatched names appear in the session's login audit.
+The session stores **group IDs**, so a rename keeps the identity and reusing a name cannot
+transfer an old session's access to another group. Explicit Engine DB memberships are checked
+on every request as well.
+
+Refreshed access tokens retain the group set from the last SSO sign-in; they do not fetch new
+provider claims. Access expiry is capped at the refresh token's expiry, so `Auth.Refresh_days`
+bounds retained claims in a server session. A local session is bounded by `Auth.Session_hours`.
+Removing someone from a group at the identity provider is seen at their next SSO sign-in,
+not by an already admitted session or run. Disable the account or the local group, or retire
+its grant, to withdraw access immediately under the current policy.
+
+Admitted runs retain their initiating group IDs after token expiry or revocation. A child
+copies its parent's `SSO_GROUP_IDS`, and grandchildren carry the same set. Before each child
+is admitted, and again immediately before a queued child starts, the engine checks that the
+initiating account is active, every retained SSO group still has `ACTIVE_FLAG=Y`, and the
+account still has operator permission through current groups and grants (or the current
+deployment role on an open pipeline). A refusal before admission
+fails the trigger task; a queued child that loses permission is cancelled with the reason in
+its interventions. Already running children keep their admitted work. Current admins and the
+controller's SERVICE account retain their existing access; scheduled execution is unaffected.
+
+The generated catalog is a **whole-project static site** and cannot enforce pipeline grants.
+Anyone who can reach it can read the project catalog. Restrict its hosting access accordingly;
+the API and live UI apply the pipeline policy.
+
 Local first-admin/recovery, pre-account initialization/migration, diagnostic doctor, and
 login/logout remain the explicit credential/bootstrap entry points described above.
 

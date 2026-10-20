@@ -183,7 +183,10 @@ def test_the_command(engine_db, site, tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(publish_docs, "wait_until_stopped", lambda: None)
     assert main(["publish-docs", "--local-only"]) == ExitCode.SUCCESS
     out = capsys.readouterr().out.splitlines()
-    assert out[0].startswith(f"publish-docs: serving {site} at http://127.0.0.1:")
+    assert any(
+        line.startswith(f"publish-docs: serving {site} at http://127.0.0.1:") for line in out
+    )
+    assert any("does not enforce pipeline grants" in line for line in out)
     assert out[-1] == "publish-docs: stopped"
 
 

@@ -41,3 +41,6 @@ Docs_site:
 
 Auth:
   Session_hours: 12                     # value — run setup and login before operating the demo
+
+# SSO deployments may set Auth.Oidc_groups_claim: groups beside Oidc_issuer and Oidc_client_id.
+# Sessions and admitted runs retain group IDs; current account/group/grant restrictions apply.

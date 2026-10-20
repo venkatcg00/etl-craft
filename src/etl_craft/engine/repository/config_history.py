@@ -42,6 +42,7 @@ def config_as_of(conn: Connection, as_of: datetime) -> Engine:
     try:
         with scratch.begin() as out:
             legacy_rules = _copy_tables(conn, out, versions, as_of)
+            _copy_groups(conn, out, as_of)
             _rebuild_legacy_sources(conn, out, legacy_versions, as_of)
             _rebuild_rule_targets(out, legacy_rules, as_of)
             _rebuild_task_targets(out, as_of)
@@ -264,3 +265,16 @@ def _cell(value: object) -> object:
     if isinstance(value, (Decimal, date)):
         return value.isoformat() if isinstance(value, date) else str(value)
     return value
+
+
+def _copy_groups(conn: Connection, out: Connection, as_of: datetime) -> None:
+    """Keep exported grant names tied to their group identity at the requested time."""
+    dialect = for_engine(conn)
+    table = "CFG_GROUPS"
+    current = dialect.table_rows(conn, table)
+    versions = dialect.table_rows(conn, "AUD_CFG_GROUPS_HISTORY", order_by="CHANGE_ID")
+    columns = dialect.column_names(conn, table)
+    rows = _at(current, versions, "group_id", table, as_of)
+    for_engine(out).write_table(
+        out, table, columns, [{name: _cell(row.get(name)) for name in columns} for row in rows]
+    )

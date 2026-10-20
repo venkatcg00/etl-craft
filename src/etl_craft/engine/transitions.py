@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from typing import Any, Literal
@@ -10,7 +11,7 @@ from uuid import uuid4
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 
-from etl_craft.core.actor import SYSTEM_ACTOR, Actor, current_actor
+from etl_craft.core.actor import SYSTEM_ACTOR, Actor, current_actor, sso_groups
 from etl_craft.core.counts import NO_COUNTS, Counts
 from etl_craft.core.enums import (
     FINISHED_RUN_STATUSES,
@@ -345,7 +346,6 @@ def create_run(
             f"pipeline_id={pipeline_id}: invalid trigger_kind={trigger_kind!r}; "
             "use SCHEDULE, MANUAL, BACKFILL, ORCHESTRATOR or STAND_IN"
         )
-    logical_date = run_date or runlog.today()
     key = run_key or f"{trigger_kind.lower().replace('_', '-')}:{uuid4()}"
     try:
         with conn.begin_nested():
@@ -354,7 +354,8 @@ def create_run(
                 {
                     **_actor_params(actor),
                     "pipeline_id": pipeline_id,
-                    "run_date": logical_date,
+                    "sso_group_ids": json.dumps(sso_groups.get()),
+                    "run_date": run_date or runlog.today(),
                     "status": status,
                     "end_date": datetime.now(UTC) if status == RunStatus.SKIPPED else None,
                     "ended_by": actor.name if status == RunStatus.SKIPPED else None,
@@ -364,8 +365,7 @@ def create_run(
                     "run_key": key,
                 },
             )
-            row = result.scalar_one()
-            return int(row)
+            return int(result.scalar_one())
     except IntegrityError as error:
         found = (
             conn.execute(

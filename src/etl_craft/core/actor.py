@@ -34,6 +34,7 @@ class Actor:
 
 SYSTEM_ACTOR = Actor("etl-craft", ActorKind.SYSTEM)
 _actor: ContextVar[Actor | None] = ContextVar("etl_craft_actor", default=None)
+sso_groups: ContextVar[tuple[int, ...]] = ContextVar("etl_craft_sso_groups", default=())
 purpose: ContextVar[str] = ContextVar("etl_craft_purpose", default="")
 migration: ContextVar[str] = ContextVar("etl_craft_migration", default="")
 

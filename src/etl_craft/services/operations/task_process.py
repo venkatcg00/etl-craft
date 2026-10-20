@@ -3,11 +3,12 @@
 from sqlalchemy.engine import Engine
 
 from etl_craft.core.actor import Actor
-from etl_craft.core.enums import ActionName, ActorKind, ApiRole, YesNo
+from etl_craft.core.enums import ActionName, ActorKind
 from etl_craft.engine.queries import statement
 from etl_craft.execution.child import run_as_process
 from etl_craft.handlers.registry import TaskContext
 from etl_craft.services.operations.actions import invoke
+from etl_craft.services.operations.child_admission import initiating_context
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.triggers import TriggerRequest
 
@@ -18,17 +19,15 @@ def execute_trigger(engine: Engine, task: TaskContext) -> int:
         row = conn.execute(
             statement(conn, "trigger_context"), {"task_run_id": task.task_run_id}
         ).one()
-        account = conn.execute(
-            statement(conn, "account_find"), {"name": row.started_by}
-        ).one_or_none()
-    actor = Actor(row.started_by, ActorKind(row.started_by_kind))
+        ctx = initiating_context(
+            conn,
+            OperationContext(
+                engine, task.config, Actor(row.started_by, ActorKind(row.started_by_kind))
+            ),
+            row.pipeline_run_id,
+        )
     invoke(
-        OperationContext(
-            engine,
-            task.config,
-            actor,
-            role=ApiRole(account.role) if account and account.active_flag == YesNo.YES else None,
-        ),
+        ctx,
         ActionName.TRIGGER_PIPELINE,
         TriggerRequest(task_run_id=task.task_run_id, attempt_id=task.attempt_id, owner=task.owner),
     )

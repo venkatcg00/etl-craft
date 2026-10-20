@@ -14,7 +14,7 @@ from etl_craft.services.operations import OperationContext
 from etl_craft.services.operations.actions import invoke
 from etl_craft.services.operations.controls import ControlRequest
 from fixtures.actions import act
-from fixtures.metadata import add_pipeline, add_task, insert, start_run
+from fixtures.metadata import add_pipeline, add_task, insert
 from fixtures.released_schema import install
 
 
@@ -40,7 +40,13 @@ def test_migrating_populated_controls_preserves_requests_fences_and_immutability
     with acting_as(ctx.actor), db.engine.begin() as conn:
         p = add_pipeline(conn, "P")
         a = add_task(conn, p, "a")
-        run = start_run(conn, p)
+        run = insert(
+            conn,
+            "INSERT INTO AUD_PIPELINES_RUN_LOG (PIPELINE_ID,STATUS,RUN_KEY,TRIGGER_KIND,RUN_DATE) "
+            "VALUES (:pipeline,'IN-PROGRESS','retained-run','MANUAL','2026-01-01')",
+            "PIPELINE_RUN_ID",
+            pipeline=p,
+        )
         control_id = insert(
             conn,
             "INSERT INTO AUD_CONTROL_REQUESTS "

@@ -12,6 +12,7 @@ from etl_craft.services.config_files import cell, read_config_files
 pytestmark = pytest.mark.unit
 
 GOOD = {
+    "grants.csv": "GROUP_NAME,PIPELINE_CODE,TAG,ROLE,ACTIVE_FLAG\n",
     "tables.csv": "CATALOG_NAME,SCHEMA_NAME,TABLE_NAME\n,sales,orders\n",
     "pipelines.csv": "PIPELINE_CODE,PIPELINE_NAME,REFRESH_TYPE,SLA_IN_HOURS,PIPELINE_PARAMETERS\n"
     'SALES,Sales,FULL,1.5,"{""TAGS"": [""sales""]}"\n'
@@ -174,16 +175,12 @@ def test_duplicate_keys_self_dependencies_and_missing_references_are_named(tmp_p
 
 
 def test_every_file_holds_its_table_with_active_flag_last():
-    assert [table.file for table in TABLES] == [
-        "pipelines.csv",
-        "tables.csv",
-        "tasks.csv",
-        "task_parameters.csv",
-        "task_dependencies.csv",
-        "pipeline_dependencies.csv",
-        "business_rules.csv",
-        "columns.csv",
-    ]
+    positions = {table.file: position for position, table in enumerate(TABLES)}
+    assert set(GOOD) <= positions.keys()
+    assert len(positions) == len(TABLES)
+    assert all(
+        positions[parent] < positions[table.file] for table in TABLES for _, parent in table.parents
+    )
     assert all(table.columns[-1].name == "ACTIVE_FLAG" for table in TABLES)
     assert all(set(table.key) <= {column.name for column in table.columns} for table in TABLES)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import secrets
 from dataclasses import dataclass
@@ -59,6 +60,7 @@ class TokenGrant:
     kind: TokenKind
     expires_at: datetime | None
     refresh_token_id: int | None = None
+    sso_group_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -197,6 +199,7 @@ def issue_token(conn: Connection, actor: str, grant: TokenGrant) -> CreatedToken
             "expires_at": grant.expires_at,
             "kind": grant.kind,
             "refresh_token_id": grant.refresh_token_id,
+            "sso_group_ids": json.dumps(grant.sso_group_ids),
         },
     )
     metadata = _view(

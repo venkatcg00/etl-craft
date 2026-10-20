@@ -37,6 +37,7 @@ def service_token(engine, name="test-admin"):
                 "expires_at": None,
                 "kind": TokenKind.SERVICE,
                 "refresh_token_id": None,
+                "sso_group_ids": "[]",
             },
         )
         return token

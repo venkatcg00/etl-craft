@@ -58,7 +58,7 @@ def control_capabilities(ctx: OperationContext, request: CapabilitiesInput) -> C
             run_id=selected.pipeline_run_id,
             task_code=task_code,
         )
-        reason = _role_refusal(ctx)
+        reason = _role_refusal(ctx, pipeline_code)
         if reason is None:
             try:
                 with control_scope(ctx, control), ctx.engine.connect() as conn:
@@ -77,12 +77,15 @@ def control_capabilities(ctx: OperationContext, request: CapabilitiesInput) -> C
     return CapabilitiesView(pipeline_code, selected.pipeline_run_id, task_code, tuple(actions))
 
 
-def _role_refusal(ctx: OperationContext) -> str | None:
+def _role_refusal(ctx: OperationContext, pipeline_code: str) -> str | None:
     """Describe a role restriction without recording a refused change on a read."""
-    from etl_craft.services.operations.actions import ACTIONS, has_role
+    from etl_craft.services.operations.actions import ACTIONS
+    from etl_craft.services.operations.permissions import pipeline_access
 
     required = ACTIONS[ActionName.CONTROL].role
-    if not has_role(ctx.role, required):
+    with ctx.engine.connect() as conn:
+        allowed = required is None or pipeline_access(conn, ctx).permits(pipeline_code, required)
+    if not allowed:
         return (
             f"account {ctx.actor.name!r}: role={ctx.role or 'unproven'}; controls need the "
             f"{required} role; ask an administrator to grant it"

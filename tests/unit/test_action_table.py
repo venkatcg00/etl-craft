@@ -6,7 +6,7 @@ from dataclasses import fields, is_dataclass
 import pytest
 
 from etl_craft.cli.commands import COMMANDS
-from etl_craft.core.enums import ActionName, ApiRole, Audit, HttpMethod, Placement
+from etl_craft.core.enums import ActionName, ActionScope, ApiRole, Audit, HttpMethod, Placement
 from etl_craft.services.operations.actions import ACTIONS
 
 pytestmark = pytest.mark.unit
@@ -91,3 +91,23 @@ def test_routed_actions_answer_with_documents_and_take_keyword_requests():
             else (action.result,)
         )
         assert all(isinstance(getattr(d, "SCHEMA", None), str) for d in documents), action.name
+
+
+def test_pipeline_selections_use_pipeline_scope_and_identity_administration_stays_deployment():
+    for action in ACTIONS.values():
+        names = {field.name for field in fields(action.request)}
+        if names & {"pipeline_code", "run_id", "attempt_id", "control_id", "task_run_id"}:
+            assert action.scope == ActionScope.PIPELINE, action.name
+    for name in (ActionName.PIPELINES, ActionName.LINEAGE, ActionName.DOCS_VERSION_CHECK):
+        assert ACTIONS[name].scope == ActionScope.PIPELINE
+    for name in (
+        ActionName.GROUP_ADD,
+        ActionName.GROUP_LIST,
+        ActionName.GROUP_DISABLE,
+        ActionName.GROUP_ADD_MEMBER,
+        ActionName.GROUP_REMOVE_MEMBER,
+        ActionName.CONFIG_APPLY,
+        ActionName.ACCOUNT_ADD,
+        ActionName.TOKEN_CREATE,
+    ):
+        assert ACTIONS[name].scope == ActionScope.DEPLOYMENT

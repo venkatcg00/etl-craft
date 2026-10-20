@@ -23,6 +23,7 @@ from etl_craft.engine.connection import check_reachable, engine_db
 from etl_craft.execution.attempt_types import ChildOptions
 from etl_craft.services.operations import OperationContext
 from etl_craft.services.operations.actions import ACTIONS, invoke
+from etl_craft.services.operations.identity import authenticated_context
 
 if TYPE_CHECKING:
     from _typeshed import DataclassInstance
@@ -113,7 +114,7 @@ def command_context(
         config = start_role(config, server=role == "controller")
     engine = connect_engine_db(config)
     try:
-        yield OperationContext(
+        context = OperationContext(
             engine,
             config,
             current_actor(),
@@ -124,6 +125,11 @@ def command_context(
                 else None
             ),
             provisioning=scoped is not None and scoped.provisioning,
+        )
+        yield (
+            authenticated_context(context, scoped.identity)
+            if scoped is not None and scoped.identity is not None
+            else context
         )
     finally:
         engine.dispose()
